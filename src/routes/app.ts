@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { listObjects, buildTree, putObject } from "@/minio";
+import { listImmediate, buildTree, putObject } from "@/minio";
 import type { DocTree } from "@/minio";
 import { emailToOrgSlug, orgExists, logOrgAccess } from "@/orgs";
 import type { User } from "better-auth/types";
@@ -148,8 +148,9 @@ function renderCreateOrg(user: User, org: string): string {
 </body></html>`;
 }
 
+
 async function renderOrgDocs(user: User, org: string): Promise<string> {
-  const entries = (await listObjects(`${org}/`)).filter((e) => !isDeleted(e.key));
+  const entries = (await listImmediate(`${org}/`)).filter((e) => !isDeleted(e.key));
   const tree = buildTree(entries, `${org}/`);
   logOrgAccess(org, user.email, "view");
   return renderOrgTreePage(user, org, tree);

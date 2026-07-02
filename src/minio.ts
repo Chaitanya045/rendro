@@ -72,6 +72,52 @@ export async function listObjects(prefix: string): Promise<DocEntry[]> {
 }
 
 /**
+ * List only immediate children (one level deep). Returns files and folder
+ * markers without recursing into subdirectories. Used for tree UI.
+ */
+export async function listImmediate(prefix: string): Promise<DocEntry[]> {
+  const entries: DocEntry[] = [];
+  let continuationToken: string | undefined;
+
+  do {
+    const cmd = new ListObjectsV2Command({
+      Bucket: MINIO_BUCKET,
+      Prefix: prefix,
+      Delimiter: "/",
+      ContinuationToken: continuationToken,
+    });
+    const res = await s3.send(cmd);
+
+    // Files at this level
+    for (const obj of res.Contents ?? []) {
+      if (!obj.Key || obj.Key === prefix || !obj.Key.endsWith(".html")) continue;
+      entries.push({
+        key: obj.Key,
+        name: obj.Key.slice(prefix.length),
+        size: obj.Size ?? 0,
+        lastModified: obj.LastModified ?? new Date(0),
+      });
+    }
+
+    // Subfolders (CommonPrefixes) — add as folder markers
+    for (const cp of res.CommonPrefixes ?? []) {
+      if (!cp.Prefix) continue;
+      const folderName = cp.Prefix.slice(prefix.length).replace(/\/$/, "");
+      entries.push({
+        key: cp.Prefix,
+        name: folderName,
+        size: 0,
+        lastModified: new Date(0),
+      });
+    }
+
+    continuationToken = res.NextContinuationToken;
+  } while (continuationToken);
+
+  return entries;
+}
+
+/**
  * Build a tree structure from listed objects.
  */
 export interface DocTree {

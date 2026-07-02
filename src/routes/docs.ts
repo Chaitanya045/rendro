@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import type { Context } from "hono";
-import { getObjectStream, putObject, headObject, listAllKeys, listObjects, buildTree } from "@/minio";
+import { getObjectStream, putObject, headObject, listAllKeys, listImmediate, buildTree } from "@/minio";
 import { MINIO_BUCKET, CONVEX_URL } from "@/config";
 import { validateApiKey } from "@/api-keys";
 import { markDeleted, isDeleted, unmarkDeleted, filterDeleted } from "@/soft-delete";
@@ -120,7 +120,7 @@ app.get("/api/tree/:org", async (c) => {
   if (prefix.includes("..")) return c.text("Invalid path", 400);
 
   // List all objects under prefix, then build tree and return top-level children
-  const allEntries = await listObjects(prefix);
+  const allEntries = await listImmediate(prefix);
   // Filter soft-deleted
   const active = allEntries.filter((e) => !isDeleted(e.key));
   // Build tree from these entries
