@@ -130,8 +130,12 @@ function handleClick(e: Event) {
     return;
   }
 
-  // File click: set as active
+  // File click: show iframe and set active
   if (item.dataset.path) {
+    const frame = document.getElementById("content-frame") as HTMLIFrameElement | null;
+    const placeholder = document.getElementById("main-placeholder");
+    if (frame) frame.style.display = "";
+    if (placeholder) placeholder.style.display = "none";
     document.querySelectorAll(".tree-item.active").forEach((el) => el.classList.remove("active"));
     item.classList.add("active");
     updateIndicator(item);
@@ -187,7 +191,12 @@ function init() {
     const { type, path } = e.data as { type: string; path: string };
     if (type === "doc-navigate") {
       const frame = document.getElementById("content-frame") as HTMLIFrameElement | null;
-      if (frame) frame.src = `/files/${ORG}/${path}?dev_user=user@${ORG}.com`;
+      const placeholder = document.getElementById("main-placeholder");
+      if (frame) {
+        frame.style.display = "";
+        frame.src = `/files/${ORG}/${path}`;
+      }
+      if (placeholder) placeholder.style.display = "none";
     }
     navigateToDoc(path);
   });

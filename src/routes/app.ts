@@ -225,7 +225,11 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e5e
   .active-indicator{position:absolute;left:0;width:4px;height:32px;background:#0a66c2;transition:transform .3s cubic-bezier(.4,0,.2,1),opacity .2s ease;border-radius:4px;z-index:10;pointer-events:none}
 
   .main{margin-left:280px;margin-top:56px;height:calc(100vh - 56px);overflow:hidden;background:#f8f9fa}
-  .content-frame{width:100%;height:100%;border:0;background:#fff}
+  .main-placeholder{display:flex;align-items:center;justify-content:center;height:100%;flex-direction:column;text-align:center;padding:3rem}
+  .main-placeholder h2{font-size:24px;font-weight:600;color:#111418;margin-bottom:8px}
+  .main-placeholder p{font-size:16px;color:#6b7280;max-width:320px}
+  .ph-icon{width:64px;height:64px;border-radius:50%;background:#f0f0f3;display:inline-flex;align-items:center;justify-content:center;margin-bottom:16px}
+  .content-frame{width:100%;height:100%;border:0;background:#fff;display:none}
 </style>
 </head>
 <body>
@@ -268,9 +272,13 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e5e
 </aside>
 
 <main class="main">
+  <div class="main-placeholder" id="main-placeholder">
+    <div class="ph-icon"><span class="material-symbols-outlined" style="font-size:32px;color:#6b7280">edit_document</span></div>
+    <h2>Select a document</h2>
+    <p>Choose a document from the sidebar to view its contents, or create a new page to start writing.</p>
+  </div>
   <iframe name="content-frame" id="content-frame" class="content-frame"
-    srcdoc="<div style='display:flex;align-items:center;justify-content:center;height:100%;background:#f1f3ff;font-family:Inter,sans-serif'><div style='text-align:center'><div style='width:64px;height:64px;border-radius:50%;background:#e1e8ff;display:inline-flex;align-items:center;justify-content:center;margin-bottom:16px'><span class='material-symbols-outlined' style='font-size:32px;color:#737685'>edit_document</span></div><h2 style='font-size:24px;font-weight:600;color:#051a3e;margin-bottom:8px'>Select a document</h2><p style='font-size:16px;color:#737685;max-width:320px'>Choose a document from the sidebar to view its contents, or create a new page to start writing.</p></div></div>"
-    title="Document content"></iframe>
+    src="about:blank" title="Document content" style="display:none"></iframe>
 </main>
 
 <script src="/lazy-tree.js?v=1"></script>
