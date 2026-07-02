@@ -136,7 +136,7 @@ function handleClick(e: Event) {
     const frame = document.getElementById("content-frame") as HTMLIFrameElement | null;
     const placeholder = document.getElementById("main-placeholder");
     if (frame) {
-      frame.style.display = "";
+      frame.style.display = "block";
       frame.src = `/files/${item.dataset.path}${DEV_USER ? `?dev_user=${DEV_USER}` : ""}`;
     }
     if (placeholder) placeholder.style.display = "none";
@@ -197,7 +197,7 @@ function init() {
       const frame = document.getElementById("content-frame") as HTMLIFrameElement | null;
       const placeholder = document.getElementById("main-placeholder");
       if (frame) {
-        frame.style.display = "";
+        frame.style.display = "block";
         frame.src = `/files/${ORG}/${path}${DEV_USER ? `?dev_user=${DEV_USER}` : ""}`;
       }
       if (placeholder) placeholder.style.display = "none";

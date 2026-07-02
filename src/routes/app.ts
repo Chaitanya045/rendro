@@ -229,7 +229,7 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e5e
   .main-placeholder h2{font-size:24px;font-weight:600;color:#111418;margin-bottom:8px}
   .main-placeholder p{font-size:16px;color:#6b7280;max-width:320px}
   .ph-icon{width:64px;height:64px;border-radius:50%;background:#f0f0f3;display:inline-flex;align-items:center;justify-content:center;margin-bottom:16px}
-  .content-frame{width:100%;height:100%;border:0;background:#fff;display:none}
+  .content-frame{width:100%;height:100%;border:0;background:#fff}
 </style>
 </head>
 <body>
