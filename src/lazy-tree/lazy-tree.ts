@@ -52,6 +52,8 @@ function setFolderIcon(folder: HTMLElement, open: boolean) {
 
 // ── expand / collapse ──
 
+const PAGE_SIZE = 50;
+
 async function expand(folder: HTMLElement) {
   const path = folder.dataset.path;
   if (!path) return;
@@ -66,18 +68,29 @@ async function expand(folder: HTMLElement) {
   }
 
   folder.classList.add("loading");
-  try {
-    const res = await fetch(`/api/tree/${ORG}?prefix=${encodeURIComponent(path)}`);
-    if (!res.ok) throw new Error(`${res.status}`);
-    const data = await res.json();
-    content.innerHTML = renderRows(data.children as TreeNode[]);
-    folder.classList.add("loaded", "open");
-    setFolderIcon(folder, true);
-    if (activeEl) updateIndicator(activeEl);
-  } catch {
-    content.innerHTML = `<div class="tree-error">Failed to load</div>`;
-  } finally {
-    folder.classList.remove("loading");
+  await loadPage(folder, path, content, undefined);
+  folder.classList.add("loaded", "open");
+  setFolderIcon(folder, true);
+  folder.classList.remove("loading");
+}
+
+async function loadPage(folder: HTMLElement, path: string, content: HTMLElement, startAfter?: string) {
+  const url = `/api/tree/${ORG}?prefix=${encodeURIComponent(path)}&limit=${PAGE_SIZE}${startAfter ? `&startAfter=${encodeURIComponent(startAfter)}` : ""}`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`${res.status}`);
+  const data = await res.json();
+
+  // Remove existing "load more" if any
+  const existingMore = content.querySelector(".tree-load-more");
+  if (existingMore) existingMore.remove();
+
+  const rows = renderRows(data.children as TreeNode[]);
+  content.insertAdjacentHTML("beforeend", rows);
+
+  if (data.isTruncated && data.nextStartAfter) {
+    folder.dataset.nextStartAfter = data.nextStartAfter;
+    content.insertAdjacentHTML("beforeend",
+      `<div class="tree-load-more"><button class="load-more-btn">Load more...</button></div>`);
   }
 }
 
@@ -119,10 +132,28 @@ function renderRows(nodes: TreeNode[]): string {
 
 function handleClick(e: Event) {
   const target = e.target as HTMLElement;
+
+  // Load-more button
+  const loadMoreBtn = target.closest(".load-more-btn") as HTMLButtonElement | null;
+  if (loadMoreBtn) {
+    e.preventDefault();
+    const folder = loadMoreBtn.closest(".tree-folder") as HTMLElement | null;
+    if (folder) {
+      const path = folder.dataset.path!;
+      const content = folder.querySelector(":scope > .tree-folder-content") as HTMLElement | null;
+      const next = folder.dataset.nextStartAfter;
+      if (path && content && next) {
+        loadMoreBtn.textContent = "Loading...";
+        loadMoreBtn.disabled = true;
+        loadPage(folder, path, content, next);
+      }
+    }
+    return;
+  }
+
   const item = target.closest(".tree-item") as HTMLElement | null;
   if (!item) return;
 
-  // Only toggle folder if this is the folder's OWN toggle item (direct child of .tree-folder)
   const folder = item.parentElement?.classList.contains("tree-folder") ? item.parentElement as HTMLElement : null;
   if (folder) {
     e.preventDefault();
@@ -130,15 +161,11 @@ function handleClick(e: Event) {
     return;
   }
 
-  // File click: navigate iframe with auth, set active
   if (item.dataset.path) {
     e.preventDefault();
     const frame = document.getElementById("content-frame") as HTMLIFrameElement | null;
     const placeholder = document.getElementById("main-placeholder");
-    if (frame) {
-      frame.style.display = "block";
-      frame.src = `/files/${item.dataset.path}${DEV_USER ? `?dev_user=${DEV_USER}` : ""}`;
-    }
+    if (frame) { frame.style.display = "block"; frame.src = `/files/${item.dataset.path}${DEV_USER ? `?dev_user=${DEV_USER}` : ""}`; }
     if (placeholder) placeholder.style.display = "none";
     document.querySelectorAll(".tree-item.active").forEach((el) => el.classList.remove("active"));
     item.classList.add("active");

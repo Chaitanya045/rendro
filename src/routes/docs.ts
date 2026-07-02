@@ -119,13 +119,16 @@ app.get("/api/tree/:org", async (c) => {
   if (!prefix.startsWith(`${org}/`)) return c.text(`Prefix must be under ${org}/`, 400);
   if (prefix.includes("..")) return c.text("Invalid path", 400);
 
-  // List all objects under prefix, then build tree and return top-level children
-  const allEntries = await listImmediate(prefix);
-  // Filter soft-deleted
-  const active = allEntries.filter((e) => !isDeleted(e.key));
-  // Build tree from these entries
+  const limit = parseInt(c.req.query("limit") || "100", 10);
+  const startAfter = c.req.query("startAfter") || undefined;
+
+  const { entries, isTruncated, nextStartAfter } = await listImmediate(prefix, {
+    maxKeys: Math.min(limit, 1000),
+    startAfter,
+  });
+
+  const active = entries.filter((e) => !isDeleted(e.key));
   const tree = buildTree(active, prefix);
-  // Convert to flat children array with type markers
   const children = tree.map((node) => ({
     name: node.name,
     path: node.path,
@@ -133,6 +136,6 @@ app.get("/api/tree/:org", async (c) => {
     size: "size" in node ? node.size : undefined,
     lastModified: "lastModified" in node ? node.lastModified : undefined,
   }));
-  return c.json({ children, prefix });
+  return c.json({ children, prefix, isTruncated, nextStartAfter });
 });
 export default app;

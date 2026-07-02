@@ -150,8 +150,9 @@ function renderCreateOrg(user: User, org: string): string {
 
 
 async function renderOrgDocs(user: User, org: string): Promise<string> {
-  const entries = (await listImmediate(`${org}/`)).filter((e) => !isDeleted(e.key));
-  const tree = buildTree(entries, `${org}/`);
+  const { entries } = await listImmediate(`${org}/`);
+  const active = entries.filter((e) => !isDeleted(e.key));
+  const tree = buildTree(active, `${org}/`);
   logOrgAccess(org, user.email, "view");
   return renderOrgTreePage(user, org, tree);
 }
@@ -214,6 +215,9 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e5e
 
   .tree-folder-content{overflow:hidden;transition:max-height .4s cubic-bezier(.34,1.56,.64,1),opacity .3s ease;max-height:0;opacity:0}
   .tree-folder.open>.tree-folder-content{max-height:2000px;opacity:1}
+  .load-more-btn{display:block;width:100%;padding:4px 12px;background:transparent;border:0;color:#0a66c2;font-size:12px;font-weight:600;cursor:pointer;text-align:left;font-family:Inter;border-radius:4px}
+  .load-more-btn:hover{background:#f0f0f3}
+  .load-more-btn:disabled{color:#6b7280;cursor:default}
   .tree-item{display:flex;align-items:center;gap:8px;padding:6px 12px;border-radius:4px;color:#6b7280;cursor:pointer;transition:transform .2s cubic-bezier(.4,0,.2,1),background-color .2s,color .2s}
   .tree-item:hover{background:#f0f0f3;color:#111418}
   .tree-item.active{background:#e8f0fe;color:#0a66c2}
