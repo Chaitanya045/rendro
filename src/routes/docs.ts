@@ -39,7 +39,11 @@ app.get("/files/:key{.+}", async (c) => {
 });
 
 function injectCommentor(html: string, org: string, filePath: string, user: User): string {
-  const widget = `<script>
+  const navScript = `<script>
+(function(){var p=window.parent;if(p!==window){p.postMessage({type:"doc-loaded",path:${JSON.stringify(filePath)}},"*");}
+document.addEventListener("click",function(e){var a=e.target.closest("a");if(!a||!a.href)return;var u=new URL(a.href);var prefix="/files/${org}/";if(!u.pathname.startsWith(prefix))return;var targetPath=u.pathname.slice(prefix.length);if(!targetPath)return;e.preventDefault();p.postMessage({type:"doc-navigate",path:targetPath},"*");});})();
+</script>
+<script>
 window.COMMENTOR = ${JSON.stringify({
   convexUrl: CONVEX_URL,
   orgSlug: org,
@@ -49,9 +53,9 @@ window.COMMENTOR = ${JSON.stringify({
 </script>
 <script src="/commentor.js?v=4"></script>`;
   if (html.includes("</body>")) {
-    return html.replace("</body>", widget + "</body>");
+    return html.replace("</body>", navScript + "</body>");
   }
-  return html + widget;
+  return html + navScript;
 }
 
 // ----- Sync API (CLI) — per-org API key auth -----

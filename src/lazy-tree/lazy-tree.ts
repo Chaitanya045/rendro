@@ -138,12 +138,37 @@ function handleClick(e: Event) {
   }
 }
 
+function navigateToDoc(path: string) {
+  const selector = `.tree-item[data-path="${CSS.escape(path)}"]`;
+  const item = document.querySelector(selector) as HTMLElement | null;
+  if (!item) return;
+  // Expand all parent folders
+  let parent = item.closest(".tree-folder") as HTMLElement | null;
+  while (parent) {
+    if (!parent.classList.contains("open")) {
+      const toggle = parent.querySelector(":scope > .tree-item") as HTMLElement | null;
+      if (toggle) toggle.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    }
+    parent = parent.parentElement?.closest(".tree-folder") as HTMLElement | null;
+  }
+  document.querySelectorAll(".tree-item.active").forEach((el) => el.classList.remove("active"));
+  item.classList.add("active");
+  updateIndicator(item);
+}
+
 function init() {
   if (!TREE) return;
   TREE.addEventListener("click", handleClick);
-
-  // Open any initially-open folders
   document.querySelectorAll(".tree-folder.open").forEach((f) => setFolderIcon(f as HTMLElement, true));
+  window.addEventListener("message", (e) => {
+    if (!e.data || typeof e.data.path !== "string") return;
+    const { type, path } = e.data as { type: string; path: string };
+    if (type === "doc-navigate") {
+      const frame = document.getElementById("content-frame") as HTMLIFrameElement | null;
+      if (frame) frame.src = `/files/${ORG}/${path}`;
+    }
+    navigateToDoc(path);
+  });
 }
 
 if (document.readyState === "loading") {
