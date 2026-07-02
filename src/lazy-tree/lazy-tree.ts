@@ -138,19 +138,41 @@ function handleClick(e: Event) {
   }
 }
 
-function navigateToDoc(path: string) {
-  const selector = `.tree-item[data-path="${CSS.escape(path)}"]`;
-  const item = document.querySelector(selector) as HTMLElement | null;
-  if (!item) return;
-  // Expand all parent folders
-  let parent = item.closest(".tree-folder") as HTMLElement | null;
-  while (parent) {
-    if (!parent.classList.contains("open")) {
-      const toggle = parent.querySelector(":scope > .tree-item") as HTMLElement | null;
-      if (toggle) toggle.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-    }
-    parent = parent.parentElement?.closest(".tree-folder") as HTMLElement | null;
+async function navigateToDoc(relPath: string) {
+  const fullPath = `${ORG}/${relPath}`;
+
+  // Expand all ancestor folders (bottom-up to avoid race conditions)
+  const ancestors: HTMLElement[] = [];
+  // We don't have the item yet, so walk the path segments
+  const parts = relPath.split("/");
+  let currentPath = ORG!;
+  for (let i = 0; i < parts.length - 1; i++) {
+    currentPath += "/" + parts[i];
+    const folder = document.querySelector(`.tree-folder[data-path="${CSS.escape(currentPath)}/"]`) as HTMLElement | null;
+    if (folder) ancestors.push(folder);
   }
+
+  // Expand each ancestor sequentially
+  for (const folder of ancestors) {
+    if (!folder.classList.contains("open")) {
+      const toggle = folder.querySelector(":scope > .tree-item") as HTMLElement | null;
+      if (toggle) {
+        toggle.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+        // Wait for async expansion to complete
+        await new Promise<void>((resolve) => {
+          const check = () => {
+            if (folder.classList.contains("open")) resolve();
+            else setTimeout(check, 50);
+          };
+          check();
+        });
+      }
+    }
+  }
+
+  // Now find and activate the item
+  const item = document.querySelector(`.tree-item[data-path="${CSS.escape(fullPath)}"]`) as HTMLElement | null;
+  if (!item) return;
   document.querySelectorAll(".tree-item.active").forEach((el) => el.classList.remove("active"));
   item.classList.add("active");
   updateIndicator(item);
@@ -165,7 +187,7 @@ function init() {
     const { type, path } = e.data as { type: string; path: string };
     if (type === "doc-navigate") {
       const frame = document.getElementById("content-frame") as HTMLIFrameElement | null;
-      if (frame) frame.src = `/files/${ORG}/${path}`;
+      if (frame) frame.src = `/files/${ORG}/${path}?dev_user=user@${ORG}.com`;
     }
     navigateToDoc(path);
   });
