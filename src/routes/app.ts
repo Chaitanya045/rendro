@@ -1,0 +1,386 @@
+import { Hono } from "hono";
+import { listObjects, buildTree, putObject } from "@/minio";
+import type { DocTree } from "@/minio";
+import { emailToOrgSlug, orgExists, logOrgAccess } from "@/orgs";
+import type { User } from "better-auth/types";
+import { logger } from "@/logger";
+import { createOrgApiKey } from "@/api-keys";
+import { isDeleted } from "@/soft-delete";
+
+const app = new Hono<{ Variables: { user?: User } }>();
+
+/**
+ * GET / — the main entry. Behavior depends on the user's session:
+ *
+ *   no session           → "Sign in with Google" page
+ *   session, org exists → doc tree
+ *   session, no org     → "Create your org" form (org pre-populated from email domain)
+ */
+app.get("/", async (c) => {
+  const user = c.get("user");
+  if (!user) {
+    return c.html(renderSignIn());
+  }
+
+  const email = user.email;
+  const org = emailToOrgSlug(email);
+  if (!org) {
+    return c.html(renderEmailUnsupported(user));
+  }
+
+  if (await orgExists(org)) {
+    return c.html(await renderOrgDocs(user, org));
+  }
+
+  return c.html(renderCreateOrg(user, org));
+});
+
+/**
+ * GET /api/auth/me — current user info (handy for client-side checks)
+ */
+app.get("/api/auth/me", (c) => {
+  const user = c.get("user");
+  if (!user) return c.json({ user: null }, 200);
+  return c.json({ user });
+});
+
+/**
+ * POST /api/orgs — create the org folder in MinIO.
+ */
+
+app.post("/api/orgs", async (c) => {
+  const user = c.get("user");
+  if (!user) return c.text("Sign in first", 401);
+
+  const body = await c.req.json<{ org?: string; displayName?: string }>()
+    .catch((): { org?: string; displayName?: string } => ({}));
+  const org = (body.org ?? emailToOrgSlug(user.email) ?? "").toLowerCase();
+  const displayName = body.displayName?.trim() || org;
+
+  if (!org.match(/^[a-z0-9]+(-[a-z0-9]+)*$/)) {
+    return c.text("Invalid org slug. Use lowercase letters, numbers, and hyphens.", 400);
+  }
+  if (await orgExists(org)) {
+    return c.redirect(`/?org=${encodeURIComponent(org)}`, 303);
+  }
+
+  const apiKey = createOrgApiKey(org);
+  const indexHtml = renderInitialIndex(user, org, displayName);
+  await putObject(`${org}/index.html`, indexHtml, "text/html");
+  logOrgAccess(org, user.email, "create");
+  logger.info({ org, user: user.email }, "org created");
+
+  return c.html(renderApiKeyPage(user, org, apiKey));
+});
+
+// ----- HTML renderers -----
+
+function renderSignIn(): string {
+  return `<!DOCTYPE html>
+<html><head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Docsync — Sign in</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font-family: system-ui, -apple-system, sans-serif; display:flex; align-items:center; justify-content:center; min-height:100vh; margin:0; background:#fafafa; color:#1a1a1a; }
+  .card { background:#fff; padding:2.5rem 3rem; border-radius:12px; box-shadow:0 1px 3px rgba(0,0,0,0.1); text-align:center; max-width:420px; }
+  h1 { margin:0 0 0.5rem; font-size:1.5rem; }
+  p { color:#666; margin:0 0 1.5rem; }
+  a.btn { display:inline-block; background:#1a1a1a; color:#fff; padding:0.75rem 1.5rem; border-radius:6px; text-decoration:none; font-weight:500; }
+  a.btn:hover { background:#333; }
+</style>
+</head><body>
+<div class="card">
+  <h1>Docsync</h1>
+  <p>Sign in to read your team's docs.</p>
+  <form id="sf" method="post" action="/api/auth/sign-in/social" style="display:none"><input type="hidden" name="provider" value="google"></form>
+  <button onclick="fetch('/api/auth/sign-in/social',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({provider:'google'})}).then(r=>r.json()).then(d=>{if(d.url)location.href=d.url}).catch(()=>document.getElementById('sf').submit())" style="background:#1a1a1a;color:#fff;padding:0.75rem 1.5rem;border:0;border-radius:6px;font-weight:500;cursor:pointer;font-size:1rem">Sign in with Google</button>
+</div>
+</body></html>`;
+}
+
+function renderEmailUnsupported(user: User): string {
+  return `<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><title>Docsync</title></head>
+<body style="font-family:system-ui;padding:2rem">
+<h1>Unsupported email domain</h1>
+<p>Your email <code>${escapeHtml(user.email)}</code> doesn't have a valid org slug. Use a work email like <code>you@company.com</code>.</p>
+<p><a href="/api/auth/sign-out">Sign out</a></p>
+</body></html>`;
+}
+
+function renderCreateOrg(user: User, org: string): string {
+  const email = escapeHtml(user.email);
+  const orgEsc = escapeHtml(org);
+  return `<!DOCTYPE html>
+<html><head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${orgEsc} — Docsync</title>
+<style>
+  body { font-family: system-ui, -apple-system, sans-serif; background:#fafafa; color:#1a1a1a; margin:0; }
+  .container { max-width: 600px; margin: 4rem auto; padding: 0 1rem; }
+  .card { background:#fff; padding:2rem 2.5rem; border-radius:8px; box-shadow:0 1px 3px rgba(0,0,0,0.1); }
+  h1 { margin:0 0 0.25rem; font-size:1.5rem; }
+  .meta { color:#666; font-size:0.875rem; margin:0 0 1.5rem; }
+  label { display:block; font-weight:500; margin: 1rem 0 0.25rem; }
+  input { width:100%; padding:0.5rem 0.75rem; border:1px solid #ccc; border-radius:4px; font-size:0.95rem; box-sizing:border-box; }
+  button { margin-top:1.5rem; background:#1a1a1a; color:#fff; padding:0.75rem 1.5rem; border:0; border-radius:6px; font-weight:500; cursor:pointer; }
+  a.logout { float:right; color:#666; font-size:0.875rem; }
+</style>
+</head><body>
+<div class="container">
+  <a class="logout" href="/api/auth/sign-out">Sign out</a>
+  <div class="card">
+    <h1>Create your org</h1>
+    <p class="meta">Signed in as ${email}</p>
+    <p>No docs found for <code>${orgEsc}</code>. Create the org to get started.</p>
+    <form method="post" action="/api/orgs">
+      <label for="org">Org slug</label>
+      <input id="org" name="org" value="${orgEsc}" readonly>
+      <label for="displayName">Display name</label>
+      <input id="displayName" name="displayName" value="${orgEsc}">
+      <button type="submit">Create org</button>
+    </form>
+  </div>
+</div>
+</body></html>`;
+}
+
+async function renderOrgDocs(user: User, org: string): Promise<string> {
+  const entries = (await listObjects(`${org}/`)).filter((e) => !isDeleted(e.key));
+  const tree = buildTree(entries, `${org}/`);
+  logOrgAccess(org, user.email, "view");
+  return renderOrgTreePage(user, org, tree);
+}
+
+
+function humanSizeStr(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+function renderOrgTreePage(user: User, org: string, tree: DocTree[]): string {
+  const email = escapeHtml(user.email);
+  const orgEsc = escapeHtml(org);
+  const initials = (user.name || email).split(/[@\s]/)[0].slice(0, 2).toUpperCase();
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${orgEsc} — DocSync</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet">
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script>
+tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e5e7eb","background":"#ffffff","surface-container-high":"#f0f0f3","on-secondary-fixed":"#111418","on-surface-variant":"#6b7280","primary":"#0a66c2","primary-fixed-dim":"#b2c5ff","surface":"#ffffff","surface-container-low":"#f8f9fa","secondary-container":"#e8f0fe","on-secondary-container":"#111418","on-surface":"#111418","outline":"#6b7280","on-primary":"#ffffff","surface-container":"#f3f4f6"},fontFamily:{"body-md":["Inter"]},fontSize:{"body-md":["14px",{lineHeight:"20px",fontWeight:"400"}],"headline-sm":["20px",{lineHeight:"28px",fontWeight:"600"}],"headline-md":["24px",{lineHeight:"32px",fontWeight:"600"}]}}}}
+</script>
+<style>
+  *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:Inter,system-ui,sans-serif;background:#fff;color:#111418;overflow:hidden;height:100vh;font-size:14px;line-height:20px}
+  .material-symbols-outlined{font-variation-settings:'FILL'0,'wght'400,'GRAD'0,'opsz'24;vertical-align:middle;font-size:20px}
+  ::-webkit-scrollbar{width:6px} ::-webkit-scrollbar-track{background:transparent} ::-webkit-scrollbar-thumb{background:#e5e7eb;border-radius:10px}
+
+  .topbar{position:fixed;top:0;z-index:50;width:100%;height:56px;background:#fff;border-bottom:1px solid #e5e7eb;display:flex;align-items:center;justify-content:space-between;padding:0 24px}
+  .topbar-left{display:flex;align-items:center;gap:24px}
+  .topbar-logo{font-size:24px;font-weight:700;color:#0a66c2;line-height:32px}
+  .topbar-search{display:flex;align-items:center;gap:8px;background:#f3f4f6;padding:6px 12px;border-radius:4px;border:1px solid #e5e7eb;width:256px;transition:border-color .15s}
+  .topbar-search:focus-within{border-color:#0a66c2}
+  .topbar-search input{border:0;outline:0;background:transparent;font-size:14px;color:#111418;width:100%;font-family:Inter}
+  .topbar-search input::placeholder{color:#6b7280}
+  .topbar-actions{display:flex;align-items:center;gap:16px}
+  .topbar-btn{padding:6px 12px;font-size:12px;font-weight:600;border-radius:4px;cursor:pointer;border:0;font-family:Inter;display:flex;align-items:center;gap:6px}
+  .topbar-btn-share{color:#0a66c2;background:transparent}
+  .topbar-btn-share:hover{background:#f3f4f6}
+  .topbar-btn-create{background:#0a66c2;color:#fff}
+  .topbar-btn-create:hover{opacity:.8}
+  .topbar-avatar{width:32px;height:32px;border-radius:50%;background:#e8f0fe;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;color:#111418;cursor:pointer;border:1px solid #e5e7eb}
+
+  .sidebar{position:fixed;top:56px;left:0;bottom:0;width:280px;background:#fff;border-right:1px solid #e5e7eb;display:flex;flex-direction:column;overflow-y:auto;padding:16px 0}
+  .sidebar-org{padding:0 24px;margin-bottom:16px}
+  .sidebar-org-row{display:flex;align-items:center;gap:12px;cursor:pointer}
+  .sidebar-org-icon{width:32px;height:32px;border-radius:4px;background:#0a66c2;display:flex;align-items:center;justify-content:center}
+  .sidebar-org-icon .material-symbols-outlined{color:#fff;font-size:18px}
+  .sidebar-org-name{font-size:20px;font-weight:600;line-height:28px;color:#111418}
+  .sidebar-org-meta{font-size:12px;font-weight:600;color:#6b7280;letter-spacing:.05em;line-height:16px}
+  .sidebar-divider{padding:8px 12px;font-size:10px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:.05em}
+  .sidebar-tree{flex:1;padding:0 12px;overflow-y:auto}
+  .sidebar-footer{padding:12px 16px;border-top:1px solid #e5e7eb;margin-top:auto}
+  .sidebar-footer a{font-size:12px;color:#6b7280;text-decoration:none;font-weight:600}
+  .sidebar-footer a:hover{color:#111418}
+
+  .tree-folder-content{overflow:hidden;transition:max-height .4s cubic-bezier(.34,1.56,.64,1),opacity .3s ease;max-height:0;opacity:0}
+  .tree-folder.open>.tree-folder-content{max-height:2000px;opacity:1}
+  .tree-item{display:flex;align-items:center;gap:8px;padding:6px 12px;border-radius:4px;color:#6b7280;cursor:pointer;transition:transform .2s cubic-bezier(.4,0,.2,1),background-color .2s,color .2s}
+  .tree-item:hover{background:#f0f0f3;color:#111418}
+  .tree-item.active{background:#e8f0fe;color:#0a66c2}
+  .tree-link{color:inherit;text-decoration:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .tree-size{color:#6b7280;font-size:11px;flex-shrink:0}
+  .tree-empty{color:#6b7280;padding:6px 12px;font-size:12px}
+  .tree-error{color:#ba1a1a;padding:4px 8px;font-size:11px}
+  .caret-icon{transition:transform .3s cubic-bezier(.4,0,.2,1)}
+  .tree-folder.open>.tree-item .caret-icon{transform:rotate(90deg)}
+  .active-indicator{position:absolute;left:0;width:4px;height:32px;background:#0a66c2;transition:transform .3s cubic-bezier(.4,0,.2,1),opacity .2s ease;border-radius:4px;z-index:10;pointer-events:none}
+
+  .main{margin-left:280px;margin-top:56px;height:calc(100vh - 56px);overflow:hidden;background:#f8f9fa}
+  .content-frame{width:100%;height:100%;border:0;background:#fff}
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="topbar-left">
+    <span class="topbar-logo">DocSync</span>
+    <div class="topbar-search">
+      <span class="material-symbols-outlined" style="color:#737685;font-size:18px">search</span>
+      <input type="text" placeholder="Search Docs... (Cmd+K)" disabled>
+    </div>
+  </div>
+  <div class="topbar-actions">
+    <button class="topbar-btn topbar-btn-share"><span class="material-symbols-outlined" style="font-size:18px">share</span> Share</button>
+    <button class="topbar-btn topbar-btn-create"><span class="material-symbols-outlined" style="font-size:18px">add</span> Create</button>
+    <div class="topbar-avatar" title="${escapeHtml(email)}">${initials}</div>
+  </div>
+</header>
+
+<aside class="sidebar">
+  <div class="sidebar-org">
+    <div class="sidebar-org-row">
+      <div class="sidebar-org-icon"><span class="material-symbols-outlined">workspaces</span></div>
+      <div>
+        <div class="sidebar-org-name">${orgEsc}</div>
+        <div class="sidebar-org-meta">Knowledge Base</div>
+      </div>
+    </div>
+  </div>
+  <div class="sidebar-divider">Documentation Tree</div>
+  <div class="sidebar-tree" data-tree-org="${orgEsc}">
+    <div class="space-y-0.5 relative" id="tree-container" style="position:relative">
+      <div class="active-indicator" id="active-indicator" style="opacity:0;transition:none"></div>
+      ${renderTree(tree)}
+    </div>
+  </div>
+  <div class="sidebar-footer">
+    <a href="/api/auth/sign-out">Sign out</a>
+  </div>
+</aside>
+
+<main class="main">
+  <iframe name="content-frame" id="content-frame" class="content-frame"
+    srcdoc="<div style='display:flex;align-items:center;justify-content:center;height:100%;background:#f1f3ff;font-family:Inter,sans-serif'><div style='text-align:center'><div style='width:64px;height:64px;border-radius:50%;background:#e1e8ff;display:inline-flex;align-items:center;justify-content:center;margin-bottom:16px'><span class='material-symbols-outlined' style='font-size:32px;color:#737685'>edit_document</span></div><h2 style='font-size:24px;font-weight:600;color:#051a3e;margin-bottom:8px'>Select a document</h2><p style='font-size:16px;color:#737685;max-width:320px'>Choose a document from the sidebar to view its contents, or create a new page to start writing.</p></div></div>"
+    title="Document content"></iframe>
+</main>
+
+<script src="/lazy-tree.js?v=1"></script>
+</body>
+</html>`;
+}
+
+
+function renderTree(nodes: DocTree[]): string {
+  if (nodes.length === 0) return '<div class="tree-empty">No documents yet.</div>';
+  return nodes
+    .map((node) => {
+      if (node.type === "folder") {
+        const folderPath = node.path.endsWith("/") ? node.path : `${node.path}/`;
+        return `<div class="tree-folder" data-path="${escapeHtml(folderPath)}">
+    <div class="tree-item flex items-center gap-2 px-3 py-1.5 rounded-lg text-on-surface-variant cursor-pointer">
+      <span class="material-symbols-outlined text-[18px] caret-icon flex-shrink-0">chevron_right</span>
+      <span class="material-symbols-outlined text-[18px] folder-icon flex-shrink-0">folder</span>
+      <span class="font-body-md flex-1 min-w-0">${escapeHtml(node.name)}</span>
+    </div>
+    <div class="tree-folder-content ml-4 space-y-0.5 border-l border-outline-variant/30 pl-2"></div>
+  </div>`;
+      }
+      const filePath = `/files/${node.path}`;
+      const meta = "size" in node && node.size ? `<span class="tree-size">${humanSizeStr(node.size)}</span>` : "";
+      return `<div class="tree-item flex items-center gap-2 px-3 py-1.5 rounded-lg text-on-surface-variant cursor-pointer" data-path="${escapeHtml(node.path)}">
+    <span class="material-symbols-outlined text-[18px] flex-shrink-0">article</span>
+    <a href="${escapeHtml(filePath)}" class="tree-link flex-1 min-w-0" target="content-frame">${escapeHtml(node.name)}</a>
+    ${meta}
+  </div>`;
+    })
+    .join("\n");
+}
+function renderInitialIndex(_user: User, org: string, displayName: string): string {
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>${escapeHtml(displayName)}</title>
+<style>body{font-family:system-ui;max-width:720px;margin:3rem auto;padding:0 1.5rem;line-height:1.6;color:#1a1a1a}</style>
+</head>
+<body>
+<h1>${escapeHtml(displayName)}</h1>
+<p>This is the <code>${escapeHtml(org)}</code> documentation space on Docsync.</p>
+<p>Push your first docs with the CLI (set DOCSYNC_API_KEY in your CI):</p>
+<pre><code>docsync push --source ./docs --org ${escapeHtml(org)}</code></pre>
+<p>Or start writing HTML directly in the bucket under <code>${escapeHtml(org)}/</code>.</p>
+</body>
+</html>`;
+}
+
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+
+function renderApiKeyPage(user: User, org: string, apiKey: string): string {
+  const email = escapeHtml(user.email);
+  const orgEsc = escapeHtml(org);
+  return `<!DOCTYPE html>
+<html><head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${orgEsc} — Docsync</title>
+<style>
+  body { font-family: system-ui, -apple-system, sans-serif; background: #fafafa; color: #1a1a1a; margin:0; }
+  .container { max-width: 600px; margin: 4rem auto; padding: 0 1rem; }
+  .card { background: #fff; padding: 2rem 2.5rem; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+  h1 { margin: 0 0 0.25rem; font-size: 1.5rem; }
+  .meta { color: #666; font-size: 0.875rem; margin: 0 0 1.5rem; }
+  .key-box { background: #f5f5f5; border: 1px solid #e0e0e0; border-radius: 6px; padding: 1rem; font-family: monospace; font-size: 0.8rem; word-break: break-all; user-select: all; margin: 0.5rem 0 1rem; }
+  .warning { background: #fff3cd; border: 1px solid #ffc107; border-radius: 6px; padding: 0.75rem 1rem; margin: 1rem 0; font-size: 0.9rem; }
+  code { background: #f0f0f0; padding: 0.15rem 0.3rem; border-radius: 3px; font-size: 0.9em; }
+  pre { background: #2d2d2d; color: #f8f8f2; padding: 1rem; border-radius: 6px; overflow-x: auto; font-size: 0.85rem; }
+  .copy-btn { background: #e8e8e8; border: 1px solid #ccc; border-radius: 4px; padding: 0.3rem 0.75rem; cursor: pointer; font-size: 0.85rem; margin-bottom: 0.5rem; }
+  .copy-btn:hover { background: #d8d8d8; }
+</style>
+</head><body>
+<div class="container">
+  <div class="card">
+    <h1>${orgEsc} — Created!</h1>
+    <p class="meta">Signed in as ${email}</p>
+    <p>Here's your API key for the CLI. Copy it now — it won't be shown again.</p>
+    <div class="key-box" id="api-key">${escapeHtml(apiKey)}</div>
+    <button type="button" class="copy-btn" onclick="copyKey()">Copy</button>
+    <div class="warning">
+      <strong>Store this securely.</strong> Add it to your CI environment as
+      <code>DOCSYNC_API_KEY</code>. Anyone with this key can push docs to
+      your org.
+    </div>
+    <pre><code># In your CI pipeline:
+docsync push --source ./docs --org ${orgEsc}
+# Set DOCSYNC_API_KEY in your CI secrets</code></pre>
+    <a class="btn" href="/">View your docs →</a>
+  </div>
+</div>
+<script>
+function copyKey() {
+  const el = document.getElementById('api-key');
+  const btn = document.querySelector('.copy-btn');
+  if (!el || !btn) return;
+  navigator.clipboard.writeText(el.textContent || '')
+    .then(() => { btn.textContent = 'Copied!'; setTimeout(() => btn.textContent = 'Copy', 1500); })
+    .catch(() => { btn.textContent = 'Copy failed'; });
+}
+</script>
+</body></html>`;
+}
+export default app;
