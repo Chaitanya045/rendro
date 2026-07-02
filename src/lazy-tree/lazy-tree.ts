@@ -2,10 +2,10 @@
  * Lazy tree — matches design.html spec with Material Symbols icons,
  * max-height animations, active indicator, and border-line indentation.
  */
-
+const ORG = (document.querySelector("[data-tree-org]") as HTMLElement)?.dataset.treeOrg;
+const DEV_USER = new URLSearchParams(location.search).get("dev_user") || "";
 interface TreeNode { name: string; path: string; type: "file" | "folder"; size?: number; }
 
-const ORG = (document.querySelector("[data-tree-org]") as HTMLElement)?.dataset.treeOrg;
 const TREE = document.getElementById("tree-container") as HTMLElement;
 
 function humanSize(bytes: number): string {
@@ -130,11 +130,15 @@ function handleClick(e: Event) {
     return;
   }
 
-  // File click: show iframe and set active
+  // File click: navigate iframe with auth, set active
   if (item.dataset.path) {
+    e.preventDefault();
     const frame = document.getElementById("content-frame") as HTMLIFrameElement | null;
     const placeholder = document.getElementById("main-placeholder");
-    if (frame) frame.style.display = "";
+    if (frame) {
+      frame.style.display = "";
+      frame.src = `/files/${item.dataset.path}${DEV_USER ? `?dev_user=${DEV_USER}` : ""}`;
+    }
     if (placeholder) placeholder.style.display = "none";
     document.querySelectorAll(".tree-item.active").forEach((el) => el.classList.remove("active"));
     item.classList.add("active");
@@ -194,7 +198,7 @@ function init() {
       const placeholder = document.getElementById("main-placeholder");
       if (frame) {
         frame.style.display = "";
-        frame.src = `/files/${ORG}/${path}`;
+        frame.src = `/files/${ORG}/${path}${DEV_USER ? `?dev_user=${DEV_USER}` : ""}`;
       }
       if (placeholder) placeholder.style.display = "none";
     }
