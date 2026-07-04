@@ -208,17 +208,15 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e5e
   .sidebar-footer a:hover{color:#111418}
 
   .tree-folder-content{overflow:hidden;transition:max-height .4s cubic-bezier(.34,1.56,.64,1),opacity .3s ease;max-height:0;opacity:0}
-  .tree-folder.open>.tree-folder-content{max-height:2000px;opacity:1}
+  .tree-folder.open>.tree-folder-content{max-height:2000px;opacity:1;overflow:visible}
   /* ── sticky folder headers (VS Code-style stacking) ── */
-  .tree-folder.open>.tree-item{position:sticky;z-index:5;background:var(--sidebar-bg,#fff)}
-  .tree-folder[data-depth="0"].open>.tree-item{top:0}
-  .tree-folder[data-depth="1"].open>.tree-item{top:30px}
-  .tree-folder[data-depth="2"].open>.tree-item{top:60px}
-  .tree-folder[data-depth="3"].open>.tree-item{top:90px}
-  .tree-folder[data-depth="4"].open>.tree-item{top:120px}
-  .tree-folder[data-depth="5"].open>.tree-item{top:150px}
-  .load-more-btn{display:block;width:100%;padding:4px 12px;background:transparent;border:0;color:#0a66c2;font-size:12px;font-weight:600;cursor:pointer;text-align:left;font-family:Inter;border-radius:4px}
-  .load-more-btn:hover{background:#f0f0f3}
+  .tree-folder.open>.tree-item{position:sticky;background:var(--sidebar-bg,#fff)}
+  .tree-folder[data-depth="0"].open>.tree-item{top:0;z-index:10}
+  .tree-folder[data-depth="1"].open>.tree-item{top:30px;z-index:9}
+  .tree-folder[data-depth="2"].open>.tree-item{top:60px;z-index:8}
+  .tree-folder[data-depth="3"].open>.tree-item{top:90px;z-index:7}
+  .tree-folder[data-depth="4"].open>.tree-item{top:120px;z-index:6}
+  .tree-folder[data-depth="5"].open>.tree-item{top:150px;z-index:5}
   .load-more-btn:disabled{color:#6b7280;cursor:default}
   .tree-item{display:flex;align-items:center;gap:8px;padding:6px 12px;border-radius:4px;color:#6b7280;cursor:pointer;transition:transform .2s cubic-bezier(.4,0,.2,1),background-color .2s,color .2s}
   .tree-item:hover{background:#f0f0f3;color:#111418}
