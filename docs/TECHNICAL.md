@@ -527,5 +527,21 @@ deleted_file table: (orgSlug, fileKey, deletedAt)
 - **Commentor widget**: injected into each doc page (iframe), Convex-backed inline comments
 - **Nav tracking script**: injected into each doc page, intercepts link clicks via postMessage
 
-### Color scheme
-Matches the commentor widget: white `#fff` background, blue `#0a66c2` accent, Inter font.
+### Color scheme & Dark mode
+
+Light mode matches the commentor widget: white `#fff` background, blue `#0a66c2` accent, Inter font.
+
+Dark mode palette:
+
+| Token | Light | Dark |
+|---|---|---|
+| Background | `#fff` | `#1e1f22` |
+| Surface | `#f3f4f6` | `#2b2d31` |
+| Accent | `#0a66c2` | `#4493f8` |
+| Text | `#111418` | `#f2f3f5` |
+| Muted text | `#6b7280` | `#9aa0a8` |
+| Border | `#e5e7eb` | `#383a40` |
+
+Toggle button in header (left of avatar) with `light_mode`/`dark_mode` Material Symbols icon. Theme persists via `localStorage.setItem("commentor-theme", ...)` — shared key with the commentor widget so both stay in sync. System preference (`prefers-color-scheme`) detected on first load.
+
+Dark mode only affects UI chrome (header, sidebar, placeholder). Doc content in the iframe is unchanged.
