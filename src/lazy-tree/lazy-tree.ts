@@ -185,16 +185,7 @@ function loadDoc(fullPath: string, pushState: boolean) {
   if (placeholder) placeholder.style.display = "none";
 
   // Update active state in tree
-  const item = document.querySelector(`.tree-item[data-path="${CSS.escape(fullPath)}"]`) as HTMLElement | null;
-  if (item) {
-    document.querySelectorAll(".tree-item.active").forEach((el) => el.classList.remove("active"));
-    item.classList.add("active");
-    updateIndicator(item, true);
-  } else {
-    // Item not in DOM yet — expand ancestors and find it
-    const relPath = fullPath.startsWith(`${ORG}/`) ? fullPath.slice(ORG!.length + 1) : fullPath;
-    navigateToDoc(relPath);
-  }
+  syncActiveState(fullPath);
 
   // Push history state
   if (pushState) {
@@ -244,6 +235,20 @@ async function navigateToDoc(relPath: string) {
   updateIndicator(item, true);
 }
 
+// Sync tree active state without reloading iframe (for doc-loaded messages)
+function syncActiveState(fullPath: string) {
+  const item = document.querySelector(`.tree-item[data-path="${CSS.escape(fullPath)}"]`) as HTMLElement | null;
+  if (item) {
+    document.querySelectorAll(".tree-item.active").forEach((el) => el.classList.remove("active"));
+    item.classList.add("active");
+    updateIndicator(item, true);
+  } else {
+    // Item not in DOM — expand ancestors using relative path
+    const relPath = fullPath.startsWith(`${ORG}/`) ? fullPath.slice(ORG!.length + 1) : fullPath;
+    navigateToDoc(relPath);
+  }
+}
+
 function init() {
   if (!TREE) return;
   TREE.addEventListener("click", handleClick);
@@ -259,10 +264,12 @@ function init() {
     if (!e.data || typeof e.data.path !== "string") return;
     const { type, path } = e.data as { type: string; path: string };
     if (type === "doc-navigate") {
+      // path is relative (e.g., "onboarding/welcome.html") — load with full path
       loadDoc(`${ORG}/${path}`, true);
     }
     if (type === "doc-loaded") {
-      navigateToDoc(path);
+      // path is full (e.g., "gmail/index.html") — just sync tree state, don't reload iframe
+      syncActiveState(path);
     }
   });
 
