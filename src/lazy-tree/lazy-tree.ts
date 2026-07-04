@@ -22,30 +22,26 @@ let activeEl: HTMLElement | null = null;
 
 // ── active indicator ──
 
-function updateIndicator(el: HTMLElement, animate = true) {
-  // Double rAF ensures DOM layout has settled after expand/collapse animations
+function updateIndicator(el: HTMLElement) {
   requestAnimationFrame(() => {
-    requestAnimationFrame(() => {
-      const indicator = document.getElementById("active-indicator");
-      if (!indicator || !TREE) return;
-      activeEl = el;
+    const indicator = document.getElementById("active-indicator");
+    if (!indicator || !TREE) return;
+    activeEl = el;
 
-      let visible = true;
-      let cur: HTMLElement | null = el.parentElement;
-      while (cur && cur !== TREE) {
-        if (cur.classList.contains("tree-folder") && !cur.classList.contains("open")) { visible = false; break; }
-        cur = cur.parentElement;
-      }
-      if (!visible) { indicator.style.opacity = "0"; return; }
+    // Check if visible (all parent folders must be open)
+    let visible = true;
+    let cur: HTMLElement | null = el.parentElement;
+    while (cur && cur !== TREE) {
+      if (cur.classList.contains("tree-folder") && !cur.classList.contains("open")) { visible = false; break; }
+      cur = cur.parentElement;
+    }
+    if (!visible) { indicator.style.opacity = "0"; return; }
 
-      const ir = el.getBoundingClientRect();
-      const cr = TREE.getBoundingClientRect();
-      indicator.style.transition = animate
-        ? "transform 0.3s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.2s ease"
-        : "none";
-      indicator.style.opacity = "1";
-      indicator.style.transform = `translate(${ir.left - cr.left}px, ${ir.top - cr.top}px)`;
-    });
+    indicator.style.transition = "none";
+    const ir = el.getBoundingClientRect();
+    const cr = TREE.getBoundingClientRect();
+    indicator.style.opacity = "1";
+    indicator.style.transform = `translate(${ir.left - cr.left}px, ${ir.top - cr.top}px)`;
   });
 }
 
@@ -104,7 +100,7 @@ async function loadPage(folder: HTMLElement, path: string, content: HTMLElement,
       `<div class="tree-load-more"><button class="load-more-btn">Load more...</button></div>`);
   }
 
-  if (activeEl) updateIndicator(activeEl, false);
+  if (activeEl) updateIndicator(activeEl);
 }
 
 function collapse(folder: HTMLElement) {
@@ -234,7 +230,7 @@ function init() {
   TREE.addEventListener("transitionend", (e) => {
     const target = e.target as HTMLElement;
     if (target.classList.contains("tree-folder-content") && activeEl) {
-      updateIndicator(activeEl, false);
+      updateIndicator(activeEl);
     }
   });
   window.addEventListener("message", (e) => {
