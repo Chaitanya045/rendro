@@ -1,6 +1,6 @@
 import Database from "better-sqlite3";
 
-const db = new Database("docsync-auth.db");
+const db = new Database("rendro-auth.db");
 db.pragma("journal_mode = WAL");
 
 db.exec(`CREATE TABLE IF NOT EXISTS deleted_file (

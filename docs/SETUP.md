@@ -1,6 +1,6 @@
-# Docsync — Local Setup
+# Rendro — Local Setup
 
-Get Docsync running on your machine in under 10 minutes.
+Get Rendro running on your machine in under 10 minutes.
 
 ## Prerequisites
 
@@ -11,14 +11,14 @@ Get Docsync running on your machine in under 10 minutes.
 ## 1. Clone & Install
 
 ```bash
-git clone <repo-url> docsync
-cd docsync
+git clone <repo-url> rendro
+cd rendro
 pnpm install
 ```
 
 ## 2. Start MinIO
 
-Docsync stores HTML files in MinIO, an S3-compatible object store. The docker-compose file starts it on port 9000.
+Rendro stores HTML files in MinIO, an S3-compatible object store. The docker-compose file starts it on port 9000.
 
 ```bash
 docker compose up -d minio
@@ -98,7 +98,7 @@ mkdir -p my-docs/api
 echo "<h1>Hello World</h1>" > my-docs/index.html
 
 # Push to your org
-DOCSYNC_API_KEY=your-api-key ./bin/docsync.mjs push \
+DOCSYNC_API_KEY=your-api-key ./bin/rendro.mjs push \
   --source ./my-docs \
   --org yourcompany \
   --endpoint http://localhost:3000
@@ -116,11 +116,11 @@ The CLI is built with esbuild:
 
 ```bash
 # Build once
-npx esbuild cli/src/index.ts --bundle --platform=node --target=node22 --format=esm --outfile=bin/docsync.mjs --banner:js='#!/usr/bin/env node'
-chmod +x bin/docsync.mjs
+npx esbuild cli/src/index.ts --bundle --platform=node --target=node22 --format=esm --outfile=bin/rendro.mjs --banner:js='#!/usr/bin/env node'
+chmod +x bin/rendro.mjs
 
 # Use it
-./bin/docsync.mjs push --source ./docs --org my-org --endpoint http://localhost:3000
+./bin/rendro.mjs push --source ./docs --org my-org --endpoint http://localhost:3000
 ```
 
 ## 9. Build Commentor Widget

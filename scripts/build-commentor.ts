@@ -23,7 +23,7 @@ await esbuild.stop();
 
 // Wrap so CONVEX_URL can be injected at page render time
 const wrapped = `
-// Auto-injected by Docsync — do not edit manually.
+// Auto-injected by Rendro — do not edit manually.
 (function() {
   var CONVEX_URL = window.__COMMENTOR_URL__ || "";
   if (!CONVEX_URL) return;

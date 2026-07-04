@@ -1,11 +1,11 @@
-# Docsync — Technical
+# Rendro — Technical
 
 Technology decisions, the data flow, the iterations, the research, and the experiments. For engineers and operators.
 
 ## The Cast
 
 - **Browser** — the visitor. Opens `example.com/<org>` to read docs.
-- **Docsync server** — a single Hono process on Node.js. Serves HTML, runs the SSO dance, brokers file access.
+- **Rendro server** — a single Hono process on Node.js. Serves HTML, runs the SSO dance, brokers file access.
 - **WorkOS** — identity provider. Routes users to the right corporate IdP, mints the SSO profile.
 - **Identity provider (IdP)** — the customer's actual auth source (Okta, Entra, Google, etc.). The IdP is configured per WorkOS org; we never see the user's password.
 - **MinIO** — object store. Holds raw HTML files. One bucket, namespaced by org.
@@ -17,7 +17,7 @@ Technology decisions, the data flow, the iterations, the research, and the exper
 ### Visitor reads a doc
 
 ```
-Browser               Docsync                              WorkOS                MinIO
+Browser               Rendro                              WorkOS                MinIO
   │                      │                                     │                     │
   │ GET /acme-corp/x.html│                                     │                     │
   │─────────────────────>│                                     │                     │
@@ -36,7 +36,7 @@ Browser               Docsync                              WorkOS               
 ### Visitor logs in
 
 ```
-Browser               Docsync                WorkOS                IdP
+Browser               Rendro                WorkOS                IdP
   │                      │                      │                   │
   │ GET /acme-corp       │                      │                   │
   │─────────────────────>│                      │                   │
@@ -75,11 +75,11 @@ Browser               Docsync                WorkOS                IdP
 ### CLI push (publisher)
 
 ```
-Repo                  CI                CLI                  Docsync                MinIO
+Repo                  CI                CLI                  Rendro                MinIO
   │                    │                 │                      │                     │
   │ Edit doc, git push │                 │                      │                     │
   │───────────────────>│                 │                      │                     │
-  │                    │ docsync push    │                      │                     │
+  │                    │ rendro push    │                      │                     │
   │                    │────────────────>│                      │                     │
   │                    │                 │ 1. Walk ./docs       │                     │
   │                    │                 │ 2. MD5-hash each     │                     │
@@ -248,7 +248,7 @@ User visits / → "Sign in with Google" → Google OAuth →
 
 ### Diff-based upload
 
-The CLI (`docsync push`) walks the docs directory, MD5-hashes each file, and calls the sync check endpoint for each one. The server compares the hash against the MinIO ETag:
+The CLI (`rendro push`) walks the docs directory, MD5-hashes each file, and calls the sync check endpoint for each one. The server compares the hash against the MinIO ETag:
 
 ```
 CLI                           Server                    MinIO
@@ -297,12 +297,12 @@ The key is tied to one org — it can't upload to another org's prefix.
 
 ### Sync-deletes (`--sync-deletes`)
 
-By default, `docsync push` only uploads changed files — it never deletes. Files removed from the local `docs/` folder stay in MinIO and remain served. This is the safe default for most CI pipelines.
+By default, `rendro push` only uploads changed files — it never deletes. Files removed from the local `docs/` folder stay in MinIO and remain served. This is the safe default for most CI pipelines.
 
 The `--sync-deletes` flag enables full sync: files that exist in MinIO but not locally are deleted. Use it to keep the live docs in exact sync with the source repo.
 
 ```
-$ docsync push --source ./docs --org acme-corp --sync-deletes
+$ rendro push --source ./docs --org acme-corp --sync-deletes
 
   ✓ acme-corp/index.html (unchanged)
   ↓ acme-corp/old-page.html (deleted)
@@ -521,7 +521,7 @@ deleted_file table: (orgSlug, fileKey, deletedAt)
 ```
 
 ### Header
-- **Logo** (DocSync, left)
+- **Logo** (Rendro, left)
 - **Share** button (right)
 - **Theme toggle** (sun/moon icon)
 - **Avatar** (initials, click for dropdown): shows email + "Sign out" link

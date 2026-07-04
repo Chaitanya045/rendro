@@ -4,9 +4,9 @@ import { GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, BASE_URL, NODE_ENV } from "@/co
 import { logger } from "@/logger";
 
 export const auth = betterAuth({
-  appName: "docsync",
+  appName: "rendro",
   baseURL: BASE_URL,
-  database: new Database("docsync-auth.db") as never,
+  database: new Database("rendro-auth.db") as never,
   secret: BASE_URL + "-dev-secret-change-in-prod",
   socialProviders: {
     google: {
@@ -16,7 +16,7 @@ export const auth = betterAuth({
   },
   trustedOrigins: [BASE_URL],
   advanced: NODE_ENV === "development"
-    ? { cookiePrefix: "docsync" }
+    ? { cookiePrefix: "rendro" }
     : {},
 });
 

@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 /**
- * docsync CLI — push docs from a local directory to the docsync server.
+ * rendro CLI — push docs from a local directory to the rendro server.
  *
  * Usage:
- *   docsync push --source ./docs --org acme-corp --endpoint http://localhost:3000 --token dev-sync-token
- *   docsync init  --source ./docs   # scaffolds a default docs dir
+ *   rendro push --source ./docs --org acme-corp --endpoint http://localhost:3000 --token dev-sync-token
+ *   rendro init  --source ./docs   # scaffolds a default docs dir
  */
 
 import { createHash } from "node:crypto";
@@ -196,7 +196,7 @@ async function init(source: string): Promise<void> {
   for (const dir of dirs) {
     console.log(`Created ${dir}/`);
   }
-  console.log("\nRun: docsync push --source ./docs --org <your-org>");
+  console.log("\nRun: rendro push --source ./docs --org <your-org>");
 }
 
 // CLI entry
@@ -205,22 +205,22 @@ async function main() {
   const cmd = args[0];
 
   if (!cmd || cmd === "help" || cmd === "--help") {
-    console.log(`docsync — sync HTML docs to Docsync
-    console.log(\`docsync — sync HTML docs to Docsync
+    console.log(`rendro — sync HTML docs to Rendro
+    console.log(\`rendro — sync HTML docs to Rendro
 
 Usage:
-  docsync push  --source <dir> --org <slug> [--endpoint <url>] [--concurrency <n>]
-  docsync init  --source <dir>
+  rendro push  --source <dir> --org <slug> [--endpoint <url>] [--concurrency <n>]
+  rendro init  --source <dir>
 
 Options:
   --source       Path to local docs directory (default: ./docs)
   --org          Organization slug (required for push)
-  --endpoint     Docsync server URL (default: http://localhost:3000)
+  --endpoint     Rendro server URL (default: http://localhost:3000)
   --concurrency  Parallel uploads (default: 8)
   --sync-deletes Remove files from server that don't exist locally (soft-delete)
 
 Auth: set DOCSYNC_API_KEY in your environment. Get your key from
-      the Docsync org page after creating your organization.
+      the Rendro org page after creating your organization.
 \`);
 `);
     return;
@@ -252,7 +252,7 @@ Auth: set DOCSYNC_API_KEY in your environment. Get your key from
       process.exit(1);
     }
     if (!token) {
-      console.error("Error: DOCSYNC_API_KEY environment variable is required. Get your key from the Docsync org page.");
+      console.error("Error: DOCSYNC_API_KEY environment variable is required. Get your key from the Rendro org page.");
       process.exit(1);
     }
     await push({ source, org, endpoint, token, concurrency, syncDeletes });

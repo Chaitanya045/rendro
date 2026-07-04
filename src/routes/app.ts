@@ -80,7 +80,7 @@ function renderSignIn(): string {
 <html><head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Docsync — Sign in</title>
+<title>Rendro — Sign in</title>
 <style>
   :root { color-scheme: light dark; }
   body { font-family: system-ui, -apple-system, sans-serif; display:flex; align-items:center; justify-content:center; min-height:100vh; margin:0; background:#fafafa; color:#1a1a1a; }
@@ -92,7 +92,7 @@ function renderSignIn(): string {
 </style>
 </head><body>
 <div class="card">
-  <h1>Docsync</h1>
+  <h1>Rendro</h1>
   <p>Sign in to read your team's docs.</p>
   <form id="sf" method="post" action="/api/auth/sign-in/social" style="display:none"><input type="hidden" name="provider" value="google"><input type="hidden" name="callbackURL" id="sf-cb"></form>
   <script>document.getElementById('sf-cb').value=location.href</script>
@@ -103,7 +103,7 @@ function renderSignIn(): string {
 
 function renderEmailUnsupported(user: User): string {
   return `<!DOCTYPE html>
-<html><head><meta charset="UTF-8"><title>Docsync</title></head>
+<html><head><meta charset="UTF-8"><title>Rendro</title></head>
 <body style="font-family:system-ui;padding:2rem">
 <h1>Unsupported email domain</h1>
 <p>Your email <code>${escapeHtml(user.email)}</code> doesn't have a valid org slug. Use a work email like <code>you@company.com</code>.</p>
@@ -118,7 +118,7 @@ function renderCreateOrg(user: User, org: string): string {
 <html><head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>${orgEsc} — Docsync</title>
+<title>${orgEsc} — Rendro</title>
 <style>
   body { font-family: system-ui, -apple-system, sans-serif; background:#fafafa; color:#1a1a1a; margin:0; }
   .container { max-width: 600px; margin: 4rem auto; padding: 0 1rem; }
@@ -167,7 +167,7 @@ function renderOrgTreePage(user: User, org: string, tree: DocTree[]): string {
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>${orgEsc} — DocSync</title>
+<title>${orgEsc} — Rendro</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet">
 <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
@@ -295,7 +295,7 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e5e
 
 <header class="topbar">
   <div class="topbar-left">
-    <span class="topbar-logo">DocSync</span>
+    <span class="topbar-logo">Rendro</span>
   </div>
   <div class="topbar-actions">
     <div class="share-wrap">
@@ -384,9 +384,9 @@ function renderInitialIndex(_user: User, org: string, displayName: string): stri
 </head>
 <body>
 <h1>${escapeHtml(displayName)}</h1>
-<p>This is the <code>${escapeHtml(org)}</code> documentation space on Docsync.</p>
+<p>This is the <code>${escapeHtml(org)}</code> documentation space on Rendro.</p>
 <p>Push your first docs with the CLI (set DOCSYNC_API_KEY in your CI):</p>
-<pre><code>docsync push --source ./docs --org ${escapeHtml(org)}</code></pre>
+<pre><code>rendro push --source ./docs --org ${escapeHtml(org)}</code></pre>
 <p>Or start writing HTML directly in the bucket under <code>${escapeHtml(org)}/</code>.</p>
 </body>
 </html>`;
@@ -408,7 +408,7 @@ function renderApiKeyPage(user: User, org: string, apiKey: string): string {
 <html><head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>${orgEsc} — Docsync</title>
+<title>${orgEsc} — Rendro</title>
 <style>
   body { font-family: system-ui, -apple-system, sans-serif; background: #fafafa; color: #1a1a1a; margin:0; }
   .container { max-width: 600px; margin: 4rem auto; padding: 0 1rem; }
@@ -436,7 +436,7 @@ function renderApiKeyPage(user: User, org: string, apiKey: string): string {
       your org.
     </div>
     <pre><code># In your CI pipeline:
-docsync push --source ./docs --org ${orgEsc}
+rendro push --source ./docs --org ${orgEsc}
 # Set DOCSYNC_API_KEY in your CI secrets</code></pre>
     <a class="btn" href="/">View your docs →</a>
   </div>

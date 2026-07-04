@@ -1,10 +1,10 @@
-# Docsync — Product
+# Rendro — Product
 
 What the product is, who it serves, and how users experience it.
 
-## What is Docsync?
+## What is Rendro?
 
-A self-hosted documentation service where each organization owns its own docs and authenticates its own users. An organization stores HTML files in a Git repo, and the Docsync server makes them readable at `example.com/<org>`.
+A self-hosted documentation service where each organization owns its own docs and authenticates its own users. An organization stores HTML files in a Git repo, and the Rendro server makes them readable at `example.com/<org>`.
 
 It is the alternative to Confluence or Notion for teams that want their docs to be version-controlled alongside their code, edited as plain HTML, and deployed in seconds — not via a clunky editor.
 
@@ -14,14 +14,14 @@ There are two kinds of people in this product's world:
 
 **Visitors** — members of a customer organization. They open `acme-corp.docs.example.com` (or `example.com/acme-corp`), sign in through their company's existing login (Okta, Google, Entra — whatever IT set up), and read the docs.
 
-**Publishers** — typically engineers at the same company. They write HTML in a Git repo, push, and the docs are live within 40 seconds. The publisher never logs into Docsync directly — they push code, the CLI picks it up.
+**Publishers** — typically engineers at the same company. They write HTML in a Git repo, push, and the docs are live within 40 seconds. The publisher never logs into Rendro directly — they push code, the CLI picks it up.
 
 ## The visitor experience
 
-A visitor lands on the Docsync home page (`docsync.example.com`).
+A visitor lands on the Rendro home page (`rendro.example.com`).
 
 1. If they're not signed in, they see a "Sign in with Google" button. No org selection, no URL paths — just one page.
-2. They sign in with their work Google account (`alice@acme-corp.com`). Docsync derives their org from the email domain (`acme-corp`).
+2. They sign in with their work Google account (`alice@acme-corp.com`). Rendro derives their org from the email domain (`acme-corp`).
 3. If the org's docs folder exists in the blob store, they see a tree of HTML files. If the org doesn't exist yet, they see a form pre-populated with their org slug to create it.
 4. They click a file. The HTML renders as-is — no theme imposed, no sidebar injected, no popups. Whoever wrote the HTML owns the page.
 5. They log out by clicking the sign-out link in the top right. The session is gone.
@@ -34,12 +34,12 @@ A publisher works in a Git repo. The repo has a `docs/` folder with HTML files. 
 
 When they push a change:
 
-1. CI runs the CLI: `docsync push --source ./docs --org acme-corp`.
+1. CI runs the CLI: `rendro push --source ./docs --org acme-corp`.
 2. The CLI walks the local `docs/` folder, hashes every file, asks the server which ones are stale.
 3. The server replies with the diff. Only changed files are uploaded.
 4. Done. The visitor sees the new content within 40 seconds.
 
-The publisher never authenticates to Docsync. They use a CI secret (`DOCSYNC_TOKEN`) that proves the upload is from their CI pipeline. The org is in the URL — the CLI says "this upload is for acme-corp" and the server trusts it because the sync token is valid.
+The publisher never authenticates to Rendro. They use a CI secret (`DOCSYNC_TOKEN`) that proves the upload is from their CI pipeline. The org is in the URL — the CLI says "this upload is for acme-corp" and the server trusts it because the sync token is valid.
 
 ## The product model
 
@@ -81,7 +81,7 @@ The trade-off is that the visitor-facing surface is whatever the publisher build
 
 ### For visitors
 
-1. Open the Docsync home page in your browser — `docsync.example.com`.
+1. Open the Rendro home page in your browser — `rendro.example.com`.
 2. Click **Sign in with Google**. Sign in with your work Google account (`you@company.com`). No org selection needed — your org is determined by your email domain.
 3. If your company already has docs, you land on the doc tree. Files at the top level, folders with a `▶` next to them. Click `▶` to expand a folder; click the file name to open it.
 4. The file loads as raw HTML — whatever the publisher wrote, exactly. There is no theme, no sidebar, no popups. The document links use the `/files/` path prefix.
@@ -94,7 +94,7 @@ The trade-off is that the visitor-facing surface is whatever the publisher build
 2. **Scaffold an example** to make sure your layout is right:
 
    ```bash
-   docsync init --source ./docs
+   rendro init --source ./docs
    ```
 
    This writes a sample `index.html` and a few empty sub-folders. Edit from there.
@@ -102,7 +102,7 @@ The trade-off is that the visitor-facing surface is whatever the publisher build
 3. **Push the docs to your org:**
 
    ```bash
-   docsync push --source ./docs --org acme-corp
+   rendro push --source ./docs --org acme-corp
    ```
 
    The CLI reads `DOCSYNC_API_KEY` from your environment. Get your org's API key from the org creation page — it's shown once when the org is created. The CLI walks the folder, MD5-hashes every file, asks the server which ones are stale, and uploads only what's changed. First push of 100 files might take 10 seconds; subsequent pushes of 2 changed files take under a second.
@@ -113,7 +113,7 @@ The trade-off is that the visitor-facing surface is whatever the publisher build
    - name: Deploy docs
      env:
        DOCSYNC_API_KEY: ${{ secrets.DOCSYNC_API_KEY }}
-     run: docsync push --source ./docs --org acme-corp
+     run: rendro push --source ./docs --org acme-corp
    ```
 
    `DOCSYNC_API_KEY` is a per-org CI secret. Each org gets a unique key (`docsk_...`) on creation. The key is tied to the org — it can only upload files under that org's prefix.
@@ -123,14 +123,14 @@ The trade-off is that the visitor-facing surface is whatever the publisher build
 ### For admins (setting up a new org)
 
 1. The first user from a new domain (e.g., `alice@acme-corp.com`) signs in with Google.
-2. Docsync derives the org slug `acme-corp` from the email domain. No docs folder exists yet, so the user sees a "Create your org" form with the slug pre-populated.
-3. The user submits the form. Docsync creates the `acme-corp/` folder in MinIO with a welcome page and `docsync push` instructions.
-4. The publisher pushes the org's docs via the CLI: `docsync push --source ./docs --org acme-corp --token $DOCSYNC_TOKEN`.
+2. Rendro derives the org slug `acme-corp` from the email domain. No docs folder exists yet, so the user sees a "Create your org" form with the slug pre-populated.
+3. The user submits the form. Rendro creates the `acme-corp/` folder in MinIO with a welcome page and `rendro push` instructions.
+4. The publisher pushes the org's docs via the CLI: `rendro push --source ./docs --org acme-corp --token $DOCSYNC_TOKEN`.
 5. Done. Any user from `acme-corp.com` who signs in now sees the org's docs.
 
 No WorkOS setup. No per-org env vars. No dashboard clicks. The email domain IS the org.
 
-## What Docsync is not
+## What Rendro is not
 
 - **Not a CMS.** No rich text editor, no media library, no draft state. The publisher writes HTML in their editor of choice.
 - **Not multi-user editing.** There's no concept of "Alice is editing this page right now." If two publishers push conflicting changes, the last one wins.
