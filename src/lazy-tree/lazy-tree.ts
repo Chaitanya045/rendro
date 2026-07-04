@@ -22,27 +22,26 @@ let activeEl: HTMLElement | null = null;
 
 // ── active indicator ──
 
-function updateIndicator(el: HTMLElement) {
-  requestAnimationFrame(() => {
-    const indicator = document.getElementById("active-indicator");
-    if (!indicator || !TREE) return;
-    activeEl = el;
+function updateIndicator(el: HTMLElement, animate = false) {
+  const indicator = document.getElementById("active-indicator");
+  if (!indicator || !TREE) return;
+  activeEl = el;
 
-    // Check if visible (all parent folders must be open)
-    let visible = true;
-    let cur: HTMLElement | null = el.parentElement;
-    while (cur && cur !== TREE) {
-      if (cur.classList.contains("tree-folder") && !cur.classList.contains("open")) { visible = false; break; }
-      cur = cur.parentElement;
-    }
-    if (!visible) { indicator.style.opacity = "0"; return; }
+  let visible = true;
+  let cur: HTMLElement | null = el.parentElement;
+  while (cur && cur !== TREE) {
+    if (cur.classList.contains("tree-folder") && !cur.classList.contains("open")) { visible = false; break; }
+    cur = cur.parentElement;
+  }
+  if (!visible) { indicator.style.opacity = "0"; return; }
 
-    indicator.style.transition = "none";
-    const ir = el.getBoundingClientRect();
-    const cr = TREE.getBoundingClientRect();
-    indicator.style.opacity = "1";
-    indicator.style.transform = `translate(${ir.left - cr.left}px, ${ir.top - cr.top}px)`;
-  });
+  indicator.style.transition = animate
+    ? "transform 0.3s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.2s ease"
+    : "none";
+  const ir = el.getBoundingClientRect();
+  const cr = TREE.getBoundingClientRect();
+  indicator.style.opacity = "1";
+  indicator.style.transform = `translate(${ir.left - cr.left}px, ${ir.top - cr.top}px)`;
 }
 
 // ── fold icon toggle ──
@@ -178,7 +177,7 @@ function handleClick(e: Event) {
     if (placeholder) placeholder.style.display = "none";
     document.querySelectorAll(".tree-item.active").forEach((el) => el.classList.remove("active"));
     item.classList.add("active");
-    updateIndicator(item);
+    updateIndicator(item, true);
   }
 }
 
@@ -219,7 +218,7 @@ async function navigateToDoc(relPath: string) {
   if (!item) return;
   document.querySelectorAll(".tree-item.active").forEach((el) => el.classList.remove("active"));
   item.classList.add("active");
-  updateIndicator(item);
+  updateIndicator(item, true);
 }
 
 function init() {
