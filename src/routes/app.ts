@@ -94,8 +94,9 @@ function renderSignIn(): string {
 <div class="card">
   <h1>Docsync</h1>
   <p>Sign in to read your team's docs.</p>
-  <form id="sf" method="post" action="/api/auth/sign-in/social" style="display:none"><input type="hidden" name="provider" value="google"></form>
-  <button onclick="fetch('/api/auth/sign-in/social',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({provider:'google'})}).then(r=>r.json()).then(d=>{if(d.url)location.href=d.url}).catch(()=>document.getElementById('sf').submit())" style="background:#1a1a1a;color:#fff;padding:0.75rem 1.5rem;border:0;border-radius:6px;font-weight:500;cursor:pointer;font-size:1rem">Sign in with Google</button>
+  <form id="sf" method="post" action="/api/auth/sign-in/social" style="display:none"><input type="hidden" name="provider" value="google"><input type="hidden" name="callbackURL" id="sf-cb"></form>
+  <script>document.getElementById('sf-cb').value=location.href</script>
+  <button onclick="fetch('/api/auth/sign-in/social',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({provider:'google',callbackURL:location.href})}).then(r=>r.json()).then(d=>{if(d.url)location.href=d.url}).catch(()=>document.getElementById('sf').submit())" style="background:#1a1a1a;color:#fff;padding:0.75rem 1.5rem;border:0;border-radius:6px;font-weight:500;cursor:pointer;font-size:1rem">Sign in with Google</button>
 </div>
 </body></html>`;
 }
