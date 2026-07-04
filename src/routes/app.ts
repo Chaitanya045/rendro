@@ -345,7 +345,7 @@ document.getElementById("share-btn")?.addEventListener("click",function(e){e.sto
 document.getElementById("copy-link-btn")?.addEventListener("click",function(){navigator.clipboard.writeText(location.href).catch(function(){});var t=document.createElement("div");t.className="toast";t.textContent="Link copied";document.body.appendChild(t);t.offsetHeight;t.classList.add("show");setTimeout(function(){t.classList.remove("show");setTimeout(function(){t.remove()},200)},1500)});
 document.addEventListener("click",function(){var m=document.getElementById("avatar-menu");if(m)m.style.display="none";var s=document.getElementById("share-menu");if(s)s.style.display="none";});})();
 </script>
-<script src="/lazy-tree.js?v=11"></script>
+<script src="/lazy-tree.js?v=12"></script>
 </body>
 </html>`;
 }

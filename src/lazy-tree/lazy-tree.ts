@@ -194,25 +194,18 @@ function loadDoc(fullPath: string, pushState: boolean) {
 
 async function navigateToDoc(relPath: string) {
   const fullPath = `${ORG}/${relPath}`;
-
-  // Expand all ancestor folders (bottom-up to avoid race conditions)
-  const ancestors: HTMLElement[] = [];
-  // We don't have the item yet, so walk the path segments
   const parts = relPath.split("/");
   let currentPath = ORG!;
+
+  // Expand each ancestor level iteratively — re-query DOM after each expansion
   for (let i = 0; i < parts.length - 1; i++) {
     currentPath += "/" + parts[i];
     const folder = document.querySelector(`.tree-folder[data-path="${CSS.escape(currentPath)}/"]`) as HTMLElement | null;
-    if (folder) ancestors.push(folder);
-  }
-
-  // Expand each ancestor sequentially
-  for (const folder of ancestors) {
+    if (!folder) break; // can't go deeper if parent doesn't exist yet
     if (!folder.classList.contains("open")) {
       const toggle = folder.querySelector(":scope > .tree-item") as HTMLElement | null;
       if (toggle) {
         toggle.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-        // Wait for async expansion to complete
         await new Promise<void>((resolve) => {
           const check = () => {
             if (folder.classList.contains("open")) resolve();
@@ -224,7 +217,7 @@ async function navigateToDoc(relPath: string) {
     }
   }
 
-  // Now find and activate the item
+  // Now activate the item
   const item = document.querySelector(`.tree-item[data-path="${CSS.escape(fullPath)}"]`) as HTMLElement | null;
   if (!item) return;
   document.querySelectorAll(".tree-item.active").forEach((el) => el.classList.remove("active"));
