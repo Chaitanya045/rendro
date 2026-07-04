@@ -203,17 +203,14 @@ async function navigateToDoc(relPath: string) {
     const folder = document.querySelector(`.tree-folder[data-path="${CSS.escape(currentPath)}/"]`) as HTMLElement | null;
     if (!folder) break; // can't go deeper if parent doesn't exist yet
     if (!folder.classList.contains("open")) {
-      const toggle = folder.querySelector(":scope > .tree-item") as HTMLElement | null;
-      if (toggle) {
-        toggle.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-        await new Promise<void>((resolve) => {
-          const check = () => {
-            if (folder.classList.contains("open")) resolve();
-            else setTimeout(check, 50);
-          };
-          check();
-        });
-      }
+      await expand(folder);
+      await new Promise<void>((resolve) => {
+        const check = () => {
+          if (folder.classList.contains("open")) resolve();
+          else setTimeout(check, 50);
+        };
+        check();
+      });
     }
   }
 
@@ -227,16 +224,9 @@ async function navigateToDoc(relPath: string) {
 
 // Sync tree active state without reloading iframe (for doc-loaded messages)
 function syncActiveState(fullPath: string) {
-  const item = document.querySelector(`.tree-item[data-path="${CSS.escape(fullPath)}"]`) as HTMLElement | null;
-  if (item) {
-    document.querySelectorAll(".tree-item.active").forEach((el) => el.classList.remove("active"));
-    item.classList.add("active");
-    updateIndicator(item, true);
-  } else {
-    // Item not in DOM — expand ancestors using relative path
-    const relPath = fullPath.startsWith(`${ORG}/`) ? fullPath.slice(ORG!.length + 1) : fullPath;
-    navigateToDoc(relPath);
-  }
+  // Always expand ancestors first (no-op if already open)
+  const relPath = fullPath.startsWith(`${ORG}/`) ? fullPath.slice(ORG!.length + 1) : fullPath;
+  navigateToDoc(relPath);
 }
 
 function init() {
