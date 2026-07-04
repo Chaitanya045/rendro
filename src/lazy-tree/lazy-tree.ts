@@ -111,7 +111,7 @@ function renderFile(node: TreeNode): string {
   const fp = `/files/${node.path}`;
   return `<div class="tree-item flex items-center gap-2 px-3 py-1.5 rounded-lg text-on-surface-variant cursor-pointer" data-path="${esc(node.path)}">
     <span class="material-symbols-outlined text-[18px] flex-shrink-0">article</span>
-    <a href="${esc(fp)}" class="tree-link flex-1 min-w-0" target="content-frame">${esc(node.name)}</a>
+    <a href="${esc(fp)}" class="tree-link flex-1 min-w-0" target="content-frame">${esc(node.name.replace(/\.html$/, ""))}</a>
   </div>`;
 }
 

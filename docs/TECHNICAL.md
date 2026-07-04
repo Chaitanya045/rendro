@@ -592,3 +592,72 @@ Dark mode palette:
 Toggle button in header (left of avatar) with `light_mode`/`dark_mode` Material Symbols icon. Theme persists via `localStorage.setItem("commentor-theme", ...)` — shared key with the commentor widget so both stay in sync. System preference (`prefers-color-scheme`) detected on first load.
 
 Dark mode only affects UI chrome (header, sidebar, placeholder). Doc content in the iframe is unchanged.
+
+## Technical Decisions
+
+### Tree rendering: Vanilla JS vs React vs @pierre/trees
+
+**Chosen: Vanilla JS (8KB IIFE)**
+
+| Approach | Pros | Cons |
+|---|---|---|
+| Vanilla JS | Zero dependencies, 8KB bundle, no build step beyond esbuild, works with SSR | More manual DOM management |
+| React | Component model, ecosystem | Requires React runtime (~40KB), hydration complexity, overkill for a tree |
+| @pierre/trees | Full-featured file tree, virtualization, drag-drop, search | Requires fixed-height container, shadow DOM renders all paths upfront, conflicts with lazy-load API pattern |
+
+**Why:** `@pierre/trees` is purpose-built for file trees but requires all paths known upfront (no lazy loading from API) and a fixed-height scrollable container. Our docs tree uses document-flow CSS transitions with variable-height expanded folders. The 8KB vanilla module handles folder expansion, infinite scroll, active indicator, history, and sticky headers without any framework overhead.
+
+### Sticky headers: CSS position:sticky vs IntersectionObserver
+
+**Chosen: CSS `position: sticky`**
+
+| Approach | Pros | Cons |
+|---|---|---|
+| CSS sticky | Zero JS, GPU-accelerated, natural stacking, 0 bytes overhead | Limited to scroll container context, needs depth-based `top` offsets |
+| IntersectionObserver | Full control, can render custom sticky overlay | Requires JS, manual position calculation, scroll jank risk |
+
+**Why:** CSS sticky is the browser-native approach. With depth-based `top` offsets (0px, 30px, 60px...) and decreasing z-index (10, 9, 8...), multiple open folder headers stack naturally. The only fix needed was `overflow:visible` on open `.tree-folder-content` (was `overflow:hidden` for animation, which blocked sticky).
+
+### Lazy loading: listImmediate vs recursive listObjects
+
+**Chosen: `listImmediate` (one-level S3 listing)**
+
+| Approach | Pros | Cons |
+|---|---|---|
+| `listImmediate` (current) | One S3 call per level, returns only immediate children, paginatable | Requires Delimiter:"/" support in S3 |
+| Recursive `listObjects` | Builds full tree upfront | Fetches ALL objects on every page load, O(n) where n = total files |
+
+**Why:** The initial page load fetches only top-level items (1 S3 call, ~77ms). Folder expansion fetches one level at a time (~40ms per 50 items). For 1000 files across 22 folders, this is ~50 calls instead of 1 massive call — but the user only expands the folders they care about. `listImmediate` also supports `MaxKeys`/`StartAfter` for pagination (infinite scroll).
+
+### Cross-doc navigation: postMessage vs shared state
+
+**Chosen: `postMessage` between iframe and parent**
+
+| Approach | Pros | Cons |
+|---|---|---|
+| postMessage | Works cross-origin, no shared state, doc pages are self-contained | Requires injected script in every doc |
+| Shared state (localStorage/global) | Simpler, no script injection | Doesn't work with iframes, coupling between doc content and UI |
+
+**Why:** Docs are plain HTML files served from MinIO. The injected nav-tracking script intercepts link clicks and sends `postMessage` to the parent. The parent handles iframe navigation, tree expansion, and history. This keeps doc pages clean (just HTML + injected script) and the tree UI self-contained.
+
+### Styling: Tailwind CDN + inline CSS vs build-step CSS
+
+**Chosen: Tailwind CDN + inline CSS**
+
+| Approach | Pros | Cons |
+|---|---|---|
+| Tailwind CDN + inline | Rapid prototyping, design.html directly reusable, no build step | 300KB CDN load, slower first paint |
+| Build-step CSS (PostCSS/Tailwind CLI) | Smaller bundle, faster load | Requires build pipeline, harder to iterate on design |
+
+**Why:** The design reference (`design.html`) uses Tailwind CDN. Using the same approach made implementation fast and the colors match exactly. For production, the Tailwind CDN would be replaced with a build-step CSS pipeline. The inline CSS handles the custom components (sticky headers, active indicator, theme toggle) that Tailwind doesn't cover.
+
+### Doc rendering: iframe vs fetch+render
+
+**Chosen: iframe**
+
+| Approach | Pros | Cons |
+|---|---|---|
+| iframe | Sandboxed, native navigation, `<a target>` works, commentor widget runs independently | Double scrollbar risk, srcdoc blocks navigation (fixed by using about:blank + src) |
+| fetch + innerHTML | Full control over rendering, no scrollbar issues | Must re-implement navigation, script execution, and commentor widget injection |
+
+**Why:** iframes provide native document navigation — `<a target="content-frame">` just works. The commentor widget runs in its own context. The `srcdoc` → `about:blank` fix was a one-line change that resolved the navigation blocking issue.
