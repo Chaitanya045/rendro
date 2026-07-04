@@ -419,3 +419,113 @@ $ pnpm lint        →  0 errors
 $ pnpm test        →  53/53 tests pass
 ```
 
+
+## Lazy Tree & Infinite Scroll
+
+The sidebar tree uses **one-level-at-a-time** fetching for scalability:
+
+### Initial page load
+```
+Browser                          Server                    MinIO
+  │                                │                         │
+  │ GET /?dev_user=...             │                         │
+  │───────────────────────────────>│                         │
+  │                                │ listImmediate("org/")   │
+  │                                │ S3 ListObjectsV2        │
+  │                                │ Delimiter: "/"          │
+  │                                │ (one level only)        │
+  │                                │────────────────────────>│
+  │                                │ files + folder markers  │
+  │                                │<────────────────────────│
+  │ HTML: top-level items only     │                         │
+  │<───────────────────────────────│                         │
+```
+
+### Folder expansion (lazy)
+```
+User clicks folder → lazy-tree.js → GET /api/tree/:org?prefix=org/api/&limit=50
+  → Server: listImmediate("org/api/", { maxKeys: 50 })
+  → Returns: { children: [...], isTruncated: true, nextStartAfter: "org/api/doc-0050.html" }
+  → Client renders children + "Load more" button if truncated
+```
+
+### Load more (pagination)
+```
+User clicks "Load more" → GET /api/tree/:org?prefix=...&startAfter=org/api/doc-0050.html&limit=50
+  → Server: listImmediate(prefix, { maxKeys: 50, startAfter: ... })
+  → Appends new items to existing children
+```
+
+**Performance:** Initial load ~77ms (top-level only). Folder expansion ~40ms (50 items per page). No recursive listing ever.
+
+## Cross-Doc Navigation Sync
+
+When a user clicks a link inside a doc that points to another doc in the same org:
+
+```
+Iframe (doc)                    Parent (tree page)
+  │                                │
+  │ User clicks <a href="/files/org/welcome.html">
+  │ Injected script intercepts     │
+  │ postMessage({type:"doc-navigate", path:"welcome.html"})
+  │───────────────────────────────>│
+  │                                │ loadDoc("org/welcome.html", true)
+  │                                │ 1. Set iframe.src (navigate)    │
+  │                                │ 2. syncActiveState (update tree)│
+  │                                │ 3. history.pushState            │
+  │ New doc loads in iframe        │
+  │<───────────────────────────────│
+  │                                │
+  │ doc-loaded postMessage         │
+  │───────────────────────────────>│
+  │                                │ syncActiveState (no iframe reload)
+  │                                │ Expands parent folders if needed
+```
+
+### Browser history (back/forward)
+```
+User clicks back → popstate event → loadDoc(state.docPath, false)
+  → Loads doc in iframe (no pushState)
+  → Updates tree active state
+```
+
+## Soft-Delete
+
+Files are never hard-deleted from MinIO. Instead, deletions are tracked in SQLite:
+
+```
+deleted_file table: (orgSlug, fileKey, deletedAt)
+```
+
+- **Tree listing**: filtered out by `isDeleted(key)` check
+- **Direct URL access**: still works (file stays in MinIO)
+- **Re-upload**: automatically un-deletes (removes from `deleted_file` table)
+- **CLI `--sync-deletes`**: marks deleted files, doesn't remove from storage
+
+## UI Architecture
+
+### Layout
+```
+┌─────────────────────────────────────────┐
+│ Topbar (56px): logo, search, avatar     │
+├──────────┬──────────────────────────────┤
+│ Sidebar  │ Content Area (iframe)        │
+│ (280px)  │                              │
+│          │                              │
+│ Org name │  ┌─────────────────────────┐ │
+│ ──────── │  │ Doc HTML (from MinIO)   │ │
+│ Tree     │  │ + Commentor widget      │ │
+│ (lazy)   │  │ + Nav tracking script   │ │
+│          │  └─────────────────────────┘ │
+│ Sign out │                              │
+├──────────┴──────────────────────────────┤
+```
+
+### Components
+- **SSR page shell**: Hono renders header + sidebar + tree (top-level only) + placeholder
+- **lazy-tree.js** (8.5KB IIFE): handles folder expansion, infinite scroll, active indicator, history
+- **Commentor widget**: injected into each doc page (iframe), Convex-backed inline comments
+- **Nav tracking script**: injected into each doc page, intercepts link clicks via postMessage
+
+### Color scheme
+Matches the commentor widget: white `#fff` background, blue `#0a66c2` accent, Inter font.
