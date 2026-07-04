@@ -229,6 +229,12 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e5e
   .main-placeholder p{font-size:16px;color:#6b7280;max-width:320px}
   .ph-icon{width:64px;height:64px;border-radius:50%;background:#f0f0f3;display:inline-flex;align-items:center;justify-content:center;margin-bottom:16px}
   .content-frame{width:100%;height:100%;border:0;background:#fff}
+  .avatar-wrap{position:relative}
+  .avatar-menu{position:absolute;top:42px;right:0;background:#fff;border:1px solid #e5e7eb;border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,.12);padding:4px;min-width:180px;z-index:100}
+  .avatar-menu-email{padding:8px 12px;font-size:12px;color:#6b7280;border-bottom:1px solid #e5e7eb;margin-bottom:4px;word-break:break-all}
+  .avatar-menu-item{display:flex;align-items:center;gap:8px;padding:8px 12px;font-size:14px;color:#111418;text-decoration:none;border-radius:4px;cursor:pointer}
+  .avatar-menu-item:hover{background:#f3f4f6}
+
   .topbar-btn-icon{width:32px;height:32px;border-radius:4px;border:0;background:transparent;cursor:pointer;display:flex;align-items:center;justify-content:center;color:#6b7280;transition:background .15s}
   .topbar-btn-icon:hover{background:#f3f4f6}
 
@@ -263,45 +269,37 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e5e
   html.dark .ph-icon{background:#2f3136}
   html.dark .load-more-btn{color:#4493f8}
   html.dark .load-more-btn:hover{background:#2f3136}
+  html.dark .avatar-menu{background:#2b2d31;border-color:#383a40;box-shadow:0 4px 12px rgba(0,0,0,.4)}
+  html.dark .avatar-menu-email{color:#9aa0a8;border-bottom-color:#383a40}
+  html.dark .avatar-menu-item{color:#f2f3f5}
+  html.dark .avatar-menu-item:hover{background:#2f3136}
 </style>
-</head>
 <body>
 
 <header class="topbar">
   <div class="topbar-left">
     <span class="topbar-logo">DocSync</span>
-    <div class="topbar-search">
-      <span class="material-symbols-outlined" style="color:#737685;font-size:18px">search</span>
-      <input type="text" placeholder="Search Docs... (Cmd+K)" disabled>
-    </div>
   </div>
   <div class="topbar-actions">
     <button class="topbar-btn topbar-btn-share"><span class="material-symbols-outlined" style="font-size:18px">share</span> Share</button>
-    <button class="topbar-btn topbar-btn-create"><span class="material-symbols-outlined" style="font-size:18px">add</span> Create</button>
     <button class="topbar-btn-icon" id="theme-toggle" title="Toggle theme"><span class="material-symbols-outlined" style="font-size:20px">dark_mode</span></button>
-    <div class="topbar-avatar" title="${escapeHtml(email)}">${initials}</div>
+    <div class="avatar-wrap">
+      <div class="topbar-avatar" id="avatar-btn" title="${escapeHtml(email)}">${initials}</div>
+      <div class="avatar-menu" id="avatar-menu" style="display:none">
+        <div class="avatar-menu-email">${escapeHtml(email)}</div>
+        <a href="/api/auth/sign-out" class="avatar-menu-item"><span class="material-symbols-outlined" style="font-size:18px">logout</span> Sign out</a>
+      </div>
+    </div>
   </div>
 </header>
 
 <aside class="sidebar">
-  <div class="sidebar-org">
-    <div class="sidebar-org-row">
-      <div class="sidebar-org-icon"><span class="material-symbols-outlined">workspaces</span></div>
-      <div>
-        <div class="sidebar-org-name">${orgEsc}</div>
-        <div class="sidebar-org-meta">Knowledge Base</div>
-      </div>
-    </div>
-  </div>
-  <div class="sidebar-divider">Documentation Tree</div>
+  <div class="sidebar-divider">Docs</div>
   <div class="sidebar-tree" data-tree-org="${orgEsc}">
     <div class="space-y-0.5 relative" id="tree-container" style="position:relative">
       <div class="active-indicator" id="active-indicator" style="opacity:0;transition:none"></div>
       ${renderTree(tree)}
     </div>
-  </div>
-  <div class="sidebar-footer">
-    <a href="/api/auth/sign-out">Sign out</a>
   </div>
 </aside>
 
@@ -319,7 +317,9 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e5e
 (function(){var t=localStorage.getItem("commentor-theme");var d=t==="dark"||(!t&&matchMedia("(prefers-color-scheme:dark)").matches);
 if(d)document.documentElement.classList.add("dark");
 function up(){var i=document.querySelector("#theme-toggle .material-symbols-outlined");if(i)i.textContent=document.documentElement.classList.contains("dark")?"light_mode":"dark_mode";}
-up();document.getElementById("theme-toggle")?.addEventListener("click",function(){var h=document.documentElement;h.classList.toggle("dark");localStorage.setItem("commentor-theme",h.classList.contains("dark")?"dark":"light");up();});})();
+up();document.getElementById("theme-toggle")?.addEventListener("click",function(){var h=document.documentElement;h.classList.toggle("dark");localStorage.setItem("commentor-theme",h.classList.contains("dark")?"dark":"light");up();});
+document.getElementById("avatar-btn")?.addEventListener("click",function(e){e.stopPropagation();var m=document.getElementById("avatar-menu");m.style.display=m.style.display==="block"?"none":"block";});
+document.addEventListener("click",function(){var m=document.getElementById("avatar-menu");if(m)m.style.display="none";});})();
 </script>
 <script src="/lazy-tree.js?v=10"></script>
 </body>

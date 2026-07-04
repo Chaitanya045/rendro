@@ -507,25 +507,36 @@ deleted_file table: (orgSlug, fileKey, deletedAt)
 ### Layout
 ```
 ┌─────────────────────────────────────────┐
-│ Topbar (56px): logo, search, avatar     │
+│ Topbar (56px): logo, Share, theme, avatar│
 ├──────────┬──────────────────────────────┤
 │ Sidebar  │ Content Area (iframe)        │
 │ (280px)  │                              │
+│          │  ┌─────────────────────────┐ │
+│ Docs     │  │ Doc HTML (from MinIO)   │ │
+│ ──────── │  │ + Commentor widget      │ │
+│ Tree     │  │ + Nav tracking script   │ │
+│ (lazy)   │  └─────────────────────────┘ │
 │          │                              │
-│ Org name │  ┌─────────────────────────┐ │
-│ ──────── │  │ Doc HTML (from MinIO)   │ │
-│ Tree     │  │ + Commentor widget      │ │
-│ (lazy)   │  │ + Nav tracking script   │ │
-│          │  └─────────────────────────┘ │
-│ Sign out │                              │
 ├──────────┴──────────────────────────────┤
 ```
+
+### Header
+- **Logo** (DocSync, left)
+- **Share** button (right)
+- **Theme toggle** (sun/moon icon)
+- **Avatar** (initials, click for dropdown): shows email + "Sign out" link
+
+### Sidebar
+- **"Docs" header** at top
+- **Tree** (lazy-loaded, fills remaining space)
+- No org branding or footer — just the tree
 
 ### Components
 - **SSR page shell**: Hono renders header + sidebar + tree (top-level only) + placeholder
 - **lazy-tree.js** (8.5KB IIFE): handles folder expansion, infinite scroll, active indicator, history
 - **Commentor widget**: injected into each doc page (iframe), Convex-backed inline comments
 - **Nav tracking script**: injected into each doc page, intercepts link clicks via postMessage
+- **Theme script**: inline, toggles dark/light via `html.dark` class, persists to localStorage
 
 ### Color scheme & Dark mode
 
