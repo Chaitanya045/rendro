@@ -229,6 +229,40 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e5e
   .main-placeholder p{font-size:16px;color:#6b7280;max-width:320px}
   .ph-icon{width:64px;height:64px;border-radius:50%;background:#f0f0f3;display:inline-flex;align-items:center;justify-content:center;margin-bottom:16px}
   .content-frame{width:100%;height:100%;border:0;background:#fff}
+  .topbar-btn-icon{width:32px;height:32px;border-radius:4px;border:0;background:transparent;cursor:pointer;display:flex;align-items:center;justify-content:center;color:#6b7280;transition:background .15s}
+  .topbar-btn-icon:hover{background:#f3f4f6}
+
+  /* ── dark mode (matches commentor widget palette) ── */
+  html.dark{background:#1e1f22;color:#f2f3f5}
+  html.dark body{background:#1e1f22;color:#f2f3f5}
+  html.dark .topbar{background:#1e1f22;border-bottom-color:#383a40}
+  html.dark .topbar-logo{color:#4493f8}
+  html.dark .topbar-search{background:#2b2d31;border-color:#383a40}
+  html.dark .topbar-search input{color:#f2f3f5}
+  html.dark .topbar-search input::placeholder{color:#9aa0a8}
+  html.dark .topbar-btn-icon{color:#9aa0a8}
+  html.dark .topbar-btn-icon:hover{background:#2f3136}
+  html.dark .topbar-btn-share{color:#4493f8}
+  html.dark .topbar-btn-share:hover{background:#2f3136}
+  html.dark .topbar-btn-create{background:#4493f8;color:#0b0c0e}
+  html.dark .topbar-avatar{background:#2f3136;color:#f2f3f5;border-color:#383a40}
+  html.dark .sidebar{background:#1e1f22;border-right-color:#383a40}
+  html.dark .sidebar-org-name{color:#f2f3f5}
+  html.dark .sidebar-org-meta{color:#9aa0a8}
+  html.dark .sidebar-org-icon{background:#0052cc}
+  html.dark .sidebar-divider{color:#9aa0a8}
+  html.dark .sidebar-footer{border-top-color:#383a40}
+  html.dark .sidebar-footer a{color:#9aa0a8}
+  html.dark .tree-item{color:#9aa0a8}
+  html.dark .tree-item:hover{background:#2f3136;color:#f2f3f5}
+  html.dark .tree-item.active{background:rgba(68,147,248,.15);color:#4493f8}
+  html.dark .active-indicator{background:#4493f8}
+  html.dark .main{background:#1e1f22}
+  html.dark .main-placeholder h2{color:#f2f3f5}
+  html.dark .main-placeholder p{color:#9aa0a8}
+  html.dark .ph-icon{background:#2f3136}
+  html.dark .load-more-btn{color:#4493f8}
+  html.dark .load-more-btn:hover{background:#2f3136}
 </style>
 </head>
 <body>
@@ -244,6 +278,7 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e5e
   <div class="topbar-actions">
     <button class="topbar-btn topbar-btn-share"><span class="material-symbols-outlined" style="font-size:18px">share</span> Share</button>
     <button class="topbar-btn topbar-btn-create"><span class="material-symbols-outlined" style="font-size:18px">add</span> Create</button>
+    <button class="topbar-btn-icon" id="theme-toggle" title="Toggle theme"><span class="material-symbols-outlined" style="font-size:20px">dark_mode</span></button>
     <div class="topbar-avatar" title="${escapeHtml(email)}">${initials}</div>
   </div>
 </header>
@@ -280,7 +315,13 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e5e
     src="about:blank" title="Document content" style="display:none"></iframe>
 </main>
 
-<script src="/lazy-tree.js?v=9"></script>
+<script>
+(function(){var t=localStorage.getItem("commentor-theme");var d=t==="dark"||(!t&&matchMedia("(prefers-color-scheme:dark)").matches);
+if(d)document.documentElement.classList.add("dark");
+function up(){var i=document.querySelector("#theme-toggle .material-symbols-outlined");if(i)i.textContent=document.documentElement.classList.contains("dark")?"light_mode":"dark_mode";}
+up();document.getElementById("theme-toggle")?.addEventListener("click",function(){var h=document.documentElement;h.classList.toggle("dark");localStorage.setItem("commentor-theme",h.classList.contains("dark")?"dark":"light");up();});})();
+</script>
+<script src="/lazy-tree.js?v=10"></script>
 </body>
 </html>`;
 }
