@@ -217,8 +217,6 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e5e
   .tree-folder[data-depth="3"].open>.tree-item{top:90px}
   .tree-folder[data-depth="4"].open>.tree-item{top:120px}
   .tree-folder[data-depth="5"].open>.tree-item{top:150px}
-  .tree-folder.open>.tree-item::after{content:"";position:absolute;bottom:0;left:0;right:0;height:1px;background:var(--border,#e5e7eb)}
-
   .load-more-btn{display:block;width:100%;padding:4px 12px;background:transparent;border:0;color:#0a66c2;font-size:12px;font-weight:600;cursor:pointer;text-align:left;font-family:Inter;border-radius:4px}
   .load-more-btn:hover{background:#f0f0f3}
   .load-more-btn:disabled{color:#6b7280;cursor:default}
@@ -268,7 +266,6 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e5e
   html.dark .topbar-btn-share{color:#4493f8}
   html.dark .topbar-btn-share:hover{background:#2f3136}
   html.dark .sidebar-tree{--sidebar-bg:#1e1f22}
-  html.dark .tree-folder.open>.tree-item::after{background:#383a40}
   html.dark .topbar-avatar{background:#2f3136;color:#f2f3f5;border-color:#383a40}
   html.dark .sidebar{background:#1e1f22;border-right-color:#383a40}
   html.dark .sidebar-org-name{color:#f2f3f5}
