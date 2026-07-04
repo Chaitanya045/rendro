@@ -230,11 +230,18 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e5e
   .ph-icon{width:64px;height:64px;border-radius:50%;background:#f0f0f3;display:inline-flex;align-items:center;justify-content:center;margin-bottom:16px}
   .content-frame{width:100%;height:100%;border:0;background:#fff}
   .avatar-wrap{position:relative}
-  .avatar-menu{position:absolute;top:42px;right:0;background:#fff;border:1px solid #e5e7eb;border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,.12);padding:4px;min-width:180px;z-index:100}
-  .avatar-menu-email{padding:8px 12px;font-size:12px;color:#6b7280;border-bottom:1px solid #e5e7eb;margin-bottom:4px;word-break:break-all}
-  .avatar-menu-item{display:flex;align-items:center;gap:8px;padding:8px 12px;font-size:14px;color:#111418;text-decoration:none;border-radius:4px;cursor:pointer}
+  .avatar-menu{position:absolute;top:42px;right:0;background:#fff;border:1px solid #e5e7eb;border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,.12);padding:4px;min-width:200px;z-index:100}
+  .avatar-menu-email{padding:8px 12px;font-size:12px;color:#6b7280;border-bottom:1px solid #e5e7eb;margin-bottom:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .avatar-menu-item{display:flex;align-items:center;gap:8px;padding:8px 12px;font-size:14px;color:#111418;text-decoration:none;border-radius:4px;cursor:pointer;border:0;background:0;width:100%;font-family:Inter}
   .avatar-menu-item:hover{background:#f3f4f6}
 
+  .share-wrap{position:relative}
+  .share-menu{position:absolute;top:38px;right:0;background:#fff;border:1px solid #e5e7eb;border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,.12);padding:4px;min-width:160px;z-index:100}
+  .share-menu-item{display:flex;align-items:center;gap:8px;padding:8px 12px;font-size:14px;color:#111418;border:0;background:0;width:100%;border-radius:4px;cursor:pointer;font-family:Inter}
+  .share-menu-item:hover{background:#f3f4f6}
+
+  .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#111418;color:#fff;padding:10px 20px;border-radius:8px;font-size:14px;font-family:Inter;z-index:200;opacity:0;transition:opacity .2s;pointer-events:none}
+  .toast.show{opacity:1}
   .topbar-btn-icon{width:32px;height:32px;border-radius:4px;border:0;background:transparent;cursor:pointer;display:flex;align-items:center;justify-content:center;color:#6b7280;transition:background .15s}
   .topbar-btn-icon:hover{background:#f3f4f6}
 
@@ -265,8 +272,12 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e5e
   html.dark .active-indicator{background:#4493f8}
   html.dark .main{background:#1e1f22}
   html.dark .main-placeholder h2{color:#f2f3f5}
-  html.dark .main-placeholder p{color:#9aa0a8}
-  html.dark .ph-icon{background:#2f3136}
+  html.dark .avatar-menu-item{color:#f2f3f5}
+  html.dark .avatar-menu-item:hover{background:#2f3136}
+  html.dark .share-menu{background:#2b2d31;border-color:#383a40}
+  html.dark .share-menu-item{color:#f2f3f5}
+  html.dark .share-menu-item:hover{background:#2f3136}
+  html.dark .toast{background:#f2f3f5;color:#111418}
   html.dark .load-more-btn{color:#4493f8}
   html.dark .load-more-btn:hover{background:#2f3136}
   html.dark .avatar-menu{background:#2b2d31;border-color:#383a40;box-shadow:0 4px 12px rgba(0,0,0,.4)}
@@ -281,7 +292,12 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e5e
     <span class="topbar-logo">DocSync</span>
   </div>
   <div class="topbar-actions">
-    <button class="topbar-btn topbar-btn-share"><span class="material-symbols-outlined" style="font-size:18px">share</span> Share</button>
+    <div class="share-wrap">
+      <button class="topbar-btn topbar-btn-share" id="share-btn"><span class="material-symbols-outlined" style="font-size:18px">share</span> Share</button>
+      <div class="share-menu" id="share-menu" style="display:none">
+        <button class="share-menu-item" id="copy-link-btn"><span class="material-symbols-outlined" style="font-size:18px">link</span> Copy link</button>
+      </div>
+    </div>
     <button class="topbar-btn-icon" id="theme-toggle" title="Toggle theme"><span class="material-symbols-outlined" style="font-size:20px">dark_mode</span></button>
     <div class="avatar-wrap">
       <div class="topbar-avatar" id="avatar-btn" title="${escapeHtml(email)}">${initials}</div>
@@ -319,7 +335,9 @@ if(d)document.documentElement.classList.add("dark");
 function up(){var i=document.querySelector("#theme-toggle .material-symbols-outlined");if(i)i.textContent=document.documentElement.classList.contains("dark")?"light_mode":"dark_mode";}
 up();document.getElementById("theme-toggle")?.addEventListener("click",function(){var h=document.documentElement;h.classList.toggle("dark");localStorage.setItem("commentor-theme",h.classList.contains("dark")?"dark":"light");up();});
 document.getElementById("avatar-btn")?.addEventListener("click",function(e){e.stopPropagation();var m=document.getElementById("avatar-menu");m.style.display=m.style.display==="block"?"none":"block";});
-document.addEventListener("click",function(){var m=document.getElementById("avatar-menu");if(m)m.style.display="none";});})();
+document.getElementById("share-btn")?.addEventListener("click",function(e){e.stopPropagation();var m=document.getElementById("share-menu");m.style.display=m.style.display==="block"?"none":"block";});
+document.getElementById("copy-link-btn")?.addEventListener("click",function(){navigator.clipboard.writeText(location.href).catch(function(){});var t=document.createElement("div");t.className="toast";t.textContent="Link copied";document.body.appendChild(t);t.offsetHeight;t.classList.add("show");setTimeout(function(){t.classList.remove("show");setTimeout(function(){t.remove()},200)},1500)});
+document.addEventListener("click",function(){var m=document.getElementById("avatar-menu");if(m)m.style.display="none";var s=document.getElementById("share-menu");if(s)s.style.display="none";});})();
 </script>
 <script src="/lazy-tree.js?v=10"></script>
 </body>
