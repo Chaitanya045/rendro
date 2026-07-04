@@ -157,12 +157,6 @@ async function renderOrgDocs(user: User, org: string): Promise<string> {
   return renderOrgTreePage(user, org, tree);
 }
 
-
-function humanSizeStr(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
 function renderOrgTreePage(user: User, org: string, tree: DocTree[]): string {
   const email = escapeHtml(user.email);
   const orgEsc = escapeHtml(org);
@@ -286,7 +280,7 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e5e
     src="about:blank" title="Document content" style="display:none"></iframe>
 </main>
 
-<script src="/lazy-tree.js?v=5"></script>
+<script src="/lazy-tree.js?v=8"></script>
 </body>
 </html>`;
 }

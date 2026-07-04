@@ -169,13 +169,38 @@ function handleClick(e: Event) {
 
   if (item.dataset.path) {
     e.preventDefault();
-    const frame = document.getElementById("content-frame") as HTMLIFrameElement | null;
-    const placeholder = document.getElementById("main-placeholder");
-    if (frame) { frame.style.display = "block"; frame.src = `/files/${item.dataset.path}${DEV_USER ? `?dev_user=${DEV_USER}` : ""}`; }
-    if (placeholder) placeholder.style.display = "none";
+    loadDoc(item.dataset.path, true);
+  }
+}
+
+// ── doc loading with history ──
+
+function loadDoc(fullPath: string, pushState: boolean) {
+  const frame = document.getElementById("content-frame") as HTMLIFrameElement | null;
+  const placeholder = document.getElementById("main-placeholder");
+  if (frame) {
+    frame.style.display = "block";
+    frame.src = `/files/${fullPath}${DEV_USER ? `?dev_user=${DEV_USER}` : ""}`;
+  }
+  if (placeholder) placeholder.style.display = "none";
+
+  // Update active state in tree
+  const item = document.querySelector(`.tree-item[data-path="${CSS.escape(fullPath)}"]`) as HTMLElement | null;
+  if (item) {
     document.querySelectorAll(".tree-item.active").forEach((el) => el.classList.remove("active"));
     item.classList.add("active");
     updateIndicator(item, true);
+  } else {
+    // Item not in DOM yet — expand ancestors and find it
+    const relPath = fullPath.startsWith(`${ORG}/`) ? fullPath.slice(ORG!.length + 1) : fullPath;
+    navigateToDoc(relPath);
+  }
+
+  // Push history state
+  if (pushState) {
+    const url = new URL(location.href);
+    url.searchParams.set("doc", fullPath);
+    history.pushState({ docPath: fullPath }, "", url);
   }
 }
 
@@ -234,16 +259,22 @@ function init() {
     if (!e.data || typeof e.data.path !== "string") return;
     const { type, path } = e.data as { type: string; path: string };
     if (type === "doc-navigate") {
-      const frame = document.getElementById("content-frame") as HTMLIFrameElement | null;
-      const placeholder = document.getElementById("main-placeholder");
-      if (frame) {
-        frame.style.display = "block";
-        frame.src = `/files/${ORG}/${path}${DEV_USER ? `?dev_user=${DEV_USER}` : ""}`;
-      }
-      if (placeholder) placeholder.style.display = "none";
+      loadDoc(`${ORG}/${path}`, true);
     }
-    navigateToDoc(path);
+    if (type === "doc-loaded") {
+      navigateToDoc(path);
+    }
   });
+
+  // Browser back/forward
+  window.addEventListener("popstate", (e) => {
+    const docPath = e.state?.docPath;
+    if (docPath) loadDoc(docPath, false);
+  });
+
+  // Initial load: check URL for doc param
+  const urlDoc = new URLSearchParams(location.search).get("doc");
+  if (urlDoc) loadDoc(urlDoc, false);
 }
 
 if (document.readyState === "loading") {
