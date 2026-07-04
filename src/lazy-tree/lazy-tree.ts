@@ -22,25 +22,31 @@ let activeEl: HTMLElement | null = null;
 
 // ── active indicator ──
 
-function updateIndicator(el: HTMLElement) {
-  const indicator = document.getElementById("active-indicator");
-  if (!indicator || !TREE) return;
-  activeEl = el;
+function updateIndicator(el: HTMLElement, animate = true) {
+  // Double rAF ensures DOM layout has settled after expand/collapse animations
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      const indicator = document.getElementById("active-indicator");
+      if (!indicator || !TREE) return;
+      activeEl = el;
 
-  // Check if visible (all parent folders must be open)
-  let visible = true;
-  let cur: HTMLElement | null = el.parentElement;
-  while (cur && cur !== TREE) {
-    if (cur.classList.contains("tree-folder") && !cur.classList.contains("open")) { visible = false; break; }
-    cur = cur.parentElement;
-  }
-  if (!visible) { indicator.style.opacity = "0"; return; }
+      let visible = true;
+      let cur: HTMLElement | null = el.parentElement;
+      while (cur && cur !== TREE) {
+        if (cur.classList.contains("tree-folder") && !cur.classList.contains("open")) { visible = false; break; }
+        cur = cur.parentElement;
+      }
+      if (!visible) { indicator.style.opacity = "0"; return; }
 
-  const ir = el.getBoundingClientRect();
-  const cr = TREE.getBoundingClientRect();
-  indicator.style.transition = "transform 0.3s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.2s ease";
-  indicator.style.opacity = "1";
-  indicator.style.transform = `translate(${ir.left - cr.left}px, ${ir.top - cr.top}px)`;
+      const ir = el.getBoundingClientRect();
+      const cr = TREE.getBoundingClientRect();
+      indicator.style.transition = animate
+        ? "transform 0.3s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.2s ease"
+        : "none";
+      indicator.style.opacity = "1";
+      indicator.style.transform = `translate(${ir.left - cr.left}px, ${ir.top - cr.top}px)`;
+    });
+  });
 }
 
 // ── fold icon toggle ──
@@ -68,10 +74,16 @@ async function expand(folder: HTMLElement) {
   }
 
   folder.classList.add("loading");
-  await loadPage(folder, path, content, undefined);
-  folder.classList.add("loaded", "open");
-  setFolderIcon(folder, true);
-  folder.classList.remove("loading");
+  try {
+    await loadPage(folder, path, content, undefined);
+    folder.classList.add("loaded", "open");
+    setFolderIcon(folder, true);
+    if (activeEl) updateIndicator(activeEl);
+  } catch {
+    content.innerHTML = `<div class="tree-error">Failed to load</div>`;
+  } finally {
+    folder.classList.remove("loading");
+  }
 }
 
 async function loadPage(folder: HTMLElement, path: string, content: HTMLElement, startAfter?: string) {
@@ -80,7 +92,6 @@ async function loadPage(folder: HTMLElement, path: string, content: HTMLElement,
   if (!res.ok) throw new Error(`${res.status}`);
   const data = await res.json();
 
-  // Remove existing "load more" if any
   const existingMore = content.querySelector(".tree-load-more");
   if (existingMore) existingMore.remove();
 
@@ -92,6 +103,8 @@ async function loadPage(folder: HTMLElement, path: string, content: HTMLElement,
     content.insertAdjacentHTML("beforeend",
       `<div class="tree-load-more"><button class="load-more-btn">Load more...</button></div>`);
   }
+
+  if (activeEl) updateIndicator(activeEl, false);
 }
 
 function collapse(folder: HTMLElement) {
@@ -216,7 +229,14 @@ async function navigateToDoc(relPath: string) {
 function init() {
   if (!TREE) return;
   TREE.addEventListener("click", handleClick);
-  document.querySelectorAll(".tree-folder.open").forEach((f) => setFolderIcon(f as HTMLElement, true));
+
+  // Re-sync indicator after folder expand/collapse animations finish
+  TREE.addEventListener("transitionend", (e) => {
+    const target = e.target as HTMLElement;
+    if (target.classList.contains("tree-folder-content") && activeEl) {
+      updateIndicator(activeEl, false);
+    }
+  });
   window.addEventListener("message", (e) => {
     if (!e.data || typeof e.data.path !== "string") return;
     const { type, path } = e.data as { type: string; path: string };
