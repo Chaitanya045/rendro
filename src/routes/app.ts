@@ -227,7 +227,7 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e5e
   .tree-error{color:#ba1a1a;padding:4px 8px;font-size:11px}
   .caret-icon{transition:transform .3s cubic-bezier(.4,0,.2,1)}
   .tree-folder.open>.tree-item .caret-icon{transform:rotate(90deg)}
-  .active-indicator{position:absolute;left:0;width:4px;height:32px;background:#0a66c2;transition:transform .3s cubic-bezier(.4,0,.2,1),opacity .2s ease;border-radius:4px;z-index:10;pointer-events:none}
+  .active-indicator{position:absolute;left:0;width:4px;height:32px;background:#0a66c2;transition:transform .3s cubic-bezier(.4,0,.2,1),opacity .2s ease;border-radius:4px;pointer-events:none}
 
   .main{margin-left:280px;margin-top:56px;height:calc(100vh - 56px);overflow:hidden;background:#f8f9fa}
   .main-placeholder{display:flex;align-items:center;justify-content:center;height:100%;flex-direction:column;text-align:center;padding:3rem}
