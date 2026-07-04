@@ -240,7 +240,7 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e5e
   .share-menu-item{display:flex;align-items:center;gap:8px;padding:8px 12px;font-size:14px;color:#111418;border:0;background:0;width:100%;border-radius:4px;cursor:pointer;font-family:Inter}
   .share-menu-item:hover{background:#f3f4f6}
 
-  .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#111418;color:#fff;padding:10px 20px;border-radius:8px;font-size:14px;font-family:Inter;z-index:200;opacity:0;transition:opacity .2s;pointer-events:none}
+  .toast{position:fixed;bottom:24px;right:24px;background:#111418;color:#fff;padding:10px 20px;border-radius:8px;font-size:14px;font-family:Inter;z-index:200;opacity:0;transition:opacity .2s;pointer-events:none}
   .toast.show{opacity:1}
   .topbar-btn-icon{width:32px;height:32px;border-radius:4px;border:0;background:transparent;cursor:pointer;display:flex;align-items:center;justify-content:center;color:#6b7280;transition:background .15s}
   .topbar-btn-icon:hover{background:#f3f4f6}
