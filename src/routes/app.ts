@@ -286,7 +286,7 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e5e
     src="about:blank" title="Document content" style="display:none"></iframe>
 </main>
 
-<script src="/lazy-tree.js?v=4"></script>
+<script src="/lazy-tree.js?v=5"></script>
 </body>
 </html>`;
 }
@@ -308,12 +308,10 @@ function renderTree(nodes: DocTree[]): string {
   </div>`;
       }
       const filePath = `/files/${node.path}`;
-      const meta = "size" in node && node.size ? `<span class="tree-size">${humanSizeStr(node.size)}</span>` : "";
       return `<div class="tree-item flex items-center gap-2 px-3 py-1.5 rounded-lg text-on-surface-variant cursor-pointer" data-path="${escapeHtml(node.path)}">
     <span class="material-symbols-outlined text-[18px] flex-shrink-0">article</span>
     <a href="${escapeHtml(filePath)}" class="tree-link flex-1 min-w-0" target="content-frame">${escapeHtml(node.name)}</a>
-    ${meta}
-  </div>`;
+</div>`;
     })
     .join("\n");
 }
