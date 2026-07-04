@@ -22,7 +22,7 @@ let activeEl: HTMLElement | null = null;
 
 // ── active indicator ──
 
-function updateIndicator(el: HTMLElement, animate = false) {
+function updateIndicator(el: HTMLElement, animate = true) {
   const indicator = document.getElementById("active-indicator");
   if (!indicator || !TREE) return;
   activeEl = el;

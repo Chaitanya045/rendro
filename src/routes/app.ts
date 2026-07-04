@@ -286,7 +286,7 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e5e
     src="about:blank" title="Document content" style="display:none"></iframe>
 </main>
 
-<script src="/lazy-tree.js?v=3"></script>
+<script src="/lazy-tree.js?v=4"></script>
 </body>
 </html>`;
 }
