@@ -86,11 +86,8 @@ async function loadPage(folder: HTMLElement, path: string, content: HTMLElement,
   const res = await fetch(url);
   if (!res.ok) throw new Error(`${res.status}`);
   const data = await res.json();
-
-  const existingMore = content.querySelector(".tree-load-more");
-  if (existingMore) existingMore.remove();
-
-  const rows = renderRows(data.children as TreeNode[]);
+  const childDepth = parseInt(folder.dataset.depth || "0") + 1;
+  const rows = renderRows(data.children as TreeNode[], childDepth);
   content.insertAdjacentHTML("beforeend", rows);
 
   if (data.isTruncated && data.nextStartAfter) {
@@ -118,9 +115,9 @@ function renderFile(node: TreeNode): string {
   </div>`;
 }
 
-function renderFolder(node: TreeNode): string {
+function renderFolder(node: TreeNode, depth: number): string {
   const path = node.path.endsWith("/") ? node.path : `${node.path}/`;
-  return `<div class="tree-folder" data-path="${esc(path)}">
+  return `<div class="tree-folder" data-path="${esc(path)}" data-depth="${depth}">
     <div class="tree-item flex items-center gap-2 px-3 py-1.5 rounded-lg text-on-surface-variant cursor-pointer">
       <span class="material-symbols-outlined text-[18px] caret-icon flex-shrink-0">chevron_right</span>
       <span class="material-symbols-outlined text-[18px] folder-icon flex-shrink-0">folder</span>
@@ -130,8 +127,8 @@ function renderFolder(node: TreeNode): string {
   </div>`;
 }
 
-function renderRows(nodes: TreeNode[]): string {
-  return nodes.map((n) => (n.type === "folder" ? renderFolder(n) : renderFile(n))).join("");
+function renderRows(nodes: TreeNode[], depth: number): string {
+  return nodes.map((n) => (n.type === "folder" ? renderFolder(n, depth) : renderFile(n))).join("");
 }
 
 // ── event handling ──

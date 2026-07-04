@@ -203,13 +203,22 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e5e
   .sidebar-org-name{font-size:20px;font-weight:600;line-height:28px;color:#111418}
   .sidebar-org-meta{font-size:12px;font-weight:600;color:#6b7280;letter-spacing:.05em;line-height:16px}
   .sidebar-divider{padding:8px 12px;font-size:10px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:.05em}
-  .sidebar-tree{flex:1;padding:0 12px;overflow-y:auto}
   .sidebar-footer{padding:12px 16px;border-top:1px solid #e5e7eb;margin-top:auto}
-  .sidebar-footer a{font-size:12px;color:#6b7280;text-decoration:none;font-weight:600}
+  .sidebar-tree{flex:1;padding:0 12px;overflow-y:auto;--sidebar-bg:#fff}
   .sidebar-footer a:hover{color:#111418}
 
   .tree-folder-content{overflow:hidden;transition:max-height .4s cubic-bezier(.34,1.56,.64,1),opacity .3s ease;max-height:0;opacity:0}
   .tree-folder.open>.tree-folder-content{max-height:2000px;opacity:1}
+  /* ── sticky folder headers (VS Code-style stacking) ── */
+  .tree-folder.open>.tree-item{position:sticky;z-index:5;background:var(--sidebar-bg,#fff)}
+  .tree-folder[data-depth="0"].open>.tree-item{top:0}
+  .tree-folder[data-depth="1"].open>.tree-item{top:30px}
+  .tree-folder[data-depth="2"].open>.tree-item{top:60px}
+  .tree-folder[data-depth="3"].open>.tree-item{top:90px}
+  .tree-folder[data-depth="4"].open>.tree-item{top:120px}
+  .tree-folder[data-depth="5"].open>.tree-item{top:150px}
+  .tree-folder.open>.tree-item::after{content:"";position:absolute;bottom:0;left:0;right:0;height:1px;background:var(--border,#e5e7eb)}
+
   .load-more-btn{display:block;width:100%;padding:4px 12px;background:transparent;border:0;color:#0a66c2;font-size:12px;font-weight:600;cursor:pointer;text-align:left;font-family:Inter;border-radius:4px}
   .load-more-btn:hover{background:#f0f0f3}
   .load-more-btn:disabled{color:#6b7280;cursor:default}
@@ -258,7 +267,8 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e5e
   html.dark .topbar-btn-icon:hover{background:#2f3136}
   html.dark .topbar-btn-share{color:#4493f8}
   html.dark .topbar-btn-share:hover{background:#2f3136}
-  html.dark .topbar-btn-create{background:#4493f8;color:#0b0c0e}
+  html.dark .sidebar-tree{--sidebar-bg:#1e1f22}
+  html.dark .tree-folder.open>.tree-item::after{background:#383a40}
   html.dark .topbar-avatar{background:#2f3136;color:#f2f3f5;border-color:#383a40}
   html.dark .sidebar{background:#1e1f22;border-right-color:#383a40}
   html.dark .sidebar-org-name{color:#f2f3f5}
@@ -340,7 +350,7 @@ document.getElementById("share-btn")?.addEventListener("click",function(e){e.sto
 document.getElementById("copy-link-btn")?.addEventListener("click",function(){navigator.clipboard.writeText(location.href).catch(function(){});var t=document.createElement("div");t.className="toast";t.textContent="Link copied";document.body.appendChild(t);t.offsetHeight;t.classList.add("show");setTimeout(function(){t.classList.remove("show");setTimeout(function(){t.remove()},200)},1500)});
 document.addEventListener("click",function(){var m=document.getElementById("avatar-menu");if(m)m.style.display="none";var s=document.getElementById("share-menu");if(s)s.style.display="none";});})();
 </script>
-<script src="/lazy-tree.js?v=10"></script>
+<script src="/lazy-tree.js?v=11"></script>
 </body>
 </html>`;
 }
@@ -352,7 +362,7 @@ function renderTree(nodes: DocTree[]): string {
     .map((node) => {
       if (node.type === "folder") {
         const folderPath = node.path.endsWith("/") ? node.path : `${node.path}/`;
-        return `<div class="tree-folder" data-path="${escapeHtml(folderPath)}">
+        return `<div class="tree-folder" data-path="${escapeHtml(folderPath)}" data-depth="0">
     <div class="tree-item flex items-center gap-2 px-3 py-1.5 rounded-lg text-on-surface-variant cursor-pointer">
       <span class="material-symbols-outlined text-[18px] caret-icon flex-shrink-0">chevron_right</span>
       <span class="material-symbols-outlined text-[18px] folder-icon flex-shrink-0">folder</span>
