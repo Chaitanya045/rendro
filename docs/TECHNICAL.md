@@ -533,10 +533,46 @@ deleted_file table: (orgSlug, fileKey, deletedAt)
 
 ### Components
 - **SSR page shell**: Hono renders header + sidebar + tree (top-level only) + placeholder
-- **lazy-tree.js** (8.5KB IIFE): handles folder expansion, infinite scroll, active indicator, history
+- **lazy-tree.js** (8.5KB IIFE): handles folder expansion, infinite scroll, active indicator, history, sticky scroll
 - **Commentor widget**: injected into each doc page (iframe), Convex-backed inline comments
 - **Nav tracking script**: injected into each doc page, intercepts link clicks via postMessage
 - **Theme script**: inline, toggles dark/light via `html.dark` class, persists to localStorage
+
+### Sticky Folder Headers
+
+VS Code-style sticky scroll. When a folder is open, its header row sticks to the top of the sidebar during scroll. Nested folders stack below each other with increasing top offset:
+
+- **Implementation**: CSS `position: sticky` with depth-based `top` offsets (0px, 30px, 60px...)
+- **Stacking**: z-index decreases with depth (parents above children)
+- **Background**: matches sidebar via `--sidebar-bg` CSS variable
+- **Overflow fix**: Open `.tree-folder-content` uses `overflow:visible` to unblock sticky positioning
+- **Zero JS**: Pure CSS, GPU-accelerated scrolling
+
+### Share Button
+
+Share dropdown with "Copy link" option:
+- Copies current URL (including `?doc=...`) to clipboard
+- "Link copied" toast at bottom-right with fade animation
+- Toast follows app theme (light/dark)
+
+### Cross-Doc Navigation
+
+When clicking a link inside a doc that points to another doc in the same org:
+
+1. **Injected script** intercepts the click, calls `postMessage({type:"doc-navigate", path:"..."})`
+2. **Parent page** calls `loadDoc()` → sets iframe src + pushes browser history
+3. **`syncActiveState`** → always calls `navigateToDoc()` to expand ancestor folders
+4. **`navigateToDoc`** expands ancestors iteratively, re-querying DOM after each level
+
+Works on fresh page loads (no folders expanded), after collapsing folders, and for any nesting depth.
+
+### Sign-in Redirect Preservation
+
+Shared URLs (`?doc=gmail/index.html`) survive the OAuth flow:
+
+- Sign-in button passes `callbackURL: location.href` to better-auth
+- After Google OAuth completes, user is redirected back to the original shared URL
+- The `doc` query param triggers automatic doc loading on the org page
 
 ### Color scheme & Dark mode
 
