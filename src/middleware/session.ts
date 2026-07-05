@@ -1,10 +1,10 @@
 import type { Context, Next } from "hono";
-import { auth } from "@/auth";
+import { auth, getAuth } from "@/auth";
 import { logger } from "@/logger";
 
 export async function sessionMiddleware(c: Context, next: Next) {
   try {
-    if (process.env.NODE_ENV === "development") {
+    if (typeof process !== "undefined" && process.env.NODE_ENV === "development") {
       const devEmail = c.req.header("X-Dev-User") || c.req.query("dev_user");
       if (devEmail) {
         c.set("user", {
@@ -16,7 +16,8 @@ export async function sessionMiddleware(c: Context, next: Next) {
         return;
       }
     }
-    const session = await auth!.api.getSession({ headers: c.req.raw.headers });
+    const authInstance = auth ?? await getAuth(c.env as Record<string, unknown>);
+    const session = await authInstance.api.getSession({ headers: c.req.raw.headers });
     if (session) c.set("user", session.user);
   } catch (err) {
     logger.debug({ err }, "Session lookup failed (anonymous request)");
