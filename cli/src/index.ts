@@ -219,7 +219,7 @@ Options:
   --concurrency  Parallel uploads (default: 8)
   --sync-deletes Remove files from server that don't exist locally (soft-delete)
 
-Auth: set DOCSYNC_API_KEY in your environment. Get your key from
+Auth: set RENDRO_API_KEY in your environment. Get your key from
       the Rendro org page after creating your organization.
 \`);
 `);
@@ -243,7 +243,7 @@ Auth: set DOCSYNC_API_KEY in your environment. Get your key from
     const source = getFlag("--source", "./docs");
     const org = getFlag("--org", "");
     const endpoint = getFlag("--endpoint", "http://localhost:3000");
-    const token = getFlag("--token", process.env.DOCSYNC_API_KEY || "");
+    const token = getFlag("--token", process.env.RENDRO_API_KEY || "");
     const concurrency = parseInt(getFlag("--concurrency", "8"), 10);
     const syncDeletes = args.includes("--sync-deletes");
 
@@ -252,7 +252,7 @@ Auth: set DOCSYNC_API_KEY in your environment. Get your key from
       process.exit(1);
     }
     if (!token) {
-      console.error("Error: DOCSYNC_API_KEY environment variable is required. Get your key from the Rendro org page.");
+      console.error("Error: RENDRO_API_KEY environment variable is required. Get your key from the Rendro org page.");
       process.exit(1);
     }
     await push({ source, org, endpoint, token, concurrency, syncDeletes });
