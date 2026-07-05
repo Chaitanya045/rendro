@@ -103,17 +103,6 @@ app.on(["POST", "GET", "OPTIONS"], "/api/auth/*", async (c) => {
   }
 });
 
-app.get("/debug/convex-get", async (c) => {
-  try {
-    const res = await fetch(`${CONVEX_SITE}/api/auth/callback/google`, {
-      method: "GET",
-      redirect: "manual",
-    });
-    return c.text(`${res.status} loc=${res.headers.get("location") || ""} type=${res.type}`);
-  } catch (err: any) {
-    return c.text(`FAIL: ${err.name}: ${err.message}`);
-  }
-});
 
 app.route("/", appRoutes);
 app.route("/", docsRoutes);
