@@ -86,11 +86,13 @@ app.use("*", async (c, next) => { await sessionMiddleware(c, next); });
 // Proxy ALL /api/auth/* to Convex HTTP actions
 app.on(["POST", "GET", "OPTIONS"], "/api/auth/*", async (c) => {
   const target = `${CONVEX_SITE}${c.req.path}${new URL(c.req.url).search}`;
-  // Forward safe headers — cookie is critical for OAuth state
+  // Forward only safe headers — cookie is required for OAuth state validation.
+  // Skip Host (misroutes on convex.site), connection/content-length/transfer-encoding (hop-by-hop).
+  const SAFE = ["cookie", "content-type", "accept", "accept-language", "origin", "referer", "user-agent", "sec-fetch-dest", "sec-fetch-mode", "sec-fetch-site"];
   const headers = new Headers();
-  for (const [k, v] of c.req.raw.headers.entries()) {
-    if (k.startsWith("cf-") || k === "host") continue; // drop CF-specific + Host
-    headers.set(k, v);
+  for (const k of SAFE) {
+    const v = c.req.raw.headers.get(k);
+    if (v) headers.set(k, v);
   }
   const init: RequestInit = { method: c.req.method, headers, redirect: "manual" };
   if (c.req.method !== "GET" && c.req.method !== "HEAD")
