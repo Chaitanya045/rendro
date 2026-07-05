@@ -1,0 +1,21 @@
+name = "rendro"
+main = "src/index.ts"
+compatibility_date = "2025-07-05"
+
+[observability]
+enabled = true
+
+[[r2_buckets]]
+binding = "DOCS"
+bucket_name = "rendro-docs"
+
+[[kv_namespaces]]
+binding = "AUTH_DB"
+id = "placeholder-auth-db-id"
+
+[vars]
+NODE_ENV = "production"
+CONVEX_URL = "https://your-project.convex.cloud"
+
+[env.production]
+routes = [{ pattern = "rendro.sh", custom_domain = true }]
