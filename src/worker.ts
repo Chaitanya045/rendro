@@ -1,13 +1,81 @@
 // Cloudflare Workers entry point
-// Polyfill DOMParser for Workers runtime compatibility
-if (typeof DOMParser === "undefined") {
-  // @ts-expect-error — minimal shim
+
+// Polyfill DOMParser for Workers (used by AWS SDK XML parser for R2/S3)
+let needsPolyfill = typeof DOMParser === "undefined";
+if (!needsPolyfill) {
+  try {
+    const doc = new DOMParser().parseFromString("<root/>", "text/xml");
+    needsPolyfill = typeof doc.getElementsByTagName !== "function";
+  } catch { needsPolyfill = true; }
+}
+if (needsPolyfill) {
+  class XmlNode {
+    tagName: string;
+    children: XmlNode[];
+    attributes: Record<string, string>;
+    #text = "";
+    constructor(tag: string, attrs: Record<string, string> = {}) {
+      this.tagName = tag;
+      this.children = [];
+      this.attributes = attrs;
+    }
+    get textContent(): string { return this.#text; }
+    set textContent(v: string) { this.#text = v; }
+    get childNodes(): XmlNode[] { return this.children; }
+    getElementsByTagName(name: string): XmlNode[] {
+      const results: XmlNode[] = [];
+      for (const c of this.children) {
+        if (c.tagName === name) results.push(c);
+        results.push(...c.getElementsByTagName(name));
+      }
+      return results;
+    }
+  }
+
+  function parseXml(xml: string): XmlNode {
+    const tagRE = /<(\/?)(\w+)([^>]*)>/g;
+    const stack: XmlNode[] = [];
+    let root: XmlNode | null = null;
+    let lastIdx = 0;
+    let match: RegExpExecArray | null;
+    while ((match = tagRE.exec(xml)) !== null) {
+      const beforeText = xml.slice(lastIdx, match.index).trim();
+      if (beforeText && stack.length > 0) stack[stack.length - 1].textContent += beforeText;
+      const [, closing, tag, attrs] = match;
+      if (closing) {
+        const closed = stack.pop();
+        if (closed && stack.length === 0) root = closed;
+      } else {
+        const attrMap: Record<string, string> = {};
+        const attrRE = /(\w+)="([^"]*)"/g;
+        let am: RegExpExecArray | null;
+        while ((am = attrRE.exec(attrs)) !== null) attrMap[am[1]] = am[2];
+        const node = new XmlNode(tag, attrMap);
+        if (stack.length > 0) stack[stack.length - 1].children.push(node);
+        stack.push(node);
+        if (match[0].endsWith("/>")) {
+          const selfClosed = stack.pop()!;
+          if (stack.length === 0) root = selfClosed;
+        }
+      }
+      lastIdx = tagRE.lastIndex;
+    }
+    return root || new XmlNode("html");
+  }
+
+  // @ts-expect-error — minimal DOMParser polyfill
   globalThis.DOMParser = class {
-    parseFromString(_html: string, _type: string) {
-      return { documentElement: { tagName: "html", textContent: _html } };
+    parseFromString(source: string, _mime: string) {
+      const root = parseXml(source);
+      return {
+        documentElement: root,
+        getElementsByTagName: (name: string) => root.getElementsByTagName(name),
+        childNodes: [root],
+      };
     }
   };
 }
+
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import type { AuthInstance } from "./auth";
