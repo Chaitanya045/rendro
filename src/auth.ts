@@ -6,7 +6,7 @@ import { logger } from "@/logger";
 export const auth = betterAuth({
   appName: "rendro",
   baseURL: BASE_URL,
-  database: new Database("rendro-auth.db") as never,
+  database: new Database("docsync-auth.db") as never,
   secret: BASE_URL + "-dev-secret-change-in-prod",
   socialProviders: {
     google: {

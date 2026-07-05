@@ -2,7 +2,7 @@ import { randomBytes, createHash } from "node:crypto";
 import Database from "better-sqlite3";
 import { logger } from "@/logger";
 
-const db = new Database("rendro-auth.db");
+const db = new Database("docsync-auth.db");
 db.pragma("journal_mode = WAL");
 
 db.exec(`
