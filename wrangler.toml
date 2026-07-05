@@ -15,10 +15,6 @@ run_worker_first = true
 binding = "DOCS"
 bucket_name = "rendro-docs"
 
-[[d1_databases]]
-binding = "rendro_auth"
-database_name = "rendro-auth"
-database_id = "fdba8cd7-5ae3-4ac9-8e23-f2ea1210e334"
 
 [vars]
 NODE_ENV = "production"
