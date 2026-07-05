@@ -1,7 +1,7 @@
 name = "rendro"
 main = "src/worker.ts"
 compatibility_date = "2025-07-06"
-
+compatibility_flags = ["nodejs_compat"]
 [observability]
 enabled = true
 
