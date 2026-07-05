@@ -1,9 +1,13 @@
 {
   "name": "rendro",
-  "version": "0.1.0",
-  "private": true,
+  "version": "1.0.0",
+  "description": "Render any file. A documentation platform with VS Code-style tree, inline comments, and dark mode.",
+  "license": "MIT",
+  "repository": "Chaitanya045/rendro",
   "type": "module",
   "packageManager": "pnpm@10.18.3",
+  "bin": { "rendro": "./bin/rendro.mjs" },
+  "files": ["bin/", "README.md", "LICENSE"],
   "scripts": {
     "dev": "tsx watch --env-file=.env src/index.ts",
     "build": "tsc",
@@ -15,7 +19,9 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "init-minio": "tsx scripts/init-minio.ts",
-    "cli": "tsx cli/src/index.ts"
+    "cli": "tsx cli/src/index.ts",
+    "cli:build": "node scripts/build-cli.mjs",
+    "deploy": "wrangler deploy"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.600.0",
@@ -43,9 +49,6 @@
     "vitest": "^3.2.0"
   },
   "pnpm": {
-    "onlyBuiltDependencies": [
-      "esbuild",
-      "better-sqlite3"
-    ]
+    "onlyBuiltDependencies": ["esbuild"]
   }
 }

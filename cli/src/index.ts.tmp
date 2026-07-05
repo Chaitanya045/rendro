@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 /**
  * rendro CLI — push docs from a local directory to the rendro server.
  *
