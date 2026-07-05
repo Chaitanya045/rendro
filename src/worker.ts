@@ -141,6 +141,17 @@ app.on(["POST", "GET"], "/api/auth/*", async (c) => {
   }
 });
 
+// Debug: test Convex connectivity directly
+app.get("/debug/convex-callback", async (c) => {
+  const url = `${convexSiteUrl}/api/auth/callback/google`;
+  try {
+    const res = await fetch(url);
+    return c.text(`OK: ${res.status} ${res.headers.get("location") || ""}`);
+  } catch (err: any) {
+    return c.text(`FAIL: ${err.message}`);
+  }
+});
+
 
 app.route("/", appRoutes);
 app.route("/", docsRoutes);
