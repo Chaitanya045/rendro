@@ -86,7 +86,10 @@ app.use("*", async (c, next) => { await sessionMiddleware(c, next); });
 // Proxy ALL /api/auth/* to Convex HTTP actions
 app.on(["POST", "GET", "OPTIONS"], "/api/auth/*", async (c) => {
   const target = `${CONVEX_SITE}${c.req.path}${new URL(c.req.url).search}`;
-  const init: RequestInit = { method: c.req.method };
+  const headers = new Headers();
+  const ct = c.req.raw.headers.get("content-type");
+  if (ct) headers.set("content-type", ct);
+  const init: RequestInit = { method: c.req.method, headers };
   if (c.req.method !== "GET" && c.req.method !== "HEAD")
     init.body = await c.req.raw.text();
   try {
