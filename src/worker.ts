@@ -123,9 +123,15 @@ const convexSiteUrl = CONVEX_URL.replace(".cloud", ".site");
 app.on(["POST", "GET"], "/api/auth/*", async (c) => {
   try {
     const url = `${convexSiteUrl}${c.req.path}${new URL(c.req.url).search}`;
+    // Forward only safe headers — strip Host and cf-* headers
+    const fwd = new Headers();
+    for (const [k, v] of c.req.raw.headers.entries()) {
+      if (k.startsWith("cf-") || k === "host" || k === "x-forwarded-host" || k === "x-forwarded-proto") continue;
+      fwd.set(k, v);
+    }
     const res = await fetch(url, {
       method: c.req.method,
-      headers: c.req.raw.headers,
+      headers: fwd,
       body: c.req.method !== "GET" && c.req.method !== "HEAD" ? await c.req.raw.text() : undefined,
     });
     return res;
