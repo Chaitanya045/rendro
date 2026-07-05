@@ -15,10 +15,12 @@ run_worker_first = true
 binding = "DOCS"
 bucket_name = "rendro-docs"
 
-[[routes]]
-pattern = "rendro.app"
-custom_domain = true
+workers_dev = true
 
+# Custom domain (uncomment once DNS propagates)
+# [[routes]]
+# pattern = "rendro.app"
+# custom_domain = true
 [vars]
 NODE_ENV = "production"
 BASE_URL = "https://rendro.app"
