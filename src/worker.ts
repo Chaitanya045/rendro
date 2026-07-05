@@ -89,7 +89,7 @@ app.on(["POST", "GET", "OPTIONS"], "/api/auth/*", async (c) => {
   const headers = new Headers();
   const ct = c.req.raw.headers.get("content-type");
   if (ct) headers.set("content-type", ct);
-  const init: RequestInit = { method: c.req.method, headers };
+  const init: RequestInit = { method: c.req.method, headers, redirect: "manual" };
   if (c.req.method !== "GET" && c.req.method !== "HEAD")
     init.body = await c.req.raw.text();
   try {
@@ -101,10 +101,12 @@ app.on(["POST", "GET", "OPTIONS"], "/api/auth/*", async (c) => {
 });
 
 app.get("/debug/convex-get", async (c) => {
-  // Test if Workers can GET from Convex.site
   try {
-    const res = await fetch(`${CONVEX_SITE}/api/auth/callback/google`);
-    return c.text(`${res.status} location=${res.headers.get("location") || ""}`);
+    const res = await fetch(`${CONVEX_SITE}/api/auth/callback/google`, {
+      method: "GET",
+      redirect: "manual",
+    });
+    return c.text(`${res.status} loc=${res.headers.get("location") || ""} type=${res.type}`);
   } catch (err: any) {
     return c.text(`FAIL: ${err.name}: ${err.message}`);
   }
