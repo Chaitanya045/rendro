@@ -8,13 +8,21 @@ if (!needsPolyfill) {
     needsPolyfill = typeof doc.getElementsByTagName !== "function";
   } catch { needsPolyfill = true; }
 }
-if (needsPolyfill) {
+  // DOM Node type constants
+  const ELEMENT_NODE = 1, TEXT_NODE = 3, DOCUMENT_NODE = 9;
+  // @ts-expect-error — AWS SDK XML parser needs Node global
+  globalThis.Node = { ELEMENT_NODE, TEXT_NODE, DOCUMENT_NODE, ATTRIBUTE_NODE: 2, CDATA_SECTION_NODE: 4, COMMENT_NODE: 8, DOCUMENT_FRAGMENT_NODE: 11 };
+
   class XmlNode {
+    nodeType: number;
+    nodeName: string;
     tagName: string;
     children: XmlNode[];
     attributes: Record<string, string>;
     #text = "";
-    constructor(tag: string, attrs: Record<string, string> = {}) {
+    constructor(tag: string, attrs: Record<string, string> = {}, isText = false) {
+      this.nodeType = isText ? TEXT_NODE : ELEMENT_NODE;
+      this.nodeName = isText ? "#text" : tag;
       this.tagName = tag;
       this.children = [];
       this.attributes = attrs;
@@ -22,10 +30,11 @@ if (needsPolyfill) {
     get textContent(): string { return this.#text; }
     set textContent(v: string) { this.#text = v; }
     get childNodes(): XmlNode[] { return this.children; }
+    get firstChild(): XmlNode | null { return this.children[0] || null; }
     getElementsByTagName(name: string): XmlNode[] {
       const results: XmlNode[] = [];
       for (const c of this.children) {
-        if (c.tagName === name) results.push(c);
+        if (c.nodeType === ELEMENT_NODE && c.tagName === name) results.push(c);
         results.push(...c.getElementsByTagName(name));
       }
       return results;
@@ -33,18 +42,22 @@ if (needsPolyfill) {
   }
 
   function parseXml(xml: string): XmlNode {
+    const root = new XmlNode("#document", {});
+    root.nodeType = DOCUMENT_NODE;
     const tagRE = /<(\/?)(\w+)([^>]*)>/g;
-    const stack: XmlNode[] = [];
-    let root: XmlNode | null = null;
+    const stack: XmlNode[] = [root];
     let lastIdx = 0;
     let match: RegExpExecArray | null;
     while ((match = tagRE.exec(xml)) !== null) {
       const beforeText = xml.slice(lastIdx, match.index).trim();
-      if (beforeText && stack.length > 0) stack[stack.length - 1].textContent += beforeText;
+      if (beforeText && stack.length > 0) {
+        const textNode = new XmlNode("#text", {}, true);
+        textNode.textContent = beforeText;
+        stack[stack.length - 1].children.push(textNode);
+      }
       const [, closing, tag, attrs] = match;
       if (closing) {
-        const closed = stack.pop();
-        if (closed && stack.length === 0) root = closed;
+        stack.pop();
       } else {
         const attrMap: Record<string, string> = {};
         const attrRE = /(\w+)="([^"]*)"/g;
@@ -52,29 +65,19 @@ if (needsPolyfill) {
         while ((am = attrRE.exec(attrs)) !== null) attrMap[am[1]] = am[2];
         const node = new XmlNode(tag, attrMap);
         if (stack.length > 0) stack[stack.length - 1].children.push(node);
-        stack.push(node);
-        if (match[0].endsWith("/>")) {
-          const selfClosed = stack.pop()!;
-          if (stack.length === 0) root = selfClosed;
-        }
+        if (!match[0].endsWith("/>")) stack.push(node);
       }
       lastIdx = tagRE.lastIndex;
     }
-    return root || new XmlNode("html");
+    return root;
   }
 
-  // @ts-expect-error — minimal DOMParser polyfill
+  // @ts-expect-error — DOMParser polyfill
   globalThis.DOMParser = class {
     parseFromString(source: string, _mime: string) {
-      const root = parseXml(source);
-      return {
-        documentElement: root,
-        getElementsByTagName: (name: string) => root.getElementsByTagName(name),
-        childNodes: [root],
-      };
+      return parseXml(source);
     }
   };
-}
 
 import { Hono } from "hono";
 import { cors } from "hono/cors";
