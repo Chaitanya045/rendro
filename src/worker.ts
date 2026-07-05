@@ -1,4 +1,13 @@
 // Cloudflare Workers entry point
+// Polyfill DOMParser for Workers runtime compatibility
+if (typeof DOMParser === "undefined") {
+  // @ts-expect-error — minimal shim
+  globalThis.DOMParser = class {
+    parseFromString(_html: string, _type: string) {
+      return { documentElement: { tagName: "html", textContent: _html } };
+    }
+  };
+}
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import type { AuthInstance } from "./auth";
