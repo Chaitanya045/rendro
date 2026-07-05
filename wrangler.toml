@@ -1,6 +1,6 @@
 name = "rendro"
 main = "src/worker.ts"
-compatibility_date = "2025-07-05"
+compatibility_date = "2025-07-06"
 
 [observability]
 enabled = true
@@ -8,15 +8,17 @@ enabled = true
 [assets]
 directory = "./public"
 binding = "ASSETS"
+run_worker_first = true
 
+# R2 bucket for blob storage (auto-created on first deploy)
 [[r2_buckets]]
 binding = "DOCS"
-bucket_name = "rendro-docs"
+
+# Custom domain
+[[routes]]
+pattern = "rendro.app"
+custom_domain = true
 
 [vars]
 NODE_ENV = "production"
 BASE_URL = "https://rendro.app"
-
-[[routes]]
-pattern = "rendro.app"
-custom_domain = true
