@@ -48,9 +48,15 @@ app.get("/api/auth/sign-out", async (c) => {
   return c.redirect("/");
 });
 
-app.on(["POST", "GET"], "/api/auth/*", (c) => {
+app.on(["POST", "GET"], "/api/auth/*", async (c) => {
   if (!auth) return c.text("Auth not ready", 503);
-  return auth.handler(c.req.raw);
+  try {
+    return await auth.handler(c.req.raw);
+  } catch (err: unknown) {
+    const e = err as Error;
+    logger.error({ err: { message: e.message, stack: e.stack } }, "Auth handler error");
+    return c.json({ error: e.message || "Auth error" }, 500);
+  }
 });
 
 app.route("/", appRoutes);
