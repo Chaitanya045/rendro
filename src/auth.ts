@@ -18,7 +18,7 @@ let instance: AuthInstance | null = null;
 export async function getAuth(env?: Record<string, unknown>) {
   if (instance) return instance;
 
-  const d1Binding = env?.rendro_auth as unknown;
+  const d1Binding = env?.rendro_auth;
   const isWorkers = !!d1Binding;
 
   if (isWorkers) {

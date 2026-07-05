@@ -51,7 +51,12 @@ app.get("/api/auth/sign-out", async (c) => {
 app.on(["POST", "GET"], "/api/auth/*", async (c) => {
   if (!auth) return c.text("Auth not ready", 503);
   try {
-    return await auth.handler(c.req.raw);
+    const res = await auth.handler(c.req.raw);
+    if (res.status >= 400 || (res.status >= 300 && res.status < 400)) {
+      const loc = res.headers.get("location") || "";
+      logger.warn({ status: res.status, location: loc, path: c.req.path }, "Auth response");
+    }
+    return res;
   } catch (err: unknown) {
     const e = err as Error;
     logger.error({ err: { message: e.message, stack: e.stack } }, "Auth handler error");
