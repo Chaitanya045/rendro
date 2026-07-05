@@ -2,7 +2,7 @@ import type { Context, Next } from "hono";
 import { CONVEX_URL } from "@/config";
 import { logger } from "@/logger";
 
-const CONVEX_CLOUD = CONVEX_URL;
+const CONVEX_SITE = CONVEX_URL.replace(".cloud", ".site");
 
 export async function sessionMiddleware(c: Context, next: Next) {
   try {
@@ -13,19 +13,20 @@ export async function sessionMiddleware(c: Context, next: Next) {
         await next(); return;
       }
     }
-    const cookie = c.req.raw.headers.get("cookie") || "";
-    const match = cookie.match(/better-auth\.session_token=([^;]+)/);
-    if (!match) { await next(); return; }
 
-    // Call Convex verifySession query
-    const res = await fetch(`${CONVEX_CLOUD}/api/query`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ path: "auth.js:verifySession", args: [{ token: match[1] }] }),
+    const cookie = c.req.raw.headers.get("cookie") || "";
+    if (!cookie.includes("better-auth")) { await next(); return; }
+
+    // Use better-auth's built-in get-session endpoint through the proxy
+    const res = await fetch(`${CONVEX_SITE}/api/auth/get-session`, {
+      headers: {
+        cookie,
+        accept: "application/json",
+      },
     });
-    const data = await res.json() as any;
-    if (data?.status === "success" && data.value) {
-      c.set("user", data.value);
+    if (res.ok) {
+      const data = await res.json() as any;
+      if (data?.user) c.set("user", data.user);
     }
   } catch (err) {
     logger.debug({ err }, "Session lookup failed");
