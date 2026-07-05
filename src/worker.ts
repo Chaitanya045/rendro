@@ -100,6 +100,16 @@ app.on(["POST", "GET", "OPTIONS"], "/api/auth/*", async (c) => {
   }
 });
 
+app.get("/debug/convex-get", async (c) => {
+  // Test if Workers can GET from Convex.site
+  try {
+    const res = await fetch(`${CONVEX_SITE}/api/auth/callback/google`);
+    return c.text(`${res.status} location=${res.headers.get("location") || ""}`);
+  } catch (err: any) {
+    return c.text(`FAIL: ${err.name}: ${err.message}`);
+  }
+});
+
 app.route("/", appRoutes);
 app.route("/", docsRoutes);
 app.get("/health", (c) => c.text("ok"));
