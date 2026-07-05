@@ -16,7 +16,7 @@ export async function sessionMiddleware(c: Context, next: Next) {
         return;
       }
     }
-    const authInstance = auth ?? await getAuth(c.env as Record<string, unknown>);
+    const authInstance = auth ?? await getAuth();
     const session = await authInstance.api.getSession({ headers: c.req.raw.headers });
     if (session) c.set("user", session.user);
   } catch (err) {
