@@ -143,17 +143,10 @@ app.on(["POST", "GET"], "/api/auth/*", async (c) => {
 
 // Debug endpoints
 app.get("/debug/convex-fetch", async (c) => {
-  // Test basic outbound fetch from Workers
   try {
-    // Test 1: external site
-    const google = await fetch("https://www.google.com");
-    // Test 2: Convex site health-like
-    const convex = await fetch(`${convexSiteUrl}/api/auth/sign-in/social`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ provider: "google", callbackURL: "https://rendro.app" }),
-    });
-    return c.text(`Google: ${google.status}, Convex: ${convex.status}`);
+    // GET to Convex site (same as callback)
+    const getRes = await fetch(`${convexSiteUrl}/api/auth/callback/google`, { method: "GET" });
+    return c.text(`Convex-GET: ${getRes.status} Location: ${getRes.headers.get("location") || "none"}`);
   } catch (err: any) {
     return c.text(`FAIL: ${err.message}`);
   }
