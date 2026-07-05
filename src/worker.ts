@@ -9,13 +9,12 @@ import docsRoutes from "./routes/docs";
 import { logger } from "./logger";
 import type { User } from "better-auth/types";
 
-// Bridge Workers env to process.env before auth init
 let auth: AuthInstance | null = null;
 
 const app = new Hono<{ Variables: { user?: User } }>();
 
 app.use("*", async (c, next) => {
-  const env = c.env as Record<string, string>;
+  const env = c.env as Record<string, unknown>;
   if (env && typeof process !== "undefined") {
     for (const key of Object.keys(env)) {
       if (env[key] !== undefined && process.env[key] === undefined) {
@@ -24,7 +23,7 @@ app.use("*", async (c, next) => {
     }
   }
   if (!auth) {
-    auth = eagerAuth ?? await getAuth();
+    auth = eagerAuth ?? await getAuth(env);
   }
   await next();
 });
