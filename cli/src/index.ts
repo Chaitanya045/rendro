@@ -17,7 +17,6 @@ interface PushOptions {
   endpoint: string;
   token: string;
   concurrency?: number;
-  syncDeletes?: boolean;
 }
 
 interface FileEntry {
@@ -141,30 +140,27 @@ async function push(opts: PushOptions): Promise<void> {
   }
   console.log(`\nDone. ${uploaded} uploaded, ${skipped} skipped, ${htmlFiles.length} total.`);
 
-  // Sync deletes — remove files from MinIO that don't exist locally
-  if (opts.syncDeletes) {
-    console.log("\nSyncing deletes...");
-    const localKeys = new Set(entries.map((e) => e.key));
-    try {
-      const listRes = await fetch(`${endpoint}/api/sync/list`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const { keys: serverKeys } = (await listRes.json()) as { keys: string[] };
-      let deleted = 0;
-      for (const key of serverKeys) {
-        if (!localKeys.has(key)) {
-          await fetch(`${endpoint}/api/sync/delete?key=${encodeURIComponent(key)}`, {
-            method: "DELETE",
-            headers: { Authorization: `Bearer ${token}` },
-          });
-          console.log(`  ↓ ${key} (soft-deleted)`);
-          deleted++;
-        }
+  // Sync deletes — remove files from server that don't exist locally
+  const localKeys = new Set(entries.map((e) => e.key));
+  try {
+    const listRes = await fetch(`${endpoint}/api/sync/list`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const { keys: serverKeys } = (await listRes.json()) as { keys: string[] };
+    let deleted = 0;
+    for (const key of serverKeys) {
+      if (!localKeys.has(key)) {
+        await fetch(`${endpoint}/api/sync/delete?key=${encodeURIComponent(key)}`, {
+          method: "DELETE",
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        console.log(`  ↓ ${key} (soft-deleted)`);
+        deleted++;
       }
-      console.log(`\n${deleted} files soft-deleted, ${uploaded} uploaded, ${skipped} skipped, ${htmlFiles.length} total.`);
-    } catch (e) {
-      console.error("Sync-deletes failed:", e);
     }
+    console.log(`${deleted} files soft-deleted, ${uploaded} uploaded, ${skipped} skipped, ${htmlFiles.length} total.`);
+  } catch (e) {
+    console.error("Sync-deletes failed:", e);
   }
 }
 
@@ -217,7 +213,6 @@ Options:
   --org          Organization slug (required for push)
   --endpoint     Rendro server URL (default: http://localhost:3000)
   --concurrency  Parallel uploads (default: 8)
-  --sync-deletes Remove files from server that don't exist locally (soft-delete)
 
 Auth: set RENDRO_API_KEY in your environment. Get your key from
       the Rendro org page after creating your organization.
@@ -245,7 +240,6 @@ Auth: set RENDRO_API_KEY in your environment. Get your key from
     const endpoint = getFlag("--endpoint", "http://localhost:3000");
     const token = getFlag("--token", process.env.RENDRO_API_KEY || "");
     const concurrency = parseInt(getFlag("--concurrency", "8"), 10);
-    const syncDeletes = args.includes("--sync-deletes");
 
     if (!org) {
       console.error("Error: --org is required for push");
@@ -255,7 +249,7 @@ Auth: set RENDRO_API_KEY in your environment. Get your key from
       console.error("Error: RENDRO_API_KEY environment variable is required. Get your key from the Rendro org page.");
       process.exit(1);
     }
-    await push({ source, org, endpoint, token, concurrency, syncDeletes });
+    await push({ source, org, endpoint, token, concurrency });
     return;
   }
 
