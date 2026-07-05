@@ -121,30 +121,29 @@ app.use("*", async (c, next) => {
 const convexSiteUrl = CONVEX_URL.replace(".cloud", ".site");
 
 app.on(["POST", "GET"], "/api/auth/*", async (c) => {
+  const start = Date.now();
+  const targetUrl = `${convexSiteUrl}${c.req.path}${new URL(c.req.url).search}`;
+  logger.info({ path: c.req.path, method: c.req.method, target: targetUrl }, "Auth proxy start");
   try {
-    const url = `${convexSiteUrl}${c.req.path}${new URL(c.req.url).search}`;
-    // Forward only safe headers — strip Host and cf-* headers
     const fwd = new Headers();
     for (const [k, v] of c.req.raw.headers.entries()) {
       if (k.startsWith("cf-") || k === "host" || k === "x-forwarded-host" || k === "x-forwarded-proto") continue;
       fwd.set(k, v);
     }
-    const res = await fetch(url, {
-      method: c.req.method,
-      headers: fwd,
-      body: c.req.method !== "GET" && c.req.method !== "HEAD" ? await c.req.raw.text() : undefined,
-    });
+    const body = c.req.method !== "GET" && c.req.method !== "HEAD" ? await c.req.raw.text() : undefined;
+    const res = await fetch(targetUrl, { method: c.req.method, headers: fwd, body });
+    logger.info({ path: c.req.path, status: res.status, ms: Date.now() - start }, "Auth proxy done");
     return res;
   } catch (err: unknown) {
     const e = err as Error;
-    logger.error({ err: e.message }, "Auth proxy error");
+    logger.error({ err: e.message, ms: Date.now() - start }, "Auth proxy error");
     return c.json({ error: "Auth service unavailable" }, 502);
   }
 });
 
+
 app.route("/", appRoutes);
 app.route("/", docsRoutes);
-
 app.get("/health", (c) => c.text("ok"));
 
 app.onError((err, c) => {
