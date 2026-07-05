@@ -3,7 +3,6 @@ import { withCloudflare } from "better-auth-cloudflare";
 import { GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, BASE_URL } from "./config";
 import { logger } from "./logger";
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
 interface AuthInstance {
   handler: (req: Request) => Response | Promise<Response>;
   api: {
@@ -22,7 +21,7 @@ export async function getAuth(env?: Record<string, unknown>) {
 
   if (isWorkers) {
     const options = withCloudflare(
-      { d1Native: d1Binding as never },
+      { d1Native: d1Binding as never, autoDetectIpAddress: false, geolocationTracking: false },
       {
         appName: "rendro",
         baseURL: BASE_URL,
