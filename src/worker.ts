@@ -148,7 +148,10 @@ app.get("/health", (c) => c.text("ok"));
 
 app.onError((err) => {
   logger.error({ err: { message: err.message, stack: err.stack } }, "Unhandled error");
-  return new Response(JSON.stringify({ error: err.message }), {
+  return new Response(JSON.stringify({
+    error: err.message,
+    stack: typeof err.stack === "string" ? err.stack.split("\n").slice(0, 8) : undefined,
+  }), {
     status: 500,
     headers: { "Content-Type": "application/json" },
   });
