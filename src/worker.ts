@@ -13,6 +13,19 @@ let auth: AuthInstance | null = null;
 
 const app = new Hono<{ Variables: { user?: User } }>();
 
+// Bridge Workers env to process.env before anything else runs
+app.use("*", async (c, next) => {
+  const env = c.env as Record<string, string>;
+  if (env && typeof process !== "undefined") {
+    for (const key of Object.keys(env)) {
+      if (env[key] !== undefined && process.env[key] === undefined) {
+        process.env[key] = String(env[key]);
+      }
+    }
+  }
+  await next();
+});
+
 app.use("/api/sync/*", cors());
 
 app.use("*", async (c, next) => {
