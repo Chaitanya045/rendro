@@ -7,7 +7,7 @@ import authConfig from "./auth.config";
 
 const http = httpRouter();
 
-function createAuthHandler(method: "GET" | "POST") {
+function createAuthHandler(_method: "GET" | "POST") {
   return httpAction(async (ctx, request) => {
     const auth = betterAuth({
       appName: "rendro",
@@ -23,10 +23,9 @@ function createAuthHandler(method: "GET" | "POST") {
       },
       plugins: [convex({ authConfig })],
     });
-    return auth.handler(request);
+    return auth.handler(request) as Promise<Response>;
   });
 }
-
 http.route({ pathPrefix: "/api/auth/", method: "GET", handler: createAuthHandler("GET") });
 http.route({ pathPrefix: "/api/auth/", method: "POST", handler: createAuthHandler("POST") });
 

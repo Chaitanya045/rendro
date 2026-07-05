@@ -105,11 +105,6 @@ app.on(["POST", "GET", "OPTIONS"], "/api/auth/*", async (c) => {
   }
 });
 
-app.get("/debug/headers", (c) => {
-  const h: Record<string, string> = {};
-  c.req.raw.headers.forEach((v, k) => { h[k] = v; });
-  return c.json(h);
-});
 
 
 app.route("/", appRoutes);
