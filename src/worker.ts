@@ -2,18 +2,18 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import type { AuthInstance } from "./auth";
-import { getAuth } from "./auth";
+import { auth as eagerAuth, getAuth } from "./auth";
 import { sessionMiddleware } from "./middleware/session";
 import appRoutes from "./routes/app";
 import docsRoutes from "./routes/docs";
 import { logger } from "./logger";
 import type { User } from "better-auth/types";
 
+// Bridge Workers env to process.env before auth init
 let auth: AuthInstance | null = null;
 
 const app = new Hono<{ Variables: { user?: User } }>();
 
-// Bridge Workers env to process.env before anything else runs
 app.use("*", async (c, next) => {
   const env = c.env as Record<string, string>;
   if (env && typeof process !== "undefined") {
@@ -22,6 +22,9 @@ app.use("*", async (c, next) => {
         process.env[key] = String(env[key]);
       }
     }
+  }
+  if (!auth) {
+    auth = eagerAuth ?? await getAuth();
   }
   await next();
 });
@@ -35,10 +38,6 @@ app.use("*", async (c, next) => {
 });
 
 app.use("*", async (c, next) => {
-  if (!auth) {
-    const env = c.env as Record<string, unknown>;
-    auth = await getAuth(env);
-  }
   await sessionMiddleware(c, next);
 });
 
@@ -61,8 +60,8 @@ app.route("/", docsRoutes);
 app.get("/health", (c) => c.text("ok"));
 
 app.onError((err) => {
-  logger.error({ err: { message: err.message, stack: err.stack, name: err.name } }, "Unhandled error");
-  return new Response(JSON.stringify({ error: err.message, stack: err.stack }), {
+  logger.error({ err: { message: err.message, stack: err.stack } }, "Unhandled error");
+  return new Response(JSON.stringify({ error: err.message }), {
     status: 500,
     headers: { "Content-Type": "application/json" },
   });
