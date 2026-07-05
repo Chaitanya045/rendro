@@ -42,9 +42,11 @@ if (!needsPolyfill) {
   }
 
   function parseXml(xml: string): XmlNode {
+    // Strip XML declaration, doctype, comments
+    xml = xml.replace(/<\?xml[^>]*\?>/gi, "").replace(/<!DOCTYPE[^>]*>/gi, "").replace(/<!--[\s\S]*?-->/g, "");
     const root = new XmlNode("#document", {});
     root.nodeType = DOCUMENT_NODE;
-    const tagRE = /<(\/?)(\w+)([^>]*)>/g;
+    const tagRE = /<(\/?)(\w+)([^>]*?)>/g;
     const stack: XmlNode[] = [root];
     let lastIdx = 0;
     let match: RegExpExecArray | null;
@@ -57,10 +59,10 @@ if (!needsPolyfill) {
       }
       const [, closing, tag, attrs] = match;
       if (closing) {
-        stack.pop();
+        if (stack.length > 1 && stack[stack.length - 1].tagName === tag) stack.pop();
       } else {
         const attrMap: Record<string, string> = {};
-        const attrRE = /(\w+)="([^"]*)"/g;
+        const attrRE = /(\w+)\s*=\s*"([^"]*)"/g;
         let am: RegExpExecArray | null;
         while ((am = attrRE.exec(attrs)) !== null) attrMap[am[1]] = am[2];
         const node = new XmlNode(tag, attrMap);
@@ -69,6 +71,7 @@ if (!needsPolyfill) {
       }
       lastIdx = tagRE.lastIndex;
     }
+    // If root has exactly one element child, that's the documentElement
     return root;
   }
 
