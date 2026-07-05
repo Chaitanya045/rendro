@@ -26,6 +26,9 @@ importers:
       better-auth:
         specifier: ^1.6.23
         version: 1.6.23(@cloudflare/workers-types@4.20260702.1)(better-sqlite3@12.11.1)(drizzle-orm@0.45.2(@cloudflare/workers-types@4.20260702.1)(@libsql/client@0.17.4)(better-sqlite3@12.11.1)(kysely@0.29.2))(react@19.2.7)(vitest@3.2.6(@types/node@20.19.43)(tsx@4.22.4))
+      better-auth-cloudflare:
+        specifier: ^0.3.0
+        version: 0.3.0(@better-auth/drizzle-adapter@1.6.23(@better-auth/core@1.6.23(@better-auth/utils@0.4.2)(@better-fetch/fetch@1.3.1)(@cloudflare/workers-types@4.20260702.1)(better-call@1.3.7(zod@4.4.3))(jose@6.2.3)(kysely@0.29.2)(nanostores@1.4.0))(@better-auth/utils@0.4.2)(drizzle-orm@0.45.2(@cloudflare/workers-types@4.20260702.1)(@libsql/client@0.17.4)(better-sqlite3@12.11.1)(kysely@0.29.2)))(@cloudflare/workers-types@4.20260702.1)(@libsql/client@0.17.4)(better-auth@1.6.23(@cloudflare/workers-types@4.20260702.1)(better-sqlite3@12.11.1)(drizzle-orm@0.45.2(@cloudflare/workers-types@4.20260702.1)(@libsql/client@0.17.4)(better-sqlite3@12.11.1)(kysely@0.29.2))(react@19.2.7)(vitest@3.2.6(@types/node@20.19.43)(tsx@4.22.4)))(better-sqlite3@12.11.1)(kysely@0.29.2)
       better-sqlite3:
         specifier: ^12.11.1
         version: 12.11.1
@@ -1316,6 +1319,13 @@ packages:
   base64-js@1.5.1:
     resolution: {integrity: sha512-AKpaYlHn8t4SVbOHCy+b5+KKgvR4vrsD8vbvrbiQJps7fKDTkjkDry6ji0rUJjC0kzbNePLwzxq8iypo41qeWA==}
 
+  better-auth-cloudflare@0.3.0:
+    resolution: {integrity: sha512-u0TrMbFhHNL2IFzkCbCQYyA/beeBSivdL+vfrNywYnsVrQO1qT5CC/yKhnRdrkwXLeNi9tCeoSwWoygTMSl0Yg==}
+    peerDependencies:
+      '@better-auth/drizzle-adapter': ^1.5.0
+      '@cloudflare/workers-types': ^4.0.0
+      better-auth: ^1.5.0
+
   better-auth@1.6.23:
     resolution: {integrity: sha512-4vOaRd9UiKGKm9R+ej0jjU1es3MiJIiNc9Qq3VCnYqOZ4/nb5272QqTxWYoDxyUXl5x6A2x2we5KZKQO9teTQQ==}
     peerDependencies:
@@ -1908,6 +1918,11 @@ packages:
   make-dir@4.0.0:
     resolution: {integrity: sha512-hXdUTZYIVOt1Ex//jAQi+wTZZpUpwBj/0QsOzqegb3rGMMeJiSEu5xLHnYfBrRV4RH2+OCSOO95Is/7x1WJ4bw==}
     engines: {node: '>=10'}
+
+  mime@4.1.0:
+    resolution: {integrity: sha512-X5ju04+cAzsojXKes0B/S4tcYtFAJ6tTMuSPBEn9CPGlrWr8Fiw7qYeLT0XyH80HSoAoqWCaz+MWKh22P7G1cw==}
+    engines: {node: '>=16'}
+    hasBin: true
 
   mimic-response@3.1.0:
     resolution: {integrity: sha512-z0yWI+4FDrrweS8Zmt4Ej5HdJmky15+L2e6Wgn3+iK5fWzb6T3fhNFq2+MeTRb064c6Wr4N/wv0DzQTjNzHNGQ==}
@@ -2748,8 +2763,7 @@ snapshots:
   '@cloudflare/workerd-windows-64@1.20260701.1':
     optional: true
 
-  '@cloudflare/workers-types@4.20260702.1':
-    optional: true
+  '@cloudflare/workers-types@4.20260702.1': {}
 
   '@convex-dev/better-auth@0.12.5(@standard-schema/spec@1.1.0)(better-auth@1.6.23(@cloudflare/workers-types@4.20260702.1)(better-sqlite3@12.11.1)(drizzle-orm@0.45.2(@cloudflare/workers-types@4.20260702.1)(@libsql/client@0.17.4)(better-sqlite3@12.11.1)(kysely@0.29.2))(react@19.2.7)(vitest@3.2.6(@types/node@20.19.43)(tsx@4.22.4)))(convex@1.42.0(react@19.2.7))(hono@4.12.27)(react@19.2.7)(typescript@5.9.3)':
     dependencies:
@@ -3538,6 +3552,44 @@ snapshots:
 
   base64-js@1.5.1: {}
 
+  better-auth-cloudflare@0.3.0(@better-auth/drizzle-adapter@1.6.23(@better-auth/core@1.6.23(@better-auth/utils@0.4.2)(@better-fetch/fetch@1.3.1)(@cloudflare/workers-types@4.20260702.1)(better-call@1.3.7(zod@4.4.3))(jose@6.2.3)(kysely@0.29.2)(nanostores@1.4.0))(@better-auth/utils@0.4.2)(drizzle-orm@0.45.2(@cloudflare/workers-types@4.20260702.1)(@libsql/client@0.17.4)(better-sqlite3@12.11.1)(kysely@0.29.2)))(@cloudflare/workers-types@4.20260702.1)(@libsql/client@0.17.4)(better-auth@1.6.23(@cloudflare/workers-types@4.20260702.1)(better-sqlite3@12.11.1)(drizzle-orm@0.45.2(@cloudflare/workers-types@4.20260702.1)(@libsql/client@0.17.4)(better-sqlite3@12.11.1)(kysely@0.29.2))(react@19.2.7)(vitest@3.2.6(@types/node@20.19.43)(tsx@4.22.4)))(better-sqlite3@12.11.1)(kysely@0.29.2):
+    dependencies:
+      '@better-auth/drizzle-adapter': 1.6.23(@better-auth/core@1.6.23(@better-auth/utils@0.4.2)(@better-fetch/fetch@1.3.1)(@cloudflare/workers-types@4.20260702.1)(better-call@1.3.7(zod@4.4.3))(jose@6.2.3)(kysely@0.29.2)(nanostores@1.4.0))(@better-auth/utils@0.4.2)(drizzle-orm@0.45.2(@cloudflare/workers-types@4.20260702.1)(@libsql/client@0.17.4)(better-sqlite3@12.11.1)(kysely@0.29.2))
+      '@cloudflare/workers-types': 4.20260702.1
+      better-auth: 1.6.23(@cloudflare/workers-types@4.20260702.1)(better-sqlite3@12.11.1)(drizzle-orm@0.45.2(@cloudflare/workers-types@4.20260702.1)(@libsql/client@0.17.4)(better-sqlite3@12.11.1)(kysely@0.29.2))(react@19.2.7)(vitest@3.2.6(@types/node@20.19.43)(tsx@4.22.4))
+      drizzle-orm: 0.45.2(@cloudflare/workers-types@4.20260702.1)(@libsql/client@0.17.4)(better-sqlite3@12.11.1)(kysely@0.29.2)
+      mime: 4.1.0
+      zod: 4.4.3
+    transitivePeerDependencies:
+      - '@aws-sdk/client-rds-data'
+      - '@electric-sql/pglite'
+      - '@libsql/client'
+      - '@libsql/client-wasm'
+      - '@neondatabase/serverless'
+      - '@op-engineering/op-sqlite'
+      - '@opentelemetry/api'
+      - '@planetscale/database'
+      - '@prisma/client'
+      - '@tidbcloud/serverless'
+      - '@types/better-sqlite3'
+      - '@types/pg'
+      - '@types/sql.js'
+      - '@upstash/redis'
+      - '@vercel/postgres'
+      - '@xata.io/client'
+      - better-sqlite3
+      - bun-types
+      - expo-sqlite
+      - gel
+      - knex
+      - kysely
+      - mysql2
+      - pg
+      - postgres
+      - prisma
+      - sql.js
+      - sqlite3
+
   better-auth@1.6.23(@cloudflare/workers-types@4.20260702.1)(better-sqlite3@12.11.1)(drizzle-orm@0.45.2(@cloudflare/workers-types@4.20260702.1)(@libsql/client@0.17.4)(better-sqlite3@12.11.1)(kysely@0.29.2))(react@19.2.7)(vitest@3.2.6(@types/node@20.19.43)(tsx@4.22.4)):
     dependencies:
       '@better-auth/core': 1.6.23(@better-auth/utils@0.4.2)(@better-fetch/fetch@1.3.1)(@cloudflare/workers-types@4.20260702.1)(better-call@1.3.7(zod@4.4.3))(jose@6.2.3)(kysely@0.29.2)(nanostores@1.4.0)
@@ -3690,7 +3742,6 @@ snapshots:
       '@libsql/client': 0.17.4
       better-sqlite3: 12.11.1
       kysely: 0.29.2
-    optional: true
 
   eastasianwidth@0.2.0: {}
 
@@ -4017,6 +4068,8 @@ snapshots:
   make-dir@4.0.0:
     dependencies:
       semver: 7.8.5
+
+  mime@4.1.0: {}
 
   mimic-response@3.1.0: {}
 

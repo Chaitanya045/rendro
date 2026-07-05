@@ -1,15 +1,6 @@
 import type { Context, Next } from "hono";
-import { ConvexClient } from "convex/browser";
-import { api } from "../../convex/_generated/api";
-import { CONVEX_URL } from "@/config";
+import { auth, getAuth } from "@/auth";
 import { logger } from "@/logger";
-
-let convex: ConvexClient | null = null;
-
-function getConvex(): ConvexClient {
-  if (!convex) convex = new ConvexClient(CONVEX_URL);
-  return convex;
-}
 
 export async function sessionMiddleware(c: Context, next: Next) {
   try {
@@ -25,12 +16,9 @@ export async function sessionMiddleware(c: Context, next: Next) {
         return;
       }
     }
-    const cookie = c.req.raw.headers.get("cookie") || "";
-    const match = cookie.match(/better-auth\.session_token=([^;]+)/);
-    if (!match) { await next(); return; }
-
-    const user = await getConvex().query(api.auth.verifySession, { token: match[1] });
-    if (user) c.set("user", user);
+    const authInstance = auth ?? await getAuth();
+    const session = await authInstance.api.getSession({ headers: c.req.raw.headers });
+    if (session) c.set("user", session.user);
   } catch (err) {
     logger.debug({ err }, "Session lookup failed (anonymous request)");
   }

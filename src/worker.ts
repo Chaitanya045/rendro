@@ -10,59 +10,44 @@ if (!needsPolyfill) {
 }
 if (needsPolyfill) {
   const ELEMENT_NODE = 1, TEXT_NODE = 3, DOCUMENT_NODE = 9;
-  // @ts-expect-error — AWS SDK XML parser needs Node global
+  // @ts-expect-error
   globalThis.Node = { ELEMENT_NODE, TEXT_NODE, DOCUMENT_NODE, ATTRIBUTE_NODE: 2, CDATA_SECTION_NODE: 4, COMMENT_NODE: 8, DOCUMENT_FRAGMENT_NODE: 11 };
 
   class XmlNode {
-    nodeType: number;
-    nodeName: string;
-    tagName: string;
-    children: XmlNode[];
-    attributes: Record<string, string>;
+    nodeType: number; nodeName: string; tagName: string;
+    children: XmlNode[]; attributes: Record<string, string>;
     #text = "";
     constructor(tag: string, attrs: Record<string, string> = {}, isText = false) {
       this.nodeType = isText ? TEXT_NODE : ELEMENT_NODE;
       this.nodeName = isText ? "#text" : tag;
-      this.tagName = tag;
-      this.children = [];
-      this.attributes = attrs;
+      this.tagName = tag; this.children = []; this.attributes = attrs;
     }
     get textContent(): string { return this.#text; }
     set textContent(v: string) { this.#text = v; }
     get childNodes(): XmlNode[] { return this.children; }
     get firstChild(): XmlNode | null { return this.children[0] || null; }
     getElementsByTagName(name: string): XmlNode[] {
-      const results: XmlNode[] = [];
+      const r: XmlNode[] = [];
       for (const c of this.children) {
-        if (c.nodeType === ELEMENT_NODE && c.tagName === name) results.push(c);
-        results.push(...c.getElementsByTagName(name));
+        if (c.nodeType === ELEMENT_NODE && c.tagName === name) r.push(c);
+        r.push(...c.getElementsByTagName(name));
       }
-      return results;
+      return r;
     }
   }
-
   function parseXml(xml: string): XmlNode {
     xml = xml.replace(/<\?xml[^>]*\?>/gi, "").replace(/<!DOCTYPE[^>]*>/gi, "").replace(/<!--[\s\S]*?-->/g, "");
-    const root = new XmlNode("#document", {});
-    root.nodeType = DOCUMENT_NODE;
+    const root = new XmlNode("#document", {}); root.nodeType = DOCUMENT_NODE;
     const tagRE = /<(\/?)(\w+)([^>]*?)>/g;
-    const stack: XmlNode[] = [root];
-    let lastIdx = 0;
-    let match: RegExpExecArray | null;
+    const stack: XmlNode[] = [root]; let lastIdx = 0; let match: RegExpExecArray | null;
     while ((match = tagRE.exec(xml)) !== null) {
-      const beforeText = xml.slice(lastIdx, match.index).trim();
-      if (beforeText && stack.length > 0) {
-        const textNode = new XmlNode("#text", {}, true);
-        textNode.textContent = beforeText;
-        stack[stack.length - 1].children.push(textNode);
-      }
+      const bt = xml.slice(lastIdx, match.index).trim();
+      if (bt && stack.length > 0) { const tn = new XmlNode("#text", {}, true); tn.textContent = bt; stack[stack.length - 1].children.push(tn); }
       const [, closing, tag, attrs] = match;
-      if (closing) {
-        if (stack.length > 1 && stack[stack.length - 1].tagName === tag) stack.pop();
-      } else {
+      if (closing) { if (stack.length > 1 && stack[stack.length - 1].tagName === tag) stack.pop(); }
+      else {
         const attrMap: Record<string, string> = {};
-        const attrRE = /(\w+)\s*=\s*"([^"]*)"/g;
-        let am: RegExpExecArray | null;
+        const attrRE = /(\w+)\s*=\s*"([^"]*)"/g; let am: RegExpExecArray | null;
         while ((am = attrRE.exec(attrs)) !== null) attrMap[am[1]] = am[2];
         const node = new XmlNode(tag, attrMap);
         if (stack.length > 0) stack[stack.length - 1].children.push(node);
@@ -72,27 +57,24 @@ if (needsPolyfill) {
     }
     return root;
   }
-
-  // @ts-expect-error — DOMParser polyfill
-  globalThis.DOMParser = class {
-    parseFromString(source: string, _mime: string) {
-      return parseXml(source);
-    }
-  };
+  // @ts-expect-error
+  globalThis.DOMParser = class { parseFromString(source: string, _mime: string) { return parseXml(source); } };
 }
 
 import { Hono } from "hono";
 import { cors } from "hono/cors";
+import type { AuthInstance } from "./auth";
+import { auth as eagerAuth, getAuth } from "./auth";
 import { sessionMiddleware } from "./middleware/session";
 import appRoutes from "./routes/app";
 import docsRoutes from "./routes/docs";
 import { logger } from "./logger";
-import { CONVEX_URL } from "./config";
 import type { User } from "better-auth/types";
+
+let auth: AuthInstance | null = null;
 
 const app = new Hono<{ Variables: { user?: User } }>();
 
-// Bridge Workers env to process.env
 app.use("*", async (c, next) => {
   const env = c.env as Record<string, unknown>;
   if (env && typeof process !== "undefined") {
@@ -101,6 +83,9 @@ app.use("*", async (c, next) => {
         process.env[key] = String(env[key]);
       }
     }
+  }
+  if (!auth) {
+    auth = eagerAuth ?? await getAuth(env);
   }
   await next();
 });
@@ -117,44 +102,22 @@ app.use("*", async (c, next) => {
   await sessionMiddleware(c, next);
 });
 
-// Proxy auth routes to Convex
-const convexSiteUrl = CONVEX_URL.replace(".cloud", ".site");
+app.get("/api/auth/me", (c) => c.json(c.get("user") || { user: null }));
 
-app.on(["POST", "GET"], "/api/auth/*", async (c) => {
-  const start = Date.now();
-  const targetUrl = `${convexSiteUrl}${c.req.path}${new URL(c.req.url).search}`;
-  logger.info({ path: c.req.path, method: c.req.method, target: targetUrl }, "Auth proxy start");
-  try {
-    const fwd = new Headers();
-    for (const [k, v] of c.req.raw.headers.entries()) {
-      if (k.startsWith("cf-") || k === "host" || k === "x-forwarded-host" || k === "x-forwarded-proto") continue;
-      fwd.set(k, v);
-    }
-    const body = c.req.method !== "GET" && c.req.method !== "HEAD" ? await c.req.raw.text() : undefined;
-    const res = await fetch(targetUrl, { method: c.req.method, headers: fwd, body });
-    logger.info({ path: c.req.path, status: res.status, ms: Date.now() - start }, "Auth proxy done");
-    return res;
-  } catch (err: unknown) {
-    const e = err as Error;
-    logger.error({ err: e.message, ms: Date.now() - start }, "Auth proxy error");
-    return c.json({ error: "Auth service unavailable" }, 502);
-  }
+app.get("/api/auth/sign-out", async (c) => {
+  if (!auth) return c.text("Auth not ready", 503);
+  await auth.api.signOut({ headers: c.req.raw.headers });
+  return c.redirect("/");
 });
 
-// Debug endpoints
-app.get("/debug/convex-fetch", async (c) => {
-  try {
-    // GET to Convex site (same as callback)
-    const getRes = await fetch(`${convexSiteUrl}/api/auth/callback/google`, { method: "GET" });
-    return c.text(`Convex-GET: ${getRes.status} Location: ${getRes.headers.get("location") || "none"}`);
-  } catch (err: any) {
-    return c.text(`FAIL: ${err.message}`);
-  }
+app.on(["POST", "GET"], "/api/auth/*", (c) => {
+  if (!auth) return c.text("Auth not ready", 503);
+  return auth.handler(c.req.raw);
 });
-
 
 app.route("/", appRoutes);
 app.route("/", docsRoutes);
+
 app.get("/health", (c) => c.text("ok"));
 
 app.onError((err, c) => {
@@ -162,11 +125,7 @@ app.onError((err, c) => {
   return new Response(JSON.stringify({
     error: err.message,
     path: c.req.path,
-    stack: typeof err.stack === "string" ? err.stack.split("\n").slice(0, 6) : undefined,
-  }), {
-    status: 500,
-    headers: { "Content-Type": "application/json" },
-  });
+  }), { status: 500, headers: { "Content-Type": "application/json" } });
 });
 
 export default app;
