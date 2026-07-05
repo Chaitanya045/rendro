@@ -1,7 +1,6 @@
-// Auth: in Workers, uses D1 for storage. Convex component is ready for future cutover.
+// Auth module: for Workers, auth is proxied to Convex. For local dev, uses memory adapter.
 
 import { betterAuth } from "better-auth";
-import { withCloudflare } from "better-auth-cloudflare";
 import { memoryAdapter } from "@better-auth/memory-adapter";
 import { GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, BASE_URL } from "./config";
 import { logger } from "./logger";
@@ -17,32 +16,22 @@ export interface AuthInstance {
 
 let instance: AuthInstance | null = null;
 
-export async function getAuth(env?: Record<string, unknown>) {
+export async function getAuth(): Promise<AuthInstance> {
   if (instance) return instance;
 
-  const d1Binding = env?.rendro_auth;
-  const isWorkers = !!d1Binding;
+  const isWorkers = typeof process === "undefined" || process.env.NODE_ENV === "production";
 
   if (isWorkers) {
-    const options = withCloudflare(
-      { d1Native: d1Binding as never, autoDetectIpAddress: false, geolocationTracking: false },
-      {
-        appName: "rendro",
-        baseURL: BASE_URL,
-        secret: (typeof process !== "undefined" ? process.env.AUTH_SECRET : "") || "rendro-d1-32chars-fallback!!",
-        socialProviders: {
-          google: { clientId: GOOGLE_CLIENT_ID, clientSecret: GOOGLE_CLIENT_SECRET },
-        },
-        trustedOrigins: [BASE_URL],
-        advanced: {},
-      },
-    );
-    instance = betterAuth(options as any) as unknown as AuthInstance;
-    logger.info({ baseURL: BASE_URL }, "better-auth initialized (D1)");
+    // Workers: auth is proxied to Convex HTTP actions. getAuth() is not used directly.
+    // The worker.ts handles /api/auth/* proxy. Return a stub.
+    instance = {
+      handler: () => Promise.resolve(new Response("Auth proxy — use /api/auth/*", { status: 404 })),
+      api: { getSession: async () => null, signOut: async () => {} },
+    };
     return instance;
   }
 
-  // Dev: memory adapter
+  // Local dev: memory adapter
   instance = betterAuth({
     appName: "rendro",
     baseURL: BASE_URL,
@@ -54,7 +43,7 @@ export async function getAuth(env?: Record<string, unknown>) {
     trustedOrigins: [BASE_URL],
     advanced: {},
   }) as unknown as AuthInstance;
-  logger.info({ baseURL: BASE_URL }, "better-auth initialized (memory)");
+  logger.info({ baseURL: BASE_URL }, "better-auth initialized (memory/dev)");
   return instance;
 }
 
