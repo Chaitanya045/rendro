@@ -149,14 +149,12 @@ app.on(["POST", "GET"], "/api/auth/*", async (c) => {
 
 app.route("/", appRoutes);
 app.route("/", docsRoutes);
-
-app.get("/health", (c) => c.text("ok"));
-
-app.onError((err) => {
-  logger.error({ err: { message: err.message, stack: err.stack } }, "Unhandled error");
+app.onError((err, c) => {
+  logger.error({ err: { message: err.message, stack: err.stack }, path: c.req.path }, "Unhandled error");
   return new Response(JSON.stringify({
     error: err.message,
-    stack: typeof err.stack === "string" ? err.stack.split("\n").slice(0, 8) : undefined,
+    path: c.req.path,
+    stack: typeof err.stack === "string" ? err.stack.split("\n").slice(0, 6) : undefined,
   }), {
     status: 500,
     headers: { "Content-Type": "application/json" },
