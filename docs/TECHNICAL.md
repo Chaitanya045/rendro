@@ -661,3 +661,14 @@ Dark mode only affects UI chrome (header, sidebar, placeholder). Doc content in 
 | fetch + innerHTML | Full control over rendering, no scrollbar issues | Must re-implement navigation, script execution, and commentor widget injection |
 
 **Why:** iframes provide native document navigation — `<a target="content-frame">` just works. The commentor widget runs in its own context. The `srcdoc` → `about:blank` fix was a one-line change that resolved the navigation blocking issue.
+
+### Soft-delete: Convex vs S3 object tags
+
+**Chosen: Convex `deleted_files` table**
+
+| Approach | Pros | Cons |
+|---|---|---|
+| Convex table (current) | Single query to check all keys, atomic, indexed by fileKey | Separate table to maintain |
+| S3 object tags | No separate store, tags live with the object | N `GetObjectTagging` calls per listing — can't batch. 1000 files = 1000 S3 API calls just to filter deleted files. R2 rate limits hit at scale. |
+
+**Why:** S3/R2 object tags require individual API calls per object — there's no batch tag retrieval. For a folder with 1000 files, filtering deleted files via tags would need 1000 sequential R2 requests. Convex checks all keys in a single indexed query, independent of listing size.
