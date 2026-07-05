@@ -149,6 +149,8 @@ app.on(["POST", "GET"], "/api/auth/*", async (c) => {
 
 app.route("/", appRoutes);
 app.route("/", docsRoutes);
+
+app.get("/health", (c) => c.text("ok"));
 app.onError((err, c) => {
   logger.error({ err: { message: err.message, stack: err.stack }, path: c.req.path }, "Unhandled error");
   return new Response(JSON.stringify({
