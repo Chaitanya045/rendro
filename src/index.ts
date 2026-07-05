@@ -40,12 +40,12 @@ app.get("/api/auth/me", (c) => {
 
 // Sign-out route — clears the session cookie and redirects home
 app.get("/api/auth/sign-out", async (c) => {
-  await auth.api.signOut({ headers: c.req.raw.headers });
+  await auth!.api.signOut({ headers: c.req.raw.headers });
   return c.redirect("/");
 });
 
 // Better-auth handler — handles /api/auth/sign-in/google, /api/auth/sign-out, etc.
-app.on(["POST", "GET"], "/api/auth/*", (c) => auth.handler(c.req.raw));
+app.on(["POST", "GET"], "/api/auth/*", (c) => auth!.handler(c.req.raw));
 
 // Main app routes — sign-in / derive org / show docs / create org form
 app.route("/", appRoutes);

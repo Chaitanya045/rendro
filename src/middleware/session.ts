@@ -16,7 +16,7 @@ export async function sessionMiddleware(c: Context, next: Next) {
         return;
       }
     }
-    const session = await auth.api.getSession({ headers: c.req.raw.headers });
+    const session = await auth!.api.getSession({ headers: c.req.raw.headers });
     if (session) c.set("user", session.user);
   } catch (err) {
     logger.debug({ err }, "Session lookup failed (anonymous request)");
