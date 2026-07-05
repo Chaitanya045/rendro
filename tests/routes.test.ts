@@ -32,9 +32,9 @@ describe("api-keys", () => {
     validateApiKey = mod.validateApiKey;
   });
 
-  it("generates a key with docsk_ prefix", async () => {
+  it("generates a key with rendro_ prefix", async () => {
     const key = await createOrgApiKey("test-org");
-    expect(key).toMatch(/^docsk_/);
+    expect(key).toMatch(/^rendro_/);
   });
 
   it("validates the generated key and returns org slug", async () => {
@@ -43,7 +43,7 @@ describe("api-keys", () => {
   });
 
   it("returns null for an invalid key", async () => {
-    expect(await validateApiKey("docsk_invalid_key")).toBeNull();
+    expect(await validateApiKey("rendro_invalid_key")).toBeNull();
   });
 
   it("replaces existing key for same org", async () => {
@@ -76,7 +76,7 @@ describe("sync API", () => {
     };
 
     app.post("/api/sync/upload", async (c) => {
-      const org = authOrg(c);
+      const org = await authOrg(c);
       if (!org) return c.text("Unauthorized", 401);
       const body = await c.req.json<{ key: string; content: string; contentType?: string }>();
       if (!body.key) return c.text("Missing key", 400);
@@ -84,8 +84,8 @@ describe("sync API", () => {
       return c.json({ ok: true });
     });
 
-    app.get("/api/sync/check", (c) => {
-      const org = authOrg(c);
+    app.get("/api/sync/check", async (c) => {
+      const org = await authOrg(c);
       if (!org) return c.text("Unauthorized", 401);
       const key = c.req.query("key");
       if (!key) return c.text("Missing key", 400);
@@ -175,14 +175,14 @@ describe("sync API — list + delete (sync-deletes)", () => {
       return await validateApiKey(h.slice(7));
     };
 
-    app.get("/api/sync/list", (c) => {
-      const org = authOrg(c);
+    app.get("/api/sync/list", async (c) => {
+      const org = await authOrg(c);
       if (!org) return c.text("Unauthorized", 401);
       return c.json({ keys: [`${org}/a.html`, `${org}/b.html`] });
     });
 
-    app.delete("/api/sync/delete", (c) => {
-      const org = authOrg(c);
+    app.delete("/api/sync/delete", async (c) => {
+      const org = await authOrg(c);
       if (!org) return c.text("Unauthorized", 401);
       const key = c.req.query("key");
       if (!key) return c.text("Missing key", 400);

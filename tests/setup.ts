@@ -10,6 +10,7 @@ process.env.MINIO_SECRET_KEY = "minioadmin";
 process.env.BASE_URL = "http://localhost:3000";
 process.env.SYNC_TOKEN = "test-sync-token";
 process.env.NODE_ENV = "test";
+process.env.CONVEX_URL = "http://127.0.0.1:3210";
 
 // Mock the better-auth SDK so tests don't try to open a real SQLite DB
 // and don't try to talk to Google.
