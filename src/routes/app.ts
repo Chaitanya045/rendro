@@ -64,7 +64,7 @@ app.post("/api/orgs", async (c) => {
     return c.redirect(`/?org=${encodeURIComponent(org)}`, 303);
   }
 
-  const apiKey = createOrgApiKey(org);
+  const apiKey = await createOrgApiKey(org);
   const indexHtml = renderInitialIndex(user, org, displayName);
   await putObject(`${org}/index.html`, indexHtml, "text/html");
   logOrgAccess(org, user.email, "create");
@@ -152,7 +152,8 @@ function renderCreateOrg(user: User, org: string): string {
 
 async function renderOrgDocs(user: User, org: string): Promise<string> {
   const { entries } = await listImmediate(`${org}/`);
-  const active = entries.filter((e) => !isDeleted(e.key));
+  const deleted = await Promise.all(entries.map(e => isDeleted(e.key)));
+  const active = entries.filter((_, i) => !deleted[i]);
   const tree = buildTree(active, `${org}/`);
   logOrgAccess(org, user.email, "view");
   return renderOrgTreePage(user, org, tree);

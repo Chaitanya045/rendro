@@ -1,35 +1,21 @@
-import Database from "better-sqlite3";
+import { ConvexClient } from "convex/browser";
+import { api } from "../convex/_generated/api.js";
+import { CONVEX_URL } from "@/config";
 
-const db = new Database("docsync-auth.db");
-db.pragma("journal_mode = WAL");
+const convex = new ConvexClient(CONVEX_URL);
 
-db.exec(`CREATE TABLE IF NOT EXISTS deleted_file (
-  orgSlug TEXT NOT NULL,
-  fileKey TEXT NOT NULL,
-  deletedAt TEXT NOT NULL,
-  PRIMARY KEY (orgSlug, fileKey)
-)`);
-
-export function markDeleted(orgSlug: string, fileKey: string): void {
-  db.prepare("INSERT OR REPLACE INTO deleted_file (orgSlug, fileKey, deletedAt) VALUES (?, ?, ?)")
-    .run(orgSlug, fileKey, new Date().toISOString());
+export async function markDeleted(orgSlug: string, fileKey: string): Promise<void> {
+  await convex.mutation(api.deletedFiles.mark, { orgSlug, fileKey });
 }
 
-export function isDeleted(fileKey: string): boolean {
-  const row = db.prepare("SELECT 1 FROM deleted_file WHERE fileKey = ?").get(fileKey);
-  return row !== undefined;
+export async function isDeleted(fileKey: string): Promise<boolean> {
+  return await convex.query(api.deletedFiles.isDeleted, { fileKey });
 }
 
-export function unmarkDeleted(fileKey: string): void {
-  db.prepare("DELETE FROM deleted_file WHERE fileKey = ?").run(fileKey);
+export async function unmarkDeleted(fileKey: string): Promise<void> {
+  await convex.mutation(api.deletedFiles.unmark, { fileKey });
 }
 
-export function filterDeleted(keys: string[]): string[] {
-  if (keys.length === 0) return [];
-  const placeholders = keys.map(() => "?").join(",");
-  const deleted = db.prepare(
-    `SELECT fileKey FROM deleted_file WHERE fileKey IN (${placeholders})`
-  ).all(...keys) as { fileKey: string }[];
-  const deletedSet = new Set(deleted.map((d) => d.fileKey));
-  return keys.filter((k) => !deletedSet.has(k));
+export async function filterDeleted(keys: string[]): Promise<string[]> {
+  return await convex.query(api.deletedFiles.filterFn, { keys });
 }

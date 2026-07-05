@@ -60,33 +60,33 @@ window.COMMENTOR = ${JSON.stringify({
 
 // ----- Sync API (CLI) — per-org API key auth -----
 
-function authOrg(c: Context): string | null {
+async function authOrg(c: Context): Promise<string | null> {
   const header = c.req.header("Authorization");
   if (!header?.startsWith("Bearer ")) return null;
-  return validateApiKey(header.slice(7));
+  return await validateApiKey(header.slice(7));
 }
 
 // POST /api/sync/upload — uploads + clears deleted status
 app.post("/api/sync/upload", async (c) => {
-  const org = authOrg(c);
+  const org = await authOrg(c);
   if (!org) return c.text("Unauthorized", 401);
   const body = await c.req.json<{ key: string; content: string; contentType?: string }>();
   if (!body.key || body.content === undefined) return c.text("Missing key or content", 400);
   if (!body.key.startsWith(`${org}/`)) return c.text(`Key must start with "${org}/"`, 400);
   await putObject(body.key, body.content, body.contentType ?? "text/html");
-  unmarkDeleted(body.key);
+  await unmarkDeleted(body.key);
   return c.json({ ok: true, key: body.key, bucket: MINIO_BUCKET });
 });
 
 // GET /api/sync/check — checks existence + hash, respects soft-delete
 app.get("/api/sync/check", async (c) => {
-  const org = authOrg(c);
+  const org = await authOrg(c);
   if (!org) return c.text("Unauthorized", 401);
   const key = c.req.query("key");
   const hash = c.req.query("hash");
   if (!key) return c.text("Missing key", 400);
   if (!key.startsWith(`${org}/`)) return c.text(`Key must start with "${org}/"`, 400);
-  if (isDeleted(key)) return c.json({ exists: false, deleted: true });
+  if (await isDeleted(key)) return c.json({ exists: false, deleted: true });
   const obj = await headObject(key);
   if (!obj) return c.json({ exists: false });
   return c.json({ exists: true, etag: obj.etag, size: obj.size, match: hash ? obj.etag === hash : true });
@@ -94,20 +94,20 @@ app.get("/api/sync/check", async (c) => {
 
 // GET /api/sync/list — list all files, filtered by soft-delete
 app.get("/api/sync/list", async (c) => {
-  const org = authOrg(c);
+  const org = await authOrg(c);
   if (!org) return c.text("Unauthorized", 401);
   const keys = await listAllKeys(`${org}/`);
-  return c.json({ keys: filterDeleted(keys) });
+  return c.json({ keys: await filterDeleted(keys) });
 });
 
 // DELETE /api/sync/delete — soft-delete (marks, doesn't remove)
-app.delete("/api/sync/delete", (c) => {
-  const org = authOrg(c);
+app.delete("/api/sync/delete", async (c) => {
+  const org = await authOrg(c);
   if (!org) return c.text("Unauthorized", 401);
   const key = c.req.query("key");
   if (!key) return c.text("Missing key", 400);
   if (!key.startsWith(`${org}/`) || key.includes("..")) return c.text(`Key must be under ${org}/`, 400);
-  markDeleted(org, key);
+  await markDeleted(org, key);
   return c.json({ deleted: true, key });
 });
 
@@ -122,13 +122,8 @@ app.get("/api/tree/:org", async (c) => {
   const limit = parseInt(c.req.query("limit") || "100", 10);
   const startAfter = c.req.query("startAfter") || undefined;
 
-  const { entries, isTruncated, nextStartAfter } = await listImmediate(prefix, {
-    maxKeys: Math.min(limit, 1000),
-    startAfter,
-  });
-
-  const active = entries.filter((e) => !isDeleted(e.key));
-  const tree = buildTree(active, prefix);
+  const { entries, isTruncated, nextStartAfter } = await listImmediate(prefix, { maxKeys: Math.min(limit, 1000), startAfter });
+  const tree = buildTree(entries, prefix);
   const children = tree.map((node) => ({
     name: node.name,
     path: node.path,

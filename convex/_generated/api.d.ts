@@ -8,6 +8,8 @@
  * @module
  */
 
+import type * as apiKeys from "../apiKeys.js";
+import type * as deletedFiles from "../deletedFiles.js";
 import type * as replies from "../replies.js";
 import type * as threads from "../threads.js";
 
@@ -18,6 +20,8 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
+  apiKeys: typeof apiKeys;
+  deletedFiles: typeof deletedFiles;
   replies: typeof replies;
   threads: typeof threads;
 }>;

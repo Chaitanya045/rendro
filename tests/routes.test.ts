@@ -10,19 +10,19 @@ import { verifySyncToken } from "@/config";
 // 1. verifySyncToken — config level
 // ────────────────────────────────────────────────────
 describe("verifySyncToken", () => {
-  it("accepts correct token", () => expect(verifySyncToken("test-sync-token")).toBe(true));
-  it("rejects wrong token", () => expect(verifySyncToken("wrong-token")).toBe(false));
-  it("rejects empty token", () => expect(verifySyncToken("")).toBe(false));
-  it("rejects different-length token", () => expect(verifySyncToken("x")).toBe(false));
-  it("rejects case-different token", () => expect(verifySyncToken("TEST-SYNC-TOKEN")).toBe(false));
+  it("accepts correct token", async () => expect(verifySyncToken("test-sync-token")).toBe(true));
+  it("rejects wrong token", async () => expect(verifySyncToken("wrong-token")).toBe(false));
+  it("rejects empty token", async () => expect(verifySyncToken("")).toBe(false));
+  it("rejects different-length token", async () => expect(verifySyncToken("x")).toBe(false));
+  it("rejects case-different token", async () => expect(verifySyncToken("TEST-SYNC-TOKEN")).toBe(false));
 });
 
 // ────────────────────────────────────────────────────
 // 2. API keys — generation, validation, org binding
 // ────────────────────────────────────────────────────
 describe("api-keys", () => {
-  let createOrgApiKey: (slug: string) => string;
-  let validateApiKey: (key: string) => string | null;
+  let createOrgApiKey: (slug: string) => Promise<string>;
+  let validateApiKey: (key: string) => Promise<string | null>;
 
   beforeEach(async () => {
     // Dynamic import needed because api-keys module eagerly connects to SQLite.
@@ -32,25 +32,25 @@ describe("api-keys", () => {
     validateApiKey = mod.validateApiKey;
   });
 
-  it("generates a key with docsk_ prefix", () => {
-    const key = createOrgApiKey("test-org");
+  it("generates a key with docsk_ prefix", async () => {
+    const key = await createOrgApiKey("test-org");
     expect(key).toMatch(/^docsk_/);
   });
 
-  it("validates the generated key and returns org slug", () => {
-    const key = createOrgApiKey("acme-corp");
-    expect(validateApiKey(key)).toBe("acme-corp");
+  it("validates the generated key and returns org slug", async () => {
+    const key = await createOrgApiKey("acme-corp");
+    expect(await validateApiKey(key)).toBe("acme-corp");
   });
 
-  it("returns null for an invalid key", () => {
-    expect(validateApiKey("docsk_invalid_key")).toBeNull();
+  it("returns null for an invalid key", async () => {
+    expect(await validateApiKey("docsk_invalid_key")).toBeNull();
   });
 
-  it("replaces existing key for same org", () => {
-    const key1 = createOrgApiKey("replace-test");
-    const key2 = createOrgApiKey("replace-test");
-    expect(validateApiKey(key1)).toBeNull();
-    expect(validateApiKey(key2)).toBe("replace-test");
+  it("replaces existing key for same org", async () => {
+    const key1 = await createOrgApiKey("replace-test");
+    const key2 = await createOrgApiKey("replace-test");
+    expect(await validateApiKey(key1)).toBeNull();
+    expect(await validateApiKey(key2)).toBe("replace-test");
   });
 });
 
@@ -58,8 +58,8 @@ describe("api-keys", () => {
 // 3. Sync API routes — per-org key + org prefix enforcement
 // ────────────────────────────────────────────────────
 describe("sync API", () => {
-  let createOrgApiKey: (slug: string) => string;
-  let validateApiKey: (key: string) => string | null;
+  let createOrgApiKey: (slug: string) => Promise<string>;
+  let validateApiKey: (key: string) => Promise<string | null>;
 
   beforeEach(async () => {
     const mod = await import("@/api-keys");
@@ -69,10 +69,10 @@ describe("sync API", () => {
 
   function makeSyncApp() {
     const app = new Hono();
-    const authOrg = (c: Context): string | null => {
+    const authOrg = async (c: Context): Promise<string | null> => {
       const h = c.req.header("Authorization");
       if (!h?.startsWith("Bearer ")) return null;
-      return validateApiKey(h.slice(7));
+      return await validateApiKey(h.slice(7));
     };
 
     app.post("/api/sync/upload", async (c) => {
@@ -116,7 +116,7 @@ describe("sync API", () => {
   });
 
   it("rejects upload to wrong org prefix", async () => {
-    const key = createOrgApiKey("demo-org");
+    const key = await createOrgApiKey("demo-org");
     const app = makeSyncApp();
     const res = await app.request("/api/sync/upload", {
       method: "POST",
@@ -127,7 +127,7 @@ describe("sync API", () => {
   });
 
   it("rejects sync check without key param", async () => {
-    const key = createOrgApiKey("demo-org");
+    const key = await createOrgApiKey("demo-org");
     const app = makeSyncApp();
     const res = await app.request("/api/sync/check", {
       headers: { "Authorization": `Bearer ${key}` },
@@ -136,7 +136,7 @@ describe("sync API", () => {
   });
 
   it("allows sync check with valid key on own org prefix", async () => {
-    const key = createOrgApiKey("demo-org");
+    const key = await createOrgApiKey("demo-org");
     const app = makeSyncApp();
     const res = await app.request("/api/sync/check?key=demo-org/index.html", {
       headers: { "Authorization": `Bearer ${key}` },
@@ -145,7 +145,7 @@ describe("sync API", () => {
   });
 
   it("rejects sync check on wrong org prefix", async () => {
-    const key = createOrgApiKey("demo-org");
+    const key = await createOrgApiKey("demo-org");
     const app = makeSyncApp();
     const res = await app.request("/api/sync/check?key=acme-corp/index.html", {
       headers: { "Authorization": `Bearer ${key}` },
@@ -158,8 +158,8 @@ describe("sync API", () => {
 // 3b. Sync API — LIST + DELETE (sync-deletes)
 // ────────────────────────────────────────────────────
 describe("sync API — list + delete (sync-deletes)", () => {
-  let createOrgApiKey: (slug: string) => string;
-  let validateApiKey: (key: string) => string | null;
+  let createOrgApiKey: (slug: string) => Promise<string>;
+  let validateApiKey: (key: string) => Promise<string | null>;
 
   beforeEach(async () => {
     const mod = await import("@/api-keys");
@@ -169,10 +169,10 @@ describe("sync API — list + delete (sync-deletes)", () => {
 
   function makeApp() {
     const app = new Hono();
-    const authOrg = (c: Context): string | null => {
+    const authOrg = async (c: Context): Promise<string | null> => {
       const h = c.req.header("Authorization");
       if (!h?.startsWith("Bearer ")) return null;
-      return validateApiKey(h.slice(7));
+      return await validateApiKey(h.slice(7));
     };
 
     app.get("/api/sync/list", (c) => {
@@ -201,7 +201,7 @@ describe("sync API — list + delete (sync-deletes)", () => {
   });
 
   it("LIST returns only the authed org's prefix", async () => {
-    const key = createOrgApiKey("demo-org");
+    const key = await createOrgApiKey("demo-org");
     const app = makeApp();
     const res = await app.request("/api/sync/list", {
       headers: { Authorization: `Bearer ${key}` },
@@ -219,7 +219,7 @@ describe("sync API — list + delete (sync-deletes)", () => {
   });
 
   it("DELETE returns 400 for cross-org key", async () => {
-    const key = createOrgApiKey("demo-org");
+    const key = await createOrgApiKey("demo-org");
     const app = makeApp();
     const res = await app.request("/api/sync/delete?key=acme-corp/x.html", {
       method: "DELETE", headers: { Authorization: `Bearer ${key}` },
@@ -228,7 +228,7 @@ describe("sync API — list + delete (sync-deletes)", () => {
   });
 
   it("DELETE returns 400 for path traversal", async () => {
-    const key = createOrgApiKey("demo-org");
+    const key = await createOrgApiKey("demo-org");
     const app = makeApp();
     const res = await app.request("/api/sync/delete?key=demo-org/../../acme-corp/x.html", {
       method: "DELETE", headers: { Authorization: `Bearer ${key}` },
@@ -237,7 +237,7 @@ describe("sync API — list + delete (sync-deletes)", () => {
   });
 
   it("DELETE returns 200 for valid same-org key", async () => {
-    const key = createOrgApiKey("demo-org");
+    const key = await createOrgApiKey("demo-org");
     const app = makeApp();
     const res = await app.request("/api/sync/delete?key=demo-org/old-file.html", {
       method: "DELETE", headers: { Authorization: `Bearer ${key}` },
