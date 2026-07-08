@@ -4,14 +4,13 @@
 // DOMParser/Node polyfill for Workers (AWS SDK XML parser for R2/S3).
 // Must be a top-level IIFE — esbuild tree-shakes conditional blocks.
 ;(() => {
-  // Runtime check — not analyzable by esbuild
   const hasDOMParser = typeof globalThis.DOMParser !== "undefined"
-    && typeof new globalThis.DOMParser().parseFromString("<r/>", "text/xml").getElementsByTagName === "function";
+    && typeof new (globalThis.DOMParser as any)().parseFromString("<r/>", "text/xml").getElementsByTagName === "function";
   if (hasDOMParser) return;
 
   const E = 1, T = 3, D = 9;
-  // @ts-expect-error — Node type mismatch is expected, we're polyfilling
-  globalThis.Node = { ELEMENT_NODE: E, TEXT_NODE: T, DOCUMENT_NODE: D, ATTRIBUTE_NODE: 2, CDATA_SECTION_NODE: 4, COMMENT_NODE: 8, DOCUMENT_FRAGMENT_NODE: 11 };
+  (globalThis as any).Node = { ELEMENT_NODE: E, TEXT_NODE: T, DOCUMENT_NODE: D, ATTRIBUTE_NODE: 2, CDATA_SECTION_NODE: 4, COMMENT_NODE: 8, DOCUMENT_FRAGMENT_NODE: 11 };
+  (globalThis as any).Node = { ELEMENT_NODE: E, TEXT_NODE: T, DOCUMENT_NODE: D, ATTRIBUTE_NODE: 2, CDATA_SECTION_NODE: 4, COMMENT_NODE: 8, DOCUMENT_FRAGMENT_NODE: 11 };
 
   class X {
     nodeType = E; nodeName = ""; tagName = "";
@@ -51,16 +50,12 @@
     return root;
   }
 
-  // @ts-expect-error — documentElement = root element, not #document node
-  globalThis.DOMParser = class {
+  (globalThis as any).DOMParser = class {
+  (globalThis as any).DOMParser = class {
     parseFromString(s: string) {
       const doc = p(s);
-      const el = doc.children.find(c => c.nodeType === E) ?? doc.children[0] ?? doc;
-      return {
-        documentElement: el,
-        getElementsByTagName: el.getElementsByTagName.bind(el),
-        childNodes: el.children,
-      };
+      const el = doc.children.find((c: X) => c.nodeType === E) ?? doc.children[0] ?? doc;
+      return { documentElement: el, getElementsByTagName: el.getElementsByTagName.bind(el), childNodes: el.children };
     }
   };
 })();
@@ -77,6 +72,7 @@ import type { User } from "better-auth/types";
 const app = new Hono<{ Variables: { user?: User } }>();
 const CONVEX_SITE = CONVEX_URL.replace(".cloud", ".site");
 
+// Bridge env to process.env
 app.use("*", async (c, next) => {
   const env = c.env as Record<string, unknown>;
   if (env && typeof process !== "undefined")
@@ -87,48 +83,36 @@ app.use("*", async (c, next) => {
 });
 
 app.use("/api/sync/*", cors());
-
-app.use("*", async (c, next) => {
-  const start = Date.now();
-  await next();
-  logger.debug({ method: c.req.method, path: c.req.path, status: c.res.status, ms: Date.now() - start }, "request");
-});
-
+app.use("*", async (c, next) => { const start = Date.now(); await next(); logger.debug({ method: c.req.method, path: c.req.path, status: c.res.status, ms: Date.now() - start }, "request"); });
 app.use("*", async (c, next) => { await sessionMiddleware(c, next); });
 
-// Sign-out: GET → POST (betterAuth only accepts POST for sign-out)
+// Sign-out: GET → POST (betterAuth only accepts POST)
 app.get("/api/auth/sign-out", async (c) => {
   const cookie = c.req.raw.headers.get("cookie") || "";
   await fetch(`${CONVEX_SITE}/api/auth/sign-out`, {
-    method: "POST",
-    headers: { cookie, "content-type": "application/json" },
-    redirect: "manual",
+    method: "POST", headers: { cookie, "content-type": "application/json" }, redirect: "manual",
   });
   const res = new Response(null, { status: 302, headers: { Location: "/" } });
   res.headers.append("Set-Cookie", "__Secure-better-auth.session_token=; Max-Age=0; Path=/; HttpOnly; Secure; SameSite=Lax");
   res.headers.append("Set-Cookie", "better-auth.session_token=; Max-Age=0; Path=/; HttpOnly; Secure; SameSite=Lax");
   return res;
 });
-// Proxy ALL /api/auth/* to Convex HTTP actions
+
+// Proxy auth to Convex
 app.on(["POST", "GET", "OPTIONS"], "/api/auth/*", async (c) => {
   const target = `${CONVEX_SITE}${c.req.path}${new URL(c.req.url).search}`;
-  // Forward only safe headers — cookie is required for OAuth state validation.
-  // Skip Host (misroutes on convex.site), connection/content-length/transfer-encoding (hop-by-hop).
-  const SAFE = ["cookie", "content-type", "accept", "accept-language", "origin", "referer", "user-agent", "sec-fetch-dest", "sec-fetch-mode", "sec-fetch-site"];
   const headers = new Headers();
-  for (const k of SAFE) {
-    const v = c.req.raw.headers.get(k);
-    if (v) headers.set(k, v);
-  }
+  const cookie = c.req.raw.headers.get("cookie");
+  const ct = c.req.raw.headers.get("content-type");
+  if (cookie) headers.set("cookie", cookie);
+  if (ct) headers.set("content-type", ct);
   const init: RequestInit = { method: c.req.method, headers, redirect: "manual" };
-  if (c.req.method !== "GET" && c.req.method !== "HEAD")
-    init.body = await c.req.raw.text();
+  if (c.req.method !== "GET" && c.req.method !== "HEAD") init.body = await c.req.raw.text();
   try {
     const upstream = await fetch(target, init);
-    // Strip Domain from Set-Cookie so cookies stick to rendro.app, not convex.site
     const setCookies = upstream.headers.getSetCookie?.() ?? [];
     if (setCookies.length > 0) {
-      const cleaned = setCookies.map(sc => sc.replace(/;\s*Domain=[^;]+;?/gi, ";"));
+      const cleaned = setCookies.map((sc: string) => sc.replace(/;\s*Domain=[^;]+;?/gi, ";"));
       const respHeaders = new Headers(upstream.headers);
       respHeaders.delete("set-cookie");
       for (const sc of cleaned) respHeaders.append("set-cookie", sc);
@@ -141,24 +125,30 @@ app.on(["POST", "GET", "OPTIONS"], "/api/auth/*", async (c) => {
   }
 });
 
-
-
-
+// App + docs routes
 app.route("/", appRoutes);
 app.route("/", docsRoutes);
 app.get("/health", (c) => c.text("ok"));
 
-
-// Fallback: serve static files (lazy-tree.js, commentor.js) from ASSETS binding
-app.get("*", async (c) => {
-  const assets = (c.env as any).ASSETS as { fetch: (req: Request) => Promise<Response> } | undefined;
-  if (assets?.fetch) {
-    try {
-      return await assets.fetch(c.req.raw);
-    } catch { /* fall through */ }
-  }
+// Serve static files from ASSETS binding
+app.get("/lazy-tree.js", async (c) => {
+  const assets = (c.env as any).ASSETS;
+  if (assets?.fetch) return assets.fetch(c.req.raw);
   return c.notFound();
 });
+app.get("/commentor.js", async (c) => {
+  const assets = (c.env as any).ASSETS;
+  if (assets?.fetch) return assets.fetch(c.req.raw);
+  return c.notFound();
+});
+
+// Catch-all fallback to ASSETS for other static files
+app.get("*", async (c) => {
+  const assets = (c.env as any).ASSETS;
+  if (assets?.fetch) return assets.fetch(c.req.raw);
+  return c.notFound();
+});
+
 app.onError((err, c) => {
   logger.error({ err: { message: err.message, stack: err.stack }, path: c.req.path }, "Unhandled error");
   return c.json({ error: err.message, path: c.req.path }, 500);
