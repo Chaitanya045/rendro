@@ -13,3 +13,6 @@ design.html
 .DS_Store
 *.log
 *.db-shm
+.wrangler/
+.convex/
+dist-check/

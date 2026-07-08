@@ -1,27 +1,28 @@
 // Cloudflare Workers entry point
 // Auth is proxied to Convex HTTP actions. Database tables are in Convex component.
 
-// Polyfill DOMParser for Workers (used by AWS SDK XML parser for R2/S3)
-let needsPolyfill = typeof DOMParser === "undefined";
-if (!needsPolyfill) {
-  try { const doc = new DOMParser().parseFromString("<root/>", "text/xml"); needsPolyfill = typeof doc.getElementsByTagName !== "function"; }
-  catch { needsPolyfill = true; }
-}
-if (needsPolyfill) {
+// DOMParser/Node polyfill for Workers (AWS SDK XML parser for R2/S3).
+// Must be a top-level IIFE — esbuild tree-shakes conditional blocks.
+;(() => {
+  // Runtime check — not analyzable by esbuild
+  const hasDOMParser = typeof globalThis.DOMParser !== "undefined"
+    && typeof new globalThis.DOMParser().parseFromString("<r/>", "text/xml").getElementsByTagName === "function";
+  if (hasDOMParser) return;
+
   const E = 1, T = 3, D = 9;
-  // @ts-expect-error
+  // @ts-expect-error — Node type mismatch is expected, we're polyfilling
   globalThis.Node = { ELEMENT_NODE: E, TEXT_NODE: T, DOCUMENT_NODE: D, ATTRIBUTE_NODE: 2, CDATA_SECTION_NODE: 4, COMMENT_NODE: 8, DOCUMENT_FRAGMENT_NODE: 11 };
+
   class X {
-    nodeType: number; nodeName: string; tagName: string;
+    nodeType = E; nodeName = ""; tagName = "";
     children: X[] = []; attributes: Record<string, string> = {};
-    #text = "";
+    textContent = "";
     constructor(tag: string, attrs: Record<string, string> = {}, isText = false) {
       this.nodeType = isText ? T : E; this.nodeName = isText ? "#text" : tag;
       this.tagName = tag; this.attributes = attrs;
     }
-    get textContent() { return this.#text; }
-    set textContent(v: string) { this.#text = v; }
     get childNodes() { return this.children; }
+    get nodeValue() { return this.textContent; }
     get firstChild() { return this.children[0] || null; }
     getElementsByTagName(n: string): X[] {
       const r: X[] = [];
@@ -29,6 +30,7 @@ if (needsPolyfill) {
       return r;
     }
   }
+
   function p(xml: string): X {
     xml = xml.replace(/<\?xml[^>]*\?>/gi, "").replace(/<!DOCTYPE[^>]*>/gi, "").replace(/<!--[\s\S]*?-->/g, "");
     const root = new X("#document"); root.nodeType = D;
@@ -48,9 +50,20 @@ if (needsPolyfill) {
     }
     return root;
   }
-  // @ts-expect-error
-  globalThis.DOMParser = class { parseFromString(s: string) { return p(s); } };
-}
+
+  // @ts-expect-error — documentElement = root element, not #document node
+  globalThis.DOMParser = class {
+    parseFromString(s: string) {
+      const doc = p(s);
+      const el = doc.children.find(c => c.nodeType === E) ?? doc.children[0] ?? doc;
+      return {
+        documentElement: el,
+        getElementsByTagName: el.getElementsByTagName.bind(el),
+        childNodes: el.children,
+      };
+    }
+  };
+})();
 
 import { Hono } from "hono";
 import { cors } from "hono/cors";
@@ -83,6 +96,19 @@ app.use("*", async (c, next) => {
 
 app.use("*", async (c, next) => { await sessionMiddleware(c, next); });
 
+// Sign-out: GET → POST (betterAuth only accepts POST for sign-out)
+app.get("/api/auth/sign-out", async (c) => {
+  const cookie = c.req.raw.headers.get("cookie") || "";
+  await fetch(`${CONVEX_SITE}/api/auth/sign-out`, {
+    method: "POST",
+    headers: { cookie, "content-type": "application/json" },
+    redirect: "manual",
+  });
+  const res = new Response(null, { status: 302, headers: { Location: "/" } });
+  res.headers.append("Set-Cookie", "__Secure-better-auth.session_token=; Max-Age=0; Path=/; HttpOnly; Secure; SameSite=Lax");
+  res.headers.append("Set-Cookie", "better-auth.session_token=; Max-Age=0; Path=/; HttpOnly; Secure; SameSite=Lax");
+  return res;
+});
 // Proxy ALL /api/auth/* to Convex HTTP actions
 app.on(["POST", "GET", "OPTIONS"], "/api/auth/*", async (c) => {
   const target = `${CONVEX_SITE}${c.req.path}${new URL(c.req.url).search}`;
@@ -98,11 +124,31 @@ app.on(["POST", "GET", "OPTIONS"], "/api/auth/*", async (c) => {
   if (c.req.method !== "GET" && c.req.method !== "HEAD")
     init.body = await c.req.raw.text();
   try {
-    return await fetch(target, init);
+    const upstream = await fetch(target, init);
+    // Strip Domain from Set-Cookie so cookies stick to rendro.app, not convex.site
+    const setCookies = upstream.headers.getSetCookie?.() ?? [];
+    if (setCookies.length > 0) {
+      const cleaned = setCookies.map(sc => sc.replace(/;\s*Domain=[^;]+;?/gi, ";"));
+      const respHeaders = new Headers(upstream.headers);
+      respHeaders.delete("set-cookie");
+      for (const sc of cleaned) respHeaders.append("set-cookie", sc);
+      return new Response(upstream.body, { status: upstream.status, headers: respHeaders });
+    }
+    return upstream;
   } catch (err: any) {
     logger.error({ err: err.message }, "Auth proxy error");
     return c.json({ error: "Auth unavailable" }, 502);
   }
+});
+
+app.get("/debug/session", async (c) => {
+  const cookie = c.req.raw.headers.get("cookie") || "(none)";
+  const res = await fetch(`${CONVEX_SITE}/api/auth/get-session`, {
+    headers: { cookie, accept: "application/json" },
+    redirect: "manual",
+  });
+  const data = await res.text();
+  return c.json({ cookie: cookie.slice(0, 80), status: res.status, body: data.slice(0, 300) });
 });
 
 

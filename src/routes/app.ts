@@ -22,17 +22,26 @@ app.get("/", async (c) => {
     return c.html(renderSignIn());
   }
 
-  const email = user.email;
-  const org = emailToOrgSlug(email);
-  if (!org) {
-    return c.html(renderEmailUnsupported(user));
-  }
+  try {
+    const email = user.email;
+    const org = emailToOrgSlug(email);
+    if (!org) {
+      return c.html(renderEmailUnsupported(user));
+    }
 
-  if (await orgExists(org)) {
-    return c.html(await renderOrgDocs(user, org));
-  }
+    if (await orgExists(org)) {
+      return c.html(await renderOrgDocs(user, org));
+    }
 
-  return c.html(renderCreateOrg(user, org));
+    return c.html(renderCreateOrg(user, org));
+  } catch (err: unknown) {
+    const e = err as { message?: string; name?: string; $metadata?: { httpStatusCode?: number } };
+    return c.json({
+      error: e.message,
+      code: e.name,
+      statusCode: e.$metadata?.httpStatusCode,
+    }, 500);
+  }
 });
 
 /**
