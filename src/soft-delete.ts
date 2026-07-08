@@ -1,25 +1,37 @@
-import { ConvexClient } from "convex/browser";
-import { api } from "../convex/_generated/api.js";
 import { CONVEX_URL } from "@/config";
 
-let convex: ConvexClient | null = null;
-function getConvex(): ConvexClient {
-  if (!convex) convex = new ConvexClient(CONVEX_URL);
-  return convex;
+async function convexQuery(path: string, args: Record<string, unknown>): Promise<unknown> {
+  const res = await fetch(`${CONVEX_URL}/api/query`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ path, args: [args] }),
+  });
+  const data = await res.json() as { status: string; value: unknown };
+  return data.status === "success" ? data.value : null;
+}
+
+async function convexMutation(path: string, args: Record<string, unknown>): Promise<void> {
+  await fetch(`${CONVEX_URL}/api/mutation`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ path, args: [args] }),
+  });
 }
 
 export async function markDeleted(orgSlug: string, fileKey: string): Promise<void> {
-  await getConvex().mutation(api.deletedFiles.mark, { orgSlug, fileKey });
+  await convexMutation("deletedFiles.ts:mark", { orgSlug, fileKey });
 }
 
 export async function isDeleted(fileKey: string): Promise<boolean> {
-  return await getConvex().query(api.deletedFiles.isDeleted, { fileKey });
+  const result = await convexQuery("deletedFiles.ts:isDeleted", { fileKey });
+  return result === true;
 }
 
 export async function unmarkDeleted(fileKey: string): Promise<void> {
-  await getConvex().mutation(api.deletedFiles.unmark, { fileKey });
+  await convexMutation("deletedFiles.ts:unmark", { fileKey });
 }
 
 export async function filterDeleted(keys: string[]): Promise<string[]> {
-  return await getConvex().query(api.deletedFiles.filterFn, { keys });
+  const result = await convexQuery("deletedFiles.ts:filterFn", { keys });
+  return (result as string[]) ?? keys;
 }

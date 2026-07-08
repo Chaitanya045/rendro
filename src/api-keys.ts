@@ -1,14 +1,6 @@
 import { randomBytes, createHash } from "node:crypto";
-import { ConvexClient } from "convex/browser";
-import { api } from "../convex/_generated/api.js";
 import { CONVEX_URL } from "@/config";
 import { logger } from "@/logger";
-
-let convex: ConvexClient | null = null;
-function getConvex(): ConvexClient {
-  if (!convex) convex = new ConvexClient(CONVEX_URL);
-  return convex;
-}
 
 export function generateApiKey(): { raw: string; hash: string } {
   const raw = `rendro_${randomBytes(24).toString("base64url")}`;
@@ -16,14 +8,35 @@ export function generateApiKey(): { raw: string; hash: string } {
   return { raw, hash };
 }
 
+async function convexQuery(path: string, args: Record<string, unknown>): Promise<unknown> {
+  const res = await fetch(`${CONVEX_URL}/api/query`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ path, args: [args] }),
+  });
+  const data = await res.json() as { status: string; value: unknown };
+  return data.status === "success" ? data.value : null;
+}
+
+async function convexMutation(path: string, args: Record<string, unknown>): Promise<unknown> {
+  const res = await fetch(`${CONVEX_URL}/api/mutation`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ path, args: [args] }),
+  });
+  const data = await res.json() as { status: string; value: unknown };
+  return data.status === "success" ? data.value : null;
+}
+
 export async function createOrgApiKey(orgSlug: string): Promise<string> {
   const { raw, hash } = generateApiKey();
-  await getConvex().mutation(api.apiKeys.create, { orgSlug, keyHash: hash });
+  await convexMutation("apiKeys.ts:create", { orgSlug, keyHash: hash });
   logger.info({ orgSlug }, "API key created");
   return raw;
 }
 
 export async function validateApiKey(key: string): Promise<string | null> {
   const hash = createHash("sha256").update(key).digest("hex");
-  return await getConvex().query(api.apiKeys.validate, { keyHash: hash });
+  const result = await convexQuery("apiKeys.ts:validate", { keyHash: hash });
+  return result as string | null;
 }
