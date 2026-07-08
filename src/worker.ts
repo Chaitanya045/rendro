@@ -2,14 +2,13 @@
 // Auth is proxied to Convex HTTP actions. Database tables are in Convex component.
 
 // DOMParser/Node polyfill for Workers (AWS SDK XML parser for R2/S3).
-// Must be a top-level IIFE — esbuild tree-shakes conditional blocks.
+// Must be an IIFE — esbuild tree-shakes conditional blocks.
 ;(() => {
-  const hasDOMParser = typeof globalThis.DOMParser !== "undefined"
-    && typeof new (globalThis.DOMParser as any)().parseFromString("<r/>", "text/xml").getElementsByTagName === "function";
+  const hasDOMParser = typeof (globalThis as any).DOMParser !== "undefined"
+    && typeof new (globalThis as any).DOMParser().parseFromString("<r/>", "text/xml").getElementsByTagName === "function";
   if (hasDOMParser) return;
 
   const E = 1, T = 3, D = 9;
-  (globalThis as any).Node = { ELEMENT_NODE: E, TEXT_NODE: T, DOCUMENT_NODE: D, ATTRIBUTE_NODE: 2, CDATA_SECTION_NODE: 4, COMMENT_NODE: 8, DOCUMENT_FRAGMENT_NODE: 11 };
   (globalThis as any).Node = { ELEMENT_NODE: E, TEXT_NODE: T, DOCUMENT_NODE: D, ATTRIBUTE_NODE: 2, CDATA_SECTION_NODE: 4, COMMENT_NODE: 8, DOCUMENT_FRAGMENT_NODE: 11 };
 
   class X {
@@ -51,7 +50,6 @@
   }
 
   (globalThis as any).DOMParser = class {
-  (globalThis as any).DOMParser = class {
     parseFromString(s: string) {
       const doc = p(s);
       const el = doc.children.find((c: X) => c.nodeType === E) ?? doc.children[0] ?? doc;
@@ -72,7 +70,6 @@ import type { User } from "better-auth/types";
 const app = new Hono<{ Variables: { user?: User } }>();
 const CONVEX_SITE = CONVEX_URL.replace(".cloud", ".site");
 
-// Bridge env to process.env
 app.use("*", async (c, next) => {
   const env = c.env as Record<string, unknown>;
   if (env && typeof process !== "undefined")
@@ -86,12 +83,10 @@ app.use("/api/sync/*", cors());
 app.use("*", async (c, next) => { const start = Date.now(); await next(); logger.debug({ method: c.req.method, path: c.req.path, status: c.res.status, ms: Date.now() - start }, "request"); });
 app.use("*", async (c, next) => { await sessionMiddleware(c, next); });
 
-// Sign-out: GET → POST (betterAuth only accepts POST)
+// Sign-out: GET → POST
 app.get("/api/auth/sign-out", async (c) => {
   const cookie = c.req.raw.headers.get("cookie") || "";
-  await fetch(`${CONVEX_SITE}/api/auth/sign-out`, {
-    method: "POST", headers: { cookie, "content-type": "application/json" }, redirect: "manual",
-  });
+  await fetch(`${CONVEX_SITE}/api/auth/sign-out`, { method: "POST", headers: { cookie, "content-type": "application/json" }, redirect: "manual" });
   const res = new Response(null, { status: 302, headers: { Location: "/" } });
   res.headers.append("Set-Cookie", "__Secure-better-auth.session_token=; Max-Age=0; Path=/; HttpOnly; Secure; SameSite=Lax");
   res.headers.append("Set-Cookie", "better-auth.session_token=; Max-Age=0; Path=/; HttpOnly; Secure; SameSite=Lax");
@@ -125,29 +120,14 @@ app.on(["POST", "GET", "OPTIONS"], "/api/auth/*", async (c) => {
   }
 });
 
-// App + docs routes
 app.route("/", appRoutes);
 app.route("/", docsRoutes);
 app.get("/health", (c) => c.text("ok"));
 
-// Serve static files from ASSETS binding
-app.get("/lazy-tree.js", async (c) => {
-  const assets = (c.env as any).ASSETS;
-  if (assets?.fetch) return assets.fetch(c.req.raw);
-  return c.notFound();
-});
-app.get("/commentor.js", async (c) => {
-  const assets = (c.env as any).ASSETS;
-  if (assets?.fetch) return assets.fetch(c.req.raw);
-  return c.notFound();
-});
-
-// Catch-all fallback to ASSETS for other static files
-app.get("*", async (c) => {
-  const assets = (c.env as any).ASSETS;
-  if (assets?.fetch) return assets.fetch(c.req.raw);
-  return c.notFound();
-});
+// Static files from ASSETS binding
+app.get("/lazy-tree.js", async (c) => { const a = (c.env as any).ASSETS; if (a?.fetch) return a.fetch(c.req.raw); return c.notFound(); });
+app.get("/commentor.js", async (c) => { const a = (c.env as any).ASSETS; if (a?.fetch) return a.fetch(c.req.raw); return c.notFound(); });
+app.get("*", async (c) => { const a = (c.env as any).ASSETS; if (a?.fetch) return a.fetch(c.req.raw); return c.notFound(); });
 
 app.onError((err, c) => {
   logger.error({ err: { message: err.message, stack: err.stack }, path: c.req.path }, "Unhandled error");
