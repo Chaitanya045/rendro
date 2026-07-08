@@ -1,1 +1,0 @@
-This folder contains the built output assets for the worker "rendro" generated at 2026-07-05T14:06:47.585Z.

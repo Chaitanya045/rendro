@@ -16,3 +16,5 @@ design.html
 .wrangler/
 .convex/
 dist-check/
+dist-check/
+*.tmp
