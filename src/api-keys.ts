@@ -30,13 +30,13 @@ async function convexMutation(path: string, args: Record<string, unknown>): Prom
 
 export async function createOrgApiKey(orgSlug: string): Promise<string> {
   const { raw, hash } = generateApiKey();
-  await convexMutation("apiKeys.ts:create", { orgSlug, keyHash: hash });
+  await convexMutation("apiKeys:create", { orgSlug, keyHash: hash });
   logger.info({ orgSlug }, "API key created");
   return raw;
 }
 
 export async function validateApiKey(key: string): Promise<string | null> {
   const hash = createHash("sha256").update(key).digest("hex");
-  const result = await convexQuery("apiKeys.ts:validate", { keyHash: hash });
+  const result = await convexQuery("apiKeys:validate", { keyHash: hash });
   return result as string | null;
 }

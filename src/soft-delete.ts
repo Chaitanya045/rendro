@@ -19,19 +19,19 @@ async function convexMutation(path: string, args: Record<string, unknown>): Prom
 }
 
 export async function markDeleted(orgSlug: string, fileKey: string): Promise<void> {
-  await convexMutation("deletedFiles.ts:mark", { orgSlug, fileKey });
+  await convexMutation("deletedFiles:mark", { orgSlug, fileKey });
 }
 
 export async function isDeleted(fileKey: string): Promise<boolean> {
-  const result = await convexQuery("deletedFiles.ts:isDeleted", { fileKey });
+  const result = await convexQuery("deletedFiles:isDeleted", { fileKey });
   return result === true;
 }
 
 export async function unmarkDeleted(fileKey: string): Promise<void> {
-  await convexMutation("deletedFiles.ts:unmark", { fileKey });
+  await convexMutation("deletedFiles:unmark", { fileKey });
 }
 
 export async function filterDeleted(keys: string[]): Promise<string[]> {
-  const result = await convexQuery("deletedFiles.ts:filterFn", { keys });
+  const result = await convexQuery("deletedFiles:filterFn", { keys });
   return (result as string[]) ?? keys;
 }
