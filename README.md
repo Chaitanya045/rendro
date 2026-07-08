@@ -1,37 +1,54 @@
-# Rendro — Product
+# Rendro
 
-Rendro is a documentation hosting platform that turns HTML files into a live, searchable knowledge base. Teams write docs as plain HTML in their code repos, push via CLI, and Rendro serves them instantly with a VS Code-style sidebar tree, inline comments, and full-text search.
+Documentation hosting platform. Write docs as HTML, push via CLI, read them live with inline comments.
 
-## How It Works
+## Install the CLI
 
-1. **Write docs** — plain HTML files in your repo's `docs/` folder
-2. **Push via CLI** — `rendro push --source ./docs --org my-org` uploads to blob storage
-3. **Read live** — visit `example.com/my-org`, sign in with Google, browse your docs
-4. **Comment inline** — select any text on a doc page, leave threaded comments
+**Option A — npm:**
+```bash
+npx rendro push --source ./docs --org my-org
+# or install globally
+npm install -g rendro
+rendro push --source ./docs --org my-org
+```
 
-## Key Features
+**Option B — direct download (no install):**
+```bash
+curl -sL https://raw.githubusercontent.com/Chaitanya045/rendro/main/bin/rendro.mjs -o rendro
+chmod +x rendro
+./rendro push --source ./docs --org my-org --endpoint https://rendro.app
+```
 
-- **Zero frontend code** — docs are raw HTML streamed directly from blob storage. No build step, no framework lock-in.
-- **Lazy tree** — sidebar tree loads one level at a time. Folders expand on click. Infinite scroll for large folders.
-- **VS Code-style UX** — depth-indented tree, sticky folder headers, smooth animations, dark mode.
-- **Cross-doc navigation** — click a link in one doc, the tree follows and expands to show your location.
-- **Inline comments** — select text, leave comments. Threaded, real-time, stored in Convex.
-- **CI/CD native** — `rendro push` detects changed files via hash comparison. Uploads only what changed. Under 40 seconds from push to live.
-- **Soft-delete** — removed files stay accessible via direct URL. Hidden from tree listing.
-- **API key auth** — per-org API keys for the CLI. Org isolation by email domain.
-- **Infinite scroll** — paginated tree API. Large folders load in pages of 50.
+## Quick Start
+
+1. Sign in at [rendro.app](https://rendro.app) with Google
+2. Create your org — you'll get an API key
+3. Push your docs:
+   ```bash
+   export RENDRO_API_KEY=rendro_xxx
+   rendro push --source ./docs --org my-org --endpoint https://rendro.app
+   ```
+4. View live at `https://rendro.app`
+
+## Features
+
+- **Zero frontend** — raw HTML streamed from blob storage, no build step
+- **Lazy tree** — VS Code-style sidebar, loads one level at a time
+- **Inline comments** — select text, leave threaded comments (Convex real-time)
+- **Dark mode** — matches system preference
+- **CI/CD native** — hash-based diffing, uploads only changed files
+- **Soft-delete** — removed files hidden from tree, still accessible via URL
+- **API key auth** — per-org keys, org isolation by email domain
 
 ## Tech Stack
 
 | Layer | Choice |
 |---|---|
-| Server | Hono (Node.js) |
-| Storage | MinIO (S3-compatible) |
-| Auth | better-auth + Google OAuth |
+| Host | Cloudflare Workers |
+| Storage | Cloudflare R2 |
+| Auth | Convex + better-auth + Google OAuth |
 | Comments | Convex |
-| CLI | Node.js (esbuild bundle) |
-| Tree | Vanilla JS (8KB IIFE) |
-| Styling | Inline CSS + Tailwind CDN |
+| CLI | Node.js (zero dependencies) |
 
 ## License
 

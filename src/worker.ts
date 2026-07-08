@@ -141,15 +141,6 @@ app.on(["POST", "GET", "OPTIONS"], "/api/auth/*", async (c) => {
   }
 });
 
-app.get("/debug/session", async (c) => {
-  const cookie = c.req.raw.headers.get("cookie") || "(none)";
-  const res = await fetch(`${CONVEX_SITE}/api/auth/get-session`, {
-    headers: { cookie, accept: "application/json" },
-    redirect: "manual",
-  });
-  const data = await res.text();
-  return c.json({ cookie: cookie.slice(0, 80), status: res.status, body: data.slice(0, 300) });
-});
 
 
 
