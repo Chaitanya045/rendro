@@ -148,6 +148,17 @@ app.route("/", appRoutes);
 app.route("/", docsRoutes);
 app.get("/health", (c) => c.text("ok"));
 
+
+// Fallback: serve static files (lazy-tree.js, commentor.js) from ASSETS binding
+app.get("*", async (c) => {
+  const assets = (c.env as any).ASSETS as { fetch: (req: Request) => Promise<Response> } | undefined;
+  if (assets?.fetch) {
+    try {
+      return await assets.fetch(c.req.raw);
+    } catch { /* fall through */ }
+  }
+  return c.notFound();
+});
 app.onError((err, c) => {
   logger.error({ err: { message: err.message, stack: err.stack }, path: c.req.path }, "Unhandled error");
   return c.json({ error: err.message, path: c.req.path }, 500);
