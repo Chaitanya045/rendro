@@ -42,7 +42,6 @@ app.get("/", async (c) => {
       error: s3Err.message ?? e.message,
       code: s3Err.name ?? e.name,
       statusCode: s3Err.$metadata?.httpStatusCode,
-      stack: e.stack,
     }, 500);
   }
 });
