@@ -35,11 +35,14 @@ app.get("/", async (c) => {
 
     return c.html(renderCreateOrg(user, org));
   } catch (err: unknown) {
-    const e = err as { message?: string; name?: string; $metadata?: { httpStatusCode?: number } };
+    const e = err instanceof Error ? err : new Error(String(err));
+    logger.error({ err: e.message, stack: e.stack, email: user.email }, "root handler error");
+    const s3Err = err as { message?: string; name?: string; $metadata?: { httpStatusCode?: number } };
     return c.json({
-      error: e.message,
-      code: e.name,
-      statusCode: e.$metadata?.httpStatusCode,
+      error: s3Err.message ?? e.message,
+      code: s3Err.name ?? e.name,
+      statusCode: s3Err.$metadata?.httpStatusCode,
+      stack: e.stack,
     }, 500);
   }
 });
