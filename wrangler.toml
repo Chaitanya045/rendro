@@ -20,3 +20,11 @@ bucket_name = "rendro-docs"
 [vars]
 NODE_ENV = "production"
 BASE_URL = "https://rendro.app"
+
+# ── Dev environment (deployed from `development` branch) ──
+[env.development]
+name = "rendro-dev"
+
+[env.development.vars]
+NODE_ENV = "production"
+BASE_URL = "https://dev.rendro.app"
