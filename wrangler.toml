@@ -11,16 +11,9 @@ directory = "./public"
 binding = "ASSETS"
 run_worker_first = true
 
-[[r2_buckets]]
-binding = "DOCS"
-bucket_name = "rendro-docs"
-
-
-
 [vars]
 NODE_ENV = "production"
 BASE_URL = "https://rendro.app"
-
 # ── Dev environment (deployed from `development` branch) ──
 [env.development]
 name = "rendro-dev"
