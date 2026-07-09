@@ -5,6 +5,7 @@ dist/
 *.db-wal
 .env
 .env.local
+.env.dev
 /tmp/
 public/commentor.js
 public/lazy-tree.js
