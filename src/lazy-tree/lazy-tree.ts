@@ -187,6 +187,7 @@ function loadDoc(fullPath: string, pushState: boolean) {
   if (placeholder) placeholder.style.display = "none";
 
   if (frame) {
+    frame.style.display = "block";
     frame.classList.add("loading");
     frame.src = `/files/${fullPath}${DEV_USER ? "?dev_user=" + DEV_USER : ""}`;
     frame.onload = () => {
