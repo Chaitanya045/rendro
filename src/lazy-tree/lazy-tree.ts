@@ -175,28 +175,16 @@ function handleClick(e: Event) {
 function loadDoc(fullPath: string, pushState: boolean) {
   const frame = document.getElementById("content-frame") as HTMLIFrameElement | null;
   const placeholder = document.getElementById("main-placeholder");
-  const loader = document.getElementById("doc-loader");
-
-  // Optimistic: update tree selected state immediately
-  document.querySelectorAll(".tree-item.active").forEach(el => el.classList.remove("active"));
-  const treeItem = document.querySelector(`.tree-item[data-path="${CSS.escape(fullPath)}"]`) as HTMLElement | null;
-  if (treeItem) treeItem.classList.add("active");
-
-  // Show loader bar above iframe
-  if (loader) loader.style.display = "block";
-  if (placeholder) placeholder.style.display = "none";
-
   if (frame) {
     frame.style.display = "block";
-    frame.classList.add("loading");
-    frame.src = `/files/${fullPath}${DEV_USER ? "?dev_user=" + DEV_USER : ""}`;
-    frame.onload = () => {
-      if (loader) loader.style.display = "none";
-      frame.classList.remove("loading");
-      frame.classList.add("ready");
-    };
+    frame.src = `/files/${fullPath}${DEV_USER ? `?dev_user=${DEV_USER}` : ""}`;
   }
+  if (placeholder) placeholder.style.display = "none";
 
+  // Update active state in tree
+  syncActiveState(fullPath);
+
+  // Push history state
   if (pushState) {
     const url = new URL(location.href);
     url.searchParams.set("doc", fullPath);
@@ -240,6 +228,7 @@ function syncActiveState(fullPath: string) {
   const relPath = fullPath.startsWith(`${ORG}/`) ? fullPath.slice(ORG!.length + 1) : fullPath;
   navigateToDoc(relPath);
 }
+
 function init() {
   if (!TREE) return;
   TREE.addEventListener("click", handleClick);
