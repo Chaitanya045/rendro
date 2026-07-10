@@ -176,39 +176,26 @@ function loadDoc(fullPath: string, pushState: boolean) {
   const frame = document.getElementById("content-frame") as HTMLIFrameElement | null;
   const placeholder = document.getElementById("main-placeholder");
   const loader = document.getElementById("doc-loader");
-  const skeleton = document.getElementById("doc-skeleton");
-  // Populate skeleton with placeholder lines if empty
-  if (skeleton && !skeleton.children.length) {
-    skeleton.innerHTML = Array.from({length: 7}, () => '<div class="sk-line"></div>').join('');
-  }
 
-  // Show loader, hide old content
+  // Optimistic: update tree selected state immediately
+  document.querySelectorAll(".tree-item.active").forEach(el => el.classList.remove("active"));
+  const treeItem = document.querySelector(`.tree-item[data-path="${CSS.escape(fullPath)}"]`) as HTMLElement | null;
+  if (treeItem) treeItem.classList.add("active");
+
+  // Show loader bar above iframe
   if (loader) loader.style.display = "block";
-  if (skeleton) skeleton.style.display = "flex";
-  if (frame) { frame.style.display = "none"; frame.classList.remove("ready"); frame.classList.add("loading"); }
   if (placeholder) placeholder.style.display = "none";
 
-  // Remove loading state from previous active item
-  document.querySelectorAll(".tree-item.loading-doc").forEach(el => el.classList.remove("loading-doc"));
-
-  // Set new src — triggers load
   if (frame) {
-    const src = `/files/${fullPath}${DEV_USER ? "?dev_user=" + DEV_USER : ""}`;
-    frame.src = src;
-    // onload fires when the page finishes rendering
+    frame.classList.add("loading");
+    frame.src = `/files/${fullPath}${DEV_USER ? "?dev_user=" + DEV_USER : ""}`;
     frame.onload = () => {
       if (loader) loader.style.display = "none";
-      if (skeleton) skeleton.style.display = "none";
-      if (frame) { frame.style.display = "block"; frame.classList.remove("loading"); frame.classList.add("ready"); }
-      document.querySelectorAll(".tree-item.loading-doc").forEach(el => el.classList.remove("loading-doc"));
+      frame.classList.remove("loading");
+      frame.classList.add("ready");
     };
   }
 
-  // Mark the clicked tree item as loading
-  const treeItem = document.querySelector(`.tree-item[data-path="${CSS.escape(fullPath)}"]`) as HTMLElement | null;
-  if (treeItem) treeItem.classList.add("loading-doc");
-
-  // Push history state
   if (pushState) {
     const url = new URL(location.href);
     url.searchParams.set("doc", fullPath);
@@ -273,7 +260,6 @@ function init() {
     if (type === "doc-loaded") {
       // path is full (e.g., "gmail/index.html") — just sync tree state, don't reload iframe
       syncActiveState(path);
-      document.querySelectorAll(".tree-item.loading-doc").forEach(el => el.classList.remove("loading-doc"));
     }
   });
 

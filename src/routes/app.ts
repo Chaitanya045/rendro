@@ -247,28 +247,14 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e5e
   .main-placeholder p{font-size:16px;color:#6b7280;max-width:320px}
   .ph-icon{width:64px;height:64px;border-radius:50%;background:#f0f0f3;display:inline-flex;align-items:center;justify-content:center;margin-bottom:16px}
   .content-frame{width:100%;height:100%;border:0;background:#fff}
-  /* ── loader / page transition ── */
-  .doc-loader{position:absolute;top:0;left:0;right:0;z-index:2;pointer-events:none}
-  .loader-bar{height:3px;width:100%;background:linear-gradient(90deg,#0a66c2 30%,#64b5f6 60%,#0a66c2 90%);background-size:200% 100%;animation:loaderSlide 1.4s ease-in-out infinite;transform-origin:left;border-radius:0 2px 2px 0}
-  @keyframes loaderSlide{0%{transform:translateX(-100%) scaleX(0.3)}40%{transform:translateX(0) scaleX(0.6)}100%{transform:translateX(100%) scaleX(0.3)}}
-  .skeleton-overlay{position:absolute;inset:3px 0 0;display:flex;flex-direction:column;gap:16px;padding:3rem 4rem;background:#fff;z-index:2}
-  .sk-line{height:16px;border-radius:8px;background:#f0f0f3;animation:skPulse 1.5s ease-in-out infinite}
-  .sk-line:nth-child(1){width:65%;animation-delay:0s}
-  .sk-line:nth-child(2){width:80%;animation-delay:.15s}
-  .sk-line:nth-child(3){width:45%;animation-delay:.3s}
-  .sk-line:nth-child(4){width:70%;animation-delay:.45s}
-  .sk-line:nth-child(5){width:55%;animation-delay:.6s}
-  .sk-line:nth-child(6){width:90%;animation-delay:.75s}
-  .sk-line:nth-child(7){width:35%;animation-delay:.9s}
-  @keyframes skPulse{0%,100%{opacity:.4}50%{opacity:.8}}
+  /* ── loader — centered in iframe area ── */
+  .doc-loader{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;z-index:2;pointer-events:none;background:#fff}
+  .doc-loader-ring{width:32px;height:32px;border:3px solid #e5e7eb;border-top-color:#0a66c2;border-radius:50%;animation:loaderSpin 0.7s linear infinite}
+  @keyframes loaderSpin{to{transform:rotate(360deg)}}
   .content-frame.loading{opacity:0;transition:opacity .15s ease}
   .content-frame.ready{opacity:1;transition:opacity .3s ease}
-  .tree-item.loading-doc .tree-link{position:relative}
-  .tree-item.loading-doc .tree-link::after{content:"";position:absolute;left:0;right:0;bottom:-2px;height:2px;background:#0a66c2;border-radius:1px;animation:treeLinkPulse .8s ease-in-out infinite}
-  @keyframes treeLinkPulse{0%,100%{opacity:.3}50%{opacity:1}}
-  html.dark .doc-loader .loader-bar{background:linear-gradient(90deg,#4493f8 30%,#8ab4f8 60%,#4493f8 90%);background-size:200% 100%}
-  html.dark .skeleton-overlay{background:#1e1f22}
-  html.dark .sk-line{background:#2f3136}
+  html.dark .doc-loader{background:#1e1f22}
+  html.dark .doc-loader-ring{border-color:#383a40;border-top-color:#4493f8}
   .avatar-wrap{position:relative}
   .avatar-menu{position:absolute;top:42px;right:0;background:#fff;border:1px solid #e5e7eb;border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,.12);padding:4px;min-width:200px;z-index:100}
   .avatar-menu-email{padding:8px 12px;font-size:12px;color:#6b7280;border-bottom:1px solid #e5e7eb;margin-bottom:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -358,8 +344,7 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e5e
     </div>
 
 <main class="main">
-  <div class="doc-loader" id="doc-loader" style="display:none" role="progressbar" aria-label="Loading document"><div class="loader-bar"></div></div>
-  <div class="skeleton-overlay" id="doc-skeleton" style="display:none" aria-hidden="true"></div>
+  <div class="doc-loader" id="doc-loader" style="display:none" role="progressbar" aria-label="Loading document"><div class="doc-loader-ring"></div></div>
   <div class="main-placeholder" id="main-placeholder">
     <div class="ph-icon"><span class="material-symbols-outlined" style="font-size:32px;color:#6b7280">edit_document</span></div>
     <h2>Select a document</h2>
@@ -369,7 +354,6 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e5e
     src="about:blank" title="Document content" style="display:none"></iframe>
 </main>
 
-<script>
 (function(){var t=localStorage.getItem("commentor-theme");var d=t==="dark"||(!t&&matchMedia("(prefers-color-scheme:dark)").matches);
 if(d)document.documentElement.classList.add("dark");
 function up(){var i=document.querySelector("#theme-toggle .material-symbols-outlined");if(i)i.textContent=document.documentElement.classList.contains("dark")?"light_mode":"dark_mode";}
