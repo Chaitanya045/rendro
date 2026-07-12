@@ -1189,9 +1189,9 @@ function anchorLabel(a: Anchor): string {
 
 const STYLES = /* css */ `
 :host {
-  --bg: #ffffff; --bg-elev: #ffffff; --fg: #111418; --fg-muted: #6b7280;
-  --border: #e5e7eb; --border-soft: #f0f0f3;
-  --accent: #0a66c2; --accent-hover: #004182; --accent-fg: #ffffff;
+  --bg: #ffffff; --bg-elev: #ffffff; --fg: #09090b; --fg-muted: #71717a;
+  --border: #e4e4e7; --border-soft: #f4f4f5;
+  --accent: #c2410c; --accent-hover: #9a3412; --accent-fg: #ffffff;
   --resolved: #1a7f37; --resolved-bg: #1a7f37;
   --shadow: 0 4px 16px rgba(15,23,42,.10);
   --shadow-lg: 0 12px 32px rgba(15,23,42,.18);
@@ -1207,16 +1207,16 @@ const STYLES = /* css */ `
   :host {
     --bg: #09090b; --bg-elev: #18181b; --fg: #fafafa; --fg-muted: #a1a1aa;
     --border: #27272a; --border-soft: #18181b;
-    --accent: #fafafa; --accent-hover: #e4e4e7; --accent-fg: #09090b;
+    --accent: #fb923c; --accent-hover: #fdba74; --accent-fg: #09090b;
     --resolved: #22c55e; --resolved-bg: #14532d;
     --shadow: 0 4px 16px rgba(0,0,0,.48);
     --shadow-lg: 0 12px 32px rgba(0,0,0,.56);
   }
 }
 :host(.light) {
-  --bg: #ffffff; --bg-elev: #ffffff; --fg: #111418; --fg-muted: #6b7280;
-  --border: #e5e7eb; --border-soft: #f0f0f3;
-  --accent: #0a66c2; --accent-hover: #004182; --accent-fg: #ffffff;
+  --bg: #ffffff; --bg-elev: #ffffff; --fg: #09090b; --fg-muted: #71717a;
+  --border: #e4e4e7; --border-soft: #f4f4f5;
+  --accent: #c2410c; --accent-hover: #9a3412; --accent-fg: #ffffff;
   --resolved: #1a7f37; --resolved-bg: #1a7f37;
   --shadow: 0 4px 16px rgba(15,23,42,.10);
   --shadow-lg: 0 12px 32px rgba(15,23,42,.18);
@@ -1224,7 +1224,7 @@ const STYLES = /* css */ `
 :host(.dark) {
   --bg: #09090b; --bg-elev: #18181b; --fg: #fafafa; --fg-muted: #a1a1aa;
   --border: #27272a; --border-soft: #18181b;
-  --accent: #fafafa; --accent-hover: #e4e4e7; --accent-fg: #09090b;
+  --accent: #fb923c; --accent-hover: #fdba74; --accent-fg: #09090b;
   --resolved: #22c55e; --resolved-bg: #14532d;
   --shadow: 0 4px 16px rgba(0,0,0,.48);
   --shadow-lg: 0 12px 32px rgba(0,0,0,.56);
