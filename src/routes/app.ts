@@ -252,7 +252,7 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
   .doc-loader-bar{position:absolute;top:0;bottom:0;left:0;width:38%;border-radius:999px;background:linear-gradient(90deg,transparent,#c2410c,transparent);animation:docLoaderSweep 1.1s cubic-bezier(.4,0,.2,1) infinite}
   .doc-loader.error .doc-loader-bar{width:100%;background:#b42318;animation:none;opacity:.9}
   @keyframes docLoaderSweep{0%{transform:translateX(-100%)}100%{transform:translateX(265%)}}
-  html.dark .doc-loader-bar{background:linear-gradient(90deg,transparent,#fb923c,transparent)}
+  html.dark .doc-loader-bar{width:46%;background:linear-gradient(90deg,transparent,#fdba74,#fb923c,#fdba74,transparent);box-shadow:0 0 6px rgba(251,146,60,.5)}
   html.dark .doc-loader.error .doc-loader-bar{background:#fca5a5}
   @media (prefers-reduced-motion: reduce){.doc-loader-bar{width:100%;opacity:.65;animation:none}}
   .avatar-wrap{position:relative}

@@ -195,7 +195,7 @@ This is the highest-risk interaction because the app shell can be dark while the
 - Loader is a **3px line** at the top of `<main>`, directly under the fixed header.
 - Loader width equals iframe/main width. It never spans the sidebar.
 - Loader background is transparent.
-- Loader animation is a left-to-right indeterminate sweep.
+- Loader animation is a left-to-right indeterminate sweep. Dark mode may use the brighter primary-hover token and a subtle glow on the 3px bar so it remains visible on near-black chrome.
 - Loader never covers, dims, fades, blurs, or masks the iframe.
 - Current iframe remains `opacity: 1` while the next document loads.
 - On `iframe.onload`, hide the line.
