@@ -171,20 +171,79 @@ function handleClick(e: Event) {
 }
 
 // ── doc loading with history ──
+let activeDocLoadId = 0;
+let docLoadTimeout: number | undefined;
+
+
+function setDocLoaderText(message: string) {
+  const text = document.getElementById("doc-loader-text");
+  if (text) text.textContent = message;
+}
+
+function showDocLoader(frame: HTMLIFrameElement | null) {
+  const loader = document.getElementById("doc-loader");
+  if (loader) {
+    loader.classList.remove("error");
+    loader.setAttribute("role", "progressbar");
+    loader.setAttribute("aria-label", "Loading document");
+    loader.style.display = "flex";
+  }
+  setDocLoaderText("Loading document");
+  if (frame) {
+    frame.style.display = "block";
+    frame.classList.add("loading");
+    frame.classList.remove("ready");
+  }
+}
+
+function showDocLoadError() {
+  const loader = document.getElementById("doc-loader");
+  if (!loader) return;
+  loader.classList.add("error");
+  loader.setAttribute("role", "status");
+  loader.setAttribute("aria-label", "Document failed to load");
+  loader.style.display = "flex";
+  setDocLoaderText("Document is taking longer than expected. Try selecting it again.");
+}
+
+function hideDocLoader(frame: HTMLIFrameElement | null) {
+  const loader = document.getElementById("doc-loader");
+  if (loader) loader.style.display = "none";
+  if (frame) {
+    frame.classList.remove("loading");
+    frame.classList.add("ready");
+  }
+}
 
 function loadDoc(fullPath: string, pushState: boolean) {
   const frame = document.getElementById("content-frame") as HTMLIFrameElement | null;
   const placeholder = document.getElementById("main-placeholder");
-  if (frame) {
-    frame.style.display = "block";
-    frame.src = `/files/${fullPath}${DEV_USER ? `?dev_user=${DEV_USER}` : ""}`;
-  }
   if (placeholder) placeholder.style.display = "none";
 
-  // Update active state in tree
+  // Optimistic: keep production tree behavior — selected state changes immediately.
   syncActiveState(fullPath);
 
-  // Push history state
+  const loadId = ++activeDocLoadId;
+  if (docLoadTimeout !== undefined) window.clearTimeout(docLoadTimeout);
+  showDocLoader(frame);
+
+  if (frame) {
+    frame.onload = () => {
+      if (loadId !== activeDocLoadId) return;
+      if (docLoadTimeout !== undefined) window.clearTimeout(docLoadTimeout);
+      hideDocLoader(frame);
+    };
+    frame.onerror = () => {
+      if (loadId !== activeDocLoadId) return;
+      if (docLoadTimeout !== undefined) window.clearTimeout(docLoadTimeout);
+      showDocLoadError();
+    };
+    docLoadTimeout = window.setTimeout(() => {
+      if (loadId === activeDocLoadId) showDocLoadError();
+    }, 15000);
+    frame.src = `/files/${fullPath}${DEV_USER ? `?dev_user=${DEV_USER}` : ""}`;
+  }
+
   if (pushState) {
     const url = new URL(location.href);
     url.searchParams.set("doc", fullPath);

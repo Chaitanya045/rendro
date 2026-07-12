@@ -38,9 +38,9 @@
 ├──────────┬───────────────────────────────────┤
 │ Sidebar  │ Main (scrollable, no overflow)     │
 │ 280px    │                                    │
-│          │ ┌─ Loader bar (3px, absolute) ──┐ │
-│ Tree UI  │ │ Skeleton overlay              │ │
-│ with     │ │ Content iframe (100% x 100%)  │ │
+│          │ │ Content iframe (100% x 100%)  │ │
+│ Tree UI  │ │ Centered loader overlay        │ │
+│ with     │ │ shown only while iframe loads   │ │
 │ lazy     │ │                                │ │
 │ loading  │ └────────────────────────────────┘ │
 └──────────┴───────────────────────────────────┘
@@ -61,12 +61,12 @@
 - Sticky folder headers at depth-dependent offsets
 - Border-line indentation via CSS custom properties
 
-### Doc Loader (page transition)
-- **Progress bar**: thin (3px) indeterminate bar at top of main area. Blue gradient slides left-to-right in 1.4s loop.
-- **Skeleton shimmer**: 7 lines of varying width (35-90%) pulse opacity 0.4→0.8 in staggered 1.5s loop.
-- **Tree loading state**: active tree item shows a pulsing underline.
-- **Lifecycle**: show loader immediately on click → hide on iframe `onload` + `doc-loaded` postMessage.
-- **Dark mode**: bar shifts to `#4493f8`, skeleton bg to `#2f3136`, lines to `#2f3136`.
+### Doc Loader (iframe transition)
+- **Scope**: iframe/content area only. Do not add loading states, pulses, or spinners to the doc tree.
+- **Visual**: centered 32px CSS spinner ring with muted helper text, over the iframe area.
+- **Lifecycle**: show immediately after document selection → hide on iframe `onload`; stale loads cannot hide newer selections.
+- **Fallback**: if the iframe request hangs, replace the spinner text with a retry hint inside the same iframe area.
+- **Dark mode**: overlay uses the dark surface token; spinner accent shifts to blue (`#4493f8`) and error state to soft red.
 
 ### Tree Item States
 | State | Visual | Trigger |
@@ -74,7 +74,7 @@
 | Default | Muted text (`#6b7280`) | — |
 | Hover | Light bg (`#f0f0f3`), dark text | Mouse over |
 | Active | Blue bg (`#e8f0fe`), blue text (`#0a66c2`) | Selected doc |
-| Loading | Pulsing underline below link text | Doc click, before iframe load |
+| Loading | No special tree visual; selected state remains optimistic | Document click |
 
 ### Commentor Widget
 - Docks to screen edge (magnetic snap)
@@ -92,9 +92,8 @@
 
 | Animation | Duration | Easing | Purpose |
 |---|---|---|---|
-| Loader bar slide | 1.4s loop | ease-in-out | Indeterminate progress |
-| Skeleton pulse | 1.5s loop, staggered | ease-in-out | Content placeholder |
-| Tree item underline | 0.8s loop | ease-in-out | Doc loading indicator |
+| Loader spinner | 0.7s loop | linear | Iframe document handoff |
+| Loader error fallback | Static | — | Hung or failed iframe load |
 | Active indicator move | 0.3s | cubic-bezier(.4,0,.2,1) | Tree selection |
 | Folder caret rotate | 0.3s | cubic-bezier(.4,0,.2,1) | Expand/collapse |
 | Iframe fade-in | 0.3s | ease | Content reveal |

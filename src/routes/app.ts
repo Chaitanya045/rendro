@@ -248,13 +248,19 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e5e
   .ph-icon{width:64px;height:64px;border-radius:50%;background:#f0f0f3;display:inline-flex;align-items:center;justify-content:center;margin-bottom:16px}
   .content-frame{width:100%;height:100%;border:0;background:#fff}
   /* ── loader — centered in iframe area ── */
-  .doc-loader{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;z-index:2;pointer-events:none;background:#fff}
+  .doc-loader{position:absolute;inset:0;display:flex;flex-direction:column;gap:12px;align-items:center;justify-content:center;z-index:2;pointer-events:none;background:#fff;color:#6b7280;font-size:.875rem;text-align:center}
   .doc-loader-ring{width:32px;height:32px;border:3px solid #e5e7eb;border-top-color:#0a66c2;border-radius:50%;animation:loaderSpin 0.7s linear infinite}
+  .doc-loader-text{max-width:240px}
+  .doc-loader.error .doc-loader-ring{animation:none;border-color:#f3d2d2;border-top-color:#b42318}
+  .doc-loader.error .doc-loader-text{color:#b42318}
   @keyframes loaderSpin{to{transform:rotate(360deg)}}
   .content-frame.loading{opacity:0;transition:opacity .15s ease}
   .content-frame.ready{opacity:1;transition:opacity .3s ease}
-  html.dark .doc-loader{background:#1e1f22}
+  html.dark .doc-loader{background:#1e1f22;color:#9aa0a8}
   html.dark .doc-loader-ring{border-color:#383a40;border-top-color:#4493f8}
+  html.dark .doc-loader.error .doc-loader-ring{border-color:#5f2d2d;border-top-color:#ffb4ab}
+  html.dark .doc-loader.error .doc-loader-text{color:#ffb4ab}
+  @media (prefers-reduced-motion: reduce){.doc-loader-ring{animation:none}.content-frame.loading,.content-frame.ready{transition:none}}
   .avatar-wrap{position:relative}
   .avatar-menu{position:absolute;top:42px;right:0;background:#fff;border:1px solid #e5e7eb;border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,.12);padding:4px;min-width:200px;z-index:100}
   .avatar-menu-email{padding:8px 12px;font-size:12px;color:#6b7280;border-bottom:1px solid #e5e7eb;margin-bottom:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -346,7 +352,7 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e5e
 </aside>
 
 <main class="main">
-  <div class="doc-loader" id="doc-loader" style="display:none" role="progressbar" aria-label="Loading document"><div class="doc-loader-ring"></div></div>
+  <div class="doc-loader" id="doc-loader" style="display:none" role="progressbar" aria-label="Loading document"><div class="doc-loader-ring"></div><div class="doc-loader-text" id="doc-loader-text">Loading document</div></div>
   <div class="main-placeholder" id="main-placeholder">
     <div class="ph-icon"><span class="material-symbols-outlined" style="font-size:32px;color:#6b7280">edit_document</span></div>
     <h2>Select a document</h2>
@@ -366,7 +372,7 @@ document.getElementById("share-btn")?.addEventListener("click",function(e){e.sto
 document.getElementById("copy-link-btn")?.addEventListener("click",function(){navigator.clipboard.writeText(location.href).catch(function(){});var t=document.createElement("div");t.className="toast";t.textContent="Link copied";document.body.appendChild(t);t.offsetHeight;t.classList.add("show");setTimeout(function(){t.classList.remove("show");setTimeout(function(){t.remove()},200)},1500)});
 document.addEventListener("click",function(){var m=document.getElementById("avatar-menu");if(m)m.style.display="none";var s=document.getElementById("share-menu");if(s)s.style.display="none";});})();
 </script>
-<script src="/lazy-tree.js?v=16"></script>
+<script src="/lazy-tree.js?v=17"></script>
 </body>
 </html>`;
 }
