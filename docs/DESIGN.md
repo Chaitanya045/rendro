@@ -38,9 +38,9 @@
 ├──────────┬───────────────────────────────────┤
 │ Sidebar  │ Main (scrollable, no overflow)     │
 │ 280px    │                                    │
-│          │ │ Content iframe (100% x 100%)  │ │
-│ Tree UI  │ │ Centered loader overlay        │ │
-│ with     │ │ shown only while iframe loads   │ │
+│          │ ┌─ 3px loading line, main width ─┐ │
+│ Tree UI  │ │ Content iframe stays visible   │ │
+│ with     │ │ during document navigation     │ │
 │ lazy     │ │                                │ │
 │ loading  │ └────────────────────────────────┘ │
 └──────────┴───────────────────────────────────┘
@@ -62,11 +62,12 @@
 - Border-line indentation via CSS custom properties
 
 ### Doc Loader (iframe transition)
-- **Scope**: iframe/content area only. Do not add loading states, pulses, or spinners to the doc tree.
-- **Visual**: centered 32px CSS spinner ring with muted helper text, over the iframe area.
+- **Scope**: iframe/content width only. The line is positioned at the top of `<main>`, directly under the app header, and never spans the sidebar/doc tree.
+- **Visual**: 3px indeterminate line moving left-to-right. No spinner, skeleton, overlay surface, or full-screen loader.
 - **Lifecycle**: show immediately after document selection → hide on iframe `onload`; stale loads cannot hide newer selections.
-- **Fallback**: if the iframe request hangs, replace the spinner text with a retry hint inside the same iframe area.
-- **Dark mode**: overlay uses the dark surface token; spinner accent shifts to blue (`#4493f8`) and error state to soft red.
+- **Theme safety**: keep the current iframe visible at full opacity while the next document loads. Do not expose the app surface behind user HTML, because user docs can be light while the app is dark or vice versa.
+- **Fallback**: if the iframe request hangs, the same line becomes static error red inside the iframe width.
+- **Dark mode**: normal line uses blue (`#4493f8`); error line uses soft red (`#ffb4ab`).
 
 ### Tree Item States
 | State | Visual | Trigger |
@@ -92,11 +93,10 @@
 
 | Animation | Duration | Easing | Purpose |
 |---|---|---|---|
-| Loader spinner | 0.7s loop | linear | Iframe document handoff |
-| Loader error fallback | Static | — | Hung or failed iframe load |
+| Loader line sweep | 1.1s loop | cubic-bezier(.4,0,.2,1) | Iframe document handoff |
+| Loader error line | Static | — | Hung or failed iframe load |
 | Active indicator move | 0.3s | cubic-bezier(.4,0,.2,1) | Tree selection |
 | Folder caret rotate | 0.3s | cubic-bezier(.4,0,.2,1) | Expand/collapse |
-| Iframe fade-in | 0.3s | ease | Content reveal |
 | Toast enter | 0.2s | — | Notification |
 
 ## Accessibility

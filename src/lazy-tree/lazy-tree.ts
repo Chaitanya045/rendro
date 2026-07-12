@@ -175,10 +175,6 @@ let activeDocLoadId = 0;
 let docLoadTimeout: number | undefined;
 
 
-function setDocLoaderText(message: string) {
-  const text = document.getElementById("doc-loader-text");
-  if (text) text.textContent = message;
-}
 
 function showDocLoader(frame: HTMLIFrameElement | null) {
   const loader = document.getElementById("doc-loader");
@@ -186,14 +182,9 @@ function showDocLoader(frame: HTMLIFrameElement | null) {
     loader.classList.remove("error");
     loader.setAttribute("role", "progressbar");
     loader.setAttribute("aria-label", "Loading document");
-    loader.style.display = "flex";
+    loader.style.display = "block";
   }
-  setDocLoaderText("Loading document");
-  if (frame) {
-    frame.style.display = "block";
-    frame.classList.add("loading");
-    frame.classList.remove("ready");
-  }
+  if (frame) frame.style.display = "block";
 }
 
 function showDocLoadError() {
@@ -201,18 +192,14 @@ function showDocLoadError() {
   if (!loader) return;
   loader.classList.add("error");
   loader.setAttribute("role", "status");
-  loader.setAttribute("aria-label", "Document failed to load");
-  loader.style.display = "flex";
-  setDocLoaderText("Document is taking longer than expected. Try selecting it again.");
+  loader.setAttribute("aria-label", "Document is taking longer than expected");
+  loader.style.display = "block";
 }
 
 function hideDocLoader(frame: HTMLIFrameElement | null) {
   const loader = document.getElementById("doc-loader");
   if (loader) loader.style.display = "none";
-  if (frame) {
-    frame.classList.remove("loading");
-    frame.classList.add("ready");
-  }
+  if (frame) frame.style.display = "block";
 }
 
 function loadDoc(fullPath: string, pushState: boolean) {
