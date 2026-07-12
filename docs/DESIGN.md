@@ -94,12 +94,14 @@ Current source locations:
 | Active indicator movement | CSS in `src/routes/app.ts` |
 | Document loading line | CSS in `src/routes/app.ts`, lifecycle in `src/lazy-tree/lazy-tree.ts` |
 | Theme/share/avatar menus | inline header script in `src/routes/app.ts` |
+| Sidebar resize/collapse | CSS and inline header script in `src/routes/app.ts` |
 | Comment widget movement | `src/commentor/` |
 
 Rules:
 
 - Prefer `transform` and `opacity` for movement.
 - Folder expansion may animate `max-height` because the tree is the only expanding layout surface; keep it bounded and predictable.
+- Sidebar collapse may animate `width`/`margin-left` over `300ms` because it is an explicit user-triggered shell layout change; live dragging disables transitions so the pane tracks the pointer directly.
 - Do not animate iframe opacity during document navigation. Full-opacity iframe prevents app-surface flashes between differently themed docs.
 - Infinite animation is allowed only for active loading state. No ambient loops in chrome.
 - Delays are almost always wrong. If feedback needs to wait, the interaction is too clever.
@@ -107,16 +109,16 @@ Rules:
 ## Application shell layout
 
 ```text
-┌──────────────────────────────────────────────┐
-│ Topbar 56px fixed                            │
-│ Rendro                                 Tools │
-├──────────┬───────────────────────────────────┤
-│ Sidebar  │ Main / iframe area                │
-│ 280px    │ ─ 3px loading line, main width ─  │
-│          │                                   │
-│ Tree     │ <iframe: publisher HTML>          │
-│          │                                   │
-└──────────┴───────────────────────────────────┘
+┌───────────────────────────────────────────────┐
+│ Topbar 56px fixed                             │
+│ [panel] Rendro                          Tools │
+├───────────────┬───────────────────────────────┤
+│ Sidebar       │ Main / iframe area            │
+│ 220-420px     │ ─ 3px loading line ─          │
+│ default 280px │                               │
+│ Tree          │ <iframe: publisher HTML>      │
+│ collapsible   │                               │
+└───────────────┴───────────────────────────────┘
 ```
 
 ### Topbar
@@ -125,6 +127,7 @@ Purpose: global actions, not navigation depth.
 
 - Fixed at the top, `56px` height.
 - White/dark surface with a bottom border.
+- Header includes a left-panel toggle immediately before the Rendro logo. It collapses/restores the document tree without changing the current document.
 - Logo uses primary color and stays visually stable across orgs.
 - Right-side actions: share, theme toggle, avatar.
 - Menus open near their trigger and close on outside click.
@@ -136,18 +139,22 @@ Interaction spec:
 |---|---|---|---|
 | Share button | Primary text, transparent bg | Container hover bg | Share menu visible |
 | Icon buttons | Muted icon | Container hover bg | Icon swaps / menu visible |
+| Sidebar toggle | Muted panel icon | Container hover bg | Icon swaps, sidebar collapses/restores |
 | Avatar | Initials chip | Border/surface emphasis | Avatar menu visible |
 
 ### Sidebar tree
 
 Purpose: file-system orientation.
 
-- Fixed left column, `280px`, below topbar.
+- Resizable left column below the topbar. Default `280px`, minimum `220px`, maximum `420px` or viewport-constrained so the document keeps usable width.
 - Mirrors object prefixes in R2.
 - Folders lazy-load one level at a time.
 - Large directories show `Load more`; the button may say `Loading...` while fetching the next page.
 - Sticky folder headers stack by depth so users keep local context while scrolling.
 - Active document is shown with background/text color plus a 4px active indicator bar.
+
+- The resize handle sits on the sidebar/main boundary, persists the last expanded width, and restores that width after collapse.
+- Collapsing hides the sidebar fully and moves the main document area to the left edge; it does not reload the iframe or clear tree state.
 
 Tree behavior rules:
 
@@ -238,6 +245,8 @@ Rendro's micro-interactions are small and functional. They make state legible.
 | Avatar menu | Opens at avatar, shows email and sign-out action |
 | Toast | Bottom-right, fades in/out, no layout movement |
 | Document load | Main-width 3px line sweeps while iframe request is active |
+| Sidebar resize | Boundary handle highlights on hover/focus; drag updates width directly; keyboard arrows resize in `24px` steps |
+| Sidebar collapse | Header panel icon swaps; sidebar and main area transition over `300ms` |
 | Comment drawer | Edge-attached, draggable, follows parent theme |
 
 Rules:
@@ -303,6 +312,9 @@ Theme mismatch rule:
 - Focus states must not depend on animation.
 - Icon-only buttons need `aria-label` or visible text.
 - Loader uses `role="progressbar"` while active and `role="status"` for timeout/error fallback.
+- Sidebar resize uses a focusable `role="separator"` with `aria-orientation="vertical"`, `aria-controls`, `aria-valuemin`, `aria-valuemax`, `aria-valuenow`, and `aria-valuetext`.
+- Sidebar splitter keyboard support: Left/Right resize by one step, Home/End move to min/max, Enter collapses/restores.
+- Collapsed sidebar receives `inert` and `aria-hidden="true"` so hidden tree links leave the tab order.
 - Dropdowns must remain reachable by keyboard in future iterations; current click-only menus are acceptable but should not regress.
 - Active tree state cannot be color-only; the 4px indicator and active background both communicate selection.
 - Error states use text or ARIA labels in addition to red color.
@@ -325,7 +337,7 @@ Specific bans:
 - Full-screen app loader for document navigation.
 - Parent-page scroll listeners for document content.
 - Parent styles that normalize iframe document typography or colors.
-- Animating `left`, `top`, `width`, or `height` for frequently repeated interactions. One-off tree max-height is the exception.
+- Animating `left`, `top`, `width`, or `height` for frequently repeated interactions is banned. Exceptions: bounded tree `max-height`, and the sidebar's explicit collapse/restore transition. Live sidebar dragging must disable transitions.
 - Multiple simultaneous indicators for a single click.
 
 ## Browser support
@@ -348,8 +360,9 @@ Before merging a UI change:
 6. **One action, one indicator** — Remove duplicate loaders/spinners/pulses.
 7. **No tree loader for doc nav** — Tree selection is optimistic; loading belongs to main/iframe width.
 8. **No iframe opacity fade** — Keep publisher HTML fully opaque during navigation.
-9. **Cache bust assets** — If `lazy-tree.ts` changes, rebuild assets and bump the script query version in `app.ts`.
-10. **Browser-harness proof** — For UI behavior, verify in a real browser, not only by reading source.
+9. **Sidebar shell changes** — Verify pointer resize, keyboard resize, collapse/restore, localStorage persistence, and dark-mode states.
+10. **Cache bust assets** — If `lazy-tree.ts` changes, rebuild assets and bump the script query version in `app.ts`.
+11. **Browser-harness proof** — For UI behavior, verify in a real browser, not only by reading source.
 
 ## Definition of done
 
