@@ -188,12 +188,20 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
 </script>
 <style>
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+  :root{--sidebar-expanded-width:280px;--sidebar-width:var(--sidebar-expanded-width)}
+  html.sidebar-collapsed{--sidebar-width:0px}
   body{font-family:Inter,system-ui,sans-serif;background:#fff;color:#09090b;overflow:hidden;height:100vh;font-size:14px;line-height:20px}
   .material-symbols-outlined{font-variation-settings:'FILL'0,'wght'400,'GRAD'0,'opsz'24;vertical-align:middle;font-size:20px}
   ::-webkit-scrollbar{width:6px} ::-webkit-scrollbar-track{background:transparent} ::-webkit-scrollbar-thumb{background:#e4e4e7;border-radius:10px}
 
   .topbar{position:fixed;top:0;z-index:50;width:100%;height:56px;background:#fff;border-bottom:1px solid #e4e4e7;display:flex;align-items:center;justify-content:space-between;padding:0 24px}
-  .topbar-left{display:flex;align-items:center;gap:24px}
+  .topbar-left{display:flex;align-items:center;gap:10px}
+  .sidebar-toggle{width:32px;height:32px;border:1px solid transparent;border-radius:8px;background:transparent;color:#71717a;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;transition:background-color .2s cubic-bezier(.4,0,.2,1),color .2s cubic-bezier(.4,0,.2,1),border-color .15s cubic-bezier(.4,0,.2,1),transform .2s cubic-bezier(.4,0,.2,1)}
+  .sidebar-toggle:hover{background:#f4f4f5;color:#09090b}
+  .sidebar-toggle:active{transform:scale(.96)}
+  .sidebar-toggle:focus-visible{outline:2px solid #c2410c;outline-offset:2px}
+  .sidebar-toggle .material-symbols-outlined{font-size:22px;transition:transform .3s cubic-bezier(.4,0,.2,1)}
+  html.sidebar-collapsed .sidebar-toggle .material-symbols-outlined{transform:rotate(180deg)}
   .topbar-logo{font-size:24px;font-weight:700;color:#c2410c;line-height:32px}
   .topbar-search{display:flex;align-items:center;gap:8px;background:#f4f4f5;padding:6px 12px;border-radius:4px;border:1px solid #e4e4e7;width:256px;transition:border-color .15s}
   .topbar-search:focus-within{border-color:#c2410c}
@@ -207,7 +215,7 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
   .topbar-btn-create:hover{background:#9a3412;opacity:1}
   .topbar-avatar{width:32px;height:32px;border-radius:50%;background:#ffedd5;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;color:#09090b;cursor:pointer;border:1px solid #fed7aa}
 
-  .sidebar{position:fixed;top:56px;left:0;bottom:0;width:280px;background:#fff;border-right:1px solid #e4e4e7;display:flex;flex-direction:column;overflow-y:auto;padding:16px 0}
+  .sidebar{position:fixed;top:56px;left:0;bottom:0;width:var(--sidebar-width);background:#fff;border-right:1px solid #e4e4e7;display:flex;flex-direction:column;overflow:hidden;padding:16px 0;transition:width .3s cubic-bezier(.4,0,.2,1),opacity .2s cubic-bezier(.4,0,.2,1);will-change:width}
   .sidebar-org{padding:0 24px;margin-bottom:16px}
   .sidebar-org-row{display:flex;align-items:center;gap:12px;cursor:pointer}
   .sidebar-org-icon{width:32px;height:32px;border-radius:4px;background:#c2410c;display:flex;align-items:center;justify-content:center}
@@ -218,6 +226,15 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
   .sidebar-footer{padding:12px 16px;border-top:1px solid #e4e4e7;margin-top:auto}
   .sidebar-tree{flex:1;padding:0 12px;overflow-y:auto;--sidebar-bg:#fff}
   .sidebar-footer a:hover{color:#09090b}
+  .sidebar-resizer{position:fixed;top:56px;bottom:0;left:calc(var(--sidebar-width) - 5px);width:10px;z-index:45;cursor:col-resize;touch-action:none;display:flex;align-items:stretch;justify-content:center;transition:left .3s cubic-bezier(.4,0,.2,1),opacity .2s cubic-bezier(.4,0,.2,1)}
+  .sidebar-resizer::before{content:"";width:2px;background:transparent;border-radius:999px;transition:background-color .15s cubic-bezier(.4,0,.2,1),box-shadow .15s cubic-bezier(.4,0,.2,1),width .15s cubic-bezier(.4,0,.2,1)}
+  .sidebar-resizer:hover::before,.sidebar-resizer:focus-visible::before{width:3px;background:#c2410c;box-shadow:0 0 0 3px rgba(194,65,12,.12)}
+  .sidebar-resizer:focus-visible{outline:0}
+  html.sidebar-collapsed .sidebar{opacity:0;pointer-events:none;border-right-width:0}
+  html.sidebar-collapsed .sidebar-resizer{opacity:0;pointer-events:none}
+  html.sidebar-resizing,.sidebar-resizing body{cursor:col-resize;user-select:none}
+  html:not(.sidebar-ready) .sidebar,html:not(.sidebar-ready) .main,html:not(.sidebar-ready) .sidebar-resizer{transition:none}
+  html.sidebar-resizing .sidebar,html.sidebar-resizing .main,html.sidebar-resizing .sidebar-resizer{transition:none}
 
   .tree-folder-content{overflow:hidden;transition:max-height .4s cubic-bezier(.34,1.56,.64,1),opacity .3s ease;max-height:0;opacity:0}
   .tree-folder.open>.tree-folder-content{max-height:2000px;opacity:1;overflow:visible}
@@ -241,7 +258,7 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
   .tree-folder.open>.tree-item .caret-icon{transform:rotate(90deg)}
   .active-indicator{position:absolute;left:0;width:4px;height:32px;background:#c2410c;transition:transform .3s cubic-bezier(.4,0,.2,1),opacity .2s ease;border-radius:4px;pointer-events:none}
 
-  .main{margin-left:280px;margin-top:56px;height:calc(100vh - 56px);overflow:hidden;background:#fafafa;position:relative}
+  .main{margin-left:var(--sidebar-width);margin-top:56px;height:calc(100vh - 56px);overflow:hidden;background:#fafafa;position:relative;transition:margin-left .3s cubic-bezier(.4,0,.2,1);will-change:margin-left}
   .main-placeholder{display:flex;align-items:center;justify-content:center;height:100%;flex-direction:column;text-align:center;padding:3rem}
   .main-placeholder h2{font-size:24px;font-weight:600;color:#09090b;margin-bottom:8px}
   .main-placeholder p{font-size:16px;color:#71717a;max-width:320px}
@@ -255,6 +272,7 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
   html.dark .doc-loader-bar{width:46%;background:linear-gradient(90deg,transparent,#fdba74,#fb923c,#fdba74,transparent);box-shadow:0 0 6px rgba(251,146,60,.5)}
   html.dark .doc-loader.error .doc-loader-bar{background:#fca5a5}
   @media (prefers-reduced-motion: reduce){.doc-loader-bar{width:100%;opacity:.65;animation:none}}
+  @media (prefers-reduced-motion: reduce){.sidebar,.main,.sidebar-resizer,.sidebar-toggle,.sidebar-toggle .material-symbols-outlined{transition:none}}
   .avatar-wrap{position:relative}
   .avatar-menu{position:absolute;top:42px;right:0;background:#fff;border:1px solid #e4e4e7;border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,.12);padding:4px;min-width:200px;z-index:100}
   .avatar-menu-email{padding:8px 12px;font-size:12px;color:#71717a;border-bottom:1px solid #e4e4e7;margin-bottom:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -281,6 +299,10 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
   html.dark .topbar-search:focus-within{border-color:#fb923c}
   html.dark .topbar-search input{color:#fafafa}
   html.dark .topbar-search input::placeholder{color:#a1a1aa}
+  html.dark .sidebar-toggle{color:#a1a1aa}
+  html.dark .sidebar-toggle:hover{background:#18181b;color:#fafafa}
+  html.dark .sidebar-toggle:focus-visible{outline-color:#fb923c}
+  html.dark .sidebar-resizer:hover::before,html.dark .sidebar-resizer:focus-visible::before{background:#fb923c;box-shadow:0 0 0 3px rgba(251,146,60,.16)}
   html.dark .topbar-btn-icon{color:#a1a1aa}
   html.dark .topbar-btn-icon:hover{background:#18181b;color:#fafafa}
   html.dark .topbar-btn-share{color:#fb923c}
@@ -328,6 +350,9 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
 
 <header class="topbar">
   <div class="topbar-left">
+    <button class="sidebar-toggle" id="sidebar-toggle" type="button" aria-label="Collapse document tree" aria-controls="doc-sidebar" aria-expanded="true" title="Collapse document tree">
+      <span class="material-symbols-outlined" aria-hidden="true">left_panel_close</span>
+    </button>
     <span class="topbar-logo">Rendro</span>
   </div>
   <div class="topbar-actions">
@@ -348,8 +373,8 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
   </div>
 </header>
 
-<aside class="sidebar">
-  <div class="sidebar-divider">Docs</div>
+<aside class="sidebar" id="doc-sidebar" aria-labelledby="doc-sidebar-title">
+  <div class="sidebar-divider" id="doc-sidebar-title">Docs</div>
   <div class="sidebar-tree" data-tree-org="${orgEsc}">
     <div class="space-y-0.5 relative" id="tree-container" style="position:relative">
       <div class="active-indicator" id="active-indicator" style="opacity:0;transition:none"></div>
@@ -357,6 +382,7 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
     </div>
   </div>
 </aside>
+<div class="sidebar-resizer" id="sidebar-resizer" role="separator" aria-orientation="vertical" aria-controls="doc-sidebar" aria-label="Resize document tree" aria-valuemin="220" aria-valuemax="420" aria-valuenow="280" aria-valuetext="Document tree 280 pixels wide" tabindex="0"></div>
 
 <main class="main">
   <div class="doc-loader" id="doc-loader" style="display:none" role="progressbar" aria-label="Loading document"><div class="doc-loader-bar"></div></div>
@@ -370,14 +396,102 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
 </main>
 
 <script>
-(function(){var t=localStorage.getItem("commentor-theme");var d=t==="dark"||(!t&&matchMedia("(prefers-color-scheme:dark)").matches);
-if(d)document.documentElement.classList.add("dark");
-function up(){var i=document.querySelector("#theme-toggle .material-symbols-outlined");if(i)i.textContent=document.documentElement.classList.contains("dark")?"light_mode":"dark_mode";}
-up();document.getElementById("theme-toggle")?.addEventListener("click",function(){var h=document.documentElement;h.classList.toggle("dark");localStorage.setItem("commentor-theme",h.classList.contains("dark")?"dark":"light");up();});
-document.getElementById("avatar-btn")?.addEventListener("click",function(e){e.stopPropagation();var m=document.getElementById("avatar-menu");m.style.display=m.style.display==="block"?"none":"block";});
-document.getElementById("share-btn")?.addEventListener("click",function(e){e.stopPropagation();var m=document.getElementById("share-menu");m.style.display=m.style.display==="block"?"none":"block";});
-document.getElementById("copy-link-btn")?.addEventListener("click",function(){navigator.clipboard.writeText(location.href).catch(function(){});var t=document.createElement("div");t.className="toast";t.textContent="Link copied";document.body.appendChild(t);t.offsetHeight;t.classList.add("show");setTimeout(function(){t.classList.remove("show");setTimeout(function(){t.remove()},200)},1500)});
-document.addEventListener("click",function(){var m=document.getElementById("avatar-menu");if(m)m.style.display="none";var s=document.getElementById("share-menu");if(s)s.style.display="none";});})();
+(function(){
+  var root=document.documentElement;
+  var theme=localStorage.getItem("commentor-theme");
+  var prefersDark=!theme&&matchMedia("(prefers-color-scheme:dark)").matches;
+  if(theme==="dark"||prefersDark)root.classList.add("dark");
+
+  var MIN_WIDTH=220;
+  var MAX_WIDTH=420;
+  var DEFAULT_WIDTH=280;
+  var STEP=24;
+  var sidebar=document.getElementById("doc-sidebar");
+  var resizer=document.getElementById("sidebar-resizer");
+  var toggle=document.getElementById("sidebar-toggle");
+  var toggleIcon=toggle&&toggle.querySelector(".material-symbols-outlined");
+  var storedWidth=Number(localStorage.getItem("rendro-sidebar-width"));
+  var expandedWidth=Number.isFinite(storedWidth)&&storedWidth>0?storedWidth:DEFAULT_WIDTH;
+
+  function maxForViewport(){return Math.max(MIN_WIDTH,Math.min(MAX_WIDTH,window.innerWidth-360));}
+  function clampWidth(value){return Math.max(MIN_WIDTH,Math.min(maxForViewport(),Math.round(value)));}
+  function updateSidebarAria(){
+    var collapsed=root.classList.contains("sidebar-collapsed");
+    var width=clampWidth(expandedWidth);
+    if(resizer){
+      resizer.setAttribute("aria-valuemin",String(MIN_WIDTH));
+      resizer.setAttribute("aria-valuemax",String(maxForViewport()));
+      resizer.setAttribute("aria-valuenow",String(width));
+      resizer.setAttribute("aria-valuetext",collapsed?"Document tree collapsed":"Document tree "+width+" pixels wide");
+      resizer.tabIndex=collapsed?-1:0;
+    }
+    if(toggle){
+      toggle.setAttribute("aria-expanded",String(!collapsed));
+      toggle.setAttribute("aria-label",collapsed?"Open document tree":"Collapse document tree");
+      toggle.setAttribute("title",collapsed?"Open document tree":"Collapse document tree");
+    }
+    if(toggleIcon)toggleIcon.textContent=collapsed?"left_panel_open":"left_panel_close";
+    if(sidebar){sidebar.setAttribute("aria-hidden",collapsed?"true":"false");if("inert" in sidebar)sidebar.inert=collapsed;}
+  }
+  function setSidebarWidth(value,persist){
+    expandedWidth=clampWidth(value);
+    root.style.setProperty("--sidebar-expanded-width",expandedWidth+"px");
+    if(persist)localStorage.setItem("rendro-sidebar-width",String(expandedWidth));
+    updateSidebarAria();
+  }
+  function setSidebarCollapsed(collapsed){
+    root.classList.toggle("sidebar-collapsed",collapsed);
+    localStorage.setItem("rendro-sidebar-collapsed",collapsed?"1":"0");
+    updateSidebarAria();
+  }
+
+  setSidebarWidth(expandedWidth,false);
+  if(localStorage.getItem("rendro-sidebar-collapsed")==="1")setSidebarCollapsed(true);
+  root.getBoundingClientRect();
+  root.classList.add("sidebar-ready");
+
+  function up(){var i=document.querySelector("#theme-toggle .material-symbols-outlined");if(i)i.textContent=root.classList.contains("dark")?"light_mode":"dark_mode";}
+  up();
+  document.getElementById("theme-toggle")?.addEventListener("click",function(){root.classList.toggle("dark");localStorage.setItem("commentor-theme",root.classList.contains("dark")?"dark":"light");up();});
+  if(toggle)toggle.addEventListener("click",function(){setSidebarCollapsed(!root.classList.contains("sidebar-collapsed"));});
+  if(resizer){
+    var dragging=false;
+    resizer.addEventListener("pointerdown",function(e){
+      if(root.classList.contains("sidebar-collapsed"))return;
+      dragging=true;
+      root.classList.add("sidebar-resizing");
+      resizer.setPointerCapture(e.pointerId);
+      e.preventDefault();
+    });
+    resizer.addEventListener("pointermove",function(e){
+      if(!dragging)return;
+      setSidebarWidth(e.clientX,false);
+    });
+    function finishResize(e){
+      if(!dragging)return;
+      dragging=false;
+      root.classList.remove("sidebar-resizing");
+      setSidebarWidth(expandedWidth,true);
+      try{resizer.releasePointerCapture(e.pointerId)}catch(_){}
+    }
+    resizer.addEventListener("pointerup",finishResize);
+    resizer.addEventListener("pointercancel",finishResize);
+    resizer.addEventListener("keydown",function(e){
+      if(e.key==="Enter"){e.preventDefault();setSidebarCollapsed(!root.classList.contains("sidebar-collapsed"));return;}
+      if(root.classList.contains("sidebar-collapsed"))return;
+      if(e.key==="ArrowLeft"){e.preventDefault();setSidebarWidth(expandedWidth-STEP,true);}
+      else if(e.key==="ArrowRight"){e.preventDefault();setSidebarWidth(expandedWidth+STEP,true);}
+      else if(e.key==="Home"){e.preventDefault();setSidebarWidth(MIN_WIDTH,true);}
+      else if(e.key==="End"){e.preventDefault();setSidebarWidth(maxForViewport(),true);}
+    });
+  }
+  window.addEventListener("resize",function(){if(!root.classList.contains("sidebar-collapsed"))setSidebarWidth(expandedWidth,false);});
+
+  document.getElementById("avatar-btn")?.addEventListener("click",function(e){e.stopPropagation();var m=document.getElementById("avatar-menu");m.style.display=m.style.display==="block"?"none":"block";});
+  document.getElementById("share-btn")?.addEventListener("click",function(e){e.stopPropagation();var m=document.getElementById("share-menu");m.style.display=m.style.display==="block"?"none":"block";});
+  document.getElementById("copy-link-btn")?.addEventListener("click",function(){navigator.clipboard.writeText(location.href).catch(function(){});var t=document.createElement("div");t.className="toast";t.textContent="Link copied";document.body.appendChild(t);t.offsetHeight;t.classList.add("show");setTimeout(function(){t.classList.remove("show");setTimeout(function(){t.remove()},200)},1500)});
+  document.addEventListener("click",function(){var m=document.getElementById("avatar-menu");if(m)m.style.display="none";var s=document.getElementById("share-menu");if(s)s.style.display="none";});
+})();
 </script>
 <script src="/lazy-tree.js?v=19"></script>
 </body>
