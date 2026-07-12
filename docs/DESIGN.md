@@ -38,16 +38,18 @@ Use semantic intent, not arbitrary color picking. If a color appears in app chro
 
 | Token | Light | Dark | Usage |
 |---|---|---|---|
-| Primary | `#0a66c2` | `#4493f8` | Links, active indicator, loader line, accent actions |
-| Primary muted | `#e8f0fe` | `rgba(68,147,248,.15)` | Active tree item background |
-| Surface | `#ffffff` | `#1e1f22` | Topbar, sidebar, app shell |
-| Surface low | `#f8f9fa` | `#1e1f22` | Main placeholder area only; never shown as a doc-loading overlay |
-| Container | `#f0f0f3` | `#2f3136` | Hover states, avatars, icon wells |
-| Menu | `#ffffff` | `#2b2d31` | Share/avatar dropdowns |
-| Text primary | `#111418` | `#f2f3f5` | Topbar, headings, active foreground |
-| Text muted | `#6b7280` | `#9aa0a8` | Secondary labels, placeholders, file metadata |
-| Border | `#e5e7eb` | `#383a40` | Topbar/sidebar dividers, dropdown borders |
-| Error | `#b42318` | `#ffb4ab` | Loader failure line, tree load errors |
+| Primary | `#0a66c2` | `#fafafa` | Links, active indicator, loader line, accent actions |
+| Primary hover | `#004182` | `#e4e4e7` | Pressed/hovered primary controls |
+| Primary muted | `#e8f0fe` | `#18181b` | Active tree item background |
+| Surface | `#ffffff` | `#09090b` | Topbar, sidebar, app shell |
+| Surface low | `#f8f9fa` | `#09090b` | Main placeholder area only; never shown as a doc-loading overlay |
+| Container | `#f0f0f3` | `#18181b` | Hover states, avatars, icon wells |
+| Menu | `#ffffff` | `#09090b` | Share/avatar dropdowns |
+| Text primary | `#111418` | `#fafafa` | Topbar, headings, active foreground |
+| Text muted | `#6b7280` | `#a1a1aa` | Secondary labels, placeholders, file metadata |
+| Border | `#e5e7eb` | `#27272a` | Topbar/sidebar dividers, dropdown borders |
+| Focus ring | `#0a66c2` | `#52525b` | Search focus and future focus states |
+| Error | `#b42318` | `#fca5a5` | Loader failure line, tree load errors |
 
 Rules:
 
@@ -286,6 +288,8 @@ Dark mode applies to app chrome only.
 - Do not pass app dark mode into the iframe as a global stylesheet.
 - Do not assume publisher docs have transparent backgrounds.
 - Every app menu, text, border, hover, active, loader, and toast color has a dark variant.
+- Dark mode follows shadcn's neutral/zinc feel: near-black shell (`#09090b`), subtle elevated surfaces (`#18181b`), neutral borders (`#27272a`), muted text (`#a1a1aa`), and high-contrast foreground (`#fafafa`).
+- Avoid the old bluish/Discord palette (`#1e1f22`, `#2b2d31`, `#2f3136`, `#383a40`) for app chrome.
 
 Theme mismatch rule:
 

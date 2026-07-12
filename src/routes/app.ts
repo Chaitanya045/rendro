@@ -252,8 +252,8 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e5e
   .doc-loader-bar{position:absolute;top:0;bottom:0;left:0;width:38%;border-radius:999px;background:linear-gradient(90deg,transparent,#0a66c2,transparent);animation:docLoaderSweep 1.1s cubic-bezier(.4,0,.2,1) infinite}
   .doc-loader.error .doc-loader-bar{width:100%;background:#b42318;animation:none;opacity:.9}
   @keyframes docLoaderSweep{0%{transform:translateX(-100%)}100%{transform:translateX(265%)}}
-  html.dark .doc-loader-bar{background:linear-gradient(90deg,transparent,#4493f8,transparent)}
-  html.dark .doc-loader.error .doc-loader-bar{background:#ffb4ab}
+  html.dark .doc-loader-bar{background:linear-gradient(90deg,transparent,#fafafa,transparent)}
+  html.dark .doc-loader.error .doc-loader-bar{background:#fca5a5}
   @media (prefers-reduced-motion: reduce){.doc-loader-bar{width:100%;opacity:.65;animation:none}}
   .avatar-wrap{position:relative}
   .avatar-menu{position:absolute;top:42px;right:0;background:#fff;border:1px solid #e5e7eb;border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,.12);padding:4px;min-width:200px;z-index:100}
@@ -271,45 +271,58 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e5e
   .topbar-btn-icon{width:32px;height:32px;border-radius:4px;border:0;background:transparent;cursor:pointer;display:flex;align-items:center;justify-content:center;color:#6b7280;transition:background .15s}
   .topbar-btn-icon:hover{background:#f3f4f6}
 
-  /* ── dark mode (matches commentor widget palette) ── */
-  html.dark{background:#1e1f22;color:#f2f3f5}
-  html.dark body{background:#1e1f22;color:#f2f3f5}
-  html.dark .topbar{background:#1e1f22;border-bottom-color:#383a40}
-  html.dark .topbar-logo{color:#4493f8}
-  html.dark .topbar-search{background:#2b2d31;border-color:#383a40}
-  html.dark .topbar-search input{color:#f2f3f5}
-  html.dark .topbar-search input::placeholder{color:#9aa0a8}
-  html.dark .topbar-btn-icon{color:#9aa0a8}
-  html.dark .topbar-btn-icon:hover{background:#2f3136}
-  html.dark .topbar-btn-share{color:#4493f8}
-  html.dark .topbar-btn-share:hover{background:#2f3136}
-  html.dark .sidebar-tree{--sidebar-bg:#1e1f22}
-  html.dark .topbar-avatar{background:#2f3136;color:#f2f3f5;border-color:#383a40}
-  html.dark .sidebar{background:#1e1f22;border-right-color:#383a40}
-  html.dark .sidebar-org-name{color:#f2f3f5}
-  html.dark .sidebar-org-meta{color:#9aa0a8}
-  html.dark .sidebar-org-icon{background:#0052cc}
-  html.dark .sidebar-divider{color:#9aa0a8}
-  html.dark .sidebar-footer{border-top-color:#383a40}
-  html.dark .sidebar-footer a{color:#9aa0a8}
-  html.dark .tree-item{color:#9aa0a8}
-  html.dark .tree-item:hover{background:#2f3136;color:#f2f3f5}
-  html.dark .tree-item.active{background:rgba(68,147,248,.15);color:#4493f8}
-  html.dark .active-indicator{background:#4493f8}
-  html.dark .main{background:#1e1f22}
-  html.dark .main-placeholder h2{color:#f2f3f5}
-  html.dark .avatar-menu-item{color:#f2f3f5}
-  html.dark .avatar-menu-item:hover{background:#2f3136}
-  html.dark .share-menu{background:#2b2d31;border-color:#383a40}
-  html.dark .share-menu-item{color:#f2f3f5}
-  html.dark .share-menu-item:hover{background:#2f3136}
-  html.dark .toast{background:#f2f3f5;color:#111418}
-  html.dark .load-more-btn{color:#4493f8}
-  html.dark .load-more-btn:hover{background:#2f3136}
-  html.dark .avatar-menu{background:#2b2d31;border-color:#383a40;box-shadow:0 4px 12px rgba(0,0,0,.4)}
-  html.dark .avatar-menu-email{color:#9aa0a8;border-bottom-color:#383a40}
-  html.dark .avatar-menu-item{color:#f2f3f5}
-  html.dark .avatar-menu-item:hover{background:#2f3136}
+  /* ── dark mode (shadcn-style neutral palette) ── */
+  html.dark{background:#09090b;color:#fafafa}
+  html.dark body{background:#09090b;color:#fafafa}
+  html.dark ::-webkit-scrollbar-thumb{background:#27272a}
+  html.dark .topbar{background:#09090b;border-bottom-color:#27272a}
+  html.dark .topbar-logo{color:#fafafa}
+  html.dark .topbar-search{background:#18181b;border-color:#27272a}
+  html.dark .topbar-search:focus-within{border-color:#52525b}
+  html.dark .topbar-search input{color:#fafafa}
+  html.dark .topbar-search input::placeholder{color:#a1a1aa}
+  html.dark .topbar-btn-icon{color:#a1a1aa}
+  html.dark .topbar-btn-icon:hover{background:#18181b;color:#fafafa}
+  html.dark .topbar-btn-share{color:#fafafa}
+  html.dark .topbar-btn-share:hover{background:#18181b}
+  html.dark .topbar-btn-create{background:#fafafa;color:#09090b}
+  html.dark .topbar-btn-create:hover{background:#e4e4e7;opacity:1}
+  html.dark .sidebar-tree{--sidebar-bg:#09090b}
+  html.dark .topbar-avatar{background:#18181b;color:#fafafa;border-color:#27272a}
+  html.dark .sidebar{background:#09090b;border-right-color:#27272a}
+  html.dark .sidebar-org-name{color:#fafafa}
+  html.dark .sidebar-org-meta{color:#a1a1aa}
+  html.dark .sidebar-org-icon{background:#fafafa}
+  html.dark .sidebar-org-icon .material-symbols-outlined{color:#18181b}
+  html.dark .sidebar-divider{color:#a1a1aa}
+  html.dark .sidebar-footer{border-top-color:#27272a}
+  html.dark .sidebar-footer a{color:#a1a1aa}
+  html.dark .sidebar-footer a:hover{color:#fafafa}
+  html.dark .tree-item{color:#a1a1aa}
+  html.dark .tree-item:hover{background:#18181b;color:#fafafa}
+  html.dark .tree-item.active{background:#18181b;color:#fafafa}
+  html.dark .active-indicator{background:#fafafa}
+  html.dark .tree-size{color:#a1a1aa}
+  html.dark .tree-empty{color:#a1a1aa}
+  html.dark .tree-error{color:#fca5a5}
+  html.dark .main{background:#09090b}
+  html.dark .main-placeholder h2{color:#fafafa}
+  html.dark .main-placeholder p{color:#a1a1aa}
+  html.dark .ph-icon{background:#18181b}
+  html.dark .ph-icon .material-symbols-outlined{color:#a1a1aa!important}
+  html.dark .avatar-menu-item{color:#fafafa}
+  html.dark .avatar-menu-item:hover{background:#18181b}
+  html.dark .share-menu{background:#09090b;border-color:#27272a;box-shadow:0 8px 24px rgba(0,0,0,.48)}
+  html.dark .share-menu-item{color:#fafafa}
+  html.dark .share-menu-item:hover{background:#18181b}
+  html.dark .toast{background:#fafafa;color:#09090b}
+  html.dark .load-more-btn{color:#fafafa}
+  html.dark .load-more-btn:hover{background:#18181b}
+  html.dark .load-more-btn:disabled{color:#71717a}
+  html.dark .avatar-menu{background:#09090b;border-color:#27272a;box-shadow:0 8px 24px rgba(0,0,0,.48)}
+  html.dark .avatar-menu-email{color:#a1a1aa;border-bottom-color:#27272a}
+  html.dark .avatar-menu-item{color:#fafafa}
+  html.dark .avatar-menu-item:hover{background:#18181b}
 </style>
 <body>
 
