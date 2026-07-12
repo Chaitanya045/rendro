@@ -21,12 +21,14 @@ const result = await esbuild.build({
 const code = result.outputFiles![0]!.text;
 await esbuild.stop();
 
-// Wrap so CONVEX_URL can be injected at page render time
+// Wrap so the widget can boot from window.COMMENTOR. If a legacy
+// __COMMENTOR_URL__ override exists, use it only to fill a missing config URL.
 const wrapped = `
 // Auto-injected by Rendro — do not edit manually.
 (function() {
-  var CONVEX_URL = window.__COMMENTOR_URL__ || "";
-  if (!CONVEX_URL) return;
+  if (window.__COMMENTOR_URL__ && window.COMMENTOR && !window.COMMENTOR.convexUrl) {
+    window.COMMENTOR.convexUrl = window.__COMMENTOR_URL__;
+  }
   ${code}
 })();
 `;

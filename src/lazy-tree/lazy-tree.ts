@@ -61,6 +61,8 @@ async function expand(folder: HTMLElement) {
   const content = folder.querySelector(":scope > .tree-folder-content") as HTMLElement | null;
   if (!content) return;
 
+  if (folder.classList.contains("loading")) return;
+
   if (folder.classList.contains("loaded")) {
     folder.classList.add("open");
     setFolderIcon(folder, true);
@@ -87,13 +89,26 @@ async function loadPage(folder: HTMLElement, path: string, content: HTMLElement,
   if (!res.ok) throw new Error(`${res.status}`);
   const data = await res.json();
   const childDepth = parseInt(folder.dataset.depth || "0") + 1;
-  const rows = renderRows(data.children as TreeNode[], childDepth);
+  const children = data.children as TreeNode[];
+  const existingPaths = new Set(
+    Array.from(content.querySelectorAll<HTMLElement>("[data-path]"))
+      .map((el) => el.dataset.path)
+      .filter((value): value is string => Boolean(value)),
+  );
+  const freshChildren = children.filter((child) => {
+    const childPath = child.type === "folder" && !child.path.endsWith("/") ? `${child.path}/` : child.path;
+    return !existingPaths.has(childPath);
+  });
+  content.querySelector(":scope > .tree-load-more")?.remove();
+  const rows = renderRows(freshChildren, childDepth);
   content.insertAdjacentHTML("beforeend", rows);
 
   if (data.isTruncated && data.nextStartAfter) {
     folder.dataset.nextStartAfter = data.nextStartAfter;
     content.insertAdjacentHTML("beforeend",
       `<div class="tree-load-more"><button class="load-more-btn">Load more...</button></div>`);
+  } else {
+    delete folder.dataset.nextStartAfter;
   }
 
   if (activeEl) updateIndicator(activeEl);
