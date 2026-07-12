@@ -38,23 +38,24 @@ Use semantic intent, not arbitrary color picking. If a color appears in app chro
 
 | Token | Light | Dark | Usage |
 |---|---|---|---|
-| Primary | `#0a66c2` | `#fafafa` | Links, active indicator, loader line, accent actions |
-| Primary hover | `#004182` | `#e4e4e7` | Pressed/hovered primary controls |
-| Primary muted | `#e8f0fe` | `#18181b` | Active tree item background |
+| Primary | `#c2410c` | `#fb923c` | Logo, links, active indicator, loader line, accent actions |
+| Primary hover | `#9a3412` | `#fdba74` | Pressed/hovered primary controls |
+| Primary muted | `#ffedd5` | `rgba(251,146,60,.16)` | Active tree item and avatar background |
 | Surface | `#ffffff` | `#09090b` | Topbar, sidebar, app shell |
-| Surface low | `#f8f9fa` | `#09090b` | Main placeholder area only; never shown as a doc-loading overlay |
-| Container | `#f0f0f3` | `#18181b` | Hover states, avatars, icon wells |
+| Surface low | `#fafafa` | `#09090b` | Main placeholder area only; never shown as a doc-loading overlay |
+| Container | `#f4f4f5` | `#18181b` | Hover states, icon wells, subtle surfaces |
 | Menu | `#ffffff` | `#09090b` | Share/avatar dropdowns |
-| Text primary | `#111418` | `#fafafa` | Topbar, headings, active foreground |
-| Text muted | `#6b7280` | `#a1a1aa` | Secondary labels, placeholders, file metadata |
-| Border | `#e5e7eb` | `#27272a` | Topbar/sidebar dividers, dropdown borders |
-| Focus ring | `#0a66c2` | `#52525b` | Search focus and future focus states |
+| Text primary | `#09090b` | `#fafafa` | Topbar, headings, active foreground |
+| Text muted | `#71717a` | `#a1a1aa` | Secondary labels, placeholders, file metadata |
+| Border | `#e4e4e7` | `#27272a` | Topbar/sidebar dividers, dropdown borders |
+| Focus ring | `#c2410c` | `#fb923c` | Search focus and future focus states |
 | Error | `#b42318` | `#fca5a5` | Loader failure line, tree load errors |
 
 Rules:
 
 - Every new chrome color gets a dark-mode counterpart in the same change.
 - Do not theme inside publisher documents. The iframe is an isolation boundary.
+- Accent direction is **Ember / Orange**: warm, energetic, and more expressive than blue while staying readable for a documentation product.
 - Avoid raw one-off hex values outside token definitions and dark-mode pairs.
 - The app may darken its chrome; it must not assume the iframe document is dark.
 
