@@ -22,7 +22,9 @@ function isSessionUser(value: unknown): value is SessionUser {
 
 export async function sessionMiddleware(c: Context, next: Next) {
   try {
-    if (typeof process !== "undefined" && process.env.NODE_ENV === "development") {
+    const isDev = (typeof process !== "undefined" && process.env.NODE_ENV === "development")
+      || c.req.header("host")?.startsWith("dev.");
+    if (isDev) {
       const devEmail = c.req.header("X-Dev-User") || c.req.query("dev_user");
       if (devEmail) {
         c.set("user", {

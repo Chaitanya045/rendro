@@ -342,6 +342,8 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e5e
       <div class="active-indicator" id="active-indicator" style="opacity:0;transition:none"></div>
       ${renderTree(tree)}
     </div>
+  </div>
+</aside>
 
 <main class="main">
   <div class="doc-loader" id="doc-loader" style="display:none" role="progressbar" aria-label="Loading document"><div class="doc-loader-ring"></div></div>
@@ -354,6 +356,7 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e5e
     src="about:blank" title="Document content" style="display:none"></iframe>
 </main>
 
+<script>
 (function(){var t=localStorage.getItem("commentor-theme");var d=t==="dark"||(!t&&matchMedia("(prefers-color-scheme:dark)").matches);
 if(d)document.documentElement.classList.add("dark");
 function up(){var i=document.querySelector("#theme-toggle .material-symbols-outlined");if(i)i.textContent=document.documentElement.classList.contains("dark")?"light_mode":"dark_mode";}
