@@ -252,7 +252,6 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
   .tree-skeleton-node{margin-top:2px}
   .tree-skeleton-node:first-child{margin-top:0}
   .tree-skeleton-item{height:33px;display:flex;align-items:center;gap:8px;padding:6px 12px;border-radius:4px;box-sizing:border-box}
-  .tree-skeleton-children{margin-left:16px;padding-left:8px;border-left:1px solid rgba(212,212,216,.3);display:flex;flex-direction:column;gap:2px}
   .tree-skeleton-icon,.tree-skeleton-label{display:block;flex-shrink:0;background:linear-gradient(90deg,#f4f4f5 25%,#ffedd5 45%,#f4f4f5 65%);background-size:200% 100%;animation:treeSkeletonShimmer 1.1s cubic-bezier(.4,0,.2,1) infinite}
   .tree-skeleton-icon{width:18px;height:18px;border-radius:4px}
   .tree-skeleton-caret{width:18px;height:18px;clip-path:polygon(35% 20%,75% 50%,35% 80%)}
@@ -351,7 +350,6 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
   html.dark .active-indicator{background:#fb923c}
   html.dark .tree-size{color:#a1a1aa}
   html.dark .tree-empty{color:#a1a1aa}
-  html.dark .tree-skeleton-children{border-left-color:rgba(63,63,70,.5)}
   html.dark .tree-skeleton-icon,html.dark .tree-skeleton-label{background:linear-gradient(90deg,#18181b 25%,rgba(251,146,60,.16) 45%,#18181b 65%);background-size:200% 100%}
   @media (prefers-reduced-motion: reduce){html.dark .tree-skeleton-icon,html.dark .tree-skeleton-label{background:#18181b}}
   html.dark .tree-error{color:#fca5a5}
@@ -621,15 +619,12 @@ function renderTreeSkeleton(): string {
         <span class="tree-skeleton-icon"></span>
         <span class="tree-skeleton-label w-md"></span>
       </div>
-      <div class="tree-skeleton-children">
-        <div class="tree-skeleton-item">
-          <span class="tree-skeleton-icon"></span>
-          <span class="tree-skeleton-label w-lg"></span>
-        </div>
-        <div class="tree-skeleton-item">
-          <span class="tree-skeleton-icon"></span>
-          <span class="tree-skeleton-label w-sm"></span>
-        </div>
+    </div>
+    <div class="tree-skeleton-node">
+      <div class="tree-skeleton-item">
+        <span class="tree-skeleton-icon tree-skeleton-caret"></span>
+        <span class="tree-skeleton-icon"></span>
+        <span class="tree-skeleton-label w-md"></span>
       </div>
     </div>
     <div class="tree-skeleton-node">
@@ -637,6 +632,13 @@ function renderTreeSkeleton(): string {
         <span class="tree-skeleton-icon tree-skeleton-caret"></span>
         <span class="tree-skeleton-icon"></span>
         <span class="tree-skeleton-label w-lg"></span>
+      </div>
+    </div>
+    <div class="tree-skeleton-node">
+      <div class="tree-skeleton-item">
+        <span class="tree-skeleton-icon tree-skeleton-caret"></span>
+        <span class="tree-skeleton-icon"></span>
+        <span class="tree-skeleton-label w-md"></span>
       </div>
     </div>
   </div>`;
