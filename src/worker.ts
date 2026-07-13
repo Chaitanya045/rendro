@@ -148,13 +148,17 @@ app.use("*", async (c, next) => { await sessionMiddleware(c, next); });
 // Sign-out: GET → POST
 app.get("/api/auth/sign-out", async (c) => {
   const cookie = c.req.raw.headers.get("cookie") || "";
-  const upstream = await fetch(`${CONVEX_SITE}/api/auth/sign-out`, {
-    method: "POST",
-    headers: { cookie, "content-type": "application/json" },
-    redirect: "manual",
-  });
   const headers = new Headers({ Location: "/" });
-  for (const sc of strippedSetCookies(upstream.headers)) headers.append("Set-Cookie", sc);
+  try {
+    const upstream = await fetch(`${CONVEX_SITE}/api/auth/sign-out`, {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      redirect: "manual",
+    });
+    for (const sc of strippedSetCookies(upstream.headers)) headers.append("Set-Cookie", sc);
+  } catch (err: unknown) {
+    logger.error({ err: err instanceof Error ? err.message : String(err) }, "Auth sign-out proxy error");
+  }
   appendAuthCookieCleanup(headers);
   return new Response(null, { status: 302, headers });
 });

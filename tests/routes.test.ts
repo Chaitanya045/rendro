@@ -362,6 +362,21 @@ describe("worker auth sign-out", () => {
     expect(joined).not.toContain("Domain=convex.site");
     expect(calls.some((call) => call.includes("/api/auth/sign-out"))).toBe(true);
   });
+
+  it("still clears site cookies when upstream sign-out fails", async () => {
+    const fakeFetch: typeof fetch = async () => {
+      throw new Error("Convex unavailable");
+    };
+    vi.stubGlobal("fetch", fakeFetch);
+
+    const res = await workerApp.request("https://dev.rendro.app/api/auth/sign-out");
+
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toBe("/");
+    expect(res.headers.get("clear-site-data")).toBe("\"cookies\"");
+    const setCookies = res.headers.getSetCookie?.() ?? [res.headers.get("set-cookie") ?? ""];
+    expect(setCookies.join("\n")).toContain("__Secure-better-auth.state=;");
+  });
 });
 
 // ────────────────────────────────────────────────────
