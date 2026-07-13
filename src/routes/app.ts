@@ -278,7 +278,7 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
   .tree-item{display:flex;align-items:center;gap:8px;padding:6px 12px;border-radius:4px;color:#71717a;cursor:pointer;transition:transform .2s cubic-bezier(.4,0,.2,1),background-color .2s,color .2s}
   html.tree-entering .tree-item,.tree-folder.open>.tree-folder-content>.tree-item,.tree-folder.open>.tree-folder-content>.tree-folder>.tree-item{animation:treeItemIn .32s cubic-bezier(.4,0,.2,1) both;animation-delay:calc(var(--tree-index,0) * 35ms)}
   .tree-folder.loading>.tree-item{cursor:progress}
-  .tree-folder.loading>.tree-item .folder-icon,.tree-folder.loading>.tree-item .font-body-md{color:transparent;background:linear-gradient(90deg,#c2410c,#fdba74,#c2410c);background-size:200% 100%;background-clip:text;-webkit-background-clip:text;-webkit-text-fill-color:transparent;animation:treeFolderLoading 1.1s cubic-bezier(.4,0,.2,1) infinite}
+  .tree-folder.loading>.tree-item .folder-icon,.tree-folder.loading>.tree-item .font-body-md{color:transparent;background:linear-gradient(90deg,#7c2d12 0%,#f97316 32%,#9a3412 55%,#fb923c 76%,#7c2d12 100%);background-size:200% 100%;background-clip:text;-webkit-background-clip:text;-webkit-text-fill-color:transparent;animation:treeFolderLoading 1.1s cubic-bezier(.4,0,.2,1) infinite}
   .tree-item:hover{background:#f4f4f5;color:#09090b}
   .tree-item.active{background:#ffedd5;color:#c2410c}
   .tree-link{color:inherit;text-decoration:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -369,7 +369,7 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
   html.dark .tree-item{color:#a1a1aa}
   html.dark .tree-item:hover{background:#18181b;color:#fafafa}
   html.dark .tree-item.active{background:rgba(251,146,60,.16);color:#fb923c}
-  html.dark .tree-folder.loading>.tree-item .folder-icon,html.dark .tree-folder.loading>.tree-item .font-body-md{background:linear-gradient(90deg,#fb923c,#fdba74,#fb923c);background-size:200% 100%;background-clip:text;-webkit-background-clip:text}
+  html.dark .tree-folder.loading>.tree-item .folder-icon,html.dark .tree-folder.loading>.tree-item .font-body-md{background:linear-gradient(90deg,#fb923c 0%,#ffedd5 32%,#f97316 55%,#fed7aa 76%,#fb923c 100%);background-size:200% 100%;background-clip:text;-webkit-background-clip:text}
   html.dark .active-indicator{background:#fb923c}
   html.dark .tree-size{color:#a1a1aa}
   html.dark .tree-empty{color:#a1a1aa}
