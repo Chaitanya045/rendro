@@ -6,6 +6,7 @@ import { auth } from "@/auth";
 import { sessionMiddleware } from "@/middleware/session";
 import appRoutes from "@/routes/app";
 import docsRoutes from "@/routes/docs";
+import shareRoutes from "@/routes/share";
 import { PORT } from "@/config";
 import { logger } from "@/logger";
 import type { User } from "better-auth/types";
@@ -28,6 +29,9 @@ app.use("*", async (c, next) => {
 
 // CORS for sync API (CLI browser access not required, but harmless)
 app.use("/api/sync/*", cors());
+
+// Public signed share routes intentionally bypass session middleware.
+app.route("/", shareRoutes);
 
 // Better-auth session — reads cookies, populates c.get("user")
 app.use("*", sessionMiddleware);

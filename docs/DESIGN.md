@@ -170,6 +170,7 @@ URL rules:
 - Tree-only app shell URLs are `/docs/:org`.
 - Legacy `?doc=:org/:path` links are upgraded with `history.replaceState` before loading the document.
 - Publisher HTML still streams inside the iframe from `/files/:org/:path*`; app-shell URLs and iframe stream URLs are separate ownership boundaries.
+- Public share links use `/share/:token` (7-day HMAC). They bypass auth and serve raw HTML without the app shell.
 - Local-only `?dev_user=email` is a one-time bootstrap for the `rendro-dev-user` cookie. Do not propagate it into document URLs or iframe URLs.
 
 State table:
@@ -248,7 +249,7 @@ Rendro's micro-interactions are small and functional. They make state legible.
 | Tree active item | 4px active indicator translates to selected item over `300ms` |
 | Tree hover | Background/text color transition over `200ms` |
 | Topbar search | Border shifts to primary on focus within `150ms` |
-| Share menu | Opens at trigger, closes on outside click; copy action shows toast |
+| Share menu | Opens at trigger, closes on outside click; copy action creates a signed public link for the current document and shows toast |
 | Theme toggle | Tri-state cycle `system → dark → light`; radial ripple expands from button center over ~`520ms`, with CSS overlay fallback and no motion under reduced-motion |
 | Avatar menu | Opens at avatar, shows email and sign-out action |
 | Toast | Bottom-right, fades in/out, no layout movement |

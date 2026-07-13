@@ -602,12 +602,13 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
 
   document.getElementById("avatar-btn")?.addEventListener("click",function(e){e.stopPropagation();var m=document.getElementById("avatar-menu");m.style.display=m.style.display==="block"?"none":"block";});
   document.getElementById("share-btn")?.addEventListener("click",function(e){e.stopPropagation();var m=document.getElementById("share-menu");m.style.display=m.style.display==="block"?"none":"block";});
-  document.getElementById("copy-link-btn")?.addEventListener("click",function(){navigator.clipboard.writeText(location.href).catch(function(){});var t=document.createElement("div");t.className="toast";t.textContent="Link copied";document.body.appendChild(t);t.offsetHeight;t.classList.add("show");setTimeout(function(){t.classList.remove("show");setTimeout(function(){t.remove()},200)},1500)});
+  function showToast(message){var t=document.createElement("div");t.className="toast";t.textContent=message;document.body.appendChild(t);t.offsetHeight;t.classList.add("show");setTimeout(function(){t.classList.remove("show");setTimeout(function(){t.remove()},200)},1500)}
+  document.getElementById("copy-link-btn")?.addEventListener("click",async function(){var doc=window.RENDRO_CURRENT_DOC||"";if(!doc){showToast("Select a document first");return;}try{var res=await fetch("/api/share/create?key="+encodeURIComponent(doc),{headers:{accept:"application/json"}});if(!res.ok)throw new Error("share failed");var data=await res.json();await navigator.clipboard.writeText(data.url);showToast("Signed link copied");}catch(_){showToast("Unable to copy link");}});
   document.addEventListener("click",function(){var m=document.getElementById("avatar-menu");if(m)m.style.display="none";var s=document.getElementById("share-menu");if(s)s.style.display="none";});
 })();
 </script>
 <script>window.RENDRO_INITIAL_DOC=${JSON.stringify(selectedDoc)};</script>
-<script src="/lazy-tree.js?v=20"></script>
+<script src="/lazy-tree.js?v=21"></script>
 </body>
 </html>`;
 }

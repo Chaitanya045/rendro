@@ -2,7 +2,7 @@
  * Lazy tree — matches design.html spec with Material Symbols icons,
  * max-height animations, active indicator, and border-line indentation.
  */
-type RendroWindow = Window & { RENDRO_INITIAL_DOC?: string };
+type RendroWindow = Window & { RENDRO_INITIAL_DOC?: string; RENDRO_CURRENT_DOC?: string };
 const RENDRO_WINDOW = window as RendroWindow;
 const ORG = (document.querySelector("[data-tree-org]") as HTMLElement)?.dataset.treeOrg;
 interface TreeNode { name: string; path: string; type: "file" | "folder"; size?: number; }
@@ -300,6 +300,7 @@ async function navigateToDoc(relPath: string) {
 
 // Sync tree active state without reloading iframe (for doc-loaded messages)
 function syncActiveState(fullPath: string) {
+  RENDRO_WINDOW.RENDRO_CURRENT_DOC = fullPath;
   // Always expand ancestors first (no-op if already open)
   const relPath = fullPath.startsWith(`${ORG}/`) ? fullPath.slice(ORG!.length + 1) : fullPath;
   navigateToDoc(relPath);
