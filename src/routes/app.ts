@@ -274,12 +274,11 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
   .tree-folder[data-depth="5"].open>.tree-item{top:150px;z-index:5}
   .load-more-btn:disabled{color:#71717a;cursor:default}
   @keyframes treeItemIn{from{opacity:0;transform:translateX(-6px)}to{opacity:1;transform:translateX(0)}}
-  @keyframes treeFolderLoading{0%{transform:translateX(-100%)}100%{transform:translateX(260%)}}
-  .tree-item{display:flex;align-items:center;gap:8px;padding:6px 12px;border-radius:4px;color:#71717a;cursor:pointer;position:relative;overflow:hidden;transition:transform .2s cubic-bezier(.4,0,.2,1),background-color .2s,color .2s}
-  .tree-item>*{position:relative;z-index:1}
+  @keyframes treeFolderLoading{0%{background-position:-200% 50%}100%{background-position:200% 50%}}
+  .tree-item{display:flex;align-items:center;gap:8px;padding:6px 12px;border-radius:4px;color:#71717a;cursor:pointer;transition:transform .2s cubic-bezier(.4,0,.2,1),background-color .2s,color .2s}
   html.tree-entering .tree-item,.tree-folder.open>.tree-folder-content>.tree-item,.tree-folder.open>.tree-folder-content>.tree-folder>.tree-item{animation:treeItemIn .32s cubic-bezier(.4,0,.2,1) both;animation-delay:calc(var(--tree-index,0) * 35ms)}
-  .tree-folder.loading>.tree-item{background:#ffedd5;color:#c2410c;cursor:progress}
-  .tree-folder.loading>.tree-item::after{content:"";position:absolute;inset:0;z-index:0;pointer-events:none;background:linear-gradient(90deg,transparent,rgba(194,65,12,.12),rgba(194,65,12,.24),rgba(194,65,12,.12),transparent);animation:treeFolderLoading 1.1s cubic-bezier(.4,0,.2,1) infinite}
+  .tree-folder.loading>.tree-item{cursor:progress}
+  .tree-folder.loading>.tree-item .folder-icon,.tree-folder.loading>.tree-item .font-body-md{color:transparent;background:linear-gradient(90deg,#c2410c,#fdba74,#c2410c);background-size:200% 100%;background-clip:text;-webkit-background-clip:text;-webkit-text-fill-color:transparent;animation:treeFolderLoading 1.1s cubic-bezier(.4,0,.2,1) infinite}
   .tree-item:hover{background:#f4f4f5;color:#09090b}
   .tree-item.active{background:#ffedd5;color:#c2410c}
   .tree-link{color:inherit;text-decoration:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -332,7 +331,7 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
     ::view-transition-old(root),::view-transition-new(root){animation:none;mix-blend-mode:normal}
     ::view-transition-image-pair(root){isolation:isolate}
   }
-  @media (prefers-reduced-motion: reduce){.theme-ripple{display:none}html.tree-entering .tree-item,.tree-folder.open>.tree-folder-content>.tree-item,.tree-folder.open>.tree-folder-content>.tree-folder>.tree-item{animation:none!important;animation-delay:0s!important;opacity:1!important;transform:none!important}.tree-folder.loading>.tree-item::after{animation:none!important;transform:none!important}::view-transition-old(root),::view-transition-new(root){animation:none!important}}
+  @media (prefers-reduced-motion: reduce){.theme-ripple{display:none}html.tree-entering .tree-item,.tree-folder.open>.tree-folder-content>.tree-item,.tree-folder.open>.tree-folder-content>.tree-folder>.tree-item{animation:none!important;animation-delay:0s!important;opacity:1!important;transform:none!important}.tree-folder.loading>.tree-item .folder-icon,.tree-folder.loading>.tree-item .font-body-md{animation:none!important;background:none!important;color:#c2410c!important;-webkit-text-fill-color:currentColor!important}html.dark .tree-folder.loading>.tree-item .folder-icon,html.dark .tree-folder.loading>.tree-item .font-body-md{color:#fb923c!important}::view-transition-old(root),::view-transition-new(root){animation:none!important}}
 
   /* ── dark mode (shadcn-style neutral palette) ── */
   html.dark{background:#09090b;color:#fafafa}
@@ -370,8 +369,7 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
   html.dark .tree-item{color:#a1a1aa}
   html.dark .tree-item:hover{background:#18181b;color:#fafafa}
   html.dark .tree-item.active{background:rgba(251,146,60,.16);color:#fb923c}
-  html.dark .tree-folder.loading>.tree-item{background:rgba(251,146,60,.16);color:#fb923c}
-  html.dark .tree-folder.loading>.tree-item::after{background:linear-gradient(90deg,transparent,rgba(251,146,60,.08),rgba(251,146,60,.22),rgba(251,146,60,.08),transparent)}
+  html.dark .tree-folder.loading>.tree-item .folder-icon,html.dark .tree-folder.loading>.tree-item .font-body-md{background:linear-gradient(90deg,#fb923c,#fdba74,#fb923c);background-size:200% 100%;background-clip:text;-webkit-background-clip:text}
   html.dark .active-indicator{background:#fb923c}
   html.dark .tree-size{color:#a1a1aa}
   html.dark .tree-empty{color:#a1a1aa}
