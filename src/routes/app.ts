@@ -247,7 +247,7 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
   .sidebar-divider{padding:8px 12px;font-size:10px;font-weight:600;color:#71717a;text-transform:uppercase;letter-spacing:.05em}
   .sidebar-footer{padding:12px 16px;border-top:1px solid #e4e4e7;margin-top:auto}
   .sidebar-tree{flex:1;padding:0 12px;overflow-y:auto;--sidebar-bg:#fff;scrollbar-width:thin;scrollbar-color:rgba(113,113,122,.45) transparent}
-  .sidebar-tree::-webkit-scrollbar{width:4px}
+  .sidebar-tree::-webkit-scrollbar{width:3px}
   .sidebar-tree::-webkit-scrollbar-track{background:transparent}
   .sidebar-tree::-webkit-scrollbar-thumb{background:rgba(113,113,122,.45);border-radius:999px}
   .sidebar-tree::-webkit-scrollbar-thumb:hover{background:#71717a}
