@@ -288,8 +288,11 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
   .tree-size{color:#71717a;font-size:11px;flex-shrink:0}
   .tree-empty{color:#71717a;padding:6px 12px;font-size:12px}
   .tree-error{color:#b42318;padding:4px 8px;font-size:11px}
-  .caret-icon{transition:transform .3s cubic-bezier(.4,0,.2,1)}
+  .caret-icon{transition:transform .3s cubic-bezier(.4,0,.2,1),translate .15s cubic-bezier(.4,0,.2,1),color .15s}
   .tree-folder.open>.tree-item .caret-icon{transform:rotate(90deg)}
+  .tree-folder>.tree-item .folder-icon{transition:color .15s}
+  .tree-folder>.tree-item:hover .caret-icon,.tree-folder>.tree-item:focus-within .caret-icon{color:#c2410c;translate:2px 0}
+  .tree-folder>.tree-item:hover .folder-icon,.tree-folder>.tree-item:focus-within .folder-icon{color:#c2410c}
   .active-indicator{position:absolute;left:0;width:4px;height:32px;background:#c2410c;transition:transform .3s cubic-bezier(.4,0,.2,1),opacity .2s ease;border-radius:4px;pointer-events:none}
 
   .main{margin-left:var(--sidebar-width);margin-top:56px;height:calc(100vh - 56px);overflow:hidden;background:#fafafa;position:relative;transition:margin-left .3s cubic-bezier(.4,0,.2,1);will-change:margin-left}
@@ -336,6 +339,7 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
   }
   @media (prefers-reduced-motion: reduce){.theme-ripple{display:none}html.tree-entering .tree-item,.tree-folder.open>.tree-folder-content>.tree-item,.tree-folder.open>.tree-folder-content>.tree-folder>.tree-item{animation:none!important;animation-delay:0s!important;opacity:1!important;transform:none!important}.tree-folder.loading>.tree-item .folder-icon,.tree-folder.loading>.tree-item .font-body-md{animation:none!important;background:none!important;color:#c2410c!important;-webkit-text-fill-color:currentColor!important}html.dark .tree-folder.loading>.tree-item .folder-icon,html.dark .tree-folder.loading>.tree-item .font-body-md{color:#fb923c!important}::view-transition-old(root),::view-transition-new(root){animation:none!important}}
   @media (prefers-reduced-motion: reduce){.tree-item[data-path],.tree-item[data-path]>.material-symbols-outlined{transition-property:background-color,color!important}.tree-item[data-path]:hover,.tree-item[data-path]:focus-within{translate:none!important}.tree-item[data-path]:hover>.material-symbols-outlined,.tree-item[data-path]:focus-within>.material-symbols-outlined{transform:none!important}}
+  @media (prefers-reduced-motion: reduce){.tree-folder>.tree-item .caret-icon,.tree-folder>.tree-item .folder-icon{transition-property:color!important}.tree-folder>.tree-item:hover .caret-icon,.tree-folder>.tree-item:focus-within .caret-icon{translate:none!important}}
 
   /* ── dark mode (shadcn-style neutral palette) ── */
   html.dark{background:#09090b;color:#fafafa}
@@ -373,6 +377,7 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
   html.dark .tree-item{color:#a1a1aa}
   html.dark .tree-item:hover{background:#18181b;color:#fafafa}
   html.dark .tree-item[data-path]:hover>.material-symbols-outlined,html.dark .tree-item[data-path]:focus-within>.material-symbols-outlined{color:#fb923c}
+  html.dark .tree-folder>.tree-item:hover .caret-icon,html.dark .tree-folder>.tree-item:focus-within .caret-icon,html.dark .tree-folder>.tree-item:hover .folder-icon,html.dark .tree-folder>.tree-item:focus-within .folder-icon{color:#fb923c}
   html.dark .tree-item.active{background:rgba(251,146,60,.16);color:#fb923c}
   html.dark .tree-folder.loading>.tree-item .folder-icon,html.dark .tree-folder.loading>.tree-item .font-body-md{background:linear-gradient(90deg,#fb923c 0%,#ffedd5 32%,#f97316 55%,#fed7aa 76%,#fb923c 100%);background-size:200% 100%;background-clip:text;-webkit-background-clip:text}
   html.dark .active-indicator{background:#fb923c}
