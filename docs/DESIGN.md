@@ -131,7 +131,7 @@ Purpose: global actions, not navigation depth.
 - Logo uses primary color and stays visually stable across orgs.
 - Right-side actions: share, theme toggle, avatar.
 - Menus open near their trigger and close on outside click.
-- Theme toggle cycles `system → dark → light → system`. The header button uses the selected Icon Morph interaction: old icon scales/fades out, the new Material Symbol scales in with a slight 15° rotation/overshoot. App chrome changes; publisher iframe content does not.
+- Theme toggle cycles `system → dark → light → system`. The selected transition is a radial theme ripple from the theme button. Use View Transitions where available; fall back to a CSS `clip-path: circle()` overlay. The icon may still morph in fallback paths, but the ripple is the primary theme-change feedback. Publisher iframe content is not restyled.
 
 Interaction spec:
 
@@ -140,7 +140,7 @@ Interaction spec:
 | Share button | Primary text, transparent bg | Container hover bg | Share menu visible |
 | Icon buttons | Muted icon | Container hover bg | Icon swaps / menu visible |
 | Sidebar toggle | Muted panel icon | Container hover bg | Icon swaps, sidebar collapses/restores |
-| Theme toggle | Current mode icon (`brightness_auto`, `dark_mode`, `light_mode`) | Container hover bg | Icon morphs to the next selected mode |
+| Theme toggle | Current mode icon (`brightness_auto`, `dark_mode`, `light_mode`) | Container hover bg | Radial theme ripple starts from the button |
 | Avatar | Initials chip | Border/surface emphasis | Avatar menu visible |
 
 ### Sidebar tree
@@ -242,7 +242,7 @@ Rendro's micro-interactions are small and functional. They make state legible.
 | Tree hover | Background/text color transition over `200ms` |
 | Topbar search | Border shifts to primary on focus within `150ms` |
 | Share menu | Opens at trigger, closes on outside click; copy action shows toast |
-| Theme toggle | Tri-state cycle `system → dark → light`; selected Icon Morph swaps icon with scale/opacity/15° rotation |
+| Theme toggle | Tri-state cycle `system → dark → light`; radial ripple expands from button center over ~`520ms`, with CSS overlay fallback and no motion under reduced-motion |
 | Avatar menu | Opens at avatar, shows email and sign-out action |
 | Toast | Bottom-right, fades in/out, no layout movement |
 | Document load | Main-width 3px line sweeps while iframe request is active |
@@ -300,6 +300,7 @@ Dark mode applies to app chrome only.
   The commentor widget is the exception: it follows the parent theme because it is Rendro chrome inside the iframe, not publisher document content.
   Parent shell sends `{ type: "rendro-theme", theme: "system" | "dark" | "light" }` to the iframe; commentor removes both host theme classes for `system` and lets its own `prefers-color-scheme` media query resolve.
   Commentor does not expose its own theme toggle.
+- Theme transition overlay/ripple is allowed only for explicit theme changes. It must be `pointer-events:none`, short-lived, and never reused for document navigation.
 - Do not assume publisher docs have transparent backgrounds.
 - Every app menu, text, border, hover, active, loader, and toast color has a dark variant.
 - Dark mode follows shadcn's neutral/zinc feel: near-black shell (`#09090b`), subtle elevated surfaces (`#18181b`), neutral borders (`#27272a`), muted text (`#a1a1aa`), and high-contrast foreground (`#fafafa`).
@@ -314,6 +315,7 @@ Theme mismatch rule:
 - Respect `prefers-reduced-motion` for loader animation and future transitions.
 - Reduced motion for loader line: static full-width accent line while loading.
 - Focus states must not depend on animation.
+- Reduced motion for theme toggle: no radial ripple, no icon morph; theme switches instantly.
 - Icon-only buttons need `aria-label` or visible text.
 - Loader uses `role="progressbar"` while active and `role="status"` for timeout/error fallback.
 - Sidebar resize uses a focusable `role="separator"` with `aria-orientation="vertical"`, `aria-controls`, `aria-valuemin`, `aria-valuemax`, `aria-valuenow`, and `aria-valuetext`.
@@ -365,7 +367,7 @@ Before merging a UI change:
 7. **No tree loader for doc nav** — Tree selection is optimistic; loading belongs to main/iframe width.
 8. **No iframe opacity fade** — Keep publisher HTML fully opaque during navigation.
 9. **Sidebar shell changes** — Verify pointer resize, keyboard resize, collapse/restore, localStorage persistence, and dark-mode states.
-10. **Theme sync** — Verify header cycle order, system fallback, commentor theme sync, no commentor-local theme button, and reduced-motion fallback.
+10. **Theme sync** — Verify header cycle order, radial ripple or fallback, system fallback, commentor theme sync, no commentor-local theme button, and reduced-motion fallback.
 11. **Cache bust assets** — If `lazy-tree.ts` or `commentor.ts` changes, rebuild assets and bump the relevant script query version.
 12. **Browser-harness proof** — For UI behavior, verify in a real browser, not only by reading source.
 
