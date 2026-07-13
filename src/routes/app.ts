@@ -203,9 +203,12 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
   .sidebar-tree::-webkit-scrollbar-thumb{background:rgba(161,161,170,.35);border-radius:999px}
   .sidebar-tree::-webkit-scrollbar-thumb:hover{background:rgba(113,113,122,.55)}
   .sidebar-footer a:hover{color:#09090b}
-  .sidebar-resizer{--resizer-origin-y:50%;position:fixed;top:56px;bottom:0;left:calc(var(--sidebar-width) - 5px);width:10px;z-index:45;cursor:col-resize;touch-action:none;display:flex;align-items:stretch;justify-content:center;transition:left .3s cubic-bezier(.4,0,.2,1),opacity .2s cubic-bezier(.4,0,.2,1)}
-  .sidebar-resizer::before{content:"";width:2px;height:100%;background:#c2410c;border-radius:999px;opacity:0;transform:scaleY(0);transform-origin:center var(--resizer-origin-y);transition:transform .3s cubic-bezier(.4,0,.2,1),opacity .15s cubic-bezier(.4,0,.2,1),box-shadow .15s cubic-bezier(.4,0,.2,1),width .15s cubic-bezier(.4,0,.2,1)}
+  .sidebar-resizer{--resizer-origin-y:50%;--resizer-spark-a:#facc15;--resizer-spark-b:#fb923c;position:fixed;top:56px;bottom:0;left:calc(var(--sidebar-width) - 5px);width:10px;z-index:45;cursor:col-resize;touch-action:none;display:flex;align-items:stretch;justify-content:center;overflow:visible;transition:left .3s cubic-bezier(.4,0,.2,1),opacity .2s cubic-bezier(.4,0,.2,1)}
+  .sidebar-resizer::before{content:"";width:2px;height:100%;background:#c2410c;border-radius:999px;opacity:0;transform:scaleY(0);transform-origin:center var(--resizer-origin-y);transition:transform .5s cubic-bezier(.4,0,.2,1),opacity .18s cubic-bezier(.4,0,.2,1),box-shadow .18s cubic-bezier(.4,0,.2,1),width .18s cubic-bezier(.4,0,.2,1)}
+  .sidebar-resizer::after{content:"";position:absolute;left:50%;top:var(--resizer-origin-y);width:54px;height:42px;pointer-events:none;opacity:0;transform:translate(-50%,-50%) scale(.45);background:radial-gradient(circle,var(--resizer-spark-a) 0 2px,transparent 3px) 50% 50%/6px 6px no-repeat,radial-gradient(circle,var(--resizer-spark-b) 0 1.5px,transparent 3px) 42% 46%/6px 6px no-repeat,radial-gradient(circle,var(--resizer-spark-a) 0 1.5px,transparent 3px) 58% 54%/6px 6px no-repeat,radial-gradient(circle,var(--resizer-spark-b) 0 1px,transparent 2px) 48% 62%/5px 5px no-repeat,radial-gradient(circle,var(--resizer-spark-a) 0 1px,transparent 2px) 54% 38%/5px 5px no-repeat;filter:drop-shadow(0 0 4px rgba(249,115,22,.65));}
   .sidebar-resizer:hover::before,.sidebar-resizer:focus-visible::before,html.sidebar-resizing .sidebar-resizer::before{width:3px;opacity:1;transform:scaleY(1);box-shadow:0 0 0 3px rgba(194,65,12,.12)}
+  @keyframes resizerSparkBurst{0%{opacity:0;transform:translate(-50%,-50%) scale(.35) rotate(0deg)}18%{opacity:1}100%{opacity:0;transform:translate(-50%,-50%) scale(1.35) rotate(18deg)}}
+  html.sidebar-resizing .sidebar-resizer::after{animation:resizerSparkBurst .52s cubic-bezier(.4,0,.2,1) infinite}
   .sidebar-resizer:focus-visible{outline:0}
   html.sidebar-collapsed .sidebar{opacity:0;pointer-events:none;border-right-width:0}
   html.sidebar-collapsed .sidebar-resizer{opacity:0;pointer-events:none}
@@ -276,7 +279,7 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
   html.dark .doc-loader.error .doc-loader-bar{background:#fca5a5}
   @media (prefers-reduced-motion: reduce){.doc-loader-bar{width:100%;opacity:.65;animation:none}}
   @media (prefers-reduced-motion: reduce){.tree-skeleton-icon,.tree-skeleton-label{animation:none;background:#f4f4f5}}
-  @media (prefers-reduced-motion: reduce){.sidebar,.main,.sidebar-resizer,.sidebar-toggle,.sidebar-toggle .material-symbols-outlined,.sidebar-resizer::before{transition:none}.sidebar-resizer::before{transform:scaleY(1)}}
+  @media (prefers-reduced-motion: reduce){.sidebar,.main,.sidebar-resizer,.sidebar-toggle,.sidebar-toggle .material-symbols-outlined,.sidebar-resizer::before{transition:none}.sidebar-resizer::before{transform:scaleY(1)}.sidebar-resizer::after{display:none}}
   .avatar-wrap{position:relative}
   .avatar-menu{position:absolute;top:42px;right:0;background:#fff;border:1px solid #e4e4e7;border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,.12);padding:4px;min-width:200px;z-index:100}
   .avatar-menu-email{padding:8px 12px;font-size:12px;color:#71717a;border-bottom:1px solid #e4e4e7;margin-bottom:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -321,8 +324,9 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
   html.dark .sidebar-toggle{color:#a1a1aa}
   html.dark .sidebar-toggle:hover{background:#18181b;color:#fafafa}
   html.dark .sidebar-toggle:focus-visible{outline-color:#fb923c}
+  html.dark .sidebar-resizer{--resizer-spark-a:#fed7aa;--resizer-spark-b:#fb923c}
   html.dark .sidebar-resizer::before{background:#fb923c}
-  html.dark .sidebar-resizer:hover::before,html.dark .sidebar-resizer:focus-visible::before,html.sidebar-resizing.dark .sidebar-resizer::before{box-shadow:0 0 0 3px rgba(251,146,60,.16)}
+  html.dark .sidebar-resizer:hover::before,html.dark .sidebar-resizer:focus-visible::before,html.dark.sidebar-resizing .sidebar-resizer::before{box-shadow:0 0 0 3px rgba(251,146,60,.16)}
   html.dark .topbar-btn-icon{color:#a1a1aa}
   html.dark .topbar-btn-icon:hover{background:#18181b;color:#fafafa}
   html.dark .topbar-btn-share{color:#fb923c}
