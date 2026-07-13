@@ -319,7 +319,7 @@ describe("worker auth sign-out", () => {
     vi.unstubAllGlobals();
   });
 
-  it("expires host-only and domain-scoped session, OAuth state, cache, and dev cookies", async () => {
+  it("expires auth cookies and asks the browser to clear site cookies", async () => {
     const upstreamHeaders = new Headers();
     upstreamHeaders.append(
       "set-cookie",
@@ -358,9 +358,7 @@ describe("worker auth sign-out", () => {
     expect(joined).toContain("__Secure-better-auth.state=;");
     expect(joined).toContain("__Secure-better-auth.session_data.0=;");
     expect(joined).toContain("rendro-dev-user=;");
-    expect(joined).toContain("__Secure-better-auth.state=; Max-Age=0; Path=/; HttpOnly; SameSite=Lax; Secure; Domain=.rendro.app");
-    expect(joined).toContain("__Secure-better-auth.session_data.0=; Max-Age=0; Path=/; HttpOnly; SameSite=Lax; Secure; Domain=.rendro.app");
-    expect(joined).toContain("rendro-dev-user=; Max-Age=0; Path=/; SameSite=Lax; Domain=.rendro.app");
+    expect(res.headers.get("clear-site-data")).toBe("\"cookies\"");
     expect(joined).not.toContain("Domain=convex.site");
     expect(calls.some((call) => call.includes("/api/auth/sign-out"))).toBe(true);
   });

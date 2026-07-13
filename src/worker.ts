@@ -113,34 +113,19 @@ function strippedSetCookies(headers: Headers): string[] {
   return values.map((sc) => sc.replace(/;\s*Domain=[^;]+;?/gi, ";"));
 }
 
-function authCookieCleanupDomains(hostname: string): string[] {
-  const parts = hostname.split(".").filter(Boolean);
-  const domains = new Set<string>([hostname, `.${hostname}`]);
-  if (parts.length > 2) {
-    const parent = parts.slice(-2).join(".");
-    domains.add(parent);
-    domains.add(`.${parent}`);
-  }
-  return [...domains];
-}
-
-function appendExpiredCookie(headers: Headers, name: string, domain?: string) {
+function appendExpiredCookie(headers: Headers, name: string) {
   const attributes = name.startsWith("better-auth") || name.startsWith("__Secure-better-auth")
     ? "Max-Age=0; Path=/; HttpOnly; SameSite=Lax"
     : "Max-Age=0; Path=/; SameSite=Lax";
   const secure = name.startsWith("__Secure-") ? "; Secure" : "";
-  const domainAttr = domain ? `; Domain=${domain}` : "";
-  headers.append("Set-Cookie", `${name}=; ${attributes}${secure}${domainAttr}`);
+  headers.append("Set-Cookie", `${name}=; ${attributes}${secure}`);
 }
 
-function appendAuthCookieCleanup(headers: Headers, hostname: string) {
-  const domains = authCookieCleanupDomains(hostname);
+function appendAuthCookieCleanup(headers: Headers) {
+  headers.set("Clear-Site-Data", "\"cookies\"");
   for (const name of AUTH_COOKIE_NAMES) {
     const suffixes = name.includes("session_data") || name.includes("account_data") ? COOKIE_CHUNK_SUFFIXES : [""];
-    for (const suffix of suffixes) {
-      appendExpiredCookie(headers, `${name}${suffix}`);
-      for (const domain of domains) appendExpiredCookie(headers, `${name}${suffix}`, domain);
-    }
+    for (const suffix of suffixes) appendExpiredCookie(headers, `${name}${suffix}`);
   }
 }
 
@@ -170,7 +155,7 @@ app.get("/api/auth/sign-out", async (c) => {
   });
   const headers = new Headers({ Location: "/" });
   for (const sc of strippedSetCookies(upstream.headers)) headers.append("Set-Cookie", sc);
-  appendAuthCookieCleanup(headers, new URL(c.req.url).hostname);
+  appendAuthCookieCleanup(headers);
   return new Response(null, { status: 302, headers });
 });
 
