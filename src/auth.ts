@@ -2,7 +2,7 @@
 
 import { betterAuth } from "better-auth";
 import { memoryAdapter } from "@better-auth/memory-adapter";
-import { GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, BASE_URL } from "./config";
+import { GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, BASE_URL, AUTH_SECRET } from "./config";
 import { logger } from "./logger";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -36,7 +36,7 @@ export async function getAuth(): Promise<AuthInstance> {
     appName: "rendro",
     baseURL: BASE_URL,
     database: memoryAdapter({}),
-    secret: process.env.AUTH_SECRET || "rendro-dev-secret-change-in-production-32chars",
+    secret: AUTH_SECRET,
     socialProviders: {
       google: { clientId: GOOGLE_CLIENT_ID, clientSecret: GOOGLE_CLIENT_SECRET },
     },
