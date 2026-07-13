@@ -205,13 +205,22 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
   .sidebar-footer a:hover{color:#09090b}
   .sidebar-resizer{--resizer-origin-y:50%;--resizer-spark-a:#facc15;--resizer-spark-b:#fb923c;position:fixed;top:56px;bottom:0;left:calc(var(--sidebar-width) - 5px);width:10px;z-index:45;cursor:col-resize;touch-action:none;display:flex;align-items:stretch;justify-content:center;overflow:visible;transition:left .3s cubic-bezier(.4,0,.2,1),opacity .2s cubic-bezier(.4,0,.2,1)}
   .sidebar-resizer::before{content:"";width:2px;height:100%;background:#c2410c;border-radius:999px;opacity:0;transform:scaleY(0);transform-origin:center var(--resizer-origin-y);transition:transform .5s cubic-bezier(.4,0,.2,1),opacity .18s cubic-bezier(.4,0,.2,1),box-shadow .18s cubic-bezier(.4,0,.2,1),width .18s cubic-bezier(.4,0,.2,1)}
-  .resizer-sparks{position:absolute;left:50%;width:3px;height:3px;border-radius:999px;pointer-events:none;opacity:0;background:var(--resizer-spark-a);transform:translateX(-50%);filter:drop-shadow(0 0 5px rgba(249,115,22,.75));box-shadow:0 0 0 0 rgba(250,204,21,0),0 0 0 0 rgba(251,146,60,0),0 0 0 0 rgba(250,204,21,0),0 0 0 0 rgba(251,146,60,0),0 0 0 0 rgba(250,204,21,0),0 0 0 0 rgba(251,146,60,0),0 0 0 0 rgba(250,204,21,0),0 0 0 0 rgba(251,146,60,0)}
+  .resizer-sparks{position:absolute;left:50%;width:3px;height:3px;border-radius:999px;pointer-events:none;opacity:0;background:var(--resizer-spark-a);transform:translateX(-50%);filter:drop-shadow(0 0 5px rgba(249,115,22,.75));box-shadow:0 0 0 0 rgba(250,204,21,0),0 0 0 0 rgba(251,146,60,0),0 0 0 0 rgba(250,204,21,0),0 0 0 0 rgba(251,146,60,0),0 0 0 0 rgba(250,204,21,0),0 0 0 0 rgba(251,146,60,0)}
   .resizer-sparks-top{top:0;transform:translate(-50%,-50%)}
   .resizer-sparks-bottom{bottom:0;transform:translate(-50%,50%)}
   .sidebar-resizer:hover::before,.sidebar-resizer:focus-visible::before,html.sidebar-resizing .sidebar-resizer::before{width:3px;opacity:1;transform:scaleY(1);box-shadow:0 0 0 3px rgba(194,65,12,.12)}
-  @keyframes resizerSparkBurst{0%{opacity:0;box-shadow:0 0 0 0 rgba(250,204,21,0),0 0 0 0 rgba(251,146,60,0),0 0 0 0 rgba(250,204,21,0),0 0 0 0 rgba(251,146,60,0),0 0 0 0 rgba(250,204,21,0),0 0 0 0 rgba(251,146,60,0),0 0 0 0 rgba(250,204,21,0),0 0 0 0 rgba(251,146,60,0)}16%{opacity:1;box-shadow:-6px -3px 0 0 var(--resizer-spark-a),7px 4px 0 0 var(--resizer-spark-b),-4px 7px 0 0 var(--resizer-spark-b),5px -8px 0 0 var(--resizer-spark-a),-8px 2px 0 0 var(--resizer-spark-a),9px -2px 0 0 var(--resizer-spark-b),-3px -9px 0 0 var(--resizer-spark-b),4px 9px 0 0 var(--resizer-spark-a)}100%{opacity:0;box-shadow:-34px -20px 0 0 rgba(250,204,21,0),36px 22px 0 0 rgba(251,146,60,0),-28px 34px 0 0 rgba(251,146,60,0),30px -36px 0 0 rgba(250,204,21,0),-42px 8px 0 0 rgba(250,204,21,0),44px -10px 0 0 rgba(251,146,60,0),-18px -42px 0 0 rgba(251,146,60,0),20px 44px 0 0 rgba(250,204,21,0)}}
-  .sidebar-resizer.resizer-impact-sparks .resizer-sparks{animation:resizerSparkBurst .42s cubic-bezier(.4,0,.2,1) .46s 1 both}
-  html.sidebar-resizing-moving .sidebar-resizer .resizer-sparks{animation:resizerSparkBurst .42s cubic-bezier(.4,0,.2,1) infinite}
+  @keyframes resizerImpactTop{0%{opacity:0;box-shadow:0 0 0 0 rgba(250,204,21,0),0 0 0 0 rgba(251,146,60,0),0 0 0 0 rgba(250,204,21,0),0 0 0 0 rgba(251,146,60,0),0 0 0 0 rgba(250,204,21,0),0 0 0 0 rgba(251,146,60,0)}18%{opacity:1;box-shadow:-4px 3px 0 0 var(--resizer-spark-a),5px 4px 0 0 var(--resizer-spark-b),-2px 7px 0 0 var(--resizer-spark-b),3px 9px 0 0 var(--resizer-spark-a),-6px 1px 0 0 var(--resizer-spark-a),7px 2px 0 0 var(--resizer-spark-b)}100%{opacity:0;box-shadow:-24px 22px 0 0 rgba(250,204,21,0),26px 24px 0 0 rgba(251,146,60,0),-14px 42px 0 0 rgba(251,146,60,0),16px 48px 0 0 rgba(250,204,21,0),-34px 10px 0 0 rgba(250,204,21,0),36px 12px 0 0 rgba(251,146,60,0)}}
+  @keyframes resizerImpactBottom{0%{opacity:0;box-shadow:0 0 0 0 rgba(250,204,21,0),0 0 0 0 rgba(251,146,60,0),0 0 0 0 rgba(250,204,21,0),0 0 0 0 rgba(251,146,60,0),0 0 0 0 rgba(250,204,21,0),0 0 0 0 rgba(251,146,60,0)}18%{opacity:1;box-shadow:-4px -3px 0 0 var(--resizer-spark-a),5px -4px 0 0 var(--resizer-spark-b),-2px -7px 0 0 var(--resizer-spark-b),3px -9px 0 0 var(--resizer-spark-a),-6px -1px 0 0 var(--resizer-spark-a),7px -2px 0 0 var(--resizer-spark-b)}100%{opacity:0;box-shadow:-24px -22px 0 0 rgba(250,204,21,0),26px -24px 0 0 rgba(251,146,60,0),-14px -42px 0 0 rgba(251,146,60,0),16px -48px 0 0 rgba(250,204,21,0),-34px -10px 0 0 rgba(250,204,21,0),36px -12px 0 0 rgba(251,146,60,0)}}
+  @keyframes resizerTopTrailLeft{0%{opacity:0;box-shadow:0 0 0 0 rgba(250,204,21,0),0 0 0 0 rgba(251,146,60,0),0 0 0 0 rgba(250,204,21,0),0 0 0 0 rgba(251,146,60,0),0 0 0 0 rgba(250,204,21,0),0 0 0 0 rgba(251,146,60,0)}12%{opacity:1;box-shadow:-5px 2px 0 0 var(--resizer-spark-a),-7px 5px 0 0 var(--resizer-spark-b),-4px 8px 0 0 var(--resizer-spark-a),-9px 10px 0 0 var(--resizer-spark-b),-3px 13px 0 0 var(--resizer-spark-a),-11px 15px 0 0 var(--resizer-spark-b)}100%{opacity:0;box-shadow:-52px 10px 0 0 rgba(250,204,21,0),-62px 20px 0 0 rgba(251,146,60,0),-42px 32px 0 0 rgba(250,204,21,0),-70px 42px 0 0 rgba(251,146,60,0),-34px 54px 0 0 rgba(250,204,21,0),-76px 64px 0 0 rgba(251,146,60,0)}}
+  @keyframes resizerBottomTrailLeft{0%{opacity:0;box-shadow:0 0 0 0 rgba(250,204,21,0),0 0 0 0 rgba(251,146,60,0),0 0 0 0 rgba(250,204,21,0),0 0 0 0 rgba(251,146,60,0),0 0 0 0 rgba(250,204,21,0),0 0 0 0 rgba(251,146,60,0)}12%{opacity:1;box-shadow:-5px -2px 0 0 var(--resizer-spark-a),-7px -5px 0 0 var(--resizer-spark-b),-4px -8px 0 0 var(--resizer-spark-a),-9px -10px 0 0 var(--resizer-spark-b),-3px -13px 0 0 var(--resizer-spark-a),-11px -15px 0 0 var(--resizer-spark-b)}100%{opacity:0;box-shadow:-52px -10px 0 0 rgba(250,204,21,0),-62px -20px 0 0 rgba(251,146,60,0),-42px -32px 0 0 rgba(250,204,21,0),-70px -42px 0 0 rgba(251,146,60,0),-34px -54px 0 0 rgba(250,204,21,0),-76px -64px 0 0 rgba(251,146,60,0)}}
+  @keyframes resizerTopTrailRight{0%{opacity:0;box-shadow:0 0 0 0 rgba(250,204,21,0),0 0 0 0 rgba(251,146,60,0),0 0 0 0 rgba(250,204,21,0),0 0 0 0 rgba(251,146,60,0),0 0 0 0 rgba(250,204,21,0),0 0 0 0 rgba(251,146,60,0)}12%{opacity:1;box-shadow:5px 2px 0 0 var(--resizer-spark-a),7px 5px 0 0 var(--resizer-spark-b),4px 8px 0 0 var(--resizer-spark-a),9px 10px 0 0 var(--resizer-spark-b),3px 13px 0 0 var(--resizer-spark-a),11px 15px 0 0 var(--resizer-spark-b)}100%{opacity:0;box-shadow:52px 10px 0 0 rgba(250,204,21,0),62px 20px 0 0 rgba(251,146,60,0),42px 32px 0 0 rgba(250,204,21,0),70px 42px 0 0 rgba(251,146,60,0),34px 54px 0 0 rgba(250,204,21,0),76px 64px 0 0 rgba(251,146,60,0)}}
+  @keyframes resizerBottomTrailRight{0%{opacity:0;box-shadow:0 0 0 0 rgba(250,204,21,0),0 0 0 0 rgba(251,146,60,0),0 0 0 0 rgba(250,204,21,0),0 0 0 0 rgba(251,146,60,0),0 0 0 0 rgba(250,204,21,0),0 0 0 0 rgba(251,146,60,0)}12%{opacity:1;box-shadow:5px -2px 0 0 var(--resizer-spark-a),7px -5px 0 0 var(--resizer-spark-b),4px -8px 0 0 var(--resizer-spark-a),9px -10px 0 0 var(--resizer-spark-b),3px -13px 0 0 var(--resizer-spark-a),11px -15px 0 0 var(--resizer-spark-b)}100%{opacity:0;box-shadow:52px -10px 0 0 rgba(250,204,21,0),62px -20px 0 0 rgba(251,146,60,0),42px -32px 0 0 rgba(250,204,21,0),70px -42px 0 0 rgba(251,146,60,0),34px -54px 0 0 rgba(250,204,21,0),76px -64px 0 0 rgba(251,146,60,0)}}
+  .sidebar-resizer.resizer-impact-sparks .resizer-sparks-top{animation:resizerImpactTop .42s cubic-bezier(.4,0,.2,1) .46s 1 both}
+  .sidebar-resizer.resizer-impact-sparks .resizer-sparks-bottom{animation:resizerImpactBottom .42s cubic-bezier(.4,0,.2,1) .46s 1 both}
+  html.sidebar-resizing-moving.sidebar-resizing-trail-left .sidebar-resizer .resizer-sparks-top{animation:resizerTopTrailLeft .36s cubic-bezier(.2,0,.2,1) infinite}
+  html.sidebar-resizing-moving.sidebar-resizing-trail-left .sidebar-resizer .resizer-sparks-bottom{animation:resizerBottomTrailLeft .36s cubic-bezier(.2,0,.2,1) infinite}
+  html.sidebar-resizing-moving.sidebar-resizing-trail-right .sidebar-resizer .resizer-sparks-top{animation:resizerTopTrailRight .36s cubic-bezier(.2,0,.2,1) infinite}
+  html.sidebar-resizing-moving.sidebar-resizing-trail-right .sidebar-resizer .resizer-sparks-bottom{animation:resizerBottomTrailRight .36s cubic-bezier(.2,0,.2,1) infinite}
   .sidebar-resizer:focus-visible{outline:0}
   html.sidebar-collapsed .sidebar{opacity:0;pointer-events:none;border-right-width:0}
   html.sidebar-collapsed .sidebar-resizer{opacity:0;pointer-events:none}
@@ -583,20 +592,36 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
       if(impactSparkTimer!==undefined)window.clearTimeout(impactSparkTimer);
       impactSparkTimer=window.setTimeout(function(){resizer.classList.remove("resizer-impact-sparks");},1000);
     }
-    function markResizeMoving(){
+    var lastResizeX=0;
+    function stopResizeMoving(){
+      root.classList.remove("sidebar-resizing-moving");
+      root.classList.remove("sidebar-resizing-trail-left");
+      root.classList.remove("sidebar-resizing-trail-right");
+    }
+    function markResizeMoving(deltaX){
+      if(Math.abs(deltaX)<1)return;
       root.classList.add("sidebar-resizing-moving");
+      root.classList.toggle("sidebar-resizing-trail-left",deltaX>0);
+      root.classList.toggle("sidebar-resizing-trail-right",deltaX<0);
       if(moveSparkTimer!==undefined)window.clearTimeout(moveSparkTimer);
-      moveSparkTimer=window.setTimeout(function(){root.classList.remove("sidebar-resizing-moving");},120);
+      moveSparkTimer=window.setTimeout(stopResizeMoving,120);
     }
     resizer.addEventListener("pointerenter",function(e){updateResizerOrigin(e);triggerImpactSparks();});
     resizer.addEventListener("pointermove",function(e){
       updateResizerOrigin(e);
-      if(dragging){setSidebarWidth(e.clientX,false);markResizeMoving();}
+      if(dragging){
+        var deltaX=e.clientX-lastResizeX;
+        setSidebarWidth(e.clientX,false);
+        markResizeMoving(deltaX);
+        lastResizeX=e.clientX;
+      }
     });
     resizer.addEventListener("pointerdown",function(e){
       if(root.classList.contains("sidebar-collapsed"))return;
       updateResizerOrigin(e);
       resizer.classList.remove("resizer-impact-sparks");
+      lastResizeX=e.clientX;
+      stopResizeMoving();
       dragging=true;
       root.classList.add("sidebar-resizing");
       resizer.setPointerCapture(e.pointerId);
@@ -606,7 +631,7 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
       if(!dragging)return;
       dragging=false;
       root.classList.remove("sidebar-resizing");
-      root.classList.remove("sidebar-resizing-moving");
+      stopResizeMoving();
       if(moveSparkTimer!==undefined)window.clearTimeout(moveSparkTimer);
       setSidebarWidth(expandedWidth,true);
       try{resizer.releasePointerCapture(e.pointerId)}catch(_){}
