@@ -6,9 +6,28 @@ import { validateApiKey } from "@/api-keys";
 import { markDeleted, isDeleted, unmarkDeleted, filterDeleted } from "@/soft-delete";
 import { emailToOrgSlug } from "@/orgs";
 import type { User } from "better-auth/types";
+import { createShareUrl, isShareableDocKey } from "@/share-links";
 import { logger } from "@/logger";
 
 const app = new Hono<{ Variables: { user?: User } }>();
+
+// GET /api/share/create?key=:org/:path — create a signed public document URL.
+app.get("/api/share/create", async (c) => {
+  const user = c.get("user");
+  if (!user) return c.text("Sign in first", 401);
+  const org = emailToOrgSlug(user.email);
+  if (!org) return c.text("Invalid email", 400);
+
+  const key = c.req.query("key");
+  if (!key) return c.text("Missing key", 400);
+  if (!key.startsWith(`${org}/`) || !isShareableDocKey(key)) {
+    return c.text("Forbidden", 403);
+  }
+  if (await isDeleted(key)) return c.text("Not found", 404);
+  if (!(await headObject(key))) return c.text("Not found", 404);
+
+  return c.json({ url: createShareUrl(new URL(c.req.url).origin, key) });
+});
 
 // GET /files/:key{.+} — stream a file (session-based auth)
 app.get("/files/:key{.+}", async (c) => {
