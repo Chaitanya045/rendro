@@ -205,10 +205,13 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
   .sidebar-footer a:hover{color:#09090b}
   .sidebar-resizer{--resizer-origin-y:50%;--resizer-spark-a:#facc15;--resizer-spark-b:#fb923c;position:fixed;top:56px;bottom:0;left:calc(var(--sidebar-width) - 5px);width:10px;z-index:45;cursor:col-resize;touch-action:none;display:flex;align-items:stretch;justify-content:center;overflow:visible;transition:left .3s cubic-bezier(.4,0,.2,1),opacity .2s cubic-bezier(.4,0,.2,1)}
   .sidebar-resizer::before{content:"";width:2px;height:100%;background:#c2410c;border-radius:999px;opacity:0;transform:scaleY(0);transform-origin:center var(--resizer-origin-y);transition:transform .5s cubic-bezier(.4,0,.2,1),opacity .18s cubic-bezier(.4,0,.2,1),box-shadow .18s cubic-bezier(.4,0,.2,1),width .18s cubic-bezier(.4,0,.2,1)}
-  .sidebar-resizer::after{content:"";position:absolute;left:50%;top:var(--resizer-origin-y);width:3px;height:3px;border-radius:999px;pointer-events:none;opacity:0;background:var(--resizer-spark-a);transform:translate(-50%,-50%);filter:drop-shadow(0 0 5px rgba(249,115,22,.75));box-shadow:0 0 0 0 rgba(250,204,21,0),0 0 0 0 rgba(251,146,60,0),0 0 0 0 rgba(250,204,21,0),0 0 0 0 rgba(251,146,60,0),0 0 0 0 rgba(250,204,21,0),0 0 0 0 rgba(251,146,60,0),0 0 0 0 rgba(250,204,21,0),0 0 0 0 rgba(251,146,60,0)}
+  .resizer-sparks{position:absolute;left:50%;width:3px;height:3px;border-radius:999px;pointer-events:none;opacity:0;background:var(--resizer-spark-a);transform:translateX(-50%);filter:drop-shadow(0 0 5px rgba(249,115,22,.75));box-shadow:0 0 0 0 rgba(250,204,21,0),0 0 0 0 rgba(251,146,60,0),0 0 0 0 rgba(250,204,21,0),0 0 0 0 rgba(251,146,60,0),0 0 0 0 rgba(250,204,21,0),0 0 0 0 rgba(251,146,60,0),0 0 0 0 rgba(250,204,21,0),0 0 0 0 rgba(251,146,60,0)}
+  .resizer-sparks-top{top:0;transform:translate(-50%,-50%)}
+  .resizer-sparks-bottom{bottom:0;transform:translate(-50%,50%)}
   .sidebar-resizer:hover::before,.sidebar-resizer:focus-visible::before,html.sidebar-resizing .sidebar-resizer::before{width:3px;opacity:1;transform:scaleY(1);box-shadow:0 0 0 3px rgba(194,65,12,.12)}
   @keyframes resizerSparkBurst{0%{opacity:0;box-shadow:0 0 0 0 rgba(250,204,21,0),0 0 0 0 rgba(251,146,60,0),0 0 0 0 rgba(250,204,21,0),0 0 0 0 rgba(251,146,60,0),0 0 0 0 rgba(250,204,21,0),0 0 0 0 rgba(251,146,60,0),0 0 0 0 rgba(250,204,21,0),0 0 0 0 rgba(251,146,60,0)}16%{opacity:1;box-shadow:-6px -3px 0 0 var(--resizer-spark-a),7px 4px 0 0 var(--resizer-spark-b),-4px 7px 0 0 var(--resizer-spark-b),5px -8px 0 0 var(--resizer-spark-a),-8px 2px 0 0 var(--resizer-spark-a),9px -2px 0 0 var(--resizer-spark-b),-3px -9px 0 0 var(--resizer-spark-b),4px 9px 0 0 var(--resizer-spark-a)}100%{opacity:0;box-shadow:-34px -20px 0 0 rgba(250,204,21,0),36px 22px 0 0 rgba(251,146,60,0),-28px 34px 0 0 rgba(251,146,60,0),30px -36px 0 0 rgba(250,204,21,0),-42px 8px 0 0 rgba(250,204,21,0),44px -10px 0 0 rgba(251,146,60,0),-18px -42px 0 0 rgba(251,146,60,0),20px 44px 0 0 rgba(250,204,21,0)}}
-  html.sidebar-resizing .sidebar-resizer::after{animation:resizerSparkBurst .52s cubic-bezier(.4,0,.2,1) infinite}
+  .sidebar-resizer.resizer-impact-sparks .resizer-sparks{animation:resizerSparkBurst .42s cubic-bezier(.4,0,.2,1) .46s 1 both}
+  html.sidebar-resizing-moving .sidebar-resizer .resizer-sparks{animation:resizerSparkBurst .42s cubic-bezier(.4,0,.2,1) infinite}
   .sidebar-resizer:focus-visible{outline:0}
   html.sidebar-collapsed .sidebar{opacity:0;pointer-events:none;border-right-width:0}
   html.sidebar-collapsed .sidebar-resizer{opacity:0;pointer-events:none}
@@ -279,7 +282,7 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
   html.dark .doc-loader.error .doc-loader-bar{background:#fca5a5}
   @media (prefers-reduced-motion: reduce){.doc-loader-bar{width:100%;opacity:.65;animation:none}}
   @media (prefers-reduced-motion: reduce){.tree-skeleton-icon,.tree-skeleton-label{animation:none;background:#f4f4f5}}
-  @media (prefers-reduced-motion: reduce){.sidebar,.main,.sidebar-resizer,.sidebar-toggle,.sidebar-toggle .material-symbols-outlined,.sidebar-resizer::before{transition:none}.sidebar-resizer::before{transform:scaleY(1)}.sidebar-resizer::after{display:none}}
+  @media (prefers-reduced-motion: reduce){.sidebar,.main,.sidebar-resizer,.sidebar-toggle,.sidebar-toggle .material-symbols-outlined,.sidebar-resizer::before{transition:none}.sidebar-resizer::before{transform:scaleY(1)}.resizer-sparks{display:none}}
   .avatar-wrap{position:relative}
   .avatar-menu{position:absolute;top:42px;right:0;background:#fff;border:1px solid #e4e4e7;border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,.12);padding:4px;min-width:200px;z-index:100}
   .avatar-menu-email{padding:8px 12px;font-size:12px;color:#71717a;border-bottom:1px solid #e4e4e7;margin-bottom:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -413,7 +416,7 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
     </div>
   </div>
 </aside>
-<div class="sidebar-resizer" id="sidebar-resizer" role="separator" aria-orientation="vertical" aria-controls="doc-sidebar" aria-label="Resize document tree" aria-valuemin="220" aria-valuemax="420" aria-valuenow="280" aria-valuetext="Document tree 280 pixels wide" tabindex="0"></div>
+<div class="sidebar-resizer" id="sidebar-resizer" role="separator" aria-orientation="vertical" aria-controls="doc-sidebar" aria-label="Resize document tree" aria-valuemin="220" aria-valuemax="420" aria-valuenow="280" aria-valuetext="Document tree 280 pixels wide" tabindex="0"><span class="resizer-sparks resizer-sparks-top" aria-hidden="true"></span><span class="resizer-sparks resizer-sparks-bottom" aria-hidden="true"></span></div>
 
 <main class="main">
   <div class="doc-loader" id="doc-loader" style="display:none" role="progressbar" aria-label="Loading document"><div class="doc-loader-bar"></div></div>
@@ -565,19 +568,35 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
   if(toggle)toggle.addEventListener("click",function(){setSidebarCollapsed(!root.classList.contains("sidebar-collapsed"));});
   if(resizer){
     var dragging=false;
+    var impactSparkTimer;
+    var moveSparkTimer;
     function updateResizerOrigin(e){
       var rect=resizer.getBoundingClientRect();
       var y=Math.max(0,Math.min(rect.height,e.clientY-rect.top));
       resizer.style.setProperty("--resizer-origin-y",y+"px");
     }
-    resizer.addEventListener("pointerenter",updateResizerOrigin);
+    function triggerImpactSparks(){
+      if(root.classList.contains("sidebar-collapsed")||dragging)return;
+      resizer.classList.remove("resizer-impact-sparks");
+      resizer.offsetWidth;
+      resizer.classList.add("resizer-impact-sparks");
+      if(impactSparkTimer!==undefined)window.clearTimeout(impactSparkTimer);
+      impactSparkTimer=window.setTimeout(function(){resizer.classList.remove("resizer-impact-sparks");},1000);
+    }
+    function markResizeMoving(){
+      root.classList.add("sidebar-resizing-moving");
+      if(moveSparkTimer!==undefined)window.clearTimeout(moveSparkTimer);
+      moveSparkTimer=window.setTimeout(function(){root.classList.remove("sidebar-resizing-moving");},120);
+    }
+    resizer.addEventListener("pointerenter",function(e){updateResizerOrigin(e);triggerImpactSparks();});
     resizer.addEventListener("pointermove",function(e){
       updateResizerOrigin(e);
-      if(dragging)setSidebarWidth(e.clientX,false);
+      if(dragging){setSidebarWidth(e.clientX,false);markResizeMoving();}
     });
     resizer.addEventListener("pointerdown",function(e){
       if(root.classList.contains("sidebar-collapsed"))return;
       updateResizerOrigin(e);
+      resizer.classList.remove("resizer-impact-sparks");
       dragging=true;
       root.classList.add("sidebar-resizing");
       resizer.setPointerCapture(e.pointerId);
@@ -587,6 +606,8 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
       if(!dragging)return;
       dragging=false;
       root.classList.remove("sidebar-resizing");
+      root.classList.remove("sidebar-resizing-moving");
+      if(moveSparkTimer!==undefined)window.clearTimeout(moveSparkTimer);
       setSidebarWidth(expandedWidth,true);
       try{resizer.releasePointerCapture(e.pointerId)}catch(_){}
     }
