@@ -161,6 +161,8 @@ Request
   │   ├─ /api/auth/sign-out → sign-out handler
   │   ├─ /api/auth/* → Convex proxy
   │   ├─ / → app routes
+  │   ├─ /docs/:org → app shell with tree only
+  │   ├─ /docs/:org/:path* → app shell with selected document
   │   ├─ /files/* → doc streaming
   │   ├─ /api/sync/* → sync API
   │   ├─ /api/tree/* → tree API
@@ -270,8 +272,9 @@ Client (lazy-tree.js, 8KB IIFE)
   │   │   └─ Not loaded? → GET /api/tree/:org?prefix=...
   │   │       └─ Render children + Load more button if truncated
   │   ├─ File click → loadDoc(path, pushState)
-  │   │   ├─ Set iframe.src = /files/path
-  │   │   └─ updateIndicator + history.pushState
+  │   │   ├─ Set iframe.src = /files/:org/:path
+  │   │   ├─ updateIndicator
+  │   │   └─ history.pushState to /docs/:org/:path
   │   └─ Load more click → next page
   │
   ├─ navigateToDoc(relPath)
@@ -282,8 +285,9 @@ Client (lazy-tree.js, 8KB IIFE)
   │   ├─ doc-navigate → loadDoc(path, pushState)
   │   └─ doc-loaded → syncActiveState(path)
   │
-  └─ popstate listener
-      └─ loadDoc(docPath, pushState=false)
+  └─ popstate / initial URL
+      ├─ /docs/:org/:path → window.RENDRO_INITIAL_DOC or path parse → loadDoc(path)
+      └─ legacy ?doc=... → history.replaceState(/docs/:org/:path) → loadDoc(path)
 ```
 
 ### Sticky Headers (CSS)
@@ -340,6 +344,19 @@ The anchor uniquely identifies text within a document, surviving minor edits.
 ---
 
 ## Deployment
+
+### URL Scheme
+
+| Purpose | URL |
+|---|---|
+| App shell, tree only | `/docs/:org` |
+| App shell, selected document | `/docs/:org/:path*` |
+| Iframe document stream | `/files/:org/:path*` |
+| Legacy selected doc | `/?doc=:org/:path` redirects in-place to `/docs/:org/:path` |
+
+The server injects `window.RENDRO_INITIAL_DOC` into the app shell for `/docs/:org/:path*`. `lazy-tree.ts` also parses `/docs/...` directly so back/forward navigation and static reloads restore the selected document.
+
+Local development can still enter through `?dev_user=email` once. Session middleware persists that value as the `rendro-dev-user` cookie, then lazy-tree removes `dev_user` from visible URLs and iframe requests rely on the cookie.
 
 ### Production URLs
 

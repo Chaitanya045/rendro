@@ -269,6 +269,35 @@ describe("session middleware", () => {
     expect(body!.email).toBe("alice@acme-corp.com");
   });
 
+  it("sets user and dev cookie from dev_user query in development", async () => {
+    process.env.NODE_ENV = "development";
+    const app = new Hono<{ Variables: { user?: User } }>();
+    app.use("*", sessionMiddleware);
+    app.get("/me", (c) => c.json(c.get("user") ?? null));
+
+    const first = await app.request("/me?dev_user=carol%40acme-corp.com");
+    const firstBody = (await first.json()) as { email: string } | null;
+    expect(firstBody?.email).toBe("carol@acme-corp.com");
+    const setCookie = first.headers.get("set-cookie");
+    expect(setCookie).toContain("rendro-dev-user=carol%40acme-corp.com");
+
+    const second = await app.request("/me", { headers: { cookie: setCookie ?? "" } });
+    const secondBody = (await second.json()) as { email: string } | null;
+    expect(secondBody?.email).toBe("carol@acme-corp.com");
+  });
+
+  it("sets user from rendro-dev-user cookie in development", async () => {
+    process.env.NODE_ENV = "development";
+    const app = new Hono<{ Variables: { user?: User } }>();
+    app.use("*", sessionMiddleware);
+    app.get("/me", (c) => c.json(c.get("user") ?? null));
+
+    const res = await app.request("/me", { headers: { cookie: "rendro-dev-user=bob%40acme-corp.com" } });
+    const body = (await res.json()) as { email: string } | null;
+    expect(body).toBeTruthy();
+    expect(body!.email).toBe("bob@acme-corp.com");
+  });
+
   it("leaves user null when no session and no dev header", async () => {
     process.env.NODE_ENV = "development";
     const app = new Hono<{ Variables: { user?: User } }>();

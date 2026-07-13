@@ -165,6 +165,13 @@ Tree behavior rules:
 - Do not delay active state until iframe load. Selection is a navigation acknowledgment.
 - Cross-doc links inside iframe post navigation messages; the tree expands ancestors and syncs active state.
 
+URL rules:
+- Canonical selected-document URLs are `/docs/:org/:path*`. The path includes the org slug plus the stored document key.
+- Tree-only app shell URLs are `/docs/:org`.
+- Legacy `?doc=:org/:path` links are upgraded with `history.replaceState` before loading the document.
+- Publisher HTML still streams inside the iframe from `/files/:org/:path*`; app-shell URLs and iframe stream URLs are separate ownership boundaries.
+- Local-only `?dev_user=email` is a one-time bootstrap for the `rendro-dev-user` cookie. Do not propagate it into document URLs or iframe URLs.
+
 State table:
 
 | State | Visual | Trigger |

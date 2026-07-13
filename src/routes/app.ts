@@ -46,6 +46,28 @@ app.get("/", async (c) => {
   }
 });
 
+app.get("/docs/:org", async (c) => {
+  const user = c.get("user");
+  if (!user) return c.html(renderSignIn());
+  const org = emailToOrgSlug(user.email);
+  if (!org || c.req.param("org") !== org) return c.text("Not found", 404);
+  if (await orgExists(org)) return c.html(await renderOrgDocs(user, org));
+  return c.html(renderCreateOrg(user, org));
+});
+
+app.get("/docs/:key{.+}", async (c) => {
+  const user = c.get("user");
+  if (!user) return c.html(renderSignIn());
+  const org = emailToOrgSlug(user.email);
+  if (!org) return c.html(renderEmailUnsupported(user));
+  const rawKey = c.req.param("key");
+  const selectedDoc = decodeURIComponent(rawKey);
+  if (selectedDoc === org) return c.html(await renderOrgDocs(user, org));
+  if (!selectedDoc.startsWith(`${org}/`)) return c.text("Not found", 404);
+  if (await orgExists(org)) return c.html(await renderOrgDocs(user, org, selectedDoc));
+  return c.html(renderCreateOrg(user, org));
+});
+
 /**
  * GET /api/auth/me — current user info (handy for client-side checks)
  */
@@ -161,16 +183,16 @@ function renderCreateOrg(user: User, org: string): string {
 }
 
 
-async function renderOrgDocs(user: User, org: string): Promise<string> {
+async function renderOrgDocs(user: User, org: string, selectedDoc = ""): Promise<string> {
   const { entries } = await listImmediate(`${org}/`);
   const deleted = await Promise.all(entries.map(e => isDeleted(e.key)));
   const active = entries.filter((_, i) => !deleted[i]);
   const tree = buildTree(active, `${org}/`);
   logOrgAccess(org, user.email, "view");
-  return renderOrgTreePage(user, org, tree);
+  return renderOrgTreePage(user, org, tree, selectedDoc);
 }
 
-function renderOrgTreePage(user: User, org: string, tree: DocTree[]): string {
+function renderOrgTreePage(user: User, org: string, tree: DocTree[], selectedDoc = ""): string {
   const email = escapeHtml(user.email);
   const orgEsc = escapeHtml(org);
   const initials = (user.name || email).split(/[@\s]/)[0].slice(0, 2).toUpperCase();
@@ -584,7 +606,8 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
   document.addEventListener("click",function(){var m=document.getElementById("avatar-menu");if(m)m.style.display="none";var s=document.getElementById("share-menu");if(s)s.style.display="none";});
 })();
 </script>
-<script src="/lazy-tree.js?v=19"></script>
+<script>window.RENDRO_INITIAL_DOC=${JSON.stringify(selectedDoc)};</script>
+<script src="/lazy-tree.js?v=20"></script>
 </body>
 </html>`;
 }
