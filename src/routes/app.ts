@@ -249,11 +249,18 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
 
   @keyframes treeSkeletonShimmer{0%{background-position:100% 0}100%{background-position:-100% 0}}
   .tree-skeleton{padding:2px 0}
-  .tree-skeleton-row{height:32px;margin:2px 12px;border-radius:6px;background:linear-gradient(90deg,#f4f4f5 25%,#ffedd5 45%,#f4f4f5 65%);background-size:200% 100%;animation:treeSkeletonShimmer 1.1s cubic-bezier(.4,0,.2,1) infinite}
-  .tree-skeleton-row:nth-child(2){width:78%;animation-delay:.08s}
-  .tree-skeleton-row:nth-child(3){width:88%;animation-delay:.16s}
-  .tree-skeleton-row:nth-child(4){width:70%;animation-delay:.24s}
-  .tree-skeleton-row:nth-child(5){width:82%;animation-delay:.32s}
+  .tree-skeleton-node{margin-top:2px}
+  .tree-skeleton-item{height:32px;display:flex;align-items:center;gap:8px;padding:6px 12px;border-radius:4px;box-sizing:border-box}
+  .tree-skeleton-children{margin-left:16px;padding-left:8px;border-left:1px solid rgba(212,212,216,.3);display:flex;flex-direction:column;gap:2px}
+  .tree-skeleton-icon,.tree-skeleton-label{display:block;flex-shrink:0;background:linear-gradient(90deg,#f4f4f5 25%,#ffedd5 45%,#f4f4f5 65%);background-size:200% 100%;animation:treeSkeletonShimmer 1.1s cubic-bezier(.4,0,.2,1) infinite}
+  .tree-skeleton-icon{width:18px;height:18px;border-radius:4px}
+  .tree-skeleton-caret{width:18px;height:18px;clip-path:polygon(35% 20%,75% 50%,35% 80%)}
+  .tree-skeleton-label{height:12px;border-radius:999px;min-width:0}
+  .tree-skeleton-label.w-sm{width:42%}
+  .tree-skeleton-label.w-md{width:58%}
+  .tree-skeleton-label.w-lg{width:72%}
+  .tree-skeleton-item:nth-child(2n) .tree-skeleton-icon,.tree-skeleton-item:nth-child(2n) .tree-skeleton-label{animation-delay:.08s}
+  .tree-skeleton-node:nth-child(2) .tree-skeleton-icon,.tree-skeleton-node:nth-child(2) .tree-skeleton-label{animation-delay:.16s}
   .main{margin-left:var(--sidebar-width);margin-top:56px;height:calc(100vh - 56px);overflow:hidden;background:#fafafa;position:relative;transition:margin-left .3s cubic-bezier(.4,0,.2,1);will-change:margin-left}
   .main-placeholder{display:flex;align-items:center;justify-content:center;height:100%;flex-direction:column;text-align:center;padding:3rem}
   .main-placeholder h2{font-size:24px;font-weight:600;color:#09090b;margin-bottom:8px}
@@ -268,7 +275,7 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
   html.dark .doc-loader-bar{width:46%;background:linear-gradient(90deg,transparent,#fdba74,#fb923c,#fdba74,transparent);box-shadow:0 0 6px rgba(251,146,60,.5)}
   html.dark .doc-loader.error .doc-loader-bar{background:#fca5a5}
   @media (prefers-reduced-motion: reduce){.doc-loader-bar{width:100%;opacity:.65;animation:none}}
-  @media (prefers-reduced-motion: reduce){.tree-skeleton-row{animation:none;background:#f4f4f5}}
+  @media (prefers-reduced-motion: reduce){.tree-skeleton-icon,.tree-skeleton-label{animation:none;background:#f4f4f5}}
   @media (prefers-reduced-motion: reduce){.sidebar,.main,.sidebar-resizer,.sidebar-toggle,.sidebar-toggle .material-symbols-outlined{transition:none}}
   .avatar-wrap{position:relative}
   .avatar-menu{position:absolute;top:42px;right:0;background:#fff;border:1px solid #e4e4e7;border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,.12);padding:4px;min-width:200px;z-index:100}
@@ -343,8 +350,9 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
   html.dark .active-indicator{background:#fb923c}
   html.dark .tree-size{color:#a1a1aa}
   html.dark .tree-empty{color:#a1a1aa}
-  html.dark .tree-skeleton-row{background:linear-gradient(90deg,#18181b 25%,rgba(251,146,60,.16) 45%,#18181b 65%);background-size:200% 100%}
-  @media (prefers-reduced-motion: reduce){html.dark .tree-skeleton-row{background:#18181b}}
+  html.dark .tree-skeleton-children{border-left-color:rgba(63,63,70,.5)}
+  html.dark .tree-skeleton-icon,html.dark .tree-skeleton-label{background:linear-gradient(90deg,#18181b 25%,rgba(251,146,60,.16) 45%,#18181b 65%);background-size:200% 100%}
+  @media (prefers-reduced-motion: reduce){html.dark .tree-skeleton-icon,html.dark .tree-skeleton-label{background:#18181b}}
   html.dark .tree-error{color:#fca5a5}
   html.dark .main{background:#09090b}
   html.dark .main-placeholder h2{color:#fafafa}
@@ -599,12 +607,37 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
 
 
 function renderTreeSkeleton(): string {
-  return `<div class="tree-skeleton" aria-label="Loading documents">
-    <div class="tree-skeleton-row"></div>
-    <div class="tree-skeleton-row"></div>
-    <div class="tree-skeleton-row"></div>
-    <div class="tree-skeleton-row"></div>
-    <div class="tree-skeleton-row"></div>
+  return `<div class="tree-skeleton" aria-label="Loading documents" aria-busy="true">
+    <div class="tree-skeleton-node">
+      <div class="tree-skeleton-item">
+        <span class="tree-skeleton-icon tree-skeleton-caret"></span>
+        <span class="tree-skeleton-icon"></span>
+        <span class="tree-skeleton-label w-md"></span>
+      </div>
+      <div class="tree-skeleton-children">
+        <div class="tree-skeleton-item">
+          <span class="tree-skeleton-icon"></span>
+          <span class="tree-skeleton-label w-lg"></span>
+        </div>
+        <div class="tree-skeleton-item">
+          <span class="tree-skeleton-icon"></span>
+          <span class="tree-skeleton-label w-sm"></span>
+        </div>
+      </div>
+    </div>
+    <div class="tree-skeleton-node">
+      <div class="tree-skeleton-item">
+        <span class="tree-skeleton-icon tree-skeleton-caret"></span>
+        <span class="tree-skeleton-icon"></span>
+        <span class="tree-skeleton-label w-lg"></span>
+      </div>
+      <div class="tree-skeleton-children">
+        <div class="tree-skeleton-item">
+          <span class="tree-skeleton-icon"></span>
+          <span class="tree-skeleton-label w-md"></span>
+        </div>
+      </div>
+    </div>
   </div>`;
 }
 
