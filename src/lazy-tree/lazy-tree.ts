@@ -64,6 +64,19 @@ function setFolderIcon(folder: HTMLElement, open: boolean) {
   if (icon) icon.textContent = open ? "folder_open" : "folder";
 }
 
+function indexChildItems(content: HTMLElement) {
+  let index = 0;
+  Array.from(content.children).forEach((row) => {
+    if (!(row instanceof HTMLElement) || row.classList.contains("tree-load-more")) return;
+    const item = row.classList.contains("tree-item")
+      ? row
+      : row.querySelector<HTMLElement>(":scope > .tree-item");
+    if (!item) return;
+    item.style.setProperty("--tree-index", String(Math.min(index, 12)));
+    index += 1;
+  });
+}
+
 // ── expand / collapse ──
 
 const PAGE_SIZE = 50;
@@ -77,6 +90,7 @@ async function expand(folder: HTMLElement) {
   if (folder.classList.contains("loading")) return;
 
   if (folder.classList.contains("loaded")) {
+    indexChildItems(content);
     folder.classList.add("open");
     setFolderIcon(folder, true);
     if (activeEl) updateIndicator(activeEl);
@@ -86,6 +100,7 @@ async function expand(folder: HTMLElement) {
   folder.classList.add("loading");
   try {
     await loadPage(folder, path, content, undefined);
+    indexChildItems(content);
     folder.classList.add("loaded", "open");
     setFolderIcon(folder, true);
     if (activeEl) updateIndicator(activeEl);
@@ -115,6 +130,7 @@ async function loadPage(folder: HTMLElement, path: string, content: HTMLElement,
   content.querySelector(":scope > .tree-load-more")?.remove();
   const rows = renderRows(freshChildren, childDepth);
   content.insertAdjacentHTML("beforeend", rows);
+  indexChildItems(content);
 
   if (data.isTruncated && data.nextStartAfter) {
     folder.dataset.nextStartAfter = data.nextStartAfter;
