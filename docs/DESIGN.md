@@ -131,7 +131,7 @@ Purpose: global actions, not navigation depth.
 - Logo uses primary color and stays visually stable across orgs.
 - Right-side actions: share, theme toggle, avatar.
 - Menus open near their trigger and close on outside click.
-- Theme toggle is instant. No crossfade. App chrome changes; iframe content does not.
+- Theme toggle cycles `system → dark → light → system`. The header button uses the selected Icon Morph interaction: old icon scales/fades out, the new Material Symbol scales in with a slight 15° rotation/overshoot. App chrome changes; publisher iframe content does not.
 
 Interaction spec:
 
@@ -140,6 +140,7 @@ Interaction spec:
 | Share button | Primary text, transparent bg | Container hover bg | Share menu visible |
 | Icon buttons | Muted icon | Container hover bg | Icon swaps / menu visible |
 | Sidebar toggle | Muted panel icon | Container hover bg | Icon swaps, sidebar collapses/restores |
+| Theme toggle | Current mode icon (`brightness_auto`, `dark_mode`, `light_mode`) | Container hover bg | Icon morphs to the next selected mode |
 | Avatar | Initials chip | Border/surface emphasis | Avatar menu visible |
 
 ### Sidebar tree
@@ -241,7 +242,7 @@ Rendro's micro-interactions are small and functional. They make state legible.
 | Tree hover | Background/text color transition over `200ms` |
 | Topbar search | Border shifts to primary on focus within `150ms` |
 | Share menu | Opens at trigger, closes on outside click; copy action shows toast |
-| Theme toggle | Instant class toggle; icon text updates immediately |
+| Theme toggle | Tri-state cycle `system → dark → light`; selected Icon Morph swaps icon with scale/opacity/15° rotation |
 | Avatar menu | Opens at avatar, shows email and sign-out action |
 | Toast | Bottom-right, fades in/out, no layout movement |
 | Document load | Main-width 3px line sweeps while iframe request is active |
@@ -292,10 +293,13 @@ The product promise is instant docs. Loading UI should acknowledge latency, not 
 
 Dark mode applies to app chrome only.
 
-- Persist app theme in `localStorage` under `commentor-theme`.
-- Respect system preference when no stored preference exists.
-- Toggle by adding/removing `html.dark` on the parent page.
+- Persist app theme in `localStorage` under `commentor-theme` with values `"system"`, `"dark"`, or `"light"`.
+- `system` follows `prefers-color-scheme`; unset storage is treated as `system`.
+- Toggle by resolving the current mode and adding/removing `html.dark` on the parent page.
 - Do not pass app dark mode into the iframe as a global stylesheet.
+  The commentor widget is the exception: it follows the parent theme because it is Rendro chrome inside the iframe, not publisher document content.
+  Parent shell sends `{ type: "rendro-theme", theme: "system" | "dark" | "light" }` to the iframe; commentor removes both host theme classes for `system` and lets its own `prefers-color-scheme` media query resolve.
+  Commentor does not expose its own theme toggle.
 - Do not assume publisher docs have transparent backgrounds.
 - Every app menu, text, border, hover, active, loader, and toast color has a dark variant.
 - Dark mode follows shadcn's neutral/zinc feel: near-black shell (`#09090b`), subtle elevated surfaces (`#18181b`), neutral borders (`#27272a`), muted text (`#a1a1aa`), and high-contrast foreground (`#fafafa`).
@@ -361,8 +365,9 @@ Before merging a UI change:
 7. **No tree loader for doc nav** — Tree selection is optimistic; loading belongs to main/iframe width.
 8. **No iframe opacity fade** — Keep publisher HTML fully opaque during navigation.
 9. **Sidebar shell changes** — Verify pointer resize, keyboard resize, collapse/restore, localStorage persistence, and dark-mode states.
-10. **Cache bust assets** — If `lazy-tree.ts` changes, rebuild assets and bump the script query version in `app.ts`.
-11. **Browser-harness proof** — For UI behavior, verify in a real browser, not only by reading source.
+10. **Theme sync** — Verify header cycle order, system fallback, commentor theme sync, no commentor-local theme button, and reduced-motion fallback.
+11. **Cache bust assets** — If `lazy-tree.ts` or `commentor.ts` changes, rebuild assets and bump the relevant script query version.
+12. **Browser-harness proof** — For UI behavior, verify in a real browser, not only by reading source.
 
 ## Definition of done
 

@@ -51,7 +51,7 @@ window.COMMENTOR = ${JSON.stringify({
   author: { email: user.email, name: user.name },
 })};
 </script>
-<script src="/commentor.js?v=8"></script>`;
+<script src="/commentor.js?v=9"></script>`;
   if (html.includes("</body>")) {
     return html.replace("</body>", navScript + "</body>");
   }

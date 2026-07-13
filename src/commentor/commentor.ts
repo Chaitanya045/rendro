@@ -96,8 +96,6 @@ const ICONS = {
   comment:
     "M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z",
   list: "M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01",
-  sun: "M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42",
-  moon: "M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z",
   check: "M20 6L9 17l-5-5",
   reply: "M9 14L4 9l5-5M4 9h11a4 4 0 0 1 0 8h-2",
   x: "M18 6L6 18M6 6l12 12",
@@ -105,7 +103,6 @@ const ICONS = {
   trash: "M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M10 11v6M14 11v6",
   more: "M12 13a1 1 0 1 0 0-2 1 1 0 0 0 0 2zM12 6a1 1 0 1 0 0-2 1 1 0 0 0 0 2zM12 20a1 1 0 1 0 0-2 1 1 0 0 0 0 2z",
 };
-const SUN_EXTRA = '<circle cx="12" cy="12" r="4"/>';
 
 function clamp(lo: number, hi: number, v: number): number {
   return Math.max(lo, Math.min(hi, v));
@@ -345,6 +342,10 @@ class Commentor {
     );
 
     this.applyTheme();
+    window.addEventListener("storage", (e) => {
+      if (e.key === "commentor-theme") this.applyTheme();
+    });
+    window.addEventListener("message", (e) => this.onThemeMessage(e));
     this.subscribe();
     this.wireTooltips();
 
@@ -383,34 +384,18 @@ class Commentor {
   }
 
   // ── theme ──
-  private isDark(): boolean {
-    const host = this.root.host as HTMLElement;
-    if (host.classList.contains("dark")) return true;
-    if (host.classList.contains("light")) return false;
-    return window.matchMedia("(prefers-color-scheme: dark)").matches;
-  }
-  private applyTheme(): void {
-    const saved = localStorage.getItem("commentor-theme");
+  private applyTheme(mode = localStorage.getItem("commentor-theme") ?? "system"): void {
     const host = this.root.host as HTMLElement;
     host.classList.remove("dark", "light");
-    if (saved === "dark" || saved === "light") host.classList.add(saved);
+    if (mode === "dark" || mode === "light") host.classList.add(mode);
   }
-  private toggleTheme(): void {
-    const host = this.root.host as HTMLElement;
-    const next = this.isDark() ? "light" : "dark";
-    host.classList.remove("dark", "light");
-    host.classList.add(next);
-    localStorage.setItem("commentor-theme", next);
-    this.updateThemeIcon();
-  }
-  private updateThemeIcon(): void {
-    const btn = this.root.querySelector<HTMLElement>(
-      '[data-testid="commentor-theme-btn"]',
-    );
-    if (btn)
-      btn.replaceChildren(
-        this.isDark() ? svg(ICONS.sun, SUN_EXTRA) : svg(ICONS.moon),
-      );
+  private onThemeMessage(e: MessageEvent): void {
+    if (e.source !== window.parent) return;
+    const data = e.data;
+    if (!data || typeof data !== "object" || !("type" in data)) return;
+    if (data.type !== "rendro-theme" || !("theme" in data)) return;
+    const theme = data.theme;
+    if (theme === "system" || theme === "dark" || theme === "light") this.applyTheme(theme);
   }
 
   // ── toolbar (the dock handle row) ──
@@ -439,16 +424,6 @@ class Commentor {
       },
       svg(ICONS.list),
     ) as HTMLButtonElement;
-    const themeBtn = h(
-      "button",
-      {
-        "data-testid": "commentor-theme-btn",
-        "data-tip": "Toggle theme",
-        "aria-label": "Toggle theme",
-        onclick: () => this.toggleTheme(),
-      },
-      svg(this.isDark() ? ICONS.sun : ICONS.moon),
-    );
     const grip = h("div", {
       class: "grip",
       "data-testid": "commentor-toolbar-grip",
@@ -462,7 +437,6 @@ class Commentor {
       grip,
       commentBtn,
       this.commentsBtn,
-      themeBtn,
     );
     const gripEl = grip;
     gripEl.addEventListener("pointerdown", (e) => this.onDragStart(e));
@@ -1258,9 +1232,6 @@ button { font: inherit; color: inherit; }
 .toolbar button:active { transform: scale(.9); }
 .toolbar button.active { background: var(--accent); color: var(--accent-fg); }
 .toolbar button:disabled { opacity: .35; cursor: not-allowed; }
-/* Theme toggle is only shown when the drawer is expanded. */
-.toolbar button[data-testid="commentor-theme-btn"] { display: none; }
-.dock[data-expanded] .toolbar button[data-testid="commentor-theme-btn"] { display: inline-flex; }
 .toolbar button:focus-visible, .pin:focus-visible {
   outline: 2px solid var(--accent); outline-offset: 2px;
 }
