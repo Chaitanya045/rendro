@@ -246,11 +246,11 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
   .sidebar-org-meta{font-size:12px;font-weight:600;color:#71717a;letter-spacing:.05em;line-height:16px}
   .sidebar-divider{padding:8px 12px;font-size:10px;font-weight:600;color:#71717a;text-transform:uppercase;letter-spacing:.05em}
   .sidebar-footer{padding:12px 16px;border-top:1px solid #e4e4e7;margin-top:auto}
-  .sidebar-tree{flex:1;padding:0 12px;overflow-y:auto;--sidebar-bg:#fff;scrollbar-width:thin;scrollbar-color:rgba(161,161,170,.45) transparent}
-  .sidebar-tree::-webkit-scrollbar{width:2px}
+  .sidebar-tree{flex:1;padding:0 12px;overflow-y:auto;--sidebar-bg:#fff;scrollbar-width:thin;scrollbar-color:rgba(161,161,170,.35) transparent}
+  .sidebar-tree::-webkit-scrollbar{width:3px}
   .sidebar-tree::-webkit-scrollbar-track{background:transparent}
-  .sidebar-tree::-webkit-scrollbar-thumb{background:rgba(161,161,170,.45);border-radius:999px}
-  .sidebar-tree::-webkit-scrollbar-thumb:hover{background:rgba(113,113,122,.75)}
+  .sidebar-tree::-webkit-scrollbar-thumb{background:rgba(161,161,170,.35);border-radius:999px}
+  .sidebar-tree::-webkit-scrollbar-thumb:hover{background:rgba(113,113,122,.55)}
   .sidebar-footer a:hover{color:#09090b}
   .sidebar-resizer{position:fixed;top:56px;bottom:0;left:calc(var(--sidebar-width) - 5px);width:10px;z-index:45;cursor:col-resize;touch-action:none;display:flex;align-items:stretch;justify-content:center;transition:left .3s cubic-bezier(.4,0,.2,1),opacity .2s cubic-bezier(.4,0,.2,1)}
   .sidebar-resizer::before{content:"";width:2px;background:transparent;border-radius:999px;transition:background-color .15s cubic-bezier(.4,0,.2,1),box-shadow .15s cubic-bezier(.4,0,.2,1),width .15s cubic-bezier(.4,0,.2,1)}
@@ -348,9 +348,9 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
   html.dark .topbar-btn-share:hover{background:rgba(251,146,60,.12)}
   html.dark .topbar-btn-create{background:#fb923c;color:#09090b}
   html.dark .topbar-btn-create:hover{background:#fdba74;opacity:1}
-  html.dark .sidebar-tree{--sidebar-bg:#09090b;scrollbar-color:#52525b transparent}
-  html.dark .sidebar-tree::-webkit-scrollbar-thumb{background:#52525b}
-  html.dark .sidebar-tree::-webkit-scrollbar-thumb:hover{background:#71717a}
+  html.dark .sidebar-tree{--sidebar-bg:#09090b;scrollbar-color:#3f3f46 transparent}
+  html.dark .sidebar-tree::-webkit-scrollbar-thumb{background:#3f3f46}
+  html.dark .sidebar-tree::-webkit-scrollbar-thumb:hover{background:#52525b}
   html.dark .topbar-avatar{background:rgba(251,146,60,.16);color:#fafafa;border-color:rgba(251,146,60,.35)}
   html.dark .sidebar{background:#09090b;border-right-color:#27272a}
   html.dark .sidebar-org-name{color:#fafafa}
