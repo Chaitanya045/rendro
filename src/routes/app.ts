@@ -248,9 +248,10 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
   .active-indicator{position:absolute;left:0;width:4px;height:32px;background:#c2410c;transition:transform .3s cubic-bezier(.4,0,.2,1),opacity .2s ease;border-radius:4px;pointer-events:none}
 
   @keyframes treeSkeletonShimmer{0%{background-position:100% 0}100%{background-position:-100% 0}}
-  .tree-skeleton{padding:2px 0}
+  .tree-skeleton{padding:0}
   .tree-skeleton-node{margin-top:2px}
-  .tree-skeleton-item{height:32px;display:flex;align-items:center;gap:8px;padding:6px 12px;border-radius:4px;box-sizing:border-box}
+  .tree-skeleton-node:first-child{margin-top:0}
+  .tree-skeleton-item{height:33px;display:flex;align-items:center;gap:8px;padding:6px 12px;border-radius:4px;box-sizing:border-box}
   .tree-skeleton-children{margin-left:16px;padding-left:8px;border-left:1px solid rgba(212,212,216,.3);display:flex;flex-direction:column;gap:2px}
   .tree-skeleton-icon,.tree-skeleton-label{display:block;flex-shrink:0;background:linear-gradient(90deg,#f4f4f5 25%,#ffedd5 45%,#f4f4f5 65%);background-size:200% 100%;animation:treeSkeletonShimmer 1.1s cubic-bezier(.4,0,.2,1) infinite}
   .tree-skeleton-icon{width:18px;height:18px;border-radius:4px}
@@ -610,6 +611,12 @@ function renderTreeSkeleton(): string {
   return `<div class="tree-skeleton" aria-label="Loading documents" aria-busy="true">
     <div class="tree-skeleton-node">
       <div class="tree-skeleton-item">
+        <span class="tree-skeleton-icon"></span>
+        <span class="tree-skeleton-label w-lg"></span>
+      </div>
+    </div>
+    <div class="tree-skeleton-node">
+      <div class="tree-skeleton-item">
         <span class="tree-skeleton-icon tree-skeleton-caret"></span>
         <span class="tree-skeleton-icon"></span>
         <span class="tree-skeleton-label w-md"></span>
@@ -630,12 +637,6 @@ function renderTreeSkeleton(): string {
         <span class="tree-skeleton-icon tree-skeleton-caret"></span>
         <span class="tree-skeleton-icon"></span>
         <span class="tree-skeleton-label w-lg"></span>
-      </div>
-      <div class="tree-skeleton-children">
-        <div class="tree-skeleton-item">
-          <span class="tree-skeleton-icon"></span>
-          <span class="tree-skeleton-label w-md"></span>
-        </div>
       </div>
     </div>
   </div>`;
