@@ -294,6 +294,13 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
   .theme-toggle.theme-enter .theme-icon{animation:themeIconEnter .24s cubic-bezier(.34,1.56,.64,1)}
   @keyframes themeIconEnter{0%{opacity:0;transform:scale(.72) rotate(15deg)}70%{opacity:1;transform:scale(1.08) rotate(0deg)}100%{opacity:1;transform:scale(1) rotate(0deg)}}
   @media (prefers-reduced-motion: reduce){.theme-icon{transition:none}.theme-toggle.theme-enter .theme-icon{animation:none}.theme-toggle.theme-exit .theme-icon{opacity:1;transform:none}}
+  .theme-ripple{position:fixed;inset:0;z-index:2147483647;pointer-events:none;background:var(--theme-ripple-bg,#fff);clip-path:circle(0 at var(--theme-ripple-x,50%) var(--theme-ripple-y,50%));transition:clip-path .48s cubic-bezier(.4,0,.2,1)}
+  .theme-ripple.is-active{clip-path:circle(var(--theme-ripple-radius,150vmax) at var(--theme-ripple-x,50%) var(--theme-ripple-y,50%))}
+  @supports (view-transition-name: root){
+    ::view-transition-old(root),::view-transition-new(root){animation:none;mix-blend-mode:normal}
+    ::view-transition-image-pair(root){isolation:isolate}
+  }
+  @media (prefers-reduced-motion: reduce){.theme-ripple{display:none}::view-transition-old(root),::view-transition-new(root){animation:none!important}}
 
   /* ── dark mode (shadcn-style neutral palette) ── */
   html.dark{background:#09090b;color:#fafafa}
@@ -443,6 +450,44 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
     renderThemeButton(mode,animate);
     notifyTheme(mode);
   }
+  function transitionTheme(mode){
+    if(!themeToggle||matchMedia("(prefers-reduced-motion: reduce)").matches){
+      applyTheme(mode,true,true);
+      return;
+    }
+    var rect=themeToggle.getBoundingClientRect();
+    var x=rect.left+rect.width/2;
+    var y=rect.top+rect.height/2;
+    var radius=Math.hypot(Math.max(x,innerWidth-x),Math.max(y,innerHeight-y));
+    root.style.setProperty("--theme-ripple-x",x+"px");
+    root.style.setProperty("--theme-ripple-y",y+"px");
+    root.style.setProperty("--theme-ripple-radius",radius+"px");
+    root.style.setProperty("--theme-ripple-bg",resolvedTheme(mode)==="dark"?"#09090b":"#ffffff");
+    if(document.startViewTransition){
+      root.classList.add("theme-rippling");
+      var viewTransition=document.startViewTransition(function(){applyTheme(mode,true,false);});
+      viewTransition.ready.then(function(){
+        document.documentElement.animate(
+          {clipPath:["circle(0px at "+x+"px "+y+"px)","circle("+radius+"px at "+x+"px "+y+"px)"]},
+          {duration:520,easing:"cubic-bezier(.4,0,.2,1)",pseudoElement:"::view-transition-new(root)"}
+        );
+      }).catch(function(){});
+      viewTransition.finished.finally(function(){root.classList.remove("theme-rippling");});
+      return;
+    }
+    var ripple=document.createElement("div");
+    ripple.className="theme-ripple";
+    ripple.style.setProperty("--theme-ripple-x",x+"px");
+    ripple.style.setProperty("--theme-ripple-y",y+"px");
+    ripple.style.setProperty("--theme-ripple-radius",radius+"px");
+    ripple.style.setProperty("--theme-ripple-bg",resolvedTheme(mode)==="dark"?"#09090b":"#ffffff");
+    document.body.appendChild(ripple);
+    applyTheme(mode,true,true);
+    requestAnimationFrame(function(){ripple.classList.add("is-active");});
+    var remove=function(){ripple.remove();};
+    ripple.addEventListener("transitionend",remove,{once:true});
+    window.setTimeout(remove,700);
+  }
   applyTheme(normalizedTheme(),false,false);
 
   var MIN_WIDTH=220;
@@ -496,7 +541,7 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
   if(themeToggle)themeToggle.addEventListener("click",function(){
     var current=normalizedTheme();
     var next=THEME_ORDER[(THEME_ORDER.indexOf(current)+1)%THEME_ORDER.length];
-    applyTheme(next,true,true);
+    transitionTheme(next);
   });
   themeMedia.addEventListener("change",function(){if(normalizedTheme()==="system")applyTheme("system",false,false);});
   if(toggle)toggle.addEventListener("click",function(){setSidebarCollapsed(!root.classList.contains("sidebar-collapsed"));});
