@@ -2,8 +2,9 @@
  * Lazy tree — matches design.html spec with Material Symbols icons,
  * max-height animations, active indicator, and border-line indentation.
  */
+type RendroWindow = Window & { RENDRO_INITIAL_DOC?: string };
+const RENDRO_WINDOW = window as RendroWindow;
 const ORG = (document.querySelector("[data-tree-org]") as HTMLElement)?.dataset.treeOrg;
-const DEV_USER = new URLSearchParams(location.search).get("dev_user") || "";
 interface TreeNode { name: string; path: string; type: "file" | "folder"; size?: number; }
 
 const TREE = document.getElementById("tree-container") as HTMLElement;
@@ -16,6 +17,18 @@ function humanSize(bytes: number): string {
 
 function esc(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+function docUrl(fullPath: string): string {
+  return `/docs/${fullPath.split("/").map(encodeURIComponent).join("/")}`;
+}
+
+function docFromPathname(): string {
+  if (!ORG || !location.pathname.startsWith("/docs/")) return "";
+  const rawPath = location.pathname.slice("/docs/".length);
+  const key = rawPath.split("/").map(decodeURIComponent).join("/");
+  if (key === ORG) return "";
+  return key.startsWith(`${ORG}/`) ? key : "";
 }
 
 let activeEl: HTMLElement | null = null;
@@ -243,12 +256,14 @@ function loadDoc(fullPath: string, pushState: boolean) {
     docLoadTimeout = window.setTimeout(() => {
       if (loadId === activeDocLoadId) showDocLoadError();
     }, 15000);
-    frame.src = `/files/${fullPath}${DEV_USER ? `?dev_user=${DEV_USER}` : ""}`;
+    frame.src = `/files/${fullPath}`;
   }
 
   if (pushState) {
     const url = new URL(location.href);
-    url.searchParams.set("doc", fullPath);
+    url.pathname = docUrl(fullPath);
+    url.searchParams.delete("doc");
+    url.searchParams.delete("dev_user");
     history.pushState({ docPath: fullPath }, "", url);
   }
 }
@@ -316,13 +331,31 @@ function init() {
 
   // Browser back/forward
   window.addEventListener("popstate", (e) => {
-    const docPath = e.state?.docPath;
+    const docPath = e.state?.docPath || docFromPathname();
     if (docPath) loadDoc(docPath, false);
   });
 
-  // Initial load: check URL for doc param
-  const urlDoc = new URLSearchParams(location.search).get("doc");
-  if (urlDoc) loadDoc(urlDoc, false);
+  const initialDoc = RENDRO_WINDOW.RENDRO_INITIAL_DOC || docFromPathname();
+  if (initialDoc) {
+    loadDoc(initialDoc, false);
+    return;
+  }
+  const params = new URLSearchParams(location.search);
+  const urlDoc = params.get("doc");
+  if (urlDoc) {
+    const url = new URL(location.href);
+    url.pathname = docUrl(urlDoc);
+    url.searchParams.delete("doc");
+    url.searchParams.delete("dev_user");
+    history.replaceState({ docPath: urlDoc }, "", url);
+    loadDoc(urlDoc, false);
+    return;
+  }
+  if (params.has("dev_user")) {
+    const url = new URL(location.href);
+    url.searchParams.delete("dev_user");
+    history.replaceState(history.state, "", url);
+  }
 }
 
 if (document.readyState === "loading") {
