@@ -159,6 +159,47 @@ function renderFile(node: TreeNode): string {
   </div>`;
 }
 
+function renderActiveIndicator(): string {
+  return `<div class="active-indicator" id="active-indicator" style="opacity:0;transition:none"></div>`;
+}
+
+function renderEmptyTree(): string {
+  const org = ORG ? esc(ORG) : "";
+  return `<div class="tree-empty">No documents yet.</div>
+  <form method="post" action="/api/orgs" class="tree-empty-create">
+    <input type="hidden" name="org" value="${org}">
+    <input type="hidden" name="displayName" value="${org}">
+    <button type="submit" class="load-more-btn">Create org</button>
+  </form>`;
+}
+
+function startTreeEntrance(scope: ParentNode = TREE) {
+  if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return;
+  document.documentElement.classList.add("tree-entering");
+  scope.querySelectorAll<HTMLElement>(".tree-item").forEach((el, i) => {
+    el.style.setProperty("--tree-index", String(Math.min(i, 12)));
+  });
+}
+
+async function loadRootTree() {
+  if (!ORG || !TREE) return;
+  TREE.dataset.loadingRoot = "true";
+  try {
+    const res = await fetch(`/api/tree/${ORG}?prefix=${encodeURIComponent(`${ORG}/`)}&limit=1000`);
+    if (!res.ok) throw new Error(`${res.status}`);
+    const data = await res.json();
+    const children = data.children as TreeNode[];
+    TREE.innerHTML = renderActiveIndicator() + (children.length ? renderRows(children, 0) : renderEmptyTree());
+    startTreeEntrance(TREE);
+    const currentDoc = RENDRO_WINDOW.RENDRO_CURRENT_DOC || RENDRO_WINDOW.RENDRO_INITIAL_DOC || docFromPathname();
+    if (currentDoc) syncActiveState(currentDoc);
+  } catch {
+    TREE.innerHTML = renderActiveIndicator() + `<div class="tree-error">Failed to load documents</div>`;
+  } finally {
+    delete TREE.dataset.loadingRoot;
+  }
+}
+
 function renderFolder(node: TreeNode, depth: number): string {
   const path = node.path.endsWith("/") ? node.path : `${node.path}/`;
   return `<div class="tree-folder" data-path="${esc(path)}" data-depth="${depth}">
@@ -324,6 +365,7 @@ function syncActiveState(fullPath: string) {
 
 function init() {
   if (!TREE) return;
+  void loadRootTree();
   TREE.addEventListener("click", handleClick);
 
   // Re-sync indicator after folder expand/collapse animations finish

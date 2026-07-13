@@ -1,20 +1,18 @@
 import { Hono } from "hono";
-import { listImmediate, buildTree, putObject } from "@/minio";
-import type { DocTree } from "@/minio";
+import { putObject } from "@/minio";
 import { emailToOrgSlug, orgExists, logOrgAccess } from "@/orgs";
 import type { User } from "better-auth/types";
 import { logger } from "@/logger";
 import { createOrgApiKey } from "@/api-keys";
-import { isDeleted } from "@/soft-delete";
 
 const app = new Hono<{ Variables: { user?: User } }>();
 
 /**
  * GET / — the main entry. Behavior depends on the user's session:
  *
- *   no session           → "Sign in with Google" page
- *   session, org exists → doc tree
- *   session, no org     → "Create your org" form (org pre-populated from email domain)
+ *   no session         → "Sign in with Google" page
+ *   invalid org email  → unsupported email page
+ *   valid org email    → app shell immediately; tree data loads client-side
  */
 app.get("/", async (c) => {
   const user = c.get("user");
@@ -29,11 +27,7 @@ app.get("/", async (c) => {
       return c.html(renderEmailUnsupported(user));
     }
 
-    if (await orgExists(org)) {
-      return c.html(await renderOrgDocs(user, org));
-    }
-
-    return c.html(renderCreateOrg(user, org));
+    return c.html(renderOrgDocs(user, org));
   } catch (err: unknown) {
     const e = err instanceof Error ? err : new Error(String(err));
     logger.error({ err: e.message, stack: e.stack, email: user.email }, "root handler error");
@@ -51,8 +45,7 @@ app.get("/docs/:org", async (c) => {
   if (!user) return c.html(renderSignIn());
   const org = emailToOrgSlug(user.email);
   if (!org || c.req.param("org") !== org) return c.text("Not found", 404);
-  if (await orgExists(org)) return c.html(await renderOrgDocs(user, org));
-  return c.html(renderCreateOrg(user, org));
+  return c.html(renderOrgDocs(user, org));
 });
 
 app.get("/docs/:key{.+}", async (c) => {
@@ -62,10 +55,9 @@ app.get("/docs/:key{.+}", async (c) => {
   if (!org) return c.html(renderEmailUnsupported(user));
   const rawKey = c.req.param("key");
   const selectedDoc = decodeURIComponent(rawKey);
-  if (selectedDoc === org) return c.html(await renderOrgDocs(user, org));
+  if (selectedDoc === org) return c.html(renderOrgDocs(user, org));
   if (!selectedDoc.startsWith(`${org}/`)) return c.text("Not found", 404);
-  if (await orgExists(org)) return c.html(await renderOrgDocs(user, org, selectedDoc));
-  return c.html(renderCreateOrg(user, org));
+  return c.html(renderOrgDocs(user, org, selectedDoc));
 });
 
 /**
@@ -144,55 +136,14 @@ function renderEmailUnsupported(user: User): string {
 </body></html>`;
 }
 
-function renderCreateOrg(user: User, org: string): string {
-  const email = escapeHtml(user.email);
-  const orgEsc = escapeHtml(org);
-  return `<!DOCTYPE html>
-<html><head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>${orgEsc} — Rendro</title>
-<style>
-  body { font-family: system-ui, -apple-system, sans-serif; background:#fafafa; color:#1a1a1a; margin:0; }
-  .container { max-width: 600px; margin: 4rem auto; padding: 0 1rem; }
-  .card { background:#fff; padding:2rem 2.5rem; border-radius:8px; box-shadow:0 1px 3px rgba(0,0,0,0.1); }
-  h1 { margin:0 0 0.25rem; font-size:1.5rem; }
-  .meta { color:#666; font-size:0.875rem; margin:0 0 1.5rem; }
-  label { display:block; font-weight:500; margin: 1rem 0 0.25rem; }
-  input { width:100%; padding:0.5rem 0.75rem; border:1px solid #ccc; border-radius:4px; font-size:0.95rem; box-sizing:border-box; }
-  button { margin-top:1.5rem; background:#1a1a1a; color:#fff; padding:0.75rem 1.5rem; border:0; border-radius:6px; font-weight:500; cursor:pointer; }
-  a.logout { float:right; color:#666; font-size:0.875rem; }
-</style>
-</head><body>
-<div class="container">
-  <a class="logout" href="/api/auth/sign-out">Sign out</a>
-  <div class="card">
-    <h1>Create your org</h1>
-    <p class="meta">Signed in as ${email}</p>
-    <p>No docs found for <code>${orgEsc}</code>. Create the org to get started.</p>
-    <form method="post" action="/api/orgs">
-      <label for="org">Org slug</label>
-      <input id="org" name="org" value="${orgEsc}" readonly>
-      <label for="displayName">Display name</label>
-      <input id="displayName" name="displayName" value="${orgEsc}">
-      <button type="submit">Create org</button>
-    </form>
-  </div>
-</div>
-</body></html>`;
-}
 
 
-async function renderOrgDocs(user: User, org: string, selectedDoc = ""): Promise<string> {
-  const { entries } = await listImmediate(`${org}/`);
-  const deleted = await Promise.all(entries.map(e => isDeleted(e.key)));
-  const active = entries.filter((_, i) => !deleted[i]);
-  const tree = buildTree(active, `${org}/`);
+function renderOrgDocs(user: User, org: string, selectedDoc = ""): string {
   logOrgAccess(org, user.email, "view");
-  return renderOrgTreePage(user, org, tree, selectedDoc);
+  return renderOrgTreePage(user, org, selectedDoc);
 }
 
-function renderOrgTreePage(user: User, org: string, tree: DocTree[], selectedDoc = ""): string {
+function renderOrgTreePage(user: User, org: string, selectedDoc = ""): string {
   const email = escapeHtml(user.email);
   const orgEsc = escapeHtml(org);
   const initials = (user.name || email).split(/[@\s]/)[0].slice(0, 2).toUpperCase();
@@ -287,6 +238,7 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
   .tree-link{color:inherit;text-decoration:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .tree-size{color:#71717a;font-size:11px;flex-shrink:0}
   .tree-empty{color:#71717a;padding:6px 12px;font-size:12px}
+  .tree-empty-create{padding:0 12px 8px}
   .tree-error{color:#b42318;padding:4px 8px;font-size:11px}
   .caret-icon{transition:transform .3s cubic-bezier(.4,0,.2,1),translate .15s cubic-bezier(.4,0,.2,1),color .15s}
   .tree-folder.open>.tree-item .caret-icon{transform:rotate(90deg)}
@@ -295,6 +247,13 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
   .tree-folder>.tree-item:hover .folder-icon,.tree-folder>.tree-item:focus-within .folder-icon{color:#c2410c}
   .active-indicator{position:absolute;left:0;width:4px;height:32px;background:#c2410c;transition:transform .3s cubic-bezier(.4,0,.2,1),opacity .2s ease;border-radius:4px;pointer-events:none}
 
+  @keyframes treeSkeletonShimmer{0%{background-position:100% 0}100%{background-position:-100% 0}}
+  .tree-skeleton{padding:2px 0}
+  .tree-skeleton-row{height:32px;margin:2px 12px;border-radius:6px;background:linear-gradient(90deg,#f4f4f5 25%,#ffedd5 45%,#f4f4f5 65%);background-size:200% 100%;animation:treeSkeletonShimmer 1.1s cubic-bezier(.4,0,.2,1) infinite}
+  .tree-skeleton-row:nth-child(2){width:78%;animation-delay:.08s}
+  .tree-skeleton-row:nth-child(3){width:88%;animation-delay:.16s}
+  .tree-skeleton-row:nth-child(4){width:70%;animation-delay:.24s}
+  .tree-skeleton-row:nth-child(5){width:82%;animation-delay:.32s}
   .main{margin-left:var(--sidebar-width);margin-top:56px;height:calc(100vh - 56px);overflow:hidden;background:#fafafa;position:relative;transition:margin-left .3s cubic-bezier(.4,0,.2,1);will-change:margin-left}
   .main-placeholder{display:flex;align-items:center;justify-content:center;height:100%;flex-direction:column;text-align:center;padding:3rem}
   .main-placeholder h2{font-size:24px;font-weight:600;color:#09090b;margin-bottom:8px}
@@ -309,6 +268,7 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
   html.dark .doc-loader-bar{width:46%;background:linear-gradient(90deg,transparent,#fdba74,#fb923c,#fdba74,transparent);box-shadow:0 0 6px rgba(251,146,60,.5)}
   html.dark .doc-loader.error .doc-loader-bar{background:#fca5a5}
   @media (prefers-reduced-motion: reduce){.doc-loader-bar{width:100%;opacity:.65;animation:none}}
+  @media (prefers-reduced-motion: reduce){.tree-skeleton-row{animation:none;background:#f4f4f5}}
   @media (prefers-reduced-motion: reduce){.sidebar,.main,.sidebar-resizer,.sidebar-toggle,.sidebar-toggle .material-symbols-outlined{transition:none}}
   .avatar-wrap{position:relative}
   .avatar-menu{position:absolute;top:42px;right:0;background:#fff;border:1px solid #e4e4e7;border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,.12);padding:4px;min-width:200px;z-index:100}
@@ -383,6 +343,8 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
   html.dark .active-indicator{background:#fb923c}
   html.dark .tree-size{color:#a1a1aa}
   html.dark .tree-empty{color:#a1a1aa}
+  html.dark .tree-skeleton-row{background:linear-gradient(90deg,#18181b 25%,rgba(251,146,60,.16) 45%,#18181b 65%);background-size:200% 100%}
+  @media (prefers-reduced-motion: reduce){html.dark .tree-skeleton-row{background:#18181b}}
   html.dark .tree-error{color:#fca5a5}
   html.dark .main{background:#09090b}
   html.dark .main-placeholder h2{color:#fafafa}
@@ -435,7 +397,7 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
   <div class="sidebar-tree" data-tree-org="${orgEsc}">
     <div class="space-y-0.5 relative" id="tree-container" style="position:relative">
       <div class="active-indicator" id="active-indicator" style="opacity:0;transition:none"></div>
-      ${renderTree(tree)}
+      ${renderTreeSkeleton()}
     </div>
   </div>
 </aside>
@@ -629,37 +591,23 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
   document.addEventListener("click",function(){var m=document.getElementById("avatar-menu");if(m)m.style.display="none";var s=document.getElementById("share-menu");if(s)s.style.display="none";});
 })();
 </script>
-<script>(function(){if(window.matchMedia&&window.matchMedia("(prefers-reduced-motion: reduce)").matches)return;document.documentElement.classList.add("tree-entering");document.querySelectorAll("#tree-container .tree-item").forEach(function(el,i){el.style.setProperty("--tree-index",String(Math.min(i,12)))})})();</script>
 <script>window.RENDRO_INITIAL_DOC=${JSON.stringify(selectedDoc)};</script>
-<script src="/lazy-tree.js?v=23"></script>
+<script src="/lazy-tree.js?v=24"></script>
 </body>
 </html>`;
 }
 
 
-function renderTree(nodes: DocTree[]): string {
-  if (nodes.length === 0) return '<div class="tree-empty">No documents yet.</div>';
-  return nodes
-    .map((node) => {
-      if (node.type === "folder") {
-        const folderPath = node.path.endsWith("/") ? node.path : `${node.path}/`;
-        return `<div class="tree-folder" data-path="${escapeHtml(folderPath)}" data-depth="0">
-    <div class="tree-item flex items-center gap-2 px-3 py-1.5 rounded-lg text-on-surface-variant cursor-pointer">
-      <span class="material-symbols-outlined text-[18px] caret-icon flex-shrink-0">chevron_right</span>
-      <span class="material-symbols-outlined text-[18px] folder-icon flex-shrink-0">folder</span>
-      <span class="font-body-md flex-1 min-w-0">${escapeHtml(node.name)}</span>
-    </div>
-    <div class="tree-folder-content ml-4 space-y-0.5 border-l border-outline-variant/30 pl-2"></div>
+function renderTreeSkeleton(): string {
+  return `<div class="tree-skeleton" aria-label="Loading documents">
+    <div class="tree-skeleton-row"></div>
+    <div class="tree-skeleton-row"></div>
+    <div class="tree-skeleton-row"></div>
+    <div class="tree-skeleton-row"></div>
+    <div class="tree-skeleton-row"></div>
   </div>`;
-      }
-      const filePath = `/files/${node.path}`;
-      return `<div class="tree-item flex items-center gap-2 px-3 py-1.5 rounded-lg text-on-surface-variant cursor-pointer" data-path="${escapeHtml(node.path)}">
-    <span class="material-symbols-outlined text-[18px] flex-shrink-0">article</span>
-    <a href="${escapeHtml(filePath)}" class="tree-link flex-1 min-w-0" target="content-frame">${escapeHtml(node.name.replace(/\.html$/, ""))}</a>
-</div>`;
-    })
-    .join("\n");
 }
+
 function renderInitialIndex(_user: User, org: string, displayName: string): string {
   return `<!DOCTYPE html>
 <html lang="en">

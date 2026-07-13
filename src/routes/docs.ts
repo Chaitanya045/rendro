@@ -142,7 +142,8 @@ app.get("/api/tree/:org", async (c) => {
   const startAfter = c.req.query("startAfter") || undefined;
 
   const { entries, isTruncated, nextStartAfter } = await listImmediate(prefix, { maxKeys: Math.min(limit, 1000), startAfter });
-  const tree = buildTree(entries, prefix);
+  const deleted = await Promise.all(entries.map((entry) => isDeleted(entry.key)));
+  const tree = buildTree(entries.filter((_, i) => !deleted[i]), prefix);
   const children = tree.map((node) => ({
     name: node.name,
     path: node.path,
