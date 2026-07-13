@@ -273,7 +273,9 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
   .tree-folder[data-depth="4"].open>.tree-item{top:120px;z-index:6}
   .tree-folder[data-depth="5"].open>.tree-item{top:150px;z-index:5}
   .load-more-btn:disabled{color:#71717a;cursor:default}
+  @keyframes treeItemIn{from{opacity:0;transform:translateX(-4px)}to{opacity:1;transform:translateX(0)}}
   .tree-item{display:flex;align-items:center;gap:8px;padding:6px 12px;border-radius:4px;color:#71717a;cursor:pointer;transition:transform .2s cubic-bezier(.4,0,.2,1),background-color .2s,color .2s}
+  html.tree-entering .tree-item{animation:treeItemIn .18s cubic-bezier(.4,0,.2,1) both;animation-delay:calc(var(--tree-index,0) * 22ms)}
   .tree-item:hover{background:#f4f4f5;color:#09090b}
   .tree-item.active{background:#ffedd5;color:#c2410c}
   .tree-link{color:inherit;text-decoration:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -326,7 +328,7 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
     ::view-transition-old(root),::view-transition-new(root){animation:none;mix-blend-mode:normal}
     ::view-transition-image-pair(root){isolation:isolate}
   }
-  @media (prefers-reduced-motion: reduce){.theme-ripple{display:none}::view-transition-old(root),::view-transition-new(root){animation:none!important}}
+  @media (prefers-reduced-motion: reduce){.theme-ripple{display:none}html.tree-entering .tree-item{animation:none!important;animation-delay:0s!important;opacity:1!important;transform:none!important}::view-transition-old(root),::view-transition-new(root){animation:none!important}}
 
   /* ── dark mode (shadcn-style neutral palette) ── */
   html.dark{background:#09090b;color:#fafafa}
@@ -613,8 +615,9 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
   document.addEventListener("click",function(){var m=document.getElementById("avatar-menu");if(m)m.style.display="none";var s=document.getElementById("share-menu");if(s)s.style.display="none";});
 })();
 </script>
+<script>(function(){if(window.matchMedia&&window.matchMedia("(prefers-reduced-motion: reduce)").matches)return;document.documentElement.classList.add("tree-entering");document.querySelectorAll("#tree-container .tree-item").forEach(function(el,i){el.style.setProperty("--tree-index",String(Math.min(i,10)))})})();</script>
 <script>window.RENDRO_INITIAL_DOC=${JSON.stringify(selectedDoc)};</script>
-<script src="/lazy-tree.js?v=21"></script>
+<script src="/lazy-tree.js?v=22"></script>
 </body>
 </html>`;
 }
