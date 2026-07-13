@@ -20,17 +20,38 @@ function isSessionUser(value: unknown): value is SessionUser {
   return typeof v.email === "string" && typeof v.id === "string";
 }
 
+function readCookie(header: string, name: string): string {
+  const prefix = `${name}=`;
+  for (const part of header.split(";")) {
+    const trimmed = part.trim();
+    if (trimmed.startsWith(prefix)) return decodeURIComponent(trimmed.slice(prefix.length));
+  }
+  return "";
+}
+
 export async function sessionMiddleware(c: Context, next: Next) {
   try {
-    if (typeof process !== "undefined" && process.env.NODE_ENV === "development") {
-      const devEmail = c.req.header("X-Dev-User") || c.req.query("dev_user");
+    const isDev = (typeof process !== "undefined" && process.env.NODE_ENV === "development")
+      || c.req.header("host")?.startsWith("dev.");
+    if (isDev) {
+      const queryDevEmail = c.req.query("dev_user");
+      const devEmail = c.req.header("X-Dev-User")
+        || queryDevEmail
+        || readCookie(c.req.raw.headers.get("cookie") || "", "rendro-dev-user");
       if (devEmail) {
         c.set("user", {
           id: "dev", email: devEmail, name: "Dev User",
           emailVerified: true, image: null,
           createdAt: new Date(), updatedAt: new Date(),
         });
-        await next(); return;
+        await next();
+        if (queryDevEmail) {
+          c.res.headers.append(
+            "Set-Cookie",
+            `rendro-dev-user=${encodeURIComponent(queryDevEmail)}; Path=/; SameSite=Lax`,
+          );
+        }
+        return;
       }
     }
 

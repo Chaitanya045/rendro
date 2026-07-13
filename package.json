@@ -30,7 +30,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "init-minio": "tsx scripts/init-minio.ts",
+    "build:assets": "tsx scripts/build-commentor.ts && tsx scripts/build-lazy-tree.ts",
     "cli": "tsx cli/src/index.ts",
     "cli:build": "node scripts/build-cli.mjs",
     "deploy": "wrangler deploy --config wrangler.toml"

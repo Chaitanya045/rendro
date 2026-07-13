@@ -2,8 +2,9 @@
  * Lazy tree — matches design.html spec with Material Symbols icons,
  * max-height animations, active indicator, and border-line indentation.
  */
+type RendroWindow = Window & { RENDRO_INITIAL_DOC?: string; RENDRO_CURRENT_DOC?: string };
+const RENDRO_WINDOW = window as RendroWindow;
 const ORG = (document.querySelector("[data-tree-org]") as HTMLElement)?.dataset.treeOrg;
-const DEV_USER = new URLSearchParams(location.search).get("dev_user") || "";
 interface TreeNode { name: string; path: string; type: "file" | "folder"; size?: number; }
 
 const TREE = document.getElementById("tree-container") as HTMLElement;
@@ -16,6 +17,18 @@ function humanSize(bytes: number): string {
 
 function esc(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+function docUrl(fullPath: string): string {
+  return `/docs/${fullPath.split("/").map(encodeURIComponent).join("/")}`;
+}
+
+function docFromPathname(): string {
+  if (!ORG || !location.pathname.startsWith("/docs/")) return "";
+  const rawPath = location.pathname.slice("/docs/".length);
+  const key = rawPath.split("/").map(decodeURIComponent).join("/");
+  if (key === ORG) return "";
+  return key.startsWith(`${ORG}/`) ? key : "";
 }
 
 let activeEl: HTMLElement | null = null;
@@ -61,6 +74,8 @@ async function expand(folder: HTMLElement) {
   const content = folder.querySelector(":scope > .tree-folder-content") as HTMLElement | null;
   if (!content) return;
 
+  if (folder.classList.contains("loading")) return;
+
   if (folder.classList.contains("loaded")) {
     folder.classList.add("open");
     setFolderIcon(folder, true);
@@ -87,13 +102,26 @@ async function loadPage(folder: HTMLElement, path: string, content: HTMLElement,
   if (!res.ok) throw new Error(`${res.status}`);
   const data = await res.json();
   const childDepth = parseInt(folder.dataset.depth || "0") + 1;
-  const rows = renderRows(data.children as TreeNode[], childDepth);
+  const children = data.children as TreeNode[];
+  const existingPaths = new Set(
+    Array.from(content.querySelectorAll<HTMLElement>("[data-path]"))
+      .map((el) => el.dataset.path)
+      .filter((value): value is string => Boolean(value)),
+  );
+  const freshChildren = children.filter((child) => {
+    const childPath = child.type === "folder" && !child.path.endsWith("/") ? `${child.path}/` : child.path;
+    return !existingPaths.has(childPath);
+  });
+  content.querySelector(":scope > .tree-load-more")?.remove();
+  const rows = renderRows(freshChildren, childDepth);
   content.insertAdjacentHTML("beforeend", rows);
 
   if (data.isTruncated && data.nextStartAfter) {
     folder.dataset.nextStartAfter = data.nextStartAfter;
     content.insertAdjacentHTML("beforeend",
       `<div class="tree-load-more"><button class="load-more-btn">Load more...</button></div>`);
+  } else {
+    delete folder.dataset.nextStartAfter;
   }
 
   if (activeEl) updateIndicator(activeEl);
@@ -171,23 +199,71 @@ function handleClick(e: Event) {
 }
 
 // ── doc loading with history ──
+let activeDocLoadId = 0;
+let docLoadTimeout: number | undefined;
+
+
+
+function showDocLoader(frame: HTMLIFrameElement | null) {
+  const loader = document.getElementById("doc-loader");
+  if (loader) {
+    loader.classList.remove("error");
+    loader.setAttribute("role", "progressbar");
+    loader.setAttribute("aria-label", "Loading document");
+    loader.style.display = "block";
+  }
+  if (frame) frame.style.display = "block";
+}
+
+function showDocLoadError() {
+  const loader = document.getElementById("doc-loader");
+  if (!loader) return;
+  loader.classList.add("error");
+  loader.setAttribute("role", "status");
+  loader.setAttribute("aria-label", "Document is taking longer than expected");
+  loader.style.display = "block";
+}
+
+function hideDocLoader(frame: HTMLIFrameElement | null) {
+  const loader = document.getElementById("doc-loader");
+  if (loader) loader.style.display = "none";
+  if (frame) frame.style.display = "block";
+}
 
 function loadDoc(fullPath: string, pushState: boolean) {
   const frame = document.getElementById("content-frame") as HTMLIFrameElement | null;
   const placeholder = document.getElementById("main-placeholder");
-  if (frame) {
-    frame.style.display = "block";
-    frame.src = `/files/${fullPath}${DEV_USER ? `?dev_user=${DEV_USER}` : ""}`;
-  }
   if (placeholder) placeholder.style.display = "none";
 
-  // Update active state in tree
+  // Optimistic: keep production tree behavior — selected state changes immediately.
   syncActiveState(fullPath);
 
-  // Push history state
+  const loadId = ++activeDocLoadId;
+  if (docLoadTimeout !== undefined) window.clearTimeout(docLoadTimeout);
+  showDocLoader(frame);
+
+  if (frame) {
+    frame.onload = () => {
+      if (loadId !== activeDocLoadId) return;
+      if (docLoadTimeout !== undefined) window.clearTimeout(docLoadTimeout);
+      hideDocLoader(frame);
+    };
+    frame.onerror = () => {
+      if (loadId !== activeDocLoadId) return;
+      if (docLoadTimeout !== undefined) window.clearTimeout(docLoadTimeout);
+      showDocLoadError();
+    };
+    docLoadTimeout = window.setTimeout(() => {
+      if (loadId === activeDocLoadId) showDocLoadError();
+    }, 15000);
+    frame.src = `/files/${fullPath}`;
+  }
+
   if (pushState) {
     const url = new URL(location.href);
-    url.searchParams.set("doc", fullPath);
+    url.pathname = docUrl(fullPath);
+    url.searchParams.delete("doc");
+    url.searchParams.delete("dev_user");
     history.pushState({ docPath: fullPath }, "", url);
   }
 }
@@ -224,6 +300,7 @@ async function navigateToDoc(relPath: string) {
 
 // Sync tree active state without reloading iframe (for doc-loaded messages)
 function syncActiveState(fullPath: string) {
+  RENDRO_WINDOW.RENDRO_CURRENT_DOC = fullPath;
   // Always expand ancestors first (no-op if already open)
   const relPath = fullPath.startsWith(`${ORG}/`) ? fullPath.slice(ORG!.length + 1) : fullPath;
   navigateToDoc(relPath);
@@ -255,13 +332,31 @@ function init() {
 
   // Browser back/forward
   window.addEventListener("popstate", (e) => {
-    const docPath = e.state?.docPath;
+    const docPath = e.state?.docPath || docFromPathname();
     if (docPath) loadDoc(docPath, false);
   });
 
-  // Initial load: check URL for doc param
-  const urlDoc = new URLSearchParams(location.search).get("doc");
-  if (urlDoc) loadDoc(urlDoc, false);
+  const initialDoc = RENDRO_WINDOW.RENDRO_INITIAL_DOC || docFromPathname();
+  if (initialDoc) {
+    loadDoc(initialDoc, false);
+    return;
+  }
+  const params = new URLSearchParams(location.search);
+  const urlDoc = params.get("doc");
+  if (urlDoc) {
+    const url = new URL(location.href);
+    url.pathname = docUrl(urlDoc);
+    url.searchParams.delete("doc");
+    url.searchParams.delete("dev_user");
+    history.replaceState({ docPath: urlDoc }, "", url);
+    loadDoc(urlDoc, false);
+    return;
+  }
+  if (params.has("dev_user")) {
+    const url = new URL(location.href);
+    url.searchParams.delete("dev_user");
+    history.replaceState(history.state, "", url);
+  }
 }
 
 if (document.readyState === "loading") {
