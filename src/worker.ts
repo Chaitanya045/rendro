@@ -4,12 +4,26 @@
 // DOMParser/Node polyfill for Workers (AWS SDK XML parser for R2/S3).
 // Must be an IIFE — esbuild tree-shakes conditional blocks.
 ;(() => {
-  const hasDOMParser = typeof (globalThis as any).DOMParser !== "undefined"
-    && typeof new (globalThis as any).DOMParser().parseFromString("<r/>", "text/xml").getElementsByTagName === "function";
+  const hasDOMParser = typeof globalThis.DOMParser !== "undefined"
+    && typeof new globalThis.DOMParser().parseFromString("<r/>", "text/xml").getElementsByTagName === "function";
   if (hasDOMParser) return;
 
   const E = 1, T = 3, D = 9;
-  (globalThis as any).Node = { ELEMENT_NODE: E, TEXT_NODE: T, DOCUMENT_NODE: D, ATTRIBUTE_NODE: 2, CDATA_SECTION_NODE: 4, COMMENT_NODE: 8, DOCUMENT_FRAGMENT_NODE: 11 };
+  class NodePolyfill {
+    static readonly ELEMENT_NODE = E;
+    static readonly ATTRIBUTE_NODE = 2;
+    static readonly TEXT_NODE = T;
+    static readonly CDATA_SECTION_NODE = 4;
+    static readonly ENTITY_REFERENCE_NODE = 5;
+    static readonly ENTITY_NODE = 6;
+    static readonly PROCESSING_INSTRUCTION_NODE = 7;
+    static readonly COMMENT_NODE = 8;
+    static readonly DOCUMENT_NODE = D;
+    static readonly DOCUMENT_TYPE_NODE = 10;
+    static readonly DOCUMENT_FRAGMENT_NODE = 11;
+    static readonly NOTATION_NODE = 12;
+  }
+  Object.defineProperty(globalThis, "Node", { value: NodePolyfill, configurable: true });
 
   class X {
     nodeType = E; nodeName = ""; tagName = "";
@@ -49,13 +63,13 @@
     return root;
   }
 
-  (globalThis as any).DOMParser = class {
-    parseFromString(s: string) {
+  Object.defineProperty(globalThis, "DOMParser", { value: class {
+    parseFromString(s: string, _mimeType?: string) {
       const doc = p(s);
       const el = doc.children.find((c: X) => c.nodeType === E) ?? doc.children[0] ?? doc;
       return { documentElement: el, getElementsByTagName: el.getElementsByTagName.bind(el), childNodes: el.children };
     }
-  };
+  }, configurable: true });
 })();
 import shareRoutes from "@/routes/share";
 
@@ -68,11 +82,54 @@ import { logger } from "./logger";
 import { CONVEX_URL } from "./config";
 import type { User } from "better-auth/types";
 
-const app = new Hono<{ Variables: { user?: User } }>();
+type AssetsBinding = { fetch(request: Request): Response | Promise<Response> };
+type WorkerBindings = Record<string, unknown> & { ASSETS?: AssetsBinding };
+
+const app = new Hono<{ Bindings: WorkerBindings; Variables: { user?: User } }>();
 const CONVEX_SITE = CONVEX_URL.replace(".cloud", ".site");
 
+const AUTH_COOKIE_NAMES = [
+  "__Secure-better-auth.session_token",
+  "better-auth.session_token",
+  "__Secure-better-auth.session_data",
+  "better-auth.session_data",
+  "__Secure-better-auth.state",
+  "better-auth.state",
+  "__Secure-better-auth.oauth_state",
+  "better-auth.oauth_state",
+  "__Secure-better-auth.dont_remember",
+  "better-auth.dont_remember",
+  "__Secure-better-auth.account_data",
+  "better-auth.account_data",
+  "rendro-dev-user",
+] as const;
+const COOKIE_CHUNK_SUFFIXES = ["", ".0", ".1", ".2", ".3", ".4"] as const;
+
+function strippedSetCookies(headers: Headers): string[] {
+  const setCookies = headers.getSetCookie?.();
+  const values = setCookies && setCookies.length > 0
+    ? setCookies
+    : headers.get("set-cookie") ? [headers.get("set-cookie")!] : [];
+  return values.map((sc) => sc.replace(/;\s*Domain=[^;]+;?/gi, ";"));
+}
+
+function appendExpiredCookie(headers: Headers, name: string) {
+  const attributes = name.startsWith("better-auth") || name.startsWith("__Secure-better-auth")
+    ? "Max-Age=0; Path=/; HttpOnly; SameSite=Lax"
+    : "Max-Age=0; Path=/; SameSite=Lax";
+  const secure = name.startsWith("__Secure-") ? "; Secure" : "";
+  headers.append("Set-Cookie", `${name}=; ${attributes}${secure}`);
+}
+
+function appendAuthCookieCleanup(headers: Headers) {
+  for (const name of AUTH_COOKIE_NAMES) {
+    const suffixes = name.includes("session_data") || name.includes("account_data") ? COOKIE_CHUNK_SUFFIXES : [""];
+    for (const suffix of suffixes) appendExpiredCookie(headers, `${name}${suffix}`);
+  }
+}
+
 app.use("*", async (c, next) => {
-  const env = c.env as Record<string, unknown>;
+  const env = c.env;
   if (env && typeof process !== "undefined")
     for (const k of Object.keys(env))
       if (env[k] !== undefined && process.env[k] === undefined)
@@ -90,11 +147,15 @@ app.use("*", async (c, next) => { await sessionMiddleware(c, next); });
 // Sign-out: GET → POST
 app.get("/api/auth/sign-out", async (c) => {
   const cookie = c.req.raw.headers.get("cookie") || "";
-  await fetch(`${CONVEX_SITE}/api/auth/sign-out`, { method: "POST", headers: { cookie, "content-type": "application/json" }, redirect: "manual" });
-  const res = new Response(null, { status: 302, headers: { Location: "/" } });
-  res.headers.append("Set-Cookie", "__Secure-better-auth.session_token=; Max-Age=0; Path=/; HttpOnly; Secure; SameSite=Lax");
-  res.headers.append("Set-Cookie", "better-auth.session_token=; Max-Age=0; Path=/; HttpOnly; Secure; SameSite=Lax");
-  return res;
+  const upstream = await fetch(`${CONVEX_SITE}/api/auth/sign-out`, {
+    method: "POST",
+    headers: { cookie, "content-type": "application/json" },
+    redirect: "manual",
+  });
+  const headers = new Headers({ Location: "/" });
+  for (const sc of strippedSetCookies(upstream.headers)) headers.append("Set-Cookie", sc);
+  appendAuthCookieCleanup(headers);
+  return new Response(null, { status: 302, headers });
 });
 
 // Proxy auth to Convex
@@ -109,17 +170,16 @@ app.on(["POST", "GET", "OPTIONS"], "/api/auth/*", async (c) => {
   if (c.req.method !== "GET" && c.req.method !== "HEAD") init.body = await c.req.raw.text();
   try {
     const upstream = await fetch(target, init);
-    const setCookies = upstream.headers.getSetCookie?.() ?? [];
+    const setCookies = strippedSetCookies(upstream.headers);
     if (setCookies.length > 0) {
-      const cleaned = setCookies.map((sc: string) => sc.replace(/;\s*Domain=[^;]+;?/gi, ";"));
       const respHeaders = new Headers(upstream.headers);
       respHeaders.delete("set-cookie");
-      for (const sc of cleaned) respHeaders.append("set-cookie", sc);
+      for (const sc of setCookies) respHeaders.append("set-cookie", sc);
       return new Response(upstream.body, { status: upstream.status, headers: respHeaders });
     }
     return upstream;
-  } catch (err: any) {
-    logger.error({ err: err.message }, "Auth proxy error");
+  } catch (err: unknown) {
+    logger.error({ err: err instanceof Error ? err.message : String(err) }, "Auth proxy error");
     return c.json({ error: "Auth unavailable" }, 502);
   }
 });
@@ -129,9 +189,9 @@ app.route("/", docsRoutes);
 app.get("/health", (c) => c.text("ok"));
 
 // Static files from ASSETS binding
-app.get("/lazy-tree.js", async (c) => { const a = (c.env as any).ASSETS; if (a?.fetch) return a.fetch(c.req.raw); return c.notFound(); });
-app.get("/commentor.js", async (c) => { const a = (c.env as any).ASSETS; if (a?.fetch) return a.fetch(c.req.raw); return c.notFound(); });
-app.get("*", async (c) => { const a = (c.env as any).ASSETS; if (a?.fetch) return a.fetch(c.req.raw); return c.notFound(); });
+app.get("/lazy-tree.js", async (c) => { const assets = c.env?.ASSETS; if (assets?.fetch) return assets.fetch(c.req.raw); return c.notFound(); });
+app.get("/commentor.js", async (c) => { const assets = c.env?.ASSETS; if (assets?.fetch) return assets.fetch(c.req.raw); return c.notFound(); });
+app.get("*", async (c) => { const assets = c.env?.ASSETS; if (assets?.fetch) return assets.fetch(c.req.raw); return c.notFound(); });
 
 app.onError((err, c) => {
   logger.error({ err: { message: err.message, stack: err.stack }, path: c.req.path }, "Unhandled error");

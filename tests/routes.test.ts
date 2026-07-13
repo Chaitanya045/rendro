@@ -1,6 +1,7 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { Hono } from "hono";
 import type { MiddlewareHandler, Context } from "hono";
+import workerApp from "@/worker";
 import type { User } from "better-auth/types";
 import * as minio from "@/minio";
 import * as orgs from "@/orgs";
@@ -307,6 +308,58 @@ describe("session middleware", () => {
     const res = await app.request("/me");
     const body = await res.json();
     expect(body).toBeNull();
+  });
+});
+
+// ────────────────────────────────────────────────────
+// 5. Worker auth sign-out — stale OAuth cookie cleanup
+// ────────────────────────────────────────────────────
+describe("worker auth sign-out", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("expires session, OAuth state, chunked cache, and dev cookies", async () => {
+    const upstreamHeaders = new Headers();
+    upstreamHeaders.append(
+      "set-cookie",
+      "__Secure-better-auth.session_token=; Max-Age=0; Path=/; HttpOnly; Secure; SameSite=Lax; Domain=convex.site",
+    );
+    upstreamHeaders.append(
+      "set-cookie",
+      "__Secure-better-auth.state=; Max-Age=0; Path=/; HttpOnly; Secure; SameSite=Lax; Domain=convex.site",
+    );
+    const calls: string[] = [];
+    const fakeFetch: typeof fetch = async (input, init) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+      calls.push(`${init?.method ?? "GET"} ${url}`);
+      if (url.includes("/api/auth/get-session")) return new Response("null", { status: 200 });
+      if (url.includes("/api/auth/sign-out")) return new Response(JSON.stringify({ success: true }), { status: 200, headers: upstreamHeaders });
+      return new Response("unexpected fetch", { status: 500 });
+    };
+    vi.stubGlobal("fetch", fakeFetch);
+
+    const res = await workerApp.request("https://rendro.app/api/auth/sign-out", {
+      headers: {
+        cookie: [
+          "__Secure-better-auth.session_token=session",
+          "__Secure-better-auth.state=oauth-state",
+          "__Secure-better-auth.session_data.0=cache",
+          "rendro-dev-user=carol%40acme-corp.com",
+        ].join("; "),
+      },
+    });
+
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toBe("/");
+    const setCookies = res.headers.getSetCookie?.() ?? [res.headers.get("set-cookie") ?? ""];
+    const joined = setCookies.join("\n");
+    expect(joined).toContain("__Secure-better-auth.session_token=;");
+    expect(joined).toContain("__Secure-better-auth.state=;");
+    expect(joined).toContain("__Secure-better-auth.session_data.0=;");
+    expect(joined).toContain("rendro-dev-user=;");
+    expect(joined).not.toContain("Domain=convex.site");
+    expect(calls.some((call) => call.includes("/api/auth/sign-out"))).toBe(true);
   });
 });
 
