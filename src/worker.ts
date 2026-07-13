@@ -93,17 +93,16 @@ const AUTH_COOKIE_NAMES = [
   "better-auth.session_token",
   "__Secure-better-auth.session_data",
   "better-auth.session_data",
+  "__Secure-better-auth.session_data.0",
+  "better-auth.session_data.0",
+  "__Secure-better-auth.session_data.1",
+  "better-auth.session_data.1",
   "__Secure-better-auth.state",
   "better-auth.state",
   "__Secure-better-auth.oauth_state",
   "better-auth.oauth_state",
-  "__Secure-better-auth.dont_remember",
-  "better-auth.dont_remember",
-  "__Secure-better-auth.account_data",
-  "better-auth.account_data",
   "rendro-dev-user",
 ] as const;
-const COOKIE_CHUNK_SUFFIXES = ["", ".0", ".1", ".2", ".3", ".4"] as const;
 
 function strippedSetCookies(headers: Headers): string[] {
   const setCookies = headers.getSetCookie?.();
@@ -113,19 +112,27 @@ function strippedSetCookies(headers: Headers): string[] {
   return values.map((sc) => sc.replace(/;\s*Domain=[^;]+;?/gi, ";"));
 }
 
-function appendExpiredCookie(headers: Headers, name: string) {
+function parentCookieDomain(hostname: string): string | undefined {
+  const parts = hostname.split(".").filter(Boolean);
+  if (parts.length < 2) return undefined;
+  return `.${parts.slice(-2).join(".")}`;
+}
+
+function appendExpiredCookie(headers: Headers, name: string, domain?: string) {
   const attributes = name.startsWith("better-auth") || name.startsWith("__Secure-better-auth")
     ? "Max-Age=0; Path=/; HttpOnly; SameSite=Lax"
     : "Max-Age=0; Path=/; SameSite=Lax";
   const secure = name.startsWith("__Secure-") ? "; Secure" : "";
-  headers.append("Set-Cookie", `${name}=; ${attributes}${secure}`);
+  const domainAttr = domain ? `; Domain=${domain}` : "";
+  headers.append("Set-Cookie", `${name}=; ${attributes}${secure}${domainAttr}`);
 }
 
-function appendAuthCookieCleanup(headers: Headers) {
+function appendAuthCookieCleanup(headers: Headers, hostname: string) {
   headers.set("Clear-Site-Data", "\"cookies\"");
+  const parentDomain = parentCookieDomain(hostname);
   for (const name of AUTH_COOKIE_NAMES) {
-    const suffixes = name.includes("session_data") || name.includes("account_data") ? COOKIE_CHUNK_SUFFIXES : [""];
-    for (const suffix of suffixes) appendExpiredCookie(headers, `${name}${suffix}`);
+    appendExpiredCookie(headers, name);
+    if (parentDomain) appendExpiredCookie(headers, name, parentDomain);
   }
 }
 
@@ -159,7 +166,7 @@ app.get("/api/auth/sign-out", async (c) => {
   } catch (err: unknown) {
     logger.error({ err: err instanceof Error ? err.message : String(err) }, "Auth sign-out proxy error");
   }
-  appendAuthCookieCleanup(headers);
+  appendAuthCookieCleanup(headers, new URL(c.req.url).hostname);
   return new Response(null, { status: 302, headers });
 });
 

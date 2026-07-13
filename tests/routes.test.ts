@@ -359,6 +359,8 @@ describe("worker auth sign-out", () => {
     expect(joined).toContain("__Secure-better-auth.session_data.0=;");
     expect(joined).toContain("rendro-dev-user=;");
     expect(res.headers.get("clear-site-data")).toBe("\"cookies\"");
+    expect(joined).toContain("__Secure-better-auth.state=; Max-Age=0; Path=/; HttpOnly; SameSite=Lax; Secure; Domain=.rendro.app");
+    expect(joined).toContain("__Secure-better-auth.session_token=; Max-Age=0; Path=/; HttpOnly; SameSite=Lax; Secure; Domain=.rendro.app");
     expect(joined).not.toContain("Domain=convex.site");
     expect(calls.some((call) => call.includes("/api/auth/sign-out"))).toBe(true);
   });
