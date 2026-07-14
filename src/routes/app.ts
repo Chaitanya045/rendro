@@ -547,6 +547,7 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
   var topHotzone=document.getElementById("shell-hotzone-top");
   var leftHotzone=document.getElementById("shell-hotzone-left");
   var shellSidebarHideTimer;
+  var shellHeaderHideTimer;
   var storedWidth=Number(localStorage.getItem("rendro-sidebar-width"));
   var expandedWidth=Number.isFinite(storedWidth)&&storedWidth>0?storedWidth:DEFAULT_WIDTH;
 
@@ -605,6 +606,15 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
     var resizerHovered=resizer&&resizer.matches(":hover");
     var revealSidebar=!root.classList.contains("sidebar-collapsed")&&(e.clientX<=sidebarLimit||!!sidebarHovered||!!resizerHovered);
     root.classList.toggle("shell-sidebar-revealed",revealSidebar);
+  }
+  function scheduleHideShellHeader(){
+    if(!root.classList.contains("shell-hidden"))return;
+    if(shellHeaderHideTimer!==undefined)window.clearTimeout(shellHeaderHideTimer);
+    shellHeaderHideTimer=window.setTimeout(function(){
+      var headerHovered=topbar&&topbar.matches(":hover");
+      var hotzoneHovered=topHotzone&&topHotzone.matches(":hover");
+      if(!headerHovered&&!hotzoneHovered)root.classList.remove("shell-header-revealed");
+    },80);
   }
   function revealShellHeader(){
     if(root.classList.contains("shell-hidden"))root.classList.add("shell-header-revealed");
@@ -713,9 +723,9 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
   window.addEventListener("resize",function(){if(!root.classList.contains("sidebar-collapsed"))setSidebarWidth(expandedWidth,false);});
   if(shellToggle)shellToggle.addEventListener("click",function(){setShellHidden(!root.classList.contains("shell-hidden"));});
   document.addEventListener("pointermove",updateShellAutoReveal,{passive:true});
-  if(topHotzone)topHotzone.addEventListener("pointerenter",revealShellHeader);
-  if(leftHotzone)leftHotzone.addEventListener("pointerenter",revealShellSidebar);
-  if(topbar)topbar.addEventListener("mouseleave",hideShellHeader);
+  if(topHotzone){topHotzone.addEventListener("pointerenter",revealShellHeader);topHotzone.addEventListener("pointerleave",scheduleHideShellHeader);}
+  if(leftHotzone){leftHotzone.addEventListener("pointerenter",revealShellSidebar);leftHotzone.addEventListener("pointerleave",scheduleHideShellSidebar);}
+  if(topbar)topbar.addEventListener("mouseleave",scheduleHideShellHeader);
   if(sidebar)sidebar.addEventListener("mouseleave",scheduleHideShellSidebar);
   if(resizer)resizer.addEventListener("mouseleave",scheduleHideShellSidebar);
   document.addEventListener("keydown",function(e){
