@@ -293,16 +293,18 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
   .main-placeholder p{font-size:16px;color:#71717a;max-width:320px}
   .ph-icon{width:64px;height:64px;border-radius:50%;background:#f4f4f5;display:inline-flex;align-items:center;justify-content:center;margin-bottom:16px}
   .content-frame{width:100%;height:100%;border:0;background:#fff}
-  /* ── loader — 3px line at top of iframe/content area, never covering the document ── */
-  .doc-loader{position:absolute;top:0;left:0;right:0;height:3px;display:block;z-index:3;pointer-events:none;overflow:hidden;background:transparent}
-  .doc-loader-bar{position:absolute;top:0;bottom:0;left:0;width:38%;border-radius:999px;background:linear-gradient(90deg,transparent,#c2410c,transparent);animation:docLoaderSweep 1.1s cubic-bezier(.4,0,.2,1) infinite}
-  .doc-loader.error .doc-loader-bar{width:100%;background:#b42318;animation:none;opacity:.9}
-  @keyframes docLoaderSweep{0%{transform:translateX(-100%)}100%{transform:translateX(265%)}}
-  html.dark .doc-loader-bar{width:46%;background:linear-gradient(90deg,transparent,#fdba74,#fb923c,#fdba74,transparent);box-shadow:0 0 6px rgba(251,146,60,.5)}
-  html.dark .doc-loader.error .doc-loader-bar{background:#fca5a5}
-  @media (prefers-reduced-motion: reduce){.doc-loader-bar{width:100%;opacity:.65;animation:none}}
+  /* ── loader — fixed top overlay for document navigation; visible even when shell chrome is hidden ── */
+  .doc-loader{position:fixed;top:56px;left:var(--sidebar-width);right:0;height:4px;display:block;z-index:70;pointer-events:none;overflow:hidden;background:rgba(254,215,170,.18);box-shadow:0 1px 0 rgba(194,65,12,.12);transition:top .3s cubic-bezier(.4,0,.2,1),left .3s cubic-bezier(.4,0,.2,1);will-change:top,left}
+  html.shell-hidden .doc-loader{top:0;left:0}
+  .doc-loader-bar{position:absolute;top:0;bottom:0;left:0;width:46%;border-radius:999px;background:linear-gradient(90deg,transparent,#fed7aa 12%,#c2410c 48%,#fb923c 72%,transparent);box-shadow:0 0 10px rgba(194,65,12,.45);animation:docLoaderSweep 1.05s cubic-bezier(.4,0,.2,1) infinite}
+  .doc-loader.error .doc-loader-bar{width:100%;background:#b42318;animation:none;opacity:.95;box-shadow:0 0 8px rgba(180,35,24,.45)}
+  @keyframes docLoaderSweep{0%{transform:translateX(-100%)}100%{transform:translateX(240%)}}
+  html.dark .doc-loader{background:rgba(251,146,60,.14);box-shadow:0 1px 0 rgba(251,146,60,.18)}
+  html.dark .doc-loader-bar{background:linear-gradient(90deg,transparent,#fdba74 12%,#fb923c 48%,#fed7aa 72%,transparent);box-shadow:0 0 12px rgba(251,146,60,.55)}
+  html.dark .doc-loader.error .doc-loader-bar{background:#fca5a5;box-shadow:0 0 8px rgba(252,165,165,.45)}
+  @media (prefers-reduced-motion: reduce){.doc-loader-bar{width:100%;opacity:.85;animation:none}}
   @media (prefers-reduced-motion: reduce){.tree-skeleton-icon,.tree-skeleton-label{animation:none;background:#f4f4f5}}
-  @media (prefers-reduced-motion: reduce){.topbar,.sidebar,.main,.sidebar-resizer,.share-label-track,.sidebar-resizer::before{transition:none}.sidebar-resizer::before{transform:scaleY(1)}.resizer-sparks{display:none}}
+  @media (prefers-reduced-motion: reduce){.topbar,.sidebar,.main,.doc-loader,.sidebar-resizer,.share-label-track,.sidebar-resizer::before{transition:none}.sidebar-resizer::before{transform:scaleY(1)}.resizer-sparks{display:none}}
   .avatar-wrap{position:relative}
   .avatar-menu{position:absolute;top:42px;right:0;background:#fff;border:1px solid #e4e4e7;border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,.12);padding:4px;min-width:200px;z-index:100}
   .avatar-menu-email{padding:8px 12px;font-size:12px;color:#71717a;border-bottom:1px solid #e4e4e7;margin-bottom:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -424,8 +426,8 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
 </aside>
 <div class="sidebar-resizer" id="sidebar-resizer" role="separator" aria-orientation="vertical" aria-controls="doc-sidebar" aria-label="Resize document tree" aria-valuemin="220" aria-valuemax="420" aria-valuenow="280" aria-valuetext="Document tree 280 pixels wide" tabindex="0"><span class="resizer-sparks resizer-sparks-top" aria-hidden="true"></span><span class="resizer-sparks resizer-sparks-bottom" aria-hidden="true"></span></div>
 
+<div class="doc-loader" id="doc-loader" style="display:none" role="progressbar" aria-label="Loading document"><div class="doc-loader-bar"></div></div>
 <main class="main">
-  <div class="doc-loader" id="doc-loader" style="display:none" role="progressbar" aria-label="Loading document"><div class="doc-loader-bar"></div></div>
   <div class="main-placeholder" id="main-placeholder">
     <div class="ph-icon"><span class="material-symbols-outlined" style="font-size:32px;color:#71717a">edit_document</span></div>
     <h2>Select a document</h2>
