@@ -57,6 +57,14 @@ function updateIndicator(el: HTMLElement, animate = true) {
   indicator.style.transform = `translate(${ir.left - cr.left}px, ${ir.top - cr.top}px)`;
 }
 
+function refreshIndicator(animate = false) {
+  if (!activeEl) return;
+  requestAnimationFrame(() => {
+    if (!activeEl) return;
+    updateIndicator(activeEl, animate);
+  });
+}
+
 // ── fold icon toggle ──
 
 function setFolderIcon(folder: HTMLElement, open: boolean) {
@@ -373,6 +381,15 @@ function init() {
     const target = e.target as HTMLElement;
     if (target.classList.contains("tree-folder-content") && activeEl) {
       updateIndicator(activeEl);
+    }
+  });
+  TREE.closest(".sidebar-tree")?.addEventListener("scroll", () => refreshIndicator(false), { passive: true });
+  window.addEventListener("resize", () => refreshIndicator(false));
+  document.addEventListener("rendro:shell-layout", () => refreshIndicator(false));
+  document.addEventListener("transitionend", (e) => {
+    const target = e.target as HTMLElement;
+    if ((target.classList.contains("sidebar") || target.classList.contains("sidebar-resizer")) && activeEl) {
+      refreshIndicator(false);
     }
   });
   window.addEventListener("message", (e) => {

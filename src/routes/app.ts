@@ -576,14 +576,21 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
     root.style.setProperty("--sidebar-expanded-width",expandedWidth+"px");
     if(persist)localStorage.setItem("rendro-sidebar-width",String(expandedWidth));
     updateSidebarAria();
+    notifyShellLayout();
   }
   function setSidebarCollapsed(collapsed){
     root.classList.toggle("sidebar-collapsed",collapsed);
     localStorage.setItem("rendro-sidebar-collapsed",collapsed?"1":"0");
     updateSidebarAria();
+    notifyShellLayout();
   }
-  function setShellHidden(hidden){
+  function notifyShellLayout(){
+    document.dispatchEvent(new CustomEvent("rendro:shell-layout"));
+    requestAnimationFrame(function(){document.dispatchEvent(new CustomEvent("rendro:shell-layout"));});
+  }
+  function setShellHidden(hidden,persist){
     root.classList.toggle("shell-hidden",hidden);
+    if(persist!==false)localStorage.setItem("rendro-shell-hidden",hidden?"1":"0");
     if(!hidden){
       root.classList.remove("shell-header-revealed");
       root.classList.remove("shell-sidebar-revealed");
@@ -595,17 +602,21 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
     }
     if(shellToggleIcon)shellToggleIcon.textContent=hidden?"fullscreen_exit":"fullscreen";
     if(hidden&&shellToggle)shellToggle.blur();
+    notifyShellLayout();
   }
   function updateShellAutoReveal(e){
     if(!root.classList.contains("shell-hidden"))return;
-    var headerLimit=root.classList.contains("shell-header-revealed")?72:12;
+    var wasHeader=root.classList.contains("shell-header-revealed");
+    var wasSidebar=root.classList.contains("shell-sidebar-revealed");
+    var headerLimit=wasHeader?72:12;
     var headerHovered=topbar&&topbar.matches(":hover");
     root.classList.toggle("shell-header-revealed",e.clientY<=headerLimit||!!headerHovered);
-    var sidebarLimit=root.classList.contains("shell-sidebar-revealed")?clampWidth(expandedWidth)+24:12;
+    var sidebarLimit=wasSidebar?clampWidth(expandedWidth)+24:12;
     var sidebarHovered=sidebar&&sidebar.matches(":hover");
     var resizerHovered=resizer&&resizer.matches(":hover");
     var revealSidebar=!root.classList.contains("sidebar-collapsed")&&(e.clientX<=sidebarLimit||!!sidebarHovered||!!resizerHovered);
     root.classList.toggle("shell-sidebar-revealed",revealSidebar);
+    if(wasHeader!==root.classList.contains("shell-header-revealed")||wasSidebar!==root.classList.contains("shell-sidebar-revealed"))notifyShellLayout();
   }
   function scheduleHideShellHeader(){
     if(!root.classList.contains("shell-hidden"))return;
@@ -613,17 +624,20 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
     shellHeaderHideTimer=window.setTimeout(function(){
       var headerHovered=topbar&&topbar.matches(":hover");
       var hotzoneHovered=topHotzone&&topHotzone.matches(":hover");
-      if(!headerHovered&&!hotzoneHovered)root.classList.remove("shell-header-revealed");
+      if(!headerHovered&&!hotzoneHovered&&root.classList.contains("shell-header-revealed")){
+        root.classList.remove("shell-header-revealed");
+        notifyShellLayout();
+      }
     },80);
   }
   function revealShellHeader(){
-    if(root.classList.contains("shell-hidden"))root.classList.add("shell-header-revealed");
+    if(root.classList.contains("shell-hidden")&&!root.classList.contains("shell-header-revealed")){root.classList.add("shell-header-revealed");notifyShellLayout();}
   }
   function hideShellHeader(){
-    if(root.classList.contains("shell-hidden"))root.classList.remove("shell-header-revealed");
+    if(root.classList.contains("shell-hidden")&&root.classList.contains("shell-header-revealed")){root.classList.remove("shell-header-revealed");notifyShellLayout();}
   }
   function revealShellSidebar(){
-    if(root.classList.contains("shell-hidden")&&!root.classList.contains("sidebar-collapsed"))root.classList.add("shell-sidebar-revealed");
+    if(root.classList.contains("shell-hidden")&&!root.classList.contains("sidebar-collapsed")&&!root.classList.contains("shell-sidebar-revealed")){root.classList.add("shell-sidebar-revealed");notifyShellLayout();}
   }
   function scheduleHideShellSidebar(){
     if(!root.classList.contains("shell-hidden"))return;
@@ -631,7 +645,10 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
     shellSidebarHideTimer=window.setTimeout(function(){
       var sidebarHovered=sidebar&&sidebar.matches(":hover");
       var resizerHovered=resizer&&resizer.matches(":hover");
-      if(!sidebarHovered&&!resizerHovered)root.classList.remove("shell-sidebar-revealed");
+      if(!sidebarHovered&&!resizerHovered&&root.classList.contains("shell-sidebar-revealed")){
+        root.classList.remove("shell-sidebar-revealed");
+        notifyShellLayout();
+      }
     },80);
   }
 
@@ -639,7 +656,7 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
   if(localStorage.getItem("rendro-sidebar-collapsed")==="1")setSidebarCollapsed(true);
   root.getBoundingClientRect();
   root.classList.add("sidebar-ready");
-  setShellHidden(false);
+  setShellHidden(localStorage.getItem("rendro-shell-hidden")==="1",false);
 
   if(themeToggle)themeToggle.addEventListener("click",function(){
     var current=normalizedTheme();
