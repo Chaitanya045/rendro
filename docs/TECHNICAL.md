@@ -252,7 +252,7 @@ CLI phases:
 Server (Hono SSR)
   │
   ├─ renderOrgTreePage(user, org, tree)
-  │   ├─ Topbar (logo, share, theme, avatar)
+  │   ├─ Topbar (logo, hide shell, copy signed URL, theme, avatar)
   │   ├─ Sidebar
   │   │   ├─ data-tree-org attribute
   │   │   └─ #tree-container
@@ -261,7 +261,7 @@ Server (Hono SSR)
   │   ├─ Main area
   │   │   ├─ #main-placeholder (shown when no doc selected)
   │   │   └─ #content-frame (iframe, hidden initially)
-  │   ├─ Inline scripts (theme, menu toggles)
+  │   ├─ Inline scripts (theme, shell hide/show, copy feedback, avatar menu)
   │   └─ <script src="/lazy-tree.js">
   │
 Client (lazy-tree.js, 8KB IIFE)

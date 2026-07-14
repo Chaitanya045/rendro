@@ -78,7 +78,7 @@ First user from a new domain:
 - **Inline comments**: select any text, leave a comment
 - **Threaded replies**: reply to comments in context
 - **Real-time**: comments appear instantly via Convex
-- **Share**: copy doc URL with one click, toast confirmation
+- **Share**: copy a signed public document URL with one click and inline confirmation
 
 ### Org Isolation
 - Users from `acme-corp.com` only see `acme-corp/` docs
@@ -182,7 +182,7 @@ No admin intervention. No dashboard. No configuration. The email domain IS the o
 - Cross-doc navigation (postMessage)
 - Browser history support
 - Dark mode toggle
-- Share button with copy link
+- Copy signed URL button with inline confirmation
 
 ### v0.3 — Migration
 - Renamed from docsync to Rendro
