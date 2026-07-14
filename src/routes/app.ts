@@ -162,19 +162,12 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
 <style>
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
   :root{--sidebar-expanded-width:280px;--sidebar-width:var(--sidebar-expanded-width)}
-  html.sidebar-collapsed{--sidebar-width:0px}
   body{font-family:Inter,system-ui,sans-serif;background:#fff;color:#09090b;overflow:hidden;height:100vh;font-size:14px;line-height:20px}
   .material-symbols-outlined{font-variation-settings:'FILL'0,'wght'400,'GRAD'0,'opsz'24;vertical-align:middle;font-size:20px}
   ::-webkit-scrollbar{width:6px} ::-webkit-scrollbar-track{background:transparent} ::-webkit-scrollbar-thumb{background:#e4e4e7;border-radius:10px}
 
   .topbar{position:fixed;top:0;z-index:50;width:100%;height:56px;background:#fff;border-bottom:1px solid #e4e4e7;display:flex;align-items:center;justify-content:space-between;padding:0 24px;transition:transform .3s cubic-bezier(.4,0,.2,1),opacity .2s cubic-bezier(.4,0,.2,1);will-change:transform,opacity}
   .topbar-left{display:flex;align-items:center;gap:10px}
-  .sidebar-toggle{width:32px;height:32px;border:1px solid transparent;border-radius:8px;background:transparent;color:#71717a;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;transition:background-color .2s cubic-bezier(.4,0,.2,1),color .2s cubic-bezier(.4,0,.2,1),border-color .15s cubic-bezier(.4,0,.2,1),transform .2s cubic-bezier(.4,0,.2,1)}
-  .sidebar-toggle:hover{background:#f4f4f5;color:#09090b}
-  .sidebar-toggle:active{transform:scale(.96)}
-  .sidebar-toggle:focus-visible{outline:2px solid #c2410c;outline-offset:2px}
-  .sidebar-toggle .material-symbols-outlined{font-size:22px;transition:transform .3s cubic-bezier(.4,0,.2,1)}
-  html.sidebar-collapsed .sidebar-toggle .material-symbols-outlined{transform:rotate(180deg)}
   .topbar-logo{font-size:24px;font-weight:700;color:#c2410c;line-height:32px}
   .topbar-search{display:flex;align-items:center;gap:8px;background:#f4f4f5;padding:6px 12px;border-radius:4px;border:1px solid #e4e4e7;width:256px;transition:border-color .15s}
   .topbar-search:focus-within{border-color:#c2410c}
@@ -182,8 +175,13 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
   .topbar-search input::placeholder{color:#71717a}
   .topbar-actions{display:flex;align-items:center;gap:16px}
   .topbar-btn{padding:6px 12px;font-size:12px;font-weight:600;border-radius:4px;cursor:pointer;border:0;font-family:Inter;display:flex;align-items:center;gap:6px}
-  .topbar-btn-share{color:#c2410c;background:transparent}
+  .topbar-btn-share{color:#c2410c;background:transparent;min-width:132px;justify-content:center;overflow:hidden}
   .topbar-btn-share:hover{background:#fff7ed}
+  .topbar-btn-share:disabled{opacity:.72;cursor:default}
+  .share-label-window{height:16px;line-height:16px;overflow:hidden;display:inline-flex;align-items:flex-start}
+  .share-label-track{display:flex;flex-direction:column;transition:transform .3s cubic-bezier(.4,0,.2,1);will-change:transform}
+  .share-label{height:16px;white-space:nowrap}
+  .topbar-btn-share.is-feedback .share-label-track{transform:translateY(-16px)}
   .topbar-btn-create{background:#c2410c;color:#fff}
   .topbar-btn-create:hover{background:#9a3412;opacity:1}
   .topbar-avatar{width:32px;height:32px;border-radius:50%;background:#ffedd5;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;color:#09090b;cursor:pointer;border:1px solid #fed7aa}
@@ -222,8 +220,6 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
   html.sidebar-resizing-moving.sidebar-resizing-trail-right .sidebar-resizer .resizer-sparks-top{animation:resizerTopTrailRight .36s cubic-bezier(.2,0,.2,1) infinite}
   html.sidebar-resizing-moving.sidebar-resizing-trail-right .sidebar-resizer .resizer-sparks-bottom{animation:resizerBottomTrailRight .36s cubic-bezier(.2,0,.2,1) infinite}
   .sidebar-resizer:focus-visible{outline:0}
-  html.sidebar-collapsed .sidebar{opacity:0;pointer-events:none;border-right-width:0}
-  html.sidebar-collapsed .sidebar-resizer{opacity:0;pointer-events:none}
   html.sidebar-resizing,.sidebar-resizing body{cursor:col-resize;user-select:none}
   html:not(.sidebar-ready) .sidebar,html:not(.sidebar-ready) .main,html:not(.sidebar-ready) .sidebar-resizer{transition:none}
   html.sidebar-resizing .sidebar,html.sidebar-resizing .main,html.sidebar-resizing .sidebar-resizer{transition:none}
@@ -301,20 +297,13 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
   html.dark .doc-loader.error .doc-loader-bar{background:#fca5a5}
   @media (prefers-reduced-motion: reduce){.doc-loader-bar{width:100%;opacity:.65;animation:none}}
   @media (prefers-reduced-motion: reduce){.tree-skeleton-icon,.tree-skeleton-label{animation:none;background:#f4f4f5}}
-  @media (prefers-reduced-motion: reduce){.topbar,.sidebar,.main,.sidebar-resizer,.sidebar-toggle,.sidebar-toggle .material-symbols-outlined,.sidebar-resizer::before{transition:none}.sidebar-resizer::before{transform:scaleY(1)}.resizer-sparks{display:none}}
+  @media (prefers-reduced-motion: reduce){.topbar,.sidebar,.main,.sidebar-resizer,.share-label-track,.sidebar-resizer::before{transition:none}.sidebar-resizer::before{transform:scaleY(1)}.resizer-sparks{display:none}}
   .avatar-wrap{position:relative}
   .avatar-menu{position:absolute;top:42px;right:0;background:#fff;border:1px solid #e4e4e7;border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,.12);padding:4px;min-width:200px;z-index:100}
   .avatar-menu-email{padding:8px 12px;font-size:12px;color:#71717a;border-bottom:1px solid #e4e4e7;margin-bottom:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .avatar-menu-item{display:flex;align-items:center;gap:8px;padding:8px 12px;font-size:14px;color:#09090b;text-decoration:none;border-radius:4px;cursor:pointer;border:0;background:0;width:100%;font-family:Inter}
   .avatar-menu-item:hover{background:#f4f4f5}
 
-  .share-wrap{position:relative}
-  .share-menu{position:absolute;top:38px;right:0;background:#fff;border:1px solid #e4e4e7;border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,.12);padding:4px;min-width:160px;z-index:100}
-  .share-menu-item{display:flex;align-items:center;gap:8px;padding:8px 12px;font-size:14px;color:#09090b;border:0;background:0;width:100%;border-radius:4px;cursor:pointer;font-family:Inter}
-  .share-menu-item:hover{background:#f4f4f5}
-
-  .toast{position:fixed;bottom:24px;right:24px;background:#09090b;color:#fff;padding:10px 20px;border-radius:8px;font-size:14px;font-family:Inter;z-index:200;opacity:0;transition:opacity .2s;pointer-events:none}
-  .toast.show{opacity:1}
   .topbar-btn-icon{width:32px;height:32px;border-radius:4px;border:0;background:transparent;cursor:pointer;display:flex;align-items:center;justify-content:center;color:#71717a;transition:background .15s,color .15s,transform .15s cubic-bezier(.4,0,.2,1)}
   .topbar-btn-icon:hover{background:#f4f4f5}
   .topbar-btn-icon:active{transform:scale(.96)}
@@ -343,9 +332,6 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
   html.dark .topbar-search:focus-within{border-color:#fb923c}
   html.dark .topbar-search input{color:#fafafa}
   html.dark .topbar-search input::placeholder{color:#a1a1aa}
-  html.dark .sidebar-toggle{color:#a1a1aa}
-  html.dark .sidebar-toggle:hover{background:#18181b;color:#fafafa}
-  html.dark .sidebar-toggle:focus-visible{outline-color:#fb923c}
   html.dark .sidebar-resizer{--resizer-spark-a:#fed7aa;--resizer-spark-b:#fb923c}
   html.dark .sidebar-resizer::before{background:#fb923c}
   html.dark .sidebar-resizer:hover::before,html.dark .sidebar-resizer:focus-visible::before,html.dark.sidebar-resizing .sidebar-resizer::before{box-shadow:0 0 0 3px rgba(251,146,60,.16)}
@@ -387,10 +373,6 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
   html.dark .ph-icon .material-symbols-outlined{color:#a1a1aa!important}
   html.dark .avatar-menu-item{color:#fafafa}
   html.dark .avatar-menu-item:hover{background:#18181b}
-  html.dark .share-menu{background:#09090b;border-color:#27272a;box-shadow:0 8px 24px rgba(0,0,0,.48)}
-  html.dark .share-menu-item{color:#fafafa}
-  html.dark .share-menu-item:hover{background:#18181b}
-  html.dark .toast{background:#fafafa;color:#09090b}
   html.dark .load-more-btn{color:#fb923c}
   html.dark .load-more-btn:hover{background:#18181b}
   html.dark .load-more-btn:disabled{color:#71717a}
@@ -403,19 +385,14 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
 
 <header class="topbar">
   <div class="topbar-left">
-    <button class="sidebar-toggle" id="sidebar-toggle" type="button" aria-label="Collapse document tree" aria-controls="doc-sidebar" aria-expanded="true" title="Collapse document tree">
-      <span class="material-symbols-outlined" aria-hidden="true">left_panel_close</span>
-    </button>
     <span class="topbar-logo">Rendro</span>
   </div>
   <div class="topbar-actions">
     <button class="topbar-btn-icon shell-toggle" id="shell-toggle" type="button" aria-label="Hide app shell" aria-pressed="false" title="Hide app shell"><span class="material-symbols-outlined" aria-hidden="true">fullscreen</span></button>
-    <div class="share-wrap">
-      <button class="topbar-btn topbar-btn-share" id="share-btn"><span class="material-symbols-outlined" style="font-size:18px">share</span> Share</button>
-      <div class="share-menu" id="share-menu" style="display:none">
-        <button class="share-menu-item" id="copy-link-btn"><span class="material-symbols-outlined" style="font-size:18px">link</span> Copy link</button>
-      </div>
-    </div>
+    <button class="topbar-btn topbar-btn-share" id="share-btn" type="button" aria-label="Copy signed URL">
+      <span class="material-symbols-outlined" style="font-size:18px" aria-hidden="true">share</span>
+      <span class="share-label-window" aria-hidden="true"><span class="share-label-track"><span class="share-label">Share</span><span class="share-label" id="share-feedback-label">Signed URL copied</span></span></span>
+    </button>
     <button class="topbar-btn-icon theme-toggle" id="theme-toggle" type="button" aria-label="Switch to dark theme" title="Theme: system"><span class="material-symbols-outlined theme-icon" aria-hidden="true">brightness_auto</span></button>
     <div class="avatar-wrap">
       <div class="topbar-avatar" id="avatar-btn" title="${escapeHtml(email)}">${initials}</div>
@@ -539,8 +516,6 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
   var STEP=24;
   var sidebar=document.getElementById("doc-sidebar");
   var resizer=document.getElementById("sidebar-resizer");
-  var toggle=document.getElementById("sidebar-toggle");
-  var toggleIcon=toggle&&toggle.querySelector(".material-symbols-outlined");
   var topbar=document.querySelector(".topbar");
   var shellToggle=document.getElementById("shell-toggle");
   var shellToggleIcon=shellToggle&&shellToggle.querySelector(".material-symbols-outlined");
@@ -554,33 +529,20 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
   function maxForViewport(){return Math.max(MIN_WIDTH,Math.min(MAX_WIDTH,window.innerWidth-360));}
   function clampWidth(value){return Math.max(MIN_WIDTH,Math.min(maxForViewport(),Math.round(value)));}
   function updateSidebarAria(){
-    var collapsed=root.classList.contains("sidebar-collapsed");
     var width=clampWidth(expandedWidth);
     if(resizer){
       resizer.setAttribute("aria-valuemin",String(MIN_WIDTH));
       resizer.setAttribute("aria-valuemax",String(maxForViewport()));
       resizer.setAttribute("aria-valuenow",String(width));
-      resizer.setAttribute("aria-valuetext",collapsed?"Document tree collapsed":"Document tree "+width+" pixels wide");
-      resizer.tabIndex=collapsed?-1:0;
+      resizer.setAttribute("aria-valuetext","Document tree "+width+" pixels wide");
+      resizer.tabIndex=0;
     }
-    if(toggle){
-      toggle.setAttribute("aria-expanded",String(!collapsed));
-      toggle.setAttribute("aria-label",collapsed?"Open document tree":"Collapse document tree");
-      toggle.setAttribute("title",collapsed?"Open document tree":"Collapse document tree");
-    }
-    if(toggleIcon)toggleIcon.textContent=collapsed?"left_panel_open":"left_panel_close";
-    if(sidebar){sidebar.setAttribute("aria-hidden",collapsed?"true":"false");if("inert" in sidebar)sidebar.inert=collapsed;}
+    if(sidebar){sidebar.setAttribute("aria-hidden","false");if("inert" in sidebar)sidebar.inert=false;}
   }
   function setSidebarWidth(value,persist){
     expandedWidth=clampWidth(value);
     root.style.setProperty("--sidebar-expanded-width",expandedWidth+"px");
     if(persist)localStorage.setItem("rendro-sidebar-width",String(expandedWidth));
-    updateSidebarAria();
-    notifyShellLayout();
-  }
-  function setSidebarCollapsed(collapsed){
-    root.classList.toggle("sidebar-collapsed",collapsed);
-    localStorage.setItem("rendro-sidebar-collapsed",collapsed?"1":"0");
     updateSidebarAria();
     notifyShellLayout();
   }
@@ -614,7 +576,7 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
     var sidebarLimit=wasSidebar?clampWidth(expandedWidth)+24:12;
     var sidebarHovered=sidebar&&sidebar.matches(":hover");
     var resizerHovered=resizer&&resizer.matches(":hover");
-    var revealSidebar=!root.classList.contains("sidebar-collapsed")&&(e.clientX<=sidebarLimit||!!sidebarHovered||!!resizerHovered);
+    var revealSidebar=e.clientX<=sidebarLimit||!!sidebarHovered||!!resizerHovered;
     root.classList.toggle("shell-sidebar-revealed",revealSidebar);
     if(wasHeader!==root.classList.contains("shell-header-revealed")||wasSidebar!==root.classList.contains("shell-sidebar-revealed"))notifyShellLayout();
   }
@@ -637,7 +599,7 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
     if(root.classList.contains("shell-hidden")&&root.classList.contains("shell-header-revealed")){root.classList.remove("shell-header-revealed");notifyShellLayout();}
   }
   function revealShellSidebar(){
-    if(root.classList.contains("shell-hidden")&&!root.classList.contains("sidebar-collapsed")&&!root.classList.contains("shell-sidebar-revealed")){root.classList.add("shell-sidebar-revealed");notifyShellLayout();}
+    if(root.classList.contains("shell-hidden")&&!root.classList.contains("shell-sidebar-revealed")){root.classList.add("shell-sidebar-revealed");notifyShellLayout();}
   }
   function scheduleHideShellSidebar(){
     if(!root.classList.contains("shell-hidden"))return;
@@ -653,7 +615,6 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
   }
 
   setSidebarWidth(expandedWidth,false);
-  if(localStorage.getItem("rendro-sidebar-collapsed")==="1")setSidebarCollapsed(true);
   root.getBoundingClientRect();
   root.classList.add("sidebar-ready");
   setShellHidden(localStorage.getItem("rendro-shell-hidden")==="1",false);
@@ -664,7 +625,6 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
     transitionTheme(next);
   });
   themeMedia.addEventListener("change",function(){if(normalizedTheme()==="system")applyTheme("system",false,false);});
-  if(toggle)toggle.addEventListener("click",function(){setSidebarCollapsed(!root.classList.contains("sidebar-collapsed"));});
   if(resizer){
     var dragging=false;
     var impactSparkTimer;
@@ -675,7 +635,7 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
       resizer.style.setProperty("--resizer-origin-y",y+"px");
     }
     function triggerImpactSparks(){
-      if(root.classList.contains("sidebar-collapsed")||dragging)return;
+      if(dragging)return;
       resizer.classList.remove("resizer-impact-sparks");
       resizer.offsetWidth;
       resizer.classList.add("resizer-impact-sparks");
@@ -707,7 +667,6 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
       }
     });
     resizer.addEventListener("pointerdown",function(e){
-      if(root.classList.contains("sidebar-collapsed"))return;
       updateResizerOrigin(e);
       resizer.classList.remove("resizer-impact-sparks");
       lastResizeX=e.clientX;
@@ -729,15 +688,13 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
     resizer.addEventListener("pointerup",finishResize);
     resizer.addEventListener("pointercancel",finishResize);
     resizer.addEventListener("keydown",function(e){
-      if(e.key==="Enter"){e.preventDefault();setSidebarCollapsed(!root.classList.contains("sidebar-collapsed"));return;}
-      if(root.classList.contains("sidebar-collapsed"))return;
       if(e.key==="ArrowLeft"){e.preventDefault();setSidebarWidth(expandedWidth-STEP,true);}
       else if(e.key==="ArrowRight"){e.preventDefault();setSidebarWidth(expandedWidth+STEP,true);}
       else if(e.key==="Home"){e.preventDefault();setSidebarWidth(MIN_WIDTH,true);}
       else if(e.key==="End"){e.preventDefault();setSidebarWidth(maxForViewport(),true);}
     });
   }
-  window.addEventListener("resize",function(){if(!root.classList.contains("sidebar-collapsed"))setSidebarWidth(expandedWidth,false);});
+  window.addEventListener("resize",function(){setSidebarWidth(expandedWidth,false);});
   if(shellToggle)shellToggle.addEventListener("click",function(){setShellHidden(!root.classList.contains("shell-hidden"));});
   document.addEventListener("pointermove",updateShellAutoReveal,{passive:true});
   if(topHotzone){topHotzone.addEventListener("pointerenter",revealShellHeader);topHotzone.addEventListener("pointerleave",scheduleHideShellHeader);}
@@ -754,10 +711,12 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
   });
 
   document.getElementById("avatar-btn")?.addEventListener("click",function(e){e.stopPropagation();var m=document.getElementById("avatar-menu");m.style.display=m.style.display==="block"?"none":"block";});
-  document.getElementById("share-btn")?.addEventListener("click",function(e){e.stopPropagation();var m=document.getElementById("share-menu");m.style.display=m.style.display==="block"?"none":"block";});
-  function showToast(message){var t=document.createElement("div");t.className="toast";t.textContent=message;document.body.appendChild(t);t.offsetHeight;t.classList.add("show");setTimeout(function(){t.classList.remove("show");setTimeout(function(){t.remove()},200)},1500)}
-  document.getElementById("copy-link-btn")?.addEventListener("click",async function(){var doc=window.RENDRO_CURRENT_DOC||"";if(!doc){showToast("Select a document first");return;}try{var res=await fetch("/api/share/create?key="+encodeURIComponent(doc),{headers:{accept:"application/json"}});if(!res.ok)throw new Error("share failed");var data=await res.json();await navigator.clipboard.writeText(data.url);showToast("Signed link copied");}catch(_){showToast("Unable to copy link");}});
-  document.addEventListener("click",function(){var m=document.getElementById("avatar-menu");if(m)m.style.display="none";var s=document.getElementById("share-menu");if(s)s.style.display="none";});
+  var shareBtn=document.getElementById("share-btn");
+  var shareFeedbackLabel=document.getElementById("share-feedback-label");
+  var shareFeedbackTimer;
+  function setShareFeedback(message){if(!shareBtn||!shareFeedbackLabel)return;shareFeedbackLabel.textContent=message;shareBtn.classList.add("is-feedback");shareBtn.setAttribute("aria-label",message);if(shareFeedbackTimer!==undefined)window.clearTimeout(shareFeedbackTimer);shareFeedbackTimer=window.setTimeout(function(){shareBtn.classList.remove("is-feedback");shareBtn.setAttribute("aria-label","Copy signed URL");},1800);}
+  if(shareBtn)shareBtn.addEventListener("click",async function(e){e.stopPropagation();var doc=window.RENDRO_CURRENT_DOC||"";if(!doc){setShareFeedback("Select a document first");return;}shareBtn.setAttribute("aria-busy","true");shareBtn.disabled=true;try{var res=await fetch("/api/share/create?key="+encodeURIComponent(doc),{headers:{accept:"application/json"}});if(!res.ok)throw new Error("share failed");var data=await res.json();await navigator.clipboard.writeText(data.url);setShareFeedback("Signed URL copied");}catch(_){setShareFeedback("Unable to copy");}finally{shareBtn.removeAttribute("aria-busy");shareBtn.disabled=false;}});
+  document.addEventListener("click",function(){var m=document.getElementById("avatar-menu");if(m)m.style.display="none";});
 })();
 </script>
 <script>window.RENDRO_INITIAL_DOC=${JSON.stringify(selectedDoc)};</script>
