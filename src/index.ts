@@ -9,6 +9,7 @@ import docsRoutes from "@/routes/docs";
 import shareRoutes from "@/routes/share";
 import { PORT } from "@/config";
 import { logger } from "@/logger";
+import { renderNotFoundPage } from "@/routes/not-found";
 import type { User } from "better-auth/types";
 
 const app = new Hono<{ Variables: { user?: User } }>();
@@ -59,6 +60,8 @@ app.route("/", docsRoutes);
 
 // Health check
 app.get("/health", (c) => c.text("ok"));
+
+app.notFound((c) => c.html(renderNotFoundPage({ path: c.req.path }), 404));
 
 // Error handler
 app.onError((err, c) => {

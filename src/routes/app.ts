@@ -1,9 +1,11 @@
 import { Hono } from "hono";
-import { putObject } from "@/minio";
+import { putObject, headObject } from "@/minio";
 import { emailToOrgSlug, orgExists, logOrgAccess } from "@/orgs";
 import type { User } from "better-auth/types";
 import { logger } from "@/logger";
 import { createOrgApiKey } from "@/api-keys";
+import { isDeleted } from "@/soft-delete";
+import { renderNotFoundPage } from "@/routes/not-found";
 
 const app = new Hono<{ Variables: { user?: User } }>();
 
@@ -44,7 +46,7 @@ app.get("/docs/:org", async (c) => {
   const user = c.get("user");
   if (!user) return c.html(renderSignIn());
   const org = emailToOrgSlug(user.email);
-  if (!org || c.req.param("org") !== org) return c.text("Not found", 404);
+  if (!org || c.req.param("org") !== org) return c.html(renderNotFoundPage({ path: c.req.path }), 404);
   return c.html(renderOrgDocs(user, org));
 });
 
@@ -56,7 +58,15 @@ app.get("/docs/:key{.+}", async (c) => {
   const rawKey = c.req.param("key");
   const selectedDoc = decodeURIComponent(rawKey);
   if (selectedDoc === org) return c.html(renderOrgDocs(user, org));
-  if (!selectedDoc.startsWith(`${org}/`)) return c.text("Not found", 404);
+  if (!selectedDoc.startsWith(`${org}/`)) return c.html(renderNotFoundPage({ path: c.req.path, homeHref: `/docs/${encodeURIComponent(org)}` }), 404);
+  if (await isDeleted(selectedDoc) || !(await headObject(selectedDoc))) {
+    return c.html(renderNotFoundPage({
+      path: c.req.path,
+      homeHref: `/docs/${encodeURIComponent(org)}`,
+      homeLabel: "Open docs tree",
+      message: "That document is not in the current docs tree. It may have moved, been deleted, or never existed.",
+    }), 404);
+  }
   return c.html(renderOrgDocs(user, org, selectedDoc));
 });
 

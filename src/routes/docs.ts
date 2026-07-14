@@ -8,6 +8,7 @@ import { emailToOrgSlug } from "@/orgs";
 import type { User } from "better-auth/types";
 import { createShareUrl, isShareableDocKey } from "@/share-links";
 import { logger } from "@/logger";
+import { renderNotFoundPage } from "@/routes/not-found";
 
 const app = new Hono<{ Variables: { user?: User } }>();
 
@@ -41,7 +42,7 @@ app.get("/files/:key{.+}", async (c) => {
   if (!key.startsWith(`${org}/`)) { logger.warn({ email: user.email, key }, "cross-org"); return c.text("Forbidden", 403); }
   try {
     const stream = await getObjectStream(key);
-    if (!stream) return c.text("Not found", 404);
+    if (!stream) return c.html(renderNotFoundPage({ path: c.req.path, homeHref: `/docs/${encodeURIComponent(org)}`, homeLabel: "Open docs tree" }), 404);
     // Read full body for commentor injection
     const reader = stream.getReader();
     const chunks: Uint8Array[] = [];

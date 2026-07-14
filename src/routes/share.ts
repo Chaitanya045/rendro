@@ -3,6 +3,7 @@ import { getObjectStream } from "@/minio";
 import { isDeleted } from "@/soft-delete";
 import { verifyShareToken } from "@/share-links";
 import { logger } from "@/logger";
+import { renderNotFoundPage } from "@/routes/not-found";
 
 const app = new Hono();
 
@@ -14,11 +15,11 @@ app.get("/share/:token", async (c) => {
   }
 
   const key = result.key;
-  if (await isDeleted(key)) return c.text("Not found", 404);
+  if (await isDeleted(key)) return c.html(renderNotFoundPage({ path: c.req.path }), 404);
 
   try {
     const stream = await getObjectStream(key);
-    if (!stream) return c.text("Not found", 404);
+    if (!stream) return c.html(renderNotFoundPage({ path: c.req.path }), 404);
 
     const reader = stream.getReader();
     const chunks: Uint8Array[] = [];

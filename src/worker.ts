@@ -80,6 +80,7 @@ import appRoutes from "./routes/app";
 import docsRoutes from "./routes/docs";
 import { logger } from "./logger";
 import { CONVEX_URL } from "./config";
+import { renderNotFoundPage } from "./routes/not-found";
 import type { User } from "better-auth/types";
 
 type AssetsBinding = { fetch(request: Request): Response | Promise<Response> };
@@ -201,9 +202,17 @@ app.route("/", docsRoutes);
 app.get("/health", (c) => c.text("ok"));
 
 // Static files from ASSETS binding
-app.get("/lazy-tree.js", async (c) => { const assets = c.env?.ASSETS; if (assets?.fetch) return assets.fetch(c.req.raw); return c.notFound(); });
-app.get("/commentor.js", async (c) => { const assets = c.env?.ASSETS; if (assets?.fetch) return assets.fetch(c.req.raw); return c.notFound(); });
-app.get("*", async (c) => { const assets = c.env?.ASSETS; if (assets?.fetch) return assets.fetch(c.req.raw); return c.notFound(); });
+app.get("/lazy-tree.js", async (c) => { const assets = c.env?.ASSETS; if (assets?.fetch) return assets.fetch(c.req.raw); return c.html(renderNotFoundPage({ path: c.req.path }), 404); });
+app.get("/commentor.js", async (c) => { const assets = c.env?.ASSETS; if (assets?.fetch) return assets.fetch(c.req.raw); return c.html(renderNotFoundPage({ path: c.req.path }), 404); });
+app.get("*", async (c) => {
+  const assets = c.env?.ASSETS;
+  if (assets?.fetch) {
+    const res = await assets.fetch(c.req.raw);
+    if (res.status !== 404) return res;
+  }
+  return c.html(renderNotFoundPage({ path: c.req.path }), 404);
+});
+app.notFound((c) => c.html(renderNotFoundPage({ path: c.req.path }), 404));
 
 app.onError((err, c) => {
   logger.error({ err: { message: err.message, stack: err.stack }, path: c.req.path }, "Unhandled error");
