@@ -438,11 +438,7 @@ class Commentor {
       commentBtn,
       this.commentsBtn,
     );
-    const gripEl = grip;
-    gripEl.addEventListener("pointerdown", (e) => this.onDragStart(e));
-    gripEl.addEventListener("pointermove", (e) => this.onDragMove(e));
-    gripEl.addEventListener("pointerup", (e) => this.onDragEnd(e));
-    gripEl.addEventListener("pointercancel", (e) => this.onDragEnd(e));
+    grip.addEventListener("pointerdown", (e) => this.onDragStart(e));
     return toolbar;
   }
 
@@ -450,8 +446,18 @@ class Commentor {
   private dragging = false;
   private dragDx = 0;
   private dragDy = 0;
+  private dragPointerId: number | null = null;
+  private dragHandle: HTMLElement | null = null;
+  private dragDoc: Document | null = null;
+  private dragMoveListener: ((e: PointerEvent) => void) | null = null;
+  private dragEndListener: ((e: PointerEvent) => void) | null = null;
   private onDragStart(e: PointerEvent): void {
+    if (e.button !== 0) return;
     this.dragging = true;
+    this.dragPointerId = e.pointerId;
+    this.dragHandle = e.currentTarget as HTMLElement;
+    this.dragDoc = this.dragHandle.ownerDocument;
+    this.hideTip();
     // Collapse the drawer before dragging so the dock returns to its compact
     // handle size — dragging the full expanded panel is unwieldy and breaks.
     if (this.dock.hasAttribute("data-expanded")) this.collapseDrawer(true);
@@ -461,11 +467,20 @@ class Commentor {
     const r = this.dock.getBoundingClientRect();
     this.dragDx = e.clientX - r.left;
     this.dragDy = e.clientY - r.top;
-    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    this.dragMoveListener = (ev) => this.onDragMove(ev);
+    this.dragEndListener = (ev) => this.onDragEnd(ev);
+    this.dragDoc.addEventListener("pointermove", this.dragMoveListener);
+    this.dragDoc.addEventListener("pointerup", this.dragEndListener);
+    this.dragDoc.addEventListener("pointercancel", this.dragEndListener);
+    try {
+      this.dragHandle.setPointerCapture(e.pointerId);
+    } catch {
+      /* document listeners still keep the drag alive */
+    }
     e.preventDefault();
   }
   private onDragMove(e: PointerEvent): void {
-    if (!this.dragging) return;
+    if (!this.dragging || e.pointerId !== this.dragPointerId) return;
     const left = clamp(MARGIN, window.innerWidth - this.dock.offsetWidth - MARGIN, e.clientX - this.dragDx);
     const top = clamp(MARGIN, window.innerHeight - this.dock.offsetHeight - MARGIN, e.clientY - this.dragDy);
     // Clear perpendicular anchors so left/top fully control position.
@@ -473,16 +488,27 @@ class Commentor {
     this.dock.style.bottom = "auto";
     this.dock.style.left = `${left}px`;
     this.dock.style.top = `${top}px`;
+    e.preventDefault();
   }
   private onDragEnd(e: PointerEvent): void {
-    if (!this.dragging) return;
+    if (!this.dragging || e.pointerId !== this.dragPointerId) return;
     this.dragging = false;
     this.dock.classList.remove("dragging");
+    if (this.dragDoc && this.dragMoveListener) this.dragDoc.removeEventListener("pointermove", this.dragMoveListener);
+    if (this.dragDoc && this.dragEndListener) {
+      this.dragDoc.removeEventListener("pointerup", this.dragEndListener);
+      this.dragDoc.removeEventListener("pointercancel", this.dragEndListener);
+    }
     try {
-      (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
+      this.dragHandle?.releasePointerCapture(e.pointerId);
     } catch {
       /* noop */
     }
+    this.dragPointerId = null;
+    this.dragHandle = null;
+    this.dragDoc = null;
+    this.dragMoveListener = null;
+    this.dragEndListener = null;
     this.snapToNearestEdge();
   }
   private snapToNearestEdge(): void {
@@ -1214,7 +1240,7 @@ button { font: inherit; color: inherit; }
   box-shadow: var(--shadow-lg);
   transition: left .42s var(--spring), top .42s var(--spring);
 }
-.dock.dragging { transition: none; }
+.dock.dragging { transition: none; cursor: grabbing; }
 .dock.dock-bottom { flex-direction: column; align-items: stretch; }
 .dock.dock-top    { flex-direction: column-reverse; align-items: stretch; }
 .dock.dock-left   { flex-direction: row-reverse; align-items: stretch; }
@@ -1238,6 +1264,7 @@ button { font: inherit; color: inherit; }
 .grip {
   width: 20px; height: 28px; cursor: grab; display: flex;
   align-items: center; justify-content: center; border-radius: 10px;
+  touch-action: none; user-select: none; -webkit-user-select: none;
   transition: background var(--dur) var(--ease);
 }
 .grip:hover { background: var(--border-soft); }
