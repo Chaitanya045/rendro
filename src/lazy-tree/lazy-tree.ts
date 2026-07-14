@@ -51,10 +51,8 @@ function updateIndicator(el: HTMLElement, animate = true) {
   indicator.style.transition = animate
     ? "transform 0.3s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.2s ease"
     : "none";
-  const ir = el.getBoundingClientRect();
-  const cr = TREE.getBoundingClientRect();
   indicator.style.opacity = "1";
-  indicator.style.transform = `translate(${ir.left - cr.left}px, ${ir.top - cr.top}px)`;
+  indicator.style.transform = `translate(${el.offsetLeft}px, ${el.offsetTop}px)`;
 }
 
 function refreshIndicator(animate = false) {
