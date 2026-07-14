@@ -174,14 +174,19 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
   .topbar-search input{border:0;outline:0;background:transparent;font-size:14px;color:#09090b;width:100%;font-family:Inter}
   .topbar-search input::placeholder{color:#71717a}
   .topbar-actions{display:flex;align-items:center;gap:16px}
-  .topbar-btn{padding:6px 12px;font-size:12px;font-weight:600;border-radius:4px;cursor:pointer;border:0;font-family:Inter;display:flex;align-items:center;gap:6px}
-  .topbar-btn-share{color:#c2410c;background:transparent;min-width:132px;justify-content:center;overflow:hidden}
-  .topbar-btn-share:hover{background:#fff7ed}
+  .topbar-btn{padding:6px 12px;font-size:12px;font-weight:600;border-radius:4px;cursor:pointer;border:0;font-family:Inter;display:flex;align-items:center;gap:6px;transition:background-color .15s,color .15s,border-color .15s,transform .15s cubic-bezier(.4,0,.2,1)}
+  .topbar-btn-share{color:#52525b;background:transparent;border:1px solid #e4e4e7;min-width:172px;justify-content:center;overflow:hidden}
+  .topbar-btn-share:hover{background:#f4f4f5;color:#09090b;border-color:#d4d4d8}
+  .topbar-btn-share:active{transform:scale(.98);background:#e4e4e7}
+  .topbar-btn-share:focus-visible{outline:2px solid #71717a;outline-offset:2px}
   .topbar-btn-share:disabled{opacity:.72;cursor:default}
   .share-label-window{height:16px;line-height:16px;overflow:hidden;display:inline-flex;align-items:flex-start}
   .share-label-track{display:flex;flex-direction:column;transition:transform .3s cubic-bezier(.4,0,.2,1);will-change:transform}
   .share-label{height:16px;white-space:nowrap}
+  .topbar-btn-share.is-feedback{background:#f4f4f5;color:#09090b;border-color:#d4d4d8}
   .topbar-btn-share.is-feedback .share-label-track{transform:translateY(-16px)}
+  .share-icon{transition:transform .18s cubic-bezier(.4,0,.2,1),opacity .18s ease}
+  .topbar-btn-share.is-feedback .share-icon{transform:scale(1.08)}
   .topbar-btn-create{background:#c2410c;color:#fff}
   .topbar-btn-create:hover{background:#9a3412;opacity:1}
   .topbar-avatar{width:32px;height:32px;border-radius:50%;background:#ffedd5;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;color:#09090b;cursor:pointer;border:1px solid #fed7aa}
@@ -336,9 +341,11 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
   html.dark .sidebar-resizer::before{background:#fb923c}
   html.dark .sidebar-resizer:hover::before,html.dark .sidebar-resizer:focus-visible::before,html.dark.sidebar-resizing .sidebar-resizer::before{box-shadow:0 0 0 3px rgba(251,146,60,.16)}
   html.dark .topbar-btn-icon{color:#a1a1aa}
+  html.dark .topbar-btn-share{color:#a1a1aa;border-color:#27272a}
+  html.dark .topbar-btn-share:hover{background:#18181b;color:#fafafa;border-color:#3f3f46}
+  html.dark .topbar-btn-share:active,html.dark .topbar-btn-share.is-feedback{background:#18181b;color:#fafafa;border-color:#3f3f46}
+  html.dark .topbar-btn-share:focus-visible{outline-color:#a1a1aa}
   html.dark .topbar-btn-icon:hover{background:#18181b;color:#fafafa}
-  html.dark .topbar-btn-share{color:#fb923c}
-  html.dark .topbar-btn-share:hover{background:rgba(251,146,60,.12)}
   html.dark .topbar-btn-create{background:#fb923c;color:#09090b}
   html.dark .topbar-btn-create:hover{background:#fdba74;opacity:1}
   html.dark .sidebar-tree{--sidebar-bg:#09090b;scrollbar-color:#3f3f46 transparent}
@@ -390,8 +397,8 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
   <div class="topbar-actions">
     <button class="topbar-btn-icon shell-toggle" id="shell-toggle" type="button" aria-label="Hide app shell" aria-pressed="false" title="Hide app shell"><span class="material-symbols-outlined" aria-hidden="true">fullscreen</span></button>
     <button class="topbar-btn topbar-btn-share" id="share-btn" type="button" aria-label="Copy signed URL">
-      <span class="material-symbols-outlined" style="font-size:18px" aria-hidden="true">share</span>
-      <span class="share-label-window" aria-hidden="true"><span class="share-label-track"><span class="share-label">Share</span><span class="share-label" id="share-feedback-label">Signed URL copied</span></span></span>
+      <span class="material-symbols-outlined share-icon" style="font-size:18px" aria-hidden="true">link</span>
+      <span class="share-label-window" aria-hidden="true"><span class="share-label-track"><span class="share-label">Copy signed URL</span><span class="share-label" id="share-feedback-label">Signed URL copied!</span></span></span>
     </button>
     <button class="topbar-btn-icon theme-toggle" id="theme-toggle" type="button" aria-label="Switch to dark theme" title="Theme: system"><span class="material-symbols-outlined theme-icon" aria-hidden="true">brightness_auto</span></button>
     <div class="avatar-wrap">
@@ -713,10 +720,11 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
   document.getElementById("avatar-btn")?.addEventListener("click",function(e){e.stopPropagation();var m=document.getElementById("avatar-menu");m.style.display=m.style.display==="block"?"none":"block";});
   var shareBtn=document.getElementById("share-btn");
   var shareFeedbackLabel=document.getElementById("share-feedback-label");
+  var shareIcon=shareBtn&&shareBtn.querySelector(".share-icon");
   var shareFeedbackTimer;
-  function setShareFeedback(message){if(!shareBtn||!shareFeedbackLabel)return;shareFeedbackLabel.textContent=message;shareBtn.classList.add("is-feedback");shareBtn.setAttribute("aria-label",message);if(shareFeedbackTimer!==undefined)window.clearTimeout(shareFeedbackTimer);shareFeedbackTimer=window.setTimeout(function(){shareBtn.classList.remove("is-feedback");shareBtn.setAttribute("aria-label","Copy signed URL");},1800);}
+  function setShareFeedback(message){if(!shareBtn||!shareFeedbackLabel)return;shareFeedbackLabel.textContent=message;if(shareIcon)shareIcon.textContent=message==="Signed URL copied!"?"check":"error";shareBtn.classList.add("is-feedback");shareBtn.setAttribute("aria-label",message);if(shareFeedbackTimer!==undefined)window.clearTimeout(shareFeedbackTimer);shareFeedbackTimer=window.setTimeout(function(){shareBtn.classList.remove("is-feedback");shareBtn.setAttribute("aria-label","Copy signed URL");if(shareIcon)shareIcon.textContent="link";},1800);}
   async function copyText(text){try{if(navigator.clipboard&&window.isSecureContext){await navigator.clipboard.writeText(text);return;}}catch(_){}var ta=document.createElement("textarea");ta.value=text;ta.setAttribute("readonly","");ta.style.position="fixed";ta.style.top="-999px";ta.style.left="-999px";document.body.appendChild(ta);ta.select();ta.setSelectionRange(0,text.length);try{if(!document.execCommand("copy"))throw new Error("copy failed");}finally{ta.remove();}}
-  if(shareBtn)shareBtn.addEventListener("click",async function(e){e.stopPropagation();var doc=window.RENDRO_CURRENT_DOC||"";if(!doc){setShareFeedback("Select a document first");return;}shareBtn.setAttribute("aria-busy","true");shareBtn.disabled=true;try{var res=await fetch("/api/share/create?key="+encodeURIComponent(doc),{headers:{accept:"application/json"}});if(!res.ok)throw new Error("share failed");var data=await res.json();await copyText(data.url);setShareFeedback("Signed URL copied");}catch(_){setShareFeedback("Unable to copy");}finally{shareBtn.removeAttribute("aria-busy");shareBtn.disabled=false;}});
+  if(shareBtn)shareBtn.addEventListener("click",async function(e){e.stopPropagation();var doc=window.RENDRO_CURRENT_DOC||"";if(!doc){setShareFeedback("Select a document first");return;}shareBtn.setAttribute("aria-busy","true");shareBtn.disabled=true;try{var res=await fetch("/api/share/create?key="+encodeURIComponent(doc),{headers:{accept:"application/json"}});if(!res.ok)throw new Error("share failed");var data=await res.json();await copyText(data.url);setShareFeedback("Signed URL copied!");}catch(_){setShareFeedback("Unable to copy");}finally{shareBtn.removeAttribute("aria-busy");shareBtn.disabled=false;}});
   document.addEventListener("click",function(){var m=document.getElementById("avatar-menu");if(m)m.style.display="none";});
 })();
 </script>
