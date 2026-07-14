@@ -712,6 +712,14 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
   if(sidebar)sidebar.addEventListener("mouseleave",scheduleHideShellSidebar);
   if(resizer)resizer.addEventListener("mouseleave",scheduleHideShellSidebar);
   document.addEventListener("keydown",function(e){
+    var key=(e.key||"").toLowerCase();
+    var shellShortcut=(key==="h"||e.code==="KeyH")&&(e.ctrlKey||e.metaKey)&&e.shiftKey&&!e.altKey&&!e.repeat&&!(e.getModifierState&&e.getModifierState("AltGraph"));
+    if(shellShortcut&&!(e.target instanceof Element&&e.target.closest("input,textarea,select,[contenteditable='true'],[contenteditable='plaintext-only'],[contenteditable='']"))){
+      e.preventDefault();
+      setShellHidden(!root.classList.contains("shell-hidden"));
+      if(!root.classList.contains("shell-hidden")&&shellToggle)shellToggle.focus();
+      return;
+    }
     if(e.key==="Escape"&&root.classList.contains("shell-hidden")){
       e.preventDefault();
       setShellHidden(false);
