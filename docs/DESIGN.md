@@ -131,15 +131,15 @@ Purpose: global actions, not navigation depth.
 - Right-side actions: hide/show app shell, copy signed URL, theme toggle, avatar.
 - Avatar menu opens near its trigger and closes on outside click. Copy feedback stays inline in the copy button.
 - Hide/show app shell persists in `localStorage`; `Ctrl+Shift+H` (`Cmd+Shift+H` on macOS) toggles it from either the app shell or the focused document iframe, top/left hot zones temporarily reveal the header/sidebar while hidden, and `Escape` restores the full shell.
-- Theme toggle cycles `system → dark → light → system`. The selected transition is a radial theme ripple from the theme button. Use View Transitions where available; fall back to a CSS `clip-path: circle()` overlay. The icon may still morph in fallback paths, but the ripple is the primary theme-change feedback. Publisher iframe content is not restyled.
+- Theme toggle cycles `system → dark → light → system`. The selected transition is a radial theme ripple from the theme button while the button icon scrolls vertically through `brightness_auto`, `dark_mode`, and `light_mode`. Use View Transitions where available; fall back to a CSS `clip-path: circle()` overlay. Publisher iframe content is not restyled.
 
 Interaction spec:
 
 | Element | Default | Hover | Active/open |
 |---|---|---|---|
 | Copy signed URL | Neutral bordered button with link icon | Neutral container hover bg, stronger border | Icon swaps to check; label scrolls to `Signed URL copied!` |
-| Icon buttons | Muted icon | Container hover bg | Icon swaps / menu visible |
-| Theme toggle | Current mode icon (`brightness_auto`, `dark_mode`, `light_mode`) | Container hover bg | Radial theme ripple starts from the button |
+| Icon buttons | Muted icon | Container hover bg | Icon motion / menu visible |
+| Theme toggle | Current mode icon (`brightness_auto`, `dark_mode`, `light_mode`) | Container hover bg | Radial theme ripple starts; icon track scrolls vertically to the active mode |
 | Avatar | Initials chip | Border/surface emphasis | Avatar menu visible |
 
 ### Sidebar tree
@@ -256,7 +256,7 @@ Rendro's micro-interactions are small and functional. They make state legible.
 | Tree hover | Background/text color transition over `200ms` |
 | Topbar search | Border shifts to primary on focus within `150ms` |
 | Copy signed URL | Directly creates a signed public link for the current document, copies it, then scrolls the button label to `Signed URL copied!` |
-| Theme toggle | Tri-state cycle `system → dark → light`; radial ripple expands from button center over ~`520ms`, with CSS overlay fallback and no motion under reduced-motion |
+| Theme toggle | Tri-state cycle `system → dark → light`; radial ripple expands from button center over ~`520ms`; icon track scrolls vertically over `300ms`; CSS overlay fallback and no motion under reduced-motion |
 | Avatar menu | Opens at avatar, shows email and sign-out action |
 | Document load | Fixed 4px line sweeps while iframe request is active; shell-hidden state moves it to viewport top |
 | Sidebar resize | Boundary handle highlights on hover/focus; drag updates width directly; keyboard arrows resize in `24px` steps |
@@ -327,7 +327,7 @@ Theme mismatch rule:
 - Respect `prefers-reduced-motion` for loader animation and future transitions.
 - Reduced motion for loader line: static full-width accent line while loading.
 - Focus states must not depend on animation.
-- Reduced motion for theme toggle: no radial ripple, no icon morph; theme switches instantly.
+- Reduced motion for theme toggle: no radial ripple, no icon scroll; theme switches instantly.
 - Icon-only buttons need `aria-label` or visible text.
 - Loader uses `role="progressbar"` while active and `role="status"` for timeout/error fallback.
 - Sidebar resize uses a focusable `role="separator"` with `aria-orientation="vertical"`, `aria-controls`, `aria-valuemin`, `aria-valuemax`, `aria-valuenow`, and `aria-valuetext`.

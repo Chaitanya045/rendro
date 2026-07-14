@@ -324,11 +324,10 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
   .topbar-btn-icon{width:32px;height:32px;border-radius:4px;border:0;background:transparent;cursor:pointer;display:flex;align-items:center;justify-content:center;color:#71717a;transition:background .15s,color .15s,transform .15s cubic-bezier(.4,0,.2,1)}
   .topbar-btn-icon:hover{background:#f4f4f5}
   .topbar-btn-icon:active{transform:scale(.96)}
-  .theme-icon{font-size:20px;display:inline-block;transition:transform .18s cubic-bezier(.4,0,.2,1),opacity .12s ease;transform-origin:center}
-  .theme-toggle.theme-exit .theme-icon{opacity:0;transform:scale(.6) rotate(-15deg)}
-  .theme-toggle.theme-enter .theme-icon{animation:themeIconEnter .24s cubic-bezier(.34,1.56,.64,1)}
-  @keyframes themeIconEnter{0%{opacity:0;transform:scale(.72) rotate(15deg)}70%{opacity:1;transform:scale(1.08) rotate(0deg)}100%{opacity:1;transform:scale(1) rotate(0deg)}}
-  @media (prefers-reduced-motion: reduce){.theme-icon{transition:none}.theme-toggle.theme-enter .theme-icon{animation:none}.theme-toggle.theme-exit .theme-icon{opacity:1;transform:none}}
+  .theme-icon-window{width:20px;height:20px;overflow:hidden;display:inline-flex;align-items:flex-start;justify-content:center}
+  .theme-icon-track{display:flex;flex-direction:column;transition:transform .3s cubic-bezier(.4,0,.2,1);will-change:transform}
+  .theme-icon{width:20px;height:20px;line-height:20px;display:flex;align-items:center;justify-content:center;flex:0 0 20px;font-size:20px}
+  @media (prefers-reduced-motion: reduce){.theme-icon-track{transition:none!important}}
   .theme-ripple{position:fixed;inset:0;z-index:2147483647;pointer-events:none;background:var(--theme-ripple-bg,#fff);clip-path:circle(0 at var(--theme-ripple-x,50%) var(--theme-ripple-y,50%));transition:clip-path .48s cubic-bezier(.4,0,.2,1)}
   .theme-ripple.is-active{clip-path:circle(var(--theme-ripple-radius,150vmax) at var(--theme-ripple-x,50%) var(--theme-ripple-y,50%))}
   @supports (view-transition-name: root){
@@ -412,7 +411,7 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
       <span class="material-symbols-outlined share-icon" style="font-size:18px" aria-hidden="true">link</span>
       <span class="share-label-window" aria-hidden="true"><span class="share-label-track"><span class="share-label">Copy signed URL</span><span class="share-label" id="share-feedback-label">Signed URL copied!</span></span></span>
     </button>
-    <button class="topbar-btn-icon theme-toggle" id="theme-toggle" type="button" aria-label="Switch to dark theme" title="Theme: system"><span class="material-symbols-outlined theme-icon" aria-hidden="true">brightness_auto</span></button>
+    <button class="topbar-btn-icon theme-toggle" id="theme-toggle" type="button" aria-label="Switch to dark theme" title="Theme: system"><span class="theme-icon-window" aria-hidden="true"><span class="theme-icon-track"><span class="material-symbols-outlined theme-icon">brightness_auto</span><span class="material-symbols-outlined theme-icon">dark_mode</span><span class="material-symbols-outlined theme-icon">light_mode</span><span class="material-symbols-outlined theme-icon">brightness_auto</span></span></span></button>
     <div class="avatar-wrap">
       <div class="topbar-avatar" id="avatar-btn" title="${escapeHtml(email)}">${initials}</div>
       <div class="avatar-menu" id="avatar-menu" style="display:none">
@@ -452,10 +451,11 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
   var root=document.documentElement;
   var themeMedia=matchMedia("(prefers-color-scheme:dark)");
   var themeToggle=document.getElementById("theme-toggle");
-  var themeIcon=themeToggle&&themeToggle.querySelector(".theme-icon");
+  var themeIconTrack=themeToggle&&themeToggle.querySelector(".theme-icon-track");
   var THEME_ORDER=["system","dark","light"];
-  var THEME_ICONS={system:"brightness_auto",dark:"dark_mode",light:"light_mode"};
+  var THEME_ICON_INDEX={system:0,dark:1,light:2};
   var THEME_NAMES={system:"system",dark:"dark",light:"light"};
+  var themeIconResetTimer;
   function normalizedTheme(){
     var saved=localStorage.getItem("commentor-theme");
     return saved==="dark"||saved==="light"||saved==="system"?saved:"system";
@@ -465,20 +465,37 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
     var frame=document.getElementById("content-frame");
     if(frame&&frame.contentWindow)frame.contentWindow.postMessage({type:"rendro-theme",theme:mode},"*");
   }
+  function setThemeIconPosition(position,animate){
+    if(!themeIconTrack)return;
+    if(themeIconResetTimer)window.clearTimeout(themeIconResetTimer);
+    if(!animate||matchMedia("(prefers-reduced-motion: reduce)").matches){
+      themeIconTrack.style.transition="none";
+      themeIconTrack.style.transform="translateY(-"+(position*20)+"px)";
+      void themeIconTrack.offsetHeight;
+      themeIconTrack.style.transition="";
+      return;
+    }
+    themeIconTrack.style.transform="translateY(-"+(position*20)+"px)";
+  }
+  function resetThemeIconToSystem(){
+    if(!themeIconTrack)return;
+    themeIconTrack.style.transition="none";
+    themeIconTrack.style.transform="translateY(0)";
+    void themeIconTrack.offsetHeight;
+    themeIconTrack.style.transition="";
+  }
   function renderThemeButton(mode,animate){
-    if(!themeToggle||!themeIcon)return;
+    if(!themeToggle||!themeIconTrack)return;
+    var current=themeToggle.dataset.themeMode||mode;
     var next=THEME_ORDER[(THEME_ORDER.indexOf(mode)+1)%THEME_ORDER.length];
+    themeToggle.dataset.themeMode=mode;
     themeToggle.setAttribute("aria-label","Switch to "+THEME_NAMES[next]+" theme");
     themeToggle.setAttribute("title","Theme: "+THEME_NAMES[mode]);
-    var nextIcon=THEME_ICONS[mode];
-    if(!animate||themeIcon.textContent===nextIcon){themeIcon.textContent=nextIcon;return;}
-    themeToggle.classList.add("theme-exit");
-    window.setTimeout(function(){
-      themeIcon.textContent=nextIcon;
-      themeToggle.classList.remove("theme-exit");
-      themeToggle.classList.add("theme-enter");
-      window.setTimeout(function(){themeToggle.classList.remove("theme-enter");},260);
-    },120);
+    var position=animate&&current==="light"&&mode==="system"?3:THEME_ICON_INDEX[mode];
+    setThemeIconPosition(position,animate);
+    if(position===3&&animate&&!matchMedia("(prefers-reduced-motion: reduce)").matches){
+      themeIconResetTimer=window.setTimeout(resetThemeIconToSystem,320);
+    }
   }
   function applyTheme(mode,persist,animate){
     var resolved=resolvedTheme(mode);
@@ -504,7 +521,7 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
     root.style.setProperty("--theme-ripple-bg",resolvedTheme(mode)==="dark"?"#09090b":"#ffffff");
     if(document.startViewTransition){
       root.classList.add("theme-rippling");
-      var viewTransition=document.startViewTransition(function(){applyTheme(mode,true,false);});
+      var viewTransition=document.startViewTransition(function(){applyTheme(mode,true,true);});
       viewTransition.ready.then(function(){
         document.documentElement.animate(
           {clipPath:["circle(0px at "+x+"px "+y+"px)","circle("+radius+"px at "+x+"px "+y+"px)"]},
