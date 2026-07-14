@@ -544,6 +544,9 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
   var topbar=document.querySelector(".topbar");
   var shellToggle=document.getElementById("shell-toggle");
   var shellToggleIcon=shellToggle&&shellToggle.querySelector(".material-symbols-outlined");
+  var topHotzone=document.getElementById("shell-hotzone-top");
+  var leftHotzone=document.getElementById("shell-hotzone-left");
+  var shellSidebarHideTimer;
   var storedWidth=Number(localStorage.getItem("rendro-sidebar-width"));
   var expandedWidth=Number.isFinite(storedWidth)&&storedWidth>0?storedWidth:DEFAULT_WIDTH;
 
@@ -590,6 +593,7 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
       shellToggle.setAttribute("title",hidden?"Show app shell":"Hide app shell");
     }
     if(shellToggleIcon)shellToggleIcon.textContent=hidden?"fullscreen_exit":"fullscreen";
+    if(hidden&&shellToggle)shellToggle.blur();
   }
   function updateShellAutoReveal(e){
     if(!root.classList.contains("shell-hidden"))return;
@@ -601,6 +605,24 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
     var resizerHovered=resizer&&resizer.matches(":hover");
     var revealSidebar=!root.classList.contains("sidebar-collapsed")&&(e.clientX<=sidebarLimit||!!sidebarHovered||!!resizerHovered);
     root.classList.toggle("shell-sidebar-revealed",revealSidebar);
+  }
+  function revealShellHeader(){
+    if(root.classList.contains("shell-hidden"))root.classList.add("shell-header-revealed");
+  }
+  function hideShellHeader(){
+    if(root.classList.contains("shell-hidden"))root.classList.remove("shell-header-revealed");
+  }
+  function revealShellSidebar(){
+    if(root.classList.contains("shell-hidden")&&!root.classList.contains("sidebar-collapsed"))root.classList.add("shell-sidebar-revealed");
+  }
+  function scheduleHideShellSidebar(){
+    if(!root.classList.contains("shell-hidden"))return;
+    if(shellSidebarHideTimer!==undefined)window.clearTimeout(shellSidebarHideTimer);
+    shellSidebarHideTimer=window.setTimeout(function(){
+      var sidebarHovered=sidebar&&sidebar.matches(":hover");
+      var resizerHovered=resizer&&resizer.matches(":hover");
+      if(!sidebarHovered&&!resizerHovered)root.classList.remove("shell-sidebar-revealed");
+    },80);
   }
 
   setSidebarWidth(expandedWidth,false);
@@ -691,6 +713,11 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
   window.addEventListener("resize",function(){if(!root.classList.contains("sidebar-collapsed"))setSidebarWidth(expandedWidth,false);});
   if(shellToggle)shellToggle.addEventListener("click",function(){setShellHidden(!root.classList.contains("shell-hidden"));});
   document.addEventListener("pointermove",updateShellAutoReveal,{passive:true});
+  if(topHotzone)topHotzone.addEventListener("pointerenter",revealShellHeader);
+  if(leftHotzone)leftHotzone.addEventListener("pointerenter",revealShellSidebar);
+  if(topbar)topbar.addEventListener("mouseleave",hideShellHeader);
+  if(sidebar)sidebar.addEventListener("mouseleave",scheduleHideShellSidebar);
+  if(resizer)resizer.addEventListener("mouseleave",scheduleHideShellSidebar);
   document.addEventListener("keydown",function(e){
     if(e.key==="Escape"&&root.classList.contains("shell-hidden")){
       e.preventDefault();
