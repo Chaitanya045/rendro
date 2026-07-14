@@ -491,9 +491,10 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
     themeToggle.dataset.themeMode=mode;
     themeToggle.setAttribute("aria-label","Switch to "+THEME_NAMES[next]+" theme");
     themeToggle.setAttribute("title","Theme: "+THEME_NAMES[mode]);
-    var position=animate&&current==="light"&&mode==="system"?3:THEME_ICON_INDEX[mode];
+    var reduceMotion=matchMedia("(prefers-reduced-motion: reduce)").matches;
+    var position=animate&&!reduceMotion&&current==="light"&&mode==="system"?3:THEME_ICON_INDEX[mode];
     setThemeIconPosition(position,animate);
-    if(position===3&&animate&&!matchMedia("(prefers-reduced-motion: reduce)").matches){
+    if(position===3&&animate&&!reduceMotion){
       themeIconResetTimer=window.setTimeout(resetThemeIconToSystem,320);
     }
   }
