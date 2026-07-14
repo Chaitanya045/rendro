@@ -233,7 +233,7 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
   .shell-hotzone-left{top:0;bottom:0;left:0;width:12px}
   html.shell-hidden .shell-hotzone{pointer-events:auto}
   html.shell-hidden .topbar{transform:translateY(-100%);opacity:0;pointer-events:none}
-  html.shell-hidden.shell-header-revealed .topbar,html.shell-hidden .topbar:focus-within{transform:translateY(0);opacity:1;pointer-events:auto}
+  html.shell-hidden.shell-header-revealed .topbar{transform:translateY(0);opacity:1;pointer-events:auto}
   html.shell-hidden .sidebar,html.shell-hidden .sidebar-resizer{top:0;transform:translateX(calc((var(--sidebar-width) + 16px) * -1));opacity:0;pointer-events:none}
   html.shell-hidden.shell-sidebar-revealed .sidebar,html.shell-hidden.shell-sidebar-revealed .sidebar-resizer{transform:translateX(0);opacity:1;pointer-events:auto}
   html.shell-hidden .main{margin-left:0;margin-top:0;height:100vh}
