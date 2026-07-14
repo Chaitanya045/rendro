@@ -188,7 +188,7 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
   .topbar-btn-create:hover{background:#9a3412;opacity:1}
   .topbar-avatar{width:32px;height:32px;border-radius:50%;background:#ffedd5;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;color:#09090b;cursor:pointer;border:1px solid #fed7aa}
 
-  .sidebar{position:fixed;top:56px;left:0;bottom:0;z-index:40;width:var(--sidebar-width);background:#fff;border-right:1px solid #e4e4e7;display:flex;flex-direction:column;overflow:hidden;padding:16px 0;transition:width .3s cubic-bezier(.4,0,.2,1),opacity .2s cubic-bezier(.4,0,.2,1),transform .3s cubic-bezier(.4,0,.2,1);will-change:width,transform,opacity}
+  .sidebar{position:fixed;top:56px;left:0;bottom:0;z-index:40;width:var(--sidebar-width);background:#fff;border-right:1px solid #e4e4e7;display:flex;flex-direction:column;overflow:hidden;padding:16px 0;transition:top .3s cubic-bezier(.4,0,.2,1),width .3s cubic-bezier(.4,0,.2,1),opacity .2s cubic-bezier(.4,0,.2,1),transform .3s cubic-bezier(.4,0,.2,1);will-change:top,width,transform,opacity}
   .sidebar-org{padding:0 24px;margin-bottom:16px}
   .sidebar-org-row{display:flex;align-items:center;gap:12px;cursor:pointer}
   .sidebar-org-icon{width:32px;height:32px;border-radius:4px;background:#c2410c;display:flex;align-items:center;justify-content:center}
@@ -203,7 +203,7 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
   .sidebar-tree::-webkit-scrollbar-thumb{background:rgba(161,161,170,.35);border-radius:999px}
   .sidebar-tree::-webkit-scrollbar-thumb:hover{background:rgba(113,113,122,.55)}
   .sidebar-footer a:hover{color:#09090b}
-  .sidebar-resizer{--resizer-origin-y:50%;--resizer-spark-a:#facc15;--resizer-spark-b:#fb923c;position:fixed;top:56px;bottom:0;left:calc(var(--sidebar-width) - 5px);width:10px;z-index:45;cursor:col-resize;touch-action:none;display:flex;align-items:stretch;justify-content:center;overflow:visible;transition:left .3s cubic-bezier(.4,0,.2,1),opacity .2s cubic-bezier(.4,0,.2,1),transform .3s cubic-bezier(.4,0,.2,1)}
+  .sidebar-resizer{--resizer-origin-y:50%;--resizer-spark-a:#facc15;--resizer-spark-b:#fb923c;position:fixed;top:56px;bottom:0;left:calc(var(--sidebar-width) - 5px);width:10px;z-index:45;cursor:col-resize;touch-action:none;display:flex;align-items:stretch;justify-content:center;overflow:visible;transition:top .3s cubic-bezier(.4,0,.2,1),left .3s cubic-bezier(.4,0,.2,1),opacity .2s cubic-bezier(.4,0,.2,1),transform .3s cubic-bezier(.4,0,.2,1)}
   .sidebar-resizer::before{content:"";width:2px;height:100%;background:#c2410c;border-radius:999px;opacity:0;transform:scaleY(0);transform-origin:center var(--resizer-origin-y);transition:transform .5s cubic-bezier(.4,0,.2,1),opacity .18s cubic-bezier(.4,0,.2,1),box-shadow .18s cubic-bezier(.4,0,.2,1),width .18s cubic-bezier(.4,0,.2,1)}
   .resizer-sparks{position:absolute;left:50%;width:3px;height:3px;border-radius:999px;pointer-events:none;opacity:0;background:var(--resizer-spark-a);transform:translateX(-50%);filter:drop-shadow(0 0 5px rgba(249,115,22,.75));box-shadow:0 0 0 0 rgba(250,204,21,0),0 0 0 0 rgba(251,146,60,0),0 0 0 0 rgba(250,204,21,0),0 0 0 0 rgba(251,146,60,0),0 0 0 0 rgba(250,204,21,0),0 0 0 0 rgba(251,146,60,0)}
   .resizer-sparks-top{top:0;transform:translate(-50%,-50%)}
@@ -234,8 +234,8 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
   html.shell-hidden .shell-hotzone{pointer-events:auto}
   html.shell-hidden .topbar{transform:translateY(-100%);opacity:0;pointer-events:none}
   html.shell-hidden.shell-header-revealed .topbar,html.shell-hidden .topbar:focus-within{transform:translateY(0);opacity:1;pointer-events:auto}
-  html.shell-hidden .sidebar,html.shell-hidden .sidebar-resizer{transform:translateX(calc((var(--sidebar-width) + 16px) * -1));opacity:0;pointer-events:none}
-  html.shell-hidden.shell-sidebar-revealed .sidebar,html.shell-hidden.shell-sidebar-revealed .sidebar-resizer,html.shell-hidden .sidebar:focus-within{transform:translateX(0);opacity:1;pointer-events:auto}
+  html.shell-hidden .sidebar,html.shell-hidden .sidebar-resizer{top:0;transform:translateX(calc((var(--sidebar-width) + 16px) * -1));opacity:0;pointer-events:none}
+  html.shell-hidden.shell-sidebar-revealed .sidebar,html.shell-hidden.shell-sidebar-revealed .sidebar-resizer{transform:translateX(0);opacity:1;pointer-events:auto}
   html.shell-hidden .main{margin-left:0;margin-top:0;height:100vh}
 
   .tree-folder-content{overflow:hidden;transition:max-height .4s cubic-bezier(.34,1.56,.64,1),opacity .3s ease;max-height:0;opacity:0}
