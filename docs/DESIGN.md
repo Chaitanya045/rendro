@@ -130,7 +130,7 @@ Purpose: global actions, not navigation depth.
 - Logo uses primary color and stays visually stable across orgs.
 - Right-side actions: hide/show app shell, copy signed URL, theme toggle, avatar.
 - Avatar menu opens near its trigger and closes on outside click. Copy feedback stays inline in the copy button.
-- Hide/show app shell persists in `localStorage`; `Ctrl+Shift+H` (`Cmd+Shift+H` on macOS) toggles it, top/left hot zones temporarily reveal the header/sidebar while hidden, and `Escape` restores the full shell.
+- Hide/show app shell persists in `localStorage`; `Ctrl+Shift+H` (`Cmd+Shift+H` on macOS) toggles it from either the app shell or the focused document iframe, top/left hot zones temporarily reveal the header/sidebar while hidden, and `Escape` restores the full shell.
 - Theme toggle cycles `system → dark → light → system`. The selected transition is a radial theme ripple from the theme button. Use View Transitions where available; fall back to a CSS `clip-path: circle()` overlay. The icon may still morph in fallback paths, but the ripple is the primary theme-change feedback. Publisher iframe content is not restyled.
 
 Interaction spec:
@@ -325,7 +325,7 @@ Theme mismatch rule:
 - Loader uses `role="progressbar"` while active and `role="status"` for timeout/error fallback.
 - Sidebar resize uses a focusable `role="separator"` with `aria-orientation="vertical"`, `aria-controls`, `aria-valuemin`, `aria-valuemax`, `aria-valuenow`, and `aria-valuetext`.
 - Sidebar splitter keyboard support: Left/Right resize by one step; Home/End move to min/max.
-- Hidden shell state preserves full sidebar width/state, uses `aria-pressed` on the shell hide/show button, toggles with `Ctrl+Shift+H`/`Cmd+Shift+H`, and restores with `Escape`.
+- Hidden shell state preserves full sidebar width/state, uses `aria-pressed` on the shell hide/show button, toggles with `Ctrl+Shift+H`/`Cmd+Shift+H` from the shell or focused document iframe, and restores with `Escape`.
 - Dropdowns must remain reachable by keyboard in future iterations; current click-only menus are acceptable but should not regress.
 - Active tree state cannot be color-only; the 4px indicator and active background both communicate selection.
 - Error states use text or ARIA labels in addition to red color.
@@ -371,7 +371,7 @@ Before merging a UI change:
 6. **One action, one indicator** — Remove duplicate loaders/spinners/pulses.
 7. **No tree loader for doc nav** — Tree selection is optimistic; loading belongs to main/iframe width.
 8. **No iframe opacity fade** — Keep publisher HTML fully opaque during navigation.
-9. **Sidebar shell changes** — Verify pointer resize, keyboard resize, hide/show shell behavior, hot-zone reveal, localStorage persistence, and dark-mode states.
+9. **Sidebar shell changes** — Verify pointer resize, keyboard resize, hide/show shell behavior from parent and iframe focus, hot-zone reveal, localStorage persistence, and dark-mode states.
 10. **Theme sync** — Verify header cycle order, radial ripple or fallback, system fallback, commentor theme sync, no commentor-local theme button, and reduced-motion fallback.
 11. **Cache bust assets** — If `lazy-tree.ts` or `commentor.ts` changes, rebuild assets and bump the relevant script query version.
 12. **Browser-harness proof** — For UI behavior, verify in a real browser, not only by reading source.

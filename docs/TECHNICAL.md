@@ -261,7 +261,7 @@ Server (Hono SSR)
   │   ├─ Main area
   │   │   ├─ #main-placeholder (shown when no doc selected)
   │   │   └─ #content-frame (iframe, hidden initially)
-  │   ├─ Inline scripts (theme, shell hide/show, copy feedback, avatar menu)
+  │   ├─ Inline scripts (theme, shell hide/show, iframe shortcut forwarding, copy feedback, avatar menu)
   │   └─ <script src="/lazy-tree.js">
   │
 Client (lazy-tree.js, 8KB IIFE)
@@ -283,7 +283,8 @@ Client (lazy-tree.js, 8KB IIFE)
   │
   ├─ postMessage listener
   │   ├─ doc-navigate → loadDoc(path, pushState)
-  │   └─ doc-loaded → syncActiveState(path)
+  │   ├─ doc-loaded → syncActiveState(path)
+  │   └─ shell-toggle → toggle parent shell when Ctrl/Cmd+Shift+H is pressed inside the document iframe
   │
   └─ popstate / initial URL
       ├─ /docs/:org/:path → window.RENDRO_INITIAL_DOC or path parse → loadDoc(path)
