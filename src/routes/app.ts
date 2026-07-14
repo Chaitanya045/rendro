@@ -726,6 +726,12 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
       if(shellToggle)shellToggle.focus();
     }
   });
+  window.addEventListener("message",function(e){
+    if(e.origin!==window.location.origin||!e.data||e.data.type!=="shell-toggle")return;
+    setShellHidden(!root.classList.contains("shell-hidden"));
+    if(!root.classList.contains("shell-hidden")&&shellToggle)shellToggle.focus();
+  });
+
 
   document.getElementById("avatar-btn")?.addEventListener("click",function(e){e.stopPropagation();var m=document.getElementById("avatar-menu");m.style.display=m.style.display==="block"?"none":"block";});
   var shareBtn=document.getElementById("share-btn");
