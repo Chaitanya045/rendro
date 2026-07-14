@@ -162,8 +162,8 @@ Request
   │   ├─ /api/auth/* → Convex proxy
   │   ├─ / → app routes
   │   ├─ /docs/:org → app shell with tree only
-  │   ├─ /docs/:org/:path* → app shell with selected document
-  │   ├─ /files/* → doc streaming
+  │   ├─ /docs/:org/:path* → app shell with selected document, or shared 404 HTML if the object is missing/deleted
+  │   ├─ /files/* → doc streaming, or shared 404 HTML inside the iframe when the object is missing/deleted
   │   ├─ /api/sync/* → sync API
   │   ├─ /api/tree/* → tree API
   │   ├─ /lazy-tree.js → ASSETS binding
@@ -264,6 +264,12 @@ Server (Hono SSR)
   │   ├─ Inline scripts (theme, shell hide/show, iframe shortcut forwarding, copy feedback, avatar menu)
   │   └─ <script src="/lazy-tree.js">
   │
+  ├─ renderNotFoundPage(options)
+  │   ├─ Shared Broken Document Graph HTML from `src/routes/not-found.ts`
+  │   ├─ `/docs/:key` checks `isDeleted` + S3 `headObject` before shell render
+  │   ├─ `/files/:key` returns iframe-safe 404 HTML for stale/missing objects
+  │   └─ Worker catch-all checks ASSETS first, then returns the shared 404 page
+  │
 Client (lazy-tree.js, 8KB IIFE)
   │
   ├─ handleClick(event)
@@ -356,11 +362,13 @@ The anchor uniquely identifies text within a document, surviving minor edits.
 | Legacy selected doc | `/?doc=:org/:path` redirects in-place to `/docs/:org/:path` |
 | Public signed document | `/share/:token` |
 
-The server injects `window.RENDRO_INITIAL_DOC` into the app shell for `/docs/:org/:path*`. `lazy-tree.ts` also parses `/docs/...` directly so back/forward navigation and static reloads restore the selected document.
+The server injects `window.RENDRO_INITIAL_DOC` into the app shell for `/docs/:org/:path*` after confirming the object exists and is not soft-deleted. Missing or deleted deep links return the shared Broken Document Graph page with HTTP `404` before the shell renders.
+
+`lazy-tree.ts` also parses `/docs/...` directly so back/forward navigation and static reloads restore the selected document. If a document disappears after the tree is loaded, `/files/:org/:path*` returns the same Broken Document Graph HTML inside `#content-frame`; the primary recovery link uses `target="_top"` to leave the iframe.
 
 Local development can still enter through `?dev_user=email` once. Session middleware persists that value as the `rendro-dev-user` cookie, then lazy-tree removes `dev_user` from visible URLs and iframe requests rely on the cookie.
 
-Signed share links are created by `GET /api/share/create?key=:org/:path` for the currently signed-in owner. The server returns a 7-day HMAC-SHA256 token using `AUTH_SECRET`; the token payload contains the document key and expiry. `GET /share/:token` is mounted before session middleware in both runtime entrypoints, so it streams the raw document HTML without login and without commentor injection. Tampered tokens return `403`, expired tokens return `410`, and deleted/missing docs return `404`.
+Signed share links are created by `GET /api/share/create?key=:org/:path` for the currently signed-in owner. The server returns a 7-day HMAC-SHA256 token using `AUTH_SECRET`; the token payload contains the document key and expiry. `GET /share/:token` is mounted before session middleware in both runtime entrypoints, so it streams the raw document HTML without login and without commentor injection. Tampered tokens return `403`, expired tokens return `410`, and deleted/missing docs return the shared Broken Document Graph page with `404`.
 
 ### Production URLs
 
