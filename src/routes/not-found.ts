@@ -27,6 +27,27 @@ export function renderNotFoundPage(options: NotFoundPageOptions = {}): string {
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>404 — Rendro</title>
+<script>
+  (function(){
+    var root=document.documentElement;
+    var media=matchMedia("(prefers-color-scheme:dark)");
+    function applyTheme(mode){
+      mode=mode==="dark"||mode==="light"||mode==="system"?mode:"system";
+      var resolved=mode==="system"?(media.matches?"dark":"light"):mode;
+      root.dataset.theme=mode;
+      root.dataset.resolvedTheme=resolved;
+      root.classList.toggle("dark",resolved==="dark");
+    }
+    var initialTheme="system";
+    try{initialTheme=localStorage.getItem("commentor-theme")||"system";}catch(_){}
+    applyTheme(initialTheme);
+    media.addEventListener("change",function(){if((root.dataset.theme||"system")==="system")applyTheme("system");});
+    addEventListener("message",function(event){
+      var data=event.data||{};
+      if(data.type==="rendro-theme")applyTheme(data.theme);
+    });
+  })();
+</script>
 <style>
   *{box-sizing:border-box}
   html,body{margin:0;min-height:100%;font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#fafafa;color:#09090b}
@@ -48,7 +69,6 @@ export function renderNotFoundPage(options: NotFoundPageOptions = {}): string {
   html.dark h1,body.dark h1{color:#fafafa}html.dark p,body.dark p{color:#a1a1aa}html.dark .path,body.dark .path{background:#09090b;border-color:#27272a;color:#fafafa}
   html.dark .btn.primary,body.dark .btn.primary{background:#fafafa;border-color:#fafafa;color:#09090b}html.dark .btn.primary:hover,body.dark .btn.primary:hover{background:#e4e4e7}
   html.dark .btn.secondary,body.dark .btn.secondary{color:#fafafa;border-color:#3f3f46}html.dark .btn.secondary:hover,body.dark .btn.secondary:hover{background:#27272a;border-color:#52525b}
-  @media (prefers-color-scheme:dark){body{background:linear-gradient(180deg,#09090b 0%,#111113 50%,#18181b 100%);color:#fafafa}.panel{background:rgba(24,24,27,.78);border-color:#27272a;box-shadow:0 28px 90px rgba(0,0,0,.45)}h1{color:#fafafa}p{color:#a1a1aa}.path{background:#09090b;border-color:#27272a;color:#fafafa}.btn.primary{background:#fafafa;border-color:#fafafa;color:#09090b}.btn.primary:hover{background:#e4e4e7}.btn.secondary{color:#fafafa;border-color:#3f3f46}.btn.secondary:hover{background:#27272a;border-color:#52525b}}
 </style>
 </head>
 <body>
