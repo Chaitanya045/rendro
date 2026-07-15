@@ -203,7 +203,7 @@ Empty state:
 
 404 state:
 
-- Missing routes and missing documents use the Broken Document Graph page.
+- Missing routes and missing documents use a centered 404 Not Found card.
 - The page works standalone and inside `#content-frame`; recovery links use `target="_top"` so iframe 404s can return to the app shell.
 - Use the same neutral chrome tokens, dark-mode variants, and reduced-motion behavior as the app shell.
 
