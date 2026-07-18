@@ -31,9 +31,7 @@ app.get("/", async (c) => {
 
     if (await orgExists(org)) {
       if (!(await orgHasApiKey(org))) {
-        const apiKey = await createOrgApiKey(org);
-        logger.info({ org, user: user.email }, "API key regenerated for existing org");
-        return c.html(renderApiKeyPage(user, org, apiKey, "API key generated"));
+        return c.html(renderCreateOrg(user, org, true));
       }
       return c.html(await renderOrgDocs(user, org));
     }
@@ -58,9 +56,7 @@ app.get("/docs/:org", async (c) => {
   if (!org || c.req.param("org") !== org) return c.text("Not found", 404);
   if (await orgExists(org)) {
     if (!(await orgHasApiKey(org))) {
-      const apiKey = await createOrgApiKey(org);
-      logger.info({ org, user: user.email }, "API key regenerated for existing org");
-      return c.html(renderApiKeyPage(user, org, apiKey, "API key generated"));
+      return c.html(renderCreateOrg(user, org, true));
     }
     return c.html(await renderOrgDocs(user, org));
   }
@@ -74,9 +70,15 @@ app.get("/docs/:key{.+}", async (c) => {
   if (!org) return c.html(renderEmailUnsupported(user));
   const rawKey = c.req.param("key");
   const selectedDoc = decodeURIComponent(rawKey);
-  if (selectedDoc === org) return c.html(await renderOrgDocs(user, org));
+  if (selectedDoc === org) {
+    if (await orgExists(org) && !(await orgHasApiKey(org))) return c.html(renderCreateOrg(user, org, true));
+    return c.html(await renderOrgDocs(user, org));
+  }
   if (!selectedDoc.startsWith(`${org}/`)) return c.text("Not found", 404);
-  if (await orgExists(org)) return c.html(await renderOrgDocs(user, org, selectedDoc));
+  if (await orgExists(org)) {
+    if (!(await orgHasApiKey(org))) return c.html(renderCreateOrg(user, org, true));
+    return c.html(await renderOrgDocs(user, org, selectedDoc));
+  }
   return c.html(renderCreateOrg(user, org));
 });
 
@@ -97,8 +99,20 @@ app.post("/api/orgs", async (c) => {
   const user = c.get("user");
   if (!user) return c.text("Sign in first", 401);
 
-  const body = await c.req.json<{ org?: string; displayName?: string }>()
-    .catch((): { org?: string; displayName?: string } => ({}));
+  const contentType = c.req.header("content-type") ?? "";
+  let body: { org?: string; displayName?: string } = {};
+  if (contentType.includes("application/json")) {
+    body = await c.req.json<{ org?: string; displayName?: string }>()
+      .catch((): { org?: string; displayName?: string } => ({}));
+  } else {
+    const form = await c.req.formData().catch((): FormData | null => null);
+    const orgValue = form?.get("org");
+    const displayNameValue = form?.get("displayName");
+    body = {
+      org: typeof orgValue === "string" ? orgValue : undefined,
+      displayName: typeof displayNameValue === "string" ? displayNameValue : undefined,
+    };
+  }
   const org = (body.org ?? emailToOrgSlug(user.email) ?? "").toLowerCase();
   const displayName = body.displayName?.trim() || org;
 
@@ -160,7 +174,7 @@ function renderEmailUnsupported(user: User): string {
 </body></html>`;
 }
 
-function renderCreateOrg(user: User, org: string): string {
+function renderCreateOrg(user: User, org: string, missingApiKey = false): string {
   const email = escapeHtml(user.email);
   const orgEsc = escapeHtml(org);
   return `<!DOCTYPE html>
@@ -183,15 +197,15 @@ function renderCreateOrg(user: User, org: string): string {
 <div class="container">
   <a class="logout" href="/api/auth/sign-out">Sign out</a>
   <div class="card">
-    <h1>Create your org</h1>
+    <h1>${missingApiKey ? "Generate API key" : "Create your org"}</h1>
     <p class="meta">Signed in as ${email}</p>
-    <p>No docs found for <code>${orgEsc}</code>. Create the org to get started.</p>
+    <p>${missingApiKey ? `Docs already exist for <code>${orgEsc}</code>, but no API key is configured. Confirm the org slug to generate a new key.` : `No docs found for <code>${orgEsc}</code>. Create the org to get started.`}</p>
     <form method="post" action="/api/orgs">
       <label for="org">Org slug</label>
       <input id="org" name="org" value="${orgEsc}" readonly>
-      <label for="displayName">Display name</label>
-      <input id="displayName" name="displayName" value="${orgEsc}">
-      <button type="submit">Create org</button>
+      ${missingApiKey ? "" : `<label for="displayName">Display name</label>
+      <input id="displayName" name="displayName" value="${orgEsc}">`}
+      <button type="submit">${missingApiKey ? "Generate API key" : "Create org"}</button>
     </form>
   </div>
 </div>

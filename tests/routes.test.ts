@@ -111,7 +111,7 @@ describe("api-keys", () => {
 // 3. App root — API key recovery
 // ────────────────────────────────────────────────────
 describe("app root API key recovery", () => {
-  it("generates a new API key screen when the org exists but its key row is missing", async () => {
+  it("shows the org confirmation form when the org exists but its key row is missing", async () => {
     vi.spyOn(minio, "listObjects").mockResolvedValue([
       { key: "gmail/index.html", name: "index.html", size: 1, lastModified: new Date("2025-01-01") },
     ]);
@@ -126,12 +126,13 @@ describe("app root API key recovery", () => {
     const res = await app.request("/");
     expect(res.status).toBe(200);
     const html = await res.text();
-    expect(html).toContain("API key generated");
-    expect(html).toContain("rendro_");
-    expect([...apiKeyOrgsByHash.values()]).toContain("gmail");
+    expect(html).toContain("Generate API key");
+    expect(html).toContain('value="gmail" readonly');
+    expect(html).not.toContain("rendro_");
+    expect([...apiKeyOrgsByHash.values()]).not.toContain("gmail");
   });
 
-  it("also generates a new API key screen on /docs/:org when the key row is missing", async () => {
+  it("also shows the org confirmation form on /docs/:org when the key row is missing", async () => {
     vi.spyOn(minio, "listObjects").mockResolvedValue([
       { key: "gmail/index.html", name: "index.html", size: 1, lastModified: new Date("2025-01-01") },
     ]);
@@ -144,6 +145,30 @@ describe("app root API key recovery", () => {
     app.route("/", appRoutes);
 
     const res = await app.request("/docs/gmail");
+    expect(res.status).toBe(200);
+    const html = await res.text();
+    expect(html).toContain("Generate API key");
+    expect(html).not.toContain("rendro_");
+    expect([...apiKeyOrgsByHash.values()]).not.toContain("gmail");
+  });
+
+  it("generates the one-time API key page after org confirmation submit", async () => {
+    vi.spyOn(minio, "listObjects").mockResolvedValue([
+      { key: "gmail/index.html", name: "index.html", size: 1, lastModified: new Date("2025-01-01") },
+    ]);
+
+    const app = new Hono<{ Variables: { user?: User } }>();
+    app.use("*", async (c, next) => {
+      c.set("user", { email: "owner@gmail.com", name: "Owner" } as User);
+      await next();
+    });
+    app.route("/", appRoutes);
+
+    const res = await app.request("/api/orgs", {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: "org=gmail",
+    });
     expect(res.status).toBe(200);
     const html = await res.text();
     expect(html).toContain("API key generated");
