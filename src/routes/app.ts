@@ -56,7 +56,14 @@ app.get("/docs/:org", async (c) => {
   if (!user) return c.html(renderSignIn());
   const org = emailToOrgSlug(user.email);
   if (!org || c.req.param("org") !== org) return c.text("Not found", 404);
-  if (await orgExists(org)) return c.html(await renderOrgDocs(user, org));
+  if (await orgExists(org)) {
+    if (!(await orgHasApiKey(org))) {
+      const apiKey = await createOrgApiKey(org);
+      logger.info({ org, user: user.email }, "API key regenerated for existing org");
+      return c.html(renderApiKeyPage(user, org, apiKey, "API key generated"));
+    }
+    return c.html(await renderOrgDocs(user, org));
+  }
   return c.html(renderCreateOrg(user, org));
 });
 
