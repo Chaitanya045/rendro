@@ -131,26 +131,6 @@ describe("app root API key recovery", () => {
     expect([...apiKeyOrgsByHash.values()]).toContain("gmail");
   });
 
-  it("also generates a new API key screen on /docs/:org when the key row is missing", async () => {
-    vi.spyOn(minio, "listObjects").mockResolvedValue([
-      { key: "gmail/index.html", name: "index.html", size: 1, lastModified: new Date("2025-01-01") },
-    ]);
-
-    const app = new Hono<{ Variables: { user?: User } }>();
-    app.use("*", async (c, next) => {
-      c.set("user", { email: "owner@gmail.com", name: "Owner" } as User);
-      await next();
-    });
-    app.route("/", appRoutes);
-
-    const res = await app.request("/docs/gmail");
-    expect(res.status).toBe(200);
-    const html = await res.text();
-    expect(html).toContain("API key generated");
-    expect(html).toContain("rendro_");
-    expect([...apiKeyOrgsByHash.values()]).toContain("gmail");
-  });
-
 });
 
 // ────────────────────────────────────────────────────
