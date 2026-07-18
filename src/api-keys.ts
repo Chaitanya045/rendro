@@ -54,3 +54,8 @@ export async function validateApiKey(key: string): Promise<string | null> {
   const result = await convexQuery("apiKeys:validate", { keyHash: hash });
   return result as string | null;
 }
+
+export async function orgHasApiKey(orgSlug: string): Promise<boolean> {
+  const result = await convexQuery("apiKeys:existsForOrg", { orgSlug });
+  return result === true;
+}

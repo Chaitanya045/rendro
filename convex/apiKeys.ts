@@ -22,3 +22,11 @@ export const validate = query({
     return row?.orgSlug ?? null;
   },
 });
+
+export const existsForOrg = query({
+  args: { orgSlug: v.string() },
+  handler: async (ctx, args) => {
+    const row = await ctx.db.query("api_keys").filter(q => q.eq(q.field("orgSlug"), args.orgSlug)).first();
+    return row !== null;
+  },
+});

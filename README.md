@@ -6,17 +6,17 @@ Documentation hosting platform. Write docs as HTML, push via CLI, read them live
 
 **Option A — npm:**
 ```bash
-npx rendro push --source ./docs --org my-org
+npx rendro push --source ./docs --org my-org --repo my-repo
 # or install globally
 npm install -g rendro
-rendro push --source ./docs --org my-org
+rendro push --source ./docs --org my-org --repo my-repo
 ```
 
 **Option B — direct download (no install):**
 ```bash
 curl -sL https://raw.githubusercontent.com/Chaitanya045/rendro/main/bin/rendro.mjs -o rendro
 chmod +x rendro
-./rendro push --source ./docs --org my-org --endpoint https://rendro.app
+./rendro push --source ./docs --org my-org --repo my-repo --endpoint https://rendro.app
 ```
 
 ## Quick Start
@@ -26,7 +26,7 @@ chmod +x rendro
 3. Push your docs:
    ```bash
    export RENDRO_API_KEY=rendro_xxx
-   rendro push --source ./docs --org my-org --endpoint https://rendro.app
+   rendro push --source ./docs --org my-org --repo my-repo --endpoint https://rendro.app
    ```
 4. View live at `https://rendro.app`
 
@@ -38,6 +38,7 @@ chmod +x rendro
 - **Dark mode** — matches system preference
 - **CI/CD native** — hash-based diffing, uploads only changed files
 - **Soft-delete** — removed files hidden from tree, still accessible via URL
+- **Multi-repo orgs** — use `--repo <slug>` to isolate each repo under `<org>/<repo>/`; sync deletes only touch that repo prefix
 - **API key auth** — per-org keys, org isolation by email domain
 
 ## Tech Stack
