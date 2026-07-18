@@ -144,8 +144,8 @@ function renderSignIn(): string {
 <div class="card">
   <h1>Rendro</h1>
   <p>Sign in to read your team's docs.</p>
-  <form id="sf" method="post" action="/api/auth/sign-in/social"><input type="hidden" name="provider" value="google"><input type="hidden" name="callbackURL" id="sf-cb"><button type="submit" style="background:#1a1a1a;color:#fff;padding:0.75rem 1.5rem;border:0;border-radius:6px;font-weight:500;cursor:pointer;font-size:1rem">Sign in with Google</button></form>
-  <script>document.getElementById('sf-cb').value=location.href</script>
+  <form id="sf"><input type="hidden" name="callbackURL" id="sf-cb"><button id="sf-btn" type="submit" style="background:#1a1a1a;color:#fff;padding:0.75rem 1.5rem;border:0;border-radius:6px;font-weight:500;cursor:pointer;font-size:1rem">Sign in with Google</button><p id="sf-error" hidden style="color:#b91c1c;margin:1rem 0 0;font-size:.9rem"></p></form>
+  <script>(function(){const form=document.getElementById('sf');const cb=document.getElementById('sf-cb');const btn=document.getElementById('sf-btn');const err=document.getElementById('sf-error');cb.value=location.href;form.addEventListener('submit',async function(e){e.preventDefault();err.hidden=true;btn.disabled=true;try{const res=await fetch('/api/auth/sign-in/social',{method:'POST',headers:{'Content-Type':'application/json','Accept':'application/json'},body:JSON.stringify({provider:'google',callbackURL:cb.value||location.href})});const data=await res.json().catch(()=>({}));if(!res.ok||!data.url)throw new Error(data.message||data.error||'Sign in is unavailable');location.href=data.url;}catch(error){err.textContent=error instanceof Error?error.message:'Sign in failed';err.hidden=false;btn.disabled=false;}});})();</script>
 </div>
 </body></html>`;
 }
