@@ -3,7 +3,7 @@ import { putObject, headObject } from "@/minio";
 import { emailToOrgSlug, orgExists, logOrgAccess } from "@/orgs";
 import type { User } from "better-auth/types";
 import { logger } from "@/logger";
-import { createOrgApiKey, orgHasApiKey } from "@/api-keys";
+import { createOrgApiKey } from "@/api-keys";
 import { isDeleted } from "@/soft-delete";
 import { renderNotFoundPage } from "@/routes/not-found";
 
@@ -27,12 +27,6 @@ app.get("/", async (c) => {
     const org = emailToOrgSlug(email);
     if (!org) {
       return c.html(renderEmailUnsupported(user));
-    }
-
-    if (await orgExists(org) && !(await orgHasApiKey(org))) {
-      const apiKey = await createOrgApiKey(org);
-      logger.info({ org, user: user.email }, "API key regenerated for existing org");
-      return c.html(renderApiKeyPage(user, org, apiKey, "API key generated"));
     }
 
     return c.html(renderOrgDocs(user, org));
@@ -102,11 +96,6 @@ app.post("/api/orgs", async (c) => {
     return c.text("Invalid org slug. Use lowercase letters, numbers, and hyphens.", 400);
   }
   if (await orgExists(org)) {
-    if (!(await orgHasApiKey(org))) {
-      const apiKey = await createOrgApiKey(org);
-      logger.info({ org, user: user.email }, "API key generated for existing org");
-      return c.html(renderApiKeyPage(user, org, apiKey, "API key generated"));
-    }
     return c.redirect(`/?org=${encodeURIComponent(org)}`, 303);
   }
 
@@ -840,9 +829,9 @@ function renderInitialIndex(_user: User, org: string, displayName: string): stri
 <body>
 <h1>${escapeHtml(displayName)}</h1>
 <p>This is the <code>${escapeHtml(org)}</code> documentation space on Rendro.</p>
-<p>Push your first docs with the CLI (set RENDRO_API_KEY in your CI):</p>
-<pre><code>rendro push --source ./docs --org ${escapeHtml(org)} --repo my-repo</code></pre>
-<p>Or start writing HTML directly in the bucket under <code>${escapeHtml(org)}/my-repo/</code>.</p>
+<p>Push your first docs with the CLI (set DOCSYNC_API_KEY in your CI):</p>
+<pre><code>rendro push --source ./docs --org ${escapeHtml(org)}</code></pre>
+<p>Or start writing HTML directly in the bucket under <code>${escapeHtml(org)}/</code>.</p>
 </body>
 </html>`;
 }
@@ -856,7 +845,7 @@ function escapeHtml(s: string): string {
 }
 
 
-function renderApiKeyPage(user: User, org: string, apiKey: string, heading = `${org} — Created!`): string {
+function renderApiKeyPage(user: User, org: string, apiKey: string): string {
   const email = escapeHtml(user.email);
   const orgEsc = escapeHtml(org);
   return `<!DOCTYPE html>
@@ -880,19 +869,19 @@ function renderApiKeyPage(user: User, org: string, apiKey: string, heading = `${
 </head><body>
 <div class="container">
   <div class="card">
-    <h1>${escapeHtml(heading)}</h1>
+    <h1>${orgEsc} — Created!</h1>
     <p class="meta">Signed in as ${email}</p>
     <p>Here's your API key for the CLI. Copy it now — it won't be shown again.</p>
     <div class="key-box" id="api-key">${escapeHtml(apiKey)}</div>
     <button type="button" class="copy-btn" onclick="copyKey()">Copy</button>
     <div class="warning">
       <strong>Store this securely.</strong> Add it to your CI environment as
-      <code>RENDRO_API_KEY</code>. Anyone with this key can push docs to
+      <code>DOCSYNC_API_KEY</code>. Anyone with this key can push docs to
       your org.
     </div>
     <pre><code># In your CI pipeline:
-rendro push --source ./docs --org ${orgEsc} --repo my-repo
-# Set RENDRO_API_KEY in your CI secrets</code></pre>
+rendro push --source ./docs --org ${orgEsc}
+# Set DOCSYNC_API_KEY in your CI secrets</code></pre>
     <a class="btn" href="/">View your docs →</a>
   </div>
 </div>

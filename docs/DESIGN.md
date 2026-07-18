@@ -234,7 +234,7 @@ Implementation contract:
 | Timeout fallback | `window.setTimeout(..., 15000)` guarded by `activeDocLoadId` |
 | No iframe fade | No `.content-frame.loading` / `.content-frame.ready` opacity rules |
 | Cache busting | bump `/lazy-tree.js?v=N` whenever `lazy-tree.ts` behavior changes |
-| Missing document | `/files/:org/:path*` returns the shared centered 404 Not Found card; `iframe.onload` still fires because HTTP 404 is a loaded response |
+| Missing document | `/files/:org/:path*` returns the shared Broken Document Graph 404 HTML; `iframe.onload` still fires because HTTP 404 is a loaded response |
 
 Rejected patterns:
 
@@ -379,7 +379,7 @@ Before merging a UI change:
 7. **No tree loader for doc nav** — Tree selection is optimistic; loading belongs to main/iframe width.
 8. **No iframe opacity fade** — Keep publisher HTML fully opaque during navigation.
 9. **Sidebar shell changes** — Verify pointer resize, keyboard resize, hide/show shell behavior from parent and iframe focus, hot-zone reveal, localStorage persistence, and dark-mode states.
-10. **404 states** — Verify bad `/docs/...` URLs, unknown routes, and missing `/files/...` iframe loads show the centered 404 Not Found card with a real `404` status where applicable.
+10. **404 states** — Verify bad `/docs/...` URLs, unknown routes, and missing `/files/...` iframe loads show the Broken Document Graph page with a real `404` status where applicable.
 11. **Theme sync** — Verify header cycle order, radial ripple or fallback, system fallback, commentor theme sync, no commentor-local theme button, and reduced-motion fallback.
 12. **Cache bust assets** — If `lazy-tree.ts` or `commentor.ts` changes, rebuild assets and bump the relevant script query version.
 13. **Browser-harness proof** — For UI behavior, verify in a real browser, not only by reading source.

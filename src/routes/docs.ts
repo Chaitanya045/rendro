@@ -90,13 +90,6 @@ async function authOrg(c: Context): Promise<string | null> {
   return await validateApiKey(header.slice(7));
 }
 
-function syncPrefixForOrg(org: string, prefix?: string): string | null {
-  if (!prefix) return `${org}/`;
-  if (!prefix.startsWith(`${org}/`)) return null;
-  if (!prefix.endsWith("/") || prefix.includes("..") || prefix.includes("\\") || prefix.includes("\0")) return null;
-  return prefix;
-}
-
 // POST /api/sync/upload — uploads + clears deleted status
 app.post("/api/sync/upload", async (c) => {
   const org = await authOrg(c);
@@ -127,9 +120,7 @@ app.get("/api/sync/check", async (c) => {
 app.get("/api/sync/list", async (c) => {
   const org = await authOrg(c);
   if (!org) return c.text("Unauthorized", 401);
-  const prefix = syncPrefixForOrg(org, c.req.query("prefix"));
-  if (!prefix) return c.text(`Prefix must be under ${org}/`, 400);
-  const keys = await listAllKeys(prefix);
+  const keys = await listAllKeys(`${org}/`);
   return c.json({ keys: await filterDeleted(keys) });
 });
 

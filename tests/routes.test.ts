@@ -2,57 +2,11 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { Hono } from "hono";
 import type { MiddlewareHandler, Context } from "hono";
 import workerApp from "@/worker";
-import appRoutes from "@/routes/app";
 import type { User } from "better-auth/types";
 import * as minio from "@/minio";
 import * as orgs from "@/orgs";
 import { verifySyncToken } from "@/config";
 
-
-const apiKeyOrgsByHash = new Map<string, string>();
-
-const convexFetchMock: typeof fetch = async (input, init) => {
-  const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
-  if (!url.includes("/api/")) return new Response("unexpected fetch", { status: 500 });
-
-  const body = JSON.parse(String(init?.body ?? "{}")) as {
-    path?: string;
-    args?: [{ orgSlug?: string; keyHash?: string }];
-  };
-  const args = body.args?.[0] ?? {};
-
-  if (url.endsWith("/api/mutation") && body.path === "apiKeys:create") {
-    if (!args.orgSlug || !args.keyHash) {
-      return new Response(JSON.stringify({ status: "error" }), { status: 400 });
-    }
-    for (const [hash, orgSlug] of apiKeyOrgsByHash) {
-      if (orgSlug === args.orgSlug) apiKeyOrgsByHash.delete(hash);
-    }
-    apiKeyOrgsByHash.set(args.keyHash, args.orgSlug);
-    return Response.json({ status: "success", value: null });
-  }
-
-  if (url.endsWith("/api/query") && body.path === "apiKeys:validate") {
-    return Response.json({ status: "success", value: args.keyHash ? apiKeyOrgsByHash.get(args.keyHash) ?? null : null });
-  }
-
-  if (url.endsWith("/api/query") && body.path === "apiKeys:existsForOrg") {
-    return Response.json({
-      status: "success",
-      value: args.orgSlug ? [...apiKeyOrgsByHash.values()].includes(args.orgSlug) : false,
-    });
-  }
-
-  return new Response("unexpected fetch", { status: 500 });
-};
-
-vi.stubGlobal("fetch", convexFetchMock);
-
-beforeEach(() => {
-  apiKeyOrgsByHash.clear();
-  vi.restoreAllMocks();
-  vi.stubGlobal("fetch", convexFetchMock);
-});
 // ────────────────────────────────────────────────────
 // 1. verifySyncToken — config level
 // ────────────────────────────────────────────────────
@@ -70,7 +24,6 @@ describe("verifySyncToken", () => {
 describe("api-keys", () => {
   let createOrgApiKey: (slug: string) => Promise<string>;
   let validateApiKey: (key: string) => Promise<string | null>;
-  let orgHasApiKey: (slug: string) => Promise<boolean>;
 
   beforeEach(async () => {
     // Dynamic import needed because api-keys module eagerly connects to SQLite.
@@ -78,7 +31,6 @@ describe("api-keys", () => {
     const mod = await import("@/api-keys");
     createOrgApiKey = mod.createOrgApiKey;
     validateApiKey = mod.validateApiKey;
-    orgHasApiKey = mod.orgHasApiKey;
   });
 
   it("generates a key with rendro_ prefix", async () => {
@@ -101,37 +53,6 @@ describe("api-keys", () => {
     expect(await validateApiKey(key1)).toBeNull();
     expect(await validateApiKey(key2)).toBe("replace-test");
   });
-  it("detects whether an org has an API key row", async () => {
-    expect(await orgHasApiKey("missing-org")).toBe(false);
-    await createOrgApiKey("keyed-org");
-    expect(await orgHasApiKey("keyed-org")).toBe(true);
-  });
-});
-
-// ────────────────────────────────────────────────────
-// 3. App root — API key recovery
-// ────────────────────────────────────────────────────
-describe("app root API key recovery", () => {
-  it("generates a new API key screen when the org exists but its key row is missing", async () => {
-    vi.spyOn(minio, "listObjects").mockResolvedValue([
-      { key: "gmail/index.html", name: "index.html", size: 1, lastModified: new Date("2025-01-01") },
-    ]);
-
-    const app = new Hono<{ Variables: { user?: User } }>();
-    app.use("*", async (c, next) => {
-      c.set("user", { email: "owner@gmail.com", name: "Owner" } as User);
-      await next();
-    });
-    app.route("/", appRoutes);
-
-    const res = await app.request("/");
-    expect(res.status).toBe(200);
-    const html = await res.text();
-    expect(html).toContain("API key generated");
-    expect(html).toContain("rendro_");
-    expect([...apiKeyOrgsByHash.values()]).toContain("gmail");
-  });
-
 });
 
 // ────────────────────────────────────────────────────
@@ -255,25 +176,10 @@ describe("sync API — list + delete (sync-deletes)", () => {
       return await validateApiKey(h.slice(7));
     };
 
-    const serverKeys = [
-      "demo-org/rendro-test/index.html",
-      "demo-org/rendro-test/guides/index.html",
-      "demo-org/rendro-api/index.html",
-      "demo-org/rendro-api/guides/index.html",
-    ];
-    const syncPrefixForOrg = (org: string, prefix?: string): string | null => {
-      if (!prefix) return `${org}/`;
-      if (!prefix.startsWith(`${org}/`)) return null;
-      if (!prefix.endsWith("/") || prefix.includes("..") || prefix.includes("\\") || prefix.includes("\0")) return null;
-      return prefix;
-    };
-
     app.get("/api/sync/list", async (c) => {
       const org = await authOrg(c);
       if (!org) return c.text("Unauthorized", 401);
-      const prefix = syncPrefixForOrg(org, c.req.query("prefix"));
-      if (!prefix) return c.text(`Prefix must be under ${org}/`, 400);
-      return c.json({ keys: serverKeys.filter((key) => key.startsWith(prefix)) });
+      return c.json({ keys: [`${org}/a.html`, `${org}/b.html`] });
     });
 
     app.delete("/api/sync/delete", async (c) => {
@@ -304,43 +210,6 @@ describe("sync API — list + delete (sync-deletes)", () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as { keys: string[] };
     expect(body.keys.every((k) => k.startsWith("demo-org/"))).toBe(true);
-  });
-
-  it("LIST scopes deletes to one repo prefix and preserves same filenames in sibling repos", async () => {
-    const key = await createOrgApiKey("demo-org");
-    const app = makeApp();
-    const res = await app.request("/api/sync/list?prefix=demo-org/rendro-test/", {
-      headers: { Authorization: `Bearer ${key}` },
-    });
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as { keys: string[] };
-    expect(body.keys).toEqual([
-      "demo-org/rendro-test/index.html",
-      "demo-org/rendro-test/guides/index.html",
-    ]);
-    expect(body.keys).not.toContain("demo-org/rendro-api/index.html");
-
-    const localKeys = new Set(["demo-org/rendro-test/index.html"]);
-    const deleteCandidates = body.keys.filter((serverKey) => !localKeys.has(serverKey));
-    expect(deleteCandidates).toEqual(["demo-org/rendro-test/guides/index.html"]);
-  });
-
-  it("LIST rejects cross-org repo prefixes", async () => {
-    const key = await createOrgApiKey("demo-org");
-    const app = makeApp();
-    const res = await app.request("/api/sync/list?prefix=acme-corp/rendro-test/", {
-      headers: { Authorization: `Bearer ${key}` },
-    });
-    expect(res.status).toBe(400);
-  });
-
-  it("LIST rejects path traversal in repo prefixes", async () => {
-    const key = await createOrgApiKey("demo-org");
-    const app = makeApp();
-    const res = await app.request("/api/sync/list?prefix=demo-org/../rendro-test/", {
-      headers: { Authorization: `Bearer ${key}` },
-    });
-    expect(res.status).toBe(400);
   });
 
   // DELETE tests
