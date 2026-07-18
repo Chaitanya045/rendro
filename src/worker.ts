@@ -103,8 +103,10 @@ app.on(["POST", "GET", "OPTIONS"], "/api/auth/*", async (c) => {
   const headers = new Headers();
   const cookie = c.req.raw.headers.get("cookie");
   const ct = c.req.raw.headers.get("content-type");
+  const origin = c.req.raw.headers.get("origin");
   if (cookie) headers.set("cookie", cookie);
   if (ct) headers.set("content-type", ct);
+  if (origin) headers.set("origin", origin);
   const init: RequestInit = { method: c.req.method, headers, redirect: "manual" };
   if (c.req.method !== "GET" && c.req.method !== "HEAD") init.body = await c.req.raw.text();
   try {
