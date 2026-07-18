@@ -3,7 +3,7 @@
  * rendro CLI — push docs from a local directory to the rendro server.
  *
  * Usage:
- *   rendro push --source ./docs --org acme-corp --endpoint http://localhost:3000 --token dev-sync-token
+ *   rendro push --source ./docs --org acme-corp --repo backend --endpoint http://localhost:3000 --token dev-sync-token
  *   rendro init  --source ./docs   # scaffolds a default docs dir
  */
 
@@ -16,18 +16,21 @@ interface PushOptions {
   org: string;
   endpoint: string;
   token: string;
+  repo?: string;
   concurrency?: number;
 }
 
 interface FileEntry {
   path: string;      // local absolute path
-  key: string;       // MinIO key: org/relative/path.html
+  key: string;       // R2/MinIO key: org[/repo]/relative/path.html
   hash: string;      // SHA-256 hex
 }
 
 function md5(content: string | Uint8Array): string {
   return createHash("md5").update(content).digest("hex");
 }
+
+const slugPattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
 async function walk(dir: string, baseDir: string): Promise<string[]> {
   const files: string[] = [];
@@ -48,11 +51,12 @@ async function walk(dir: string, baseDir: string): Promise<string[]> {
 }
 
 async function push(opts: PushOptions): Promise<void> {
-  const { source, org, endpoint, token, concurrency = 8 } = opts;
+  const { source, org, repo, endpoint, token, concurrency = 8 } = opts;
 
   // Resolve absolute paths
   const absSource = resolve(source);
   const htmlFiles = await walk(absSource, absSource);
+  const keyPrefix = repo ? `${org}/${repo}/` : `${org}/`;
 
   if (htmlFiles.length === 0) {
     console.log(`No .html files found in ${source}`);
@@ -64,8 +68,8 @@ async function push(opts: PushOptions): Promise<void> {
   // Build file entries with hashes
   const entries: FileEntry[] = [];
   for (const file of htmlFiles) {
-    const rel = relative(absSource, file);
-    const key = `${org}/${rel}`;
+    const rel = relative(absSource, file).replace(/\\/g, "/");
+    const key = `${keyPrefix}${rel}`;
     const content = await readFile(file);
     const hash = md5(content);
     entries.push({ path: file, key, hash });
@@ -143,7 +147,9 @@ async function push(opts: PushOptions): Promise<void> {
   // Sync deletes — remove files from server that don't exist locally
   const localKeys = new Set(entries.map((e) => e.key));
   try {
-    const listRes = await fetch(`${endpoint}/api/sync/list`, {
+    const listUrl = new URL("/api/sync/list", endpoint);
+    if (repo) listUrl.searchParams.set("prefix", keyPrefix);
+    const listRes = await fetch(listUrl, {
       headers: { Authorization: `Bearer ${token}` },
     });
     const { keys: serverKeys } = (await listRes.json()) as { keys: string[] };
@@ -205,12 +211,13 @@ async function main() {
     console.log(\`rendro — sync HTML docs to Rendro
 
 Usage:
-  rendro push  --source <dir> --org <slug> [--endpoint <url>] [--concurrency <n>]
+  rendro push  --source <dir> --org <slug> [--repo <slug>] [--endpoint <url>] [--concurrency <n>]
   rendro init  --source <dir>
 
 Options:
   --source       Path to local docs directory (default: ./docs)
   --org          Organization slug (required for push)
+  --repo         Optional repository slug. Scopes keys and deletes to <org>/<repo>/
   --endpoint     Rendro server URL (default: http://localhost:3000)
   --concurrency  Parallel uploads (default: 8)
 
@@ -237,6 +244,7 @@ Auth: set RENDRO_API_KEY in your environment. Get your key from
 
     const source = getFlag("--source", "./docs");
     const org = getFlag("--org", "");
+    const repo = getFlag("--repo", "");
     const endpoint = getFlag("--endpoint", "http://localhost:3000");
     const token = getFlag("--token", process.env.RENDRO_API_KEY || "");
     const concurrency = parseInt(getFlag("--concurrency", "8"), 10);
@@ -245,11 +253,15 @@ Auth: set RENDRO_API_KEY in your environment. Get your key from
       console.error("Error: --org is required for push");
       process.exit(1);
     }
+    if (repo && !slugPattern.test(repo)) {
+      console.error("Error: --repo must be a lowercase slug, e.g. backend or api-docs");
+      process.exit(1);
+    }
     if (!token) {
       console.error("Error: RENDRO_API_KEY environment variable is required. Get your key from the Rendro org page.");
       process.exit(1);
     }
-    await push({ source, org, endpoint, token, concurrency });
+    await push({ source, org, repo: repo || undefined, endpoint, token, concurrency });
     return;
   }
 

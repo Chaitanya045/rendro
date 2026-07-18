@@ -162,6 +162,15 @@ chmod +x bin/rendro.mjs
 ./bin/rendro.mjs --help
 ```
 
+Repo-scoped pushes:
+
+```bash
+export RENDRO_API_KEY=rendro_xxx
+rendro push --source ./docs --org gmail --repo rendro-test --endpoint https://rendro.app
+```
+
+Use a distinct `--repo` slug for each source repository in the same org. Sync deletes are scoped to `<org>/<repo>/`.
+
 ## Commentor Build
 
 ```bash

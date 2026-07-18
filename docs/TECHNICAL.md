@@ -131,17 +131,20 @@ No permission tables, no role mapping, no env vars per org. The email domain IS 
 ```
 rendro-docs/
 ├── gmail/
-│   ├── index.html
-│   ├── api/
-│   │   ├── overview.html
-│   │   └── reference.html
-│   └── getting-started/
-│       └── quickstart.html
+│   ├── rendro-test/
+│   │   ├── index.html
+│   │   └── api/
+│   │       └── reference.html
+│   └── rendro-api/
+│       ├── index.html
+│       └── guides/
+│           └── quickstart.html
 └── acme-corp/
-    └── handbook.html
+    └── handbook/
+        └── index.html
 ```
 
-Keys follow the pattern `<org>/<relative-path>.html`. The org prefix doubles as the security boundary.
+Keys follow the pattern `<org>/<repo>/<relative-path>.html` when the CLI is run with `--repo`. The org prefix remains the security boundary; the repo prefix scopes sync deletes so one repo cannot delete sibling repo docs. Legacy org-root keys (`<org>/<relative-path>.html`) still resolve.
 
 ---
 
@@ -264,6 +267,12 @@ Server (Hono SSR)
   │   ├─ Inline scripts (theme, menu toggles)
   │   └─ <script src="/lazy-tree.js">
   │
+  ├─ renderNotFoundPage(options)
+  │   ├─ Shared centered 404 Not Found card from `src/routes/not-found.ts`
+  │   ├─ `/docs/:key` checks `isDeleted` + S3 `headObject` before shell render
+  │   ├─ `/files/:key` returns iframe-safe 404 HTML for stale/missing objects
+  │   └─ Worker catch-all checks ASSETS first, then returns the shared 404 page
+  │
 Client (lazy-tree.js, 8KB IIFE)
   │
   ├─ handleClick(event)
@@ -355,11 +364,13 @@ The anchor uniquely identifies text within a document, surviving minor edits.
 | Legacy selected doc | `/?doc=:org/:path` redirects in-place to `/docs/:org/:path` |
 | Public signed document | `/share/:token` |
 
-The server injects `window.RENDRO_INITIAL_DOC` into the app shell for `/docs/:org/:path*`. `lazy-tree.ts` also parses `/docs/...` directly so back/forward navigation and static reloads restore the selected document.
+The server injects `window.RENDRO_INITIAL_DOC` into the app shell for `/docs/:org/:path*` after confirming the object exists and is not soft-deleted. Missing or deleted deep links return the shared centered 404 Not Found card with HTTP `404` before the shell renders.
+
+`lazy-tree.ts` also parses `/docs/...` directly so back/forward navigation and static reloads restore the selected document. If a document disappears after the tree is loaded, `/files/:org/:path*` returns the same centered 404 Not Found card inside `#content-frame`; the primary recovery link uses `target="_top"` to leave the iframe.
 
 Local development can still enter through `?dev_user=email` once. Session middleware persists that value as the `rendro-dev-user` cookie, then lazy-tree removes `dev_user` from visible URLs and iframe requests rely on the cookie.
 
-Signed share links are created by `GET /api/share/create?key=:org/:path` for the currently signed-in owner. The server returns a 7-day HMAC-SHA256 token using `AUTH_SECRET`; the token payload contains the document key and expiry. `GET /share/:token` is mounted before session middleware in both runtime entrypoints, so it streams the raw document HTML without login and without commentor injection. Tampered tokens return `403`, expired tokens return `410`, and deleted/missing docs return `404`.
+Signed share links are created by `GET /api/share/create?key=:org/:path` for the currently signed-in owner. The server returns a 7-day HMAC-SHA256 token using `AUTH_SECRET`; the token payload contains the document key and expiry. `GET /share/:token` is mounted before session middleware in both runtime entrypoints, so it streams the raw document HTML without login and without commentor injection. Tampered tokens return `403`, expired tokens return `410`, and deleted/missing docs return the shared centered 404 Not Found card with `404`.
 
 ### Production URLs
 
