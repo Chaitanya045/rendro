@@ -59,7 +59,7 @@
 })();
 import shareRoutes from "@/routes/share";
 
-import { Hono, type Context } from "hono";
+import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { sessionMiddleware } from "./middleware/session";
 import appRoutes from "./routes/app";
@@ -98,7 +98,7 @@ app.get("/api/auth/sign-out", async (c) => {
 });
 
 // Proxy auth to Convex
-async function proxyAuth(c: Context<{ Variables: { user?: User } }>): Promise<Response> {
+app.on(["POST", "GET", "OPTIONS"], "/api/auth/*", async (c) => {
   const target = `${CONVEX_SITE}${c.req.path}${new URL(c.req.url).search}`;
   const headers = new Headers();
   const cookie = c.req.raw.headers.get("cookie");
@@ -120,16 +120,11 @@ async function proxyAuth(c: Context<{ Variables: { user?: User } }>): Promise<Re
       return new Response(upstream.body, { status: upstream.status, headers: respHeaders });
     }
     return upstream;
-  } catch (err: unknown) {
-    const e = err instanceof Error ? err : new Error(String(err));
-    logger.error({ err: e.message }, "Auth proxy error");
+  } catch (err: any) {
+    logger.error({ err: err.message }, "Auth proxy error");
     return c.json({ error: "Auth unavailable" }, 502);
   }
-}
-
-app.post("/api/auth/*", proxyAuth);
-app.get("/api/auth/*", proxyAuth);
-app.options("/api/auth/*", proxyAuth);
+});
 
 app.route("/", appRoutes);
 app.route("/", docsRoutes);
