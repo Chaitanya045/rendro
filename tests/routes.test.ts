@@ -35,11 +35,9 @@ const convexFetchMock: typeof fetch = async (input, init) => {
     return Response.json({ status: "success", value: args.keyHash ? apiKeyOrgsByHash.get(args.keyHash) ?? null : null });
   }
 
-  if (url.endsWith("/api/query") && body.path === "apiKeys:existsForOrg") {
-    return Response.json({
-      status: "success",
-      value: args.orgSlug ? [...apiKeyOrgsByHash.values()].includes(args.orgSlug) : false,
-    });
+
+  if (url.endsWith("/api/query") && body.path === "deletedFiles:isDeleted") {
+    return Response.json({ status: "success", value: false });
   }
 
   return new Response("unexpected fetch", { status: 500 });
@@ -69,7 +67,6 @@ describe("verifySyncToken", () => {
 describe("api-keys", () => {
   let createOrgApiKey: (slug: string) => Promise<string>;
   let validateApiKey: (key: string) => Promise<string | null>;
-  let orgHasApiKey: (slug: string) => Promise<boolean>;
 
   beforeEach(async () => {
     // Dynamic import needed because api-keys module eagerly connects to SQLite.
@@ -77,7 +74,6 @@ describe("api-keys", () => {
     const mod = await import("@/api-keys");
     createOrgApiKey = mod.createOrgApiKey;
     validateApiKey = mod.validateApiKey;
-    orgHasApiKey = mod.orgHasApiKey;
   });
 
   it("generates a key with rendro_ prefix", async () => {
@@ -100,21 +96,16 @@ describe("api-keys", () => {
     expect(await validateApiKey(key1)).toBeNull();
     expect(await validateApiKey(key2)).toBe("replace-test");
   });
-  it("detects whether an org has an API key row", async () => {
-    expect(await orgHasApiKey("missing-org")).toBe(false);
-    await createOrgApiKey("keyed-org");
-    expect(await orgHasApiKey("keyed-org")).toBe(true);
-  });
 });
 
 // ────────────────────────────────────────────────────
-// 3. App root — API key recovery
+// 3. App root — docs access does not require API keys
 // ────────────────────────────────────────────────────
-describe("app root API key recovery", () => {
-  it("shows the org confirmation form when the org exists but its key row is missing", async () => {
-    vi.spyOn(minio, "listObjects").mockResolvedValue([
-      { key: "gmail/index.html", name: "index.html", size: 1, lastModified: new Date("2025-01-01") },
-    ]);
+describe("app docs access without API key", () => {
+  it("still shows docs when the org exists but its key row is missing", async () => {
+    const entry = { key: "gmail/index.html", name: "index.html", size: 1, lastModified: new Date("2025-01-01") };
+    vi.spyOn(minio, "listObjects").mockResolvedValue([entry]);
+    vi.spyOn(minio, "listImmediate").mockResolvedValue({ entries: [entry], isTruncated: false });
 
     const app = new Hono<{ Variables: { user?: User } }>();
     app.use("*", async (c, next) => {
@@ -126,16 +117,16 @@ describe("app root API key recovery", () => {
     const res = await app.request("/");
     expect(res.status).toBe(200);
     const html = await res.text();
-    expect(html).toContain("Generate API key");
-    expect(html).toContain('value="gmail" readonly');
+    expect(html).toContain("<title>gmail — Rendro</title>");
+    expect(html).not.toContain("Generate API key");
     expect(html).not.toContain("rendro_");
     expect([...apiKeyOrgsByHash.values()]).not.toContain("gmail");
   });
 
-  it("also shows the org confirmation form on /docs/:org when the key row is missing", async () => {
-    vi.spyOn(minio, "listObjects").mockResolvedValue([
-      { key: "gmail/index.html", name: "index.html", size: 1, lastModified: new Date("2025-01-01") },
-    ]);
+  it("also shows docs on /docs/:org when the key row is missing", async () => {
+    const entry = { key: "gmail/index.html", name: "index.html", size: 1, lastModified: new Date("2025-01-01") };
+    vi.spyOn(minio, "listObjects").mockResolvedValue([entry]);
+    vi.spyOn(minio, "listImmediate").mockResolvedValue({ entries: [entry], isTruncated: false });
 
     const app = new Hono<{ Variables: { user?: User } }>();
     app.use("*", async (c, next) => {
@@ -147,34 +138,12 @@ describe("app root API key recovery", () => {
     const res = await app.request("/docs/gmail");
     expect(res.status).toBe(200);
     const html = await res.text();
-    expect(html).toContain("Generate API key");
+    expect(html).toContain("<title>gmail — Rendro</title>");
+    expect(html).not.toContain("Generate API key");
     expect(html).not.toContain("rendro_");
     expect([...apiKeyOrgsByHash.values()]).not.toContain("gmail");
   });
 
-  it("generates the one-time API key page after org confirmation submit", async () => {
-    vi.spyOn(minio, "listObjects").mockResolvedValue([
-      { key: "gmail/index.html", name: "index.html", size: 1, lastModified: new Date("2025-01-01") },
-    ]);
-
-    const app = new Hono<{ Variables: { user?: User } }>();
-    app.use("*", async (c, next) => {
-      c.set("user", { email: "owner@gmail.com", name: "Owner" } as User);
-      await next();
-    });
-    app.route("/", appRoutes);
-
-    const res = await app.request("/api/orgs", {
-      method: "POST",
-      headers: { "content-type": "application/x-www-form-urlencoded" },
-      body: "org=gmail",
-    });
-    expect(res.status).toBe(200);
-    const html = await res.text();
-    expect(html).toContain("API key generated");
-    expect(html).toContain("rendro_");
-    expect([...apiKeyOrgsByHash.values()]).toContain("gmail");
-  });
 
 });
 
