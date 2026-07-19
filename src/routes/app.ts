@@ -1117,11 +1117,18 @@ function renderApiKeyPage(user: User, org: string, apiKey: string): string {
   html.dark .key-label{color:#a1a1aa}
   .key-box{border:1px solid #e4e4e7;border-radius:10px;background:#fff;color:#09090b;padding:14px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;line-height:20px;word-break:break-all;user-select:all}
   html.dark .key-box{border-color:#27272a;background:#09090b;color:#fafafa}
-  .copy-btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:40px;border:1px solid #e4e4e7;border-radius:8px;background:#fff;color:#09090b;padding:0 14px;font:inherit;font-weight:500;cursor:pointer;transition:background 200ms cubic-bezier(.4,0,.2,1),border-color 200ms cubic-bezier(.4,0,.2,1),transform 150ms cubic-bezier(.4,0,.2,1)}
+  .copy-btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:40px;border:1px solid #e4e4e7;border-radius:8px;background:#fff;color:#09090b;padding:0 14px;font:inherit;font-weight:500;cursor:pointer;transition:background 200ms cubic-bezier(.4,0,.2,1),border-color 200ms cubic-bezier(.4,0,.2,1),transform 150ms cubic-bezier(.4,0,.2,1),color 200ms cubic-bezier(.4,0,.2,1)}
   .copy-btn:hover{background:#f4f4f5;border-color:#d4d4d8}
   .copy-btn:active{transform:scale(.98)}
+  .copy-btn.is-feedback{background:#f4f4f5;color:#09090b;border-color:#d4d4d8}
   html.dark .copy-btn{border-color:#27272a;background:#09090b;color:#fafafa}
-  html.dark .copy-btn:hover{background:#18181b;border-color:#3f3f46}
+  html.dark .copy-btn:hover,html.dark .copy-btn.is-feedback{background:#18181b;border-color:#3f3f46;color:#fafafa}
+  .copy-icon{transition:transform 180ms cubic-bezier(.4,0,.2,1),opacity 180ms ease}
+  .copy-btn.is-feedback .copy-icon{transform:scale(1.08)}
+  .copy-label-window{height:16px;line-height:16px;overflow:hidden;display:inline-flex;align-items:flex-start}
+  .copy-label-track{display:flex;flex-direction:column;transition:transform 300ms cubic-bezier(.4,0,.2,1);will-change:transform}
+  .copy-label{height:16px;white-space:nowrap}
+  .copy-btn.is-feedback .copy-label-track{transform:translateY(-16px)}
   .warning{display:flex;gap:12px;border:1px solid #fed7aa;border-radius:14px;background:#fff7ed;color:#3f3f46;padding:14px 16px;margin:18px 0 20px}
   .warning strong{display:block;color:#09090b;margin-bottom:2px}
   html.dark .warning{border-color:rgba(251,146,60,.24);background:rgba(251,146,60,.12);color:#d4d4d8}
@@ -1136,7 +1143,7 @@ function renderApiKeyPage(user: User, org: string, apiKey: string): string {
   html.dark .primary-btn:hover{background:#fdba74;box-shadow:0 10px 30px rgba(251,146,60,.18)}
   .material-symbols-outlined{font-size:20px;line-height:20px}
   @keyframes rendroApiCardEnter{from{opacity:0;transform:translateY(8px) scale(.985)}to{opacity:1;transform:translateY(0) scale(1)}}
-  @media (prefers-reduced-motion:reduce){.icon-btn,.secondary-btn,.primary-btn,.copy-btn{transition:none}.card{animation:none}}
+  @media (prefers-reduced-motion:reduce){.icon-btn,.secondary-btn,.primary-btn,.copy-btn,.copy-label-track,.copy-icon{transition:none}.card{animation:none}}
   @media (max-width:640px){.topbar{padding:0 16px}.page{padding:24px 16px;place-items:start center}.card-head,.card-body{padding-left:20px;padding-right:20px}h1{font-size:24px;line-height:32px}.key-label{align-items:flex-start;flex-direction:column}}
 </style>
 </head><body>
@@ -1157,7 +1164,7 @@ function renderApiKeyPage(user: User, org: string, apiKey: string): string {
     <div class="card-body">
       <p class="copy">Copy this one-time API key now. You’ll use it from CI or the CLI to upload docs into <code>${orgEsc}</code>.</p>
       <div class="key-panel">
-        <div class="key-label"><span>Upload API key</span><button type="button" class="copy-btn" onclick="copyKey()"><span class="material-symbols-outlined" aria-hidden="true">content_copy</span><span id="copy-label">Copy key</span></button></div>
+        <div class="key-label"><span>Upload API key</span><button type="button" class="copy-btn" id="api-copy-btn" onclick="copyKey()" aria-label="Copy API key"><span class="material-symbols-outlined copy-icon" aria-hidden="true">content_copy</span><span class="copy-label-window" aria-hidden="true"><span class="copy-label-track"><span class="copy-label">Copy key</span><span class="copy-label" id="copy-feedback-label">API key copied!</span></span></span></button></div>
         <div class="key-box" id="api-key">${escapeHtml(apiKey)}</div>
       </div>
       <div class="warning">
@@ -1207,13 +1214,51 @@ rendro push --source ./docs --org ${orgEsc}
     });
     applyTheme(normalizedTheme(),false);
   })();
+  var copyFeedbackTimer;
+  function setCopyFeedback(message) {
+    var btn = document.getElementById("api-copy-btn");
+    var label = document.getElementById("copy-feedback-label");
+    var icon = btn && btn.querySelector(".copy-icon");
+    if (!btn || !label) return;
+    label.textContent = message;
+    if (icon) icon.textContent = message === "API key copied!" ? "check" : "error";
+    btn.classList.add("is-feedback");
+    btn.setAttribute("aria-label", message);
+    if (copyFeedbackTimer !== undefined) window.clearTimeout(copyFeedbackTimer);
+    copyFeedbackTimer = window.setTimeout(function(){
+      btn.classList.remove("is-feedback");
+      btn.setAttribute("aria-label","Copy API key");
+      if (icon) icon.textContent = "content_copy";
+    },1500);
+  }
+  async function copyApiKeyText(text) {
+    try {
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(text);
+        return;
+      }
+    } catch {}
+    var ta = document.createElement("textarea");
+    ta.value = text;
+    ta.setAttribute("readonly","");
+    ta.style.position = "fixed";
+    ta.style.top = "-999px";
+    ta.style.left = "-999px";
+    document.body.appendChild(ta);
+    ta.select();
+    ta.setSelectionRange(0,text.length);
+    try {
+      if (!document.execCommand("copy")) throw new Error("copy failed");
+    } finally {
+      ta.remove();
+    }
+  }
   function copyKey() {
     var el = document.getElementById("api-key");
-    var label = document.getElementById("copy-label");
-    if (!el || !label) return;
-    navigator.clipboard.writeText(el.textContent || "")
-      .then(function(){ label.textContent = "Copied"; })
-      .catch(function(){ label.textContent = "Copy failed"; });
+    if (!el) return;
+    copyApiKeyText(el.textContent || "")
+      .then(function(){ setCopyFeedback("API key copied!"); })
+      .catch(function(){ setCopyFeedback("Copy failed"); });
   }
 </script>
 </body></html>`;
