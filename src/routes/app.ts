@@ -29,7 +29,10 @@ app.get("/", async (c) => {
       return c.html(renderEmailUnsupported(user));
     }
 
-    return c.html(renderOrgDocs(user, org));
+    if (await orgExists(org)) {
+      return c.html(renderOrgDocs(user, org));
+    }
+    return c.html(renderCreateOrg(user, org));
   } catch (err: unknown) {
     const e = err instanceof Error ? err : new Error(String(err));
     logger.error({ err: e.message, stack: e.stack, email: user.email }, "root handler error");
@@ -47,7 +50,8 @@ app.get("/docs/:org", async (c) => {
   if (!user) return c.html(renderSignIn());
   const org = emailToOrgSlug(user.email);
   if (!org || c.req.param("org") !== org) return c.html(renderNotFoundPage({ path: c.req.path }), 404);
-  return c.html(renderOrgDocs(user, org));
+  if (await orgExists(org)) return c.html(renderOrgDocs(user, org));
+  return c.html(renderCreateOrg(user, org));
 });
 
 app.get("/docs/:key{.+}", async (c) => {
@@ -57,9 +61,12 @@ app.get("/docs/:key{.+}", async (c) => {
   if (!org) return c.html(renderEmailUnsupported(user));
   const rawKey = c.req.param("key");
   const selectedDoc = decodeURIComponent(rawKey);
-  if (selectedDoc === org) return c.html(renderOrgDocs(user, org));
+  if (selectedDoc === org) {
+    if (await orgExists(org)) return c.html(renderOrgDocs(user, org));
+    return c.html(renderCreateOrg(user, org));
+  }
   if (!selectedDoc.startsWith(`${org}/`)) return c.html(renderNotFoundPage({ path: c.req.path, homeHref: `/docs/${encodeURIComponent(org)}` }), 404);
-  if (await isDeleted(selectedDoc) || !(await headObject(selectedDoc))) {
+  if (!(await orgExists(org)) || await isDeleted(selectedDoc) || !(await headObject(selectedDoc))) {
     return c.html(renderNotFoundPage({
       path: c.req.path,
       homeHref: `/docs/${encodeURIComponent(org)}`,
@@ -87,8 +94,20 @@ app.post("/api/orgs", async (c) => {
   const user = c.get("user");
   if (!user) return c.text("Sign in first", 401);
 
-  const body = await c.req.json<{ org?: string; displayName?: string }>()
-    .catch((): { org?: string; displayName?: string } => ({}));
+  const contentType = c.req.header("content-type") ?? "";
+  let body: { org?: string; displayName?: string } = {};
+  if (contentType.includes("application/json")) {
+    body = await c.req.json<{ org?: string; displayName?: string }>()
+      .catch((): { org?: string; displayName?: string } => ({}));
+  } else {
+    const form = await c.req.formData().catch((): FormData | null => null);
+    const orgValue = form?.get("org");
+    const displayNameValue = form?.get("displayName");
+    body = {
+      org: typeof orgValue === "string" ? orgValue : undefined,
+      displayName: typeof displayNameValue === "string" ? displayNameValue : undefined,
+    };
+  }
   const org = (body.org ?? emailToOrgSlug(user.email) ?? "").toLowerCase();
   const displayName = body.displayName?.trim() || org;
 
@@ -143,6 +162,45 @@ function renderEmailUnsupported(user: User): string {
 <h1>Unsupported email domain</h1>
 <p>Your email <code>${escapeHtml(user.email)}</code> doesn't have a valid org slug. Use a work email like <code>you@company.com</code>.</p>
 <p><a href="/api/auth/sign-out">Sign out</a></p>
+</body></html>`;
+}
+
+
+function renderCreateOrg(user: User, org: string): string {
+  const email = escapeHtml(user.email);
+  const orgEsc = escapeHtml(org);
+  return `<!DOCTYPE html>
+<html><head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${orgEsc} — Rendro</title>
+<style>
+  body { font-family: system-ui, -apple-system, sans-serif; background:#fafafa; color:#1a1a1a; margin:0; }
+  .container { max-width: 600px; margin: 4rem auto; padding: 0 1rem; }
+  .card { background:#fff; padding:2rem 2.5rem; border-radius:8px; box-shadow:0 1px 3px rgba(0,0,0,0.1); }
+  h1 { margin:0 0 0.25rem; font-size:1.5rem; }
+  .meta { color:#666; font-size:0.875rem; margin:0 0 1.5rem; }
+  label { display:block; font-weight:500; margin: 1rem 0 0.25rem; }
+  input { width:100%; padding:0.5rem 0.75rem; border:1px solid #ccc; border-radius:4px; font-size:0.95rem; box-sizing:border-box; }
+  button { margin-top:1.5rem; background:#1a1a1a; color:#fff; padding:0.75rem 1.5rem; border:0; border-radius:6px; font-weight:500; cursor:pointer; }
+  a.logout { float:right; color:#666; font-size:0.875rem; }
+</style>
+</head><body>
+<div class="container">
+  <a class="logout" href="/api/auth/sign-out">Sign out</a>
+  <div class="card">
+    <h1>Create your org</h1>
+    <p class="meta">Signed in as ${email}</p>
+    <p>No docs found for <code>${orgEsc}</code>. Create the org to get started.</p>
+    <form method="post" action="/api/orgs">
+      <label for="org">Org slug</label>
+      <input id="org" name="org" value="${orgEsc}" readonly>
+      <label for="displayName">Display name</label>
+      <input id="displayName" name="displayName" value="${orgEsc}">
+      <button type="submit">Create org</button>
+    </form>
+  </div>
+</div>
 </body></html>`;
 }
 
