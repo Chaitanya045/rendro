@@ -174,33 +174,178 @@ function renderCreateOrg(user: User, org: string): string {
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${orgEsc} — Rendro</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet">
+<script>
+  (function(){
+    var saved=localStorage.getItem("commentor-theme");
+    var mode=saved==="dark"||saved==="light"||saved==="system"?saved:"system";
+    var dark=mode==="dark"||(mode==="system"&&matchMedia("(prefers-color-scheme: dark)").matches);
+    document.documentElement.dataset.theme=mode;
+    document.documentElement.dataset.resolvedTheme=dark?"dark":"light";
+    document.documentElement.classList.toggle("dark",dark);
+  })();
+</script>
 <style>
-  body { font-family: system-ui, -apple-system, sans-serif; background:#fafafa; color:#1a1a1a; margin:0; }
-  .container { max-width: 600px; margin: 4rem auto; padding: 0 1rem; }
-  .card { background:#fff; padding:2rem 2.5rem; border-radius:8px; box-shadow:0 1px 3px rgba(0,0,0,0.1); }
-  h1 { margin:0 0 0.25rem; font-size:1.5rem; }
-  .meta { color:#666; font-size:0.875rem; margin:0 0 1.5rem; }
-  label { display:block; font-weight:500; margin: 1rem 0 0.25rem; }
-  input { width:100%; padding:0.5rem 0.75rem; border:1px solid #ccc; border-radius:4px; font-size:0.95rem; box-sizing:border-box; }
-  button { margin-top:1.5rem; background:#1a1a1a; color:#fff; padding:0.75rem 1.5rem; border:0; border-radius:6px; font-weight:500; cursor:pointer; }
-  a.logout { float:right; color:#666; font-size:0.875rem; }
+  *{box-sizing:border-box}
+  html{color-scheme:light dark}
+  body{margin:0;min-height:100vh;background:#fafafa;color:#09090b;font:14px/20px Inter,system-ui,sans-serif}
+  html.dark body{background:#09090b;color:#fafafa}
+  .topbar{height:56px;border-bottom:1px solid #e4e4e7;background:#fff;display:flex;align-items:center;justify-content:space-between;padding:0 24px;position:sticky;top:0;z-index:10}
+  html.dark .topbar{border-color:#27272a;background:#09090b}
+  .brand{color:#c2410c;font-size:24px;line-height:32px;font-weight:700;letter-spacing:-.02em}
+  html.dark .brand{color:#fb923c}
+  .actions{display:flex;align-items:center;gap:8px}
+  .icon-btn,.secondary-btn,.primary-btn{border:0;border-radius:8px;font:inherit;font-weight:500;cursor:pointer;transition:background 200ms cubic-bezier(.4,0,.2,1),border-color 200ms cubic-bezier(.4,0,.2,1),color 200ms cubic-bezier(.4,0,.2,1),transform 150ms cubic-bezier(.4,0,.2,1),box-shadow 200ms cubic-bezier(.4,0,.2,1)}
+  .icon-btn{width:40px;height:40px;padding:0;display:grid;place-items:center;background:transparent;color:#71717a}
+  .icon-btn:hover{background:#f4f4f5;color:#09090b}
+  .icon-btn:active,.secondary-btn:active,.primary-btn:active{transform:scale(.98)}
+  .icon-btn:focus-visible,.secondary-btn:focus-visible,.primary-btn:focus-visible,input:focus-visible{outline:2px solid #c2410c;outline-offset:2px}
+  html.dark .icon-btn{color:#a1a1aa}
+  html.dark .icon-btn:hover{background:#18181b;color:#fafafa}
+  html.dark .icon-btn:focus-visible,html.dark .secondary-btn:focus-visible,html.dark .primary-btn:focus-visible,html.dark input:focus-visible{outline-color:#fb923c}
+  .secondary-btn{min-height:40px;border:1px solid #e4e4e7;background:#fff;color:#09090b;padding:0 14px}
+  .secondary-btn:hover{background:#f4f4f5;border-color:#d4d4d8}
+  html.dark .secondary-btn{border-color:#27272a;background:#09090b;color:#fafafa}
+  html.dark .secondary-btn:hover{background:#18181b;border-color:#3f3f46}
+  .page{min-height:calc(100vh - 56px);display:grid;place-items:center;padding:48px 24px}
+  .card{width:min(100%,560px);border:1px solid #e4e4e7;border-radius:18px;background:#fff;box-shadow:0 24px 70px rgba(9,9,11,.08);overflow:hidden}
+  html.dark .card{border-color:#27272a;background:#09090b;box-shadow:0 24px 70px rgba(0,0,0,.34)}
+  .card-head{padding:28px 32px 22px;border-bottom:1px solid #e4e4e7;background:linear-gradient(180deg,#fff7ed 0%,#fff 78%)}
+  html.dark .card-head{border-color:#27272a;background:linear-gradient(180deg,rgba(251,146,60,.16) 0%,#09090b 78%)}
+  .eyebrow{display:inline-flex;align-items:center;gap:8px;margin:0 0 16px;padding:6px 10px;border-radius:999px;background:#ffedd5;color:#9a3412;font-size:12px;line-height:16px;font-weight:600}
+  html.dark .eyebrow{background:rgba(251,146,60,.16);color:#fdba74}
+  h1{margin:0;color:#09090b;font-size:28px;line-height:36px;font-weight:700;letter-spacing:-.03em}
+  html.dark h1{color:#fafafa}
+  .meta{margin:8px 0 0;color:#71717a}
+  html.dark .meta{color:#a1a1aa}
+  .card-body{padding:28px 32px 32px}
+  .copy{margin:0 0 24px;color:#3f3f46}
+  html.dark .copy{color:#d4d4d8}
+  code{border:1px solid #e4e4e7;border-radius:6px;background:#f4f4f5;color:#09090b;padding:2px 6px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px}
+  html.dark code{border-color:#27272a;background:#18181b;color:#fafafa}
+  label{display:block;margin:16px 0 6px;color:#09090b;font-weight:600}
+  html.dark label{color:#fafafa}
+  input{width:100%;height:44px;border:1px solid #e4e4e7;border-radius:10px;background:#fff;color:#09090b;padding:0 12px;font:inherit;transition:border-color 200ms cubic-bezier(.4,0,.2,1),box-shadow 200ms cubic-bezier(.4,0,.2,1),background 200ms cubic-bezier(.4,0,.2,1)}
+  input[readonly]{background:#f4f4f5;color:#71717a}
+  input:hover{border-color:#c2410c}
+  html.dark input{border-color:#27272a;background:#09090b;color:#fafafa}
+  html.dark input[readonly]{background:#18181b;color:#a1a1aa}
+  html.dark input:hover{border-color:#fb923c}
+  .primary-btn{position:relative;display:inline-flex;align-items:center;justify-content:center;gap:8px;width:100%;min-height:46px;margin-top:24px;background:#c2410c;color:#fff;padding:0 18px}
+  .primary-btn:hover{background:#9a3412;box-shadow:0 10px 30px rgba(194,65,12,.22)}
+  .primary-btn:disabled{cursor:wait;opacity:.95}
+  html.dark .primary-btn{background:#fb923c;color:#09090b}
+  html.dark .primary-btn:hover{background:#fdba74;box-shadow:0 10px 30px rgba(251,146,60,.18)}
+  .primary-icon{font-size:20px;line-height:20px}
+  .primary-btn[data-state="idle"] .primary-icon{display:none}
+  .primary-btn[data-state="loading"] .primary-icon{display:inline-block;animation:rendroCreateSpin 1100ms linear infinite}
+  .primary-btn[data-state="done"]{background:#16a34a;color:#fff;box-shadow:0 10px 30px rgba(22,163,74,.2)}
+  .primary-btn[data-state="done"] .primary-icon{color:#bbf7d0}
+  .error{display:none;margin:14px 0 0;color:#b42318;font-weight:500}
+  html.dark .error{color:#fca5a5}
+  @keyframes rendroCreateSpin{to{transform:rotate(360deg)}}
+  @media (prefers-reduced-motion:reduce){.icon-btn,.secondary-btn,.primary-btn,input{transition:none}.primary-btn[data-state="loading"] .primary-icon{animation:none}}
+  @media (max-width:640px){.topbar{padding:0 16px}.page{padding:24px 16px;place-items:start center}.card-head,.card-body{padding-left:20px;padding-right:20px}h1{font-size:24px;line-height:32px}}
 </style>
 </head><body>
-<div class="container">
-  <a class="logout" href="/api/auth/sign-out">Sign out</a>
-  <div class="card">
-    <h1>Create your org</h1>
-    <p class="meta">Signed in as ${email}</p>
-    <p>No docs found for <code>${orgEsc}</code>. Create the org to get started.</p>
-    <form method="post" action="/api/orgs">
-      <label for="org">Org slug</label>
-      <input id="org" name="org" value="${orgEsc}" readonly>
-      <label for="displayName">Display name</label>
-      <input id="displayName" name="displayName" value="${orgEsc}">
-      <button type="submit">Create org</button>
-    </form>
+<header class="topbar">
+  <div class="brand">Rendro</div>
+  <div class="actions">
+    <button class="icon-btn" id="theme-toggle" type="button" aria-label="Switch theme" title="Theme: system"><span class="material-symbols-outlined" id="theme-icon" aria-hidden="true">brightness_auto</span></button>
+    <form method="get" action="/api/auth/sign-out"><button class="secondary-btn" type="submit">Sign out</button></form>
   </div>
-</div>
+</header>
+<main class="page">
+  <section class="card" aria-labelledby="create-org-title">
+    <div class="card-head">
+      <p class="eyebrow"><span class="material-symbols-outlined" aria-hidden="true" style="font-size:18px">folder_managed</span> New workspace</p>
+      <h1 id="create-org-title">Create your org</h1>
+      <p class="meta">Signed in as ${email}</p>
+    </div>
+    <div class="card-body">
+      <p class="copy">No docs found for <code>${orgEsc}</code>. Create this org to generate an upload key and publish your docs.</p>
+      <form id="create-org-form" method="post" action="/api/orgs">
+        <label for="org">Org slug</label>
+        <input id="org" name="org" value="${orgEsc}" readonly>
+        <label for="displayName">Display name</label>
+        <input id="displayName" name="displayName" value="${orgEsc}" autocomplete="organization">
+        <button class="primary-btn" id="create-org-submit" type="submit" data-state="idle"><span class="material-symbols-outlined primary-icon" aria-hidden="true">progress_activity</span><span id="create-org-label">Create org</span></button>
+        <p class="error" id="create-org-error" role="alert"></p>
+      </form>
+    </div>
+  </section>
+</main>
+<script>
+  (function(){
+    var root=document.documentElement;
+    var themeMedia=matchMedia("(prefers-color-scheme: dark)");
+    var themeToggle=document.getElementById("theme-toggle");
+    var themeIcon=document.getElementById("theme-icon");
+    var modes=["system","dark","light"];
+    var icons={system:"brightness_auto",dark:"dark_mode",light:"light_mode"};
+    function normalizedTheme(){
+      var saved=localStorage.getItem("commentor-theme");
+      return saved==="dark"||saved==="light"||saved==="system"?saved:"system";
+    }
+    function applyTheme(mode,persist){
+      var dark=mode==="dark"||(mode==="system"&&themeMedia.matches);
+      root.dataset.theme=mode;
+      root.dataset.resolvedTheme=dark?"dark":"light";
+      root.classList.toggle("dark",dark);
+      if(persist)localStorage.setItem("commentor-theme",mode);
+      if(themeIcon)themeIcon.textContent=icons[mode];
+      if(themeToggle){
+        var next=modes[(modes.indexOf(mode)+1)%modes.length];
+        themeToggle.title="Theme: "+mode;
+        themeToggle.setAttribute("aria-label","Switch to "+next+" theme");
+      }
+    }
+    if(themeToggle){
+      themeToggle.addEventListener("click",function(){
+        var mode=normalizedTheme();
+        applyTheme(modes[(modes.indexOf(mode)+1)%modes.length],true);
+      });
+    }
+    themeMedia.addEventListener("change",function(){
+      if(normalizedTheme()==="system")applyTheme("system",false);
+    });
+    applyTheme(normalizedTheme(),false);
+
+    var form=document.getElementById("create-org-form");
+    var button=document.getElementById("create-org-submit");
+    var label=document.getElementById("create-org-label");
+    var icon=button&&button.querySelector(".primary-icon");
+    var error=document.getElementById("create-org-error");
+    if(form&&button&&label&&icon&&error){
+      form.addEventListener("submit",async function(event){
+        event.preventDefault();
+        button.disabled=true;
+        button.dataset.state="loading";
+        icon.textContent="progress_activity";
+        label.textContent="Creating org";
+        error.style.display="none";
+        error.textContent="";
+        try{
+          var res=await fetch(form.action,{method:"POST",body:new FormData(form),headers:{Accept:"text/html"}});
+          var html=await res.text();
+          if(!res.ok)throw new Error(html||"Create org failed");
+          button.dataset.state="done";
+          icon.textContent="check_circle";
+          label.textContent="Created";
+          setTimeout(function(){document.open();document.write(html);document.close();},350);
+        }catch(err){
+          button.disabled=false;
+          button.dataset.state="idle";
+          icon.textContent="progress_activity";
+          label.textContent="Create org";
+          error.textContent=err instanceof Error?err.message:"Create org failed";
+          error.style.display="block";
+        }
+      });
+    }
+  })();
+</script>
 </body></html>`;
 }
 

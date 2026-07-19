@@ -382,7 +382,36 @@ describe("worker auth sign-out", () => {
 });
 
 // ────────────────────────────────────────────────────
-// 6. orgExists — MinIO integration
+// 6. Create org screen — design-system chrome
+// ────────────────────────────────────────────────────
+describe("create org screen", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("renders theme-aware chrome, button sign-out, and submit micro-interaction hooks", async () => {
+    process.env.NODE_ENV = "development";
+    vi.spyOn(minio, "listObjects").mockResolvedValueOnce([]);
+
+    const res = await workerApp.request("https://dev.rendro.app/?dev_user=owner%40gmail.com");
+    const html = await res.text();
+
+    expect(res.status).toBe(200);
+    expect(html).toContain("<title>gmail — Rendro</title>");
+    expect(html).toContain("commentor-theme");
+    expect(html).toContain("prefers-color-scheme: dark");
+    expect(html).toContain('class="secondary-btn" type="submit">Sign out</button>');
+    expect(html).not.toContain("<a class=\"logout\"");
+    expect(html).toContain('id="theme-toggle"');
+    expect(html).toContain('data-state="idle"');
+    expect(html).toContain("Creating org");
+    expect(html).toContain("check_circle");
+    expect(html).toContain("Created");
+  });
+});
+
+// ────────────────────────────────────────────────────
+// 7. orgExists — MinIO integration
 // ────────────────────────────────────────────────────
 describe("orgExists", () => {
   it("returns true when files exist under org prefix", async () => {
