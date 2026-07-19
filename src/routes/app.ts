@@ -232,22 +232,30 @@ function renderCreateOrg(user: User, org: string): string {
   html.dark input{border-color:#27272a;background:#09090b;color:#fafafa}
   html.dark input[readonly]{background:#18181b;color:#a1a1aa}
   html.dark input:hover{border-color:#fb923c}
-  .primary-btn{position:relative;display:inline-flex;align-items:center;justify-content:center;gap:8px;width:100%;min-height:46px;margin-top:24px;background:#c2410c;color:#fff;padding:0 18px}
-  .primary-btn:hover{background:#9a3412;box-shadow:0 10px 30px rgba(194,65,12,.22)}
-  .primary-btn:disabled{cursor:wait;opacity:.95}
+  .primary-btn{position:relative;display:inline-flex;align-items:center;justify-content:center;gap:8px;width:100%;min-height:46px;margin-top:24px;background:#c2410c;color:#fff;padding:0 18px;overflow:hidden;box-shadow:0 0 0 rgba(194,65,12,0)}
+  .primary-btn:hover{background:#b45309;box-shadow:0 8px 24px rgba(194,65,12,.16);transform:translateY(-1px)}
+  .primary-btn:disabled{cursor:wait;opacity:1}
   html.dark .primary-btn{background:#fb923c;color:#09090b}
-  html.dark .primary-btn:hover{background:#fdba74;box-shadow:0 10px 30px rgba(251,146,60,.18)}
-  .primary-icon{font-size:20px;line-height:20px}
-  .primary-btn[data-state="idle"] .primary-icon{display:none}
-  .primary-btn[data-state="loading"] .primary-icon{display:inline-block;animation:rendroCreateSpin 1100ms linear infinite}
-  .primary-btn[data-state="done"]{background:#c2410c;color:#fff;box-shadow:0 10px 30px rgba(194,65,12,.22)}
-  .primary-btn[data-state="done"] .primary-icon{color:#fff}
-  html.dark .primary-btn[data-state="done"]{background:#fb923c;color:#09090b;box-shadow:0 10px 30px rgba(251,146,60,.18)}
-  html.dark .primary-btn[data-state="done"] .primary-icon{color:#09090b}
+  html.dark .primary-btn:hover{background:#fdba74;box-shadow:0 8px 24px rgba(251,146,60,.16)}
+  .btn-status{position:relative;display:grid;place-items:center;width:20px;height:20px;flex:0 0 20px}
+  .btn-spinner,.btn-check{grid-area:1/1;transition:opacity 150ms cubic-bezier(.4,0,.2,1),transform 200ms cubic-bezier(.4,0,.2,1)}
+  .btn-spinner{width:18px;height:18px;border:2px solid currentColor;border-right-color:transparent;border-radius:999px;opacity:0;transform:scale(.76) rotate(0deg)}
+  .btn-check{font-size:20px;line-height:20px;opacity:0;transform:scale(.76) rotate(-80deg)}
+  .primary-btn[data-state="loading"] .btn-spinner{opacity:1;transform:scale(1) rotate(0deg);animation:rendroCreateSpin 1100ms linear infinite}
+  .primary-btn[data-state="done"] .btn-spinner{opacity:0;transform:scale(.7) rotate(90deg);animation:none}
+  .primary-btn[data-state="done"] .btn-check{opacity:1;transform:scale(1) rotate(0deg);transition-delay:60ms}
+  .btn-label-wrap{position:relative;display:grid;place-items:center;min-width:84px;height:20px;overflow:hidden}
+  .btn-label{grid-area:1/1;transition:opacity 150ms cubic-bezier(.4,0,.2,1),transform 200ms cubic-bezier(.4,0,.2,1)}
+  .btn-label-loading,.btn-label-done{opacity:0;transform:translateY(6px)}
+  .primary-btn[data-state="loading"] .btn-label-idle,.primary-btn[data-state="done"] .btn-label-idle{opacity:0;transform:translateY(-6px)}
+  .primary-btn[data-state="loading"] .btn-label-loading{opacity:1;transform:translateY(0)}
+  .primary-btn[data-state="done"] .btn-label-loading{opacity:0;transform:translateY(-6px)}
+  .primary-btn[data-state="done"] .btn-label-done{opacity:1;transform:translateY(0)}
+  html.org-created-exit .topbar,html.org-created-exit .page{opacity:0;transform:translateY(-8px);transition:opacity 200ms cubic-bezier(.4,0,.2,1),transform 200ms cubic-bezier(.4,0,.2,1)}
   .error{display:none;margin:14px 0 0;color:#b42318;font-weight:500}
   html.dark .error{color:#fca5a5}
-  @keyframes rendroCreateSpin{to{transform:rotate(360deg)}}
-  @media (prefers-reduced-motion:reduce){.icon-btn,.secondary-btn,.primary-btn,input{transition:none}.primary-btn[data-state="loading"] .primary-icon{animation:none}}
+  @keyframes rendroCreateSpin{to{transform:scale(1) rotate(360deg)}}
+  @media (prefers-reduced-motion:reduce){.icon-btn,.secondary-btn,.primary-btn,input,.btn-spinner,.btn-check,.btn-label{transition:none}.primary-btn:hover{transform:none}.primary-btn[data-state="loading"] .btn-spinner{animation:none}html.org-created-exit .topbar,html.org-created-exit .page{transition:none}}
   @media (max-width:640px){.topbar{padding:0 16px}.page{padding:24px 16px;place-items:start center}.card-head,.card-body{padding-left:20px;padding-right:20px}h1{font-size:24px;line-height:32px}}
 </style>
 </head><body>
@@ -272,7 +280,7 @@ function renderCreateOrg(user: User, org: string): string {
         <input id="org" name="org" value="${orgEsc}" readonly>
         <label for="displayName">Display name</label>
         <input id="displayName" name="displayName" value="${orgEsc}" autocomplete="organization">
-        <button class="primary-btn" id="create-org-submit" type="submit" data-state="idle"><span class="material-symbols-outlined primary-icon" aria-hidden="true">progress_activity</span><span id="create-org-label">Create org</span></button>
+        <button class="primary-btn" id="create-org-submit" type="submit" data-state="idle" aria-live="polite"><span class="btn-status" aria-hidden="true"><span class="btn-spinner"></span><span class="material-symbols-outlined btn-check">check_circle</span></span><span class="btn-label-wrap"><span class="btn-label btn-label-idle">Create org</span><span class="btn-label btn-label-loading">Creating org</span><span class="btn-label btn-label-done">Created</span></span></button>
         <p class="error" id="create-org-error" role="alert"></p>
       </form>
     </div>
@@ -316,16 +324,13 @@ function renderCreateOrg(user: User, org: string): string {
 
     var form=document.getElementById("create-org-form");
     var button=document.getElementById("create-org-submit");
-    var label=document.getElementById("create-org-label");
-    var icon=button&&button.querySelector(".primary-icon");
     var error=document.getElementById("create-org-error");
-    if(form&&button&&label&&icon&&error){
+    if(form&&button&&error){
       form.addEventListener("submit",async function(event){
         event.preventDefault();
         button.disabled=true;
         button.dataset.state="loading";
-        icon.textContent="progress_activity";
-        label.textContent="Creating org";
+        button.setAttribute("aria-busy","true");
         error.style.display="none";
         error.textContent="";
         try{
@@ -333,14 +338,14 @@ function renderCreateOrg(user: User, org: string): string {
           var html=await res.text();
           if(!res.ok)throw new Error(html||"Create org failed");
           button.dataset.state="done";
-          icon.textContent="check_circle";
-          label.textContent="Created";
-          setTimeout(function(){document.open();document.write(html);document.close();},350);
+          button.setAttribute("aria-busy","false");
+          var reduceMotion=matchMedia("(prefers-reduced-motion: reduce)").matches;
+          if(!reduceMotion)document.documentElement.classList.add("org-created-exit");
+          setTimeout(function(){document.open();document.write(html);document.close();},reduceMotion?0:220);
         }catch(err){
           button.disabled=false;
           button.dataset.state="idle";
-          icon.textContent="progress_activity";
-          label.textContent="Create org";
+          button.setAttribute("aria-busy","false");
           error.textContent=err instanceof Error?err.message:"Create org failed";
           error.style.display="block";
         }
@@ -1093,7 +1098,7 @@ function renderApiKeyPage(user: User, org: string, apiKey: string): string {
   html.dark .secondary-btn{border-color:#27272a;background:#09090b;color:#fafafa}
   html.dark .secondary-btn:hover{background:#18181b;border-color:#3f3f46}
   .page{min-height:calc(100vh - 56px);display:grid;place-items:center;padding:48px 24px}
-  .card{width:min(100%,720px);border:1px solid #e4e4e7;border-radius:18px;background:#fff;box-shadow:0 24px 70px rgba(9,9,11,.08);overflow:hidden}
+  .card{width:min(100%,720px);border:1px solid #e4e4e7;border-radius:18px;background:#fff;box-shadow:0 24px 70px rgba(9,9,11,.08);overflow:hidden;animation:rendroApiCardEnter 300ms cubic-bezier(.4,0,.2,1) both}
   html.dark .card{border-color:#27272a;background:#09090b;box-shadow:0 24px 70px rgba(0,0,0,.34)}
   .card-head{padding:28px 32px 22px;border-bottom:1px solid #e4e4e7;background:linear-gradient(180deg,#fff7ed 0%,#fff 78%)}
   html.dark .card-head{border-color:#27272a;background:linear-gradient(180deg,rgba(251,146,60,.16) 0%,#09090b 78%)}
@@ -1130,7 +1135,8 @@ function renderApiKeyPage(user: User, org: string, apiKey: string): string {
   html.dark .primary-btn{background:#fb923c;color:#09090b}
   html.dark .primary-btn:hover{background:#fdba74;box-shadow:0 10px 30px rgba(251,146,60,.18)}
   .material-symbols-outlined{font-size:20px;line-height:20px}
-  @media (prefers-reduced-motion:reduce){.icon-btn,.secondary-btn,.primary-btn,.copy-btn{transition:none}}
+  @keyframes rendroApiCardEnter{from{opacity:0;transform:translateY(8px) scale(.985)}to{opacity:1;transform:translateY(0) scale(1)}}
+  @media (prefers-reduced-motion:reduce){.icon-btn,.secondary-btn,.primary-btn,.copy-btn{transition:none}.card{animation:none}}
   @media (max-width:640px){.topbar{padding:0 16px}.page{padding:24px 16px;place-items:start center}.card-head,.card-body{padding-left:20px;padding-right:20px}h1{font-size:24px;line-height:32px}.key-label{align-items:flex-start;flex-direction:column}}
 </style>
 </head><body>
