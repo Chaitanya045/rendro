@@ -1,28 +1,30 @@
 #!/usr/bin/env node
 /**
- * rendro CLI — push docs from a local directory to the rendro server.
+ * rendro CLI — push docs from a local directory to the Rendro server.
  *
  * Usage:
- *   rendro push --source ./docs --org acme-corp --endpoint http://localhost:3000 --token dev-sync-token
- *   rendro init  --source ./docs   # scaffolds a default docs dir
+ *   rendro push --source ./docs --org acme-corp --repo api --endpoint https://rendro.app
+ *   rendro init --source ./docs
  */
 
 import { createHash } from "node:crypto";
-import { readdir, readFile, writeFile, mkdir } from "node:fs/promises";
-import { join, resolve, relative } from "node:path";
+import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
+import { join, relative, resolve } from "node:path";
 
 interface PushOptions {
   source: string;
   org: string;
+  repo: string;
   endpoint: string;
   token: string;
   concurrency?: number;
 }
 
 interface FileEntry {
-  path: string;      // local absolute path
-  key: string;       // MinIO key: org/relative/path.html
-  hash: string;      // SHA-256 hex
+  path: string;
+  rel: string;
+  key: string;
+  hash: string;
 }
 
 function md5(content: string | Uint8Array): string {
@@ -36,9 +38,8 @@ async function walk(dir: string, baseDir: string): Promise<string[]> {
   for (const entry of entries) {
     const full = join(dir, entry.name);
     if (entry.isDirectory()) {
-      // Skip hidden dirs and node_modules
       if (entry.name.startsWith(".") || entry.name === "node_modules") continue;
-      files.push(...(await walk(full, baseDir)));
+      files.push(...await walk(full, baseDir));
     } else if (entry.isFile() && entry.name.endsWith(".html")) {
       files.push(full);
     }
@@ -47,89 +48,82 @@ async function walk(dir: string, baseDir: string): Promise<string[]> {
   return files;
 }
 
+async function fetchJson<T>(url: string, token: string): Promise<T> {
+  const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+  if (!res.ok) throw new Error(`${res.status} ${await res.text()}`);
+  return await res.json() as T;
+}
+
 async function push(opts: PushOptions): Promise<void> {
-  const { source, org, endpoint, token, concurrency = 8 } = opts;
-
-  // Resolve absolute paths
+  const { source, org, repo, endpoint, token, concurrency = 8 } = opts;
+  const cleanEndpoint = endpoint.replace(/\/$/, "");
   const absSource = resolve(source);
-  const htmlFiles = await walk(absSource, absSource);
+  const prefix = repo ? `${org}/${repo}/` : `${org}/`;
+  const targetLabel = repo ? `(org: ${org}, repo: ${repo})` : `(org: ${org})`;
 
-  if (htmlFiles.length === 0) {
-    console.log(`No .html files found in ${source}`);
-    return;
+  console.log(`→ Syncing ${source} to ${cleanEndpoint} ${targetLabel}`);
+
+  try {
+    await fetchJson<{ keys: string[] }>(`${cleanEndpoint}/api/sync/list?prefix=${encodeURIComponent(prefix)}`, token);
+  } catch {
+    throw new Error("API key invalid or prefix unauthorized");
   }
 
-  console.log(`Found ${htmlFiles.length} HTML files in ${source}\n`);
+  console.log("✓ API key valid");
 
-  // Build file entries with hashes
+  const htmlFiles = await walk(absSource, absSource);
   const entries: FileEntry[] = [];
+
   for (const file of htmlFiles) {
     const rel = relative(absSource, file);
-    const key = `${org}/${rel}`;
+    const key = `${prefix}${rel}`;
     const content = await readFile(file);
-    const hash = md5(content);
-    entries.push({ path: file, key, hash });
+    entries.push({ path: file, rel, key, hash: md5(content) });
   }
 
-  // Check which files need uploading by calling the server's check endpoint
   const toUpload: FileEntry[] = [];
   let skipped = 0;
 
   const checkBatch = async (batch: FileEntry[]) => {
-    const results = await Promise.all(
-      batch.map(async (entry) => {
-        const url = `${endpoint}/api/sync/check?key=${encodeURIComponent(entry.key)}&hash=${entry.hash}`;
-        try {
-          const res = await fetch(url, {
-            headers: { Authorization: `Bearer ${token}` },
-          });
-          if (!res.ok) return { entry, needsUpload: true };
-          const body = (await res.json()) as { exists: boolean; match: boolean };
-          return { entry, needsUpload: !body.match };
-        } catch {
-          return { entry, needsUpload: true };
-        }
-      })
-    );
+    const results = await Promise.all(batch.map(async (entry) => {
+      const url = `${cleanEndpoint}/api/sync/check?key=${encodeURIComponent(entry.key)}&hash=${entry.hash}`;
+      try {
+        const body = await fetchJson<{ exists: boolean; match: boolean }>(url, token);
+        return { entry, needsUpload: !body.match };
+      } catch {
+        return { entry, needsUpload: true };
+      }
+    }));
 
-    for (const r of results) {
-      if (r.needsUpload) {
-        toUpload.push(r.entry);
+    for (const result of results) {
+      if (result.needsUpload) {
+        toUpload.push(result.entry);
       } else {
         skipped++;
-        console.log(`  ✓ ${r.entry.key} (unchanged)`);
       }
     }
   };
 
-  // Process in batches
   for (let i = 0; i < entries.length; i += concurrency) {
     await checkBatch(entries.slice(i, i + concurrency));
   }
 
-  console.log(`\n${toUpload.length} files to upload, ${skipped} skipped\n`);
-
-  // Upload changed files with controlled concurrency
   const upload = async (entry: FileEntry) => {
-    const content = await readFile(entry.path);
-    const res = await fetch(`${endpoint}/api/sync/upload`, {
+    const content = await readFile(entry.path, "utf8");
+    const res = await fetch(`${cleanEndpoint}/api/sync/upload`, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${token}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({
-        key: entry.key,
-        content: content.toString("utf-8"),
-      }),
+      body: JSON.stringify({ key: entry.key, content }),
     });
 
     if (!res.ok) {
-      const text = await res.text();
-      throw new Error(`Upload failed for ${entry.key}: ${res.status} ${text}`);
+      throw new Error(`Upload failed for ${entry.rel}: ${res.status} ${await res.text()}`);
     }
 
-    console.log(`  ↑ ${entry.key}`);
+    console.log(`  ↑ ${entry.rel}`);
   };
 
   let uploaded = 0;
@@ -138,30 +132,25 @@ async function push(opts: PushOptions): Promise<void> {
     await Promise.all(batch.map(upload));
     uploaded += batch.length;
   }
-  console.log(`\nDone. ${uploaded} uploaded, ${skipped} skipped, ${htmlFiles.length} total.`);
 
-  // Sync deletes — remove files from server that don't exist locally
-  const localKeys = new Set(entries.map((e) => e.key));
-  try {
-    const listRes = await fetch(`${endpoint}/api/sync/list`, {
+  const existing = await fetchJson<{ keys: string[] }>(`${cleanEndpoint}/api/sync/list?prefix=${encodeURIComponent(prefix)}`, token);
+  const localKeys = new Set(entries.map((entry) => entry.key));
+  let deleted = 0;
+
+  for (const serverKey of existing.keys.filter((key) => key.startsWith(prefix))) {
+    if (localKeys.has(serverKey)) continue;
+    const rel = serverKey.startsWith(prefix) ? serverKey.slice(prefix.length) : serverKey;
+    const res = await fetch(`${cleanEndpoint}/api/sync/delete?key=${encodeURIComponent(serverKey)}`, {
+      method: "DELETE",
       headers: { Authorization: `Bearer ${token}` },
     });
-    const { keys: serverKeys } = (await listRes.json()) as { keys: string[] };
-    let deleted = 0;
-    for (const key of serverKeys) {
-      if (!localKeys.has(key)) {
-        await fetch(`${endpoint}/api/sync/delete?key=${encodeURIComponent(key)}`, {
-          method: "DELETE",
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        console.log(`  ↓ ${key} (soft-deleted)`);
-        deleted++;
-      }
-    }
-    console.log(`${deleted} files soft-deleted, ${uploaded} uploaded, ${skipped} skipped, ${htmlFiles.length} total.`);
-  } catch (e) {
-    console.error("Sync-deletes failed:", e);
+    if (!res.ok) throw new Error(`Delete failed for ${rel}: ${res.status} ${await res.text()}`);
+    console.log(`  ✗ ${rel} (deleted)`);
+    deleted++;
   }
+
+  console.log("");
+  console.log(`✓ Sync complete: ${uploaded} uploaded, ${skipped} unchanged, ${deleted} deleted`);
 }
 
 async function init(source: string): Promise<void> {
@@ -172,7 +161,6 @@ async function init(source: string): Promise<void> {
     join(absSource, "api"),
     join(absSource, "engineering"),
   ];
-
 
   for (const dir of dirs) {
     await mkdir(dir, { recursive: true }).catch(() => {});
@@ -186,58 +174,59 @@ async function init(source: string): Promise<void> {
 <p>Edit this file to get started with your documentation.</p>
 </body>
 </html>`;
+
   await writeFile(join(absSource, "index.html"), indexContent);
   console.log(`Created ${join(absSource, "index.html")}`);
 
   for (const dir of dirs) {
     console.log(`Created ${dir}/`);
   }
-  console.log("\nRun: rendro push --source ./docs --org <your-org>");
+  console.log("\nRun: rendro push --source ./docs --org <your-org> --repo <repo-name>");
 }
 
-// CLI entry
-async function main() {
-  const args = process.argv.slice(2);
-  const cmd = args[0];
-
-  if (!cmd || cmd === "help" || cmd === "--help") {
-    console.log(`rendro — sync HTML docs to Rendro
-    console.log(\`rendro — sync HTML docs to Rendro
+function printHelp(): void {
+  console.log(`rendro — sync HTML docs to Rendro
 
 Usage:
-  rendro push  --source <dir> --org <slug> [--endpoint <url>] [--concurrency <n>]
-  rendro init  --source <dir>
+  rendro push --source <dir> --org <slug> [--repo <name>] [--endpoint <url>] [--concurrency <n>]
+  rendro init --source <dir>
 
 Options:
   --source       Path to local docs directory (default: ./docs)
   --org          Organization slug (required for push)
-  --endpoint     Rendro server URL (default: http://localhost:3000)
+  --repo         Optional repo slug; when set, docs sync under <org>/<repo>/
+  --endpoint     Rendro server URL (default: https://rendro.app)
   --concurrency  Parallel uploads (default: 8)
 
 Auth: set RENDRO_API_KEY in your environment. Get your key from
       the Rendro org page after creating your organization.
-\`);
 `);
+}
+
+async function main(): Promise<void> {
+  const args = process.argv.slice(2);
+  const cmd = args[0];
+
+  if (!cmd || cmd === "help" || cmd === "--help") {
+    printHelp();
     return;
   }
 
+  const getFlag = (flag: string, fallback: string) => {
+    const idx = args.indexOf(flag);
+    return idx !== -1 && idx + 1 < args.length ? args[idx + 1] : fallback;
+  };
+
   if (cmd === "init") {
-    const source = args.includes("--source")
-      ? args[args.indexOf("--source") + 1]
-      : "./docs";
-    await init(source);
+    await init(getFlag("--source", "./docs"));
     return;
   }
 
   if (cmd === "push") {
-    const getFlag = (flag: string, fallback: string) => {
-      const idx = args.indexOf(flag);
-      return idx !== -1 && idx + 1 < args.length ? args[idx + 1] : fallback;
-    };
-
     const source = getFlag("--source", "./docs");
     const org = getFlag("--org", "");
-    const endpoint = getFlag("--endpoint", "http://localhost:3000");
+    const repo = getFlag("--repo", "");
+    const endpoint = getFlag("--endpoint", "https://rendro.app");
     const token = getFlag("--token", process.env.RENDRO_API_KEY || "");
     const concurrency = parseInt(getFlag("--concurrency", "8"), 10);
 
@@ -249,7 +238,8 @@ Auth: set RENDRO_API_KEY in your environment. Get your key from
       console.error("Error: RENDRO_API_KEY environment variable is required. Get your key from the Rendro org page.");
       process.exit(1);
     }
-    await push({ source, org, endpoint, token, concurrency });
+
+    await push({ source, org, repo, endpoint, token, concurrency });
     return;
   }
 
@@ -258,6 +248,6 @@ Auth: set RENDRO_API_KEY in your environment. Get your key from
 }
 
 main().catch((err) => {
-  console.error(err);
+  console.error(err instanceof Error ? err.message : err);
   process.exit(1);
 });

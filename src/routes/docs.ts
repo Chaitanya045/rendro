@@ -120,7 +120,10 @@ app.get("/api/sync/check", async (c) => {
 app.get("/api/sync/list", async (c) => {
   const org = await authOrg(c);
   if (!org) return c.text("Unauthorized", 401);
-  const keys = await listAllKeys(`${org}/`);
+  const prefix = c.req.query("prefix") || `${org}/`;
+  if (!prefix.startsWith(`${org}/`)) return c.text(`Prefix must be under ${org}/`, 400);
+  if (prefix.includes("..")) return c.text("Invalid path", 400);
+  const keys = await listAllKeys(prefix);
   return c.json({ keys: await filterDeleted(keys) });
 });
 
