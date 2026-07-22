@@ -5,15 +5,21 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/Chaitanya045/rendro.git",
+    "url": "git+https://github.com/Chaitanya045/rendro.git",
     "directory": "."
   },
   "homepage": "https://rendro.app",
-  "keywords": ["docs", "documentation", "sync", "cli", "rendro"],
+  "keywords": [
+    "docs",
+    "documentation",
+    "sync",
+    "cli",
+    "rendro"
+  ],
   "type": "module",
   "packageManager": "pnpm@10.18.3",
   "bin": {
-    "rendro": "./bin/rendro.mjs"
+    "rendro": "bin/rendro.mjs"
   },
   "files": [
     "bin/",
