@@ -407,6 +407,15 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
   .topbar-btn-share.is-feedback .share-label-track{transform:translateY(-16px)}
   .share-icon{transition:transform .18s cubic-bezier(.4,0,.2,1),opacity .18s ease}
   .topbar-btn-share.is-feedback .share-icon{transform:scale(1.08)}
+  .shortcut-tooltip-wrap{position:relative;display:inline-flex}
+  .shortcut-tooltip{position:absolute;top:40px;right:0;display:flex;align-items:center;gap:12px;pointer-events:none;opacity:0;transform:translateY(-4px) scale(.98);transition:opacity 150ms cubic-bezier(.4,0,.2,1),transform 150ms cubic-bezier(.4,0,.2,1);z-index:120;background:#09090b;color:#fafafa;border-radius:8px;padding:8px 10px;box-shadow:0 8px 24px rgba(0,0,0,.18);font-size:12px;line-height:16px;white-space:nowrap}
+  .shortcut-tooltip-label{font-weight:600}
+  .shortcut-keys{display:inline-flex;align-items:center;gap:4px;color:#d4d4d8}
+  .shortcut-key{min-width:18px;height:18px;padding:0 5px;border-radius:4px;background:#27272a;color:#fafafa;display:inline-flex;align-items:center;justify-content:center;font-size:11px;line-height:18px;font-weight:600;box-shadow:inset 0 -1px 0 rgba(255,255,255,.14)}
+  .shortcut-tooltip-wrap:hover .shortcut-tooltip,.shortcut-tooltip-wrap:focus-within .shortcut-tooltip{opacity:1;transform:translateY(0) scale(1)}
+  html.dark .shortcut-tooltip{background:#fafafa;color:#09090b;box-shadow:0 8px 24px rgba(0,0,0,.34)}
+  html.dark .shortcut-keys{color:#52525b}
+  html.dark .shortcut-key{background:#e4e4e7;color:#09090b;box-shadow:inset 0 -1px 0 rgba(9,9,11,.12)}
   .topbar-btn-create{background:#c2410c;color:#fff}
   .topbar-btn-create:hover{background:#9a3412;opacity:1}
   .topbar-avatar{width:32px;height:32px;border-radius:50%;background:#ffedd5;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;color:#09090b;cursor:pointer;border:1px solid #fed7aa}
@@ -524,7 +533,7 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
   html.dark .doc-loader.error .doc-loader-bar{background:#fca5a5;box-shadow:0 0 8px rgba(252,165,165,.45)}
   @media (prefers-reduced-motion: reduce){.doc-loader-bar{width:100%;opacity:.85;animation:none}}
   @media (prefers-reduced-motion: reduce){.tree-skeleton-icon,.tree-skeleton-label{animation:none;background:#f4f4f5}}
-  @media (prefers-reduced-motion: reduce){.topbar,.sidebar,.main,.doc-loader,.sidebar-resizer,.share-label-track,.sidebar-resizer::before{transition:none}.sidebar-resizer::before{transform:scaleY(1)}.resizer-sparks{display:none}}
+  @media (prefers-reduced-motion: reduce){.topbar,.sidebar,.main,.doc-loader,.sidebar-resizer,.share-label-track,.shortcut-tooltip,.sidebar-resizer::before{transition:none}.sidebar-resizer::before{transform:scaleY(1)}.resizer-sparks{display:none}}
   .avatar-wrap{position:relative}
   .avatar-menu{position:absolute;top:42px;right:0;background:#fff;border:1px solid #e4e4e7;border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,.12);padding:4px;min-width:200px;z-index:100}
   .avatar-menu-email{padding:8px 12px;font-size:12px;color:#71717a;border-bottom:1px solid #e4e4e7;margin-bottom:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -616,7 +625,7 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
     <span class="topbar-logo">Rendro</span>
   </div>
   <div class="topbar-actions">
-    <button class="topbar-btn-icon shell-toggle" id="shell-toggle" type="button" aria-label="Hide app shell" aria-pressed="false" title="Hide app shell"><span class="material-symbols-outlined" aria-hidden="true">fullscreen</span></button>
+    <span class="shortcut-tooltip-wrap"><button class="topbar-btn-icon shell-toggle" id="shell-toggle" type="button" aria-label="Hide app shell, keyboard shortcut Ctrl Shift H" aria-describedby="shell-shortcut-tooltip" aria-pressed="false" title="Hide app shell — Ctrl Shift H"><span class="material-symbols-outlined" aria-hidden="true">fullscreen</span></button><span class="shortcut-tooltip" id="shell-shortcut-tooltip" role="tooltip"><span class="shortcut-tooltip-label">Hide app shell</span><span class="shortcut-keys" id="shell-shortcut-keys" aria-hidden="true"><span class="shortcut-key">Ctrl</span><span class="shortcut-key">Shift</span><span class="shortcut-key">H</span></span></span></span>
     <button class="topbar-btn topbar-btn-share" id="share-btn" type="button" aria-label="Copy signed URL">
       <span class="material-symbols-outlined share-icon" style="font-size:18px" aria-hidden="true">link</span>
       <span class="share-label-window" aria-hidden="true"><span class="share-label-track"><span class="share-label">Copy signed URL</span><span class="share-label" id="share-feedback-label">Signed URL copied!</span></span></span>
@@ -766,6 +775,14 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
   var topbar=document.querySelector(".topbar");
   var shellToggle=document.getElementById("shell-toggle");
   var shellToggleIcon=shellToggle&&shellToggle.querySelector(".material-symbols-outlined");
+  var shellShortcutKeys=document.getElementById("shell-shortcut-keys");
+  var shellShortcutText="Ctrl Shift H";
+  if(shellToggle&&shellShortcutKeys){
+    var platform=(navigator.userAgentData&&navigator.userAgentData.platform)||navigator.platform||"";
+    var isMac=/mac|iphone|ipad|ipod/i.test(platform);
+    shellShortcutText=isMac?"⌘ Shift H":"Ctrl Shift H";
+    shellShortcutKeys.innerHTML=isMac?'<span class="shortcut-key">⌘</span><span class="shortcut-key">Shift</span><span class="shortcut-key">H</span>':'<span class="shortcut-key">Ctrl</span><span class="shortcut-key">Shift</span><span class="shortcut-key">H</span>';
+  }
   var topHotzone=document.getElementById("shell-hotzone-top");
   var leftHotzone=document.getElementById("shell-hotzone-left");
   var shellSidebarHideTimer;
@@ -806,8 +823,8 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
     }
     if(shellToggle){
       shellToggle.setAttribute("aria-pressed",String(hidden));
-      shellToggle.setAttribute("aria-label",hidden?"Show app shell":"Hide app shell");
-      shellToggle.setAttribute("title",hidden?"Show app shell":"Hide app shell");
+      shellToggle.setAttribute("aria-label",(hidden?"Show app shell":"Hide app shell")+", keyboard shortcut "+shellShortcutText);
+      shellToggle.setAttribute("title",(hidden?"Show app shell":"Hide app shell")+" — "+shellShortcutText);
     }
     if(shellToggleIcon)shellToggleIcon.textContent=hidden?"fullscreen_exit":"fullscreen";
     if(hidden&&shellToggle)shellToggle.blur();
