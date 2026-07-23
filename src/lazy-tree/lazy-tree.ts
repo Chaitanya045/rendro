@@ -265,22 +265,39 @@ function handleClick(e: Event) {
 // ── doc loading with history ──
 let activeDocLoadId = 0;
 let docLoadTimeout: number | undefined;
+let docLoadClearTimer: number | undefined;
+let docLoadStartedAt = 0;
+const DOC_LOAD_MIN_VISIBLE_MS = 520;
 
 
+function clearDocLoadingState() {
+  document.documentElement.classList.remove("doc-loading", "doc-loading-error");
+}
 
 function showDocLoader(frame: HTMLIFrameElement | null) {
+  if (docLoadClearTimer !== undefined) window.clearTimeout(docLoadClearTimer);
+  docLoadStartedAt = performance.now();
   document.documentElement.classList.add("doc-loading");
   document.documentElement.classList.remove("doc-loading-error");
   if (frame) frame.style.display = "block";
 }
 
 function showDocLoadError() {
+  if (docLoadClearTimer !== undefined) window.clearTimeout(docLoadClearTimer);
   document.documentElement.classList.remove("doc-loading");
   document.documentElement.classList.add("doc-loading-error");
 }
 
-function hideDocLoader(frame: HTMLIFrameElement | null) {
-  document.documentElement.classList.remove("doc-loading", "doc-loading-error");
+function hideDocLoader(frame: HTMLIFrameElement | null, loadId: number) {
+  const remaining = Math.max(0, DOC_LOAD_MIN_VISIBLE_MS - (performance.now() - docLoadStartedAt));
+  const clear = () => {
+    if (loadId === activeDocLoadId) clearDocLoadingState();
+  };
+  if (remaining > 0) {
+    docLoadClearTimer = window.setTimeout(clear, remaining);
+  } else {
+    clear();
+  }
   if (frame) frame.style.display = "block";
 }
 
@@ -300,7 +317,7 @@ function loadDoc(fullPath: string, pushState: boolean) {
     frame.onload = () => {
       if (loadId !== activeDocLoadId) return;
       if (docLoadTimeout !== undefined) window.clearTimeout(docLoadTimeout);
-      hideDocLoader(frame);
+      hideDocLoader(frame, loadId);
     };
     frame.onerror = () => {
       if (loadId !== activeDocLoadId) return;
