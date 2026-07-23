@@ -50,10 +50,9 @@ function updateIndicator(el: HTMLElement, animate = true) {
 
   const transform = `translate(${el.offsetLeft}px, ${el.offsetTop}px)`;
   indicator.style.transition = animate
-    ? "transform 0.3s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.2s ease, background-color 0.15s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.2s cubic-bezier(0.4, 0, 0.2, 1)"
+    ? "transform 0.3s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.2s ease"
     : "none";
   indicator.style.opacity = "1";
-  indicator.style.setProperty("--active-indicator-transform", transform);
   indicator.style.transform = transform;
 }
 

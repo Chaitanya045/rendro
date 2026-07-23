@@ -481,7 +481,8 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
   .load-more-btn:disabled{color:#71717a;cursor:default}
   @keyframes treeItemIn{from{opacity:0;transform:translateX(-6px)}to{opacity:1;transform:translateX(0)}}
   @keyframes treeFolderLoading{0%{background-position:-200% 50%}100%{background-position:200% 50%}}
-  .tree-item{position:relative;display:flex;align-items:center;gap:8px;padding:6px 12px;border-radius:4px;color:#71717a;cursor:pointer;transition:translate .15s cubic-bezier(.4,0,.2,1),background-color .2s,color .2s}
+  .tree-item{position:relative;display:flex;align-items:center;gap:8px;padding:6px 12px;border-radius:4px;color:#71717a;cursor:pointer;overflow:hidden;transition:translate .15s cubic-bezier(.4,0,.2,1),background-color .2s,color .2s}
+  .tree-item>*{position:relative;z-index:1}
   html.tree-entering .tree-item,.tree-folder.open>.tree-folder-content>.tree-item,.tree-folder.open>.tree-folder-content>.tree-folder>.tree-item{animation:treeItemIn .32s cubic-bezier(.4,0,.2,1) both;animation-delay:calc(var(--tree-index,0) * 35ms)}
   .tree-folder.loading>.tree-item{cursor:progress}
   .tree-folder.loading>.tree-item .folder-icon,.tree-folder.loading>.tree-item .font-body-md{color:transparent;background:linear-gradient(90deg,#7c2d12 0%,#f97316 32%,#9a3412 55%,#fb923c 76%,#7c2d12 100%);background-size:200% 100%;background-clip:text;-webkit-background-clip:text;-webkit-text-fill-color:transparent;animation:treeFolderLoading 1.1s cubic-bezier(.4,0,.2,1) infinite}
@@ -500,14 +501,10 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
   .tree-folder>.tree-item .folder-icon{transition:color .15s}
   .tree-folder>.tree-item:hover .caret-icon,.tree-folder>.tree-item:focus-within .caret-icon{color:#c2410c;translate:2px 0}
   .tree-folder>.tree-item:hover .folder-icon,.tree-folder>.tree-item:focus-within .folder-icon{color:#c2410c}
-  .active-indicator{position:absolute;left:0;width:4px;height:32px;background:#c2410c;transition:transform .3s cubic-bezier(.4,0,.2,1),opacity .2s ease,background-color .15s cubic-bezier(.4,0,.2,1),box-shadow .2s cubic-bezier(.4,0,.2,1);border-radius:4px;pointer-events:none;z-index:1}
-  @keyframes docRailPulse{0%,100%{box-shadow:0 0 0 0 rgba(194,65,12,.22);transform:var(--active-indicator-transform) scaleY(1)}50%{box-shadow:0 0 0 5px rgba(194,65,12,.08);transform:var(--active-indicator-transform) scaleY(.72)}}
-  html.doc-loading .active-indicator{animation:docRailPulse 1.1s cubic-bezier(.4,0,.2,1) infinite;will-change:transform,box-shadow}
-  html.doc-loading-error .active-indicator{background:#b42318;box-shadow:0 0 0 3px rgba(180,35,24,.12);animation:none}
-  html.dark.doc-loading .active-indicator{box-shadow:0 0 0 0 rgba(251,146,60,.22)}
-  @keyframes docRailPulseDark{0%,100%{box-shadow:0 0 0 0 rgba(251,146,60,.24);transform:var(--active-indicator-transform) scaleY(1)}50%{box-shadow:0 0 0 5px rgba(251,146,60,.1);transform:var(--active-indicator-transform) scaleY(.72)}}
-  html.dark.doc-loading .active-indicator{animation-name:docRailPulseDark}
-  html.dark.doc-loading-error .active-indicator{background:#fca5a5;box-shadow:0 0 0 3px rgba(252,165,165,.14)}
+  .active-indicator{position:absolute;left:0;width:4px;height:32px;background:#c2410c;transition:transform .3s cubic-bezier(.4,0,.2,1),opacity .2s ease;border-radius:4px;pointer-events:none;z-index:1}
+  @keyframes docRowShimmer{0%{background-position:-180% 0}100%{background-position:180% 0}}
+  html.doc-loading .tree-item.active::before{content:"";position:absolute;inset:0;border-radius:inherit;background:linear-gradient(90deg,rgba(194,65,12,0) 0%,rgba(254,215,170,.72) 42%,rgba(251,146,60,.28) 56%,rgba(255,237,213,.5) 72%,rgba(194,65,12,0) 100%);background-size:220% 100%;animation:docRowShimmer 1.1s cubic-bezier(.4,0,.2,1) infinite;z-index:0}
+  html.doc-loading-error .tree-item.active::before{content:"";position:absolute;inset:0;border-radius:inherit;background:rgba(180,35,24,.1);z-index:0}
 
   @keyframes treeSkeletonShimmer{0%{background-position:100% 0}100%{background-position:-100% 0}}
   .tree-skeleton{padding:0}
@@ -550,7 +547,7 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
     ::view-transition-old(root),::view-transition-new(root){animation:none;mix-blend-mode:normal}
     ::view-transition-image-pair(root){isolation:isolate}
   }
-  @media (prefers-reduced-motion: reduce){.theme-ripple{display:none}html.tree-entering .tree-item,.tree-folder.open>.tree-folder-content>.tree-item,.tree-folder.open>.tree-folder-content>.tree-folder>.tree-item{animation:none!important;animation-delay:0s!important;opacity:1!important;transform:none!important}.tree-folder.loading>.tree-item .folder-icon,.tree-folder.loading>.tree-item .font-body-md{animation:none!important;background:none!important;color:#c2410c!important;-webkit-text-fill-color:currentColor!important}html.doc-loading .active-indicator{animation:none!important;box-shadow:none!important}html.dark .tree-folder.loading>.tree-item .folder-icon,html.dark .tree-folder.loading>.tree-item .font-body-md{color:#fb923c!important}::view-transition-old(root),::view-transition-new(root){animation:none!important}}
+  @media (prefers-reduced-motion: reduce){.theme-ripple{display:none}html.tree-entering .tree-item,.tree-folder.open>.tree-folder-content>.tree-item,.tree-folder.open>.tree-folder-content>.tree-folder>.tree-item{animation:none!important;animation-delay:0s!important;opacity:1!important;transform:none!important}.tree-folder.loading>.tree-item .folder-icon,.tree-folder.loading>.tree-item .font-body-md{animation:none!important;background:none!important;color:#c2410c!important;-webkit-text-fill-color:currentColor!important}html.doc-loading .tree-item.active::before{animation:none!important}html.dark .tree-folder.loading>.tree-item .folder-icon,html.dark .tree-folder.loading>.tree-item .font-body-md{color:#fb923c!important}::view-transition-old(root),::view-transition-new(root){animation:none!important}}
   @media (prefers-reduced-motion: reduce){.tree-item[data-path],.tree-item[data-path]>.material-symbols-outlined{transition-property:background-color,color!important}.tree-item[data-path]:hover,.tree-item[data-path]:focus-within{translate:none!important}.tree-item[data-path]:hover>.material-symbols-outlined,.tree-item[data-path]:focus-within>.material-symbols-outlined{transform:none!important}}
   @media (prefers-reduced-motion: reduce){.tree-folder>.tree-item .caret-icon,.tree-folder>.tree-item .folder-icon{transition-property:color!important}.tree-folder>.tree-item:hover .caret-icon,.tree-folder>.tree-item:focus-within .caret-icon{translate:none!important}}
 
@@ -593,6 +590,8 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
   html.dark .tree-item[data-path]:hover>.material-symbols-outlined,html.dark .tree-item[data-path]:focus-within>.material-symbols-outlined{color:#fb923c}
   html.dark .tree-folder>.tree-item:hover .caret-icon,html.dark .tree-folder>.tree-item:focus-within .caret-icon,html.dark .tree-folder>.tree-item:hover .folder-icon,html.dark .tree-folder>.tree-item:focus-within .folder-icon{color:#fb923c}
   html.dark .tree-item.active{background:rgba(251,146,60,.16);color:#fb923c}
+  html.dark.doc-loading .tree-item.active::before{background:linear-gradient(90deg,rgba(251,146,60,0) 0%,rgba(251,146,60,.18) 38%,rgba(253,186,116,.32) 56%,rgba(251,146,60,.14) 72%,rgba(251,146,60,0) 100%);background-size:220% 100%}
+  html.dark.doc-loading-error .tree-item.active::before{background:rgba(252,165,165,.14)}
   html.dark .tree-folder.loading>.tree-item .folder-icon,html.dark .tree-folder.loading>.tree-item .font-body-md{background:linear-gradient(90deg,#fb923c 0%,#ffedd5 32%,#f97316 55%,#fed7aa 76%,#fb923c 100%);background-size:200% 100%;background-clip:text;-webkit-background-clip:text}
   html.dark .active-indicator{background:#fb923c}
   html.dark .tree-size{color:#a1a1aa}
