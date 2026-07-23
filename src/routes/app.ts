@@ -625,7 +625,7 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
     <span class="topbar-logo">Rendro</span>
   </div>
   <div class="topbar-actions">
-    <span class="shortcut-tooltip-wrap"><button class="topbar-btn-icon shell-toggle" id="shell-toggle" type="button" aria-label="Hide app shell, keyboard shortcut Ctrl Shift H" aria-describedby="shell-shortcut-tooltip" aria-pressed="false" title="Hide app shell — Ctrl Shift H"><span class="material-symbols-outlined" aria-hidden="true">fullscreen</span></button><span class="shortcut-tooltip" id="shell-shortcut-tooltip" role="tooltip"><span class="shortcut-tooltip-label">Hide app shell</span><span class="shortcut-keys" id="shell-shortcut-keys" aria-hidden="true"><span class="shortcut-key">Ctrl</span><span class="shortcut-key">Shift</span><span class="shortcut-key">H</span></span></span></span>
+    <span class="shortcut-tooltip-wrap"><button class="topbar-btn-icon shell-toggle" id="shell-toggle" type="button" aria-label="Hide app shell, keyboard shortcut Ctrl Shift H" aria-describedby="shell-shortcut-tooltip" aria-pressed="false"><span class="material-symbols-outlined" aria-hidden="true">fullscreen</span></button><span class="shortcut-tooltip" id="shell-shortcut-tooltip" role="tooltip"><span class="shortcut-tooltip-label">Hide app shell</span><span class="shortcut-keys" id="shell-shortcut-keys" aria-hidden="true"><span class="shortcut-key">Ctrl</span><span class="shortcut-key">Shift</span><span class="shortcut-key">H</span></span></span></span>
     <button class="topbar-btn topbar-btn-share" id="share-btn" type="button" aria-label="Copy signed URL">
       <span class="material-symbols-outlined share-icon" style="font-size:18px" aria-hidden="true">link</span>
       <span class="share-label-window" aria-hidden="true"><span class="share-label-track"><span class="share-label">Copy signed URL</span><span class="share-label" id="share-feedback-label">Signed URL copied!</span></span></span>
@@ -824,7 +824,6 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
     if(shellToggle){
       shellToggle.setAttribute("aria-pressed",String(hidden));
       shellToggle.setAttribute("aria-label",(hidden?"Show app shell":"Hide app shell")+", keyboard shortcut "+shellShortcutText);
-      shellToggle.setAttribute("title",(hidden?"Show app shell":"Hide app shell")+" — "+shellShortcutText);
     }
     if(shellToggleIcon)shellToggleIcon.textContent=hidden?"fullscreen_exit":"fullscreen";
     if(hidden&&shellToggle)shellToggle.blur();
