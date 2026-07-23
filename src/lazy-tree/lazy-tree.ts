@@ -48,11 +48,13 @@ function updateIndicator(el: HTMLElement, animate = true) {
   }
   if (!visible) { indicator.style.opacity = "0"; return; }
 
+  const transform = `translate(${el.offsetLeft}px, ${el.offsetTop}px)`;
   indicator.style.transition = animate
-    ? "transform 0.3s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.2s ease"
+    ? "transform 0.3s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.2s ease, background-color 0.15s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.2s cubic-bezier(0.4, 0, 0.2, 1)"
     : "none";
   indicator.style.opacity = "1";
-  indicator.style.transform = `translate(${el.offsetLeft}px, ${el.offsetTop}px)`;
+  indicator.style.setProperty("--active-indicator-transform", transform);
+  indicator.style.transform = transform;
 }
 
 function refreshIndicator(animate = false) {
@@ -268,28 +270,18 @@ let docLoadTimeout: number | undefined;
 
 
 function showDocLoader(frame: HTMLIFrameElement | null) {
-  const loader = document.getElementById("doc-loader");
-  if (loader) {
-    loader.classList.remove("error");
-    loader.setAttribute("role", "progressbar");
-    loader.setAttribute("aria-label", "Loading document");
-    loader.style.display = "block";
-  }
+  document.documentElement.classList.add("doc-loading");
+  document.documentElement.classList.remove("doc-loading-error");
   if (frame) frame.style.display = "block";
 }
 
 function showDocLoadError() {
-  const loader = document.getElementById("doc-loader");
-  if (!loader) return;
-  loader.classList.add("error");
-  loader.setAttribute("role", "status");
-  loader.setAttribute("aria-label", "Document is taking longer than expected");
-  loader.style.display = "block";
+  document.documentElement.classList.remove("doc-loading");
+  document.documentElement.classList.add("doc-loading-error");
 }
 
 function hideDocLoader(frame: HTMLIFrameElement | null) {
-  const loader = document.getElementById("doc-loader");
-  if (loader) loader.style.display = "none";
+  document.documentElement.classList.remove("doc-loading", "doc-loading-error");
   if (frame) frame.style.display = "block";
 }
 

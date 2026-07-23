@@ -500,7 +500,14 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
   .tree-folder>.tree-item .folder-icon{transition:color .15s}
   .tree-folder>.tree-item:hover .caret-icon,.tree-folder>.tree-item:focus-within .caret-icon{color:#c2410c;translate:2px 0}
   .tree-folder>.tree-item:hover .folder-icon,.tree-folder>.tree-item:focus-within .folder-icon{color:#c2410c}
-  .active-indicator{position:absolute;left:0;width:4px;height:32px;background:#c2410c;transition:transform .3s cubic-bezier(.4,0,.2,1),opacity .2s ease;border-radius:4px;pointer-events:none;z-index:1}
+  .active-indicator{position:absolute;left:0;width:4px;height:32px;background:#c2410c;transition:transform .3s cubic-bezier(.4,0,.2,1),opacity .2s ease,background-color .15s cubic-bezier(.4,0,.2,1),box-shadow .2s cubic-bezier(.4,0,.2,1);border-radius:4px;pointer-events:none;z-index:1}
+  @keyframes docRailPulse{0%,100%{box-shadow:0 0 0 0 rgba(194,65,12,.22);transform:var(--active-indicator-transform) scaleY(1)}50%{box-shadow:0 0 0 5px rgba(194,65,12,.08);transform:var(--active-indicator-transform) scaleY(.72)}}
+  html.doc-loading .active-indicator{animation:docRailPulse 1.1s cubic-bezier(.4,0,.2,1) infinite;will-change:transform,box-shadow}
+  html.doc-loading-error .active-indicator{background:#b42318;box-shadow:0 0 0 3px rgba(180,35,24,.12);animation:none}
+  html.dark.doc-loading .active-indicator{box-shadow:0 0 0 0 rgba(251,146,60,.22)}
+  @keyframes docRailPulseDark{0%,100%{box-shadow:0 0 0 0 rgba(251,146,60,.24);transform:var(--active-indicator-transform) scaleY(1)}50%{box-shadow:0 0 0 5px rgba(251,146,60,.1);transform:var(--active-indicator-transform) scaleY(.72)}}
+  html.dark.doc-loading .active-indicator{animation-name:docRailPulseDark}
+  html.dark.doc-loading-error .active-indicator{background:#fca5a5;box-shadow:0 0 0 3px rgba(252,165,165,.14)}
 
   @keyframes treeSkeletonShimmer{0%{background-position:100% 0}100%{background-position:-100% 0}}
   .tree-skeleton{padding:0}
@@ -522,18 +529,8 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
   .main-placeholder p{font-size:16px;color:#71717a;max-width:320px}
   .ph-icon{width:64px;height:64px;border-radius:50%;background:#f4f4f5;display:inline-flex;align-items:center;justify-content:center;margin-bottom:16px}
   .content-frame{width:100%;height:100%;border:0;background:#fff}
-  /* ── loader — fixed top overlay for document navigation; visible even when shell chrome is hidden ── */
-  .doc-loader{position:fixed;top:56px;left:var(--sidebar-width);right:0;height:4px;display:block;z-index:70;pointer-events:none;overflow:hidden;background:rgba(254,215,170,.18);box-shadow:0 1px 0 rgba(194,65,12,.12);transition:top .3s cubic-bezier(.4,0,.2,1),left .3s cubic-bezier(.4,0,.2,1);will-change:top,left}
-  html.shell-hidden .doc-loader{top:0;left:0}
-  .doc-loader-bar{position:absolute;top:0;bottom:0;left:0;width:46%;border-radius:999px;background:linear-gradient(90deg,transparent,#fed7aa 12%,#c2410c 48%,#fb923c 72%,transparent);box-shadow:0 0 10px rgba(194,65,12,.45);animation:docLoaderSweep 1.05s cubic-bezier(.4,0,.2,1) infinite}
-  .doc-loader.error .doc-loader-bar{width:100%;background:#b42318;animation:none;opacity:.95;box-shadow:0 0 8px rgba(180,35,24,.45)}
-  @keyframes docLoaderSweep{0%{transform:translateX(-100%)}100%{transform:translateX(240%)}}
-  html.dark .doc-loader{background:rgba(251,146,60,.14);box-shadow:0 1px 0 rgba(251,146,60,.18)}
-  html.dark .doc-loader-bar{background:linear-gradient(90deg,transparent,#fdba74 12%,#fb923c 48%,#fed7aa 72%,transparent);box-shadow:0 0 12px rgba(251,146,60,.55)}
-  html.dark .doc-loader.error .doc-loader-bar{background:#fca5a5;box-shadow:0 0 8px rgba(252,165,165,.45)}
-  @media (prefers-reduced-motion: reduce){.doc-loader-bar{width:100%;opacity:.85;animation:none}}
   @media (prefers-reduced-motion: reduce){.tree-skeleton-icon,.tree-skeleton-label{animation:none;background:#f4f4f5}}
-  @media (prefers-reduced-motion: reduce){.topbar,.sidebar,.main,.doc-loader,.sidebar-resizer,.share-label-track,.shortcut-tooltip,.sidebar-resizer::before{transition:none}.sidebar-resizer::before{transform:scaleY(1)}.resizer-sparks{display:none}}
+  @media (prefers-reduced-motion: reduce){.topbar,.sidebar,.main,.sidebar-resizer,.share-label-track,.shortcut-tooltip,.sidebar-resizer::before{transition:none}.sidebar-resizer::before{transform:scaleY(1)}.resizer-sparks{display:none}}
   .avatar-wrap{position:relative}
   .avatar-menu{position:absolute;top:42px;right:0;background:#fff;border:1px solid #e4e4e7;border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,.12);padding:4px;min-width:200px;z-index:100}
   .avatar-menu-email{padding:8px 12px;font-size:12px;color:#71717a;border-bottom:1px solid #e4e4e7;margin-bottom:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -553,7 +550,7 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
     ::view-transition-old(root),::view-transition-new(root){animation:none;mix-blend-mode:normal}
     ::view-transition-image-pair(root){isolation:isolate}
   }
-  @media (prefers-reduced-motion: reduce){.theme-ripple{display:none}html.tree-entering .tree-item,.tree-folder.open>.tree-folder-content>.tree-item,.tree-folder.open>.tree-folder-content>.tree-folder>.tree-item{animation:none!important;animation-delay:0s!important;opacity:1!important;transform:none!important}.tree-folder.loading>.tree-item .folder-icon,.tree-folder.loading>.tree-item .font-body-md{animation:none!important;background:none!important;color:#c2410c!important;-webkit-text-fill-color:currentColor!important}html.dark .tree-folder.loading>.tree-item .folder-icon,html.dark .tree-folder.loading>.tree-item .font-body-md{color:#fb923c!important}::view-transition-old(root),::view-transition-new(root){animation:none!important}}
+  @media (prefers-reduced-motion: reduce){.theme-ripple{display:none}html.tree-entering .tree-item,.tree-folder.open>.tree-folder-content>.tree-item,.tree-folder.open>.tree-folder-content>.tree-folder>.tree-item{animation:none!important;animation-delay:0s!important;opacity:1!important;transform:none!important}.tree-folder.loading>.tree-item .folder-icon,.tree-folder.loading>.tree-item .font-body-md{animation:none!important;background:none!important;color:#c2410c!important;-webkit-text-fill-color:currentColor!important}html.doc-loading .active-indicator{animation:none!important;box-shadow:none!important}html.dark .tree-folder.loading>.tree-item .folder-icon,html.dark .tree-folder.loading>.tree-item .font-body-md{color:#fb923c!important}::view-transition-old(root),::view-transition-new(root){animation:none!important}}
   @media (prefers-reduced-motion: reduce){.tree-item[data-path],.tree-item[data-path]>.material-symbols-outlined{transition-property:background-color,color!important}.tree-item[data-path]:hover,.tree-item[data-path]:focus-within{translate:none!important}.tree-item[data-path]:hover>.material-symbols-outlined,.tree-item[data-path]:focus-within>.material-symbols-outlined{transform:none!important}}
   @media (prefers-reduced-motion: reduce){.tree-folder>.tree-item .caret-icon,.tree-folder>.tree-item .folder-icon{transition-property:color!important}.tree-folder>.tree-item:hover .caret-icon,.tree-folder>.tree-item:focus-within .caret-icon{translate:none!important}}
 
@@ -654,7 +651,6 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
 </aside>
 <div class="sidebar-resizer" id="sidebar-resizer" role="separator" aria-orientation="vertical" aria-controls="doc-sidebar" aria-label="Resize document tree" aria-valuemin="220" aria-valuemax="420" aria-valuenow="280" aria-valuetext="Document tree 280 pixels wide" tabindex="0"><span class="resizer-sparks resizer-sparks-top" aria-hidden="true"></span><span class="resizer-sparks resizer-sparks-bottom" aria-hidden="true"></span></div>
 
-<div class="doc-loader" id="doc-loader" style="display:none" role="progressbar" aria-label="Loading document"><div class="doc-loader-bar"></div></div>
 <main class="main">
   <div class="main-placeholder" id="main-placeholder">
     <div class="ph-icon"><span class="material-symbols-outlined" style="font-size:32px;color:#71717a">edit_document</span></div>
