@@ -502,7 +502,7 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
   .tree-folder>.tree-item:hover .caret-icon,.tree-folder>.tree-item:focus-within .caret-icon{color:#c2410c;translate:2px 0}
   .tree-folder>.tree-item:hover .folder-icon,.tree-folder>.tree-item:focus-within .folder-icon{color:#c2410c}
   .active-indicator{position:absolute;left:0;width:4px;height:32px;background:#c2410c;transition:transform .3s cubic-bezier(.4,0,.2,1),opacity .2s ease;border-radius:4px;pointer-events:none;z-index:1}
-  @keyframes docRowShimmer{0%{background-position:-180% 0}100%{background-position:180% 0}}
+  @keyframes docRowShimmer{0%{background-position:180% 0}100%{background-position:-180% 0}}
   html.doc-loading .tree-item.active::before{content:"";position:absolute;inset:0;border-radius:inherit;background:linear-gradient(90deg,rgba(194,65,12,0) 0%,rgba(254,215,170,.72) 42%,rgba(251,146,60,.28) 56%,rgba(255,237,213,.5) 72%,rgba(194,65,12,0) 100%);background-size:220% 100%;animation:docRowShimmer 1.1s cubic-bezier(.4,0,.2,1) infinite;z-index:0}
   html.doc-loading-error .tree-item.active::before{content:"";position:absolute;inset:0;border-radius:inherit;background:rgba(180,35,24,.1);z-index:0}
 
