@@ -267,7 +267,7 @@ let activeDocLoadId = 0;
 let docLoadTimeout: number | undefined;
 let docLoadClearTimer: number | undefined;
 let docLoadStartedAt = 0;
-const DOC_LOAD_MIN_VISIBLE_MS = 900;
+const DOC_LOAD_MIN_VISIBLE_MS = 520;
 
 
 function clearDocLoadingState() {
