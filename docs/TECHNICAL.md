@@ -22,7 +22,7 @@ Browser → Cloudflare Workers (Hono) → Convex (auth, comments, API keys, soft
 | **Database** | Convex | Auth tables (component), comments, API keys, soft-delete |
 | **Blob Storage** | Cloudflare R2 | HTML docs, org-namespaced, S3-compatible API |
 | **CLI** | Node.js (zero deps) | Doc upload, hash-based diffing, CI/CD integration |
-| **Tree UI** | Vanilla JS (8KB IIFE) | Lazy-loading sidebar, infinite scroll, cross-doc navigation |
+| **Tree UI** | Vanilla JS (~15KB IIFE) | Lazy-loading sidebar, infinite scroll, cross-doc navigation |
 | **Comments** | Vanilla JS (Convex real-time) | Inline text selection, threaded replies |
 
 ---
@@ -262,7 +262,7 @@ Server (Hono SSR)
   │   │   ├─ #main-placeholder (shown when no doc selected)
   │   │   └─ #content-frame (iframe, hidden initially)
   │   ├─ Inline scripts (theme, shell hide/show, iframe shortcut forwarding, copy feedback, avatar menu)
-  │   └─ <script src="/lazy-tree.js">
+  │   └─ <script src="/lazy-tree.js?v=24">
   │
   ├─ renderNotFoundPage(options)
   │   ├─ Shared Broken Document Graph HTML from `src/routes/not-found.ts`
@@ -270,7 +270,7 @@ Server (Hono SSR)
   │   ├─ `/files/:key` returns iframe-safe 404 HTML for stale/missing objects
   │   └─ Worker catch-all checks ASSETS first, then returns the shared 404 page
   │
-Client (lazy-tree.js, 8KB IIFE)
+Client (lazy-tree.js, ~15KB IIFE)
   │
   ├─ handleClick(event)
   │   ├─ Folder click → expand(collapse)
@@ -278,8 +278,9 @@ Client (lazy-tree.js, 8KB IIFE)
   │   │   └─ Not loaded? → GET /api/tree/:org?prefix=...
   │   │       └─ Render children + Load more button if truncated
   │   ├─ File click → loadDoc(path, pushState)
-  │   │   ├─ Set iframe.src = /files/:org/:path
-  │   │   ├─ updateIndicator
+  │   │   ├─ Optimistically select row + updateIndicator
+  │   │   ├─ Add html.doc-loading and set iframe.src = /files/:org/:path
+  │   │   ├─ On iframe load, retain tree feedback for the remainder of the 520ms minimum window
   │   │   └─ history.pushState to /docs/:org/:path
   │   └─ Load more click → next page
   │
@@ -296,6 +297,21 @@ Client (lazy-tree.js, 8KB IIFE)
       ├─ /docs/:org/:path → window.RENDRO_INITIAL_DOC or path parse → loadDoc(path)
       └─ legacy ?doc=... → history.replaceState(/docs/:org/:path) → loadDoc(path)
 ```
+
+### Document Loading Lifecycle
+
+Document loading has no standalone DOM loader and never covers the iframe. The selected tree row is the only loading-feedback surface:
+
+1. `loadDoc()` calls `syncActiveState()` before changing `iframe.src`, so the row and 4px active indicator move immediately.
+2. `showDocLoader()` adds `html.doc-loading`. Despite its legacy function name, it does not show a separate loader element.
+3. CSS keeps row text/icons readable, runs `docRowShimmer` left-to-right on `.tree-item.active::before`, and applies the synchronized `docPillRecoil` transform to the active pill. The active indicator remains static.
+4. `frame.onload` calls `hideDocLoader(frame, loadId)`. The iframe is already visible; only the CSS loading class remains until the `520ms` minimum feedback window ends.
+5. `activeDocLoadId` prevents an older iframe response or clear timer from changing a newer navigation state.
+6. `frame.onerror` or the `15s` timeout calls `showDocLoadError()`, replacing `doc-loading` with `doc-loading-error` and leaving a static error tint on the active row.
+7. `prefers-reduced-motion: reduce` disables shimmer and recoil animation while retaining the active-row state.
+8. Neither class currently emits a live-region/status announcement; the timeout tint is color-only. This remains an accessibility gap.
+
+The iframe stays at full opacity throughout. There is no fixed header line, main-area progress bar, document skeleton, or active-indicator pulse.
 
 ### Sticky Headers (CSS)
 
