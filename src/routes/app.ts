@@ -395,18 +395,26 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
   .topbar-search input::placeholder{color:#71717a}
   .topbar-actions{display:flex;align-items:center;gap:16px}
   .topbar-btn{padding:6px 12px;font-size:12px;font-weight:600;border-radius:4px;cursor:pointer;border:0;font-family:Inter;display:flex;align-items:center;gap:6px;transition:background-color .15s,color .15s,border-color .15s,transform .15s cubic-bezier(.4,0,.2,1)}
-  .topbar-btn-share{color:#52525b;background:transparent;border:1px solid #e4e4e7;min-width:172px;justify-content:center;overflow:hidden}
+  .topbar-btn-share{color:#52525b;background:transparent;border:1px solid #e4e4e7;width:172px;justify-content:center;overflow:hidden}
   .topbar-btn-share:hover{background:#f4f4f5;color:#09090b;border-color:#d4d4d8}
   .topbar-btn-share:active{transform:scale(.98);background:#e4e4e7}
   .topbar-btn-share:focus-visible{outline:2px solid #71717a;outline-offset:2px}
-  .topbar-btn-share:disabled{opacity:.72;cursor:default}
+  .share-icon-window{width:18px;height:18px;line-height:18px;overflow:hidden;display:inline-flex;align-items:flex-start;justify-content:center;flex:0 0 18px}
+  .share-icon-track{display:flex;flex-direction:column;align-items:center;transition:transform .3s cubic-bezier(.4,0,.2,1);will-change:transform}
+  .share-icon-row{width:18px;height:18px;line-height:18px;display:flex;align-items:center;justify-content:center;flex:0 0 18px;font-size:18px}
+  .share-loader{width:14px;height:14px;box-sizing:border-box;border:2px solid currentColor;border-right-color:transparent;border-radius:999px}
+  @keyframes shareLoaderSpin{to{transform:rotate(360deg)}}
   .share-label-window{height:16px;line-height:16px;overflow:hidden;display:inline-flex;align-items:flex-start}
   .share-label-track{display:flex;flex-direction:column;transition:transform .3s cubic-bezier(.4,0,.2,1);will-change:transform}
   .share-label{height:16px;white-space:nowrap}
   .topbar-btn-share.is-feedback{background:#f4f4f5;color:#09090b;border-color:#d4d4d8}
-  .topbar-btn-share.is-feedback .share-label-track{transform:translateY(-16px)}
-  .share-icon{transition:transform .18s cubic-bezier(.4,0,.2,1),opacity .18s ease}
-  .topbar-btn-share.is-feedback .share-icon{transform:scale(1.08)}
+  .topbar-btn-share.is-loading .share-label-track{transform:translateY(-16px)}
+  .topbar-btn-share.is-feedback .share-label-track{transform:translateY(-32px)}
+  .topbar-btn-share.is-loading .share-icon-track{transform:translateY(-18px)}
+  .topbar-btn-share.is-loading .share-loader{animation:shareLoaderSpin .8s linear infinite}
+  .topbar-btn-share.is-feedback .share-icon-track{transform:translateY(-36px)}
+  #share-feedback-icon{transition:transform .18s cubic-bezier(.4,0,.2,1)}
+  .topbar-btn-share.is-feedback #share-feedback-icon{transform:scale(1.08)}
   .shortcut-tooltip-wrap{position:relative;display:inline-flex}
   .shortcut-tooltip{position:absolute;top:40px;right:0;display:flex;align-items:center;gap:12px;pointer-events:none;opacity:0;transform:translateY(-4px) scale(.98);transition:opacity 150ms cubic-bezier(.4,0,.2,1),transform 150ms cubic-bezier(.4,0,.2,1);z-index:120;background:#09090b;color:#fafafa;border-radius:8px;padding:8px 10px;box-shadow:0 8px 24px rgba(0,0,0,.18);font-size:12px;line-height:16px;white-space:nowrap}
   .shortcut-tooltip-label{font-weight:600}
@@ -530,6 +538,7 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
   .content-frame{width:100%;height:100%;border:0;background:#fff}
   @media (prefers-reduced-motion: reduce){.tree-skeleton-icon,.tree-skeleton-label{animation:none;background:#f4f4f5}}
   @media (prefers-reduced-motion: reduce){.topbar,.sidebar,.main,.sidebar-resizer,.share-label-track,.shortcut-tooltip,.sidebar-resizer::before{transition:none}.sidebar-resizer::before{transform:scaleY(1)}.resizer-sparks{display:none}}
+  @media (prefers-reduced-motion: reduce){.share-icon-track{transition:none}.share-loader{animation:none!important}}
   .avatar-wrap{position:relative}
   .avatar-menu{position:absolute;top:42px;right:0;background:#fff;border:1px solid #e4e4e7;border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,.12);padding:4px;min-width:200px;z-index:100}
   .avatar-menu-email{padding:8px 12px;font-size:12px;color:#71717a;border-bottom:1px solid #e4e4e7;margin-bottom:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -624,8 +633,8 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
   <div class="topbar-actions">
     <span class="shortcut-tooltip-wrap"><button class="topbar-btn-icon shell-toggle" id="shell-toggle" type="button" aria-label="Hide app shell, keyboard shortcut Ctrl Shift H" aria-describedby="shell-shortcut-tooltip" aria-pressed="false"><span class="material-symbols-outlined" aria-hidden="true">fullscreen</span></button><span class="shortcut-tooltip" id="shell-shortcut-tooltip" role="tooltip"><span class="shortcut-tooltip-label">Hide app shell</span><span class="shortcut-keys" id="shell-shortcut-keys" aria-hidden="true"><span class="shortcut-key">Ctrl</span><span class="shortcut-key">Shift</span><span class="shortcut-key">H</span></span></span></span>
     <button class="topbar-btn topbar-btn-share" id="share-btn" type="button" aria-label="Copy signed URL">
-      <span class="material-symbols-outlined share-icon" style="font-size:18px" aria-hidden="true">link</span>
-      <span class="share-label-window" aria-hidden="true"><span class="share-label-track"><span class="share-label">Copy signed URL</span><span class="share-label" id="share-feedback-label">Signed URL copied!</span></span></span>
+      <span class="share-icon-window" aria-hidden="true"><span class="share-icon-track"><span class="material-symbols-outlined share-icon-row">link</span><span class="share-icon-row"><span class="share-loader"></span></span><span class="material-symbols-outlined share-icon-row" id="share-feedback-icon">check</span></span></span>
+      <span class="share-label-window" aria-hidden="true"><span class="share-label-track"><span class="share-label">Copy signed URL</span><span class="share-label">Creating signed URL…</span><span class="share-label" id="share-feedback-label">Signed URL copied!</span></span></span>
     </button>
     <button class="topbar-btn-icon theme-toggle" id="theme-toggle" type="button" aria-label="Switch to dark theme" title="Theme: system"><span class="theme-icon-window" aria-hidden="true"><span class="theme-icon-track"><span class="material-symbols-outlined theme-icon">brightness_auto</span><span class="material-symbols-outlined theme-icon">dark_mode</span><span class="material-symbols-outlined theme-icon">light_mode</span><span class="material-symbols-outlined theme-icon">brightness_auto</span></span></span></button>
     <div class="avatar-wrap">
@@ -979,11 +988,13 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
   document.getElementById("avatar-btn")?.addEventListener("click",function(e){e.stopPropagation();var m=document.getElementById("avatar-menu");m.style.display=m.style.display==="block"?"none":"block";});
   var shareBtn=document.getElementById("share-btn");
   var shareFeedbackLabel=document.getElementById("share-feedback-label");
-  var shareIcon=shareBtn&&shareBtn.querySelector(".share-icon");
+  var shareFeedbackIcon=document.getElementById("share-feedback-icon");
   var shareFeedbackTimer;
-  function setShareFeedback(message){if(!shareBtn||!shareFeedbackLabel)return;shareFeedbackLabel.textContent=message;if(shareIcon)shareIcon.textContent=message==="Signed URL copied!"?"check":"error";shareBtn.classList.add("is-feedback");shareBtn.setAttribute("aria-label",message);if(shareFeedbackTimer!==undefined)window.clearTimeout(shareFeedbackTimer);shareFeedbackTimer=window.setTimeout(function(){shareBtn.classList.remove("is-feedback");shareBtn.setAttribute("aria-label","Copy signed URL");if(shareIcon)shareIcon.textContent="link";},1800);}
+  var sharePending=false;
+  function setShareLoading(){if(!shareBtn)return;if(shareFeedbackTimer!==undefined)window.clearTimeout(shareFeedbackTimer);shareBtn.classList.remove("is-feedback");shareBtn.classList.add("is-loading");shareBtn.setAttribute("aria-busy","true");shareBtn.setAttribute("aria-label","Creating signed URL");}
+  function setShareFeedback(message){if(!shareBtn||!shareFeedbackLabel)return;shareBtn.classList.remove("is-loading");shareBtn.removeAttribute("aria-busy");shareFeedbackLabel.textContent=message;if(shareFeedbackIcon)shareFeedbackIcon.textContent=message==="Signed URL copied!"?"check":"error";shareBtn.classList.add("is-feedback");shareBtn.setAttribute("aria-label",message);if(shareFeedbackTimer!==undefined)window.clearTimeout(shareFeedbackTimer);shareFeedbackTimer=window.setTimeout(function(){shareBtn.classList.remove("is-feedback");shareBtn.setAttribute("aria-label","Copy signed URL");if(shareFeedbackIcon)shareFeedbackIcon.textContent="check";},1800);}
   async function copyText(text){try{if(navigator.clipboard&&window.isSecureContext){await navigator.clipboard.writeText(text);return;}}catch(_){}var ta=document.createElement("textarea");ta.value=text;ta.setAttribute("readonly","");ta.style.position="fixed";ta.style.top="-999px";ta.style.left="-999px";document.body.appendChild(ta);ta.select();ta.setSelectionRange(0,text.length);try{if(!document.execCommand("copy"))throw new Error("copy failed");}finally{ta.remove();}}
-  if(shareBtn)shareBtn.addEventListener("click",async function(e){e.stopPropagation();var doc=window.RENDRO_CURRENT_DOC||"";if(!doc){setShareFeedback("Select a document first");return;}shareBtn.setAttribute("aria-busy","true");shareBtn.disabled=true;try{var res=await fetch("/api/share/create?key="+encodeURIComponent(doc),{headers:{accept:"application/json"}});if(!res.ok)throw new Error("share failed");var data=await res.json();await copyText(data.url);setShareFeedback("Signed URL copied!");}catch(_){setShareFeedback("Unable to copy");}finally{shareBtn.removeAttribute("aria-busy");shareBtn.disabled=false;}});
+  if(shareBtn)shareBtn.addEventListener("click",async function(e){e.stopPropagation();if(sharePending)return;var doc=window.RENDRO_CURRENT_DOC||"";if(!doc){setShareFeedback("Select a document first");return;}sharePending=true;setShareLoading();try{var res=await fetch("/api/share/create?key="+encodeURIComponent(doc),{headers:{accept:"application/json"}});if(!res.ok)throw new Error("share failed");var data=await res.json();await copyText(data.url);setShareFeedback("Signed URL copied!");}catch(_){setShareFeedback("Unable to copy");}finally{sharePending=false;}});
   document.addEventListener("click",function(){var m=document.getElementById("avatar-menu");if(m)m.style.display="none";});
 })();
 </script>

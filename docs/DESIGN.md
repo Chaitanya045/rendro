@@ -137,7 +137,7 @@ Interaction spec:
 
 | Element | Default | Hover | Active/open |
 |---|---|---|---|
-| Copy signed URL | Neutral bordered button with link icon | Neutral container hover bg, stronger border | Icon swaps to check; label scrolls to `Signed URL copied!` |
+| Copy signed URL | Neutral bordered button with link icon | Neutral container hover bg, stronger border | Link and label scroll to a CSS spinner plus `Creating signed URL…`; success continues to the check icon plus `Signed URL copied!` |
 | Icon buttons | Muted icon | Container hover bg | Icon motion / menu visible |
 | Theme toggle | Current mode icon (`brightness_auto`, `dark_mode`, `light_mode`) | Container hover bg | Stabilized radial theme reveal starts; icon track scrolls vertically to the active mode |
 | Avatar | Initials chip | Border/surface emphasis | Avatar menu visible |
@@ -258,7 +258,7 @@ Rendro's micro-interactions are small and functional. They make state legible.
 | Tree active item | 4px active indicator translates to selected item over `300ms` |
 | Tree hover | Background/text color transition over `200ms` |
 | Topbar search | Border shifts to primary on focus within `150ms` |
-| Copy signed URL | Directly creates a signed public link for the current document, copies it, then scrolls the button label to `Signed URL copied!` |
+| Copy signed URL | Keeps the button enabled while creating the link; scrolls the link icon to a spinner and the label to `Creating signed URL…`; ignores duplicate activation until completion; then preserves the existing check icon and `Signed URL copied!` feedback |
 | Theme toggle | Tri-state cycle `system → dark → light`; stabilized radial View Transition over `520ms`; icon track scrolls vertically over `300ms`; direct switch under reduced motion or without View Transition support |
 | Avatar menu | Opens at avatar, shows email and sign-out action |
 | Document load | Active tree pill shimmers left-to-right and subtly recoils while the iframe request is active; the 4px indicator remains static |
@@ -331,6 +331,7 @@ Theme mismatch rule:
 - Reduced motion for document loading: disable pill recoil and shimmer motion; retain the static active-row background.
 - Focus states must not depend on animation.
 - Reduced motion for theme toggle: no radial reveal and no icon scroll; theme switches directly.
+- Reduced motion for signed-link creation: icon and label rows switch instantly and the loader remains static.
 - Icon-only buttons need `aria-label` or visible text.
 - There is no standalone loading element with `role="progressbar"` or a live-region announcement.
 - Sidebar resize uses a focusable `role="separator"` with `aria-orientation="vertical"`, `aria-controls`, `aria-valuemin`, `aria-valuemax`, `aria-valuenow`, and `aria-valuetext`.
