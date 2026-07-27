@@ -281,6 +281,7 @@ class Commentor {
   private raf = 0;
   private openThreadId: Id<"threads"> | null = null;
   private closeTimer = 0;
+  private drawerCollapseTimer = 0;
   private dockEdge: Edge = "bottom";
   private dockOffset = 0;
 
@@ -990,6 +991,10 @@ class Commentor {
     else this.expandDrawer();
   }
   private expandDrawer(): void {
+    if (this.drawerCollapseTimer) {
+      window.clearTimeout(this.drawerCollapseTimer);
+      this.drawerCollapseTimer = 0;
+    }
     this.renderDrawerList();
     this.dock.setAttribute("data-expanded", "");
     this.commentsBtn.setAttribute("aria-expanded", "true");
@@ -1014,6 +1019,10 @@ class Commentor {
     });
   }
   private collapseDrawer(immediate = false): void {
+    if (this.drawerCollapseTimer) {
+      window.clearTimeout(this.drawerCollapseTimer);
+      this.drawerCollapseTimer = 0;
+    }
     this.commentsBtn.setAttribute("aria-expanded", "false");
     this.commentsBtn.classList.remove("active");
     // Collapse BOTH dimensions simultaneously for a smooth diagonal shrink.
@@ -1040,7 +1049,9 @@ class Commentor {
       const bw = parseFloat(ds.borderLeftWidth) + parseFloat(ds.borderRightWidth);
       const bh = parseFloat(ds.borderTopWidth) + parseFloat(ds.borderBottomWidth);
       this.repositionDock(tw + bw, th + bh);
-      window.setTimeout(() => {
+      this.drawerCollapseTimer = window.setTimeout(() => {
+        this.drawerCollapseTimer = 0;
+        if (this.dock.hasAttribute("data-expanded")) return;
         this.content.style.height = "";
         this.content.style.width = "";
       }, 420);
