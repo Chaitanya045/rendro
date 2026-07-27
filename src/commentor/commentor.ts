@@ -376,8 +376,12 @@ class Commentor {
         this.threads = threads;
         this.renderPins();
         this.renderDrawerList();
-        if (this.dock.hasAttribute("data-expanded"))
-          requestAnimationFrame(() => this.sizeContent());
+        if (this.dock.hasAttribute("data-expanded")) {
+          requestAnimationFrame(() => {
+            const { w, h } = this.sizeContent();
+            this.repositionExpandedDock(w, h);
+          });
+        }
         this.refreshOpenBubble();
       },
       (err: Error) => console.error("[commentor] subscription error", err),
@@ -1000,22 +1004,8 @@ class Commentor {
     this.commentsBtn.setAttribute("aria-expanded", "true");
     this.commentsBtn.classList.add("active");
     requestAnimationFrame(() => {
-      const { w: cw, h: ch } = this.sizeContent();
-      // Compute the TARGET dock dimensions (toolbar + content) so
-      // repositionDock can position correctly before the CSS transition
-      // settles — offsetWidth would return the compact size here.
-      const toolbar = this.dock.querySelector<HTMLElement>(".toolbar");
-      const tw = toolbar ? toolbar.offsetWidth : 48;
-      const th = toolbar ? toolbar.offsetHeight : 48;
-      // offsetWidth includes the element's own border; our tw+cw sum does not
-      // include the DOCK's border, so add it to avoid a 2px viewport overflow.
-      const ds = getComputedStyle(this.dock);
-      const bw = parseFloat(ds.borderLeftWidth) + parseFloat(ds.borderRightWidth);
-      const bh = parseFloat(ds.borderTopWidth) + parseFloat(ds.borderBottomWidth);
-      const horizontal = this.dockEdge === "left" || this.dockEdge === "right";
-      const dockW = (horizontal ? tw + cw : Math.max(tw, cw)) + bw;
-      const dockH = (horizontal ? Math.max(th, ch) : th + ch) + bh;
-      this.repositionDock(dockW, dockH);
+      const { w, h } = this.sizeContent();
+      this.repositionExpandedDock(w, h);
     });
   }
   private collapseDrawer(immediate = false): void {
@@ -1081,6 +1071,19 @@ class Commentor {
     this.content.style.height = `${targetH}px`;
     this.content.style.width = `${targetW}px`;
     return { w: targetW, h: targetH };
+  }
+  private repositionExpandedDock(contentW: number, contentH: number): void {
+    if (!this.dock.hasAttribute("data-expanded")) return;
+    const toolbar = this.dock.querySelector<HTMLElement>(".toolbar");
+    const tw = toolbar ? toolbar.offsetWidth : 48;
+    const th = toolbar ? toolbar.offsetHeight : 48;
+    const ds = getComputedStyle(this.dock);
+    const bw = parseFloat(ds.borderLeftWidth) + parseFloat(ds.borderRightWidth);
+    const bh = parseFloat(ds.borderTopWidth) + parseFloat(ds.borderBottomWidth);
+    const horizontal = this.dockEdge === "left" || this.dockEdge === "right";
+    const dockW = (horizontal ? tw + contentW : Math.max(tw, contentW)) + bw;
+    const dockH = (horizontal ? Math.max(th, contentH) : th + contentH) + bh;
+    this.repositionDock(dockW, dockH);
   }
   private renderDrawerList(): void {
     const count = this.content.querySelector<HTMLElement>(".count");
@@ -1312,8 +1315,9 @@ button { font: inherit; color: inherit; }
   min-width: 18px; height: 18px; border-radius: 999px; display: inline-flex;
   align-items: center; justify-content: center; padding: 0 5px;
 }
-.content-list { flex: 1 1 0; min-height: 0; overflow-y: auto; padding: 4px 8px 8px; display: flex; flex-direction: column; gap: 8px; width: min(var(--panel), calc(100vw - 32px)); }
+.content-list { flex: 1 1 0; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 4px 8px 8px; display: flex; flex-direction: column; gap: 8px; width: min(var(--panel), calc(100vw - 32px)); }
 .drawer-thread {
+  flex: 0 0 auto;
   padding: 10px 12px; border: 1px solid var(--border-soft); border-radius: var(--radius-sm);
   background: var(--bg); transition: border-color var(--dur) var(--ease);
 }

@@ -288,6 +288,8 @@ The commentor is an enhancement over publisher HTML.
 - Follows the parent app theme intent but must remain legible on arbitrary document backgrounds.
 - Selection-to-comment should feel contextual: select text, affordance appears, drawer opens only when needed.
 - Comment UI must never permanently cover the selected document text without a way to move/close it.
+- Expanded comment content is capped at `min(60vh, 520px)`; additional comments scroll inside the list and comment cards never shrink to absorb overflow.
+- When the rendered list changes height, reposition the expanded dock against its saved edge so the complete widget remains inside the viewport margin.
 
 State expectations:
 
@@ -296,6 +298,7 @@ State expectations:
 | Idle | Drawer/chrome recedes to edge |
 | Selection | Show comment affordance near selection |
 | Open thread | Keep selected context visible when possible |
+| Growing list | Cap panel height, preserve full card height, and scroll the comment list without moving the dock off-screen |
 | Drag | Drawer follows pointer without layout jank |
 | Theme change | Comment UI updates; publisher document remains untouched |
 
