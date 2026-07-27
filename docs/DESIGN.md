@@ -131,7 +131,7 @@ Purpose: global actions, not navigation depth.
 - Right-side actions: hide/show app shell, copy signed URL, theme toggle, avatar.
 - Avatar menu opens near its trigger and closes on outside click. Copy feedback stays inline in the copy button.
 - Hide/show app shell persists in `localStorage`; `Ctrl+Shift+H` (`Cmd+Shift+H` on macOS) toggles it from either the app shell or the focused document iframe, top/left hot zones temporarily reveal the header/sidebar while hidden, and `Escape` restores the full shell.
-- Theme toggle cycles `system → dark → light → system`. Theme colors apply atomically across the shell and commentor; only the button icon scrolls vertically through `brightness_auto`, `dark_mode`, and `light_mode`. Publisher iframe content is not restyled.
+- Theme toggle cycles `system → dark → light → system`. Supported browsers reveal the new shell/commentor theme with a radial ripple from the theme button while the icon scrolls through `brightness_auto`, `dark_mode`, and `light_mode`. Reduced-motion and unsupported browsers switch directly. Publisher iframe content is not restyled.
 
 Interaction spec:
 
@@ -139,7 +139,7 @@ Interaction spec:
 |---|---|---|---|
 | Copy signed URL | Neutral bordered button with link icon | Neutral container hover bg, stronger border | Icon swaps to check; label scrolls to `Signed URL copied!` |
 | Icon buttons | Muted icon | Container hover bg | Icon motion / menu visible |
-| Theme toggle | Current mode icon (`brightness_auto`, `dark_mode`, `light_mode`) | Container hover bg | Theme applies atomically; icon track scrolls vertically to the active mode |
+| Theme toggle | Current mode icon (`brightness_auto`, `dark_mode`, `light_mode`) | Container hover bg | Stabilized radial theme reveal starts; icon track scrolls vertically to the active mode |
 | Avatar | Initials chip | Border/surface emphasis | Avatar menu visible |
 
 ### Sidebar tree
@@ -259,7 +259,7 @@ Rendro's micro-interactions are small and functional. They make state legible.
 | Tree hover | Background/text color transition over `200ms` |
 | Topbar search | Border shifts to primary on focus within `150ms` |
 | Copy signed URL | Directly creates a signed public link for the current document, copies it, then scrolls the button label to `Signed URL copied!` |
-| Theme toggle | Tri-state cycle `system → dark → light`; shell and commentor colors switch atomically while the icon track scrolls vertically over `300ms`; no full-page overlay or root snapshot |
+| Theme toggle | Tri-state cycle `system → dark → light`; stabilized radial View Transition over `520ms`; icon track scrolls vertically over `300ms`; direct switch under reduced motion or without View Transition support |
 | Avatar menu | Opens at avatar, shows email and sign-out action |
 | Document load | Active tree pill shimmers left-to-right and subtly recoils while the iframe request is active; the 4px indicator remains static |
 | Sidebar resize | Boundary handle highlights on hover/focus; drag updates width directly; keyboard arrows resize in `24px` steps |
@@ -315,7 +315,7 @@ Dark mode applies to app chrome only.
   The commentor widget is the exception: it follows the parent theme because it is Rendro chrome inside the iframe, not publisher document content.
   Parent shell sends `{ type: "rendro-theme", theme: "system" | "dark" | "light" }` to the iframe; commentor removes both host theme classes for `system` and lets its own `prefers-color-scheme` media query resolve.
   Commentor does not expose its own theme toggle.
-- Do not use a full-page theme overlay, root View Transition, or clip-path reveal. They retain stale iframe/commentor snapshots and create visible mixed-theme frames.
+- The radial theme View Transition must pre-clip the new root snapshot at the trigger, use `fill:"both"`, and guard overlapping completion. Do not use a solid-color overlay fallback or allow an un-clipped new snapshot frame.
 - Do not assume publisher docs have transparent backgrounds.
 - Every app menu, text, border, hover, active, document-loading feedback, and inline copy-feedback color has a dark variant.
 - Dark mode follows shadcn's neutral/zinc feel: near-black shell (`#09090b`), subtle elevated surfaces (`#18181b`), neutral borders (`#27272a`), muted text (`#a1a1aa`), and high-contrast foreground (`#fafafa`).
@@ -330,7 +330,7 @@ Theme mismatch rule:
 - Respect `prefers-reduced-motion` for document-loading and future transitions.
 - Reduced motion for document loading: disable pill recoil and shimmer motion; retain the static active-row background.
 - Focus states must not depend on animation.
-- Reduced motion for theme toggle: no icon scroll; the atomic theme switch is unchanged.
+- Reduced motion for theme toggle: no radial reveal and no icon scroll; theme switches directly.
 - Icon-only buttons need `aria-label` or visible text.
 - There is no standalone loading element with `role="progressbar"` or a live-region announcement.
 - Sidebar resize uses a focusable `role="separator"` with `aria-orientation="vertical"`, `aria-controls`, `aria-valuemin`, `aria-valuemax`, `aria-valuenow`, and `aria-valuetext`.
@@ -384,7 +384,7 @@ Before merging a UI change:
 8. **No iframe opacity fade** — Keep publisher HTML fully opaque during navigation.
 9. **Sidebar shell changes** — Verify pointer resize, keyboard resize, hide/show shell behavior from parent and iframe focus, hot-zone reveal, localStorage persistence, and dark-mode states.
 10. **404 states** — Verify bad `/docs/...` URLs, unknown routes, and missing `/files/...` iframe loads show the Broken Document Graph page with a real `404` status where applicable.
-11. **Theme sync** — Verify header cycle order, atomic shell/commentor theme sync, system fallback, no commentor-local theme button, no mixed-theme frame, and reduced-motion behavior.
+11. **Theme sync** — Verify header cycle order, stabilized radial reveal without an initial flash, system fallback, commentor theme sync, no commentor-local theme button, overlapping switches, and reduced-motion fallback.
 12. **Cache bust assets** — If `lazy-tree.ts` or `commentor.ts` changes, rebuild assets and bump the relevant script query version.
 13. **Browser-harness proof** — For UI behavior, verify in a real browser, not only by reading source.
 
