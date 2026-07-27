@@ -131,27 +131,34 @@ app.post("/api/orgs", async (c) => {
 
 function renderSignIn(): string {
   return `<!DOCTYPE html>
-<html><head>
+<html lang="en" class="dark"><head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#09090b">
 <title>Rendro — Sign in</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
-  :root { color-scheme: light dark; }
-  body { font-family: system-ui, -apple-system, sans-serif; display:flex; align-items:center; justify-content:center; min-height:100vh; margin:0; background:#fafafa; color:#1a1a1a; }
-  .card { background:#fff; padding:2.5rem 3rem; border-radius:12px; box-shadow:0 1px 3px rgba(0,0,0,0.1); text-align:center; max-width:420px; }
-  h1 { margin:0 0 0.5rem; font-size:1.5rem; }
-  p { color:#666; margin:0 0 1.5rem; }
-  a.btn { display:inline-block; background:#1a1a1a; color:#fff; padding:0.75rem 1.5rem; border-radius:6px; text-decoration:none; font-weight:500; }
-  a.btn:hover { background:#333; }
+  *{box-sizing:border-box}
+  :root{color-scheme:dark;background:#09090b}
+  body{font-family:Inter,system-ui,-apple-system,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;min-height:100dvh;margin:0;padding:24px;background:#09090b;color:#fafafa}
+  .card{width:min(100%,380px);background:#18181b;padding:40px;border:1px solid #27272a;border-radius:12px;box-shadow:0 16px 48px rgba(0,0,0,.32);text-align:center}
+  h1{margin:0 0 8px;color:#fb923c;font-size:24px;line-height:32px;font-weight:700;letter-spacing:-.02em}
+  p{margin:0 0 28px;color:#a1a1aa;font-size:14px;line-height:20px}
+  .sign-in-btn{display:inline-flex;align-items:center;justify-content:center;width:100%;min-height:44px;padding:0 18px;border:0;border-radius:6px;background:#fb923c;color:#09090b;font:600 14px/20px Inter,system-ui,sans-serif;cursor:pointer;transition:background-color 150ms cubic-bezier(.4,0,.2,1),transform 150ms cubic-bezier(.4,0,.2,1),box-shadow 150ms cubic-bezier(.4,0,.2,1)}
+  .sign-in-btn:hover{background:#fdba74;box-shadow:0 8px 24px rgba(251,146,60,.16);transform:translateY(-1px)}
+  .sign-in-btn:active{transform:scale(.98)}
+  .sign-in-btn:focus-visible{outline:2px solid #fafafa;outline-offset:3px}
+  @media (prefers-reduced-motion:reduce){.sign-in-btn{transition:none}.sign-in-btn:hover,.sign-in-btn:active{transform:none}}
 </style>
 </head><body>
-<div class="card">
+<main class="card">
   <h1>Rendro</h1>
-  <p>Sign in to read your team's docs.</p>
+  <p id="signin-description">Sign in to read your team's docs.</p>
   <form id="sf" method="post" action="/api/auth/sign-in/social" style="display:none"><input type="hidden" name="provider" value="google"><input type="hidden" name="callbackURL" id="sf-cb"></form>
   <script>document.getElementById('sf-cb').value=location.href</script>
-  <button onclick="fetch('/api/auth/sign-in/social',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({provider:'google',callbackURL:location.href})}).then(r=>r.json()).then(d=>{if(d.url)location.href=d.url}).catch(()=>document.getElementById('sf').submit())" style="background:#1a1a1a;color:#fff;padding:0.75rem 1.5rem;border:0;border-radius:6px;font-weight:500;cursor:pointer;font-size:1rem">Sign in with Google</button>
-</div>
+  <button class="sign-in-btn" type="button" aria-describedby="signin-description" onclick="fetch('/api/auth/sign-in/social',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({provider:'google',callbackURL:location.href})}).then(r=>r.json()).then(d=>{if(d.url)location.href=d.url}).catch(()=>document.getElementById('sf').submit())">Sign in with Google</button>
+</main>
 </body></html>`;
 }
 

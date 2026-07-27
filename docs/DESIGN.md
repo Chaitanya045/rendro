@@ -68,6 +68,13 @@ Rules:
 - Buttons and labels: compact, readable, never decorative.
 - Document typography belongs to the uploaded HTML. Do not normalize iframe fonts from the parent app.
 
+### Sign-in surface
+
+- The unauthenticated sign-in page is intentionally fixed to the application dark theme, regardless of OS color scheme or saved app preference.
+- Use the dark chrome tokens directly: `#09090b` page, `#18181b` card, `#27272a` border, `#fafafa` foreground, and `#a1a1aa` supporting copy.
+- Brand and primary sign-in action use dark-theme Ember Orange: `#fb923c`, with `#fdba74` on hover and `#09090b` text.
+- Keep the card centered and responsive, use Inter, preserve a `44px` button target, and expose a visible keyboard focus ring.
+
 ## Motion tokens
 
 Rendro does not have a runtime motion library. These values are the canonical timing contract for CSS and vanilla JS-driven state changes.
