@@ -543,13 +543,7 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
   .theme-icon-track{display:flex;flex-direction:column;transition:transform .3s cubic-bezier(.4,0,.2,1);will-change:transform}
   .theme-icon{width:20px;height:20px;line-height:20px;display:flex;align-items:center;justify-content:center;flex:0 0 20px;font-size:20px}
   @media (prefers-reduced-motion: reduce){.theme-icon-track{transition:none!important}}
-  .theme-ripple{position:fixed;inset:0;z-index:2147483647;pointer-events:none;background:var(--theme-ripple-bg,#fff);clip-path:circle(0 at var(--theme-ripple-x,50%) var(--theme-ripple-y,50%));transition:clip-path .48s cubic-bezier(.4,0,.2,1)}
-  .theme-ripple.is-active{clip-path:circle(var(--theme-ripple-radius,150vmax) at var(--theme-ripple-x,50%) var(--theme-ripple-y,50%))}
-  @supports (view-transition-name: root){
-    ::view-transition-old(root),::view-transition-new(root){animation:none;mix-blend-mode:normal}
-    ::view-transition-image-pair(root){isolation:isolate}
-  }
-  @media (prefers-reduced-motion: reduce){.theme-ripple{display:none}html.tree-entering .tree-item,.tree-folder.open>.tree-folder-content>.tree-item,.tree-folder.open>.tree-folder-content>.tree-folder>.tree-item{animation:none!important;animation-delay:0s!important;opacity:1!important;transform:none!important}.tree-folder.loading>.tree-item .folder-icon,.tree-folder.loading>.tree-item .font-body-md{animation:none!important;background:none!important;color:#c2410c!important;-webkit-text-fill-color:currentColor!important}html.doc-loading .tree-item.active{animation:none!important;transform:none!important}html.doc-loading .tree-item.active::before{animation:none!important}html.dark .tree-folder.loading>.tree-item .folder-icon,html.dark .tree-folder.loading>.tree-item .font-body-md{color:#fb923c!important}::view-transition-old(root),::view-transition-new(root){animation:none!important}}
+  @media (prefers-reduced-motion: reduce){html.tree-entering .tree-item,.tree-folder.open>.tree-folder-content>.tree-item,.tree-folder.open>.tree-folder-content>.tree-folder>.tree-item{animation:none!important;animation-delay:0s!important;opacity:1!important;transform:none!important}.tree-folder.loading>.tree-item .folder-icon,.tree-folder.loading>.tree-item .font-body-md{animation:none!important;background:none!important;color:#c2410c!important;-webkit-text-fill-color:currentColor!important}html.doc-loading .tree-item.active{animation:none!important;transform:none!important}html.doc-loading .tree-item.active::before{animation:none!important}html.dark .tree-folder.loading>.tree-item .folder-icon,html.dark .tree-folder.loading>.tree-item .font-body-md{color:#fb923c!important}}
   @media (prefers-reduced-motion: reduce){.tree-item[data-path],.tree-item[data-path]>.material-symbols-outlined{transition-property:background-color,color!important}.tree-item[data-path]:hover,.tree-item[data-path]:focus-within{translate:none!important}.tree-item[data-path]:hover>.material-symbols-outlined,.tree-item[data-path]:focus-within>.material-symbols-outlined{transform:none!important}}
   @media (prefers-reduced-motion: reduce){.tree-folder>.tree-item .caret-icon,.tree-folder>.tree-item .folder-icon{transition-property:color!important}.tree-folder>.tree-item:hover .caret-icon,.tree-folder>.tree-item:focus-within .caret-icon{translate:none!important}}
 
@@ -724,42 +718,7 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
     notifyTheme(mode);
   }
   function transitionTheme(mode){
-    if(!themeToggle||matchMedia("(prefers-reduced-motion: reduce)").matches){
-      applyTheme(mode,true,true);
-      return;
-    }
-    var rect=themeToggle.getBoundingClientRect();
-    var x=rect.left+rect.width/2;
-    var y=rect.top+rect.height/2;
-    var radius=Math.hypot(Math.max(x,innerWidth-x),Math.max(y,innerHeight-y));
-    root.style.setProperty("--theme-ripple-x",x+"px");
-    root.style.setProperty("--theme-ripple-y",y+"px");
-    root.style.setProperty("--theme-ripple-radius",radius+"px");
-    root.style.setProperty("--theme-ripple-bg",resolvedTheme(mode)==="dark"?"#09090b":"#ffffff");
-    if(document.startViewTransition){
-      root.classList.add("theme-rippling");
-      var viewTransition=document.startViewTransition(function(){applyTheme(mode,true,true);});
-      viewTransition.ready.then(function(){
-        document.documentElement.animate(
-          {clipPath:["circle(0px at "+x+"px "+y+"px)","circle("+radius+"px at "+x+"px "+y+"px)"]},
-          {duration:520,easing:"cubic-bezier(.4,0,.2,1)",pseudoElement:"::view-transition-new(root)"}
-        );
-      }).catch(function(){});
-      viewTransition.finished.finally(function(){root.classList.remove("theme-rippling");});
-      return;
-    }
-    var ripple=document.createElement("div");
-    ripple.className="theme-ripple";
-    ripple.style.setProperty("--theme-ripple-x",x+"px");
-    ripple.style.setProperty("--theme-ripple-y",y+"px");
-    ripple.style.setProperty("--theme-ripple-radius",radius+"px");
-    ripple.style.setProperty("--theme-ripple-bg",resolvedTheme(mode)==="dark"?"#09090b":"#ffffff");
-    document.body.appendChild(ripple);
     applyTheme(mode,true,true);
-    requestAnimationFrame(function(){ripple.classList.add("is-active");});
-    var remove=function(){ripple.remove();};
-    ripple.addEventListener("transitionend",remove,{once:true});
-    window.setTimeout(remove,700);
   }
   applyTheme(normalizedTheme(),false,false);
 
