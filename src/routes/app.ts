@@ -402,7 +402,7 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
   .topbar-search input::placeholder{color:#71717a}
   .topbar-actions{display:flex;align-items:center;gap:16px}
   .topbar-btn{padding:6px 12px;font-size:12px;font-weight:600;border-radius:4px;cursor:pointer;border:0;font-family:Inter;display:flex;align-items:center;gap:6px;transition:background-color .15s,color .15s,border-color .15s,transform .15s cubic-bezier(.4,0,.2,1)}
-  .topbar-btn-share{color:#52525b;background:transparent;border:1px solid #e4e4e7;width:172px;justify-content:center;overflow:hidden}
+  .topbar-btn-share{color:#52525b;background:transparent;border:1px solid #e4e4e7;min-width:172px;justify-content:center;overflow:hidden}
   .topbar-btn-share:hover{background:#f4f4f5;color:#09090b;border-color:#d4d4d8}
   .topbar-btn-share:active{transform:scale(.98);background:#e4e4e7}
   .topbar-btn-share:focus-visible{outline:2px solid #71717a;outline-offset:2px}
@@ -411,8 +411,8 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
   .share-icon-row{width:18px;height:18px;line-height:18px;display:flex;align-items:center;justify-content:center;flex:0 0 18px;font-size:18px}
   .share-loader{width:14px;height:14px;box-sizing:border-box;border:2px solid currentColor;border-right-color:transparent;border-radius:999px}
   @keyframes shareLoaderSpin{to{transform:rotate(360deg)}}
-  .share-label-window{height:16px;line-height:16px;overflow:hidden;display:inline-flex;align-items:flex-start}
-  .share-label-track{display:flex;flex-direction:column;transition:transform .3s cubic-bezier(.4,0,.2,1);will-change:transform}
+  .share-label-window{width:136px;height:16px;line-height:16px;overflow:hidden;display:inline-flex;align-items:flex-start;justify-content:center;flex:0 0 136px}
+  .share-label-track{width:100%;display:flex;flex-direction:column;align-items:center;transition:transform .3s cubic-bezier(.4,0,.2,1);will-change:transform}
   .share-label{height:16px;white-space:nowrap}
   .topbar-btn-share.is-feedback{background:#f4f4f5;color:#09090b;border-color:#d4d4d8}
   .topbar-btn-share.is-loading .share-label-track{transform:translateY(-16px)}
