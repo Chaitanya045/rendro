@@ -440,6 +440,7 @@ class Commentor {
   private toolbar!: HTMLElement;
   private commentsBtn!: HTMLButtonElement;
   private filterButtons!: Record<ThreadFilter, HTMLButtonElement>;
+  private filterTabs!: HTMLElement;
   private newCommentsButton!: HTMLButtonElement;
   private markersLayer: HTMLElement;
   private bubbleLayer: HTMLElement;
@@ -568,13 +569,18 @@ class Commentor {
         h("span", undefined, "Comments"),
         h("span", { class: "count", "aria-label": "0 active comments" }, "0"),
       ),
-      h(
+      (this.filterTabs = h(
         "div",
-        { class: "filter-tabs", role: "tablist", "aria-label": "Comment views" },
+        {
+          class: "filter-tabs",
+          role: "tablist",
+          "aria-label": "Comment views",
+          "data-active-filter": this.threadFilter,
+        },
         this.filterButtons.active,
         this.filterButtons.resolved,
         this.filterButtons.history,
-      ),
+      )),
       (this.drawerList = h("div", {
         class: "content-list",
         id: "commentor-thread-list",
@@ -1501,7 +1507,7 @@ class Commentor {
             "aria-label": "Locate commented text on page",
             onclick: () => this.focusThread(t),
           },
-          escapeText(quote),
+          h("span", { class: "quote-text" }, escapeText(quote)),
         )
       : h(
           "button",
@@ -1623,6 +1629,7 @@ class Commentor {
 
   private setThreadFilter(filter: ThreadFilter): void {
     this.threadFilter = filter;
+    this.filterTabs.dataset.activeFilter = filter;
     this.drawerList.setAttribute(
       "aria-label",
       `${THREAD_FILTER_LABELS[filter]} comments`,
@@ -2388,6 +2395,7 @@ button:focus-visible, [tabindex="0"]:focus-visible, textarea:focus-visible {
 }
 .count.is-updated { animation: count-tint var(--duration-base) var(--ease-standard); }
 .filter-tabs {
+  position: relative;
   flex: 0 0 auto;
   display: grid;
   grid-template-columns: repeat(3, 1fr);
@@ -2397,7 +2405,29 @@ button:focus-visible, [tabindex="0"]:focus-visible, textarea:focus-visible {
   border-radius: 10px;
   background: var(--border-soft);
 }
+.filter-tabs::before {
+  content: "";
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  left: 3px;
+  width: calc((100% - 10px) / 3);
+  border-radius: 7px;
+  background: var(--bg-elev);
+  box-shadow: var(--shadow);
+  pointer-events: none;
+  transform: translateX(0);
+  transition: transform var(--duration-base) var(--ease-standard);
+}
+.filter-tabs[data-active-filter="resolved"]::before {
+  transform: translateX(calc(100% + 2px));
+}
+.filter-tabs[data-active-filter="history"]::before {
+  transform: translateX(calc(200% + 4px));
+}
 .filter-tabs button {
+  position: relative;
+  z-index: 1;
   min-width: 0;
   min-height: 36px;
   padding: 6px 8px;
@@ -2408,11 +2438,10 @@ button:focus-visible, [tabindex="0"]:focus-visible, textarea:focus-visible {
   cursor: pointer;
   font-size: 12px;
   font-weight: 600;
+  transition: color var(--duration-fast) var(--ease-standard);
 }
 .filter-tabs button[aria-selected="true"] {
   color: var(--fg);
-  background: var(--bg-elev);
-  box-shadow: var(--shadow);
 }
 .filter-count {
   margin-left: 5px;
@@ -2731,7 +2760,15 @@ button:focus-visible, [tabindex="0"]:focus-visible, textarea:focus-visible {
   cursor: pointer;
   text-align: left;
   font-size: 12px;
+}
+.quote-text {
+  line-height: 1.5;
+  display: -webkit-box;
+  overflow: hidden;
   overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
 }
 .quote:hover { color: var(--fg); }
 .locate-link {
@@ -2952,7 +2989,7 @@ button:focus-visible, [tabindex="0"]:focus-visible, textarea:focus-visible {
 }
 @media (prefers-reduced-motion: reduce) {
   .pin, .bubble, .reply, .drawer-thread, .selection-action, .anchor-highlight,
-  .count, .content, .hint, .toast, .tip, .dock, .busy::before {
+  .count, .content, .hint, .toast, .tip, .dock, .filter-tabs::before, .busy::before {
     animation: none !important;
     transition: none !important;
   }
