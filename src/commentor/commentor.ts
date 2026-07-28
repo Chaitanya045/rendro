@@ -146,55 +146,83 @@ function resolvePath(path: string[]): Element | null {
 }
 
 function findQuoteRange(root: Element, quote: string): Range | null {
-  const needle = quote.slice(0, 80).trim();
-  // Normalize whitespace — the browser adds \n\n between block elements
-  // but the TreeWalker sees text nodes without it.
-  const norm = (s: string) => s.replace(/\s+/g, " ").trim();
-  const normalizedNeedle = norm(needle);
-  if (!normalizedNeedle) return null;
-  // Try exact match in a single text node first (fast path)
+  const exactNeedle = quote.trim();
+  if (!exactNeedle) return null;
+
+  const nodes: Text[] = [];
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
   let node: Node | null;
   while ((node = walker.nextNode())) {
-    if (node.nodeType !== 3) continue;
-    const text = (node as Text).data;
-    if (norm(text).includes(normalizedNeedle)) {
-      const idx = text.indexOf(needle.slice(0, 40));
-      if (idx >= 0) {
-        const range = document.createRange();
-        range.setStart(node, idx);
-        range.setEnd(node, idx + Math.min(needle.length, text.length - idx));
-        return range;
+    if (node.nodeType !== Node.TEXT_NODE) continue;
+    const text = node as Text;
+    nodes.push(text);
+    const index = text.data.indexOf(exactNeedle);
+    if (index < 0) continue;
+    const range = document.createRange();
+    range.setStart(text, index);
+    range.setEnd(text, index + exactNeedle.length);
+    return range;
+  }
+
+  const normalizedNeedle = exactNeedle.replace(/\s+/g, " ");
+  type MappedCharacter = {
+    node: Text;
+    startOffset: number;
+    endOffset: number;
+  };
+  const findMappedRange = (separateNodes: boolean): Range | null => {
+    let normalizedText = "";
+    const characters: MappedCharacter[] = [];
+    const appendSpace = (
+      textNode: Text,
+      startOffset: number,
+      endOffset: number,
+    ) => {
+      if (!normalizedText || normalizedText.endsWith(" ")) {
+        const previous = characters.at(-1);
+        if (previous && normalizedText.endsWith(" "))
+          previous.endOffset = endOffset;
+        return;
       }
-    }
-  }
-  // Multi-node fallback: start at firstWord, collect text forward with spaces
-  const firstWord = norm(needle.split(/\s+/)[0]);
-  if (!firstWord || firstWord.length < 3) return null;
-  const w2 = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
-  let n2: Node | null;
-  while ((n2 = w2.nextNode())) {
-    if (n2.nodeType !== 3) continue;
-    const t2 = (n2 as Text).data;
-    if (!norm(t2).includes(firstWord)) continue;
-    // Start collecting from this node, with spaces between text nodes
-    let collected = t2;
-    let endNode: Node = n2;
-    while (norm(collected).length < normalizedNeedle.length) {
-      const next = w2.nextNode();
-      if (!next) break;
-      collected += " " + (next as Text).data;
-      endNode = next;
-    }
-    if (norm(collected).includes(normalizedNeedle)) {
-      const range = document.createRange();
-      const startPos = Math.max(0, t2.indexOf(firstWord));
-      range.setStart(n2, startPos);
-      range.setEnd(n2, startPos + firstWord.length);
-      return range;
-    }
-  }
-  return null;
+      normalizedText += " ";
+      characters.push({ node: textNode, startOffset, endOffset });
+    };
+
+    nodes.forEach((textNode, nodeIndex) => {
+      if (
+        separateNodes &&
+        nodeIndex > 0 &&
+        textNode.data.trim() &&
+        normalizedText
+      )
+        appendSpace(textNode, 0, 0);
+      for (let offset = 0; offset < textNode.data.length; offset += 1) {
+        const character = textNode.data[offset];
+        if (/\s/.test(character)) {
+          appendSpace(textNode, offset, offset + 1);
+          continue;
+        }
+        normalizedText += character;
+        characters.push({
+          node: textNode,
+          startOffset: offset,
+          endOffset: offset + 1,
+        });
+      }
+    });
+
+    const index = normalizedText.indexOf(normalizedNeedle);
+    if (index < 0) return null;
+    const start = characters[index];
+    const end = characters[index + normalizedNeedle.length - 1];
+    if (!start || !end) return null;
+    const range = document.createRange();
+    range.setStart(start.node, start.startOffset);
+    range.setEnd(end.node, end.endOffset);
+    return range;
+  };
+
+  return findMappedRange(false) ?? findMappedRange(true);
 }
 
 function anchorElement(a: Anchor): Element | null {
@@ -208,18 +236,67 @@ function anchorElement(a: Anchor): Element | null {
   return resolvePath(a.path);
 }
 
+function textRangeClientRects(range: Range): DOMRect[] {
+  const common = range.commonAncestorContainer;
+  const textNodes: Text[] = [];
+  if (common.nodeType === Node.TEXT_NODE) {
+    textNodes.push(common as Text);
+  } else {
+    const walker = document.createTreeWalker(common, NodeFilter.SHOW_TEXT);
+    let node: Node | null;
+    while ((node = walker.nextNode())) textNodes.push(node as Text);
+  }
+  const rects: DOMRect[] = [];
+  for (const textNode of textNodes) {
+    if (!range.intersectsNode(textNode)) continue;
+    const startOffset =
+      textNode === range.startContainer ? range.startOffset : 0;
+    const endOffset =
+      textNode === range.endContainer ? range.endOffset : textNode.length;
+    if (startOffset >= endOffset) continue;
+    const textRange = document.createRange();
+    textRange.setStart(textNode, startOffset);
+    textRange.setEnd(textNode, endOffset);
+    for (const rect of textRange.getClientRects()) {
+      if (rect.width > 0 || rect.height > 0) rects.push(rect);
+    }
+  }
+  return rects;
+}
+
+function textAnchorClientRects(
+  anchor: Extract<Anchor, { kind: "text-range" }>,
+): DOMRect[] {
+  const scope =
+    resolvePath(anchor.path) ??
+    document.querySelector("main, article, [data-page]") ??
+    document.body;
+  const range = findQuoteRange(scope, anchor.quote);
+  return range ? textRangeClientRects(range) : [];
+}
+
+function anchorQuote(anchor: Anchor): string | null {
+  if (anchor.kind === "text-range")
+    return anchor.quote.trim() ? anchor.quote : null;
+  const element = resolvePath(anchor.path);
+  if (!element) return null;
+  const range = document.createRange();
+  range.selectNodeContents(element);
+  if (textRangeClientRects(range).length === 0) return null;
+  const text =
+    element instanceof HTMLElement ? element.innerText : element.textContent;
+  const quote = text?.replace(/\s+/g, " ").trim();
+  return quote || null;
+}
+
 function anchorPoint(
   a: Anchor,
 ): { x: number; y: number; ok: true } | { ok: false } {
   if (a.kind === "text-range") {
-    const el = resolvePath(a.path);
-    if (el) {
-      const r = findQuoteRange(el, a.quote)?.getBoundingClientRect();
-      if (r) return { x: r.left, y: r.top, ok: true };
-    }
-    const fallback = findQuoteRange(document.querySelector("main, article, [data-page]") || document.body, a.quote)?.getBoundingClientRect();
-    if (fallback) return { x: fallback.left, y: fallback.top, ok: true };
-    return { ok: false };
+    const rect = textAnchorClientRects(a)[0];
+    return rect
+      ? { x: rect.left, y: rect.top, ok: true }
+      : { ok: false };
   }
   const el = resolvePath(a.path);
   if (!el) return { ok: false };
@@ -229,19 +306,77 @@ function anchorPoint(
 
 function anchorRect(a: Anchor): Rect | null {
   if (a.kind === "text-range") {
-    const scope =
-      resolvePath(a.path) ??
-      document.querySelector("main, article, [data-page]") ??
-      document.body;
-    const r = findQuoteRange(scope, a.quote)?.getBoundingClientRect();
-    return r
-      ? { left: r.left, top: r.top, right: r.right, bottom: r.bottom }
-      : null;
+    const rects = textAnchorClientRects(a);
+    const first = rects[0];
+    if (!first) return null;
+    const bounds: Rect = {
+      left: first.left,
+      top: first.top,
+      right: first.right,
+      bottom: first.bottom,
+    };
+    for (let index = 1; index < rects.length; index += 1) {
+      const rect = rects[index];
+      bounds.left = Math.min(bounds.left, rect.left);
+      bounds.top = Math.min(bounds.top, rect.top);
+      bounds.right = Math.max(bounds.right, rect.right);
+      bounds.bottom = Math.max(bounds.bottom, rect.bottom);
+    }
+    return bounds;
   }
   const r = resolvePath(a.path)?.getBoundingClientRect();
   return r
     ? { left: r.left, top: r.top, right: r.right, bottom: r.bottom }
     : null;
+}
+
+function anchorRects(a: Anchor): Rect[] {
+  let orderedRects: DOMRect[];
+  if (a.kind === "text-range") {
+    orderedRects = textAnchorClientRects(a);
+  } else {
+    const element = resolvePath(a.path);
+    if (!element) return [];
+    const textRange = document.createRange();
+    textRange.selectNodeContents(element);
+    orderedRects = textRangeClientRects(textRange);
+    if (orderedRects.length === 0)
+      orderedRects = [element.getBoundingClientRect()];
+  }
+  orderedRects.sort(
+    (first, second) =>
+      first.top - second.top || first.left - second.left,
+  );
+  const lines: Rect[] = [];
+  for (const rect of orderedRects) {
+    const previous = lines.at(-1);
+    const overlap = previous
+      ? Math.min(previous.bottom, rect.bottom) -
+        Math.max(previous.top, rect.top)
+      : 0;
+    const sameLine =
+      previous &&
+      overlap >=
+        Math.min(
+          previous.bottom - previous.top,
+          rect.bottom - rect.top,
+        ) /
+          2;
+    if (previous && sameLine) {
+      previous.left = Math.min(previous.left, rect.left);
+      previous.top = Math.min(previous.top, rect.top);
+      previous.right = Math.max(previous.right, rect.right);
+      previous.bottom = Math.max(previous.bottom, rect.bottom);
+      continue;
+    }
+    lines.push({
+      left: rect.left,
+      top: rect.top,
+      right: rect.right,
+      bottom: rect.bottom,
+    });
+  }
+  return lines;
 }
 
 function timeAgo(ms: number): string {
@@ -1356,28 +1491,28 @@ class Commentor {
         ),
       );
     }
-    const locate =
-      t.anchor.kind === "text-range"
-        ? h(
-            "button",
-            {
-              class: "quote",
-              type: "button",
-              "aria-label": "Locate quoted text on page",
-              onclick: () => this.focusThread(t),
-            },
-            escapeText(t.anchor.quote),
-          )
-        : h(
-            "button",
-            {
-              class: "locate-link",
-              type: "button",
-              "aria-label": "Locate commented element on page",
-              onclick: () => this.focusThread(t),
-            },
-            "Locate element",
-          );
+    const quote = anchorQuote(t.anchor);
+    const locate = quote
+      ? h(
+          "button",
+          {
+            class: "quote",
+            type: "button",
+            "aria-label": "Locate commented text on page",
+            onclick: () => this.focusThread(t),
+          },
+          escapeText(quote),
+        )
+      : h(
+          "button",
+          {
+            class: "locate-link",
+            type: "button",
+            "aria-label": "Locate commented element on page",
+            onclick: () => this.focusThread(t),
+          },
+          "Locate element",
+        );
     const view = h(
       "div",
       { class: "thread-view", "data-thread-id": t._id },
@@ -1763,24 +1898,38 @@ class Commentor {
   }
 
   private positionAnchorHighlight(): void {
-    const t = this.threads.find(
-      (thread) => thread._id === this.highlightedThreadId,
+    const thread = this.threads.find(
+      (candidate) => candidate._id === this.highlightedThreadId,
     );
-    const r = t ? anchorRect(t.anchor) : null;
-    if (
-      !r ||
-      r.bottom < 0 ||
-      r.top > window.innerHeight ||
-      r.right < 0 ||
-      r.left > window.innerWidth
-    ) {
+    const rects = thread ? anchorRects(thread.anchor) : [];
+    let visibleCount = 0;
+    for (const rect of rects) {
+      if (
+        rect.bottom < 0 ||
+        rect.top > window.innerHeight ||
+        rect.right < 0 ||
+        rect.left > window.innerWidth
+      )
+        continue;
+      let segment = this.anchorHighlight.children[
+        visibleCount
+      ] as HTMLElement | undefined;
+      if (!segment) {
+        segment = h("div", { class: "anchor-highlight-segment" });
+        this.anchorHighlight.append(segment);
+      }
+      segment.style.left = `${rect.left - 3}px`;
+      segment.style.top = `${rect.top - 3}px`;
+      segment.style.width = `${Math.max(6, rect.right - rect.left + 6)}px`;
+      segment.style.height = `${Math.max(6, rect.bottom - rect.top + 6)}px`;
+      visibleCount += 1;
+    }
+    while (this.anchorHighlight.children.length > visibleCount)
+      this.anchorHighlight.lastElementChild?.remove();
+    if (visibleCount === 0) {
       this.anchorHighlight.removeAttribute("data-visible");
       return;
     }
-    this.anchorHighlight.style.left = `${r.left - 3}px`;
-    this.anchorHighlight.style.top = `${r.top - 3}px`;
-    this.anchorHighlight.style.width = `${Math.max(6, r.right - r.left + 6)}px`;
-    this.anchorHighlight.style.height = `${Math.max(6, r.bottom - r.top + 6)}px`;
     this.anchorHighlight.setAttribute("data-visible", "");
   }
 
@@ -2019,8 +2168,9 @@ class Commentor {
 }
 
 function anchorLabel(a: Anchor): string {
-  return a.kind === "text-range"
-    ? `On: “${a.quote.slice(0, 60)}${a.quote.length > 60 ? "…" : ""}”`
+  const quote = anchorQuote(a);
+  return quote
+    ? `On: “${quote.slice(0, 60)}${quote.length > 60 ? "…" : ""}”`
     : "On: element";
 }
 
@@ -2384,15 +2534,19 @@ button:focus-visible, [tabindex="0"]:focus-visible, textarea:focus-visible {
 }
 .anchor-highlight {
   position: fixed;
+  inset: 0;
   z-index: 2147483644;
   pointer-events: none;
-  border: 2px solid var(--accent);
-  border-radius: 6px;
-  background: color-mix(in srgb, var(--accent) 12%, transparent);
   opacity: 0;
   transition: opacity var(--duration-fast) var(--ease-standard);
 }
 .anchor-highlight[data-visible] { opacity: 1; }
+.anchor-highlight-segment {
+  position: absolute;
+  border: 2px solid var(--accent);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
 
 /* Pins */
 .markers {
