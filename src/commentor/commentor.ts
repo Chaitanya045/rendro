@@ -1784,9 +1784,39 @@ class Commentor {
     this.anchorHighlight.setAttribute("data-visible", "");
   }
 
+  private scrollDocumentToRect(
+    rect: Rect,
+    behavior: ScrollBehavior,
+  ): boolean {
+    const scroller = document.scrollingElement;
+    if (!scroller) return false;
+    const viewportHeight =
+      document.documentElement.clientHeight || window.innerHeight;
+    const maxScrollTop = Math.max(0, scroller.scrollHeight - viewportHeight);
+    if (
+      maxScrollTop === 0 ||
+      (rect.top >= 0 && rect.bottom <= viewportHeight)
+    )
+      return false;
+    const targetTop = Math.min(
+      maxScrollTop,
+      Math.max(
+        0,
+        scroller.scrollTop +
+          rect.top +
+          (rect.bottom - rect.top) / 2 -
+          viewportHeight / 2,
+      ),
+    );
+    if (Math.abs(targetTop - scroller.scrollTop) < 1) return false;
+    scroller.scrollTo({ top: targetTop, behavior });
+    return true;
+  }
+
   private focusThread(t: Thread, returnFocus?: HTMLElement): void {
     const el = anchorElement(t.anchor);
-    if (!el || !anchorRect(t.anchor)) {
+    const rect = anchorRect(t.anchor);
+    if (!el || !rect) {
       this.toast("This comment’s anchor is no longer available.", {
         kind: "error",
       });
@@ -1795,10 +1825,10 @@ class Commentor {
     const reduce = window.matchMedia(
       "(prefers-reduced-motion: reduce)",
     ).matches;
-    el.scrollIntoView({
-      block: "center",
-      behavior: reduce ? "auto" : "smooth",
-    });
+    const scrolled = this.scrollDocumentToRect(
+      rect,
+      reduce ? "auto" : "smooth",
+    );
     const reveal = () => {
       this.repositionPins();
       this.highlightThread(t._id);
@@ -1807,7 +1837,7 @@ class Commentor {
       );
       if (pin) this.openThreadBubble(t, pin, returnFocus);
     };
-    if (reduce) {
+    if (reduce || !scrolled) {
       requestAnimationFrame(reveal);
       return;
     }

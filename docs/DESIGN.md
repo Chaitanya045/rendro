@@ -294,6 +294,7 @@ The commentor is an enhancement over publisher HTML.
 - Toolbar controls and the keyboard-operable drag grip use `44px` targets. Pins may remain visually compact but must keep at least the WCAG 2.2 minimum target area.
 - The drawer separates **Active**, **Resolved**, and **History** threads. Archived threads belong only in History; resolved threads remain recoverable.
 - Hover, focus, and card activation connect a drawer card to its pin and document anchor. Missing anchors remain visible in the drawer with an explicit recovery message.
+- Anchor navigation scrolls only the publisher document's scrolling element. It does nothing when the anchor is already visible or the document cannot scroll, and must never move an ancestor iframe or app-shell container.
 - The composer exposes **Post** and **Cancel**. `Enter` posts, `Shift+Enter` inserts a newline, and `Escape` closes the current mode or bubble.
 - Mutation controls expose one local pending indicator, preserve drafts on error, and report failures through an accessible status. Delete uses a five-second **Undo** toast before the destructive mutation.
 - Collapsed drawer content is `inert` and `aria-hidden`. Icon tooltips supplement accessible names through `aria-describedby`; status and error feedback use appropriate live-region semantics.
