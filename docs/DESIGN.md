@@ -290,6 +290,13 @@ The commentor is an enhancement over publisher HTML.
 - Comment UI must never permanently cover the selected document text without a way to move/close it.
 - Expanded comment content is capped at `min(60vh, 520px)`; additional comments scroll inside the list and comment cards never shrink to absorb overflow.
 - When the rendered list changes height, reposition the expanded dock against its saved edge so the complete widget remains inside the viewport margin.
+- Below `420px`, expansion becomes a viewport-contained bottom sheet with `16px` margins and a horizontal toolbar; the panel must also remain contained inside narrow publisher iframes.
+- Toolbar controls and the keyboard-operable drag grip use `44px` targets. Pins may remain visually compact but must keep at least the WCAG 2.2 minimum target area.
+- The drawer separates **Active**, **Resolved**, and **History** threads. Archived threads belong only in History; resolved threads remain recoverable.
+- Hover, focus, and card activation connect a drawer card to its pin and document anchor. Missing anchors remain visible in the drawer with an explicit recovery message.
+- The composer exposes **Post** and **Cancel**. `Enter` posts, `Shift+Enter` inserts a newline, and `Escape` closes the current mode or bubble.
+- Mutation controls expose one local pending indicator, preserve drafts on error, and report failures through an accessible status. Delete uses a five-second **Undo** toast before the destructive mutation.
+- Collapsed drawer content is `inert` and `aria-hidden`. Icon tooltips supplement accessible names through `aria-describedby`; status and error feedback use appropriate live-region semantics.
 
 State expectations:
 
@@ -301,6 +308,10 @@ State expectations:
 | Growing list | Cap panel height, preserve full card height, and scroll the comment list without moving the dock off-screen |
 | Drag | Drawer follows pointer without layout jank |
 | Theme change | Comment UI updates; publisher document remains untouched |
+| Composer pending | Disable duplicate submission, keep one button-local indicator, then close on confirmed success or restore the draft on failure |
+| Realtime arrival | Animate only newly arrived pins/cards/replies; if the reader is away from the list end, show a local `N new comments` action without moving their scroll position |
+| Review filters | Active is the default; resolving moves a thread to Resolved, archiving moves it to History, and each view shows its own count and contextual empty state |
+| Reduced motion | Replace smooth scrolling and positional/scale transitions with direct state changes |
 
 ## Loading & perceived speed
 
@@ -398,6 +409,7 @@ Before merging a UI change:
 11. **Theme sync** — Verify header cycle order, stabilized radial reveal without an initial flash, system fallback, commentor theme sync, no commentor-local theme button, overlapping switches, and reduced-motion fallback.
 12. **Cache bust assets** — If `lazy-tree.ts` or `commentor.ts` changes, rebuild assets and bump the relevant script query version.
 13. **Browser-harness proof** — For UI behavior, verify in a real browser, not only by reading source.
+14. **Comment workflow** — Verify selection chip, explicit composer controls, mutation recovery/Undo, keyboard tab and drag behavior, collapsed `inert` state, Active/Resolved/History filters, card/pin/anchor linking, realtime arrival feedback, narrow-iframe containment, dark contrast, and reduced-motion fallback.
 
 ## Definition of done
 

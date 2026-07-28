@@ -54,6 +54,23 @@ interface Thread {
   replies: Reply[];
 }
 type Edge = "bottom" | "top" | "left" | "right";
+type ThreadFilter = "active" | "resolved" | "history";
+const THREAD_FILTERS: readonly ThreadFilter[] = [
+  "active",
+  "resolved",
+  "history",
+];
+const THREAD_FILTER_LABELS: Record<ThreadFilter, string> = {
+  active: "Active",
+  resolved: "Resolved",
+  history: "History",
+};
+interface ToastOptions {
+  kind?: "status" | "error";
+  actionLabel?: string;
+  onAction?: () => void;
+  duration?: number;
+}
 
 // ───────────────────────────── helpers ──────────────────────────────
 
@@ -210,6 +227,23 @@ function anchorPoint(
   return { x: r.left, y: r.top, ok: true };
 }
 
+function anchorRect(a: Anchor): Rect | null {
+  if (a.kind === "text-range") {
+    const scope =
+      resolvePath(a.path) ??
+      document.querySelector("main, article, [data-page]") ??
+      document.body;
+    const r = findQuoteRange(scope, a.quote)?.getBoundingClientRect();
+    return r
+      ? { left: r.left, top: r.top, right: r.right, bottom: r.bottom }
+      : null;
+  }
+  const r = resolvePath(a.path)?.getBoundingClientRect();
+  return r
+    ? { left: r.left, top: r.top, right: r.right, bottom: r.bottom }
+    : null;
+}
+
 function timeAgo(ms: number): string {
   const s = Math.max(1, Math.round((Date.now() - ms) / 1000));
   if (s < 60) return `${s}s`;
@@ -270,12 +304,29 @@ class Commentor {
   private drawerList!: HTMLElement;
   private toolbar!: HTMLElement;
   private commentsBtn!: HTMLButtonElement;
+  private filterButtons!: Record<ThreadFilter, HTMLButtonElement>;
+  private newCommentsButton!: HTMLButtonElement;
   private markersLayer: HTMLElement;
   private bubbleLayer: HTMLElement;
+  private anchorHighlight: HTMLElement;
   private tip!: HTMLElement;
   private tipTimer = 0;
   private tipTarget: HTMLElement | null = null;
+  private tipPreviousDescription: string | null = null;
+  private selectionRaf = 0;
+  private selectionHideTimer = 0;
+  private suppressedSelectionKey: string | null = null;
+  private bubbleReturnFocus: HTMLElement | null = null;
   private threads: Thread[] = [];
+  private threadFilter: ThreadFilter = "active";
+  private seenThreadIds = new Set<Id<"threads">>();
+  private seenReplyIds = new Set<Id<"replies">>();
+  private newThreadIds = new Set<Id<"threads">>();
+  private newReplyIds = new Set<Id<"replies">>();
+  private subscriptionReady = false;
+  private pendingDeletes = new Map<Id<"threads">, number>();
+  private newCommentCount = 0;
+  private highlightedThreadId: Id<"threads"> | null = null;
   private commentMode = false;
   private canWrite: boolean;
   private raf = 0;
@@ -298,12 +349,38 @@ class Commentor {
 
     this.markersLayer = h("div", { class: "markers" });
     this.bubbleLayer = h("div", { class: "bubbles" });
+    this.anchorHighlight = h("div", {
+      class: "anchor-highlight",
+      "aria-hidden": "true",
+    });
     this.tip = h("div", {
       class: "tip",
+      id: "commentor-tooltip",
       "data-testid": "commentor-tip",
       role: "tooltip",
     });
-    this.root.append(this.markersLayer, this.bubbleLayer, this.tip);
+    this.root.append(
+      this.markersLayer,
+      this.bubbleLayer,
+      this.anchorHighlight,
+      this.tip,
+    );
+
+    this.selectionAction = h(
+      "button",
+      {
+        class: "selection-action",
+        "data-testid": "commentor-selection-action",
+        "aria-label": "Comment on selected text",
+        "data-state": "closed",
+        hidden: "",
+        onpointerdown: (e: Event) => e.preventDefault(),
+        onclick: () => this.openSelectionComposer(),
+      },
+      svg(ICONS.comment),
+      h("span", undefined, "Comment"),
+    ) as HTMLButtonElement;
+    this.root.append(this.selectionAction);
 
     this.content = h("div", {
       class: "content",
@@ -311,18 +388,68 @@ class Commentor {
       id: "commentor-drawer",
       role: "complementary",
       "aria-label": "Comments",
+      "aria-hidden": "true",
     });
+    this.content.inert = true;
+    const makeFilter = (
+      filter: ThreadFilter,
+      label: string,
+    ): HTMLButtonElement =>
+      h(
+        "button",
+        {
+          type: "button",
+          role: "tab",
+          "data-filter": filter,
+          "aria-controls": "commentor-thread-list",
+          "aria-selected": String(filter === this.threadFilter),
+          onclick: () => this.setThreadFilter(filter),
+          onkeydown: (e: KeyboardEvent) =>
+            this.onFilterKeyDown(e, filter),
+          tabindex: filter === this.threadFilter ? "0" : "-1",
+        },
+        label,
+      ) as HTMLButtonElement;
+    this.filterButtons = {
+      active: makeFilter("active", "Active"),
+      resolved: makeFilter("resolved", "Resolved"),
+      history: makeFilter("history", "History"),
+    };
+    this.newCommentsButton = h(
+      "button",
+      {
+        class: "new-comments",
+        type: "button",
+        hidden: "",
+        "aria-live": "polite",
+        onclick: () => this.showNewComments(),
+      },
+      "New comment",
+    ) as HTMLButtonElement;
     this.content.append(
       h(
         "div",
         { class: "content-head" },
         h("span", undefined, "Comments"),
-        h("span", { class: "count" }),
+        h("span", { class: "count", "aria-label": "0 active comments" }, "0"),
+      ),
+      h(
+        "div",
+        { class: "filter-tabs", role: "tablist", "aria-label": "Comment views" },
+        this.filterButtons.active,
+        this.filterButtons.resolved,
+        this.filterButtons.history,
       ),
       (this.drawerList = h("div", {
         class: "content-list",
+        id: "commentor-thread-list",
         "data-testid": "commentor-drawer-list",
+        role: "tabpanel",
+        tabindex: "0",
+        "aria-label": "Active comments",
+        onscroll: () => this.onDrawerScroll(),
       })),
+      this.newCommentsButton,
     );
 
     this.dock = h("div", { class: "dock", "data-testid": "commentor-dock" });
@@ -349,19 +476,31 @@ class Commentor {
     window.addEventListener("message", (e) => this.onThemeMessage(e));
     this.subscribe();
     this.wireTooltips();
+    document.addEventListener("selectionchange", () =>
+      this.scheduleSelectionAction(),
+    );
 
     document.addEventListener("click", (e) => this.onDocumentClick(e));
-    window.addEventListener("scroll", () => this.scheduleReposition(), {
+    window.addEventListener("scroll", () => {
+      this.hideSelectionAction(false);
+      this.scheduleReposition();
+    }, {
       passive: true,
     });
     window.addEventListener("resize", () => {
-      this.repositionDock();
+      if (this.dock.hasAttribute("data-expanded")) {
+        const { w, h } = this.sizeContent();
+        this.repositionExpandedDock(w, h);
+      } else {
+        this.repositionDock();
+      }
       this.scheduleReposition();
     });
     document.addEventListener("keydown", (e) => {
       if (e.key === "Escape") {
         if (this.commentMode) this.setCommentMode(false);
-        else this.closeBubbles(true);
+        else this.closeBubbles(true, true);
+        this.hideSelectionAction(true);
         this.hideTip();
       }
     });
@@ -373,9 +512,42 @@ class Commentor {
       api.threads.list,
       { orgSlug: this.cfg.orgSlug, filePath: this.cfg.filePath },
       (threads: Thread[]) => {
+        this.newThreadIds = new Set(
+          this.subscriptionReady
+            ? threads
+                .filter((t) => !this.seenThreadIds.has(t._id))
+                .map((t) => t._id)
+            : [],
+        );
+        this.newReplyIds = new Set(
+          this.subscriptionReady
+            ? threads.flatMap((t) =>
+                t.replies
+                  .filter((r) => !this.seenReplyIds.has(r._id))
+                  .map((r) => r._id),
+              )
+            : [],
+        );
+        const incomingActive = threads.filter(
+          (t) =>
+            this.newThreadIds.has(t._id) &&
+            !t.resolved &&
+            !t.archived &&
+            !this.pendingDeletes.has(t._id),
+        ).length;
         this.threads = threads;
+        this.seenThreadIds = new Set(threads.map((t) => t._id));
+        this.seenReplyIds = new Set(
+          threads.flatMap((t) => t.replies.map((r) => r._id)),
+        );
+        for (const [threadId, timer] of this.pendingDeletes) {
+          if (threads.some((t) => t._id === threadId)) continue;
+          window.clearTimeout(timer);
+          this.pendingDeletes.delete(threadId);
+        }
         this.renderPins();
         this.renderDrawerList();
+        if (incomingActive > 0) this.announceNewComments(incomingActive);
         if (this.dock.hasAttribute("data-expanded")) {
           requestAnimationFrame(() => {
             const { w, h } = this.sizeContent();
@@ -383,6 +555,9 @@ class Commentor {
           });
         }
         this.refreshOpenBubble();
+        this.subscriptionReady = true;
+        this.newThreadIds.clear();
+        this.newReplyIds.clear();
       },
       (err: Error) => console.error("[commentor] subscription error", err),
     );
@@ -411,6 +586,7 @@ class Commentor {
         "data-testid": "commentor-comment-btn",
         "data-tip": "Comment (select text, or click then click an element)",
         "aria-label": "Comment",
+        "aria-pressed": "false",
         ...(this.canWrite
           ? { onclick: () => this.onCommentButton() }
           : { disabled: "disabled" }),
@@ -429,13 +605,18 @@ class Commentor {
       },
       svg(ICONS.list),
     ) as HTMLButtonElement;
-    const grip = h("div", {
-      class: "grip",
-      "data-testid": "commentor-toolbar-grip",
-      "data-tip": "Drag — snaps to edge",
-      role: "separator",
-      "aria-label": "Drag widget",
-    });
+    const grip = h(
+      "button",
+      {
+        class: "grip",
+        type: "button",
+        "data-testid": "commentor-toolbar-grip",
+        "data-tip": "Drag or use arrow keys to move",
+        "aria-label": "Move comment widget",
+        "aria-keyshortcuts": "ArrowLeft ArrowRight ArrowUp ArrowDown Home End",
+        onkeydown: (e: Event) => this.onGripKeyDown(e as KeyboardEvent),
+      },
+    ) as HTMLButtonElement;
     const toolbar = h(
       "div",
       { class: "toolbar", role: "toolbar", "aria-label": "Commentor" },
@@ -445,6 +626,27 @@ class Commentor {
     );
     grip.addEventListener("pointerdown", (e) => this.onDragStart(e));
     return toolbar;
+  }
+
+  private onGripKeyDown(e: KeyboardEvent): void {
+    const horizontal =
+      this.dockEdge === "bottom" || this.dockEdge === "top";
+    const step = 24;
+    let next = this.dockOffset;
+    if (horizontal && e.key === "ArrowLeft") next -= step;
+    else if (horizontal && e.key === "ArrowRight") next += step;
+    else if (!horizontal && e.key === "ArrowUp") next -= step;
+    else if (!horizontal && e.key === "ArrowDown") next += step;
+    else if (e.key === "Home") next = MARGIN;
+    else if (e.key === "End")
+      next =
+        (horizontal ? window.innerWidth : window.innerHeight) -
+        (horizontal ? this.dock.offsetWidth : this.dock.offsetHeight) -
+        MARGIN;
+    else return;
+    e.preventDefault();
+    if (this.dock.hasAttribute("data-expanded")) this.collapseDrawer(true);
+    this.applyDockEdge(this.dockEdge, Math.max(MARGIN, next), true);
   }
 
   // ── drag + magnetic edge snap ──
@@ -583,35 +785,97 @@ class Commentor {
   }
 
   // ── comment authoring ──
-  private onCommentButton(): void {
-    if (!this.cfg.author) return;
+  private selectedAnchor(): {
+    anchor: Anchor;
+    rect: Rect;
+    key: string;
+  } | null {
     const sel = window.getSelection();
     if (
-      sel &&
-      !sel.isCollapsed &&
-      sel.rangeCount > 0 &&
-      sel.toString().trim()
-    ) {
-      const range = sel.getRangeAt(0);
-      const quote = sel.toString();
-      const node = range.commonAncestorContainer;
-      const el = node.nodeType === 1 ? (node as Element) : node.parentElement;
-      const anchor: Anchor = {
-        kind: "text-range",
-        quote,
-        path: cssPath(el),
-        startOffset: range.startOffset,
-        endOffset: range.endOffset,
-      };
-      const r = range.getBoundingClientRect();
-      this.openComposer(anchor, {
-        left: r.left,
-        top: r.top,
-        right: r.right,
-        bottom: r.bottom,
+      !sel ||
+      sel.isCollapsed ||
+      sel.rangeCount === 0 ||
+      !sel.toString().trim()
+    )
+      return null;
+    const range = sel.getRangeAt(0);
+    const node = range.commonAncestorContainer;
+    const el = node.nodeType === 1 ? (node as Element) : node.parentElement;
+    if (!el || el.closest("#commentor-host")) return null;
+    const quote = sel.toString();
+    const path = cssPath(el);
+    const anchor: Anchor = {
+      kind: "text-range",
+      quote,
+      path,
+      startOffset: range.startOffset,
+      endOffset: range.endOffset,
+    };
+    const r = range.getBoundingClientRect();
+    if (!r.width && !r.height) return null;
+    return {
+      anchor,
+      rect: { left: r.left, top: r.top, right: r.right, bottom: r.bottom },
+      key: `${quote}\u0000${path.join(">")}\u0000${range.startOffset}:${range.endOffset}`,
+    };
+  }
+
+  private scheduleSelectionAction(): void {
+    if (!this.canWrite) return;
+    if (this.selectionRaf) return;
+    this.selectionRaf = requestAnimationFrame(() => {
+      this.selectionRaf = 0;
+      const selected = this.selectedAnchor();
+      if (!selected) {
+        this.suppressedSelectionKey = null;
+        this.hideSelectionAction(false);
+        return;
+      }
+      if (
+        selected.key === this.suppressedSelectionKey ||
+        this.bubbleLayer.children.length > 0
+      ) {
+        this.hideSelectionAction(false);
+        return;
+      }
+      clearTimeout(this.selectionHideTimer);
+      this.selectionAction.hidden = false;
+      requestAnimationFrame(() => {
+        this.selectionAction.setAttribute("data-state", "open");
+        placeFloating(this.selectionAction, selected.rect, 6);
       });
-      return;
+    });
+  }
+
+  private hideSelectionAction(suppressCurrent: boolean): void {
+    if (suppressCurrent) {
+      this.suppressedSelectionKey = this.selectedAnchor()?.key ?? null;
     }
+    clearTimeout(this.selectionHideTimer);
+    this.selectionAction.setAttribute("data-state", "closed");
+    this.selectionHideTimer = window.setTimeout(() => {
+      if (this.selectionAction.getAttribute("data-state") === "closed")
+        this.selectionAction.hidden = true;
+    }, 150);
+  }
+
+  private openSelectionComposer(): boolean {
+    const selected = this.selectedAnchor();
+    if (!selected) return false;
+    this.suppressedSelectionKey = selected.key;
+    this.hideSelectionAction(false);
+    this.setCommentMode(false);
+    const returnFocus =
+      this.root.querySelector<HTMLElement>(
+        '[data-testid="commentor-comment-btn"]',
+      ) ?? this.commentsBtn;
+    this.openComposer(selected.anchor, selected.rect, returnFocus);
+    return true;
+  }
+
+  private onCommentButton(): void {
+    if (!this.cfg.author) return;
+    if (this.openSelectionComposer()) return;
     this.setCommentMode(!this.commentMode);
   }
 
@@ -621,8 +885,10 @@ class Commentor {
       '[data-testid="commentor-comment-btn"]',
     );
     btn?.classList.toggle("active", on);
+    btn?.setAttribute("aria-pressed", String(on));
     this.root.querySelector('[data-testid="commentor-comment-hint"]')?.remove();
     if (on) {
+      this.hideSelectionAction(true);
       this.root.append(
         h(
           "div",
@@ -669,23 +935,33 @@ class Commentor {
   // ── pins ──
   private renderPins(): void {
     this.markersLayer.replaceChildren();
-    const ordered = [...this.threads].sort(
-      (a, b) => a._creationTime - b._creationTime,
+    const ordered = this.filteredThreads(
+      this.dock.hasAttribute("data-expanded") ? this.threadFilter : "active",
     );
     ordered.forEach((t, i) => {
       const pin = h(
         "button",
         {
-          class: `pin${t.resolved ? " resolved" : ""}`,
+          class: `pin${t.resolved ? " resolved" : ""}${
+            this.newThreadIds.has(t._id) ? " is-new" : ""
+          }`,
           "data-testid": "commentor-pin",
           "data-thread-id": t._id,
           "data-tip": `${t.authorName}: ${t.body.slice(0, 60)}`,
           "aria-label": `Thread ${i + 1} by ${t.authorName}`,
+          "aria-pressed": String(this.openThreadId === t._id),
+          onpointerenter: () => this.highlightThread(t._id),
+          onpointerleave: () => {
+            if (this.openThreadId !== t._id) this.highlightThread(null);
+          },
+          onfocus: () => this.highlightThread(t._id),
+          onblur: () => {
+            if (this.openThreadId !== t._id) this.highlightThread(null);
+          },
           onclick: (ev) => {
             ev.stopPropagation();
-            // Toggle: if this thread's bubble is already open, close it.
             if (this.openThreadId === t._id) {
-              this.closeBubbles(true);
+              this.closeBubbles(true, true);
             } else {
               this.openThreadBubble(t, ev.currentTarget as HTMLElement);
             }
@@ -696,6 +972,7 @@ class Commentor {
       this.markersLayer.append(pin);
     });
     this.repositionPins();
+    this.highlightThread(this.highlightedThreadId);
   }
 
   private scheduleReposition(): void {
@@ -713,6 +990,7 @@ class Commentor {
         );
         if (pin) placeFloating(open, pin.getBoundingClientRect());
       }
+      this.positionAnchorHighlight();
     });
   }
 
@@ -747,36 +1025,73 @@ class Commentor {
   }
 
   // ── bubbles ──
-  private openComposer(anchor: Anchor, rect: Rect): void {
+  private openComposer(
+    anchor: Anchor,
+    rect: Rect,
+    invoker: HTMLElement | null = null,
+  ): void {
     if (!this.cfg.author) return;
     this.closeBubbles(false);
+    this.hideSelectionAction(true);
+    this.bubbleReturnFocus = invoker ?? this.commentsBtn;
     const textarea = h("textarea", {
       "data-testid": "commentor-composer-textarea",
-      placeholder: "Add a comment…  (Enter to send, Shift+Enter for newline)",
-    });
-    // Keyboard-native: Enter sends, Shift/Ctrl/Cmd+Enter inserts a newline.
-    // No submit button — the hint is in the placeholder.
+      placeholder: "Add a comment…",
+      "aria-describedby": "commentor-composer-help",
+    }) as HTMLTextAreaElement;
+    const post = h(
+      "button",
+      {
+        class: "primary",
+        "data-testid": "commentor-composer-post",
+      },
+      "Post",
+    ) as HTMLButtonElement;
+    const cancel = h(
+      "button",
+      {
+        class: "ghost",
+        "data-testid": "commentor-composer-cancel",
+        onclick: () => this.closeBubbles(true, true),
+      },
+      "Cancel",
+    ) as HTMLButtonElement;
+    const submit = async () => {
+      const body = textarea.value.trim();
+      if (!body || post.disabled) return;
+      textarea.disabled = true;
+      post.disabled = true;
+      cancel.disabled = true;
+      post.classList.add("is-pending");
+      post.setAttribute("aria-busy", "true");
+      post.textContent = "Posting…";
+      try {
+        await this.client.mutation(api.threads.create, {
+          orgSlug: this.cfg.orgSlug,
+          filePath: this.cfg.filePath,
+          authorEmail: this.cfg.author!.email,
+          authorName: this.cfg.author!.name,
+          body,
+          anchor,
+        });
+        this.closeBubbles(true, true);
+      } catch (err) {
+        console.error("[commentor] create failed", err);
+        textarea.disabled = false;
+        post.disabled = false;
+        cancel.disabled = false;
+        post.classList.remove("is-pending");
+        post.removeAttribute("aria-busy");
+        post.textContent = "Post";
+        this.toast("Could not post comment. Try again.", { kind: "error" });
+        textarea.focus();
+      }
+    };
+    post.addEventListener("click", submit);
     textarea.addEventListener("keydown", async (e: KeyboardEvent) => {
       if (e.key === "Enter" && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
         e.preventDefault();
-        const body = textarea.value.trim();
-        if (!body) return;
-        textarea.disabled = true;
-        try {
-          await this.client.mutation(api.threads.create, {
-            orgSlug: this.cfg.orgSlug,
-            filePath: this.cfg.filePath,
-            authorEmail: this.cfg.author!.email,
-            authorName: this.cfg.author!.name,
-            body,
-            anchor,
-          });
-          this.closeBubbles(true);
-        } catch (err) {
-          console.error("[commentor] create failed", err);
-          textarea.disabled = false;
-          this.toast("Could not post comment. Try again.");
-        }
+        await submit();
       }
     });
     const bubble = h(
@@ -787,46 +1102,80 @@ class Commentor {
         "data-state": "open",
         role: "dialog",
         "aria-label": "New comment",
+        "aria-modal": "false",
       },
       h("div", { class: "anchor-label" }, anchorLabel(anchor)),
       textarea,
+      h(
+        "div",
+        { class: "composer-footer" },
+        h(
+          "span",
+          { class: "composer-help", id: "commentor-composer-help" },
+          "Enter to post · Shift+Enter for a new line",
+        ),
+        h("div", { class: "actions" }, cancel, post),
+      ),
     );
     this.bubbleLayer.append(bubble);
     placeFloating(bubble, rect);
-    setTimeout(() => textarea.focus(), 0);
+    queueMicrotask(() => textarea.focus());
   }
 
-  private openThreadBubble(t: Thread, pin: HTMLElement): void {
+  private openThreadBubble(
+    t: Thread,
+    pin: HTMLElement,
+    returnFocus: HTMLElement = pin,
+  ): void {
     this.closeBubbles(false);
     this.openThreadId = t._id;
+    this.bubbleReturnFocus = returnFocus;
+    for (const marker of this.markersLayer.querySelectorAll<HTMLElement>(
+      '[data-testid="commentor-pin"]',
+    ))
+      marker.setAttribute(
+        "aria-pressed",
+        String(marker.dataset.threadId === t._id),
+      );
+    this.highlightThread(t._id);
     const bubble = h("div", {
       class: "bubble thread",
       "data-testid": "commentor-thread-bubble",
       "data-thread-id": t._id,
       "data-state": "open",
       role: "dialog",
+      "aria-modal": "false",
       "aria-label": `Thread by ${t.authorName}`,
     });
-    bubble.append(this.threadView(t));
+    bubble.append(this.threadView(t, true));
     this.bubbleLayer.append(bubble);
     placeFloating(bubble, pin.getBoundingClientRect());
   }
 
-  private closeBubbles(animate: boolean): void {
+  private closeBubbles(animate: boolean, restoreFocus = false): void {
     if (this.closeTimer) {
       clearTimeout(this.closeTimer);
       this.closeTimer = 0;
     }
     this.openThreadId = null;
+    for (const marker of this.markersLayer.querySelectorAll<HTMLElement>(
+      '[data-testid="commentor-pin"]',
+    ))
+      marker.setAttribute("aria-pressed", "false");
+    this.highlightThread(null);
+    const returnFocus = restoreFocus ? this.bubbleReturnFocus : null;
+    this.bubbleReturnFocus = null;
+    const finish = () => {
+      this.bubbleLayer.replaceChildren();
+      this.closeTimer = 0;
+      if (returnFocus?.isConnected) returnFocus.focus();
+    };
     const kids = Array.from(this.bubbleLayer.children) as HTMLElement[];
     if (animate && kids.length) {
       kids.forEach((k) => k.setAttribute("data-state", "closed"));
-      this.closeTimer = window.setTimeout(() => {
-        this.bubbleLayer.replaceChildren();
-        this.closeTimer = 0;
-      }, 150);
+      this.closeTimer = window.setTimeout(finish, 150);
     } else {
-      this.bubbleLayer.replaceChildren();
+      finish();
     }
   }
 
@@ -844,17 +1193,71 @@ class Commentor {
       this.closeBubbles(true);
       return;
     }
-    bubble.replaceChildren(this.threadView(t));
+    bubble.replaceChildren(this.threadView(t, true));
     const pin = this.markersLayer.querySelector<HTMLElement>(
       `[data-thread-id="${t._id}"]`,
     );
     if (pin) placeFloating(bubble, pin.getBoundingClientRect());
   }
 
-  private threadView(t: Thread): HTMLElement {
-    // Header row: author + when + resolved badge on the left, hover action
-    // icons (resolve, archive, delete) on the right. Icons are invisible
-    // until the card is hovered — keeps the UI clean at rest.
+  private async runThreadAction(
+    button: HTMLButtonElement,
+    label: string,
+    action: () => Promise<unknown>,
+    errorMessage: string,
+  ): Promise<void> {
+    if (button.disabled) return;
+    button.disabled = true;
+    button.classList.add("is-pending");
+    button.setAttribute("aria-busy", "true");
+    button.setAttribute("aria-label", `${label} in progress`);
+    try {
+      await action();
+    } catch (err) {
+      console.error(`[commentor] ${label.toLowerCase()} failed`, err);
+      this.toast(errorMessage, { kind: "error" });
+    } finally {
+      if (button.isConnected) {
+        button.disabled = false;
+        button.classList.remove("is-pending");
+        button.removeAttribute("aria-busy");
+        button.setAttribute("aria-label", label);
+      }
+    }
+  }
+
+  private scheduleDelete(t: Thread): void {
+    if (this.pendingDeletes.has(t._id)) return;
+    const timer = window.setTimeout(async () => {
+      try {
+        await this.client.mutation(api.threads.remove, { threadId: t._id });
+      } catch (err) {
+        console.error("[commentor] delete failed", err);
+        this.pendingDeletes.delete(t._id);
+        this.renderPins();
+        this.renderDrawerList();
+        this.toast("Could not delete comment.", { kind: "error" });
+      }
+    }, 5000);
+    this.pendingDeletes.set(t._id, timer);
+    if (this.openThreadId === t._id) this.closeBubbles(true);
+    this.renderPins();
+    this.renderDrawerList();
+    this.toast("Comment deleted.", {
+      actionLabel: "Undo",
+      duration: 5000,
+      onAction: () => {
+        const pending = this.pendingDeletes.get(t._id);
+        window.clearTimeout(pending);
+        this.pendingDeletes.delete(t._id);
+        this.renderPins();
+        this.renderDrawerList();
+        this.toast("Deletion undone.");
+      },
+    });
+  }
+
+  private threadView(t: Thread, inBubble = false): HTMLElement {
     const head = h(
       "div",
       { class: "head" },
@@ -864,85 +1267,122 @@ class Commentor {
         ? h("span", { class: "resolved" }, svg(ICONS.check, ""), "Resolved")
         : null,
       t.archived
-        ? h("span", { class: "archived-badge" }, svg(ICONS.archive, ""), "Archived")
+        ? h(
+            "span",
+            { class: "archived-badge" },
+            svg(ICONS.archive, ""),
+            "Archived",
+          )
         : null,
     );
     if (this.canWrite) {
       const actions = h("div", { class: "card-actions" });
-      actions.append(
-        h(
-          "button",
-          {
-            class: "card-action",
-            "data-tip": t.resolved ? "Reopen" : "Resolve",
-            "data-testid": "commentor-resolve-btn",
-            onclick: async () => {
-              try {
-                await this.client.mutation(api.threads.resolve, {
-                  threadId: t._id,
-                });
-              } catch (err) {
-                console.error("[commentor] resolve failed", err);
-              }
-            },
+      const resolveLabel = t.resolved ? "Reopen" : "Resolve";
+      const resolveActionLabel = `${resolveLabel} comment by ${t.authorName}`;
+      const resolveButton = h(
+        "button",
+        {
+          class: "card-action",
+          type: "button",
+          "data-tip": resolveLabel,
+          "aria-label": resolveActionLabel,
+          "data-testid": "commentor-resolve-btn",
+        },
+        svg(ICONS.check),
+      ) as HTMLButtonElement;
+      resolveButton.addEventListener("click", (e) => {
+        e.stopPropagation();
+        void this.runThreadAction(
+          resolveButton,
+          resolveActionLabel,
+          () =>
+            this.client.mutation(api.threads.resolve, { threadId: t._id }),
+          `Could not ${resolveLabel.toLowerCase()} comment.`,
+        );
+      });
+      const archiveLabel = t.archived ? "Unarchive" : "Archive";
+      const archiveActionLabel = `${archiveLabel} comment by ${t.authorName}`;
+      const archiveButton = h(
+        "button",
+        {
+          class: "card-action",
+          type: "button",
+          "data-tip": archiveLabel,
+          "aria-label": archiveActionLabel,
+          "data-testid": "commentor-archive-btn",
+        },
+        svg(ICONS.archive),
+      ) as HTMLButtonElement;
+      archiveButton.addEventListener("click", (e) => {
+        e.stopPropagation();
+        void this.runThreadAction(
+          archiveButton,
+          archiveActionLabel,
+          () =>
+            this.client.mutation(api.threads.archive, { threadId: t._id }),
+          `Could not ${archiveLabel.toLowerCase()} comment.`,
+        );
+      });
+      const deleteButton = h(
+        "button",
+        {
+          class: "card-action danger",
+          type: "button",
+          "data-tip": "Delete",
+          "aria-label": `Delete comment by ${t.authorName}`,
+          "data-testid": "commentor-delete-btn",
+          onclick: (e: Event) => {
+            e.stopPropagation();
+            this.scheduleDelete(t);
           },
-          svg(ICONS.check),
-        ),
-        h(
-          "button",
-          {
-            class: "card-action",
-            "data-tip": t.archived ? "Unarchive" : "Archive",
-            "data-testid": "commentor-archive-btn",
-            onclick: async () => {
-              try {
-                await this.client.mutation(api.threads.archive, {
-                  threadId: t._id,
-                });
-              } catch (err) {
-                console.error("[commentor] archive failed", err);
-              }
-            },
-          },
-          svg(ICONS.archive),
-        ),
-        h(
-          "button",
-          {
-            class: "card-action danger",
-            "data-tip": "Delete",
-            "data-testid": "commentor-delete-btn",
-            onclick: async () => {
-              try {
-                await this.client.mutation(api.threads.remove, {
-                  threadId: t._id,
-                });
-              } catch (err) {
-                console.error("[commentor] delete failed", err);
-                this.toast("Could not delete comment.");
-              }
-            },
-          },
-          svg(ICONS.trash),
-        ),
+        },
+        svg(ICONS.trash),
       );
+      actions.append(resolveButton, archiveButton, deleteButton);
       head.append(actions);
     }
-    const view = h(
-      "div",
-      {},
-      head,
+    if (inBubble) {
+      head.append(
+        h(
+          "button",
+          {
+            class: "card-action thread-close",
+            type: "button",
+            "data-tip": "Close",
+            "aria-label": "Close thread",
+            onclick: () => this.closeBubbles(true, true),
+          },
+          svg(ICONS.x),
+        ),
+      );
+    }
+    const locate =
       t.anchor.kind === "text-range"
         ? h(
-            "blockquote",
+            "button",
             {
               class: "quote",
-              title: "Locate on page",
+              type: "button",
+              "aria-label": "Locate quoted text on page",
               onclick: () => this.focusThread(t),
             },
             escapeText(t.anchor.quote),
           )
-        : null,
+        : h(
+            "button",
+            {
+              class: "locate-link",
+              type: "button",
+              "aria-label": "Locate commented element on page",
+              onclick: () => this.focusThread(t),
+            },
+            "Locate element",
+          );
+    const view = h(
+      "div",
+      { class: "thread-view", "data-thread-id": t._id },
+      head,
+      locate,
       h("div", { class: "body" }, escapeText(t.body)),
     );
     const replies = h("div", { class: "replies" });
@@ -950,64 +1390,162 @@ class Commentor {
       replies.append(
         h(
           "div",
-          { class: "reply" },
+          {
+            class: `reply${this.newReplyIds.has(r._id) ? " is-new" : ""}`,
+          },
           h("span", { class: "reply-who" }, r.authorName),
           escapeText(r.body),
         ),
       );
     view.append(replies);
     if (this.canWrite && this.cfg.author) {
-      // Keyboard-native reply: Enter to send, Shift/Ctrl/Cmd+Enter for
-      // newline. No send button.
+      const helpId = `commentor-reply-help-${t._id}`;
       const input = h("textarea", {
         class: "reply-input",
         "data-testid": "commentor-reply-input",
-        placeholder: "Reply…  (Enter to send, Shift+Enter for newline)",
+        placeholder: "Reply…",
         rows: "1",
-      });
-      input.addEventListener("keydown", async (e: KeyboardEvent) => {
-        if (e.key === "Enter" && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
-          e.preventDefault();
-          const body = (e.target as HTMLTextAreaElement).value.trim();
-          if (!body) return;
-          (e.target as HTMLTextAreaElement).value = "";
-          try {
-            await this.client.mutation(api.replies.add, {
-              threadId: t._id,
-              authorEmail: this.cfg.author!.email,
-              authorName: this.cfg.author!.name,
-              body,
-            });
-          } catch (err) {
-            console.error("[commentor] reply failed", err);
-            this.toast("Could not post reply.");
+        "aria-describedby": helpId,
+      }) as HTMLTextAreaElement;
+      const send = h(
+        "button",
+        {
+          class: "primary compact",
+          type: "button",
+          "data-testid": "commentor-reply-send",
+        },
+        "Reply",
+      ) as HTMLButtonElement;
+      const submitReply = async () => {
+        const body = input.value.trim();
+        if (!body || send.disabled) return;
+        input.disabled = true;
+        send.disabled = true;
+        send.classList.add("is-pending");
+        send.setAttribute("aria-busy", "true");
+        send.textContent = "Sending…";
+        try {
+          await this.client.mutation(api.replies.add, {
+            threadId: t._id,
+            authorEmail: this.cfg.author!.email,
+            authorName: this.cfg.author!.name,
+            body,
+          });
+          input.value = "";
+        } catch (err) {
+          console.error("[commentor] reply failed", err);
+          this.toast("Could not post reply.", { kind: "error" });
+        } finally {
+          if (input.isConnected) {
+            input.disabled = false;
+            send.disabled = false;
+            send.classList.remove("is-pending");
+            send.removeAttribute("aria-busy");
+            send.textContent = "Reply";
+            input.focus();
           }
         }
+      };
+      send.addEventListener("click", () => void submitReply());
+      input.addEventListener("keydown", (e: KeyboardEvent) => {
+        if (e.key === "Enter" && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
+          e.preventDefault();
+          void submitReply();
+        }
       });
-      view.append(h("div", { class: "reply-row" }, input));
+      view.append(
+        h(
+          "div",
+          { class: "reply-row" },
+          input,
+          h(
+            "div",
+            { class: "reply-footer" },
+            h(
+              "span",
+              { class: "composer-help", id: helpId },
+              "Enter to reply · Shift+Enter for a new line",
+            ),
+            send,
+          ),
+        ),
+      );
     }
     return view;
   }
 
   // ── drawer (the widget expanding into the comments list) ──
-  private toggleDrawer(): void {
-    if (this.dock.hasAttribute("data-expanded")) this.collapseDrawer();
-    else this.expandDrawer();
+  private filteredThreads(filter: ThreadFilter): Thread[] {
+    return this.threads
+      .filter((t) => !this.pendingDeletes.has(t._id))
+      .filter((t) => {
+        if (filter === "history") return Boolean(t.archived);
+        if (t.archived) return false;
+        return filter === "resolved" ? t.resolved : !t.resolved;
+      })
+      .sort((a, b) => a._creationTime - b._creationTime);
   }
-  private expandDrawer(): void {
-    if (this.drawerCollapseTimer) {
-      window.clearTimeout(this.drawerCollapseTimer);
-      this.drawerCollapseTimer = 0;
+
+  private setThreadFilter(filter: ThreadFilter): void {
+    this.threadFilter = filter;
+    this.drawerList.setAttribute(
+      "aria-label",
+      `${THREAD_FILTER_LABELS[filter]} comments`,
+    );
+    for (const [name, button] of Object.entries(this.filterButtons) as [
+      ThreadFilter,
+      HTMLButtonElement,
+    ][]) {
+      button.setAttribute("aria-selected", String(name === filter));
+      button.tabIndex = name === filter ? 0 : -1;
     }
     this.renderDrawerList();
-    this.dock.setAttribute("data-expanded", "");
-    this.commentsBtn.setAttribute("aria-expanded", "true");
-    this.commentsBtn.classList.add("active");
+    this.renderPins();
     requestAnimationFrame(() => {
       const { w, h } = this.sizeContent();
       this.repositionExpandedDock(w, h);
     });
   }
+
+  private onFilterKeyDown(e: KeyboardEvent, filter: ThreadFilter): void {
+    const index = THREAD_FILTERS.indexOf(filter);
+    let next = index;
+    if (e.key === "ArrowRight") next = (index + 1) % THREAD_FILTERS.length;
+    else if (e.key === "ArrowLeft")
+      next = (index - 1 + THREAD_FILTERS.length) % THREAD_FILTERS.length;
+    else if (e.key === "Home") next = 0;
+    else if (e.key === "End") next = THREAD_FILTERS.length - 1;
+    else return;
+    e.preventDefault();
+    const target = THREAD_FILTERS[next];
+    this.setThreadFilter(target);
+    this.filterButtons[target].focus();
+  }
+
+  private toggleDrawer(): void {
+    if (this.dock.hasAttribute("data-expanded")) this.collapseDrawer();
+    else this.expandDrawer();
+  }
+
+  private expandDrawer(): void {
+    if (this.drawerCollapseTimer) {
+      window.clearTimeout(this.drawerCollapseTimer);
+      this.drawerCollapseTimer = 0;
+    }
+    this.dock.setAttribute("data-expanded", "");
+    this.dock.toggleAttribute("data-compact-sheet", window.innerWidth < 420);
+    this.content.inert = false;
+    this.content.setAttribute("aria-hidden", "false");
+    this.commentsBtn.setAttribute("aria-expanded", "true");
+    this.commentsBtn.classList.add("active");
+    this.renderDrawerList();
+    this.renderPins();
+    requestAnimationFrame(() => {
+      const { w, h } = this.sizeContent();
+      this.repositionExpandedDock(w, h);
+    });
+  }
+
   private collapseDrawer(immediate = false): void {
     if (this.drawerCollapseTimer) {
       window.clearTimeout(this.drawerCollapseTimer);
@@ -1015,63 +1553,65 @@ class Commentor {
     }
     this.commentsBtn.setAttribute("aria-expanded", "false");
     this.commentsBtn.classList.remove("active");
-    // Collapse BOTH dimensions simultaneously for a smooth diagonal shrink.
+    this.content.inert = true;
+    this.content.setAttribute("aria-hidden", "true");
     this.content.style.height = "0px";
     this.content.style.width = "0px";
+    this.dock.removeAttribute("data-compact-sheet");
     if (immediate) {
       this.dock.removeAttribute("data-expanded");
       this.content.style.height = "";
       this.content.style.width = "";
-    } else {
-      // Remove data-expanded NOW so the theme toggle (and other expanded-only
-      // toolbar buttons) disappear immediately — in sync with the collapse
-      // starting, not 420ms later. The content still animates because the
-      // inline height:0/width:0 above drive the CSS transition.
-      this.dock.removeAttribute("data-expanded");
-      // Reposition the dock to its COMPACT size (toolbar only) so the
-      // left/top transition glides it back to the edge in sync with the
-      // content shrinking. Without this, right/bottom-edge docks detach
-      // from their edge and float toward center during collapse.
-      const toolbar = this.dock.querySelector<HTMLElement>(".toolbar");
-      const tw = toolbar ? toolbar.offsetWidth : 48;
-      const th = toolbar ? toolbar.offsetHeight : 48;
-      const ds = getComputedStyle(this.dock);
-      const bw = parseFloat(ds.borderLeftWidth) + parseFloat(ds.borderRightWidth);
-      const bh = parseFloat(ds.borderTopWidth) + parseFloat(ds.borderBottomWidth);
-      this.repositionDock(tw + bw, th + bh);
-      this.drawerCollapseTimer = window.setTimeout(() => {
-        this.drawerCollapseTimer = 0;
-        if (this.dock.hasAttribute("data-expanded")) return;
-        this.content.style.height = "";
-        this.content.style.width = "";
-      }, 420);
+      this.renderPins();
+      return;
     }
-  }
-  // Grow the content area to fit its rendered list. Returns the target
-  // content dimensions so the caller can compute the target DOCK size for
-  // repositionDock (offsetWidth returns the pre-transition compact size).
-  // Width is computed from the viewport, not the current dock position —
-  // the dock will be repositioned to fit, so we don't artificially narrow
-  // the panel just because the compact dock was in a corner.
-  private sizeContent(): { w: number; h: number } {
-    if (!this.dock.hasAttribute("data-expanded")) return { w: 0, h: 0 };
-    const head = this.content.querySelector<HTMLElement>(".content-head");
-    const headH = head ? head.offsetHeight : 0;
-    const maxH = Math.min(window.innerHeight * 0.6, 520);
-    const naturalH = Math.min(headH + this.drawerList.scrollHeight, maxH);
-    // For left/right edges the toolbar sits beside the content, so subtract
-    // its width from the available space. For top/bottom the toolbar is
-    // above/below the content (full width), so no subtraction needed.
+    this.dock.removeAttribute("data-expanded");
     const toolbar = this.dock.querySelector<HTMLElement>(".toolbar");
     const tw = toolbar ? toolbar.offsetWidth : 48;
-    const horizontal = this.dockEdge === "left" || this.dockEdge === "right";
-    const availW = window.innerWidth - 2 * MARGIN - (horizontal ? tw : 0);
-    const targetW = Math.max(200, Math.min(380, availW));
-    const targetH = horizontal ? Math.min(maxH, 520) : naturalH;
+    const th = toolbar ? toolbar.offsetHeight : 48;
+    const ds = getComputedStyle(this.dock);
+    const bw = parseFloat(ds.borderLeftWidth) + parseFloat(ds.borderRightWidth);
+    const bh = parseFloat(ds.borderTopWidth) + parseFloat(ds.borderBottomWidth);
+    this.repositionDock(tw + bw, th + bh);
+    this.renderPins();
+    this.drawerCollapseTimer = window.setTimeout(() => {
+      this.drawerCollapseTimer = 0;
+      if (this.dock.hasAttribute("data-expanded")) return;
+      this.content.style.height = "";
+      this.content.style.width = "";
+    }, 300);
+  }
+
+  private sizeContent(): { w: number; h: number } {
+    if (!this.dock.hasAttribute("data-expanded")) return { w: 0, h: 0 };
+    const compact = window.innerWidth < 420;
+    this.dock.toggleAttribute("data-compact-sheet", compact);
+    const headH =
+      this.content.querySelector<HTMLElement>(".content-head")?.offsetHeight ??
+      0;
+    const tabsH =
+      this.content.querySelector<HTMLElement>(".filter-tabs")?.offsetHeight ??
+      0;
+    const maxH = Math.min(window.innerHeight * 0.6, 520);
+    const naturalH = Math.min(
+      headH + tabsH + this.drawerList.scrollHeight,
+      maxH,
+    );
+    const toolbar = this.dock.querySelector<HTMLElement>(".toolbar");
+    const tw = toolbar ? toolbar.offsetWidth : 48;
+    const horizontal =
+      !compact && (this.dockEdge === "left" || this.dockEdge === "right");
+    const availW = Math.max(
+      0,
+      window.innerWidth - 2 * MARGIN - (horizontal ? tw : 0),
+    );
+    const targetW = Math.min(380, availW);
+    const targetH = horizontal ? maxH : naturalH;
     this.content.style.height = `${targetH}px`;
     this.content.style.width = `${targetW}px`;
     return { w: targetW, h: targetH };
   }
+
   private repositionExpandedDock(contentW: number, contentH: number): void {
     if (!this.dock.hasAttribute("data-expanded")) return;
     const toolbar = this.dock.querySelector<HTMLElement>(".toolbar");
@@ -1080,81 +1620,298 @@ class Commentor {
     const ds = getComputedStyle(this.dock);
     const bw = parseFloat(ds.borderLeftWidth) + parseFloat(ds.borderRightWidth);
     const bh = parseFloat(ds.borderTopWidth) + parseFloat(ds.borderBottomWidth);
-    const horizontal = this.dockEdge === "left" || this.dockEdge === "right";
+    const compact = window.innerWidth < 420;
+    const horizontal =
+      !compact && (this.dockEdge === "left" || this.dockEdge === "right");
     const dockW = (horizontal ? tw + contentW : Math.max(tw, contentW)) + bw;
     const dockH = (horizontal ? Math.max(th, contentH) : th + contentH) + bh;
-    this.repositionDock(dockW, dockH);
-  }
-  private renderDrawerList(): void {
-    const count = this.content.querySelector<HTMLElement>(".count");
-    if (count) count.textContent = String(this.threads.length);
-    this.drawerList.replaceChildren();
-    if (this.threads.length === 0) {
-      this.drawerList.append(h("div", { class: "empty" }, "No comments yet."));
+    if (compact) {
+      this.dock.style.right = "auto";
+      this.dock.style.bottom = "auto";
+      this.dock.style.left = `${MARGIN}px`;
+      this.dock.style.top = `${window.innerHeight - dockH - MARGIN}px`;
       return;
     }
-    const ordered = [...this.threads].sort(
-      (a, b) => a._creationTime - b._creationTime,
-    );
-    for (const t of ordered)
-      this.drawerList.append(
-        h("div", { class: "drawer-thread" }, this.threadView(t)),
-      );
+    this.repositionDock(dockW, dockH);
   }
 
-  private focusThread(t: Thread): void {
+  private renderDrawerList(): void {
+    const counts: Record<ThreadFilter, number> = {
+      active: this.filteredThreads("active").length,
+      resolved: this.filteredThreads("resolved").length,
+      history: this.filteredThreads("history").length,
+    };
+    const count = this.content.querySelector<HTMLElement>(".count");
+    if (count) {
+      count.textContent = String(counts.active);
+      count.setAttribute(
+        "aria-label",
+        `${counts.active} active comment${counts.active === 1 ? "" : "s"}`,
+      );
+    }
+    for (const filter of THREAD_FILTERS) {
+      const button = this.filterButtons[filter];
+      button.replaceChildren(
+        THREAD_FILTER_LABELS[filter],
+        h("span", { class: "filter-count" }, String(counts[filter])),
+      );
+    }
+    this.drawerList.replaceChildren();
+    const visible = this.filteredThreads(this.threadFilter);
+    if (visible.length === 0) {
+      const title: Record<ThreadFilter, string> = {
+        active: "No active comments",
+        resolved: "No resolved comments",
+        history: "No archived comments",
+      };
+      const empty = h(
+        "div",
+        { class: "empty" },
+        h("strong", undefined, title[this.threadFilter]),
+        h(
+          "span",
+          undefined,
+          this.threadFilter === "active"
+            ? "Select text to start a discussion."
+            : "Threads will appear here when their status changes.",
+        ),
+      );
+      if (this.canWrite && this.threadFilter === "active") {
+        empty.append(
+          h(
+            "button",
+            {
+              type: "button",
+              onclick: () => {
+                this.collapseDrawer();
+                this.setCommentMode(true);
+                this.root
+                  .querySelector<HTMLButtonElement>(
+                    '[data-testid="commentor-comment-btn"]',
+                  )
+                  ?.focus();
+              },
+            },
+            svg(ICONS.comment),
+            "Start a comment",
+          ),
+        );
+      }
+      this.drawerList.append(empty);
+      return;
+    }
+    for (const t of visible) {
+      const card = h(
+        "div",
+        {
+          class: `drawer-thread${
+            this.newThreadIds.has(t._id) ? " is-new" : ""
+          }`,
+          "data-thread-id": t._id,
+          role: "group",
+          tabindex: "0",
+          "aria-label": `Comment by ${t.authorName}`,
+        },
+        this.threadView(t),
+      );
+      if (!anchorRect(t.anchor)) {
+        card.classList.add("is-orphan");
+        card.prepend(
+          h("span", { class: "orphan-badge" }, "Anchor no longer found"),
+        );
+      }
+      card.addEventListener("pointerenter", () =>
+        this.highlightThread(t._id),
+      );
+      card.addEventListener("pointerleave", () => {
+        if (this.openThreadId !== t._id) this.highlightThread(null);
+      });
+      card.addEventListener("focusin", () => this.highlightThread(t._id));
+      card.addEventListener("focusout", (e) => {
+        if (
+          !(e.relatedTarget instanceof Node) ||
+          !card.contains(e.relatedTarget)
+        )
+          if (this.openThreadId !== t._id) this.highlightThread(null);
+      });
+      card.addEventListener("click", (e) => {
+        if ((e.target as Element).closest("button, textarea")) return;
+        this.focusThread(t, card);
+      });
+      card.addEventListener("keydown", (e) => {
+        if (e.target === card && (e.key === "Enter" || e.key === " ")) {
+          e.preventDefault();
+          this.focusThread(t, card);
+        }
+      });
+      this.drawerList.append(card);
+    }
+    this.highlightThread(this.highlightedThreadId);
+  }
+
+  private highlightThread(threadId: Id<"threads"> | null): void {
+    this.highlightedThreadId = threadId;
+    for (const el of this.root.querySelectorAll<HTMLElement>(
+      "[data-thread-id]",
+    )) {
+      el.classList.toggle(
+        "is-highlighted",
+        Boolean(threadId && el.dataset.threadId === threadId),
+      );
+    }
+    this.positionAnchorHighlight();
+  }
+
+  private positionAnchorHighlight(): void {
+    const t = this.threads.find(
+      (thread) => thread._id === this.highlightedThreadId,
+    );
+    const r = t ? anchorRect(t.anchor) : null;
+    if (
+      !r ||
+      r.bottom < 0 ||
+      r.top > window.innerHeight ||
+      r.right < 0 ||
+      r.left > window.innerWidth
+    ) {
+      this.anchorHighlight.removeAttribute("data-visible");
+      return;
+    }
+    this.anchorHighlight.style.left = `${r.left - 3}px`;
+    this.anchorHighlight.style.top = `${r.top - 3}px`;
+    this.anchorHighlight.style.width = `${Math.max(6, r.right - r.left + 6)}px`;
+    this.anchorHighlight.style.height = `${Math.max(6, r.bottom - r.top + 6)}px`;
+    this.anchorHighlight.setAttribute("data-visible", "");
+  }
+
+  private focusThread(t: Thread, returnFocus?: HTMLElement): void {
     const el = anchorElement(t.anchor);
-    if (el) el.scrollIntoView({ block: "center", behavior: "smooth" });
-    setTimeout(() => {
+    if (!el || !anchorRect(t.anchor)) {
+      this.toast("This comment’s anchor is no longer available.", {
+        kind: "error",
+      });
+      return;
+    }
+    const reduce = window.matchMedia(
+      "(prefers-reduced-motion: reduce)",
+    ).matches;
+    el.scrollIntoView({
+      block: "center",
+      behavior: reduce ? "auto" : "smooth",
+    });
+    const reveal = () => {
       this.repositionPins();
+      this.highlightThread(t._id);
       const pin = this.markersLayer.querySelector<HTMLElement>(
         `[data-thread-id="${t._id}"]`,
       );
-      if (pin) this.openThreadBubble(t, pin);
-    }, 250);
+      if (pin) this.openThreadBubble(t, pin, returnFocus);
+    };
+    if (reduce) {
+      requestAnimationFrame(reveal);
+      return;
+    }
+    let revealed = false;
+    const once = () => {
+      if (revealed) return;
+      revealed = true;
+      window.removeEventListener("scrollend", once);
+      reveal();
+    };
+    window.addEventListener("scrollend", once, { once: true });
+    window.setTimeout(once, 450);
+  }
+
+  private announceNewComments(count: number): void {
+    const badge = this.content.querySelector<HTMLElement>(".count");
+    badge?.classList.remove("is-updated");
+    void badge?.offsetWidth;
+    badge?.classList.add("is-updated");
+    if (
+      !this.dock.hasAttribute("data-expanded") ||
+      this.threadFilter !== "active"
+    )
+      return;
+    const nearBottom =
+      this.drawerList.scrollTop + this.drawerList.clientHeight >=
+      this.drawerList.scrollHeight - 48;
+    if (nearBottom) return;
+    this.newCommentCount += count;
+    this.newCommentsButton.textContent = `${this.newCommentCount} new comment${
+      this.newCommentCount === 1 ? "" : "s"
+    }`;
+    this.newCommentsButton.hidden = false;
+  }
+
+  private onDrawerScroll(): void {
+    const nearBottom =
+      this.drawerList.scrollTop + this.drawerList.clientHeight >=
+      this.drawerList.scrollHeight - 24;
+    if (!nearBottom) return;
+    this.newCommentCount = 0;
+    this.newCommentsButton.hidden = true;
+  }
+
+  private showNewComments(): void {
+    this.newCommentCount = 0;
+    this.newCommentsButton.hidden = true;
+    this.setThreadFilter("active");
+    requestAnimationFrame(() => {
+      this.drawerList.scrollTo({
+        top: this.drawerList.scrollHeight,
+        behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches
+          ? "auto"
+          : "smooth",
+      });
+    });
   }
 
   // ── tooltips (fast, per-element, flip below when no room above) ──
   private tipScrollSuppress = false;
   private wireTooltips(): void {
     const show = (target: HTMLElement) => {
-      // Suppress during/after scroll: pins are position:fixed and repositioned
-      // via rAF on scroll, which fires pointerover when a pin slides under the
-      // stationary cursor. Without this guard the tooltip re-shows immediately
-      // after the scroll handler hides it.
-      if (this.tipScrollSuppress) return;
-      if (this.tipTarget === target) return;
-      this.tipTarget = target;
+      if (this.tipScrollSuppress || this.tipTarget === target) return;
       const text = target.getAttribute("data-tip");
       if (!text) return;
-      if (this.tipTimer) clearTimeout(this.tipTimer);
-      this.tipTimer = window.setTimeout(() => this.placeTip(target, text), 140);
-    };
-    const hide = () => {
-      if (this.tipTimer) clearTimeout(this.tipTimer);
-      this.tipTarget = null;
-      this.tip.setAttribute("data-state", "closed");
+      this.hideTip();
+      this.tipTarget = target;
+      this.tipPreviousDescription = target.getAttribute("aria-describedby");
+      target.setAttribute(
+        "aria-describedby",
+        [this.tipPreviousDescription, this.tip.id].filter(Boolean).join(" "),
+      );
+      this.tipTimer = window.setTimeout(
+        () => this.placeTip(target, text),
+        150,
+      );
     };
     this.root.addEventListener("pointerover", (e) => {
-      const t = (e.target as HTMLElement)?.closest<HTMLElement>("[data-tip]");
-      if (t) show(t);
+      const target = (e.target as HTMLElement)?.closest<HTMLElement>(
+        "[data-tip]",
+      );
+      if (target) show(target);
     });
-    this.root.addEventListener("pointerout", () => hide());
+    this.root.addEventListener("pointerout", () => this.hideTip());
     this.root.addEventListener("focusin", (e) => {
-      const t = (e.target as HTMLElement)?.closest<HTMLElement>("[data-tip]");
-      if (t) show(t);
+      const target = (e.target as HTMLElement)?.closest<HTMLElement>(
+        "[data-tip]",
+      );
+      if (target) show(target);
     });
-    this.root.addEventListener("focusout", () => hide());
-    // Hide on scroll and suppress re-showing: pins reposition via rAF after
-    // scroll, which fires pointerover under a stationary cursor. The suppress
-    // flag is cleared 120ms after scrolling stops so normal hover resumes.
+    this.root.addEventListener("focusout", () => this.hideTip());
     let scrollTimer: number | undefined;
-    window.addEventListener("scroll", () => {
-      this.tipScrollSuppress = true;
-      hide();
-      if (scrollTimer) clearTimeout(scrollTimer);
-      scrollTimer = window.setTimeout(() => { this.tipScrollSuppress = false; }, 120);
-    }, { passive: true });
+    window.addEventListener(
+      "scroll",
+      () => {
+        this.tipScrollSuppress = true;
+        this.hideTip();
+        clearTimeout(scrollTimer);
+        scrollTimer = window.setTimeout(() => {
+          this.tipScrollSuppress = false;
+        }, 120);
+      },
+      { passive: true },
+    );
   }
   private placeTip(target: HTMLElement, text: string): void {
     // Don't show a tooltip for an element that has scrolled out of view.
@@ -1178,18 +1935,56 @@ class Commentor {
     this.tip.style.top = `${top}px`;
   }
   private hideTip(): void {
-    if (this.tipTimer) clearTimeout(this.tipTimer);
+    clearTimeout(this.tipTimer);
+    if (this.tipTarget) {
+      if (this.tipPreviousDescription)
+        this.tipTarget.setAttribute(
+          "aria-describedby",
+          this.tipPreviousDescription,
+        );
+      else this.tipTarget.removeAttribute("aria-describedby");
+    }
+    this.tipTimer = 0;
     this.tipTarget = null;
+    this.tipPreviousDescription = null;
     this.tip.setAttribute("data-state", "closed");
   }
 
-  private toast(msg: string): void {
-    const el = h("div", { class: "toast" }, msg);
-    this.root.append(el);
-    setTimeout(() => {
+  private toast(msg: string, options: ToastOptions = {}): void {
+    this.root.querySelector(".toast")?.remove();
+    const close = (el: HTMLElement) => {
       el.setAttribute("data-state", "closed");
-      setTimeout(() => el.remove(), 150);
-    }, 2200);
+      window.setTimeout(() => el.remove(), 150);
+    };
+    const el = h(
+      "div",
+      {
+        class: `toast${options.kind === "error" ? " error" : ""}`,
+        role: options.kind === "error" ? "alert" : "status",
+        "aria-live": options.kind === "error" ? "assertive" : "polite",
+      },
+      h("span", undefined, msg),
+    );
+    if (options.actionLabel && options.onAction) {
+      el.append(
+        h(
+          "button",
+          {
+            type: "button",
+            onclick: () => {
+              options.onAction?.();
+              close(el);
+            },
+          },
+          options.actionLabel,
+        ),
+      );
+    }
+    this.root.append(el);
+    window.setTimeout(
+      () => close(el),
+      options.duration ?? (options.kind === "error" ? 6000 : 3000),
+    );
   }
 }
 
@@ -1203,249 +1998,783 @@ function anchorLabel(a: Anchor): string {
 
 const STYLES = /* css */ `
 :host {
-  --bg: #ffffff; --bg-elev: #ffffff; --fg: #09090b; --fg-muted: #71717a;
-  --border: #e4e4e7; --border-soft: #f4f4f5;
-  --accent: #c2410c; --accent-hover: #9a3412; --accent-fg: #ffffff;
-  --resolved: #1a7f37; --resolved-bg: #1a7f37;
-  --shadow: 0 4px 16px rgba(15,23,42,.10);
-  --shadow-lg: 0 12px 32px rgba(15,23,42,.18);
-  --radius: 16px; --radius-sm: 8px;
+  --bg: #ffffff;
+  --bg-elev: #ffffff;
+  --fg: #09090b;
+  --fg-muted: #71717a;
+  --border: #e4e4e7;
+  --border-soft: #f4f4f5;
+  --accent: #c2410c;
+  --accent-hover: #9a3412;
+  --accent-fg: #ffffff;
+  --resolved: #15803d;
+  --resolved-bg: #166534;
+  --danger: #b42318;
+  --danger-bg: #b42318;
+  --shadow: 0 4px 16px rgba(15, 23, 42, .10);
+  --shadow-lg: 0 12px 32px rgba(15, 23, 42, .18);
+  --radius: 16px;
+  --radius-sm: 8px;
   --panel: 380px;
-  --ease: cubic-bezier(.22,1,.36,1);
-  --spring: cubic-bezier(.2,1.3,.4,1);
-  --dur: 180ms;
+  --ease-standard: cubic-bezier(.4, 0, .2, 1);
+  --ease-spring: cubic-bezier(.34, 1.56, .64, 1);
+  --duration-fast: 150ms;
+  --duration-base: 200ms;
+  --duration-expand: 300ms;
+  --duration-dock: 400ms;
   color: var(--fg);
   background: transparent;
 }
 @media (prefers-color-scheme: dark) {
   :host {
-    --bg: #09090b; --bg-elev: #18181b; --fg: #fafafa; --fg-muted: #a1a1aa;
-    --border: #27272a; --border-soft: #18181b;
-    --accent: #fb923c; --accent-hover: #fdba74; --accent-fg: #09090b;
-    --resolved: #22c55e; --resolved-bg: #14532d;
-    --shadow: 0 4px 16px rgba(0,0,0,.48);
-    --shadow-lg: 0 12px 32px rgba(0,0,0,.56);
+    --bg: #09090b;
+    --bg-elev: #18181b;
+    --fg: #fafafa;
+    --fg-muted: #a1a1aa;
+    --border: #3f3f46;
+    --border-soft: #27272a;
+    --accent: #fb923c;
+    --accent-hover: #fdba74;
+    --accent-fg: #09090b;
+    --resolved: #86efac;
+    --resolved-bg: #166534;
+    --danger: #fda4af;
+    --danger-bg: #9f1239;
+    --shadow: 0 4px 16px rgba(0, 0, 0, .48);
+    --shadow-lg: 0 12px 32px rgba(0, 0, 0, .56);
   }
 }
 :host(.light) {
-  --bg: #ffffff; --bg-elev: #ffffff; --fg: #09090b; --fg-muted: #71717a;
-  --border: #e4e4e7; --border-soft: #f4f4f5;
-  --accent: #c2410c; --accent-hover: #9a3412; --accent-fg: #ffffff;
-  --resolved: #1a7f37; --resolved-bg: #1a7f37;
-  --shadow: 0 4px 16px rgba(15,23,42,.10);
-  --shadow-lg: 0 12px 32px rgba(15,23,42,.18);
+  --bg: #ffffff;
+  --bg-elev: #ffffff;
+  --fg: #09090b;
+  --fg-muted: #71717a;
+  --border: #e4e4e7;
+  --border-soft: #f4f4f5;
+  --accent: #c2410c;
+  --accent-hover: #9a3412;
+  --accent-fg: #ffffff;
+  --resolved: #15803d;
+  --resolved-bg: #166534;
+  --danger: #b42318;
+  --danger-bg: #b42318;
+  --shadow: 0 4px 16px rgba(15, 23, 42, .10);
+  --shadow-lg: 0 12px 32px rgba(15, 23, 42, .18);
 }
 :host(.dark) {
-  --bg: #09090b; --bg-elev: #18181b; --fg: #fafafa; --fg-muted: #a1a1aa;
-  --border: #27272a; --border-soft: #18181b;
-  --accent: #fb923c; --accent-hover: #fdba74; --accent-fg: #09090b;
-  --resolved: #22c55e; --resolved-bg: #14532d;
-  --shadow: 0 4px 16px rgba(0,0,0,.48);
-  --shadow-lg: 0 12px 32px rgba(0,0,0,.56);
+  --bg: #09090b;
+  --bg-elev: #18181b;
+  --fg: #fafafa;
+  --fg-muted: #a1a1aa;
+  --border: #3f3f46;
+  --border-soft: #27272a;
+  --accent: #fb923c;
+  --accent-hover: #fdba74;
+  --accent-fg: #09090b;
+  --resolved: #86efac;
+  --resolved-bg: #166534;
+  --danger: #fda4af;
+  --danger-bg: #9f1239;
+  --shadow: 0 4px 16px rgba(0, 0, 0, .48);
+  --shadow-lg: 0 12px 32px rgba(0, 0, 0, .56);
 }
 
-* { box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; }
+* {
+  box-sizing: border-box;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+}
 button { font: inherit; color: inherit; }
+button:focus-visible, [tabindex="0"]:focus-visible, textarea:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
 
-/* dock = the single widget surface; it docks to an edge and expands */
+/* Single movable surface: compact toolbar when closed, review panel when open. */
 .dock {
-  position: fixed; z-index: 2147483646; display: flex; overflow: hidden;
-  background: var(--bg-elev); border: 1px solid var(--border); border-radius: var(--radius);
+  position: fixed;
+  z-index: 2147483646;
+  display: flex;
+  overflow: hidden;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
   box-shadow: var(--shadow-lg);
-  transition: left .42s var(--spring), top .42s var(--spring);
+  transition:
+    left var(--duration-dock) var(--ease-spring),
+    top var(--duration-dock) var(--ease-spring);
 }
 .dock.dragging { transition: none; cursor: grabbing; }
 .dock.dock-bottom { flex-direction: column; align-items: stretch; }
-.dock.dock-top    { flex-direction: column-reverse; align-items: stretch; }
-.dock.dock-left   { flex-direction: row-reverse; align-items: stretch; }
-.dock.dock-right  { flex-direction: row; align-items: stretch; }
+.dock.dock-top { flex-direction: column-reverse; align-items: stretch; }
+.dock.dock-left { flex-direction: row-reverse; align-items: stretch; }
+.dock.dock-right { flex-direction: row; align-items: stretch; }
 
-/* toolbar = the handle row inside the dock */
-.toolbar { display: flex; align-items: center; gap: 2px; padding: 6px 8px; }
-.toolbar button {
-  background: transparent; border: none; border-radius: 10px;
-  padding: 8px; cursor: pointer; color: var(--fg);
-  display: inline-flex; align-items: center; justify-content: center;
-  transition: background var(--dur) var(--ease), transform var(--dur) var(--spring);
+.toolbar { display: flex; align-items: center; gap: 2px; padding: 4px; }
+.toolbar button, .grip {
+  width: 44px;
+  min-width: 44px;
+  height: 44px;
+  min-height: 44px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--fg);
+  transition:
+    background var(--duration-fast) var(--ease-standard),
+    transform var(--duration-fast) var(--ease-standard);
 }
-.toolbar button:hover { background: var(--border-soft); }
-.toolbar button:active { transform: scale(.9); }
+.toolbar button:hover, .grip:hover { background: var(--border-soft); }
+.toolbar button:active { transform: scale(.96); }
 .toolbar button.active { background: var(--accent); color: var(--accent-fg); }
-.toolbar button:disabled { opacity: .35; cursor: not-allowed; }
-.toolbar button:focus-visible, .pin:focus-visible {
-  outline: 2px solid var(--accent); outline-offset: 2px;
-}
+.toolbar button:disabled { opacity: .38; cursor: not-allowed; }
 .grip {
-  width: 20px; height: 28px; cursor: grab; display: flex;
-  align-items: center; justify-content: center; border-radius: 10px;
-  touch-action: none; user-select: none; -webkit-user-select: none;
-  transition: background var(--dur) var(--ease);
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
 }
-.grip:hover { background: var(--border-soft); }
 .grip:active { cursor: grabbing; }
 .grip::before {
-  content: ""; width: 4px; height: 14px; border-radius: 2px;
-  background: repeating-linear-gradient(to bottom, var(--fg-muted) 0 2px, transparent 2px 4px);
+  content: "";
+  width: 4px;
+  height: 16px;
+  border-radius: 2px;
+  background: repeating-linear-gradient(
+    to bottom,
+    var(--fg-muted) 0 2px,
+    transparent 2px 5px
+  );
 }
-/* Portrait orientation when docked to left/right edges. */
-.dock.dock-left .toolbar, .dock.dock-right .toolbar { flex-direction: column; padding: 8px 6px; }
-.dock.dock-left .grip, .dock.dock-right .grip { width: 28px; height: 20px; }
+.dock.dock-left .toolbar, .dock.dock-right .toolbar {
+  flex-direction: column;
+}
 .dock.dock-left .grip::before, .dock.dock-right .grip::before {
-  width: 14px; height: 4px;
-  background: repeating-linear-gradient(to right, var(--fg-muted) 0 2px, transparent 2px 4px);
+  width: 16px;
+  height: 4px;
+  background: repeating-linear-gradient(
+    to right,
+    var(--fg-muted) 0 2px,
+    transparent 2px 5px
+  );
 }
 
-/* content = the expandable comments list (the dock grows into it) */
 .content {
-  overflow: hidden; opacity: 0; height: 0; width: 0;
-  display: flex; flex-direction: column;
-  transition: height .42s var(--spring), width .42s var(--spring), opacity .22s var(--ease);
+  position: relative;
+  overflow: hidden;
+  opacity: 0;
+  height: 0;
+  width: 0;
+  display: flex;
+  flex-direction: column;
+  transition:
+    height var(--duration-expand) var(--ease-spring),
+    width var(--duration-expand) var(--ease-spring),
+    opacity var(--duration-base) var(--ease-standard);
 }
 .dock[data-expanded] .content { opacity: 1; }
-.dock.dock-bottom[data-expanded] .content, .dock.dock-top[data-expanded] .content { width: min(var(--panel), calc(100vw - 32px)); max-height: min(60vh, 520px); }
-.dock.dock-left[data-expanded] .content, .dock.dock-right[data-expanded] .content { height: min(60vh, 520px); max-width: var(--panel); }
-.dock[data-expanded] .toolbar { box-shadow: 0 -1px 0 var(--border-soft) inset; }
-.dock.dock-top[data-expanded] .toolbar, .dock.dock-left[data-expanded] .toolbar { box-shadow: 0 1px 0 var(--border-soft) inset; }
+.dock[data-expanded] .toolbar {
+  box-shadow: 0 -1px 0 var(--border-soft) inset;
+}
+.dock.dock-top[data-expanded] .toolbar,
+.dock.dock-left[data-expanded] .toolbar {
+  box-shadow: 0 1px 0 var(--border-soft) inset;
+}
 .content-head {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 12px 14px; font-weight: 600; white-space: nowrap;
+  flex: 0 0 auto;
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  font-weight: 650;
+  white-space: nowrap;
 }
 .count {
-  font-size: 11px; font-weight: 700; color: var(--accent-fg); background: var(--accent);
-  min-width: 18px; height: 18px; border-radius: 999px; display: inline-flex;
-  align-items: center; justify-content: center; padding: 0 5px;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--accent-fg);
+  background: var(--accent);
+  font-size: 11px;
+  font-weight: 750;
 }
-.content-list { flex: 1 1 0; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 4px 8px 8px; display: flex; flex-direction: column; gap: 8px; width: min(var(--panel), calc(100vw - 32px)); }
+.count.is-updated { animation: count-tint var(--duration-base) var(--ease-standard); }
+.filter-tabs {
+  flex: 0 0 auto;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 2px;
+  margin: 0 10px 8px;
+  padding: 3px;
+  border-radius: 10px;
+  background: var(--border-soft);
+}
+.filter-tabs button {
+  min-width: 0;
+  min-height: 36px;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--fg-muted);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+}
+.filter-tabs button[aria-selected="true"] {
+  color: var(--fg);
+  background: var(--bg-elev);
+  box-shadow: var(--shadow);
+}
+.filter-count {
+  margin-left: 5px;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+.new-comments {
+  position: absolute;
+  z-index: 3;
+  top: 88px;
+  left: 50%;
+  transform: translateX(-50%);
+  min-height: 32px;
+  padding: 6px 12px;
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  background: var(--bg-elev);
+  color: var(--accent);
+  box-shadow: var(--shadow);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 650;
+}
+.new-comments[hidden] { display: none; }
+.content-list {
+  flex: 1 1 0;
+  min-height: 0;
+  width: 100%;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 4px 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
 .drawer-thread {
   flex: 0 0 auto;
-  padding: 10px 12px; border: 1px solid var(--border-soft); border-radius: var(--radius-sm);
-  background: var(--bg); transition: border-color var(--dur) var(--ease);
+  padding: 10px 12px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  transition:
+    border-color var(--duration-base) var(--ease-standard),
+    box-shadow var(--duration-base) var(--ease-standard);
 }
-.drawer-thread:hover { border-color: var(--border); }
-.empty { padding: 18px; color: var(--fg-muted); font-size: 13px; text-align: center; }
+.drawer-thread:hover, .drawer-thread:focus-within,
+.drawer-thread.is-highlighted {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 25%, transparent);
+}
+.drawer-thread.is-new { animation: new-card var(--duration-base) var(--ease-standard); }
+.orphan-badge {
+  display: inline-flex;
+  margin-bottom: 7px;
+  color: var(--danger);
+  font-size: 11px;
+  font-weight: 650;
+}
+.empty {
+  min-height: 180px;
+  padding: 24px 18px;
+  color: var(--fg-muted);
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font-size: 13px;
+}
+.empty strong { color: var(--fg); font-size: 14px; }
+.empty button {
+  min-height: 40px;
+  margin-top: 6px;
+  padding: 8px 12px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: var(--accent);
+  color: var(--accent-fg);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  font-weight: 650;
+}
+.empty button svg { width: 15px; height: 15px; }
 
-/* pins */
-.markers { position: fixed; inset: 0; pointer-events: none; z-index: 2147483645; }
+.selection-action {
+  position: fixed;
+  z-index: 2147483647;
+  width: auto;
+  min-width: 44px;
+  height: 44px;
+  padding: 0 12px;
+  gap: 6px;
+  border: 2px solid var(--bg-elev);
+  font-size: 12px;
+  font-weight: 650;
+  white-space: nowrap;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--accent-fg);
+  box-shadow: var(--shadow-lg);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  opacity: 0;
+  transform: translateY(4px) scale(.96);
+  pointer-events: none;
+  transition:
+    opacity var(--duration-fast) var(--ease-standard),
+    transform var(--duration-fast) var(--ease-standard);
+}
+.selection-action[data-state="open"] {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+  pointer-events: auto;
+}
+.anchor-highlight {
+  position: fixed;
+  z-index: 2147483644;
+  pointer-events: none;
+  border: 2px solid var(--accent);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  opacity: 0;
+  transition: opacity var(--duration-fast) var(--ease-standard);
+}
+.anchor-highlight[data-visible] { opacity: 1; }
+
+/* Pins */
+.markers {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 2147483645;
+}
 .pin {
-  position: fixed; pointer-events: auto; opacity: 1;
-  width: 24px; height: 24px; border-radius: 50% 50% 50% 0; transform: rotate(-45deg);
-  background: var(--accent); color: var(--accent-fg); border: 2px solid var(--bg);
+  position: fixed;
+  pointer-events: auto;
+  opacity: 1;
+  width: 28px;
+  height: 28px;
+  border-radius: 50% 50% 50% 0;
+  transform: rotate(-45deg);
+  background: var(--accent);
+  color: var(--accent-fg);
+  border: 2px solid var(--bg);
   box-shadow: var(--shadow);
-  font-size: 11px; font-weight: 700; cursor: pointer; padding: 0;
-  display: flex; align-items: center; justify-content: center;
-  animation: pin-in var(--dur) var(--spring) 0s 1 normal forwards;
-  transition: background var(--dur) var(--ease), transform var(--dur) var(--spring);
+  font-size: 11px;
+  font-weight: 750;
+  cursor: pointer;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition:
+    background var(--duration-base) var(--ease-standard),
+    transform var(--duration-fast) var(--ease-standard),
+    box-shadow var(--duration-fast) var(--ease-standard);
+}
+.pin::after {
+  content: "";
+  position: absolute;
+  inset: -8px;
+  border-radius: 999px;
 }
 .pin-num { display: block; transform: rotate(45deg); line-height: 1; }
-.pin.resolved { background: var(--resolved-bg); }
-.pin:hover { transform: rotate(-45deg) scale(1.18); z-index: 2; }
-.pin:active { transform: rotate(-45deg) scale(.95); }
+.pin.resolved { background: var(--resolved-bg); color: #ffffff; }
+.pin:hover, .pin.is-highlighted {
+  transform: rotate(-45deg) scale(1.08);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 28%, transparent), var(--shadow);
+  z-index: 2;
+}
+.pin:active { transform: rotate(-45deg) scale(.96); }
 .pin.orphan { display: none; }
+.pin.is-new { animation: pin-in var(--duration-base) var(--ease-spring); }
 
-/* bubbles */
-.bubbles { position: fixed; inset: 0; pointer-events: none; z-index: 2147483647; }
+/* Composer and thread bubbles */
+.bubbles {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 2147483647;
+}
 .bubble {
-  position: fixed; pointer-events: auto; width: min(320px, calc(100vw - 16px));
-  background: var(--bg-elev); border: 1px solid var(--border); border-radius: var(--radius);
-  box-shadow: var(--shadow-lg); padding: 12px; color: var(--fg);
-  animation: bubble-in var(--dur) var(--spring);
+  position: fixed;
+  pointer-events: auto;
+  width: min(320px, calc(100vw - 16px));
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-lg);
+  padding: 12px;
+  color: var(--fg);
+  animation: bubble-in var(--duration-base) var(--ease-standard);
 }
-.bubble[data-state="closed"] { animation: bubble-out 140ms var(--ease) forwards; }
-.anchor-label { font-size: 12px; color: var(--fg-muted); margin-bottom: 8px; overflow-wrap: anywhere; }
+.bubble[data-state="closed"] {
+  animation: bubble-out var(--duration-fast) var(--ease-standard) forwards;
+}
+.anchor-label {
+  margin-bottom: 8px;
+  color: var(--fg-muted);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
 .bubble textarea, .reply-input {
-  width: 100%; border: 1px solid var(--border); border-radius: var(--radius-sm);
-  background: var(--bg); color: var(--fg); outline: none;
-  transition: border-color var(--dur) var(--ease), box-shadow var(--dur) var(--ease);
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--fg);
+  outline: none;
+  transition:
+    border-color var(--duration-fast) var(--ease-standard),
+    box-shadow var(--duration-fast) var(--ease-standard);
 }
-.bubble textarea { padding: 8px 10px; font-size: 13px; min-height: 64px; resize: vertical; }
-.reply-input { padding: 6px 10px; font-size: 12px; min-height: 36px; resize: none; }
-.bubble textarea:focus, .reply-input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 20%, transparent); }
+.bubble textarea {
+  min-height: 72px;
+  padding: 9px 10px;
+  resize: vertical;
+  font-size: 13px;
+}
+.reply-input {
+  min-height: 40px;
+  padding: 8px 10px;
+  resize: vertical;
+  font-size: 12px;
+}
+.bubble textarea:focus, .reply-input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 20%, transparent);
+}
+.composer-buttons { display: flex; gap: 6px; margin-top: 8px; }
+.composer-help {
+  display: block;
+  margin-top: 6px;
+  color: var(--fg-muted);
+  font-size: 11px;
+}
 .reply-row { margin-top: 8px; }
-
 .head { display: flex; gap: 6px; align-items: center; font-size: 12px; }
-.who { font-weight: 600; max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.who {
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 650;
+}
 .when { color: var(--fg-muted); }
-.resolved { display: inline-flex; align-items: center; gap: 3px; color: var(--resolved); font-size: 11px; font-weight: 600; }
-.resolved svg { width: 13px; height: 13px; }
-.archived-badge { display: inline-flex; align-items: center; gap: 3px; color: var(--fg-muted); font-size: 11px; font-weight: 600; }
-.archived-badge svg { width: 13px; height: 13px; }
-/* Hover-only action icons on the card header (resolve, archive, delete).
-   Invisible at rest, fade in on hover. Pushed right via margin-left:auto. */
-.card-actions { display: flex; gap: 2px; margin-left: auto; opacity: 0; transition: opacity var(--dur) var(--ease); }
-.drawer-thread:hover .card-actions, .bubble:hover .card-actions { opacity: 1; }
+.resolved {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: var(--resolved);
+  font-size: 11px;
+  font-weight: 650;
+}
+.resolved svg, .archived-badge svg { width: 13px; height: 13px; }
+.archived-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: var(--fg-muted);
+  font-size: 11px;
+  font-weight: 650;
+}
+.card-actions {
+  display: flex;
+  gap: 2px;
+  margin-left: auto;
+  opacity: 0;
+  transition: opacity var(--duration-fast) var(--ease-standard);
+}
+.drawer-thread:hover .card-actions,
+.drawer-thread:focus-within .card-actions,
+.bubble:hover .card-actions,
+.bubble:focus-within .card-actions {
+  opacity: 1;
+}
 .card-action {
-  background: transparent; border: none; border-radius: 6px; padding: 4px;
-  cursor: pointer; color: var(--fg-muted); display: inline-flex; align-items: center;
-  justify-content: center; transition: background var(--dur) var(--ease), color var(--dur) var(--ease);
+  width: 36px;
+  height: 36px;
+  border: 0;
+  border-radius: 7px;
+  padding: 0;
+  background: transparent;
+  color: var(--fg-muted);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition:
+    background var(--duration-fast) var(--ease-standard),
+    color var(--duration-fast) var(--ease-standard);
 }
 .card-action:hover { background: var(--border-soft); color: var(--fg); }
-.card-action.danger:hover { color: #e5484d; }
-.card-action svg { width: 14px; height: 14px; }
+.card-action.danger:hover { color: var(--danger); }
+.card-action:disabled { opacity: .45; cursor: wait; }
+.card-action svg { width: 15px; height: 15px; }
 .quote {
-  margin: 8px 0; padding: 6px 10px; border-left: 3px solid var(--accent);
-  color: var(--fg-muted); font-size: 12px; background: var(--border-soft);
-  border-radius: 0 var(--radius-sm) var(--radius-sm) 0; overflow-wrap: anywhere; cursor: pointer;
+  width: fit-content;
+  max-width: 100%;
+  margin: 8px 0;
+  padding: 6px 10px;
+  border: 0;
+  border-left: 3px solid var(--accent);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  background: var(--border-soft);
+  color: var(--fg-muted);
+  cursor: pointer;
+  text-align: left;
+  font-size: 12px;
+  overflow-wrap: anywhere;
 }
 .quote:hover { color: var(--fg); }
-.body { font-size: 13px; margin: 6px 0; white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; }
-.replies { margin-top: 8px; display: flex; flex-direction: column; gap: 4px; }
+.locate-link {
+  margin: 6px 0 2px;
+  padding: 4px 0;
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  cursor: pointer;
+  text-align: left;
+  font-size: 12px;
+  font-weight: 650;
+}
+.locate-link:hover { color: var(--accent-hover); text-decoration: underline; }
+.body {
+  margin: 6px 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  font-size: 13px;
+}
+.replies {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
 .reply {
-  font-size: 12px; color: var(--fg); background: var(--border-soft);
-  padding: 6px 8px; border-radius: var(--radius-sm); overflow-wrap: anywhere; word-break: break-word;
-  animation: reply-in var(--dur) var(--ease);
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  background: var(--border-soft);
+  color: var(--fg);
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  font-size: 12px;
 }
-.reply-who { font-weight: 600; margin-right: 4px; }
-.actions { display: flex; gap: 6px; margin-top: 10px; align-items: center; }
-.actions button {
-  border: none; border-radius: var(--radius-sm); padding: 7px 12px; font-size: 12px; cursor: pointer;
-  display: inline-flex; align-items: center; gap: 4px;
-  transition: background var(--dur) var(--ease), transform var(--dur) var(--spring), opacity var(--dur) var(--ease);
+.reply.is-new { animation: reply-in var(--duration-base) var(--ease-standard); }
+.reply-who { margin-right: 4px; font-weight: 650; }
+.actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 10px;
+  align-items: center;
 }
-.actions button.primary { background: var(--accent); color: var(--accent-fg); }
-.actions button.primary:hover { background: var(--accent-hover); }
+.actions button, .reply-row button {
+  min-height: 38px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  padding: 7px 12px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  font-size: 12px;
+  transition:
+    background var(--duration-fast) var(--ease-standard),
+    transform var(--duration-fast) var(--ease-standard),
+    opacity var(--duration-fast) var(--ease-standard);
+}
+.reply-row button { margin-top: 7px; }
+.actions button.primary, .reply-row button.primary {
+  background: var(--accent);
+  color: var(--accent-fg);
+}
+.actions button.primary:hover, .reply-row button.primary:hover {
+  background: var(--accent-hover);
+}
 .actions button.ghost { background: var(--border-soft); color: var(--fg); }
 .actions button.ghost:hover { background: var(--border); }
-.actions button:active { transform: scale(.92); }
-.actions button:disabled { opacity: .5; cursor: not-allowed; }
-.actions button svg { width: 15px; height: 15px; }
+.actions button:active, .reply-row button:active { transform: scale(.96); }
+.actions button:disabled, .reply-row button:disabled {
+  opacity: .58;
+  cursor: wait;
+}
+.actions button svg, .reply-row button svg { width: 15px; height: 15px; }
+.busy svg { display: none; }
+.busy::before {
+  content: "";
+  width: 13px;
+  height: 13px;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: spin .8s linear infinite;
+}
 
-/* hint + toast + tooltip */
+/* Guidance, status and tooltips */
 .hint {
-  position: fixed; bottom: 96px; left: 50%; transform: translateX(-50%);
-  z-index: 2147483647; background: var(--accent); color: var(--accent-fg);
-  padding: 9px 16px; border-radius: 999px; font-size: 13px; font-weight: 500;
-  box-shadow: var(--shadow-lg); max-width: calc(100vw - 24px); text-align: center;
-  animation: rise var(--dur) var(--spring);
+  position: fixed;
+  bottom: 96px;
+  left: 50%;
+  z-index: 2147483647;
+  max-width: calc(100vw - 24px);
+  padding: 9px 16px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--accent-fg);
+  box-shadow: var(--shadow-lg);
+  text-align: center;
+  font-size: 13px;
+  font-weight: 550;
+  transform: translateX(-50%);
+  animation: rise var(--duration-base) var(--ease-standard);
 }
 .toast {
-  position: fixed; bottom: 96px; left: 50%; transform: translateX(-50%);
-  z-index: 2147483647; background: var(--fg); color: var(--bg);
-  padding: 9px 16px; border-radius: 999px; font-size: 13px; max-width: calc(100vw - 24px);
-  animation: rise var(--dur) var(--ease);
+  position: fixed;
+  bottom: 96px;
+  left: 50%;
+  z-index: 2147483647;
+  max-width: calc(100vw - 24px);
+  min-height: 44px;
+  padding: 8px 10px 8px 14px;
+  border-radius: 999px;
+  background: var(--fg);
+  color: var(--bg);
+  box-shadow: var(--shadow-lg);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  transform: translateX(-50%);
+  animation: rise var(--duration-base) var(--ease-standard);
 }
-.toast[data-state="closed"] { animation: fall 140ms var(--ease) forwards; }
+.toast.error { background: var(--danger-bg); color: #ffffff; }
+.toast button {
+  min-height: 32px;
+  padding: 5px 10px;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font-weight: 700;
+}
+.toast[data-state="closed"] {
+  animation: fall var(--duration-fast) var(--ease-standard) forwards;
+}
 .tip {
-  position: fixed; z-index: 2147483647; pointer-events: none;
-  background: var(--fg); color: var(--bg); padding: 5px 9px; border-radius: 6px;
-  font-size: 12px; white-space: nowrap; max-width: 240px; overflow: hidden; text-overflow: ellipsis;
-  opacity: 0; transform: translateY(2px) scale(.96);
-  transition: opacity var(--dur) var(--ease), transform var(--dur) var(--spring);
+  position: fixed;
+  z-index: 2147483647;
+  pointer-events: none;
+  max-width: 240px;
+  padding: 5px 9px;
+  border-radius: 6px;
+  background: var(--fg);
+  color: var(--bg);
+  opacity: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  transform: translateY(2px) scale(.96);
+  transition:
+    opacity var(--duration-fast) var(--ease-standard),
+    transform var(--duration-fast) var(--ease-standard);
 }
 .tip[data-state="open"] { opacity: 1; transform: translateY(0) scale(1); }
 
-/* keyframes */
-@keyframes pin-in { from { opacity: 0; transform: rotate(-45deg) scale(.3); } to { opacity: 1; transform: rotate(-45deg) scale(1); } }
-@keyframes bubble-in { from { opacity: 0; transform: scale(.88); } to { opacity: 1; transform: scale(1); } }
-@keyframes bubble-out { from { opacity: 1; transform: scale(1); } to { opacity: 0; transform: scale(.96); } }
-@keyframes reply-in { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }
-@keyframes rise { from { opacity: 0; transform: translateX(-50%) translateY(10px); } to { opacity: 1; transform: translateX(-50%) translateY(0); } }
-@keyframes fall { from { opacity: 1; transform: translateX(-50%) translateY(0); } to { opacity: 0; transform: translateX(-50%) translateY(10px); } }
-
-@media (prefers-reduced-motion: reduce) {
-  .pin, .bubble, .reply, .content, .hint, .toast, .dock { animation: none !important; transition: none !important; }
+.dock[data-compact-sheet] {
+  flex-direction: column;
+  align-items: stretch;
 }
-`;
+.dock[data-compact-sheet] .toolbar {
+  order: 2;
+  flex-direction: row;
+  justify-content: center;
+  box-shadow: 0 -1px 0 var(--border-soft) inset;
+}
+.dock[data-compact-sheet] .content { order: 1; }
 
+@keyframes pin-in {
+  from { opacity: 0; transform: rotate(-45deg) scale(.8); }
+  to { opacity: 1; transform: rotate(-45deg) scale(1); }
+}
+@keyframes bubble-in {
+  from { opacity: 0; transform: scale(.96); }
+  to { opacity: 1; transform: scale(1); }
+}
+@keyframes bubble-out {
+  from { opacity: 1; transform: scale(1); }
+  to { opacity: 0; transform: scale(.98); }
+}
+@keyframes reply-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes new-card {
+  from { background: color-mix(in srgb, var(--accent) 18%, var(--bg)); }
+  to { background: var(--bg); }
+}
+@keyframes count-tint {
+  50% { box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 22%, transparent); }
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes rise {
+  from { opacity: 0; transform: translateX(-50%) translateY(8px); }
+  to { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+@keyframes fall {
+  from { opacity: 1; transform: translateX(-50%) translateY(0); }
+  to { opacity: 0; transform: translateX(-50%) translateY(8px); }
+}
+
+@media (max-width: 419px) {
+  .actions button, .reply-row button, .card-action, .filter-tabs button, .empty button {
+    min-height: 44px;
+  }
+  .bubble { width: calc(100vw - 16px); }
+  .content-head { min-height: 44px; }
+}
+@media (hover: none) {
+  .card-actions { opacity: 1; }
+  .card-action { width: 44px; height: 44px; }
+  .filter-tabs button, .actions button, .reply-row button, .toast button {
+    min-height: 44px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .pin, .bubble, .reply, .drawer-thread, .selection-action, .anchor-highlight,
+  .count, .content, .hint, .toast, .tip, .dock, .busy::before {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
+`;
 // ────────────────────────────── boot ────────────────────────────────
 
 function boot(): void {
