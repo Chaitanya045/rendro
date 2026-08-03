@@ -242,6 +242,22 @@ CLI phases:
 3. **Upload**: Changed/new files → POST `/api/sync/upload`
 4. **Delete**: Files on server but not locally → DELETE `/api/sync/delete`
 
+### Publication API
+
+Uploads are private by default. An API-key-authenticated publication record maps one existing organization-owned folder prefix to a stable public slug; no R2 objects are copied or made bucket-public.
+
+| Method | Path | Auth | Body/Params | Returns |
+|---|---|---|---|---|
+| GET | `/api/publications` | API Key | — | `{ publications }` |
+| POST | `/api/publications` | API Key | `{ sourcePrefix, slug, title, entryFile }` | Publication record |
+| DELETE | `/api/publications/:slug` | API Key | — | `{ unpublished, slug }` |
+| GET | `/public/:org/:slug` | Anonymous | — | Read-only publication shell |
+| GET | `/public/:org/:slug/tree` | Anonymous | `?path=` | Published HTML tree |
+| GET | `/public/:org/:slug/files/*` | Anonymous | — | Sandboxed published HTML |
+| GET | `/public/:org/:slug/sitemap.xml` | Anonymous | — | Publication sitemap |
+
+Publication records live under the reserved `__rendro/publications/` object prefix and are excluded from document listings. Each anonymous request reloads the enabled record, validates the requested relative path, confirms the resolved object remains under the exact registered prefix, and filters soft-deleted files. Existing `/api/tree/:org` routes require a same-organization session.
+
 ---
 
 ## Tree UI

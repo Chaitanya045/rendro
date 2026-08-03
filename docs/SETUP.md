@@ -90,6 +90,28 @@ curl -X POST http://localhost:3000/api/sync/upload \
   -d '{"key": "acme-corp/index.html", "content": "<h1>Hello</h1>"}'
 ```
 
+### 6. Publish a Folder
+
+Publishing is explicit: uploads remain private until their folder prefix is registered. The folder and entry file must already exist.
+
+```bash
+RENDRO_API_KEY=rendro_xxx ./bin/rendro.mjs publish \
+  --org acme-corp \
+  --folder product-docs \
+  --slug product \
+  --entry index.html \
+  --title "Acme Product Documentation" \
+  --endpoint http://localhost:3000
+
+# Inspect or revoke public folders
+RENDRO_API_KEY=rendro_xxx ./bin/rendro.mjs publications \
+  --org acme-corp --endpoint http://localhost:3000
+RENDRO_API_KEY=rendro_xxx ./bin/rendro.mjs unpublish \
+  --org acme-corp --slug product --endpoint http://localhost:3000
+```
+
+The public URL is `http://localhost:3000/public/acme-corp/product`. Only HTML files below the registered folder are available anonymously; sibling folders and private tree APIs remain session-protected.
+
 ## Deployment
 
 ### Convex

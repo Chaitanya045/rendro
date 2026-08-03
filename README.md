@@ -28,7 +28,11 @@ chmod +x rendro
    export RENDRO_API_KEY=rendro_xxx
    rendro push --source ./docs --org my-org --endpoint https://rendro.app
    ```
-4. View live at `https://rendro.app`
+4. Keep the organization tree private, or publish an uploaded folder at a stable public URL:
+   ```bash
+   rendro publish --org my-org --folder product-docs --slug product
+   # https://rendro.app/public/my-org/product
+   ```
 
 ## Features
 
@@ -39,6 +43,7 @@ chmod +x rendro
 - **CI/CD native** — hash-based diffing, uploads only changed files
 - **Soft-delete** — removed files hidden from tree, still accessible via URL
 - **API key auth** — per-org keys, org isolation by email domain
+- **Public folders** — explicitly publish one uploaded folder at a stable, anonymous read-only URL
 
 ## Tech Stack
 

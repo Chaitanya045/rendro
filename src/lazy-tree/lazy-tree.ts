@@ -4,27 +4,60 @@
  */
 type RendroWindow = Window & { RENDRO_INITIAL_DOC?: string; RENDRO_CURRENT_DOC?: string };
 const RENDRO_WINDOW = window as RendroWindow;
-const ORG = (document.querySelector("[data-tree-org]") as HTMLElement)?.dataset.treeOrg;
+const TREE_HOST = document.querySelector<HTMLElement>("[data-tree-org]");
+const ORG = TREE_HOST?.dataset.treeOrg;
+const PUBLICATION_BASE = TREE_HOST?.dataset.publicationBase ?? "";
 interface TreeNode { name: string; path: string; type: "file" | "folder"; size?: number; }
+interface TreePageResponse { children: TreeNode[]; isTruncated: boolean; nextStartAfter?: string; }
+interface Publication {
+  slug: string;
+  sourcePrefix: string;
+  title: string;
+  entryFile: string;
+  url: string;
+}
+
+let publications: Publication[] = [];
+let publicationDialog: HTMLDialogElement | null = null;
+let publicDocuments: string[] | null = null;
 
 const TREE = document.getElementById("tree-container") as HTMLElement;
 
-function humanSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+function encodePath(path: string): string {
+  return path.split("/").map(encodeURIComponent).join("/");
 }
 
 function esc(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
+function relativePublicPath(fullPath: string): string {
+  if (!ORG || !fullPath.startsWith(`${ORG}/`)) return "";
+  return fullPath.slice(ORG.length + 1);
+}
+
 function docUrl(fullPath: string): string {
-  return `/docs/${fullPath.split("/").map(encodeURIComponent).join("/")}`;
+  if (PUBLICATION_BASE) {
+    const url = new URL(PUBLICATION_BASE, location.origin);
+    url.searchParams.set("doc", relativePublicPath(fullPath));
+    return `${url.pathname}${url.search}`;
+  }
+  return `/docs/${encodePath(fullPath)}`;
+}
+
+function documentFrameUrl(fullPath: string): string {
+  return PUBLICATION_BASE
+    ? `${PUBLICATION_BASE}/files/${encodePath(relativePublicPath(fullPath))}`
+    : `/files/${encodePath(fullPath)}`;
 }
 
 function docFromPathname(): string {
-  if (!ORG || !location.pathname.startsWith("/docs/")) return "";
+  if (!ORG) return "";
+  if (PUBLICATION_BASE) {
+    const documentPath = new URLSearchParams(location.search).get("doc");
+    return documentPath ? `${ORG}/${documentPath}` : "";
+  }
+  if (!location.pathname.startsWith("/docs/")) return "";
   const rawPath = location.pathname.slice("/docs/".length);
   const key = rawPath.split("/").map(decodeURIComponent).join("/");
   if (key === ORG) return "";
@@ -118,13 +151,49 @@ async function expand(folder: HTMLElement) {
   }
 }
 
+async function ensurePublicDocuments(): Promise<void> {
+  if (!PUBLICATION_BASE || publicDocuments) return;
+  const response = await fetch(`${PUBLICATION_BASE}/tree`);
+  if (!response.ok) throw new Error(`${response.status}`);
+  const result = await response.json() as { documents?: unknown };
+  if (!Array.isArray(result.documents) || !result.documents.every((path) => typeof path === "string")) {
+    throw new Error("Invalid public document tree");
+  }
+  publicDocuments = result.documents;
+}
+
+function publicChildren(path: string): TreeNode[] {
+  if (!ORG || !publicDocuments || !path.startsWith(`${ORG}/`)) return [];
+  const relativePrefix = path.slice(ORG.length + 1);
+  const children = new Map<string, TreeNode>();
+  for (const documentPath of publicDocuments) {
+    if (!documentPath.startsWith(relativePrefix)) continue;
+    const remainder = documentPath.slice(relativePrefix.length);
+    if (!remainder) continue;
+    const separator = remainder.indexOf("/");
+    const name = separator === -1 ? remainder : remainder.slice(0, separator);
+    const type: TreeNode["type"] = separator === -1 ? "file" : "folder";
+    const childPath = `${ORG}/${relativePrefix}${name}${type === "folder" ? "/" : ""}`;
+    children.set(`${type}:${name}`, { name, path: childPath, type });
+  }
+  return Array.from(children.values()).sort((left, right) =>
+    left.type === right.type ? left.name.localeCompare(right.name) : left.type === "folder" ? -1 : 1
+  );
+}
+
 async function loadPage(folder: HTMLElement, path: string, content: HTMLElement, startAfter?: string) {
-  const url = `/api/tree/${ORG}?prefix=${encodeURIComponent(path)}&limit=${PAGE_SIZE}${startAfter ? `&startAfter=${encodeURIComponent(startAfter)}` : ""}`;
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`${res.status}`);
-  const data = await res.json();
+  let data: TreePageResponse;
+  if (PUBLICATION_BASE) {
+    await ensurePublicDocuments();
+    data = { children: publicChildren(path), isTruncated: false };
+  } else {
+    const url = `/api/tree/${ORG}?prefix=${encodeURIComponent(path)}&limit=${PAGE_SIZE}${startAfter ? `&startAfter=${encodeURIComponent(startAfter)}` : ""}`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`${res.status}`);
+    data = await res.json() as TreePageResponse;
+  }
   const childDepth = parseInt(folder.dataset.depth || "0") + 1;
-  const children = data.children as TreeNode[];
+  const children = data.children;
   const existingPaths = new Set(
     Array.from(content.querySelectorAll<HTMLElement>("[data-path]"))
       .map((el) => el.dataset.path)
@@ -138,6 +207,7 @@ async function loadPage(folder: HTMLElement, path: string, content: HTMLElement,
   const rows = renderRows(freshChildren, childDepth);
   content.insertAdjacentHTML("beforeend", rows);
   indexChildItems(content);
+  markPublicationButtons();
 
   if (data.isTruncated && data.nextStartAfter) {
     folder.dataset.nextStartAfter = data.nextStartAfter;
@@ -180,6 +250,175 @@ function renderEmptyTree(): string {
   </form>`;
 }
 
+function publicationFor(path: string): Publication | undefined {
+  return publications.find((publication) => publication.sourcePrefix === path);
+}
+
+function markPublicationButtons() {
+  TREE.querySelectorAll<HTMLButtonElement>(".publication-action").forEach((button) => {
+    const published = Boolean(button.dataset.publicationPath && publicationFor(button.dataset.publicationPath));
+    button.classList.toggle("published", published);
+    button.setAttribute("aria-pressed", String(published));
+    button.title = published ? "Manage public access" : "Publish folder";
+  });
+}
+
+async function refreshPublications(): Promise<void> {
+  const response = await fetch("/api/publications");
+  if (!response.ok) throw new Error(await response.text() || "Could not load publications");
+  const result = await response.json() as { publications: Publication[] };
+  publications = result.publications;
+  markPublicationButtons();
+}
+
+function setPublicationMessage(message: string, isError = false) {
+  const output = publicationDialog?.querySelector<HTMLElement>("#publication-message");
+  if (!output) return;
+  output.textContent = message;
+  output.classList.toggle("error", isError);
+}
+
+function setPublicationBusy(busy: boolean) {
+  publicationDialog?.querySelectorAll<HTMLInputElement | HTMLButtonElement>("input,button").forEach((element) => {
+    element.disabled = busy;
+  });
+}
+
+function currentPublicationPath(): string {
+  return publicationDialog?.dataset.path ?? "";
+}
+
+function showPublication(publication?: Publication) {
+  const link = publicationDialog?.querySelector<HTMLAnchorElement>("#publication-link");
+  const unpublish = publicationDialog?.querySelector<HTMLButtonElement>("#publication-unpublish");
+  if (link) {
+    link.hidden = !publication;
+    link.href = publication?.url ?? "#";
+  }
+  if (unpublish) unpublish.hidden = !publication;
+}
+
+function defaultPublicationSlug(path: string): string {
+  const name = path.replace(/\/+$/, "").split("/").at(-1) ?? "docs";
+  return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "docs";
+}
+
+async function publishFromDialog(): Promise<void> {
+  const path = currentPublicationPath();
+  const slug = publicationDialog?.querySelector<HTMLInputElement>("#publication-slug");
+  const title = publicationDialog?.querySelector<HTMLInputElement>("#publication-title");
+  const entry = publicationDialog?.querySelector<HTMLInputElement>("#publication-entry");
+  if (!path || !slug || !title || !entry) return;
+  setPublicationBusy(true);
+  setPublicationMessage("Publishing…");
+  try {
+    const response = await fetch("/api/publications", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        sourcePrefix: path,
+        slug: slug.value.trim(),
+        title: title.value.trim(),
+        entryFile: entry.value.trim(),
+      }),
+    });
+    if (!response.ok) throw new Error(await response.text() || "Could not publish folder");
+    const publication = await response.json() as Publication;
+    await refreshPublications();
+    showPublication(publication);
+    setPublicationMessage("Published. Future uploads inside this folder stay public.");
+  } catch (error) {
+    setPublicationMessage(error instanceof Error ? error.message : "Could not publish folder", true);
+  } finally {
+    setPublicationBusy(false);
+  }
+}
+
+async function unpublishFromDialog(): Promise<void> {
+  const path = currentPublicationPath();
+  const publication = publicationFor(path);
+  if (!publication) return;
+  setPublicationBusy(true);
+  setPublicationMessage("Removing public access…");
+  try {
+    const response = await fetch(`/api/publications/${encodeURIComponent(publication.slug)}`, { method: "DELETE" });
+    if (!response.ok) throw new Error(await response.text() || "Could not remove public access");
+    await refreshPublications();
+    showPublication();
+    setPublicationMessage("Public access removed. The uploaded files remain private.");
+  } catch (error) {
+    setPublicationMessage(error instanceof Error ? error.message : "Could not remove public access", true);
+  } finally {
+    setPublicationBusy(false);
+  }
+}
+
+function ensurePublicationDialog(): HTMLDialogElement {
+  if (publicationDialog) return publicationDialog;
+  publicationDialog = document.createElement("dialog");
+  publicationDialog.className = "publication-dialog";
+  publicationDialog.setAttribute("aria-labelledby", "publication-dialog-title");
+  publicationDialog.innerHTML = `<form class="publication-form">
+    <div class="publication-heading">
+      <span class="material-symbols-outlined" aria-hidden="true">public</span>
+      <div><p class="publication-eyebrow">Public access</p><h2 id="publication-dialog-title">Publish folder</h2></div>
+    </div>
+    <p class="publication-copy">Anyone with the public URL can read HTML documents inside this folder. Sibling folders stay private.</p>
+    <label for="publication-title">Title</label>
+    <input id="publication-title" name="title" required>
+    <label for="publication-slug">Public URL slug</label>
+    <div class="publication-input-prefix"><span>/public/${esc(ORG ?? "")}/</span><input id="publication-slug" name="slug" required pattern="[a-z0-9]+(?:-[a-z0-9]+)*"></div>
+    <label for="publication-entry">Landing document</label>
+    <input id="publication-entry" name="entry" required placeholder="index.html">
+    <p id="publication-message" class="publication-message" role="status" aria-live="polite"></p>
+    <div class="publication-actions">
+      <a id="publication-link" class="publication-link" target="_blank" rel="noopener" hidden>Open public docs</a>
+      <button id="publication-unpublish" class="publication-unpublish" type="button" hidden>Unpublish</button>
+      <span class="publication-action-spacer"></span>
+      <button class="publication-cancel" type="button">Cancel</button>
+      <button class="publication-submit" type="submit">Publish folder</button>
+    </div>
+  </form>`;
+  document.body.append(publicationDialog);
+  publicationDialog.querySelector(".publication-cancel")?.addEventListener("click", () => publicationDialog?.close());
+  publicationDialog.querySelector(".publication-unpublish")?.addEventListener("click", () => { void unpublishFromDialog(); });
+  publicationDialog.querySelector(".publication-form")?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    void publishFromDialog();
+  });
+  publicationDialog.addEventListener("click", (event) => {
+    if (event.target === publicationDialog) publicationDialog?.close();
+  });
+  return publicationDialog;
+}
+
+async function openPublicationDialog(path: string, folderName: string): Promise<void> {
+  const dialog = ensurePublicationDialog();
+  dialog.dataset.path = path;
+  const heading = dialog.querySelector<HTMLElement>("#publication-dialog-title");
+  const slug = dialog.querySelector<HTMLInputElement>("#publication-slug");
+  const title = dialog.querySelector<HTMLInputElement>("#publication-title");
+  const entry = dialog.querySelector<HTMLInputElement>("#publication-entry");
+  if (heading) heading.textContent = folderName;
+  setPublicationMessage("Loading publication status…");
+  showPublication();
+  dialog.showModal();
+  try {
+    await refreshPublications();
+    const publication = publicationFor(path);
+    if (slug) slug.value = publication?.slug ?? defaultPublicationSlug(path);
+    if (title) title.value = publication?.title ?? folderName;
+    if (entry) entry.value = publication?.entryFile ?? "index.html";
+    showPublication(publication);
+    setPublicationMessage(publication
+      ? "This folder is public. New uploads inside it appear automatically."
+      : "This folder is private.");
+    slug?.focus();
+  } catch (error) {
+    setPublicationMessage(error instanceof Error ? error.message : "Could not load publication status", true);
+  }
+}
+
 function startTreeEntrance(scope: ParentNode = TREE) {
   if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return;
   document.documentElement.classList.add("tree-entering");
@@ -192,12 +431,19 @@ async function loadRootTree() {
   if (!ORG || !TREE) return;
   TREE.dataset.loadingRoot = "true";
   try {
-    const res = await fetch(`/api/tree/${ORG}?prefix=${encodeURIComponent(`${ORG}/`)}&limit=1000`);
-    if (!res.ok) throw new Error(`${res.status}`);
-    const data = await res.json();
-    const children = data.children as TreeNode[];
+    let children: TreeNode[];
+    if (PUBLICATION_BASE) {
+      await ensurePublicDocuments();
+      children = publicChildren(`${ORG}/`);
+    } else {
+      const res = await fetch(`/api/tree/${ORG}?prefix=${encodeURIComponent(`${ORG}/`)}&limit=1000`);
+      if (!res.ok) throw new Error(`${res.status}`);
+      const data = await res.json() as TreePageResponse;
+      children = data.children;
+    }
     TREE.innerHTML = renderActiveIndicator() + (children.length ? renderRows(children, 0) : renderEmptyTree());
     startTreeEntrance(TREE);
+    if (!PUBLICATION_BASE) void refreshPublications().catch(() => undefined);
     const currentDoc = RENDRO_WINDOW.RENDRO_CURRENT_DOC || RENDRO_WINDOW.RENDRO_INITIAL_DOC || docFromPathname();
     if (currentDoc) syncActiveState(currentDoc);
   } catch {
@@ -209,11 +455,13 @@ async function loadRootTree() {
 
 function renderFolder(node: TreeNode, depth: number): string {
   const path = node.path.endsWith("/") ? node.path : `${node.path}/`;
+  const publicationAction = PUBLICATION_BASE ? "" : `<button class="publication-action" type="button" data-publication-path="${esc(path)}" aria-label="Public access for ${esc(node.name)}" aria-pressed="false" title="Publish folder"><span class="material-symbols-outlined" aria-hidden="true">public</span></button>`;
   return `<div class="tree-folder" data-path="${esc(path)}" data-depth="${depth}">
     <div class="tree-item flex items-center gap-2 px-3 py-1.5 rounded-lg text-on-surface-variant cursor-pointer">
       <span class="material-symbols-outlined text-[18px] caret-icon flex-shrink-0">chevron_right</span>
       <span class="material-symbols-outlined text-[18px] folder-icon flex-shrink-0">folder</span>
       <span class="font-body-md flex-1 min-w-0">${esc(node.name)}</span>
+      ${publicationAction}
     </div>
     <div class="tree-folder-content ml-4 space-y-0.5 border-l border-outline-variant/30 pl-2"></div>
   </div>`;
@@ -227,6 +475,16 @@ function renderRows(nodes: TreeNode[], depth: number): string {
 
 function handleClick(e: Event) {
   const target = e.target as HTMLElement;
+  const publicationAction = target.closest<HTMLButtonElement>(".publication-action");
+  if (publicationAction) {
+    e.preventDefault();
+    e.stopPropagation();
+    const folder = publicationAction.closest<HTMLElement>(".tree-folder");
+    const path = publicationAction.dataset.publicationPath;
+    const name = folder?.querySelector<HTMLElement>(":scope > .tree-item > .font-body-md")?.textContent?.trim();
+    if (path && name) void openPublicationDialog(path, name);
+    return;
+  }
 
   // Load-more button
   const loadMoreBtn = target.closest(".load-more-btn") as HTMLButtonElement | null;
@@ -327,14 +585,20 @@ function loadDoc(fullPath: string, pushState: boolean) {
     docLoadTimeout = window.setTimeout(() => {
       if (loadId === activeDocLoadId) showDocLoadError();
     }, 15000);
-    frame.src = `/files/${fullPath}`;
+    frame.src = documentFrameUrl(fullPath);
   }
 
   if (pushState) {
     const url = new URL(location.href);
-    url.pathname = docUrl(fullPath);
-    url.searchParams.delete("doc");
-    url.searchParams.delete("dev_user");
+    if (PUBLICATION_BASE) {
+      url.pathname = PUBLICATION_BASE;
+      url.search = "";
+      url.searchParams.set("doc", relativePublicPath(fullPath));
+    } else {
+      url.pathname = docUrl(fullPath);
+      url.searchParams.delete("doc");
+      url.searchParams.delete("dev_user");
+    }
     history.pushState({ docPath: fullPath }, "", url);
   }
 }

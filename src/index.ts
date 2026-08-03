@@ -7,6 +7,8 @@ import { sessionMiddleware } from "@/middleware/session";
 import appRoutes from "@/routes/app";
 import docsRoutes from "@/routes/docs";
 import shareRoutes from "@/routes/share";
+import publicRoutes from "@/routes/public";
+import publicationRoutes from "@/routes/publications";
 import { PORT } from "@/config";
 import { logger } from "@/logger";
 import { renderNotFoundPage } from "@/routes/not-found";
@@ -33,6 +35,7 @@ app.use("/api/sync/*", cors());
 
 // Public signed share routes intentionally bypass session middleware.
 app.route("/", shareRoutes);
+app.route("/", publicRoutes);
 
 // Better-auth session — reads cookies, populates c.get("user")
 app.use("*", sessionMiddleware);
@@ -54,6 +57,7 @@ app.on(["POST", "GET"], "/api/auth/*", (c) => auth!.handler(c.req.raw));
 
 // Main app routes — sign-in / derive org / show docs / create org form
 app.route("/", appRoutes);
+app.route("/", publicationRoutes);
 
 // File streaming + sync API
 app.route("/", docsRoutes);

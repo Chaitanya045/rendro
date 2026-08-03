@@ -365,21 +365,53 @@ function renderCreateOrg(user: User, org: string): string {
 
 
 
+export interface PublicShellPublication {
+  orgSlug: string;
+  slug: string;
+  title: string;
+  entryFile: string;
+}
+
+interface OrgTreePageOptions {
+  publication?: PublicShellPublication;
+}
+
 function renderOrgDocs(user: User, org: string, selectedDoc = ""): string {
   logOrgAccess(org, user.email, "view");
   return renderOrgTreePage(user, org, selectedDoc);
 }
 
-function renderOrgTreePage(user: User, org: string, selectedDoc = ""): string {
-  const email = escapeHtml(user.email);
+export function renderPublicOrgDocs(publication: PublicShellPublication, selectedPath: string): string {
+  const selectedDoc = `${publication.orgSlug}/${selectedPath}`;
+  return renderOrgTreePage(null, publication.orgSlug, selectedDoc, { publication });
+}
+
+function renderOrgTreePage(user: User | null, org: string, selectedDoc = "", options: OrgTreePageOptions = {}): string {
+  const publication = options.publication;
+  const email = user ? escapeHtml(user.email) : "Public documentation";
   const orgEsc = escapeHtml(org);
-  const initials = (user.name || email).split(/[@\s]/)[0].slice(0, 2).toUpperCase();
+  const initials = user ? (user.name || email).split(/[@\s]/)[0].slice(0, 2).toUpperCase() : "PU";
+  const publicationBase = publication
+    ? `/public/${encodeURIComponent(publication.orgSlug)}/${encodeURIComponent(publication.slug)}`
+    : "";
+  const shareLabel = publication ? "Copy public URL" : "Copy signed URL";
+  const sharePendingLabel = publication ? "Copying public URL…" : "Creating signed URL…";
+  const shareDoneLabel = publication ? "Public URL copied!" : "Signed URL copied!";
+  const avatarMarkup = user
+    ? `<div class="avatar-wrap">
+      <div class="topbar-avatar" id="avatar-btn" title="${escapeHtml(email)}">${initials}</div>
+      <div class="avatar-menu" id="avatar-menu" style="display:none">
+        <div class="avatar-menu-email">${escapeHtml(email)}</div>
+        <a href="/api/auth/sign-out" class="avatar-menu-item"><span class="material-symbols-outlined" style="font-size:18px">logout</span> Sign out</a>
+      </div>
+    </div>`
+    : "";
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>${orgEsc} — Rendro</title>
+<title>${escapeHtml(publication?.title ?? org)} — Rendro</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet">
 <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
@@ -516,6 +548,63 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
   .tree-folder>.tree-item .folder-icon{transition:color .15s}
   .tree-folder>.tree-item:hover .caret-icon,.tree-folder>.tree-item:focus-within .caret-icon{color:#c2410c;translate:2px 0}
   .tree-folder>.tree-item:hover .folder-icon,.tree-folder>.tree-item:focus-within .folder-icon{color:#c2410c}
+  .publication-action{width:28px;height:28px;margin:-4px -7px -4px 0;border:0;border-radius:6px;display:inline-grid;place-items:center;flex:0 0 auto;background:transparent;color:#71717a;opacity:0;cursor:pointer;transition:opacity .15s cubic-bezier(.4,0,.2,1),background-color .15s cubic-bezier(.4,0,.2,1),color .15s cubic-bezier(.4,0,.2,1)}
+  .publication-action .material-symbols-outlined{font-size:17px}
+  .tree-item:hover .publication-action,.tree-item:focus-within .publication-action,.publication-action.published{opacity:1}
+  .publication-action:hover{background:#ffedd5;color:#c2410c}
+  .publication-action:active{background:#fed7aa;color:#9a3412}
+  .publication-action:focus-visible{opacity:1;outline:2px solid #c2410c;outline-offset:1px}
+  .publication-action.published{color:#c2410c}
+  .publication-dialog{width:min(560px,calc(100vw - 32px));max-height:calc(100vh - 32px);padding:0;border:1px solid #e4e4e7;border-radius:12px;background:#fff;color:#09090b;box-shadow:0 24px 72px rgba(9,9,11,.24);overflow:auto}
+  .publication-dialog::backdrop{background:rgba(9,9,11,.48)}
+  .publication-form{display:grid;gap:10px;padding:24px}
+  .publication-heading{display:flex;align-items:flex-start;gap:12px;margin-bottom:2px}
+  .publication-heading>.material-symbols-outlined{width:40px;height:40px;border-radius:8px;display:grid;place-items:center;background:#ffedd5;color:#c2410c}
+  .publication-eyebrow{margin:0 0 2px;color:#c2410c;font-size:11px;line-height:16px;font-weight:700;letter-spacing:.08em;text-transform:uppercase}
+  .publication-dialog h2{margin:0;font-size:20px;line-height:28px;font-weight:600}
+  .publication-copy{margin:0 0 6px;color:#71717a;font-size:13px;line-height:20px}
+  .publication-dialog label{font-size:12px;line-height:18px;font-weight:600}
+  .publication-dialog input{width:100%;height:40px;padding:0 11px;border:1px solid #e4e4e7;border-radius:7px;background:#fff;color:#09090b;font:inherit;box-sizing:border-box;transition:border-color .15s cubic-bezier(.4,0,.2,1),box-shadow .15s cubic-bezier(.4,0,.2,1)}
+  .publication-dialog input:focus{outline:0;border-color:#c2410c;box-shadow:0 0 0 3px rgba(194,65,12,.14)}
+  .publication-input-prefix{display:flex;align-items:center;border:1px solid #e4e4e7;border-radius:7px;overflow:hidden;background:#f4f4f5}
+  .publication-input-prefix:focus-within{border-color:#c2410c;box-shadow:0 0 0 3px rgba(194,65,12,.14)}
+  .publication-input-prefix>span{padding-left:11px;color:#71717a;font-size:12px;white-space:nowrap}
+  .publication-input-prefix input{border:0;box-shadow:none!important;background:transparent;padding-left:2px}
+  .publication-message{min-height:20px;margin:2px 0 0;color:#71717a;font-size:12px;line-height:20px}
+  .publication-message.error{color:#b42318}
+  .publication-actions{display:flex;align-items:center;gap:8px;margin-top:4px}
+  .publication-action-spacer{flex:1}
+  .publication-actions button,.publication-link{min-height:40px;padding:0 14px;border-radius:7px;font:inherit;font-size:13px;font-weight:600;display:inline-flex;align-items:center;justify-content:center;text-decoration:none;cursor:pointer;transition:background-color .15s cubic-bezier(.4,0,.2,1),color .15s cubic-bezier(.4,0,.2,1),border-color .15s cubic-bezier(.4,0,.2,1)}
+  .publication-link{color:#c2410c}
+  .publication-link:hover{background:#ffedd5;color:#9a3412}
+  .publication-link:focus-visible{outline:2px solid #c2410c;outline-offset:1px}
+  .publication-cancel,.publication-unpublish{border:1px solid #e4e4e7;background:#fff;color:#09090b}
+  .publication-cancel:hover,.publication-unpublish:hover{background:#f4f4f5}
+  .publication-submit{border:1px solid #c2410c;background:#c2410c;color:#fff}
+  .publication-submit:hover{border-color:#9a3412;background:#9a3412}
+  .publication-actions button:focus-visible{outline:2px solid #c2410c;outline-offset:1px}
+  .publication-actions button:disabled,.publication-dialog input:disabled{opacity:.55;cursor:wait}
+  html.dark .publication-action{color:#a1a1aa}
+  html.dark .publication-action:hover{background:rgba(251,146,60,.16);color:#fb923c}
+  html.dark .publication-action:active{background:rgba(251,146,60,.24);color:#fdba74}
+  html.dark .publication-action:focus-visible{outline-color:#fb923c}
+  html.dark .publication-action.published{color:#fb923c}
+  html.dark .publication-dialog{border-color:#27272a;background:#09090b;color:#fafafa;box-shadow:0 24px 72px rgba(0,0,0,.56)}
+  html.dark .publication-heading>.material-symbols-outlined{background:rgba(251,146,60,.16);color:#fb923c}
+  html.dark .publication-eyebrow{color:#fb923c}
+  html.dark .publication-copy,html.dark .publication-message,html.dark .publication-input-prefix>span{color:#a1a1aa}
+  html.dark .publication-dialog input{border-color:#27272a;background:#09090b;color:#fafafa}
+  html.dark .publication-dialog input:focus,html.dark .publication-input-prefix:focus-within{border-color:#fb923c;box-shadow:0 0 0 3px rgba(251,146,60,.16)}
+  html.dark .publication-input-prefix{border-color:#27272a;background:#18181b}
+  html.dark .publication-message.error{color:#fca5a5}
+  html.dark .publication-link{color:#fb923c}
+  html.dark .publication-link:hover{background:rgba(251,146,60,.16);color:#fdba74}
+  html.dark .publication-link:focus-visible,html.dark .publication-actions button:focus-visible{outline-color:#fb923c}
+  html.dark .publication-cancel,html.dark .publication-unpublish{border-color:#27272a;background:#09090b;color:#fafafa}
+  html.dark .publication-cancel:hover,html.dark .publication-unpublish:hover{background:#18181b}
+  html.dark .publication-submit{border-color:#fb923c;background:#fb923c;color:#09090b}
+  html.dark .publication-submit:hover{border-color:#fdba74;background:#fdba74}
+  @media(max-width:640px){.publication-action{width:44px;height:44px;margin:-10px -8px -10px 0}.publication-form{padding:20px}.publication-actions{flex-wrap:wrap}.publication-action-spacer{display:none}.publication-link{width:100%}.publication-actions button{flex:1}}
   .active-indicator{position:absolute;left:0;width:4px;height:32px;background:#c2410c;transition:transform .3s cubic-bezier(.4,0,.2,1),opacity .2s ease;border-radius:4px;pointer-events:none;z-index:1}
   @keyframes docRowShimmer{0%{background-position:180% 0}100%{background-position:-180% 0}}
   @keyframes docPillRecoil{0%,100%{transform:translateX(0) scale(1)}7%{transform:translateX(-4px) scaleX(.982)}17%{transform:translateX(2px) scaleX(1.006)}34%{transform:translateX(0) scale(1)}}
@@ -639,18 +728,12 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
   </div>
   <div class="topbar-actions">
     <span class="shortcut-tooltip-wrap"><button class="topbar-btn-icon shell-toggle" id="shell-toggle" type="button" aria-label="Hide app shell, keyboard shortcut Ctrl Shift H" aria-describedby="shell-shortcut-tooltip" aria-pressed="false"><span class="material-symbols-outlined" aria-hidden="true">fullscreen</span></button><span class="shortcut-tooltip" id="shell-shortcut-tooltip" role="tooltip"><span class="shortcut-tooltip-label">Hide app shell</span><span class="shortcut-keys" id="shell-shortcut-keys" aria-hidden="true"><span class="shortcut-key">Ctrl</span><span class="shortcut-key">Shift</span><span class="shortcut-key">H</span></span></span></span>
-    <button class="topbar-btn topbar-btn-share" id="share-btn" type="button" aria-label="Copy signed URL">
+    <button class="topbar-btn topbar-btn-share" id="share-btn" type="button" aria-label="${shareLabel}">
       <span class="share-icon-window" aria-hidden="true"><span class="share-icon-track"><span class="material-symbols-outlined share-icon-row">link</span><span class="share-icon-row"><span class="share-loader"></span></span><span class="material-symbols-outlined share-icon-row" id="share-feedback-icon">check</span></span></span>
-      <span class="share-label-window" aria-hidden="true"><span class="share-label-track"><span class="share-label">Copy signed URL</span><span class="share-label">Creating signed URL…</span><span class="share-label" id="share-feedback-label">Signed URL copied!</span></span></span>
+      <span class="share-label-window" aria-hidden="true"><span class="share-label-track"><span class="share-label">${shareLabel}</span><span class="share-label">${sharePendingLabel}</span><span class="share-label" id="share-feedback-label">${shareDoneLabel}</span></span></span>
     </button>
     <button class="topbar-btn-icon theme-toggle" id="theme-toggle" type="button" aria-label="Switch to dark theme" title="Theme: system"><span class="theme-icon-window" aria-hidden="true"><span class="theme-icon-track"><span class="material-symbols-outlined theme-icon">brightness_auto</span><span class="material-symbols-outlined theme-icon">dark_mode</span><span class="material-symbols-outlined theme-icon">light_mode</span><span class="material-symbols-outlined theme-icon">brightness_auto</span></span></span></button>
-    <div class="avatar-wrap">
-      <div class="topbar-avatar" id="avatar-btn" title="${escapeHtml(email)}">${initials}</div>
-      <div class="avatar-menu" id="avatar-menu" style="display:none">
-        <div class="avatar-menu-email">${escapeHtml(email)}</div>
-        <a href="/api/auth/sign-out" class="avatar-menu-item"><span class="material-symbols-outlined" style="font-size:18px">logout</span> Sign out</a>
-      </div>
-    </div>
+    ${avatarMarkup}
   </div>
 </header>
 <div class="shell-hotzone shell-hotzone-top" id="shell-hotzone-top" aria-hidden="true"></div>
@@ -658,7 +741,7 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
 
 <aside class="sidebar" id="doc-sidebar" aria-labelledby="doc-sidebar-title">
   <div class="sidebar-divider" id="doc-sidebar-title">Docs</div>
-  <div class="sidebar-tree" data-tree-org="${orgEsc}">
+  <div class="sidebar-tree" data-tree-org="${orgEsc}"${publicationBase ? ` data-publication-base="${escapeHtml(publicationBase)}"` : ""}>
     <div class="space-y-0.5 relative" id="tree-container" style="position:relative">
       <div class="active-indicator" id="active-indicator" style="opacity:0;transition:none"></div>
       ${renderTreeSkeleton()}
@@ -674,7 +757,7 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
     <p>Choose a document from the sidebar to view its contents, or create a new page to start writing.</p>
   </div>
   <iframe name="content-frame" id="content-frame" class="content-frame"
-    src="about:blank" title="Document content" style="display:none"></iframe>
+    src="about:blank" title="Document content" style="display:none"${publication ? ' sandbox="allow-scripts allow-forms allow-popups allow-downloads"' : ""}></iframe>
 </main>
 
 <script>
@@ -986,7 +1069,8 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
     }
   });
   window.addEventListener("message",function(e){
-    if(e.origin!==window.location.origin||!e.data||e.data.type!=="shell-toggle")return;
+    var allowedOrigin=e.origin===window.location.origin||(window.RENDRO_PUBLICATION_BASE&&e.origin==="null");
+    if(!allowedOrigin||!e.data||e.data.type!=="shell-toggle")return;
     setShellHidden(!root.classList.contains("shell-hidden"));
     if(!root.classList.contains("shell-hidden")&&shellToggle)shellToggle.focus();
   });
@@ -998,15 +1082,15 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
   var shareFeedbackIcon=document.getElementById("share-feedback-icon");
   var shareFeedbackTimer;
   var sharePending=false;
-  function setShareLoading(){if(!shareBtn)return;if(shareFeedbackTimer!==undefined)window.clearTimeout(shareFeedbackTimer);shareBtn.classList.remove("is-feedback");shareBtn.classList.add("is-loading");shareBtn.setAttribute("aria-busy","true");shareBtn.setAttribute("aria-label","Creating signed URL");}
-  function setShareFeedback(message){if(!shareBtn||!shareFeedbackLabel)return;shareBtn.classList.remove("is-loading");shareBtn.removeAttribute("aria-busy");shareFeedbackLabel.textContent=message;if(shareFeedbackIcon)shareFeedbackIcon.textContent=message==="Signed URL copied!"?"check":"error";shareBtn.classList.add("is-feedback");shareBtn.setAttribute("aria-label",message);if(shareFeedbackTimer!==undefined)window.clearTimeout(shareFeedbackTimer);shareFeedbackTimer=window.setTimeout(function(){shareBtn.classList.remove("is-feedback");shareBtn.setAttribute("aria-label","Copy signed URL");if(shareFeedbackIcon)shareFeedbackIcon.textContent="check";},1800);}
+  function setShareLoading(){if(!shareBtn)return;if(shareFeedbackTimer!==undefined)window.clearTimeout(shareFeedbackTimer);shareBtn.classList.remove("is-feedback");shareBtn.classList.add("is-loading");shareBtn.setAttribute("aria-busy","true");shareBtn.setAttribute("aria-label",${JSON.stringify(sharePendingLabel)});}
+  function setShareFeedback(message){if(!shareBtn||!shareFeedbackLabel)return;shareBtn.classList.remove("is-loading");shareBtn.removeAttribute("aria-busy");shareFeedbackLabel.textContent=message;if(shareFeedbackIcon)shareFeedbackIcon.textContent=message.endsWith("copied!")?"check":"error";shareBtn.classList.add("is-feedback");shareBtn.setAttribute("aria-label",message);if(shareFeedbackTimer!==undefined)window.clearTimeout(shareFeedbackTimer);shareFeedbackTimer=window.setTimeout(function(){shareBtn.classList.remove("is-feedback");shareBtn.setAttribute("aria-label",${JSON.stringify(shareLabel)});if(shareFeedbackIcon)shareFeedbackIcon.textContent="check";},1800);}
   async function copyText(text){try{if(navigator.clipboard&&window.isSecureContext){await navigator.clipboard.writeText(text);return;}}catch(_){}var ta=document.createElement("textarea");ta.value=text;ta.setAttribute("readonly","");ta.style.position="fixed";ta.style.top="-999px";ta.style.left="-999px";document.body.appendChild(ta);ta.select();ta.setSelectionRange(0,text.length);try{if(!document.execCommand("copy"))throw new Error("copy failed");}finally{ta.remove();}}
-  if(shareBtn)shareBtn.addEventListener("click",async function(e){e.stopPropagation();if(sharePending)return;var doc=window.RENDRO_CURRENT_DOC||"";if(!doc){setShareFeedback("Select a document first");return;}sharePending=true;setShareLoading();try{var res=await fetch("/api/share/create?key="+encodeURIComponent(doc),{headers:{accept:"application/json"}});if(!res.ok)throw new Error("share failed");var data=await res.json();await copyText(data.url);setShareFeedback("Signed URL copied!");}catch(_){setShareFeedback("Unable to copy");}finally{sharePending=false;}});
+  if(shareBtn)shareBtn.addEventListener("click",async function(e){e.stopPropagation();if(sharePending)return;var doc=window.RENDRO_CURRENT_DOC||"";if(!doc){setShareFeedback("Select a document first");return;}sharePending=true;setShareLoading();try{var publicBase=window.RENDRO_PUBLICATION_BASE||"";if(publicBase){var relativeDoc=doc.indexOf(window.RENDRO_ORG+"/")===0?doc.slice(window.RENDRO_ORG.length+1):doc;var publicUrl=new URL(publicBase,window.location.origin);publicUrl.searchParams.set("doc",relativeDoc);await copyText(publicUrl.href);setShareFeedback("Public URL copied!");}else{var res=await fetch("/api/share/create?key="+encodeURIComponent(doc),{headers:{accept:"application/json"}});if(!res.ok)throw new Error("share failed");var data=await res.json();await copyText(data.url);setShareFeedback("Signed URL copied!");}}catch(_){setShareFeedback("Unable to copy");}finally{sharePending=false;}});
   document.addEventListener("click",function(){var m=document.getElementById("avatar-menu");if(m)m.style.display="none";});
 })();
 </script>
-<script>window.RENDRO_INITIAL_DOC=${JSON.stringify(selectedDoc)};</script>
-<script src="/lazy-tree.js?v=24"></script>
+<script>window.RENDRO_INITIAL_DOC=${JSON.stringify(selectedDoc)};window.RENDRO_ORG=${JSON.stringify(org)};window.RENDRO_PUBLICATION_BASE=${JSON.stringify(publicationBase)};</script>
+<script src="/lazy-tree.js?v=25"></script>
 </body>
 </html>`;
 }

@@ -141,6 +141,10 @@ app.delete("/api/sync/delete", async (c) => {
 
 // GET /api/tree/:org — returns children of a folder for lazy-load tree UI
 app.get("/api/tree/:org", async (c) => {
+  const user = c.get("user");
+  if (!user) return c.text("Unauthorized", 401);
+  const userOrg = emailToOrgSlug(user.email);
+  if (!userOrg || userOrg !== c.req.param("org")) return c.text("Forbidden", 403);
   const org = c.req.param("org");
   const prefix = c.req.query("prefix") || `${org}/`;
   if (!prefix.startsWith(`${org}/`)) return c.text(`Prefix must be under ${org}/`, 400);

@@ -1,12 +1,14 @@
 #!/usr/bin/env node
 /**
- * rendro CLI — push docs from a local directory to the Rendro server.
+ * rendro CLI — sync and publish HTML documentation.
  *
  * Usage:
  *   rendro push --source ./docs --org acme-corp --repo api --endpoint https://rendro.app
+ *   rendro publish --org acme-corp --repo api --folder product --slug product
+ *   rendro publications --org acme-corp
+ *   rendro unpublish --org acme-corp --slug product
  *   rendro init --source ./docs
  */
-
 import { createHash } from "node:crypto";
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { join, relative, resolve } from "node:path";
@@ -18,6 +20,22 @@ interface PushOptions {
   endpoint: string;
   token: string;
   concurrency?: number;
+}
+
+interface PublicationApiOptions {
+  org: string;
+  endpoint: string;
+  token: string;
+}
+
+interface PublicationResponse {
+  orgSlug: string;
+  slug: string;
+  sourcePrefix: string;
+  title: string;
+  entryFile: string;
+  url: string;
+  documentCount?: number;
 }
 
 interface FileEntry {
@@ -48,10 +66,16 @@ async function walk(dir: string, baseDir: string): Promise<string[]> {
   return files;
 }
 
-async function fetchJson<T>(url: string, token: string): Promise<T> {
-  const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+async function requestJson<T>(url: string, token: string, init?: RequestInit): Promise<T> {
+  const headers = new Headers(init?.headers);
+  headers.set("Authorization", `Bearer ${token}`);
+  const res = await fetch(url, { ...init, headers });
   if (!res.ok) throw new Error(`${res.status} ${await res.text()}`);
   return await res.json() as T;
+}
+
+async function fetchJson<T>(url: string, token: string): Promise<T> {
+  return requestJson<T>(url, token);
 }
 
 async function push(opts: PushOptions): Promise<void> {
@@ -153,6 +177,78 @@ async function push(opts: PushOptions): Promise<void> {
   console.log(`✓ Sync complete: ${uploaded} uploaded, ${skipped} unchanged, ${deleted} deleted`);
 }
 
+function publicSourcePrefix(org: string, repo: string, folder: string): string {
+  const trimmedFolder = folder.trim().replace(/^\/+|\/+$/g, "");
+  const folderParts = trimmedFolder === "." ? [] : trimmedFolder.split("/");
+  const parts = [org, ...(repo ? [repo] : []), ...folderParts];
+  if (
+    !org ||
+    folder.includes("\\") ||
+    folderParts.some((part) => !part || part === "." || part === "..") ||
+    parts.some((part) => part.includes("\0"))
+  ) {
+    throw new Error("Folder must be a relative path inside the pushed docs tree");
+  }
+  return `${parts.join("/")}/`;
+}
+
+async function publishFolder(
+  opts: PublicationApiOptions & {
+    repo: string;
+    folder: string;
+    slug: string;
+    title: string;
+    entryFile: string;
+  },
+): Promise<void> {
+  const endpoint = opts.endpoint.replace(/\/$/, "");
+  const sourcePrefix = publicSourcePrefix(opts.org, opts.repo, opts.folder);
+  const publication = await requestJson<PublicationResponse>(
+    `${endpoint}/api/publications`,
+    opts.token,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        sourcePrefix,
+        slug: opts.slug,
+        title: opts.title,
+        entryFile: opts.entryFile,
+      }),
+    },
+  );
+  console.log(`✓ Published ${publication.documentCount ?? 0} documents`);
+  console.log(publication.url);
+}
+
+async function showPublications(opts: PublicationApiOptions): Promise<void> {
+  const endpoint = opts.endpoint.replace(/\/$/, "");
+  const result = await requestJson<{ publications: PublicationResponse[] }>(
+    `${endpoint}/api/publications`,
+    opts.token,
+  );
+  if (result.publications.length === 0) {
+    console.log("No public folders");
+    return;
+  }
+  for (const publication of result.publications) {
+    console.log(`${publication.slug}  ${publication.url}`);
+    console.log(`  ${publication.sourcePrefix} → ${publication.entryFile}`);
+  }
+}
+
+async function unpublishFolder(
+  opts: PublicationApiOptions & { slug: string },
+): Promise<void> {
+  const endpoint = opts.endpoint.replace(/\/$/, "");
+  await requestJson<{ unpublished: boolean }>(
+    `${endpoint}/api/publications/${encodeURIComponent(opts.slug)}`,
+    opts.token,
+    { method: "DELETE" },
+  );
+  console.log(`✓ Unpublished ${opts.slug}`);
+}
+
 async function init(source: string): Promise<void> {
   const absSource = resolve(source);
   const dirs = [
@@ -189,12 +285,19 @@ function printHelp(): void {
 
 Usage:
   rendro push --source <dir> --org <slug> [--repo <name>] [--endpoint <url>] [--concurrency <n>]
+  rendro publish --org <slug> [--repo <name>] --folder <path> --slug <slug> [--entry <file>] [--title <title>]
+  rendro publications --org <slug> [--endpoint <url>]
+  rendro unpublish --org <slug> --slug <slug> [--endpoint <url>]
   rendro init --source <dir>
 
 Options:
   --source       Path to local docs directory (default: ./docs)
-  --org          Organization slug (required for push)
-  --repo         Optional repo slug; when set, docs sync under <org>/<repo>/
+  --org          Organization slug
+  --repo         Optional repo slug; docs sync under <org>/<repo>/
+  --folder       Folder relative to the pushed docs root
+  --slug         Stable public URL slug
+  --entry        Public landing document inside the folder (default: index.html)
+  --title        Public documentation title (default: slug)
   --endpoint     Rendro server URL (default: https://rendro.app)
   --concurrency  Parallel uploads (default: 8)
 
@@ -219,6 +322,52 @@ async function main(): Promise<void> {
 
   if (cmd === "init") {
     await init(getFlag("--source", "./docs"));
+    return;
+  }
+
+  if (cmd === "publish" || cmd === "publications" || cmd === "unpublish") {
+    const org = getFlag("--org", "");
+    const endpoint = getFlag("--endpoint", "https://rendro.app");
+    const token = getFlag("--token", process.env.RENDRO_API_KEY || "");
+    if (!org) {
+      console.error(`Error: --org is required for ${cmd}`);
+      process.exit(1);
+    }
+    if (!token) {
+      console.error("Error: RENDRO_API_KEY environment variable is required. Get your key from the Rendro org page.");
+      process.exit(1);
+    }
+
+    if (cmd === "publications") {
+      await showPublications({ org, endpoint, token });
+      return;
+    }
+
+    const slug = getFlag("--slug", "");
+    if (!slug) {
+      console.error(`Error: --slug is required for ${cmd}`);
+      process.exit(1);
+    }
+    if (cmd === "unpublish") {
+      await unpublishFolder({ org, endpoint, token, slug });
+      return;
+    }
+
+    const folder = getFlag("--folder", "");
+    if (!folder) {
+      console.error("Error: --folder is required for publish");
+      process.exit(1);
+    }
+    await publishFolder({
+      org,
+      endpoint,
+      token,
+      slug,
+      folder,
+      repo: getFlag("--repo", ""),
+      entryFile: getFlag("--entry", "index.html"),
+      title: getFlag("--title", slug),
+    });
     return;
   }
 

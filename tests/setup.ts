@@ -12,6 +12,34 @@ process.env.SYNC_TOKEN = "test-sync-token";
 process.env.NODE_ENV = "test";
 process.env.CONVEX_URL = "http://127.0.0.1:3210";
 
+const keyHashByOrg = new Map<string, string>();
+const orgByKeyHash = new Map<string, string>();
+
+globalThis.fetch = vi.fn((input: string | URL | Request, init?: RequestInit) => {
+  const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+  if (!url.endsWith("/api/query") && !url.endsWith("/api/mutation")) {
+    return Promise.resolve(new Response("Not found", { status: 404 }));
+  }
+
+  const body = typeof init?.body === "string" ? init.body : "{}";
+  const payload = JSON.parse(body) as {
+    path?: string;
+    args?: Array<{ orgSlug?: string; keyHash?: string }>;
+  };
+  const args = payload.args?.[0] ?? {};
+  let value: unknown = null;
+  if (payload.path === "apiKeys:create" && args.orgSlug && args.keyHash) {
+    const previousHash = keyHashByOrg.get(args.orgSlug);
+    if (previousHash) orgByKeyHash.delete(previousHash);
+    keyHashByOrg.set(args.orgSlug, args.keyHash);
+    orgByKeyHash.set(args.keyHash, args.orgSlug);
+    value = true;
+  } else if (payload.path === "apiKeys:validate" && args.keyHash) {
+    value = orgByKeyHash.get(args.keyHash) ?? null;
+  }
+  return Promise.resolve(Response.json({ status: "success", value }));
+}) as typeof fetch;
+
 // Mock the better-auth SDK so tests don't try to open a real SQLite DB
 // and don't try to talk to Google.
 vi.mock("@/auth", () => {

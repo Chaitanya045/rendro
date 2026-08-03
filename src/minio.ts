@@ -169,7 +169,7 @@ export function buildTree(entries: DocEntry[], prefix: string): DocTree[] {
   return root;
 }
 
-export async function getObjectStream(key: string): Promise<ReadableStream | null> {
+export async function getObjectStream(key: string): Promise<ReadableStream<Uint8Array> | null> {
   try {
     const cmd = new GetObjectCommand({
       Bucket: MINIO_BUCKET,
@@ -177,7 +177,8 @@ export async function getObjectStream(key: string): Promise<ReadableStream | nul
     });
     const res = await s3.send(cmd);
     if (!res.Body) return null;
-    return res.Body.transformToWebStream();
+    const stream = res.Body.transformToWebStream() as ReadableStream<Uint8Array>;
+    return stream;
   } catch (err: unknown) {
     if ((err as { $metadata?: { httpStatusCode?: number } })?.$metadata?.httpStatusCode === 404) {
       return null;

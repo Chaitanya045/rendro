@@ -72,6 +72,8 @@
   }, configurable: true });
 })();
 import shareRoutes from "@/routes/share";
+import publicRoutes from "@/routes/public";
+import publicationRoutes from "@/routes/publications";
 
 import { Hono } from "hono";
 import { cors } from "hono/cors";
@@ -150,6 +152,7 @@ app.use("/api/sync/*", cors());
 app.use("*", async (c, next) => { const start = Date.now(); await next(); logger.debug({ method: c.req.method, path: c.req.path, status: c.res.status, ms: Date.now() - start }, "request"); });
 // Public signed share routes intentionally bypass session middleware.
 app.route("/", shareRoutes);
+app.route("/", publicRoutes);
 
 app.use("*", async (c, next) => { await sessionMiddleware(c, next); });
 
@@ -198,6 +201,7 @@ app.on(["POST", "GET", "OPTIONS"], "/api/auth/*", async (c) => {
 });
 
 app.route("/", appRoutes);
+app.route("/", publicationRoutes);
 app.route("/", docsRoutes);
 app.get("/health", (c) => c.text("ok"));
 

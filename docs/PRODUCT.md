@@ -38,6 +38,8 @@ Members of an organization who read documentation:
 4. Click files to read, expand folders to navigate
 5. Select text to leave comments
 
+Public documentation visitors do not sign in. They open a publication URL shared by a publisher and can navigate only within that explicitly published folder.
+
 ### Publishers (writers)
 
 Engineers who write and maintain documentation:
@@ -45,6 +47,7 @@ Engineers who write and maintain documentation:
 2. Push to Git → CI runs `rendro push`
 3. CLI hashes files, uploads only changed ones
 4. Docs are live within 40 seconds
+5. Optionally publish an uploaded folder at a stable, anonymous read-only URL
 
 ### Admins (org creators)
 
