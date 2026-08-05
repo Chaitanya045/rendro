@@ -203,9 +203,13 @@ async function loadPage(folder: HTMLElement, path: string, content: HTMLElement,
     const childPath = child.type === "folder" && !child.path.endsWith("/") ? `${child.path}/` : child.path;
     return !existingPaths.has(childPath);
   });
+  const existingTreeItems = new Set(content.querySelectorAll<HTMLElement>(".tree-item"));
   content.querySelector(":scope > .tree-load-more")?.remove();
   const rows = renderRows(freshChildren, childDepth);
   content.insertAdjacentHTML("beforeend", rows);
+  startTreeEntrance(
+    Array.from(content.querySelectorAll<HTMLElement>(".tree-item")).filter((item) => !existingTreeItems.has(item)),
+  );
   indexChildItems(content);
   markPublicationButtons();
 
@@ -419,11 +423,19 @@ async function openPublicationDialog(path: string, folderName: string): Promise<
   }
 }
 
-function startTreeEntrance(scope: ParentNode = TREE) {
+function startTreeEntrance(items: Iterable<HTMLElement>) {
   if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return;
-  document.documentElement.classList.add("tree-entering");
-  scope.querySelectorAll<HTMLElement>(".tree-item").forEach((el, i) => {
-    el.style.setProperty("--tree-index", String(Math.min(i, 12)));
+  Array.from(items).forEach((item, index) => {
+    const finish = () => {
+      item.classList.remove("tree-item-entering");
+      item.style.removeProperty("--tree-index");
+      item.removeEventListener("animationend", finish);
+      item.removeEventListener("animationcancel", finish);
+    };
+    item.style.setProperty("--tree-index", String(Math.min(index, 12)));
+    item.classList.add("tree-item-entering");
+    item.addEventListener("animationend", finish);
+    item.addEventListener("animationcancel", finish);
   });
 }
 
@@ -442,7 +454,7 @@ async function loadRootTree() {
       children = data.children;
     }
     TREE.innerHTML = renderActiveIndicator() + (children.length ? renderRows(children, 0) : renderEmptyTree());
-    startTreeEntrance(TREE);
+    startTreeEntrance(TREE.querySelectorAll<HTMLElement>(".tree-item"));
     if (!PUBLICATION_BASE) void refreshPublications().catch(() => undefined);
     const currentDoc = RENDRO_WINDOW.RENDRO_CURRENT_DOC || RENDRO_WINDOW.RENDRO_INITIAL_DOC || docFromPathname();
     if (currentDoc) syncActiveState(currentDoc);
