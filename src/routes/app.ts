@@ -538,7 +538,8 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
   .tree-item[data-path]>.material-symbols-outlined{transition:transform .15s cubic-bezier(.4,0,.2,1),color .15s}
   .tree-item[data-path]:hover,.tree-item[data-path]:focus-within{translate:0 -1px}
   .tree-item[data-path]:hover>.material-symbols-outlined,.tree-item[data-path]:focus-within>.material-symbols-outlined{color:#c2410c;transform:translateX(2px) scale(1.06)}
-  .tree-link{color:inherit;text-decoration:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .tree-link{color:inherit;text-decoration:none}
+  .tree-label{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .tree-size{color:#71717a;font-size:11px;flex-shrink:0}
   .tree-empty{color:#71717a;padding:6px 12px;font-size:12px}
   .tree-empty-create{padding:0 12px 8px}
@@ -1033,7 +1034,7 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
 })();
 </script>
 <script>window.RENDRO_INITIAL_DOC=${JSON.stringify(selectedDoc)};window.RENDRO_ORG=${JSON.stringify(org)};window.RENDRO_PUBLICATION_BASE=${JSON.stringify(publicationBase)};</script>
-<script src="/lazy-tree.js?v=26"></script>
+<script src="/lazy-tree.js?v=27"></script>
 </body>
 </html>`;
 }

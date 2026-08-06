@@ -158,6 +158,7 @@ Purpose: file-system orientation.
 - Folders lazy-load one level at a time.
 - Large directories show `Load more`; the button may say `Loading...` while fetching the next page.
 - Sticky folder headers stack by depth so users keep local context while scrolling.
+- File and folder labels stay on one line and truncate with an ellipsis when the available sidebar width is insufficient; the complete name remains in the DOM.
 - Active document is shown with background/text color plus a 4px active indicator bar.
 
 - The resize handle sits on the sidebar/main boundary, persists the last width, and never collapses the sidebar.

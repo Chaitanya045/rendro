@@ -196,7 +196,7 @@ describe("anonymous public routes", () => {
     expect(html).toContain('id="content-frame"');
     expect(html).toContain('data-tree-org="acme" data-publication-base="/public/acme/product"');
     expect(html).toContain('sandbox="allow-scripts allow-forms allow-popups allow-downloads"');
-    expect(html).toContain('src="/lazy-tree.js?v=26"');
+    expect(html).toContain('src="/lazy-tree.js?v=27"');
     expect(html).not.toContain('<div class="topbar-avatar"');
     expect(html).not.toContain("publication-action");
     expect(html).not.toContain("publication-dialog");

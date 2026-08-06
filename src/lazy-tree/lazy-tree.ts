@@ -225,7 +225,7 @@ function renderFile(node: TreeNode): string {
   const fp = `/files/${node.path}`;
   return `<div class="tree-item flex items-center gap-2 px-3 py-1.5 rounded-lg text-on-surface-variant cursor-pointer" data-path="${esc(node.path)}">
     <span class="material-symbols-outlined text-[18px] flex-shrink-0">article</span>
-    <a href="${esc(fp)}" class="tree-link flex-1 min-w-0" target="content-frame">${esc(node.name.replace(/\.html$/, ""))}</a>
+    <a href="${esc(fp)}" class="tree-link tree-label flex-1 min-w-0" target="content-frame">${esc(node.name.replace(/\.html$/, ""))}</a>
   </div>`;
 }
 
@@ -291,7 +291,7 @@ function renderFolder(node: TreeNode, depth: number): string {
     <div class="tree-item flex items-center gap-2 px-3 py-1.5 rounded-lg text-on-surface-variant cursor-pointer">
       <span class="material-symbols-outlined text-[18px] caret-icon flex-shrink-0">chevron_right</span>
       <span class="material-symbols-outlined text-[18px] folder-icon flex-shrink-0">folder</span>
-      <span class="font-body-md flex-1 min-w-0">${esc(node.name)}</span>
+      <span class="font-body-md tree-label flex-1 min-w-0">${esc(node.name)}</span>
     </div>
     <div class="tree-folder-content ml-4 space-y-0.5 border-l border-outline-variant/30 pl-2"></div>
   </div>`;
