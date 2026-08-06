@@ -47,7 +47,7 @@ Engineers who write and maintain documentation:
 2. Push to Git → CI runs `rendro push`
 3. CLI hashes files, uploads only changed ones
 4. Docs are live within 40 seconds
-5. Optionally publish an uploaded folder at a stable, anonymous read-only URL
+5. CI can optionally publish an uploaded folder at a stable, anonymous read-only URL; the authenticated docs UI exposes no publishing controls
 
 ### Admins (org creators)
 

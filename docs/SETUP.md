@@ -92,7 +92,7 @@ curl -X POST http://localhost:3000/api/sync/upload \
 
 ### 6. Publish a Folder
 
-Publishing is explicit: uploads remain private until their folder prefix is registered. The folder and entry file must already exist.
+Publishing is explicit and intended for trusted GitHub Actions or equivalent CI. Uploads remain private until the workflow registers their folder prefix; the authenticated docs UI exposes no publish or unpublish controls. The folder and entry file must already exist.
 
 ```bash
 RENDRO_API_KEY=rendro_xxx ./bin/rendro.mjs publish \

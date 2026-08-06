@@ -244,7 +244,7 @@ CLI phases:
 
 ### Publication API
 
-Uploads are private by default. An API-key-authenticated publication record maps one existing organization-owned folder prefix to a stable public slug; no R2 objects are copied or made bucket-public.
+Uploads are private by default. An API-key-authenticated publication record maps one existing organization-owned folder prefix to a stable public slug; no R2 objects are copied or made bucket-public. Publication mutations are intended for trusted GitHub Actions or equivalent CI and are not exposed through the session-authenticated docs UI.
 
 | Method | Path | Auth | Body/Params | Returns |
 |---|---|---|---|---|

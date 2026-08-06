@@ -28,7 +28,7 @@ chmod +x rendro
    export RENDRO_API_KEY=rendro_xxx
    rendro push --source ./docs --org my-org --endpoint https://rendro.app
    ```
-4. Keep the organization tree private, or publish an uploaded folder at a stable public URL:
+4. From a trusted GitHub Actions workflow, keep the organization tree private or publish an uploaded folder at a stable public URL:
    ```bash
    rendro publish --org my-org --folder product-docs --slug product
    # https://rendro.app/public/my-org/product
