@@ -118,7 +118,7 @@ Rules:
 ```text
 ┌───────────────────────────────────────────────┐
 │ Topbar 56px fixed                             │
-│ Rendro                                 Tools  │
+│ Organization                           Tools  │
 ├───────────────┬───────────────────────────────┤
 │ Sidebar       │ Main / iframe area            │
 │ 220-420px     │                               │
@@ -133,8 +133,8 @@ Purpose: global actions, not navigation depth.
 
 - Fixed at the top, `56px` height.
 - White/dark surface with a bottom border.
-- Header starts with the Rendro logo; there is no sidebar collapse toggle.
-- Logo uses primary color and stays visually stable across orgs.
+- Header starts with the current organization slug; there is no sidebar collapse toggle.
+- The organization label uses the primary color and stays consistent between private and public docs.
 - Right-side actions: hide/show app shell, copy signed URL, theme toggle, avatar.
 - Avatar menu opens near its trigger and closes on outside click. Copy feedback stays inline in the copy button.
 - Hide/show app shell persists in `localStorage`; `Ctrl+Shift+H` (`Cmd+Shift+H` on macOS) toggles it from either the app shell or the focused document iframe, top/left hot zones temporarily reveal the header/sidebar while hidden, and `Escape` restores the full shell.
