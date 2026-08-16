@@ -312,7 +312,43 @@ describe("session middleware", () => {
 });
 
 // ────────────────────────────────────────────────────
-// 5. Worker auth sign-out — stale OAuth cookie cleanup
+// 5. Unauthenticated landing — product and auth contract
+// ────────────────────────────────────────────────────
+describe("unauthenticated landing", () => {
+  it("presents the product before offering Google sign-in", async () => {
+    process.env.NODE_ENV = "development";
+
+    const res = await workerApp.request("https://dev.rendro.app/");
+    const html = await res.text();
+
+    expect(res.status).toBe(200);
+    expect(html).toContain("<title>Rendro — Documentation that ships with your code</title>");
+    expect(html).toContain('<h1 id="hero-title">Your docs should ship with your code.</h1>');
+    expect(html).toContain('src="/landing-product.webp"');
+    expect(html).toContain('id="product"');
+    expect(html).toContain('id="workflow"');
+    expect(html).toContain('id="security"');
+    expect(html).toContain('action="/api/auth/sign-in/social"');
+    expect(html).toContain("Start with Google");
+    expect(html).toContain("prefers-reduced-motion: reduce");
+    expect(html).not.toContain("Sign in to read your team's docs.");
+  });
+
+  it("uses the same product landing for an unauthenticated private document route", async () => {
+    process.env.NODE_ENV = "development";
+
+    const res = await workerApp.request("https://dev.rendro.app/docs/acme/reference/index.html");
+    const html = await res.text();
+
+    expect(res.status).toBe(200);
+    expect(html).toContain('<main id="main-content">');
+    expect(html).toContain('action="/api/auth/sign-in/social"');
+  });
+});
+
+
+// ────────────────────────────────────────────────────
+// 6. Worker auth sign-out — stale OAuth cookie cleanup
 // ────────────────────────────────────────────────────
 describe("worker auth sign-out", () => {
   afterEach(() => {
@@ -383,7 +419,7 @@ describe("worker auth sign-out", () => {
 
 
 // ────────────────────────────────────────────────────
-// 6. Create org screen — design-system chrome
+// 7. Create org screen — design-system chrome
 // ────────────────────────────────────────────────────
 describe("create org screen", () => {
   afterEach(() => {
@@ -412,7 +448,7 @@ describe("create org screen", () => {
 });
 
 // ────────────────────────────────────────────────────
-// 7. orgExists — MinIO integration
+// 8. orgExists — MinIO integration
 // ────────────────────────────────────────────────────
 describe("orgExists", () => {
   it("returns true when files exist under org prefix", async () => {

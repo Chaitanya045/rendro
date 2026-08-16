@@ -6,20 +6,21 @@ import { logger } from "@/logger";
 import { createOrgApiKey } from "@/api-keys";
 import { isDeleted } from "@/soft-delete";
 import { renderNotFoundPage } from "@/routes/not-found";
+import { renderLandingPage } from "@/routes/landing";
 
 const app = new Hono<{ Variables: { user?: User } }>();
 
 /**
  * GET / — the main entry. Behavior depends on the user's session:
  *
- *   no session         → "Sign in with Google" page
+ *   no session         → product landing page with Google sign-in
  *   invalid org email  → unsupported email page
  *   valid org email    → app shell immediately; tree data loads client-side
  */
 app.get("/", async (c) => {
   const user = c.get("user");
   if (!user) {
-    return c.html(renderSignIn());
+    return c.html(renderLandingPage());
   }
 
   try {
@@ -47,7 +48,7 @@ app.get("/", async (c) => {
 
 app.get("/docs/:org", async (c) => {
   const user = c.get("user");
-  if (!user) return c.html(renderSignIn());
+  if (!user) return c.html(renderLandingPage());
   const org = emailToOrgSlug(user.email);
   if (!org || c.req.param("org") !== org) return c.html(renderNotFoundPage({ path: c.req.path }), 404);
   if (await orgExists(org)) return c.html(renderOrgDocs(user, org));
@@ -56,7 +57,7 @@ app.get("/docs/:org", async (c) => {
 
 app.get("/docs/:key{.+}", async (c) => {
   const user = c.get("user");
-  if (!user) return c.html(renderSignIn());
+  if (!user) return c.html(renderLandingPage());
   const org = emailToOrgSlug(user.email);
   if (!org) return c.html(renderEmailUnsupported(user));
   const rawKey = c.req.param("key");
@@ -129,38 +130,6 @@ app.post("/api/orgs", async (c) => {
 
 // ----- HTML renderers -----
 
-function renderSignIn(): string {
-  return `<!DOCTYPE html>
-<html lang="en" class="dark"><head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="theme-color" content="#09090b">
-<title>Rendro — Sign in</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-<style>
-  *{box-sizing:border-box}
-  :root{color-scheme:dark;background:#09090b}
-  body{font-family:Inter,system-ui,-apple-system,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;min-height:100dvh;margin:0;padding:24px;background:#09090b;color:#fafafa}
-  .card{width:min(100%,380px);background:#18181b;padding:40px;border:1px solid #27272a;border-radius:12px;box-shadow:0 16px 48px rgba(0,0,0,.32);text-align:center}
-  h1{margin:0 0 8px;color:#fb923c;font-size:24px;line-height:32px;font-weight:700;letter-spacing:-.02em}
-  p{margin:0 0 28px;color:#a1a1aa;font-size:14px;line-height:20px}
-  .sign-in-btn{display:inline-flex;align-items:center;justify-content:center;width:100%;min-height:44px;padding:0 18px;border:0;border-radius:6px;background:#fb923c;color:#09090b;font:600 14px/20px Inter,system-ui,sans-serif;cursor:pointer;transition:background-color 150ms cubic-bezier(.4,0,.2,1),transform 150ms cubic-bezier(.4,0,.2,1),box-shadow 150ms cubic-bezier(.4,0,.2,1)}
-  .sign-in-btn:hover{background:#fdba74;box-shadow:0 8px 24px rgba(251,146,60,.16);transform:translateY(-1px)}
-  .sign-in-btn:active{transform:scale(.98)}
-  .sign-in-btn:focus-visible{outline:2px solid #fafafa;outline-offset:3px}
-  @media (prefers-reduced-motion:reduce){.sign-in-btn{transition:none}.sign-in-btn:hover,.sign-in-btn:active{transform:none}}
-</style>
-</head><body>
-<main class="card">
-  <h1>Rendro</h1>
-  <p id="signin-description">Sign in to read your team's docs.</p>
-  <form id="sf" method="post" action="/api/auth/sign-in/social" style="display:none"><input type="hidden" name="provider" value="google"><input type="hidden" name="callbackURL" id="sf-cb"></form>
-  <script>document.getElementById('sf-cb').value=location.href</script>
-  <button class="sign-in-btn" type="button" aria-describedby="signin-description" onclick="fetch('/api/auth/sign-in/social',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({provider:'google',callbackURL:location.href})}).then(r=>r.json()).then(d=>{if(d.url)location.href=d.url}).catch(()=>document.getElementById('sf').submit())">Sign in with Google</button>
-</main>
-</body></html>`;
-}
 
 function renderEmailUnsupported(user: User): string {
   return `<!DOCTYPE html>
