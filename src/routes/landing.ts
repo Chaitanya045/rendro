@@ -198,10 +198,7 @@ export function renderLandingPage(): string {
 </head>
 <body>
   <a class="skip-link" href="#main-content">Skip to content</a>
-  <form id="sign-in-form" method="post" action="/api/auth/sign-in/social" hidden>
-    <input type="hidden" name="provider" value="google">
-    <input type="hidden" name="callbackURL" id="sign-in-callback">
-  </form>
+  <form id="sign-in-form" hidden></form>
   <header class="site-header">
     <div class="container header-inner">
       <a class="brand" href="/" aria-label="Rendro home">Rendro</a>
@@ -421,15 +418,30 @@ export function renderLandingPage(): string {
       }
 
       var form = document.getElementById("sign-in-form");
-      var callback = document.getElementById("sign-in-callback");
-      if (!(form instanceof HTMLFormElement) || !(callback instanceof HTMLInputElement)) return;
-      callback.value = window.location.href;
+      if (!(form instanceof HTMLFormElement)) return;
+      var buttons = Array.from(document.querySelectorAll("[data-auth]"));
+      buttons.forEach(function (button) {
+        var label = button.querySelector("[data-auth-label]");
+        if (label && !label.hasAttribute("data-auth-idle-label"))
+          label.setAttribute("data-auth-idle-label", label.textContent || "");
+      });
+      var resetSignIn = function () {
+        delete form.dataset.submitting;
+        buttons.forEach(function (button) {
+          button.disabled = false;
+          button.removeAttribute("aria-busy");
+          var label = button.querySelector("[data-auth-label]");
+          var idleLabel = label && label.getAttribute("data-auth-idle-label");
+          if (label && idleLabel !== null) label.textContent = idleLabel;
+        });
+      };
+      window.addEventListener("pageshow", resetSignIn);
       form.addEventListener("submit", function (event) {
         if (form.dataset.submitting === "true") { event.preventDefault(); return; }
         event.preventDefault();
+        resetSignIn();
         form.dataset.submitting = "true";
         var submitter = event.submitter;
-        var buttons = Array.from(document.querySelectorAll("[data-auth]"));
         buttons.forEach(function (button) { button.disabled = true; });
         if (submitter instanceof HTMLButtonElement) {
           submitter.setAttribute("aria-busy", "true");
@@ -439,7 +451,7 @@ export function renderLandingPage(): string {
         fetch("/api/auth/sign-in/social", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ provider: "google", callbackURL: callback.value })
+          body: JSON.stringify({ provider: "google", callbackURL: window.location.href })
         }).then(function (response) {
           if (!response.ok) throw new Error("Sign-in request failed");
           return response.json();
@@ -447,7 +459,12 @@ export function renderLandingPage(): string {
           if (!data || typeof data.url !== "string") throw new Error("Sign-in URL missing");
           window.location.href = data.url;
         }).catch(function () {
-          form.submit();
+          resetSignIn();
+          if (submitter instanceof HTMLButtonElement) {
+            var label = submitter.querySelector("[data-auth-label]");
+            if (label) label.textContent = "Try again";
+            submitter.focus();
+          }
         });
       });
     })();

@@ -75,7 +75,7 @@ Rules:
 - Brand and primary sign-in actions use dark-theme Ember Orange: `#fb923c`, with `#fdba74` on hover and `#09090b` text.
 - Lead with the product value and a real Rendro workspace image before asking the visitor to authenticate. The page order is hero, factual product proof, workflow, feature showcase, organization security, and final sign-in action.
 - The header anchors Product, Workflow, and Security on the same page; authenticated navigation remains outside this marketing surface.
-- Google sign-in is available from the header, hero, security section, and final call to action through one shared progressive-enhancement form.
+- Google sign-in is available from the header, hero, security section, and final call to action through one shared JSON submit handler. The handler resets pending UI on history restoration and re-enables the actions after request failures; it must never fall back to an HTML form POST because the auth endpoint accepts only JSON.
 - Desktop uses a copy/product split; tablet and mobile stack the hero and convert all primary actions to full-width `44px` targets without horizontal overflow.
 - Product claims must be evidence-backed. Do not add placeholder customer logos, fabricated usage counts, fake CLI output, or features not present in the application.
 - Hero entrance and viewport reveals run once with `transform` and `opacity`; hover motion stays within the `150ms`–`300ms` timing contract, and reduced-motion mode removes transforms.

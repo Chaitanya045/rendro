@@ -328,7 +328,10 @@ describe("unauthenticated landing", () => {
     expect(html).toContain('id="product"');
     expect(html).toContain('id="workflow"');
     expect(html).toContain('id="security"');
-    expect(html).toContain('action="/api/auth/sign-in/social"');
+    expect(html).toContain('fetch("/api/auth/sign-in/social"');
+    expect(html).not.toContain('action="/api/auth/sign-in/social"');
+    expect(html).toContain('window.addEventListener("pageshow", resetSignIn)');
+    expect(html).not.toContain("form.submit()");
     expect(html).toContain("Start with Google");
     expect(html).toContain("prefers-reduced-motion: reduce");
     expect(html.match(/data-auth-id=/g)).toHaveLength(5);
@@ -347,13 +350,59 @@ describe("unauthenticated landing", () => {
 
     expect(res.status).toBe(200);
     expect(html).toContain('<main id="main-content">');
-    expect(html).toContain('action="/api/auth/sign-in/social"');
+    expect(html).toContain('data-auth-id="hero-start"');
+  });
+});
+
+// ────────────────────────────────────────────────────
+// 6. Worker auth proxy — browser request context
+// ────────────────────────────────────────────────────
+describe("worker auth proxy", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("forwards the browser origin for repeated OAuth sign-in requests", async () => {
+    let proxiedHeaders = new Headers();
+    let proxiedBody = "";
+    const fakeFetch: typeof fetch = (input, init) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+      if (url.includes("/api/auth/get-session")) return Promise.resolve(Response.json(null));
+      if (url.includes("/api/auth/sign-in/social")) {
+        proxiedHeaders = new Headers(init?.headers);
+        proxiedBody = typeof init?.body === "string" ? init.body : "";
+        return Promise.resolve(Response.json({ url: "https://accounts.google.com/o/oauth2/v2/auth" }));
+      }
+      return Promise.resolve(new Response("unexpected fetch", { status: 500 }));
+    };
+    vi.stubGlobal("fetch", fakeFetch);
+
+    const body = JSON.stringify({
+      provider: "google",
+      callbackURL: "https://dev.rendro.app/",
+    });
+    const res = await workerApp.request("https://dev.rendro.app/api/auth/sign-in/social", {
+      method: "POST",
+      headers: {
+        cookie: "__Secure-better-auth.state=oauth-state",
+        "content-type": "application/json",
+        origin: "https://dev.rendro.app",
+      },
+      body,
+    });
+
+    expect(res.status).toBe(200);
+    expect(proxiedHeaders.get("origin")).toBe("https://dev.rendro.app");
+    expect(proxiedHeaders.get("content-type")).toBe("application/json");
+    expect(proxiedHeaders.get("cookie")).toBe("__Secure-better-auth.state=oauth-state");
+    expect(proxiedBody).toBe(body);
   });
 });
 
 
+
 // ────────────────────────────────────────────────────
-// 6. Worker auth sign-out — stale OAuth cookie cleanup
+// 7. Worker auth sign-out — stale OAuth cookie cleanup
 // ────────────────────────────────────────────────────
 describe("worker auth sign-out", () => {
   afterEach(() => {
@@ -424,7 +473,7 @@ describe("worker auth sign-out", () => {
 
 
 // ────────────────────────────────────────────────────
-// 7. Create org screen — design-system chrome
+// 8. Create org screen — design-system chrome
 // ────────────────────────────────────────────────────
 describe("create org screen", () => {
   afterEach(() => {
@@ -453,7 +502,7 @@ describe("create org screen", () => {
 });
 
 // ────────────────────────────────────────────────────
-// 8. orgExists — MinIO integration
+// 9. orgExists — MinIO integration
 // ────────────────────────────────────────────────────
 describe("orgExists", () => {
   it("returns true when files exist under org prefix", async () => {
