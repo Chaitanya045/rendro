@@ -203,9 +203,9 @@ export function renderLandingPage(): string {
     <div class="container header-inner">
       <a class="brand" href="/" aria-label="Rendro home">Rendro</a>
       <nav class="nav-links" aria-label="Primary navigation">
-        <a href="#product" data-section-link>Product</a>
-        <a href="#workflow" data-section-link>Workflow</a>
-        <a href="#security" data-section-link>Security</a>
+        <a href="#product" data-section-link data-scroll-section="product">Product</a>
+        <a href="#workflow" data-section-link data-scroll-section="workflow">Workflow</a>
+        <a href="#security" data-section-link data-scroll-section="security">Security</a>
       </nav>
       <div class="header-actions">
         <button class="button button-quiet header-signin" type="submit" form="sign-in-form" data-auth data-auth-id="header-sign-in">
@@ -328,7 +328,7 @@ export function renderLandingPage(): string {
       <a class="footer-brand" href="/">Rendro</a>
       <span>Documentation that stays close to the code.</span>
       <nav class="footer-links" aria-label="Footer navigation">
-        <a href="#product">Product</a><a href="#workflow">Workflow</a><a href="#security">Security</a><a href="https://github.com/Chaitanya045/rendro" target="_blank" rel="noreferrer">GitHub</a>
+        <a href="#product" data-scroll-section="product">Product</a><a href="#workflow" data-scroll-section="workflow">Workflow</a><a href="#security" data-scroll-section="security">Security</a><a href="https://github.com/Chaitanya045/rendro" target="_blank" rel="noreferrer">GitHub</a>
       </nav>
     </div>
   </footer>
@@ -373,29 +373,46 @@ export function renderLandingPage(): string {
         revealTargets.forEach(function (element) { revealObserver.observe(element); });
         document.documentElement.classList.add("motion-ready");
 
-        var revealHashTarget = function () {
-          if (!window.location.hash) return;
-          var id;
-          try { id = decodeURIComponent(window.location.hash.slice(1)); } catch { return; }
-          var target = document.getElementById(id);
-          if (!target) return;
-          if (target.matches("[data-reveal], [data-reveal-item]")) revealElement(target);
-          if (target.classList.contains("section"))
-            target.querySelectorAll("[data-reveal], [data-reveal-item]").forEach(revealElement);
-        };
-        window.addEventListener("hashchange", revealHashTarget);
         document.addEventListener("focusin", function (event) {
           if (!(event.target instanceof Element)) return;
           var target = event.target.closest("[data-reveal], [data-reveal-item]");
           if (target) revealElement(target);
         });
-        revealHashTarget();
       }
+      var scrollLinks = Array.from(document.querySelectorAll("[data-scroll-section]"));
+      var scrollSectionIds = scrollLinks.map(function (link) {
+        return link.getAttribute("data-scroll-section");
+      });
+      var initialSectionHash = "";
+      try { initialSectionHash = decodeURIComponent(window.location.hash.slice(1)); } catch {}
+      var hasLegacySectionHash = scrollSectionIds.includes(initialSectionHash);
+      var navigationEntry = performance.getEntriesByType("navigation")[0];
+      var isReload = navigationEntry && navigationEntry.type === "reload";
+      if (hasLegacySectionHash)
+        history.replaceState(null, "", window.location.pathname + window.location.search);
+      if (hasLegacySectionHash || isReload) {
+        var resetSectionPosition = function () {
+          window.scrollTo({ top: 0, behavior: "auto" });
+        };
+        resetSectionPosition();
+        window.addEventListener("pageshow", resetSectionPosition, { once: true });
+      }
+      scrollLinks.forEach(function (link) {
+        link.addEventListener("click", function (event) {
+          var id = link.getAttribute("data-scroll-section");
+          var section = id && document.getElementById(id);
+          if (!section) return;
+          event.preventDefault();
+          var sectionTop = window.scrollY + section.getBoundingClientRect().top;
+          window.scrollTo({ top: sectionTop, behavior: reduceMotion ? "auto" : "smooth" });
+        });
+      });
+
 
       if (canObserve) {
         var sectionLinks = Array.from(document.querySelectorAll("[data-section-link]"));
         var sectionMap = new Map(sectionLinks.map(function (link) {
-          return [link.getAttribute("href").slice(1), link];
+          return [link.getAttribute("data-scroll-section"), link];
         }));
         var setActiveSection = function (id) {
           sectionLinks.forEach(function (link) {

@@ -339,6 +339,11 @@ describe("unauthenticated landing", () => {
     expect(html).toContain("data-reveal-group");
     expect(html).toContain("IntersectionObserver");
     expect(html).toContain('document.documentElement.classList.add("motion-ready")');
+    expect(html.match(/data-scroll-section=/g)).toHaveLength(6);
+    expect(html).toContain('history.replaceState(null, "", window.location.pathname + window.location.search)');
+    expect(html).toContain('window.scrollTo({ top: sectionTop');
+    expect(html).toContain('navigationEntry.type === "reload"');
+    expect(html).not.toContain('window.addEventListener("hashchange"');
     expect(html).not.toContain("Sign in to read your team's docs.");
   });
 
