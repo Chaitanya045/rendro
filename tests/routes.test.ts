@@ -331,6 +331,11 @@ describe("unauthenticated landing", () => {
     expect(html).toContain('action="/api/auth/sign-in/social"');
     expect(html).toContain("Start with Google");
     expect(html).toContain("prefers-reduced-motion: reduce");
+    expect(html.match(/data-auth-id=/g)).toHaveLength(5);
+    expect(html).toContain('data-action-id="live-docs"');
+    expect(html).toContain("data-reveal-group");
+    expect(html).toContain("IntersectionObserver");
+    expect(html).toContain('document.documentElement.classList.add("motion-ready")');
     expect(html).not.toContain("Sign in to read your team's docs.");
   });
 

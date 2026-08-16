@@ -49,7 +49,10 @@ export function renderLandingPage(): string {
     .brand { color: var(--primary); font-size: 24px; line-height: 32px; font-weight: 700; letter-spacing: -.03em; }
     .nav-links { display: flex; align-items: center; gap: 28px; margin-left: auto; color: var(--text-muted); font-size: 14px; }
     .nav-links a, .footer-links a { transition: color 150ms var(--ease-standard); }
-    .nav-links a:hover, .footer-links a:hover { color: var(--text); }
+    .nav-links a { position: relative; padding-block: 6px; }
+    .nav-links a::after { content: ""; position: absolute; right: 0; bottom: 0; left: 0; height: 1px; background: var(--primary); transform: scaleX(0); transform-origin: left; transition: transform 150ms var(--ease-standard); }
+    .nav-links a:hover, .nav-links a:focus-visible, .nav-links a[aria-current="true"], .footer-links a:hover { color: var(--text); }
+    .nav-links a:hover::after, .nav-links a:focus-visible::after, .nav-links a[aria-current="true"]::after { transform: scaleX(1); }
     .header-actions { display: flex; align-items: center; gap: 10px; }
     .button { min-height: 44px; display: inline-flex; align-items: center; justify-content: center; gap: 8px; padding: 0 18px; border: 1px solid transparent; border-radius: 7px; font-size: 14px; line-height: 20px; font-weight: 600; cursor: pointer; transition: transform 150ms var(--ease-standard), background-color 150ms var(--ease-standard), border-color 150ms var(--ease-standard), color 150ms var(--ease-standard), box-shadow 150ms var(--ease-standard); }
     .button:hover { transform: translateY(-1px); }
@@ -90,8 +93,9 @@ export function renderLandingPage(): string {
     .proof { min-height: 156px; padding: 32px; border-right: 1px solid var(--border); transition: background-color 200ms var(--ease-standard); }
     .proof:last-child { border-right: 0; }
     .proof:hover { background: var(--surface-hover); }
-    .proof-value { margin: 0 0 4px; color: var(--primary); font-size: 34px; line-height: 42px; font-weight: 700; letter-spacing: -.04em; }
+    .proof-value { margin: 0 0 4px; color: var(--primary); font-size: 34px; line-height: 42px; font-weight: 700; letter-spacing: -.04em; transition: transform 150ms var(--ease-standard); }
     .proof-label { margin: 0; color: var(--text-muted); font-size: 14px; }
+    .proof:hover .proof-value { transform: translateY(-2px); }
     .section { padding: 112px 0; border-bottom: 1px solid var(--border); }
     .section-header { max-width: 720px; margin-bottom: 52px; }
     .section-kicker { margin-bottom: 14px; color: var(--primary); font-size: 12px; font-weight: 700; letter-spacing: .13em; text-transform: uppercase; }
@@ -101,7 +105,8 @@ export function renderLandingPage(): string {
     .workflow-steps { display: grid; gap: 12px; }
     .workflow-step { display: grid; grid-template-columns: 52px 1fr; gap: 18px; padding: 22px; border: 1px solid var(--border); border-radius: 9px; background: var(--surface-elevated); transition: border-color 200ms var(--ease-standard), transform 200ms var(--ease-standard); }
     .workflow-step:hover { border-color: var(--text-muted); transform: translateX(3px); }
-    .step-number { width: 42px; height: 42px; display: grid; place-items: center; border-radius: 6px; background: var(--primary-muted); color: var(--primary); font-size: 13px; font-weight: 700; }
+    .step-number { width: 42px; height: 42px; display: grid; place-items: center; border-radius: 6px; background: var(--primary-muted); color: var(--primary); font-size: 13px; font-weight: 700; transition: transform 150ms var(--ease-standard), background-color 150ms var(--ease-standard); }
+    .workflow-step:hover .step-number { transform: translateY(-1px) scale(1.03); background: var(--primary); color: var(--surface); }
     .workflow-step h3 { margin: 0 0 5px; font-size: 16px; line-height: 24px; }
     .workflow-step p { margin: 0; color: var(--text-muted); font-size: 14px; line-height: 22px; }
     .terminal { align-self: stretch; min-height: 100%; display: flex; flex-direction: column; overflow: hidden; border: 1px solid var(--border); border-radius: 9px; background: var(--surface-elevated); box-shadow: 0 20px 48px rgba(0,0,0,.26); }
@@ -113,7 +118,9 @@ export function renderLandingPage(): string {
     .features { display: grid; grid-template-columns: repeat(2,1fr); gap: 16px; }
     .feature { min-height: 230px; padding: 30px; border: 1px solid var(--border); border-radius: 9px; background: var(--surface-elevated); transition: transform 200ms var(--ease-standard), border-color 200ms var(--ease-standard), background-color 200ms var(--ease-standard); }
     .feature:hover { transform: translateY(-3px); border-color: var(--text-muted); background: var(--surface-hover); }
-    .feature-number { display: block; margin-bottom: 38px; color: var(--primary); font: 700 12px/16px ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .feature-number { display: block; width: max-content; margin-bottom: 38px; color: var(--primary); font: 700 12px/16px ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .feature-number::after { content: ""; display: block; width: 24px; height: 1px; margin-top: 8px; background: var(--primary); transform: scaleX(0); transform-origin: left; transition: transform 150ms var(--ease-standard); }
+    .feature:hover .feature-number::after { transform: scaleX(1); }
     .feature h3 { margin-bottom: 9px; font-size: 20px; line-height: 28px; letter-spacing: -.02em; }
     .feature p { max-width: 480px; margin: 0; color: var(--text-muted); font-size: 14px; line-height: 23px; }
     .security-grid { display: grid; grid-template-columns: .8fr 1.2fr; align-items: start; gap: 80px; }
@@ -133,6 +140,10 @@ export function renderLandingPage(): string {
     .footer-inner { display: flex; align-items: center; gap: 28px; color: var(--text-muted); font-size: 13px; }
     .footer-brand { color: var(--primary); font-size: 16px; font-weight: 700; }
     .footer-links { display: flex; flex-wrap: wrap; gap: 20px; margin-left: auto; }
+    @media (prefers-reduced-motion: no-preference) {
+      [data-reveal], [data-reveal-item] { transition: opacity 300ms var(--ease-standard), transform 300ms var(--ease-standard), background-color 200ms var(--ease-standard), border-color 200ms var(--ease-standard); transition-delay: var(--reveal-delay,0ms), var(--reveal-delay,0ms), 0ms, 0ms; }
+      .motion-ready [data-reveal]:not(.is-visible), .motion-ready [data-reveal-item]:not(.is-visible) { opacity: 0; transform: translateY(var(--reveal-y,16px)); }
+    }
     @keyframes spin { to { transform: rotate(360deg); } }
     @keyframes heroReveal { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
     @keyframes shotReveal { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
@@ -178,7 +189,10 @@ export function renderLandingPage(): string {
     @media (prefers-reduced-motion: reduce) {
       html { scroll-behavior: auto; }
       *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; scroll-behavior: auto !important; }
-      .button:hover, .button:active, .product-shot:hover, .workflow-step:hover, .feature:hover { transform: none; }
+      .button:hover, .button:active, .product-shot:hover, .workflow-step:hover, .workflow-step:hover .step-number, .feature:hover, .proof:hover .proof-value { transform: none; }
+    }
+    @media print {
+      [data-reveal], [data-reveal-item] { opacity: 1 !important; transform: none !important; }
     }
   </style>
 </head>
@@ -192,15 +206,15 @@ export function renderLandingPage(): string {
     <div class="container header-inner">
       <a class="brand" href="/" aria-label="Rendro home">Rendro</a>
       <nav class="nav-links" aria-label="Primary navigation">
-        <a href="#product">Product</a>
-        <a href="#workflow">Workflow</a>
-        <a href="#security">Security</a>
+        <a href="#product" data-section-link>Product</a>
+        <a href="#workflow" data-section-link>Workflow</a>
+        <a href="#security" data-section-link>Security</a>
       </nav>
       <div class="header-actions">
-        <button class="button button-quiet header-signin" type="submit" form="sign-in-form" data-auth>
+        <button class="button button-quiet header-signin" type="submit" form="sign-in-form" data-auth data-auth-id="header-sign-in">
           <span data-auth-label>Sign in</span><span class="button-spinner" aria-hidden="true"></span>
         </button>
-        <button class="button button-primary header-get-started" type="submit" form="sign-in-form" data-auth>
+        <button class="button button-primary header-get-started" type="submit" form="sign-in-form" data-auth data-auth-id="header-get-started">
           <span data-auth-label>Get started</span><span class="button-spinner" aria-hidden="true"></span>
         </button>
       </div>
@@ -214,10 +228,10 @@ export function renderLandingPage(): string {
           <h1 id="hero-title">Your docs should ship with your code.</h1>
           <p class="hero-lede">Keep documentation as plain HTML in the repo. Rendro publishes it from CI into a fast, navigable workspace—with contextual comments and no CMS to maintain.</p>
           <div class="hero-actions">
-            <button class="button button-primary" type="submit" form="sign-in-form" data-auth>
+            <button class="button button-primary" type="submit" form="sign-in-form" data-auth data-auth-id="hero-start">
               <span data-auth-label>Start with Google</span><span class="button-spinner" aria-hidden="true"></span>
             </button>
-            <a class="button button-secondary" href="https://dev.rendro.app/public/rendro-feature-test/reference" target="_blank" rel="noreferrer">View live docs <span class="arrow" aria-hidden="true">→</span></a>
+            <a class="button button-secondary" href="https://dev.rendro.app/public/rendro-feature-test/reference" target="_blank" rel="noreferrer" data-action-id="live-docs">View live docs <span class="arrow" aria-hidden="true">→</span></a>
           </div>
           <ul class="hero-facts" aria-label="Product principles">
             <li>Plain HTML</li>
@@ -237,27 +251,27 @@ export function renderLandingPage(): string {
     </section>
 
     <section class="proof-band" aria-label="Product proof">
-      <div class="container proof-grid">
-        <article class="proof"><p class="proof-value">&lt;40s</p><p class="proof-label">Target from CI push to live documentation</p></article>
-        <article class="proof"><p class="proof-value">0</p><p class="proof-label">Runtime dependencies in the publishing CLI</p></article>
-        <article class="proof"><p class="proof-value">3 layers</p><p class="proof-label">Organization isolation across auth, routing, and storage</p></article>
+      <div class="container proof-grid" data-reveal-group data-reveal-stagger="45">
+        <article class="proof" data-reveal-item style="--reveal-y:12px"><p class="proof-value">&lt;40s</p><p class="proof-label">Target from CI push to live documentation</p></article>
+        <article class="proof" data-reveal-item style="--reveal-y:12px"><p class="proof-value">0</p><p class="proof-label">Runtime dependencies in the publishing CLI</p></article>
+        <article class="proof" data-reveal-item style="--reveal-y:12px"><p class="proof-value">3 layers</p><p class="proof-label">Organization isolation across auth, routing, and storage</p></article>
       </div>
     </section>
 
     <section class="section" id="workflow" aria-labelledby="workflow-title">
       <div class="container">
-        <header class="section-header">
+        <header class="section-header" data-reveal>
           <p class="section-kicker">Workflow</p>
           <h2 id="workflow-title">From commit to readable in one push.</h2>
           <p class="section-intro">Rendro fits the workflow your engineering team already reviews, tests, and deploys.</p>
         </header>
         <div class="workflow-grid">
-          <div class="workflow-steps">
-            <article class="workflow-step"><span class="step-number">01</span><div><h3>Author plain HTML</h3><p>Keep documentation beside the code, with your own structure and styling.</p></div></article>
-            <article class="workflow-step"><span class="step-number">02</span><div><h3>Push through CI</h3><p>The Rendro CLI hashes files and uploads only what changed.</p></div></article>
-            <article class="workflow-step"><span class="step-number">03</span><div><h3>Read and review</h3><p>Your team gets navigation, sharing, and comments without adopting another editor.</p></div></article>
+          <div class="workflow-steps" data-reveal-group data-reveal-stagger="55">
+            <article class="workflow-step" data-reveal-item style="--reveal-y:12px"><span class="step-number">01</span><div><h3>Author plain HTML</h3><p>Keep documentation beside the code, with your own structure and styling.</p></div></article>
+            <article class="workflow-step" data-reveal-item style="--reveal-y:12px"><span class="step-number">02</span><div><h3>Push through CI</h3><p>The Rendro CLI hashes files and uploads only what changed.</p></div></article>
+            <article class="workflow-step" data-reveal-item style="--reveal-y:12px"><span class="step-number">03</span><div><h3>Read and review</h3><p>Your team gets navigation, sharing, and comments without adopting another editor.</p></div></article>
           </div>
-          <div class="terminal" aria-label="Rendro command example">
+          <div class="terminal" aria-label="Rendro command example" data-reveal data-reveal-delay="80">
             <div class="terminal-bar"><span class="shot-dot"></span><span class="shot-dot"></span><span class="shot-dot"></span><span>CI / publish-docs</span></div>
             <div class="terminal-body">
               <div><span class="terminal-prompt">$</span> rendro push --source ./docs --org my-org</div>
@@ -272,42 +286,42 @@ export function renderLandingPage(): string {
 
     <section class="section" id="product" aria-labelledby="product-title">
       <div class="container">
-        <header class="section-header">
+        <header class="section-header" data-reveal>
           <p class="section-kicker">Product</p>
           <h2 id="product-title">The docs shell your HTML does not have to build.</h2>
           <p class="section-intro">Rendro owns the workspace around the document. Your uploaded HTML remains isolated and renders exactly as authored.</p>
         </header>
-        <div class="features">
-          <article class="feature"><span class="feature-number">01 / NAVIGATE</span><h3>File-tree navigation</h3><p>Folders load on demand, large directories paginate, and cross-document links keep the active tree location synchronized.</p></article>
-          <article class="feature"><span class="feature-number">02 / RENDER</span><h3>Publisher-owned HTML</h3><p>Your document stays inside a sandboxed iframe. Rendro does not impose its typography or rewrite your presentation.</p></article>
-          <article class="feature"><span class="feature-number">03 / REVIEW</span><h3>Comments in context</h3><p>Select text, open a thread, and receive replies in real time without moving the discussion to chat or email.</p></article>
-          <article class="feature"><span class="feature-number">04 / PUBLISH</span><h3>Controlled public access</h3><p>Uploads remain private until trusted CI registers an approved folder at a stable, anonymous read-only URL.</p></article>
+        <div class="features" data-reveal-group data-reveal-stagger="60">
+          <article class="feature" data-reveal-item style="--reveal-y:12px"><span class="feature-number">01 / NAVIGATE</span><h3>File-tree navigation</h3><p>Folders load on demand, large directories paginate, and cross-document links keep the active tree location synchronized.</p></article>
+          <article class="feature" data-reveal-item style="--reveal-y:12px"><span class="feature-number">02 / RENDER</span><h3>Publisher-owned HTML</h3><p>Your document stays inside a sandboxed iframe. Rendro does not impose its typography or rewrite your presentation.</p></article>
+          <article class="feature" data-reveal-item style="--reveal-y:12px"><span class="feature-number">03 / REVIEW</span><h3>Comments in context</h3><p>Select text, open a thread, and receive replies in real time without moving the discussion to chat or email.</p></article>
+          <article class="feature" data-reveal-item style="--reveal-y:12px"><span class="feature-number">04 / PUBLISH</span><h3>Controlled public access</h3><p>Uploads remain private until trusted CI registers an approved folder at a stable, anonymous read-only URL.</p></article>
         </div>
       </div>
     </section>
 
     <section class="section" id="security" aria-labelledby="security-title">
       <div class="container security-grid">
-        <div class="security-copy">
+        <div class="security-copy" data-reveal>
           <p class="section-kicker">Security</p>
           <h2 id="security-title">Private by default. Scoped by organization.</h2>
           <p class="section-intro">The organization boundary is part of every request, not an optional permission setting.</p>
-          <button class="button button-secondary" type="submit" form="sign-in-form" data-auth><span data-auth-label>Start with Google</span><span class="button-spinner" aria-hidden="true"></span></button>
+          <button class="button button-secondary" type="submit" form="sign-in-form" data-auth data-auth-id="security-start"><span data-auth-label>Start with Google</span><span class="button-spinner" aria-hidden="true"></span></button>
         </div>
-        <dl class="security-list">
-          <div class="security-row"><dt>Identity</dt><dd>Google OAuth connects each session to a verified work email.</dd></div>
-          <div class="security-row"><dt>Organization</dt><dd>The work-email domain determines the organization namespace.</dd></div>
-          <div class="security-row"><dt>Storage</dt><dd>Document objects are stored under organization-specific prefixes.</dd></div>
-          <div class="security-row"><dt>Public access</dt><dd>Only folders explicitly registered by trusted CI receive anonymous routes.</dd></div>
+        <dl class="security-list" data-reveal-group data-reveal-stagger="45">
+          <div class="security-row" data-reveal-item style="--reveal-y:12px"><dt>Identity</dt><dd>Google OAuth connects each session to a verified work email.</dd></div>
+          <div class="security-row" data-reveal-item style="--reveal-y:12px"><dt>Organization</dt><dd>The work-email domain determines the organization namespace.</dd></div>
+          <div class="security-row" data-reveal-item style="--reveal-y:12px"><dt>Storage</dt><dd>Document objects are stored under organization-specific prefixes.</dd></div>
+          <div class="security-row" data-reveal-item style="--reveal-y:12px"><dt>Public access</dt><dd>Only folders explicitly registered by trusted CI receive anonymous routes.</dd></div>
         </dl>
       </div>
     </section>
 
     <section class="final-cta" aria-labelledby="cta-title">
       <div class="container">
-        <div class="cta-panel">
+        <div class="cta-panel" data-reveal style="--reveal-y:12px">
           <div><h2 id="cta-title">Keep writing docs where the code changes.</h2><p>Let Rendro handle delivery, navigation, and feedback.</p></div>
-          <button class="button button-primary" type="submit" form="sign-in-form" data-auth><span data-auth-label>Start with Google</span><span class="button-spinner" aria-hidden="true"></span></button>
+          <button class="button button-primary" type="submit" form="sign-in-form" data-auth data-auth-id="final-start"><span data-auth-label>Start with Google</span><span class="button-spinner" aria-hidden="true"></span></button>
         </div>
       </div>
     </section>
@@ -323,6 +337,89 @@ export function renderLandingPage(): string {
   </footer>
   <script>
     (function () {
+      var reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      var canObserve = "IntersectionObserver" in window;
+      var revealTargets = Array.from(document.querySelectorAll("[data-reveal], [data-reveal-item]"));
+
+      function revealElement(element) {
+        if (element.classList.contains("is-visible")) return;
+        element.classList.add("is-visible");
+        var clearDelay = function (event) {
+          if (event.target !== element) return;
+          element.style.removeProperty("--reveal-delay");
+          element.removeEventListener("transitionend", clearDelay);
+        };
+        element.addEventListener("transitionend", clearDelay);
+      }
+
+      if (!reduceMotion && canObserve && revealTargets.length > 0) {
+        Array.from(document.querySelectorAll("[data-reveal-group]")).forEach(function (group) {
+          var stagger = Number.parseInt(group.getAttribute("data-reveal-stagger") || "0", 10);
+          Array.from(group.children).forEach(function (child, index) {
+            if (child.hasAttribute("data-reveal-item"))
+              child.style.setProperty("--reveal-delay", Math.min(index * stagger, 180) + "ms");
+          });
+        });
+        revealTargets.forEach(function (element) {
+          var delay = Number.parseInt(element.getAttribute("data-reveal-delay") || "0", 10);
+          if (delay > 0) element.style.setProperty("--reveal-delay", Math.min(delay, 180) + "ms");
+        });
+
+        var revealObserver = new IntersectionObserver(function (entries) {
+          entries.forEach(function (entry) {
+            if (!entry.isIntersecting) return;
+            revealElement(entry.target);
+            revealObserver.unobserve(entry.target);
+          });
+        }, { threshold: .12, rootMargin: "0px 0px -10% 0px" });
+
+        revealTargets.forEach(function (element) { revealObserver.observe(element); });
+        document.documentElement.classList.add("motion-ready");
+
+        var revealHashTarget = function () {
+          if (!window.location.hash) return;
+          var id;
+          try { id = decodeURIComponent(window.location.hash.slice(1)); } catch { return; }
+          var target = document.getElementById(id);
+          if (!target) return;
+          if (target.matches("[data-reveal], [data-reveal-item]")) revealElement(target);
+          if (target.classList.contains("section"))
+            target.querySelectorAll("[data-reveal], [data-reveal-item]").forEach(revealElement);
+        };
+        window.addEventListener("hashchange", revealHashTarget);
+        document.addEventListener("focusin", function (event) {
+          if (!(event.target instanceof Element)) return;
+          var target = event.target.closest("[data-reveal], [data-reveal-item]");
+          if (target) revealElement(target);
+        });
+        revealHashTarget();
+      }
+
+      if (canObserve) {
+        var sectionLinks = Array.from(document.querySelectorAll("[data-section-link]"));
+        var sectionMap = new Map(sectionLinks.map(function (link) {
+          return [link.getAttribute("href").slice(1), link];
+        }));
+        var setActiveSection = function (id) {
+          sectionLinks.forEach(function (link) {
+            if (link === sectionMap.get(id)) link.setAttribute("aria-current", "true");
+            else link.removeAttribute("aria-current");
+          });
+        };
+        var sectionObserver = new IntersectionObserver(function (entries) {
+          var visible = entries.filter(function (entry) { return entry.isIntersecting; });
+          if (visible.length === 0) return;
+          visible.sort(function (a, b) {
+            return Math.abs(a.boundingClientRect.top - 68) - Math.abs(b.boundingClientRect.top - 68);
+          });
+          setActiveSection(visible[0].target.id);
+        }, { threshold: 0, rootMargin: "-25% 0px -65% 0px" });
+        sectionMap.forEach(function (_, id) {
+          var section = document.getElementById(id);
+          if (section) sectionObserver.observe(section);
+        });
+      }
+
       var form = document.getElementById("sign-in-form");
       var callback = document.getElementById("sign-in-callback");
       if (!(form instanceof HTMLFormElement) || !(callback instanceof HTMLInputElement)) return;

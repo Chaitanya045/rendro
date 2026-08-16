@@ -78,7 +78,10 @@ Rules:
 - Google sign-in is available from the header, hero, security section, and final call to action through one shared progressive-enhancement form.
 - Desktop uses a copy/product split; tablet and mobile stack the hero and convert all primary actions to full-width `44px` targets without horizontal overflow.
 - Product claims must be evidence-backed. Do not add placeholder customer logos, fabricated usage counts, fake CLI output, or features not present in the application.
-- Entrance motion runs once with `transform` and `opacity`; hover motion stays within the `150ms`–`300ms` timing contract, and reduced-motion mode removes transforms.
+- Hero entrance and viewport reveals run once with `transform` and `opacity`; hover motion stays within the `150ms`–`300ms` timing contract, and reduced-motion mode removes transforms.
+- Landing viewport reveals use one native `IntersectionObserver`, reveal each target once, and unobserve it immediately. Section headers move `16px`; proof cells, cards, security rows, and the final CTA move `12px`; group staggering is capped at `180ms`.
+- Content remains visible by default. The `motion-ready` class is added only after the observer and reveal targets are initialized, so disabled JavaScript, script errors, unsupported observers, reduced motion, and print output never hide content.
+- Primary navigation may mark the current Product, Workflow, or Security section with a `150ms` Ember underline. Do not add scroll listeners, `requestAnimationFrame` loops, count-up numbers, simulated terminal typing, parallax, pinned sections, or replay-on-reverse reveals.
 
 ## Motion tokens
 
