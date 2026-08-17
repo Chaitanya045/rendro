@@ -1,0 +1,34 @@
+name: Deployment retention
+
+on:
+  schedule:
+    - cron: "23 3 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: deployment-retention
+  cancel-in-progress: false
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm cleanup:retention
+        env:
+          CONVEX_SITE_URL: ${{ secrets.CONVEX_SITE_URL }}
+          RETENTION_SECRET: ${{ secrets.RETENTION_SECRET }}
+          MINIO_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+          MINIO_ACCESS_KEY: ${{ secrets.R2_ACCESS_KEY }}
+          MINIO_SECRET_KEY: ${{ secrets.R2_SECRET_KEY }}
+          MINIO_BUCKET: ${{ secrets.R2_BUCKET }}
+          MINIO_REGION: auto
+          MINIO_FORCE_PATH_STYLE: "true"
