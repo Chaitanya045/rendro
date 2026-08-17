@@ -1,9 +1,11 @@
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
+import { requireInternalSecret } from "./security";
 
 export const mark = mutation({
-  args: { orgSlug: v.string(), fileKey: v.string() },
+  args: { orgSlug: v.string(), fileKey: v.string(), internalSecret: v.string() },
   handler: async (ctx, args) => {
+    requireInternalSecret(args.internalSecret);
     // Delete any existing entry for this key
     const existing = await ctx.db.query("deleted_files").withIndex("by_key", q => q.eq("fileKey", args.fileKey)).first();
     if (existing) await ctx.db.delete(existing._id);
@@ -13,24 +15,27 @@ export const mark = mutation({
 });
 
 export const isDeleted = query({
-  args: { fileKey: v.string() },
+  args: { fileKey: v.string(), internalSecret: v.string() },
   handler: async (ctx, args) => {
+    requireInternalSecret(args.internalSecret);
     const row = await ctx.db.query("deleted_files").withIndex("by_key", q => q.eq("fileKey", args.fileKey)).first();
     return row !== null;
   },
 });
 
 export const unmark = mutation({
-  args: { fileKey: v.string() },
+  args: { fileKey: v.string(), internalSecret: v.string() },
   handler: async (ctx, args) => {
+    requireInternalSecret(args.internalSecret);
     const existing = await ctx.db.query("deleted_files").withIndex("by_key", q => q.eq("fileKey", args.fileKey)).first();
     if (existing) await ctx.db.delete(existing._id);
   },
 });
 
 export const filterFn = query({
-  args: { keys: v.array(v.string()) },
+  args: { keys: v.array(v.string()), internalSecret: v.string() },
   handler: async (ctx, args) => {
+    requireInternalSecret(args.internalSecret);
     if (args.keys.length === 0) return [];
     const deleted = new Set<string>();
     for (const key of args.keys) {

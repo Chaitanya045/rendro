@@ -370,6 +370,14 @@ Doc HTML (iframe)                    Convex
   │                                    │<───────────────
 ```
 
+The widget fetches a short-lived Convex JWT from
+`/api/auth/convex/token` before subscribing. Every thread read and mutation
+requires that signed identity and checks its email-derived organization against
+the thread's organization. Thread and reply author fields are derived from JWT
+claims; the client cannot submit or override them. Worker-only API-key and
+soft-delete functions require `CONVEX_INTERNAL_SECRET`, which must match in the
+Worker and Convex environments.
+
 ### Anchor Format
 
 ```typescript
@@ -398,7 +406,9 @@ The server injects `window.RENDRO_INITIAL_DOC` into the app shell for `/docs/:or
 
 `lazy-tree.ts` also parses `/docs/...` directly so back/forward navigation and static reloads restore the selected document. If a document disappears after the tree is loaded, `/files/:org/:path*` returns the same Broken Document Graph HTML inside `#content-frame`; the primary recovery link uses `target="_top"` to leave the iframe.
 
-Local development can still enter through `?dev_user=email` once. Session middleware persists that value as the `rendro-dev-user` cookie, then lazy-tree removes `dev_user` from visible URLs and iframe requests rely on the cookie.
+Local and deployed environments use Better Auth sessions. The legacy
+`dev_user` query, `X-Dev-User` header, and `rendro-dev-user` cookie are ignored;
+local development must use a configured authentication provider.
 
 Signed share links are created by `GET /api/share/create?key=:org/:path` for the currently signed-in owner. The server returns a 7-day HMAC-SHA256 token using `AUTH_SECRET`; the token payload contains the document key and expiry. `GET /share/:token` is mounted before session middleware in both runtime entrypoints, so it streams the raw document HTML without login and without commentor injection. Tampered tokens return `403`, expired tokens return `410`, and deleted/missing docs return the shared Broken Document Graph page with `404`.
 
@@ -432,6 +442,7 @@ npx convex deploy --cmd "push"
 | `GOOGLE_CLIENT_SECRET` | Secret | OAuth secret |
 | `AUTH_SECRET` | Secret | Cookie signing |
 | `CONVEX_URL` | Secret | Convex API endpoint |
+| `CONVEX_INTERNAL_SECRET` | Secret | Worker-to-Convex service authentication |
 | `MINIO_ENDPOINT` | Secret | R2 S3 endpoint |
 | `MINIO_ACCESS_KEY` | Secret | R2 access key |
 | `MINIO_SECRET_KEY` | Secret | R2 secret key |
@@ -446,6 +457,7 @@ npx convex deploy --cmd "push"
 | `GOOGLE_CLIENT_ID` | OAuth client |
 | `GOOGLE_CLIENT_SECRET` | OAuth secret |
 | `AUTH_SECRET` | Cookie signing (must match Workers) |
+| `CONVEX_INTERNAL_SECRET` | Worker-to-Convex service authentication (must match Workers) |
 | `SITE_URL` | "https://rendro.app" |
 
 ---

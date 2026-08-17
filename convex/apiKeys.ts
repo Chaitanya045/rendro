@@ -1,9 +1,11 @@
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
+import { requireInternalSecret } from "./security";
 
 export const create = mutation({
-  args: { orgSlug: v.string(), keyHash: v.string() },
+  args: { orgSlug: v.string(), keyHash: v.string(), internalSecret: v.string() },
   handler: async (ctx, args) => {
+    requireInternalSecret(args.internalSecret);
     // Delete existing key
     const existing = await ctx.db.query("api_keys").withIndex("by_hash", q => q.eq("keyHash", args.keyHash)).first();
     if (existing) await ctx.db.delete(existing._id);
@@ -16,8 +18,9 @@ export const create = mutation({
 });
 
 export const validate = query({
-  args: { keyHash: v.string() },
+  args: { keyHash: v.string(), internalSecret: v.string() },
   handler: async (ctx, args) => {
+    requireInternalSecret(args.internalSecret);
     const row = await ctx.db.query("api_keys").withIndex("by_hash", q => q.eq("keyHash", args.keyHash)).first();
     return row?.orgSlug ?? null;
   },

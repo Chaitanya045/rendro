@@ -42,6 +42,7 @@ AUTH_SECRET=your-secret-32chars
 
 # Convex
 CONVEX_URL=https://your-project.convex.cloud
+CONVEX_INTERNAL_SECRET=generate-a-separate-32-plus-character-secret
 
 # MinIO / R2 (local dev uses MinIO)
 MINIO_ENDPOINT=http://localhost:9000
@@ -66,15 +67,23 @@ pnpm dev
 
 Server starts on `http://localhost:3000`.
 
-For local dev without Google OAuth, use the dev bypass:
+Local authentication uses the same Google OAuth flow as production. Add
+`http://localhost:3000/api/auth/callback/google` to the OAuth client's authorized
+redirect URIs, then sign in at `http://localhost:3000`. Legacy `dev_user`,
+`X-Dev-User`, and `rendro-dev-user` impersonation inputs are intentionally
+ignored.
 
-```
-http://localhost:3000/?dev_user=test@example.com
+Set the same service secret on the Convex development deployment before starting
+the app:
+
+```bash
+npx convex env set CONVEX_INTERNAL_SECRET <same-value-as-.env>
 ```
 
 ### 4. Generate API Key
 
-Sign in at `http://localhost:3000/?dev_user=test@acme-corp.com`, create your org (the form auto-fills `acme-corp` from email domain). You'll get an API key.
+Sign in at `http://localhost:3000`, then create your org (the form auto-fills the
+slug from the current email-domain model). The raw API key is shown once.
 
 ### 5. Push Docs
 
@@ -127,6 +136,7 @@ npx convex env set GOOGLE_CLIENT_ID=xxx
 npx convex env set GOOGLE_CLIENT_SECRET=xxx
 npx convex env set AUTH_SECRET=xxx
 npx convex env set SITE_URL=https://rendro.app
+npx convex env set CONVEX_INTERNAL_SECRET=<shared-service-secret>
 ```
 
 ### Cloudflare Workers
@@ -142,6 +152,7 @@ npx wrangler secret put GOOGLE_CLIENT_ID
 npx wrangler secret put GOOGLE_CLIENT_SECRET
 npx wrangler secret put AUTH_SECRET
 npx wrangler secret put CONVEX_URL
+npx wrangler secret put CONVEX_INTERNAL_SECRET
 npx wrangler secret put MINIO_ENDPOINT
 npx wrangler secret put MINIO_ACCESS_KEY
 npx wrangler secret put MINIO_SECRET_KEY

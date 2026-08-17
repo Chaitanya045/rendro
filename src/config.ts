@@ -19,6 +19,9 @@ const envSchema = z.object({
   PORT: z.coerce.number().int().min(1).max(65535).default(3000),
   BASE_URL: z.string().url().default("http://localhost:3000"),
   CONVEX_URL: z.string().default(""),
+  CONVEX_INTERNAL_SECRET: z
+    .string()
+    .min(32, "CONVEX_INTERNAL_SECRET must be at least 32 characters"),
   // Auth DB secret (dev only — prod should use a real secret)
   AUTH_SECRET: z.string().min(16, "AUTH_SECRET must be at least 16 characters"),
 
@@ -56,6 +59,7 @@ export const MINIO_FORCE_PATH_STYLE = env.MINIO_FORCE_PATH_STYLE;
 export const PORT = env.PORT;
 export const BASE_URL = env.BASE_URL;
 export const CONVEX_URL = env.CONVEX_URL;
+export const CONVEX_INTERNAL_SECRET = env.CONVEX_INTERNAL_SECRET;
 
 export const AUTH_SECRET = env.AUTH_SECRET;
 

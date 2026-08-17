@@ -476,6 +476,15 @@ class Commentor {
     this.cfg = cfg;
     this.canWrite = Boolean(cfg.author);
     this.client = new ConvexClient(cfg.convexUrl);
+    this.client.setAuth(async () => {
+      const response = await fetch("/api/auth/convex/token", {
+        credentials: "same-origin",
+        headers: { Accept: "application/json" },
+      });
+      if (!response.ok) return null;
+      const payload = (await response.json()) as { token?: unknown };
+      return typeof payload.token === "string" ? payload.token : null;
+    });
 
     const host = document.createElement("div");
     host.id = "commentor-host";
@@ -1210,8 +1219,7 @@ class Commentor {
         await this.client.mutation(api.threads.create, {
           orgSlug: this.cfg.orgSlug,
           filePath: this.cfg.filePath,
-          authorEmail: this.cfg.author!.email,
-          authorName: this.cfg.author!.name,
+          // Author identity is derived from the signed Convex token server-side.
           body,
           anchor,
         });
@@ -1568,8 +1576,6 @@ class Commentor {
         try {
           await this.client.mutation(api.replies.add, {
             threadId: t._id,
-            authorEmail: this.cfg.author!.email,
-            authorName: this.cfg.author!.name,
             body,
           });
           input.value = "";

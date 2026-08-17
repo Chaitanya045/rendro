@@ -41,11 +41,11 @@
     "cli:build": "node scripts/build-cli.mjs",
     "deploy": "wrangler deploy --config wrangler.toml"
   },
-  "dependencies": {},
   "devDependencies": {
     "@aws-sdk/client-s3": "^3.600.0",
     "@better-auth/memory-adapter": "^1.6.23",
     "@convex-dev/better-auth": "^0.12.5",
+    "@edge-runtime/vm": "^5.0.0",
     "@eslint/js": "^10.0.1",
     "@hono/node-server": "^2.0.6",
     "@libsql/client": "^0.17.4",
@@ -55,6 +55,7 @@
     "better-auth-cloudflare": "^0.3.0",
     "better-sqlite3": "^12.11.1",
     "convex": "^1.42.0",
+    "convex-test": "^0.0.54",
     "dotenv": "^17.4.2",
     "esbuild": "^0.28.1",
     "eslint": "^10.6.0",

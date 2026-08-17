@@ -11,6 +11,7 @@ process.env.BASE_URL = "http://localhost:3000";
 process.env.SYNC_TOKEN = "test-sync-token";
 process.env.NODE_ENV = "test";
 process.env.CONVEX_URL = "http://127.0.0.1:3210";
+process.env.CONVEX_INTERNAL_SECRET = "test-convex-internal-secret-32-chars";
 
 const keyHashByOrg = new Map<string, string>();
 const orgByKeyHash = new Map<string, string>();

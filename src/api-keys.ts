@@ -1,5 +1,5 @@
 import { randomBytes, createHash } from "node:crypto";
-import { CONVEX_URL } from "@/config";
+import { CONVEX_INTERNAL_SECRET, CONVEX_URL } from "@/config";
 import { logger } from "@/logger";
 
 export function generateApiKey(): { raw: string; hash: string } {
@@ -16,7 +16,10 @@ async function convexQuery(path: string, args: Record<string, unknown>): Promise
     const res = await fetch(`${CONVEX_URL}/api/query`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ path, args: [args] }),
+      body: JSON.stringify({
+        path,
+        args: [{ ...args, internalSecret: CONVEX_INTERNAL_SECRET }],
+      }),
     });
     const data = await res.json() as { status: string; value: unknown };
     return data.status === "success" ? data.value : null;
@@ -32,7 +35,10 @@ async function convexMutation(path: string, args: Record<string, unknown>): Prom
     const res = await fetch(`${CONVEX_URL}/api/mutation`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ path, args: [args] }),
+      body: JSON.stringify({
+        path,
+        args: [{ ...args, internalSecret: CONVEX_INTERNAL_SECRET }],
+      }),
     });
     const data = await res.json() as { status: string; value: unknown };
     return data.status === "success" ? data.value : null;

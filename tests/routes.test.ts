@@ -11,11 +11,11 @@ import { verifySyncToken } from "@/config";
 // 1. verifySyncToken — config level
 // ────────────────────────────────────────────────────
 describe("verifySyncToken", () => {
-  it("accepts correct token", async () => expect(verifySyncToken("test-sync-token")).toBe(true));
-  it("rejects wrong token", async () => expect(verifySyncToken("wrong-token")).toBe(false));
-  it("rejects empty token", async () => expect(verifySyncToken("")).toBe(false));
-  it("rejects different-length token", async () => expect(verifySyncToken("x")).toBe(false));
-  it("rejects case-different token", async () => expect(verifySyncToken("TEST-SYNC-TOKEN")).toBe(false));
+  it("accepts correct token", () => expect(verifySyncToken("test-sync-token")).toBe(true));
+  it("rejects wrong token", () => expect(verifySyncToken("wrong-token")).toBe(false));
+  it("rejects empty token", () => expect(verifySyncToken("")).toBe(false));
+  it("rejects different-length token", () => expect(verifySyncToken("x")).toBe(false));
+  it("rejects case-different token", () => expect(verifySyncToken("TEST-SYNC-TOKEN")).toBe(false));
 });
 
 // ────────────────────────────────────────────────────
@@ -248,7 +248,7 @@ describe("sync API — list + delete (sync-deletes)", () => {
 });
 
 // ────────────────────────────────────────────────────
-// 4. Session middleware — dev bypass
+// 4. Session middleware — rejects legacy impersonation inputs
 // ────────────────────────────────────────────────────
 describe("session middleware", () => {
   let sessionMiddleware: MiddlewareHandler;
@@ -258,56 +258,36 @@ describe("session middleware", () => {
     sessionMiddleware = mod.sessionMiddleware;
   });
 
-  it("sets user from X-Dev-User header in development", async () => {
-    process.env.NODE_ENV = "development";
+  function makeSessionApp() {
     const app = new Hono<{ Variables: { user?: User } }>();
     app.use("*", sessionMiddleware);
     app.get("/me", (c) => c.json(c.get("user") ?? null));
+    return app;
+  }
 
-    const res = await app.request("/me", { headers: { "X-Dev-User": "alice@acme-corp.com" } });
-    const body = (await res.json()) as { email: string } | null;
-    expect(body).toBeTruthy();
-    expect(body!.email).toBe("alice@acme-corp.com");
+  it("ignores X-Dev-User even in development", async () => {
+    process.env.NODE_ENV = "development";
+    const res = await makeSessionApp().request("/me", {
+      headers: { "X-Dev-User": "alice@acme-corp.com" },
+    });
+    expect(await res.json()).toBeNull();
   });
 
-  it("sets user and dev cookie from dev_user query in development", async () => {
+  it("ignores dev_user on the public dev hostname", async () => {
     process.env.NODE_ENV = "development";
-    const app = new Hono<{ Variables: { user?: User } }>();
-    app.use("*", sessionMiddleware);
-    app.get("/me", (c) => c.json(c.get("user") ?? null));
-
-    const first = await app.request("/me?dev_user=carol%40acme-corp.com");
-    const firstBody = (await first.json()) as { email: string } | null;
-    expect(firstBody?.email).toBe("carol@acme-corp.com");
-    const setCookie = first.headers.get("set-cookie");
-    expect(setCookie).toContain("rendro-dev-user=carol%40acme-corp.com");
-
-    const second = await app.request("/me", { headers: { cookie: setCookie ?? "" } });
-    const secondBody = (await second.json()) as { email: string } | null;
-    expect(secondBody?.email).toBe("carol@acme-corp.com");
+    const res = await makeSessionApp().request(
+      "https://dev.rendro.app/me?dev_user=carol%40acme-corp.com",
+    );
+    expect(await res.json()).toBeNull();
+    expect(res.headers.get("set-cookie")).toBeNull();
   });
 
-  it("sets user from rendro-dev-user cookie in development", async () => {
+  it("ignores the legacy development user cookie", async () => {
     process.env.NODE_ENV = "development";
-    const app = new Hono<{ Variables: { user?: User } }>();
-    app.use("*", sessionMiddleware);
-    app.get("/me", (c) => c.json(c.get("user") ?? null));
-
-    const res = await app.request("/me", { headers: { cookie: "rendro-dev-user=bob%40acme-corp.com" } });
-    const body = (await res.json()) as { email: string } | null;
-    expect(body).toBeTruthy();
-    expect(body!.email).toBe("bob@acme-corp.com");
-  });
-
-  it("leaves user null when no session and no dev header", async () => {
-    process.env.NODE_ENV = "development";
-    const app = new Hono<{ Variables: { user?: User } }>();
-    app.use("*", sessionMiddleware);
-    app.get("/me", (c) => c.json(c.get("user") ?? null));
-
-    const res = await app.request("/me");
-    const body = await res.json();
-    expect(body).toBeNull();
+    const res = await makeSessionApp().request("/me", {
+      headers: { cookie: "rendro-dev-user=bob%40acme-corp.com" },
+    });
+    expect(await res.json()).toBeNull();
   });
 });
 
@@ -425,12 +405,14 @@ describe("worker auth sign-out", () => {
       "__Secure-better-auth.state=; Max-Age=0; Path=/; HttpOnly; Secure; SameSite=Lax; Domain=convex.site",
     );
     const calls: string[] = [];
-    const fakeFetch: typeof fetch = async (input, init) => {
+    const fakeFetch: typeof fetch = (input, init) => {
       const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
       calls.push(`${init?.method ?? "GET"} ${url}`);
-      if (url.includes("/api/auth/get-session")) return new Response("null", { status: 200 });
-      if (url.includes("/api/auth/sign-out")) return new Response(JSON.stringify({ success: true }), { status: 200, headers: upstreamHeaders });
-      return new Response("unexpected fetch", { status: 500 });
+      if (url.includes("/api/auth/get-session")) return Promise.resolve(new Response("null", { status: 200 }));
+      if (url.includes("/api/auth/sign-out")) {
+        return Promise.resolve(new Response(JSON.stringify({ success: true }), { status: 200, headers: upstreamHeaders }));
+      }
+      return Promise.resolve(new Response("unexpected fetch", { status: 500 }));
     };
     vi.stubGlobal("fetch", fakeFetch);
 
@@ -461,9 +443,8 @@ describe("worker auth sign-out", () => {
   });
 
   it("still clears site cookies when upstream sign-out fails", async () => {
-    const fakeFetch: typeof fetch = async () => {
-      throw new Error("Convex unavailable");
-    };
+    const fakeFetch: typeof fetch = () =>
+      Promise.reject(new Error("Convex unavailable"));
     vi.stubGlobal("fetch", fakeFetch);
 
     const res = await workerApp.request("https://dev.rendro.app/api/auth/sign-out");
@@ -483,13 +464,36 @@ describe("worker auth sign-out", () => {
 describe("create org screen", () => {
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.unstubAllGlobals();
   });
 
   it("renders theme-aware chrome, button sign-out, and submit micro-interaction hooks", async () => {
-    process.env.NODE_ENV = "development";
     vi.spyOn(minio, "listObjects").mockResolvedValueOnce([]);
+    vi.stubGlobal("fetch", (input: string | URL | Request) => {
+      const url = typeof input === "string"
+        ? input
+        : input instanceof URL
+          ? input.href
+          : input.url;
+      if (url.includes("/api/auth/get-session")) {
+        return Promise.resolve(Response.json({
+          user: {
+            id: "user_owner",
+            email: "owner@gmail.com",
+            name: "Owner",
+            emailVerified: true,
+            image: null,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          },
+        }));
+      }
+      return Promise.resolve(new Response("unexpected fetch", { status: 500 }));
+    });
 
-    const res = await workerApp.request("https://dev.rendro.app/?dev_user=owner%40gmail.com");
+    const res = await workerApp.request("https://dev.rendro.app/", {
+      headers: { cookie: "__Secure-better-auth.session_token=test-session" },
+    });
     const html = await res.text();
 
     expect(res.status).toBe(200);
