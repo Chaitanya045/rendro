@@ -5,6 +5,7 @@ import {
   PutObjectCommand,
   HeadObjectCommand,
   DeleteObjectCommand,
+  CopyObjectCommand,
 } from "@aws-sdk/client-s3";
 import {
   MINIO_ENDPOINT,
@@ -190,7 +191,8 @@ export async function getObjectStream(key: string): Promise<ReadableStream<Uint8
 export async function putObject(
   key: string,
   body: string | Uint8Array,
-  contentType = "text/html"
+  contentType = "text/html",
+  metadata?: Record<string, string>,
 ): Promise<void> {
   await s3.send(
     new PutObjectCommand({
@@ -198,7 +200,8 @@ export async function putObject(
       Key: key,
       Body: body,
       ContentType: contentType,
-    })
+      Metadata: metadata,
+    }),
   );
 }
 
@@ -217,16 +220,43 @@ export async function listAllKeys(prefix: string): Promise<string[]> {
   return keys;
 }
 
-
-export async function headObject(key: string): Promise<{ etag?: string; size?: number } | null> {
+export async function getObjectText(key: string): Promise<string | null> {
   try {
-    const res = await s3.send(new HeadObjectCommand({ Bucket: MINIO_BUCKET, Key: key }));
-    return { etag: res.ETag?.replace(/"/g, ""), size: res.ContentLength };
-  } catch (err: unknown) {
-    if ((err as { $metadata?: { httpStatusCode?: number } })?.$metadata?.httpStatusCode === 404) {
+    const response = await s3.send(new GetObjectCommand({ Bucket: MINIO_BUCKET, Key: key }));
+    return response.Body ? await response.Body.transformToString() : null;
+  } catch (error: unknown) {
+    if ((error as { $metadata?: { httpStatusCode?: number } }).$metadata?.httpStatusCode === 404) {
       return null;
     }
-    throw err;
+    throw error;
+  }
+}
+
+export async function copyObject(sourceKey: string, destinationKey: string): Promise<void> {
+  const encodedSource = encodeURIComponent(sourceKey).replaceAll("%2F", "/");
+  await s3.send(new CopyObjectCommand({
+    Bucket: MINIO_BUCKET,
+    CopySource: `${MINIO_BUCKET}/${encodedSource}`,
+    Key: destinationKey,
+  }));
+}
+
+
+export async function headObject(
+  key: string,
+): Promise<{ etag?: string; size?: number; metadata?: Record<string, string> } | null> {
+  try {
+    const response = await s3.send(new HeadObjectCommand({ Bucket: MINIO_BUCKET, Key: key }));
+    return {
+      etag: response.ETag?.replace(/"/g, ""),
+      size: response.ContentLength,
+      metadata: response.Metadata,
+    };
+  } catch (error: unknown) {
+    if ((error as { $metadata?: { httpStatusCode?: number } }).$metadata?.httpStatusCode === 404) {
+      return null;
+    }
+    throw error;
   }
 }
 export async function deleteObject(key: string): Promise<void> {

@@ -90,7 +90,7 @@ function refreshIndicator(animate = false) {
 // ── fold icon toggle ──
 
 function setFolderIcon(folder: HTMLElement, open: boolean) {
-  const icon = folder.querySelector(":scope > .tree-item .folder-icon") as HTMLElement | null;
+  const icon = folder.querySelector(":scope > .tree-item .folder-icon");
   if (icon) icon.textContent = open ? "folder_open" : "folder";
 }
 
@@ -114,7 +114,7 @@ const PAGE_SIZE = 50;
 async function expand(folder: HTMLElement) {
   const path = folder.dataset.path;
   if (!path) return;
-  const content = folder.querySelector(":scope > .tree-folder-content") as HTMLElement | null;
+  const content = folder.querySelector<HTMLElement>(":scope > .tree-folder-content");
   if (!content) return;
 
   if (folder.classList.contains("loading")) return;
@@ -304,39 +304,41 @@ function renderRows(nodes: TreeNode[], depth: number): string {
 // ── event handling ──
 
 function handleClick(e: Event) {
-  const target = e.target as HTMLElement;
+  if (!(e.target instanceof HTMLElement)) return;
+  const target = e.target;
 
-  // Load-more button
-  const loadMoreBtn = target.closest(".load-more-btn") as HTMLButtonElement | null;
+  const loadMoreBtn = target.closest<HTMLButtonElement>(".load-more-btn");
   if (loadMoreBtn) {
     e.preventDefault();
-    const folder = loadMoreBtn.closest(".tree-folder") as HTMLElement | null;
+    const folder = loadMoreBtn.closest<HTMLElement>(".tree-folder");
     if (folder) {
-      const path = folder.dataset.path!;
-      const content = folder.querySelector(":scope > .tree-folder-content") as HTMLElement | null;
+      const path = folder.dataset.path;
+      const content = folder.querySelector<HTMLElement>(":scope > .tree-folder-content");
       const next = folder.dataset.nextStartAfter;
       if (path && content && next) {
         loadMoreBtn.textContent = "Loading...";
         loadMoreBtn.disabled = true;
-        loadPage(folder, path, content, next);
+        void loadPage(folder, path, content, next);
       }
     }
     return;
   }
 
-  const item = target.closest(".tree-item") as HTMLElement | null;
+  const item = target.closest<HTMLElement>(".tree-item");
   if (!item) return;
 
-  const folder = item.parentElement?.classList.contains("tree-folder") ? item.parentElement as HTMLElement : null;
+  const folder = item.parentElement?.classList.contains("tree-folder") ? item.parentElement : null;
   if (folder) {
     e.preventDefault();
-    folder.classList.contains("open") ? collapse(folder) : expand(folder);
+    if (folder.classList.contains("open")) collapse(folder);
+    else void expand(folder);
     return;
   }
 
-  if (item.dataset.path) {
+  const path = item.dataset.path;
+  if (path) {
     e.preventDefault();
-    loadDoc(item.dataset.path, true);
+    loadDoc(path, true);
   }
 }
 
@@ -424,15 +426,17 @@ function loadDoc(fullPath: string, pushState: boolean) {
 }
 
 async function navigateToDoc(relPath: string) {
+  if (!ORG) return;
   const fullPath = `${ORG}/${relPath}`;
   const parts = relPath.split("/");
-  let currentPath = ORG!;
+  let currentPath = ORG;
 
-  // Expand each ancestor level iteratively — re-query DOM after each expansion
   for (let i = 0; i < parts.length - 1; i++) {
     currentPath += "/" + parts[i];
-    const folder = document.querySelector(`.tree-folder[data-path="${CSS.escape(currentPath)}/"]`) as HTMLElement | null;
-    if (!folder) break; // can't go deeper if parent doesn't exist yet
+    const folder = document.querySelector<HTMLElement>(
+      `.tree-folder[data-path="${CSS.escape(currentPath)}/"]`,
+    );
+    if (!folder) break;
     if (!folder.classList.contains("open")) {
       await expand(folder);
       await new Promise<void>((resolve) => {
@@ -445,10 +449,11 @@ async function navigateToDoc(relPath: string) {
     }
   }
 
-  // Now activate the item
-  const item = document.querySelector(`.tree-item[data-path="${CSS.escape(fullPath)}"]`) as HTMLElement | null;
+  const item = document.querySelector<HTMLElement>(
+    `.tree-item[data-path="${CSS.escape(fullPath)}"]`,
+  );
   if (!item) return;
-  document.querySelectorAll(".tree-item.active").forEach((el) => el.classList.remove("active"));
+  document.querySelectorAll(".tree-item.active").forEach((element) => element.classList.remove("active"));
   item.classList.add("active");
   updateIndicator(item, true);
 }
@@ -457,8 +462,23 @@ async function navigateToDoc(relPath: string) {
 function syncActiveState(fullPath: string) {
   RENDRO_WINDOW.RENDRO_CURRENT_DOC = fullPath;
   // Always expand ancestors first (no-op if already open)
-  const relPath = fullPath.startsWith(`${ORG}/`) ? fullPath.slice(ORG!.length + 1) : fullPath;
-  navigateToDoc(relPath);
+  if (!ORG) return;
+  const relPath = fullPath.startsWith(`${ORG}/`) ? fullPath.slice(ORG.length + 1) : fullPath;
+  void navigateToDoc(relPath);
+}
+
+function isDocumentMessage(value: unknown): value is { type: string; path: string } {
+  if (!value || typeof value !== "object") return false;
+  return "type" in value
+    && typeof value.type === "string"
+    && "path" in value
+    && typeof value.path === "string";
+}
+
+function documentPathFromHistory(value: unknown): string {
+  return value && typeof value === "object" && "docPath" in value && typeof value.docPath === "string"
+    ? value.docPath
+    : "";
 }
 
 function init() {
@@ -467,37 +487,35 @@ function init() {
   TREE.addEventListener("click", handleClick);
 
   // Re-sync indicator after folder expand/collapse animations finish
-  TREE.addEventListener("transitionend", (e) => {
-    const target = e.target as HTMLElement;
-    if (target.classList.contains("tree-folder-content") && activeEl) {
+  TREE.addEventListener("transitionend", (event) => {
+    if (!(event.target instanceof HTMLElement)) return;
+    if (event.target.classList.contains("tree-folder-content") && activeEl) {
       updateIndicator(activeEl);
     }
   });
   TREE.closest(".sidebar-tree")?.addEventListener("scroll", () => refreshIndicator(false), { passive: true });
   window.addEventListener("resize", () => refreshIndicator(false));
   document.addEventListener("rendro:shell-layout", () => refreshIndicator(false));
-  document.addEventListener("transitionend", (e) => {
-    const target = e.target as HTMLElement;
-    if ((target.classList.contains("sidebar") || target.classList.contains("sidebar-resizer")) && activeEl) {
-      refreshIndicator(false);
-    }
+  document.addEventListener("transitionend", (event) => {
+    if (!(event.target instanceof HTMLElement)) return;
+    if (
+      (event.target.classList.contains("sidebar") || event.target.classList.contains("sidebar-resizer"))
+      && activeEl
+    ) refreshIndicator(false);
   });
-  window.addEventListener("message", (e) => {
-    if (!e.data || typeof e.data.path !== "string") return;
-    const { type, path } = e.data as { type: string; path: string };
-    if (type === "doc-navigate") {
-      // path is relative (e.g., "onboarding/welcome.html") — load with full path
-      loadDoc(`${ORG}/${path}`, true);
+  window.addEventListener("message", (event) => {
+    if (!isDocumentMessage(event.data)) return;
+    if (event.data.type === "doc-navigate") {
+      loadDoc(`${ORG}/${event.data.path}`, true);
     }
-    if (type === "doc-loaded") {
-      // path is full (e.g., "gmail/index.html") — just sync tree state, don't reload iframe
-      syncActiveState(path);
+    if (event.data.type === "doc-loaded") {
+      syncActiveState(event.data.path);
     }
   });
 
   // Browser back/forward
-  window.addEventListener("popstate", (e) => {
-    const docPath = e.state?.docPath || docFromPathname();
+  window.addEventListener("popstate", (event) => {
+    const docPath = documentPathFromHistory(event.state) || docFromPathname();
     if (docPath) loadDoc(docPath, false);
   });
 

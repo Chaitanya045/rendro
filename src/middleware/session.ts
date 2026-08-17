@@ -1,8 +1,8 @@
 import type { Context, Next } from "hono";
-import { CONVEX_URL } from "@/config";
+import type { User } from "better-auth/types";
+import { CONVEX_SITE_URL } from "@/config";
 import { logger } from "@/logger";
 
-const CONVEX_SITE = CONVEX_URL.replace(".cloud", ".site");
 
 interface SessionUser {
   id: string;
@@ -13,22 +13,29 @@ interface SessionUser {
   createdAt: string;
   updatedAt: string;
 }
-
 function isSessionUser(value: unknown): value is SessionUser {
   if (!value || typeof value !== "object") return false;
-  const v = value as Record<string, unknown>;
-  return typeof v.email === "string" && typeof v.id === "string";
+  const sessionUser = value as Record<string, unknown>;
+  return typeof sessionUser.id === "string"
+    && typeof sessionUser.email === "string"
+    && typeof sessionUser.name === "string"
+    && typeof sessionUser.emailVerified === "boolean"
+    && typeof sessionUser.createdAt === "string"
+    && typeof sessionUser.updatedAt === "string";
 }
 
 
-export async function sessionMiddleware(c: Context, next: Next) {
+export async function sessionMiddleware(
+  c: Context<{ Variables: { user?: User } }>,
+  next: Next,
+): Promise<void> {
   try {
 
     const cookie = c.req.raw.headers.get("cookie") || "";
     if (!cookie.includes("better-auth")) { await next(); return; }
 
     // Use better-auth's built-in get-session endpoint via Convex
-    const res = await fetch(`${CONVEX_SITE}/api/auth/get-session`, {
+    const res = await fetch(`${CONVEX_SITE_URL}/api/auth/get-session`, {
       headers: { cookie, accept: "application/json" },
       redirect: "manual",
     });
@@ -38,7 +45,11 @@ export async function sessionMiddleware(c: Context, next: Next) {
       if (text && text !== "null") {
         const data: unknown = JSON.parse(text);
         if (data && typeof data === "object" && "user" in data && isSessionUser(data.user)) {
-          c.set("user", data.user);
+          c.set("user", {
+            ...data.user,
+            createdAt: new Date(data.user.createdAt),
+            updatedAt: new Date(data.user.updatedAt),
+          });
           logger.debug({ email: data.user.email }, "Session validated");
         }
       }

@@ -11,39 +11,17 @@ import { renderLandingPage } from "@/routes/landing";
 const app = new Hono<{ Variables: { user?: User } }>();
 
 /**
- * GET / — the main entry. Behavior depends on the user's session:
- *
- *   no session         → product landing page with Google sign-in
- *   invalid org email  → unsupported email page
- *   valid org email    → app shell immediately; tree data loads client-side
+ * The public root is the product landing page. Authenticated users enter
+ * through the organization selector; organization membership, not email
+ * domain derivation, determines every subsequent authorization decision.
  */
-app.get("/", async (c) => {
+app.get("/", (c) => {
   const user = c.get("user");
   if (!user) {
     return c.html(renderLandingPage());
   }
 
-  try {
-    const email = user.email;
-    const org = emailToOrgSlug(email);
-    if (!org) {
-      return c.html(renderEmailUnsupported(user));
-    }
-
-    if (await orgExists(org)) {
-      return c.html(renderOrgDocs(user, org));
-    }
-    return c.html(renderCreateOrg(user, org));
-  } catch (err: unknown) {
-    const e = err instanceof Error ? err : new Error(String(err));
-    logger.error({ err: e.message, stack: e.stack, email: user.email }, "root handler error");
-    const s3Err = err as { message?: string; name?: string; $metadata?: { httpStatusCode?: number } };
-    return c.json({
-      error: s3Err.message ?? e.message,
-      code: s3Err.name ?? e.name,
-      statusCode: s3Err.$metadata?.httpStatusCode,
-    }, 500);
-  }
+  return c.redirect("/organizations");
 });
 
 app.get("/docs/:org", async (c) => {
@@ -96,7 +74,7 @@ app.post("/api/orgs", async (c) => {
   if (!user) return c.text("Sign in first", 401);
 
   const contentType = c.req.header("content-type") ?? "";
-  let body: { org?: string; displayName?: string } = {};
+  let body: { org?: string; displayName?: string };
   if (contentType.includes("application/json")) {
     body = await c.req.json<{ org?: string; displayName?: string }>()
       .catch((): { org?: string; displayName?: string } => ({}));
@@ -371,6 +349,7 @@ function renderOrgTreePage(user: User | null, org: string, selectedDoc = "", opt
       <div class="topbar-avatar" id="avatar-btn" title="${escapeHtml(email)}">${initials}</div>
       <div class="avatar-menu" id="avatar-menu" style="display:none">
         <div class="avatar-menu-email">${escapeHtml(email)}</div>
+        <a href="/account/security" class="avatar-menu-item"><span class="material-symbols-outlined" style="font-size:18px">shield</span> Account security</a>
         <a href="/api/auth/sign-out" class="avatar-menu-item"><span class="material-symbols-outlined" style="font-size:18px">logout</span> Sign out</a>
       </div>
     </div>`
