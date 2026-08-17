@@ -208,12 +208,8 @@ export function renderLandingPage(): string {
         <a href="#security" data-section-link data-scroll-section="security">Security</a>
       </nav>
       <div class="header-actions">
-        <button class="button button-quiet header-signin" type="submit" form="sign-in-form" data-auth data-auth-id="header-sign-in">
-          <span data-auth-label>Sign in</span><span class="button-spinner" aria-hidden="true"></span>
-        </button>
-        <button class="button button-primary header-get-started" type="submit" form="sign-in-form" data-auth data-auth-id="header-get-started">
-          <span data-auth-label>Get started</span><span class="button-spinner" aria-hidden="true"></span>
-        </button>
+        <a class="button button-quiet header-signin" href="/sign-in">Sign in</a>
+        <a class="button button-primary header-get-started" href="/sign-up">Get started</a>
       </div>
     </div>
   </header>
@@ -306,7 +302,7 @@ export function renderLandingPage(): string {
           <button class="button button-secondary" type="submit" form="sign-in-form" data-auth data-auth-id="security-start"><span data-auth-label>Start with Google</span><span class="button-spinner" aria-hidden="true"></span></button>
         </div>
         <dl class="security-list" data-reveal-group data-reveal-stagger="45">
-          <div class="security-row" data-reveal-item style="--reveal-y:12px"><dt>Identity</dt><dd>Google OAuth connects each session to a verified work email.</dd></div>
+          <div class="security-row" data-reveal-item style="--reveal-y:12px"><dt>Identity</dt><dd>Google OAuth or verified email credentials connect each session to one stable account.</dd></div>
           <div class="security-row" data-reveal-item style="--reveal-y:12px"><dt>Organization</dt><dd>The work-email domain determines the organization namespace.</dd></div>
           <div class="security-row" data-reveal-item style="--reveal-y:12px"><dt>Storage</dt><dd>Document objects are stored under organization-specific prefixes.</dd></div>
           <div class="security-row" data-reveal-item style="--reveal-y:12px"><dt>Public access</dt><dd>Only folders explicitly registered by trusted CI receive anonymous routes.</dd></div>

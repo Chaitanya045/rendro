@@ -19,6 +19,7 @@ const envSchema = z.object({
   PORT: z.coerce.number().int().min(1).max(65535).default(3000),
   BASE_URL: z.string().url().default("http://localhost:3000"),
   CONVEX_URL: z.string().default(""),
+  CONVEX_SITE_URL: z.string().url().optional(),
   CONVEX_INTERNAL_SECRET: z
     .string()
     .min(32, "CONVEX_INTERNAL_SECRET must be at least 32 characters"),
@@ -60,6 +61,10 @@ export const PORT = env.PORT;
 export const BASE_URL = env.BASE_URL;
 export const CONVEX_URL = env.CONVEX_URL;
 export const CONVEX_INTERNAL_SECRET = env.CONVEX_INTERNAL_SECRET;
+export const CONVEX_SITE_URL = env.CONVEX_SITE_URL
+  ?? (CONVEX_URL.startsWith("http://127.0.0.1:3210")
+    ? CONVEX_URL.replace(/:3210$/, ":3211")
+    : CONVEX_URL.replace(/\.cloud$/, ".site"));
 
 export const AUTH_SECRET = env.AUTH_SECRET;
 

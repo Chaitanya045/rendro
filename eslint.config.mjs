@@ -31,6 +31,16 @@ export default tseslint.config(
     extends: [tseslint.configs.disableTypeChecked],
   },
   {
-    ignores: ["dist/**", "node_modules/**", "bun.lock", "public/**", "src/commentor/**", "scripts/**"],
+    ignores: [
+      "bin/**",
+      "convex/_generated/**",
+      "convex/betterAuth/_generated/**",
+      "dist/**",
+      "node_modules/**",
+      "bun.lock",
+      "public/**",
+      "src/commentor/**",
+      "scripts/**",
+    ],
   }
 );

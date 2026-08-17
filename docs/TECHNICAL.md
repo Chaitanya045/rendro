@@ -8,22 +8,26 @@ Complete technical reference: architecture, data flow, API, design decisions, an
 
 ## Architecture
 
-```
-Browser → Cloudflare Workers (Hono) → Convex (auth, comments, API keys, soft-delete)
-                                    → R2 (doc blob storage)
+```text
+Browser / CI
+      │ session cookie or scoped API credential
+      ▼
+Cloudflare Workers (Hono)
+      ├── Better Auth HTTP proxy ──► Convex component (users, sessions, organizations, teams)
+      ├── Rendro metadata API ─────► Convex app tables
+      └── immutable file delivery ─► R2
 ```
 
 ### Component Roles
 
 | Component | Technology | Purpose |
 |---|---|---|
-| **Web Server** | Hono on Cloudflare Workers | Request routing, auth proxy, session verification, SSR, file streaming |
-| **Auth** | better-auth + Convex component | Google OAuth, session management, cookie signing |
-| **Database** | Convex | Auth tables (component), comments, API keys, soft-delete |
-| **Blob Storage** | Cloudflare R2 | HTML docs, org-namespaced, S3-compatible API |
-| **CLI** | Node.js (zero deps) | Doc upload, hash-based diffing, CI/CD integration |
-| **Tree UI** | Vanilla JS (~15KB IIFE) | Lazy-loading sidebar, infinite scroll, cross-doc navigation |
-| **Comments** | Vanilla JS (Convex real-time) | Inline text selection, threaded replies |
+| **Edge application** | Hono on Cloudflare Workers | Request routing, SSR, auth proxy, authorization handoff, sandboxed file streaming |
+| **Identity and tenancy** | Better Auth Convex component | Google/email identity, verified email, sessions, organizations, teams, invitations, roles |
+| **Application metadata** | Convex | Projects, immutable deployments, publications, scoped credentials, revocable shares, comments, audit events |
+| **Blob storage** | Cloudflare R2 | Deployment manifests and immutable objects under organization-ID prefixes |
+| **CLI** | Node.js, bundled to one executable | Manifest hashing, delta upload, provenance, deployment commit, publication management |
+| **Browser UI** | Server HTML + vanilla JavaScript | Organization/project operations, lazy document navigation, comments |
 
 ---
 
@@ -57,7 +61,7 @@ Browser → Cloudflare Workers (Hono) → Convex (auth, comments, API keys, soft
     a. Reads cookie header
     b. Calls Convex GET /api/auth/get-session with cookie
     c. If user returned → c.set("user", user)
-22. App route checks user → derives org from email → renders org docs
+22. Organization membership and role checks in Convex determine which organization and project routes the session may access.
 ```
 
 ### Cookie Flow
@@ -86,62 +90,60 @@ The proxy handles three concerns:
 
 ---
 
-## Org Isolation
+## Tenant Isolation
 
+Every protected operation starts with an opaque Better Auth organization ID. Human-readable slugs are display and URL fields only; they never grant access.
+
+```text
+session/API credential
+  → organizationId membership or credential binding
+  → optional projectId binding
+  → role/scope check
+  → metadata lookup
+  → R2 key derived from stored IDs
 ```
-1. Session → Convex get-session → user.email = "alice@acme-corp.com"
-2. emailToOrgSlug(email) = "acme-corp"
-3. File prefix check: key.startsWith("acme-corp/")
-4. Cross-org access → 403
-```
 
-**Three-layer enforcement:**
-1. **Auth layer**: Session cookie → Convex → user identity
-2. **Derivation**: Email domain → org slug (deterministic, no lookup)
-3. **Storage layer**: R2 key prefix must match derived org
+Enforcement layers:
 
-No permission tables, no role mapping, no env vars per org. The email domain IS the authorization boundary.
-
----
+1. **Identity:** Better Auth validates the session. API keys are random credentials stored only as SHA-256 hashes.
+2. **Organization authorization:** Convex resolves current membership and role (`owner`, `admin`, or `member`).
+3. **Project authorization:** every project/deployment/publication record stores `organizationId`; cross-organization IDs fail before storage access.
+4. **Storage namespace:** committed files live below `tenants/{organizationId}/projects/{projectId}/deployments/{deploymentId}/`.
+5. **Public capability:** anonymous publication and share routes resolve an indexed Convex record. They never accept an arbitrary organization prefix.
 
 ## Data Storage
 
 ### Convex Tables
 
-**Component namespace** (`betterAuth`):
-| Table | Fields | Indexes |
-|---|---|---|
-| `user` | id, name, email, emailVerified, image, createdAt, updatedAt | email, name |
-| `session` | id, expiresAt, token, userId, ipAddress, userAgent, createdAt, updatedAt | token, userId, expiresAt |
-| `account` | id, accountId, providerId, userId, accessToken, refreshToken, createdAt, updatedAt | userId |
-| `verification` | id, identifier, value, expiresAt, createdAt, updatedAt | identifier, expiresAt |
-| `jwks` | id, publicKey, privateKey, createdAt | — |
-| `rateLimit` | key, count, lastRequest | — |
+The Better Auth component owns users, sessions, accounts, verification records, organizations, members, teams, team members, invitations, JWKs, and rate-limit state.
 
-**App namespace:**
-| Table | Fields | Indexes |
-|---|---|---|
-| `api_keys` | orgSlug, keyHash, createdAt | keyHash |
-| `deleted_files` | orgSlug, fileKey, deletedAt | fileKey |
-| `threads` | orgSlug, filePath, authorEmail, authorName, body, anchor, resolved | org_file |
-| `replies` | threadId, authorEmail, authorName, body | threadId |
+The application schema owns:
+
+| Table | Purpose |
+|---|---|
+| `projects` | Organization-scoped documentation products and active deployment pointer |
+| `deployments` | Immutable manifest metadata, status, provenance, predecessor, retention state |
+| `publications` | Indexed global public slug, project/path mapping, tracked or pinned release mode |
+| `shareGrants` | Hashed, expiring, revocable private document capabilities pinned to a deployment |
+| `apiKeyCredentials` | Hashed organization/project credentials with scopes, expiry, revocation, and last-used timestamp |
+| `auditEvents` | Actor/action/resource audit trail for privileged changes |
+| `threads`, `replies`, `deleted_files` | Documentation comments and compatibility data |
 
 ### R2 Structure
 
-```
+```text
 rendro-docs/
-├── gmail/
-│   ├── index.html
-│   ├── api/
-│   │   ├── overview.html
-│   │   └── reference.html
-│   └── getting-started/
-│       └── quickstart.html
-└── acme-corp/
-    └── handbook.html
+└── tenants/{organizationId}/
+    └── projects/{projectId}/
+        └── deployments/{deploymentId}/
+            ├── manifest.json
+            └── files/
+                ├── index.html
+                ├── assets/app.css
+                └── reference/api.html
 ```
 
-Keys follow the pattern `<org>/<relative-path>.html`. The org prefix doubles as the security boundary.
+Deployment keys are immutable. A push uploads changed objects under a staging deployment, writes its manifest, then atomically changes the Convex project pointer. A failed or interrupted push cannot overwrite the active version. Superseded deployments remain available to pinned publications and unexpired shares until retention permits deletion.
 
 ---
 
@@ -203,60 +205,40 @@ Affected modules: `api-keys.ts`, `soft-delete.ts`, `session.ts` (middleware).
 
 ---
 
-## Sync API
+## Deployment and Publication API
 
-| Method | Path | Auth | Body/Params | Returns |
-|---|---|---|---|---|
-| POST | `/api/sync/upload` | API Key | `{ key, content, contentType? }` | `{ ok, key, bucket }` |
-| GET | `/api/sync/check` | API Key | `?key=&hash=` | `{ exists, etag?, size?, match? }` |
-| GET | `/api/sync/list` | API Key | — | `{ keys: string[] }` |
-| DELETE | `/api/sync/delete` | API Key | `?key=` | `{ deleted, key }` |
+The Worker proxies `/api/rendro/*` to Convex. Session requests are authorized by organization membership; CI requests use scoped API credentials.
 
-### Hash-Based Diffing
+### Immutable deployment protocol
 
-```
-CLI                          Server                      R2
- │                             │                          │
- │ MD5-hash local file         │                          │
- │ GET /api/sync/check         │                          │
- │   ?key=org/x.html&hash=abc  │                          │
- │────────────────────────────>│                          │
- │                             │ HeadObject(org/x.html)   │
- │                             │─────────────────────────>│
- │                             │ { ETag: "def" }          │
- │                             │<─────────────────────────│
- │ hash=abc ≠ etag=def         │                          │
- │ POST /api/sync/upload       │                          │
- │────────────────────────────>│                          │
- │                             │ PutObject(org/x.html)    │
- │                             │─────────────────────────>│
- │                             │ OK                       │
- │                             │<─────────────────────────│
- │ { ok: true }                │                          │
- │<────────────────────────────│                          │
-```
+| Method | Path | Required scope | Purpose |
+|---|---|---|---|
+| POST | `/api/rendro/deployments/start` | `docs:write` | Create/reuse staging deployment and return manifest diff |
+| GET | `/api/rendro/deployments/staging` | `docs:write` | Recover an interrupted staging deployment |
+| POST | `/api/rendro/deployments/:id/files/*` | `docs:write` | Upload one changed staging object |
+| POST | `/api/rendro/deployments/:id/manifest` | `docs:write` | Upload the canonical manifest |
+| POST | `/api/rendro/deployments/commit` | `docs:write` | Verify manifest and atomically activate deployment |
+| POST | `/api/rendro/deployments/fail` | `docs:write` | Mark an unrecoverable staging deployment failed |
+| GET | `/api/rendro/deployments/active` | `docs:read` | Resolve the current project pointer |
+| GET | `/api/rendro/deployments` | `docs:read` | List immutable history |
 
-CLI phases:
-1. **List**: GET `/api/sync/list` → existing server files
-2. **Check**: For each local file, GET `/api/sync/check?key=&hash=` → match?
-3. **Upload**: Changed/new files → POST `/api/sync/upload`
-4. **Delete**: Files on server but not locally → DELETE `/api/sync/delete`
+The CLI computes SHA-256 for every file and the canonical manifest. Start returns files whose `(path, sha256, size)` match the active manifest. Those objects are copied server-side into the new deployment; only changed files cross the client connection. Commit rejects missing or mismatched manifests.
 
-### Publication API
+### Publications
 
-Uploads are private by default. An API-key-authenticated publication record maps one existing organization-owned folder prefix to a stable public slug; no R2 objects are copied or made bucket-public. Publication mutations are intended for trusted GitHub Actions or equivalent CI and are not exposed through the session-authenticated docs UI.
+| Method | Path | Required access | Purpose |
+|---|---|---|---|
+| GET/POST | `/api/rendro/publications` | member read / admin write, or publication scope | List or create explicit public mappings |
+| POST | `/api/rendro/publications/remove` | admin or `publications:write` | Remove a publication |
+| GET | `/p/:slug` | Anonymous | Public read-only shell |
+| GET | `/p/:slug/tree` | Anonymous | Paginated published document list |
+| GET | `/p/:slug/files/*` | Anonymous | Manifest-validated sandboxed object |
 
-| Method | Path | Auth | Body/Params | Returns |
-|---|---|---|---|---|
-| GET | `/api/publications` | API Key | — | `{ publications }` |
-| POST | `/api/publications` | API Key | `{ sourcePrefix, slug, title, entryFile }` | Publication record |
-| DELETE | `/api/publications/:slug` | API Key | — | `{ unpublished, slug }` |
-| GET | `/public/:org/:slug` | Anonymous | — | Read-only publication shell |
-| GET | `/public/:org/:slug/tree` | Anonymous | `?path=` | Published HTML tree |
-| GET | `/public/:org/:slug/files/*` | Anonymous | — | Sandboxed published HTML |
-| GET | `/public/:org/:slug/sitemap.xml` | Anonymous | — | Publication sitemap |
+Publication slugs are globally indexed. A publication maps one project path to either the project’s active deployment or an explicit pinned deployment. Creating one is an intentional UI/CLI operation; uploading never makes content public.
 
-Publication records live under the reserved `__rendro/publications/` object prefix and are excluded from document listings. Each anonymous request reloads the enabled record, validates the requested relative path, confirms the resolved object remains under the exact registered prefix, and filters soft-deleted files. Existing `/api/tree/:org` routes require a same-organization session.
+### Revocable private shares
+
+`POST /api/rendro/shares` creates a 256-bit random capability. Convex stores only its SHA-256 hash, expiry, creator, document path, and pinned deployment. `/s/:token` resolves the hash on every request, so expiry or revocation takes effect immediately. A grant exposes its exact HTML document and same-tree non-HTML assets, never the project tree or another HTML document.
 
 ---
 
@@ -396,99 +378,104 @@ The anchor uniquely identifies text within a document, surviving minor edits.
 
 | Purpose | URL |
 |---|---|
-| App shell, tree only | `/docs/:org` |
-| App shell, selected document | `/docs/:org/:path*` |
-| Iframe document stream | `/files/:org/:path*` |
-| Legacy selected doc | `/?doc=:org/:path` redirects in-place to `/docs/:org/:path` |
-| Public signed document | `/share/:token` |
+| Organization settings | `/organizations/:organizationId` |
+| Project settings/history | `/organizations/:organizationId/projects/:projectId` |
+| Authenticated project docs | `/organizations/:organizationId/projects/:projectId/docs` |
+| Publication management | `/organizations/:organizationId/projects/:projectId/publications` |
+| Public publication | `/p/:slug` |
+| Revocable private share | `/s/:token` |
 
-The server injects `window.RENDRO_INITIAL_DOC` into the app shell for `/docs/:org/:path*` after confirming the object exists and is not soft-deleted. Missing or deleted deep links return the shared Broken Document Graph page with HTTP `404` before the shell renders.
-
-`lazy-tree.ts` also parses `/docs/...` directly so back/forward navigation and static reloads restore the selected document. If a document disappears after the tree is loaded, `/files/:org/:path*` returns the same Broken Document Graph HTML inside `#content-frame`; the primary recovery link uses `target="_top"` to leave the iframe.
-
-Local and deployed environments use Better Auth sessions. The legacy
-`dev_user` query, `X-Dev-User` header, and `rendro-dev-user` cookie are ignored;
-local development must use a configured authentication provider.
-
-Signed share links are created by `GET /api/share/create?key=:org/:path` for the currently signed-in owner. The server returns a 7-day HMAC-SHA256 token using `AUTH_SECRET`; the token payload contains the document key and expiry. `GET /share/:token` is mounted before session middleware in both runtime entrypoints, so it streams the raw document HTML without login and without commentor injection. Tampered tokens return `403`, expired tokens return `410`, and deleted/missing docs return the shared Broken Document Graph page with `404`.
+Local and deployed environments use the same Better Auth session and organization checks. Development impersonation inputs are ignored.
 
 ### Production URLs
 
 | Service | URL |
 |---|---|
 | Web app | `https://rendro.app` |
-| Worker | `https://rendro.schaitanya075.workers.dev` |
-| Convex | `https://limitless-wolverine-248.convex.cloud` |
-| Convex HTTP | `https://limitless-wolverine-248.convex.site` |
-| R2 | `https://940d14f56cb81ce60ff9b23aeb820481.r2.cloudflarestorage.com` |
+| Worker | Cloudflare Workers custom-domain deployment |
+| Convex API | `CONVEX_URL` |
+| Convex HTTP actions | `CONVEX_SITE_URL` |
+| Blob storage | Cloudflare R2 S3 endpoint |
 
 ### Deploy Commands
 
 ```bash
-# Workers
-npx wrangler deploy --config wrangler.toml
-
-# Convex
-npx convex deploy --cmd "push"
+pnpm exec convex deploy --cmd "push"
+pnpm exec wrangler deploy --config wrangler.toml
 ```
 
 ### Environment Variables (Workers)
 
-| Variable | Source | Purpose |
+| Variable | Storage | Purpose |
 |---|---|---|
-| `NODE_ENV` | wrangler.toml vars | "production" |
-| `BASE_URL` | wrangler.toml vars | "https://rendro.app" |
-| `GOOGLE_CLIENT_ID` | Secret | OAuth client |
-| `GOOGLE_CLIENT_SECRET` | Secret | OAuth secret |
-| `AUTH_SECRET` | Secret | Cookie signing |
-| `CONVEX_URL` | Secret | Convex API endpoint |
-| `CONVEX_INTERNAL_SECRET` | Secret | Worker-to-Convex service authentication |
-| `MINIO_ENDPOINT` | Secret | R2 S3 endpoint |
-| `MINIO_ACCESS_KEY` | Secret | R2 access key |
-| `MINIO_SECRET_KEY` | Secret | R2 secret key |
-| `MINIO_BUCKET` | Secret | "rendro-docs" |
-| `MINIO_REGION` | Secret | "auto" |
-| `MINIO_FORCE_PATH_STYLE` | Secret | "true" |
+| `NODE_ENV`, `BASE_URL` | Wrangler vars | Runtime mode and canonical origin |
+| `CONVEX_SITE_URL` | Wrangler var/secret | Convex HTTP action origin |
+| `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Secrets | Google OAuth |
+| `AUTH_SECRET` | Secret | Better Auth signing; same value in Convex |
+| `MINIO_ENDPOINT`, `MINIO_ACCESS_KEY`, `MINIO_SECRET_KEY` | Secrets | R2 S3 access |
+| `MINIO_BUCKET`, `MINIO_REGION`, `MINIO_FORCE_PATH_STYLE` | Vars/secrets | R2 bucket configuration |
 
 ### Environment Variables (Convex)
 
 | Variable | Purpose |
 |---|---|
-| `GOOGLE_CLIENT_ID` | OAuth client |
-| `GOOGLE_CLIENT_SECRET` | OAuth secret |
-| `AUTH_SECRET` | Cookie signing (must match Workers) |
-| `CONVEX_INTERNAL_SECRET` | Worker-to-Convex service authentication (must match Workers) |
-| `SITE_URL` | "https://rendro.app" |
+| `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | OAuth client |
+| `AUTH_SECRET` | Better Auth signing; same value as Worker |
+| `SITE_URL` | Canonical Worker origin |
+| `RESEND_API_KEY`, `AUTH_EMAIL_FROM` | Verification, reset, invitation, and account-link security email |
+| `RETENTION_SECRET` | Bearer secret accepted only by retention HTTP actions |
+| `MIGRATION_SECRET` | Bearer secret accepted only by the staged migration control action |
 
 ---
+
+## Operational Runbooks
+
+### Interrupted push
+
+1. Re-run the same `rendro push` command. The CLI queries the project’s staging deployment and reuses matching uploaded objects.
+2. If the manifest changed, start creates a new staging deployment and marks the obsolete one failed.
+3. Confirm the project page shows the new deployment as `active`; the predecessor becomes `superseded`.
+4. Never change the project pointer or copy files manually. Commit is the atomic boundary.
+
+### Revoke leaked access
+
+- API credential: Organization settings → API keys → Revoke. Validation checks revocation on every request.
+- Private share: call `POST /api/rendro/shares/revoke` with its grant ID. The token hash stops resolving immediately.
+- Public publication: remove it from the project Publications page. `/p/:slug` returns 404 afterward.
+
+### Retention
+
+`pnpm cleanup:retention` purges failed deployments older than 24 hours and superseded deployments older than 30 days. Active deployments, pinned publications, and deployments referenced by unexpired shares are excluded. `.github/workflows/retention.yml` runs daily. Required secrets: `CONVEX_SITE_URL`, `RETENTION_SECRET`, and the R2 endpoint/access key/secret/bucket. Convex records `deployment.purged` audit events.
+
+### Legacy migration
+
+Legacy slug-prefixed objects are migrated by copy, never in place:
+
+1. Set the same random `MIGRATION_SECRET` in Convex and the operator environment.
+2. Create a JSON array containing `legacyOrgSlug`, Better Auth `organizationId`, an organization-scoped migration `apiKey`, and optionally `projectId`, `projectName`, and `legacyApiKey`. A supplied project must be empty; otherwise the protected migration endpoint rejects it.
+3. Run `pnpm migrate:legacy -- --map targets.json` for a read-only inventory.
+4. Run again with `--apply`. The tool creates/reuses an empty dedicated project, hashes legacy objects, copies them into one immutable deployment, commits it, and recreates legacy publications as pinned mappings when `legacyApiKey` is supplied.
+5. Preserve the emitted `migration-rollback-*.json`. The migration does not delete old objects or old routes. Run `pnpm migrate:legacy -- --map targets.json --rollback migration-rollback-….json` to revoke all migrated publications; migrated bytes remain private for audit.
+6. Compare object/file counts and sample private/public routes before retiring legacy paths. Do not derive new organization IDs from old slugs.
 
 ## Key Technical Decisions
 
-| # | Decision | Why |
-|---|---|---|
-| 1 | HTML over Markdown | Publisher owns rendering, no sanitization pipeline |
-| 2 | Convex for auth | Built-in schema, HTTP actions, component architecture |
-| 3 | Workers proxy pattern | Serverless, no database maintenance, global edge |
-| 4 | DOMParser polyfill (IIFE) | Minimal, self-contained, tree-shake-proof |
-| 5 | Hash-based diffing (MD5) | Content determines staleness, deterministic in CI |
-| 6 | iframe doc rendering | Native navigation, sandboxed scripts |
-| 7 | Soft-delete (Convex table) | Single query vs N R2 tag API calls |
-| 8 | CSS sticky headers | Zero JS, GPU-accelerated, natural stacking |
-| 9 | Email-domain orgs | Zero setup, self-service, no dashboard |
-| 10 | Zero-dep CLI | 4.7KB, instant install, no dependency conflicts |
-| 11 | Convex REST API (vs ConvexClient) | Workers I/O limitation, no WebSocket reuse |
-| 12 | redirect:manual (vs default) | Prevents 302 loops causing 522 errors |
-| 13 | Domain stripping (Set-Cookie) | Cookies must bind to rendro.app, not convex.site |
-| 14 | Curated header allowlist | Only forward safe headers, exclude Host |
-
----
+| Decision | Reason |
+|---|---|
+| Better Auth organization IDs are the tenant key | Membership, teams, invitations, and roles stay in one canonical authorization model |
+| Immutable deployment namespaces | Interrupted writes cannot corrupt the active site; rollback and provenance are explicit |
+| Convex metadata, R2 bytes | Indexed relationships and authorization remain separate from cheap blob storage |
+| SHA-256 manifests and server-side reuse | CI sends only changed files without relying on mutable object ETags |
+| Explicit tracked or pinned publications | Upload remains private; public release intent and version behavior are auditable |
+| Hashed, revocable credentials and share grants | Raw secrets are shown once and can be expired or revoked without changing storage |
+| Server HTML and vanilla JavaScript | The operational UI stays compatible with the existing no-framework browser architecture |
+| iframe document rendering | Publisher HTML remains isolated from application chrome |
 
 ## Known Limitations
 
-1. **No built-in search** — Publishers must implement their own (Algolia, Lunr, etc.)
-2. **No WYSIWYG editor** — HTML-only, by design
-3. **No fine-grained permissions** — All org members share the same API key
-4. **No versioning of docs** — Always serves latest push, use git for history
-5. **iframe doc rendering** — Double scrollbar potential with fixed headers
-6. **Single Google OAuth client** — All tenants share one OAuth app
-7. **Convex cold starts** — First HTTP action call may take ~1s
+1. Search is publisher-provided; Rendro only filters loaded tree pages.
+2. Publisher HTML is rendered in sandboxed iframes and can still produce its own internal scroll behavior.
+3. Publication slugs are global, so product naming policy must account for collisions.
+4. Retention cleanup needs R2 credentials in the scheduled GitHub environment.
+5. Legacy slug-based routes remain only for the staged migration window and must be removed after production verification.
+6. The first Convex HTTP action after a cold start can add latency.

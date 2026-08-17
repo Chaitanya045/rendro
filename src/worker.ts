@@ -79,128 +79,90 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { sessionMiddleware } from "./middleware/session";
 import appRoutes from "./routes/app";
+import authPageRoutes from "./routes/auth-pages";
+import organizationPageRoutes from "./routes/organization-pages";
+import projectPageRoutes from "./routes/project-pages";
+import deploymentRoutes from "./routes/deployments";
+import publicationPageRoutes from "./routes/publication-pages";
+import publicationApiRoutes from "./routes/publication-api";
+import projectDocsRoutes from "./routes/project-docs";
+import sharePageRoutes from "./routes/share-pages";
+import apiKeyPageRoutes from "./routes/api-key-pages";
 import docsRoutes from "./routes/docs";
 import { logger } from "./logger";
-import { CONVEX_URL } from "./config";
+import { proxyAuthRequest, proxyAuthSignOut, proxyConvexRequest } from "./auth-proxy";
 import { renderNotFoundPage } from "./routes/not-found";
+import shareV2Routes from "./routes/share-v2";
+import publicV2Routes from "./routes/public-v2";
 import type { User } from "better-auth/types";
 
 type AssetsBinding = { fetch(request: Request): Response | Promise<Response> };
 type WorkerBindings = Record<string, unknown> & { ASSETS?: AssetsBinding };
 
 const app = new Hono<{ Bindings: WorkerBindings; Variables: { user?: User } }>();
-const CONVEX_SITE = CONVEX_URL.replace(".cloud", ".site");
-
-const AUTH_COOKIE_NAMES = [
-  "__Secure-better-auth.session_token",
-  "better-auth.session_token",
-  "__Secure-better-auth.session_data",
-  "better-auth.session_data",
-  "__Secure-better-auth.session_data.0",
-  "better-auth.session_data.0",
-  "__Secure-better-auth.session_data.1",
-  "better-auth.session_data.1",
-  "__Secure-better-auth.state",
-  "better-auth.state",
-  "__Secure-better-auth.oauth_state",
-  "better-auth.oauth_state",
-  "rendro-dev-user",
-] as const;
-
-function strippedSetCookies(headers: Headers): string[] {
-  const setCookies = headers.getSetCookie?.();
-  const values = setCookies && setCookies.length > 0
-    ? setCookies
-    : headers.get("set-cookie") ? [headers.get("set-cookie")!] : [];
-  return values.map((sc) => sc.replace(/;\s*Domain=[^;]+;?/gi, ";"));
-}
-
-function parentCookieDomain(hostname: string): string | undefined {
-  const parts = hostname.split(".").filter(Boolean);
-  if (parts.length < 2) return undefined;
-  return `.${parts.slice(-2).join(".")}`;
-}
-
-function appendExpiredCookie(headers: Headers, name: string, domain?: string) {
-  const attributes = name.startsWith("better-auth") || name.startsWith("__Secure-better-auth")
-    ? "Max-Age=0; Path=/; HttpOnly; SameSite=Lax"
-    : "Max-Age=0; Path=/; SameSite=Lax";
-  const secure = name.startsWith("__Secure-") ? "; Secure" : "";
-  const domainAttr = domain ? `; Domain=${domain}` : "";
-  headers.append("Set-Cookie", `${name}=; ${attributes}${secure}${domainAttr}`);
-}
-
-function appendAuthCookieCleanup(headers: Headers, hostname: string) {
-  headers.set("Clear-Site-Data", "\"cookies\"");
-  const parentDomain = parentCookieDomain(hostname);
-  for (const name of AUTH_COOKIE_NAMES) {
-    appendExpiredCookie(headers, name);
-    if (parentDomain) appendExpiredCookie(headers, name, parentDomain);
-  }
-}
 
 app.use("*", async (c, next) => {
   const env = c.env;
-  if (env && typeof process !== "undefined")
-    for (const k of Object.keys(env))
-      if (env[k] !== undefined && process.env[k] === undefined)
-        process.env[k] = String(env[k]);
+  if (env && typeof process !== "undefined") {
+    for (const key of Object.keys(env)) {
+      const value = env[key];
+      if (typeof value === "string" && process.env[key] === undefined) process.env[key] = value;
+    }
+  }
   await next();
 });
 
 app.use("/api/sync/*", cors());
 app.use("*", async (c, next) => { const start = Date.now(); await next(); logger.debug({ method: c.req.method, path: c.req.path, status: c.res.status, ms: Date.now() - start }, "request"); });
 // Public signed share routes intentionally bypass session middleware.
+app.route("/", publicV2Routes);
+app.route("/", shareV2Routes);
 app.route("/", shareRoutes);
 app.route("/", publicRoutes);
 
-app.use("*", async (c, next) => { await sessionMiddleware(c, next); });
+app.use("*", sessionMiddleware);
 
 // Sign-out: GET → POST
-app.get("/api/auth/sign-out", async (c) => {
-  const cookie = c.req.raw.headers.get("cookie") || "";
-  const headers = new Headers({ Location: "/" });
-  try {
-    const upstream = await fetch(`${CONVEX_SITE}/api/auth/sign-out`, {
-      method: "POST",
-      headers: { cookie, "content-type": "application/json" },
-      redirect: "manual",
-    });
-    for (const sc of strippedSetCookies(upstream.headers)) headers.append("Set-Cookie", sc);
-  } catch (err: unknown) {
-    logger.error({ err: err instanceof Error ? err.message : String(err) }, "Auth sign-out proxy error");
-  }
-  appendAuthCookieCleanup(headers, new URL(c.req.url).hostname);
-  return new Response(null, { status: 302, headers });
-});
+app.get("/api/auth/sign-out", (c) => proxyAuthSignOut(c.req.raw));
 
 // Proxy auth to Convex
 app.on(["POST", "GET", "OPTIONS"], "/api/auth/*", async (c) => {
-  const target = `${CONVEX_SITE}${c.req.path}${new URL(c.req.url).search}`;
-  const headers = new Headers();
-  const cookie = c.req.raw.headers.get("cookie");
-  const ct = c.req.raw.headers.get("content-type");
-  if (cookie) headers.set("cookie", cookie);
-  if (ct) headers.set("content-type", ct);
-  const origin = c.req.raw.headers.get("origin");
-  if (origin) headers.set("origin", origin);
-  const init: RequestInit = { method: c.req.method, headers, redirect: "manual" };
-  if (c.req.method !== "GET" && c.req.method !== "HEAD") init.body = await c.req.raw.text();
   try {
-    const upstream = await fetch(target, init);
-    const setCookies = strippedSetCookies(upstream.headers);
-    if (setCookies.length > 0) {
-      const respHeaders = new Headers(upstream.headers);
-      respHeaders.delete("set-cookie");
-      for (const sc of setCookies) respHeaders.append("set-cookie", sc);
-      return new Response(upstream.body, { status: upstream.status, headers: respHeaders });
-    }
-    return upstream;
-  } catch (err: unknown) {
-    logger.error({ err: err instanceof Error ? err.message : String(err) }, "Auth proxy error");
+    return await proxyAuthRequest(c.req.raw);
+  } catch (error: unknown) {
+    logger.error(
+      { error: error instanceof Error ? error.message : String(error) },
+      "Auth proxy error",
+    );
     return c.json({ error: "Auth unavailable" }, 502);
   }
 });
+app.route("/", deploymentRoutes);
+app.route("/", publicationApiRoutes);
+
+
+app.on(["POST", "GET", "PATCH", "DELETE"], "/api/rendro/*", async (c) => {
+  try {
+    return await proxyConvexRequest(c.req.raw);
+  } catch (error: unknown) {
+    logger.error(
+      { error: error instanceof Error ? error.message : String(error) },
+      "Convex API proxy error",
+    );
+    return c.json({ error: "Backend unavailable" }, 502);
+  }
+});
+app.route("/", authPageRoutes);
+app.route("/", organizationPageRoutes);
+app.route("/", projectPageRoutes);
+
+
+
+
+app.route("/", publicationPageRoutes);
+app.route("/", projectDocsRoutes);
+app.route("/", sharePageRoutes);
+app.route("/", apiKeyPageRoutes);
 
 app.route("/", appRoutes);
 app.route("/", publicationRoutes);

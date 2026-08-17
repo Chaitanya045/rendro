@@ -2,11 +2,22 @@ import { Hono } from "hono";
 import { serve } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
 import { cors } from "hono/cors";
-import { auth } from "@/auth";
+import { proxyAuthRequest, proxyAuthSignOut, proxyConvexRequest } from "@/auth-proxy";
 import { sessionMiddleware } from "@/middleware/session";
 import appRoutes from "@/routes/app";
+import authPageRoutes from "@/routes/auth-pages";
+import organizationPageRoutes from "@/routes/organization-pages";
+import projectPageRoutes from "@/routes/project-pages";
+import deploymentRoutes from "@/routes/deployments";
+import publicationPageRoutes from "@/routes/publication-pages";
+import publicationApiRoutes from "@/routes/publication-api";
+import projectDocsRoutes from "@/routes/project-docs";
+import sharePageRoutes from "@/routes/share-pages";
+import apiKeyPageRoutes from "@/routes/api-key-pages";
 import docsRoutes from "@/routes/docs";
 import shareRoutes from "@/routes/share";
+import shareV2Routes from "@/routes/share-v2";
+import publicV2Routes from "@/routes/public-v2";
 import publicRoutes from "@/routes/public";
 import publicationRoutes from "@/routes/publications";
 import { PORT } from "@/config";
@@ -32,6 +43,8 @@ app.use("*", async (c, next) => {
 });
 
 // CORS for sync API (CLI browser access not required, but harmless)
+app.route("/", publicV2Routes);
+app.route("/", shareV2Routes);
 app.use("/api/sync/*", cors());
 
 // Public signed share routes intentionally bypass session middleware.
@@ -47,14 +60,46 @@ app.get("/api/auth/me", (c) => {
   return c.json(user || { user: null });
 });
 
-// Sign-out route — clears the session cookie and redirects home
-app.get("/api/auth/sign-out", async (c) => {
-  await auth!.api.signOut({ headers: c.req.raw.headers });
-  return c.redirect("/");
-});
+// Local and deployed runtimes use the same Convex-backed Better Auth service.
+app.get("/api/auth/sign-out", (c) => proxyAuthSignOut(c.req.raw));
 
-// Better-auth handler — handles /api/auth/sign-in/google, /api/auth/sign-out, etc.
-app.on(["POST", "GET"], "/api/auth/*", (c) => auth!.handler(c.req.raw));
+app.on(["POST", "GET", "OPTIONS"], "/api/auth/*", async (c) => {
+  try {
+    return await proxyAuthRequest(c.req.raw);
+  } catch (error: unknown) {
+    logger.error(
+      { error: error instanceof Error ? error.message : String(error) },
+      "Auth proxy error",
+    );
+    return c.json({ error: "Auth unavailable" }, 502);
+  }
+});
+app.route("/", deploymentRoutes);
+app.route("/", publicationApiRoutes);
+
+
+app.on(["POST", "GET", "PATCH", "DELETE"], "/api/rendro/*", async (c) => {
+  try {
+    return await proxyConvexRequest(c.req.raw);
+  } catch (error: unknown) {
+    logger.error(
+      { error: error instanceof Error ? error.message : String(error) },
+      "Convex API proxy error",
+    );
+    return c.json({ error: "Backend unavailable" }, 502);
+  }
+});
+app.route("/", authPageRoutes);
+app.route("/", organizationPageRoutes);
+app.route("/", projectPageRoutes);
+app.route("/", projectDocsRoutes);
+app.route("/", publicationPageRoutes);
+app.route("/", sharePageRoutes);
+app.route("/", apiKeyPageRoutes);
+
+
+
+
 
 // Main app routes — sign-in / derive org / show docs / create org form
 app.route("/", appRoutes);

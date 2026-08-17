@@ -314,7 +314,7 @@ describe("unauthenticated landing", () => {
     expect(html).not.toContain("form.submit()");
     expect(html).toContain("Start with Google");
     expect(html).toContain("prefers-reduced-motion: reduce");
-    expect(html.match(/data-auth-id=/g)).toHaveLength(5);
+    expect(html.match(/data-auth-id=/g)).toHaveLength(3);
     expect(html).toContain('data-action-id="live-docs"');
     expect(html).toContain("data-reveal-group");
     expect(html).toContain("IntersectionObserver");
@@ -461,13 +461,13 @@ describe("worker auth sign-out", () => {
 // ────────────────────────────────────────────────────
 // 8. Create org screen — design-system chrome
 // ────────────────────────────────────────────────────
-describe("create org screen", () => {
+describe("authenticated entry", () => {
   afterEach(() => {
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
   });
 
-  it("renders theme-aware chrome, button sign-out, and submit micro-interaction hooks", async () => {
+  it("redirects an authenticated session to organization selection", async () => {
     vi.spyOn(minio, "listObjects").mockResolvedValueOnce([]);
     vi.stubGlobal("fetch", (input: string | URL | Request) => {
       const url = typeof input === "string"
@@ -494,19 +494,9 @@ describe("create org screen", () => {
     const res = await workerApp.request("https://dev.rendro.app/", {
       headers: { cookie: "__Secure-better-auth.session_token=test-session" },
     });
-    const html = await res.text();
-
-    expect(res.status).toBe(200);
-    expect(html).toContain("<title>gmail — Rendro</title>");
-    expect(html).toContain("commentor-theme");
-    expect(html).toContain("prefers-color-scheme: dark");
-    expect(html).toContain('class="secondary-btn" type="submit">Sign out</button>');
-    expect(html).not.toContain("<a class=\"logout\"");
-    expect(html).toContain('id="theme-toggle"');
-    expect(html).toContain('data-state="idle"');
-    expect(html).toContain("Creating org");
-    expect(html).toContain("check_circle");
-    expect(html).toContain("Created");
+    expect(await res.text()).toBe("");
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toBe("/organizations");
   });
 });
 

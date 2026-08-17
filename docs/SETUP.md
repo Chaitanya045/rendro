@@ -32,154 +32,134 @@ Required environment variables in `.env`:
 PORT=3000
 NODE_ENV=development
 BASE_URL=http://localhost:3000
-
-# Google OAuth
 GOOGLE_CLIENT_ID=your-client-id.apps.googleusercontent.com
 GOOGLE_CLIENT_SECRET=GOCSPX-your-secret
-
-# Auth secret (32+ chars — generate: openssl rand -hex 32)
-AUTH_SECRET=your-secret-32chars
-
-# Convex
+AUTH_SECRET=generate-at-least-32-random-characters
 CONVEX_URL=https://your-project.convex.cloud
-CONVEX_INTERNAL_SECRET=generate-a-separate-32-plus-character-secret
-
-# MinIO / R2 (local dev uses MinIO)
+CONVEX_SITE_URL=https://your-project.convex.site
+CONVEX_INTERNAL_SECRET=separate-legacy-service-secret
 MINIO_ENDPOINT=http://localhost:9000
 MINIO_ACCESS_KEY=minioadmin
 MINIO_SECRET_KEY=minioadmin
 MINIO_BUCKET=docs
 MINIO_REGION=us-east-1
 MINIO_FORCE_PATH_STYLE=true
+```
 
-SYNC_TOKEN=dev-sync-token
+Set Convex development environment values before starting:
+
+```bash
+pnpm exec convex env set GOOGLE_CLIENT_ID <value>
+pnpm exec convex env set GOOGLE_CLIENT_SECRET <value>
+pnpm exec convex env set AUTH_SECRET <same-value-as-.env>
+pnpm exec convex env set SITE_URL http://localhost:3000
+pnpm exec convex env set CONVEX_INTERNAL_SECRET <same-value-as-.env>
 ```
 
 ### 3. Start Services
 
 ```bash
-# Convex dev (auth, database)
-npx convex dev
-
-# Local dev server
+docker compose up -d minio
+pnpm init:minio
+pnpm exec convex dev
 pnpm dev
 ```
 
-Server starts on `http://localhost:3000`.
+The app starts at `http://localhost:3000`; MinIO’s S3 API and console use ports 9000 and 9001. Add `http://localhost:3000/api/auth/callback/google` to the OAuth client. Development impersonation headers and query parameters are intentionally ignored.
 
-Local authentication uses the same Google OAuth flow as production. Add
-`http://localhost:3000/api/auth/callback/google` to the OAuth client's authorized
-redirect URIs, then sign in at `http://localhost:3000`. Legacy `dev_user`,
-`X-Dev-User`, and `rendro-dev-user` impersonation inputs are intentionally
-ignored.
+### 4. Create the organization and project
 
-Set the same service secret on the Convex development deployment before starting
-the app:
+Sign in, create or join an organization, then open **Projects** and create a project. Organization and project pages show their opaque IDs. Slugs are display fields, not authorization keys.
 
-```bash
-npx convex env set CONVEX_INTERNAL_SECRET <same-value-as-.env>
-```
+### 5. Create a scoped API credential
 
-### 4. Generate API Key
+Open **Organization settings → API keys**. For CI, select the project and grant only:
 
-Sign in at `http://localhost:3000`, then create your org (the form auto-fills the
-slug from the current email-domain model). The raw API key is shown once.
+- `docs:read`
+- `docs:write`
+- `publications:read` and `publications:write` only when that workflow also releases public docs
 
-### 5. Push Docs
+Set an expiry. The raw `rendro_…` value is shown once.
+
+### 6. Push docs
 
 ```bash
-# Using the CLI
+pnpm cli:build
 RENDRO_API_KEY=rendro_xxx ./bin/rendro.mjs push \
-  --source ./docs --org acme-corp --endpoint http://localhost:3000
-
-# Or via curl
-curl -X POST http://localhost:3000/api/sync/upload \
-  -H "Authorization: Bearer rendro_xxx" \
-  -H "Content-Type: application/json" \
-  -d '{"key": "acme-corp/index.html", "content": "<h1>Hello</h1>"}'
+  --source ./docs \
+  --organization <organization-id> \
+  --project <project-id> \
+  --endpoint http://localhost:3000
 ```
 
-### 6. Publish a Folder
+The command computes a SHA-256 manifest, reuses unchanged active objects, uploads changes to an isolated staging deployment, and commits the project pointer only after verification. Re-run the same command to resume an interrupted upload.
 
-Publishing is explicit and intended for trusted GitHub Actions or equivalent CI. Uploads remain private until the workflow registers their folder prefix; the authenticated docs UI exposes no publish or unpublish controls. The folder and entry file must already exist.
+### 7. Browse, share, and publish
+
+The project page links to **Browse docs** and **Publications**. Authenticated project docs remain private. **Share document** creates a seven-day revocable capability pinned to the current deployment.
+
+Create a public release in the Publications UI or CLI:
 
 ```bash
-RENDRO_API_KEY=rendro_xxx ./bin/rendro.mjs publish \
-  --org acme-corp \
-  --folder product-docs \
+RENDRO_API_KEY=rendro_xxx ./bin/rendro.mjs publication create \
+  --organization <organization-id> \
+  --project <project-id> \
   --slug product \
+  --path product-docs \
   --entry index.html \
-  --title "Acme Product Documentation" \
+  --title "Product documentation" \
   --endpoint http://localhost:3000
 
-# Inspect or revoke public folders
-RENDRO_API_KEY=rendro_xxx ./bin/rendro.mjs publications \
-  --org acme-corp --endpoint http://localhost:3000
-RENDRO_API_KEY=rendro_xxx ./bin/rendro.mjs unpublish \
-  --org acme-corp --slug product --endpoint http://localhost:3000
+./bin/rendro.mjs publication list \
+  --organization <organization-id> --project <project-id> \
+  --endpoint http://localhost:3000
 ```
 
-The public URL is `http://localhost:3000/public/acme-corp/product`. Only HTML files below the registered folder are available anonymously; sibling folders and private tree APIs remain session-protected.
+The public URL is `http://localhost:3000/p/product`. A tracked publication follows future active deployments; `--pin <deployment-id>` keeps it on one immutable version.
 
 ## Deployment
 
 ### Convex
 
 ```bash
-npx convex deploy --cmd "push"
+pnpm exec convex env set GOOGLE_CLIENT_ID <value>
+pnpm exec convex env set GOOGLE_CLIENT_SECRET <value>
+pnpm exec convex env set AUTH_SECRET <value>
+pnpm exec convex env set SITE_URL https://rendro.app
+pnpm exec convex env set RESEND_API_KEY <value>
+pnpm exec convex env set AUTH_EMAIL_FROM auth@rendro.app
+pnpm exec convex env set RETENTION_SECRET <random-32-plus-character-value>
+pnpm exec convex env set CONVEX_INTERNAL_SECRET <legacy-service-secret>
+pnpm exec convex deploy --cmd "push"
 ```
 
-Set Convex environment variables:
+`AUTH_SECRET` must equal the Worker value. `CONVEX_INTERNAL_SECRET` remains only for compatibility paths during migration.
+
+### Cloudflare Workers and R2
+
+Create the private `rendro-docs` R2 bucket and an S3 API token restricted to that bucket. The endpoint is `https://<account-id>.r2.cloudflarestorage.com`; do not append the bucket name.
 
 ```bash
-npx convex env set GOOGLE_CLIENT_ID=xxx
-npx convex env set GOOGLE_CLIENT_SECRET=xxx
-npx convex env set AUTH_SECRET=xxx
-npx convex env set SITE_URL=https://rendro.app
-npx convex env set CONVEX_INTERNAL_SECRET=<shared-service-secret>
+pnpm exec wrangler secret put GOOGLE_CLIENT_ID
+pnpm exec wrangler secret put GOOGLE_CLIENT_SECRET
+pnpm exec wrangler secret put AUTH_SECRET
+pnpm exec wrangler secret put CONVEX_URL
+pnpm exec wrangler secret put CONVEX_SITE_URL
+pnpm exec wrangler secret put CONVEX_INTERNAL_SECRET
+pnpm exec wrangler secret put MINIO_ENDPOINT
+pnpm exec wrangler secret put MINIO_ACCESS_KEY
+pnpm exec wrangler secret put MINIO_SECRET_KEY
+pnpm exec wrangler secret put MINIO_BUCKET
+pnpm exec wrangler secret put MINIO_REGION
+pnpm exec wrangler secret put MINIO_FORCE_PATH_STYLE
+pnpm exec wrangler deploy --config wrangler.toml
 ```
 
-### Cloudflare Workers
+Do not configure public R2 access. Worker routes are the authorization boundary.
 
-```bash
-npx wrangler deploy --config wrangler.toml
-```
+### Scheduled retention
 
-Set Cloudflare secrets:
-
-```bash
-npx wrangler secret put GOOGLE_CLIENT_ID
-npx wrangler secret put GOOGLE_CLIENT_SECRET
-npx wrangler secret put AUTH_SECRET
-npx wrangler secret put CONVEX_URL
-npx wrangler secret put CONVEX_INTERNAL_SECRET
-npx wrangler secret put MINIO_ENDPOINT
-npx wrangler secret put MINIO_ACCESS_KEY
-npx wrangler secret put MINIO_SECRET_KEY
-npx wrangler secret put MINIO_BUCKET
-npx wrangler secret put MINIO_REGION
-npx wrangler secret put MINIO_FORCE_PATH_STYLE
-```
-
-### R2 Setup
-
-Create bucket via Cloudflare Dashboard → R2 → Create bucket (`rendro-docs`).
-
-Configure in `wrangler.toml`:
-
-```toml
-[[r2_buckets]]
-binding = "DOCS"
-bucket_name = "rendro-docs"
-```
-
-The `MINIO_ENDPOINT` for R2 in production:
-
-```
-https://<account-id>.r2.cloudflarestorage.com
-```
-
-**Important**: Do NOT include the bucket name in the endpoint URL.
+Configure the repository secrets named in `.github/workflows/retention.yml`: `CONVEX_SITE_URL`, `RETENTION_SECRET`, `R2_ENDPOINT`, `R2_ACCESS_KEY`, `R2_SECRET_KEY`, and `R2_BUCKET`. The daily job purges eligible deployment namespaces; pinned publications and unexpired shares block deletion.
 
 ## CLI Build
 

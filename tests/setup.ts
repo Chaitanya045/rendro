@@ -41,14 +41,3 @@ globalThis.fetch = vi.fn((input: string | URL | Request, init?: RequestInit) => 
   return Promise.resolve(Response.json({ status: "success", value }));
 }) as typeof fetch;
 
-// Mock the better-auth SDK so tests don't try to open a real SQLite DB
-// and don't try to talk to Google.
-vi.mock("@/auth", () => {
-  const handler = vi.fn((_req: Request) => {
-    return new Response(JSON.stringify({ user: null }), { status: 200 });
-  });
-  const api = {
-    getSession: vi.fn(() => null),
-  };
-  return { auth: { handler, api } };
-});

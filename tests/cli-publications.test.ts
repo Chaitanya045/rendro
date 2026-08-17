@@ -14,16 +14,13 @@ interface CapturedRequest {
 }
 
 describe("publication CLI", () => {
-  it("publishes, lists, and unpublishes through the management API", async () => {
+  it("creates, lists, and removes project publications through the management API", async () => {
     const requests: CapturedRequest[] = [];
     const publication = {
-      orgSlug: "acme",
+      _id: "publication-a",
       slug: "product",
-      sourcePrefix: "acme/repo/product/",
       title: "Product documentation",
-      entryFile: "index.html",
-      enabled: true,
-      url: "http://example.test/public/acme/product",
+      trackingMode: "track_active",
     };
     const server = createServer((request, response) => {
       const chunks: Buffer[] = [];
@@ -36,9 +33,13 @@ describe("publication CLI", () => {
           body: rawBody ? JSON.parse(rawBody) as unknown : null,
         });
         response.setHeader("Content-Type", "application/json");
-        if (request.method === "POST") response.end(JSON.stringify(publication));
-        else if (request.method === "GET") response.end(JSON.stringify({ publications: [publication] }));
-        else response.end(JSON.stringify({ unpublished: true, slug: "product" }));
+        if (request.url === "/api/rendro/publications" && request.method === "POST") {
+          response.end(JSON.stringify({ publication, url: "/p/product" }));
+        } else if (request.method === "GET") {
+          response.end(JSON.stringify({ publications: [publication] }));
+        } else {
+          response.end(JSON.stringify({ removed: true }));
+        }
       });
     });
     await new Promise<void>((resolveListen) => server.listen(0, "127.0.0.1", resolveListen));
@@ -52,35 +53,55 @@ describe("publication CLI", () => {
         { env: { ...process.env, RENDRO_API_KEY: "rendro_test" } },
       );
 
-      const published = await run([
-        "publish",
-        "--org", "acme",
-        "--repo", "repo",
-        "--folder", "product",
+      const created = await run([
+        "publication", "create",
+        "--organization", "org-a",
+        "--project", "project-a",
+        "--path", "product",
         "--slug", "product",
         "--title", "Product documentation",
       ]);
-      expect(published.stdout).toContain("http://example.test/public/acme/product");
+      expect(created.stdout).toContain("/p/product");
 
-      const listed = await run(["publications", "--org", "acme"]);
-      expect(listed.stdout).toContain("acme/repo/product/ → index.html");
+      const listed = await run([
+        "publication", "list",
+        "--organization", "org-a",
+        "--project", "project-a",
+      ]);
+      expect(listed.stdout).toContain("publication-a  product  track_active");
 
-      const unpublished = await run(["unpublish", "--org", "acme", "--slug", "product"]);
-      expect(unpublished.stdout).toContain("Unpublished product");
+      const removed = await run([
+        "publication", "remove",
+        "--organization", "org-a",
+        "--project", "project-a",
+        "--id", "publication-a",
+      ]);
+      expect(removed.stdout).toContain("Removed publication publication-a");
 
       expect(requests).toEqual([
         {
           method: "POST",
-          path: "/api/publications",
+          path: "/api/rendro/publications",
           body: {
-            sourcePrefix: "acme/repo/product/",
+            organizationId: "org-a",
+            projectId: "project-a",
             slug: "product",
-            title: "Product documentation",
+            pathPrefix: "product",
             entryFile: "index.html",
+            title: "Product documentation",
+            trackingMode: "track_active",
           },
         },
-        { method: "GET", path: "/api/publications", body: null },
-        { method: "DELETE", path: "/api/publications/product", body: null },
+        {
+          method: "GET",
+          path: "/api/rendro/publications?organizationId=org-a&projectId=project-a",
+          body: null,
+        },
+        {
+          method: "POST",
+          path: "/api/rendro/publications/remove",
+          body: { organizationId: "org-a", projectId: "project-a", publicationId: "publication-a" },
+        },
       ]);
     } finally {
       await new Promise<void>((resolveClose, rejectClose) => {

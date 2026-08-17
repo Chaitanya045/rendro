@@ -4,6 +4,10 @@ on:
   push:
     branches: [development]
 
+concurrency:
+  group: deploy-dev
+  cancel-in-progress: false
+
 jobs:
   check:
     runs-on: ubuntu-latest
@@ -26,12 +30,12 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: "22", cache: "pnpm" }
       - run: pnpm install --frozen-lockfile
-      - run: npx convex deploy
+      - run: pnpm exec convex deploy
         env:
           CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_DEPLOY_KEY_DEV }}
 
   deploy-worker:
-    needs: check
+    needs: [check, deploy-convex]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -40,7 +44,7 @@ jobs:
         with: { node-version: "22", cache: "pnpm" }
       - run: pnpm install --frozen-lockfile
       - run: pnpm build:assets
-      - run: npx wrangler deploy --config wrangler.toml --env development
+      - run: pnpm exec wrangler deploy --config wrangler.toml --env development
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
