@@ -39,6 +39,8 @@
     "build:assets": "tsx scripts/build-commentor.ts && tsx scripts/build-lazy-tree.ts",
     "cli": "tsx cli/src/index.ts",
     "cli:build": "node scripts/build-cli.mjs",
+    "migrate:legacy": "tsx --env-file=.env scripts/migrate-legacy-tenancy.ts",
+    "cleanup:retention": "tsx --env-file=.env scripts/cleanup-retention.ts",
     "deploy": "wrangler deploy --config wrangler.toml"
   },
   "devDependencies": {
