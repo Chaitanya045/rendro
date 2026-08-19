@@ -132,7 +132,7 @@ export function renderControlPlanePage(options: ControlPlanePageOptions): string
 </div></header>
 ${hasSidebar ? `<aside class="cp-sidebar">${controlNavigation(organizationId ?? "", options.active)}</aside><button class="cp-backdrop" id="cp-backdrop" type="button" aria-label="Close navigation"></button>` : ""}
 <main class="cp-main${hasSidebar ? "" : " focused"}"><div class="cp-content${pageClass}">
-  <header class="cp-page-head"><div class="cp-page-copy"><p class="eyebrow">${escapeHtml(options.eyebrow)}</p><h1>${escapeHtml(options.heading)}</h1><p class="cp-page-description">${escapeHtml(options.description)}</p></div>${options.actions ? `<div class="cp-page-actions">${options.actions}</div>` : ""}</header>
+  <header class="cp-page-head"><div class="cp-page-copy"><p class="eyebrow">${escapeHtml(options.eyebrow)}</p><h1 class="cp-page-heading">${escapeHtml(options.heading)}</h1><p class="cp-page-description">${escapeHtml(options.description)}</p></div>${options.actions ? `<div class="cp-page-actions">${options.actions}</div>` : ""}</header>
   ${options.content}
 </div></main>
 <div class="toast-region" id="cp-toasts" aria-live="polite"></div>

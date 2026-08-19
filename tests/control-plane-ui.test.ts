@@ -78,6 +78,7 @@ describe("control-plane UI", () => {
     expect(onboarding).toContain("Waiting for your first deployment");
 
     const project = await (await app.request("/organizations/org-a/projects/project-a")).text();
+    expect(project).toContain('<h1 class="cp-page-heading">Project</h1>');
     expect(project).toContain("Project overview");
     expect(project).toContain("Deployment history");
     expect(project).toContain("Publications");
