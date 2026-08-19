@@ -83,6 +83,58 @@ Rules:
 - Content remains visible by default. The `motion-ready` class is added only after the observer and reveal targets are initialized, so disabled JavaScript, script errors, unsupported observers, reduced motion, and print output never hide content.
 - Primary navigation may mark the current Product, Workflow, or Security section with a `150ms` Ember underline. Do not add scroll listeners, `requestAnimationFrame` loops, count-up numbers, simulated terminal typing, parallax, pinned sections, or replay-on-reverse reveals.
 
+## Authenticated control plane
+
+The management experience is a separate shell from the document viewer. It operates organizations, projects, people, credentials, deployments, publications, and shares; it never wraps or restyles publisher HTML.
+
+### Shell and navigation
+
+- Use one shared server-rendered shell for every authenticated management route.
+- Desktop: fixed `56px` topbar, fixed `232px` organization sidebar, and a centered main column no wider than `1120px`.
+- Mobile at `760px` and below: the sidebar becomes a left drawer opened from a visible **Menu** control. The scrim, `Escape`, and a selected navigation link close it. No page may create horizontal viewport overflow.
+- The topbar contains the Rendro mark, organization switcher, **Open docs**, theme control, and account menu. The organization switcher returns to an explicit chooser; it must not force repeat selection during normal sign-in.
+- Sidebar information architecture is stable: **Overview**, **Projects**; **People**, **Teams**, **Settings**; **API keys**. The active item uses an Ember background and left indicator so state is not communicated by color alone.
+- Organization pages load the canonical organization name after authorization. IDs may appear in operational details, but placeholder slugs or domain-derived tenant labels must not drive navigation.
+- Reuse neutral zinc surfaces, compact `8px`–`12px` radii, border-based hierarchy, Ember Orange intent, dark-mode counterparts, and the motion tokens below. Do not add a dashboard framework or icon package.
+
+### Authentication and invitations
+
+- Authentication uses a focused two-column desktop composition: factual Rendro context beside a `380px`–`440px` form. Mobile collapses to the form.
+- Sign-in, sign-up, verification, recovery, reset, and account-security routes share the same fields, error region, pending state, password reveal behavior, and theme semantics.
+- An invitation `returnTo` survives sign-in and sign-up. Invitation context appears before authentication, but acceptance remains a distinct authenticated decision showing organization, invited email, and role.
+- Never ask an invited user to create an unrelated personal organization. After acceptance, route directly to the accepted organization.
+- OAuth failure restores the initiating button without losing the current URL. Email recovery and verification responses do not reveal whether an account exists.
+
+### First-use activation
+
+1. Resolve organization membership after authentication.
+   - Zero organizations: start organization creation.
+   - One organization: open it directly.
+   - Multiple organizations or an explicit switch action: show the chooser.
+2. Onboard with exactly three visible steps: **Organization → Project → First deployment**.
+3. Generate a project-scoped API key with `docs:read` and `docs:write` as the recommended minimum, then show the secret once.
+4. Show the real CLI command and wait on actual deployment state. Do not simulate terminal typing, progress, document counts, or deployment success.
+5. Replace the waiting state only when an active deployment is observed; then expose **Open documentation**.
+
+### Management interaction patterns
+
+- Overview shows project, member, and team counts; project release states; setup checklist; and the latest real deployment. No decorative graphs or fabricated metrics.
+- Create and invite actions use focused dialogs. Destructive revoke/remove actions require an explicit confirmation and provide inline or toast completion feedback.
+- People uses separate member and pending-invitation tables. Role changes apply only after server confirmation. Batch invitations preserve failures on their individual rows.
+- Teams organize existing members; they do not introduce a second role model. Removing a team never implies removing organization members.
+- API key rows expose name, prefix, project scope, permissions, last use, expiry, and status. Default to project scope, minimum permissions, and `90`-day expiry.
+- A newly created API key is rendered once in a modal. The user must affirm that it was stored before closing; subsequent screens show only the prefix.
+- Project detail keeps **Overview**, deployments, **Publications**, and **Private shares** in one project navigation context. Deployment history explains immutable releases without exposing storage keys.
+- Publications distinguish tracked active releases from pinned immutable releases. Private shares expose expiry and revocation state. Both stay subordinate to the selected project.
+- Tables may scroll inside their own container on narrow screens; the page itself must not overflow. Empty states state what is missing and offer one next action.
+
+### Control-plane motion
+
+- Page content enters once with `opacity` and at most `6px` vertical movement.
+- Drawer, dialog, dropdown, toast, row insertion/removal, copy feedback, and button press use the shared `150ms`–`300ms` tokens.
+- Loading uses a local skeleton or one pending control. Deployment polling uses one small state indicator; never animate the whole page.
+- `prefers-reduced-motion` removes transforms, shimmer, pulse, and stagger while retaining visible state changes.
+
 ## Motion tokens
 
 Rendro does not have a runtime motion library. These values are the canonical timing contract for CSS and vanilla JS-driven state changes.
