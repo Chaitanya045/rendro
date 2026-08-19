@@ -3,6 +3,13 @@ name: Deploy Dev
 on:
   push:
     branches: [development]
+  workflow_dispatch:
+    inputs:
+      deploy_worker:
+        description: Deploy the Cloudflare Worker from GitHub Actions
+        required: false
+        default: true
+        type: boolean
 
 concurrency:
   group: deploy-dev
@@ -30,12 +37,17 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: "22", cache: "pnpm" }
       - run: pnpm install --frozen-lockfile
+      - run: pnpm exec convex env set CONVEX_INTERNAL_SECRET "$CONVEX_INTERNAL_SECRET"
+        env:
+          CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_DEPLOY_KEY_DEV }}
+          CONVEX_INTERNAL_SECRET: ${{ secrets.CONVEX_INTERNAL_SECRET }}
       - run: pnpm exec convex deploy
         env:
           CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_DEPLOY_KEY_DEV }}
 
   deploy-worker:
     needs: [check, deploy-convex]
+    if: github.event_name != 'workflow_dispatch' || inputs.deploy_worker
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
