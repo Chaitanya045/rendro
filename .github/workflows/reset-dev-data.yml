@@ -37,7 +37,7 @@ jobs:
         env:
           CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_DEPLOY_KEY_DEV }}
         run: |
-          for table in projects deployments publications shareGrants apiKeyCredentials documentThreads documentReplies auditEvents threads replies api_keys deleted_files; do
+          for table in projects deployments publications shareGrants apiKeyCredentials documentThreads documentReplies auditEvents threads replies api_keys deleted_files _storage; do
             output="$(pnpm exec convex data "$table" --limit 1 --format jsonArray)"
             test -z "$output"
           done
