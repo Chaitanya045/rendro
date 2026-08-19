@@ -1,0 +1,49 @@
+name: Reset Dev Data
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: reset-dev-data
+  cancel-in-progress: false
+
+jobs:
+  reset:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: "22", cache: "pnpm" }
+      - run: pnpm install --frozen-lockfile
+      - name: Build empty Convex snapshots
+        run: |
+          python - <<'PY'
+          import zipfile
+          with zipfile.ZipFile("/tmp/empty-app.zip", "w") as archive:
+              archive.writestr("projects/documents.jsonl", "")
+          with zipfile.ZipFile("/tmp/empty-auth.zip", "w") as archive:
+              archive.writestr("user/documents.jsonl", "")
+          PY
+      - name: Delete all application records
+        run: pnpm exec convex import --replace-all --yes /tmp/empty-app.zip
+        env:
+          CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_DEPLOY_KEY_DEV }}
+      - name: Delete all authentication records
+        run: pnpm exec convex import --replace-all --yes --component betterAuth /tmp/empty-auth.zip
+        env:
+          CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_DEPLOY_KEY_DEV }}
+      - name: Verify application tables are empty
+        env:
+          CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_DEPLOY_KEY_DEV }}
+        run: |
+          for table in projects deployments publications shareGrants apiKeyCredentials documentThreads documentReplies auditEvents threads replies api_keys deleted_files; do
+            pnpm exec convex data "$table" --limit 1 --format jsonArray | jq -e 'length == 0'
+          done
+      - name: Verify authentication tables are empty
+        env:
+          CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_DEPLOY_KEY_DEV }}
+        run: |
+          for table in user session account verification organization team teamMember member invitation; do
+            pnpm exec convex data "$table" --component betterAuth --limit 1 --format jsonArray | jq -e 'length == 0'
+          done
