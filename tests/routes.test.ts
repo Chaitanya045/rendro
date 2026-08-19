@@ -350,8 +350,10 @@ describe("worker auth proxy", () => {
   it("forwards the browser origin for repeated OAuth sign-in requests", async () => {
     let proxiedHeaders = new Headers();
     let proxiedBody = "";
+    const upstreamUrls: string[] = [];
     const fakeFetch: typeof fetch = (input, init) => {
       const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+      upstreamUrls.push(url);
       if (url.includes("/api/auth/get-session")) return Promise.resolve(Response.json(null));
       if (url.includes("/api/auth/sign-in/social")) {
         proxiedHeaders = new Headers(init?.headers);
@@ -380,6 +382,7 @@ describe("worker auth proxy", () => {
     expect(proxiedHeaders.get("origin")).toBe("https://dev.rendro.app");
     expect(proxiedHeaders.get("content-type")).toBe("application/json");
     expect(proxiedHeaders.get("cookie")).toBe("__Secure-better-auth.state=oauth-state");
+    expect(upstreamUrls.filter((url) => url.includes("/api/auth/get-session"))).toHaveLength(0);
     expect(proxiedBody).toBe(body);
   });
 });

@@ -52,6 +52,12 @@ export function createAuthOptions(ctx: GenericCtx<DataModel>) {
         clientSecret: optionEnv("GOOGLE_CLIENT_SECRET"),
       },
     },
+    session: {
+      cookieCache: {
+        enabled: true,
+        maxAge: 5 * 60,
+      },
+    },
     emailAndPassword: {
       enabled: true,
       requireEmailVerification: true,
@@ -85,8 +91,9 @@ export function createAuthOptions(ctx: GenericCtx<DataModel>) {
       enabled: true,
       storage: "database",
       window: 60,
-      max: 20,
+      max: 100,
       customRules: {
+        "/get-session": { window: 60, max: 120 },
         "/sign-in/email": { window: 60, max: 5 },
         "/sign-up/email": { window: 60 * 60, max: 5 },
         "/request-password-reset": { window: 60 * 60, max: 5 },

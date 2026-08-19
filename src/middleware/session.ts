@@ -36,6 +36,16 @@ export async function sessionMiddleware(
   c: Context<{ Variables: { user?: User } }>,
   next: Next,
 ): Promise<void> {
+  const path = c.req.path;
+  if (
+    path.startsWith("/api/auth/")
+    || path.startsWith("/api/rendro/")
+    || path.startsWith("/api/sync/")
+  ) {
+    await next();
+    return;
+  }
+
   try {
 
     const cookie = c.req.raw.headers.get("cookie") || "";
