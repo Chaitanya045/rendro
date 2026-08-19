@@ -46,6 +46,11 @@ export function createAuthOptions(ctx: GenericCtx<DataModel>) {
     secret: optionEnv("AUTH_SECRET"),
     trustedOrigins: [siteUrl],
     database: authComponent.adapter(ctx),
+    advanced: {
+      database: {
+        generateId: false,
+      },
+    },
     socialProviders: {
       google: {
         clientId: optionEnv("GOOGLE_CLIENT_ID"),
