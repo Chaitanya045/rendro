@@ -39,7 +39,7 @@ jobs:
         run: |
           for table in projects deployments publications shareGrants apiKeyCredentials documentThreads documentReplies auditEvents threads replies api_keys deleted_files; do
             output="$(pnpm exec convex data "$table" --limit 1 --format jsonArray)"
-            test "$output" = "There are no documents in this table."
+            test -z "$output"
           done
       - name: Verify authentication tables are empty
         env:
@@ -47,5 +47,5 @@ jobs:
         run: |
           for table in user session account verification organization team teamMember member invitation; do
             output="$(pnpm exec convex data "$table" --component betterAuth --limit 1 --format jsonArray)"
-            test "$output" = "There are no documents in this table."
+            test -z "$output"
           done
