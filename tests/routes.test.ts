@@ -483,8 +483,8 @@ describe("authenticated entry", () => {
             name: "Owner",
             emailVerified: true,
             image: null,
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
           },
         }));
       }

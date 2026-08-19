@@ -4,15 +4,22 @@ import { CONVEX_SITE_URL } from "@/config";
 import { logger } from "@/logger";
 
 
+type SerializedDate = string | number;
+
 interface SessionUser {
   id: string;
   email: string;
   name: string;
   emailVerified: boolean;
   image: string | null;
-  createdAt: string;
-  updatedAt: string;
+  createdAt: SerializedDate;
+  updatedAt: SerializedDate;
 }
+function isSerializedDate(value: unknown): value is SerializedDate {
+  if (typeof value === "number") return Number.isFinite(value);
+  return typeof value === "string" && !Number.isNaN(Date.parse(value));
+}
+
 function isSessionUser(value: unknown): value is SessionUser {
   if (!value || typeof value !== "object") return false;
   const sessionUser = value as Record<string, unknown>;
@@ -20,8 +27,8 @@ function isSessionUser(value: unknown): value is SessionUser {
     && typeof sessionUser.email === "string"
     && typeof sessionUser.name === "string"
     && typeof sessionUser.emailVerified === "boolean"
-    && typeof sessionUser.createdAt === "string"
-    && typeof sessionUser.updatedAt === "string";
+    && isSerializedDate(sessionUser.createdAt)
+    && isSerializedDate(sessionUser.updatedAt);
 }
 
 
