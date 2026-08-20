@@ -24,6 +24,7 @@ function authenticatedPages(): Hono<{ Variables: { user?: User } }> {
     c.set("user", user);
     await next();
   });
+  app.route("/", authPageRoutes);
   app.route("/", organizationPageRoutes);
   app.route("/", projectPageRoutes);
   app.route("/", apiKeyPageRoutes);
@@ -54,6 +55,37 @@ describe("control-plane UI", () => {
       expect(html, route).toContain("prefers-reduced-motion:reduce");
       expect(html, route).toContain("/organizations/org-a/people");
       expect(html, route).toContain("/organizations/org-a/api-keys");
+    }
+  });
+  it("renders destination-shaped loading states without generic placeholders", async () => {
+    const app = authenticatedPages();
+    const cases = [
+      ["/organizations?choose=1", 'id="organization-state"', "Loading organizations", "organization-grid"],
+      ["/organizations/org-a", 'id="organization-content"', "Loading workspace overview", "overview-metrics"],
+      ["/organizations/org-a/people", 'id="organization-content"', "Loading people and invitations", "skeleton-table-head"],
+      ["/organizations/org-a/teams", 'id="organization-content"', "Loading teams", "skeleton-card"],
+      ["/organizations/org-a/settings", 'id="organization-content"', "Loading organization settings", "skeleton-field"],
+      ["/organizations/org-a/projects", 'id="project-content"', "Loading projects", "project-list"],
+      ["/organizations/org-a/projects/project-a", 'id="project-content"', "Loading project overview", "deployments-panel"],
+      ["/organizations/org-a/projects/project-a/publications", 'id="publication-list"', "Loading publications", "skeleton-table-row"],
+      ["/organizations/org-a/projects/project-a/shares", 'id="share-list"', "Loading private shares", "skeleton-table-row"],
+      ["/organizations/org-a/api-keys", 'id="key-list"', "Loading API keys", "skeleton-table-row"],
+      ["/accept-invitation/invitation-a", 'id="invitation-state"', "Loading invitation", "invitation-mark"],
+      ["/account/security", 'id="method-list"', "Loading sign-in methods", "method-skeleton"],
+    ] as const;
+
+    for (const [route, marker, label, shape] of cases) {
+      const response = await app.request(route);
+      const html = await response.text();
+      const mountStart = html.indexOf(marker);
+      const stateScript = html.indexOf("<script>window.__", mountStart);
+      const initialMount = html.slice(mountStart, stateScript);
+      expect(response.status, route).toBe(200);
+      expect(mountStart, route).toBeGreaterThan(0);
+      expect(stateScript, route).toBeGreaterThan(mountStart);
+      expect(initialMount, route).toContain(label);
+      expect(initialMount, route).toContain(shape);
+      expect(initialMount, route).not.toContain('<div class="skeleton loading-panel"></div>');
     }
   });
 

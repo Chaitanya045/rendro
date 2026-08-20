@@ -8,6 +8,7 @@ process.env.MINIO_ENDPOINT = "http://localhost:9000";
 process.env.MINIO_ACCESS_KEY = "minioadmin";
 process.env.MINIO_SECRET_KEY = "minioadmin";
 process.env.BASE_URL = "http://localhost:3000";
+process.env.SITE_URL = "http://localhost:3000";
 process.env.SYNC_TOKEN = "test-sync-token";
 process.env.NODE_ENV = "test";
 process.env.CONVEX_URL = "http://127.0.0.1:3210";

@@ -1,13 +1,14 @@
 import { describe, expect, it } from "vitest";
 
 import { convexTest } from "convex-test";
-import { api } from "../convex/_generated/api";
+import { api, components } from "../convex/_generated/api";
 declare global {
   interface ImportMeta {
     glob(pattern: string): Record<string, () => Promise<unknown>>;
   }
 }
 import schema from "../convex/schema";
+import betterAuthSchema from "../convex/betterAuth/schema";
 
 const modules = import.meta.glob("../convex/**/*.ts");
 const acmeIdentity = {
@@ -17,7 +18,13 @@ const acmeIdentity = {
 };
 
 function makeBackend() {
-  return convexTest(schema, modules);
+  const backend = convexTest(schema, modules);
+  backend.registerComponent(
+    "betterAuth",
+    betterAuthSchema,
+    import.meta.glob("../convex/betterAuth/**/*.ts"),
+  );
+  return backend;
 }
 
 describe("Convex authorization boundary", () => {
@@ -109,6 +116,111 @@ describe("Convex authorization boundary", () => {
     await expect(
       outsider.mutation(api.threads.remove, { threadId }),
     ).rejects.toThrow("Forbidden");
+  });
+
+  it("scopes document comments to an authorized project and document", async () => {
+    const backend = makeBackend();
+    const now = Date.now();
+    const seeded = await backend.run(async (ctx) => {
+      const user = await ctx.runMutation(components.betterAuth.adapter.create, {
+        input: {
+          model: "user",
+          data: {
+            name: "Project Member",
+            email: "member@acme.test",
+            emailVerified: true,
+            createdAt: now,
+            updatedAt: now,
+          },
+        },
+      });
+      const session = await ctx.runMutation(components.betterAuth.adapter.create, {
+        input: {
+          model: "session",
+          data: {
+            token: "project-member-session",
+            userId: user._id,
+            createdAt: now,
+            updatedAt: now,
+            expiresAt: now + 60_000,
+          },
+        },
+      });
+      const organization = await ctx.runMutation(components.betterAuth.adapter.create, {
+        input: {
+          model: "organization",
+          data: {
+            name: "Project Comments",
+            slug: "project-comments",
+            createdAt: now,
+          },
+        },
+      });
+      await ctx.runMutation(components.betterAuth.adapter.create, {
+        input: {
+          model: "member",
+          data: {
+            organizationId: organization._id,
+            userId: user._id,
+            role: "member",
+            createdAt: now,
+          },
+        },
+      });
+      const projectId = await ctx.db.insert("projects", {
+        organizationId: organization._id,
+        name: "Product docs",
+        slug: "product-docs",
+        createdBy: user._id,
+        createdAt: now,
+      });
+      return {
+        userId: user._id,
+        sessionId: session._id,
+        organizationId: organization._id,
+        projectId,
+      };
+    });
+    const member = backend.withIdentity({
+      subject: seeded.userId,
+      sessionId: seeded.sessionId,
+      email: "member@acme.test",
+      name: "Project Member",
+    });
+
+    const threadId = await member.mutation(api.documentThreads.create, {
+      organizationId: seeded.organizationId,
+      projectId: seeded.projectId,
+      documentPath: "guide/index.html",
+      body: "Anchor this section",
+      anchor: { kind: "element", path: ["main", "h2"] },
+    });
+    await member.mutation(api.documentReplies.add, {
+      threadId,
+      body: "Updated in the next deployment",
+    });
+
+    const threads = await member.query(api.documentThreads.list, {
+      organizationId: seeded.organizationId,
+      projectId: seeded.projectId,
+      documentPath: "guide/index.html",
+    });
+    const otherDocument = await member.query(api.documentThreads.list, {
+      organizationId: seeded.organizationId,
+      projectId: seeded.projectId,
+      documentPath: "guide/other.html",
+    });
+    expect(threads).toHaveLength(1);
+    expect(threads[0]).toMatchObject({
+      authorId: seeded.userId,
+      authorEmail: "member@acme.test",
+      body: "Anchor this section",
+    });
+    expect(threads[0].replies[0]).toMatchObject({
+      authorId: seeded.userId,
+      body: "Updated in the next deployment",
+    });
+    expect(otherDocument).toEqual([]);
   });
 
   it("rejects direct API-key and deleted-file calls without the service secret", async () => {

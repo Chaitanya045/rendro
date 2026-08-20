@@ -1,3 +1,5 @@
+import { Hono } from "hono";
+import type { User } from "better-auth/types";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import publicRoutes from "@/routes/public-v2";
 import shareRoutes from "@/routes/share-v2";
@@ -29,10 +31,30 @@ const manifest = JSON.stringify({
   version: 1,
   files: [
     { path: "reference/index.html", sha256: "a", size: 10, contentType: "text/html; charset=utf-8" },
+    { path: "reference/guide.html", sha256: "d", size: 10, contentType: "text/html; charset=utf-8" },
     { path: "reference/app.css", sha256: "b", size: 10, contentType: "text/css; charset=utf-8" },
     { path: "private.html", sha256: "c", size: 10, contentType: "text/html; charset=utf-8" },
   ],
 });
+const user: User = {
+  id: "user-a",
+  email: "owner@example.com",
+  name: "Owner",
+  emailVerified: true,
+  image: null,
+  createdAt: new Date("2026-01-01"),
+  updatedAt: new Date("2026-01-01"),
+};
+
+function authenticatedProjectDocs() {
+  const app = new Hono<{ Variables: { user?: User } }>();
+  app.use("*", async (c, next) => {
+    c.set("user", user);
+    await next();
+  });
+  app.route("/", projectDocsRoutes);
+  return app;
+}
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -53,6 +75,29 @@ describe("deployment-backed publications", () => {
     const privateSibling = await publicRoutes.request("/p/product/files/private.html");
     expect(privateSibling.status).toBe(404);
     expect(read).toHaveBeenCalledTimes(1);
+  });
+
+  it("renders the canonical public shell for entry and selected HTML documents", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockImplementation(() => Promise.resolve(jsonResponse(publication))));
+    vi.spyOn(minio, "getObjectText").mockResolvedValue(manifest);
+
+    const entry = await publicRoutes.request("/p/product");
+    const entryHtml = await entry.text();
+    expect(entry.status).toBe(200);
+    expect(entry.headers.get("Cache-Control")).toBe("public, max-age=0, must-revalidate");
+    expect(entry.headers.get("X-Content-Type-Options")).toBe("nosniff");
+    expect(entryHtml).toContain("Product docs");
+    expect(entryHtml).toContain('window.RENDRO_INITIAL_DOC="product/index.html"');
+    expect(entryHtml).toContain('window.RENDRO_DOCUMENT_BASE="/p/product"');
+    expect(entryHtml).toContain('sandbox="allow-scripts allow-forms allow-popups allow-downloads"');
+    expect(entryHtml).not.toContain('id="avatar-btn"');
+
+    const selected = await publicRoutes.request("/p/product?doc=guide.html");
+    expect(selected.status).toBe(200);
+    expect(await selected.text()).toContain('window.RENDRO_INITIAL_DOC="product/guide.html"');
+
+    const missing = await publicRoutes.request("/p/product?doc=missing.html");
+    expect(missing.status).toBe(404);
   });
 
   it("returns 404 immediately after publication resolution is removed", async () => {
@@ -80,6 +125,21 @@ describe("deployment-backed publications", () => {
     const secondBody = await second.json() as { documents: string[]; cursor: string | null };
     expect(secondBody.documents).toHaveLength(5);
     expect(secondBody.cursor).toBeNull();
+  });
+
+  it("keeps manifest-controlled document paths inside inline state", async () => {
+    const hostilePath = 'reference/guide</script><script>window.injected=true</script>.html';
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(publication)));
+    vi.spyOn(minio, "getObjectText").mockResolvedValue(JSON.stringify({
+      version: 1,
+      files: [{ path: hostilePath, sha256: "x", size: 1, contentType: "text/html; charset=utf-8" }],
+    }));
+
+    const response = await publicRoutes.request(`/p/product?doc=${encodeURIComponent(hostilePath.slice("reference/".length))}`);
+    const html = await response.text();
+    expect(response.status).toBe(200);
+    expect(html).not.toContain("</script><script>window.injected=true");
+    expect(html).toContain("guide\\u003c/script>\\u003cscript>window.injected=true\\u003c/script>.html");
   });
 });
 
@@ -139,5 +199,88 @@ describe("private project documents", () => {
   it("rejects tree and file requests without an authenticated session", async () => {
     expect((await projectDocsRoutes.request("/organizations/org-a/projects/project-a/docs/tree")).status).toBe(401);
     expect((await projectDocsRoutes.request("/organizations/org-a/projects/project-a/docs/files/index.html")).status).toBe(404);
+  });
+
+  it("renders the authenticated project shell with a valid document selection", async () => {
+    const app = authenticatedProjectDocs();
+    const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(jsonResponse({
+      project: { name: "Product" },
+      deployment: publication.deployment,
+    })));
+    vi.stubGlobal("fetch", fetchMock);
+    vi.spyOn(minio, "getObjectText").mockResolvedValue(manifest);
+
+    const response = await app.request("/organizations/org-a/projects/project-a/docs", {
+      headers: { Cookie: "better-auth.session=abc" },
+    });
+    const html = await response.text();
+    expect(response.status).toBe(200);
+    expect(html).toContain("Product");
+    expect(html).toContain('window.RENDRO_INITIAL_DOC="project-a/reference/index.html"');
+    expect(html).toContain('href="/organizations/org-a/projects/project-a"');
+    expect(html).toContain('"organizationId":"org-a","projectId":"project-a"');
+    expect(html).toContain('sandbox="allow-scripts allow-forms allow-popups allow-downloads"');
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining("/api/rendro/deployments/active?organizationId=org-a&projectId=project-a"),
+      expect.objectContaining({ headers: expect.objectContaining({ Cookie: "better-auth.session=abc" }) }),
+    );
+
+    const invalid = await app.request("/organizations/org-a/projects/project-a/docs?doc=reference%2Fapp.css");
+    expect(invalid.status).toBe(404);
+  });
+
+  it("injects private HTML features without modifying non-HTML assets", async () => {
+    const app = authenticatedProjectDocs();
+    vi.stubGlobal("fetch", vi.fn().mockImplementation(() => Promise.resolve(jsonResponse({
+      project: { name: "Product" },
+      deployment: publication.deployment,
+    }))));
+    vi.spyOn(minio, "getObjectText").mockResolvedValue(manifest);
+    vi.spyOn(minio, "getObjectStream").mockImplementation((key) => Promise.resolve(
+      stream(key.endsWith("app.css") ? "body{color:red}" : "<!doctype html><body><h1>Publisher docs</h1></body>")
+    ));
+
+    const htmlResponse = await app.request("/organizations/org-a/projects/project-a/docs/files/reference/index.html");
+    const html = await htmlResponse.text();
+    expect(htmlResponse.status).toBe(200);
+    expect(htmlResponse.headers.get("Cache-Control")).toBe("private, no-store");
+    expect(htmlResponse.headers.get("Content-Security-Policy")).toContain("sandbox allow-scripts");
+    expect(htmlResponse.headers.get("X-Content-Type-Options")).toBe("nosniff");
+    expect(html).toContain("<h1>Publisher docs</h1>");
+    expect(html).toContain('window.COMMENTOR={"convexUrl":');
+    expect(html.match(/window\.COMMENTOR=/g)).toHaveLength(1);
+
+    const assetResponse = await app.request("/organizations/org-a/projects/project-a/docs/files/reference/app.css");
+    expect(assetResponse.status).toBe(200);
+    expect(assetResponse.headers.get("Content-Type")).toBe("text/css; charset=utf-8");
+    expect(await assetResponse.text()).toBe("body{color:red}");
+  });
+
+  it("escapes manifest-controlled paths in private document scripts", async () => {
+    const app = authenticatedProjectDocs();
+    const hostilePath = 'guide</script><script>window.injected=true</script>.html';
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({
+      project: { name: "Product" },
+      deployment: publication.deployment,
+    })));
+    vi.spyOn(minio, "getObjectText").mockResolvedValue(JSON.stringify({
+      version: 1,
+      files: [{ path: hostilePath, contentType: "text/html; charset=utf-8" }],
+    }));
+    vi.spyOn(minio, "getObjectStream").mockResolvedValue(stream("<body>Safe publisher content</body>"));
+
+    const response = await app.request(`/organizations/org-a/projects/project-a/docs/files/${encodeURIComponent(hostilePath)}`);
+    const html = await response.text();
+    expect(response.status).toBe(200);
+    expect(html).not.toContain("</script><script>window.injected=true");
+    expect(html).toContain("guide\\u003c/script>\\u003cscript>window.injected=true\\u003c/script>.html");
+  });
+
+  it("preserves the requested project document in anonymous sign-in redirects", async () => {
+    const response = await projectDocsRoutes.request("/organizations/org-a/projects/project-a/docs");
+    expect(response.status).toBe(302);
+    expect(response.headers.get("Location")).toBe(
+      "/sign-in?returnTo=%2Forganizations%2Forg-a%2Fprojects%2Fproject-a%2Fdocs",
+    );
   });
 });

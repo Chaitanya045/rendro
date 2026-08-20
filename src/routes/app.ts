@@ -321,6 +321,31 @@ export interface PublicShellPublication {
 
 interface OrgTreePageOptions {
   publication?: PublicShellPublication;
+  documentBase?: string;
+  displayName?: string;
+  backHref?: string;
+  backLabel?: string;
+  sandboxed?: boolean;
+  publicDocument?: boolean;
+  shareConfig?: {
+    organizationId: string;
+    projectId: string;
+  };
+}
+
+export interface ScopedDocumentShellOptions {
+  user: User | null;
+  namespace: string;
+  title: string;
+  basePath: string;
+  selectedPath: string;
+  backHref?: string;
+  backLabel?: string;
+  publicDocument?: boolean;
+  shareConfig?: {
+    organizationId: string;
+    projectId: string;
+  };
 }
 
 function renderOrgDocs(user: User, org: string, selectedDoc = ""): string {
@@ -333,21 +358,43 @@ export function renderPublicOrgDocs(publication: PublicShellPublication, selecte
   return renderOrgTreePage(null, publication.orgSlug, selectedDoc, { publication });
 }
 
+export function renderScopedDocumentShell(options: ScopedDocumentShellOptions): string {
+  const selectedDoc = options.selectedPath ? `${options.namespace}/${options.selectedPath}` : "";
+  return renderOrgTreePage(options.user, options.namespace, selectedDoc, {
+    documentBase: options.basePath,
+    displayName: options.title,
+    backHref: options.backHref,
+    backLabel: options.backLabel,
+    sandboxed: true,
+    publicDocument: options.publicDocument,
+    shareConfig: options.shareConfig,
+  });
+}
+
 function renderOrgTreePage(user: User | null, org: string, selectedDoc = "", options: OrgTreePageOptions = {}): string {
   const publication = options.publication;
+  const isPublicDocument = Boolean(publication || options.publicDocument);
+  const documentBase = options.documentBase ?? (publication
+    ? `/public/${encodeURIComponent(publication.orgSlug)}/${encodeURIComponent(publication.slug)}`
+    : "");
+  const displayName = options.displayName ?? publication?.title ?? org;
   const email = user ? escapeHtml(user.email) : "Public documentation";
   const orgEsc = escapeHtml(org);
+  const displayNameEsc = escapeHtml(displayName);
   const initials = user ? (user.name || email).split(/[@\s]/)[0].slice(0, 2).toUpperCase() : "PU";
-  const publicationBase = publication
-    ? `/public/${encodeURIComponent(publication.orgSlug)}/${encodeURIComponent(publication.slug)}`
+  const shareLabel = isPublicDocument ? "Copy public URL" : options.shareConfig ? "Share document" : "Copy signed URL";
+  const sharePendingLabel = isPublicDocument ? "Copying public URL…" : options.shareConfig ? "Creating share…" : "Creating signed URL…";
+  const shareDoneLabel = isPublicDocument ? "Public URL copied!" : options.shareConfig ? "Share link copied!" : "Signed URL copied!";
+  const sandboxAttribute = options.sandboxed || publication
+    ? ' sandbox="allow-scripts allow-forms allow-popups allow-downloads"'
     : "";
-  const shareLabel = publication ? "Copy public URL" : "Copy signed URL";
-  const sharePendingLabel = publication ? "Copying public URL…" : "Creating signed URL…";
-  const shareDoneLabel = publication ? "Public URL copied!" : "Signed URL copied!";
+  const backMarkup = options.backHref
+    ? `<a class="topbar-btn topbar-btn-back" href="${escapeHtml(options.backHref)}"><span class="material-symbols-outlined" aria-hidden="true">arrow_back</span><span class="topbar-back-label">${escapeHtml(options.backLabel ?? "Back")}</span></a>`
+    : "";
   const avatarMarkup = user
     ? `<div class="avatar-wrap">
-      <div class="topbar-avatar" id="avatar-btn" title="${escapeHtml(email)}">${initials}</div>
-      <div class="avatar-menu" id="avatar-menu" style="display:none">
+      <button class="topbar-avatar" id="avatar-btn" type="button" title="${escapeHtml(email)}" aria-label="Open account menu" aria-expanded="false">${initials}</button>
+      <div class="avatar-menu" id="avatar-menu" hidden>
         <div class="avatar-menu-email">${escapeHtml(email)}</div>
         <a href="/account/security" class="avatar-menu-item"><span class="material-symbols-outlined" style="font-size:18px">shield</span> Account security</a>
         <a href="/api/auth/sign-out" class="avatar-menu-item"><span class="material-symbols-outlined" style="font-size:18px">logout</span> Sign out</a>
@@ -359,7 +406,7 @@ function renderOrgTreePage(user: User | null, org: string, selectedDoc = "", opt
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>${escapeHtml(publication?.title ?? org)} — Rendro</title>
+<title>${displayNameEsc} — Rendro</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet">
 <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
@@ -373,6 +420,10 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
   .material-symbols-outlined{font-variation-settings:'FILL'0,'wght'400,'GRAD'0,'opsz'24;vertical-align:middle;font-size:20px}
   ::-webkit-scrollbar{width:6px} ::-webkit-scrollbar-track{background:transparent} ::-webkit-scrollbar-thumb{background:#e4e4e7;border-radius:10px}
 
+  .topbar-btn-back{color:#52525b;background:transparent;border:1px solid #e4e4e7;text-decoration:none}
+  .topbar-btn-back:hover{background:#f4f4f5;color:#09090b;border-color:#d4d4d8}
+  .mobile-tree-toggle{display:none}
+  .mobile-tree-backdrop{display:none}
   .topbar{position:fixed;top:0;z-index:50;width:100%;height:56px;background:#fff;border-bottom:1px solid #e4e4e7;display:flex;align-items:center;justify-content:space-between;padding:0 24px;transition:transform .3s cubic-bezier(.4,0,.2,1),opacity .2s cubic-bezier(.4,0,.2,1);will-change:transform,opacity}
   .topbar-left{display:flex;align-items:center;gap:10px}
   .topbar-logo{font-size:24px;font-weight:700;color:#c2410c;line-height:32px}
@@ -611,12 +662,36 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
   html.dark .avatar-menu-email{color:#a1a1aa;border-bottom-color:#27272a}
   html.dark .avatar-menu-item{color:#fafafa}
   html.dark .avatar-menu-item:hover{background:#18181b}
+  html.dark .topbar-btn-back{color:#a1a1aa;border-color:#27272a}
+  html.dark .topbar-btn-back:hover{background:#18181b;color:#fafafa;border-color:#3f3f46}
+  @media(max-width:760px){
+    .topbar{padding:0 10px}
+    .topbar-left{min-width:0;gap:6px}
+    .topbar-logo{max-width:34vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:18px}
+    .topbar-actions{gap:4px}
+    .mobile-tree-toggle{width:44px;height:44px;display:flex;flex:0 0 44px}
+    .topbar-btn-back{width:44px;height:44px;padding:0;justify-content:center}
+    .topbar-btn-back .topbar-back-label{display:none}
+    .topbar-btn-share{width:44px;min-width:44px;height:44px;padding:0}
+    .topbar-btn-share .share-label-window{display:none}
+    .topbar-btn-icon{width:44px;height:44px}
+    .topbar-avatar{width:44px;height:44px}
+    .sidebar{z-index:70;width:min(320px,86vw);transform:translateX(-102%);opacity:0;pointer-events:none;box-shadow:0 18px 48px rgba(24,24,27,.18)}
+    .sidebar-resizer{display:none}
+    .main{margin-left:0}
+    .mobile-tree-backdrop{position:fixed;z-index:65;inset:56px 0 0;display:block;border:0;background:rgba(9,9,11,.42);opacity:0;pointer-events:none;transition:opacity .3s cubic-bezier(.4,0,.2,1)}
+    html.tree-mobile-open .sidebar{transform:translateX(0);opacity:1;pointer-events:auto}
+    html.tree-mobile-open .mobile-tree-backdrop{opacity:1;pointer-events:auto}
+    html.shell-hidden.tree-mobile-open .sidebar{transform:translateX(0);opacity:1;pointer-events:auto}
+  }
 </style>
 <body>
 
 <header class="topbar">
   <div class="topbar-left">
-    <span class="topbar-logo">${orgEsc}</span>
+    <button class="topbar-btn-icon mobile-tree-toggle" id="mobile-tree-toggle" type="button" aria-label="Open document tree" aria-expanded="false"><span class="material-symbols-outlined" aria-hidden="true">menu</span></button>
+    <span class="topbar-logo">${displayNameEsc}</span>
+    ${backMarkup}
   </div>
   <div class="topbar-actions">
     <span class="shortcut-tooltip-wrap"><button class="topbar-btn-icon shell-toggle" id="shell-toggle" type="button" aria-label="Hide app shell, keyboard shortcut Ctrl Shift H" aria-describedby="shell-shortcut-tooltip" aria-pressed="false"><span class="material-symbols-outlined" aria-hidden="true">fullscreen</span></button><span class="shortcut-tooltip" id="shell-shortcut-tooltip" role="tooltip"><span class="shortcut-tooltip-label">Hide app shell</span><span class="shortcut-keys" id="shell-shortcut-keys" aria-hidden="true"><span class="shortcut-key">Ctrl</span><span class="shortcut-key">Shift</span><span class="shortcut-key">H</span></span></span></span>
@@ -630,10 +705,11 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
 </header>
 <div class="shell-hotzone shell-hotzone-top" id="shell-hotzone-top" aria-hidden="true"></div>
 <div class="shell-hotzone shell-hotzone-left" id="shell-hotzone-left" aria-hidden="true"></div>
+<button class="mobile-tree-backdrop" id="mobile-tree-backdrop" type="button" aria-label="Close document tree"></button>
 
 <aside class="sidebar" id="doc-sidebar" aria-labelledby="doc-sidebar-title">
   <div class="sidebar-divider" id="doc-sidebar-title">Docs</div>
-  <div class="sidebar-tree" data-tree-org="${orgEsc}"${publicationBase ? ` data-publication-base="${escapeHtml(publicationBase)}"` : ""}>
+  <div class="sidebar-tree" data-tree-org="${orgEsc}"${documentBase ? ` data-document-base="${escapeHtml(documentBase)}"` : ""}>
     <div class="space-y-0.5 relative" id="tree-container" style="position:relative">
       <div class="active-indicator" id="active-indicator" style="opacity:0;transition:none"></div>
       ${renderTreeSkeleton()}
@@ -649,7 +725,7 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
     <p>Choose a document from the sidebar to view its contents, or create a new page to start writing.</p>
   </div>
   <iframe name="content-frame" id="content-frame" class="content-frame"
-    src="about:blank" title="Document content" style="display:none"${publication ? ' sandbox="allow-scripts allow-forms allow-popups allow-downloads"' : ""}></iframe>
+    src="about:blank" title="Document content" style="display:none"${sandboxAttribute}></iframe>
 </main>
 
 <script>
@@ -756,6 +832,8 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
   var shellToggle=document.getElementById("shell-toggle");
   var shellToggleIcon=shellToggle&&shellToggle.querySelector(".material-symbols-outlined");
   var shellShortcutKeys=document.getElementById("shell-shortcut-keys");
+  var mobileTreeToggle=document.getElementById("mobile-tree-toggle");
+  var mobileTreeBackdrop=document.getElementById("mobile-tree-backdrop");
   var shellShortcutText="Ctrl Shift H";
   if(shellToggle&&shellShortcutKeys){
     var platform=(navigator.userAgentData&&navigator.userAgentData.platform)||navigator.platform||"";
@@ -772,6 +850,19 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
 
   function maxForViewport(){return Math.max(MIN_WIDTH,Math.min(MAX_WIDTH,window.innerWidth-360));}
   function clampWidth(value){return Math.max(MIN_WIDTH,Math.min(maxForViewport(),Math.round(value)));}
+  function mobileTreeMode(){return window.matchMedia("(max-width:760px)").matches;}
+  function setMobileTree(open){
+    var active=mobileTreeMode()&&open;
+    root.classList.toggle("tree-mobile-open",active);
+    if(mobileTreeToggle){
+      mobileTreeToggle.setAttribute("aria-expanded",String(active));
+      mobileTreeToggle.setAttribute("aria-label",active?"Close document tree":"Open document tree");
+    }
+    if(sidebar){
+      sidebar.setAttribute("aria-hidden",String(mobileTreeMode()&&!active));
+      if("inert" in sidebar)sidebar.inert=mobileTreeMode()&&!active;
+    }
+  }
   function updateSidebarAria(){
     var width=clampWidth(expandedWidth);
     if(resizer){
@@ -779,9 +870,9 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
       resizer.setAttribute("aria-valuemax",String(maxForViewport()));
       resizer.setAttribute("aria-valuenow",String(width));
       resizer.setAttribute("aria-valuetext","Document tree "+width+" pixels wide");
-      resizer.tabIndex=0;
+      resizer.tabIndex=mobileTreeMode()?-1:0;
     }
-    if(sidebar){sidebar.setAttribute("aria-hidden","false");if("inert" in sidebar)sidebar.inert=false;}
+    if(sidebar&&!mobileTreeMode()){sidebar.setAttribute("aria-hidden","false");if("inert" in sidebar)sidebar.inert=false;}
   }
   function setSidebarWidth(value,persist){
     expandedWidth=clampWidth(value);
@@ -858,6 +949,7 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
   }
 
   setSidebarWidth(expandedWidth,false);
+  setMobileTree(false);
   root.getBoundingClientRect();
   root.classList.add("sidebar-ready");
   setShellHidden(localStorage.getItem("rendro-shell-hidden")==="1",false);
@@ -937,8 +1029,11 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
       else if(e.key==="End"){e.preventDefault();setSidebarWidth(maxForViewport(),true);}
     });
   }
-  window.addEventListener("resize",function(){setSidebarWidth(expandedWidth,false);});
+  window.addEventListener("resize",function(){setSidebarWidth(expandedWidth,false);setMobileTree(root.classList.contains("tree-mobile-open"));});
   if(shellToggle)shellToggle.addEventListener("click",function(){setShellHidden(!root.classList.contains("shell-hidden"));});
+  if(mobileTreeToggle)mobileTreeToggle.addEventListener("click",function(){setMobileTree(!root.classList.contains("tree-mobile-open"));});
+  if(mobileTreeBackdrop)mobileTreeBackdrop.addEventListener("click",function(){setMobileTree(false);});
+  if(sidebar)sidebar.addEventListener("click",function(e){if(e.target instanceof Element&&e.target.closest(".tree-item[data-path]"))setMobileTree(false);});
   document.addEventListener("pointermove",updateShellAutoReveal,{passive:true});
   if(topHotzone){topHotzone.addEventListener("pointerenter",revealShellHeader);topHotzone.addEventListener("pointerleave",scheduleHideShellHeader);}
   if(leftHotzone){leftHotzone.addEventListener("pointerenter",revealShellSidebar);leftHotzone.addEventListener("pointerleave",scheduleHideShellSidebar);}
@@ -954,6 +1049,12 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
       if(!root.classList.contains("shell-hidden")&&shellToggle)shellToggle.focus();
       return;
     }
+    if(e.key==="Escape"&&root.classList.contains("tree-mobile-open")){
+      e.preventDefault();
+      setMobileTree(false);
+      if(mobileTreeToggle)mobileTreeToggle.focus();
+      return;
+    }
     if(e.key==="Escape"&&root.classList.contains("shell-hidden")){
       e.preventDefault();
       setShellHidden(false);
@@ -961,14 +1062,29 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
     }
   });
   window.addEventListener("message",function(e){
-    var allowedOrigin=e.origin===window.location.origin||(window.RENDRO_PUBLICATION_BASE&&e.origin==="null");
-    if(!allowedOrigin||!e.data||e.data.type!=="shell-toggle")return;
+    var allowedOrigin=e.origin===window.location.origin||(window.RENDRO_DOCUMENT_BASE&&e.origin==="null");
+    if(!allowedOrigin||!e.data)return;
+    if(e.data.type==="commentor-auth-request"){
+      var frame=document.getElementById("content-frame");
+      var source=e.source;
+      var requestId=typeof e.data.requestId==="string"?e.data.requestId:"";
+      if(!window.RENDRO_SHARE_CONFIG||!frame||source!==frame.contentWindow||!requestId)return;
+      fetch("/api/auth/convex/token",{credentials:"same-origin",headers:{Accept:"application/json"}})
+        .then(function(response){return response.ok?response.json():null;})
+        .then(function(payload){source.postMessage({type:"commentor-auth-response",requestId:requestId,token:payload&&typeof payload.token==="string"?payload.token:null},"*");})
+        .catch(function(){source.postMessage({type:"commentor-auth-response",requestId:requestId,token:null},"*");});
+      return;
+    }
+    if(e.data.type!=="shell-toggle")return;
     setShellHidden(!root.classList.contains("shell-hidden"));
     if(!root.classList.contains("shell-hidden")&&shellToggle)shellToggle.focus();
   });
 
 
-  document.getElementById("avatar-btn")?.addEventListener("click",function(e){e.stopPropagation();var m=document.getElementById("avatar-menu");m.style.display=m.style.display==="block"?"none":"block";});
+  var avatarButton=document.getElementById("avatar-btn"),avatarMenu=document.getElementById("avatar-menu");
+  function setAvatarMenu(open){if(!avatarButton||!avatarMenu)return;avatarMenu.hidden=!open;avatarButton.setAttribute("aria-expanded",String(open));}
+  if(avatarButton)avatarButton.addEventListener("click",function(e){e.stopPropagation();setAvatarMenu(avatarMenu.hidden);});
+  document.addEventListener("keydown",function(e){if(e.key==="Escape")setAvatarMenu(false);});
   var shareBtn=document.getElementById("share-btn");
   var shareFeedbackLabel=document.getElementById("share-feedback-label");
   var shareFeedbackIcon=document.getElementById("share-feedback-icon");
@@ -977,12 +1093,12 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
   function setShareLoading(){if(!shareBtn)return;if(shareFeedbackTimer!==undefined)window.clearTimeout(shareFeedbackTimer);shareBtn.classList.remove("is-feedback");shareBtn.classList.add("is-loading");shareBtn.setAttribute("aria-busy","true");shareBtn.setAttribute("aria-label",${JSON.stringify(sharePendingLabel)});}
   function setShareFeedback(message){if(!shareBtn||!shareFeedbackLabel)return;shareBtn.classList.remove("is-loading");shareBtn.removeAttribute("aria-busy");shareFeedbackLabel.textContent=message;if(shareFeedbackIcon)shareFeedbackIcon.textContent=message.endsWith("copied!")?"check":"error";shareBtn.classList.add("is-feedback");shareBtn.setAttribute("aria-label",message);if(shareFeedbackTimer!==undefined)window.clearTimeout(shareFeedbackTimer);shareFeedbackTimer=window.setTimeout(function(){shareBtn.classList.remove("is-feedback");shareBtn.setAttribute("aria-label",${JSON.stringify(shareLabel)});if(shareFeedbackIcon)shareFeedbackIcon.textContent="check";},1800);}
   async function copyText(text){try{if(navigator.clipboard&&window.isSecureContext){await navigator.clipboard.writeText(text);return;}}catch(_){}var ta=document.createElement("textarea");ta.value=text;ta.setAttribute("readonly","");ta.style.position="fixed";ta.style.top="-999px";ta.style.left="-999px";document.body.appendChild(ta);ta.select();ta.setSelectionRange(0,text.length);try{if(!document.execCommand("copy"))throw new Error("copy failed");}finally{ta.remove();}}
-  if(shareBtn)shareBtn.addEventListener("click",async function(e){e.stopPropagation();if(sharePending)return;var doc=window.RENDRO_CURRENT_DOC||"";if(!doc){setShareFeedback("Select a document first");return;}sharePending=true;setShareLoading();try{var publicBase=window.RENDRO_PUBLICATION_BASE||"";if(publicBase){var relativeDoc=doc.indexOf(window.RENDRO_ORG+"/")===0?doc.slice(window.RENDRO_ORG.length+1):doc;var publicUrl=new URL(publicBase,window.location.origin);publicUrl.searchParams.set("doc",relativeDoc);await copyText(publicUrl.href);setShareFeedback("Public URL copied!");}else{var res=await fetch("/api/share/create?key="+encodeURIComponent(doc),{headers:{accept:"application/json"}});if(!res.ok)throw new Error("share failed");var data=await res.json();await copyText(data.url);setShareFeedback("Signed URL copied!");}}catch(_){setShareFeedback("Unable to copy");}finally{sharePending=false;}});
-  document.addEventListener("click",function(){var m=document.getElementById("avatar-menu");if(m)m.style.display="none";});
+  if(shareBtn)shareBtn.addEventListener("click",async function(e){e.stopPropagation();if(sharePending)return;var doc=window.RENDRO_CURRENT_DOC||"";if(!doc){setShareFeedback("Select a document first");return;}sharePending=true;setShareLoading();try{var relativeDoc=doc.indexOf(window.RENDRO_ORG+"/")===0?doc.slice(window.RENDRO_ORG.length+1):doc;var publicBase=window.RENDRO_PUBLICATION_BASE||"";var shareConfig=window.RENDRO_SHARE_CONFIG;if(publicBase){var publicUrl=new URL(publicBase,window.location.origin);publicUrl.searchParams.set("doc",relativeDoc);await copyText(publicUrl.href);setShareFeedback("Public URL copied!");}else if(shareConfig){var res=await fetch("/api/rendro/shares",{method:"POST",headers:{"Content-Type":"application/json",accept:"application/json"},body:JSON.stringify({organizationId:shareConfig.organizationId,projectId:shareConfig.projectId,documentPath:relativeDoc,expiresInSeconds:604800})});var data=await res.json();if(!res.ok||!data.url)throw new Error("share failed");await copyText(new URL(data.url,window.location.origin).href);setShareFeedback("Share link copied!");}else{var legacyRes=await fetch("/api/share/create?key="+encodeURIComponent(doc),{headers:{accept:"application/json"}});if(!legacyRes.ok)throw new Error("share failed");var legacyData=await legacyRes.json();await copyText(legacyData.url);setShareFeedback("Signed URL copied!");}}catch(_){setShareFeedback("Unable to copy");}finally{sharePending=false;}});
+  document.addEventListener("click",function(){setAvatarMenu(false);});
 })();
 </script>
-<script>window.RENDRO_INITIAL_DOC=${JSON.stringify(selectedDoc)};window.RENDRO_ORG=${JSON.stringify(org)};window.RENDRO_PUBLICATION_BASE=${JSON.stringify(publicationBase)};</script>
-<script src="/lazy-tree.js?v=27"></script>
+<script>window.RENDRO_INITIAL_DOC=${inlineJson(selectedDoc)};window.RENDRO_ORG=${inlineJson(org)};window.RENDRO_DOCUMENT_BASE=${inlineJson(documentBase)};window.RENDRO_PUBLICATION_BASE=${inlineJson(isPublicDocument ? documentBase : "")};window.RENDRO_SHARE_CONFIG=${inlineJson(options.shareConfig ?? null)};</script>
+<script src="/lazy-tree.js?v=28"></script>
 </body>
 </html>`;
 }
@@ -1043,6 +1159,10 @@ function renderInitialIndex(_user: User, org: string, displayName: string): stri
 <p>Or start writing HTML directly in the bucket under <code>${escapeHtml(org)}/</code>.</p>
 </body>
 </html>`;
+}
+
+function inlineJson(value: unknown): string {
+  return JSON.stringify(value).replace(/</g, "\\u003c");
 }
 
 function escapeHtml(s: string): string {

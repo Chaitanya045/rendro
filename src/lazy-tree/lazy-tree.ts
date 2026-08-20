@@ -6,10 +6,10 @@ type RendroWindow = Window & { RENDRO_INITIAL_DOC?: string; RENDRO_CURRENT_DOC?:
 const RENDRO_WINDOW = window as RendroWindow;
 const TREE_HOST = document.querySelector<HTMLElement>("[data-tree-org]");
 const ORG = TREE_HOST?.dataset.treeOrg;
-const PUBLICATION_BASE = TREE_HOST?.dataset.publicationBase ?? "";
+const DOCUMENT_BASE = TREE_HOST?.dataset.documentBase ?? "";
 interface TreeNode { name: string; path: string; type: "file" | "folder"; size?: number; }
 interface TreePageResponse { children: TreeNode[]; isTruncated: boolean; nextStartAfter?: string; }
-let publicDocuments: string[] | null = null;
+let scopedDocuments: string[] | null = null;
 
 const TREE = document.getElementById("tree-container") as HTMLElement;
 
@@ -21,29 +21,29 @@ function esc(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
-function relativePublicPath(fullPath: string): string {
+function relativeDocumentPath(fullPath: string): string {
   if (!ORG || !fullPath.startsWith(`${ORG}/`)) return "";
   return fullPath.slice(ORG.length + 1);
 }
 
 function docUrl(fullPath: string): string {
-  if (PUBLICATION_BASE) {
-    const url = new URL(PUBLICATION_BASE, location.origin);
-    url.searchParams.set("doc", relativePublicPath(fullPath));
+  if (DOCUMENT_BASE) {
+    const url = new URL(DOCUMENT_BASE, location.origin);
+    url.searchParams.set("doc", relativeDocumentPath(fullPath));
     return `${url.pathname}${url.search}`;
   }
   return `/docs/${encodePath(fullPath)}`;
 }
 
 function documentFrameUrl(fullPath: string): string {
-  return PUBLICATION_BASE
-    ? `${PUBLICATION_BASE}/files/${encodePath(relativePublicPath(fullPath))}`
+  return DOCUMENT_BASE
+    ? `${DOCUMENT_BASE}/files/${encodePath(relativeDocumentPath(fullPath))}`
     : `/files/${encodePath(fullPath)}`;
 }
 
 function docFromPathname(): string {
   if (!ORG) return "";
-  if (PUBLICATION_BASE) {
+  if (DOCUMENT_BASE) {
     const documentPath = new URLSearchParams(location.search).get("doc");
     return documentPath ? `${ORG}/${documentPath}` : "";
   }
@@ -141,22 +141,30 @@ async function expand(folder: HTMLElement) {
   }
 }
 
-async function ensurePublicDocuments(): Promise<void> {
-  if (!PUBLICATION_BASE || publicDocuments) return;
-  const response = await fetch(`${PUBLICATION_BASE}/tree`);
-  if (!response.ok) throw new Error(`${response.status}`);
-  const result = await response.json() as { documents?: unknown };
-  if (!Array.isArray(result.documents) || !result.documents.every((path) => typeof path === "string")) {
-    throw new Error("Invalid public document tree");
-  }
-  publicDocuments = result.documents;
+async function ensureScopedDocuments(): Promise<void> {
+  if (!DOCUMENT_BASE || scopedDocuments) return;
+  const documents: string[] = [];
+  let cursor: string | null = null;
+  do {
+    const url = new URL(`${DOCUMENT_BASE}/tree`, location.origin);
+    if (cursor) url.searchParams.set("cursor", cursor);
+    const response = await fetch(`${url.pathname}${url.search}`);
+    if (!response.ok) throw new Error(`${response.status}`);
+    const result = await response.json() as { documents?: unknown; cursor?: unknown };
+    if (!Array.isArray(result.documents) || !result.documents.every((path) => typeof path === "string")) {
+      throw new Error("Invalid document tree");
+    }
+    documents.push(...result.documents);
+    cursor = typeof result.cursor === "string" && result.cursor ? result.cursor : null;
+  } while (cursor);
+  scopedDocuments = Array.from(new Set(documents));
 }
 
-function publicChildren(path: string): TreeNode[] {
-  if (!ORG || !publicDocuments || !path.startsWith(`${ORG}/`)) return [];
+function scopedChildren(path: string): TreeNode[] {
+  if (!ORG || !scopedDocuments || !path.startsWith(`${ORG}/`)) return [];
   const relativePrefix = path.slice(ORG.length + 1);
   const children = new Map<string, TreeNode>();
-  for (const documentPath of publicDocuments) {
+  for (const documentPath of scopedDocuments) {
     if (!documentPath.startsWith(relativePrefix)) continue;
     const remainder = documentPath.slice(relativePrefix.length);
     if (!remainder) continue;
@@ -173,9 +181,9 @@ function publicChildren(path: string): TreeNode[] {
 
 async function loadPage(folder: HTMLElement, path: string, content: HTMLElement, startAfter?: string) {
   let data: TreePageResponse;
-  if (PUBLICATION_BASE) {
-    await ensurePublicDocuments();
-    data = { children: publicChildren(path), isTruncated: false };
+  if (DOCUMENT_BASE) {
+    await ensureScopedDocuments();
+    data = { children: scopedChildren(path), isTruncated: false };
   } else {
     const url = `/api/tree/${ORG}?prefix=${encodeURIComponent(path)}&limit=${PAGE_SIZE}${startAfter ? `&startAfter=${encodeURIComponent(startAfter)}` : ""}`;
     const res = await fetch(url);
@@ -222,7 +230,7 @@ function collapse(folder: HTMLElement) {
 // ── rendering ──
 
 function renderFile(node: TreeNode): string {
-  const fp = `/files/${node.path}`;
+  const fp = documentFrameUrl(node.path);
   return `<div class="tree-item flex items-center gap-2 px-3 py-1.5 rounded-lg text-on-surface-variant cursor-pointer" data-path="${esc(node.path)}">
     <span class="material-symbols-outlined text-[18px] flex-shrink-0">article</span>
     <a href="${esc(fp)}" class="tree-link tree-label flex-1 min-w-0" target="content-frame">${esc(node.name.replace(/\.html$/, ""))}</a>
@@ -265,9 +273,9 @@ async function loadRootTree() {
   TREE.dataset.loadingRoot = "true";
   try {
     let children: TreeNode[];
-    if (PUBLICATION_BASE) {
-      await ensurePublicDocuments();
-      children = publicChildren(`${ORG}/`);
+    if (DOCUMENT_BASE) {
+      await ensureScopedDocuments();
+      children = scopedChildren(`${ORG}/`);
     } else {
       const res = await fetch(`/api/tree/${ORG}?prefix=${encodeURIComponent(`${ORG}/`)}&limit=1000`);
       if (!res.ok) throw new Error(`${res.status}`);
@@ -412,10 +420,10 @@ function loadDoc(fullPath: string, pushState: boolean) {
 
   if (pushState) {
     const url = new URL(location.href);
-    if (PUBLICATION_BASE) {
-      url.pathname = PUBLICATION_BASE;
+    if (DOCUMENT_BASE) {
+      url.pathname = DOCUMENT_BASE;
       url.search = "";
-      url.searchParams.set("doc", relativePublicPath(fullPath));
+      url.searchParams.set("doc", relativeDocumentPath(fullPath));
     } else {
       url.pathname = docUrl(fullPath);
       url.searchParams.delete("doc");

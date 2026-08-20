@@ -50,25 +50,19 @@ export function renderNotFoundPage(options: NotFoundPageOptions = {}): string {
 </script>
 <style>
   *{box-sizing:border-box}
-  html,body{margin:0;min-height:100%;font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#fafafa;color:#09090b}
-  body{min-height:100vh;display:grid;place-items:center;padding:32px;overflow-x:hidden;background:
-    radial-gradient(circle at 20% 15%,rgba(251,146,60,.16),transparent 34%),
-    radial-gradient(circle at 82% 18%,rgba(36,28,12,.08),transparent 28%),
-    linear-gradient(180deg,#fff 0%,#fafafa 42%,#f4f4f5 100%)}
-  .page{width:min(744px,100%);display:grid;place-items:center}
-  .panel{width:100%;border:1px solid #e4e4e7;background:rgba(255,255,255,.86);box-shadow:0 28px 96px rgba(9,9,11,.12);backdrop-filter:blur(16px);border-radius:34px;padding:41px;position:relative;overflow:hidden}
-  .panel:before{content:"404";position:absolute;right:-22px;top:-46px;font-size:180px;font-weight:800;letter-spacing:-.08em;color:rgba(249,115,22,.08);line-height:1}
-  .eyebrow{display:inline-flex;align-items:center;gap:8px;margin:0 0 22px;padding:8px 12px;border-radius:999px;background:#fff7ed;border:1px solid #fed7aa;color:#9a3412;font-size:14px;font-weight:700;text-transform:uppercase;letter-spacing:.08em}
-  h1{position:relative;margin:0 0 14px;font-size:clamp(41px,6vw,70px);line-height:.95;letter-spacing:-.055em;color:#09090b}
-  p{position:relative;margin:0;color:#52525b;font-size:19px;line-height:1.65;max-width:58ch}.path{position:relative;margin:26px 0 29px;padding:16px 17px;border:1px solid #e4e4e7;border-radius:19px;background:#f4f4f5;color:#18181b;font:16px/1.45 ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;overflow-wrap:anywhere}
-  .actions{position:relative;display:flex;flex-wrap:wrap;gap:12px;margin-top:5px}.btn{display:inline-flex;align-items:center;justify-content:center;min-height:50px;padding:0 19px;border-radius:999px;border:1px solid #d4d4d8;font-size:17px;font-weight:700;text-decoration:none;cursor:pointer;transition:transform .18s cubic-bezier(.4,0,.2,1),background .18s ease,border-color .18s ease,color .18s ease}.btn:hover{transform:translateY(-1px)}.btn.primary{background:#241c0c;border-color:#241c0c;color:#fff}.btn.primary:hover{background:#3f2f12}.btn.secondary{background:transparent;color:#18181b}.btn.secondary:hover{background:#f4f4f5;border-color:#a1a1aa}.hint{margin-top:24px;color:#71717a;font-size:16px}
-  @media (prefers-reduced-motion:reduce){.btn{transition:none}}
-  @media (max-width:820px){body{padding:20px}.panel{padding:34px}.panel:before{font-size:132px}}
-  html.dark body,body.dark{background:linear-gradient(180deg,#09090b 0%,#111113 50%,#18181b 100%);color:#fafafa}
-  html.dark .panel,body.dark .panel{background:rgba(24,24,27,.78);border-color:#27272a;box-shadow:0 28px 90px rgba(0,0,0,.45)}
-  html.dark h1,body.dark h1{color:#fafafa}html.dark p,body.dark p{color:#a1a1aa}html.dark .path,body.dark .path{background:#09090b;border-color:#27272a;color:#fafafa}
-  html.dark .btn.primary,body.dark .btn.primary{background:#fafafa;border-color:#fafafa;color:#09090b}html.dark .btn.primary:hover,body.dark .btn.primary:hover{background:#e4e4e7}
-  html.dark .btn.secondary,body.dark .btn.secondary{color:#fafafa;border-color:#3f3f46}html.dark .btn.secondary:hover,body.dark .btn.secondary:hover{background:#27272a;border-color:#52525b}
+  :root{color-scheme:light;--page:#fafafa;--surface:#fff;--container:#f4f4f5;--text:#18181b;--strong:#09090b;--muted:#71717a;--border:#e4e4e7;--border-strong:#d4d4d8;--accent:#c2410c;--accent-hover:#9a3412;--accent-soft:#ffedd5;--on-accent:#fff;--focus:rgba(194,65,12,.2)}
+  html.dark{color-scheme:dark;--page:#09090b;--surface:#18181b;--container:#27272a;--text:#e4e4e7;--strong:#fafafa;--muted:#a1a1aa;--border:#27272a;--border-strong:#3f3f46;--accent:#fb923c;--accent-hover:#fdba74;--accent-soft:rgba(251,146,60,.16);--on-accent:#09090b;--focus:rgba(251,146,60,.23)}
+  html,body{margin:0;min-height:100%;font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:var(--page);color:var(--text)}
+  body{min-height:100vh;display:grid;place-items:center;padding:24px}
+  .page{width:min(640px,100%)}
+  .panel{width:100%;padding:32px;border:1px solid var(--border);border-radius:10px;background:var(--surface);box-shadow:0 18px 48px rgba(24,24,27,.08)}
+  .eyebrow{margin:0 0 8px;color:var(--accent);font-size:11px;font-weight:750;letter-spacing:.09em;text-transform:uppercase}
+  h1{margin:0;color:var(--strong);font-size:clamp(30px,5vw,42px);line-height:1.08;letter-spacing:-.04em}
+  p{margin:12px 0 0;max-width:56ch;color:var(--muted);font-size:15px;line-height:1.6}
+  .path{margin:24px 0;padding:12px 13px;border:1px solid var(--border);border-radius:6px;background:var(--container);color:var(--text);font:13px/1.5 ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;overflow-wrap:anywhere}
+  .actions{display:flex;flex-wrap:wrap;gap:8px}.btn{min-height:44px;display:inline-flex;align-items:center;justify-content:center;padding:8px 14px;border:1px solid var(--border-strong);border-radius:6px;background:var(--surface);color:var(--strong);font-size:14px;font-weight:650;text-decoration:none;cursor:pointer;transition:background 150ms cubic-bezier(.4,0,.2,1),border-color 150ms cubic-bezier(.4,0,.2,1),color 150ms cubic-bezier(.4,0,.2,1),transform 150ms cubic-bezier(.4,0,.2,1)}.btn:hover{border-color:var(--muted);background:var(--container)}.btn:active{transform:scale(.98)}.btn:focus-visible{outline:none;box-shadow:0 0 0 3px var(--focus);border-color:var(--accent)}.btn.primary{border-color:var(--accent);background:var(--accent);color:var(--on-accent)}.btn.primary:hover{border-color:var(--accent-hover);background:var(--accent-hover)}.hint{margin-top:20px;font-size:12px}
+  @media (prefers-reduced-motion:reduce){.btn{transition:none}.btn:active{transform:none}}
+  @media (max-width:520px){body{padding:14px}.panel{padding:24px 20px}.actions{align-items:stretch;flex-direction:column}.btn{width:100%}}
 </style>
 </head>
 <body>

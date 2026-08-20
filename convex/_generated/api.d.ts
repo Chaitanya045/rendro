@@ -17,6 +17,8 @@ import type * as credentialHttp from "../credentialHttp.js";
 import type * as deletedFiles from "../deletedFiles.js";
 import type * as deploymentHttp from "../deploymentHttp.js";
 import type * as deployments from "../deployments.js";
+import type * as documentReplies from "../documentReplies.js";
+import type * as documentThreads from "../documentThreads.js";
 import type * as http from "../http.js";
 import type * as migrationHttp from "../migrationHttp.js";
 import type * as projects from "../projects.js";
@@ -47,6 +49,8 @@ declare const fullApi: ApiFromModules<{
   deletedFiles: typeof deletedFiles;
   deploymentHttp: typeof deploymentHttp;
   deployments: typeof deployments;
+  documentReplies: typeof documentReplies;
+  documentThreads: typeof documentThreads;
   http: typeof http;
   migrationHttp: typeof migrationHttp;
   projects: typeof projects;

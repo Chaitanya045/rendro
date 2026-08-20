@@ -20,10 +20,74 @@ interface Author {
 }
 interface Config {
   convexUrl: string;
-  orgSlug: string;
-  filePath: string;
+  orgSlug?: string;
+  filePath?: string;
+  organizationId?: string;
+  projectId?: Id<"projects">;
+  documentPath?: string;
   author?: Author;
 }
+type ThreadId = Id<"threads"> | Id<"documentThreads">;
+type ReplyId = Id<"replies"> | Id<"documentReplies">;
+
+function isProjectConfig(config: Config): config is Config & {
+  organizationId: string;
+  projectId: Id<"projects">;
+  documentPath: string;
+} {
+  return Boolean(config.organizationId && config.projectId && config.documentPath);
+}
+
+async function requestAuthToken(): Promise<string | null> {
+  if (window.parent === window) {
+    const response = await fetch("/api/auth/convex/token", {
+      credentials: "same-origin",
+      headers: { Accept: "application/json" },
+    });
+    if (!response.ok) return null;
+    const payload = (await response.json()) as { token?: unknown };
+    return typeof payload.token === "string" ? payload.token : null;
+  }
+  return new Promise((resolve) => {
+    const requestId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const timeout = window.setTimeout(() => finish(null), 10_000);
+    const finish = (token: string | null) => {
+      window.clearTimeout(timeout);
+      window.removeEventListener("message", onMessage);
+      resolve(token);
+    };
+    const onMessage = (event: MessageEvent) => {
+      if (
+        event.source !== window.parent ||
+        event.data?.type !== "commentor-auth-response" ||
+        event.data.requestId !== requestId
+      ) {
+        return;
+      }
+      finish(typeof event.data.token === "string" ? event.data.token : null);
+    };
+    window.addEventListener("message", onMessage);
+    window.parent.postMessage({ type: "commentor-auth-request", requestId }, "*");
+  });
+}
+
+function storageGet(key: string): string | null {
+  try {
+    return window.localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function storageSet(key: string, value: string): void {
+  try {
+    window.localStorage.setItem(key, value);
+  } catch {
+    // Sandboxed document frames have an opaque origin and cannot persist UI state.
+  }
+}
+
+
 type Anchor =
   | {
       kind: "text-range";
@@ -34,17 +98,20 @@ type Anchor =
     }
   | { kind: "element"; path: string[] };
 interface Reply {
-  _id: Id<"replies">;
+  _id: ReplyId;
   _creationTime: number;
   authorEmail: string;
   authorName: string;
   body: string;
 }
 interface Thread {
-  _id: Id<"threads">;
+  _id: ThreadId;
   _creationTime: number;
-  orgSlug: string;
-  filePath: string;
+  orgSlug?: string;
+  filePath?: string;
+  organizationId?: string;
+  projectId?: Id<"projects">;
+  documentPath?: string;
   authorEmail: string;
   authorName: string;
   body: string;
@@ -455,18 +522,18 @@ class Commentor {
   private bubbleReturnFocus: HTMLElement | null = null;
   private threads: Thread[] = [];
   private threadFilter: ThreadFilter = "active";
-  private seenThreadIds = new Set<Id<"threads">>();
-  private seenReplyIds = new Set<Id<"replies">>();
-  private newThreadIds = new Set<Id<"threads">>();
-  private newReplyIds = new Set<Id<"replies">>();
+  private seenThreadIds = new Set<ThreadId>();
+  private seenReplyIds = new Set<ReplyId>();
+  private newThreadIds = new Set<ThreadId>();
+  private newReplyIds = new Set<ReplyId>();
   private subscriptionReady = false;
-  private pendingDeletes = new Map<Id<"threads">, number>();
+  private pendingDeletes = new Map<ThreadId, number>();
   private newCommentCount = 0;
-  private highlightedThreadId: Id<"threads"> | null = null;
+  private highlightedThreadId: ThreadId | null = null;
   private commentMode = false;
   private canWrite: boolean;
   private raf = 0;
-  private openThreadId: Id<"threads"> | null = null;
+  private openThreadId: ThreadId | null = null;
   private closeTimer = 0;
   private drawerCollapseTimer = 0;
   private dockEdge: Edge = "bottom";
@@ -476,15 +543,7 @@ class Commentor {
     this.cfg = cfg;
     this.canWrite = Boolean(cfg.author);
     this.client = new ConvexClient(cfg.convexUrl);
-    this.client.setAuth(async () => {
-      const response = await fetch("/api/auth/convex/token", {
-        credentials: "same-origin",
-        headers: { Accept: "application/json" },
-      });
-      if (!response.ok) return null;
-      const payload = (await response.json()) as { token?: unknown };
-      return typeof payload.token === "string" ? payload.token : null;
-    });
+    this.client.setAuth(requestAuthToken);
 
     const host = document.createElement("div");
     host.id = "commentor-host";
@@ -607,8 +666,9 @@ class Commentor {
     this.dock.append(this.content, this.toolbar);
     this.root.append(this.dock);
 
-    const savedEdge = localStorage.getItem("commentor-dock") as Edge | null;
-    const savedOffset = Number(localStorage.getItem("commentor-dock-offset"));
+    const savedEdge = storageGet("commentor-dock") as Edge | null;
+    const savedOffsetValue = storageGet("commentor-dock-offset");
+    const savedOffset = savedOffsetValue === null ? Number.NaN : Number(savedOffsetValue);
     this.applyDockEdge(
       savedEdge && ["bottom", "top", "left", "right"].includes(savedEdge)
         ? savedEdge
@@ -658,63 +718,81 @@ class Commentor {
 
   // ── subscription ──
   private subscribe(): void {
+    const update = (threads: Thread[]) => {
+      this.newThreadIds = new Set(
+        this.subscriptionReady
+          ? threads
+              .filter((thread) => !this.seenThreadIds.has(thread._id))
+              .map((thread) => thread._id)
+          : [],
+      );
+      this.newReplyIds = new Set(
+        this.subscriptionReady
+          ? threads.flatMap((thread) =>
+              thread.replies
+                .filter((reply) => !this.seenReplyIds.has(reply._id))
+                .map((reply) => reply._id),
+            )
+          : [],
+      );
+      const incomingActive = threads.filter(
+        (thread) =>
+          this.newThreadIds.has(thread._id) &&
+          !thread.resolved &&
+          !thread.archived &&
+          !this.pendingDeletes.has(thread._id),
+      ).length;
+      this.threads = threads;
+      this.seenThreadIds = new Set(threads.map((thread) => thread._id));
+      this.seenReplyIds = new Set(
+        threads.flatMap((thread) => thread.replies.map((reply) => reply._id)),
+      );
+      for (const [threadId, timer] of this.pendingDeletes) {
+        if (threads.some((thread) => thread._id === threadId)) continue;
+        window.clearTimeout(timer);
+        this.pendingDeletes.delete(threadId);
+      }
+      this.renderPins();
+      this.renderDrawerList();
+      if (incomingActive > 0) this.announceNewComments(incomingActive);
+      if (this.dock.hasAttribute("data-expanded")) {
+        requestAnimationFrame(() => {
+          const { w, h } = this.sizeContent();
+          this.repositionExpandedDock(w, h);
+        });
+      }
+      this.refreshOpenBubble();
+      this.subscriptionReady = true;
+      this.newThreadIds.clear();
+      this.newReplyIds.clear();
+    };
+    const fail = (error: Error) =>
+      console.error("[commentor] subscription error", error);
+
+    if (isProjectConfig(this.cfg)) {
+      this.client.onUpdate(
+        api.documentThreads.list,
+        {
+          organizationId: this.cfg.organizationId,
+          projectId: this.cfg.projectId,
+          documentPath: this.cfg.documentPath,
+        },
+        update,
+        fail,
+      );
+      return;
+    }
+    if (!this.cfg.orgSlug || !this.cfg.filePath) return;
     this.client.onUpdate(
       api.threads.list,
       { orgSlug: this.cfg.orgSlug, filePath: this.cfg.filePath },
-      (threads: Thread[]) => {
-        this.newThreadIds = new Set(
-          this.subscriptionReady
-            ? threads
-                .filter((t) => !this.seenThreadIds.has(t._id))
-                .map((t) => t._id)
-            : [],
-        );
-        this.newReplyIds = new Set(
-          this.subscriptionReady
-            ? threads.flatMap((t) =>
-                t.replies
-                  .filter((r) => !this.seenReplyIds.has(r._id))
-                  .map((r) => r._id),
-              )
-            : [],
-        );
-        const incomingActive = threads.filter(
-          (t) =>
-            this.newThreadIds.has(t._id) &&
-            !t.resolved &&
-            !t.archived &&
-            !this.pendingDeletes.has(t._id),
-        ).length;
-        this.threads = threads;
-        this.seenThreadIds = new Set(threads.map((t) => t._id));
-        this.seenReplyIds = new Set(
-          threads.flatMap((t) => t.replies.map((r) => r._id)),
-        );
-        for (const [threadId, timer] of this.pendingDeletes) {
-          if (threads.some((t) => t._id === threadId)) continue;
-          window.clearTimeout(timer);
-          this.pendingDeletes.delete(threadId);
-        }
-        this.renderPins();
-        this.renderDrawerList();
-        if (incomingActive > 0) this.announceNewComments(incomingActive);
-        if (this.dock.hasAttribute("data-expanded")) {
-          requestAnimationFrame(() => {
-            const { w, h } = this.sizeContent();
-            this.repositionExpandedDock(w, h);
-          });
-        }
-        this.refreshOpenBubble();
-        this.subscriptionReady = true;
-        this.newThreadIds.clear();
-        this.newReplyIds.clear();
-      },
-      (err: Error) => console.error("[commentor] subscription error", err),
+      update,
+      fail,
     );
   }
 
   // ── theme ──
-  private applyTheme(mode = localStorage.getItem("commentor-theme") ?? "system"): void {
+  private applyTheme(mode = storageGet("commentor-theme") ?? "system"): void {
     const host = this.root.host as HTMLElement;
     host.classList.remove("dark", "light");
     if (mode === "dark" || mode === "light") host.classList.add(mode);
@@ -891,8 +969,8 @@ class Commentor {
   private applyDockEdge(edge: Edge, offset: number, animate: boolean): void {
     this.dockEdge = edge;
     this.dockOffset = offset;
-    localStorage.setItem("commentor-dock", edge);
-    localStorage.setItem("commentor-dock-offset", String(offset));
+    storageSet("commentor-dock", edge);
+    storageSet("commentor-dock-offset", String(offset));
     this.dock.className = `dock dock-${edge}`;
     if (!animate) {
       this.dock.style.transition = "none";
@@ -1216,13 +1294,24 @@ class Commentor {
       post.setAttribute("aria-busy", "true");
       post.textContent = "Posting…";
       try {
-        await this.client.mutation(api.threads.create, {
-          orgSlug: this.cfg.orgSlug,
-          filePath: this.cfg.filePath,
-          // Author identity is derived from the signed Convex token server-side.
-          body,
-          anchor,
-        });
+        if (isProjectConfig(this.cfg)) {
+          await this.client.mutation(api.documentThreads.create, {
+            organizationId: this.cfg.organizationId,
+            projectId: this.cfg.projectId,
+            documentPath: this.cfg.documentPath,
+            body,
+            anchor,
+          });
+        } else if (this.cfg.orgSlug && this.cfg.filePath) {
+          await this.client.mutation(api.threads.create, {
+            orgSlug: this.cfg.orgSlug,
+            filePath: this.cfg.filePath,
+            body,
+            anchor,
+          });
+        } else {
+          throw new Error("Comment scope is unavailable");
+        }
         this.closeBubbles(true, true);
       } catch (err) {
         console.error("[commentor] create failed", err);
@@ -1375,11 +1464,53 @@ class Commentor {
     }
   }
 
+  private removeThread(threadId: ThreadId): Promise<unknown> {
+    return isProjectConfig(this.cfg)
+      ? this.client.mutation(api.documentThreads.remove, {
+          threadId: threadId as Id<"documentThreads">,
+        })
+      : this.client.mutation(api.threads.remove, {
+          threadId: threadId as Id<"threads">,
+        });
+  }
+
+  private resolveThread(threadId: ThreadId): Promise<unknown> {
+    return isProjectConfig(this.cfg)
+      ? this.client.mutation(api.documentThreads.resolve, {
+          threadId: threadId as Id<"documentThreads">,
+        })
+      : this.client.mutation(api.threads.resolve, {
+          threadId: threadId as Id<"threads">,
+        });
+  }
+
+  private archiveThread(threadId: ThreadId): Promise<unknown> {
+    return isProjectConfig(this.cfg)
+      ? this.client.mutation(api.documentThreads.archive, {
+          threadId: threadId as Id<"documentThreads">,
+        })
+      : this.client.mutation(api.threads.archive, {
+          threadId: threadId as Id<"threads">,
+        });
+  }
+
+  private addReply(threadId: ThreadId, body: string): Promise<unknown> {
+    return isProjectConfig(this.cfg)
+      ? this.client.mutation(api.documentReplies.add, {
+          threadId: threadId as Id<"documentThreads">,
+          body,
+        })
+      : this.client.mutation(api.replies.add, {
+          threadId: threadId as Id<"threads">,
+          body,
+        });
+  }
+
   private scheduleDelete(t: Thread): void {
     if (this.pendingDeletes.has(t._id)) return;
     const timer = window.setTimeout(async () => {
       try {
-        await this.client.mutation(api.threads.remove, { threadId: t._id });
+        await this.removeThread(t._id);
       } catch (err) {
         console.error("[commentor] delete failed", err);
         this.pendingDeletes.delete(t._id);
@@ -1444,8 +1575,7 @@ class Commentor {
         void this.runThreadAction(
           resolveButton,
           resolveActionLabel,
-          () =>
-            this.client.mutation(api.threads.resolve, { threadId: t._id }),
+          () => this.resolveThread(t._id),
           `Could not ${resolveLabel.toLowerCase()} comment.`,
         );
       });
@@ -1467,8 +1597,7 @@ class Commentor {
         void this.runThreadAction(
           archiveButton,
           archiveActionLabel,
-          () =>
-            this.client.mutation(api.threads.archive, { threadId: t._id }),
+          () => this.archiveThread(t._id),
           `Could not ${archiveLabel.toLowerCase()} comment.`,
         );
       });
@@ -1574,10 +1703,7 @@ class Commentor {
         send.setAttribute("aria-busy", "true");
         send.textContent = "Sending…";
         try {
-          await this.client.mutation(api.replies.add, {
-            threadId: t._id,
-            body,
-          });
+          await this.addReply(t._id, body);
           input.value = "";
         } catch (err) {
           console.error("[commentor] reply failed", err);
@@ -1897,7 +2023,7 @@ class Commentor {
     this.highlightThread(this.highlightedThreadId);
   }
 
-  private highlightThread(threadId: Id<"threads"> | null): void {
+  private highlightThread(threadId: ThreadId | null): void {
     this.highlightedThreadId = threadId;
     for (const el of this.root.querySelectorAll<HTMLElement>(
       "[data-thread-id]",
@@ -3006,9 +3132,10 @@ button:focus-visible, [tabindex="0"]:focus-visible, textarea:focus-visible {
 
 function boot(): void {
   const cfg = (window as unknown as { COMMENTOR?: Config }).COMMENTOR;
-  if (!cfg || !cfg.convexUrl || !cfg.orgSlug || !cfg.filePath) {
+  const hasLegacyScope = Boolean(cfg?.orgSlug && cfg.filePath);
+  if (!cfg?.convexUrl || (!hasLegacyScope && !isProjectConfig(cfg))) {
     console.error(
-      "[commentor] not started — set window.COMMENTOR = { convexUrl, orgSlug, filePath } before loading commentor.js",
+      "[commentor] not started — configure a legacy organization/file or project document scope",
     );
     return;
   }

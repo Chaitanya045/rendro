@@ -1,6 +1,6 @@
 # Rendro Design Language
 
-> Last updated: 2026-07-27
+> Last updated: 2026-08-03
 > Companion docs: [PRODUCT.md](PRODUCT.md) (what Rendro is) and [TECHNICAL.md](TECHNICAL.md) (how it works). This doc is **how Rendro looks, moves, loads, and stays out of the document's way**.
 
 ## Philosophy
@@ -124,15 +124,18 @@ The management experience is a separate shell from the document viewer. It opera
 - Teams organize existing members; they do not introduce a second role model. Removing a team never implies removing organization members.
 - API key rows expose name, prefix, project scope, permissions, last use, expiry, and status. Default to project scope, minimum permissions, and `90`-day expiry.
 - A newly created API key is rendered once in a modal. The user must affirm that it was stored before closing; subsequent screens show only the prefix.
+- Every close path for a one-time secret modal—close button, `Escape`, and backdrop—must respect the confirmation gate. The first-use screen also warns before navigation until the secret is confirmed; deployment polling may continue in the background while the page remains open.
 - Project detail keeps **Overview**, deployments, **Publications**, and **Private shares** in one project navigation context. Deployment history explains immutable releases without exposing storage keys.
 - Publications distinguish tracked active releases from pinned immutable releases. Private shares expose expiry and revocation state. Both stay subordinate to the selected project.
 - Tables may scroll inside their own container on narrow screens; the page itself must not overflow. Empty states state what is missing and offer one next action.
+- Dynamic collection removal must resolve to the same explicit empty state as an initially empty response. Empty-state marks use Material Symbols, remain `aria-hidden`, and never rely on a placeholder letter as the visible icon.
 
 ### Control-plane motion
 
 - Page content enters once with `opacity` and at most `6px` vertical movement.
 - Drawer, dialog, dropdown, toast, row insertion/removal, copy feedback, and button press use the shared `150ms`–`300ms` tokens.
 - Loading uses a local skeleton or one pending control. Deployment polling uses one small state indicator; never animate the whole page.
+- Initial loads and retries render a destination-shaped skeleton inside the final screen container. Reloadable async views use a request version guard so an older response cannot replace newer content; failures replace the skeleton with an actionable retry state.
 - `prefers-reduced-motion` removes transforms, shimmer, pulse, and stagger while retaining visible state changes.
 
 ## Motion tokens
