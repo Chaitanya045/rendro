@@ -1,21 +1,16 @@
 import { Hono } from "hono";
 import { CONVEX_SITE_URL } from "@/config";
 import { getObjectText } from "@/minio";
+import { parseStoredManifest, type StoredManifest } from "@/stored-manifest";
 
 const app = new Hono();
 
-type Manifest = { files: Array<{ path: string; contentType: string }> };
 type Deployment = { _id: string; manifestKey: string; status: string };
 
 function cleanPath(value: string, allowEmpty: boolean): string | null {
   const path = value.trim().replace(/^\/+|\/+$/g, "");
   if (!path) return allowEmpty ? "" : null;
   return path.includes("\\") || path.split("/").some((part) => !part || part === "." || part === "..") ? null : path;
-}
-
-function parseManifest(value: string | null): Manifest | null {
-  if (!value) return null;
-  try { return JSON.parse(value) as Manifest; } catch { return null; }
 }
 
 function forwardedHeaders(request: Request): Headers {
@@ -72,7 +67,7 @@ app.post("/api/rendro/publications", async (c) => {
     return c.json({ error: "Publication requires an available deployment" }, 409);
   }
   const text = await getObjectText(deployment.manifestKey);
-  const manifest = parseManifest(text);
+  const manifest: StoredManifest | null = parseStoredManifest(text);
   const fullEntry = pathPrefix ? `${pathPrefix}/${entryFile}` : entryFile;
   if (!manifest?.files.some((file) => file.path === fullEntry && file.contentType.startsWith("text/html"))) {
     return c.json({ error: "Publication entry file is not present in the selected deployment path" }, 400);

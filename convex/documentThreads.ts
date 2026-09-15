@@ -31,9 +31,21 @@ export const list = query({
       .order("asc")
       .collect();
 
+    const authorRequests = new Map<
+      string,
+      ReturnType<typeof authComponent.getAnyUserById>
+    >();
+    const authorById = (authorId: string) => {
+      const existing = authorRequests.get(authorId);
+      if (existing) return existing;
+      const request = authComponent.getAnyUserById(ctx, authorId);
+      authorRequests.set(authorId, request);
+      return request;
+    };
+
     return Promise.all(threads.map(async (thread) => {
       const [author, replies] = await Promise.all([
-        authComponent.getAnyUserById(ctx, thread.authorId),
+        authorById(thread.authorId),
         ctx.db
           .query("documentReplies")
           .withIndex("by_thread", (index) => index.eq("threadId", thread._id))
@@ -41,7 +53,7 @@ export const list = query({
           .collect(),
       ]);
       const enrichedReplies = await Promise.all(replies.map(async (reply) => {
-        const replyAuthor = await authComponent.getAnyUserById(ctx, reply.authorId);
+        const replyAuthor = await authorById(reply.authorId);
         return {
           ...reply,
           authorEmail: replyAuthor?.email ?? "",

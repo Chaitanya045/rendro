@@ -201,7 +201,7 @@ Purpose: global actions, not navigation depth.
 - Right-side actions: hide/show app shell, copy signed URL, theme toggle, avatar.
 - Avatar menu opens near its trigger and closes on outside click. Copy feedback stays inline in the copy button.
 - Hide/show app shell persists in `localStorage`; `Ctrl+Shift+H` (`Cmd+Shift+H` on macOS) toggles it from either the app shell or the focused document iframe, top/left hot zones temporarily reveal the header/sidebar while hidden, and `Escape` restores the full shell.
-- Theme toggle cycles `system → dark → light → system`. Supported browsers reveal the new shell/commentor theme with a radial ripple from the theme button while the icon scrolls through `brightness_auto`, `dark_mode`, and `light_mode`. Reduced-motion and unsupported browsers switch directly. Publisher iframe content is not restyled.
+- Theme toggle cycles `system → dark → light → system`. Supported browsers reveal the new shell/commentor theme with a radial ripple from the theme button while the icon scrolls through `contrast`, `dark_mode`, and `light_mode`. Reduced-motion and unsupported browsers switch directly. Publisher iframe content is not restyled.
 
 Interaction spec:
 
@@ -209,7 +209,7 @@ Interaction spec:
 |---|---|---|---|
 | Copy signed URL | Neutral bordered button with link icon | Neutral container hover bg, stronger border | Link and label scroll to a CSS spinner plus `Creating signed URL…`; success continues to the check icon plus `Signed URL copied!` |
 | Icon buttons | Muted icon | Container hover bg | Icon motion / menu visible |
-| Theme toggle | Current mode icon (`brightness_auto`, `dark_mode`, `light_mode`) | Container hover bg | Stabilized radial theme reveal starts; icon track scrolls vertically to the active mode |
+| Theme toggle | Current mode icon (`contrast`, `dark_mode`, `light_mode`) | Container hover bg | Stabilized radial theme reveal starts; icon track scrolls vertically to the active mode |
 | Avatar | Initials chip | Border/surface emphasis | Avatar menu visible |
 
 ### Sidebar tree
@@ -400,6 +400,9 @@ Dark mode applies to app chrome only.
 
 - Persist app theme in `localStorage` under `commentor-theme` with values `"system"`, `"dark"`, or `"light"`.
 - `system` follows `prefers-color-scheme`; unset storage is treated as `system`.
+- All theme-aware route templates use `renderThemeAssets()` from `src/routes/theme.ts`; pages with a toggle mount its shared controller. Do not create page-local theme engines. Landing remains intentionally fixed dark.
+- Every toggle cycles `system → dark → light → system`, with the same `contrast`, `dark_mode`, and `light_mode` icon track (300ms), radial reveal (520ms), and subtle press feedback. The next mode is announced by the button label; the current mode is exposed in its title.
+- Initialize before page content paints. Synchronize preference changes across tabs and system appearance changes without animating unrelated screens. Rapid toggles must preserve the latest intended mode, including when an earlier transition fails or completes late.
 - Toggle by resolving the current mode and adding/removing `html.dark` on the parent page.
 - Do not pass app dark mode into the iframe as a global stylesheet.
   The commentor widget is the exception: it follows the parent theme because it is Rendro chrome inside the iframe, not publisher document content.

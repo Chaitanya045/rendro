@@ -315,11 +315,12 @@ describe("unauthenticated landing", () => {
     expect(html).toContain("Start with Google");
     expect(html).toContain("prefers-reduced-motion: reduce");
     expect(html.match(/data-auth-id=/g)).toHaveLength(3);
-    expect(html).toContain('data-action-id="live-docs"');
+    expect(html).toContain('href="#product" data-scroll-section="product" data-action-id="explore-product"');
+    expect(html).not.toContain('href="https://dev.rendro.app/public/rendro-feature-test/reference"');
     expect(html).toContain("data-reveal-group");
     expect(html).toContain("IntersectionObserver");
     expect(html).toContain('document.documentElement.classList.add("motion-ready")');
-    expect(html.match(/data-scroll-section=/g)).toHaveLength(6);
+    expect(html.match(/data-scroll-section=/g)).toHaveLength(7);
     expect(html).toContain('history.replaceState(null, "", window.location.pathname + window.location.search)');
     expect(html).toContain('window.scrollTo({ top: sectionTop');
     expect(html).toContain('navigationEntry.type === "reload"');

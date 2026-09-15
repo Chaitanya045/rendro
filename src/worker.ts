@@ -184,7 +184,7 @@ app.notFound((c) => c.html(renderNotFoundPage({ path: c.req.path }), 404));
 
 app.onError((err, c) => {
   logger.error({ err: { message: err.message, stack: err.stack }, path: c.req.path }, "Unhandled error");
-  return c.json({ error: err.message, path: c.req.path }, 500);
+  return c.json({ error: "Internal server error" }, 500);
 });
 
 export default app;

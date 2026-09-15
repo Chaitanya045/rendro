@@ -99,7 +99,8 @@ export default defineSchema({
     createdAt: v.number(),
   })
     .index("by_token_hash", ["tokenHash"])
-    .index("by_organization", ["organizationId", "createdAt"]),
+    .index("by_organization", ["organizationId", "createdAt"])
+    .index("by_organization_project", ["organizationId", "projectId", "createdAt"]),
 
   apiKeyCredentials: defineTable({
     organizationId: v.string(),

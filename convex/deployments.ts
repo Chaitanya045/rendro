@@ -75,8 +75,12 @@ export const getInternal = internalQuery({
 });
 
 export const listInternal = internalQuery({
-  args: { projectId: v.id("projects") },
+  args: { organizationId: v.string(), projectId: v.id("projects") },
   handler: async (ctx, args) => {
+    const project = await ctx.db.get(args.projectId);
+    if (!project || project.organizationId !== args.organizationId) {
+      throw new ConvexError("Project not found");
+    }
     return ctx.db
       .query("deployments")
       .withIndex("by_project_created", (query) => query.eq("projectId", args.projectId))
@@ -133,12 +137,19 @@ export const commitInternal = internalMutation({
 
 export const failInternal = internalMutation({
   args: {
+    organizationId: v.string(),
+    projectId: v.id("projects"),
     deploymentId: v.id("deployments"),
     reason: v.string(),
   },
   handler: async (ctx, args) => {
     const deployment = await ctx.db.get(args.deploymentId);
-    if (!deployment || deployment.status !== "staging") return false;
+    if (
+      !deployment
+      || deployment.organizationId !== args.organizationId
+      || deployment.projectId !== args.projectId
+      || deployment.status !== "staging"
+    ) return false;
     await ctx.db.patch(deployment._id, {
       status: "failed",
       failureReason: args.reason.slice(0, 500),

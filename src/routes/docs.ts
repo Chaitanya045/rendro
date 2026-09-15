@@ -9,6 +9,7 @@ import type { User } from "better-auth/types";
 import { createShareUrl, isShareableDocKey } from "@/share-links";
 import { logger } from "@/logger";
 import { renderNotFoundPage } from "@/routes/not-found";
+import { injectMobileViewportScrollbarStyle } from "@/routes/document-html";
 
 const app = new Hono<{ Variables: { user?: User } }>();
 
@@ -52,7 +53,7 @@ app.get("/files/:key{.+}", async (c) => {
       if (result.value) chunks.push(result.value);
     }
     const decoder = new TextDecoder();
-    let html = chunks.map(c => decoder.decode(c)).join("");
+    let html = injectMobileViewportScrollbarStyle(chunks.map(c => decoder.decode(c)).join(""));
     if (CONVEX_URL) html = injectCommentor(html, org, key, user);
     return c.html(html);
   } catch (err) { logger.error({ err, key }, "stream failed"); return c.text("Stream failed", 500); }
@@ -75,7 +76,7 @@ window.COMMENTOR = ${JSON.stringify({
   author: { email: user.email, name: user.name },
 })};
 </script>
-<script src="/commentor.js?v=22"></script>`;
+<script src="/commentor.js?v=32"></script>`;
   if (html.includes("</body>")) {
     return html.replace("</body>", navScript + "</body>");
   }

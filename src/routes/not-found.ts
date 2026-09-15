@@ -1,3 +1,5 @@
+import { renderThemeAssets } from "./theme";
+
 export interface NotFoundPageOptions {
   path?: string;
   homeHref?: string;
@@ -27,26 +29,10 @@ export function renderNotFoundPage(options: NotFoundPageOptions = {}): string {
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>404 — Rendro</title>
+${renderThemeAssets()}
 <script>
-  (function(){
-    var root=document.documentElement;
-    var media=matchMedia("(prefers-color-scheme:dark)");
-    function applyTheme(mode){
-      mode=mode==="dark"||mode==="light"||mode==="system"?mode:"system";
-      var resolved=mode==="system"?(media.matches?"dark":"light"):mode;
-      root.dataset.theme=mode;
-      root.dataset.resolvedTheme=resolved;
-      root.classList.toggle("dark",resolved==="dark");
-    }
-    var initialTheme="system";
-    try{initialTheme=localStorage.getItem("commentor-theme")||"system";}catch(_){}
-    applyTheme(initialTheme);
-    media.addEventListener("change",function(){if((root.dataset.theme||"system")==="system")applyTheme("system");});
-    addEventListener("message",function(event){
-      var data=event.data||{};
-      if(data.type==="rendro-theme")applyTheme(data.theme);
-    });
-  })();
+  addEventListener("message",function(event){if(event.source!==window.parent||window.parent===window)return;var data=event.data||{};if(data.type==="rendro-theme")window.RendroUI.applyTheme(data.theme,false,false);});
+  if(window.parent!==window)window.parent.postMessage({type:"commentor-theme-ready"},"*");
 </script>
 <style>
   *{box-sizing:border-box}
@@ -59,7 +45,8 @@ export function renderNotFoundPage(options: NotFoundPageOptions = {}): string {
   .eyebrow{margin:0 0 8px;color:var(--accent);font-size:11px;font-weight:750;letter-spacing:.09em;text-transform:uppercase}
   h1{margin:0;color:var(--strong);font-size:clamp(30px,5vw,42px);line-height:1.08;letter-spacing:-.04em}
   p{margin:12px 0 0;max-width:56ch;color:var(--muted);font-size:15px;line-height:1.6}
-  .path{margin:24px 0;padding:12px 13px;border:1px solid var(--border);border-radius:6px;background:var(--container);color:var(--text);font:13px/1.5 ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;overflow-wrap:anywhere}
+  .path-label{margin:24px 0 6px;color:var(--muted);font-size:12px;line-height:1.4;font-weight:650}
+  .path{display:block;margin:0 0 24px;padding:12px 13px;border:1px solid var(--border);border-radius:6px;background:var(--container);color:var(--text);font:13px/1.5 ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;overflow-wrap:anywhere;white-space:pre-wrap}
   .actions{display:flex;flex-wrap:wrap;gap:8px}.btn{min-height:44px;display:inline-flex;align-items:center;justify-content:center;padding:8px 14px;border:1px solid var(--border-strong);border-radius:6px;background:var(--surface);color:var(--strong);font-size:14px;font-weight:650;text-decoration:none;cursor:pointer;transition:background 150ms cubic-bezier(.4,0,.2,1),border-color 150ms cubic-bezier(.4,0,.2,1),color 150ms cubic-bezier(.4,0,.2,1),transform 150ms cubic-bezier(.4,0,.2,1)}.btn:hover{border-color:var(--muted);background:var(--container)}.btn:active{transform:scale(.98)}.btn:focus-visible{outline:none;box-shadow:0 0 0 3px var(--focus);border-color:var(--accent)}.btn.primary{border-color:var(--accent);background:var(--accent);color:var(--on-accent)}.btn.primary:hover{border-color:var(--accent-hover);background:var(--accent-hover)}.hint{margin-top:20px;font-size:12px}
   @media (prefers-reduced-motion:reduce){.btn{transition:none}.btn:active{transform:none}}
   @media (max-width:520px){body{padding:14px}.panel{padding:24px 20px}.actions{align-items:stretch;flex-direction:column}.btn{width:100%}}
@@ -71,14 +58,30 @@ export function renderNotFoundPage(options: NotFoundPageOptions = {}): string {
       <div class="eyebrow">404 · Not found</div>
       <h1 id="not-found-title">${escapeHtml(heading)}</h1>
       <p>${escapeHtml(message)}</p>
-      <div class="path" aria-label="Requested path">${escapeHtml(path)}</div>
+      <p class="path-label" id="requested-path-label">Requested path</p>
+      <code class="path" aria-labelledby="requested-path-label">${escapeHtml(path)}</code>
       <div class="actions">
         <a class="btn primary" href="${escapeHtml(homeHref)}" target="_top">${escapeHtml(homeLabel)}</a>
-        <button class="btn secondary" type="button" onclick="if(window.top&&window.top!==window){window.top.history.back()}else{history.back()}">Go back</button>
+        <button class="btn secondary" id="go-back" type="button" data-home-href="${escapeHtml(homeHref)}">Go back</button>
       </div>
       <p class="hint">Check the URL, open the docs tree, or return to a known branch.</p>
     </section>
   </main>
 </body>
+<script>
+  (function(){
+    var button=document.getElementById("go-back");
+    if(!button)return;
+    button.addEventListener("click",function(){
+      var target=window;
+      try{if(window.top&&window.top!==window)target=window.top;}catch(_){target=window;}
+      try{
+        if(target.history.length>1){target.history.back();return;}
+      }catch(_){/* Sandboxed or cross-origin top windows may deny history access. */}
+      var href=button.dataset.homeHref||"/";
+      try{target.location.assign(href);}catch(_){window.location.assign(href);}
+    });
+  })();
+</script>
 </html>`;
 }

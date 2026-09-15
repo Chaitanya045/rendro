@@ -2,6 +2,15 @@
  * Lazy tree — matches design.html spec with Material Symbols icons,
  * max-height animations, active indicator, and border-line indentation.
  */
+import {
+  isContentFrameSource,
+  normalizeLoadedDocumentPath,
+  validRelativeDocumentPath,
+} from "./messages";
+import { documentLoadAccessibility } from "./load-state";
+import { emptyTreeAction, shouldUseNativeLinkNavigation } from "./navigation";
+import { folderTransitionOverride, indicatorTransition } from "./motion";
+
 type RendroWindow = Window & { RENDRO_INITIAL_DOC?: string; RENDRO_CURRENT_DOC?: string };
 const RENDRO_WINDOW = window as RendroWindow;
 const TREE_HOST = document.querySelector<HTMLElement>("[data-tree-org]");
@@ -56,6 +65,10 @@ function docFromPathname(): string {
 
 let activeEl: HTMLElement | null = null;
 
+function reducedMotion(): boolean {
+  return window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
+}
+
 // ── active indicator ──
 
 function updateIndicator(el: HTMLElement, animate = true) {
@@ -72,9 +85,7 @@ function updateIndicator(el: HTMLElement, animate = true) {
   if (!visible) { indicator.style.opacity = "0"; return; }
 
   const transform = `translate(${el.offsetLeft}px, ${el.offsetTop}px)`;
-  indicator.style.transition = animate
-    ? "transform 0.3s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.2s ease"
-    : "none";
+  indicator.style.transition = indicatorTransition(animate, reducedMotion());
   indicator.style.opacity = "1";
   indicator.style.transform = transform;
 }
@@ -92,6 +103,7 @@ function refreshIndicator(animate = false) {
 function setFolderIcon(folder: HTMLElement, open: boolean) {
   const icon = folder.querySelector(":scope > .tree-item .folder-icon");
   if (icon) icon.textContent = open ? "folder_open" : "folder";
+  folder.querySelector(":scope > .tree-item")?.setAttribute("aria-expanded", String(open));
 }
 
 function indexChildItems(content: HTMLElement) {
@@ -116,6 +128,7 @@ async function expand(folder: HTMLElement) {
   if (!path) return;
   const content = folder.querySelector<HTMLElement>(":scope > .tree-folder-content");
   if (!content) return;
+  content.style.transition = folderTransitionOverride(reducedMotion());
 
   if (folder.classList.contains("loading")) return;
 
@@ -128,6 +141,7 @@ async function expand(folder: HTMLElement) {
   }
 
   folder.classList.add("loading");
+  folder.setAttribute("aria-busy", "true");
   try {
     await loadPage(folder, path, content, undefined);
     indexChildItems(content);
@@ -135,9 +149,12 @@ async function expand(folder: HTMLElement) {
     setFolderIcon(folder, true);
     if (activeEl) updateIndicator(activeEl);
   } catch {
-    content.innerHTML = `<div class="tree-error">Failed to load</div>`;
+    content.innerHTML = `<div class="tree-error" role="alert">Failed to load folder. <button class="load-more-btn folder-retry-btn" type="button">Retry</button></div>`;
+    folder.classList.add("open");
+    setFolderIcon(folder, true);
   } finally {
     folder.classList.remove("loading");
+    folder.removeAttribute("aria-busy");
   }
 }
 
@@ -222,6 +239,8 @@ async function loadPage(folder: HTMLElement, path: string, content: HTMLElement,
 }
 
 function collapse(folder: HTMLElement) {
+  const content = folder.querySelector<HTMLElement>(":scope > .tree-folder-content");
+  if (content) content.style.transition = folderTransitionOverride(reducedMotion());
   folder.classList.remove("open");
   setFolderIcon(folder, false);
   if (activeEl) updateIndicator(activeEl);
@@ -242,18 +261,15 @@ function renderActiveIndicator(): string {
 }
 
 function renderEmptyTree(): string {
-  const org = ORG ? esc(ORG) : "";
-  return `<div class="tree-empty">No documents yet.</div>
-  <form method="post" action="/api/orgs" class="tree-empty-create">
-    <input type="hidden" name="org" value="${org}">
-    <input type="hidden" name="displayName" value="${org}">
-    <button type="submit" class="load-more-btn">Create org</button>
-  </form>`;
+  const state = emptyTreeAction(DOCUMENT_BASE);
+  return `<div class="tree-empty">${esc(state.message)}</div>${state.href && state.label
+    ? `<div class="tree-empty-create"><a class="load-more-btn" href="${esc(state.href)}">${esc(state.label)}</a></div>`
+    : ""}`;
 }
 
 
 function startTreeEntrance(items: Iterable<HTMLElement>) {
-  if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return;
+  if (reducedMotion()) return;
   Array.from(items).forEach((item, index) => {
     const finish = () => {
       item.classList.remove("tree-item-entering");
@@ -271,6 +287,7 @@ function startTreeEntrance(items: Iterable<HTMLElement>) {
 async function loadRootTree() {
   if (!ORG || !TREE) return;
   TREE.dataset.loadingRoot = "true";
+  TREE.setAttribute("aria-busy", "true");
   try {
     let children: TreeNode[];
     if (DOCUMENT_BASE) {
@@ -287,16 +304,17 @@ async function loadRootTree() {
     const currentDoc = RENDRO_WINDOW.RENDRO_CURRENT_DOC || RENDRO_WINDOW.RENDRO_INITIAL_DOC || docFromPathname();
     if (currentDoc) syncActiveState(currentDoc);
   } catch {
-    TREE.innerHTML = renderActiveIndicator() + `<div class="tree-error">Failed to load documents</div>`;
+    TREE.innerHTML = renderActiveIndicator() + `<div class="tree-error" role="alert">Failed to load documents. <button class="load-more-btn tree-root-retry-btn" type="button">Retry</button></div>`;
   } finally {
     delete TREE.dataset.loadingRoot;
+    TREE.removeAttribute("aria-busy");
   }
 }
 
 function renderFolder(node: TreeNode, depth: number): string {
   const path = node.path.endsWith("/") ? node.path : `${node.path}/`;
   return `<div class="tree-folder" data-path="${esc(path)}" data-depth="${depth}">
-    <div class="tree-item flex items-center gap-2 px-3 py-1.5 rounded-lg text-on-surface-variant cursor-pointer">
+    <div class="tree-item flex items-center gap-2 px-3 py-1.5 rounded-lg text-on-surface-variant cursor-pointer" role="button" tabindex="0" aria-expanded="false">
       <span class="material-symbols-outlined text-[18px] caret-icon flex-shrink-0">chevron_right</span>
       <span class="material-symbols-outlined text-[18px] folder-icon flex-shrink-0">folder</span>
       <span class="font-body-md tree-label flex-1 min-w-0">${esc(node.name)}</span>
@@ -315,6 +333,25 @@ function handleClick(e: Event) {
   if (!(e.target instanceof HTMLElement)) return;
   const target = e.target;
 
+  if (target.closest(".tree-root-retry-btn")) {
+    e.preventDefault();
+    (target.closest(".tree-root-retry-btn") as HTMLButtonElement).disabled = true;
+    void loadRootTree();
+    return;
+  }
+
+  const folderRetry = target.closest<HTMLButtonElement>(".folder-retry-btn");
+  if (folderRetry) {
+    e.preventDefault();
+    const folder = folderRetry.closest<HTMLElement>(".tree-folder");
+    const content = folder?.querySelector<HTMLElement>(":scope > .tree-folder-content");
+    if (folder && content) {
+      content.replaceChildren();
+      void expand(folder);
+    }
+    return;
+  }
+
   const loadMoreBtn = target.closest<HTMLButtonElement>(".load-more-btn");
   if (loadMoreBtn) {
     e.preventDefault();
@@ -324,9 +361,15 @@ function handleClick(e: Event) {
       const content = folder.querySelector<HTMLElement>(":scope > .tree-folder-content");
       const next = folder.dataset.nextStartAfter;
       if (path && content && next) {
-        loadMoreBtn.textContent = "Loading...";
+        loadMoreBtn.textContent = "Loading…";
         loadMoreBtn.disabled = true;
-        void loadPage(folder, path, content, next);
+        loadMoreBtn.setAttribute("aria-busy", "true");
+        void loadPage(folder, path, content, next).catch(() => {
+          if (!loadMoreBtn.isConnected) return;
+          loadMoreBtn.textContent = "Retry";
+          loadMoreBtn.disabled = false;
+          loadMoreBtn.removeAttribute("aria-busy");
+        });
       }
     }
     return;
@@ -334,6 +377,9 @@ function handleClick(e: Event) {
 
   const item = target.closest<HTMLElement>(".tree-item");
   if (!item) return;
+
+  const link = target.closest<HTMLAnchorElement>("a.tree-link");
+  if (link && e instanceof MouseEvent && shouldUseNativeLinkNavigation(e)) return;
 
   const folder = item.parentElement?.classList.contains("tree-folder") ? item.parentElement : null;
   if (folder) {
@@ -350,12 +396,34 @@ function handleClick(e: Event) {
   }
 }
 
+function handleKeydown(e: KeyboardEvent) {
+  if (e.key !== "Enter" && e.key !== " ") return;
+  if (!(e.target instanceof HTMLElement)) return;
+  const folderItem = e.target.closest<HTMLElement>(".tree-folder > .tree-item");
+  if (!folderItem) return;
+  e.preventDefault();
+  folderItem.click();
+}
+
 // ── doc loading with history ──
 let activeDocLoadId = 0;
 let docLoadTimeout: number | undefined;
 let docLoadClearTimer: number | undefined;
 let docLoadStartedAt = 0;
 const DOC_LOAD_MIN_VISIBLE_MS = 520;
+
+function announceDocumentState(message: string, assertive = false) {
+  let status = document.getElementById("document-load-status");
+  if (!status) {
+    status = document.createElement("div");
+    status.id = "document-load-status";
+    status.setAttribute("role", "status");
+    status.style.cssText = "position:fixed;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0";
+    document.body.append(status);
+  }
+  status.setAttribute("aria-live", assertive ? "assertive" : "polite");
+  status.textContent = message;
+}
 
 
 function clearDocLoadingState() {
@@ -367,13 +435,18 @@ function showDocLoader(frame: HTMLIFrameElement | null) {
   docLoadStartedAt = performance.now();
   document.documentElement.classList.add("doc-loading");
   document.documentElement.classList.remove("doc-loading-error");
-  if (frame) frame.style.display = "block";
+  const accessibility = documentLoadAccessibility("loading");
+  announceDocumentState(accessibility.message, accessibility.assertive);
+  if (frame) {frame.style.display = "block";frame.setAttribute("aria-busy", String(accessibility.busy));}
 }
 
-function showDocLoadError() {
+function showDocLoadError(frame: HTMLIFrameElement | null) {
   if (docLoadClearTimer !== undefined) window.clearTimeout(docLoadClearTimer);
   document.documentElement.classList.remove("doc-loading");
   document.documentElement.classList.add("doc-loading-error");
+  const accessibility = documentLoadAccessibility("error");
+  if (frame) frame.removeAttribute("aria-busy");
+  announceDocumentState(accessibility.message, accessibility.assertive);
 }
 
 function hideDocLoader(frame: HTMLIFrameElement | null, loadId: number) {
@@ -387,6 +460,9 @@ function hideDocLoader(frame: HTMLIFrameElement | null, loadId: number) {
     clear();
   }
   if (frame) frame.style.display = "block";
+  const accessibility = documentLoadAccessibility("loaded");
+  if (frame) frame.removeAttribute("aria-busy");
+  announceDocumentState(accessibility.message, accessibility.assertive);
 }
 
 function loadDoc(fullPath: string, pushState: boolean) {
@@ -410,10 +486,10 @@ function loadDoc(fullPath: string, pushState: boolean) {
     frame.onerror = () => {
       if (loadId !== activeDocLoadId) return;
       if (docLoadTimeout !== undefined) window.clearTimeout(docLoadTimeout);
-      showDocLoadError();
+      showDocLoadError(frame);
     };
     docLoadTimeout = window.setTimeout(() => {
-      if (loadId === activeDocLoadId) showDocLoadError();
+      if (loadId === activeDocLoadId) showDocLoadError(frame);
     }, 15000);
     frame.src = documentFrameUrl(fullPath);
   }
@@ -447,13 +523,7 @@ async function navigateToDoc(relPath: string) {
     if (!folder) break;
     if (!folder.classList.contains("open")) {
       await expand(folder);
-      await new Promise<void>((resolve) => {
-        const check = () => {
-          if (folder.classList.contains("open")) resolve();
-          else setTimeout(check, 50);
-        };
-        check();
-      });
+      if (!folder.classList.contains("open")) return;
     }
   }
 
@@ -493,6 +563,7 @@ function init() {
   if (!TREE) return;
   void loadRootTree();
   TREE.addEventListener("click", handleClick);
+  TREE.addEventListener("keydown", handleKeydown);
 
   // Re-sync indicator after folder expand/collapse animations finish
   TREE.addEventListener("transitionend", (event) => {
@@ -512,12 +583,17 @@ function init() {
     ) refreshIndicator(false);
   });
   window.addEventListener("message", (event) => {
+    const frame = document.getElementById("content-frame") as HTMLIFrameElement | null;
+    if (!isContentFrameSource(event.source, frame?.contentWindow ?? null)) return;
     if (!isDocumentMessage(event.data)) return;
     if (event.data.type === "doc-navigate") {
+      if (!ORG || !validRelativeDocumentPath(event.data.path)) return;
       loadDoc(`${ORG}/${event.data.path}`, true);
     }
     if (event.data.type === "doc-loaded") {
-      syncActiveState(event.data.path);
+      if (!ORG) return;
+      const loadedPath = normalizeLoadedDocumentPath(event.data.path, ORG);
+      if (loadedPath) syncActiveState(loadedPath);
     }
   });
 

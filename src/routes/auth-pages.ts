@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import type { User } from "better-auth/types";
+import { renderThemeAssets } from "./theme";
 
 const app = new Hono<{ Variables: { user?: User } }>();
 
@@ -22,7 +23,7 @@ function escapeHtml(value: string): string {
 }
 
 function safeReturnTo(value: string | undefined): string {
-  if (!value || !value.startsWith("/") || value.startsWith("//")) return "/";
+  if (!value || !value.startsWith("/") || value.startsWith("//") || value.includes("\\") || Array.from(value).some((character) => { const code = character.charCodeAt(0); return code < 32 || code === 127; })) return "/";
   return value;
 }
 
@@ -39,16 +40,16 @@ function field(
 ): string {
   const minlength = options.minlength ? ` minlength="${options.minlength}"` : "";
   const value = options.value ? ` value="${escapeHtml(options.value)}"` : "";
-  return `<label class="field" for="${id}">
-    <span>${label}</span>
+  return `<div class="field">
+    <label for="${id}"><span>${label}</span></label>
     <span class="input-wrap">
       <input id="${id}" name="${id}" type="${type}" autocomplete="${autocomplete}" required${minlength}${value}>
       ${type === "password" ? `<button class="reveal" type="button" data-reveal="${id}" aria-label="Show password">Show</button>` : ""}
     </span>
-  </label>`;
+  </div>`;
 }
 
-function pageBody(page: AuthPage, user?: User, verified = false): string {
+function pageBody(page: AuthPage, user?: User, verified = false, token = ""): string {
   if (page === "sign-in") {
     return `<div class="heading"><p class="eyebrow">Welcome back</p><h1>Sign in to Rendro</h1><p>Open your team documentation and continue where you left off.</p></div>
       <button class="button google" id="google-auth" type="button"><span class="google-mark">G</span><span>Continue with Google</span></button>
@@ -56,7 +57,7 @@ function pageBody(page: AuthPage, user?: User, verified = false): string {
       <form id="auth-form" novalidate>
         ${field("email", "Work email", "email", "email")}
         ${field("password", "Password", "password", "current-password")}
-        <div class="form-row"><label class="check"><input id="rememberMe" type="checkbox" checked> Keep me signed in</label><a href="/forgot-password">Forgot password?</a></div>
+        <div class="form-row"><label class="check"><input id="rememberMe" type="checkbox" checked> Keep me signed in</label><a data-return-link href="/forgot-password">Forgot password?</a></div>
         <p class="message error" id="form-error" role="alert"></p>
         <button class="button primary" type="submit"><span class="button-label">Sign in</span><span class="spinner" aria-hidden="true"></span></button>
       </form>
@@ -74,7 +75,7 @@ function pageBody(page: AuthPage, user?: User, verified = false): string {
         <p class="message error" id="form-error" role="alert"></p>
         <button class="button primary" type="submit"><span class="button-label">Create account</span><span class="spinner" aria-hidden="true"></span></button>
       </form>
-      <section class="success-panel" id="success-panel" hidden><span class="success-icon">✓</span><h2>Check your email</h2><p>If the address can be registered, we sent a verification link. Verify it before signing in.</p><a class="button primary" href="/sign-in">Back to sign in</a></section>
+      <section class="success-panel" id="success-panel" hidden><span class="success-icon" aria-hidden="true"><span class="material-symbols-outlined">check</span></span><h2>Check your email</h2><p>If the address can be registered, we sent a verification link. Verify it before signing in.</p><a class="button primary" data-return-link href="/sign-in">Back to sign in</a></section>
       <p class="switch">Already have an account? <a data-return-link href="/sign-in">Sign in</a></p>`;
   }
   if (page === "verify-email") {
@@ -87,6 +88,7 @@ function pageBody(page: AuthPage, user?: User, verified = false): string {
       <p class="switch"><a data-return-link href="/sign-in">Back to sign in</a></p>`;
   }
   if (page === "reset-password") {
+    if (!token) return `<div class="heading status-heading"><span class="status-icon mail"><span class="material-symbols-outlined" aria-hidden="true">password</span></span><p class="eyebrow">Account recovery</p><h1>Reset link unavailable</h1><p role="alert" class="message error reset-invalid">This reset link is missing or invalid. Request a new link to continue.</p></div><a class="button primary" data-return-link href="/forgot-password">Request a new reset link</a>`;
     return `<div class="heading status-heading"><span class="status-icon mail"><span class="material-symbols-outlined" aria-hidden="true">password</span></span><p class="eyebrow">Choose a new password</p><h1>Set a secure password</h1><p>This link can be used once. Signing in again will require your new password.</p></div>
       <form id="auth-form" novalidate>${field("password", "New password", "password", "new-password", { minlength: 15 })}${field("confirmPassword", "Confirm password", "password", "new-password", { minlength: 15 })}<p class="hint">Use at least 15 characters.</p><p class="message error" id="form-error" role="alert"></p><button class="button primary" type="submit"><span class="button-label">Update password</span><span class="spinner" aria-hidden="true"></span></button></form>
       <section class="success-panel" id="success-panel" hidden><span class="success-icon"><span class="material-symbols-outlined" aria-hidden="true">check</span></span><h2>Password updated</h2><p>Your password was reset. Previous sessions were revoked.</p><a class="button primary" data-return-link href="/sign-in">Sign in</a></section>`;
@@ -99,16 +101,16 @@ function pageBody(page: AuthPage, user?: User, verified = false): string {
 }
 
 const authRefreshStyles = `
-.topbar{height:56px;padding:0 clamp(18px,4vw,44px);position:relative;z-index:2}.theme{width:44px;height:44px;min-width:44px;min-height:44px;border-radius:7px;color:var(--muted);transition:color 150ms ease,border-color 150ms ease,transform 150ms ease}.theme .material-symbols-outlined{font-family:"Material Symbols Outlined";font-size:20px;font-style:normal;font-weight:400;line-height:1;font-variation-settings:"FILL" 0,"wght" 400,"GRAD" 0,"opsz" 24}.theme:hover{color:var(--text);border-color:var(--accent)}.theme:active{transform:translateY(1px)}
+.topbar{height:56px;padding:0 clamp(18px,4vw,44px);position:relative;z-index:2}.theme{width:44px;height:44px;min-width:44px;min-height:44px;border-radius:7px;color:var(--muted);transition:color 150ms ease,border-color 150ms ease,transform 150ms ease}.theme .material-symbols-outlined{font-family:"Material Symbols Outlined";font-size:20px;font-style:normal;font-weight:400;line-height:1;font-variation-settings:"FILL" 0,"wght" 400,"GRAD" 0,"opsz" 24}.theme:hover{color:var(--text);border-color:var(--accent)}.theme:focus-visible,.button:focus-visible,.reveal:focus-visible,.method-action:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .button.primary{color:var(--on-accent)}
 .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}.status-icon .material-symbols-outlined,.success-icon .material-symbols-outlined{font-family:"Material Symbols Outlined";font-size:22px;font-style:normal;font-weight:400;line-height:1}.method-skeleton{display:grid;grid-template-columns:38px minmax(0,1fr) 72px;gap:12px}.method-skeleton-icon,.method-skeleton-copy span,.method-skeleton-pill{position:relative;overflow:hidden;background:var(--surface-2)}.method-skeleton-icon{width:38px;height:38px;border-radius:7px}.method-skeleton-copy{display:grid;gap:7px}.method-skeleton-copy span{height:10px;border-radius:999px}.method-skeleton-copy span:first-child{width:45%}.method-skeleton-copy span:last-child{width:70%}.method-skeleton-pill{width:72px;height:24px;border-radius:999px}.method-skeleton-icon:after,.method-skeleton-copy span:after,.method-skeleton-pill:after{content:"";position:absolute;inset:0;transform:translateX(-100%);background:linear-gradient(90deg,transparent,color-mix(in srgb,var(--surface) 75%,transparent),transparent);animation:authSkeleton 1.1s infinite}@keyframes authSkeleton{to{transform:translateX(100%)}}
-.main{width:min(1080px,100%);margin:0 auto;display:grid;grid-template-columns:minmax(0,1fr) minmax(380px,440px);align-items:center;gap:clamp(44px,8vw,104px);padding:56px clamp(22px,5vw,64px)}
+.main{width:min(1080px,100%);margin:0 auto;display:grid;grid-template-columns:minmax(0,1fr) minmax(380px,440px);align-items:center;gap:clamp(44px,8vw,104px);padding:56px clamp(22px,5vw,64px)}.main.security-main{align-items:start}
 .auth-context{max-width:480px}.auth-context .eyebrow{margin:0 0 14px;color:var(--accent);font-size:11px;font-weight:800;letter-spacing:.11em;text-transform:uppercase}.auth-context h2{margin:0;color:var(--text);font-size:clamp(34px,4vw,52px);line-height:1.04;letter-spacing:-.045em}.auth-context>p{margin:18px 0 0;max-width:440px;color:var(--muted);font-size:16px;line-height:1.65}.context-list{display:grid;gap:12px;margin-top:30px}.context-item{display:grid;grid-template-columns:22px 1fr;align-items:start;gap:10px;color:var(--muted);font-size:13px}.context-item:before{content:"";width:16px;height:16px;margin-top:2px;border-radius:50%;border:1px solid color-mix(in srgb,var(--accent) 48%,var(--border));background:var(--surface);box-shadow:inset 0 0 0 4px var(--page)}
 .invitation-context{padding-left:22px;border-left:3px solid var(--accent)}.invitation-context h2{font-size:clamp(30px,3.6vw,46px)}.invitation-chip{display:inline-flex;align-items:center;gap:8px;margin-bottom:18px;padding:6px 9px;border:1px solid color-mix(in srgb,var(--accent) 34%,var(--border));border-radius:7px;background:color-mix(in srgb,var(--accent) 8%,var(--surface));color:var(--accent);font-size:11px;font-weight:800;letter-spacing:.06em;text-transform:uppercase}.invitation-chip:before{content:"";width:7px;height:7px;border-radius:50%;background:var(--accent)}
-.card{width:100%;max-width:440px;padding:32px;border:1px solid var(--border);border-radius:12px;box-shadow:0 18px 48px rgba(24,24,27,.07)}.card.wide{max-width:620px}.heading h1{letter-spacing:-.035em}.button{transition:background 150ms ease,border-color 150ms ease,color 150ms ease,transform 150ms ease,opacity 150ms ease}.button:active:not(:disabled){transform:translateY(1px)}.field input{transition:border-color 150ms ease,box-shadow 150ms ease,background 150ms ease}.reveal{top:0;right:0;height:44px;min-width:52px}.method-action{min-height:36px}.auth-context-mobile{display:none;margin:0 0 20px;padding:12px 13px;border-left:3px solid var(--accent);background:color-mix(in srgb,var(--accent) 7%,var(--surface));color:var(--muted);font-size:13px}.auth-context-mobile strong{display:block;color:var(--text);margin-bottom:2px}.footer{font-size:11px}
-@media(max-width:820px){.main{grid-template-columns:1fr;max-width:500px;padding-top:38px}.auth-context{display:none}.auth-context-mobile{display:block}.card,.card.wide{max-width:none}}
-@media(max-width:520px){.main{padding:24px 12px}.card{padding:24px 20px;border-radius:10px}.topbar{height:56px}.heading h1{font-size:26px}.form-row{align-items:flex-start}.method-action{min-height:44px}}
-@media(prefers-reduced-motion:reduce){.button,.theme,.field input{transition-duration:.01ms}.method-skeleton-icon:after,.method-skeleton-copy span:after,.method-skeleton-pill:after{animation:none}}
+.card{width:100%;max-width:440px;padding:32px;border:1px solid var(--border);border-radius:12px;box-shadow:0 18px 48px rgba(24,24,27,.07)}.card.wide{max-width:620px}.heading h1{letter-spacing:-.035em}.button{transition:background 150ms ease,border-color 150ms ease,color 150ms ease,transform 150ms ease,opacity 150ms ease}.button:active:not(:disabled){transform:translateY(1px)}.field label{display:block;font-size:12px;font-weight:650;margin-bottom:7px}.field>.input-wrap{font-size:inherit;font-weight:inherit;margin-bottom:0}.field input{transition:border-color 150ms ease,box-shadow 150ms ease,background 150ms ease}.reveal{top:0;right:0;height:44px;min-width:52px}.method-action{min-height:36px}.auth-context-mobile{display:none;margin:0 0 20px;padding:12px 13px;border-left:3px solid var(--accent);background:color-mix(in srgb,var(--accent) 7%,var(--surface));color:var(--muted);font-size:13px}.auth-context-mobile strong{display:block;color:var(--text);margin-bottom:2px}.footer{font-size:11px}
+@media(max-width:820px){.main{grid-template-columns:1fr;max-width:500px;padding-top:38px}.main.security-main{place-items:start center}.auth-context{display:none}.auth-context-mobile{display:block}.card,.card.wide{max-width:none}}
+@media(max-width:520px){.main{padding:24px 12px}.card{padding:24px 20px;border-radius:10px}.topbar{height:56px}.heading h1{font-size:26px}.form-row{align-items:center;min-height:44px}.form-row .check,.form-row>a{min-height:44px;display:inline-flex;align-items:center}.method-action{min-height:44px}}
+@media(prefers-reduced-motion:reduce){.button,.theme,.field input{transition-duration:.01ms}.button:active:not(:disabled){transform:none}.method-skeleton-icon:after,.method-skeleton-copy span:after,.method-skeleton-pill:after{animation:none}}
 `;
 
 
@@ -136,7 +138,7 @@ function renderAuthPage(
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${page === "security" ? "Account security" : "Authentication"} — Rendro</title>
 <link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..24,400,0,0&display=swap" rel="stylesheet">
-<script>try{var m=localStorage.getItem("commentor-theme"),r=m==="dark"||m==="light"?m:(matchMedia("(prefers-color-scheme:dark)").matches?"dark":"light");document.documentElement.classList.toggle("dark",r==="dark");}catch(_error){}</script>
+${renderThemeAssets()}
 <style>
 :root{color-scheme:light;--page:#fafafa;--surface:#fff;--surface-2:#f4f4f5;--text:#18181b;--muted:#71717a;--border:#e4e4e7;--accent:#c2410c;--accent-hover:#9a3412;--on-accent:#fff;--focus:rgba(194,65,12,.2);--danger:#b42318;--success:#15803d;--shadow:0 24px 60px rgba(24,24,27,.09)}
 html.dark{color-scheme:dark;--page:#09090b;--surface:#18181b;--surface-2:#27272a;--text:#fafafa;--muted:#a1a1aa;--border:#3f3f46;--accent:#fb923c;--accent-hover:#fdba74;--on-accent:#09090b;--focus:rgba(251,146,60,.24);--danger:#fca5a5;--success:#86efac;--shadow:0 24px 70px rgba(0,0,0,.42)}
@@ -144,37 +146,35 @@ html.dark{color-scheme:dark;--page:#09090b;--surface:#18181b;--surface-2:#27272a
 @media(max-width:520px){.main{padding:24px 12px;place-items:start center}.card{padding:26px 20px;border-radius:12px}.topbar{height:56px}.heading h1{font-size:26px}.form-row{align-items:flex-start}}
 @media(prefers-reduced-motion:reduce){*,*:before,*:after{scroll-behavior:auto!important;animation-duration:.01ms!important;transition-duration:.01ms!important}}
 </style><style>${authRefreshStyles}</style></head>
-<body><div class="shell"><header class="topbar"><a class="brand" href="/">Rendro<i>.</i></a><button class="theme" id="theme-toggle" type="button" aria-label="Change color theme"><span class="material-symbols-outlined" id="theme-icon" aria-hidden="true">contrast</span></button></header><main class="main">${context}<section class="card${wide}" data-page="${page}">${mobileContext}${pageBody(page, options.user, options.verified ?? false)}</section></main><footer class="footer">Rendro · Documentation that ships with your code</footer></div>
+<body><div class="shell"><header class="topbar"><a class="brand" href="/">Rendro<i>.</i></a><button class="theme" id="theme-toggle" type="button" aria-label="Change color theme"><span class="material-symbols-outlined" id="theme-icon" aria-hidden="true">contrast</span></button></header><main class="main${page === "security" ? " security-main" : ""}">${context}<section class="card${wide}" data-page="${page}">${mobileContext}${pageBody(page, options.user, options.verified ?? false, options.token ?? "")}</section></main><footer class="footer">Rendro · Documentation that ships with your code</footer></div>
 <script>window.__AUTH_STATE__=${state};</script>
-<script>
+<script id="auth-runtime">
 (function(){
   "use strict";
   var state=window.__AUTH_STATE__;
-  var root=document.documentElement;
-  var media=matchMedia("(prefers-color-scheme: dark)");
-  function themeMode(){var saved=localStorage.getItem("commentor-theme");return saved==="dark"||saved==="light"?saved:"system";}
-  function resolvedTheme(){var mode=themeMode();return mode==="system"?(media.matches?"dark":"light"):mode;}
-  function apply(){var mode=themeMode();root.classList.toggle("dark",resolvedTheme()==="dark");var button=document.getElementById("theme-toggle"),icon=document.getElementById("theme-icon");if(icon)icon.textContent=mode==="system"?"contrast":mode==="dark"?"dark_mode":"light_mode";button.setAttribute("aria-label","Theme: "+mode+". Activate to change.");button.title="Theme: "+mode;}
-  apply();media.addEventListener("change",function(){if(themeMode()==="system")apply();});
-  document.getElementById("theme-toggle").addEventListener("click",function(){var current=themeMode(),next=current==="system"?"dark":current==="dark"?"light":"system";if(next==="system")localStorage.removeItem("commentor-theme");else localStorage.setItem("commentor-theme",next);apply();});
+  window.RendroTheme.mount(document.getElementById("theme-toggle"));
   document.querySelectorAll("[data-return-link]").forEach(function(link){var href=link.getAttribute("href");if(href&&state.returnTo!=="/")link.setAttribute("href",href+(href.indexOf("?")<0?"?":"&")+"returnTo="+encodeURIComponent(state.returnTo));});
   document.querySelectorAll("[data-reveal]").forEach(function(button){button.addEventListener("click",function(){var input=document.getElementById(button.dataset.reveal);if(!input)return;var show=input.type==="password";input.type=show?"text":"password";button.textContent=show?"Hide":"Show";button.setAttribute("aria-label",(show?"Hide":"Show")+" password");});});
-  function busy(form,on){var button=form.querySelector("button[type=submit]");if(button){button.disabled=on;button.setAttribute("aria-busy",String(on));}var alternate=document.getElementById("google-auth");if(alternate)alternate.disabled=on;}
-  async function post(path,body){var response=await fetch(path,{method:"POST",headers:{"Content-Type":"application/json","Accept":"application/json"},body:JSON.stringify(body)});var data=null;try{data=await response.json();}catch(_error){}if(!response.ok){var message=data&&(data.message||data.error);throw new Error(typeof message==="string"?message:"Request failed. Please try again.");}return data;}
+  function busy(form,on){form.dataset.inFlight=String(on);var button=form.querySelector("button[type=submit]");if(button){button.disabled=on;button.setAttribute("aria-busy",String(on));}var alternate=document.getElementById("google-auth");if(alternate)alternate.disabled=on;}
+  async function post(path,body){var response=await fetch(path,{method:"POST",headers:{"Content-Type":"application/json","Accept":"application/json"},body:JSON.stringify(body)});var data=null;try{data=await response.json();}catch(_error){}if(!response.ok){var message=data&&(data.message||data.error);var error=new Error(typeof message==="string"?message:"Request failed. Please try again.");error.status=response.status;throw error;}return data;}
   function errorAt(id,error){var node=document.getElementById(id);if(node){node.textContent=error instanceof Error?error.message:"Request failed. Please try again.";if(id==="security-message")node.className="message error";}}
+  function clearError(id){var node=document.getElementById(id);if(node){node.textContent="";if(id==="security-message")node.className="message";}}
+  function validate(form,errorId){var invalid=form.querySelector(":invalid");if(!invalid)return true;invalid.focus();invalid.setAttribute("aria-invalid","true");invalid.setAttribute("aria-describedby",errorId);var message=invalid.validity.valueMissing?"Please complete this field.":invalid.validity.typeMismatch?"Enter a valid email address.":invalid.validity.tooShort?"Use at least "+invalid.minLength+" characters.":"Check this field.";errorAt(errorId,new Error(message));return false;}
+  function retryable(error){return !error || !error.status || error.status>=500;}
   async function google(){var button=document.getElementById("google-auth");if(!button)return;var submit=document.querySelector("#auth-form button[type=submit]");button.disabled=true;button.setAttribute("aria-busy","true");if(submit)submit.disabled=true;try{var data=await post("/api/auth/sign-in/social",{provider:"google",callbackURL:location.origin+state.returnTo});if(!data||typeof data.url!=="string")throw new Error("Google sign-in is unavailable.");location.assign(data.url);}catch(error){button.disabled=false;button.setAttribute("aria-busy","false");if(submit)submit.disabled=false;errorAt("form-error",error);}}
   var googleButton=document.getElementById("google-auth");if(googleButton)googleButton.addEventListener("click",google);
   var form=document.getElementById("auth-form");
-  if(form&&state.page==="sign-in")form.addEventListener("submit",async function(event){event.preventDefault();busy(form,true);errorAt("form-error",new Error(""));try{await post("/api/auth/sign-in/email",{email:form.email.value,password:form.password.value,rememberMe:form.rememberMe.checked,callbackURL:location.origin+state.returnTo});location.assign(state.returnTo);}catch(error){busy(form,false);errorAt("form-error",error);}});
+  document.querySelectorAll("form").forEach(function(currentForm){currentForm.addEventListener("input",function(event){var input=event.target;if(!(input instanceof HTMLInputElement))return;input.removeAttribute("aria-invalid");input.removeAttribute("aria-describedby");var alert=currentForm.querySelector("[role=alert]");if(alert)alert.textContent="";});});
+  if(form&&state.page==="sign-in")form.addEventListener("submit",async function(event){event.preventDefault();if(form.dataset.inFlight==="true"||!validate(form,"form-error"))return;busy(form,true);clearError("form-error");try{await post("/api/auth/sign-in/email",{email:form.email.value,password:form.password.value,rememberMe:form.rememberMe.checked,callbackURL:location.origin+state.returnTo});location.assign(state.returnTo);}catch(error){busy(form,false);errorAt("form-error",error);}});
   if(form&&state.page==="sign-up")form.addEventListener("submit",async function(event){
-    event.preventDefault();busy(form,true);errorAt("form-error",new Error(""));
+    event.preventDefault();if(form.dataset.inFlight==="true"||!validate(form,"form-error"))return;busy(form,true);clearError("form-error");
     try{
       var nameInput=form.elements.namedItem("name");
       await post("/api/auth/sign-up/email",{
         name:nameInput.value,
         email:form.email.value,
         password:form.password.value,
-        callbackURL:location.origin+"/verify-email?verified=1"
+        callbackURL:location.origin+"/verify-email?verified=1"+(state.returnTo!=="/"?"&returnTo="+encodeURIComponent(state.returnTo):"")
       });
       form.hidden=true;
       document.getElementById("google-auth").hidden=true;
@@ -182,15 +182,15 @@ html.dark{color-scheme:dark;--page:#09090b;--surface:#18181b;--surface-2:#27272a
       document.getElementById("success-panel").hidden=false;
     }catch(error){busy(form,false);errorAt("form-error",error);}
   });
-  var resend=document.getElementById("resend-form");if(resend)resend.addEventListener("submit",async function(event){event.preventDefault();busy(resend,true);var message=document.getElementById("form-message");try{await post("/api/auth/send-verification-email",{email:resend.email.value,callbackURL:location.origin+"/verify-email?verified=1"});message.textContent="If the address is eligible, a new verification email is on its way.";}catch(_error){message.textContent="If the address is eligible, a new verification email is on its way.";}busy(resend,false);});
-  if(form&&state.page==="forgot-password")form.addEventListener("submit",async function(event){event.preventDefault();busy(form,true);var message=document.getElementById("form-message");try{await post("/api/auth/request-password-reset",{email:form.email.value,redirectTo:location.origin+"/reset-password"});}catch(_error){}message.textContent="If an account exists for that email, a reset link is on its way.";busy(form,false);});
-  if(form&&state.page==="reset-password")form.addEventListener("submit",async function(event){event.preventDefault();errorAt("form-error",new Error(""));if(!state.token){errorAt("form-error",new Error("This reset link is missing or invalid."));return;}if(form.password.value!==form.confirmPassword.value){errorAt("form-error",new Error("Passwords do not match."));return;}busy(form,true);try{await post("/api/auth/reset-password",{newPassword:form.password.value,token:state.token});form.hidden=true;document.getElementById("success-panel").hidden=false;}catch(error){busy(form,false);errorAt("form-error",error);}});
+  var resend=document.getElementById("resend-form");if(resend)resend.addEventListener("submit",async function(event){event.preventDefault();if(resend.dataset.inFlight==="true"||!validate(resend,"form-message"))return;busy(resend,true);var message=document.getElementById("form-message");try{await post("/api/auth/send-verification-email",{email:resend.email.value,callbackURL:location.origin+"/verify-email?verified=1"+(state.returnTo!=="/"?"&returnTo="+encodeURIComponent(state.returnTo):"")});message.className="message";message.textContent="If the address is eligible, a new verification email is on its way.";}catch(error){message.className="message";message.textContent=retryable(error)?"We couldn't send that email. Please try again.":"If the address is eligible, a new verification email is on its way.";}busy(resend,false);});
+  if(form&&state.page==="forgot-password")form.addEventListener("submit",async function(event){event.preventDefault();if(form.dataset.inFlight==="true"||!validate(form,"form-error"))return;busy(form,true);var message=document.getElementById("form-message");try{await post("/api/auth/request-password-reset",{email:form.email.value,redirectTo:location.origin+"/reset-password"+(state.returnTo!=="/"?"?returnTo="+encodeURIComponent(state.returnTo):"")});message.textContent="If an account exists for that email, a reset link is on its way.";}catch(error){message.textContent=retryable(error)?"We couldn't send that email. Please try again.":"If an account exists for that email, a reset link is on its way.";}busy(form,false);});
+  if(form&&state.page==="reset-password")form.addEventListener("submit",async function(event){event.preventDefault();if(form.dataset.inFlight==="true"||!validate(form,"form-error"))return;clearError("form-error");if(!state.token){errorAt("form-error",new Error("This reset link is missing or invalid."));return;}if(form.password.value!==form.confirmPassword.value){errorAt("form-error",new Error("Passwords do not match."));return;}busy(form,true);try{await post("/api/auth/reset-password",{newPassword:form.password.value,token:state.token});form.hidden=true;document.getElementById("success-panel").hidden=false;}catch(error){busy(form,false);errorAt("form-error",error);}});
   if(state.page==="security")loadSecurity();
-  async function loadSecurity(){var list=document.getElementById("method-list");list.setAttribute("aria-busy","true");try{var response=await fetch("/api/auth/list-accounts",{headers:{Accept:"application/json"}});if(!response.ok)throw new Error("Unable to load sign-in methods.");var accounts=await response.json();var hasCredential=accounts.some(function(account){return account.providerId==="credential";});var hasGoogle=accounts.some(function(account){return account.providerId==="google";});list.innerHTML="";list.appendChild(methodRow("Password",hasCredential?"Configured":"Not configured",hasCredential?null:"Add below"));list.appendChild(methodRow("Google",hasGoogle?"Connected":"Not connected",hasGoogle?null:"Connect",linkGoogle));document.getElementById(hasCredential?"change-password-section":"initial-password-section").hidden=false;}catch(error){list.innerHTML="<div class='method method-error'><span><strong>Unable to load sign-in methods</strong><span class='error'></span></span><button class='method-action' type='button'>Try again</button></div>";list.querySelector(".error").textContent=error.message;list.querySelector("button").addEventListener("click",loadSecurity);}finally{list.setAttribute("aria-busy","false");}}
+  async function loadSecurity(){var list=document.getElementById("method-list");list.setAttribute("aria-busy","true");try{var response=await fetch("/api/auth/list-accounts",{headers:{Accept:"application/json"}});if(!response.ok)throw new Error("Unable to load sign-in methods.");var accounts=await response.json();var hasCredential=accounts.some(function(account){return account.providerId==="credential";});var hasGoogle=accounts.some(function(account){return account.providerId==="google";});list.innerHTML="";list.appendChild(methodRow("Password",hasCredential?"Configured":"Not configured",hasCredential?null:"Add below",hasCredential?null:function(){var section=document.getElementById("initial-password-section");if(!section)return;section.hidden=false;section.scrollIntoView({behavior:matchMedia("(prefers-reduced-motion: reduce)").matches?"auto":"smooth",block:"nearest"});var input=section.querySelector("input");if(input)input.focus({preventScroll:true});}));list.appendChild(methodRow("Google",hasGoogle?"Connected":"Not connected",hasGoogle?null:"Connect",hasGoogle?null:linkGoogle));document.getElementById(hasCredential?"change-password-section":"initial-password-section").hidden=false;}catch(error){list.innerHTML="<div class='method method-error'><span><strong>Unable to load sign-in methods</strong><span class='error'></span></span><button class='method-action' type='button'>Try again</button></div>";list.querySelector(".error").textContent=error.message;list.querySelector("button").addEventListener("click",loadSecurity);}finally{list.setAttribute("aria-busy","false");}}
   function methodRow(name,status,action,onClick){var row=document.createElement("div");row.className="method";var copy=document.createElement("span");copy.className="method-copy";var strong=document.createElement("strong");strong.textContent=name;var detail=document.createElement("span");detail.textContent=status;copy.append(strong,detail);row.append(copy);if(action){var button=document.createElement("button");button.type="button";button.className="method-action";button.textContent=action;if(onClick)button.addEventListener("click",onClick);row.append(button);}else{var stateNode=document.createElement("span");stateNode.className="method-state";stateNode.textContent="Active";row.append(stateNode);}return row;}
   async function linkGoogle(event){var button=event.currentTarget,message=document.getElementById("security-message");button.disabled=true;button.setAttribute("aria-busy","true");message.textContent="";message.className="message";try{var data=await post("/api/auth/link-social",{provider:"google",callbackURL:location.href});if(!data||typeof data.url!=="string")throw new Error("Google connection is unavailable.");location.assign(data.url);}catch(error){button.disabled=false;button.setAttribute("aria-busy","false");errorAt("security-message",error);}}
-  var initial=document.getElementById("initial-password-form");if(initial)initial.addEventListener("submit",async function(event){event.preventDefault();errorAt("initial-error",new Error(""));if(initial.password.value!==initial.confirmPassword.value){errorAt("initial-error",new Error("Passwords do not match."));return;}busy(initial,true);try{await post("/api/auth/set-initial-password",{newPassword:initial.password.value});location.reload();}catch(error){busy(initial,false);errorAt("initial-error",error);}});
-  var change=document.getElementById("change-password-form");if(change)change.addEventListener("submit",async function(event){event.preventDefault();busy(change,true);errorAt("change-error",new Error(""));try{await post("/api/auth/change-password",{currentPassword:change.currentPassword.value,newPassword:change.newPassword.value,revokeOtherSessions:change.revokeSessions.checked});change.reset();var message=document.getElementById("security-message");message.textContent="Password changed successfully.";}catch(error){errorAt("change-error",error);}busy(change,false);});
+  var initial=document.getElementById("initial-password-form");if(initial)initial.addEventListener("submit",async function(event){event.preventDefault();if(initial.dataset.inFlight==="true"||!validate(initial,"initial-error"))return;clearError("initial-error");if(initial.password.value!==initial.confirmPassword.value){errorAt("initial-error",new Error("Passwords do not match."));return;}busy(initial,true);try{await post("/api/auth/set-initial-password",{newPassword:initial.password.value});location.reload();}catch(error){busy(initial,false);errorAt("initial-error",error);}});
+  var change=document.getElementById("change-password-form");if(change)change.addEventListener("submit",async function(event){event.preventDefault();if(change.dataset.inFlight==="true"||!validate(change,"change-error"))return;busy(change,true);clearError("change-error");try{await post("/api/auth/change-password",{currentPassword:change.currentPassword.value,newPassword:change.newPassword.value,revokeOtherSessions:change.revokeSessions.checked});change.reset();var message=document.getElementById("security-message");message.textContent="Password changed successfully.";}catch(error){errorAt("change-error",error);}busy(change,false);});
 })();
 </script></body></html>`;
 }
@@ -211,7 +211,9 @@ app.get("/verify-email", (c) => c.html(renderAuthPage("verify-email", {
   returnTo: safeReturnTo(c.req.query("returnTo")),
   verified: c.req.query("verified") === "1",
 })));
-app.get("/forgot-password", (c) => c.html(renderAuthPage("forgot-password")));
+app.get("/forgot-password", (c) => c.html(renderAuthPage("forgot-password", {
+  returnTo: safeReturnTo(c.req.query("returnTo")),
+})));
 app.get("/reset-password", (c) => c.html(renderAuthPage("reset-password", {
   token: c.req.query("token") ?? "",
   returnTo: safeReturnTo(c.req.query("returnTo")),

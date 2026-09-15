@@ -19,3 +19,4 @@ dist-check/
 dist-check/
 *.tmp
 paseo.json
+docs

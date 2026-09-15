@@ -64,6 +64,8 @@ describe("immutable deployment lifecycle", () => {
     });
     const interrupted = await stage(backend, owned._id, "org-a", "interrupted");
     await backend.mutation(internal.deployments.failInternal, {
+      organizationId: "org-a",
+      projectId: owned._id,
       deploymentId: interrupted.deploymentId,
       reason: "network disconnected",
     });

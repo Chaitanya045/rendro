@@ -1,3 +1,5 @@
+import { mobileViewportStyles } from "./viewport";
+
 export function renderLandingPage(): string {
   return `<!DOCTYPE html>
 <html lang="en" class="dark">
@@ -18,6 +20,7 @@ export function renderLandingPage(): string {
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <title>Rendro — Documentation that ships with your code</title>
   <style>
+    ${mobileViewportStyles}
     :root {
       color-scheme: dark;
       --surface: #09090b;
@@ -224,7 +227,7 @@ export function renderLandingPage(): string {
             <button class="button button-primary" type="submit" form="sign-in-form" data-auth data-auth-id="hero-start">
               <span data-auth-label>Start with Google</span><span class="button-spinner" aria-hidden="true"></span>
             </button>
-            <a class="button button-secondary" href="https://dev.rendro.app/public/rendro-feature-test/reference" target="_blank" rel="noreferrer" data-action-id="live-docs">View live docs <span class="arrow" aria-hidden="true">→</span></a>
+            <a class="button button-secondary" href="#product" data-scroll-section="product" data-action-id="explore-product">Explore the workspace <span class="arrow" aria-hidden="true">→</span></a>
           </div>
           <ul class="hero-facts" aria-label="Product principles">
             <li>Plain HTML</li>
@@ -267,10 +270,9 @@ export function renderLandingPage(): string {
           <div class="terminal" aria-label="Rendro command example" data-reveal data-reveal-delay="80">
             <div class="terminal-bar"><span class="shot-dot"></span><span class="shot-dot"></span><span class="shot-dot"></span><span>CI / publish-docs</span></div>
             <div class="terminal-body">
-              <div><span class="terminal-prompt">$</span> rendro push --source ./docs --org my-org</div>
-              <div class="terminal-muted">→ Syncing ./docs to https://rendro.app my-org</div>
-              <div class="terminal-success">✓ API key valid</div>
-              <div class="terminal-muted">Only changed HTML is uploaded.</div>
+              <div><span class="terminal-prompt">$</span> rendro push --source ./docs<br>  --organization &lt;organization-id&gt;<br>  --project &lt;project-id&gt;</div>
+              <div class="terminal-muted">Use your organization and project IDs with a scoped RENDRO_API_KEY.</div>
+              <div class="terminal-muted">Only changed files are uploaded. A verified deployment becomes active atomically.</div>
             </div>
           </div>
         </div>
@@ -303,7 +305,7 @@ export function renderLandingPage(): string {
         </div>
         <dl class="security-list" data-reveal-group data-reveal-stagger="45">
           <div class="security-row" data-reveal-item style="--reveal-y:12px"><dt>Identity</dt><dd>Google OAuth or verified email credentials connect each session to one stable account.</dd></div>
-          <div class="security-row" data-reveal-item style="--reveal-y:12px"><dt>Organization</dt><dd>The work-email domain determines the organization namespace.</dd></div>
+          <div class="security-row" data-reveal-item style="--reveal-y:12px"><dt>Organization</dt><dd>Organization membership and roles determine access to each workspace.</dd></div>
           <div class="security-row" data-reveal-item style="--reveal-y:12px"><dt>Storage</dt><dd>Document objects are stored under organization-specific prefixes.</dd></div>
           <div class="security-row" data-reveal-item style="--reveal-y:12px"><dt>Public access</dt><dd>Only folders explicitly registered by trusted CI receive anonymous routes.</dd></div>
         </dl>

@@ -3,6 +3,8 @@ import { CONVEX_SITE_URL } from "@/config";
 import { getObjectStream, getObjectText } from "@/minio";
 import { renderScopedDocumentShell } from "@/routes/app";
 import { renderNotFoundPage } from "@/routes/not-found";
+import { injectMobileViewportScrollbarStyle } from "@/routes/document-html";
+import { parseStoredManifest, type StoredManifest } from "@/stored-manifest";
 
 const app = new Hono();
 
@@ -16,11 +18,6 @@ type PublicResolution = {
   };
   project: { name: string; slug: string };
   deployment: { manifestKey: string; manifestSha256: string };
-};
-
-type Manifest = {
-  version: 1;
-  files: Array<{ path: string; sha256: string; size: number; contentType: string }>;
 };
 
 
@@ -43,10 +40,9 @@ async function resolvePublication(slug: string): Promise<PublicResolution | null
   return response.json() as Promise<PublicResolution>;
 }
 
-async function manifestFor(result: PublicResolution): Promise<Manifest | null> {
+async function manifestFor(result: PublicResolution): Promise<StoredManifest | null> {
   const text = await getObjectText(result.deployment.manifestKey);
-  if (!text) return null;
-  try { return JSON.parse(text) as Manifest; } catch { return null; }
+  return parseStoredManifest(text);
 }
 
 function publicationPath(result: PublicResolution, path: string): string | null {
@@ -73,6 +69,7 @@ async function readStream(stream: ReadableStream<Uint8Array>): Promise<string> {
 }
 
 function injectNavigation(html: string, slug: string, path: string): string {
+  html = injectMobileViewportScrollbarStyle(html);
   const basePath = `/p/${encodeURIComponent(slug)}/files/`;
   const script = `<script>(function(){var parentWindow=window.parent;if(parentWindow!==window)parentWindow.postMessage({type:"doc-loaded",path:${JSON.stringify(path)}},location.origin);document.addEventListener("click",function(event){var anchor=event.target.closest("a");if(!anchor||!anchor.href)return;var url=new URL(anchor.href);var prefix=${JSON.stringify(basePath)};if(url.origin!==location.origin||!url.pathname.startsWith(prefix))return;var next=url.pathname.slice(prefix.length).split("/").map(decodeURIComponent).join("/");if(!next)return;event.preventDefault();parentWindow.postMessage({type:"doc-navigate",path:next},location.origin);});})();</script>`;
   return /<\/body\s*>/i.test(html) ? html.replace(/<\/body\s*>/i, `${script}</body>`) : html + script;

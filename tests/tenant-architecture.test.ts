@@ -69,7 +69,9 @@ describe("deployment-backed publications", () => {
 
     const allowed = await publicRoutes.request("/p/product/files/index.html");
     expect(allowed.status).toBe(200);
-    expect(await allowed.text()).toContain("Docs");
+    const allowedHtml = await allowed.text();
+    expect(allowedHtml).toContain("Docs");
+    expect(allowedHtml).toContain("data-rendro-mobile-viewport");
     expect(read).toHaveBeenCalledWith("organizations/org-a/projects/project-a/deployments/deploy-a/files/reference/index.html");
 
     const privateSibling = await publicRoutes.request("/p/product/files/private.html");
@@ -180,10 +182,28 @@ describe("revocable private shares", () => {
   it("allows the exact HTML document and same-tree assets but not another HTML document", async () => {
     vi.stubGlobal("fetch", vi.fn().mockImplementation(() => Promise.resolve(jsonResponse(resolution))));
     const read = vi.spyOn(minio, "getObjectStream").mockImplementation(() => Promise.resolve(stream()));
-    expect((await shareRoutes.request("/s/token/files/guide/index.html")).status).toBe(200);
-    expect((await shareRoutes.request("/s/token/files/guide/app.css")).status).toBe(200);
+    const document = await shareRoutes.request("/s/token/files/guide/index.html");
+    expect(document.status).toBe(200);
+    expect(await document.clone().text()).toContain("data-rendro-mobile-viewport");
+    expect(document.headers.get("Cache-Control")).toBe("private, no-store");
+    expect(document.headers.get("Content-Security-Policy")).toContain("sandbox allow-scripts");
+    const asset = await shareRoutes.request("/s/token/files/guide/app.css");
+    expect(asset.status).toBe(200);
+    expect(asset.headers.get("Content-Security-Policy")).toBe("default-src 'none'");
     expect((await shareRoutes.request("/s/token/files/guide/secret.html")).status).toBe(404);
+    expect((await shareRoutes.request("/s/token/files/shared/app.css")).status).toBe(404);
     expect(read).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([
+    "/s/token/files/guide/%2E%2E/secret.css",
+    "/s/token/files/guide/%5Csecret.css",
+    "/s/token/files/guide/%E0%A4%A.css",
+  ])("rejects malformed or traversal file paths without reading storage: %s", async (path) => {
+    vi.stubGlobal("fetch", vi.fn().mockImplementation(() => Promise.resolve(jsonResponse(resolution))));
+    const read = vi.spyOn(minio, "getObjectStream");
+    expect((await shareRoutes.request(path)).status).toBe(404);
+    expect(read).not.toHaveBeenCalled();
   });
 
   it("stops serving when the grant lookup is revoked or expired", async () => {
@@ -192,6 +212,18 @@ describe("revocable private shares", () => {
     const response = await shareRoutes.request("/s/revoked/files/guide/index.html");
     expect(response.status).toBe(404);
     expect(read).not.toHaveBeenCalled();
+  });
+
+  it("renders a private no-store shell with a sandboxed, referrerless frame", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockImplementation(() => Promise.resolve(jsonResponse(resolution))));
+    const response = await shareRoutes.request("/s/token");
+    const html = await response.text();
+    expect(response.status).toBe(200);
+    expect(response.headers.get("Cache-Control")).toBe("private, no-store");
+    expect(response.headers.get("Referrer-Policy")).toBe("no-referrer");
+    expect(html).toContain('sandbox="allow-scripts allow-forms allow-popups allow-downloads allow-same-origin"');
+    expect(html).toContain('referrerpolicy="no-referrer"');
+    expect(html).toContain("/s/token/files/guide/index.html");
   });
 });
 
@@ -247,6 +279,7 @@ describe("private project documents", () => {
     expect(htmlResponse.headers.get("Content-Security-Policy")).toContain("sandbox allow-scripts");
     expect(htmlResponse.headers.get("X-Content-Type-Options")).toBe("nosniff");
     expect(html).toContain("<h1>Publisher docs</h1>");
+    expect(html).toContain("data-rendro-mobile-viewport");
     expect(html).toContain('window.COMMENTOR={"convexUrl":');
     expect(html.match(/window\.COMMENTOR=/g)).toHaveLength(1);
 

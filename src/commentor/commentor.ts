@@ -11,6 +11,11 @@
 import { ConvexClient } from "convex/browser";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
+import { CommentorAuthPolicy } from "./auth-policy";
+import { draftAfterSuccessfulReply } from "./reply-state";
+import { PendingDeletionCoordinator } from "./delete-state";
+import { requestParentTheme } from "./theme-message";
+import { appendPlainText } from "./text";
 
 // ─────────────────────────────── types ───────────────────────────────
 
@@ -38,7 +43,13 @@ function isProjectConfig(config: Config): config is Config & {
   return Boolean(config.organizationId && config.projectId && config.documentPath);
 }
 
-async function requestAuthToken(): Promise<string | null> {
+const authPolicy = new CommentorAuthPolicy();
+
+async function requestAuthToken({
+  forceRefreshToken = false,
+}: { forceRefreshToken?: boolean } = {}): Promise<string | null> {
+  const policy = authPolicy.request(forceRefreshToken);
+  if (!policy.requestRemote) return null;
   if (window.parent === window) {
     const response = await fetch("/api/auth/convex/token", {
       credentials: "same-origin",
@@ -67,7 +78,12 @@ async function requestAuthToken(): Promise<string | null> {
       finish(typeof event.data.token === "string" ? event.data.token : null);
     };
     window.addEventListener("message", onMessage);
-    window.parent.postMessage({ type: "commentor-auth-request", requestId }, "*");
+    window.parent.postMessage({
+      type: "commentor-auth-request",
+      requestId,
+      forceRefreshToken,
+      allowCachedToken: policy.allowParentCache,
+    }, "*");
   });
 }
 
@@ -157,8 +173,10 @@ function h<K extends keyof HTMLElementTagNameMap>(
       else el.setAttribute(k, v as string);
     }
   for (const kid of kids)
-    if (kid)
-      el.append(typeof kid === "string" ? document.createTextNode(kid) : kid);
+    if (kid) {
+      if (typeof kid === "string") appendPlainText(el, kid);
+      else el.append(kid);
+    }
   return el;
 }
 
@@ -456,12 +474,6 @@ function timeAgo(ms: number): string {
   return `${Math.round(hr / 24)}d`;
 }
 
-function escapeText(s: string): string {
-  return s.replace(/[&<>]/g, (c) =>
-    c === "&" ? "&amp;" : c === "<" ? "&lt;" : "&gt;",
-  );
-}
-
 interface Rect {
   left: number;
   top: number;
@@ -527,7 +539,9 @@ class Commentor {
   private newThreadIds = new Set<ThreadId>();
   private newReplyIds = new Set<ReplyId>();
   private subscriptionReady = false;
-  private pendingDeletes = new Map<ThreadId, number>();
+  private pendingDeletes = new PendingDeletionCoordinator<ThreadId>();
+  private replyDrafts = new Map<ThreadId, string>();
+  private pendingReplies = new Map<ThreadId, string>();
   private newCommentCount = 0;
   private highlightedThreadId: ThreadId | null = null;
   private commentMode = false;
@@ -679,11 +693,12 @@ class Commentor {
       false,
     );
 
+    window.addEventListener("message", (e) => this.onThemeMessage(e));
     this.applyTheme();
     window.addEventListener("storage", (e) => {
       if (e.key === "commentor-theme") this.applyTheme();
     });
-    window.addEventListener("message", (e) => this.onThemeMessage(e));
+    if (window.parent !== window) requestParentTheme(window.parent);
     this.subscribe();
     this.wireTooltips();
     document.addEventListener("selectionchange", () =>
@@ -719,6 +734,16 @@ class Commentor {
   // ── subscription ──
   private subscribe(): void {
     const update = (threads: Thread[]) => {
+      const activeReply = this.root.activeElement instanceof HTMLTextAreaElement
+        && this.root.activeElement.matches('[data-testid="commentor-reply-input"]')
+        ? this.root.activeElement
+        : null;
+      const activeThreadId = activeReply
+        ?.closest<HTMLElement>("[data-thread-id]")
+        ?.dataset.threadId;
+      const activeReplyInBubble = Boolean(activeReply?.closest(".bubble"));
+      const selectionStart = activeReply?.selectionStart ?? 0;
+      const selectionEnd = activeReply?.selectionEnd ?? 0;
       this.newThreadIds = new Set(
         this.subscriptionReady
           ? threads
@@ -747,10 +772,9 @@ class Commentor {
       this.seenReplyIds = new Set(
         threads.flatMap((thread) => thread.replies.map((reply) => reply._id)),
       );
-      for (const [threadId, timer] of this.pendingDeletes) {
+      for (const threadId of this.pendingDeletes.keys()) {
         if (threads.some((thread) => thread._id === threadId)) continue;
-        window.clearTimeout(timer);
-        this.pendingDeletes.delete(threadId);
+        this.pendingDeletes.acknowledge(threadId);
       }
       this.renderPins();
       this.renderDrawerList();
@@ -762,6 +786,23 @@ class Commentor {
         });
       }
       this.refreshOpenBubble();
+      if (activeThreadId) {
+        requestAnimationFrame(() => {
+          const scope = activeReplyInBubble ? this.bubbleLayer : this.drawerList;
+          const replacement = Array.from(
+            scope.querySelectorAll<HTMLTextAreaElement>(
+              '[data-testid="commentor-reply-input"]',
+            ),
+          ).find(
+            (input) =>
+              input.closest<HTMLElement>("[data-thread-id]")?.dataset.threadId ===
+              activeThreadId,
+          );
+          if (!replacement) return;
+          replacement.focus({ preventScroll: true });
+          replacement.setSelectionRange(selectionStart, selectionEnd);
+        });
+      }
       this.subscriptionReady = true;
       this.newThreadIds.clear();
       this.newReplyIds.clear();
@@ -1507,19 +1548,18 @@ class Commentor {
   }
 
   private scheduleDelete(t: Thread): void {
-    if (this.pendingDeletes.has(t._id)) return;
-    const timer = window.setTimeout(async () => {
-      try {
-        await this.removeThread(t._id);
-      } catch (err) {
+    const started = this.pendingDeletes.begin(
+      t._id,
+      5000,
+      () => this.removeThread(t._id),
+      (err) => {
         console.error("[commentor] delete failed", err);
-        this.pendingDeletes.delete(t._id);
         this.renderPins();
         this.renderDrawerList();
         this.toast("Could not delete comment.", { kind: "error" });
-      }
-    }, 5000);
-    this.pendingDeletes.set(t._id, timer);
+      },
+    );
+    if (!started) return;
     if (this.openThreadId === t._id) this.closeBubbles(true);
     this.renderPins();
     this.renderDrawerList();
@@ -1527,9 +1567,10 @@ class Commentor {
       actionLabel: "Undo",
       duration: 5000,
       onAction: () => {
-        const pending = this.pendingDeletes.get(t._id);
-        window.clearTimeout(pending);
-        this.pendingDeletes.delete(t._id);
+        if (this.pendingDeletes.undo(t._id) !== "undone") {
+          this.toast("Deletion is already in progress.");
+          return;
+        }
         this.renderPins();
         this.renderDrawerList();
         this.toast("Deletion undone.");
@@ -1644,7 +1685,7 @@ class Commentor {
             "aria-label": "Locate commented text on page",
             onclick: () => this.focusThread(t),
           },
-          h("span", { class: "quote-text" }, escapeText(quote)),
+          h("span", { class: "quote-text" }, quote),
         )
       : h(
           "button",
@@ -1661,7 +1702,7 @@ class Commentor {
       { class: "thread-view", "data-thread-id": t._id },
       head,
       locate,
-      h("div", { class: "body" }, escapeText(t.body)),
+      h("div", { class: "body" }, t.body),
     );
     const replies = h("div", { class: "replies" });
     for (const r of t.replies)
@@ -1672,7 +1713,7 @@ class Commentor {
             class: `reply${this.newReplyIds.has(r._id) ? " is-new" : ""}`,
           },
           h("span", { class: "reply-who" }, r.authorName),
-          escapeText(r.body),
+          r.body,
         ),
       );
     view.append(replies);
@@ -1685,6 +1726,11 @@ class Commentor {
         rows: "1",
         "aria-describedby": helpId,
       }) as HTMLTextAreaElement;
+      input.value = this.replyDrafts.get(t._id) ?? "";
+      input.addEventListener("input", () => {
+        if (input.value) this.replyDrafts.set(t._id, input.value);
+        else this.replyDrafts.delete(t._id);
+      });
       const send = h(
         "button",
         {
@@ -1694,29 +1740,40 @@ class Commentor {
         },
         "Reply",
       ) as HTMLButtonElement;
-      const submitReply = async () => {
-        const body = input.value.trim();
-        if (!body || send.disabled) return;
+      if (this.pendingReplies.has(t._id)) {
         input.disabled = true;
         send.disabled = true;
         send.classList.add("is-pending");
         send.setAttribute("aria-busy", "true");
         send.textContent = "Sending…";
+      }
+      const submitReply = async () => {
+        const submittedDraft = input.value;
+        const body = submittedDraft.trim();
+        if (!body || send.disabled) return;
+        this.pendingReplies.set(t._id, submittedDraft);
+        this.setReplyPendingState(t._id, true);
         try {
           await this.addReply(t._id, body);
-          input.value = "";
+          const nextDraft = draftAfterSuccessfulReply(
+            this.replyDrafts.get(t._id),
+            submittedDraft,
+          );
+          if (nextDraft === undefined) this.replyDrafts.delete(t._id);
+          else this.replyDrafts.set(t._id, nextDraft);
+          for (const candidate of this.replyInputs(t._id)) {
+            if (candidate.value === submittedDraft) candidate.value = "";
+          }
         } catch (err) {
           console.error("[commentor] reply failed", err);
           this.toast("Could not post reply.", { kind: "error" });
         } finally {
-          if (input.isConnected) {
-            input.disabled = false;
-            send.disabled = false;
-            send.classList.remove("is-pending");
-            send.removeAttribute("aria-busy");
-            send.textContent = "Reply";
-            input.focus();
-          }
+          this.pendingReplies.delete(t._id);
+          this.setReplyPendingState(t._id, false);
+          const replacement = this.replyInputs(t._id).find((candidate) =>
+            candidate.closest(".bubble") === input.closest(".bubble"),
+          );
+          replacement?.focus({ preventScroll: true });
         }
       };
       send.addEventListener("click", () => void submitReply());
@@ -1745,6 +1802,28 @@ class Commentor {
       );
     }
     return view;
+  }
+
+  private replyInputs(threadId: ThreadId): HTMLTextAreaElement[] {
+    return Array.from(this.root.querySelectorAll<HTMLTextAreaElement>(
+      '[data-testid="commentor-reply-input"]',
+    )).filter((input) =>
+      input.closest<HTMLElement>("[data-thread-id]")?.dataset.threadId === threadId,
+    );
+  }
+
+  private setReplyPendingState(threadId: ThreadId, pending: boolean): void {
+    for (const input of this.replyInputs(threadId)) input.disabled = pending;
+    for (const button of this.root.querySelectorAll<HTMLButtonElement>(
+      '[data-testid="commentor-reply-send"]',
+    )) {
+      if (button.closest<HTMLElement>("[data-thread-id]")?.dataset.threadId !== threadId)
+        continue;
+      button.disabled = pending;
+      button.classList.toggle("is-pending", pending);
+      button.toggleAttribute("aria-busy", pending);
+      button.textContent = pending ? "Sending…" : "Reply";
+    }
   }
 
   // ── drawer (the widget expanding into the comments list) ──
@@ -2269,10 +2348,23 @@ class Commentor {
   }
 
   private toast(msg: string, options: ToastOptions = {}): void {
-    this.root.querySelector(".toast")?.remove();
+    let region = this.root.querySelector<HTMLElement>(".toast-region");
+    if (!region) {
+      region = h("div", {
+        class: "toast-region",
+        "aria-label": "Notifications",
+      });
+      this.root.append(region);
+    }
     const close = (el: HTMLElement) => {
+      if (!el.isConnected || el.getAttribute("data-state") === "closed") return;
       el.setAttribute("data-state", "closed");
-      window.setTimeout(() => el.remove(), 150);
+      window.setTimeout(() => {
+        const parent = el.parentElement;
+        el.remove();
+        if (parent?.classList.contains("toast-region") && !parent.children.length)
+          parent.remove();
+      }, 150);
     };
     const el = h(
       "div",
@@ -2298,7 +2390,7 @@ class Commentor {
         ),
       );
     }
-    this.root.append(el);
+    region.append(el);
     window.setTimeout(
       () => close(el),
       options.duration ?? (options.kind === "error" ? 6000 : 3000),
@@ -2608,7 +2700,16 @@ button:focus-visible, [tabindex="0"]:focus-visible, textarea:focus-visible {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
 }
+.content-list::-webkit-scrollbar { width: 5px; }
+.content-list::-webkit-scrollbar-track { background: transparent; }
+.content-list::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: var(--border);
+}
+.content-list::-webkit-scrollbar-button { display: none; }
 .drawer-thread {
   flex: 0 0 auto;
   padding: 10px 12px;
@@ -2813,6 +2914,20 @@ button:focus-visible, [tabindex="0"]:focus-visible, textarea:focus-visible {
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 20%, transparent);
 }
 .composer-buttons { display: flex; gap: 6px; margin-top: 8px; }
+.composer-footer, .reply-footer {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 8px;
+}
+.composer-footer .composer-help, .reply-footer .composer-help {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin-top: 0;
+}
+.composer-footer .actions { flex: 0 0 auto; margin-top: 0; }
+.reply-footer > button { flex: 0 0 auto; margin-top: 0; }
 .composer-help {
   display: block;
   margin-top: 6px;
@@ -3006,12 +3121,27 @@ button:focus-visible, [tabindex="0"]:focus-visible, textarea:focus-visible {
   transform: translateX(-50%);
   animation: rise var(--duration-base) var(--ease-standard);
 }
-.toast {
+.toast-region {
   position: fixed;
   bottom: 96px;
   left: 50%;
   z-index: 2147483647;
+  width: max-content;
   max-width: calc(100vw - 24px);
+  max-height: max(44px, calc(100vh - 120px));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  transform: translateX(-50%);
+}
+.toast {
+  position: relative;
+  flex: 0 0 auto;
+  max-width: 100%;
   min-height: 44px;
   padding: 8px 10px 8px 14px;
   border-radius: 999px;
@@ -3022,8 +3152,7 @@ button:focus-visible, [tabindex="0"]:focus-visible, textarea:focus-visible {
   align-items: center;
   gap: 10px;
   font-size: 13px;
-  transform: translateX(-50%);
-  animation: rise var(--duration-base) var(--ease-standard);
+  animation: toast-rise var(--duration-base) var(--ease-standard);
 }
 .toast.error { background: var(--danger-bg); color: #ffffff; }
 .toast button {
@@ -3037,7 +3166,7 @@ button:focus-visible, [tabindex="0"]:focus-visible, textarea:focus-visible {
   font-weight: 700;
 }
 .toast[data-state="closed"] {
-  animation: fall var(--duration-fast) var(--ease-standard) forwards;
+  animation: toast-fall var(--duration-fast) var(--ease-standard) forwards;
 }
 .tip {
   position: fixed;
@@ -3104,8 +3233,26 @@ button:focus-visible, [tabindex="0"]:focus-visible, textarea:focus-visible {
   from { opacity: 1; transform: translateX(-50%) translateY(0); }
   to { opacity: 0; transform: translateX(-50%) translateY(8px); }
 }
+@keyframes toast-rise {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes toast-fall {
+  from { opacity: 1; transform: translateY(0); }
+  to { opacity: 0; transform: translateY(8px); }
+}
 
 @media (max-width: 419px) {
+  .head { display: grid; grid-template-columns: minmax(0, 1fr) auto 44px; align-items: center; }
+  .head .who { grid-column: 1; grid-row: 1; max-width: 100%; }
+  .head .when { grid-column: 2; grid-row: 1; }
+  .head .thread-close { grid-column: 3; grid-row: 1; }
+  .head .resolved, .head .archived-badge { grid-column: 1 / -1; justify-self: start; }
+  .head .card-actions { grid-column: 1 / -1; margin-left: 0; justify-content: flex-end; opacity: 1; }
+  .card-action { width: 44px; height: 44px; flex: 0 0 44px; }
+  .composer-footer, .reply-footer { align-items: stretch; flex-direction: column; }
+  .composer-footer .actions { justify-content: flex-end; }
+  .reply-footer > button { width: 100%; }
   .actions button, .reply-row button, .card-action, .filter-tabs button, .empty button {
     min-height: 44px;
   }

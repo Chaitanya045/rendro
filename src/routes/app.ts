@@ -7,6 +7,7 @@ import { createOrgApiKey } from "@/api-keys";
 import { isDeleted } from "@/soft-delete";
 import { renderNotFoundPage } from "@/routes/not-found";
 import { renderLandingPage } from "@/routes/landing";
+import { renderThemeAssets } from "./theme";
 
 const app = new Hono<{ Variables: { user?: User } }>();
 
@@ -130,16 +131,7 @@ function renderCreateOrg(user: User, org: string): string {
 <title>${orgEsc} — Rendro</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet">
-<script>
-  (function(){
-    var saved=localStorage.getItem("commentor-theme");
-    var mode=saved==="dark"||saved==="light"||saved==="system"?saved:"system";
-    var dark=mode==="dark"||(mode==="system"&&matchMedia("(prefers-color-scheme: dark)").matches);
-    document.documentElement.dataset.theme=mode;
-    document.documentElement.dataset.resolvedTheme=dark?"dark":"light";
-    document.documentElement.classList.toggle("dark",dark);
-  })();
-</script>
+${renderThemeAssets()}
 <style>
   *{box-sizing:border-box}
   html{color-scheme:light dark}
@@ -243,38 +235,7 @@ function renderCreateOrg(user: User, org: string): string {
 <script>
   (function(){
     var root=document.documentElement;
-    var themeMedia=matchMedia("(prefers-color-scheme: dark)");
-    var themeToggle=document.getElementById("theme-toggle");
-    var themeIcon=document.getElementById("theme-icon");
-    var modes=["system","dark","light"];
-    var icons={system:"brightness_auto",dark:"dark_mode",light:"light_mode"};
-    function normalizedTheme(){
-      var saved=localStorage.getItem("commentor-theme");
-      return saved==="dark"||saved==="light"||saved==="system"?saved:"system";
-    }
-    function applyTheme(mode,persist){
-      var dark=mode==="dark"||(mode==="system"&&themeMedia.matches);
-      root.dataset.theme=mode;
-      root.dataset.resolvedTheme=dark?"dark":"light";
-      root.classList.toggle("dark",dark);
-      if(persist)localStorage.setItem("commentor-theme",mode);
-      if(themeIcon)themeIcon.textContent=icons[mode];
-      if(themeToggle){
-        var next=modes[(modes.indexOf(mode)+1)%modes.length];
-        themeToggle.title="Theme: "+mode;
-        themeToggle.setAttribute("aria-label","Switch to "+next+" theme");
-      }
-    }
-    if(themeToggle){
-      themeToggle.addEventListener("click",function(){
-        var mode=normalizedTheme();
-        applyTheme(modes[(modes.indexOf(mode)+1)%modes.length],true);
-      });
-    }
-    themeMedia.addEventListener("change",function(){
-      if(normalizedTheme()==="system")applyTheme("system",false);
-    });
-    applyTheme(normalizedTheme(),false);
+    window.RendroTheme.mount(document.getElementById("theme-toggle"));
 
     var form=document.getElementById("create-org-form");
     var button=document.getElementById("create-org-submit");
@@ -389,7 +350,7 @@ function renderOrgTreePage(user: User | null, org: string, selectedDoc = "", opt
     ? ' sandbox="allow-scripts allow-forms allow-popups allow-downloads"'
     : "";
   const backMarkup = options.backHref
-    ? `<a class="topbar-btn topbar-btn-back" href="${escapeHtml(options.backHref)}"><span class="material-symbols-outlined" aria-hidden="true">arrow_back</span><span class="topbar-back-label">${escapeHtml(options.backLabel ?? "Back")}</span></a>`
+    ? `<a class="topbar-btn topbar-btn-back" href="${escapeHtml(options.backHref)}" aria-label="${escapeHtml(options.backLabel ?? "Back")}"><span class="material-symbols-outlined" aria-hidden="true">arrow_back</span><span class="topbar-back-label">${escapeHtml(options.backLabel ?? "Back")}</span></a>`
     : "";
   const avatarMarkup = user
     ? `<div class="avatar-wrap">
@@ -409,6 +370,7 @@ function renderOrgTreePage(user: User | null, org: string, selectedDoc = "", opt
 <title>${displayNameEsc} — Rendro</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet">
+${renderThemeAssets()}
 <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
 <script>
 tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e4e7","background":"#ffffff","surface-container-high":"#f4f4f5","on-secondary-fixed":"#09090b","on-surface-variant":"#71717a","primary":"#c2410c","primary-fixed-dim":"#fed7aa","surface":"#ffffff","surface-container-low":"#fafafa","secondary-container":"#ffedd5","on-secondary-container":"#09090b","on-surface":"#09090b","outline":"#71717a","on-primary":"#ffffff","surface-container":"#f4f4f5"},fontFamily:{"body-md":["Inter"]},fontSize:{"body-md":["14px",{lineHeight:"20px",fontWeight:"400"}],"headline-sm":["20px",{lineHeight:"28px",fontWeight:"600"}],"headline-md":["24px",{lineHeight:"32px",fontWeight:"600"}]}}}}
@@ -416,13 +378,13 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
 <style>
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
   :root{--sidebar-expanded-width:280px;--sidebar-width:var(--sidebar-expanded-width)}
-  body{font-family:Inter,system-ui,sans-serif;background:#fff;color:#09090b;overflow:hidden;height:100vh;font-size:14px;line-height:20px}
+  body{display:flow-root;font-family:Inter,system-ui,sans-serif;background:#fff;color:#09090b;overflow:hidden;height:100vh;font-size:14px;line-height:20px}
   .material-symbols-outlined{font-variation-settings:'FILL'0,'wght'400,'GRAD'0,'opsz'24;vertical-align:middle;font-size:20px}
   ::-webkit-scrollbar{width:6px} ::-webkit-scrollbar-track{background:transparent} ::-webkit-scrollbar-thumb{background:#e4e4e7;border-radius:10px}
 
   .topbar-btn-back{color:#52525b;background:transparent;border:1px solid #e4e4e7;text-decoration:none}
   .topbar-btn-back:hover{background:#f4f4f5;color:#09090b;border-color:#d4d4d8}
-  .mobile-tree-toggle{display:none}
+  .topbar-btn-icon.mobile-tree-toggle{display:none}
   .mobile-tree-backdrop{display:none}
   .topbar{position:fixed;top:0;z-index:50;width:100%;height:56px;background:#fff;border-bottom:1px solid #e4e4e7;display:flex;align-items:center;justify-content:space-between;padding:0 24px;transition:transform .3s cubic-bezier(.4,0,.2,1),opacity .2s cubic-bezier(.4,0,.2,1);will-change:transform,opacity}
   .topbar-left{display:flex;align-items:center;gap:10px}
@@ -432,6 +394,10 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
   .topbar-search input{border:0;outline:0;background:transparent;font-size:14px;color:#09090b;width:100%;font-family:Inter}
   .topbar-search input::placeholder{color:#71717a}
   .topbar-actions{display:flex;align-items:center;gap:16px}
+  .mobile-more{display:none;position:relative}
+  .mobile-more-menu{position:absolute;top:48px;right:0;width:min(280px,calc(100vw - 20px));max-height:calc(100vh - 68px);overflow:auto;background:#fff;border:1px solid #e4e4e7;border-radius:10px;box-shadow:0 12px 32px rgba(24,24,27,.18);padding:6px;z-index:120}
+  .mobile-more-menu[hidden]{display:none}
+  .mobile-action-label{display:none}
   .topbar-btn{padding:6px 12px;font-size:12px;font-weight:600;border-radius:4px;cursor:pointer;border:0;font-family:Inter;display:flex;align-items:center;gap:6px;transition:background-color .15s,color .15s,border-color .15s,transform .15s cubic-bezier(.4,0,.2,1)}
   .topbar-btn-share{color:#52525b;background:transparent;border:1px solid #e4e4e7;min-width:172px;justify-content:center;overflow:hidden}
   .topbar-btn-share:hover{background:#f4f4f5;color:#09090b;border-color:#d4d4d8}
@@ -574,10 +540,11 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
   .main-placeholder h2{font-size:24px;font-weight:600;color:#09090b;margin-bottom:8px}
   .main-placeholder p{font-size:16px;color:#71717a;max-width:320px}
   .ph-icon{width:64px;height:64px;border-radius:50%;background:#f4f4f5;display:inline-flex;align-items:center;justify-content:center;margin-bottom:16px}
-  .content-frame{width:100%;height:100%;border:0;background:#fff}
+  .content-frame{display:block;width:100%;height:100%;border:0;background:#fff}
   @media (prefers-reduced-motion: reduce){.tree-skeleton-icon,.tree-skeleton-label{animation:none;background:#f4f4f5}}
   @media (prefers-reduced-motion: reduce){.topbar,.sidebar,.main,.sidebar-resizer,.share-label-track,.shortcut-tooltip,.sidebar-resizer::before{transition:none}.sidebar-resizer::before{transform:scaleY(1)}.resizer-sparks{display:none}}
   @media (prefers-reduced-motion: reduce){.share-icon-track{transition:none}.share-loader{animation:none!important}}
+  @media (prefers-reduced-motion: reduce){.tree-folder-content,.active-indicator{transition:none!important}}
   .avatar-wrap{position:relative}
   .avatar-menu{position:absolute;top:42px;right:0;background:#fff;border:1px solid #e4e4e7;border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,.12);padding:4px;min-width:200px;z-index:100}
   .avatar-menu-email{padding:8px 12px;font-size:12px;color:#71717a;border-bottom:1px solid #e4e4e7;margin-bottom:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -587,15 +554,6 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
   .topbar-btn-icon{width:32px;height:32px;border-radius:4px;border:0;background:transparent;cursor:pointer;display:flex;align-items:center;justify-content:center;color:#71717a;transition:background .15s,color .15s,transform .15s cubic-bezier(.4,0,.2,1)}
   .topbar-btn-icon:hover{background:#f4f4f5}
   .topbar-btn-icon:active{transform:scale(.96)}
-  .theme-icon-window{width:20px;height:20px;overflow:hidden;display:inline-flex;align-items:flex-start;justify-content:center}
-  .theme-icon-track{display:flex;flex-direction:column;transition:transform .3s cubic-bezier(.4,0,.2,1);will-change:transform}
-  .theme-icon{width:20px;height:20px;line-height:20px;display:flex;align-items:center;justify-content:center;flex:0 0 20px;font-size:20px}
-  @media (prefers-reduced-motion: reduce){.theme-icon-track{transition:none!important}}
-  @supports (view-transition-name: root){
-    ::view-transition-old(root),::view-transition-new(root){animation:none;mix-blend-mode:normal}
-    ::view-transition-image-pair(root){isolation:isolate}
-    html.theme-rippling::view-transition-new(root){clip-path:circle(0 at var(--theme-ripple-x,50%) var(--theme-ripple-y,50%))}
-  }
   @media (prefers-reduced-motion: reduce){.tree-item.tree-item-entering{animation:none!important;animation-delay:0s!important;opacity:1!important;transform:none!important}.tree-folder.loading>.tree-item .folder-icon,.tree-folder.loading>.tree-item .font-body-md{animation:none!important;background:none!important;color:#c2410c!important;-webkit-text-fill-color:currentColor!important}html.doc-loading .tree-item.active{animation:none!important;transform:none!important}html.doc-loading .tree-item.active::before{animation:none!important}html.dark .tree-folder.loading>.tree-item .folder-icon,html.dark .tree-folder.loading>.tree-item .font-body-md{color:#fb923c!important}}
   @media (prefers-reduced-motion: reduce){.tree-item[data-path],.tree-item[data-path]>.material-symbols-outlined{transition-property:background-color,color!important}.tree-item[data-path]:hover,.tree-item[data-path]:focus-within{translate:none!important}.tree-item[data-path]:hover>.material-symbols-outlined,.tree-item[data-path]:focus-within>.material-symbols-outlined{transform:none!important}}
   @media (prefers-reduced-motion: reduce){.tree-folder>.tree-item .caret-icon,.tree-folder>.tree-item .folder-icon{transition-property:color!important}.tree-folder>.tree-item:hover .caret-icon,.tree-folder>.tree-item:focus-within .caret-icon{translate:none!important}}
@@ -664,13 +622,30 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
   html.dark .avatar-menu-item:hover{background:#18181b}
   html.dark .topbar-btn-back{color:#a1a1aa;border-color:#27272a}
   html.dark .topbar-btn-back:hover{background:#18181b;color:#fafafa;border-color:#3f3f46}
+  html.dark .mobile-more-menu{background:#09090b;border-color:#27272a;box-shadow:0 16px 40px rgba(0,0,0,.5)}
   @media(max-width:760px){
+    .sidebar-tree{scrollbar-width:none}
+    .sidebar-tree::-webkit-scrollbar{display:none}
     .topbar{padding:0 10px}
-    .topbar-left{min-width:0;gap:6px}
-    .topbar-logo{max-width:34vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:18px}
+    .topbar-left{min-width:0;gap:6px;flex:1}
+    .topbar-logo{min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:18px}
     .topbar-actions{gap:4px}
-    .mobile-tree-toggle{width:44px;height:44px;display:flex;flex:0 0 44px}
-    .topbar-btn-back{width:44px;height:44px;padding:0;justify-content:center}
+    .mobile-more{display:block}
+    .mobile-more-menu .topbar-btn-back,.mobile-more-menu .shortcut-tooltip-wrap,.mobile-more-menu .theme-toggle,.mobile-more-menu .avatar-wrap{display:flex;width:100%}
+    .mobile-more-menu .topbar-btn-back,.mobile-more-menu #shell-toggle,.mobile-more-menu #theme-toggle,.mobile-more-menu #avatar-btn{height:44px;width:100%;padding:0 12px;border:0;border-radius:6px;justify-content:flex-start;gap:10px;background:transparent;color:#52525b;font-size:14px;font-weight:600;text-decoration:none}
+    .mobile-more-menu .topbar-btn-back:hover,.mobile-more-menu #shell-toggle:hover,.mobile-more-menu #theme-toggle:hover,.mobile-more-menu #avatar-btn:hover{background:#f4f4f5;color:#09090b}
+    .mobile-more-menu .topbar-btn-back .topbar-back-label{display:inline}
+    .mobile-more-menu .mobile-action-label{display:inline}
+    .mobile-more-menu #theme-toggle::after{content:"Theme"}
+    .mobile-more-menu #avatar-btn::after{content:"Account"}
+    .mobile-more-menu #avatar-btn{border-radius:6px}
+    .mobile-more-menu .shortcut-tooltip{display:none}
+    .mobile-more-menu .avatar-wrap{display:block}
+    .mobile-more-menu .avatar-menu{position:static;width:100%;min-width:0;margin-top:2px;box-shadow:none;border-radius:6px}
+    html.dark .mobile-more-menu .topbar-btn-back,html.dark .mobile-more-menu #shell-toggle,html.dark .mobile-more-menu #theme-toggle,html.dark .mobile-more-menu #avatar-btn{color:#d4d4d8}
+    html.dark .mobile-more-menu .topbar-btn-back:hover,html.dark .mobile-more-menu #shell-toggle:hover,html.dark .mobile-more-menu #theme-toggle:hover,html.dark .mobile-more-menu #avatar-btn:hover{background:#18181b;color:#fafafa}
+    .topbar-btn-icon.mobile-tree-toggle{width:44px;height:44px;display:flex;flex:0 0 44px}
+    .topbar-btn-back{width:44px;height:44px;flex:0 0 44px;padding:0;justify-content:center}
     .topbar-btn-back .topbar-back-label{display:none}
     .topbar-btn-share{width:44px;min-width:44px;height:44px;padding:0}
     .topbar-btn-share .share-label-window{display:none}
@@ -694,13 +669,17 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
     ${backMarkup}
   </div>
   <div class="topbar-actions">
-    <span class="shortcut-tooltip-wrap"><button class="topbar-btn-icon shell-toggle" id="shell-toggle" type="button" aria-label="Hide app shell, keyboard shortcut Ctrl Shift H" aria-describedby="shell-shortcut-tooltip" aria-pressed="false"><span class="material-symbols-outlined" aria-hidden="true">fullscreen</span></button><span class="shortcut-tooltip" id="shell-shortcut-tooltip" role="tooltip"><span class="shortcut-tooltip-label">Hide app shell</span><span class="shortcut-keys" id="shell-shortcut-keys" aria-hidden="true"><span class="shortcut-key">Ctrl</span><span class="shortcut-key">Shift</span><span class="shortcut-key">H</span></span></span></span>
+    <span class="shortcut-tooltip-wrap"><button class="topbar-btn-icon shell-toggle" id="shell-toggle" type="button" aria-label="Hide app shell, keyboard shortcut Ctrl Shift H" aria-describedby="shell-shortcut-tooltip" aria-pressed="false"><span class="material-symbols-outlined" aria-hidden="true">fullscreen</span><span class="mobile-action-label" id="shell-mobile-label">Enter reading mode</span></button><span class="shortcut-tooltip" id="shell-shortcut-tooltip" role="tooltip"><span class="shortcut-tooltip-label">Hide app shell</span><span class="shortcut-keys" id="shell-shortcut-keys" aria-hidden="true"><span class="shortcut-key">Ctrl</span><span class="shortcut-key">Shift</span><span class="shortcut-key">H</span></span></span></span>
     <button class="topbar-btn topbar-btn-share" id="share-btn" type="button" aria-label="${shareLabel}">
       <span class="share-icon-window" aria-hidden="true"><span class="share-icon-track"><span class="material-symbols-outlined share-icon-row">link</span><span class="share-icon-row"><span class="share-loader"></span></span><span class="material-symbols-outlined share-icon-row" id="share-feedback-icon">check</span></span></span>
       <span class="share-label-window" aria-hidden="true"><span class="share-label-track"><span class="share-label">${shareLabel}</span><span class="share-label">${sharePendingLabel}</span><span class="share-label" id="share-feedback-label">${shareDoneLabel}</span></span></span>
     </button>
-    <button class="topbar-btn-icon theme-toggle" id="theme-toggle" type="button" aria-label="Switch to dark theme" title="Theme: system"><span class="theme-icon-window" aria-hidden="true"><span class="theme-icon-track"><span class="material-symbols-outlined theme-icon">brightness_auto</span><span class="material-symbols-outlined theme-icon">dark_mode</span><span class="material-symbols-outlined theme-icon">light_mode</span><span class="material-symbols-outlined theme-icon">brightness_auto</span></span></span></button>
+    <button class="topbar-btn-icon theme-toggle" id="theme-toggle" type="button" aria-label="Switch to dark theme" title="Theme: system"><span class="material-symbols-outlined" aria-hidden="true">contrast</span></button>
     ${avatarMarkup}
+    <div class="mobile-more" id="mobile-more">
+      <button class="topbar-btn-icon" id="mobile-more-btn" type="button" aria-label="More document actions" aria-haspopup="dialog" aria-controls="mobile-more-menu" aria-expanded="false"><span class="material-symbols-outlined" aria-hidden="true">more_vert</span></button>
+      <div class="mobile-more-menu" id="mobile-more-menu" role="dialog" aria-label="More document actions" hidden></div>
+    </div>
   </div>
 </header>
 <div class="shell-hotzone shell-hotzone-top" id="shell-hotzone-top" aria-hidden="true"></div>
@@ -731,96 +710,9 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
 <script>
 (function(){
   var root=document.documentElement;
-  var themeMedia=matchMedia("(prefers-color-scheme:dark)");
-  var themeToggle=document.getElementById("theme-toggle");
-  var themeIconTrack=themeToggle&&themeToggle.querySelector(".theme-icon-track");
-  var THEME_ORDER=["system","dark","light"];
-  var THEME_ICON_INDEX={system:0,dark:1,light:2};
-  var THEME_NAMES={system:"system",dark:"dark",light:"light"};
-  var themeIconResetTimer;
-  var activeThemeTransition;
-  var themeTransitionId=0;
-  function normalizedTheme(){
-    var saved=localStorage.getItem("commentor-theme");
-    return saved==="dark"||saved==="light"||saved==="system"?saved:"system";
-  }
-  function resolvedTheme(mode){return mode==="system"?(themeMedia.matches?"dark":"light"):mode;}
-  function notifyTheme(mode){
-    var frame=document.getElementById("content-frame");
-    if(frame&&frame.contentWindow)frame.contentWindow.postMessage({type:"rendro-theme",theme:mode},"*");
-  }
-  function setThemeIconPosition(position,animate){
-    if(!themeIconTrack)return;
-    if(themeIconResetTimer)window.clearTimeout(themeIconResetTimer);
-    if(!animate||matchMedia("(prefers-reduced-motion: reduce)").matches){
-      themeIconTrack.style.transition="none";
-      themeIconTrack.style.transform="translateY(-"+(position*20)+"px)";
-      void themeIconTrack.offsetHeight;
-      themeIconTrack.style.transition="";
-      return;
-    }
-    themeIconTrack.style.transform="translateY(-"+(position*20)+"px)";
-  }
-  function resetThemeIconToSystem(){
-    if(!themeIconTrack)return;
-    themeIconTrack.style.transition="none";
-    themeIconTrack.style.transform="translateY(0)";
-    void themeIconTrack.offsetHeight;
-    themeIconTrack.style.transition="";
-  }
-  function renderThemeButton(mode,animate){
-    if(!themeToggle||!themeIconTrack)return;
-    var current=themeToggle.dataset.themeMode||mode;
-    var next=THEME_ORDER[(THEME_ORDER.indexOf(mode)+1)%THEME_ORDER.length];
-    themeToggle.dataset.themeMode=mode;
-    themeToggle.setAttribute("aria-label","Switch to "+THEME_NAMES[next]+" theme");
-    themeToggle.setAttribute("title","Theme: "+THEME_NAMES[mode]);
-    var reduceMotion=matchMedia("(prefers-reduced-motion: reduce)").matches;
-    var position=animate&&!reduceMotion&&current==="light"&&mode==="system"?3:THEME_ICON_INDEX[mode];
-    setThemeIconPosition(position,animate);
-    if(position===3&&animate&&!reduceMotion){
-      themeIconResetTimer=window.setTimeout(resetThemeIconToSystem,320);
-    }
-  }
-  function applyTheme(mode,persist,animate){
-    var resolved=resolvedTheme(mode);
-    root.dataset.theme=mode;
-    root.dataset.resolvedTheme=resolved;
-    root.classList.toggle("dark",resolved==="dark");
-    if(persist)localStorage.setItem("commentor-theme",mode);
-    renderThemeButton(mode,animate);
-    notifyTheme(mode);
-  }
-  function transitionTheme(mode){
-    if(!themeToggle||matchMedia("(prefers-reduced-motion: reduce)").matches||!document.startViewTransition){
-      applyTheme(mode,true,true);
-      return;
-    }
-    var transitionId=++themeTransitionId;
-    if(activeThemeTransition)activeThemeTransition.skipTransition();
-    var rect=themeToggle.getBoundingClientRect();
-    var x=rect.left+rect.width/2;
-    var y=rect.top+rect.height/2;
-    var radius=Math.hypot(Math.max(x,innerWidth-x),Math.max(y,innerHeight-y));
-    root.style.setProperty("--theme-ripple-x",x+"px");
-    root.style.setProperty("--theme-ripple-y",y+"px");
-    root.classList.add("theme-rippling");
-    var viewTransition=document.startViewTransition(function(){applyTheme(mode,true,true);});
-    activeThemeTransition=viewTransition;
-    viewTransition.ready.then(function(){
-      if(transitionId!==themeTransitionId)return;
-      root.animate(
-        {clipPath:["circle(0px at "+x+"px "+y+"px)","circle("+radius+"px at "+x+"px "+y+"px)"]},
-        {duration:520,easing:"cubic-bezier(.4,0,.2,1)",fill:"both",pseudoElement:"::view-transition-new(root)"}
-      );
-    }).catch(function(){});
-    viewTransition.finished.finally(function(){
-      if(transitionId!==themeTransitionId)return;
-      activeThemeTransition=undefined;
-      root.classList.remove("theme-rippling");
-    });
-  }
-  applyTheme(normalizedTheme(),false,false);
+  function normalizedTheme(){return window.RendroTheme.getMode();}
+  function notifyTheme(mode){var frame=document.getElementById("content-frame");if(frame&&frame.contentWindow)frame.contentWindow.postMessage({type:"rendro-theme",theme:mode},"*");}
+  window.RendroTheme.mount(document.getElementById("theme-toggle"),notifyTheme);
 
   var MIN_WIDTH=220;
   var MAX_WIDTH=420;
@@ -831,6 +723,7 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
   var topbar=document.querySelector(".topbar");
   var shellToggle=document.getElementById("shell-toggle");
   var shellToggleIcon=shellToggle&&shellToggle.querySelector(".material-symbols-outlined");
+  var shellToggleMobileLabel=document.getElementById("shell-mobile-label");
   var shellShortcutKeys=document.getElementById("shell-shortcut-keys");
   var mobileTreeToggle=document.getElementById("mobile-tree-toggle");
   var mobileTreeBackdrop=document.getElementById("mobile-tree-backdrop");
@@ -894,12 +787,14 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
     }
     if(shellToggle){
       shellToggle.setAttribute("aria-pressed",String(hidden));
-      shellToggle.setAttribute("aria-label",(hidden?"Show app shell":"Hide app shell")+", keyboard shortcut "+shellShortcutText);
+      shellToggle.setAttribute("aria-label",(mobileTreeMode()?(hidden?"Exit reading mode":"Enter reading mode"):(hidden?"Show app shell":"Hide app shell"))+", keyboard shortcut "+shellShortcutText);
     }
+    if(shellToggleMobileLabel)shellToggleMobileLabel.textContent=hidden?"Exit reading mode":"Enter reading mode";
     if(shellToggleIcon)shellToggleIcon.textContent=hidden?"fullscreen_exit":"fullscreen";
     if(hidden&&shellToggle)shellToggle.blur();
     notifyShellLayout();
   }
+  function focusShellControl(){if(mobileTreeMode()&&mobileMoreButton)mobileMoreButton.focus();else if(shellToggle)shellToggle.focus();}
   function updateShellAutoReveal(e){
     if(!root.classList.contains("shell-hidden"))return;
     var wasHeader=root.classList.contains("shell-header-revealed");
@@ -954,12 +849,6 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
   root.classList.add("sidebar-ready");
   setShellHidden(localStorage.getItem("rendro-shell-hidden")==="1",false);
 
-  if(themeToggle)themeToggle.addEventListener("click",function(){
-    var current=normalizedTheme();
-    var next=THEME_ORDER[(THEME_ORDER.indexOf(current)+1)%THEME_ORDER.length];
-    transitionTheme(next);
-  });
-  themeMedia.addEventListener("change",function(){if(normalizedTheme()==="system")applyTheme("system",false,false);});
   if(resizer){
     var dragging=false;
     var impactSparkTimer;
@@ -1046,7 +935,7 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
     if(shellShortcut&&!(e.target instanceof Element&&e.target.closest("input,textarea,select,[contenteditable='true'],[contenteditable='plaintext-only'],[contenteditable='']"))){
       e.preventDefault();
       setShellHidden(!root.classList.contains("shell-hidden"));
-      if(!root.classList.contains("shell-hidden")&&shellToggle)shellToggle.focus();
+      if(!root.classList.contains("shell-hidden"))focusShellControl();
       return;
     }
     if(e.key==="Escape"&&root.classList.contains("tree-mobile-open")){
@@ -1058,9 +947,24 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
     if(e.key==="Escape"&&root.classList.contains("shell-hidden")){
       e.preventDefault();
       setShellHidden(false);
-      if(shellToggle)shellToggle.focus();
+      focusShellControl();
     }
   });
+  var commentorToken="",commentorTokenExpiresAt=0,commentorTokenRequest=null;
+  function commentorTokenExpiry(token){
+    try{var part=token.split(".")[1];if(!part)return 0;part=part.replace(/-/g,"+").replace(/_/g,"/");while(part.length%4)part+="=";var payload=JSON.parse(atob(part));return typeof payload.exp==="number"?payload.exp*1000:0;}catch(_){return 0;}
+  }
+  function fetchCommentorToken(forceRefresh,allowCached){
+    var now=Date.now();
+    if((!forceRefresh||allowCached)&&commentorToken&&commentorTokenExpiresAt>now+30000)return Promise.resolve(commentorToken);
+    if(commentorTokenRequest)return commentorTokenRequest;
+    commentorTokenRequest=fetch("/api/auth/convex/token",{credentials:"same-origin",headers:{Accept:"application/json"}})
+      .then(function(response){return response.ok?response.json():null;})
+      .then(function(payload){var token=payload&&typeof payload.token==="string"?payload.token:null;if(token){commentorToken=token;commentorTokenExpiresAt=commentorTokenExpiry(token);}else{commentorToken="";commentorTokenExpiresAt=0;}return token;})
+      .catch(function(){commentorToken="";commentorTokenExpiresAt=0;return null;})
+      .finally(function(){commentorTokenRequest=null;});
+    return commentorTokenRequest;
+  }
   window.addEventListener("message",function(e){
     var allowedOrigin=e.origin===window.location.origin||(window.RENDRO_DOCUMENT_BASE&&e.origin==="null");
     if(!allowedOrigin||!e.data)return;
@@ -1069,22 +973,54 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
       var source=e.source;
       var requestId=typeof e.data.requestId==="string"?e.data.requestId:"";
       if(!window.RENDRO_SHARE_CONFIG||!frame||source!==frame.contentWindow||!requestId)return;
-      fetch("/api/auth/convex/token",{credentials:"same-origin",headers:{Accept:"application/json"}})
-        .then(function(response){return response.ok?response.json():null;})
-        .then(function(payload){source.postMessage({type:"commentor-auth-response",requestId:requestId,token:payload&&typeof payload.token==="string"?payload.token:null},"*");})
-        .catch(function(){source.postMessage({type:"commentor-auth-response",requestId:requestId,token:null},"*");});
+      fetchCommentorToken(e.data.forceRefreshToken===true,e.data.allowCachedToken===true)
+        .then(function(token){source.postMessage({type:"commentor-auth-response",requestId:requestId,token:token},"*");});
+      return;
+    }
+    if(e.data.type==="commentor-theme-ready"){
+      var themeFrame=document.getElementById("content-frame");
+      if(!themeFrame||e.source!==themeFrame.contentWindow)return;
+      notifyTheme(root.dataset.theme||normalizedTheme());
       return;
     }
     if(e.data.type!=="shell-toggle")return;
+    var shellFrame=document.getElementById("content-frame");
+    if(!shellFrame||e.source!==shellFrame.contentWindow)return;
     setShellHidden(!root.classList.contains("shell-hidden"));
-    if(!root.classList.contains("shell-hidden")&&shellToggle)shellToggle.focus();
+    if(!root.classList.contains("shell-hidden"))focusShellControl();
   });
 
+  var mobileMoreButton=document.getElementById("mobile-more-btn"),mobileMoreMenu=document.getElementById("mobile-more-menu");
+  var mobileMoreMedia=window.matchMedia("(max-width:760px)");
+  var mobileMoreItems=[document.querySelector(".topbar-btn-back"),document.querySelector(".shortcut-tooltip-wrap"),document.getElementById("theme-toggle"),document.querySelector(".avatar-wrap")].filter(Boolean);
+  var mobileMoreSlots=mobileMoreItems.map(function(item){var slot=document.createComment("mobile-more-slot");item.parentNode.insertBefore(slot,item);return {item:item,slot:slot};});
+  function setMobileMore(open,restoreFocus){
+    if(!mobileMoreButton||!mobileMoreMenu)return;
+    var active=mobileMoreMedia.matches&&open;
+    mobileMoreMenu.hidden=!active;
+    mobileMoreButton.setAttribute("aria-expanded",String(active));
+    if(active){var first=mobileMoreMenu.querySelector("a,button");if(first)first.focus();}
+    if(!active&&restoreFocus)mobileMoreButton.focus();
+  }
+  function syncMobileMore(){
+    if(!mobileMoreMenu)return;
+    setMobileMore(false,false);
+    mobileMoreSlots.forEach(function(entry){
+      if(mobileMoreMedia.matches)mobileMoreMenu.appendChild(entry.item);
+      else entry.slot.parentNode.insertBefore(entry.item,entry.slot.nextSibling);
+    });
+    setShellHidden(root.classList.contains("shell-hidden"),false);
+  }
+  syncMobileMore();
+  if(mobileMoreMedia.addEventListener)mobileMoreMedia.addEventListener("change",syncMobileMore);
+  else mobileMoreMedia.addListener(syncMobileMore);
+  if(mobileMoreButton)mobileMoreButton.addEventListener("click",function(e){e.stopPropagation();setMobileMore(mobileMoreMenu.hidden,false);});
+  mobileMoreItems.slice(0,3).forEach(function(item){item.addEventListener("click",function(){setMobileMore(false,false);});});
 
   var avatarButton=document.getElementById("avatar-btn"),avatarMenu=document.getElementById("avatar-menu");
   function setAvatarMenu(open){if(!avatarButton||!avatarMenu)return;avatarMenu.hidden=!open;avatarButton.setAttribute("aria-expanded",String(open));}
   if(avatarButton)avatarButton.addEventListener("click",function(e){e.stopPropagation();setAvatarMenu(avatarMenu.hidden);});
-  document.addEventListener("keydown",function(e){if(e.key==="Escape")setAvatarMenu(false);});
+  document.addEventListener("keydown",function(e){if(e.key==="Escape"){var restore=Boolean(mobileMoreMenu&&!mobileMoreMenu.hidden);setAvatarMenu(false);setMobileMore(false,restore);}});
   var shareBtn=document.getElementById("share-btn");
   var shareFeedbackLabel=document.getElementById("share-feedback-label");
   var shareFeedbackIcon=document.getElementById("share-feedback-icon");
@@ -1094,11 +1030,11 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
   function setShareFeedback(message){if(!shareBtn||!shareFeedbackLabel)return;shareBtn.classList.remove("is-loading");shareBtn.removeAttribute("aria-busy");shareFeedbackLabel.textContent=message;if(shareFeedbackIcon)shareFeedbackIcon.textContent=message.endsWith("copied!")?"check":"error";shareBtn.classList.add("is-feedback");shareBtn.setAttribute("aria-label",message);if(shareFeedbackTimer!==undefined)window.clearTimeout(shareFeedbackTimer);shareFeedbackTimer=window.setTimeout(function(){shareBtn.classList.remove("is-feedback");shareBtn.setAttribute("aria-label",${JSON.stringify(shareLabel)});if(shareFeedbackIcon)shareFeedbackIcon.textContent="check";},1800);}
   async function copyText(text){try{if(navigator.clipboard&&window.isSecureContext){await navigator.clipboard.writeText(text);return;}}catch(_){}var ta=document.createElement("textarea");ta.value=text;ta.setAttribute("readonly","");ta.style.position="fixed";ta.style.top="-999px";ta.style.left="-999px";document.body.appendChild(ta);ta.select();ta.setSelectionRange(0,text.length);try{if(!document.execCommand("copy"))throw new Error("copy failed");}finally{ta.remove();}}
   if(shareBtn)shareBtn.addEventListener("click",async function(e){e.stopPropagation();if(sharePending)return;var doc=window.RENDRO_CURRENT_DOC||"";if(!doc){setShareFeedback("Select a document first");return;}sharePending=true;setShareLoading();try{var relativeDoc=doc.indexOf(window.RENDRO_ORG+"/")===0?doc.slice(window.RENDRO_ORG.length+1):doc;var publicBase=window.RENDRO_PUBLICATION_BASE||"";var shareConfig=window.RENDRO_SHARE_CONFIG;if(publicBase){var publicUrl=new URL(publicBase,window.location.origin);publicUrl.searchParams.set("doc",relativeDoc);await copyText(publicUrl.href);setShareFeedback("Public URL copied!");}else if(shareConfig){var res=await fetch("/api/rendro/shares",{method:"POST",headers:{"Content-Type":"application/json",accept:"application/json"},body:JSON.stringify({organizationId:shareConfig.organizationId,projectId:shareConfig.projectId,documentPath:relativeDoc,expiresInSeconds:604800})});var data=await res.json();if(!res.ok||!data.url)throw new Error("share failed");await copyText(new URL(data.url,window.location.origin).href);setShareFeedback("Share link copied!");}else{var legacyRes=await fetch("/api/share/create?key="+encodeURIComponent(doc),{headers:{accept:"application/json"}});if(!legacyRes.ok)throw new Error("share failed");var legacyData=await legacyRes.json();await copyText(legacyData.url);setShareFeedback("Signed URL copied!");}}catch(_){setShareFeedback("Unable to copy");}finally{sharePending=false;}});
-  document.addEventListener("click",function(){setAvatarMenu(false);});
+  document.addEventListener("click",function(){setAvatarMenu(false);setMobileMore(false,false);});
 })();
 </script>
 <script>window.RENDRO_INITIAL_DOC=${inlineJson(selectedDoc)};window.RENDRO_ORG=${inlineJson(org)};window.RENDRO_DOCUMENT_BASE=${inlineJson(documentBase)};window.RENDRO_PUBLICATION_BASE=${inlineJson(isPublicDocument ? documentBase : "")};window.RENDRO_SHARE_CONFIG=${inlineJson(options.shareConfig ?? null)};</script>
-<script src="/lazy-tree.js?v=28"></script>
+<script src="/lazy-tree.js?v=32"></script>
 </body>
 </html>`;
 }
@@ -1184,16 +1120,7 @@ function renderApiKeyPage(user: User, org: string, apiKey: string): string {
 <title>${orgEsc} — Rendro</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet">
-<script>
-  (function(){
-    var saved=localStorage.getItem("commentor-theme");
-    var mode=saved==="dark"||saved==="light"||saved==="system"?saved:"system";
-    var dark=mode==="dark"||(mode==="system"&&matchMedia("(prefers-color-scheme: dark)").matches);
-    document.documentElement.dataset.theme=mode;
-    document.documentElement.dataset.resolvedTheme=dark?"dark":"light";
-    document.documentElement.classList.toggle("dark",dark);
-  })();
-</script>
+${renderThemeAssets()}
 <style>
   *{box-sizing:border-box}
   html{color-scheme:light dark}
@@ -1300,38 +1227,7 @@ rendro push --source ./docs --org ${orgEsc}
 <script>
   (function(){
     var root=document.documentElement;
-    var themeMedia=matchMedia("(prefers-color-scheme: dark)");
-    var themeToggle=document.getElementById("theme-toggle");
-    var themeIcon=document.getElementById("theme-icon");
-    var modes=["system","dark","light"];
-    var icons={system:"brightness_auto",dark:"dark_mode",light:"light_mode"};
-    function normalizedTheme(){
-      var saved=localStorage.getItem("commentor-theme");
-      return saved==="dark"||saved==="light"||saved==="system"?saved:"system";
-    }
-    function applyTheme(mode,persist){
-      var dark=mode==="dark"||(mode==="system"&&themeMedia.matches);
-      root.dataset.theme=mode;
-      root.dataset.resolvedTheme=dark?"dark":"light";
-      root.classList.toggle("dark",dark);
-      if(persist)localStorage.setItem("commentor-theme",mode);
-      if(themeIcon)themeIcon.textContent=icons[mode];
-      if(themeToggle){
-        var next=modes[(modes.indexOf(mode)+1)%modes.length];
-        themeToggle.title="Theme: "+mode;
-        themeToggle.setAttribute("aria-label","Switch to "+next+" theme");
-      }
-    }
-    if(themeToggle){
-      themeToggle.addEventListener("click",function(){
-        var mode=normalizedTheme();
-        applyTheme(modes[(modes.indexOf(mode)+1)%modes.length],true);
-      });
-    }
-    themeMedia.addEventListener("change",function(){
-      if(normalizedTheme()==="system")applyTheme("system",false);
-    });
-    applyTheme(normalizedTheme(),false);
+    window.RendroTheme.mount(document.getElementById("theme-toggle"));
   })();
   var copyFeedbackTimer;
   function setCopyFeedback(message) {

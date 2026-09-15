@@ -4,11 +4,12 @@ import { CONVEX_SITE_URL, CONVEX_URL } from "@/config";
 import { getObjectStream, getObjectText } from "@/minio";
 import { renderScopedDocumentShell } from "@/routes/app";
 import { renderNotFoundPage } from "@/routes/not-found";
+import { injectMobileViewportScrollbarStyle } from "@/routes/document-html";
+import { parseStoredManifest, type StoredManifest } from "@/stored-manifest";
 
 const app = new Hono<{ Variables: { user?: User } }>();
 
 type ActiveDeployment = { project: { name: string }; deployment: { manifestKey: string } };
-type Manifest = { files: Array<{ path: string; contentType: string }> };
 
 function safePath(value: string): string | null {
   let path: string;
@@ -31,10 +32,9 @@ async function activeDeployment(
   return response.ok ? response.json() as Promise<ActiveDeployment> : null;
 }
 
-async function activeManifest(result: ActiveDeployment): Promise<Manifest | null> {
+async function activeManifest(result: ActiveDeployment): Promise<StoredManifest | null> {
   const text = await getObjectText(result.deployment.manifestKey);
-  if (!text) return null;
-  try { return JSON.parse(text) as Manifest; } catch { return null; }
+  return parseStoredManifest(text);
 }
 
 function basePath(organizationId: string, projectId: string): string {
@@ -63,6 +63,7 @@ function injectDocumentFeatures(
     user: User;
   },
 ): string {
+  html = injectMobileViewportScrollbarStyle(html);
   const frameBase = `${options.base}/files/`;
   const virtualPath = `${options.projectId}/${options.documentPath}`;
   const navigation = `<script>
@@ -80,7 +81,7 @@ document.addEventListener("click",function(e){var a=e.target.closest("a");if(!a|
     documentPath: options.documentPath,
     author: { email: options.user.email, name: options.user.name },
   })};</script>
-<script src="/commentor.js?v=24"></script>`;
+<script src="/commentor.js?v=32"></script>`;
   return /<\/body\s*>/i.test(html)
     ? html.replace(/<\/body\s*>/i, `${navigation}</body>`)
     : `${html}${navigation}`;

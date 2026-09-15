@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { convexTest } from "convex-test";
 import { api, components } from "../convex/_generated/api";
@@ -9,6 +9,7 @@ declare global {
 }
 import schema from "../convex/schema";
 import betterAuthSchema from "../convex/betterAuth/schema";
+import { authComponent } from "../convex/auth";
 
 const modules = import.meta.glob("../convex/**/*.ts");
 const acmeIdentity = {
@@ -200,6 +201,7 @@ describe("Convex authorization boundary", () => {
       body: "Updated in the next deployment",
     });
 
+    const authorLookup = vi.spyOn(authComponent, "getAnyUserById");
     const threads = await member.query(api.documentThreads.list, {
       organizationId: seeded.organizationId,
       projectId: seeded.projectId,
@@ -221,6 +223,8 @@ describe("Convex authorization boundary", () => {
       body: "Updated in the next deployment",
     });
     expect(otherDocument).toEqual([]);
+    expect(authorLookup).toHaveBeenCalledTimes(1);
+    authorLookup.mockRestore();
   });
 
   it("rejects direct API-key and deleted-file calls without the service secret", async () => {
