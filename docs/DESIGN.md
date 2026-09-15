@@ -90,6 +90,10 @@ The management experience is a separate shell from the document viewer. It opera
 ### Shell and navigation
 
 - Use one shared server-rendered shell for every authenticated management route.
+- Same-organization management navigation progressively enhances links: keep the topbar, organization identity, sidebar and shared theme controller mounted, and replace only the main content. Insert the destination skeleton locally before awaiting authenticated HTML. First loads remain server-rendered; this is not static generation of personalized pages.
+- Keep account, authentication, onboarding, organization switching, document viewing, modified clicks and unsupported routes on full browser navigation. Enhanced navigation must preserve history/hash behavior and fall back to full navigation for an incompatible shell or authentication redirect.
+- Each management page owns an abortable request scope. Disposing it cancels reads and releases observers/listeners; stale successes and failures cannot paint a later page. Deduplicate in-flight reads only, never cache permission-bearing responses across completed requests or identities. Explicit organization-scoped navigation must not mutate the active organization.
+- Pending writes and open dialogs block enhanced navigation. Unsaved settings offer a discard confirmation; one-time secrets must be confirmed before leaving and cleared from their dialog and copy handlers after completion.
 - Desktop: fixed `56px` topbar, fixed `232px` organization sidebar, and a centered main column no wider than `1120px`.
 - Mobile at `760px` and below: the sidebar becomes a left drawer opened from a visible **Menu** control. The scrim, `Escape`, and a selected navigation link close it. No page may create horizontal viewport overflow.
 - The topbar contains the Rendro mark, organization switcher, **Open docs**, theme control, and account menu. The organization switcher returns to an explicit chooser; it must not force repeat selection during normal sign-in.
@@ -136,6 +140,7 @@ The management experience is a separate shell from the document viewer. It opera
 - Drawer, dialog, dropdown, toast, row insertion/removal, copy feedback, and button press use the shared `150ms`–`300ms` tokens.
 - Loading uses a local skeleton or one pending control. Deployment polling uses one small state indicator; never animate the whole page.
 - Initial loads and retries render a destination-shaped skeleton inside the final screen container. Reloadable async views use a request version guard so an older response cannot replace newer content; failures replace the skeleton with an actionable retry state.
+- Immediate management navigation and SSR must use the same canonical loading template, including page-specific headings, tabs, wrappers, columns and responsive styles. Keep those skeleton nodes mounted through the authenticated HTML handoff; do not insert a generic first loader, restart shimmer, or replay a whole-content fade when HTML/data arrives. Unknown data values and row counts remain placeholders.
 - `prefers-reduced-motion` removes transforms, shimmer, pulse, and stagger while retaining visible state changes.
 
 ## Motion tokens
@@ -340,6 +345,8 @@ Rendro's micro-interactions are small and functional. They make state legible.
 Rules:
 
 - Every interactive element needs hover/focus/active or open state where applicable.
+- Repeated controls share state styling, not just event handlers: use neutral container hover, Ember keyboard focus, 150ms standard easing, and `.98` button press feedback. Disabled controls must not acquire enabled hover/press feedback. Reduced motion removes press transforms while preserving positioning transforms. Account-menu rows use 14px/20px text, 20px icons, and 44px mobile targets; toolbar controls use 36px desktop and 44px mobile targets.
+- Keep tab underlines inside their link box; an indicator must not create vertical scrolling in a horizontal navigation strip. Long document titles truncate within the fixed-height header without shrinking its actions.
 - Do not add flourish to app chrome. Rendro should feel fast and reliable, not playful.
 - If two indicators could describe one action, keep the more local one and remove the other.
 - Motion must never block pointer interaction.
@@ -401,6 +408,7 @@ Dark mode applies to app chrome only.
 - Persist app theme in `localStorage` under `commentor-theme` with values `"system"`, `"dark"`, or `"light"`.
 - `system` follows `prefers-color-scheme`; unset storage is treated as `system`.
 - All theme-aware route templates use `renderThemeAssets()` from `src/routes/theme.ts`; pages with a toggle mount its shared controller. Do not create page-local theme engines. Landing remains intentionally fixed dark.
+- Every theme button is emitted by `renderThemeButton()`, without page-local icon/button classes. Its neutral surface, muted icon, border, 6px radius, container hover, strong hover foreground, Ember keyboard focus ring, .98 press, disabled state, and 150ms easing belong to the shared component. Use 36px desktop and 44px at widths up to 760px consistently across shells. A viewer mobile-menu row may expand in width and add its label; it does not redefine hover/focus colors or motion. Hover-only feedback is gated by hover-capable input; reduced motion removes transitions and press transforms.
 - Every toggle cycles `system → dark → light → system`, with the same `contrast`, `dark_mode`, and `light_mode` icon track (300ms), radial reveal (520ms), and subtle press feedback. The next mode is announced by the button label; the current mode is exposed in its title.
 - Initialize before page content paints. Synchronize preference changes across tabs and system appearance changes without animating unrelated screens. Rapid toggles must preserve the latest intended mode, including when an earlier transition fails or completes late.
 - Toggle by resolving the current mode and adding/removing `html.dark` on the parent page.

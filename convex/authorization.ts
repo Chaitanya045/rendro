@@ -67,6 +67,13 @@ export async function authorizeHttpOrganization(
   const organization = await auth.api.getFullOrganization({
     query: { organizationId },
     headers,
+  }).catch((error: unknown) => {
+    // Better Auth throws before returning organization data for outsiders.
+    // Normalize that typed denial so HTTP handlers do not misclassify it as 400.
+    const status = error && typeof error === "object" && "statusCode" in error ? error.statusCode : undefined;
+    if (status === 403) throw new ConvexError("Organization membership required");
+    if (status === 401) throw new ConvexError("Authentication required");
+    throw error;
   });
   if (!organization) throw new ConvexError("Organization not found");
   const member = organization.members.find(

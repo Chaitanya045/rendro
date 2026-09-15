@@ -9,15 +9,16 @@ import publicationPages from "@/routes/publication-pages";
 import sharePages from "@/routes/share-pages";
 import { renderScopedDocumentShell } from "@/routes/app";
 import { renderNotFoundPage } from "@/routes/not-found";
-import { sharedThemeRuntime } from "@/routes/theme";
+import { sharedThemeRuntime, renderThemeButton, sharedThemeStyles } from "@/routes/theme";
 import { mobileViewportStyles } from "@/routes/viewport";
 import { renderLandingPage } from "@/routes/landing";
 
-function assertSharedTheme(html: string, buttonId?: string) {
+function assertSharedTheme(html: string, buttonId?: "theme-toggle" | "cp-theme") {
   expect(html).toContain(sharedThemeRuntime);
   expect(html).toContain(mobileViewportStyles);
   expect(html.match(/<script data-rendro-theme>/g)).toHaveLength(1);
   if (buttonId) {
+    expect(html).toContain(renderThemeButton(buttonId));
     expect(html).toContain(`RendroTheme.mount(document.getElementById("${buttonId}")`);
     expect(html.match(new RegExp(`id="${buttonId}"`, "g"))).toHaveLength(1);
   }
@@ -26,6 +27,28 @@ function assertSharedTheme(html: string, buttonId?: string) {
 }
 
 describe("shared theme integration", () => {
+  it("owns button appearance and all interaction states, not just the switching runtime", () => {
+    expect(renderThemeButton()).toContain('class="rendro-theme-control"');
+    expect(renderThemeButton()).not.toMatch(/class="(?:theme|icon-btn|topbar-btn-icon|cp-icon-button)"/);
+    expect(sharedThemeStyles).toContain("background:var(--theme-button-surface)");
+    expect(sharedThemeStyles).toContain(":hover:not(:disabled){background:var(--theme-button-hover)");
+    expect(sharedThemeStyles).toContain(":focus-visible{border-color:var(--theme-button-focus);outline-color:var(--theme-button-focus)}");
+    expect(sharedThemeStyles).toContain(":active:not(:disabled)");
+    expect(sharedThemeStyles).toContain(":disabled{opacity:.5;cursor:not-allowed}");
+    expect(sharedThemeStyles).toContain("--theme-button-focus:#c2410c");
+    expect(sharedThemeStyles).toContain("--theme-button-focus:#fb923c");
+    expect(sharedThemeStyles).toContain("@media (hover:hover)");
+    expect(sharedThemeStyles).toContain("@media (prefers-reduced-motion:reduce)");
+  });
+
+  it("gives document toolbar controls the same strong hover and Ember focus treatment", () => {
+    const html = renderScopedDocumentShell({ user: null, namespace: "qa", title: "QA", basePath: "/p/qa", selectedPath: "index.html", publicDocument: true });
+    expect(html).toContain(".topbar-btn-icon:hover:not(:disabled){background:#f4f4f5;color:#09090b}");
+    expect(html).toContain(".topbar-btn-icon:focus-visible,.topbar-avatar:focus-visible{outline:2px solid #c2410c;outline-offset:2px}");
+    expect(html).toContain("html.dark .topbar-avatar:focus-visible{outline-color:#fb923c}");
+    expect(html).not.toContain(".topbar-btn-share:focus-visible{outline:2px solid #71717a");
+    expect(html).not.toContain(".mobile-more-menu #theme-toggle:hover");
+  });
   it("keeps the landing page fixed dark while sharing only viewport scrollbar styling", () => {
     const html = renderLandingPage();
     expect(html).toContain(mobileViewportStyles);

@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const authState = vi.hoisted(() => ({
   sessionUserId: "owner-user" as string | null,
+  organizationErrorStatus: null as number | null,
   members: [] as Array<{ id: string; organizationId: string; userId: string; role: string }>,
 }));
 
@@ -11,7 +12,9 @@ vi.mock("../convex/auth", () => ({
       getSession: vi.fn(() => Promise.resolve(authState.sessionUserId
         ? { user: { id: authState.sessionUserId }, session: { id: "session" } }
         : null)),
-      getFullOrganization: vi.fn(({ query }: { query: { organizationId: string } }) => Promise.resolve({
+      getFullOrganization: vi.fn(({ query }: { query: { organizationId: string } }) => authState.organizationErrorStatus
+        ? Promise.reject(Object.assign(new Error("You are not a member of this organization"), { statusCode: authState.organizationErrorStatus }))
+        : Promise.resolve({
         id: query.organizationId,
         name: "Acme",
         slug: "acme",
@@ -45,10 +48,22 @@ function asRole(role: "owner" | "admin" | "member") {
 
 beforeEach(() => {
   authState.sessionUserId = "owner-user";
+  authState.organizationErrorStatus = null;
   authState.members = [];
 });
 
 describe("HTTP organization role authorization", () => {
+  it("normalizes native provider permission errors without hiding unrelated failures", async () => {
+    authState.organizationErrorStatus = 403;
+    await expect(authorizeHttpOrganization(fakeContext, new Headers(), "org-a"))
+      .rejects.toThrow("Organization membership required");
+    authState.organizationErrorStatus = 401;
+    await expect(authorizeHttpOrganization(fakeContext, new Headers(), "org-a"))
+      .rejects.toThrow("Authentication required");
+    authState.organizationErrorStatus = 500;
+    await expect(authorizeHttpOrganization(fakeContext, new Headers(), "org-a"))
+      .rejects.toMatchObject({ statusCode: 500 });
+  });
   it.each(["owner", "admin"] as const)("allows %s to perform administrative writes", async (role) => {
     asRole(role);
     await expect(authorizeHttpOrganization(

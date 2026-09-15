@@ -34,6 +34,11 @@ function authenticatedPages(): Hono<{ Variables: { user?: User } }> {
 }
 
 describe("control-plane UI", () => {
+  it("preserves hidden controls and conditional fields over component display styles", async () => {
+    const html = await (await authenticatedPages().request("/organizations/org-a/api-keys")).text();
+    expect(html).toContain("[hidden]{display:none!important}");
+  });
+
   it("aligns select chevrons consistently without replacing native select behavior", async () => {
     const html = await (await authenticatedPages().request("/organizations/org-a/people")).text();
     expect(html).toContain("select.select{appearance:none;padding-inline-end:40px");
@@ -41,6 +46,16 @@ describe("control-plane UI", () => {
     expect(html).toContain("html.dark select.select{background-image:");
     expect(html).toContain("@media(forced-colors:active){select.select,html.dark select.select{appearance:auto");
   });
+
+  it("gives dialog close buttons complete interaction states", async () => {
+    const html = await (await authenticatedPages().request("/organizations/org-a/api-keys")).text();
+    expect(html).toContain(".dialog-close:hover:not(:disabled){background:var(--cp-container);color:var(--cp-strong)}");
+    expect(html).toContain(".dialog-close:active:not(:disabled){transform:scale(.98)}");
+    expect(html).toContain(".dialog-close:disabled{cursor:not-allowed;opacity:.5;transform:none}");
+    expect(html).toContain("transform var(--cp-instant) var(--cp-ease),opacity var(--cp-instant) var(--cp-ease)");
+    expect(html).toContain(".dialog-close:active,.organization-card:hover");
+  });
+
   it("removes desktop table widths and scrollbar chrome from stacked mobile layouts", async () => {
     const app = authenticatedPages();
     for (const route of [

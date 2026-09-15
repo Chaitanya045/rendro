@@ -2,13 +2,18 @@ import { mobileViewportStyles } from "./viewport";
 
 export const sharedThemeStyles = String.raw`
 ${mobileViewportStyles}
-.rendro-theme-control.rendro-theme-control{display:inline-flex;align-items:center;justify-content:center;transition:background-color 150ms cubic-bezier(.4,0,.2,1),border-color 150ms cubic-bezier(.4,0,.2,1),color 150ms cubic-bezier(.4,0,.2,1),transform 150ms cubic-bezier(.4,0,.2,1)}
-.rendro-theme-control.rendro-theme-control:active{transform:scale(.98)}
+.rendro-theme-control{--theme-button-surface:#fff;--theme-button-hover:#f4f4f5;--theme-button-text:#71717a;--theme-button-strong:#09090b;--theme-button-border:#e4e4e7;--theme-button-border-hover:#d4d4d8;--theme-button-focus:#c2410c}
+html.dark .rendro-theme-control{--theme-button-surface:#09090b;--theme-button-hover:#18181b;--theme-button-text:#a1a1aa;--theme-button-strong:#fafafa;--theme-button-border:#27272a;--theme-button-border-hover:#3f3f46;--theme-button-focus:#fb923c}
+.rendro-theme-control.rendro-theme-control{box-sizing:border-box;appearance:none;display:inline-flex;flex:none;align-items:center;justify-content:center;width:36px;height:36px;min-width:36px;min-height:36px;padding:0;border:1px solid var(--theme-button-border);border-radius:6px;background:var(--theme-button-surface);color:var(--theme-button-text);font:inherit;line-height:1;cursor:pointer;outline:2px solid transparent;outline-offset:2px;box-shadow:none;transition:background-color 150ms cubic-bezier(.4,0,.2,1),border-color 150ms cubic-bezier(.4,0,.2,1),color 150ms cubic-bezier(.4,0,.2,1),transform 150ms cubic-bezier(.4,0,.2,1)}
+@media (hover:hover){.rendro-theme-control.rendro-theme-control:hover:not(:disabled){background:var(--theme-button-hover);border-color:var(--theme-button-border-hover);color:var(--theme-button-strong)}}
+.rendro-theme-control.rendro-theme-control:focus-visible{border-color:var(--theme-button-focus);outline-color:var(--theme-button-focus)}
+.rendro-theme-control.rendro-theme-control:active:not(:disabled){background:var(--theme-button-hover);color:var(--theme-button-strong);transform:scale(.98)}
+.rendro-theme-control.rendro-theme-control:disabled{opacity:.5;cursor:not-allowed}
 .rendro-theme-icon-window{width:20px;height:20px;overflow:hidden;display:inline-flex;align-items:flex-start;justify-content:center}
 .rendro-theme-icon-track{display:flex;flex-direction:column;transition:transform 300ms cubic-bezier(.4,0,.2,1);will-change:transform}
-.rendro-theme-icon{width:20px;height:20px;line-height:20px;display:flex;align-items:center;justify-content:center;flex:0 0 20px;font-size:20px}
+.rendro-theme-icon{width:20px;height:20px;line-height:20px;display:flex;align-items:center;justify-content:center;flex:0 0 20px;font-family:"Material Symbols Outlined";font-style:normal;font-weight:400;font-size:20px;font-variation-settings:"FILL" 0,"wght" 400,"GRAD" 0,"opsz" 20}
 @supports (view-transition-name:root){html.rendro-theme-rippling::view-transition-old(root),html.rendro-theme-rippling::view-transition-new(root){animation:none;mix-blend-mode:normal}html.rendro-theme-rippling::view-transition-image-pair(root){isolation:isolate}html.rendro-theme-rippling::view-transition-new(root){clip-path:circle(0 at var(--rendro-theme-x,50%) var(--rendro-theme-y,50%))}}
-@media (max-width:760px){.rendro-theme-control{min-width:44px;min-height:44px}}
+@media (max-width:760px){.rendro-theme-control.rendro-theme-control{width:44px;height:44px;min-width:44px;min-height:44px}.mobile-more-menu .rendro-theme-control.rendro-theme-control{width:100%;justify-content:flex-start;gap:10px;padding:0 12px;font-size:14px;font-weight:600}.mobile-more-menu .rendro-theme-control::after{content:"Theme"}}
 @media (prefers-reduced-motion:reduce){.rendro-theme-control,.rendro-theme-icon-track{transition:none!important}.rendro-theme-control.rendro-theme-control:active{transform:none!important}}
 `;
 
@@ -74,4 +79,10 @@ export const sharedThemeRuntime = String.raw`
 
 export function renderThemeAssets(): string {
   return `<style data-rendro-theme>${sharedThemeStyles}</style><script data-rendro-theme>${sharedThemeRuntime}</script>`;
+}
+
+// Shells share markup as well as behavior: page-local button classes must not
+// override this control's interaction states. Menu placement changes only layout.
+export function renderThemeButton(id: "theme-toggle" | "cp-theme" = "theme-toggle"): string {
+  return `<button class="rendro-theme-control" id="${id}" type="button" aria-label="Switch to dark theme" title="Theme: system"><span class="material-symbols-outlined rendro-theme-icon" aria-hidden="true">contrast</span></button>`;
 }

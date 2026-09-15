@@ -81,7 +81,7 @@ document.addEventListener("click",function(e){var a=e.target.closest("a");if(!a|
     documentPath: options.documentPath,
     author: { email: options.user.email, name: options.user.name },
   })};</script>
-<script src="/commentor.js?v=32"></script>`;
+<script src="/commentor.js?v=33"></script>`;
   return /<\/body\s*>/i.test(html)
     ? html.replace(/<\/body\s*>/i, `${navigation}</body>`)
     : `${html}${navigation}`;

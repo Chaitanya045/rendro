@@ -7,7 +7,7 @@ import { createOrgApiKey } from "@/api-keys";
 import { isDeleted } from "@/soft-delete";
 import { renderNotFoundPage } from "@/routes/not-found";
 import { renderLandingPage } from "@/routes/landing";
-import { renderThemeAssets } from "./theme";
+import { renderThemeAssets, renderThemeButton } from "./theme";
 
 const app = new Hono<{ Variables: { user?: User } }>();
 
@@ -208,7 +208,7 @@ ${renderThemeAssets()}
 <header class="topbar">
   <div class="brand">Rendro</div>
   <div class="actions">
-    <button class="icon-btn" id="theme-toggle" type="button" aria-label="Switch theme" title="Theme: system"><span class="material-symbols-outlined" id="theme-icon" aria-hidden="true">brightness_auto</span></button>
+    ${renderThemeButton()}
     <form method="get" action="/api/auth/sign-out"><button class="secondary-btn" type="submit">Sign out</button></form>
   </div>
 </header>
@@ -357,8 +357,8 @@ function renderOrgTreePage(user: User | null, org: string, selectedDoc = "", opt
       <button class="topbar-avatar" id="avatar-btn" type="button" title="${escapeHtml(email)}" aria-label="Open account menu" aria-expanded="false">${initials}</button>
       <div class="avatar-menu" id="avatar-menu" hidden>
         <div class="avatar-menu-email">${escapeHtml(email)}</div>
-        <a href="/account/security" class="avatar-menu-item"><span class="material-symbols-outlined" style="font-size:18px">shield</span> Account security</a>
-        <a href="/api/auth/sign-out" class="avatar-menu-item"><span class="material-symbols-outlined" style="font-size:18px">logout</span> Sign out</a>
+        <a href="/account/security" class="avatar-menu-item"><span class="material-symbols-outlined" aria-hidden="true">shield</span> Account security</a>
+        <a href="/api/auth/sign-out" class="avatar-menu-item"><span class="material-symbols-outlined" aria-hidden="true">logout</span> Sign out</a>
       </div>
     </div>`
     : "";
@@ -377,32 +377,35 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
 </script>
 <style>
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
-  :root{--sidebar-expanded-width:280px;--sidebar-width:var(--sidebar-expanded-width)}
+  :root{--sidebar-expanded-width:280px;--sidebar-width:var(--sidebar-expanded-width);--tree-row-height:33px;--viewer-focus:#c2410c}
   body{display:flow-root;font-family:Inter,system-ui,sans-serif;background:#fff;color:#09090b;overflow:hidden;height:100vh;font-size:14px;line-height:20px}
   .material-symbols-outlined{font-variation-settings:'FILL'0,'wght'400,'GRAD'0,'opsz'24;vertical-align:middle;font-size:20px}
   ::-webkit-scrollbar{width:6px} ::-webkit-scrollbar-track{background:transparent} ::-webkit-scrollbar-thumb{background:#e4e4e7;border-radius:10px}
 
-  .topbar-btn-back{color:#52525b;background:transparent;border:1px solid #e4e4e7;text-decoration:none}
+  .topbar-btn.topbar-btn-back{color:#52525b;background:transparent;border:1px solid #e4e4e7;text-decoration:none}
   .topbar-btn-back:hover{background:#f4f4f5;color:#09090b;border-color:#d4d4d8}
   .topbar-btn-icon.mobile-tree-toggle{display:none}
   .mobile-tree-backdrop{display:none}
   .topbar{position:fixed;top:0;z-index:50;width:100%;height:56px;background:#fff;border-bottom:1px solid #e4e4e7;display:flex;align-items:center;justify-content:space-between;padding:0 24px;transition:transform .3s cubic-bezier(.4,0,.2,1),opacity .2s cubic-bezier(.4,0,.2,1);will-change:transform,opacity}
-  .topbar-left{display:flex;align-items:center;gap:10px}
-  .topbar-logo{font-size:24px;font-weight:700;color:#c2410c;line-height:32px}
+  .topbar-left{display:flex;align-items:center;gap:10px;min-width:0;flex:1;margin-right:16px}
+  .topbar-logo{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:24px;font-weight:700;color:#c2410c;line-height:32px}
+  .topbar-left>.topbar-btn-back{flex-shrink:0}
   .topbar-search{display:flex;align-items:center;gap:8px;background:#f4f4f5;padding:6px 12px;border-radius:4px;border:1px solid #e4e4e7;width:256px;transition:border-color .15s}
   .topbar-search:focus-within{border-color:#c2410c}
   .topbar-search input{border:0;outline:0;background:transparent;font-size:14px;color:#09090b;width:100%;font-family:Inter}
   .topbar-search input::placeholder{color:#71717a}
-  .topbar-actions{display:flex;align-items:center;gap:16px}
+  .topbar-actions{display:flex;align-items:center;gap:16px;flex:none}
   .mobile-more{display:none;position:relative}
   .mobile-more-menu{position:absolute;top:48px;right:0;width:min(280px,calc(100vw - 20px));max-height:calc(100vh - 68px);overflow:auto;background:#fff;border:1px solid #e4e4e7;border-radius:10px;box-shadow:0 12px 32px rgba(24,24,27,.18);padding:6px;z-index:120}
   .mobile-more-menu[hidden]{display:none}
   .mobile-action-label{display:none}
-  .topbar-btn{padding:6px 12px;font-size:12px;font-weight:600;border-radius:4px;cursor:pointer;border:0;font-family:Inter;display:flex;align-items:center;gap:6px;transition:background-color .15s,color .15s,border-color .15s,transform .15s cubic-bezier(.4,0,.2,1)}
+  .topbar-btn{min-height:36px;padding:6px 12px;font-size:12px;font-weight:600;border-radius:6px;cursor:pointer;border:0;font-family:Inter;display:flex;align-items:center;gap:6px;transition:background-color 150ms cubic-bezier(.4,0,.2,1),color 150ms cubic-bezier(.4,0,.2,1),border-color 150ms cubic-bezier(.4,0,.2,1),transform 150ms cubic-bezier(.4,0,.2,1)}
+  .topbar-btn:focus-visible,.avatar-menu-item:focus-visible,.load-more-btn:focus-visible{outline:2px solid var(--viewer-focus);outline-offset:2px}
+  .topbar-btn-back:active,.avatar-menu-item:active{transform:scale(.98)}
   .topbar-btn-share{color:#52525b;background:transparent;border:1px solid #e4e4e7;min-width:172px;justify-content:center;overflow:hidden}
-  .topbar-btn-share:hover{background:#f4f4f5;color:#09090b;border-color:#d4d4d8}
-  .topbar-btn-share:active{transform:scale(.98);background:#e4e4e7}
-  .topbar-btn-share:focus-visible{outline:2px solid #71717a;outline-offset:2px}
+  .topbar-btn-share:hover:not(:disabled){background:#f4f4f5;color:#09090b;border-color:#d4d4d8}
+  .topbar-btn-share:active:not(:disabled){transform:scale(.98);background:#e4e4e7}
+  .topbar-btn-share:focus-visible{outline:2px solid #c2410c;outline-offset:2px}
   .share-icon-window{width:18px;height:18px;line-height:18px;overflow:hidden;display:inline-flex;align-items:flex-start;justify-content:center;flex:0 0 18px}
   .share-icon-track{display:flex;flex-direction:column;align-items:center;transition:transform .3s cubic-bezier(.4,0,.2,1);will-change:transform}
   .share-icon-row{width:18px;height:18px;line-height:18px;display:flex;align-items:center;justify-content:center;flex:0 0 18px;font-size:18px}
@@ -430,7 +433,9 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
   html.dark .shortcut-key{background:#e4e4e7;color:#09090b;box-shadow:inset 0 -1px 0 rgba(9,9,11,.12)}
   .topbar-btn-create{background:#c2410c;color:#fff}
   .topbar-btn-create:hover{background:#9a3412;opacity:1}
-  .topbar-avatar{width:32px;height:32px;border-radius:50%;background:#ffedd5;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;color:#09090b;cursor:pointer;border:1px solid #fed7aa}
+  .topbar-avatar{width:36px;height:36px;flex:none;border-radius:50%;background:#ffedd5;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700;color:#c2410c;cursor:pointer;border:1px solid rgba(194,65,12,.24);transition:background-color 150ms cubic-bezier(.4,0,.2,1),border-color 150ms cubic-bezier(.4,0,.2,1),color 150ms cubic-bezier(.4,0,.2,1),transform 150ms cubic-bezier(.4,0,.2,1)}
+  .topbar-avatar:hover:not(:disabled){background:#f4f4f5;color:#09090b;border-color:#d4d4d8}
+  .topbar-avatar:active:not(:disabled){transform:scale(.98)}
 
   .sidebar{position:fixed;top:56px;left:0;bottom:0;z-index:40;width:var(--sidebar-width);background:#fff;border-right:1px solid #e4e4e7;display:flex;flex-direction:column;overflow:hidden;padding:16px 0;transition:top .3s cubic-bezier(.4,0,.2,1),width .3s cubic-bezier(.4,0,.2,1),opacity .2s cubic-bezier(.4,0,.2,1),transform .3s cubic-bezier(.4,0,.2,1);will-change:top,width,transform,opacity}
   .sidebar-org{padding:0 24px;margin-bottom:16px}
@@ -485,15 +490,20 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
   /* ── sticky folder headers (VS Code-style stacking) ── */
   .tree-folder.open>.tree-item{position:sticky;background:var(--sidebar-bg,#fff)}
   .tree-folder[data-depth="0"].open>.tree-item{top:0;z-index:10}
-  .tree-folder[data-depth="1"].open>.tree-item{top:30px;z-index:9}
-  .tree-folder[data-depth="2"].open>.tree-item{top:60px;z-index:8}
-  .tree-folder[data-depth="3"].open>.tree-item{top:90px;z-index:7}
-  .tree-folder[data-depth="4"].open>.tree-item{top:120px;z-index:6}
-  .tree-folder[data-depth="5"].open>.tree-item{top:150px;z-index:5}
-  .load-more-btn:disabled{color:#71717a;cursor:default}
+  .tree-folder[data-depth="1"].open>.tree-item{top:var(--tree-row-height);z-index:9}
+  .tree-folder[data-depth="2"].open>.tree-item{top:calc(var(--tree-row-height) * 2);z-index:8}
+  .tree-folder[data-depth="3"].open>.tree-item{top:calc(var(--tree-row-height) * 3);z-index:7}
+  .tree-folder[data-depth="4"].open>.tree-item{top:calc(var(--tree-row-height) * 4);z-index:6}
+  .tree-folder[data-depth="5"].open>.tree-item{top:calc(var(--tree-row-height) * 5);z-index:5}
+  .load-more-btn{display:inline-flex;align-items:center;justify-content:center;min-height:36px;padding:6px 10px;border:1px solid #e4e4e7;border-radius:6px;background:transparent;color:#c2410c;font:600 12px/20px Inter,system-ui,sans-serif;text-decoration:none;cursor:pointer;transition:background-color 150ms cubic-bezier(.4,0,.2,1),border-color 150ms cubic-bezier(.4,0,.2,1),transform 150ms cubic-bezier(.4,0,.2,1)}
+  .load-more-btn:hover:not(:disabled){background:#f4f4f5;border-color:#d4d4d8}
+  .load-more-btn:active:not(:disabled){transform:scale(.98)}
+  .load-more-btn:disabled{color:#71717a;cursor:not-allowed;opacity:.5}
   @keyframes treeItemIn{from{opacity:0;transform:translateX(-6px)}to{opacity:1;transform:translateX(0)}}
   @keyframes treeFolderLoading{0%{background-position:-200% 50%}100%{background-position:200% 50%}}
-  .tree-item{position:relative;display:flex;align-items:center;gap:8px;padding:6px 12px;border-radius:4px;color:#71717a;cursor:pointer;overflow:hidden;transition:translate .15s cubic-bezier(.4,0,.2,1),background-color .2s,color .2s}
+  .tree-item{position:relative;display:flex;align-items:center;gap:8px;min-height:var(--tree-row-height);padding:6px 12px;border-radius:4px;color:#71717a;cursor:pointer;overflow:hidden;transition:translate .15s cubic-bezier(.4,0,.2,1),background-color .2s,color .2s}
+  .tree-item:focus-visible,.tree-item:has(.tree-link:focus-visible){outline:2px solid var(--viewer-focus);outline-offset:-2px}
+  .tree-link:focus-visible{outline:none}
   .tree-item>*{position:relative;z-index:1}
   .tree-item.tree-item-entering{animation:treeItemIn .32s cubic-bezier(.4,0,.2,1) both;animation-delay:calc(var(--tree-index,0) * 35ms)}
   .tree-folder.loading>.tree-item{cursor:progress}
@@ -546,20 +556,28 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
   @media (prefers-reduced-motion: reduce){.share-icon-track{transition:none}.share-loader{animation:none!important}}
   @media (prefers-reduced-motion: reduce){.tree-folder-content,.active-indicator{transition:none!important}}
   .avatar-wrap{position:relative}
-  .avatar-menu{position:absolute;top:42px;right:0;background:#fff;border:1px solid #e4e4e7;border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,.12);padding:4px;min-width:200px;z-index:100}
+  @keyframes viewerMenuIn{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}
+  .avatar-menu{position:absolute;top:44px;right:0;background:#fff;border:1px solid #e4e4e7;border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,.12);padding:4px;width:230px;max-width:calc(100vw - 20px);z-index:100}
+  .avatar-menu:not([hidden]),.mobile-more-menu:not([hidden]){animation:viewerMenuIn 200ms cubic-bezier(.4,0,.2,1)}
   .avatar-menu-email{padding:8px 12px;font-size:12px;color:#71717a;border-bottom:1px solid #e4e4e7;margin-bottom:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .avatar-menu-item{display:flex;align-items:center;gap:8px;padding:8px 12px;font-size:14px;color:#09090b;text-decoration:none;border-radius:4px;cursor:pointer;border:0;background:0;width:100%;font-family:Inter}
+  .avatar-menu-item{display:flex;align-items:center;gap:8px;padding:9px 10px;font-size:14px;line-height:20px;color:#09090b;text-decoration:none;border-radius:4px;cursor:pointer;border:0;background:transparent;width:100%;font-family:Inter;transition:background-color 150ms cubic-bezier(.4,0,.2,1),color 150ms cubic-bezier(.4,0,.2,1),transform 150ms cubic-bezier(.4,0,.2,1)}
   .avatar-menu-item:hover{background:#f4f4f5}
+  .avatar-menu-item:active{background:#f4f4f5}
 
-  .topbar-btn-icon{width:32px;height:32px;border-radius:4px;border:0;background:transparent;cursor:pointer;display:flex;align-items:center;justify-content:center;color:#71717a;transition:background .15s,color .15s,transform .15s cubic-bezier(.4,0,.2,1)}
-  .topbar-btn-icon:hover{background:#f4f4f5}
-  .topbar-btn-icon:active{transform:scale(.96)}
+  .topbar-btn-icon{width:36px;height:36px;flex:none;border-radius:6px;border:0;background:transparent;cursor:pointer;display:flex;align-items:center;justify-content:center;color:#71717a;transition:background-color 150ms cubic-bezier(.4,0,.2,1),color 150ms cubic-bezier(.4,0,.2,1),transform 150ms cubic-bezier(.4,0,.2,1)}
+  .topbar-btn-icon:hover:not(:disabled){background:#f4f4f5;color:#09090b}
+  .topbar-btn-icon:active:not(:disabled){transform:scale(.98)}
+  .topbar-btn:disabled,.topbar-btn-icon:disabled,.topbar-avatar:disabled{opacity:.5;cursor:not-allowed;transform:none}
+  .topbar-btn-icon:focus-visible,.topbar-avatar:focus-visible{outline:2px solid #c2410c;outline-offset:2px}
+  .topbar-avatar:focus-visible{border-color:#d4d4d8}
+  @media(prefers-reduced-motion:reduce){.topbar-btn-icon,.topbar-avatar{transition:none}.topbar-btn-icon:active,.topbar-avatar:active{transform:none!important}}
+  @media(prefers-reduced-motion:reduce){.topbar-btn,.avatar-menu-item,.load-more-btn{transition:none}.topbar-btn:active,.avatar-menu-item:active,.load-more-btn:active{transform:none!important}.avatar-menu,.mobile-more-menu{animation:none!important}.topbar-btn-share.is-feedback #share-feedback-icon{transform:none}#share-feedback-icon,.mobile-tree-backdrop{transition:none!important}}
   @media (prefers-reduced-motion: reduce){.tree-item.tree-item-entering{animation:none!important;animation-delay:0s!important;opacity:1!important;transform:none!important}.tree-folder.loading>.tree-item .folder-icon,.tree-folder.loading>.tree-item .font-body-md{animation:none!important;background:none!important;color:#c2410c!important;-webkit-text-fill-color:currentColor!important}html.doc-loading .tree-item.active{animation:none!important;transform:none!important}html.doc-loading .tree-item.active::before{animation:none!important}html.dark .tree-folder.loading>.tree-item .folder-icon,html.dark .tree-folder.loading>.tree-item .font-body-md{color:#fb923c!important}}
   @media (prefers-reduced-motion: reduce){.tree-item[data-path],.tree-item[data-path]>.material-symbols-outlined{transition-property:background-color,color!important}.tree-item[data-path]:hover,.tree-item[data-path]:focus-within{translate:none!important}.tree-item[data-path]:hover>.material-symbols-outlined,.tree-item[data-path]:focus-within>.material-symbols-outlined{transform:none!important}}
   @media (prefers-reduced-motion: reduce){.tree-folder>.tree-item .caret-icon,.tree-folder>.tree-item .folder-icon{transition-property:color!important}.tree-folder>.tree-item:hover .caret-icon,.tree-folder>.tree-item:focus-within .caret-icon{translate:none!important}}
 
   /* ── dark mode (shadcn-style neutral palette) ── */
-  html.dark{background:#09090b;color:#fafafa}
+  html.dark{--viewer-focus:#fb923c;background:#09090b;color:#fafafa}
   html.dark body{background:#09090b;color:#fafafa}
   html.dark ::-webkit-scrollbar-thumb{background:#27272a}
   html.dark .topbar{background:#09090b;border-bottom-color:#27272a}
@@ -573,16 +591,18 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
   html.dark .sidebar-resizer:hover::before,html.dark .sidebar-resizer:focus-visible::before,html.dark.sidebar-resizing .sidebar-resizer::before{box-shadow:0 0 0 3px rgba(251,146,60,.16)}
   html.dark .topbar-btn-icon{color:#a1a1aa}
   html.dark .topbar-btn-share{color:#a1a1aa;border-color:#27272a}
-  html.dark .topbar-btn-share:hover{background:#18181b;color:#fafafa;border-color:#3f3f46}
-  html.dark .topbar-btn-share:active,html.dark .topbar-btn-share.is-feedback{background:#18181b;color:#fafafa;border-color:#3f3f46}
-  html.dark .topbar-btn-share:focus-visible{outline-color:#a1a1aa}
-  html.dark .topbar-btn-icon:hover{background:#18181b;color:#fafafa}
+  html.dark .topbar-btn-share:hover:not(:disabled){background:#18181b;color:#fafafa;border-color:#3f3f46}
+  html.dark .topbar-btn-share:active:not(:disabled),html.dark .topbar-btn-share.is-feedback{background:#18181b;color:#fafafa;border-color:#3f3f46}
+  html.dark .topbar-btn-share:focus-visible,html.dark .topbar-btn-icon:focus-visible,html.dark .topbar-avatar:focus-visible{outline-color:#fb923c}
+  html.dark .topbar-avatar:focus-visible{border-color:#3f3f46}
+  html.dark .topbar-btn-icon:hover:not(:disabled){background:#18181b;color:#fafafa}
   html.dark .topbar-btn-create{background:#fb923c;color:#09090b}
   html.dark .topbar-btn-create:hover{background:#fdba74;opacity:1}
   html.dark .sidebar-tree{--sidebar-bg:#09090b;scrollbar-color:#3f3f46 transparent}
   html.dark .sidebar-tree::-webkit-scrollbar-thumb{background:#3f3f46}
   html.dark .sidebar-tree::-webkit-scrollbar-thumb:hover{background:#52525b}
-  html.dark .topbar-avatar{background:rgba(251,146,60,.16);color:#fafafa;border-color:rgba(251,146,60,.35)}
+  html.dark .topbar-avatar{background:rgba(251,146,60,.16);color:#fb923c;border-color:rgba(251,146,60,.35)}
+  html.dark .topbar-avatar:hover:not(:disabled){background:#18181b;color:#fafafa;border-color:#3f3f46}
   html.dark .sidebar{background:#09090b;border-right-color:#27272a}
   html.dark .sidebar-org-name{color:#fafafa}
   html.dark .sidebar-org-meta{color:#a1a1aa}
@@ -613,37 +633,41 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
   html.dark .ph-icon .material-symbols-outlined{color:#a1a1aa!important}
   html.dark .avatar-menu-item{color:#fafafa}
   html.dark .avatar-menu-item:hover{background:#18181b}
-  html.dark .load-more-btn{color:#fb923c}
-  html.dark .load-more-btn:hover{background:#18181b}
-  html.dark .load-more-btn:disabled{color:#71717a}
+  html.dark .avatar-menu-item:active{background:#18181b}
+  html.dark .load-more-btn{color:#fb923c;border-color:#27272a}
+  html.dark .load-more-btn:hover:not(:disabled){background:#18181b;border-color:#3f3f46}
+  html.dark .load-more-btn:disabled{color:#a1a1aa}
   html.dark .avatar-menu{background:#09090b;border-color:#27272a;box-shadow:0 8px 24px rgba(0,0,0,.48)}
   html.dark .avatar-menu-email{color:#a1a1aa;border-bottom-color:#27272a}
   html.dark .avatar-menu-item{color:#fafafa}
   html.dark .avatar-menu-item:hover{background:#18181b}
-  html.dark .topbar-btn-back{color:#a1a1aa;border-color:#27272a}
+  html.dark .topbar-btn.topbar-btn-back{color:#a1a1aa;border-color:#27272a}
   html.dark .topbar-btn-back:hover{background:#18181b;color:#fafafa;border-color:#3f3f46}
   html.dark .mobile-more-menu{background:#09090b;border-color:#27272a;box-shadow:0 16px 40px rgba(0,0,0,.5)}
   @media(max-width:760px){
+    :root{--tree-row-height:44px}
+    .tree-item{min-height:44px}
+    .tree-item .tree-link{min-height:32px;line-height:32px}
+    .avatar-menu-item,.load-more-btn{min-height:44px}
     .sidebar-tree{scrollbar-width:none}
     .sidebar-tree::-webkit-scrollbar{display:none}
     .topbar{padding:0 10px}
-    .topbar-left{min-width:0;gap:6px;flex:1}
+    .topbar-left{min-width:0;gap:6px;flex:1;margin-right:6px}
     .topbar-logo{min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:18px}
     .topbar-actions{gap:4px}
     .mobile-more{display:block}
-    .mobile-more-menu .topbar-btn-back,.mobile-more-menu .shortcut-tooltip-wrap,.mobile-more-menu .theme-toggle,.mobile-more-menu .avatar-wrap{display:flex;width:100%}
-    .mobile-more-menu .topbar-btn-back,.mobile-more-menu #shell-toggle,.mobile-more-menu #theme-toggle,.mobile-more-menu #avatar-btn{height:44px;width:100%;padding:0 12px;border:0;border-radius:6px;justify-content:flex-start;gap:10px;background:transparent;color:#52525b;font-size:14px;font-weight:600;text-decoration:none}
-    .mobile-more-menu .topbar-btn-back:hover,.mobile-more-menu #shell-toggle:hover,.mobile-more-menu #theme-toggle:hover,.mobile-more-menu #avatar-btn:hover{background:#f4f4f5;color:#09090b}
+    .mobile-more-menu .topbar-btn-back,.mobile-more-menu .shortcut-tooltip-wrap,.mobile-more-menu .avatar-wrap{display:flex;width:100%}
+    .mobile-more-menu .topbar-btn-back,.mobile-more-menu #shell-toggle,.mobile-more-menu #avatar-btn{height:44px;width:100%;padding:0 12px;border:0;border-radius:6px;justify-content:flex-start;gap:10px;background:transparent;color:#52525b;font-size:14px;font-weight:600;text-decoration:none}
+    .mobile-more-menu .topbar-btn-back:hover,.mobile-more-menu #shell-toggle:hover:not(:disabled),.mobile-more-menu #avatar-btn:hover:not(:disabled){background:#f4f4f5;color:#09090b}
     .mobile-more-menu .topbar-btn-back .topbar-back-label{display:inline}
     .mobile-more-menu .mobile-action-label{display:inline}
-    .mobile-more-menu #theme-toggle::after{content:"Theme"}
     .mobile-more-menu #avatar-btn::after{content:"Account"}
     .mobile-more-menu #avatar-btn{border-radius:6px}
     .mobile-more-menu .shortcut-tooltip{display:none}
     .mobile-more-menu .avatar-wrap{display:block}
     .mobile-more-menu .avatar-menu{position:static;width:100%;min-width:0;margin-top:2px;box-shadow:none;border-radius:6px}
-    html.dark .mobile-more-menu .topbar-btn-back,html.dark .mobile-more-menu #shell-toggle,html.dark .mobile-more-menu #theme-toggle,html.dark .mobile-more-menu #avatar-btn{color:#d4d4d8}
-    html.dark .mobile-more-menu .topbar-btn-back:hover,html.dark .mobile-more-menu #shell-toggle:hover,html.dark .mobile-more-menu #theme-toggle:hover,html.dark .mobile-more-menu #avatar-btn:hover{background:#18181b;color:#fafafa}
+    html.dark .mobile-more-menu .topbar-btn-back,html.dark .mobile-more-menu #shell-toggle,html.dark .mobile-more-menu #avatar-btn{color:#d4d4d8}
+    html.dark .mobile-more-menu .topbar-btn-back:hover,html.dark .mobile-more-menu #shell-toggle:hover:not(:disabled),html.dark .mobile-more-menu #avatar-btn:hover:not(:disabled){background:#18181b;color:#fafafa}
     .topbar-btn-icon.mobile-tree-toggle{width:44px;height:44px;display:flex;flex:0 0 44px}
     .topbar-btn-back{width:44px;height:44px;flex:0 0 44px;padding:0;justify-content:center}
     .topbar-btn-back .topbar-back-label{display:none}
@@ -674,7 +698,7 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
       <span class="share-icon-window" aria-hidden="true"><span class="share-icon-track"><span class="material-symbols-outlined share-icon-row">link</span><span class="share-icon-row"><span class="share-loader"></span></span><span class="material-symbols-outlined share-icon-row" id="share-feedback-icon">check</span></span></span>
       <span class="share-label-window" aria-hidden="true"><span class="share-label-track"><span class="share-label">${shareLabel}</span><span class="share-label">${sharePendingLabel}</span><span class="share-label" id="share-feedback-label">${shareDoneLabel}</span></span></span>
     </button>
-    <button class="topbar-btn-icon theme-toggle" id="theme-toggle" type="button" aria-label="Switch to dark theme" title="Theme: system"><span class="material-symbols-outlined" aria-hidden="true">contrast</span></button>
+    ${renderThemeButton()}
     ${avatarMarkup}
     <div class="mobile-more" id="mobile-more">
       <button class="topbar-btn-icon" id="mobile-more-btn" type="button" aria-label="More document actions" aria-haspopup="dialog" aria-controls="mobile-more-menu" aria-expanded="false"><span class="material-symbols-outlined" aria-hidden="true">more_vert</span></button>
@@ -994,6 +1018,7 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
   var mobileMoreMedia=window.matchMedia("(max-width:760px)");
   var mobileMoreItems=[document.querySelector(".topbar-btn-back"),document.querySelector(".shortcut-tooltip-wrap"),document.getElementById("theme-toggle"),document.querySelector(".avatar-wrap")].filter(Boolean);
   var mobileMoreSlots=mobileMoreItems.map(function(item){var slot=document.createComment("mobile-more-slot");item.parentNode.insertBefore(slot,item);return {item:item,slot:slot};});
+  var mobileMoreSyncedMode=null;
   function setMobileMore(open,restoreFocus){
     if(!mobileMoreButton||!mobileMoreMenu)return;
     var active=mobileMoreMedia.matches&&open;
@@ -1003,10 +1028,13 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
     if(!active&&restoreFocus)mobileMoreButton.focus();
   }
   function syncMobileMore(){
+    var mobileMode=mobileMoreMedia.matches;
+    if(mobileMoreSyncedMode===mobileMode)return;
+    mobileMoreSyncedMode=mobileMode;
     if(!mobileMoreMenu)return;
     setMobileMore(false,false);
     mobileMoreSlots.forEach(function(entry){
-      if(mobileMoreMedia.matches)mobileMoreMenu.appendChild(entry.item);
+      if(mobileMode)mobileMoreMenu.appendChild(entry.item);
       else entry.slot.parentNode.insertBefore(entry.item,entry.slot.nextSibling);
     });
     setShellHidden(root.classList.contains("shell-hidden"),false);
@@ -1014,6 +1042,7 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
   syncMobileMore();
   if(mobileMoreMedia.addEventListener)mobileMoreMedia.addEventListener("change",syncMobileMore);
   else mobileMoreMedia.addListener(syncMobileMore);
+  window.addEventListener("resize",function(){if(mobileMoreMedia.matches!==mobileMoreSyncedMode)syncMobileMore();});
   if(mobileMoreButton)mobileMoreButton.addEventListener("click",function(e){e.stopPropagation();setMobileMore(mobileMoreMenu.hidden,false);});
   mobileMoreItems.slice(0,3).forEach(function(item){item.addEventListener("click",function(){setMobileMore(false,false);});});
 
@@ -1196,7 +1225,7 @@ ${renderThemeAssets()}
 <header class="topbar">
   <div class="brand">Rendro</div>
   <div class="actions">
-    <button class="icon-btn" id="theme-toggle" type="button" aria-label="Switch theme" title="Theme: system"><span class="material-symbols-outlined" id="theme-icon" aria-hidden="true">brightness_auto</span></button>
+    ${renderThemeButton()}
     <form method="get" action="/api/auth/sign-out"><button class="secondary-btn" type="submit">Sign out</button></form>
   </div>
 </header>
