@@ -8,6 +8,13 @@ const authState = vi.hoisted(() => ({
 
 vi.mock("../convex/auth", () => ({
   createAuth: vi.fn(() => ({
+    $context: Promise.resolve({ adapter: { findOne: vi.fn(({ model, where }: { model: string; where: Array<{ field: string; value: string }> }) => {
+      if (authState.organizationErrorStatus) return Promise.reject(Object.assign(new Error("Provider lookup failed"), { statusCode: authState.organizationErrorStatus }));
+      const organizationId = where.find((entry) => entry.field === "organizationId" || entry.field === "id")?.value;
+      return Promise.resolve(model === "member"
+        ? authState.members.find((member) => member.organizationId === organizationId && member.userId === authState.sessionUserId) ?? null
+        : { id: organizationId, name: "Acme", slug: "acme" });
+    }) } }),
     api: {
       getSession: vi.fn(() => Promise.resolve(authState.sessionUserId
         ? { user: { id: authState.sessionUserId }, session: { id: "session" } }

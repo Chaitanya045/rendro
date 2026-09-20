@@ -21,7 +21,7 @@ async function runtime(role: string, requestError = false, activePage = true) {
   const keyList = { innerHTML: "", querySelector: (selector: string) => selector === "p" ? errorCopy : retry };
   const request = vi.fn((path: string) => {
     if (requestError) return Promise.reject(new Error("Network unavailable"));
-    if (path.includes("get-full-organization")) return Promise.resolve({ name: "QA", members: [{ userId: "qa", role }] });
+    if (path.includes("management/access")) return Promise.resolve({ name: "QA", member: { userId: "qa", role } });
     if (path.includes("credentials")) return Promise.resolve({ credentials: [] });
     return Promise.resolve({ projects: [] });
   });

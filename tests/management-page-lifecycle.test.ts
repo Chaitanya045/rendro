@@ -20,7 +20,7 @@ const pages: PageCase[] = [
     name: "publication",
     path: "/organizations/org/projects/project/publications",
     routes: publicationPages,
-    requestCount: 4,
+    requestCount: 3,
     loadEnd: "  function render(",
   },
   {
@@ -49,7 +49,10 @@ async function loadRuntime(page: PageCase) {
     await next();
   });
   app.route("/", page.routes);
-  const html = await (await app.request(page.path)).text();
+  const responseHtml = await (await app.request(page.path)).text();
+  // The shell has its own loading routines; exercise only this page's controller.
+  const html = responseHtml.match(/<script data-cp-page-script>([\s\S]*?)<\/script>/)?.[1] ?? "";
+  expect(html).not.toBe("");
 
   const activeStart = html.indexOf("  function active(){");
   const activeEnd = html.indexOf("\n", activeStart);

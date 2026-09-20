@@ -67,6 +67,7 @@ export default defineSchema({
     purgedAt: v.optional(v.number()),
   })
     .index("by_project_created", ["projectId", "createdAt"])
+    .index("by_organization_activated", ["organizationId", "activatedAt"])
     .index("by_organization_status", ["organizationId", "status"]),
 
   publications: defineTable({

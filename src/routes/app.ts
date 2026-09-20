@@ -8,6 +8,7 @@ import { isDeleted } from "@/soft-delete";
 import { renderNotFoundPage } from "@/routes/not-found";
 import { renderLandingPage } from "@/routes/landing";
 import { renderThemeAssets, renderThemeButton } from "./theme";
+import { menuSurfaceStyles } from "../ui/menu-styles";
 
 const app = new Hono<{ Variables: { user?: User } }>();
 
@@ -683,6 +684,7 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
     html.tree-mobile-open .mobile-tree-backdrop{opacity:1;pointer-events:auto}
     html.shell-hidden.tree-mobile-open .sidebar{transform:translateX(0);opacity:1;pointer-events:auto}
   }
+  ${menuSurfaceStyles}
 </style>
 <body>
 

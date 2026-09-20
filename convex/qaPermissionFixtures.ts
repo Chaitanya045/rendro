@@ -171,6 +171,25 @@ export const run = internalAction({
       }
       phase = "http-permission-matrix";
 
+      const accessPath = `/api/rendro/management/access?organizationId=${encodeURIComponent(primaryOrgId)}`;
+      for (const role of ["owner", "admin", "member", "outsider", "anonymous"] as const) {
+        const response = await call(role, accessPath);
+        record(`management:access:${role}`, role === "anonymous" ? 401 : role === "outsider" ? 403 : 200, response.status);
+        if (response.ok) {
+          const access = await response.json() as { id?: string; userId?: string; member?: { userId?: string; role?: string }; members?: unknown; teams?: unknown };
+          record(`management:access:${role}:minimal`, 1, access.id === primaryOrgId && access.userId === access.member?.userId && access.member?.role === role && !access.members && !access.teams && response.headers.get("cache-control")?.includes("no-store") ? 1 : 0);
+        }
+      }
+      for (const role of ["member", "outsider", "anonymous"] as const) {
+        record(`management:recent:${role}`, role === "member" ? 200 : 403, (await call(role, `/api/rendro/management/recent-deployment?organizationId=${encodeURIComponent(primaryOrgId)}`)).status);
+      }
+
+      for (const role of ["owner", "admin", "member", "outsider", "anonymous"] as const) {
+        const response = await call(role, `/api/rendro/management/members?organizationId=${primaryOrgId}`);
+        record(`members:cursor:${role}`, role === "outsider" || role === "anonymous" ? 403 : 200, response.status);
+        if (response.ok) { const page = await response.json() as { members?: unknown[]; nextCursor?: string | null }; record(`members:cursor:${role}:complete`, 1, page.members?.length === 3 && page.nextCursor === null ? 1 : 0); }
+      }
+
       const memberOrganization = await call("member", `/api/auth/organization/get-full-organization?organizationId=${encodeURIComponent(primaryOrgId)}`);
       record("organization:get-full:member", 200, memberOrganization.status);
       const outsiderOrganization = await call("outsider", `/api/auth/organization/get-full-organization?organizationId=${encodeURIComponent(primaryOrgId)}`);
@@ -222,6 +241,19 @@ export const run = internalAction({
 
       const authPost = (role: (typeof roles)[number], action: string, body: Record<string, unknown>) =>
         call(role, `/api/auth/organization/${action}`, { method: "POST", body: JSON.stringify(body) });
+      const createdOrgResponse = await authPost("owner", "create", { name: `QA created ${runId}`, slug: `qa-created-${runId}`, keepCurrentActiveOrganization: true });
+      record("organizations:create", 200, createdOrgResponse.status);
+      const createdOrg = await createdOrgResponse.json() as { id?: string };
+      if (!createdOrg.id) throw new Error("Created organization unavailable");
+      organizationIds.push(createdOrg.id);
+      record("organizations:duplicate-slug-denied", 400, (await authPost("owner", "create", { name: `QA duplicate ${runId}`, slug: `qa-created-${runId}`, keepCurrentActiveOrganization: true })).status);
+      record("organizations:rename", 200, (await authPost("owner", "update", { organizationId: createdOrg.id, data: { name: `QA renamed ${runId}` } })).status);
+      const renamed = await (await call("owner", `/api/auth/organization/get-full-organization?organizationId=${createdOrg.id}`)).json() as { name?: string; members?: Array<{ userId: string; role: string }> };
+      record("organizations:rename-persisted", 1, renamed.name === `QA renamed ${runId}` ? 1 : 0);
+      record("organizations:creator-is-owner", 1, renamed.members?.some(member => member.userId === users[0].id && member.role === "owner") ? 1 : 0);
+      record("organizations:member-cannot-rename", 403, (await authPost("member", "update", { organizationId: primaryOrgId, data: { name: "Unauthorized rename" } })).status);
+      record("organizations:last-owner-removal-denied", 1, (await authPost("owner", "remove-member", { organizationId: primaryOrgId, memberIdOrEmail: ownerMember.id })).status >= 400 ? 1 : 0);
+      record("projects:duplicate-slug-denied", 400, (await createProject("owner", primaryOrgId, `owner-${runId}`)).status);
       for (const role of ["owner", "admin", "member"] as const) {
         const response = await authPost(role, "create-team", { organizationId: primaryOrgId, name: `QA ${role} ${runId}` });
         const team = await response.clone().json().catch(() => null) as { id?: string } | null;
@@ -229,13 +261,24 @@ export const run = internalAction({
         record(`teams:create:${role}`, role === "member" ? 403 : 200, response.status);
       }
       if (!teamIds[0]) throw new Error("Fixture team unavailable");
+      record("teams:rename", 200, (await authPost("owner", "update-team", { teamId: teamIds[0], data: { organizationId: primaryOrgId, name: `QA renamed team ${runId}` } })).status);
+      const renamedTeam = await authContext.adapter.findOne<{ name: string }>({ model: "team", where: [{ field: "id", value: teamIds[0] }] });
+      record("teams:rename-persisted", 1, renamedTeam?.name === `QA renamed team ${runId}` ? 1 : 0);
+      const rosterPath = `/api/rendro/management/team-members?organizationId=${primaryOrgId}&teamId=${teamIds[0]}`;
+      for (const role of ["owner", "admin", "member", "outsider", "anonymous"] as const) record(`teams:roster:${role}`, role === "owner" || role === "admin" ? 200 : 403, (await call(role, rosterPath)).status);
+      record("teams:roster:foreign-team-denied", 404, (await call("outsider", `/api/rendro/management/team-members?organizationId=${outsiderOrgId}&teamId=${teamIds[0]}`)).status);
       const teamBody = { organizationId: primaryOrgId, teamId: teamIds[0], userId: users[2].id };
       record("teams:add:member-denied", 403, (await authPost("member", "add-team-member", teamBody)).status);
       record("teams:add:admin", 200, (await authPost("admin", "add-team-member", teamBody)).status);
       record("teams:add:duplicate-idempotent", 200, (await authPost("admin", "add-team-member", teamBody)).status);
       record("teams:add:single-membership", 1, (await authContext.adapter.findMany({ model: "teamMember", where: [{ field: "teamId", value: teamIds[0] }, { field: "userId", value: users[2].id }] })).length);
+      const rosterResponse = await call("owner", rosterPath);
+      const roster = await rosterResponse.json() as { members?: Array<{ userId: string }> };
+      record("teams:roster:added-member-visible", 1, roster.members?.some(member => member.userId === users[2].id) ? 1 : 0);
+      record("teams:roster:no-store", 1, rosterResponse.headers.get("cache-control")?.includes("no-store") ? 1 : 0);
       record("teams:remove-member:member-denied", 403, (await authPost("member", "remove-team-member", teamBody)).status);
       record("teams:remove-member:admin", 200, (await authPost("admin", "remove-team-member", teamBody)).status);
+      record("teams:remove-member:persisted", 0, (await authContext.adapter.findMany({ model: "teamMember", where: [{ field: "teamId", value: teamIds[0] }, { field: "userId", value: users[2].id }] })).length);
       record("teams:remove-member:organization-access-retained", 200, (await call("member", projectPath)).status);
       record("teams:remove:member-denied", 403, (await authPost("member", "remove-team", teamBody)).status);
       record("teams:remove:owner", 200, (await authPost("owner", "remove-team", teamBody)).status);
@@ -299,10 +342,12 @@ export const run = internalAction({
       record("session:expired-uncached-denied", 403, (await call("admin", projectPath)).status);
       headers.set("admin", cachedHeaders.get("admin") ?? new Headers());
       record("session:expired-cached-denied", 403, (await call("admin", projectPath)).status);
+      record("management:access:expired-session", 401, (await call("admin", accessPath)).status);
       await authContext.internalAdapter.deleteSession(sessionTokens[0]);
       record("session:revoked-uncached-denied", 403, (await call("owner", projectPath)).status);
       headers.set("owner", cachedHeaders.get("owner") ?? new Headers());
       record("session:revoked-cached-denied", 403, (await call("owner", projectPath)).status);
+      record("management:access:revoked-session", 401, (await call("owner", accessPath)).status);
       record("session:revoked-cached-native-organization-denied", 401, (await call("owner", `/api/auth/organization/get-full-organization?organizationId=${encodeURIComponent(primaryOrgId)}`)).status);
       void ownerMember;
     } catch (error) {

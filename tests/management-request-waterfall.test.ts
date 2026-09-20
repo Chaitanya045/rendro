@@ -54,6 +54,25 @@ function organizationContext() {
 }
 
 describe("management request waterfall", () => {
+  it("loads members beyond the full-organization join's first 100 without duplicates", async () => {
+    const context = organizationContext(), all = Array.from({ length: 121 }, (_, i) => ({ id: `member-${i}` }));
+    const paths: string[] = [];
+    const result = await context.request({ isActive: () => true, request: (path) => {
+      paths.push(path);
+      if (path.includes("get-full-organization")) return { id: "org-a", members: all.slice(0, 100) };
+      const cursor = new URL(path, "https://rendro.test").searchParams.get("cursor");
+      return { members: cursor ? all.slice(100) : all.slice(0, 100), nextCursor: cursor ? null : "page-two" };
+    } }, "org-a");
+    expect(result.members).toHaveLength(121);
+    expect(paths).toHaveLength(3);
+    expect(paths.at(-1)).toContain("cursor=page-two");
+  });
+  it("fails visibly if roster pagination stops making progress", async () => {
+    const context = organizationContext();
+    await expect(context.request({ isActive: () => true, request: (path) => path.includes("get-full-organization")
+      ? { id: "org-a", members: Array.from({ length: 100 }, (_, i) => ({ id: String(i) })) }
+      : { members: [], nextCursor: "stuck" } }, "org-a")).rejects.toThrow("changed while loading");
+  });
   it("shares only an active in-flight organization check and checks again after it settles", async () => {
     const context = organizationContext();
     const first = deferred<Record<string, unknown>>();

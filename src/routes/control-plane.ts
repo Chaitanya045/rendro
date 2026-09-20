@@ -1,6 +1,8 @@
 import type { User } from "better-auth/types";
 import { renderThemeAssets, renderThemeButton } from "./theme";
 import { MANAGEMENT_SHELL_VERSION, renderManagementNavigationRuntime } from "./management-navigation";
+import { selectStyles } from "../ui/select-styles";
+import { organizationSwitcherRuntime, organizationSwitcherStyles, renderOrganizationLabelBootstrap } from "./organization-switcher";
 export { renderLoadingState, renderProjectNavigation, renderTableLoading } from "./management-loading";
 export type { ProjectNavigationSection } from "./management-loading";
 
@@ -461,7 +463,7 @@ const controlPlaneRuntime = String.raw`
   function busy(button,on){if(!button)return;button.disabled=on;button.setAttribute("aria-busy",String(on));}
   var copyTimers=new WeakMap();
   async function copyText(button,value,idleLabel){if(!button||button.disabled)return false;var previous=copyTimers.get(button);if(previous){clearTimeout(previous);copyTimers.delete(button);}busy(button,true);try{await navigator.clipboard.writeText(value);busy(button,false);button.textContent="Copied";copyTimers.set(button,setTimeout(function(){button.textContent=idleLabel;copyTimers.delete(button);},1500));return true;}catch(error){busy(button,false);button.textContent=idleLabel;copyTimers.delete(button);throw error;}}
-  async function request(path,options){var response=await fetch(path,Object.assign({headers:{Accept:"application/json","Content-Type":"application/json"}},options||{}));var data=null;try{data=await response.json();}catch(_error){}if(!response.ok){var message=data&&(data.message||data.error);throw new Error(typeof message==="string"?message:"Request failed. Please try again.");}return data;}
+  async function request(path,options){var response=await fetch(path,Object.assign({headers:{Accept:"application/json","Content-Type":"application/json"}},options||{}));var data=null;try{data=await response.json();}catch(_error){}if(!response.ok){var message=data&&(data.message||data.error),error=new Error(typeof message==="string"?message:"Request failed. Please try again.");error.status=response.status;throw error;}return data;}
   function toast(message,type){var region=document.getElementById("cp-toasts");if(!region)return;var node=document.createElement("div");node.className="toast"+(type?" "+type:"");node.setAttribute("role",type==="error"?"alert":"status");node.textContent=message;region.appendChild(node);requestAnimationFrame(function(){node.classList.add("visible");});setTimeout(function(){node.classList.remove("visible");setTimeout(function(){node.remove();},220);},4200);}
   function openDialog(id){var dialog=document.getElementById(id);if(dialog&&typeof dialog.showModal==="function")dialog.showModal();}
   function dialogBusy(dialog){return Boolean(dialog.querySelector("[aria-busy=true]"));}
@@ -489,6 +491,8 @@ const controlPlaneRuntime = String.raw`
   if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",enhanceProjectNavigation,{once:true});else enhanceProjectNavigation();
   function enhancePage(){normalizeEmptyMarks(document);enhanceDialogs(document);enhanceProjectNavigation();syncProjectSectionPickers();}
   window.RendroUI={busy:busy,copyText:copyText,request:request,toast:toast,openDialog:openDialog,applyTheme:applyTheme,setNav:setNav,syncActiveNav:syncActiveNav,enhancePage:enhancePage};
+  var userId=document.querySelector(".cp-main").getAttribute("data-cp-user-id");
+  if(userId&&window.RendroQueryCore&&window.RendroQueryCore.installOrganizationList)window.RendroUI.request=window.RendroQueryCore.installOrganizationList({userId:userId,origin:location.origin},request);
   requestAnimationFrame(function(){root.classList.add("motion-ready");});
 })();
 `;
@@ -504,27 +508,31 @@ export function renderControlPlanePage(options: ControlPlanePageOptions): string
   const openDocs = organizationId
     ? `<a class="cp-top-action" data-cp-open-docs href="/organizations/${encodeURIComponent(organizationId)}/projects${options.projectId ? `/${encodeURIComponent(options.projectId)}/docs` : ""}"><span class="material-symbols-outlined" aria-hidden="true">description</span><span>Open docs</span></a>`
     : "";
-  const organizationSwitcher = organizationId
-    ? `<a class="cp-org-switcher" href="/organizations?choose=1" aria-label="Switch organization"><span class="cp-org-mark" data-org-mark>R</span><span class="cp-org-name" data-org-name>${orgLabel}</span><span class="material-symbols-outlined cp-org-caret" aria-hidden="true">unfold_more</span></a>`
-    : `<a class="cp-org-switcher" href="/organizations"><span class="cp-org-mark">R</span><span class="cp-org-name">Organizations</span></a>`;
+  const organizationSwitcher = `<a class="cp-org-switcher" id="cp-org-switcher" href="/organizations?choose=1" aria-label="Switch organization"><span class="cp-org-mark"${organizationId ? " data-org-mark" : ""}>R</span><span class="cp-org-name"${organizationId ? " data-org-name" : ""}>${orgLabel}</span><span class="material-symbols-outlined cp-org-caret" aria-hidden="true">unfold_more</span></a>`;
   return `<!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>${escapeHtml(options.title)} — Rendro</title><link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..24,400,0,0&display=swap" rel="stylesheet">${renderThemeAssets()}<style>${controlPlaneStyles}</style></head>
+<link rel="preload" href="/select.js?v=3" as="script">
+${hasSidebar ? `<script defer src="/management-pages.js?v=${MANAGEMENT_SHELL_VERSION}"></script>` : ""}
+<link rel="preload" href="/management-query.js?v=4" as="script">
+<title>${escapeHtml(options.title)} — Rendro</title><link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..24,400,0,0&display=swap" rel="stylesheet">${renderThemeAssets()}<style>${controlPlaneStyles}${selectStyles}${organizationSwitcherStyles}</style></head>
 <body class="${hasSidebar ? "has-sidebar" : "focused-layout"}">
 <header class="cp-topbar"><div class="cp-topbar-inner">
   ${hasSidebar ? '<button class="cp-icon-button cp-mobile-menu" id="cp-menu" type="button" aria-label="Open navigation" aria-expanded="false" aria-controls="cp-navigation"><span class="material-symbols-outlined" aria-hidden="true">menu</span></button>' : ""}
-  <a class="cp-brand" href="/">Rendro<i>.</i></a>
+  <a class="cp-brand" href="${organizationId ? `/organizations/${encodeURIComponent(organizationId)}` : "/organizations"}">Rendro<i>.</i></a>
   ${organizationSwitcher}
+  <script data-cp-org-label>${renderOrganizationLabelBootstrap(options.user.id, organizationId)}</script>
   <span class="cp-top-spacer"></span>${openDocs}
   ${renderThemeButton("cp-theme")}
   <div class="cp-account" id="cp-account"><button class="cp-avatar" id="cp-avatar" type="button" aria-label="Open account menu" aria-expanded="false" aria-controls="cp-account-menu">${escapeHtml(initial)}</button><div class="cp-account-menu" id="cp-account-menu"><span class="cp-account-email">${escapeHtml(options.user.email)}</span><a href="/account/security"><span class="material-symbols-outlined" aria-hidden="true">shield</span><span>Account security</span></a><a href="/api/auth/sign-out"><span class="material-symbols-outlined" aria-hidden="true">logout</span><span>Sign out</span></a></div></div>
 </div></header>
+<div class="cp-org-menu" id="cp-org-menu" role="menu" aria-label="Switch organization" popover="manual" hidden><p class="cp-org-menu-heading" role="presentation">Switch organization</p><p class="cp-org-menu-status" role="status"></p><div data-org-options role="presentation"></div><div class="cp-org-menu-footer" role="presentation"><a href="/organizations?choose=1" role="menuitem">Manage organizations</a></div></div>
 ${hasSidebar ? `<aside class="cp-sidebar" id="cp-navigation"><div class="cp-drawer-head"><span>Navigation</span><button class="cp-icon-button" id="cp-nav-close" type="button" aria-label="Close navigation"><span class="material-symbols-outlined" aria-hidden="true">close</span></button></div>${controlNavigation(organizationId ?? "", options.active)}</aside><button class="cp-backdrop" id="cp-backdrop" type="button" aria-label="Close navigation" tabindex="-1"></button>` : ""}
 <main class="cp-main${hasSidebar ? "" : " focused"}" data-cp-route-envelope="true" data-cp-shell-version="${MANAGEMENT_SHELL_VERSION}" data-cp-organization-id="${escapeHtml(organizationId ?? "")}" data-cp-project-id="${escapeHtml(options.projectId ?? "")}" data-cp-user-id="${escapeHtml(options.user.id)}"><div class="cp-content${pageClass}">
   <header class="cp-page-head"><div class="cp-page-copy"><p class="eyebrow">${escapeHtml(options.eyebrow)}</p><h1 class="cp-page-heading">${escapeHtml(options.heading)}</h1><p class="cp-page-description">${escapeHtml(options.description)}</p></div>${options.actions ? `<div class="cp-page-actions">${options.actions}</div>` : ""}</header>
   ${options.content}
 </div></main>
 <div class="toast-region" id="cp-toasts" aria-live="polite"></div>
-<script data-cp-page-state type="application/json">${state}</script><script>window.__RENDRO_PAGE_STATE__=${state};</script><script>${controlPlaneRuntime}</script><script>${renderManagementNavigationRuntime(organizationId)}</script><script data-cp-page-script>${options.script}</script>
+${organizationId ? '<div class="cp-refresh-notice" id="cp-refresh-notice" hidden><span role="status">Updates may be available.</span><button class="button small" type="button" id="cp-refresh-button">Refresh</button></div>' : ""}
+<script data-cp-page-state type="application/json">${state}</script><script>window.__RENDRO_PAGE_STATE__=${state};</script><script src="/select.js?v=3"></script><script src="/management-query.js?v=4"></script><script>${controlPlaneRuntime}</script><script>${organizationSwitcherRuntime}</script><script>${renderManagementNavigationRuntime(organizationId)}</script><script data-cp-page-script>${options.script}</script>
 </body></html>`;
 }

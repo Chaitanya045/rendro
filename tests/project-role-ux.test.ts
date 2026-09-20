@@ -186,9 +186,9 @@ async function roleRuntime(page: Page, initialRole: Role) {
   const document = new DocumentMock();
   parseHTML(document.body, html);
   let role = initialRole;
-  const organization = () => ({ name: "Acme", members: managementMember(role) });
+  const organization = () => ({ name: "Acme", members: managementMember(role), member: managementMember(role)[0] });
   const request = (path: string) => {
-    if (path.startsWith("/api/auth/organization/get-full-organization")) return organization();
+    if (path.startsWith("/api/rendro/management/access")) return organization();
     if (path.startsWith("/api/rendro/projects/get")) return { project: { _id: "project-a", name: "Docs", slug: "docs", createdAt: Date.now() } };
     if (path.startsWith("/api/rendro/projects")) return { projects: [] };
     if (path.startsWith("/api/rendro/deployments")) return { deployments: [] };
@@ -308,7 +308,7 @@ describe("project role-aware UX", () => {
   it("derives management access from the signed-in member while retaining read routes", async () => {
     const html = await (await authenticatedPages().request("/organizations/org-a/projects/project-a")).text();
 
-    expect(html).toContain('candidate.userId===state.userId');
+    expect(html).toContain('var member=organization.member');
     expect(html).toContain('String(member.role||"").split(",").map(function(role){return role.trim();})');
     expect(html).toContain('return role==="owner"||role==="admin";');
     expect(html).toContain('trigger.hidden=!canManage;trigger.disabled=!canManage;');
@@ -325,12 +325,14 @@ describe("project role-aware UX", () => {
 
   it("reuses the organization lookup that supplies canonical chrome for permission resolution", async () => {
     const html = await (await authenticatedPages().request("/organizations/org-a/projects/project-a")).text();
-    const lookups = html.match(/\/api\/auth\/organization\/get-full-organization/g) ?? [];
+    const pageScript = html.match(/<script data-cp-page-script>([\s\S]*?)<\/script>/)?.[1] ?? "";
+    const lookups = pageScript.match(/\/api\/auth\/organization\/get-full-organization/g) ?? [];
 
-    // The shared context owns the single full-organization lookup. Its settled
-    // authorization response is discarded while display identity may be reused.
+    // The page's shared context owns one lookup. The shell additionally declares
+    // a cache-hit authorization guard; runtime tests assert both callers dedupe
+    // to one network read rather than counting their source-code occurrences.
     expect(lookups).toHaveLength(1);
-    expect(html).toContain('applyOrganization(results[2])');
+    expect(html).toContain('applyOrganization(results[1])');
     expect(html).toContain("if(inFlight.get(key)===entry)inFlight.delete(key)");
     expect(html).not.toContain('.then(setChrome)');
   });
@@ -342,7 +344,7 @@ describe("project role-aware UX", () => {
 
     expect(html).toContain('id="publication-create" type="button" data-dialog-open="publication-dialog" disabled hidden');
     expect(html).toContain('"userId":"member-user"');
-    expect(html).toContain('candidate.userId===state.userId');
+    expect(html).toContain('var member=organization.member');
     expect(html).toContain('trigger.hidden=!canManage;trigger.disabled=!canManage;note.hidden=canManage;');
     expect(html).toContain('form.querySelectorAll("input,select,button[type=submit]")');
     expect(html).toContain('if(!canManage){error.textContent="Only organization owners and admins can create publications.";return;}');
@@ -359,7 +361,7 @@ describe("project role-aware UX", () => {
     )).text();
 
     expect(html).toContain('"userId":"member-user"');
-    expect(html).toContain('candidate.userId===state.userId');
+    expect(html).toContain('var member=organization.member');
     expect(html).toContain('document.getElementById("share-access-note").hidden=canManage;');
     expect(html).toContain('if(canManage){var revoke=');
     expect(html).toContain('else action.append(h("span","cell-secondary","Owner/admin only"))');

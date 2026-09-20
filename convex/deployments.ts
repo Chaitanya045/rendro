@@ -89,6 +89,19 @@ export const listInternal = internalQuery({
   },
 });
 
+export const latestForOrganization = internalQuery({
+  args: { organizationId: v.string() },
+  handler: async (ctx, { organizationId }) => {
+    const latest = await ctx.db.query("deployments")
+      .withIndex("by_organization_activated", (q) => q.eq("organizationId", organizationId).gt("activatedAt", 0))
+      .order("desc").first();
+    if (!latest) return null;
+    const project = await ctx.db.get(latest.projectId);
+    if (!project || project.organizationId !== organizationId) return null;
+    return { projectId: latest.projectId, projectName: project.name, status: latest.status, activatedAt: latest.activatedAt, commit: latest.provenance.source.commit };
+  },
+});
+
 export const commitInternal = internalMutation({
   args: {
     organizationId: v.string(),

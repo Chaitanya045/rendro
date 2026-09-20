@@ -46,6 +46,22 @@ async function stage(
 }
 
 describe("immutable deployment lifecycle", () => {
+  it("returns one compact recent deployment across all projects, scoped to its organization", async () => {
+    const backend = convexTest(schema, modules);
+    const owned = await project(backend), other = await project(backend, "org-b");
+    expect(await backend.query(internal.deployments.latestForOrganization, { organizationId: "org-a" })).toBeNull();
+    const own = await stage(backend, owned._id), foreign = await stage(backend, other._id, "org-b");
+    await backend.run(async (ctx) => {
+      await ctx.db.patch(own.deploymentId, { status: "active", activatedAt: 100 });
+      await ctx.db.patch(foreign.deploymentId, { status: "active", activatedAt: 200 });
+    });
+    // A newer staging deployment must not replace the latest committed release.
+    await stage(backend, owned._id);
+    const recent = await backend.query(internal.deployments.latestForOrganization, { organizationId: "org-a" });
+    expect(recent).toMatchObject({ projectId: owned._id, projectName: "Documentation", activatedAt: 100, commit: "abc123" });
+    expect(recent).not.toHaveProperty("manifestKey");
+    expect(recent).not.toHaveProperty("treeIndexKey");
+  });
   it("rejects a project ID paired with another organization ID", async () => {
     const backend = convexTest(schema, modules);
     const owned = await project(backend);

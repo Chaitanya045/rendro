@@ -316,10 +316,28 @@ async function runtime(
 function apiData(path: string, data: unknown) {
   if (path === "/api/auth/organization/set-active") return jsonResponse({ ok: true });
   if (path.startsWith("/api/auth/organization/get-full-organization")) return jsonResponse(organization);
+  if (path.startsWith("/api/rendro/management/access")) return jsonResponse({ id: organization.id, name: organization.name, slug: organization.slug, userId: owner.id, member: organization.members[0] });
   return jsonResponse(data);
 }
 
 describe("organization management form regressions", () => {
+  it("creates two teams with one POST each and resets the reused dialog", async () => {
+    let creates = 0;
+    const ui = await runtime("teams", (path) => {
+      if (path === "/api/auth/organization/create-team") { creates++; return jsonResponse({ id: `team-${creates}` }); }
+      return apiData(path, {});
+    });
+    const form = ui.document.getElementById("team-form")!;
+    const button = form.querySelector("button[type=submit]")!;
+    for (const name of ["First QA team", "Second QA team"]) {
+      form.elements.namedItem("name")!.value = name;
+      await form.dispatch("submit", { preventDefault() {} });
+      expect(button.disabled).toBe(false);
+      expect(form.elements.namedItem("name")!.value).toBe("");
+      expect(form.listeners.get("submit")).toHaveLength(1);
+    }
+    expect(creates).toBe(2);
+  });
   it("keeps only failed rows after a partially failed batch invitation", async () => {
     const calls: { path: string; body: { email?: string } | undefined }[] = [];
     const ui = await runtime("people", (path, options) => {

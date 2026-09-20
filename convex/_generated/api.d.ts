@@ -24,6 +24,8 @@ import type * as migrationHttp from "../migrationHttp.js";
 import type * as projects from "../projects.js";
 import type * as publicationHttp from "../publicationHttp.js";
 import type * as publicationsV2 from "../publicationsV2.js";
+import type * as qaPermissionFixtures from "../qaPermissionFixtures.js";
+import type * as qaWorkspaceFixtures from "../qaWorkspaceFixtures.js";
 import type * as rendroHttp from "../rendroHttp.js";
 import type * as replies from "../replies.js";
 import type * as retention from "../retention.js";
@@ -56,6 +58,8 @@ declare const fullApi: ApiFromModules<{
   projects: typeof projects;
   publicationHttp: typeof publicationHttp;
   publicationsV2: typeof publicationsV2;
+  qaPermissionFixtures: typeof qaPermissionFixtures;
+  qaWorkspaceFixtures: typeof qaWorkspaceFixtures;
   rendroHttp: typeof rendroHttp;
   replies: typeof replies;
   retention: typeof retention;

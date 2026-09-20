@@ -189,9 +189,9 @@ describe("organization role UX", () => {
           { id: "target", userId: "target-user", role: "admin", user: { id: "target-user", email: "target@example.test" } },
         ],
       },
-      invitations: [], canManage: true, currentRole: "owner", isOwner: true, isAdmin: false,
+      invitations: [], invitationRequest: Promise.resolve({ data: [] }), canManage: true, currentRole: "owner", isOwner: true, isAdmin: false,
     };
-    await context.window.__roleUx.renderPeople(data);
+    await context.window.__roleUx.renderPeople(data, 0);
     expect(selects[0].children.find((option) => option.value === "member")?.disabled).toBe(true);
     const inviteRows = elements.get("invite-rows")!;
     const draftRow = inviteRows.children[0];
@@ -262,8 +262,8 @@ describe("organization role UX", () => {
           { id: "target", userId: "target-user", role: "admin", user: { id: "target-user", email: "target@example.test" } },
         ],
       },
-      invitations: [], canManage: true, isOwner: true, isAdmin: false,
-    });
+      invitations: [], invitationRequest: Promise.resolve({ data: [] }), canManage: true, isOwner: true, isAdmin: false,
+    }, 0);
     const targetSelect = selects[1];
     expect(targetSelect.value).toBe("admin");
     targetSelect.value = "member";

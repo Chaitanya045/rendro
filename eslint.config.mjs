@@ -32,6 +32,7 @@ export default tseslint.config(
   },
   {
     ignores: [
+      ".wrangler/**",
       "bin/**",
       "convex/_generated/**",
       "convex/betterAuth/_generated/**",

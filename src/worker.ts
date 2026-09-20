@@ -120,6 +120,10 @@ app.route("/", shareV2Routes);
 app.route("/", shareRoutes);
 app.route("/", publicRoutes);
 
+// Public, versioned browser code must not trigger an authenticated session RPC.
+app.get("/management-query.js", async (c) => { const assets = c.env?.ASSETS; if (assets?.fetch) return assets.fetch(c.req.raw); return c.html(renderNotFoundPage({ path: c.req.path }), 404); });
+app.get("/select.js", async (c) => { const assets = c.env?.ASSETS; if (assets?.fetch) return assets.fetch(c.req.raw); return c.html(renderNotFoundPage({ path: c.req.path }), 404); });
+app.get("/management-pages.js", async (c) => { const assets = c.env?.ASSETS; if (assets?.fetch) return assets.fetch(c.req.raw); return c.html(renderNotFoundPage({ path: c.req.path }), 404); });
 app.use("*", sessionMiddleware);
 
 // Sign-out: GET → POST
