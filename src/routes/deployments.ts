@@ -7,6 +7,7 @@ import {
   listAllKeys,
   putObject,
 } from "@/minio";
+import { readExactBody } from "@/bounded-body";
 
 const app = new Hono();
 
@@ -195,8 +196,15 @@ app.put("/api/rendro/deployments/:deploymentId/files/*", async (c) => {
   const manifest = await loadManifest(staging.deployment.manifestKey);
   const expected = manifest?.files.find((file) => file.path === filePath);
   if (!expected) return c.json({ error: "File is not present in the deployment manifest" }, 400);
-  const bytes = new Uint8Array(await c.req.raw.arrayBuffer());
-  if (bytes.byteLength !== expected.size || await sha256(bytes) !== expected.sha256) {
+  const declaredLength = c.req.header("Content-Length");
+  if (declaredLength !== undefined) {
+    const length = Number(declaredLength);
+    if (!Number.isSafeInteger(length) || length < 0 || length !== expected.size) {
+      return c.json({ error: "Uploaded file size does not match its manifest entry" }, 413);
+    }
+  }
+  const bytes = await readExactBody(c.req.raw.body, expected.size);
+  if (!bytes || await sha256(bytes) !== expected.sha256) {
     return c.json({ error: "Uploaded file does not match its manifest entry" }, 400);
   }
   await putObject(

@@ -1,6 +1,6 @@
 # Rendro Design Language
 
-> Last updated: 2026-07-27
+> Last updated: 2026-08-03
 > Companion docs: [PRODUCT.md](PRODUCT.md) (what Rendro is) and [TECHNICAL.md](TECHNICAL.md) (how it works). This doc is **how Rendro looks, moves, loads, and stays out of the document's way**.
 
 ## Philosophy
@@ -90,11 +90,16 @@ The management experience is a separate shell from the document viewer. It opera
 ### Shell and navigation
 
 - Use one shared server-rendered shell for every authenticated management route.
+- Same-organization management navigation progressively enhances links: keep the topbar, organization identity, sidebar and shared theme controller mounted, and replace only the main content. Insert the destination skeleton locally, then mount the version-matched public controller/template bundle generated from the SSR routes. Start fresh access and data reads together; never release data to the controller until the current account and organization membership are verified. Missing/incompatible bundles retain the authenticated-HTML fallback. First loads remain server-rendered; this is not static generation or caching of personalized pages.
+- Keep account, authentication, onboarding, organization switching, document viewing, modified clicks and unsupported routes on full browser navigation. Enhanced navigation must preserve history/hash behavior and fall back to full navigation for an incompatible shell or authentication redirect.
+- Each management page owns an abortable request scope. Disposing it cancels reads and releases observers/listeners; stale successes and failures cannot paint a later page. Deduplicate in-flight reads. The user-approved TanStack Query Core exception caches only project lists/details, deployment lists and publication lists in memory (30-second freshness, five-minute inactive retention), keyed by user, organization, endpoint and project. TanStack owns freshness, deduplication and garbage collection; do not duplicate its timestamps or storage. Retained data additionally requires fresh organization membership. Never cache permission-bearing responses, credentials, invitation data, private shares, secrets or authenticated HTML. Known writes remove only affected native queries before and after settlement, including uncertain failures; authorization-changing and unknown writes invalidate conservatively. Cross-tab invalidations carry only resource/organization/project identity. Session failure and page exit clear the cache. Resumed visibility and reconnect mark data stale without aborting an initial read or replacing form drafts. A Refresh notice lets users explicitly reload the screen through existing pending-write, dialog and unsaved-change guards. These are snapshots, not live subscriptions. Explicit organization-scoped navigation must not mutate the active organization.
+- Pending writes and open dialogs block enhanced navigation. Unsaved settings offer a discard confirmation; one-time secrets must be confirmed before leaving and cleared from their dialog and copy handlers after completion.
 - Desktop: fixed `56px` topbar, fixed `232px` organization sidebar, and a centered main column no wider than `1120px`.
 - Mobile at `760px` and below: the sidebar becomes a left drawer opened from a visible **Menu** control. The scrim, `Escape`, and a selected navigation link close it. No page may create horizontal viewport overflow.
-- The topbar contains the Rendro mark, organization switcher, **Open docs**, theme control, and account menu. The organization switcher returns to an explicit chooser; it must not force repeat selection during normal sign-in.
+- The topbar contains the Rendro mark, organization switcher, **Open docs**, theme control, and account menu. The organization button opens an in-place navigation menu with a current-organization checkmark; selecting another organization preserves the active sidebar section (Overview, Projects, People, Teams, Settings, or API keys). Project-detail sections fall back to the destination organization's Projects screen because project IDs are organization-specific. The switcher and chooser share user-scoped TanStack Query Core display data (ID/name/slug only). TanStack's per-query persister keeps that sanitized list in tab-local session storage across full-page organization navigation; time, visibility, reconnect and page exit do not make it stale. Organization creation, rename, deletion and membership changes invalidate it locally and across tabs; sign-out or authorization failure clears it. Cached labels never authorize access. Reopening a fresh menu or switching organizations must not issue another list request unless an invalidating change occurred. It reuses shared popup surface tokens, supports keyboard navigation and dismissal, and provides local loading/error/retry states. The chooser remains an explicit Manage organizations action and no-JavaScript fallback. The Rendro mark returns to the current organization's overview (or organizations when no organization is selected).
 - Sidebar information architecture is stable: **Overview**, **Projects**; **People**, **Teams**, **Settings**; **API keys**. The active item uses an Ember background and left indicator so state is not communicated by color alone.
 - Organization pages load the canonical organization name after authorization. IDs may appear in operational details, but placeholder slugs or domain-derived tenant labels must not drive navigation.
+- Organization switching updates the source header label and mark immediately, then carries the selected display name as a one-use, tab-local navigation hint bound to the signed-in user and destination organization and discarded after sixty seconds. Apply it inline beside the destination header before external scripts so the name does not flash back to “Organization.” This is navigation presentation only, not persisted TanStack data or authorization. If a route-leave guard rejects or navigation fails, restore the previous source label and clear the hint; the normal authorized response may reconcile a renamed organization. Missing/blocked storage falls back safely to the normal loading behavior.
 - Reuse neutral zinc surfaces, compact `8px`–`12px` radii, border-based hierarchy, Ember Orange intent, dark-mode counterparts, and the motion tokens below. Do not add a dashboard framework or icon package.
 
 ### Authentication and invitations
@@ -118,21 +123,27 @@ The management experience is a separate shell from the document viewer. It opera
 
 ### Management interaction patterns
 
+- Every single-value selection dropdown uses the progressive-enhancement component in `src/ui/select.ts`. Retain the native select for form values, validation, no-JavaScript fallback and existing change handlers. Use a shared shadcn-style trigger/listbox/checkmark, neutral popup surface, 40px desktop/44px mobile triggers, keyboard typeahead, Arrow/Home/End/Page keys, Enter/Space/Tab commit and Escape cancellation. Native multi-select/listbox controls remain native. Popups stay in their modal's active tree, use the top layer when supported, constrain themselves to the viewport, and reposition after dialog transitions. Do not rebuild options for unchanged property writes: the management shell also observes and synchronizes the DOM. Selection lists and action menus share popup surface tokens in `src/ui/menu-styles.ts` but retain their distinct semantics.
 - Overview shows project, member, and team counts; project release states; setup checklist; and the latest real deployment. No decorative graphs or fabricated metrics.
 - Create and invite actions use focused dialogs. Destructive revoke/remove actions require an explicit confirmation and provide inline or toast completion feedback.
 - People uses separate member and pending-invitation tables. Role changes apply only after server confirmation. Batch invitations preserve failures on their individual rows.
-- Teams organize existing members; they do not introduce a second role model. Removing a team never implies removing organization members.
+- Teams organize existing members; they do not introduce a second role model. Managers can expand a team roster on demand, add members, and remove individual memberships with confirmation. Roster reads use bounded Convex cursor pages, never the unsupported Better Auth offset adapter. Removing a team or team membership never implies removing organization members.
+- People exposes confirmed organization-member removal only where the current role allows it; the current user and sole owner are protected. Role changes and removals update counts and controls only after server confirmation. Organization contexts at the auth join's 100-member boundary complete their roster through fresh cursor reads rather than silently omitting members. Moving large rosters to fully paginated screen rendering remains a separate performance improvement.
 - API key rows expose name, prefix, project scope, permissions, last use, expiry, and status. Default to project scope, minimum permissions, and `90`-day expiry.
 - A newly created API key is rendered once in a modal. The user must affirm that it was stored before closing; subsequent screens show only the prefix.
+- Every close path for a one-time secret modal—close button, `Escape`, and backdrop—must respect the confirmation gate. The first-use screen also warns before navigation until the secret is confirmed; deployment polling may continue in the background while the page remains open.
 - Project detail keeps **Overview**, deployments, **Publications**, and **Private shares** in one project navigation context. Deployment history explains immutable releases without exposing storage keys.
 - Publications distinguish tracked active releases from pinned immutable releases. Private shares expose expiry and revocation state. Both stay subordinate to the selected project.
 - Tables may scroll inside their own container on narrow screens; the page itself must not overflow. Empty states state what is missing and offer one next action.
+- Dynamic collection removal must resolve to the same explicit empty state as an initially empty response. Empty-state marks use Material Symbols, remain `aria-hidden`, and never rely on a placeholder letter as the visible icon.
 
 ### Control-plane motion
 
 - Page content enters once with `opacity` and at most `6px` vertical movement.
 - Drawer, dialog, dropdown, toast, row insertion/removal, copy feedback, and button press use the shared `150ms`–`300ms` tokens.
 - Loading uses a local skeleton or one pending control. Deployment polling uses one small state indicator; never animate the whole page.
+- Initial loads and retries render a destination-shaped skeleton inside the final screen container. Reloadable async views use a request version guard so an older response cannot replace newer content; failures replace the skeleton with an actionable retry state.
+- Immediate management navigation and SSR must use the same canonical loading template, including page-specific headings, tabs, wrappers, columns and responsive styles. Keep those skeleton nodes mounted through controller initialization (and any authenticated-HTML fallback); do not insert a generic first loader, restart shimmer, or replay a whole-content fade when data arrives. Unknown data values and row counts remain placeholders. Primary content must not wait for independent secondary sections: deployment history, recent deployment and invitations have local loading/error/retry states. Publication deployment choices load only when pinned mode is selected.
 - `prefers-reduced-motion` removes transforms, shimmer, pulse, and stagger while retaining visible state changes.
 
 ## Motion tokens
@@ -198,7 +209,7 @@ Purpose: global actions, not navigation depth.
 - Right-side actions: hide/show app shell, copy signed URL, theme toggle, avatar.
 - Avatar menu opens near its trigger and closes on outside click. Copy feedback stays inline in the copy button.
 - Hide/show app shell persists in `localStorage`; `Ctrl+Shift+H` (`Cmd+Shift+H` on macOS) toggles it from either the app shell or the focused document iframe, top/left hot zones temporarily reveal the header/sidebar while hidden, and `Escape` restores the full shell.
-- Theme toggle cycles `system → dark → light → system`. Supported browsers reveal the new shell/commentor theme with a radial ripple from the theme button while the icon scrolls through `brightness_auto`, `dark_mode`, and `light_mode`. Reduced-motion and unsupported browsers switch directly. Publisher iframe content is not restyled.
+- Theme toggle cycles `system → dark → light → system`. Supported browsers reveal the new shell/commentor theme with a radial ripple from the theme button while the icon scrolls through `contrast`, `dark_mode`, and `light_mode`. Reduced-motion and unsupported browsers switch directly. Publisher iframe content is not restyled.
 
 Interaction spec:
 
@@ -206,7 +217,7 @@ Interaction spec:
 |---|---|---|---|
 | Copy signed URL | Neutral bordered button with link icon | Neutral container hover bg, stronger border | Link and label scroll to a CSS spinner plus `Creating signed URL…`; success continues to the check icon plus `Signed URL copied!` |
 | Icon buttons | Muted icon | Container hover bg | Icon motion / menu visible |
-| Theme toggle | Current mode icon (`brightness_auto`, `dark_mode`, `light_mode`) | Container hover bg | Stabilized radial theme reveal starts; icon track scrolls vertically to the active mode |
+| Theme toggle | Current mode icon (`contrast`, `dark_mode`, `light_mode`) | Container hover bg | Stabilized radial theme reveal starts; icon track scrolls vertically to the active mode |
 | Avatar | Initials chip | Border/surface emphasis | Avatar menu visible |
 
 ### Sidebar tree
@@ -337,6 +348,8 @@ Rendro's micro-interactions are small and functional. They make state legible.
 Rules:
 
 - Every interactive element needs hover/focus/active or open state where applicable.
+- Repeated controls share state styling, not just event handlers: use neutral container hover, Ember keyboard focus, 150ms standard easing, and `.98` button press feedback. Disabled controls must not acquire enabled hover/press feedback. Reduced motion removes press transforms while preserving positioning transforms. Account-menu rows use 14px/20px text, 20px icons, and 44px mobile targets; toolbar controls use 36px desktop and 44px mobile targets.
+- Keep tab underlines inside their link box; an indicator must not create vertical scrolling in a horizontal navigation strip. Long document titles truncate within the fixed-height header without shrinking its actions.
 - Do not add flourish to app chrome. Rendro should feel fast and reliable, not playful.
 - If two indicators could describe one action, keep the more local one and remove the other.
 - Motion must never block pointer interaction.
@@ -397,6 +410,10 @@ Dark mode applies to app chrome only.
 
 - Persist app theme in `localStorage` under `commentor-theme` with values `"system"`, `"dark"`, or `"light"`.
 - `system` follows `prefers-color-scheme`; unset storage is treated as `system`.
+- All theme-aware route templates use `renderThemeAssets()` from `src/routes/theme.ts`; pages with a toggle mount its shared controller. Do not create page-local theme engines. Landing remains intentionally fixed dark.
+- Every theme button is emitted by `renderThemeButton()`, without page-local icon/button classes. Its neutral surface, muted icon, border, 6px radius, container hover, strong hover foreground, Ember keyboard focus ring, .98 press, disabled state, and 150ms easing belong to the shared component. Use 36px desktop and 44px at widths up to 760px consistently across shells. A viewer mobile-menu row may expand in width and add its label; it does not redefine hover/focus colors or motion. Hover-only feedback is gated by hover-capable input; reduced motion removes transitions and press transforms.
+- Every toggle cycles `system → dark → light → system`, with the same `contrast`, `dark_mode`, and `light_mode` icon track (300ms), radial reveal (520ms), and subtle press feedback. The next mode is announced by the button label; the current mode is exposed in its title.
+- Initialize before page content paints. Synchronize preference changes across tabs and system appearance changes without animating unrelated screens. Rapid toggles must preserve the latest intended mode, including when an earlier transition fails or completes late.
 - Toggle by resolving the current mode and adding/removing `html.dark` on the parent page.
 - Do not pass app dark mode into the iframe as a global stylesheet.
   The commentor widget is the exception: it follows the parent theme because it is Rendro chrome inside the iframe, not publisher document content.

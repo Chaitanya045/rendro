@@ -1,3 +1,5 @@
+import { mobileViewportStyles } from "./viewport";
+
 export function renderLandingPage(): string {
   return `<!DOCTYPE html>
 <html lang="en" class="dark">
@@ -18,6 +20,7 @@ export function renderLandingPage(): string {
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <title>Rendro — Documentation that ships with your code</title>
   <style>
+    ${mobileViewportStyles}
     :root {
       color-scheme: dark;
       --surface: #09090b;
@@ -55,15 +58,15 @@ export function renderLandingPage(): string {
     .nav-links a:hover::after, .nav-links a:focus-visible::after, .nav-links a[aria-current="true"]::after { transform: scaleX(1); }
     .header-actions { display: flex; align-items: center; gap: 10px; }
     .button { min-height: 44px; display: inline-flex; align-items: center; justify-content: center; gap: 8px; padding: 0 18px; border: 1px solid transparent; border-radius: 7px; font-size: 14px; line-height: 20px; font-weight: 600; cursor: pointer; transition: transform 150ms var(--ease-standard), background-color 150ms var(--ease-standard), border-color 150ms var(--ease-standard), color 150ms var(--ease-standard), box-shadow 150ms var(--ease-standard); }
-    .button:hover { transform: translateY(-1px); }
-    .button:active { transform: scale(.98); }
+    .button:hover:not(:disabled):not([aria-disabled="true"]) { transform: translateY(-1px); }
+    .button:active:not(:disabled):not([aria-disabled="true"]) { transform: scale(.98); }
     .button-primary { background: var(--primary); color: var(--surface); box-shadow: 0 10px 30px var(--primary-shadow); }
-    .button-primary:hover { background: var(--primary-hover); }
+    .button-primary:hover:not(:disabled):not([aria-disabled="true"]) { background: var(--primary-hover); }
     .button-secondary { border-color: var(--border); background: var(--surface-elevated); color: var(--text); }
-    .button-secondary:hover { border-color: var(--text-muted); background: var(--surface-hover); }
+    .button-secondary:hover:not(:disabled):not([aria-disabled="true"]) { border-color: var(--text-muted); background: var(--surface-hover); }
     .button-quiet { border-color: transparent; background: transparent; color: var(--text-muted); box-shadow: none; }
-    .button-quiet:hover { color: var(--text); background: var(--surface-elevated); }
-    .button[disabled] { cursor: wait; opacity: .72; transform: none; }
+    .button-quiet:hover:not(:disabled):not([aria-disabled="true"]) { color: var(--text); background: var(--surface-elevated); }
+    .button[disabled], .button[aria-disabled="true"] { cursor: wait; opacity: .72; transform: none; }
     .button-spinner { display: none; width: 14px; height: 14px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: spin 700ms linear infinite; }
     .button[aria-busy="true"] .button-spinner { display: block; }
     .hero { position: relative; overflow: clip; padding: 104px 0 88px; }
@@ -77,7 +80,7 @@ export function renderLandingPage(): string {
     .hero-lede { max-width: 620px; margin-bottom: 32px; color: var(--text-muted); font-size: 18px; line-height: 29px; }
     .hero-actions { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 28px; }
     .arrow { display: inline-block; transition: transform 150ms var(--ease-standard); }
-    .button:hover .arrow { transform: translateX(2px); }
+    .button:hover:not(:disabled):not([aria-disabled="true"]) .arrow { transform: translateX(2px); }
     .hero-facts { display: flex; flex-wrap: wrap; gap: 10px 22px; margin: 0; padding: 0; color: var(--text-muted); font-size: 13px; list-style: none; }
     .hero-facts li { position: relative; padding-left: 14px; }
     .hero-facts li::before { content: ""; position: absolute; left: 0; top: .75em; width: 4px; height: 4px; border-radius: 50%; background: var(--primary); }
@@ -190,6 +193,7 @@ export function renderLandingPage(): string {
       html { scroll-behavior: auto; }
       *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; scroll-behavior: auto !important; }
       .button:hover, .button:active, .product-shot:hover, .workflow-step:hover, .workflow-step:hover .step-number, .feature:hover, .proof:hover .proof-value { transform: none; }
+      .button:hover:not(:disabled):not([aria-disabled="true"]), .button:active:not(:disabled):not([aria-disabled="true"]) { transform: none !important; }
     }
     @media print {
       [data-reveal], [data-reveal-item] { opacity: 1 !important; transform: none !important; }
@@ -224,7 +228,7 @@ export function renderLandingPage(): string {
             <button class="button button-primary" type="submit" form="sign-in-form" data-auth data-auth-id="hero-start">
               <span data-auth-label>Start with Google</span><span class="button-spinner" aria-hidden="true"></span>
             </button>
-            <a class="button button-secondary" href="https://dev.rendro.app/public/rendro-feature-test/reference" target="_blank" rel="noreferrer" data-action-id="live-docs">View live docs <span class="arrow" aria-hidden="true">→</span></a>
+            <a class="button button-secondary" href="#product" data-scroll-section="product" data-action-id="explore-product">Explore the workspace <span class="arrow" aria-hidden="true">→</span></a>
           </div>
           <ul class="hero-facts" aria-label="Product principles">
             <li>Plain HTML</li>
@@ -267,10 +271,9 @@ export function renderLandingPage(): string {
           <div class="terminal" aria-label="Rendro command example" data-reveal data-reveal-delay="80">
             <div class="terminal-bar"><span class="shot-dot"></span><span class="shot-dot"></span><span class="shot-dot"></span><span>CI / publish-docs</span></div>
             <div class="terminal-body">
-              <div><span class="terminal-prompt">$</span> rendro push --source ./docs --org my-org</div>
-              <div class="terminal-muted">→ Syncing ./docs to https://rendro.app my-org</div>
-              <div class="terminal-success">✓ API key valid</div>
-              <div class="terminal-muted">Only changed HTML is uploaded.</div>
+              <div><span class="terminal-prompt">$</span> rendro push --source ./docs<br>  --organization &lt;organization-id&gt;<br>  --project &lt;project-id&gt;</div>
+              <div class="terminal-muted">Use your organization and project IDs with a scoped RENDRO_API_KEY.</div>
+              <div class="terminal-muted">Only changed files are uploaded. A verified deployment becomes active atomically.</div>
             </div>
           </div>
         </div>
@@ -303,7 +306,7 @@ export function renderLandingPage(): string {
         </div>
         <dl class="security-list" data-reveal-group data-reveal-stagger="45">
           <div class="security-row" data-reveal-item style="--reveal-y:12px"><dt>Identity</dt><dd>Google OAuth or verified email credentials connect each session to one stable account.</dd></div>
-          <div class="security-row" data-reveal-item style="--reveal-y:12px"><dt>Organization</dt><dd>The work-email domain determines the organization namespace.</dd></div>
+          <div class="security-row" data-reveal-item style="--reveal-y:12px"><dt>Organization</dt><dd>Organization membership and roles determine access to each workspace.</dd></div>
           <div class="security-row" data-reveal-item style="--reveal-y:12px"><dt>Storage</dt><dd>Document objects are stored under organization-specific prefixes.</dd></div>
           <div class="security-row" data-reveal-item style="--reveal-y:12px"><dt>Public access</dt><dd>Only folders explicitly registered by trusted CI receive anonymous routes.</dd></div>
         </dl>

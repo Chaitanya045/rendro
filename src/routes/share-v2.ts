@@ -1,7 +1,9 @@
+import { renderThemeAssets } from "./theme";
 import { Hono } from "hono";
 import { CONVEX_SITE_URL } from "@/config";
 import { getObjectStream } from "@/minio";
 import { renderNotFoundPage } from "@/routes/not-found";
+import { injectMobileViewportScrollbarStream } from "@/routes/document-html";
 
 const app = new Hono();
 
@@ -58,7 +60,8 @@ app.get("/s/:token/files/*", async (c) => {
   const key = `${resolution.deployment.manifestKey.slice(0, -"manifest.json".length)}files/${path}`;
   const stream = await getObjectStream(key);
   if (!stream) return c.html(renderNotFoundPage({ path: c.req.path }), 404);
-  return new Response(stream, {
+  const body = type.startsWith("text/html") ? injectMobileViewportScrollbarStream(stream) : stream;
+  return new Response(body, {
     headers: {
       "Cache-Control": "private, no-store",
       "Content-Type": type,
@@ -78,7 +81,7 @@ app.get("/s/:token", async (c) => {
   if (!resolution) return c.html(renderNotFoundPage({ path: c.req.path }), 404);
   const fileUrl = `/s/${encodeURIComponent(token)}/files/${resolution.grant.documentPath.split("/").map(encodeURIComponent).join("/")}`;
   const title = resolution.project.name.replace(/[&<>"']/g, "");
-  return c.html(`<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow,noarchive"><title>${title} — Shared via Rendro</title><style>*{box-sizing:border-box}body{margin:0;background:#09090b;color:#fafafa;font-family:Inter,ui-sans-serif,system-ui}.bar{height:48px;display:flex;align-items:center;justify-content:space-between;padding:0 16px;border-bottom:1px solid #27272a;font-size:12px}.brand{font-weight:750}.brand i{font-style:normal;color:#fb923c}.expiry{color:#a1a1aa}.frame{display:block;width:100%;height:calc(100vh - 48px);border:0;background:#fff}</style></head><body><header class="bar"><div class="brand">Rendro<i>.</i> secure share</div><div class="expiry">Expires ${new Date(resolution.grant.expiresAt).toISOString()}</div></header><iframe class="frame" src="${fileUrl}" sandbox="allow-scripts allow-forms allow-popups allow-downloads allow-same-origin" referrerpolicy="no-referrer"></iframe></body></html>`, 200, {
+  return c.html(`<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow,noarchive"><title>${title} — Shared via Rendro</title>${renderThemeAssets()}<style>:root{color-scheme:light;--page:#fafafa;--surface:#fff;--text:#18181b;--muted:#71717a;--border:#e4e4e7;--accent:#c2410c}html.dark{color-scheme:dark;--page:#09090b;--surface:#18181b;--text:#fafafa;--muted:#a1a1aa;--border:#27272a;--accent:#fb923c}*{box-sizing:border-box}body{margin:0;background:var(--page);color:var(--text);font-family:Inter,ui-sans-serif,system-ui}.bar{height:48px;display:flex;align-items:center;justify-content:space-between;gap:16px;padding:0 16px;border-bottom:1px solid var(--border);background:var(--surface);font-size:12px}.brand{font-weight:750;white-space:nowrap}.brand i{font-style:normal;color:var(--accent)}.expiry{overflow:hidden;color:var(--muted);text-overflow:ellipsis;white-space:nowrap}.frame{display:block;width:100%;height:calc(100vh - 48px);border:0;background:#fff}@media(max-width:520px){.bar{padding:0 12px}.share-label{display:none}.expiry{font-size:11px}}</style></head><body><header class="bar"><div class="brand">Rendro<i>.</i><span class="share-label"> secure share</span></div><div class="expiry">Expires ${new Date(resolution.grant.expiresAt).toISOString().slice(0, 10)}</div></header><iframe class="frame" title="Shared documentation" src="${fileUrl}" sandbox="allow-scripts allow-forms allow-popups allow-downloads allow-same-origin" referrerpolicy="no-referrer"></iframe></body></html>`, 200, {
     "Cache-Control": "private, no-store",
     "Referrer-Policy": "no-referrer",
     "X-Content-Type-Options": "nosniff",

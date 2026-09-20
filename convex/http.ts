@@ -5,6 +5,10 @@ import {
   createProject,
   getProject,
   listProjects,
+  managementAccess,
+  managementTeamMembers,
+  managementMembers,
+  managementRecentDeployment,
 } from "./rendroHttp";
 import {
   createCredential,
@@ -71,6 +75,10 @@ http.route({
 });
 
 http.route({ path: "/api/rendro/projects", method: "GET", handler: listProjects });
+http.route({ path: "/api/rendro/management/access", method: "GET", handler: managementAccess });
+http.route({ path: "/api/rendro/management/team-members", method: "GET", handler: managementTeamMembers });
+http.route({ path: "/api/rendro/management/members", method: "GET", handler: managementMembers });
+http.route({ path: "/api/rendro/management/recent-deployment", method: "GET", handler: managementRecentDeployment });
 http.route({ path: "/api/rendro/projects", method: "POST", handler: createProject });
 http.route({ path: "/api/rendro/projects/get", method: "GET", handler: getProject });
 http.route({ path: "/api/rendro/credentials", method: "GET", handler: listCredentials });

@@ -59,8 +59,9 @@ export function createAuthOptions(ctx: GenericCtx<DataModel>) {
     },
     session: {
       cookieCache: {
-        enabled: true,
-        maxAge: 5 * 60,
+        // Authenticated requests must re-check persisted sessions so expiry and
+        // revocation take effect immediately on every protected route.
+        enabled: false,
       },
     },
     emailAndPassword: {

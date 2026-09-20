@@ -7,6 +7,8 @@ import { createOrgApiKey } from "@/api-keys";
 import { isDeleted } from "@/soft-delete";
 import { renderNotFoundPage } from "@/routes/not-found";
 import { renderLandingPage } from "@/routes/landing";
+import { renderThemeAssets, renderThemeButton } from "./theme";
+import { menuSurfaceStyles } from "../ui/menu-styles";
 
 const app = new Hono<{ Variables: { user?: User } }>();
 
@@ -130,16 +132,7 @@ function renderCreateOrg(user: User, org: string): string {
 <title>${orgEsc} — Rendro</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet">
-<script>
-  (function(){
-    var saved=localStorage.getItem("commentor-theme");
-    var mode=saved==="dark"||saved==="light"||saved==="system"?saved:"system";
-    var dark=mode==="dark"||(mode==="system"&&matchMedia("(prefers-color-scheme: dark)").matches);
-    document.documentElement.dataset.theme=mode;
-    document.documentElement.dataset.resolvedTheme=dark?"dark":"light";
-    document.documentElement.classList.toggle("dark",dark);
-  })();
-</script>
+${renderThemeAssets()}
 <style>
   *{box-sizing:border-box}
   html{color-scheme:light dark}
@@ -216,7 +209,7 @@ function renderCreateOrg(user: User, org: string): string {
 <header class="topbar">
   <div class="brand">Rendro</div>
   <div class="actions">
-    <button class="icon-btn" id="theme-toggle" type="button" aria-label="Switch theme" title="Theme: system"><span class="material-symbols-outlined" id="theme-icon" aria-hidden="true">brightness_auto</span></button>
+    ${renderThemeButton()}
     <form method="get" action="/api/auth/sign-out"><button class="secondary-btn" type="submit">Sign out</button></form>
   </div>
 </header>
@@ -243,38 +236,7 @@ function renderCreateOrg(user: User, org: string): string {
 <script>
   (function(){
     var root=document.documentElement;
-    var themeMedia=matchMedia("(prefers-color-scheme: dark)");
-    var themeToggle=document.getElementById("theme-toggle");
-    var themeIcon=document.getElementById("theme-icon");
-    var modes=["system","dark","light"];
-    var icons={system:"brightness_auto",dark:"dark_mode",light:"light_mode"};
-    function normalizedTheme(){
-      var saved=localStorage.getItem("commentor-theme");
-      return saved==="dark"||saved==="light"||saved==="system"?saved:"system";
-    }
-    function applyTheme(mode,persist){
-      var dark=mode==="dark"||(mode==="system"&&themeMedia.matches);
-      root.dataset.theme=mode;
-      root.dataset.resolvedTheme=dark?"dark":"light";
-      root.classList.toggle("dark",dark);
-      if(persist)localStorage.setItem("commentor-theme",mode);
-      if(themeIcon)themeIcon.textContent=icons[mode];
-      if(themeToggle){
-        var next=modes[(modes.indexOf(mode)+1)%modes.length];
-        themeToggle.title="Theme: "+mode;
-        themeToggle.setAttribute("aria-label","Switch to "+next+" theme");
-      }
-    }
-    if(themeToggle){
-      themeToggle.addEventListener("click",function(){
-        var mode=normalizedTheme();
-        applyTheme(modes[(modes.indexOf(mode)+1)%modes.length],true);
-      });
-    }
-    themeMedia.addEventListener("change",function(){
-      if(normalizedTheme()==="system")applyTheme("system",false);
-    });
-    applyTheme(normalizedTheme(),false);
+    window.RendroTheme.mount(document.getElementById("theme-toggle"));
 
     var form=document.getElementById("create-org-form");
     var button=document.getElementById("create-org-submit");
@@ -321,6 +283,31 @@ export interface PublicShellPublication {
 
 interface OrgTreePageOptions {
   publication?: PublicShellPublication;
+  documentBase?: string;
+  displayName?: string;
+  backHref?: string;
+  backLabel?: string;
+  sandboxed?: boolean;
+  publicDocument?: boolean;
+  shareConfig?: {
+    organizationId: string;
+    projectId: string;
+  };
+}
+
+export interface ScopedDocumentShellOptions {
+  user: User | null;
+  namespace: string;
+  title: string;
+  basePath: string;
+  selectedPath: string;
+  backHref?: string;
+  backLabel?: string;
+  publicDocument?: boolean;
+  shareConfig?: {
+    organizationId: string;
+    projectId: string;
+  };
 }
 
 function renderOrgDocs(user: User, org: string, selectedDoc = ""): string {
@@ -333,24 +320,46 @@ export function renderPublicOrgDocs(publication: PublicShellPublication, selecte
   return renderOrgTreePage(null, publication.orgSlug, selectedDoc, { publication });
 }
 
+export function renderScopedDocumentShell(options: ScopedDocumentShellOptions): string {
+  const selectedDoc = options.selectedPath ? `${options.namespace}/${options.selectedPath}` : "";
+  return renderOrgTreePage(options.user, options.namespace, selectedDoc, {
+    documentBase: options.basePath,
+    displayName: options.title,
+    backHref: options.backHref,
+    backLabel: options.backLabel,
+    sandboxed: true,
+    publicDocument: options.publicDocument,
+    shareConfig: options.shareConfig,
+  });
+}
+
 function renderOrgTreePage(user: User | null, org: string, selectedDoc = "", options: OrgTreePageOptions = {}): string {
   const publication = options.publication;
+  const isPublicDocument = Boolean(publication || options.publicDocument);
+  const documentBase = options.documentBase ?? (publication
+    ? `/public/${encodeURIComponent(publication.orgSlug)}/${encodeURIComponent(publication.slug)}`
+    : "");
+  const displayName = options.displayName ?? publication?.title ?? org;
   const email = user ? escapeHtml(user.email) : "Public documentation";
   const orgEsc = escapeHtml(org);
+  const displayNameEsc = escapeHtml(displayName);
   const initials = user ? (user.name || email).split(/[@\s]/)[0].slice(0, 2).toUpperCase() : "PU";
-  const publicationBase = publication
-    ? `/public/${encodeURIComponent(publication.orgSlug)}/${encodeURIComponent(publication.slug)}`
+  const shareLabel = isPublicDocument ? "Copy public URL" : options.shareConfig ? "Share document" : "Copy signed URL";
+  const sharePendingLabel = isPublicDocument ? "Copying public URL…" : options.shareConfig ? "Creating share…" : "Creating signed URL…";
+  const shareDoneLabel = isPublicDocument ? "Public URL copied!" : options.shareConfig ? "Share link copied!" : "Signed URL copied!";
+  const sandboxAttribute = options.sandboxed || publication
+    ? ' sandbox="allow-scripts allow-forms allow-popups allow-downloads"'
     : "";
-  const shareLabel = publication ? "Copy public URL" : "Copy signed URL";
-  const sharePendingLabel = publication ? "Copying public URL…" : "Creating signed URL…";
-  const shareDoneLabel = publication ? "Public URL copied!" : "Signed URL copied!";
+  const backMarkup = options.backHref
+    ? `<a class="topbar-btn topbar-btn-back" href="${escapeHtml(options.backHref)}" aria-label="${escapeHtml(options.backLabel ?? "Back")}"><span class="material-symbols-outlined" aria-hidden="true">arrow_back</span><span class="topbar-back-label">${escapeHtml(options.backLabel ?? "Back")}</span></a>`
+    : "";
   const avatarMarkup = user
     ? `<div class="avatar-wrap">
-      <div class="topbar-avatar" id="avatar-btn" title="${escapeHtml(email)}">${initials}</div>
-      <div class="avatar-menu" id="avatar-menu" style="display:none">
+      <button class="topbar-avatar" id="avatar-btn" type="button" title="${escapeHtml(email)}" aria-label="Open account menu" aria-expanded="false">${initials}</button>
+      <div class="avatar-menu" id="avatar-menu" hidden>
         <div class="avatar-menu-email">${escapeHtml(email)}</div>
-        <a href="/account/security" class="avatar-menu-item"><span class="material-symbols-outlined" style="font-size:18px">shield</span> Account security</a>
-        <a href="/api/auth/sign-out" class="avatar-menu-item"><span class="material-symbols-outlined" style="font-size:18px">logout</span> Sign out</a>
+        <a href="/account/security" class="avatar-menu-item"><span class="material-symbols-outlined" aria-hidden="true">shield</span> Account security</a>
+        <a href="/api/auth/sign-out" class="avatar-menu-item"><span class="material-symbols-outlined" aria-hidden="true">logout</span> Sign out</a>
       </div>
     </div>`
     : "";
@@ -359,33 +368,45 @@ function renderOrgTreePage(user: User | null, org: string, selectedDoc = "", opt
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>${escapeHtml(publication?.title ?? org)} — Rendro</title>
+<title>${displayNameEsc} — Rendro</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet">
+${renderThemeAssets()}
 <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
 <script>
 tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e4e7","background":"#ffffff","surface-container-high":"#f4f4f5","on-secondary-fixed":"#09090b","on-surface-variant":"#71717a","primary":"#c2410c","primary-fixed-dim":"#fed7aa","surface":"#ffffff","surface-container-low":"#fafafa","secondary-container":"#ffedd5","on-secondary-container":"#09090b","on-surface":"#09090b","outline":"#71717a","on-primary":"#ffffff","surface-container":"#f4f4f5"},fontFamily:{"body-md":["Inter"]},fontSize:{"body-md":["14px",{lineHeight:"20px",fontWeight:"400"}],"headline-sm":["20px",{lineHeight:"28px",fontWeight:"600"}],"headline-md":["24px",{lineHeight:"32px",fontWeight:"600"}]}}}}
 </script>
 <style>
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
-  :root{--sidebar-expanded-width:280px;--sidebar-width:var(--sidebar-expanded-width)}
-  body{font-family:Inter,system-ui,sans-serif;background:#fff;color:#09090b;overflow:hidden;height:100vh;font-size:14px;line-height:20px}
+  :root{--sidebar-expanded-width:280px;--sidebar-width:var(--sidebar-expanded-width);--tree-row-height:33px;--viewer-focus:#c2410c}
+  body{display:flow-root;font-family:Inter,system-ui,sans-serif;background:#fff;color:#09090b;overflow:hidden;height:100vh;font-size:14px;line-height:20px}
   .material-symbols-outlined{font-variation-settings:'FILL'0,'wght'400,'GRAD'0,'opsz'24;vertical-align:middle;font-size:20px}
   ::-webkit-scrollbar{width:6px} ::-webkit-scrollbar-track{background:transparent} ::-webkit-scrollbar-thumb{background:#e4e4e7;border-radius:10px}
 
+  .topbar-btn.topbar-btn-back{color:#52525b;background:transparent;border:1px solid #e4e4e7;text-decoration:none}
+  .topbar-btn-back:hover{background:#f4f4f5;color:#09090b;border-color:#d4d4d8}
+  .topbar-btn-icon.mobile-tree-toggle{display:none}
+  .mobile-tree-backdrop{display:none}
   .topbar{position:fixed;top:0;z-index:50;width:100%;height:56px;background:#fff;border-bottom:1px solid #e4e4e7;display:flex;align-items:center;justify-content:space-between;padding:0 24px;transition:transform .3s cubic-bezier(.4,0,.2,1),opacity .2s cubic-bezier(.4,0,.2,1);will-change:transform,opacity}
-  .topbar-left{display:flex;align-items:center;gap:10px}
-  .topbar-logo{font-size:24px;font-weight:700;color:#c2410c;line-height:32px}
+  .topbar-left{display:flex;align-items:center;gap:10px;min-width:0;flex:1;margin-right:16px}
+  .topbar-logo{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:24px;font-weight:700;color:#c2410c;line-height:32px}
+  .topbar-left>.topbar-btn-back{flex-shrink:0}
   .topbar-search{display:flex;align-items:center;gap:8px;background:#f4f4f5;padding:6px 12px;border-radius:4px;border:1px solid #e4e4e7;width:256px;transition:border-color .15s}
   .topbar-search:focus-within{border-color:#c2410c}
   .topbar-search input{border:0;outline:0;background:transparent;font-size:14px;color:#09090b;width:100%;font-family:Inter}
   .topbar-search input::placeholder{color:#71717a}
-  .topbar-actions{display:flex;align-items:center;gap:16px}
-  .topbar-btn{padding:6px 12px;font-size:12px;font-weight:600;border-radius:4px;cursor:pointer;border:0;font-family:Inter;display:flex;align-items:center;gap:6px;transition:background-color .15s,color .15s,border-color .15s,transform .15s cubic-bezier(.4,0,.2,1)}
+  .topbar-actions{display:flex;align-items:center;gap:16px;flex:none}
+  .mobile-more{display:none;position:relative}
+  .mobile-more-menu{position:absolute;top:48px;right:0;width:min(280px,calc(100vw - 20px));max-height:calc(100vh - 68px);overflow:auto;background:#fff;border:1px solid #e4e4e7;border-radius:10px;box-shadow:0 12px 32px rgba(24,24,27,.18);padding:6px;z-index:120}
+  .mobile-more-menu[hidden]{display:none}
+  .mobile-action-label{display:none}
+  .topbar-btn{min-height:36px;padding:6px 12px;font-size:12px;font-weight:600;border-radius:6px;cursor:pointer;border:0;font-family:Inter;display:flex;align-items:center;gap:6px;transition:background-color 150ms cubic-bezier(.4,0,.2,1),color 150ms cubic-bezier(.4,0,.2,1),border-color 150ms cubic-bezier(.4,0,.2,1),transform 150ms cubic-bezier(.4,0,.2,1)}
+  .topbar-btn:focus-visible,.avatar-menu-item:focus-visible,.load-more-btn:focus-visible{outline:2px solid var(--viewer-focus);outline-offset:2px}
+  .topbar-btn-back:active,.avatar-menu-item:active{transform:scale(.98)}
   .topbar-btn-share{color:#52525b;background:transparent;border:1px solid #e4e4e7;min-width:172px;justify-content:center;overflow:hidden}
-  .topbar-btn-share:hover{background:#f4f4f5;color:#09090b;border-color:#d4d4d8}
-  .topbar-btn-share:active{transform:scale(.98);background:#e4e4e7}
-  .topbar-btn-share:focus-visible{outline:2px solid #71717a;outline-offset:2px}
+  .topbar-btn-share:hover:not(:disabled){background:#f4f4f5;color:#09090b;border-color:#d4d4d8}
+  .topbar-btn-share:active:not(:disabled){transform:scale(.98);background:#e4e4e7}
+  .topbar-btn-share:focus-visible{outline:2px solid #c2410c;outline-offset:2px}
   .share-icon-window{width:18px;height:18px;line-height:18px;overflow:hidden;display:inline-flex;align-items:flex-start;justify-content:center;flex:0 0 18px}
   .share-icon-track{display:flex;flex-direction:column;align-items:center;transition:transform .3s cubic-bezier(.4,0,.2,1);will-change:transform}
   .share-icon-row{width:18px;height:18px;line-height:18px;display:flex;align-items:center;justify-content:center;flex:0 0 18px;font-size:18px}
@@ -413,7 +434,9 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
   html.dark .shortcut-key{background:#e4e4e7;color:#09090b;box-shadow:inset 0 -1px 0 rgba(9,9,11,.12)}
   .topbar-btn-create{background:#c2410c;color:#fff}
   .topbar-btn-create:hover{background:#9a3412;opacity:1}
-  .topbar-avatar{width:32px;height:32px;border-radius:50%;background:#ffedd5;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;color:#09090b;cursor:pointer;border:1px solid #fed7aa}
+  .topbar-avatar{width:36px;height:36px;flex:none;border-radius:50%;background:#ffedd5;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700;color:#c2410c;cursor:pointer;border:1px solid rgba(194,65,12,.24);transition:background-color 150ms cubic-bezier(.4,0,.2,1),border-color 150ms cubic-bezier(.4,0,.2,1),color 150ms cubic-bezier(.4,0,.2,1),transform 150ms cubic-bezier(.4,0,.2,1)}
+  .topbar-avatar:hover:not(:disabled){background:#f4f4f5;color:#09090b;border-color:#d4d4d8}
+  .topbar-avatar:active:not(:disabled){transform:scale(.98)}
 
   .sidebar{position:fixed;top:56px;left:0;bottom:0;z-index:40;width:var(--sidebar-width);background:#fff;border-right:1px solid #e4e4e7;display:flex;flex-direction:column;overflow:hidden;padding:16px 0;transition:top .3s cubic-bezier(.4,0,.2,1),width .3s cubic-bezier(.4,0,.2,1),opacity .2s cubic-bezier(.4,0,.2,1),transform .3s cubic-bezier(.4,0,.2,1);will-change:top,width,transform,opacity}
   .sidebar-org{padding:0 24px;margin-bottom:16px}
@@ -468,15 +491,20 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
   /* ── sticky folder headers (VS Code-style stacking) ── */
   .tree-folder.open>.tree-item{position:sticky;background:var(--sidebar-bg,#fff)}
   .tree-folder[data-depth="0"].open>.tree-item{top:0;z-index:10}
-  .tree-folder[data-depth="1"].open>.tree-item{top:30px;z-index:9}
-  .tree-folder[data-depth="2"].open>.tree-item{top:60px;z-index:8}
-  .tree-folder[data-depth="3"].open>.tree-item{top:90px;z-index:7}
-  .tree-folder[data-depth="4"].open>.tree-item{top:120px;z-index:6}
-  .tree-folder[data-depth="5"].open>.tree-item{top:150px;z-index:5}
-  .load-more-btn:disabled{color:#71717a;cursor:default}
+  .tree-folder[data-depth="1"].open>.tree-item{top:var(--tree-row-height);z-index:9}
+  .tree-folder[data-depth="2"].open>.tree-item{top:calc(var(--tree-row-height) * 2);z-index:8}
+  .tree-folder[data-depth="3"].open>.tree-item{top:calc(var(--tree-row-height) * 3);z-index:7}
+  .tree-folder[data-depth="4"].open>.tree-item{top:calc(var(--tree-row-height) * 4);z-index:6}
+  .tree-folder[data-depth="5"].open>.tree-item{top:calc(var(--tree-row-height) * 5);z-index:5}
+  .load-more-btn{display:inline-flex;align-items:center;justify-content:center;min-height:36px;padding:6px 10px;border:1px solid #e4e4e7;border-radius:6px;background:transparent;color:#c2410c;font:600 12px/20px Inter,system-ui,sans-serif;text-decoration:none;cursor:pointer;transition:background-color 150ms cubic-bezier(.4,0,.2,1),border-color 150ms cubic-bezier(.4,0,.2,1),transform 150ms cubic-bezier(.4,0,.2,1)}
+  .load-more-btn:hover:not(:disabled){background:#f4f4f5;border-color:#d4d4d8}
+  .load-more-btn:active:not(:disabled){transform:scale(.98)}
+  .load-more-btn:disabled{color:#71717a;cursor:not-allowed;opacity:.5}
   @keyframes treeItemIn{from{opacity:0;transform:translateX(-6px)}to{opacity:1;transform:translateX(0)}}
   @keyframes treeFolderLoading{0%{background-position:-200% 50%}100%{background-position:200% 50%}}
-  .tree-item{position:relative;display:flex;align-items:center;gap:8px;padding:6px 12px;border-radius:4px;color:#71717a;cursor:pointer;overflow:hidden;transition:translate .15s cubic-bezier(.4,0,.2,1),background-color .2s,color .2s}
+  .tree-item{position:relative;display:flex;align-items:center;gap:8px;min-height:var(--tree-row-height);padding:6px 12px;border-radius:4px;color:#71717a;cursor:pointer;overflow:hidden;transition:translate .15s cubic-bezier(.4,0,.2,1),background-color .2s,color .2s}
+  .tree-item:focus-visible,.tree-item:has(.tree-link:focus-visible){outline:2px solid var(--viewer-focus);outline-offset:-2px}
+  .tree-link:focus-visible{outline:none}
   .tree-item>*{position:relative;z-index:1}
   .tree-item.tree-item-entering{animation:treeItemIn .32s cubic-bezier(.4,0,.2,1) both;animation-delay:calc(var(--tree-index,0) * 35ms)}
   .tree-folder.loading>.tree-item{cursor:progress}
@@ -523,34 +551,34 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
   .main-placeholder h2{font-size:24px;font-weight:600;color:#09090b;margin-bottom:8px}
   .main-placeholder p{font-size:16px;color:#71717a;max-width:320px}
   .ph-icon{width:64px;height:64px;border-radius:50%;background:#f4f4f5;display:inline-flex;align-items:center;justify-content:center;margin-bottom:16px}
-  .content-frame{width:100%;height:100%;border:0;background:#fff}
+  .content-frame{display:block;width:100%;height:100%;border:0;background:#fff}
   @media (prefers-reduced-motion: reduce){.tree-skeleton-icon,.tree-skeleton-label{animation:none;background:#f4f4f5}}
   @media (prefers-reduced-motion: reduce){.topbar,.sidebar,.main,.sidebar-resizer,.share-label-track,.shortcut-tooltip,.sidebar-resizer::before{transition:none}.sidebar-resizer::before{transform:scaleY(1)}.resizer-sparks{display:none}}
   @media (prefers-reduced-motion: reduce){.share-icon-track{transition:none}.share-loader{animation:none!important}}
+  @media (prefers-reduced-motion: reduce){.tree-folder-content,.active-indicator{transition:none!important}}
   .avatar-wrap{position:relative}
-  .avatar-menu{position:absolute;top:42px;right:0;background:#fff;border:1px solid #e4e4e7;border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,.12);padding:4px;min-width:200px;z-index:100}
+  @keyframes viewerMenuIn{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}
+  .avatar-menu{position:absolute;top:44px;right:0;background:#fff;border:1px solid #e4e4e7;border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,.12);padding:4px;width:230px;max-width:calc(100vw - 20px);z-index:100}
+  .avatar-menu:not([hidden]),.mobile-more-menu:not([hidden]){animation:viewerMenuIn 200ms cubic-bezier(.4,0,.2,1)}
   .avatar-menu-email{padding:8px 12px;font-size:12px;color:#71717a;border-bottom:1px solid #e4e4e7;margin-bottom:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .avatar-menu-item{display:flex;align-items:center;gap:8px;padding:8px 12px;font-size:14px;color:#09090b;text-decoration:none;border-radius:4px;cursor:pointer;border:0;background:0;width:100%;font-family:Inter}
+  .avatar-menu-item{display:flex;align-items:center;gap:8px;padding:9px 10px;font-size:14px;line-height:20px;color:#09090b;text-decoration:none;border-radius:4px;cursor:pointer;border:0;background:transparent;width:100%;font-family:Inter;transition:background-color 150ms cubic-bezier(.4,0,.2,1),color 150ms cubic-bezier(.4,0,.2,1),transform 150ms cubic-bezier(.4,0,.2,1)}
   .avatar-menu-item:hover{background:#f4f4f5}
+  .avatar-menu-item:active{background:#f4f4f5}
 
-  .topbar-btn-icon{width:32px;height:32px;border-radius:4px;border:0;background:transparent;cursor:pointer;display:flex;align-items:center;justify-content:center;color:#71717a;transition:background .15s,color .15s,transform .15s cubic-bezier(.4,0,.2,1)}
-  .topbar-btn-icon:hover{background:#f4f4f5}
-  .topbar-btn-icon:active{transform:scale(.96)}
-  .theme-icon-window{width:20px;height:20px;overflow:hidden;display:inline-flex;align-items:flex-start;justify-content:center}
-  .theme-icon-track{display:flex;flex-direction:column;transition:transform .3s cubic-bezier(.4,0,.2,1);will-change:transform}
-  .theme-icon{width:20px;height:20px;line-height:20px;display:flex;align-items:center;justify-content:center;flex:0 0 20px;font-size:20px}
-  @media (prefers-reduced-motion: reduce){.theme-icon-track{transition:none!important}}
-  @supports (view-transition-name: root){
-    ::view-transition-old(root),::view-transition-new(root){animation:none;mix-blend-mode:normal}
-    ::view-transition-image-pair(root){isolation:isolate}
-    html.theme-rippling::view-transition-new(root){clip-path:circle(0 at var(--theme-ripple-x,50%) var(--theme-ripple-y,50%))}
-  }
+  .topbar-btn-icon{width:36px;height:36px;flex:none;border-radius:6px;border:0;background:transparent;cursor:pointer;display:flex;align-items:center;justify-content:center;color:#71717a;transition:background-color 150ms cubic-bezier(.4,0,.2,1),color 150ms cubic-bezier(.4,0,.2,1),transform 150ms cubic-bezier(.4,0,.2,1)}
+  .topbar-btn-icon:hover:not(:disabled){background:#f4f4f5;color:#09090b}
+  .topbar-btn-icon:active:not(:disabled){transform:scale(.98)}
+  .topbar-btn:disabled,.topbar-btn-icon:disabled,.topbar-avatar:disabled{opacity:.5;cursor:not-allowed;transform:none}
+  .topbar-btn-icon:focus-visible,.topbar-avatar:focus-visible{outline:2px solid #c2410c;outline-offset:2px}
+  .topbar-avatar:focus-visible{border-color:#d4d4d8}
+  @media(prefers-reduced-motion:reduce){.topbar-btn-icon,.topbar-avatar{transition:none}.topbar-btn-icon:active,.topbar-avatar:active{transform:none!important}}
+  @media(prefers-reduced-motion:reduce){.topbar-btn,.avatar-menu-item,.load-more-btn{transition:none}.topbar-btn:active,.avatar-menu-item:active,.load-more-btn:active{transform:none!important}.avatar-menu,.mobile-more-menu{animation:none!important}.topbar-btn-share.is-feedback #share-feedback-icon{transform:none}#share-feedback-icon,.mobile-tree-backdrop{transition:none!important}}
   @media (prefers-reduced-motion: reduce){.tree-item.tree-item-entering{animation:none!important;animation-delay:0s!important;opacity:1!important;transform:none!important}.tree-folder.loading>.tree-item .folder-icon,.tree-folder.loading>.tree-item .font-body-md{animation:none!important;background:none!important;color:#c2410c!important;-webkit-text-fill-color:currentColor!important}html.doc-loading .tree-item.active{animation:none!important;transform:none!important}html.doc-loading .tree-item.active::before{animation:none!important}html.dark .tree-folder.loading>.tree-item .folder-icon,html.dark .tree-folder.loading>.tree-item .font-body-md{color:#fb923c!important}}
   @media (prefers-reduced-motion: reduce){.tree-item[data-path],.tree-item[data-path]>.material-symbols-outlined{transition-property:background-color,color!important}.tree-item[data-path]:hover,.tree-item[data-path]:focus-within{translate:none!important}.tree-item[data-path]:hover>.material-symbols-outlined,.tree-item[data-path]:focus-within>.material-symbols-outlined{transform:none!important}}
   @media (prefers-reduced-motion: reduce){.tree-folder>.tree-item .caret-icon,.tree-folder>.tree-item .folder-icon{transition-property:color!important}.tree-folder>.tree-item:hover .caret-icon,.tree-folder>.tree-item:focus-within .caret-icon{translate:none!important}}
 
   /* ── dark mode (shadcn-style neutral palette) ── */
-  html.dark{background:#09090b;color:#fafafa}
+  html.dark{--viewer-focus:#fb923c;background:#09090b;color:#fafafa}
   html.dark body{background:#09090b;color:#fafafa}
   html.dark ::-webkit-scrollbar-thumb{background:#27272a}
   html.dark .topbar{background:#09090b;border-bottom-color:#27272a}
@@ -564,16 +592,18 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
   html.dark .sidebar-resizer:hover::before,html.dark .sidebar-resizer:focus-visible::before,html.dark.sidebar-resizing .sidebar-resizer::before{box-shadow:0 0 0 3px rgba(251,146,60,.16)}
   html.dark .topbar-btn-icon{color:#a1a1aa}
   html.dark .topbar-btn-share{color:#a1a1aa;border-color:#27272a}
-  html.dark .topbar-btn-share:hover{background:#18181b;color:#fafafa;border-color:#3f3f46}
-  html.dark .topbar-btn-share:active,html.dark .topbar-btn-share.is-feedback{background:#18181b;color:#fafafa;border-color:#3f3f46}
-  html.dark .topbar-btn-share:focus-visible{outline-color:#a1a1aa}
-  html.dark .topbar-btn-icon:hover{background:#18181b;color:#fafafa}
+  html.dark .topbar-btn-share:hover:not(:disabled){background:#18181b;color:#fafafa;border-color:#3f3f46}
+  html.dark .topbar-btn-share:active:not(:disabled),html.dark .topbar-btn-share.is-feedback{background:#18181b;color:#fafafa;border-color:#3f3f46}
+  html.dark .topbar-btn-share:focus-visible,html.dark .topbar-btn-icon:focus-visible,html.dark .topbar-avatar:focus-visible{outline-color:#fb923c}
+  html.dark .topbar-avatar:focus-visible{border-color:#3f3f46}
+  html.dark .topbar-btn-icon:hover:not(:disabled){background:#18181b;color:#fafafa}
   html.dark .topbar-btn-create{background:#fb923c;color:#09090b}
   html.dark .topbar-btn-create:hover{background:#fdba74;opacity:1}
   html.dark .sidebar-tree{--sidebar-bg:#09090b;scrollbar-color:#3f3f46 transparent}
   html.dark .sidebar-tree::-webkit-scrollbar-thumb{background:#3f3f46}
   html.dark .sidebar-tree::-webkit-scrollbar-thumb:hover{background:#52525b}
-  html.dark .topbar-avatar{background:rgba(251,146,60,.16);color:#fafafa;border-color:rgba(251,146,60,.35)}
+  html.dark .topbar-avatar{background:rgba(251,146,60,.16);color:#fb923c;border-color:rgba(251,146,60,.35)}
+  html.dark .topbar-avatar:hover:not(:disabled){background:#18181b;color:#fafafa;border-color:#3f3f46}
   html.dark .sidebar{background:#09090b;border-right-color:#27272a}
   html.dark .sidebar-org-name{color:#fafafa}
   html.dark .sidebar-org-meta{color:#a1a1aa}
@@ -604,36 +634,87 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
   html.dark .ph-icon .material-symbols-outlined{color:#a1a1aa!important}
   html.dark .avatar-menu-item{color:#fafafa}
   html.dark .avatar-menu-item:hover{background:#18181b}
-  html.dark .load-more-btn{color:#fb923c}
-  html.dark .load-more-btn:hover{background:#18181b}
-  html.dark .load-more-btn:disabled{color:#71717a}
+  html.dark .avatar-menu-item:active{background:#18181b}
+  html.dark .load-more-btn{color:#fb923c;border-color:#27272a}
+  html.dark .load-more-btn:hover:not(:disabled){background:#18181b;border-color:#3f3f46}
+  html.dark .load-more-btn:disabled{color:#a1a1aa}
   html.dark .avatar-menu{background:#09090b;border-color:#27272a;box-shadow:0 8px 24px rgba(0,0,0,.48)}
   html.dark .avatar-menu-email{color:#a1a1aa;border-bottom-color:#27272a}
   html.dark .avatar-menu-item{color:#fafafa}
   html.dark .avatar-menu-item:hover{background:#18181b}
+  html.dark .topbar-btn.topbar-btn-back{color:#a1a1aa;border-color:#27272a}
+  html.dark .topbar-btn-back:hover{background:#18181b;color:#fafafa;border-color:#3f3f46}
+  html.dark .mobile-more-menu{background:#09090b;border-color:#27272a;box-shadow:0 16px 40px rgba(0,0,0,.5)}
+  @media(max-width:760px){
+    :root{--tree-row-height:44px}
+    .tree-item{min-height:44px}
+    .tree-item .tree-link{min-height:32px;line-height:32px}
+    .avatar-menu-item,.load-more-btn{min-height:44px}
+    .sidebar-tree{scrollbar-width:none}
+    .sidebar-tree::-webkit-scrollbar{display:none}
+    .topbar{padding:0 10px}
+    .topbar-left{min-width:0;gap:6px;flex:1;margin-right:6px}
+    .topbar-logo{min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:18px}
+    .topbar-actions{gap:4px}
+    .mobile-more{display:block}
+    .mobile-more-menu .topbar-btn-back,.mobile-more-menu .shortcut-tooltip-wrap,.mobile-more-menu .avatar-wrap{display:flex;width:100%}
+    .mobile-more-menu .topbar-btn-back,.mobile-more-menu #shell-toggle,.mobile-more-menu #avatar-btn{height:44px;width:100%;padding:0 12px;border:0;border-radius:6px;justify-content:flex-start;gap:10px;background:transparent;color:#52525b;font-size:14px;font-weight:600;text-decoration:none}
+    .mobile-more-menu .topbar-btn-back:hover,.mobile-more-menu #shell-toggle:hover:not(:disabled),.mobile-more-menu #avatar-btn:hover:not(:disabled){background:#f4f4f5;color:#09090b}
+    .mobile-more-menu .topbar-btn-back .topbar-back-label{display:inline}
+    .mobile-more-menu .mobile-action-label{display:inline}
+    .mobile-more-menu #avatar-btn::after{content:"Account"}
+    .mobile-more-menu #avatar-btn{border-radius:6px}
+    .mobile-more-menu .shortcut-tooltip{display:none}
+    .mobile-more-menu .avatar-wrap{display:block}
+    .mobile-more-menu .avatar-menu{position:static;width:100%;min-width:0;margin-top:2px;box-shadow:none;border-radius:6px}
+    html.dark .mobile-more-menu .topbar-btn-back,html.dark .mobile-more-menu #shell-toggle,html.dark .mobile-more-menu #avatar-btn{color:#d4d4d8}
+    html.dark .mobile-more-menu .topbar-btn-back:hover,html.dark .mobile-more-menu #shell-toggle:hover:not(:disabled),html.dark .mobile-more-menu #avatar-btn:hover:not(:disabled){background:#18181b;color:#fafafa}
+    .topbar-btn-icon.mobile-tree-toggle{width:44px;height:44px;display:flex;flex:0 0 44px}
+    .topbar-btn-back{width:44px;height:44px;flex:0 0 44px;padding:0;justify-content:center}
+    .topbar-btn-back .topbar-back-label{display:none}
+    .topbar-btn-share{width:44px;min-width:44px;height:44px;padding:0}
+    .topbar-btn-share .share-label-window{display:none}
+    .topbar-btn-icon{width:44px;height:44px}
+    .topbar-avatar{width:44px;height:44px}
+    .sidebar{z-index:70;width:min(320px,86vw);transform:translateX(-102%);opacity:0;pointer-events:none;box-shadow:0 18px 48px rgba(24,24,27,.18)}
+    .sidebar-resizer{display:none}
+    .main{margin-left:0}
+    .mobile-tree-backdrop{position:fixed;z-index:65;inset:56px 0 0;display:block;border:0;background:rgba(9,9,11,.42);opacity:0;pointer-events:none;transition:opacity .3s cubic-bezier(.4,0,.2,1)}
+    html.tree-mobile-open .sidebar{transform:translateX(0);opacity:1;pointer-events:auto}
+    html.tree-mobile-open .mobile-tree-backdrop{opacity:1;pointer-events:auto}
+    html.shell-hidden.tree-mobile-open .sidebar{transform:translateX(0);opacity:1;pointer-events:auto}
+  }
+  ${menuSurfaceStyles}
 </style>
 <body>
 
 <header class="topbar">
   <div class="topbar-left">
-    <span class="topbar-logo">${orgEsc}</span>
+    <button class="topbar-btn-icon mobile-tree-toggle" id="mobile-tree-toggle" type="button" aria-label="Open document tree" aria-expanded="false"><span class="material-symbols-outlined" aria-hidden="true">menu</span></button>
+    <span class="topbar-logo">${displayNameEsc}</span>
+    ${backMarkup}
   </div>
   <div class="topbar-actions">
-    <span class="shortcut-tooltip-wrap"><button class="topbar-btn-icon shell-toggle" id="shell-toggle" type="button" aria-label="Hide app shell, keyboard shortcut Ctrl Shift H" aria-describedby="shell-shortcut-tooltip" aria-pressed="false"><span class="material-symbols-outlined" aria-hidden="true">fullscreen</span></button><span class="shortcut-tooltip" id="shell-shortcut-tooltip" role="tooltip"><span class="shortcut-tooltip-label">Hide app shell</span><span class="shortcut-keys" id="shell-shortcut-keys" aria-hidden="true"><span class="shortcut-key">Ctrl</span><span class="shortcut-key">Shift</span><span class="shortcut-key">H</span></span></span></span>
+    <span class="shortcut-tooltip-wrap"><button class="topbar-btn-icon shell-toggle" id="shell-toggle" type="button" aria-label="Hide app shell, keyboard shortcut Ctrl Shift H" aria-describedby="shell-shortcut-tooltip" aria-pressed="false"><span class="material-symbols-outlined" aria-hidden="true">fullscreen</span><span class="mobile-action-label" id="shell-mobile-label">Enter reading mode</span></button><span class="shortcut-tooltip" id="shell-shortcut-tooltip" role="tooltip"><span class="shortcut-tooltip-label">Hide app shell</span><span class="shortcut-keys" id="shell-shortcut-keys" aria-hidden="true"><span class="shortcut-key">Ctrl</span><span class="shortcut-key">Shift</span><span class="shortcut-key">H</span></span></span></span>
     <button class="topbar-btn topbar-btn-share" id="share-btn" type="button" aria-label="${shareLabel}">
       <span class="share-icon-window" aria-hidden="true"><span class="share-icon-track"><span class="material-symbols-outlined share-icon-row">link</span><span class="share-icon-row"><span class="share-loader"></span></span><span class="material-symbols-outlined share-icon-row" id="share-feedback-icon">check</span></span></span>
       <span class="share-label-window" aria-hidden="true"><span class="share-label-track"><span class="share-label">${shareLabel}</span><span class="share-label">${sharePendingLabel}</span><span class="share-label" id="share-feedback-label">${shareDoneLabel}</span></span></span>
     </button>
-    <button class="topbar-btn-icon theme-toggle" id="theme-toggle" type="button" aria-label="Switch to dark theme" title="Theme: system"><span class="theme-icon-window" aria-hidden="true"><span class="theme-icon-track"><span class="material-symbols-outlined theme-icon">brightness_auto</span><span class="material-symbols-outlined theme-icon">dark_mode</span><span class="material-symbols-outlined theme-icon">light_mode</span><span class="material-symbols-outlined theme-icon">brightness_auto</span></span></span></button>
+    ${renderThemeButton()}
     ${avatarMarkup}
+    <div class="mobile-more" id="mobile-more">
+      <button class="topbar-btn-icon" id="mobile-more-btn" type="button" aria-label="More document actions" aria-haspopup="dialog" aria-controls="mobile-more-menu" aria-expanded="false"><span class="material-symbols-outlined" aria-hidden="true">more_vert</span></button>
+      <div class="mobile-more-menu" id="mobile-more-menu" role="dialog" aria-label="More document actions" hidden></div>
+    </div>
   </div>
 </header>
 <div class="shell-hotzone shell-hotzone-top" id="shell-hotzone-top" aria-hidden="true"></div>
 <div class="shell-hotzone shell-hotzone-left" id="shell-hotzone-left" aria-hidden="true"></div>
+<button class="mobile-tree-backdrop" id="mobile-tree-backdrop" type="button" aria-label="Close document tree"></button>
 
 <aside class="sidebar" id="doc-sidebar" aria-labelledby="doc-sidebar-title">
   <div class="sidebar-divider" id="doc-sidebar-title">Docs</div>
-  <div class="sidebar-tree" data-tree-org="${orgEsc}"${publicationBase ? ` data-publication-base="${escapeHtml(publicationBase)}"` : ""}>
+  <div class="sidebar-tree" data-tree-org="${orgEsc}"${documentBase ? ` data-document-base="${escapeHtml(documentBase)}"` : ""}>
     <div class="space-y-0.5 relative" id="tree-container" style="position:relative">
       <div class="active-indicator" id="active-indicator" style="opacity:0;transition:none"></div>
       ${renderTreeSkeleton()}
@@ -649,102 +730,15 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
     <p>Choose a document from the sidebar to view its contents, or create a new page to start writing.</p>
   </div>
   <iframe name="content-frame" id="content-frame" class="content-frame"
-    src="about:blank" title="Document content" style="display:none"${publication ? ' sandbox="allow-scripts allow-forms allow-popups allow-downloads"' : ""}></iframe>
+    src="about:blank" title="Document content" style="display:none"${sandboxAttribute}></iframe>
 </main>
 
 <script>
 (function(){
   var root=document.documentElement;
-  var themeMedia=matchMedia("(prefers-color-scheme:dark)");
-  var themeToggle=document.getElementById("theme-toggle");
-  var themeIconTrack=themeToggle&&themeToggle.querySelector(".theme-icon-track");
-  var THEME_ORDER=["system","dark","light"];
-  var THEME_ICON_INDEX={system:0,dark:1,light:2};
-  var THEME_NAMES={system:"system",dark:"dark",light:"light"};
-  var themeIconResetTimer;
-  var activeThemeTransition;
-  var themeTransitionId=0;
-  function normalizedTheme(){
-    var saved=localStorage.getItem("commentor-theme");
-    return saved==="dark"||saved==="light"||saved==="system"?saved:"system";
-  }
-  function resolvedTheme(mode){return mode==="system"?(themeMedia.matches?"dark":"light"):mode;}
-  function notifyTheme(mode){
-    var frame=document.getElementById("content-frame");
-    if(frame&&frame.contentWindow)frame.contentWindow.postMessage({type:"rendro-theme",theme:mode},"*");
-  }
-  function setThemeIconPosition(position,animate){
-    if(!themeIconTrack)return;
-    if(themeIconResetTimer)window.clearTimeout(themeIconResetTimer);
-    if(!animate||matchMedia("(prefers-reduced-motion: reduce)").matches){
-      themeIconTrack.style.transition="none";
-      themeIconTrack.style.transform="translateY(-"+(position*20)+"px)";
-      void themeIconTrack.offsetHeight;
-      themeIconTrack.style.transition="";
-      return;
-    }
-    themeIconTrack.style.transform="translateY(-"+(position*20)+"px)";
-  }
-  function resetThemeIconToSystem(){
-    if(!themeIconTrack)return;
-    themeIconTrack.style.transition="none";
-    themeIconTrack.style.transform="translateY(0)";
-    void themeIconTrack.offsetHeight;
-    themeIconTrack.style.transition="";
-  }
-  function renderThemeButton(mode,animate){
-    if(!themeToggle||!themeIconTrack)return;
-    var current=themeToggle.dataset.themeMode||mode;
-    var next=THEME_ORDER[(THEME_ORDER.indexOf(mode)+1)%THEME_ORDER.length];
-    themeToggle.dataset.themeMode=mode;
-    themeToggle.setAttribute("aria-label","Switch to "+THEME_NAMES[next]+" theme");
-    themeToggle.setAttribute("title","Theme: "+THEME_NAMES[mode]);
-    var reduceMotion=matchMedia("(prefers-reduced-motion: reduce)").matches;
-    var position=animate&&!reduceMotion&&current==="light"&&mode==="system"?3:THEME_ICON_INDEX[mode];
-    setThemeIconPosition(position,animate);
-    if(position===3&&animate&&!reduceMotion){
-      themeIconResetTimer=window.setTimeout(resetThemeIconToSystem,320);
-    }
-  }
-  function applyTheme(mode,persist,animate){
-    var resolved=resolvedTheme(mode);
-    root.dataset.theme=mode;
-    root.dataset.resolvedTheme=resolved;
-    root.classList.toggle("dark",resolved==="dark");
-    if(persist)localStorage.setItem("commentor-theme",mode);
-    renderThemeButton(mode,animate);
-    notifyTheme(mode);
-  }
-  function transitionTheme(mode){
-    if(!themeToggle||matchMedia("(prefers-reduced-motion: reduce)").matches||!document.startViewTransition){
-      applyTheme(mode,true,true);
-      return;
-    }
-    var transitionId=++themeTransitionId;
-    if(activeThemeTransition)activeThemeTransition.skipTransition();
-    var rect=themeToggle.getBoundingClientRect();
-    var x=rect.left+rect.width/2;
-    var y=rect.top+rect.height/2;
-    var radius=Math.hypot(Math.max(x,innerWidth-x),Math.max(y,innerHeight-y));
-    root.style.setProperty("--theme-ripple-x",x+"px");
-    root.style.setProperty("--theme-ripple-y",y+"px");
-    root.classList.add("theme-rippling");
-    var viewTransition=document.startViewTransition(function(){applyTheme(mode,true,true);});
-    activeThemeTransition=viewTransition;
-    viewTransition.ready.then(function(){
-      if(transitionId!==themeTransitionId)return;
-      root.animate(
-        {clipPath:["circle(0px at "+x+"px "+y+"px)","circle("+radius+"px at "+x+"px "+y+"px)"]},
-        {duration:520,easing:"cubic-bezier(.4,0,.2,1)",fill:"both",pseudoElement:"::view-transition-new(root)"}
-      );
-    }).catch(function(){});
-    viewTransition.finished.finally(function(){
-      if(transitionId!==themeTransitionId)return;
-      activeThemeTransition=undefined;
-      root.classList.remove("theme-rippling");
-    });
-  }
-  applyTheme(normalizedTheme(),false,false);
+  function normalizedTheme(){return window.RendroTheme.getMode();}
+  function notifyTheme(mode){var frame=document.getElementById("content-frame");if(frame&&frame.contentWindow)frame.contentWindow.postMessage({type:"rendro-theme",theme:mode},"*");}
+  window.RendroTheme.mount(document.getElementById("theme-toggle"),notifyTheme);
 
   var MIN_WIDTH=220;
   var MAX_WIDTH=420;
@@ -755,7 +749,10 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
   var topbar=document.querySelector(".topbar");
   var shellToggle=document.getElementById("shell-toggle");
   var shellToggleIcon=shellToggle&&shellToggle.querySelector(".material-symbols-outlined");
+  var shellToggleMobileLabel=document.getElementById("shell-mobile-label");
   var shellShortcutKeys=document.getElementById("shell-shortcut-keys");
+  var mobileTreeToggle=document.getElementById("mobile-tree-toggle");
+  var mobileTreeBackdrop=document.getElementById("mobile-tree-backdrop");
   var shellShortcutText="Ctrl Shift H";
   if(shellToggle&&shellShortcutKeys){
     var platform=(navigator.userAgentData&&navigator.userAgentData.platform)||navigator.platform||"";
@@ -772,6 +769,19 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
 
   function maxForViewport(){return Math.max(MIN_WIDTH,Math.min(MAX_WIDTH,window.innerWidth-360));}
   function clampWidth(value){return Math.max(MIN_WIDTH,Math.min(maxForViewport(),Math.round(value)));}
+  function mobileTreeMode(){return window.matchMedia("(max-width:760px)").matches;}
+  function setMobileTree(open){
+    var active=mobileTreeMode()&&open;
+    root.classList.toggle("tree-mobile-open",active);
+    if(mobileTreeToggle){
+      mobileTreeToggle.setAttribute("aria-expanded",String(active));
+      mobileTreeToggle.setAttribute("aria-label",active?"Close document tree":"Open document tree");
+    }
+    if(sidebar){
+      sidebar.setAttribute("aria-hidden",String(mobileTreeMode()&&!active));
+      if("inert" in sidebar)sidebar.inert=mobileTreeMode()&&!active;
+    }
+  }
   function updateSidebarAria(){
     var width=clampWidth(expandedWidth);
     if(resizer){
@@ -779,9 +789,9 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
       resizer.setAttribute("aria-valuemax",String(maxForViewport()));
       resizer.setAttribute("aria-valuenow",String(width));
       resizer.setAttribute("aria-valuetext","Document tree "+width+" pixels wide");
-      resizer.tabIndex=0;
+      resizer.tabIndex=mobileTreeMode()?-1:0;
     }
-    if(sidebar){sidebar.setAttribute("aria-hidden","false");if("inert" in sidebar)sidebar.inert=false;}
+    if(sidebar&&!mobileTreeMode()){sidebar.setAttribute("aria-hidden","false");if("inert" in sidebar)sidebar.inert=false;}
   }
   function setSidebarWidth(value,persist){
     expandedWidth=clampWidth(value);
@@ -803,12 +813,14 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
     }
     if(shellToggle){
       shellToggle.setAttribute("aria-pressed",String(hidden));
-      shellToggle.setAttribute("aria-label",(hidden?"Show app shell":"Hide app shell")+", keyboard shortcut "+shellShortcutText);
+      shellToggle.setAttribute("aria-label",(mobileTreeMode()?(hidden?"Exit reading mode":"Enter reading mode"):(hidden?"Show app shell":"Hide app shell"))+", keyboard shortcut "+shellShortcutText);
     }
+    if(shellToggleMobileLabel)shellToggleMobileLabel.textContent=hidden?"Exit reading mode":"Enter reading mode";
     if(shellToggleIcon)shellToggleIcon.textContent=hidden?"fullscreen_exit":"fullscreen";
     if(hidden&&shellToggle)shellToggle.blur();
     notifyShellLayout();
   }
+  function focusShellControl(){if(mobileTreeMode()&&mobileMoreButton)mobileMoreButton.focus();else if(shellToggle)shellToggle.focus();}
   function updateShellAutoReveal(e){
     if(!root.classList.contains("shell-hidden"))return;
     var wasHeader=root.classList.contains("shell-header-revealed");
@@ -858,16 +870,11 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
   }
 
   setSidebarWidth(expandedWidth,false);
+  setMobileTree(false);
   root.getBoundingClientRect();
   root.classList.add("sidebar-ready");
   setShellHidden(localStorage.getItem("rendro-shell-hidden")==="1",false);
 
-  if(themeToggle)themeToggle.addEventListener("click",function(){
-    var current=normalizedTheme();
-    var next=THEME_ORDER[(THEME_ORDER.indexOf(current)+1)%THEME_ORDER.length];
-    transitionTheme(next);
-  });
-  themeMedia.addEventListener("change",function(){if(normalizedTheme()==="system")applyTheme("system",false,false);});
   if(resizer){
     var dragging=false;
     var impactSparkTimer;
@@ -937,8 +944,11 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
       else if(e.key==="End"){e.preventDefault();setSidebarWidth(maxForViewport(),true);}
     });
   }
-  window.addEventListener("resize",function(){setSidebarWidth(expandedWidth,false);});
+  window.addEventListener("resize",function(){setSidebarWidth(expandedWidth,false);setMobileTree(root.classList.contains("tree-mobile-open"));});
   if(shellToggle)shellToggle.addEventListener("click",function(){setShellHidden(!root.classList.contains("shell-hidden"));});
+  if(mobileTreeToggle)mobileTreeToggle.addEventListener("click",function(){setMobileTree(!root.classList.contains("tree-mobile-open"));});
+  if(mobileTreeBackdrop)mobileTreeBackdrop.addEventListener("click",function(){setMobileTree(false);});
+  if(sidebar)sidebar.addEventListener("click",function(e){if(e.target instanceof Element&&e.target.closest(".tree-item[data-path]"))setMobileTree(false);});
   document.addEventListener("pointermove",updateShellAutoReveal,{passive:true});
   if(topHotzone){topHotzone.addEventListener("pointerenter",revealShellHeader);topHotzone.addEventListener("pointerleave",scheduleHideShellHeader);}
   if(leftHotzone){leftHotzone.addEventListener("pointerenter",revealShellSidebar);leftHotzone.addEventListener("pointerleave",scheduleHideShellSidebar);}
@@ -951,24 +961,97 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
     if(shellShortcut&&!(e.target instanceof Element&&e.target.closest("input,textarea,select,[contenteditable='true'],[contenteditable='plaintext-only'],[contenteditable='']"))){
       e.preventDefault();
       setShellHidden(!root.classList.contains("shell-hidden"));
-      if(!root.classList.contains("shell-hidden")&&shellToggle)shellToggle.focus();
+      if(!root.classList.contains("shell-hidden"))focusShellControl();
+      return;
+    }
+    if(e.key==="Escape"&&root.classList.contains("tree-mobile-open")){
+      e.preventDefault();
+      setMobileTree(false);
+      if(mobileTreeToggle)mobileTreeToggle.focus();
       return;
     }
     if(e.key==="Escape"&&root.classList.contains("shell-hidden")){
       e.preventDefault();
       setShellHidden(false);
-      if(shellToggle)shellToggle.focus();
+      focusShellControl();
     }
   });
+  var commentorToken="",commentorTokenExpiresAt=0,commentorTokenRequest=null;
+  function commentorTokenExpiry(token){
+    try{var part=token.split(".")[1];if(!part)return 0;part=part.replace(/-/g,"+").replace(/_/g,"/");while(part.length%4)part+="=";var payload=JSON.parse(atob(part));return typeof payload.exp==="number"?payload.exp*1000:0;}catch(_){return 0;}
+  }
+  function fetchCommentorToken(forceRefresh,allowCached){
+    var now=Date.now();
+    if((!forceRefresh||allowCached)&&commentorToken&&commentorTokenExpiresAt>now+30000)return Promise.resolve(commentorToken);
+    if(commentorTokenRequest)return commentorTokenRequest;
+    commentorTokenRequest=fetch("/api/auth/convex/token",{credentials:"same-origin",headers:{Accept:"application/json"}})
+      .then(function(response){return response.ok?response.json():null;})
+      .then(function(payload){var token=payload&&typeof payload.token==="string"?payload.token:null;if(token){commentorToken=token;commentorTokenExpiresAt=commentorTokenExpiry(token);}else{commentorToken="";commentorTokenExpiresAt=0;}return token;})
+      .catch(function(){commentorToken="";commentorTokenExpiresAt=0;return null;})
+      .finally(function(){commentorTokenRequest=null;});
+    return commentorTokenRequest;
+  }
   window.addEventListener("message",function(e){
-    var allowedOrigin=e.origin===window.location.origin||(window.RENDRO_PUBLICATION_BASE&&e.origin==="null");
-    if(!allowedOrigin||!e.data||e.data.type!=="shell-toggle")return;
+    var allowedOrigin=e.origin===window.location.origin||(window.RENDRO_DOCUMENT_BASE&&e.origin==="null");
+    if(!allowedOrigin||!e.data)return;
+    if(e.data.type==="commentor-auth-request"){
+      var frame=document.getElementById("content-frame");
+      var source=e.source;
+      var requestId=typeof e.data.requestId==="string"?e.data.requestId:"";
+      if(!window.RENDRO_SHARE_CONFIG||!frame||source!==frame.contentWindow||!requestId)return;
+      fetchCommentorToken(e.data.forceRefreshToken===true,e.data.allowCachedToken===true)
+        .then(function(token){source.postMessage({type:"commentor-auth-response",requestId:requestId,token:token},"*");});
+      return;
+    }
+    if(e.data.type==="commentor-theme-ready"){
+      var themeFrame=document.getElementById("content-frame");
+      if(!themeFrame||e.source!==themeFrame.contentWindow)return;
+      notifyTheme(root.dataset.theme||normalizedTheme());
+      return;
+    }
+    if(e.data.type!=="shell-toggle")return;
+    var shellFrame=document.getElementById("content-frame");
+    if(!shellFrame||e.source!==shellFrame.contentWindow)return;
     setShellHidden(!root.classList.contains("shell-hidden"));
-    if(!root.classList.contains("shell-hidden")&&shellToggle)shellToggle.focus();
+    if(!root.classList.contains("shell-hidden"))focusShellControl();
   });
 
+  var mobileMoreButton=document.getElementById("mobile-more-btn"),mobileMoreMenu=document.getElementById("mobile-more-menu");
+  var mobileMoreMedia=window.matchMedia("(max-width:760px)");
+  var mobileMoreItems=[document.querySelector(".topbar-btn-back"),document.querySelector(".shortcut-tooltip-wrap"),document.getElementById("theme-toggle"),document.querySelector(".avatar-wrap")].filter(Boolean);
+  var mobileMoreSlots=mobileMoreItems.map(function(item){var slot=document.createComment("mobile-more-slot");item.parentNode.insertBefore(slot,item);return {item:item,slot:slot};});
+  var mobileMoreSyncedMode=null;
+  function setMobileMore(open,restoreFocus){
+    if(!mobileMoreButton||!mobileMoreMenu)return;
+    var active=mobileMoreMedia.matches&&open;
+    mobileMoreMenu.hidden=!active;
+    mobileMoreButton.setAttribute("aria-expanded",String(active));
+    if(active){var first=mobileMoreMenu.querySelector("a,button");if(first)first.focus();}
+    if(!active&&restoreFocus)mobileMoreButton.focus();
+  }
+  function syncMobileMore(){
+    var mobileMode=mobileMoreMedia.matches;
+    if(mobileMoreSyncedMode===mobileMode)return;
+    mobileMoreSyncedMode=mobileMode;
+    if(!mobileMoreMenu)return;
+    setMobileMore(false,false);
+    mobileMoreSlots.forEach(function(entry){
+      if(mobileMode)mobileMoreMenu.appendChild(entry.item);
+      else entry.slot.parentNode.insertBefore(entry.item,entry.slot.nextSibling);
+    });
+    setShellHidden(root.classList.contains("shell-hidden"),false);
+  }
+  syncMobileMore();
+  if(mobileMoreMedia.addEventListener)mobileMoreMedia.addEventListener("change",syncMobileMore);
+  else mobileMoreMedia.addListener(syncMobileMore);
+  window.addEventListener("resize",function(){if(mobileMoreMedia.matches!==mobileMoreSyncedMode)syncMobileMore();});
+  if(mobileMoreButton)mobileMoreButton.addEventListener("click",function(e){e.stopPropagation();setMobileMore(mobileMoreMenu.hidden,false);});
+  mobileMoreItems.slice(0,3).forEach(function(item){item.addEventListener("click",function(){setMobileMore(false,false);});});
 
-  document.getElementById("avatar-btn")?.addEventListener("click",function(e){e.stopPropagation();var m=document.getElementById("avatar-menu");m.style.display=m.style.display==="block"?"none":"block";});
+  var avatarButton=document.getElementById("avatar-btn"),avatarMenu=document.getElementById("avatar-menu");
+  function setAvatarMenu(open){if(!avatarButton||!avatarMenu)return;avatarMenu.hidden=!open;avatarButton.setAttribute("aria-expanded",String(open));}
+  if(avatarButton)avatarButton.addEventListener("click",function(e){e.stopPropagation();setAvatarMenu(avatarMenu.hidden);});
+  document.addEventListener("keydown",function(e){if(e.key==="Escape"){var restore=Boolean(mobileMoreMenu&&!mobileMoreMenu.hidden);setAvatarMenu(false);setMobileMore(false,restore);}});
   var shareBtn=document.getElementById("share-btn");
   var shareFeedbackLabel=document.getElementById("share-feedback-label");
   var shareFeedbackIcon=document.getElementById("share-feedback-icon");
@@ -977,12 +1060,12 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
   function setShareLoading(){if(!shareBtn)return;if(shareFeedbackTimer!==undefined)window.clearTimeout(shareFeedbackTimer);shareBtn.classList.remove("is-feedback");shareBtn.classList.add("is-loading");shareBtn.setAttribute("aria-busy","true");shareBtn.setAttribute("aria-label",${JSON.stringify(sharePendingLabel)});}
   function setShareFeedback(message){if(!shareBtn||!shareFeedbackLabel)return;shareBtn.classList.remove("is-loading");shareBtn.removeAttribute("aria-busy");shareFeedbackLabel.textContent=message;if(shareFeedbackIcon)shareFeedbackIcon.textContent=message.endsWith("copied!")?"check":"error";shareBtn.classList.add("is-feedback");shareBtn.setAttribute("aria-label",message);if(shareFeedbackTimer!==undefined)window.clearTimeout(shareFeedbackTimer);shareFeedbackTimer=window.setTimeout(function(){shareBtn.classList.remove("is-feedback");shareBtn.setAttribute("aria-label",${JSON.stringify(shareLabel)});if(shareFeedbackIcon)shareFeedbackIcon.textContent="check";},1800);}
   async function copyText(text){try{if(navigator.clipboard&&window.isSecureContext){await navigator.clipboard.writeText(text);return;}}catch(_){}var ta=document.createElement("textarea");ta.value=text;ta.setAttribute("readonly","");ta.style.position="fixed";ta.style.top="-999px";ta.style.left="-999px";document.body.appendChild(ta);ta.select();ta.setSelectionRange(0,text.length);try{if(!document.execCommand("copy"))throw new Error("copy failed");}finally{ta.remove();}}
-  if(shareBtn)shareBtn.addEventListener("click",async function(e){e.stopPropagation();if(sharePending)return;var doc=window.RENDRO_CURRENT_DOC||"";if(!doc){setShareFeedback("Select a document first");return;}sharePending=true;setShareLoading();try{var publicBase=window.RENDRO_PUBLICATION_BASE||"";if(publicBase){var relativeDoc=doc.indexOf(window.RENDRO_ORG+"/")===0?doc.slice(window.RENDRO_ORG.length+1):doc;var publicUrl=new URL(publicBase,window.location.origin);publicUrl.searchParams.set("doc",relativeDoc);await copyText(publicUrl.href);setShareFeedback("Public URL copied!");}else{var res=await fetch("/api/share/create?key="+encodeURIComponent(doc),{headers:{accept:"application/json"}});if(!res.ok)throw new Error("share failed");var data=await res.json();await copyText(data.url);setShareFeedback("Signed URL copied!");}}catch(_){setShareFeedback("Unable to copy");}finally{sharePending=false;}});
-  document.addEventListener("click",function(){var m=document.getElementById("avatar-menu");if(m)m.style.display="none";});
+  if(shareBtn)shareBtn.addEventListener("click",async function(e){e.stopPropagation();if(sharePending)return;var doc=window.RENDRO_CURRENT_DOC||"";if(!doc){setShareFeedback("Select a document first");return;}sharePending=true;setShareLoading();try{var relativeDoc=doc.indexOf(window.RENDRO_ORG+"/")===0?doc.slice(window.RENDRO_ORG.length+1):doc;var publicBase=window.RENDRO_PUBLICATION_BASE||"";var shareConfig=window.RENDRO_SHARE_CONFIG;if(publicBase){var publicUrl=new URL(publicBase,window.location.origin);publicUrl.searchParams.set("doc",relativeDoc);await copyText(publicUrl.href);setShareFeedback("Public URL copied!");}else if(shareConfig){var res=await fetch("/api/rendro/shares",{method:"POST",headers:{"Content-Type":"application/json",accept:"application/json"},body:JSON.stringify({organizationId:shareConfig.organizationId,projectId:shareConfig.projectId,documentPath:relativeDoc,expiresInSeconds:604800})});var data=await res.json();if(!res.ok||!data.url)throw new Error("share failed");await copyText(new URL(data.url,window.location.origin).href);setShareFeedback("Share link copied!");}else{var legacyRes=await fetch("/api/share/create?key="+encodeURIComponent(doc),{headers:{accept:"application/json"}});if(!legacyRes.ok)throw new Error("share failed");var legacyData=await legacyRes.json();await copyText(legacyData.url);setShareFeedback("Signed URL copied!");}}catch(_){setShareFeedback("Unable to copy");}finally{sharePending=false;}});
+  document.addEventListener("click",function(){setAvatarMenu(false);setMobileMore(false,false);});
 })();
 </script>
-<script>window.RENDRO_INITIAL_DOC=${JSON.stringify(selectedDoc)};window.RENDRO_ORG=${JSON.stringify(org)};window.RENDRO_PUBLICATION_BASE=${JSON.stringify(publicationBase)};</script>
-<script src="/lazy-tree.js?v=27"></script>
+<script>window.RENDRO_INITIAL_DOC=${inlineJson(selectedDoc)};window.RENDRO_ORG=${inlineJson(org)};window.RENDRO_DOCUMENT_BASE=${inlineJson(documentBase)};window.RENDRO_PUBLICATION_BASE=${inlineJson(isPublicDocument ? documentBase : "")};window.RENDRO_SHARE_CONFIG=${inlineJson(options.shareConfig ?? null)};</script>
+<script src="/lazy-tree.js?v=32"></script>
 </body>
 </html>`;
 }
@@ -1045,6 +1128,10 @@ function renderInitialIndex(_user: User, org: string, displayName: string): stri
 </html>`;
 }
 
+function inlineJson(value: unknown): string {
+  return JSON.stringify(value).replace(/</g, "\\u003c");
+}
+
 function escapeHtml(s: string): string {
   return s
     .replace(/&/g, "&amp;")
@@ -1064,16 +1151,7 @@ function renderApiKeyPage(user: User, org: string, apiKey: string): string {
 <title>${orgEsc} — Rendro</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet">
-<script>
-  (function(){
-    var saved=localStorage.getItem("commentor-theme");
-    var mode=saved==="dark"||saved==="light"||saved==="system"?saved:"system";
-    var dark=mode==="dark"||(mode==="system"&&matchMedia("(prefers-color-scheme: dark)").matches);
-    document.documentElement.dataset.theme=mode;
-    document.documentElement.dataset.resolvedTheme=dark?"dark":"light";
-    document.documentElement.classList.toggle("dark",dark);
-  })();
-</script>
+${renderThemeAssets()}
 <style>
   *{box-sizing:border-box}
   html{color-scheme:light dark}
@@ -1149,7 +1227,7 @@ function renderApiKeyPage(user: User, org: string, apiKey: string): string {
 <header class="topbar">
   <div class="brand">Rendro</div>
   <div class="actions">
-    <button class="icon-btn" id="theme-toggle" type="button" aria-label="Switch theme" title="Theme: system"><span class="material-symbols-outlined" id="theme-icon" aria-hidden="true">brightness_auto</span></button>
+    ${renderThemeButton()}
     <form method="get" action="/api/auth/sign-out"><button class="secondary-btn" type="submit">Sign out</button></form>
   </div>
 </header>
@@ -1180,38 +1258,7 @@ rendro push --source ./docs --org ${orgEsc}
 <script>
   (function(){
     var root=document.documentElement;
-    var themeMedia=matchMedia("(prefers-color-scheme: dark)");
-    var themeToggle=document.getElementById("theme-toggle");
-    var themeIcon=document.getElementById("theme-icon");
-    var modes=["system","dark","light"];
-    var icons={system:"brightness_auto",dark:"dark_mode",light:"light_mode"};
-    function normalizedTheme(){
-      var saved=localStorage.getItem("commentor-theme");
-      return saved==="dark"||saved==="light"||saved==="system"?saved:"system";
-    }
-    function applyTheme(mode,persist){
-      var dark=mode==="dark"||(mode==="system"&&themeMedia.matches);
-      root.dataset.theme=mode;
-      root.dataset.resolvedTheme=dark?"dark":"light";
-      root.classList.toggle("dark",dark);
-      if(persist)localStorage.setItem("commentor-theme",mode);
-      if(themeIcon)themeIcon.textContent=icons[mode];
-      if(themeToggle){
-        var next=modes[(modes.indexOf(mode)+1)%modes.length];
-        themeToggle.title="Theme: "+mode;
-        themeToggle.setAttribute("aria-label","Switch to "+next+" theme");
-      }
-    }
-    if(themeToggle){
-      themeToggle.addEventListener("click",function(){
-        var mode=normalizedTheme();
-        applyTheme(modes[(modes.indexOf(mode)+1)%modes.length],true);
-      });
-    }
-    themeMedia.addEventListener("change",function(){
-      if(normalizedTheme()==="system")applyTheme("system",false);
-    });
-    applyTheme(normalizedTheme(),false);
+    window.RendroTheme.mount(document.getElementById("theme-toggle"));
   })();
   var copyFeedbackTimer;
   function setCopyFeedback(message) {
