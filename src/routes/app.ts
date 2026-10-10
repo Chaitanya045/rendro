@@ -1090,7 +1090,7 @@ function renderInitialIndex(_user: User, org: string, displayName: string): stri
 <body>
 <h1>${escapeHtml(displayName)}</h1>
 <p>This is the <code>${escapeHtml(org)}</code> documentation space on Rendro.</p>
-<p>Push your first docs with the CLI (set DOCSYNC_API_KEY in your CI):</p>
+<p>Push your first docs with the CLI (set RENDRO_API_KEY in your CI):</p>
 <pre><code>rendro push --source ./docs --org ${escapeHtml(org)}</code></pre>
 <p>Or start writing HTML directly in the bucket under <code>${escapeHtml(org)}/</code>.</p>
 </body>
@@ -1215,11 +1215,11 @@ ${renderThemeAssets()}
       </div>
       <div class="warning">
         <span class="material-symbols-outlined" aria-hidden="true">lock</span>
-        <div><strong>Store this securely.</strong> Add it to your CI environment as <code>DOCSYNC_API_KEY</code>. Anyone with this key can push docs to your org.</div>
+        <div><strong>Store this securely.</strong> Add it to your CI environment as <code>RENDRO_API_KEY</code>. Anyone with this key can push docs to your org.</div>
       </div>
       <pre><code># In your CI pipeline:
 rendro push --source ./docs --org ${orgEsc}
-# Set DOCSYNC_API_KEY in your CI secrets</code></pre>
+# Set RENDRO_API_KEY in your CI secrets</code></pre>
       <a class="primary-btn" href="/"><span class="material-symbols-outlined" aria-hidden="true">docs</span>View your docs</a>
     </div>
   </section>
