@@ -34,6 +34,7 @@ export function renderLandingPage(): string {
       --primary-hover: #9a3412;
       --primary-muted: #ffedd5;
       --primary-shadow: rgba(194,65,12,.16);
+      --danger: #b42318;
       --shadow-strong: rgba(0,0,0,.12);
       --shadow-soft: rgba(0,0,0,.08);
       --page-width: 1200px;
@@ -52,6 +53,7 @@ export function renderLandingPage(): string {
       --primary-hover: #fdba74;
       --primary-muted: rgba(251,146,60,.16);
       --primary-shadow: rgba(251,146,60,.2);
+      --danger: #fca5a5;
       --shadow-strong: rgba(0,0,0,.42);
       --shadow-soft: rgba(0,0,0,.26);
     }
@@ -68,7 +70,8 @@ export function renderLandingPage(): string {
     .container { width: min(calc(100% - 48px), var(--page-width)); margin-inline: auto; }
     .site-header { position: sticky; top: 0; z-index: 30; min-height: 68px; border-bottom: 1px solid var(--border); background: var(--surface-glass); backdrop-filter: blur(18px); }
     .header-inner { min-height: 68px; display: flex; align-items: center; gap: 32px; }
-    .brand { color: var(--primary); font-size: 24px; line-height: 32px; font-weight: 700; letter-spacing: -.03em; }
+    .brand, .footer-brand { color: var(--text); font-size: 24px; line-height: 32px; font-weight: 700; letter-spacing: -.04em; }
+    .brand i, .footer-brand i { color: var(--primary); font-style: normal; }
     .nav-links { display: flex; align-items: center; gap: 28px; margin-left: auto; color: var(--text-muted); font-size: 14px; }
     .nav-links a, .footer-links a { transition: color 150ms var(--ease-standard); }
     .nav-links a { position: relative; padding-block: 6px; }
@@ -160,7 +163,12 @@ export function renderLandingPage(): string {
     .cta-panel .button { position: relative; z-index: 1; }
     .site-footer { padding: 32px 0; border-top: 1px solid var(--border); }
     .footer-inner { display: flex; align-items: center; gap: 28px; color: var(--text-muted); font-size: 13px; }
-    .footer-brand { color: var(--primary); font-size: 16px; font-weight: 700; }
+    .footer-brand { font-size: 16px; line-height: 24px; }
+    .auth-error { margin: 0 0 20px; color: var(--danger); font-size: 14px; line-height: 20px; }
+    .auth-error:empty { display: none; }
+    .auth-error a { color: inherit; font-weight: 600; text-decoration: underline; text-underline-offset: 3px; }
+    .hero-copy .auth-error { margin: -12px 0 24px; }
+    .security-copy .auth-error, .cta-panel .auth-error { margin: 12px 0 0; color: var(--danger); }
     .footer-links { display: flex; flex-wrap: wrap; gap: 20px; margin-left: auto; }
     @media (prefers-reduced-motion: no-preference) {
       [data-reveal], [data-reveal-item] { transition: opacity 300ms var(--ease-standard), transform 300ms var(--ease-standard), background-color 200ms var(--ease-standard), border-color 200ms var(--ease-standard); transition-delay: var(--reveal-delay,0ms), var(--reveal-delay,0ms), 0ms, 0ms; }
@@ -178,8 +186,12 @@ export function renderLandingPage(): string {
     }
     @media (max-width: 760px) {
       .container { width: min(calc(100% - 32px), var(--page-width)); }
-      .nav-links, .header-signin { display: none; }
-      .header-actions { margin-left: auto; }
+      .nav-links { display: none; }
+      .header-inner { gap: 12px; }
+      .brand { font-size: 20px; line-height: 28px; }
+      .header-actions { margin-left: auto; gap: 6px; }
+      .header-signin { padding-inline: 10px; }
+      .header-signin, .header-get-started { white-space: nowrap; }
       .hero { padding: 68px 0 64px; }
       h1 { font-size: clamp(40px,13vw,56px); }
       .hero-lede { font-size: 16px; line-height: 26px; }
@@ -202,11 +214,19 @@ export function renderLandingPage(): string {
     }
     @media (max-width: 420px) {
       .header-get-started { padding-inline: 13px; }
+      .header-signin { padding-inline: 8px; }
       .hero-facts { align-items: flex-start; flex-direction: column; gap: 8px; }
       .product-shot { border-radius: 8px; }
       .shot-title { display: none; }
       .workflow-step { grid-template-columns: 42px 1fr; padding: 18px; gap: 13px; }
       .step-number { width: 36px; height: 36px; }
+    }
+    @media (max-width: 360px) {
+      .header-inner { gap: 8px; }
+      .brand { font-size: 18px; }
+      .header-actions { gap: 4px; }
+      .header-signin { padding-inline: 6px; }
+      .header-get-started { padding-inline: 10px; }
     }
     @media (prefers-reduced-motion: reduce) {
       html { scroll-behavior: auto; }
@@ -224,7 +244,7 @@ export function renderLandingPage(): string {
   <form id="sign-in-form" hidden></form>
   <header class="site-header">
     <div class="container header-inner">
-      <a class="brand" href="/" aria-label="Rendro home">Rendro</a>
+      <a class="brand" href="/" aria-label="Rendro home">Rendro<i aria-hidden="true">.</i></a>
       <nav class="nav-links" aria-label="Primary navigation">
         <a href="#product" data-section-link data-scroll-section="product">Product</a>
         <a href="#workflow" data-section-link data-scroll-section="workflow">Workflow</a>
@@ -250,6 +270,7 @@ export function renderLandingPage(): string {
             </button>
             <a class="button button-secondary" href="#product" data-scroll-section="product" data-action-id="explore-product">Explore the workspace <span class="arrow" aria-hidden="true">→</span></a>
           </div>
+          <p class="auth-error" id="hero-start-error" role="alert"></p>
           <ul class="hero-facts" aria-label="Product principles">
             <li>Plain HTML</li>
             <li>Zero-dependency CLI</li>
@@ -323,6 +344,7 @@ export function renderLandingPage(): string {
           <h2 id="security-title">Private by default. Scoped by organization.</h2>
           <p class="section-intro">The organization boundary is part of every request, not an optional permission setting.</p>
           <button class="button button-secondary" type="submit" form="sign-in-form" data-auth data-auth-id="security-start"><span data-auth-label>Start with Google</span><span class="button-spinner" aria-hidden="true"></span></button>
+          <p class="auth-error" id="security-start-error" role="alert"></p>
         </div>
         <dl class="security-list" data-reveal-group data-reveal-stagger="45">
           <div class="security-row" data-reveal-item style="--reveal-y:12px"><dt>Identity</dt><dd>Google OAuth or verified email credentials connect each session to one stable account.</dd></div>
@@ -336,7 +358,7 @@ export function renderLandingPage(): string {
     <section class="final-cta" aria-labelledby="cta-title">
       <div class="container">
         <div class="cta-panel" data-reveal style="--reveal-y:12px">
-          <div><h2 id="cta-title">Keep writing docs where the code changes.</h2><p>Let Rendro handle delivery, navigation, and feedback.</p></div>
+          <div><h2 id="cta-title">Keep writing docs where the code changes.</h2><p>Let Rendro handle delivery, navigation, and feedback.</p><p class="auth-error" id="final-start-error" role="alert"></p></div>
           <button class="button button-primary" type="submit" form="sign-in-form" data-auth data-auth-id="final-start"><span data-auth-label>Start with Google</span><span class="button-spinner" aria-hidden="true"></span></button>
         </div>
       </div>
@@ -344,7 +366,7 @@ export function renderLandingPage(): string {
   </main>
   <footer class="site-footer">
     <div class="container footer-inner">
-      <a class="footer-brand" href="/">Rendro</a>
+      <a class="footer-brand" href="/">Rendro<i aria-hidden="true">.</i></a>
       <span>Documentation that stays close to the code.</span>
       <nav class="footer-links" aria-label="Footer navigation">
         <a href="#product" data-scroll-section="product">Product</a><a href="#workflow" data-scroll-section="workflow">Workflow</a><a href="#security" data-scroll-section="security">Security</a><a href="https://github.com/Chaitanya045/rendro" target="_blank" rel="noreferrer">GitHub</a>
@@ -462,8 +484,10 @@ export function renderLandingPage(): string {
         if (label && !label.hasAttribute("data-auth-idle-label"))
           label.setAttribute("data-auth-idle-label", label.textContent || "");
       });
+      var errors = Array.from(document.querySelectorAll(".auth-error"));
       var resetSignIn = function () {
         delete form.dataset.submitting;
+        errors.forEach(function (region) { region.textContent = ""; });
         buttons.forEach(function (button) {
           button.disabled = false;
           button.removeAttribute("aria-busy");
@@ -498,8 +522,8 @@ export function renderLandingPage(): string {
         }).catch(function () {
           resetSignIn();
           if (submitter instanceof HTMLButtonElement) {
-            var label = submitter.querySelector("[data-auth-label]");
-            if (label) label.textContent = "Try again";
+            var region = document.getElementById((submitter.getAttribute("data-auth-id") || "") + "-error");
+            if (region) region.innerHTML = 'Google sign-in could not start. Try again, or <a href="/sign-in">sign in with email</a>.';
             submitter.focus();
           }
         });

@@ -74,7 +74,7 @@ document.addEventListener("click",function(e){var a=e.target.closest("a");if(!a|
     transport: "parent",
     canWrite: true,
   })};</script>
-<script defer src="/commentor.js?v=34"></script>`;
+<script defer src="/commentor.js?v=35"></script>`;
 }
 
 app.get("/organizations/:organizationId/projects/:projectId/docs/tree", async (c) => {
@@ -103,7 +103,7 @@ app.get("/organizations/:organizationId/projects/:projectId/docs/files/*", async
   if (!active) return c.html(renderNotFoundPage({ path: c.req.path }), 404);
   const manifest = await activeManifest(active);
   const entry = manifest?.files.find((file) => file.path === path);
-  if (!entry) return c.html(renderNotFoundPage({ path: c.req.path }), 404);
+  if (!entry) return c.html(renderNotFoundPage({ path: c.req.path, homeHref: base, homeLabel: "Open project docs" }), 404);
   const key = `${active.deployment.manifestKey.slice(0, -"manifest.json".length)}files/${path}`;
   const stream = await getObjectStream(key);
   if (!stream) return c.html(renderNotFoundPage({ path: c.req.path }), 404);

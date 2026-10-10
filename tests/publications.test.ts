@@ -191,7 +191,7 @@ describe("anonymous public routes", () => {
     const html = await shell.text();
     expect(html).toContain("<title>Product docs — Rendro</title>");
     expect(html).toContain('<header class="topbar">');
-    expect(html).toContain('<span class="topbar-logo">Product docs</span>');
+    expect(html).toContain('<h1 class="topbar-logo">Product docs</h1>');
     expect(html).toContain('class="sidebar"');
     expect(html).toContain('id="content-frame"');
     expect(html).toContain('data-tree-org="acme" data-document-base="/public/acme/product"');

@@ -3179,7 +3179,9 @@ textarea:disabled {
   min-height: 32px;
   padding: 5px 10px;
   border-radius: 8px;
-  font: 600 12px/1 var(--font-ui);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
   cursor: pointer;
 }
 .load-older:hover:not(:disabled) { background: var(--border-soft); color: var(--accent-hover); }
