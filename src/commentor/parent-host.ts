@@ -249,6 +249,9 @@ export class CommentorParentHost {
     if (method === "reply.add") {
       return validBody(args.body) ? { threadId, body: args.body.trim() } : null;
     }
+    if (method === "reply.remove") {
+      return typeof args.replyId === "string" ? { threadId, replyId: args.replyId } : null;
+    }
     return { threadId };
   }
 
@@ -399,7 +402,7 @@ class ConvexDocumentCommentBackend implements DocumentCommentBackend {
   }
 
   mutate(method: CommentorParentMutationMethod, scope: DocumentCommentScope, value: unknown): Promise<unknown> {
-    const args = value as { body?: string; anchor?: never; threadId?: string };
+    const args = value as { body?: string; anchor?: never; threadId?: string; replyId?: string };
     if (method === "thread.create") {
       return this.client.mutation(api.documentThreads.create, {
         ...scope,
@@ -411,6 +414,9 @@ class ConvexDocumentCommentBackend implements DocumentCommentBackend {
     if (method === "thread.resolve") return this.client.mutation(api.documentThreads.resolve, { ...scope, threadId });
     if (method === "thread.archive") return this.client.mutation(api.documentThreads.archive, { ...scope, threadId });
     if (method === "thread.remove") return this.client.mutation(api.documentThreads.remove, { ...scope, threadId });
+    if (method === "reply.remove") {
+      return this.client.mutation(api.documentReplies.remove, { ...scope, threadId, replyId: args.replyId as Id<"documentReplies"> });
+    }
     return this.client.mutation(api.documentReplies.add, { ...scope, threadId, body: args.body! });
   }
 }

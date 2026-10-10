@@ -2,7 +2,7 @@ import { paginationOptsValidator } from "convex/server";
 import { ConvexError, v } from "convex/values";
 import { mutation, query } from "./_generated/server";
 import { authComponent } from "./auth";
-import { requireOrganizationMember } from "./authorization";
+import { canDeleteComment, requireCommentAuthorOrAdmin, requireOrganizationMember } from "./authorization";
 
 export const DOCUMENT_REPLY_PAGE_SIZE = 20;
 const MAX_REACTIVE_PAGE_ROWS = 24;
@@ -38,7 +38,7 @@ export const list = query({
       || thread.projectId !== args.projectId
       || thread.documentPath !== args.documentPath
     ) throw new ConvexError("Comment not found");
-    await requireOrganizationMember(ctx, thread.organizationId);
+    const authorized = await requireOrganizationMember(ctx, thread.organizationId);
     const repliesPage = await ctx.db
       .query("documentReplies")
       .withIndex("by_thread", (index) => index.eq("threadId", args.threadId))
@@ -58,6 +58,7 @@ export const list = query({
       const author = await request;
       return {
         ...reply,
+        canDelete: canDeleteComment(authorized, reply.authorId),
         ...authorDisplay(author),
       };
     }));
@@ -94,5 +95,33 @@ export const add = mutation({
       createdAt: now,
       updatedAt: now,
     });
+  },
+});
+
+// Delete one reply only after checking both its parent document and its author.
+export const remove = mutation({
+  args: {
+    organizationId: v.string(),
+    projectId: v.id("projects"),
+    documentPath: v.string(),
+    threadId: v.id("documentThreads"),
+    replyId: v.id("documentReplies"),
+  },
+  handler: async (ctx, { replyId, threadId, ...scope }) => {
+    const thread = await ctx.db.get(threadId);
+    const reply = await ctx.db.get(replyId);
+    if (
+      !thread
+      || thread.deletedAt !== undefined
+      || thread.organizationId !== scope.organizationId
+      || thread.projectId !== scope.projectId
+      || thread.documentPath !== scope.documentPath
+      || !reply
+      || reply.threadId !== threadId
+      || reply.organizationId !== thread.organizationId
+    ) throw new ConvexError("Comment not found");
+    const authorized = await requireOrganizationMember(ctx, thread.organizationId);
+    requireCommentAuthorOrAdmin(authorized, reply.authorId);
+    await ctx.db.delete(replyId);
   },
 });
