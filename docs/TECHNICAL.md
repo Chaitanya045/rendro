@@ -493,21 +493,21 @@ comment/navigation bundles are generated release artifacts, not source files.
 
 ### Environment Variables (Workers)
 
-`src/config.ts` validates the Worker environment at startup.
+`src/config.ts` validates the Worker environment at startup. The table lists every named string setting read by Worker code; `ASSETS` is the separate static-asset fetch binding in `src/worker.ts`. Google OAuth credentials are read only by Convex, and `BASE_URL` is unused. The local Node entry reads `PORT` separately.
+
+Both production (top-level) and `development` declare the same required secrets: `CONVEX_INTERNAL_SECRET`, `AUTH_SECRET`, `MINIO_ENDPOINT`, `MINIO_ACCESS_KEY`, and `MINIO_SECRET_KEY`. Wrangler checks these at deploy time, and `src/config.ts` validates them at startup. Production commands use the top-level configuration without an `--env` flag; development commands use `--env development`.
 
 | Variable | Storage | Purpose |
 |---|---|---|
 | `NODE_ENV` | Wrangler var | Runtime mode; `production` selects JSON logs at `info` level |
-| `BASE_URL` | Wrangler var | Canonical origin. Validated by `src/config.ts`; not otherwise read by Worker code |
-| `CONVEX_URL` | Secret | Convex deployment URL; used by legacy Convex calls and the browser comment client |
-| `CONVEX_SITE_URL` | Secret (optional) | Convex HTTP action origin; derived from `CONVEX_URL` when unset |
+| `CONVEX_URL` | Var/secret (optional at startup) | Convex deployment URL for legacy calls and browser comments; defaults to empty, disabling those features. Set for the full app |
+| `CONVEX_SITE_URL` | Var/secret (optional) | Convex HTTP action origin for auth and project routes; derived from `CONVEX_URL` when unset. Startup and `/health` work without either URL; backend routes do not |
 | `CONVEX_INTERNAL_SECRET` | Secret (required by `wrangler.toml`, ≥32 chars) | Legacy Worker-only Convex functions; same value in Convex |
-| `AUTH_SECRET` | Secret (≥16 chars) | Signs legacy `/share/:token` HMAC links. Better Auth signing happens in Convex |
-| `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Secrets | Required by `src/config.ts` validation; the Worker does not otherwise use them (OAuth runs in Convex) |
-| `MINIO_ENDPOINT`, `MINIO_ACCESS_KEY`, `MINIO_SECRET_KEY` | Secrets | R2 S3 access |
+| `AUTH_SECRET` | Secret (required, ≥16 chars) | Signs legacy `/share/:token` HMAC links. Better Auth signing happens in Convex |
+| `MINIO_ENDPOINT`, `MINIO_ACCESS_KEY`, `MINIO_SECRET_KEY` | Secrets (required, nonempty) | R2 S3 access |
 | `MINIO_BUCKET`, `MINIO_REGION`, `MINIO_FORCE_PATH_STYLE` | Vars/secrets | R2 bucket configuration (defaults `docs`, `us-east-1`, `true`) |
 | `LOG_LEVEL` | Var (optional) | Pino log level; defaults to `debug` outside production, `info` in production |
-| `PORT` | Local only | Node.js server port (default 3000) |
+| `PORT` | Local only; not read by Worker | Validated in `src/index.ts`; Node.js server port (integer 1–65535, default 3000) |
 
 ### Environment Variables (Convex)
 
@@ -525,7 +525,6 @@ comment/navigation bundles are generated release artifacts, not source files.
 
 | Workflow | Trigger | Runs |
 |---|---|---|
-| `.github/workflows/ci.yml` | Pull requests | `pnpm typecheck`, `pnpm lint`, `pnpm test` |
 | `.github/workflows/quality.yml` | Pull requests, pushes to `main`/`development`, manual | `pnpm verify` and `pnpm audit --audit-level=high`, read-only permissions, no deployment credentials |
 | `.github/workflows/release.yml` | `v*` tags | Builds `bin/rendro.mjs` and attaches it to a GitHub release |
 | `.github/workflows/retention.yml` | Daily cron, manual | `pnpm cleanup:retention` |
