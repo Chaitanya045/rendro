@@ -11,16 +11,22 @@ const app = new Hono();
 app.get("/share/:token", async (c) => {
   const token = c.req.param("token");
   const result = verifyShareToken(token);
-  if (!result.ok) {
-    return c.text(result.reason === "expired" ? "Share link expired" : "Invalid share link", result.status);
-  }
+  // Only a verified signature can establish expiry. All other unavailable
+  // links get the same message without revealing document or token history.
+  const unavailable = (status: 404 | 410 = 404) => c.html(renderNotFoundPage({
+    status,
+    path: "/share/…",
+    heading: "Share link unavailable",
+    message: "This share link is invalid or no longer available. Ask the sender for a new link.",
+  }), status);
+  if (!result.ok) return unavailable(result.reason === "expired" ? 410 : 404);
 
   const key = result.key;
-  if (await isDeleted(key)) return c.html(renderNotFoundPage({ path: c.req.path }), 404);
+  if (await isDeleted(key)) return unavailable();
 
   try {
     const stream = await getObjectStream(key);
-    if (!stream) return c.html(renderNotFoundPage({ path: c.req.path }), 404);
+    if (!stream) return unavailable();
 
     const html = injectMobileViewportScrollbarStyle(await readHtmlStream(stream));
     return c.html(html);

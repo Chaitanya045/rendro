@@ -41,7 +41,27 @@ function field(
   </div>`;
 }
 
-function pageBody(page: AuthPage, user?: User, verified = false, token = ""): string {
+function signInErrorMessage(code: string): string {
+  switch (code.toLowerCase()) {
+    case "access_denied":
+      return "Google sign-in was canceled. Try again or sign in with your email and password.";
+    case "state_mismatch":
+    case "state_security_mismatch":
+    case "state_not_found":
+    case "invalid_state":
+      return "Your sign-in attempt expired or could not be verified. Please start again.";
+    case "unable_to_link_account":
+    case "account_not_linked":
+    case "account_already_linked_to_different_user":
+    case "email_doesn't_match":
+    case "email_not_verified":
+      return "We couldn't connect this Google account. Sign in with your existing method, verify your email, and try connecting Google from account security.";
+    default:
+      return "We couldn't complete sign-in. Please try again or use your email and password.";
+  }
+}
+
+function pageBody(page: AuthPage, user?: User, verified = false, token = "", error = ""): string {
   if (page === "sign-in") {
     return `<div class="heading"><p class="eyebrow">Welcome back</p><h1>Sign in to Rendro</h1><p>Open your team documentation and continue where you left off.</p></div>
       <button class="button google" id="google-auth" type="button"><span class="google-mark">G</span><span>Continue with Google</span></button>
@@ -50,7 +70,7 @@ function pageBody(page: AuthPage, user?: User, verified = false, token = ""): st
         ${field("email", "Work email", "email", "email")}
         ${field("password", "Password", "password", "current-password")}
         <div class="form-row"><label class="check"><input id="rememberMe" type="checkbox" checked> Keep me signed in</label><a data-return-link href="/forgot-password">Forgot password?</a></div>
-        <p class="message error" id="form-error" role="alert"></p>
+        <p class="message error" id="form-error" role="alert">${error ? escapeHtml(signInErrorMessage(error)) : ""}</p>
         <button class="button primary" type="submit"><span class="button-label">Sign in</span><span class="spinner" aria-hidden="true"></span></button>
       </form>
       <p class="switch">New to Rendro? <a data-return-link href="/sign-up">Create an account</a></p>`;
@@ -112,7 +132,7 @@ const authRefreshStyles = `
 
 function renderAuthPage(
   page: AuthPage,
-  options: { returnTo?: string; token?: string; user?: User; verified?: boolean } = {},
+  options: { returnTo?: string; token?: string; user?: User; verified?: boolean; error?: string } = {},
 ): string {
   const returnTo = safeReturnTo(options.returnTo);
   const state = JSON.stringify({
@@ -142,7 +162,7 @@ html.dark{color-scheme:dark;--page:#09090b;--surface:#09090b;--surface-2:#18181b
 @media(max-width:520px){.main{padding:24px 12px;place-items:start center}.card{padding:26px 20px;border-radius:12px}.topbar{height:56px}.heading h1{font-size:26px}.form-row{align-items:flex-start}}
 @media(prefers-reduced-motion:reduce){*,*:before,*:after{scroll-behavior:auto!important;animation-duration:.01ms!important;transition-duration:.01ms!important}}
 </style><style>${authRefreshStyles}</style></head>
-<body><div class="shell"><header class="topbar"><a class="brand" href="/">Rendro<i>.</i></a>${renderThemeButton()}</header><main class="main${page === "security" ? " security-main" : ""}"><section class="card${wide}" data-page="${page}">${mobileContext}${pageBody(page, options.user, options.verified ?? false, options.token ?? "")}</section>${context}</main><footer class="footer">Rendro · Documentation that ships with your code</footer></div>
+<body><div class="shell"><header class="topbar"><a class="brand" href="/">Rendro<i>.</i></a>${renderThemeButton()}</header><main class="main${page === "security" ? " security-main" : ""}"><section class="card${wide}" data-page="${page}">${mobileContext}${pageBody(page, options.user, options.verified ?? false, options.token ?? "", options.error ?? "")}</section>${context}</main><footer class="footer">Rendro · Documentation that ships with your code</footer></div>
 <script>window.__AUTH_STATE__=${state};</script>
 <script id="auth-runtime">
 (function(){
@@ -193,8 +213,9 @@ html.dark{color-scheme:dark;--page:#09090b;--surface:#09090b;--surface-2:#18181b
 
 app.get("/sign-in", (c) => {
   const returnTo = safeReturnTo(c.req.query("returnTo"));
-  if (c.get("user")) return c.redirect(returnTo);
-  return c.html(renderAuthPage("sign-in", { returnTo }));
+  const error = c.req.query("error");
+  if (c.get("user") && !error) return c.redirect(returnTo);
+  return c.html(renderAuthPage("sign-in", { returnTo, error }));
 });
 
 app.get("/sign-up", (c) => {

@@ -2,6 +2,7 @@ import { renderFaviconLinks } from "./favicon";
 import { renderThemeAssets } from "./theme";
 
 export interface NotFoundPageOptions {
+  status?: 404 | 410;
   path?: string;
   homeHref?: string;
   homeLabel?: string;
@@ -18,6 +19,7 @@ function escapeHtml(value: string): string {
 }
 
 export function renderNotFoundPage(options: NotFoundPageOptions = {}): string {
+  const status = options.status ?? 404;
   const path = options.path || "/";
   const homeHref = options.homeHref || "/";
   const homeLabel = options.homeLabel || "Go to Rendro";
@@ -29,7 +31,7 @@ export function renderNotFoundPage(options: NotFoundPageOptions = {}): string {
 <head>${renderFaviconLinks()}
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>404 · Page not found — Rendro</title>
+<title>${status} · ${escapeHtml(heading)} — Rendro</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 ${renderThemeAssets()}
@@ -61,7 +63,7 @@ ${renderThemeAssets()}
   <main class="page" aria-labelledby="not-found-title">
     <a class="brand" href="/" target="_top">Rendro<i>.</i></a>
     <section class="panel">
-      <div class="eyebrow">Error 404</div>
+      <div class="eyebrow">Error ${status}</div>
       <h1 id="not-found-title">${escapeHtml(heading)}</h1>
       <p>${escapeHtml(message)}</p>
       <p class="path-label" id="requested-path-label">Requested path</p>

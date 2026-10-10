@@ -29,7 +29,7 @@ app.get("/", (c) => {
 
 app.get("/docs/:org", async (c) => {
   const user = c.get("user");
-  if (!user) return c.html(renderLandingPage());
+  if (!user) return c.redirect(`/sign-in?returnTo=${encodeURIComponent(c.req.path)}`);
   const org = emailToOrgSlug(user.email);
   if (!org || c.req.param("org") !== org) return c.html(renderNotFoundPage({ path: c.req.path }), 404);
   if (await orgExists(org)) return c.html(renderOrgDocs(user, org));
@@ -38,7 +38,7 @@ app.get("/docs/:org", async (c) => {
 
 app.get("/docs/:key{.+}", async (c) => {
   const user = c.get("user");
-  if (!user) return c.html(renderLandingPage());
+  if (!user) return c.redirect(`/sign-in?returnTo=${encodeURIComponent(c.req.path)}`);
   const org = emailToOrgSlug(user.email);
   if (!org) return c.html(renderEmailUnsupported(user));
   const rawKey = c.req.param("key");
