@@ -7,6 +7,8 @@ import {
   listAllKeys,
   putObject,
 } from "@/minio";
+import { readExactBody } from "@/bounded-body";
+import { MAX_REUSED_FILES_PER_REQUEST } from "../../shared/deployment-limits";
 
 const app = new Hono();
 
@@ -195,8 +197,15 @@ app.put("/api/rendro/deployments/:deploymentId/files/*", async (c) => {
   const manifest = await loadManifest(staging.deployment.manifestKey);
   const expected = manifest?.files.find((file) => file.path === filePath);
   if (!expected) return c.json({ error: "File is not present in the deployment manifest" }, 400);
-  const bytes = new Uint8Array(await c.req.raw.arrayBuffer());
-  if (bytes.byteLength !== expected.size || await sha256(bytes) !== expected.sha256) {
+  const declaredLength = c.req.header("Content-Length");
+  if (declaredLength !== undefined) {
+    const length = Number(declaredLength);
+    if (!Number.isSafeInteger(length) || length < 0 || length !== expected.size) {
+      return c.json({ error: "Uploaded file size does not match its manifest entry" }, 413);
+    }
+  }
+  const bytes = await readExactBody(c.req.raw.body, expected.size);
+  if (!bytes || await sha256(bytes) !== expected.sha256) {
     return c.json({ error: "Uploaded file does not match its manifest entry" }, 400);
   }
   await putObject(
@@ -224,6 +233,9 @@ app.post("/api/rendro/deployments/:deploymentId/copy", async (c) => {
     ? body.paths.map((value) => typeof value === "string" ? safePath(value) : null)
     : [];
   if (paths.some((path) => !path)) return c.json({ error: "Invalid copy path" }, 400);
+  if (paths.length > MAX_REUSED_FILES_PER_REQUEST) {
+    return c.json({ error: `Copy at most ${MAX_REUSED_FILES_PER_REQUEST} files per request; update the Rendro CLI` }, 400);
+  }
   const manifest = await loadManifest(staging.deployment.manifestKey);
   if (!manifest) return c.json({ error: "Deployment manifest not found" }, 404);
   const expectedByPath = new Map(manifest.files.map((file) => [file.path, file]));
@@ -265,5 +277,12 @@ app.post("/api/rendro/deployments/:deploymentId/commit", async (c) => {
     body: JSON.stringify(identity),
   });
 });
+
+// The generic session proxy intentionally omits Authorization. CLI failure
+// callbacks need the same scoped bearer forwarding as start/upload/commit.
+app.post("/api/rendro/deployments/fail", async (c) => backendRequest(
+  "/api/rendro/deployments/fail", c.req.raw,
+  { method: "POST", body: await c.req.text() },
+));
 
 export default app;

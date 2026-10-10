@@ -11,6 +11,11 @@
 import { ConvexClient } from "convex/browser";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
+import { draftAfterSuccessfulReply } from "./reply-state";
+import { PendingDeletionCoordinator } from "./delete-state";
+import { requestParentTheme } from "./theme-message";
+import { appendPlainText } from "./text";
+import { ParentCommentTransport } from "./parent-transport";
 
 // ─────────────────────────────── types ───────────────────────────────
 
@@ -19,11 +24,59 @@ interface Author {
   email: string;
 }
 interface Config {
-  convexUrl: string;
-  orgSlug: string;
-  filePath: string;
+  convexUrl?: string;
+  orgSlug?: string;
+  filePath?: string;
+  organizationId?: string;
+  projectId?: Id<"projects">;
+  documentPath?: string;
+  transport?: "parent";
+  canWrite?: boolean;
   author?: Author;
 }
+type ThreadId = Id<"threads"> | Id<"documentThreads">;
+type ReplyId = Id<"replies"> | Id<"documentReplies">;
+
+function isProjectConfig(config: Config): config is Config & {
+  organizationId: string;
+  projectId: Id<"projects">;
+  documentPath: string;
+} {
+  return Boolean(
+    config.transport === "parent"
+    && config.organizationId
+    && config.projectId
+    && config.documentPath,
+  );
+}
+
+async function requestAuthToken(): Promise<string | null> {
+  const response = await fetch("/api/auth/convex/token", {
+    credentials: "same-origin",
+    headers: { Accept: "application/json" },
+  });
+  if (!response.ok) return null;
+  const payload = (await response.json()) as { token?: unknown };
+  return typeof payload.token === "string" ? payload.token : null;
+}
+
+function storageGet(key: string): string | null {
+  try {
+    return window.localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function storageSet(key: string, value: string): void {
+  try {
+    window.localStorage.setItem(key, value);
+  } catch {
+    // Sandboxed document frames have an opaque origin and cannot persist UI state.
+  }
+}
+
+
 type Anchor =
   | {
       kind: "text-range";
@@ -34,17 +87,20 @@ type Anchor =
     }
   | { kind: "element"; path: string[] };
 interface Reply {
-  _id: Id<"replies">;
+  _id: ReplyId;
   _creationTime: number;
   authorEmail: string;
   authorName: string;
   body: string;
 }
 interface Thread {
-  _id: Id<"threads">;
+  _id: ThreadId;
   _creationTime: number;
-  orgSlug: string;
-  filePath: string;
+  orgSlug?: string;
+  filePath?: string;
+  organizationId?: string;
+  projectId?: Id<"projects">;
+  documentPath?: string;
   authorEmail: string;
   authorName: string;
   body: string;
@@ -52,6 +108,7 @@ interface Thread {
   resolved: boolean;
   archived?: boolean;
   replies: Reply[];
+  repliesHasMore?: boolean;
 }
 type Edge = "bottom" | "top" | "left" | "right";
 type ThreadFilter = "active" | "resolved" | "history";
@@ -90,8 +147,10 @@ function h<K extends keyof HTMLElementTagNameMap>(
       else el.setAttribute(k, v as string);
     }
   for (const kid of kids)
-    if (kid)
-      el.append(typeof kid === "string" ? document.createTextNode(kid) : kid);
+    if (kid) {
+      if (typeof kid === "string") appendPlainText(el, kid);
+      else el.append(kid);
+    }
   return el;
 }
 
@@ -389,12 +448,6 @@ function timeAgo(ms: number): string {
   return `${Math.round(hr / 24)}d`;
 }
 
-function escapeText(s: string): string {
-  return s.replace(/[&<>]/g, (c) =>
-    c === "&" ? "&amp;" : c === "<" ? "&lt;" : "&gt;",
-  );
-}
-
 interface Rect {
   left: number;
   top: number;
@@ -432,7 +485,8 @@ const MARGIN = 16;
 
 class Commentor {
   private cfg: Config;
-  private client: ConvexClient;
+  private client: ConvexClient | null;
+  private parentTransport: ParentCommentTransport | null;
   private root: ShadowRoot;
   private dock: HTMLElement;
   private content!: HTMLElement;
@@ -455,18 +509,24 @@ class Commentor {
   private bubbleReturnFocus: HTMLElement | null = null;
   private threads: Thread[] = [];
   private threadFilter: ThreadFilter = "active";
-  private seenThreadIds = new Set<Id<"threads">>();
-  private seenReplyIds = new Set<Id<"replies">>();
-  private newThreadIds = new Set<Id<"threads">>();
-  private newReplyIds = new Set<Id<"replies">>();
+  private seenThreadIds = new Set<ThreadId>();
+  private seenReplyIds = new Set<ReplyId>();
+  private newThreadIds = new Set<ThreadId>();
+  private newReplyIds = new Set<ReplyId>();
   private subscriptionReady = false;
-  private pendingDeletes = new Map<Id<"threads">, number>();
+  private pendingDeletes = new PendingDeletionCoordinator<ThreadId>();
+  private replyDrafts = new Map<ThreadId, string>();
+  private pendingReplies = new Map<ThreadId, string>();
+  private expandedReplies = new Map<ThreadId, Reply[]>();
+  private replyPagination = new Map<ThreadId, { canLoadMore: boolean; loading: boolean }>();
+  private canLoadMoreThreads = false;
+  private loadingMoreThreads = false;
   private newCommentCount = 0;
-  private highlightedThreadId: Id<"threads"> | null = null;
+  private highlightedThreadId: ThreadId | null = null;
   private commentMode = false;
   private canWrite: boolean;
   private raf = 0;
-  private openThreadId: Id<"threads"> | null = null;
+  private openThreadId: ThreadId | null = null;
   private closeTimer = 0;
   private drawerCollapseTimer = 0;
   private dockEdge: Edge = "bottom";
@@ -474,17 +534,15 @@ class Commentor {
 
   constructor(cfg: Config) {
     this.cfg = cfg;
-    this.canWrite = Boolean(cfg.author);
-    this.client = new ConvexClient(cfg.convexUrl);
-    this.client.setAuth(async () => {
-      const response = await fetch("/api/auth/convex/token", {
-        credentials: "same-origin",
-        headers: { Accept: "application/json" },
-      });
-      if (!response.ok) return null;
-      const payload = (await response.json()) as { token?: unknown };
-      return typeof payload.token === "string" ? payload.token : null;
-    });
+    this.canWrite = isProjectConfig(cfg) ? cfg.canWrite === true : Boolean(cfg.author);
+    if (isProjectConfig(cfg)) {
+      this.client = null;
+      this.parentTransport = new ParentCommentTransport(window.parent, window, cfg.documentPath);
+    } else {
+      this.client = new ConvexClient(cfg.convexUrl!);
+      this.client.setAuth(requestAuthToken);
+      this.parentTransport = null;
+    }
 
     const host = document.createElement("div");
     host.id = "commentor-host";
@@ -607,8 +665,9 @@ class Commentor {
     this.dock.append(this.content, this.toolbar);
     this.root.append(this.dock);
 
-    const savedEdge = localStorage.getItem("commentor-dock") as Edge | null;
-    const savedOffset = Number(localStorage.getItem("commentor-dock-offset"));
+    const savedEdge = storageGet("commentor-dock") as Edge | null;
+    const savedOffsetValue = storageGet("commentor-dock-offset");
+    const savedOffset = savedOffsetValue === null ? Number.NaN : Number(savedOffsetValue);
     this.applyDockEdge(
       savedEdge && ["bottom", "top", "left", "right"].includes(savedEdge)
         ? savedEdge
@@ -619,11 +678,12 @@ class Commentor {
       false,
     );
 
+    window.addEventListener("message", (e) => this.onThemeMessage(e));
     this.applyTheme();
     window.addEventListener("storage", (e) => {
       if (e.key === "commentor-theme") this.applyTheme();
     });
-    window.addEventListener("message", (e) => this.onThemeMessage(e));
+    if (window.parent !== window) requestParentTheme(window.parent);
     this.subscribe();
     this.wireTooltips();
     document.addEventListener("selectionchange", () =>
@@ -658,63 +718,149 @@ class Commentor {
 
   // ── subscription ──
   private subscribe(): void {
+    const update = (
+      incomingThreads: Thread[],
+      pagination?: { canLoadMore: boolean; loading: boolean },
+      suppressNew = false,
+    ) => {
+      const wasLoadingMore = this.loadingMoreThreads;
+      if (pagination) {
+        this.canLoadMoreThreads = pagination.canLoadMore;
+        this.loadingMoreThreads = pagination.loading;
+      }
+      // The experimental client may publish an empty LoadingFirstPage state
+      // before the first real page (including after a BFCache resubscribe).
+      // Keep the current realtime view until that page arrives.
+      if (pagination?.loading && incomingThreads.length === 0) {
+        this.renderDrawerList();
+        return;
+      }
+      const currentIds = new Set(incomingThreads.map((thread) => thread._id));
+      for (const threadId of this.expandedReplies.keys()) {
+        if (currentIds.has(threadId)) continue;
+        this.expandedReplies.delete(threadId);
+        this.replyPagination.delete(threadId);
+      }
+      const threads = incomingThreads.map((thread) => {
+        const expanded = this.expandedReplies.get(thread._id);
+        const replyState = this.replyPagination.get(thread._id);
+        return expanded
+          ? { ...thread, replies: expanded, repliesHasMore: replyState?.canLoadMore ?? false }
+          : thread;
+      });
+      suppressNew ||= wasLoadingMore || pagination?.loading === true;
+      const activeReply = this.root.activeElement instanceof HTMLTextAreaElement
+        && this.root.activeElement.matches('[data-testid="commentor-reply-input"]')
+        ? this.root.activeElement
+        : null;
+      const activeThreadId = activeReply
+        ?.closest<HTMLElement>("[data-thread-id]")
+        ?.dataset.threadId;
+      const activeReplyInBubble = Boolean(activeReply?.closest(".bubble"));
+      const selectionStart = activeReply?.selectionStart ?? 0;
+      const selectionEnd = activeReply?.selectionEnd ?? 0;
+      this.newThreadIds = new Set(
+        this.subscriptionReady && !suppressNew
+          ? threads
+              .filter((thread) => !this.seenThreadIds.has(thread._id))
+              .map((thread) => thread._id)
+          : [],
+      );
+      this.newReplyIds = new Set(
+        this.subscriptionReady && !suppressNew
+          ? threads.flatMap((thread) =>
+              thread.replies
+                .filter((reply) => !this.seenReplyIds.has(reply._id))
+                .map((reply) => reply._id),
+            )
+          : [],
+      );
+      const incomingActive = threads.filter(
+        (thread) =>
+          this.newThreadIds.has(thread._id) &&
+          !thread.resolved &&
+          !thread.archived &&
+          !this.pendingDeletes.has(thread._id),
+      ).length;
+      this.threads = threads;
+      this.seenThreadIds = new Set(threads.map((thread) => thread._id));
+      this.seenReplyIds = new Set(
+        threads.flatMap((thread) => thread.replies.map((reply) => reply._id)),
+      );
+      for (const threadId of this.pendingDeletes.keys()) {
+        if (threads.some((thread) => thread._id === threadId)) continue;
+        this.pendingDeletes.acknowledge(threadId);
+      }
+      this.renderPins();
+      this.renderDrawerList();
+      if (incomingActive > 0) this.announceNewComments(incomingActive);
+      if (this.dock.hasAttribute("data-expanded")) {
+        requestAnimationFrame(() => {
+          const { w, h } = this.sizeContent();
+          this.repositionExpandedDock(w, h);
+        });
+      }
+      this.refreshOpenBubble();
+      if (activeThreadId) {
+        requestAnimationFrame(() => {
+          const scope = activeReplyInBubble ? this.bubbleLayer : this.drawerList;
+          const replacement = Array.from(
+            scope.querySelectorAll<HTMLTextAreaElement>(
+              '[data-testid="commentor-reply-input"]',
+            ),
+          ).find(
+            (input) =>
+              input.closest<HTMLElement>("[data-thread-id]")?.dataset.threadId ===
+              activeThreadId,
+          );
+          if (!replacement) return;
+          replacement.focus({ preventScroll: true });
+          replacement.setSelectionRange(selectionStart, selectionEnd);
+        });
+      }
+      if (this.subscriptionReady || pagination?.loading !== true) {
+        this.subscriptionReady = true;
+      }
+      this.newThreadIds.clear();
+      this.newReplyIds.clear();
+    };
+    const fail = (error: Error) =>
+      console.error("[commentor] subscription error", error);
+
+    if (isProjectConfig(this.cfg)) {
+      this.parentTransport?.subscribe(
+        (threads, canLoadMore, loading) => update(
+          threads as Thread[],
+          { canLoadMore, loading },
+        ),
+        (threadId, replies, canLoadMore, loading) => {
+          const id = threadId as ThreadId;
+          const prior = this.replyPagination.get(id);
+          if (replies.length > 0 || !loading) this.expandedReplies.set(id, replies as Reply[]);
+          this.replyPagination.set(id, { canLoadMore, loading });
+          update(this.threads.map((thread) => thread._id === id
+            ? {
+                ...thread,
+                replies: this.expandedReplies.get(id) ?? thread.replies,
+                repliesHasMore: canLoadMore,
+              }
+            : thread), undefined, prior?.loading === true || loading);
+        },
+        fail,
+      );
+      return;
+    }
+    if (!this.client || !this.cfg.orgSlug || !this.cfg.filePath) return;
     this.client.onUpdate(
       api.threads.list,
       { orgSlug: this.cfg.orgSlug, filePath: this.cfg.filePath },
-      (threads: Thread[]) => {
-        this.newThreadIds = new Set(
-          this.subscriptionReady
-            ? threads
-                .filter((t) => !this.seenThreadIds.has(t._id))
-                .map((t) => t._id)
-            : [],
-        );
-        this.newReplyIds = new Set(
-          this.subscriptionReady
-            ? threads.flatMap((t) =>
-                t.replies
-                  .filter((r) => !this.seenReplyIds.has(r._id))
-                  .map((r) => r._id),
-              )
-            : [],
-        );
-        const incomingActive = threads.filter(
-          (t) =>
-            this.newThreadIds.has(t._id) &&
-            !t.resolved &&
-            !t.archived &&
-            !this.pendingDeletes.has(t._id),
-        ).length;
-        this.threads = threads;
-        this.seenThreadIds = new Set(threads.map((t) => t._id));
-        this.seenReplyIds = new Set(
-          threads.flatMap((t) => t.replies.map((r) => r._id)),
-        );
-        for (const [threadId, timer] of this.pendingDeletes) {
-          if (threads.some((t) => t._id === threadId)) continue;
-          window.clearTimeout(timer);
-          this.pendingDeletes.delete(threadId);
-        }
-        this.renderPins();
-        this.renderDrawerList();
-        if (incomingActive > 0) this.announceNewComments(incomingActive);
-        if (this.dock.hasAttribute("data-expanded")) {
-          requestAnimationFrame(() => {
-            const { w, h } = this.sizeContent();
-            this.repositionExpandedDock(w, h);
-          });
-        }
-        this.refreshOpenBubble();
-        this.subscriptionReady = true;
-        this.newThreadIds.clear();
-        this.newReplyIds.clear();
-      },
-      (err: Error) => console.error("[commentor] subscription error", err),
+      update,
+      fail,
     );
   }
 
   // ── theme ──
-  private applyTheme(mode = localStorage.getItem("commentor-theme") ?? "system"): void {
+  private applyTheme(mode = storageGet("commentor-theme") ?? "system"): void {
     const host = this.root.host as HTMLElement;
     host.classList.remove("dark", "light");
     if (mode === "dark" || mode === "light") host.classList.add(mode);
@@ -891,8 +1037,8 @@ class Commentor {
   private applyDockEdge(edge: Edge, offset: number, animate: boolean): void {
     this.dockEdge = edge;
     this.dockOffset = offset;
-    localStorage.setItem("commentor-dock", edge);
-    localStorage.setItem("commentor-dock-offset", String(offset));
+    storageSet("commentor-dock", edge);
+    storageSet("commentor-dock-offset", String(offset));
     this.dock.className = `dock dock-${edge}`;
     if (!animate) {
       this.dock.style.transition = "none";
@@ -1024,7 +1170,7 @@ class Commentor {
   }
 
   private onCommentButton(): void {
-    if (!this.cfg.author) return;
+    if (!this.canWrite) return;
     if (this.openSelectionComposer()) return;
     this.setCommentMode(!this.commentMode);
   }
@@ -1180,7 +1326,7 @@ class Commentor {
     rect: Rect,
     invoker: HTMLElement | null = null,
   ): void {
-    if (!this.cfg.author) return;
+    if (!this.canWrite) return;
     this.closeBubbles(false);
     this.hideSelectionAction(true);
     this.bubbleReturnFocus = invoker ?? this.commentsBtn;
@@ -1216,13 +1362,18 @@ class Commentor {
       post.setAttribute("aria-busy", "true");
       post.textContent = "Posting…";
       try {
-        await this.client.mutation(api.threads.create, {
-          orgSlug: this.cfg.orgSlug,
-          filePath: this.cfg.filePath,
-          // Author identity is derived from the signed Convex token server-side.
-          body,
-          anchor,
-        });
+        if (isProjectConfig(this.cfg)) {
+          await this.parentTransport?.mutate("thread.create", { body, anchor });
+        } else if (this.client && this.cfg.orgSlug && this.cfg.filePath) {
+          await this.client.mutation(api.threads.create, {
+            orgSlug: this.cfg.orgSlug,
+            filePath: this.cfg.filePath,
+            body,
+            anchor,
+          });
+        } else {
+          throw new Error("Comment scope is unavailable");
+        }
         this.closeBubbles(true, true);
       } catch (err) {
         console.error("[commentor] create failed", err);
@@ -1375,20 +1526,88 @@ class Commentor {
     }
   }
 
+  private removeThread(threadId: ThreadId): Promise<unknown> {
+    return isProjectConfig(this.cfg)
+      ? this.parentTransport!.mutate("thread.remove", { threadId })
+      : this.client!.mutation(api.threads.remove, {
+          threadId: threadId as Id<"threads">,
+        });
+  }
+
+  private resolveThread(threadId: ThreadId): Promise<unknown> {
+    return isProjectConfig(this.cfg)
+      ? this.parentTransport!.mutate("thread.resolve", { threadId })
+      : this.client!.mutation(api.threads.resolve, {
+          threadId: threadId as Id<"threads">,
+        });
+  }
+
+  private archiveThread(threadId: ThreadId): Promise<unknown> {
+    return isProjectConfig(this.cfg)
+      ? this.parentTransport!.mutate("thread.archive", { threadId })
+      : this.client!.mutation(api.threads.archive, {
+          threadId: threadId as Id<"threads">,
+        });
+  }
+
+  private addReply(threadId: ThreadId, body: string): Promise<unknown> {
+    return isProjectConfig(this.cfg)
+      ? this.parentTransport!.mutate("reply.add", { threadId, body })
+      : this.client!.mutation(api.replies.add, {
+          threadId: threadId as Id<"threads">,
+          body,
+        });
+  }
+
+  private async loadOlderThreads(): Promise<void> {
+    if (!this.parentTransport || this.loadingMoreThreads || !this.canLoadMoreThreads) return;
+    this.loadingMoreThreads = true;
+    this.renderDrawerList();
+    try {
+      await this.parentTransport.loadMoreThreads();
+    } catch (error) {
+      console.error("[commentor] older comments failed", error);
+      this.loadingMoreThreads = false;
+      this.renderDrawerList();
+      this.toast("Could not load older comments.", { kind: "error" });
+    }
+  }
+
+  private async loadOlderReplies(threadId: ThreadId): Promise<void> {
+    if (!this.parentTransport) return;
+    const thread = this.threads.find((candidate) => candidate._id === threadId);
+    const current = this.replyPagination.get(threadId) ?? {
+      canLoadMore: Boolean(thread?.repliesHasMore),
+      loading: false,
+    };
+    if (current.loading || !current.canLoadMore) return;
+    this.replyPagination.set(threadId, { ...current, loading: true });
+    this.renderDrawerList();
+    this.refreshOpenBubble();
+    try {
+      await this.parentTransport.loadMoreReplies(threadId);
+    } catch (error) {
+      console.error("[commentor] older replies failed", error);
+      this.replyPagination.set(threadId, { ...current, loading: false });
+      this.renderDrawerList();
+      this.refreshOpenBubble();
+      this.toast("Could not load older replies.", { kind: "error" });
+    }
+  }
+
   private scheduleDelete(t: Thread): void {
-    if (this.pendingDeletes.has(t._id)) return;
-    const timer = window.setTimeout(async () => {
-      try {
-        await this.client.mutation(api.threads.remove, { threadId: t._id });
-      } catch (err) {
+    const started = this.pendingDeletes.begin(
+      t._id,
+      5000,
+      () => this.removeThread(t._id),
+      (err) => {
         console.error("[commentor] delete failed", err);
-        this.pendingDeletes.delete(t._id);
         this.renderPins();
         this.renderDrawerList();
         this.toast("Could not delete comment.", { kind: "error" });
-      }
-    }, 5000);
-    this.pendingDeletes.set(t._id, timer);
+      },
+    );
+    if (!started) return;
     if (this.openThreadId === t._id) this.closeBubbles(true);
     this.renderPins();
     this.renderDrawerList();
@@ -1396,9 +1615,10 @@ class Commentor {
       actionLabel: "Undo",
       duration: 5000,
       onAction: () => {
-        const pending = this.pendingDeletes.get(t._id);
-        window.clearTimeout(pending);
-        this.pendingDeletes.delete(t._id);
+        if (this.pendingDeletes.undo(t._id) !== "undone") {
+          this.toast("Deletion is already in progress.");
+          return;
+        }
         this.renderPins();
         this.renderDrawerList();
         this.toast("Deletion undone.");
@@ -1444,8 +1664,7 @@ class Commentor {
         void this.runThreadAction(
           resolveButton,
           resolveActionLabel,
-          () =>
-            this.client.mutation(api.threads.resolve, { threadId: t._id }),
+          () => this.resolveThread(t._id),
           `Could not ${resolveLabel.toLowerCase()} comment.`,
         );
       });
@@ -1467,8 +1686,7 @@ class Commentor {
         void this.runThreadAction(
           archiveButton,
           archiveActionLabel,
-          () =>
-            this.client.mutation(api.threads.archive, { threadId: t._id }),
+          () => this.archiveThread(t._id),
           `Could not ${archiveLabel.toLowerCase()} comment.`,
         );
       });
@@ -1515,7 +1733,7 @@ class Commentor {
             "aria-label": "Locate commented text on page",
             onclick: () => this.focusThread(t),
           },
-          h("span", { class: "quote-text" }, escapeText(quote)),
+          h("span", { class: "quote-text" }, quote),
         )
       : h(
           "button",
@@ -1532,7 +1750,7 @@ class Commentor {
       { class: "thread-view", "data-thread-id": t._id },
       head,
       locate,
-      h("div", { class: "body" }, escapeText(t.body)),
+      h("div", { class: "body" }, t.body),
     );
     const replies = h("div", { class: "replies" });
     for (const r of t.replies)
@@ -1543,11 +1761,30 @@ class Commentor {
             class: `reply${this.newReplyIds.has(r._id) ? " is-new" : ""}`,
           },
           h("span", { class: "reply-who" }, r.authorName),
-          escapeText(r.body),
+          r.body,
         ),
       );
+    const replyState = this.replyPagination.get(t._id) ?? {
+      canLoadMore: Boolean(t.repliesHasMore),
+      loading: false,
+    };
+    if (replyState.canLoadMore || replyState.loading) {
+      const loadOlder = h(
+        "button",
+        {
+          class: "load-older",
+          type: "button",
+          "data-testid": "commentor-load-older-replies",
+          "aria-busy": String(replyState.loading),
+          onclick: () => void this.loadOlderReplies(t._id),
+        },
+        replyState.loading ? "Loading older replies…" : "Load older replies",
+      ) as HTMLButtonElement;
+      loadOlder.disabled = replyState.loading;
+      view.append(loadOlder);
+    }
     view.append(replies);
-    if (this.canWrite && this.cfg.author) {
+    if (this.canWrite) {
       const helpId = `commentor-reply-help-${t._id}`;
       const input = h("textarea", {
         class: "reply-input",
@@ -1556,6 +1793,11 @@ class Commentor {
         rows: "1",
         "aria-describedby": helpId,
       }) as HTMLTextAreaElement;
+      input.value = this.replyDrafts.get(t._id) ?? "";
+      input.addEventListener("input", () => {
+        if (input.value) this.replyDrafts.set(t._id, input.value);
+        else this.replyDrafts.delete(t._id);
+      });
       const send = h(
         "button",
         {
@@ -1565,32 +1807,40 @@ class Commentor {
         },
         "Reply",
       ) as HTMLButtonElement;
-      const submitReply = async () => {
-        const body = input.value.trim();
-        if (!body || send.disabled) return;
+      if (this.pendingReplies.has(t._id)) {
         input.disabled = true;
         send.disabled = true;
         send.classList.add("is-pending");
         send.setAttribute("aria-busy", "true");
         send.textContent = "Sending…";
+      }
+      const submitReply = async () => {
+        const submittedDraft = input.value;
+        const body = submittedDraft.trim();
+        if (!body || send.disabled) return;
+        this.pendingReplies.set(t._id, submittedDraft);
+        this.setReplyPendingState(t._id, true);
         try {
-          await this.client.mutation(api.replies.add, {
-            threadId: t._id,
-            body,
-          });
-          input.value = "";
+          await this.addReply(t._id, body);
+          const nextDraft = draftAfterSuccessfulReply(
+            this.replyDrafts.get(t._id),
+            submittedDraft,
+          );
+          if (nextDraft === undefined) this.replyDrafts.delete(t._id);
+          else this.replyDrafts.set(t._id, nextDraft);
+          for (const candidate of this.replyInputs(t._id)) {
+            if (candidate.value === submittedDraft) candidate.value = "";
+          }
         } catch (err) {
           console.error("[commentor] reply failed", err);
           this.toast("Could not post reply.", { kind: "error" });
         } finally {
-          if (input.isConnected) {
-            input.disabled = false;
-            send.disabled = false;
-            send.classList.remove("is-pending");
-            send.removeAttribute("aria-busy");
-            send.textContent = "Reply";
-            input.focus();
-          }
+          this.pendingReplies.delete(t._id);
+          this.setReplyPendingState(t._id, false);
+          const replacement = this.replyInputs(t._id).find((candidate) =>
+            candidate.closest(".bubble") === input.closest(".bubble"),
+          );
+          replacement?.focus({ preventScroll: true });
         }
       };
       send.addEventListener("click", () => void submitReply());
@@ -1619,6 +1869,28 @@ class Commentor {
       );
     }
     return view;
+  }
+
+  private replyInputs(threadId: ThreadId): HTMLTextAreaElement[] {
+    return Array.from(this.root.querySelectorAll<HTMLTextAreaElement>(
+      '[data-testid="commentor-reply-input"]',
+    )).filter((input) =>
+      input.closest<HTMLElement>("[data-thread-id]")?.dataset.threadId === threadId,
+    );
+  }
+
+  private setReplyPendingState(threadId: ThreadId, pending: boolean): void {
+    for (const input of this.replyInputs(threadId)) input.disabled = pending;
+    for (const button of this.root.querySelectorAll<HTMLButtonElement>(
+      '[data-testid="commentor-reply-send"]',
+    )) {
+      if (button.closest<HTMLElement>("[data-thread-id]")?.dataset.threadId !== threadId)
+        continue;
+      button.disabled = pending;
+      button.classList.toggle("is-pending", pending);
+      button.toggleAttribute("aria-busy", pending);
+      button.textContent = pending ? "Sending…" : "Reply";
+    }
   }
 
   // ── drawer (the widget expanding into the comments list) ──
@@ -1806,6 +2078,21 @@ class Commentor {
     }
     this.drawerList.replaceChildren();
     const visible = this.filteredThreads(this.threadFilter);
+    if (isProjectConfig(this.cfg) && (this.canLoadMoreThreads || this.loadingMoreThreads)) {
+      const loadOlder = h(
+        "button",
+        {
+          class: "load-older load-older-threads",
+          type: "button",
+          "data-testid": "commentor-load-older-threads",
+          "aria-busy": String(this.loadingMoreThreads),
+          onclick: () => void this.loadOlderThreads(),
+        },
+        this.loadingMoreThreads ? "Loading older comments…" : "Load older comments",
+      ) as HTMLButtonElement;
+      loadOlder.disabled = this.loadingMoreThreads;
+      this.drawerList.append(loadOlder);
+    }
     if (visible.length === 0) {
       const title: Record<ThreadFilter, string> = {
         active: "No active comments",
@@ -1897,7 +2184,7 @@ class Commentor {
     this.highlightThread(this.highlightedThreadId);
   }
 
-  private highlightThread(threadId: Id<"threads"> | null): void {
+  private highlightThread(threadId: ThreadId | null): void {
     this.highlightedThreadId = threadId;
     for (const el of this.root.querySelectorAll<HTMLElement>(
       "[data-thread-id]",
@@ -2143,10 +2430,23 @@ class Commentor {
   }
 
   private toast(msg: string, options: ToastOptions = {}): void {
-    this.root.querySelector(".toast")?.remove();
+    let region = this.root.querySelector<HTMLElement>(".toast-region");
+    if (!region) {
+      region = h("div", {
+        class: "toast-region",
+        "aria-label": "Notifications",
+      });
+      this.root.append(region);
+    }
     const close = (el: HTMLElement) => {
+      if (!el.isConnected || el.getAttribute("data-state") === "closed") return;
       el.setAttribute("data-state", "closed");
-      window.setTimeout(() => el.remove(), 150);
+      window.setTimeout(() => {
+        const parent = el.parentElement;
+        el.remove();
+        if (parent?.classList.contains("toast-region") && !parent.children.length)
+          parent.remove();
+      }, 150);
     };
     const el = h(
       "div",
@@ -2172,7 +2472,7 @@ class Commentor {
         ),
       );
     }
-    this.root.append(el);
+    region.append(el);
     window.setTimeout(
       () => close(el),
       options.duration ?? (options.kind === "error" ? 6000 : 3000),
@@ -2281,6 +2581,10 @@ button:focus-visible, [tabindex="0"]:focus-visible, textarea:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
+textarea:disabled {
+  opacity: .62;
+  cursor: not-allowed;
+}
 
 /* Single movable surface: compact toolbar when closed, review panel when open. */
 .dock {
@@ -2320,10 +2624,10 @@ button:focus-visible, [tabindex="0"]:focus-visible, textarea:focus-visible {
     background var(--duration-fast) var(--ease-standard),
     transform var(--duration-fast) var(--ease-standard);
 }
-.toolbar button:hover, .grip:hover { background: var(--border-soft); }
-.toolbar button:active { transform: scale(.96); }
+.toolbar button:hover:not(:disabled), .grip:hover { background: var(--border-soft); }
+.toolbar button:active:not(:disabled) { transform: scale(.98); }
 .toolbar button.active { background: var(--accent); color: var(--accent-fg); }
-.toolbar button:disabled { opacity: .38; cursor: not-allowed; }
+.toolbar button:disabled { opacity: .38; cursor: not-allowed; transform: none; }
 .grip {
   cursor: grab;
   touch-action: none;
@@ -2444,8 +2748,14 @@ button:focus-visible, [tabindex="0"]:focus-visible, textarea:focus-visible {
   cursor: pointer;
   font-size: 12px;
   font-weight: 600;
-  transition: color var(--duration-fast) var(--ease-standard);
+  transition:
+    color var(--duration-fast) var(--ease-standard),
+    transform var(--duration-fast) var(--ease-standard),
+    opacity var(--duration-fast) var(--ease-standard);
 }
+.filter-tabs button:hover:not(:disabled) { color: var(--fg); }
+.filter-tabs button:active:not(:disabled) { transform: scale(.98); }
+.filter-tabs button:disabled { opacity: .45; cursor: not-allowed; transform: none; }
 .filter-tabs button[aria-selected="true"] {
   color: var(--fg);
 }
@@ -2470,7 +2780,15 @@ button:focus-visible, [tabindex="0"]:focus-visible, textarea:focus-visible {
   cursor: pointer;
   font-size: 12px;
   font-weight: 650;
+  transition:
+    background var(--duration-fast) var(--ease-standard),
+    color var(--duration-fast) var(--ease-standard),
+    transform var(--duration-fast) var(--ease-standard),
+    opacity var(--duration-fast) var(--ease-standard);
 }
+.new-comments:hover:not(:disabled) { background: var(--border-soft); color: var(--accent-hover); }
+.new-comments:active:not(:disabled) { transform: translateX(-50%) scale(.98); }
+.new-comments:disabled { opacity: .45; cursor: not-allowed; transform: translateX(-50%); }
 .new-comments[hidden] { display: none; }
 .content-list {
   flex: 1 1 0;
@@ -2482,7 +2800,16 @@ button:focus-visible, [tabindex="0"]:focus-visible, textarea:focus-visible {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
 }
+.content-list::-webkit-scrollbar { width: 5px; }
+.content-list::-webkit-scrollbar-track { background: transparent; }
+.content-list::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: var(--border);
+}
+.content-list::-webkit-scrollbar-button { display: none; }
 .drawer-thread {
   flex: 0 0 auto;
   padding: 10px 12px;
@@ -2532,7 +2859,14 @@ button:focus-visible, [tabindex="0"]:focus-visible, textarea:focus-visible {
   gap: 6px;
   cursor: pointer;
   font-weight: 650;
+  transition:
+    background var(--duration-fast) var(--ease-standard),
+    transform var(--duration-fast) var(--ease-standard),
+    opacity var(--duration-fast) var(--ease-standard);
 }
+.empty button:hover:not(:disabled) { background: var(--accent-hover); }
+.empty button:active:not(:disabled) { transform: scale(.98); }
+.empty button:disabled { opacity: .5; cursor: not-allowed; transform: none; }
 .empty button svg { width: 15px; height: 15px; }
 
 .selection-action {
@@ -2559,13 +2893,23 @@ button:focus-visible, [tabindex="0"]:focus-visible, textarea:focus-visible {
   transform: translateY(4px) scale(.96);
   pointer-events: none;
   transition:
+    background var(--duration-fast) var(--ease-standard),
     opacity var(--duration-fast) var(--ease-standard),
     transform var(--duration-fast) var(--ease-standard);
 }
+.selection-action:hover:not(:disabled) { background: var(--accent-hover); }
 .selection-action[data-state="open"] {
   opacity: 1;
   transform: translateY(0) scale(1);
   pointer-events: auto;
+}
+.selection-action[data-state="open"]:active:not(:disabled) {
+  transform: translateY(0) scale(.98);
+}
+.selection-action[data-state="open"]:disabled {
+  opacity: .5;
+  cursor: not-allowed;
+  transform: translateY(0);
 }
 .anchor-highlight {
   position: fixed;
@@ -2687,6 +3031,20 @@ button:focus-visible, [tabindex="0"]:focus-visible, textarea:focus-visible {
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 20%, transparent);
 }
 .composer-buttons { display: flex; gap: 6px; margin-top: 8px; }
+.composer-footer, .reply-footer {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 8px;
+}
+.composer-footer .composer-help, .reply-footer .composer-help {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin-top: 0;
+}
+.composer-footer .actions { flex: 0 0 auto; margin-top: 0; }
+.reply-footer > button { flex: 0 0 auto; margin-top: 0; }
 .composer-help {
   display: block;
   margin-top: 6px;
@@ -2747,11 +3105,14 @@ button:focus-visible, [tabindex="0"]:focus-visible, textarea:focus-visible {
   justify-content: center;
   transition:
     background var(--duration-fast) var(--ease-standard),
-    color var(--duration-fast) var(--ease-standard);
+    color var(--duration-fast) var(--ease-standard),
+    transform var(--duration-fast) var(--ease-standard),
+    opacity var(--duration-fast) var(--ease-standard);
 }
-.card-action:hover { background: var(--border-soft); color: var(--fg); }
-.card-action.danger:hover { color: var(--danger); }
-.card-action:disabled { opacity: .45; cursor: wait; }
+.card-action:hover:not(:disabled) { background: var(--border-soft); color: var(--fg); }
+.card-action.danger:hover:not(:disabled) { color: var(--danger); }
+.card-action:active:not(:disabled) { transform: scale(.98); }
+.card-action:disabled { opacity: .45; cursor: wait; transform: none; }
 .card-action svg { width: 15px; height: 15px; }
 .quote {
   width: fit-content;
@@ -2766,6 +3127,11 @@ button:focus-visible, [tabindex="0"]:focus-visible, textarea:focus-visible {
   cursor: pointer;
   text-align: left;
   font-size: 12px;
+  transition:
+    background var(--duration-fast) var(--ease-standard),
+    color var(--duration-fast) var(--ease-standard),
+    transform var(--duration-fast) var(--ease-standard),
+    opacity var(--duration-fast) var(--ease-standard);
 }
 .quote-text {
   line-height: 1.5;
@@ -2776,7 +3142,9 @@ button:focus-visible, [tabindex="0"]:focus-visible, textarea:focus-visible {
   -webkit-line-clamp: 2;
   line-clamp: 2;
 }
-.quote:hover { color: var(--fg); }
+.quote:hover:not(:disabled) { color: var(--fg); background: var(--border); }
+.quote:active:not(:disabled) { transform: scale(.98); }
+.quote:disabled { opacity: .5; cursor: not-allowed; transform: none; }
 .locate-link {
   margin: 6px 0 2px;
   padding: 4px 0;
@@ -2787,8 +3155,14 @@ button:focus-visible, [tabindex="0"]:focus-visible, textarea:focus-visible {
   text-align: left;
   font-size: 12px;
   font-weight: 650;
+  transition:
+    color var(--duration-fast) var(--ease-standard),
+    transform var(--duration-fast) var(--ease-standard),
+    opacity var(--duration-fast) var(--ease-standard);
 }
-.locate-link:hover { color: var(--accent-hover); text-decoration: underline; }
+.locate-link:hover:not(:disabled) { color: var(--accent-hover); text-decoration: underline; }
+.locate-link:active:not(:disabled) { transform: scale(.98); transform-origin: left center; }
+.locate-link:disabled { opacity: .5; cursor: not-allowed; transform: none; }
 .body {
   margin: 6px 0;
   white-space: pre-wrap;
@@ -2802,6 +3176,21 @@ button:focus-visible, [tabindex="0"]:focus-visible, textarea:focus-visible {
   flex-direction: column;
   gap: 4px;
 }
+.load-older {
+  align-self: center;
+  margin-top: 8px;
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  min-height: 32px;
+  padding: 5px 10px;
+  border-radius: 8px;
+  font: 600 12px/1 var(--font-ui);
+  cursor: pointer;
+}
+.load-older:hover:not(:disabled) { background: var(--border-soft); color: var(--accent-hover); }
+.load-older:disabled { cursor: wait; opacity: .65; }
+.load-older-threads { flex: 0 0 auto; margin: 4px auto 8px; }
 .reply {
   padding: 6px 8px;
   border-radius: var(--radius-sm);
@@ -2840,15 +3229,16 @@ button:focus-visible, [tabindex="0"]:focus-visible, textarea:focus-visible {
   background: var(--accent);
   color: var(--accent-fg);
 }
-.actions button.primary:hover, .reply-row button.primary:hover {
+.actions button.primary:hover:not(:disabled), .reply-row button.primary:hover:not(:disabled) {
   background: var(--accent-hover);
 }
 .actions button.ghost { background: var(--border-soft); color: var(--fg); }
-.actions button.ghost:hover { background: var(--border); }
-.actions button:active, .reply-row button:active { transform: scale(.96); }
+.actions button.ghost:hover:not(:disabled) { background: var(--border); }
+.actions button:active:not(:disabled), .reply-row button:active:not(:disabled) { transform: scale(.98); }
 .actions button:disabled, .reply-row button:disabled {
   opacity: .58;
   cursor: wait;
+  transform: none;
 }
 .actions button svg, .reply-row button svg { width: 15px; height: 15px; }
 .busy svg { display: none; }
@@ -2880,12 +3270,27 @@ button:focus-visible, [tabindex="0"]:focus-visible, textarea:focus-visible {
   transform: translateX(-50%);
   animation: rise var(--duration-base) var(--ease-standard);
 }
-.toast {
+.toast-region {
   position: fixed;
   bottom: 96px;
   left: 50%;
   z-index: 2147483647;
+  width: max-content;
   max-width: calc(100vw - 24px);
+  max-height: max(44px, calc(100vh - 120px));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  transform: translateX(-50%);
+}
+.toast {
+  position: relative;
+  flex: 0 0 auto;
+  max-width: 100%;
   min-height: 44px;
   padding: 8px 10px 8px 14px;
   border-radius: 999px;
@@ -2896,8 +3301,7 @@ button:focus-visible, [tabindex="0"]:focus-visible, textarea:focus-visible {
   align-items: center;
   gap: 10px;
   font-size: 13px;
-  transform: translateX(-50%);
-  animation: rise var(--duration-base) var(--ease-standard);
+  animation: toast-rise var(--duration-base) var(--ease-standard);
 }
 .toast.error { background: var(--danger-bg); color: #ffffff; }
 .toast button {
@@ -2909,9 +3313,16 @@ button:focus-visible, [tabindex="0"]:focus-visible, textarea:focus-visible {
   color: inherit;
   cursor: pointer;
   font-weight: 700;
+  transition:
+    background var(--duration-fast) var(--ease-standard),
+    transform var(--duration-fast) var(--ease-standard),
+    opacity var(--duration-fast) var(--ease-standard);
 }
+.toast button:hover:not(:disabled) { background: color-mix(in srgb, currentColor 14%, transparent); }
+.toast button:active:not(:disabled) { transform: scale(.98); }
+.toast button:disabled { opacity: .5; cursor: not-allowed; transform: none; }
 .toast[data-state="closed"] {
-  animation: fall var(--duration-fast) var(--ease-standard) forwards;
+  animation: toast-fall var(--duration-fast) var(--ease-standard) forwards;
 }
 .tip {
   position: fixed;
@@ -2978,27 +3389,61 @@ button:focus-visible, [tabindex="0"]:focus-visible, textarea:focus-visible {
   from { opacity: 1; transform: translateX(-50%) translateY(0); }
   to { opacity: 0; transform: translateX(-50%) translateY(8px); }
 }
+@keyframes toast-rise {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes toast-fall {
+  from { opacity: 1; transform: translateY(0); }
+  to { opacity: 0; transform: translateY(8px); }
+}
 
-@media (max-width: 419px) {
-  .actions button, .reply-row button, .card-action, .filter-tabs button, .empty button {
+@media (max-width: 760px) {
+  .card-action { width: 44px; height: 44px; flex: 0 0 44px; }
+  .filter-tabs button, .actions button, .reply-row button, .empty button,
+  .new-comments, .quote, .locate-link, .toast button {
     min-height: 44px;
   }
+}
+@media (max-width: 419px) {
+  .head { display: grid; grid-template-columns: minmax(0, 1fr) auto 44px; align-items: center; }
+  .head .who { grid-column: 1; grid-row: 1; max-width: 100%; }
+  .head .when { grid-column: 2; grid-row: 1; }
+  .head .thread-close { grid-column: 3; grid-row: 1; }
+  .head .resolved, .head .archived-badge { grid-column: 1 / -1; justify-self: start; }
+  .head .card-actions { grid-column: 1 / -1; margin-left: 0; justify-content: flex-end; opacity: 1; }
+  .composer-footer, .reply-footer { align-items: stretch; flex-direction: column; }
+  .composer-footer .actions { justify-content: flex-end; }
+  .reply-footer > button { width: 100%; }
   .bubble { width: calc(100vw - 16px); }
   .content-head { min-height: 44px; }
 }
 @media (hover: none) {
   .card-actions { opacity: 1; }
   .card-action { width: 44px; height: 44px; }
-  .filter-tabs button, .actions button, .reply-row button, .toast button {
+  .filter-tabs button, .actions button, .reply-row button, .empty button,
+  .new-comments, .quote, .locate-link, .toast button {
     min-height: 44px;
   }
 }
 @media (prefers-reduced-motion: reduce) {
   .pin, .bubble, .reply, .drawer-thread, .selection-action, .anchor-highlight,
-  .count, .content, .hint, .toast, .tip, .dock, .filter-tabs::before, .busy::before {
+  .count, .content, .hint, .toast, .tip, .dock, .filter-tabs::before, .busy::before,
+  .toolbar button, .filter-tabs button, .new-comments, .empty button, .card-action,
+  .quote, .locate-link, .actions button, .reply-row button, .toast button {
     animation: none !important;
     transition: none !important;
   }
+  .toolbar button:active:not(:disabled), .filter-tabs button:active:not(:disabled),
+  .new-comments:active:not(:disabled), .empty button:active:not(:disabled),
+  .selection-action[data-state="open"]:active:not(:disabled),
+  .card-action:active:not(:disabled), .quote:active:not(:disabled),
+  .locate-link:active:not(:disabled), .actions button:active:not(:disabled),
+  .reply-row button:active:not(:disabled), .toast button:active:not(:disabled) {
+    transform: none;
+  }
+  .new-comments:active:not(:disabled) { transform: translateX(-50%); }
+  .pin:hover, .pin.is-highlighted, .pin:active { transform: rotate(-45deg); }
 }
 
 `;
@@ -3006,9 +3451,10 @@ button:focus-visible, [tabindex="0"]:focus-visible, textarea:focus-visible {
 
 function boot(): void {
   const cfg = (window as unknown as { COMMENTOR?: Config }).COMMENTOR;
-  if (!cfg || !cfg.convexUrl || !cfg.orgSlug || !cfg.filePath) {
+  const hasLegacyScope = Boolean(cfg?.orgSlug && cfg.filePath);
+  if (!cfg || (!isProjectConfig(cfg) && (!cfg.convexUrl || !hasLegacyScope))) {
     console.error(
-      "[commentor] not started — set window.COMMENTOR = { convexUrl, orgSlug, filePath } before loading commentor.js",
+      "[commentor] not started — configure a legacy organization/file or project document scope",
     );
     return;
   }

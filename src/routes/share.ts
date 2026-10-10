@@ -4,6 +4,7 @@ import { isDeleted } from "@/soft-delete";
 import { verifyShareToken } from "@/share-links";
 import { logger } from "@/logger";
 import { renderNotFoundPage } from "@/routes/not-found";
+import { injectMobileViewportScrollbarStyle, readHtmlStream } from "@/routes/document-html";
 
 const app = new Hono();
 
@@ -21,15 +22,7 @@ app.get("/share/:token", async (c) => {
     const stream = await getObjectStream(key);
     if (!stream) return c.html(renderNotFoundPage({ path: c.req.path }), 404);
 
-    const reader = stream.getReader();
-    const chunks: Uint8Array[] = [];
-    while (true) {
-      const read = await reader.read();
-      if (read.done) break;
-      if (read.value) chunks.push(read.value);
-    }
-
-    const html = chunks.map((chunk) => new TextDecoder().decode(chunk)).join("");
+    const html = injectMobileViewportScrollbarStyle(await readHtmlStream(stream));
     return c.html(html);
   } catch (err) {
     logger.error({ err, key }, "share stream failed");

@@ -67,6 +67,7 @@ export default defineSchema({
     purgedAt: v.optional(v.number()),
   })
     .index("by_project_created", ["projectId", "createdAt"])
+    .index("by_organization_activated", ["organizationId", "activatedAt"])
     .index("by_organization_status", ["organizationId", "status"]),
 
   publications: defineTable({
@@ -99,7 +100,8 @@ export default defineSchema({
     createdAt: v.number(),
   })
     .index("by_token_hash", ["tokenHash"])
-    .index("by_organization", ["organizationId", "createdAt"]),
+    .index("by_organization", ["organizationId", "createdAt"])
+    .index("by_organization_project", ["organizationId", "projectId", "createdAt"]),
 
   apiKeyCredentials: defineTable({
     organizationId: v.string(),
@@ -129,10 +131,12 @@ export default defineSchema({
     anchor: anchorValidator,
     resolved: v.boolean(),
     archived: v.boolean(),
+    deletedAt: v.optional(v.number()),
     createdAt: v.number(),
     updatedAt: v.number(),
   })
     .index("by_document", ["organizationId", "projectId", "documentPath", "createdAt"])
+    .index("by_active_document", ["organizationId", "projectId", "documentPath", "deletedAt", "createdAt"])
     .index("by_project", ["projectId", "createdAt"]),
 
   documentReplies: defineTable({

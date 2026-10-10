@@ -11,6 +11,7 @@ import {
 import { renderNotFoundPage } from "@/routes/not-found";
 import { logger } from "@/logger";
 import { renderPublicOrgDocs } from "@/routes/app";
+import { injectMobileViewportScrollbarStyle } from "@/routes/document-html";
 
 const app = new Hono();
 
@@ -36,6 +37,7 @@ async function readStream(stream: ReadableStream<Uint8Array>): Promise<string> {
 }
 
 function injectPublicNavigation(html: string, publication: Publication, documentPath: string): string {
+  html = injectMobileViewportScrollbarStyle(html);
   const basePath = `/public/${encodeURIComponent(publication.orgSlug)}/${encodeURIComponent(publication.slug)}/files/`;
   const fullPath = `${publication.orgSlug}/${documentPath}`;
   const navigation = `<script>

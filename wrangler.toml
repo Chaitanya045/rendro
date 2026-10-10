@@ -6,6 +6,9 @@ compatibility_flags = ["nodejs_compat"]
 [observability]
 enabled = true
 
+[secrets]
+required = ["CONVEX_INTERNAL_SECRET"]
+
 [assets]
 directory = "./public"
 binding = "ASSETS"
@@ -17,6 +20,9 @@ BASE_URL = "https://rendro.app"
 # ── Dev environment (deployed from `development` branch) ──
 [env.development]
 name = "rendro-dev"
+
+[env.development.secrets]
+required = ["CONVEX_INTERNAL_SECRET"]
 
 [env.development.vars]
 NODE_ENV = "production"

@@ -75,13 +75,30 @@ export const getInternal = internalQuery({
 });
 
 export const listInternal = internalQuery({
-  args: { projectId: v.id("projects") },
+  args: { organizationId: v.string(), projectId: v.id("projects") },
   handler: async (ctx, args) => {
+    const project = await ctx.db.get(args.projectId);
+    if (!project || project.organizationId !== args.organizationId) {
+      throw new ConvexError("Project not found");
+    }
     return ctx.db
       .query("deployments")
       .withIndex("by_project_created", (query) => query.eq("projectId", args.projectId))
       .order("desc")
       .take(100);
+  },
+});
+
+export const latestForOrganization = internalQuery({
+  args: { organizationId: v.string() },
+  handler: async (ctx, { organizationId }) => {
+    const latest = await ctx.db.query("deployments")
+      .withIndex("by_organization_activated", (q) => q.eq("organizationId", organizationId).gt("activatedAt", 0))
+      .order("desc").first();
+    if (!latest) return null;
+    const project = await ctx.db.get(latest.projectId);
+    if (!project || project.organizationId !== organizationId) return null;
+    return { projectId: latest.projectId, projectName: project.name, status: latest.status, activatedAt: latest.activatedAt, commit: latest.provenance.source.commit };
   },
 });
 
@@ -133,12 +150,19 @@ export const commitInternal = internalMutation({
 
 export const failInternal = internalMutation({
   args: {
+    organizationId: v.string(),
+    projectId: v.id("projects"),
     deploymentId: v.id("deployments"),
     reason: v.string(),
   },
   handler: async (ctx, args) => {
     const deployment = await ctx.db.get(args.deploymentId);
-    if (!deployment || deployment.status !== "staging") return false;
+    if (
+      !deployment
+      || deployment.organizationId !== args.organizationId
+      || deployment.projectId !== args.projectId
+      || deployment.status !== "staging"
+    ) return false;
     await ctx.db.patch(deployment._id, {
       status: "failed",
       failureReason: args.reason.slice(0, 500),

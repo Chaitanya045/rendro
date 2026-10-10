@@ -67,10 +67,12 @@ export const listInternal = internalQuery({
   handler: async (ctx, args) => {
     const grants = await ctx.db
       .query("shareGrants")
-      .withIndex("by_organization", (query) => query.eq("organizationId", args.organizationId))
+      .withIndex("by_organization_project", (query) => query
+        .eq("organizationId", args.organizationId)
+        .eq("projectId", args.projectId))
       .order("desc")
       .take(200);
-    return grants.filter((grant) => grant.projectId === args.projectId);
+    return grants;
   },
 });
 

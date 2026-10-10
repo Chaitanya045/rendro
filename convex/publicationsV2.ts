@@ -43,7 +43,12 @@ export const createInternal = internalMutation({
     if (args.trackingMode === "pinned") {
       if (!args.pinnedDeploymentId) throw new ConvexError("Pinned publication requires a deployment");
       const pinned = await ctx.db.get(args.pinnedDeploymentId);
-      if (!pinned || pinned.projectId !== project._id || pinned.status === "failed") {
+      if (
+        !pinned
+        || pinned.projectId !== project._id
+        || pinned.status === "failed"
+        || pinned.status === "staging"
+      ) {
         throw new ConvexError("Pinned deployment not found");
       }
     }
@@ -83,6 +88,10 @@ export const listInternal = internalQuery({
   handler: async (ctx, args) => {
     const projectId = args.projectId;
     if (projectId) {
+      const project = await ctx.db.get(projectId);
+      if (!project || project.organizationId !== args.organizationId) {
+        throw new ConvexError("Project not found");
+      }
       return ctx.db
         .query("publications")
         .withIndex("by_project", (query) => query.eq("projectId", projectId))
@@ -120,12 +129,17 @@ export const resolvePublicInternal = internalQuery({
 export const removeInternal = internalMutation({
   args: {
     organizationId: v.string(),
+    projectId: v.id("projects"),
     publicationId: v.id("publications"),
     actorId: v.string(),
   },
   handler: async (ctx, args) => {
     const publication = await ctx.db.get(args.publicationId);
-    if (!publication || publication.organizationId !== args.organizationId) {
+    if (
+      !publication
+      || publication.organizationId !== args.organizationId
+      || publication.projectId !== args.projectId
+    ) {
       throw new ConvexError("Publication not found");
     }
     await ctx.db.delete(publication._id);

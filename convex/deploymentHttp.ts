@@ -180,6 +180,8 @@ const principal = await validateApiCredential(ctx, request, {
 });
 if (!principal) return failure("Invalid or insufficient API key", 401);
 await ctx.runMutation(internal.deployments.failInternal, {
+  organizationId,
+  projectId: projectId as Id<"projects">,
   deploymentId: deploymentId as Id<"deployments">,
   reason,
 });
@@ -202,6 +204,7 @@ try {
   });
   if (!project) return failure("Project not found", 404);
   const deployments = await ctx.runQuery(internal.deployments.listInternal, {
+    organizationId,
     projectId: projectId as Id<"projects">,
   });
   return Response.json({ deployments });

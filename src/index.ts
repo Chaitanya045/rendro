@@ -30,6 +30,9 @@ const app = new Hono<{ Variables: { user?: User } }>();
 // Serve static assets (commentor.js, etc.)
 app.use("/commentor.js", serveStatic({ path: "./public/commentor.js" }));
 app.use("/lazy-tree.js", serveStatic({ path: "./public/lazy-tree.js" }));
+app.use("/management-query.js", serveStatic({ path: "./public/management-query.js" }));
+app.use("/select.js", serveStatic({ path: "./public/select.js" }));
+app.use("/management-pages.js", serveStatic({ path: "./public/management-pages.js" }));
 app.use("/landing-product.webp", serveStatic({ path: "./public/landing-product.webp" }));
 
 // Request timing

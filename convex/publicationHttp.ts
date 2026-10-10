@@ -128,6 +128,7 @@ export const removePublication = httpAction(async (ctx: GenericActionCtx<DataMod
   if (!principal) return failure("Invalid or insufficient principal", 403);
   await ctx.runMutation(internal.publicationsV2.removeInternal, {
     organizationId,
+    projectId: projectId as Id<"projects">,
     publicationId: publicationId as Id<"publications">,
     actorId: principal.actorId,
   });
