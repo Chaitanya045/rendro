@@ -12,7 +12,7 @@ const envSchema = z.object({
   MINIO_SECRET_KEY: z.string().min(1),
   MINIO_BUCKET: z.string().default("docs"),
   MINIO_REGION: z.string().default("us-east-1"),
-  MINIO_FORCE_PATH_STYLE: z.coerce.boolean().default(true),
+  MINIO_FORCE_PATH_STYLE: z.string().optional().transform((value) => value !== "false"),
 
   // Server
   PORT: z.coerce.number().int().min(1).max(65535).default(3000),
