@@ -1,12 +1,12 @@
 import type { User } from "better-auth/types";
 import { renderThemeAssets, renderThemeButton } from "./theme";
+import { escapeHtml } from "./html";
 import { MANAGEMENT_SHELL_VERSION, renderManagementNavigationRuntime } from "./management-navigation";
 import { selectStyles } from "../ui/select-styles";
 import { organizationSwitcherRuntime, organizationSwitcherStyles, renderOrganizationLabelBootstrap } from "./organization-switcher";
 export { renderLoadingState, renderProjectNavigation, renderTableLoading } from "./management-loading";
-export type { ProjectNavigationSection } from "./management-loading";
 
-export type ControlPlaneSection =
+type ControlPlaneSection =
   | "overview"
   | "projects"
   | "people"
@@ -31,17 +31,7 @@ interface ControlPlanePageOptions {
   pageClass?: string;
 }
 
-export function escapeHtml(value: string): string {
-  return value.replace(/[&<>"']/g, (character) => ({
-    "&": "&amp;",
-    "<": "&lt;",
-    ">": "&gt;",
-    '"': "&quot;",
-    "'": "&#039;",
-  })[character] ?? character);
-}
-
-export function jsonState(value: unknown): string {
+function jsonState(value: unknown): string {
   return JSON.stringify(value).replace(/</g, "\\u003c");
 }
 function navLink(

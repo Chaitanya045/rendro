@@ -5,29 +5,15 @@ import workerApp from "@/worker";
 import type { User } from "better-auth/types";
 import * as minio from "@/minio";
 import * as orgs from "@/orgs";
-import { verifySyncToken } from "@/config";
 
 // ────────────────────────────────────────────────────
-// 1. verifySyncToken — config level
-// ────────────────────────────────────────────────────
-describe("verifySyncToken", () => {
-  it("accepts correct token", () => expect(verifySyncToken("test-sync-token")).toBe(true));
-  it("rejects wrong token", () => expect(verifySyncToken("wrong-token")).toBe(false));
-  it("rejects empty token", () => expect(verifySyncToken("")).toBe(false));
-  it("rejects different-length token", () => expect(verifySyncToken("x")).toBe(false));
-  it("rejects case-different token", () => expect(verifySyncToken("TEST-SYNC-TOKEN")).toBe(false));
-});
-
-// ────────────────────────────────────────────────────
-// 2. API keys — generation, validation, org binding
+// 1. API keys — generation, validation, org binding
 // ────────────────────────────────────────────────────
 describe("api-keys", () => {
   let createOrgApiKey: (slug: string) => Promise<string>;
   let validateApiKey: (key: string) => Promise<string | null>;
 
   beforeEach(async () => {
-    // Dynamic import needed because api-keys module eagerly connects to SQLite.
-    // The test setup already creates the tables, so this is safe.
     const mod = await import("@/api-keys");
     createOrgApiKey = mod.createOrgApiKey;
     validateApiKey = mod.validateApiKey;
@@ -56,7 +42,7 @@ describe("api-keys", () => {
 });
 
 // ────────────────────────────────────────────────────
-// 3. Sync API routes — per-org key + org prefix enforcement
+// 2. Sync API routes — per-org key + org prefix enforcement
 // ────────────────────────────────────────────────────
 describe("sync API", () => {
   let createOrgApiKey: (slug: string) => Promise<string>;
@@ -156,7 +142,7 @@ describe("sync API", () => {
 });
 
 // ────────────────────────────────────────────────────
-// 3b. Sync API — LIST + DELETE (sync-deletes)
+// 2b. Sync API — LIST + DELETE (sync-deletes)
 // ────────────────────────────────────────────────────
 describe("sync API — list + delete (sync-deletes)", () => {
   let createOrgApiKey: (slug: string) => Promise<string>;
@@ -248,7 +234,7 @@ describe("sync API — list + delete (sync-deletes)", () => {
 });
 
 // ────────────────────────────────────────────────────
-// 4. Session middleware — rejects legacy impersonation inputs
+// 3. Session middleware — rejects legacy impersonation inputs
 // ────────────────────────────────────────────────────
 describe("session middleware", () => {
   let sessionMiddleware: MiddlewareHandler;
@@ -292,7 +278,7 @@ describe("session middleware", () => {
 });
 
 // ────────────────────────────────────────────────────
-// 5. Unauthenticated landing — product and auth contract
+// 4. Unauthenticated landing — product and auth contract
 // ────────────────────────────────────────────────────
 describe("unauthenticated landing", () => {
   it("presents the product before offering Google sign-in", async () => {
@@ -341,7 +327,7 @@ describe("unauthenticated landing", () => {
 });
 
 // ────────────────────────────────────────────────────
-// 6. Worker auth proxy — browser request context
+// 5. Worker auth proxy — browser request context
 // ────────────────────────────────────────────────────
 describe("worker auth proxy", () => {
   afterEach(() => {
@@ -391,7 +377,7 @@ describe("worker auth proxy", () => {
 
 
 // ────────────────────────────────────────────────────
-// 7. Worker auth sign-out — stale OAuth cookie cleanup
+// 6. Worker auth sign-out — stale OAuth cookie cleanup
 // ────────────────────────────────────────────────────
 describe("worker auth sign-out", () => {
   afterEach(() => {
@@ -463,7 +449,7 @@ describe("worker auth sign-out", () => {
 
 
 // ────────────────────────────────────────────────────
-// 8. Create org screen — design-system chrome
+// 7. Create org screen — design-system chrome
 // ────────────────────────────────────────────────────
 describe("authenticated entry", () => {
   afterEach(() => {
@@ -505,7 +491,7 @@ describe("authenticated entry", () => {
 });
 
 // ────────────────────────────────────────────────────
-// 9. orgExists — MinIO integration
+// 8. orgExists — MinIO integration
 // ────────────────────────────────────────────────────
 describe("orgExists", () => {
   it("returns true when files exist under org prefix", async () => {

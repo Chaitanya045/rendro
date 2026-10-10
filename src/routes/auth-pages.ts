@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import type { User } from "better-auth/types";
 import { renderThemeAssets, renderThemeButton } from "./theme";
+import { escapeHtml } from "./html";
 
 const app = new Hono<{ Variables: { user?: User } }>();
 
@@ -11,16 +12,6 @@ type AuthPage =
   | "forgot-password"
   | "reset-password"
   | "security";
-
-function escapeHtml(value: string): string {
-  return value.replace(/[&<>"']/g, (character) => ({
-    "&": "&amp;",
-    "<": "&lt;",
-    ">": "&gt;",
-    '"': "&quot;",
-    "'": "&#039;",
-  })[character] ?? character);
-}
 
 function safeReturnTo(value: string | undefined): string {
   if (!value || !value.startsWith("/") || value.startsWith("//") || value.includes("\\") || Array.from(value).some((character) => { const code = character.charCodeAt(0); return code < 32 || code === 127; })) return "/";

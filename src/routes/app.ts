@@ -59,18 +59,8 @@ app.get("/docs/:key{.+}", async (c) => {
 });
 
 /**
- * GET /api/auth/me — current user info (handy for client-side checks)
- */
-app.get("/api/auth/me", (c) => {
-  const user = c.get("user");
-  if (!user) return c.json({ user: null }, 200);
-  return c.json({ user });
-});
-
-/**
  * POST /api/orgs — create the org folder in MinIO.
  */
-
 app.post("/api/orgs", async (c) => {
   const user = c.get("user");
   if (!user) return c.text("Sign in first", 401);

@@ -71,35 +71,26 @@
     }
   }, configurable: true });
 })();
-import shareRoutes from "@/routes/share";
-import publicRoutes from "@/routes/public";
-import publicationRoutes from "@/routes/publications";
-
 import { Hono } from "hono";
+import type { Context } from "hono";
 import { cors } from "hono/cors";
 import { sessionMiddleware } from "./middleware/session";
-import appRoutes from "./routes/app";
-import authPageRoutes from "./routes/auth-pages";
-import organizationPageRoutes from "./routes/organization-pages";
-import projectPageRoutes from "./routes/project-pages";
-import deploymentRoutes from "./routes/deployments";
-import publicationPageRoutes from "./routes/publication-pages";
-import publicationApiRoutes from "./routes/publication-api";
-import projectDocsRoutes from "./routes/project-docs";
-import sharePageRoutes from "./routes/share-pages";
-import apiKeyPageRoutes from "./routes/api-key-pages";
-import docsRoutes from "./routes/docs";
 import { logger } from "./logger";
-import { proxyAuthRequest, proxyAuthSignOut, proxyConvexRequest } from "./auth-proxy";
 import { renderNotFoundPage } from "./routes/not-found";
-import shareV2Routes from "./routes/share-v2";
-import publicV2Routes from "./routes/public-v2";
+import { mountPublicRoutes, mountSessionRoutes } from "./app-routes";
 import type { User } from "better-auth/types";
 
 type AssetsBinding = { fetch(request: Request): Response | Promise<Response> };
 type WorkerBindings = Record<string, unknown> & { ASSETS?: AssetsBinding };
+type WorkerEnv = { Bindings: WorkerBindings; Variables: { user?: User } };
 
-const app = new Hono<{ Bindings: WorkerBindings; Variables: { user?: User } }>();
+const app = new Hono<WorkerEnv>();
+
+async function serveAsset(c: Context<WorkerEnv>): Promise<Response> {
+  const assets = c.env?.ASSETS;
+  if (assets?.fetch) return assets.fetch(c.req.raw);
+  return c.html(renderNotFoundPage({ path: c.req.path }), 404);
+}
 
 app.use("*", async (c, next) => {
   const env = c.env;
@@ -115,68 +106,20 @@ app.use("*", async (c, next) => {
 app.use("/api/sync/*", cors());
 app.use("*", async (c, next) => { const start = Date.now(); await next(); logger.debug({ method: c.req.method, path: c.req.path, status: c.res.status, ms: Date.now() - start }, "request"); });
 // Public signed share routes intentionally bypass session middleware.
-app.route("/", publicV2Routes);
-app.route("/", shareV2Routes);
-app.route("/", shareRoutes);
-app.route("/", publicRoutes);
+mountPublicRoutes(app);
 
 // Public, versioned browser code must not trigger an authenticated session RPC.
-app.get("/management-query.js", async (c) => { const assets = c.env?.ASSETS; if (assets?.fetch) return assets.fetch(c.req.raw); return c.html(renderNotFoundPage({ path: c.req.path }), 404); });
-app.get("/select.js", async (c) => { const assets = c.env?.ASSETS; if (assets?.fetch) return assets.fetch(c.req.raw); return c.html(renderNotFoundPage({ path: c.req.path }), 404); });
-app.get("/management-pages.js", async (c) => { const assets = c.env?.ASSETS; if (assets?.fetch) return assets.fetch(c.req.raw); return c.html(renderNotFoundPage({ path: c.req.path }), 404); });
-app.get("/commentor-parent.js", async (c) => { const assets = c.env?.ASSETS; if (assets?.fetch) return assets.fetch(c.req.raw); return c.html(renderNotFoundPage({ path: c.req.path }), 404); });
+app.get("/management-query.js", serveAsset);
+app.get("/select.js", serveAsset);
+app.get("/management-pages.js", serveAsset);
+app.get("/commentor-parent.js", serveAsset);
 app.use("*", sessionMiddleware);
 
-// Sign-out: GET → POST
-app.get("/api/auth/sign-out", (c) => proxyAuthSignOut(c.req.raw));
-
-// Proxy auth to Convex
-app.on(["POST", "GET", "OPTIONS"], "/api/auth/*", async (c) => {
-  try {
-    return await proxyAuthRequest(c.req.raw);
-  } catch (error: unknown) {
-    logger.error(
-      { error: error instanceof Error ? error.message : String(error) },
-      "Auth proxy error",
-    );
-    return c.json({ error: "Auth unavailable" }, 502);
-  }
-});
-app.route("/", deploymentRoutes);
-app.route("/", publicationApiRoutes);
-
-
-app.on(["POST", "GET", "PATCH", "DELETE"], "/api/rendro/*", async (c) => {
-  try {
-    return await proxyConvexRequest(c.req.raw);
-  } catch (error: unknown) {
-    logger.error(
-      { error: error instanceof Error ? error.message : String(error) },
-      "Convex API proxy error",
-    );
-    return c.json({ error: "Backend unavailable" }, 502);
-  }
-});
-app.route("/", authPageRoutes);
-app.route("/", organizationPageRoutes);
-app.route("/", projectPageRoutes);
-
-
-
-
-app.route("/", publicationPageRoutes);
-app.route("/", projectDocsRoutes);
-app.route("/", sharePageRoutes);
-app.route("/", apiKeyPageRoutes);
-
-app.route("/", appRoutes);
-app.route("/", publicationRoutes);
-app.route("/", docsRoutes);
-app.get("/health", (c) => c.text("ok"));
+mountSessionRoutes(app);
 
 // Static files from ASSETS binding
-app.get("/lazy-tree.js", async (c) => { const assets = c.env?.ASSETS; if (assets?.fetch) return assets.fetch(c.req.raw); return c.html(renderNotFoundPage({ path: c.req.path }), 404); });
-app.get("/commentor.js", async (c) => { const assets = c.env?.ASSETS; if (assets?.fetch) return assets.fetch(c.req.raw); return c.html(renderNotFoundPage({ path: c.req.path }), 404); });
+app.get("/lazy-tree.js", serveAsset);
+app.get("/commentor.js", serveAsset);
 app.get("*", async (c) => {
   const assets = c.env?.ASSETS;
   if (assets?.fetch) {

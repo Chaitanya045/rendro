@@ -23,13 +23,6 @@ export async function orgExists(org: string): Promise<boolean> {
   return entries.length > 0;
 }
 
-export async function listUserOrgs(email: string): Promise<string[]> {
-  const slug = emailToOrgSlug(email);
-  if (!slug) return [];
-  if (await orgExists(slug)) return [slug];
-  return [];
-}
-
 export function logOrgAccess(org: string, email: string, action: "view" | "create"): void {
   logger.info({ org, email, action }, "org access");
 }

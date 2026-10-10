@@ -1,12 +1,4 @@
-function escapeHtml(value: string): string {
-  return value.replace(/[&<>"']/g, (character) => ({
-    "&": "&amp;",
-    "<": "&lt;",
-    ">": "&gt;",
-    '"': "&quot;",
-    "'": "&#039;",
-  })[character] ?? character);
-}
+import { escapeHtml } from "./html";
 
 export function renderLoadingState(label: string, content: string): string {
   return `<div class="loading-view" aria-busy="true" aria-label="${escapeHtml(label)}">${content}<span class="sr-only">${escapeHtml(label)}</span></div>`;

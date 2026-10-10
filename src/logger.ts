@@ -17,10 +17,3 @@ export const logger = pino({
       }
     : {}),
 });
-
-/**
- * Create a child logger with bound request context.
- */
-export function requestLogger(requestId: string) {
-  return logger.child({ requestId });
-}
