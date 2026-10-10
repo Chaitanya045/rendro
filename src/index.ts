@@ -1,5 +1,6 @@
 import { faviconAssets, faviconCacheControl } from "./routes/favicon";
 import { Hono } from "hono";
+import { redactViewerPath } from "./viewer-log";
 import { serve } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
 import { cors } from "hono/cors";
@@ -34,12 +35,14 @@ app.use("/select.js", serveStatic({ path: "./public/select.js" }));
 app.use("/management-pages.js", serveStatic({ path: "./public/management-pages.js" }));
 app.use("/landing-product.webp", serveStatic({ path: "./public/landing-product.webp" }));
 
+app.use("/private-viewer.js", serveStatic({ path: "./public/private-viewer.js" }));
+
 // Request timing
 app.use("*", async (c, next) => {
   const start = Date.now();
   await next();
   logger.debug(
-    { method: c.req.method, path: c.req.path, status: c.res.status, ms: Date.now() - start },
+    { method: c.req.method, path: redactViewerPath(c.req.path), status: c.res.status, ms: Date.now() - start },
     "request"
   );
 });
@@ -66,7 +69,7 @@ app.notFound((c) => c.html(renderNotFoundPage({ path: c.req.path }), 404));
 
 // Error handler
 app.onError((err, c) => {
-  logger.error({ err }, "Unhandled error");
+  logger.error({ errorType: err.name, path: redactViewerPath(c.req.path) }, "Unhandled error");
   return c.text("Internal server error", 500);
 });
 

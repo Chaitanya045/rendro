@@ -272,7 +272,7 @@ describe("private project documents", () => {
       stream(key.endsWith("app.css") ? "body{color:red}" : "<!doctype html><body><h1>Publisher docs</h1></body>")
     ));
 
-    const htmlResponse = await app.request("/organizations/org-a/projects/project-a/docs/files/reference/index.html");
+    const htmlResponse = await app.request("/organizations/org-a/projects/project-a/docs/files/reference/index.html", { headers: { Cookie: "better-auth.session_token=fixture" } });
     const html = await htmlResponse.text();
     expect(htmlResponse.status).toBe(200);
     expect(htmlResponse.headers.get("Cache-Control")).toBe("private, no-store");
@@ -284,7 +284,7 @@ describe("private project documents", () => {
     expect(html).not.toContain('window.COMMENTOR={"convexUrl":');
     expect(html.match(/window\.COMMENTOR=/g)).toHaveLength(1);
 
-    const assetResponse = await app.request("/organizations/org-a/projects/project-a/docs/files/reference/app.css");
+    const assetResponse = await app.request("/organizations/org-a/projects/project-a/docs/files/reference/app.css", { headers: { Cookie: "better-auth.session_token=fixture" } });
     expect(assetResponse.status).toBe(200);
     expect(assetResponse.headers.get("Content-Type")).toBe("text/css; charset=utf-8");
     expect(await assetResponse.text()).toBe("body{color:red}");
@@ -303,7 +303,7 @@ describe("private project documents", () => {
     }));
     vi.spyOn(minio, "getObjectStream").mockResolvedValue(stream("<body>Safe publisher content</body>"));
 
-    const response = await app.request(`/organizations/org-a/projects/project-a/docs/files/${encodeURIComponent(hostilePath)}`);
+    const response = await app.request(`/organizations/org-a/projects/project-a/docs/files/${encodeURIComponent(hostilePath)}`, { headers: { Cookie: "better-auth.session_token=fixture" } });
     const html = await response.text();
     expect(response.status).toBe(200);
     expect(html).not.toContain("</script><script>window.injected=true");
