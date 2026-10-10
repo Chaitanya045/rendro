@@ -28,18 +28,18 @@ pnpm install
 cp .env.example .env
 ```
 
-`pnpm dev`, `pnpm start`, and `pnpm init:minio` read `.env`. `src/config.ts` validates it at startup:
+`pnpm dev`, `pnpm start`, and `pnpm init:minio` read `.env`. `src/config.ts` validates Worker settings at startup; `src/index.ts` validates the local Node port. Google OAuth credentials belong only to Convex (step 3), and `BASE_URL` is unused:
 
 | Variable | Required | Notes |
 |---|---|---|
-| `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Yes | Validated by the server, though OAuth itself runs in Convex |
 | `AUTH_SECRET` | Yes (≥16 chars; use 32+) | Signs legacy `/share/:token` links only. It does not need to match Convex |
 | `CONVEX_INTERNAL_SECRET` | Yes (≥32 chars) | Sent with legacy API-key and soft-delete Convex calls (`src/convex-internal.ts`); must equal the Convex value |
-| `CONVEX_URL` | Yes in practice | From `convex dev` (step 3) |
+| `CONVEX_URL` | No at startup; needed for the full app | From `convex dev` (step 3); defaults to empty, disabling legacy Convex calls and comments |
 | `CONVEX_SITE_URL` | No | Derived from `CONVEX_URL` when unset |
 | `MINIO_ENDPOINT`, `MINIO_ACCESS_KEY`, `MINIO_SECRET_KEY` | Yes | Local MinIO defaults are in `.env.example` |
 | `MINIO_BUCKET`, `MINIO_REGION`, `MINIO_FORCE_PATH_STYLE` | No | Defaults `docs`, `us-east-1`, `true` |
-| `PORT`, `BASE_URL`, `NODE_ENV` | No | Defaults `3000`, `http://localhost:3000`, `development` |
+| `NODE_ENV` | No | Defaults to `development`; Wrangler sets `production` |
+| `PORT` | No (local Node server only) | Defaults to `3000`; must be an integer from 1 to 65535 |
 | `LOG_LEVEL` | No | Pino level; defaults to `debug` outside production (`src/logger.ts`) |
 
 Generate secrets with `openssl rand -hex 32`.
@@ -152,11 +152,13 @@ pnpm exec convex deploy
 
 Create the private `rendro-docs` R2 bucket and an S3 API token restricted to that bucket. The endpoint is `https://<account-id>.r2.cloudflarestorage.com`; do not append the bucket name.
 
-`wrangler.toml` sets `NODE_ENV` and `BASE_URL` as vars and declares `CONVEX_INTERNAL_SECRET` a required secret. Set the rest as secrets:
+`wrangler.toml` sets `NODE_ENV` as a var. Both production (the top-level configuration) and `development` require exactly these five secrets at startup and in Wrangler: `CONVEX_INTERNAL_SECRET`, `AUTH_SECRET`, `MINIO_ENDPOINT`, `MINIO_ACCESS_KEY`, and `MINIO_SECRET_KEY`.
+
+List secret names with `pnpm exec wrangler secret list` for production (`rendro`) and `pnpm exec wrangler secret list --env development` for development (`rendro-dev`). Production uses the top-level configuration; there is no named `--env production` environment.
+
+Configure the Worker settings below. `CONVEX_URL` and the optional `CONVEX_SITE_URL` override remain outside `secrets.required`: startup and `/health` work without them, but auth and project routes need a Convex HTTP origin. Google credentials are Convex-only; the Worker does not read `BASE_URL`.
 
 ```bash
-pnpm exec wrangler secret put GOOGLE_CLIENT_ID        # validated at startup, otherwise unused
-pnpm exec wrangler secret put GOOGLE_CLIENT_SECRET    # validated at startup, otherwise unused
 pnpm exec wrangler secret put AUTH_SECRET
 pnpm exec wrangler secret put CONVEX_URL
 pnpm exec wrangler secret put CONVEX_SITE_URL         # optional
@@ -213,7 +215,7 @@ pnpm verify                    # all of the above, plus build:assets, git diff -
 pnpm audit --audit-level=high
 ```
 
-`pnpm verify:assets` fails if the committed bundles differ from a fresh build. CI runs `ci.yml` (typecheck, lint, test) and `quality.yml` (`pnpm verify`, audit); `release.yml` attaches `bin/rendro.mjs` to the GitHub release for `v*` tags. See [CI workflows](TECHNICAL.md#ci-workflows).
+`pnpm verify:assets` fails if the committed bundles differ from a fresh build. CI runs `quality.yml` (`pnpm verify`, audit); `release.yml` attaches `bin/rendro.mjs` to the GitHub release for `v*` tags. See [CI workflows](TECHNICAL.md#ci-workflows).
 
 ## Project Structure
 
@@ -255,7 +257,7 @@ rendro/
 ├── public/                   # Browser bundles and static assets
 ├── tests/                    # Vitest suites and fixtures
 ├── docs/                     # Product, technical, design docs; archive/ holds dated QA reports
-├── .github/workflows/        # ci, quality, release, retention
+├── .github/workflows/        # quality, release, retention
 ├── docker-compose.yml        # Local MinIO
 ├── wrangler.toml             # Worker config (production and development envs)
 └── convex.json

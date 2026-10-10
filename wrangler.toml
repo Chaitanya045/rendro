@@ -7,7 +7,8 @@ compatibility_flags = ["nodejs_compat"]
 enabled = true
 
 [secrets]
-required = ["CONVEX_INTERNAL_SECRET"]
+# Match the mandatory runtime settings validated in src/config.ts.
+required = ["CONVEX_INTERNAL_SECRET", "AUTH_SECRET", "MINIO_ENDPOINT", "MINIO_ACCESS_KEY", "MINIO_SECRET_KEY"]
 
 [assets]
 directory = "./public"
@@ -16,14 +17,14 @@ run_worker_first = true
 
 [vars]
 NODE_ENV = "production"
-BASE_URL = "https://rendro.app"
+
 # ── Dev environment (deployed from `development` branch) ──
 [env.development]
 name = "rendro-dev"
 
 [env.development.secrets]
-required = ["CONVEX_INTERNAL_SECRET"]
+# Match the mandatory runtime settings validated in src/config.ts.
+required = ["CONVEX_INTERNAL_SECRET", "AUTH_SECRET", "MINIO_ENDPOINT", "MINIO_ACCESS_KEY", "MINIO_SECRET_KEY"]
 
 [env.development.vars]
 NODE_ENV = "production"
-BASE_URL = "https://dev.rendro.app"

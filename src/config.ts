@@ -1,10 +1,9 @@
 import { z } from "zod/v4";
 
 const envSchema = z.object({
-  // Google OAuth
-  GOOGLE_CLIENT_ID: z.string().min(1, "GOOGLE_CLIENT_ID is required"),
-  GOOGLE_CLIENT_SECRET: z.string().min(1, "GOOGLE_CLIENT_SECRET is required"),
+  // Logging
   NODE_ENV: z.enum(["development", "production", "test"]).default("development"),
+  LOG_LEVEL: z.enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"]).optional(),
 
   // MinIO
   MINIO_ENDPOINT: z.string().min(1),
@@ -14,15 +13,13 @@ const envSchema = z.object({
   MINIO_REGION: z.string().default("us-east-1"),
   MINIO_FORCE_PATH_STYLE: z.string().optional().transform((value) => value !== "false"),
 
-  // Server
-  PORT: z.coerce.number().int().min(1).max(65535).default(3000),
-  BASE_URL: z.string().url().default("http://localhost:3000"),
+  // Convex (Google OAuth credentials belong only to Convex)
   CONVEX_URL: z.string().default(""),
   CONVEX_SITE_URL: z.string().url().optional(),
   CONVEX_INTERNAL_SECRET: z
     .string()
     .min(32, "CONVEX_INTERNAL_SECRET must be at least 32 characters"),
-  // Shared with Convex Better Auth; also signs legacy /share/:token links.
+  // Signs legacy /share/:token links; independent of Convex Better Auth.
   AUTH_SECRET: z.string().min(16, "AUTH_SECRET must be at least 16 characters"),
 });
 
@@ -49,7 +46,8 @@ export const MINIO_BUCKET = env.MINIO_BUCKET;
 export const MINIO_REGION = env.MINIO_REGION;
 export const MINIO_FORCE_PATH_STYLE = env.MINIO_FORCE_PATH_STYLE;
 
-export const PORT = env.PORT;
+export const NODE_ENV = env.NODE_ENV;
+export const LOG_LEVEL = env.LOG_LEVEL ?? (NODE_ENV === "production" ? "info" : "debug");
 export const CONVEX_URL = env.CONVEX_URL;
 export const CONVEX_INTERNAL_SECRET = env.CONVEX_INTERNAL_SECRET;
 export const CONVEX_SITE_URL = env.CONVEX_SITE_URL

@@ -4,10 +4,13 @@ import { serveStatic } from "@hono/node-server/serve-static";
 import { cors } from "hono/cors";
 import { sessionMiddleware } from "@/middleware/session";
 import { mountPublicRoutes, mountSessionRoutes } from "@/app-routes";
-import { PORT } from "@/config";
+import { z } from "zod/v4";
 import { logger } from "@/logger";
 import { renderNotFoundPage } from "@/routes/not-found";
 import type { User } from "better-auth/types";
+
+// Only the local Node server listens on a port; Workers do not read PORT.
+const PORT = z.coerce.number().int().min(1).max(65535).default(3000).parse(process.env.PORT);
 
 const app = new Hono<{ Variables: { user?: User } }>();
 
