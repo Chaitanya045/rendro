@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
+import { Script } from "node:vm";
 import { CommentorAuthPolicy } from "../src/commentor/auth-policy";
 import { draftAfterSuccessfulReply } from "../src/commentor/reply-state";
 import { PendingDeletionCoordinator } from "../src/commentor/delete-state";
@@ -199,6 +200,70 @@ describe("document UI regressions", () => {
     );
     expect(html.startsWith("<!doctype html><style data-rendro-mobile-viewport>")).toBe(true);
     expect(html.indexOf("<style")).toBeLessThan(html.indexOf("<body"));
+  });
+
+  it.each([
+    '<script>const sentinel = "</head>";</script>',
+    '<style>p::before { content: "</head>"; }</style>',
+    '<!-- a fake </head> and <body> -->',
+    '<meta name="description" content="a fake </head> and <body>">',
+    '<title>A fake </head> and &lt;body&gt;</title>',
+    '<noscript>A fake </head> and <body></noscript>',
+  ])("preserves publisher raw text and markup: %s", (content) => {
+    const source = `<!doctype html><html><head>${content}</head><body>Résumé 📖</body></html>`;
+    const styled = injectMobileViewportScrollbarStyle(source);
+    expect(styled).toContain(content);
+    expect(styled).toContain('<head><style data-rendro-mobile-viewport>');
+    expect(styled.replace(/<style data-rendro-mobile-viewport>[\s\S]*?<\/style>/, "")).toBe(source);
+    if (content.startsWith("<script>")) {
+      const script = styled.match(/<script>([\s\S]*?)<\/script>/)![1];
+      expect(() => new Script(script)).not.toThrow();
+    }
+  });
+
+  it("does not treat commented or quoted head tags as insertion points", () => {
+    const prelude = '<!-- <head></head><body> --><!doctype html><html data-note="<head></head>">';
+    const source = `${prelude}<head><title>Actual head</title></head><body>Body</body></html>`;
+    expect(injectMobileViewportScrollbarStyle(source)).toContain(`${prelude}<head><style data-rendro-mobile-viewport>`);
+  });
+
+  it.each(["ok", "<h1>Docs</h1>", '<script>const sentinel="</head>";</script>'])("styles headless fragments without changing their content: %s", source => {
+    const styled = injectMobileViewportScrollbarStyle(source);
+    expect(styled).toMatch(/^<style data-rendro-mobile-viewport>/);
+    expect(styled.replace(/<style data-rendro-mobile-viewport>[\s\S]*?<\/style>/, "")).toBe(source);
+  });
+
+  it("leaves long or incomplete publisher prefixes untouched when there is no safe anchor", () => {
+    for (const source of [
+      '<!doctype html PUBLIC "unfinished',
+      '<!-- <head></head>',
+      '<!doctype html><html><head data-note="' + 'x'.repeat(70_000) + '"></head><body>Body</body>',
+      '<!-- ' + 'x'.repeat(70_000) + ' --><!doctype html><head></head>',
+    ]) expect(injectMobileViewportScrollbarStyle(source)).toBe(source);
+  });
+
+  it("preserves raw text and multibyte characters across every streamed byte boundary", async () => {
+    const source = '<!-- <head></head> --><!doctype html><head><script>const sentinel="</head>";</script></head><body>Résumé 📖</body>';
+    const bytes = new TextEncoder().encode(source);
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) { for (const byte of bytes) controller.enqueue(Uint8Array.of(byte)); controller.close(); },
+    });
+    const styled = await new Response(injectMobileViewportScrollbarStream(stream)).text();
+    expect(styled).toContain('<head><style data-rendro-mobile-viewport>');
+    expect(styled.replace(/<style data-rendro-mobile-viewport>[\s\S]*?<\/style>/, "")).toBe(source);
+  });
+
+  it("streams an oversized unfinished tag without rewriting or buffering the whole document", async () => {
+    let controller!: ReadableStreamDefaultController<Uint8Array>;
+    const source = new ReadableStream<Uint8Array>({ start(value) { controller = value; } });
+    const reader = injectMobileViewportScrollbarStream(source, 32).getReader();
+    const prefix = '<!doctype html><head data-note="' + 'x'.repeat(32);
+    controller.enqueue(new TextEncoder().encode(prefix));
+    expect(new TextDecoder().decode((await reader.read()).value)).toBe(prefix);
+    const tail = '"></head><body>Body</body>';
+    controller.enqueue(new TextEncoder().encode(tail)); controller.close();
+    expect(new TextDecoder().decode((await reader.read()).value)).toBe(tail);
+    expect((await reader.read()).done).toBe(true);
   });
 
   it("streams injected HTML once its bounded prefix is complete without corrupting split UTF-8", async () => {

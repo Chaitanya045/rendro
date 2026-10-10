@@ -13,6 +13,8 @@ import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { extname, join, relative, resolve } from "node:path";
+import { MAX_REUSED_FILES_PER_REQUEST } from "../../shared/deployment-limits";
+import { version } from "../../package.json";
 
 interface PushOptions {
   source: string;
@@ -111,7 +113,7 @@ function deploymentProvenance(source: string, manifestSha256: string) {
           actor: process.env.GITHUB_ACTOR,
         }
       : { kind: "local" as const, actor: process.env.USER },
-    cliVersion: "1.0.0",
+    cliVersion: version,
     manifestSha256,
   };
 }
@@ -286,8 +288,8 @@ async function push(opts: PushOptions): Promise<void> {
 
   try {
     if (unchanged.length > 0) {
-      for (let start = 0; start < unchanged.length; start += 1_000) {
-        const paths = unchanged.slice(start, start + 1_000).map((entry) => entry.path);
+      for (let start = 0; start < unchanged.length; start += MAX_REUSED_FILES_PER_REQUEST) {
+        const paths = unchanged.slice(start, start + MAX_REUSED_FILES_PER_REQUEST).map((entry) => entry.path);
         await requestJson<{ copied: number }>(
           `${cleanEndpoint}/api/rendro/deployments/${encodedDeploymentId}/copy?${deploymentQuery}`,
           token,
@@ -396,6 +398,7 @@ Usage:
   rendro publication list --organization <id> --project <id> [--endpoint <url>]
   rendro publication remove --organization <id> --project <id> --id <publication-id>
   rendro init --source <dir>
+  rendro --version
 
 Options:
   --source       Path to local docs directory (default: ./docs)
@@ -416,6 +419,11 @@ Auth: set RENDRO_API_KEY in your environment. Create a scoped key from
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
   const cmd = args[0];
+
+  if (cmd === "--version") {
+    console.log(version);
+    return;
+  }
 
   if (!cmd || cmd === "help" || cmd === "--help") {
     printHelp();

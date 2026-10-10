@@ -1,0 +1,4 @@
+interface:
+  display_name: "Rendro PR Review"
+  short_description: "Review Rendro changes for production risks"
+  default_prompt: "Use $rendro-pr-review to review this pull request for correctness, security, scalability, maintainability, performance, and Rendro design-system regressions."

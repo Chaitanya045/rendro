@@ -80,7 +80,7 @@ describe("management control consistency", () => {
     const base = "/organizations/org-a/projects/project-a";
     const publication = renderProjectNavigation("org-a", "project-a", "publications");
     expect(publication).toContain(`<a href="${base}">Overview</a>`);
-    expect(publication).toContain(`<a href="${base}#deployments">Deployments</a>`);
+    expect(publication).toContain(`<a href="${base}/deployments">Deployments</a>`);
     expect(publication).toContain(`<a class="active" aria-current="page" href="${base}/publications">Publications</a>`);
     expect(publication).toContain(`<a href="${base}/shares">Private shares</a>`);
     expect((publication.match(/aria-current="page"/g) ?? [])).toHaveLength(1);

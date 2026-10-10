@@ -11,7 +11,7 @@ const organizations = [{ id: "org-a", name: "Acme" }, { id: "org-b", name: "Beta
 function page(organizationId?: string) {
   return renderControlPlanePage({ user: { id: "u", name: "QA", email: "qa@example.test" } as User, organizationId, title: "Test", eyebrow: "", heading: "Test", description: "", content: "", script: "" });
 }
-function setup(respond: () => Promise<unknown> = () => Promise.resolve(organizations), cached = false) {
+function setup(respond: () => Promise<unknown> = () => Promise.resolve(organizations), cached = false, navigationEvents = false) {
   const win = new Window({ url: "https://rendro.test/organizations/org-a/projects", settings: { enableJavaScriptEvaluation: true, disableJavaScriptFileLoading: true, disableCSSFileLoading: true } });
   windows.push(win);
   win.document.write(page("org-a").replace(/<script\b[^>]*>[\s\S]*?<\/script>/g, ""));
@@ -20,11 +20,13 @@ function setup(respond: () => Promise<unknown> = () => Promise.resolve(organizat
   if (cache) caches.push(cache);
   const uiRequest = cache ? cache.request : request;
   Object.assign(win, { RendroUI: { request: uiRequest, navigate, toast } });
+  const navigation = navigationEvents ? new win.EventTarget() : null;
+  if (navigation) Object.assign(win, { navigation });
   win.eval(organizationSwitcherRuntime);
   const trigger = win.document.querySelector<HTMLButtonElement>("#cp-org-switcher")!;
   const menu = win.document.querySelector<HTMLElement>("#cp-org-menu")!;
   const key = (target: HTMLElement, value: string) => target.dispatchEvent(new win.KeyboardEvent("keydown", { key: value, bubbles: true, cancelable: true }));
-  return { win, request, navigate, toast, trigger, menu, key, uiRequest };
+  return { win, request, navigate, toast, trigger, menu, key, uiRequest, navigation };
 }
 async function flush() { for (let i = 0; i < 3; i++) await new Promise<void>(resolve => setImmediate(resolve)); }
 afterEach(async () => { await Promise.all(caches.splice(0).map(cache => cache.clear())); for (const win of windows.splice(0)) { win.dispatchEvent(new win.Event("pagehide")); await win.happyDOM.close(); } });
@@ -71,6 +73,7 @@ describe("header organization switcher", () => {
     ["/organizations/org-a/projects", "/organizations/org-b/projects"],
     ["/organizations/org-a/projects/project-a", "/organizations/org-b/projects"],
     ["/organizations/org-a/projects/project-a/publications", "/organizations/org-b/projects"],
+    ["/organizations/org-a/projects/project-a/deployments", "/organizations/org-b/projects"],
     ["/organizations/org-a/people", "/organizations/org-b/people"],
     ["/organizations/org-a/teams", "/organizations/org-b/teams"],
     ["/organizations/org-a/settings", "/organizations/org-b/settings"],
@@ -138,6 +141,50 @@ describe("header organization switcher", () => {
     const { trigger, menu, navigate } = setup(); trigger.click(); await flush();
     menu.querySelector<HTMLElement>('[aria-current="true"]')!.click();
     expect(navigate).not.toHaveBeenCalled(); expect(menu.hidden).toBe(true);
+  });
+  it("restores the original identity and control after a back/forward cache resume", async () => {
+    const { win, trigger, menu, key } = setup();
+    trigger.click(); await flush(); menu.querySelector<HTMLElement>('[data-organization-id="org-b"]')!.click();
+    key(trigger, "ArrowDown"); expect(menu.hidden).toBe(true);
+    await flush();
+    win.dispatchEvent(new win.Event("pagehide")); win.dispatchEvent(new win.Event("pageshow"));
+    expect(trigger.querySelector("[data-org-name]")?.textContent).toBe("Organization");
+    expect(trigger.querySelector("[data-org-mark]")?.textContent).toBe("R");
+    expect(trigger.hasAttribute("aria-busy")).toBe(false);
+    expect(trigger.hasAttribute("aria-disabled")).toBe(false);
+    expect(win.sessionStorage.getItem("rendro-org-navigation-label")).toBeNull();
+    trigger.click(); await flush(); expect(menu.hidden).toBe(false);
+  });
+  it("recovers when a native unload prompt keeps the source document alive", async () => {
+    const { win, trigger, menu } = setup();
+    trigger.click(); await flush(); menu.querySelector<HTMLElement>('[data-organization-id="org-b"]')!.click();
+    await flush();
+    // A later listener can cancel, after the switcher's own listener has run.
+    win.addEventListener("beforeunload", event => event.preventDefault());
+    win.dispatchEvent(new win.Event("beforeunload", { cancelable: true }));
+    await new Promise(resolve => setTimeout(resolve, 10));
+    expect(trigger.querySelector("[data-org-name]")?.textContent).toBe("Organization");
+    expect(trigger.hasAttribute("aria-busy")).toBe(false);
+    expect(trigger.hasAttribute("aria-disabled")).toBe(false);
+    expect(win.sessionStorage.getItem("rendro-org-navigation-label")).toBeNull();
+    trigger.click(); await flush(); expect(menu.hidden).toBe(false);
+  });
+  it("does not erase the current label when navigating to Manage organizations", async () => {
+    const { trigger, menu } = setup(); trigger.click(); await flush();
+    menu.querySelector<HTMLElement>('.cp-org-menu-footer a')!.click();
+    expect(trigger.querySelector("[data-org-name]")?.textContent).toBe("Organization");
+  });
+  it("rolls back when the browser aborts navigation before unload", async () => {
+    const { win, trigger, menu, navigation } = setup(undefined, false, true);
+    trigger.click(); await flush(); menu.querySelector<HTMLElement>('[data-organization-id="org-b"]')!.click();
+    const controller = new win.AbortController();
+    const event = new win.Event("navigate");
+    Object.defineProperty(event, "signal", { value: controller.signal });
+    navigation!.dispatchEvent(event); controller.abort();
+    expect(trigger.querySelector("[data-org-name]")?.textContent).toBe("Organization");
+    expect(trigger.hasAttribute("aria-disabled")).toBe(false);
+    expect(win.sessionStorage.getItem("rendro-org-navigation-label")).toBeNull();
+    trigger.click(); await flush(); expect(menu.hidden).toBe(false);
   });
   it("supports arrows, Home/End, typeahead, Space selection and Escape focus restoration", async () => {
     const { trigger, menu, key, win, navigate } = setup();

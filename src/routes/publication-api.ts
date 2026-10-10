@@ -75,4 +75,13 @@ app.post("/api/rendro/publications", async (c) => {
   return backend("/api/rendro/publications", c.req.raw, "POST", JSON.stringify(body));
 });
 
+// Keep the CLI credential on all publication operations, not only creation.
+// Convex still enforces scope and organization/project identity on each call.
+app.get("/api/rendro/publications", (c) => backend(
+  `/api/rendro/publications${new URL(c.req.url).search}`, c.req.raw,
+));
+app.post("/api/rendro/publications/remove", async (c) => backend(
+  "/api/rendro/publications/remove", c.req.raw, "POST", await c.req.text(),
+));
+
 export default app;

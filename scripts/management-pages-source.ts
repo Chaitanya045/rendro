@@ -16,7 +16,7 @@ export async function managementPagesSource() {
     await next();
   });
   for (const routes of [organizationPages, projectPages, publicationPages, sharePages, apiKeyPages]) app.route("/", routes);
-  const suffixes = { overview: "", projects: "/projects", people: "/people", teams: "/teams", settings: "/settings", "api-keys": "/api-keys", project: "/projects/__RD_PROJECT__", publications: "/projects/__RD_PROJECT__/publications", shares: "/projects/__RD_PROJECT__/shares" };
+  const suffixes = { overview: "", projects: "/projects", people: "/people", teams: "/teams", settings: "/settings", "api-keys": "/api-keys", project: "/projects/__RD_PROJECT__", deployments: "/projects/__RD_PROJECT__/deployments", publications: "/projects/__RD_PROJECT__/publications", shares: "/projects/__RD_PROJECT__/shares" };
   const entries = [];
   for (const [section, suffix] of Object.entries(suffixes)) {
     const response = await app.request(`/organizations/__RD_ORG__${suffix}`);

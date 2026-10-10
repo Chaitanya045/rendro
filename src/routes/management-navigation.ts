@@ -1,15 +1,15 @@
 import { MANAGEMENT_PROJECT_PLACEHOLDER, managementLoadingPages } from "./management-loading-pages";
 
-export const MANAGEMENT_SHELL_VERSION = "14";
+export const MANAGEMENT_SHELL_VERSION = "16";
 
 export interface ManagementRouteIdentity {
   organizationId: string;
   projectId?: string;
-  section: "overview" | "projects" | "people" | "teams" | "settings" | "api-keys" | "project" | "publications" | "shares";
+  section: "overview" | "projects" | "people" | "teams" | "settings" | "api-keys" | "project" | "deployments" | "publications" | "shares";
 }
 
 export function managementRouteIdentity(pathname: string): ManagementRouteIdentity | null {
-  const match = pathname.match(/^\/organizations\/([^/]+)(?:\/(projects)(?:\/([^/]+)(?:\/(publications|shares))?)?|\/(people|teams|settings|api-keys))?\/?$/);
+  const match = pathname.match(/^\/organizations\/([^/]+)(?:\/(projects)(?:\/([^/]+)(?:\/(deployments|publications|shares))?)?|\/(people|teams|settings|api-keys))?\/?$/);
   if (!match) return null;
   try {
     const organizationId = decodeURIComponent(match[1]);
@@ -34,7 +34,7 @@ function managementNavigationRuntime(loadingPagesJson: string): string {
   if(!shellOrganization||main.getAttribute("data-cp-shell-version")!==SHELL_VERSION)return;
 
   function routeIdentity(url){
-    var match=url.pathname.match(/^\/organizations\/([^/]+)(?:\/(projects)(?:\/([^/]+)(?:\/(publications|shares))?)?|\/(people|teams|settings|api-keys))?\/?$/);
+    var match=url.pathname.match(/^\/organizations\/([^/]+)(?:\/(projects)(?:\/([^/]+)(?:\/(deployments|publications|shares))?)?|\/(people|teams|settings|api-keys))?\/?$/);
     if(!match)return null;
     try{return {organizationId:decodeURIComponent(match[1]),projectId:match[3]?decodeURIComponent(match[3]):"",section:match[5]||(match[3]?(match[4]||"project"):(match[2]||"overview"))};}catch(_error){return null;}
   }
@@ -132,7 +132,15 @@ function managementNavigationRuntime(loadingPagesJson: string): string {
     if(mode==="replace"||url.href===location.href){state.__rendroManagementIndex=historyIndex;history.replaceState(state,"",url.href);}
     else{history.replaceState(Object.assign({},state,{__rendroManagementIndex:historyIndex,__rendroScrollY:departingScroll||0}),"",location.href);historyIndex+=1;state.__rendroManagementIndex=historyIndex;state.__rendroScrollY=0;history.pushState(state,"",url.href);}
   }
-  function hardNavigate(url,replace){if(replace)location.replace(url.href);else location.assign(url.href);}
+  var approvedUnload=false;
+  function resetUnloadApproval(){approvedUnload=false;}
+  function hardNavigate(url,replace){
+    // The route guard already accepted this departure. Consume that decision
+    // for this navigation's unload. Do not expire it with a timer: browsers may
+    // dispatch beforeunload from a later navigation task.
+    approvedUnload=true;
+    try{if(replace)location.replace(url.href);else location.assign(url.href);}catch(error){approvedUnload=false;throw error;}
+  }
   function validateDocument(doc,responseUrl){
     var nextMain=doc.querySelector(".cp-main[data-cp-route-envelope]"),stateNode=doc.querySelector("script[data-cp-page-state]"),scriptNode=doc.querySelector("script[data-cp-page-script]"),openDocs=doc.querySelector("[data-cp-open-docs]");
     if(!nextMain||!stateNode||!scriptNode)return null;
@@ -149,6 +157,7 @@ function managementNavigationRuntime(loadingPagesJson: string): string {
     script.textContent=source.textContent||"";document.body.append(script);
   }
   async function navigate(rawUrl,options){
+    resetUnloadApproval();
     var url=new URL(rawUrl,location.href),route=supported(url),mode=options&&options.mode||"push";
     var leaveDetail={kind:mode==="pop"?"history":"navigation",url:url.href};
     if(!route||!loadingPages[route.section]){if(!(options&&options.checked)&&!canLeave(leaveDetail))return false;hardNavigate(url);return true;}
@@ -212,7 +221,13 @@ function managementNavigationRuntime(loadingPagesJson: string): string {
     historyIndex=Number.isFinite(targetIndex)?targetIndex:historyIndex;navigate(url.href,{mode:"pop",checked:true,scrollY:Number(event.state&&event.state.__rendroScrollY)||0});
   });
   addEventListener("hashchange",function(){currentUrl=location.href;});
-  addEventListener("beforeunload",function(event){if(currentScope&&!currentScope.canLeave({kind:"unload",url:location.href})){event.preventDefault();event.returnValue="";}});
+  addEventListener("pageshow",resetUnloadApproval);
+  // If the user resumes work after stopping navigation, a later close/reload
+  // must protect the draft again. The initiating pointer/key event has already
+  // passed the capture phase before hardNavigate grants the approval.
+  ["pointerdown","keydown","input"].forEach(function(type){document.addEventListener(type,resetUnloadApproval,true);});
+  if(window.navigation)window.navigation.addEventListener("navigateerror",resetUnloadApproval);
+  addEventListener("beforeunload",function(event){if(approvedUnload){approvedUnload=false;return;}if(currentScope&&!currentScope.canLeave({kind:"unload",url:location.href})){event.preventDefault();event.returnValue="";}});
 })();
 `;
 }

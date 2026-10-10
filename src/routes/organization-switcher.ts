@@ -43,10 +43,10 @@ export const organizationSwitcherRuntime = String.raw`
   trigger.setAttribute("aria-controls",menu.id);trigger.setAttribute("aria-expanded","false");
   while(fallback.firstChild)trigger.append(fallback.firstChild);
   fallback.replaceWith(trigger);
-  var list=menu.querySelector("[data-org-options]"),status=menu.querySelector("[role=status]"),controller=null,version=0,open=false,switching=false,focusWhenReady="",typeBuffer="",lastType=0;
+  var list=menu.querySelector("[data-org-options]"),status=menu.querySelector("[role=status]"),controller=null,version=0,open=false,switching=false,rollbackSwitch=null,focusWhenReady="",typeBuffer="",lastType=0;
   function items(){return Array.from(menu.querySelectorAll('[role="menuitem"]'));}
   function destination(organizationId){
-    var match=location.pathname.match(/^\/organizations\/[^/]+(?:\/(projects)(?:\/[^/]+(?:\/(?:publications|shares))?)?|\/(people|teams|settings|api-keys))?\/?$/),section=match&&(match[2]||match[1]);
+    var match=location.pathname.match(/^\/organizations\/[^/]+(?:\/(projects)(?:\/[^/]+(?:\/(?:deployments|publications|shares))?)?|\/(people|teams|settings|api-keys))?\/?$/),section=match&&(match[2]||match[1]);
     return "/organizations/"+encodeURIComponent(organizationId)+(section?"/"+section:"");
   }
   function position(){
@@ -101,6 +101,7 @@ export const organizationSwitcherRuntime = String.raw`
   }
   trigger.addEventListener("click",function(){if(switching)return;if(open)close(false);else show("first");});
   trigger.addEventListener("keydown",function(event){
+    if(switching)return;
     if(event.key==="ArrowDown"||event.key==="ArrowUp"){event.preventDefault();if(open)focusItem(event.key==="ArrowUp"?"last":"first");else show(event.key==="ArrowUp"?"last":"first");}
   });
   menu.addEventListener("keydown",function(event){
@@ -116,18 +117,20 @@ export const organizationSwitcherRuntime = String.raw`
   menu.addEventListener("click",function(event){
     var link=event.target.closest("a[href]");if(!link)return;
     if(event.button!==0||event.metaKey||event.ctrlKey||event.shiftKey||event.altKey)return;
+    if(switching){event.preventDefault();return;}
     var href=link.href,current=link.getAttribute("aria-current")==="true";event.preventDefault();
     if(current){close(true);return;}
     var label=trigger.querySelector("[data-org-name]"),mark=trigger.querySelector("[data-org-mark]"),previousName=label&&label.textContent,previousMark=mark&&mark.textContent;
     close(false);switching=true;trigger.setAttribute("aria-busy","true");trigger.setAttribute("aria-disabled","true");
-    if(label)label.textContent=link.title;if(mark)mark.textContent=link.title.charAt(0).toUpperCase();
+    if(link.dataset.organizationId){if(label)label.textContent=link.title;if(mark)mark.textContent=link.title.charAt(0).toUpperCase();}
     // Carry the selected display name across the full document navigation. The
     // destination consumes it inline, before external scripts or API responses.
     try{
       sessionStorage.removeItem("rendro-org-navigation-label");
       if(link.dataset.organizationId)sessionStorage.setItem("rendro-org-navigation-label",JSON.stringify({userId:document.querySelector(".cp-main").getAttribute("data-cp-user-id"),organizationId:link.dataset.organizationId,name:link.title,createdAt:Date.now()}));
     }catch(_error){}
-    function rollback(){switching=false;trigger.removeAttribute("aria-busy");trigger.removeAttribute("aria-disabled");if(label)label.textContent=previousName;if(mark)mark.textContent=previousMark;try{sessionStorage.removeItem("rendro-org-navigation-label");}catch(_error){}trigger.focus();}
+    function rollback(restoreFocus){if(rollbackSwitch!==rollback)return;rollbackSwitch=null;switching=false;trigger.removeAttribute("aria-busy");trigger.removeAttribute("aria-disabled");if(label)label.textContent=previousName;if(mark)mark.textContent=previousMark;try{sessionStorage.removeItem("rendro-org-navigation-label");}catch(_error){}if(restoreFocus!==false)trigger.focus();}
+    rollbackSwitch=rollback;
     function failed(){rollback();if(window.RendroUI.toast)window.RendroUI.toast("Unable to switch organization. Please try again.","error");}
     try{if(window.RendroUI.navigate)Promise.resolve(window.RendroUI.navigate(href)).then(function(navigated){if(navigated===false)rollback();},failed);else location.assign(href);}catch(_error){failed();}
   });
@@ -135,6 +138,18 @@ export const organizationSwitcherRuntime = String.raw`
   document.addEventListener("pointerdown",function(event){if(open&&!menu.contains(event.target)&&!trigger.contains(event.target))close(false);},true);
   document.addEventListener("focusin",function(event){if(open&&!menu.contains(event.target)&&!trigger.contains(event.target))close(false);});
   document.addEventListener("rendro:before-route-leave",function(){close(false);});
+  addEventListener("beforeunload",function(event){
+    var rollback=rollbackSwitch;
+    // Read after every unload listener ran. If the native leave prompt is
+    // canceled, this task runs in the surviving page; a departing page instead
+    // recovers when restored from the back/forward cache.
+    setTimeout(function(){if(event.defaultPrevented&&rollback)rollback(false);},0);
+  });
+  addEventListener("pageshow",function(){if(rollbackSwitch)rollbackSwitch(false);});
+  if(window.navigation)window.navigation.addEventListener("navigate",function(event){
+    var rollback=rollbackSwitch;
+    if(rollback&&event.signal)event.signal.addEventListener("abort",function(){rollback(false);},{once:true});
+  });
   addEventListener("pagehide",function(){close(false);});addEventListener("resize",position);
   if(window.visualViewport){visualViewport.addEventListener("resize",position);visualViewport.addEventListener("scroll",position);}
 })();

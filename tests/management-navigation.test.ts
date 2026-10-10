@@ -100,6 +100,7 @@ describe("persistent management navigation", () => {
   it("recognizes only the exact progressive-enhancement route set", () => {
     expect(managementRouteIdentity("/organizations/org-a")).toEqual({ organizationId: "org-a", projectId: undefined, section: "overview" });
     expect(managementRouteIdentity("/organizations/org-a/projects/project-a/publications")).toEqual({ organizationId: "org-a", projectId: "project-a", section: "publications" });
+    expect(managementRouteIdentity("/organizations/org-a/projects/project-a/deployments")).toEqual({ organizationId: "org-a", projectId: "project-a", section: "deployments" });
     expect(managementRouteIdentity("/organizations/org-a/projects/project-a/shares/")).toEqual({ organizationId: "org-a", projectId: "project-a", section: "shares" });
     expect(managementRouteIdentity("/organizations/org-a/projects/project-a/docs")).toBeNull();
     expect(managementRouteIdentity("/organizations/org-a/onboarding")).toBeNull();

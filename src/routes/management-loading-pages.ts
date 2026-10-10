@@ -53,6 +53,7 @@ export function managementLoadingPages(organizationId: string): Record<string, M
     settings: renderOrganizationLoadingPage(organizationId, "settings"),
     projects: renderProjectLoadingPage(organizationId),
     project: renderProjectLoadingPage(organizationId, projectId),
+    deployments: renderProjectLoadingPage(organizationId, projectId, "deployments"),
     "api-keys": apiKeyLoadingPage(),
     publications: publicationLoadingPage(organizationId, projectId),
     shares: shareLoadingPage(organizationId, projectId),

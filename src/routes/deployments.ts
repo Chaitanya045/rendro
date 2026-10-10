@@ -8,6 +8,7 @@ import {
   putObject,
 } from "@/minio";
 import { readExactBody } from "@/bounded-body";
+import { MAX_REUSED_FILES_PER_REQUEST } from "../../shared/deployment-limits";
 
 const app = new Hono();
 
@@ -232,6 +233,9 @@ app.post("/api/rendro/deployments/:deploymentId/copy", async (c) => {
     ? body.paths.map((value) => typeof value === "string" ? safePath(value) : null)
     : [];
   if (paths.some((path) => !path)) return c.json({ error: "Invalid copy path" }, 400);
+  if (paths.length > MAX_REUSED_FILES_PER_REQUEST) {
+    return c.json({ error: `Copy at most ${MAX_REUSED_FILES_PER_REQUEST} files per request; update the Rendro CLI` }, 400);
+  }
   const manifest = await loadManifest(staging.deployment.manifestKey);
   if (!manifest) return c.json({ error: "Deployment manifest not found" }, 404);
   const expectedByPath = new Map(manifest.files.map((file) => [file.path, file]));
@@ -273,5 +277,12 @@ app.post("/api/rendro/deployments/:deploymentId/commit", async (c) => {
     body: JSON.stringify(identity),
   });
 });
+
+// The generic session proxy intentionally omits Authorization. CLI failure
+// callbacks need the same scoped bearer forwarding as start/upload/commit.
+app.post("/api/rendro/deployments/fail", async (c) => backendRequest(
+  "/api/rendro/deployments/fail", c.req.raw,
+  { method: "POST", body: await c.req.text() },
+));
 
 export default app;

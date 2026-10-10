@@ -5,7 +5,7 @@ import { MANAGEMENT_SHELL_VERSION, renderManagementNavigationRuntime } from "@/r
 
 interface PageScope {
   request(path: string, options?: RequestInit): Promise<unknown>;
-  preventNavigation(check: () => boolean): () => void;
+  preventNavigation(check: (detail: { kind: string }) => boolean): () => void;
 }
 
 interface RuntimeUi {
@@ -360,6 +360,45 @@ describe("management navigation regressions", () => {
     expect(runtime.importNode).not.toHaveBeenCalled();
     expect(runtime.appendedScripts).toHaveLength(0);
     expect(runtime.main.current.label).toBe("skeleton");
+  });
+
+  it("does not prompt twice for an accepted cross-organization departure", async () => {
+    const runtime = navigationRuntime("/organizations/org-a/settings");
+    const blocker = vi.fn((detail: { kind: string }) => detail.kind !== "unload");
+    runtime.ui.createPageScope().preventNavigation(blocker);
+    const navigation = runtime.ui.navigate("/organizations/org-b/settings");
+    // Unload is dispatched by a navigation task, not necessarily synchronously.
+    await new Promise(resolve => setTimeout(resolve, 10));
+    const unload = { state: undefined, preventDefault: vi.fn(), returnValue: undefined as string | undefined };
+    runtime.listeners.get("beforeunload")!(unload);
+    await expect(navigation).resolves.toBe(true);
+    expect(runtime.assignLocation).toHaveBeenCalledExactlyOnceWith("https://rendro.test/organizations/org-b/settings");
+    expect(blocker).toHaveBeenCalledOnce();
+    expect(blocker.mock.calls[0][0].kind).toBe("navigation");
+    expect(unload.preventDefault).not.toHaveBeenCalled();
+    // An unrelated close/reload must still protect unsaved edits.
+    runtime.listeners.get("beforeunload")!(unload);
+    expect(unload.preventDefault).toHaveBeenCalledOnce();
+  });
+
+  it("revokes unused unload approval when the user resumes editing after stopping navigation", async () => {
+    const runtime = navigationRuntime("/organizations/org-a/settings");
+    runtime.ui.createPageScope().preventNavigation(detail => detail.kind !== "unload");
+    await runtime.ui.navigate("/organizations/org-b/settings");
+    runtime.listeners.get("input")!({});
+    const unload = { state: undefined, preventDefault: vi.fn(), returnValue: undefined as string | undefined };
+    runtime.listeners.get("beforeunload")!(unload);
+    expect(unload.preventDefault).toHaveBeenCalledOnce();
+  });
+
+  it("does not start a cross-organization departure when discard is declined", async () => {
+    const runtime = navigationRuntime("/organizations/org-a/settings");
+    runtime.ui.createPageScope().preventNavigation(() => false);
+    await expect(runtime.ui.navigate("/organizations/org-b/settings")).resolves.toBe(false);
+    expect(runtime.assignLocation).not.toHaveBeenCalled();
+    const unload = { state: undefined, preventDefault: vi.fn(), returnValue: undefined as string | undefined };
+    runtime.listeners.get("beforeunload")!(unload);
+    expect(unload.preventDefault).toHaveBeenCalledOnce();
   });
 
   it("reverses a blocked Back, then permits Back and Forward route restoration", async () => {

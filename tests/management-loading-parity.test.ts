@@ -63,7 +63,14 @@ const routes: RouteCase[] = [
     kind: "project",
     path: `/organizations/${organizationId}/projects/${projectId}`,
     projectId,
-    snippets: ['id="project-content"', 'aria-label="Loading project overview"', 'class="skeleton-tabs"', 'class="project-overview"', "deployments-panel"],
+    snippets: ['id="project-content"', 'aria-label="Loading project overview"', 'class="skeleton-tabs"', 'class="project-overview"'],
+  },
+  {
+    kind: "deployments",
+    path: `/organizations/${organizationId}/projects/${projectId}/deployments`,
+    projectId,
+    snippets: ['id="project-content"', 'aria-label="Loading deployment history"', 'id="deployment-list"', 'class="panel panel-pad deployments-panel"'],
+    projectTabs: true,
   },
   {
     kind: "api-keys",

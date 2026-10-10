@@ -59,7 +59,15 @@ export function organizationSectionLoading(section: OrganizationLoadingSection):
     <section class="panel panel-pad recent-panel skeleton-copy"><span class="skeleton skeleton-line strong medium"></span><span class="skeleton skeleton-line long"></span>${loadingRows(1)}</section>`);
 }
 
-export function projectLoading(projectId: string): string {
+export function deploymentHistoryLoading(): string {
+  return renderTableLoading("Loading deployment history", 4);
+}
+
+export function renderDeploymentHistoryPanel(): string {
+  return `<section class="panel panel-pad deployments-panel" id="deployments"><div class="panel-head"><div><h2>Deployment history</h2><p>The latest 100 immutable releases, newest first.</p></div><span class="count-note" id="deployment-count" role="status"></span></div><div class="table-wrap loading-view deployment-table-wrap" aria-busy="true" aria-label="Loading deployment history"><table class="data-table deployment-table" aria-label="Project deployments"><colgroup><col><col><col class="deployment-files-column"><col class="deployment-status-column"></colgroup><thead><tr><th scope="col">Deployment</th><th scope="col">Source</th><th scope="col">Files</th><th scope="col">Status</th></tr></thead><tbody id="deployment-list">${deploymentHistoryLoading()}</tbody></table></div></section>`;
+}
+
+export function projectLoading(projectId: string, section: "overview" | "deployments" = "overview"): string {
   const row = `<div class="project-row">
     <span class="skeleton skeleton-icon"></span>
     <span class="skeleton-copy"><span class="skeleton skeleton-line strong medium"></span><span class="skeleton skeleton-line long"></span></span>
@@ -72,12 +80,15 @@ export function projectLoading(projectId: string): string {
       <div class="project-list">${row}${row}${row}</div>
     </section>`);
   }
+  if (section === "deployments") {
+    return renderLoadingState("Loading project deployments", `${renderDeploymentHistoryPanel()}
+      <aside class="panel skeleton-card deployments-panel"><span class="skeleton skeleton-line strong medium"></span><span class="skeleton skeleton-line long"></span><span class="skeleton skeleton-field"></span></aside>`);
+  }
   return renderLoadingState("Loading project overview", `<div class="skeleton-tabs"><span class="skeleton skeleton-line"></span><span class="skeleton skeleton-line"></span><span class="skeleton skeleton-line"></span><span class="skeleton skeleton-line"></span></div>
     <div class="project-overview">
       <section class="panel skeleton-card"><span class="skeleton skeleton-line strong medium"></span><span class="skeleton skeleton-line long"></span>${row}${row}</section>
       <section class="panel skeleton-card"><span class="skeleton skeleton-line strong medium"></span><span class="skeleton skeleton-line long"></span><span class="skeleton skeleton-field"></span><span class="skeleton skeleton-button"></span></section>
-    </div>
-    <section class="panel skeleton-card deployments-panel"><span class="skeleton skeleton-line strong short"></span><span class="skeleton skeleton-line medium"></span>${row}${row}</section>`);
+    </div>`);
 }
 
 export type OrganizationPageSection = "overview" | "people" | "teams" | "settings";
@@ -101,12 +112,12 @@ export function renderProjectNavigation(
     const current = section === active;
     return `<a${current ? ' class="active" aria-current="page"' : ""} href="${href}">${label}</a>`;
   };
-  return `<nav class="project-tabs" aria-label="Project sections">${link(base, "Overview", "overview")}${link(`${base}#deployments`, "Deployments", "deployments")}${link(`${base}/publications`, "Publications", "publications")}${link(`${base}/shares`, "Private shares", "shares")}</nav>`;
+  return `<nav class="project-tabs" aria-label="Project sections">${link(base, "Overview", "overview")}${link(`${base}/deployments`, "Deployments", "deployments")}${link(`${base}/publications`, "Publications", "publications")}${link(`${base}/shares`, "Private shares", "shares")}</nav>`;
 }
 
 export const organizationPageStyles = `.overview-metrics{margin-bottom:16px}.overview-grid{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(280px,.65fr);gap:16px}.overview-list,.checklist{display:grid}.overview-row{display:flex;align-items:center;justify-content:space-between;gap:14px;min-height:54px;padding:10px 0;border-bottom:1px solid var(--cp-border);text-decoration:none}.overview-row:last-child{border-bottom:0}.overview-row>.cell-primary{min-width:0;flex:1}.overview-row .cell-secondary{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.overview-row strong{overflow-wrap:anywhere}.overview-row>.badge{flex:none}.overview-row[href]:hover strong{color:var(--cp-accent)}.checklist-row{display:grid;grid-template-columns:22px 1fr;align-items:center;gap:9px;min-height:38px;color:var(--cp-muted)}.checklist-row.complete{color:var(--cp-text)}.checklist-mark{position:relative;width:18px;height:18px;display:grid;place-items:center;border:1px solid var(--cp-border-strong);border-radius:50%;font-size:0}.checklist-row.complete .checklist-mark{border-color:var(--cp-success);background:var(--cp-success-soft)}.checklist-row.complete .checklist-mark:after{content:"check";position:absolute;inset:0;display:grid;place-items:center;color:var(--cp-success);font:400 14px/1 "Material Symbols Outlined";font-feature-settings:"liga";font-variation-settings:"FILL" 0,"wght" 400,"GRAD" 0,"opsz" 20}.recent-panel,.pending-panel{margin-top:16px}.mini-empty{padding:18px 0;color:var(--cp-muted)}.people-head{margin:0;padding-bottom:10px}.role-select{min-height:34px;width:120px;padding:5px 8px}.invite-entry{display:grid;grid-template-columns:minmax(0,1fr) 140px auto;align-items:end;gap:10px}.team-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}.team-card{transition:opacity var(--cp-fast) var(--cp-ease)}.team-assign{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px}.team-footer{display:flex;justify-content:flex-end;margin-top:18px;padding-top:14px;border-top:1px solid var(--cp-border)}.settings-panel{max-width:720px}.metric .skeleton-line.strong{height:23px}@media(max-width:880px){.overview-grid,.team-grid{grid-template-columns:1fr}}@media(max-width:620px){.invite-entry{grid-template-columns:1fr}.team-assign{grid-template-columns:1fr}.team-footer .button{min-height:44px}}`;
 
-export const projectPageStyles = `.list-head{margin:0}.project-list{display:grid}.project-row{display:grid;grid-template-columns:auto minmax(0,1fr) auto auto;align-items:center;gap:12px;min-height:68px;padding:10px 18px;border-top:1px solid var(--cp-border);text-decoration:none;transition:background var(--cp-instant) var(--cp-ease)}.project-row:hover{background:var(--cp-surface-2)}.project-mark{width:36px;height:36px;display:grid;place-items:center;border-radius:8px;background:var(--cp-accent-soft);color:var(--cp-accent);font-size:11px;font-weight:800}.project-arrow{color:var(--cp-accent);font-size:12px;font-weight:750}.project-overview{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(300px,.9fr);gap:16px}.detail-list{display:grid;grid-template-columns:1fr 1fr;margin:0}.detail-list div{padding:13px 0;border-top:1px solid var(--cp-border)}.detail-list div:nth-child(odd){padding-right:14px}.detail-list dt{color:var(--cp-muted);font-size:12px}.detail-list dd{margin:3px 0 0;color:var(--cp-strong);font-weight:650;overflow-wrap:anywhere}.project-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}.deployments-panel{margin-top:16px}.deployment-list{display:grid}.deployment-row{display:grid;grid-template-columns:1fr 1fr 1fr auto;align-items:center;gap:16px;padding:13px 0;border-top:1px solid var(--cp-border)}.mini-empty{padding:18px 0;color:var(--cp-muted)}@media(max-width:900px){.project-overview{grid-template-columns:1fr}.deployment-row{grid-template-columns:1fr 1fr}}@media(max-width:620px){.project-row{grid-template-columns:auto 1fr}.project-row>.badge,.project-arrow{display:none}.detail-list{grid-template-columns:1fr}.detail-list div:nth-child(odd){padding-right:0}.deployment-row{grid-template-columns:1fr}.deployment-row>.badge{justify-self:start}}`;
+export const projectPageStyles = `.list-head{margin:0}.project-list{display:grid}.project-row{display:grid;grid-template-columns:auto minmax(0,1fr) auto auto;align-items:center;gap:12px;min-height:68px;padding:10px 18px;border-top:1px solid var(--cp-border);text-decoration:none;transition:background var(--cp-instant) var(--cp-ease)}.project-row:hover{background:var(--cp-surface-2)}.project-mark{width:36px;height:36px;display:grid;place-items:center;border-radius:8px;background:var(--cp-accent-soft);color:var(--cp-accent);font-size:11px;font-weight:800}.project-arrow{color:var(--cp-accent);font-size:12px;font-weight:750}.project-overview{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(300px,.9fr);gap:16px}.detail-list{display:grid;grid-template-columns:1fr 1fr;margin:0}.detail-list div{padding:13px 0;border-top:1px solid var(--cp-border)}.detail-list div:nth-child(odd){padding-right:14px}.detail-list dt{color:var(--cp-muted);font-size:12px}.detail-list dd{margin:3px 0 0;color:var(--cp-strong);font-weight:650;overflow-wrap:anywhere}.project-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}.deployments-panel{margin-top:16px}.deployment-table{table-layout:fixed}.deployment-table .deployment-files-column{width:100px}.deployment-table .deployment-status-column{width:120px}.deployment-table td{vertical-align:top;overflow-wrap:anywhere}.deployment-table .cell-primary{min-width:0}.deployment-failure{color:var(--cp-danger);font-size:12px;font-weight:400;overflow-wrap:anywhere}.mini-empty{padding:18px 0;color:var(--cp-muted)}@media(max-width:900px){.project-overview{grid-template-columns:1fr}}@media(max-width:760px){.deployment-table colgroup{display:none}.deployment-table .skeleton-table-row td{padding:7px 0}.deployment-table-wrap .loading-announcement{padding:0;border:0}}@media(max-width:620px){.project-row{grid-template-columns:auto 1fr}.project-row>.badge,.project-arrow{display:none}.detail-list{grid-template-columns:1fr}.detail-list div:nth-child(odd){padding-right:0}}`;
 
 export function organizationSectionHeading(section: OrganizationPageSection, organizationId: string) {
   const base = `/organizations/${encodeURIComponent(organizationId)}`;
@@ -151,17 +162,18 @@ export function renderOrganizationLoadingPage(organizationId: string, section: O
   };
 }
 
-export function renderProjectLoadingPage(organizationId: string, projectId = ""): ManagementLoadingPage {
+export function renderProjectLoadingPage(organizationId: string, projectId = "", section: "overview" | "deployments" = "overview"): ManagementLoadingPage {
   const base = `/organizations/${encodeURIComponent(organizationId)}/projects`;
+  const deployments = Boolean(projectId) && section === "deployments";
   return {
     eyebrow: projectId ? "Project" : "Documentation delivery",
-    heading: projectId ? "Project" : "Projects",
-    description: projectId
+    heading: deployments ? "Deployments" : projectId ? "Project" : "Projects",
+    description: deployments ? "Immutable release history for this project, newest first." : projectId
       ? "Immutable deployments, publications, and access for this documentation product."
       : "View independently deployed documentation products and their release state.",
     actions: projectId
       ? `<a class="button" href="${base}">All projects</a>`
       : '<button class="button primary" id="project-create" type="button" data-dialog-open="project-dialog" disabled hidden>Create project</button>',
-    content: `<div id="project-content">${projectLoading(projectId)}</div><style>${projectPageStyles}</style>`,
+    content: `<div id="project-content">${deployments ? renderProjectNavigation(organizationId, projectId, "deployments") : ""}${projectLoading(projectId, section)}</div><style>${projectPageStyles}</style>`,
   };
 }

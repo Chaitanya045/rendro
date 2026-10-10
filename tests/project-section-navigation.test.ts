@@ -4,23 +4,23 @@ import type { User } from "better-auth/types";
 import { describe, expect, it, vi } from "vitest";
 import projectPages from "@/routes/project-pages";
 
-async function renderedPage() {
+async function renderedPage(path = "/organizations/org/projects/project") {
   const app = new Hono<{ Variables: { user?: User } }>();
   app.use("*", async (c, next) => {
     c.set("user", { id: "qa", name: "QA", email: "qa@example.test" } as User);
     await next();
   });
   app.route("/", projectPages);
-  return (await app.request("/organizations/org/projects/project")).text();
+  return (await app.request(path)).text();
 }
 
-async function navigationRuntime() {
+async function navigationRuntime(fragment = false) {
   const html = await renderedPage();
   const script = html.slice(html.indexOf('var sectionTarget=null'), html.indexOf('var createProjectNavigation='));
   expect(script).not.toBe("");
   const base = "https://rendro.test/organizations/org/projects/project";
-  const location = { href: `${base}#deployments`, pathname: new URL(base).pathname, hash: "#deployments" };
-  const links = [base, `${base}#deployments`].map((href) => ({
+  const location = { href: fragment ? `${base}#deployments` : `${base}/deployments`, pathname: new URL(base).pathname + (fragment ? "" : "/deployments"), hash: fragment ? "#deployments" : "" };
+  const links = [base, `${base}/deployments`].map((href) => ({
     href, classList: { toggle: vi.fn() }, setAttribute: vi.fn(), removeAttribute: vi.fn(),
   }));
   const select = { options: links.map((link) => ({ value: link.href })), value: base };
@@ -36,16 +36,32 @@ async function navigationRuntime() {
 }
 
 describe("project section navigation", () => {
+  it("serves a deep-linkable deployment page with a selected tab and matching first-paint skeleton", async () => {
+    const html = await renderedPage("/organizations/org/projects/project/deployments");
+    expect(html).toContain('<h1 class="cp-page-heading">Deployments</h1>');
+    expect(html).toContain('<a class="active" aria-current="page" href="/organizations/org/projects/project/deployments">Deployments</a>');
+    expect(html).toContain('aria-label="Loading deployment history"');
+    expect(html).toContain('"section":"deployments"');
+  });
+  it("requires sign-in on direct deployment visits and preserves the destination", async () => {
+    const app = new Hono(); app.route("/", projectPages);
+    const path = "/organizations/org/projects/project/deployments";
+    const response = await app.request(path);
+    expect(response.status).toBe(302);
+    expect(response.headers.get("location")).toBe(`/sign-in?returnTo=${encodeURIComponent(path)}`);
+  });
   it("aligns the mobile picker and desktop active tab with a deep link", async () => {
     const ui = await navigationRuntime();
     ui.sync();
-    expect(ui.select.value).toContain("#deployments");
+    expect(ui.select.value).toContain("/deployments");
     expect(ui.links[0].removeAttribute).toHaveBeenCalledWith("aria-current");
     expect(ui.links[1].setAttribute).toHaveBeenCalledWith("aria-current", "page");
+    ui.mount(); ui.sync();
+    expect(ui.target.scrollIntoView).not.toHaveBeenCalled();
   });
 
   it("scrolls to an asynchronously mounted section once, without later mutation scroll jumps", async () => {
-    const ui = await navigationRuntime();
+    const ui = await navigationRuntime(true);
     ui.sync();
     expect(ui.target.scrollIntoView).not.toHaveBeenCalled();
     ui.mount();
@@ -61,7 +77,7 @@ describe("project section navigation", () => {
   });
 
   it("ignores malformed and unknown fragments without throwing or scrolling", async () => {
-    const ui = await navigationRuntime();
+    const ui = await navigationRuntime(true);
     ui.mount();
     ui.location.hash = "#%E0%A4%A";
     expect(ui.sync).not.toThrow();

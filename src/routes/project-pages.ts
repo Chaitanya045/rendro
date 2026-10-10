@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import type { User } from "better-auth/types";
 import { renderControlPlanePage } from "./control-plane";
 import { organizationContextScript } from "./organization-context";
-import { projectLoading, renderProjectLoadingPage, renderProjectNavigation } from "./management-loading";
+import { deploymentHistoryLoading, projectLoading, renderDeploymentHistoryPanel, renderProjectLoadingPage, renderProjectNavigation } from "./management-loading";
 
 const app = new Hono<{ Variables: { user?: User } }>();
 
@@ -10,7 +10,7 @@ const app = new Hono<{ Variables: { user?: User } }>();
 const projectPageScript = String.raw`
 (function(){
   "use strict";
-  var ui=window.RendroUI.createPageScope?window.RendroUI.createPageScope():window.RendroUI,state=window.__RENDRO_PAGE_STATE__,mount=document.getElementById("project-content"),base="/organizations/"+encodeURIComponent(state.organizationId)+"/projects",canManage=false,loadVersion=0,loading=${JSON.stringify(projectLoading(""))},detailLoading=${JSON.stringify(projectLoading("project"))};
+  var ui=window.RendroUI.createPageScope?window.RendroUI.createPageScope():window.RendroUI,state=window.__RENDRO_PAGE_STATE__,mount=document.getElementById("project-content"),base="/organizations/"+encodeURIComponent(state.organizationId)+"/projects",canManage=false,loadVersion=0,loading=${JSON.stringify(projectLoading(""))},detailLoading=state.section==="deployments"?state.projectNavigation+${JSON.stringify(projectLoading("project","deployments"))}:${JSON.stringify(projectLoading("project"))};
   function active(){return !ui.isActive||ui.isActive();}
   function h(tag,className,text){var node=document.createElement(tag);if(className)node.className=className;if(text!==undefined)node.textContent=text;return node;}
   function setChrome(organization){if(!active())return;var name=organization.name||"Organization",mark=(organization.name||"R").charAt(0).toUpperCase();document.querySelectorAll("[data-org-name]").forEach(function(node){if(node.textContent!==name)node.textContent=name;});document.querySelectorAll("[data-org-mark]").forEach(function(node){if(node.textContent!==mark)node.textContent=mark;});}
@@ -19,9 +19,59 @@ const projectPageScript = String.raw`
   function slugify(value){return value.toLowerCase().trim().replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"").slice(0,48);}
   function tabs(){return state.projectNavigation;}
   async function renderList(version){var query="?organizationId="+encodeURIComponent(state.organizationId),organizationRequest=window.RendroUI.organizationContext.access(ui,state.organizationId);organizationRequest.then(function(organization){if(active())setChrome(organization);}).catch(function(){});var results=await Promise.all([ui.request("/api/rendro/projects"+query),organizationRequest]);if(!active()||version!==loadVersion)return;var data=results[0];applyOrganization(results[1]);mount.innerHTML='<section class="panel"><div class="panel-head panel-pad list-head"><div><h2>Organization projects</h2><p>Each project owns an immutable deployment history, publications, and private shares.</p></div></div><div class="project-list" id="project-list"></div></section>';var list=document.getElementById("project-list");if(!data.projects.length){list.innerHTML='<div class="empty compact"><span class="empty-mark material-symbols-outlined" aria-hidden="true">folder</span><h2>No projects yet</h2><p>'+(canManage?'Create the first documentation product for this organization.':'An owner or admin can create the first documentation product.')+'</p>'+(canManage?'<button class="button primary" type="button">Create project</button>':'')+'</div>';var create=list.querySelector("button");if(create)create.addEventListener("click",function(){ui.openDialog("project-dialog");});return;}data.projects.forEach(function(project){var link=h("a","project-row");link.href=base+"/"+encodeURIComponent(project._id);var mark=h("span","project-mark",project.name.slice(0,2).toUpperCase()),copy=h("span","cell-primary");copy.append(h("strong","",project.name),h("span","cell-secondary",project.slug));link.append(mark,copy,h("span","badge "+(project.activeDeploymentId?"success":""),project.activeDeploymentId?"Deployed":"Not deployed"),h("span","project-arrow","Open"));list.append(link);});}
-  async function renderDetail(version){var query="?organizationId="+encodeURIComponent(state.organizationId)+"&projectId="+encodeURIComponent(state.projectId),organizationRequest=window.RendroUI.organizationContext.access(ui,state.organizationId);organizationRequest.then(function(organization){if(active())setChrome(organization);}).catch(function(){});var historyRequest=ui.request("/api/rendro/deployments"+query).then(function(data){return {data:data};},function(error){return {error:error};});var results=await Promise.all([ui.request("/api/rendro/projects/get"+query),organizationRequest]);if(!active()||version!==loadVersion)return;var project=results[0].project,command="rendro push --organization "+state.organizationId+" --project "+state.projectId;applyOrganization(results[1]);document.querySelector(".cp-page-heading").textContent=project.name;document.querySelector(".cp-page-description").textContent="Immutable deployment history and publication controls for "+project.slug+".";mount.innerHTML=tabs()+(canManage?'':'<p class="access-note" role="status">You have read-only project access. Owners and admins manage publications and revoke private shares.</p>')+'<div class="project-overview"><section class="panel panel-pad"><div class="panel-head"><div><h2>Project overview</h2><p>Stable identifiers and current release state.</p></div><span class="badge '+(project.activeDeploymentId?"success":"")+'">'+(project.activeDeploymentId?"Active":"Setup required")+'</span></div><dl class="detail-list"><div><dt>Project ID</dt><dd id="project-id"></dd></div><div><dt>Slug</dt><dd id="project-slug"></dd></div><div><dt>Active deployment</dt><dd id="active-deployment"></dd></div><div><dt>Created</dt><dd id="project-created"></dd></div></dl></section><aside class="panel panel-pad"><div class="panel-head"><div><h2>Publish from the CLI</h2><p>Pushes stage files, verify a manifest, then atomically move the active pointer.</p></div></div><div class="command"><code id="push-command"></code><button class="button small" id="copy-command" type="button">Copy</button></div><div class="project-actions"><a class="button primary" href="'+base+'/'+encodeURIComponent(state.projectId)+'/docs">Open documentation</a><a class="button" href="'+base+'/'+encodeURIComponent(state.projectId)+'/publications">'+(canManage?'Manage publications':'View publications')+'</a></div></aside></div><section class="panel panel-pad deployments-panel" id="deployments"><div class="panel-head"><div><h2>Deployment history</h2><p>Immutable releases, newest first.</p></div><span class="count-note" id="deployment-count"></span></div><div class="deployment-list" id="deployment-list"></div></section>';document.getElementById("project-id").textContent=project._id;document.getElementById("project-slug").textContent=project.slug;document.getElementById("active-deployment").textContent=project.activeDeploymentId||"None yet";document.getElementById("project-created").textContent=new Date(project.createdAt).toLocaleDateString();document.getElementById("push-command").textContent=command;document.getElementById("copy-command").addEventListener("click",function(){ui.copyText(this,command,"Copy").catch(function(){if(active())ui.toast("Unable to copy. Select the command and copy it manually.","error");});});loadDeploymentHistory(version,query,historyRequest);}
+  function publishPanel(command){var panel=h("aside","panel panel-pad deployments-panel");panel.innerHTML='<div class="panel-head"><div><h2>Publish from the CLI</h2><p>Pushes stage files, verify a manifest, then atomically move the active pointer.</p></div></div><div class="command"><code></code><button class="button small" type="button">Copy</button></div>';panel.querySelector("code").textContent=command;panel.querySelector("button").addEventListener("click",function(){ui.copyText(this,command,"Copy").catch(function(){if(active())ui.toast("Unable to copy. Select the command and copy it manually.","error");});});return panel;}
+  async function renderDetail(version){
+    var query="?organizationId="+encodeURIComponent(state.organizationId)+"&projectId="+encodeURIComponent(state.projectId),deploymentsPage=state.section==="deployments",organizationRequest=window.RendroUI.organizationContext.access(ui,state.organizationId);
+    organizationRequest.then(function(organization){if(active())setChrome(organization);}).catch(function(){});
+    var historyRequest=deploymentsPage?ui.request("/api/rendro/deployments"+query).then(function(data){return {data:data};},function(error){return {error:error};}):null;
+    var results=await Promise.all([ui.request("/api/rendro/projects/get"+query),organizationRequest]);
+    if(!active()||version!==loadVersion)return;
+    var project=results[0].project,command="rendro push --organization "+state.organizationId+" --project "+state.projectId;
+    applyOrganization(results[1]);
+    document.querySelector(".cp-page-heading").textContent=deploymentsPage?"Deployments":project.name;
+    document.querySelector(".cp-page-description").textContent=deploymentsPage?"Release history for "+project.name+" ("+project.slug+"), newest first.":"Immutable deployments and publication controls for "+project.slug+".";
+    mount.innerHTML=tabs()+(canManage?'':'<p class="access-note" role="status">You have read-only project access. Owners and admins manage publications and revoke private shares.</p>');
+    if(deploymentsPage){
+      mount.insertAdjacentHTML("beforeend",${JSON.stringify(renderDeploymentHistoryPanel())});
+      mount.append(publishPanel(command));
+      loadDeploymentHistory(version,query,historyRequest);
+      return;
+    }
+    mount.insertAdjacentHTML("beforeend",'<div class="project-overview"><section class="panel panel-pad"><div class="panel-head"><div><h2>Project overview</h2><p>Stable identifiers and current release state.</p></div><span class="badge '+(project.activeDeploymentId?"success":"")+'">'+(project.activeDeploymentId?"Active":"Setup required")+'</span></div><dl class="detail-list"><div><dt>Project ID</dt><dd id="project-id"></dd></div><div><dt>Slug</dt><dd id="project-slug"></dd></div><div><dt>Active deployment</dt><dd id="active-deployment"></dd></div><div><dt>Created</dt><dd id="project-created"></dd></div></dl></section></div>');
+    document.getElementById("project-id").textContent=project._id;
+    document.getElementById("project-slug").textContent=project.slug;
+    document.getElementById("active-deployment").textContent=project.activeDeploymentId||"None yet";
+    document.getElementById("project-created").textContent=new Date(project.createdAt).toLocaleDateString();
+    var panel=publishPanel(command);panel.classList.remove("deployments-panel");
+    panel.insertAdjacentHTML("beforeend",'<div class="project-actions"><a class="button primary" href="'+base+'/'+encodeURIComponent(state.projectId)+'/docs">Open documentation</a><a class="button" href="'+base+'/'+encodeURIComponent(state.projectId)+'/publications">'+(canManage?'Manage publications':'View publications')+'</a></div>');
+    mount.querySelector(".project-overview").append(panel);
+  }
   var deploymentVersion=0;
-  async function loadDeploymentHistory(version,query,pending){var current=++deploymentVersion,list=document.getElementById("deployment-list");list.innerHTML='<div class="loading-view" role="status" aria-label="Loading deployment history"><div class="skeleton skeleton-field"></div></div>';var result=await (pending||ui.request("/api/rendro/deployments"+query).then(function(data){return {data:data};},function(error){return {error:error};}));if(!active()||version!==loadVersion||current!==deploymentVersion)return;if(result.error){list.innerHTML='<div class="mini-empty" role="status"><p>Deployment history could not be loaded.</p><button class="button" type="button">Try again</button></div>';list.querySelector("button").onclick=function(){loadDeploymentHistory(version,query);};return;}var deployments=result.data.deployments||[];document.getElementById("deployment-count").textContent=deployments.length+" total";list.innerHTML="";if(!deployments.length){list.innerHTML='<div class="mini-empty">No deployments yet. Run the CLI command above to create the first immutable release.</div>';return;}deployments.forEach(function(deployment,index){var source=deployment.provenance&&deployment.provenance.source||{},row=h("div","deployment-row");var status=h("span","cell-primary");status.append(h("strong","",index===0&&deployment.status==="active"?"Active deployment":deployment.status),h("span","cell-secondary",new Date(deployment.createdAt).toLocaleString()));var provenance=h("span","cell-primary");provenance.append(h("strong","",source.commit?source.commit.slice(0,12):source.localPathLabel||"Local source"),h("span","cell-secondary",source.dirty?"Uncommitted source changes":"Source provenance"));var size=h("span","cell-primary");size.append(h("strong","",String(deployment.fileCount)+" files"),h("span","cell-secondary",Math.round(deployment.byteCount/1024)+" KB"));row.append(status,provenance,size,h("span","badge "+(deployment.status==="active"?"success":""),deployment.status));list.append(row);});}
+  async function loadDeploymentHistory(version,query,pending){
+    var current=++deploymentVersion,list=document.getElementById("deployment-list"),wrapper=list.closest(".deployment-table-wrap");
+    wrapper.classList.add("loading-view");wrapper.setAttribute("aria-busy","true");
+    if(!list.querySelector(".skeleton-table-row"))list.innerHTML=${JSON.stringify(deploymentHistoryLoading())};
+    var result=await (pending||ui.request("/api/rendro/deployments"+query).then(function(data){return {data:data};},function(error){return {error:error};}));
+    if(!active()||version!==loadVersion||current!==deploymentVersion)return;
+    wrapper.classList.remove("loading-view");wrapper.setAttribute("aria-busy","false");wrapper.removeAttribute("aria-label");
+    if(result.error){list.innerHTML='<tr><td colspan="4"><div class="mini-empty" role="status"><p>Deployment history could not be loaded.</p><button class="button" type="button">Try again</button></div></td></tr>';list.querySelector("button").onclick=function(){loadDeploymentHistory(version,query);};return;}
+    var deployments=result.data.deployments||[];
+    document.getElementById("deployment-count").textContent=deployments.length+" shown";
+    list.innerHTML="";
+    if(!deployments.length){list.innerHTML='<tr><td colspan="4"><div class="mini-empty" role="status">No deployments yet. Run the CLI command below to create the first immutable release.</div></td></tr>';return;}
+    deployments.forEach(function(deployment){
+      var source=deployment.provenance&&deployment.provenance.source||{},row=h("tr","deployment-row");
+      var identity=h("span","cell-primary");
+      identity.append(h("strong","",deployment._id),h("span","cell-secondary",new Date(deployment.createdAt).toLocaleString()));
+      var provenance=h("span","cell-primary");
+      provenance.append(h("strong","",source.commit?source.commit.slice(0,12):source.localPathLabel||"Local source"),h("span","cell-secondary",source.dirty?"Uncommitted source changes":"Source provenance"));
+      var size=h("span","cell-primary");
+      size.append(h("strong","",String(deployment.fileCount)+" files"),h("span","cell-secondary",Math.round(deployment.byteCount/1024)+" KB"));
+      if(deployment.failureReason)provenance.append(h("span","deployment-failure",deployment.failureReason));
+      [identity,provenance,size,h("span","badge "+(deployment.status==="active"?"success":deployment.status==="failed"?"danger":""),deployment.status)].forEach(function(content,index){var cell=h("td");cell.setAttribute("data-label",["Deployment","Source","Files","Status"][index]);cell.append(content);row.append(cell);});
+      list.append(row);
+    });
+  }
 
   var form=document.getElementById("project-form"),name=form.elements.namedItem("name"),slug=form.elements.namedItem("slug"),touched=false;slug.addEventListener("input",function(){touched=true;});name.addEventListener("input",function(){if(!touched)slug.value=slugify(name.value);});form.addEventListener("submit",async function(event){event.preventDefault();var button=form.querySelector("button[type=submit]"),error=document.getElementById("project-error");if(button.getAttribute("aria-busy")==="true")return;error.textContent="";if(!canManage){error.textContent="Only organization owners and admins can create projects.";return;}ui.busy(button,true);try{var result=await ui.request("/api/rendro/projects",{method:"POST",body:JSON.stringify({organizationId:state.organizationId,name:name.value.trim(),slug:slug.value.trim()})});if(!active())return;ui.busy(button,false);document.getElementById("project-dialog").close();var destination=base+"/"+encodeURIComponent(result.project._id);if(window.RendroUI.navigate)await window.RendroUI.navigate(destination);else location.assign(destination);}catch(reason){if(!active())return;error.textContent=reason.message;ui.busy(button,false);}});
   async function load(){var version=++loadVersion;if(version>1||!mount.querySelector(".loading-view"))mount.innerHTML=state.projectId?detailLoading:loading;try{await (state.projectId?renderDetail(version):renderList(version));}catch(error){if(!active()||version!==loadVersion)return;mount.innerHTML='<section class="panel empty"><span class="empty-mark material-symbols-outlined" aria-hidden="true">error</span><h2>Unable to load projects</h2><p></p><button class="button" type="button">Try again</button></section>';mount.querySelector("p").textContent=error.message;mount.querySelector("button").addEventListener("click",load);}}
@@ -30,11 +80,11 @@ const projectPageScript = String.raw`
 })();
 `;
 
-function renderProjectPage(user: User, organizationId: string, projectId = ""): string {
-  const loadingPage = renderProjectLoadingPage(organizationId, projectId);
+function renderProjectPage(user: User, organizationId: string, projectId = "", section: "overview" | "deployments" = "overview"): string {
+  const loadingPage = renderProjectLoadingPage(organizationId, projectId, section);
   return renderControlPlanePage({
     user,
-    title: projectId ? "Project" : "Projects",
+    title: section === "deployments" ? "Deployments" : projectId ? "Project" : "Projects",
     eyebrow: loadingPage.eyebrow,
     heading: loadingPage.heading,
     description: loadingPage.description,
@@ -42,7 +92,7 @@ function renderProjectPage(user: User, organizationId: string, projectId = ""): 
     projectId: projectId || undefined,
     active: "projects",
     actions: loadingPage.actions,
-    state: { organizationId, projectId, userId: user.id, projectNavigation: projectId ? renderProjectNavigation(organizationId, projectId, "overview") : "" },
+    state: { organizationId, projectId, section, userId: user.id, projectNavigation: projectId ? renderProjectNavigation(organizationId, projectId, section) : "" },
     content: loadingPage.content + '<dialog class="cp-dialog" id="project-dialog"><div class="dialog-head"><div><h2>Create project</h2><p>Use one project per independently deployed documentation product.</p></div><button class="dialog-close" type="button" data-dialog-close aria-label="Close project dialog">Close</button></div><form id="project-form"><div class="dialog-body"><div class="form-grid"><label class="field"><span>Project name</span><input class="input" name="name" required maxlength="80" placeholder="Product documentation" disabled></label><label class="field"><span>Project slug</span><input class="input" name="slug" required maxlength="48" pattern="[a-z0-9]+(?:-[a-z0-9]+)*" placeholder="product-docs" disabled><small>Generated from the name until you edit it.</small></label><p class="message error" id="project-error" role="alert"></p></div></div><div class="dialog-footer"><button class="button" type="button" data-dialog-close>Cancel</button><button class="button primary" type="submit" disabled><span class="button-label">Create project</span></button></div></form></dialog>',
     script: organizationContextScript + projectPageScript,
   });
@@ -63,6 +113,15 @@ app.get("/organizations/:organizationId/projects/:projectId", (c) => {
   const returnTo = `/organizations/${encodeURIComponent(organizationId)}/projects/${encodeURIComponent(projectId)}`;
   if (!user) return c.redirect(`/sign-in?returnTo=${encodeURIComponent(returnTo)}`);
   return c.html(renderProjectPage(user, organizationId, projectId));
+});
+
+app.get("/organizations/:organizationId/projects/:projectId/deployments", (c) => {
+  const organizationId = c.req.param("organizationId");
+  const projectId = c.req.param("projectId");
+  const user = c.get("user");
+  const returnTo = `/organizations/${encodeURIComponent(organizationId)}/projects/${encodeURIComponent(projectId)}/deployments`;
+  if (!user) return c.redirect(`/sign-in?returnTo=${encodeURIComponent(returnTo)}`);
+  return c.html(renderProjectPage(user, organizationId, projectId, "deployments"));
 });
 
 export default app;
