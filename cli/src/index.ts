@@ -412,7 +412,7 @@ Options:
   --concurrency  Parallel uploads (default: 8)
 
 Auth: set RENDRO_API_KEY in your environment. Create a scoped key from
-      Organization settings → API keys.
+      your organization's API keys page.
 `);
 }
 

@@ -12,10 +12,9 @@ npx --yes rendro@2.0.0 --version
 npm install -g rendro@2.0.0
 ```
 
-The legacy `rendro@1.0.0` uses `--org` / `--repo` and is not compatible with the
-project-based commands below. The `latest` tag is independent of this explicit
-version; do not use an unversioned install in CI. Verify server compatibility
-before migrating an existing production workflow.
+The CLI has no runtime dependencies. The `latest` tag is independent of this
+explicit version; do not use an unversioned install in CI. If you are upgrading
+from 1.x, see [Migrating from 1.x](#migrating-from-1x).
 
 Build the current CLI from a trusted checkout:
 ```bash
@@ -27,16 +26,20 @@ node bin/rendro.mjs --help
 ## Quick Start
 
 1. Sign in to your Rendro deployment. These examples target [dev.rendro.app](https://dev.rendro.app).
-2. Create an organization and project, then create a project-scoped API key.
+2. Create an organization and project, then create an API key scoped to that project.
    Use the organization and project **IDs**, not their slugs, from onboarding.
-3. Push your docs:
+3. Optionally scaffold a docs folder:
+   ```bash
+   npx --yes rendro@2.0.0 init --source ./docs
+   ```
+4. Push your docs:
    ```bash
    # Set RENDRO_API_KEY securely in your environment; never commit it.
    npx --yes rendro@2.0.0 push --source ./docs \
      --organization <organization-id> --project <project-id> \
      --endpoint https://dev.rendro.app
    ```
-4. From a trusted GitHub Actions workflow, keep the organization tree private or publish an uploaded folder at a stable public URL:
+5. From a trusted GitHub Actions workflow, keep the project private or publish an uploaded folder at a stable public URL:
    ```bash
    npx --yes rendro@2.0.0 publication create \
      --organization <organization-id> --project <project-id> \
@@ -48,7 +51,51 @@ CI must use a pinned compatible CLI, a scoped repository secret, and trusted bra
 deployment credentials available to untrusted pull-request code. Use
 `--endpoint https://dev.rendro.app` for disposable QA rather than production.
 
+## Commands
+
+| Command | Purpose |
+|---|---|
+| `rendro init --source <dir>` | Create `<dir>/index.html` plus empty `onboarding/`, `api/`, and `engineering/` folders |
+| `rendro push --source <dir> --organization <id> --project <id>` | Upload a new immutable deployment and activate it |
+| `rendro publication create --organization <id> --project <id> --slug <slug>` | Publish a folder of the project at `/p/<slug>` |
+| `rendro publication list --organization <id> --project <id>` | List the project's publications |
+| `rendro publication remove --organization <id> --project <id> --id <publication-id>` | Remove a publication |
+| `rendro --version` | Print the CLI version |
+
+| Option | Applies to | Default |
+|---|---|---|
+| `--source <dir>` | `init`, `push` | `./docs` |
+| `--endpoint <url>` | `push`, `publication` | `https://rendro.app` |
+| `--concurrency <n>` | `push` | `8` parallel uploads |
+| `--path <prefix>` | `publication create` | Deployment root |
+| `--entry <file>` | `publication create` | `index.html` (relative to `--path`) |
+| `--title <title>` | `publication create` | The slug |
+| `--pin <deployment-id>` | `publication create` | Track the active deployment |
+
+`push` and `publication` read the API key from `RENDRO_API_KEY`.
+
+### API key scopes
+
+Organization owners and admins create keys on the organization's API keys page. A key can be limited to one project and given an expiry. The secret is shown once.
+
+| Command | Required scopes |
+|---|---|
+| `push` | `docs:read`, `docs:write` |
+| `publication create` | `docs:read`, `publications:write` |
+| `publication list` | `publications:read` |
+| `publication remove` | `publications:write` |
+
+### How push works
+
+The CLI walks the source folder (skipping dot-folders and `node_modules`), computes a SHA-256 manifest, and compares it with the active deployment. Unchanged files are copied server-side from the active deployment; only changed files are uploaded. The new deployment becomes active only after every file in the manifest is present. If a copy, upload, or commit fails, the CLI marks the new deployment failed and the previous deployment stays active.
+
+A publication created without `--pin` follows the project's active deployment. With `--pin`, it keeps serving that deployment after later pushes.
+
 ## Migrating from 1.x
+
+The legacy `rendro@1.0.0` uses `--org` / `--repo` and is not compatible with the
+project-based commands above. Verify server compatibility before migrating an
+existing production workflow.
 
 - Create a project and scoped API key; use the organization and project IDs, not legacy slugs.
 - Replace `--org` / `--repo` with `--organization` / `--project`, and specify the endpoint.
@@ -57,24 +104,25 @@ deployment credentials available to untrusted pull-request code. Use
 
 ## Features
 
-- **Zero frontend** — raw HTML streamed from blob storage, no build step
-- **Lazy tree** — VS Code-style sidebar, loads one level at a time
+- **Zero frontend** — publisher HTML is served as uploaded, with no build step
+- **Document tree** — sidebar tree with collapsible folders
 - **Inline comments** — select text, leave threaded comments (Convex real-time)
-- **Dark mode** — matches system preference
-- **CI/CD native** — hash-based diffing, uploads only changed files
-- **Immutable deployments** — activation is atomic; pinned releases retain older documents
-- **API key auth** — scoped credentials and explicit organization/project membership boundaries
+- **Theme** — system, dark, and light modes for the Rendro interface
+- **CI/CD native** — SHA-256 manifests; only changed files are uploaded
+- **Immutable deployments** — activation is atomic; pinned publications retain older deployments
+- **Scoped API keys** — explicit scopes, optional project binding and expiry
 - **Public folders** — explicitly publish one uploaded folder at a stable, anonymous read-only URL
+- **Private shares** — revocable, expiring links to a single document
 
 ## Tech Stack
 
 | Layer | Choice |
 |---|---|
-| Host | Cloudflare Workers |
-| Storage | Cloudflare R2 |
-| Auth | Convex + better-auth + Google OAuth |
-| Comments | Convex |
-| CLI | Node.js (zero dependencies) |
+| Host | Cloudflare Workers (Hono) |
+| Document storage | Cloudflare R2 (S3 API) |
+| Metadata | Convex (projects, deployments, publications, shares, API keys, comments) |
+| Auth | Better Auth on Convex: Google OAuth or email/password with email verification; organizations and teams |
+| CLI | Node.js 22+ (zero runtime dependencies) |
 
 ## License
 

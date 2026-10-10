@@ -45,4 +45,4 @@ Deployed HTTP authorization matrix on the earlier candidate passed 65/65, run `7
 
 ## Open production gates
 
-See [production release gates](PRODUCTION-RELEASE-GATES.md). Email is parked by the user, not passed. Remaining T3 visual/mobile/keyboard checks above, Firefox/Safari/device coverage, load/field baselines, client monitoring and alert routing, restore/rollback rehearsal, CI enforcement and explicit production rollout approval remain open. No production-readiness guarantee is claimed.
+See [production release gates](../PRODUCTION-RELEASE-GATES.md). Email is parked by the user, not passed. Remaining T3 visual/mobile/keyboard checks above, Firefox/Safari/device coverage, load/field baselines, client monitoring and alert routing, restore/rollback rehearsal, CI enforcement and explicit production rollout approval remain open. No production-readiness guarantee is claimed.

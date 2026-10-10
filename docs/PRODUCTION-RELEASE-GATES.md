@@ -31,9 +31,9 @@ the release evidence, not only mocked storage tests.
 
 ## Automated verification
 
-Run `pnpm verify` (typecheck, lint, complete unit/regression suite, browser asset build, whitespace check) and `pnpm audit --audit-level=high` before a DEV candidate. `.github/workflows/quality.yml` adds these checks for PRs, main/development pushes and manual runs, with read-only repository permission and no deployment credentials. The workflow is a local change until committed/pushed. Requiring its status through branch protection still needs repository-owner configuration.
+Run `pnpm verify` (typecheck, lint, complete unit/regression suite, browser asset build, whitespace check) and `pnpm audit --audit-level=high` before a DEV candidate. `.github/workflows/quality.yml` adds these checks for PRs, main/development pushes and manual runs, with read-only repository permission and no deployment credentials. Requiring its status through branch protection still needs repository-owner configuration.
 
-Run `node scripts/run-permission-qa.mjs` deliberately against the development deployment, never production. Require every expected permission response to match and synthetic fixture cleanup to report zero remaining records. This is not a replacement for real signed-in multi-user browser testing.
+Run `node scripts/run-permission-qa.mjs` deliberately against the development deployment, never production (see [Development QA fixtures](TECHNICAL.md#development-qa-fixtures)). Require every expected permission response to match and synthetic fixture cleanup to report zero remaining records. This is not a replacement for real signed-in multi-user browser testing.
 
 ## Screen refresh contract
 
@@ -46,7 +46,7 @@ Run `node scripts/run-permission-qa.mjs` deliberately against the development de
 | Onboarding | Existing fresh polling; outside enhanced-navigation cache | Actual deployment state drives completion. |
 | Every management screen | Public, version-matched SSR-derived controllers/templates; fresh account/membership gate before management reads are released. SSR first load and authenticated-HTML fallback; no private HTML cache | Reconnect, visibility resume or cross-tab writes offer Refresh. Refresh invalidates and reloads only after dialog/write/draft guards permit it. No silent form reset or implied live synchronization. |
 
-Latest implementation and evidence: [management content performance, September 16](MANAGEMENT-CONTENT-PERFORMANCE-2026-09-16.md). The public controller bundle must be rebuilt and its shared shell version bumped when controller/template code changes. Deployment includes the new Convex access/recent-deployment endpoints before the frontend switches to them.
+Historical implementation evidence: [management content performance, September 16](archive/MANAGEMENT-CONTENT-PERFORMANCE-2026-09-16.md). The public controller bundle must be rebuilt and `MANAGEMENT_SHELL_VERSION` (`src/routes/management-navigation.ts`) bumped when controller/template code changes. Deployment includes the new Convex access/recent-deployment endpoints before the frontend switches to them.
 
 ## Required before a production rollout
 
@@ -58,11 +58,9 @@ Latest implementation and evidence: [management content performance, September 1
 6. Backup/restore rehearsal on disposable data, including database/storage consistency, plus an exercised rollback to an identified previous Worker version. Never test restore over user data.
 7. Explicit production release approval identifying version, rollback version, rollout fractions, observation duration, minimum sample size, abort thresholds and owner. Start with the agreed small canary; advance only after the observation gate passes, and roll back on breached thresholds. Do not improvise percentages or deploy production before these decisions exist.
 
-## Dependency findings (2026-09-15)
+## Dependency findings (2026-09-15) — superseded
 
-Compatible updates to Hono, the Node adapter, Wrangler and affected transitive dependencies reduced the audit from 12 high findings to **zero critical/high**. Two moderate findings remain in Vitest 3 / `@vitest/mocker` ([advisory](https://github.com/advisories/GHSA-82fw-gwwq-j7x9)). They concern test-server file access, not shipped browser code. Current verification uses `vitest run`, not an exposed test UI/server. Patched versions require a Vitest 4 migration; this is deferred, not silently accepted as risk-free. Release-owner acceptance or migration remains necessary.
-
-Wrangler's optional Workers Types 5 peer differs from the Workers Types 4 peer used by the current authentication toolchain. Typecheck/build/deploy are verified, but reconciling that tooling peer constraint remains a follow-up. No broad authentication-stack upgrade was made merely to silence the warning.
+The September 15 audit findings (moderate Vitest 3 advisories) are superseded by the October 10 audit below; Vitest is now on 4.x. That report also noted that Wrangler's optional Workers Types 5 peer differs from the Workers Types 4 peer used by the authentication toolchain; this has not been re-checked since. Run `pnpm audit --audit-level=high` for the current state.
 
 ## Release-owner deployment request (2026-10-10)
 
@@ -77,6 +75,6 @@ No restore was performed over production data.
 A fresh audit superseded the September dependency evidence: new advisories affected
 Tinypool, Undici, Sharp, source-map-js, and fast-copy. Migrating Vitest/coverage to
 4.1.11, updating Wrangler to 4.149.0, and refreshing the affected transitive patch
-versions produced **no known vulnerabilities**. The 502-test suite, lint, and
+versions produced **no known vulnerabilities**. The full test suite, lint, and
 typecheck passed with the new versions. The canonical `pnpm run deploy` now rebuilds
 browser assets instead of relying on an earlier build in the operator's checkout.

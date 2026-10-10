@@ -9,128 +9,151 @@ What the product is, who it serves, how it evolved, and how users experience it.
 
 ## What is Rendro?
 
-Rendro is a documentation hosting platform that turns static HTML files into a live, searchable knowledge base. Teams write docs as plain HTML in their code repos, push via CLI, and Rendro serves them instantly with a VS Code-style sidebar tree, inline comments, and dark mode.
+Rendro hosts static HTML documentation. Teams write docs as plain HTML in their code repositories, push them with the CLI, and read them in a viewer with a sidebar tree and inline comments.
 
-It is the alternative to Confluence or Notion for teams that want their docs version-controlled alongside their code, edited as plain HTML, and deployed in seconds — not via a clunky editor.
+It is for teams that want docs version-controlled alongside their code, edited as plain HTML, and deployed from CI — not written in a hosted editor.
 
 ## The Problem It Solves
 
 **Before Rendro:**
 - Docs live in a separate tool (Confluence, Notion) → out of sync with code
 - Docs require a build pipeline (Docusaurus, Nextra) → slow iteration
-- Docs need a CMS login → extra friction for engineers
-- Docs don't support inline comments → feedback via Slack/email
+- Feedback on docs happens in Slack or email, away from the text
 
 **With Rendro:**
-- Docs are HTML files in the same repo as code → always in sync
-- Push to Git, CI uploads automatically → under 40 seconds to live
-- No separate auth — sign in with Google, org derived from email
-- Select text, leave comments → threaded, real-time, in context
+- Docs are HTML files in the same repo as code
+- CI runs `rendro push`; only changed files are uploaded
+- Each push is an immutable deployment that becomes active atomically
+- Readers select text and leave threaded comments in context
+- Publishing publicly is a separate, explicit step
+
+## Core Concepts
+
+| Concept | What it is |
+|---|---|
+| **Organization** | The security boundary. Members have one role: `owner`, `admin`, or `member` |
+| **Team** | A named group of organization members. Teams do not currently grant or restrict project access |
+| **Project** | A documentation product inside an organization. It has one active deployment at a time |
+| **Deployment** | An immutable snapshot of the uploaded folder, with a SHA-256 manifest and provenance (git commit, ref, CI run, CLI version) |
+| **API key** | A credential for the CLI and CI, bound to one organization, optionally to one project, with explicit scopes and an optional expiry |
+| **Publication** | An explicit public mapping of one project folder to `/p/:slug`. It tracks the active deployment or is pinned to one |
+| **Private share** | A revocable, expiring link (`/s/:token`) to one document in one deployment |
 
 ## The People
 
-### Visitors (readers)
+### Members (readers)
 
-Members of an organization who read documentation:
-1. Visit `rendro.app`
-2. Sign in with Google (`alice@acme-corp.com`)
-3. See their org's docs in the sidebar tree
-4. Click files to read, expand folders to navigate
-5. Select text to leave comments
-
-Public documentation visitors do not sign in. They open a publication URL shared by a publisher and can navigate only within that explicitly published folder.
+1. Sign in with Google, or with email and password (email verification required)
+2. Choose an organization at `/organizations`
+3. Open a project's documentation
+4. Expand folders in the sidebar tree and read documents
+5. Select text to leave comments; reply, resolve, or archive threads
+6. Create a private share link for a single document
 
 ### Publishers (writers)
 
-Engineers who write and maintain documentation:
-1. Create HTML files in their repo's `docs/` folder
-2. Push to Git → CI runs `rendro push`
-3. CLI hashes files, uploads only changed ones
-4. Docs are live within 40 seconds
-5. CI can optionally publish an uploaded folder at a stable, anonymous read-only URL; the authenticated docs UI exposes no publishing controls
+1. Create HTML files in the repo's `docs/` folder (`rendro init` scaffolds one)
+2. Push to Git → CI runs `rendro push` with a scoped API key
+3. The CLI hashes files, reuses unchanged files server-side, and uploads only changed ones
+4. The new deployment becomes active only when every file is present
+5. Optionally publish a folder at a stable, anonymous read-only URL with `rendro publication create`
 
-### Admins (org creators)
+### Owners and admins
 
-First user from a new domain:
-1. Signs in with Google
-2. Sees "Create your org" form (slug auto-filled from email)
-3. Submits → org folder created in R2, API key generated
-4. Shares API key with team for CI/CD
+1. Create the organization and invite people (invitations expire after 7 days and require a verified email)
+2. Assign roles, create teams, and manage team membership
+3. Create projects, API keys, and publications; revoke keys, publications, and private shares
 
-## The Visitor Experience
+Members can read projects, deployments, and publications, comment, and create private shares. They cannot create projects, API keys, or publications.
 
-### Authentication
-- One click: "Sign in with Google"
-- No org selection, no URL paths, no setup
-- Email domain determines which docs you see
+### Anonymous visitors
+
+- Open a publication URL (`/p/:slug`) and navigate only within that published folder
+- Open a private share URL (`/s/:token`) and see only that document and its same-folder assets
+
+## Onboarding
+
+New organizations go through three steps at `/organizations/:id/onboarding`:
+
+1. **Organization** — name and slug
+2. **Project** — the first documentation project
+3. **First deployment** — create a project-scoped API key, copy the generated `npx --yes rendro@<version> push …` command (pinned to the CLI version and pointing at the current site), and push. The page polls until the first deployment is active and then links to the documentation.
+
+## The Reader Experience
 
 ### Navigation
-- **Sidebar tree**: folders expand on click, files load in content area
-- **Lazy loading**: large directories load one level at a time
-- **Infinite scroll**: "Load more" button for directories with 50+ files
-- **Breadcrumb-free**: tree shows your location with an active indicator
-- **Cross-doc links**: clicking a link in one doc navigates to another, tree follows
+- **Sidebar tree**: folders expand on click, files load in the content area
+- **Active indicator**: shows the current document; the row shimmers while it loads
+- **Cross-doc links**: clicking a link in one document navigates to another, and the tree follows
+- **History**: the selected document is in the URL (`?doc=<path>`), so Back/Forward and deep links work
+- **Shell**: the tree can be resized or hidden (Ctrl/Cmd+Shift+H)
+- **Mobile**: the tree opens as a drawer; secondary toolbar actions move into a "More document actions" menu
 
 ### Reading
-- **Raw HTML**: docs render exactly as the publisher wrote them
-- **No imposed theme**: the publisher owns the styling
-- **Dark mode**: toggle in header, persists across sessions
-- **Responsive**: works on desktop and tablet
+- **Raw HTML**: docs render exactly as the publisher wrote them, in a sandboxed iframe
+- **No imposed theme**: the publisher owns the document's styling
+- **Theme**: the Rendro interface cycles between system, dark, and light; the choice persists and syncs across tabs
 
 ### Interacting
-- **Inline comments**: select any text, leave a comment
-- **Threaded replies**: reply to comments in context
-- **Real-time**: comments appear instantly via Convex
-- **Share**: copy a signed public document URL with one click and inline confirmation
+- **Inline comments**: select text or an element, leave a comment
+- **Threaded replies**, resolve/reopen, archive/unarchive, delete with undo
+- **Real-time**: comments update live through Convex
+- **Share**: the toolbar creates a private share link valid for 7 days and copies it
 
-### Org Isolation
-- Users from `acme-corp.com` only see `acme-corp/` docs
-- Cross-org access blocked at three layers (auth, derivation, storage)
-- No permission tables, no role management
+Comments are available in the signed-in project viewer, not on publications or private shares.
 
 ## The Publisher Experience
 
 ### Writing
-- Any text editor: VS Code, Vim, Notepad
-- Any structure: nested folders mirror the URL structure
+- Any text editor
+- Any structure: nested folders become the tree
 - Any styling: inline CSS, CDN stylesheets, custom fonts
-- Any content: code blocks, tables, callouts, images, scripts
+- Any content: code blocks, tables, images, scripts (scripts run inside the sandbox)
 
 ### Pushing
 ```bash
-# One command
-rendro push --source ./docs --org my-org
+rendro push --source ./docs --organization <organization-id> --project <project-id>
 
 # What happens:
-# 1. Walk docs/ directory
-# 2. MD5-hash each file
-# 3. Check server for matches (skip unchanged)
-# 4. Upload changed/new files
-# 5. Soft-delete removed files
+# 1. Walk docs/ and compute SHA-256 + size for each file
+# 2. Compare with the active deployment's manifest
+# 3. Start a new staging deployment
+# 4. Copy unchanged files server-side (16 per request)
+# 5. Upload changed files (8 in parallel by default)
+# 6. Commit: verify every manifest file is present, then activate
 ```
+
+Files removed from the source are simply absent from the new deployment. Nothing is overwritten in place.
 
 ### CI/CD
 ```yaml
-# .github/workflows/sync-docs.yml
+# .github/workflows/docs.yml
 on:
   push:
     branches: [main]
 jobs:
-  sync:
+  deploy-docs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Sync docs
+      - uses: actions/setup-node@v4
+        with: { node-version: "22" }
+      - name: Deploy docs
         env:
           RENDRO_API_KEY: ${{ secrets.RENDRO_API_KEY }}
-        run: rendro push --source ./docs --org my-org
+        run: >
+          npx --yes rendro@2.0.0 push --source ./docs
+          --organization <organization-id> --project <project-id>
+          --endpoint https://rendro.app
 ```
 
-### Performance
-- **First push** (100 files): ~10 seconds
-- **Incremental push** (2 changed): <1 second
-- **Hash-based**: content determines staleness, not timestamps
-- **Parallel**: concurrent uploads (default 5)
+Pin the CLI version and run deployments only from trusted branches, never from untrusted pull-request code.
+
+### Publishing
+- `rendro publication create --slug <slug> [--path <folder>] [--entry <file>] [--pin <deployment-id>]`
+- Without `--pin`, the publication follows each new active deployment
+- With `--pin`, it keeps serving that deployment; retention will not delete a pinned deployment
+- Publications can also be created and removed from the project's Publications page
 
 ## The Product Model
 
@@ -144,40 +167,31 @@ This gives us:
 - **Diff for free** — every change is a git diff
 - **Reviews for free** — pull requests, code review, Git workflows
 
-### One Bucket, Many Tenants
+### Storage
 
-All files for all orgs live in a single R2 bucket. The org slug is the prefix:
+Document bytes live in one R2 bucket under opaque IDs:
 
 ```
-rendro-docs/
-├── gmail/
-│   ├── index.html
-│   └── api/
-│       └── reference.html
-└── acme-corp/
-    └── handbook.html
+tenants/{organizationId}/projects/{projectId}/deployments/{deploymentId}/
+├── manifest.json
+├── tree-index.json
+└── files/…
 ```
 
-No per-org storage account. No separate database. The org slug is the only namespace mechanism.
+Metadata — projects, deployments, publications, shares, API keys, comments, and audit events — lives in Convex. Slugs are display and URL fields only; access is always decided by organization membership or a scoped credential.
 
-### Self-Service Orgs
+### Retention
 
-When a new user signs in:
-1. Email domain → org slug (automatic)
-2. If org exists → see docs
-3. If org doesn't exist → create form (pre-filled)
-
-No admin intervention. No dashboard. No configuration. The email domain IS the org.
+Superseded deployments are kept for 30 days and failed deployments for 24 hours, unless a pinned publication or an unexpired share still references them. A daily job deletes the rest.
 
 ## Feature Timeline
 
-### v0.1 — Core Platform
+### v0.1 — Core Platform (July 2026)
 - SSR doc platform with Hono
 - Sidebar tree with lazy loading
 - Document streaming from MinIO
 - Google OAuth with better-auth + SQLite
 - Email-domain org derivation
-- MinIO blob storage
 
 ### v0.2 — Tree UX
 - Infinite scroll with pagination
@@ -185,73 +199,80 @@ No admin intervention. No dashboard. No configuration. The email domain IS the o
 - Cross-doc navigation (postMessage)
 - Browser history support
 - Dark mode toggle
-- Copy signed URL button with inline confirmation
+- Share button
 
 ### v0.3 — Migration
 - Renamed from docsync to Rendro
 - SQLite → Convex for API keys and soft-delete
 - R2 for production blob storage
-- WorkOS SSO integration (later replaced)
 
 ### v0.4 — Workers
 - Cloudflare Workers deployment
 - DOMParser polyfill for AWS SDK
 - D1 for auth sessions (later replaced)
-- CLI distribution (npm + standalone)
+- CLI distribution (npm package)
 
 ### v0.5 — Convex Auth
 - Auth migrated to Convex component
 - Workers proxy to Convex HTTP actions
 - Cookie forwarding + Domain stripping
 - Session middleware via Convex get-session
-- Convex REST API for Workers compat
+- Convex HTTP API for Workers compatibility
 
 ### v0.6 — Production
 - Inline comments (Convex real-time)
 - Soft-delete with recovery
 - CI/CD with GitHub Actions
-- 200 doc test suite
-- npm package (4.7KB, zero deps)
-- Standalone CLI binary download
+- npm package (zero dependencies)
+
+### v0.7 — Viewer polish (July 2026)
+- Shadcn-style theme with radial theme transition
+- Signed document links
+- Resizable, auto-hiding shell with keyboard shortcut
+- Shared 404 page
+- Comment review workflow (filters, quotes, anchors)
+
+### v0.8 — Public folders (August 2026)
+- Explicit public documentation publishing (legacy `/public/:org/:slug`)
+- Product landing page
+
+### v2.0 — Projects and immutable deployments (August–October 2026)
+- Better Auth organizations with owner/admin/member roles, teams, and invitations
+- Email/password accounts with verification, password recovery, and account security page
+- Projects inside organizations; tenant boundaries enforced by organization ID
+- Scoped, expiring, revocable API keys
+- Atomic immutable deployments with SHA-256 manifests and provenance
+- Tracked or pinned publications at `/p/:slug`; revocable private shares at `/s/:token`
+- Legacy migration and deployment retention jobs
+- Management UI: onboarding, projects, people, teams, settings, API keys, publications, shares
+- CLI 2.0.0 with `--organization` / `--project`, published as an explicit version
 
 ## What Rendro Is Not
 
-- **Not a CMS** — no rich text editor, no media library, no draft/publish workflow
-- **Not multi-user editing** — last push wins, use Git for conflict resolution
-- **Not a wiki** — no cross-linking engine, no built-in search
-- **Not a collaboration tool** — no reactions, no notifications (comments only)
+- **Not a CMS** — no rich text editor, no media library, no draft workflow
+- **Not multi-user editing** — the last push wins; use Git for conflict resolution
+- **Not a wiki** — no cross-linking engine and no search
+- **Not a notification tool** — no reactions, no email notifications for comments
 - **Not a blogging platform** — no RSS, no tags, no archives
-- **Not identity-aware on the read path** — no per-user tracking, no analytics
-
-## Comparisons
-
-| | Rendro | Confluence | Notion | Docusaurus | GitBook |
-|---|---|---|---|---|---|
-| **Content format** | HTML | Rich text | Blocks | Markdown | Markdown |
-| **Version control** | Git | Built-in | Built-in | Git | Git |
-| **Deployment** | CI push | Hosted | Hosted | Build + deploy | Hosted |
-| **Auth** | Google OAuth | Built-in | Built-in | None/plugin | Built-in |
-| **Comments** | Inline | Inline | Inline | None | Inline |
-| **Custom domain** | Yes | Yes | No | Yes | Yes |
-| **Self-hosted** | Yes | No | No | Yes | No |
-| **Editor** | Any text editor | Web | Web | Any text editor | Web |
+- **Not an analytics tool** — no page-view tracking
+- **No custom domains** — publications are served from the Rendro origin
 
 ## Roadmap
 
+These are candidates, not commitments.
+
 ### Short Term
-- Full-text search (Algolia or Lunr integration)
-- Multiple API keys per org
-- Webhook notifications on doc changes
+- Full-text search
+- Webhook notifications on new deployments
 - Markdown-to-HTML conversion in CLI
 
 ### Medium Term
-- Analytics dashboard (page views, popular docs)
-- Org branding (custom logo, colors)
-- PDF export
-- Multi-language support (i18n)
+- Team-based project access
+- Browsing previous deployments in the viewer
+- Analytics (page views, popular docs)
+- Organization branding (logo, colors)
 
 ### Long Term
-- Fine-grained permissions (reader/writer/admin)
-- Doc versioning (view previous versions)
+- Custom domains for publications
+- PDF export
 - Plugin system for custom widgets
-- On-premise deployment option
