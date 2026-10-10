@@ -40,6 +40,10 @@ describe("repository quality gates", () => {
     expect(readFileSync(join(root, ".github/workflows/quality.yml"), "utf8")).toContain("run: pnpm verify");
   });
 
+  it("rebuilds ignored browser assets in the canonical deployment command", () => {
+    expect(scripts.deploy).toBe("pnpm build:assets && wrangler deploy --config wrangler.toml");
+  });
+
   it("allows a clean generated build and unrelated working changes", () => {
     const directory = assetFixture();
     expect(checkAssets(directory).status).toBe(0);

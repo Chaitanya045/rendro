@@ -9,7 +9,7 @@ interface PageScope {
 }
 
 interface RuntimeUi {
-  request: ReturnType<typeof vi.fn>;
+  request: ReturnType<typeof vi.fn<(...args: unknown[]) => Promise<unknown>>>;
   createPageScope(): PageScope;
   navigate(href: string): Promise<boolean>;
 }

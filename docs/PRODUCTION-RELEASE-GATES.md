@@ -63,3 +63,20 @@ Latest implementation and evidence: [management content performance, September 1
 Compatible updates to Hono, the Node adapter, Wrangler and affected transitive dependencies reduced the audit from 12 high findings to **zero critical/high**. Two moderate findings remain in Vitest 3 / `@vitest/mocker` ([advisory](https://github.com/advisories/GHSA-82fw-gwwq-j7x9)). They concern test-server file access, not shipped browser code. Current verification uses `vitest run`, not an exposed test UI/server. Patched versions require a Vitest 4 migration; this is deferred, not silently accepted as risk-free. Release-owner acceptance or migration remains necessary.
 
 Wrangler's optional Workers Types 5 peer differs from the Workers Types 4 peer used by the current authentication toolchain. Typecheck/build/deploy are verified, but reconciling that tooling peer constraint remains a follow-up. No broad authentication-stack upgrade was made merely to silence the warning.
+
+## Release-owner deployment request (2026-10-10)
+
+The owner has explicitly requested review, fixes, merge into `main`, and deployment
+of that merged revision to production. This authorizes deployment, not an absolute
+bug-free certification or completion of the visual, email, alerting, or restore
+gates above. Email remains parked. The deployed production Worker rollback target
+was recorded as `1c27ca58-b88b-4d6c-8147-220aef3ca5be`, and a production Convex
+snapshot was exported to a restricted local release directory before changes.
+No restore was performed over production data.
+
+A fresh audit superseded the September dependency evidence: new advisories affected
+Tinypool, Undici, Sharp, source-map-js, and fast-copy. Migrating Vitest/coverage to
+4.1.11, updating Wrangler to 4.149.0, and refreshing the affected transitive patch
+versions produced **no known vulnerabilities**. The 502-test suite, lint, and
+typecheck passed with the new versions. The canonical `pnpm deploy` now rebuilds
+browser assets instead of relying on an earlier build in the operator's checkout.

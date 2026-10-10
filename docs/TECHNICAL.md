@@ -400,9 +400,13 @@ Local and deployed environments use the same Better Auth session and organizatio
 ### Deploy Commands
 
 ```bash
-pnpm exec convex deploy --cmd "push"
-pnpm exec wrangler deploy --config wrangler.toml
+pnpm exec convex deploy
+pnpm deploy
 ```
+
+`pnpm deploy` rebuilds the browser assets before uploading the Worker. Do not
+replace it with a bare Wrangler deployment from a fresh checkout: ignored
+comment/navigation bundles are generated release artifacts, not source files.
 
 ### Environment Variables (Workers)
 
