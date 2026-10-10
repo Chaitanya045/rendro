@@ -2,6 +2,8 @@ import vm from "node:vm";
 import { describe, expect, it, vi } from "vitest";
 import { renderThemeAssets, sharedThemeRuntime, sharedThemeStyles } from "@/routes/theme";
 
+type WindowEventMock = { key?: string; newValue?: string | null; persisted?: boolean };
+
 class ClassListMock {
   values = new Set<string>();
   toggle(name: string, enabled: boolean) { if (enabled) this.values.add(name); else this.values.delete(name); }
@@ -28,11 +30,11 @@ class ElementMock {
   getBoundingClientRect() { return { left: 10, top: 20, width: 40, height: 40 }; }
 }
 
-function themeRuntime(options: { saved?: string | null; dark?: boolean; reduced?: boolean; transitions?: boolean; asyncUpdates?: boolean; animateThrows?: boolean } = {}) {
+function themeRuntime(options: { saved?: string | null; dark?: boolean; reduced?: boolean; transitions?: boolean; asyncUpdates?: boolean; animateThrows?: boolean; storageBlocked?: boolean } = {}) {
   let dark = Boolean(options.dark);
   let reducedMotion = Boolean(options.reduced);
   const mediaListeners = new Map<string, Set<() => void>>();
-  const windowListeners = new Map<string, Set<(event: { key: string; newValue: string | null }) => void>>();
+  const windowListeners = new Map<string, Set<(event: WindowEventMock) => void>>();
   const storage = new Map<string, string>();
   if (options.saved) storage.set("commentor-theme", options.saved);
   const root = new ElementMock();
@@ -66,13 +68,16 @@ function themeRuntime(options: { saved?: string | null; dark?: boolean; reduced?
   });
   const windowObject: Record<string, unknown> = {
     matchMedia,
-    addEventListener: (type: string, listener: (event: { key: string; newValue: string | null }) => void) => { const set = windowListeners.get(type) ?? new Set(); set.add(listener); windowListeners.set(type, set); },
-    removeEventListener: (type: string, listener: (event: { key: string; newValue: string | null }) => void) => windowListeners.get(type)?.delete(listener),
+    addEventListener: (type: string, listener: (event: WindowEventMock) => void) => { const set = windowListeners.get(type) ?? new Set(); set.add(listener); windowListeners.set(type, set); },
+    removeEventListener: (type: string, listener: (event: WindowEventMock) => void) => windowListeners.get(type)?.delete(listener),
   };
   const context = vm.createContext({
     window: windowObject,
     document,
-    localStorage: { getItem: (key: string) => storage.get(key) ?? null, setItem: (key: string, value: string) => storage.set(key, value) },
+    localStorage: {
+      getItem: (key: string) => { if (options.storageBlocked) throw new Error("Storage blocked"); return storage.get(key) ?? null; },
+      setItem: (key: string, value: string) => { if (options.storageBlocked) throw new Error("Storage blocked"); storage.set(key, value); },
+    },
     innerWidth: 400,
     innerHeight: 800,
     Math,
@@ -127,6 +132,76 @@ describe("shared theme runtime", () => {
       if (query.includes("color-scheme")) for (const listener of listeners) listener();
     }
     expect(runtime.root.dataset.resolvedTheme).toBe("dark");
+  });
+
+  it("saves navigation intent before a pending snapshot and ignores superseded commits", async () => {
+    const source = themeRuntime({ saved: "light", transitions: true, asyncUpdates: true });
+    const controller = source.api.mount(source.button);
+    controller.apply("dark", true, true);
+    expect(source.root.dataset.theme).toBe("light");
+    const destination = themeRuntime({ saved: source.storage.get("commentor-theme") });
+    expect(destination.root.dataset.resolvedTheme).toBe("dark");
+    controller.apply("system", true, true);
+    source.transitions[0]?.runUpdate();
+    expect(source.storage.get("commentor-theme")).toBe("system");
+    source.transitions[1]?.runUpdate();
+    await Promise.resolve();
+    expect(source.root.dataset.theme).toBe("system");
+  });
+
+  it("does not re-persist an older choice when its delayed visual commit completes", async () => {
+    const runtime = themeRuntime({ saved: "light", transitions: true, asyncUpdates: true });
+    const controller = runtime.api.mount(runtime.button);
+    controller.apply("dark", true, true);
+    // A newer tab's write is visible in storage before its event is delivered.
+    runtime.storage.set("commentor-theme", "light");
+    runtime.transitions[0]?.runUpdate();
+    await Promise.resolve();
+    expect(runtime.storage.get("commentor-theme")).toBe("light");
+    for (const listener of runtime.windowListeners.get("storage") ?? []) listener({ key: "commentor-theme", newValue: "light" });
+    expect(controller.getMode()).toBe("light");
+    expect(runtime.root.dataset.theme).toBe("light");
+  });
+
+  it.each([false, true])("reconciles back/forward restoration without animation (mounted: %s)", (mounted) => {
+    const source = themeRuntime({ saved: "dark", transitions: true });
+    const controller = mounted ? source.api.mount(source.button) : null;
+    // Another document in the same tab changes the preference; no storage event
+    // is delivered to this BFCache document while it is suspended.
+    source.storage.set("commentor-theme", "light");
+    for (const listener of source.windowListeners.get("pageshow") ?? []) listener({ persisted: false });
+    expect(source.root.dataset.theme).toBe("dark");
+    for (const listener of source.windowListeners.get("pageshow") ?? []) listener({ persisted: true });
+    expect(source.root.dataset.theme).toBe("light");
+    expect(controller?.getMode() ?? source.api.getMode()).toBe("light");
+    expect(source.transitions).toHaveLength(0);
+    source.storage.set("commentor-theme", "system");
+    source.setDark(true);
+    for (const listener of source.windowListeners.get("pageshow") ?? []) listener({ persisted: true });
+    expect(source.root.dataset.resolvedTheme).toBe("dark");
+  });
+
+  it("cancels stale snapshot callbacks when a cached page resumes with a newer choice", async () => {
+    const runtime = themeRuntime({ saved: "light", transitions: true, asyncUpdates: true });
+    runtime.api.mount(runtime.button).apply("dark", true, true);
+    runtime.storage.set("commentor-theme", "system");
+    for (const listener of runtime.windowListeners.get("pageshow") ?? []) listener({ persisted: true });
+    runtime.transitions[0]?.runUpdate();
+    await Promise.resolve();
+    expect(runtime.api.getMode()).toBe("system");
+    expect(runtime.root.dataset.theme).toBe("system");
+    expect(runtime.storage.get("commentor-theme")).toBe("system");
+    expect(runtime.transitions[0]?.skipTransition).toHaveBeenCalledOnce();
+  });
+
+  it("keeps theme controls usable when preference storage is unavailable", () => {
+    const runtime = themeRuntime({ storageBlocked: true, dark: true });
+    const controller = runtime.api.mount(runtime.button);
+    expect(runtime.root.dataset.resolvedTheme).toBe("dark");
+    expect(() => controller.apply("light", true, false)).not.toThrow();
+    expect(runtime.root.dataset.resolvedTheme).toBe("light");
+    for (const listener of runtime.windowListeners.get("pageshow") ?? []) listener({ persisted: true });
+    expect(controller.getMode()).toBe("system");
   });
 
   it("uses direct application for reduced motion and safely supersedes rapid transitions", async () => {
@@ -201,7 +276,7 @@ describe("shared theme runtime", () => {
     runtime.button.dispatch("click");
     expect(controller.getMode()).toBe("system");
     expect(runtime.root.dataset.theme).toBe("light");
-    expect(runtime.storage.get("commentor-theme")).toBe("light");
+    expect(runtime.storage.get("commentor-theme")).toBe("system");
 
     runtime.setDark(true);
     for (const [query, listeners] of runtime.mediaListeners) {
@@ -227,7 +302,7 @@ describe("shared theme runtime", () => {
     direct.transitions[0]?.runUpdate();
     await Promise.resolve();
     expect(direct.root.dataset.theme).toBe("light");
-    expect(direct.storage.has("commentor-theme")).toBe(false);
+    expect(direct.storage.get("commentor-theme")).toBe("dark");
     expect(direct.transitions[0]?.skipTransition).toHaveBeenCalled();
 
     const destroyed = themeRuntime({ transitions: true, asyncUpdates: true });
@@ -237,7 +312,7 @@ describe("shared theme runtime", () => {
     destroyed.transitions[0]?.runUpdate();
     await Promise.resolve();
     expect(destroyed.root.dataset.theme).toBe("system");
-    expect(destroyed.storage.has("commentor-theme")).toBe(false);
+    expect(destroyed.storage.get("commentor-theme")).toBe("dark");
 
     const motion = themeRuntime({ transitions: true, asyncUpdates: true });
     const motionController = motion.api.mount(motion.button);

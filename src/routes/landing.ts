@@ -1,12 +1,11 @@
-import { mobileViewportStyles } from "./viewport";
+import { renderThemeAssets, renderThemeButton } from "./theme";
 
 export function renderLandingPage(): string {
   return `<!DOCTYPE html>
-<html lang="en" class="dark">
+<html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#09090b">
   <meta name="description" content="Rendro turns plain HTML in your repository into a navigable documentation workspace with contextual comments and controlled publishing.">
   <meta property="og:type" content="website">
   <meta property="og:title" content="Rendro — Documentation that ships with your code">
@@ -18,14 +17,34 @@ export function renderLandingPage(): string {
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20,400,0,0" rel="stylesheet">
   <title>Rendro — Documentation that ships with your code</title>
+  ${renderThemeAssets()}
   <style>
-    ${mobileViewportStyles}
     :root {
+      color-scheme: light;
+      --surface: #ffffff;
+      --surface-elevated: #f4f4f5;
+      --surface-hover: #e4e4e7;
+      --surface-glass: rgba(255,255,255,.86);
+      --text: #09090b;
+      --text-muted: #52525b;
+      --border: #e4e4e7;
+      --primary: #c2410c;
+      --primary-hover: #9a3412;
+      --primary-muted: #ffedd5;
+      --primary-shadow: rgba(194,65,12,.16);
+      --shadow-strong: rgba(0,0,0,.12);
+      --shadow-soft: rgba(0,0,0,.08);
+      --page-width: 1200px;
+      --ease-standard: cubic-bezier(.4,0,.2,1);
+    }
+    html.dark {
       color-scheme: dark;
       --surface: #09090b;
       --surface-elevated: #18181b;
       --surface-hover: #27272a;
+      --surface-glass: rgba(9,9,11,.86);
       --text: #fafafa;
       --text-muted: #a1a1aa;
       --border: #27272a;
@@ -33,8 +52,8 @@ export function renderLandingPage(): string {
       --primary-hover: #fdba74;
       --primary-muted: rgba(251,146,60,.16);
       --primary-shadow: rgba(251,146,60,.2);
-      --page-width: 1200px;
-      --ease-standard: cubic-bezier(.4,0,.2,1);
+      --shadow-strong: rgba(0,0,0,.42);
+      --shadow-soft: rgba(0,0,0,.26);
     }
     * { box-sizing: border-box; }
     html { scroll-behavior: smooth; scroll-padding-top: 88px; background: var(--surface); }
@@ -47,7 +66,7 @@ export function renderLandingPage(): string {
     .skip-link:focus { transform: translateY(0); }
     :focus-visible { outline: 2px solid var(--primary); outline-offset: 3px; }
     .container { width: min(calc(100% - 48px), var(--page-width)); margin-inline: auto; }
-    .site-header { position: sticky; top: 0; z-index: 30; min-height: 68px; border-bottom: 1px solid var(--border); background: rgba(9,9,11,.86); backdrop-filter: blur(18px); }
+    .site-header { position: sticky; top: 0; z-index: 30; min-height: 68px; border-bottom: 1px solid var(--border); background: var(--surface-glass); backdrop-filter: blur(18px); }
     .header-inner { min-height: 68px; display: flex; align-items: center; gap: 32px; }
     .brand { color: var(--primary); font-size: 24px; line-height: 32px; font-weight: 700; letter-spacing: -.03em; }
     .nav-links { display: flex; align-items: center; gap: 28px; margin-left: auto; color: var(--text-muted); font-size: 14px; }
@@ -84,13 +103,13 @@ export function renderLandingPage(): string {
     .hero-facts { display: flex; flex-wrap: wrap; gap: 10px 22px; margin: 0; padding: 0; color: var(--text-muted); font-size: 13px; list-style: none; }
     .hero-facts li { position: relative; padding-left: 14px; }
     .hero-facts li::before { content: ""; position: absolute; left: 0; top: .75em; width: 4px; height: 4px; border-radius: 50%; background: var(--primary); }
-    .product-shot { position: relative; margin: 0; border: 1px solid var(--border); border-radius: 12px; overflow: hidden; background: var(--surface-elevated); box-shadow: 0 28px 80px rgba(0,0,0,.42); animation: shotReveal 300ms 80ms var(--ease-standard) both; transition: transform 300ms var(--ease-standard), border-color 200ms var(--ease-standard); }
+    .product-shot { position: relative; margin: 0; border: 1px solid var(--border); border-radius: 12px; overflow: hidden; background: var(--surface-elevated); box-shadow: 0 28px 80px var(--shadow-strong); animation: shotReveal 300ms 80ms var(--ease-standard) both; transition: transform 300ms var(--ease-standard), border-color 200ms var(--ease-standard); }
     .product-shot:hover { transform: translateY(-3px); border-color: var(--text-muted); }
     .shot-bar { height: 38px; display: flex; align-items: center; gap: 7px; padding: 0 13px; border-bottom: 1px solid var(--border); background: var(--surface-elevated); }
     .shot-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text-muted); opacity: .42; }
     .shot-title { min-width: 0; margin-left: 7px; overflow: hidden; color: var(--text-muted); font-size: 11px; line-height: 16px; text-overflow: ellipsis; white-space: nowrap; }
     .product-shot img { width: 100%; height: auto; aspect-ratio: 1280/577; object-fit: cover; }
-    .shot-caption { position: absolute; right: 12px; bottom: 12px; padding: 6px 9px; border: 1px solid var(--border); border-radius: 5px; background: rgba(9,9,11,.88); color: var(--text-muted); font-size: 10px; line-height: 14px; }
+    .shot-caption { position: absolute; right: 12px; bottom: 12px; padding: 6px 9px; border: 1px solid var(--border); border-radius: 5px; background: var(--surface-glass); color: var(--text-muted); font-size: 10px; line-height: 14px; }
     .proof-band { border-block: 1px solid var(--border); background: var(--surface-elevated); }
     .proof-grid { display: grid; grid-template-columns: repeat(3,1fr); }
     .proof { min-height: 156px; padding: 32px; border-right: 1px solid var(--border); transition: background-color 200ms var(--ease-standard); }
@@ -112,7 +131,7 @@ export function renderLandingPage(): string {
     .workflow-step:hover .step-number { transform: translateY(-1px) scale(1.03); background: var(--primary); color: var(--surface); }
     .workflow-step h3 { margin: 0 0 5px; font-size: 16px; line-height: 24px; }
     .workflow-step p { margin: 0; color: var(--text-muted); font-size: 14px; line-height: 22px; }
-    .terminal { align-self: stretch; min-height: 100%; display: flex; flex-direction: column; overflow: hidden; border: 1px solid var(--border); border-radius: 9px; background: var(--surface-elevated); box-shadow: 0 20px 48px rgba(0,0,0,.26); }
+    .terminal { align-self: stretch; min-height: 100%; display: flex; flex-direction: column; overflow: hidden; border: 1px solid var(--border); border-radius: 9px; background: var(--surface-elevated); box-shadow: 0 20px 48px var(--shadow-soft); }
     .terminal-bar { min-height: 44px; display: flex; align-items: center; gap: 7px; padding: 0 16px; border-bottom: 1px solid var(--border); color: var(--text-muted); font: 500 11px/16px ui-monospace, SFMono-Regular, Menlo, monospace; }
     .terminal-body { flex: 1; display: flex; flex-direction: column; justify-content: center; gap: 12px; padding: 30px; color: var(--text); font: 13px/22px ui-monospace, SFMono-Regular, Menlo, monospace; }
     .terminal-prompt { color: var(--primary); }
@@ -212,6 +231,7 @@ export function renderLandingPage(): string {
         <a href="#security" data-section-link data-scroll-section="security">Security</a>
       </nav>
       <div class="header-actions">
+        ${renderThemeButton()}
         <a class="button button-quiet header-signin" href="/sign-in">Sign in</a>
         <a class="button button-primary header-get-started" href="/sign-up">Get started</a>
       </div>
@@ -333,6 +353,7 @@ export function renderLandingPage(): string {
   </footer>
   <script>
     (function () {
+      window.RendroTheme.mount(document.getElementById("theme-toggle"));
       var reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
       var canObserve = "IntersectionObserver" in window;
       var revealTargets = Array.from(document.querySelectorAll("[data-reveal], [data-reveal-item]"));
