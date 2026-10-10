@@ -71,6 +71,7 @@
     }
   }, configurable: true });
 })();
+import { faviconAssets, faviconCacheControl } from "./routes/favicon";
 import { Hono } from "hono";
 import type { Context } from "hono";
 import { cors } from "hono/cors";
@@ -107,6 +108,18 @@ app.use("/api/sync/*", cors());
 app.use("*", async (c, next) => { const start = Date.now(); await next(); logger.debug({ method: c.req.method, path: c.req.path, status: c.res.status, ms: Date.now() - start }, "request"); });
 // Public signed share routes intentionally bypass session middleware.
 mountPublicRoutes(app);
+
+// Favicons are public assets and must not trigger a session lookup.
+for (const [path, contentType] of Object.entries(faviconAssets)) {
+  app.get(path, async (c) => {
+    const response = await serveAsset(c);
+    if (!response.ok) return response;
+    const headers = new Headers(response.headers);
+    headers.set("Content-Type", contentType);
+    headers.set("Cache-Control", faviconCacheControl);
+    return new Response(response.body, { status: response.status, headers });
+  });
+}
 
 // Public, versioned browser code must not trigger an authenticated session RPC.
 app.get("/management-query.js", serveAsset);

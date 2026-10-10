@@ -1,3 +1,4 @@
+import { renderFaviconLinks } from "./favicon";
 import { renderThemeAssets } from "./theme";
 
 export interface NotFoundPageOptions {
@@ -25,7 +26,7 @@ export function renderNotFoundPage(options: NotFoundPageOptions = {}): string {
 
   return `<!DOCTYPE html>
 <html lang="en">
-<head>
+<head>${renderFaviconLinks()}
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>404 · Page not found — Rendro</title>

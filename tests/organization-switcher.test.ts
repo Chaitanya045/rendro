@@ -32,6 +32,21 @@ async function flush() { for (let i = 0; i < 3; i++) await new Promise<void>(res
 afterEach(async () => { await Promise.all(caches.splice(0).map(cache => cache.clear())); for (const win of windows.splice(0)) { win.dispatchEvent(new win.Event("pagehide")); await win.happyDOM.close(); } });
 
 describe("header organization switcher", () => {
+  it("derives its name from the current visible organization through hydration and switching", async () => {
+    const { win, trigger, menu } = setup();
+    expect(trigger.hasAttribute("aria-label")).toBe(false);
+    expect(trigger.querySelector("[data-org-mark]")?.getAttribute("aria-hidden")).toBe("true");
+    expect(trigger.querySelector(".sr-only")?.textContent).toBe(", switch organization");
+    win.sessionStorage.setItem("rendro-org-navigation-label", JSON.stringify({ userId: "u", organizationId: "org-a", name: "Acme & Sons", createdAt: Date.now() }));
+    win.eval(renderOrganizationLabelBootstrap("u", "org-a"));
+    expect(trigger.querySelector("[data-org-name]")?.textContent).toBe("Acme & Sons");
+    trigger.click(); await flush();
+    menu.querySelector<HTMLElement>('[data-organization-id="org-b"]')!.click();
+    expect(trigger.querySelector("[data-org-name]")?.textContent).toBe("Beta");
+    expect(trigger.hasAttribute("aria-label")).toBe(false);
+    expect(trigger.querySelector(".sr-only")?.textContent).toBe(", switch organization");
+  });
+
   it("reopens from TanStack cache, then refetches after a confirmed organization creation", async () => {
     const { trigger, menu, request, uiRequest } = setup(undefined, true);
     trigger.click(); await flush(); trigger.click(); trigger.click(); await flush();

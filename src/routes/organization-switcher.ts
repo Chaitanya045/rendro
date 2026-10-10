@@ -39,7 +39,7 @@ export const organizationSwitcherRuntime = String.raw`
   if(!fallback||!menu)return;
   var trigger=document.createElement("button");
   trigger.type="button";trigger.id=fallback.id;trigger.className=fallback.className;
-  trigger.setAttribute("aria-label","Switch organization");trigger.setAttribute("aria-haspopup","menu");
+  trigger.setAttribute("aria-haspopup","menu");
   trigger.setAttribute("aria-controls",menu.id);trigger.setAttribute("aria-expanded","false");
   while(fallback.firstChild)trigger.append(fallback.firstChild);
   fallback.replaceWith(trigger);

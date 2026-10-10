@@ -1,3 +1,4 @@
+import { renderFaviconLinks } from "./favicon";
 import { Hono } from "hono";
 import { putObject, headObject } from "@/minio";
 import { emailToOrgSlug, orgExists, logOrgAccess } from "@/orgs";
@@ -103,7 +104,7 @@ app.post("/api/orgs", async (c) => {
 
 function renderEmailUnsupported(user: User): string {
   return `<!DOCTYPE html>
-<html><head><meta charset="UTF-8"><title>Rendro</title></head>
+<html><head>${renderFaviconLinks()}<meta charset="UTF-8"><title>Rendro</title></head>
 <body style="font-family:system-ui;padding:2rem">
 <h1>Unsupported email domain</h1>
 <p>Your email <code>${escapeHtml(user.email)}</code> doesn't have a valid org slug. Use a work email like <code>you@company.com</code>.</p>
@@ -116,7 +117,7 @@ function renderCreateOrg(user: User, org: string): string {
   const email = escapeHtml(user.email);
   const orgEsc = escapeHtml(org);
   return `<!DOCTYPE html>
-<html><head>
+<html><head>${renderFaviconLinks()}
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${orgEsc} — Rendro</title>
@@ -359,7 +360,7 @@ function renderOrgTreePage(user: User | null, org: string, selectedDoc = "", opt
     : "";
   return `<!DOCTYPE html>
 <html lang="en">
-<head>
+<head>${renderFaviconLinks()}
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${displayNameEsc} — Rendro</title>
@@ -1084,7 +1085,7 @@ function renderTreeSkeleton(): string {
 function renderInitialIndex(_user: User, org: string, displayName: string): string {
   return `<!DOCTYPE html>
 <html lang="en">
-<head>
+<head>${renderFaviconLinks()}
 <meta charset="UTF-8">
 <title>${escapeHtml(displayName)}</title>
 <style>body{font-family:system-ui;max-width:720px;margin:3rem auto;padding:0 1.5rem;line-height:1.6;color:#1a1a1a}</style>
@@ -1116,7 +1117,7 @@ function renderApiKeyPage(user: User, org: string, apiKey: string): string {
   const email = escapeHtml(user.email);
   const orgEsc = escapeHtml(org);
   return `<!DOCTYPE html>
-<html><head>
+<html><head>${renderFaviconLinks()}
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${orgEsc} — Rendro</title>

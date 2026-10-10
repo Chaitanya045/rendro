@@ -1,3 +1,4 @@
+import { faviconAssets, faviconCacheControl } from "./routes/favicon";
 import { Hono } from "hono";
 import { serve } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
@@ -12,7 +13,17 @@ import type { User } from "better-auth/types";
 // Only the local Node server listens on a port; Workers do not read PORT.
 const PORT = z.coerce.number().int().min(1).max(65535).default(3000).parse(process.env.PORT);
 
-const app = new Hono<{ Variables: { user?: User } }>();
+export const app = new Hono<{ Variables: { user?: User } }>();
+
+for (const [path, contentType] of Object.entries(faviconAssets)) {
+  app.use(path, async (c, next) => {
+    await next();
+    if (c.res.ok) {
+      c.header("Content-Type", contentType);
+      c.header("Cache-Control", faviconCacheControl);
+    }
+  }, serveStatic({ path: `./public${path}` }));
+}
 
 // Serve static assets (commentor.js, etc.)
 app.use("/commentor.js", serveStatic({ path: "./public/commentor.js" }));

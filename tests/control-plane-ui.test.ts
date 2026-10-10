@@ -34,6 +34,22 @@ function authenticatedPages(): Hono<{ Variables: { user?: User } }> {
 }
 
 describe("control-plane UI", () => {
+  it("names workspace and complementary panels on overview and deployment templates", async () => {
+    const app = authenticatedPages();
+    for (const suffix of ["", "/projects/project-a", "/projects/project-a/deployments"]) {
+      const html = await (await app.request("/organizations/org-a" + suffix)).text();
+      expect(html).toContain('<aside class="cp-sidebar" id="cp-navigation" aria-label="Workspace navigation">');
+      if (!suffix) {
+        expect(html).toContain('aria-labelledby="workspace-status-title"');
+        expect(html).toContain('<h2 id="workspace-status-title">Workspace status</h2>');
+      } else {
+        expect(html).toContain('panel.setAttribute("aria-labelledby","publish-cli-title")');
+        expect(html).toContain('<h2 id="publish-cli-title">Publish from the CLI</h2>');
+      }
+      expect(html).not.toContain('<aside class="panel skeleton-card');
+    }
+  });
+
   it("preserves hidden controls and conditional fields over component display styles", async () => {
     const html = await (await authenticatedPages().request("/organizations/org-a/api-keys")).text();
     expect(html).toContain("[hidden]{display:none!important}");
