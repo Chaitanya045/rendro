@@ -85,10 +85,16 @@ export const validateInternal = internalMutation({
   args: {
     secretHash: v.string(),
     organizationId: v.string(),
-    projectId: v.optional(v.id("projects")),
+    projectId: v.optional(v.string()),
     requiredScope: v.string(),
   },
   handler: async (ctx, args) => {
+    // HTTP callers supply untrusted strings. Reject malformed IDs as invalid
+    // credentials rather than throwing before the authorization handler runs.
+    const projectId = args.projectId === undefined
+      ? undefined
+      : ctx.db.normalizeId("projects", args.projectId);
+    if (projectId === null) return null;
     const credential = await ctx.db
       .query("apiKeyCredentials")
       .withIndex("by_secret_hash", (query) => query.eq("secretHash", args.secretHash))
@@ -100,7 +106,7 @@ export const validateInternal = internalMutation({
       || credential.revokedAt !== undefined
       || (credential.expiresAt !== undefined && credential.expiresAt <= now)
       || !credential.scopes.includes(args.requiredScope)
-      || (credential.projectId !== undefined && credential.projectId !== args.projectId)
+      || (credential.projectId !== undefined && credential.projectId !== projectId)
     ) {
       return null;
     }
