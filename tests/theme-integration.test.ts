@@ -49,11 +49,17 @@ describe("shared theme integration", () => {
     expect(html).not.toContain(".topbar-btn-share:focus-visible{outline:2px solid #71717a");
     expect(html).not.toContain(".mobile-more-menu #theme-toggle:hover");
   });
-  it("keeps the landing page fixed dark while sharing only viewport scrollbar styling", () => {
+  it("uses the shared theme on landing before content paints, with light and dark tokens", () => {
     const html = renderLandingPage();
-    expect(html).toContain(mobileViewportStyles);
-    expect(html).toContain('<html lang="en" class="dark">');
-    expect(html).not.toContain(sharedThemeRuntime);
+    assertSharedTheme(html, "theme-toggle");
+    expect(html.indexOf(sharedThemeRuntime)).toBeLessThan(html.indexOf("<body>"));
+    expect(html).not.toContain('<html lang="en" class="dark">');
+    expect(html).toContain("color-scheme: light;");
+    expect(html).toContain("html.dark {");
+    expect(html).toContain("--surface: #ffffff;");
+    expect(html).toContain("--surface: #09090b;");
+    expect(html).toContain("background: var(--surface-glass)");
+    expect(html).toContain("family=Material+Symbols+Outlined");
   });
   it("uses one theme implementation on every public authentication form", async () => {
     for (const path of ["/sign-in", "/sign-up", "/forgot-password", "/reset-password", "/verify-email"]) {

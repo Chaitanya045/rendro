@@ -70,9 +70,10 @@ Rules:
 
 ### Unauthenticated landing surface
 
-- The unauthenticated landing page is intentionally fixed to the application dark theme, regardless of OS color scheme or saved app preference.
-- Use the dark chrome tokens directly: `#09090b` page, `#18181b` containers, `#27272a` borders, `#fafafa` foreground, and `#a1a1aa` supporting copy.
-- Brand and primary sign-in actions use dark-theme Ember Orange: `#fb923c`, with `#fdba74` on hover and `#09090b` text.
+- The unauthenticated landing page uses the same saved light/dark/system preference as authentication, management, and viewer chrome. Initialize the shared runtime in the head before content paints; never force dark or overwrite a visitor's preference on navigation.
+- Use paired light/dark chrome tokens, including the sticky header, screenshot caption, shadows, and primary-action foreground. The product screenshot remains an authored image, not a themeable application surface.
+- Small secondary copy must maintain at least 4.5:1 contrast against normal and hovered cards. Use the darker zinc secondary token on light elevated surfaces rather than carrying white-surface muted text unchanged.
+- The header includes the shared theme control with the same tri-state cycle, micro-interactions, keyboard focus, and mobile target size as other screens.
 - Lead with the product value and a real Rendro workspace image before asking the visitor to authenticate. The page order is hero, factual product proof, workflow, feature showcase, organization security, and final sign-in action.
 - Header and footer navigation scroll Product, Workflow, and Security to the top of their section content without adding fragments or history entries. The section's own top padding clears the sticky header; reloads return to the hero, and legacy section fragments are removed.
 - Google sign-in is available from the header, hero, security section, and final call to action through one shared JSON submit handler. The handler resets pending UI on history restoration and re-enables the actions after request failures; it must never fall back to an HTML form POST because the auth endpoint accepts only JSON.
@@ -410,10 +411,11 @@ Dark mode applies to app chrome only.
 
 - Persist app theme in `localStorage` under `commentor-theme` with values `"system"`, `"dark"`, or `"light"`.
 - `system` follows `prefers-color-scheme`; unset storage is treated as `system`.
-- All theme-aware route templates use `renderThemeAssets()` from `src/routes/theme.ts`; pages with a toggle mount its shared controller. Do not create page-local theme engines. Landing remains intentionally fixed dark.
+- All theme-aware route templates, including landing, use `renderThemeAssets()` from `src/routes/theme.ts`; pages with a toggle mount its shared controller. Do not create page-local theme engines or force a mode when following sign-in/get-started links.
 - Every theme button is emitted by `renderThemeButton()`, without page-local icon/button classes. Its neutral surface, muted icon, border, 6px radius, container hover, strong hover foreground, Ember keyboard focus ring, .98 press, disabled state, and 150ms easing belong to the shared component. Use 36px desktop and 44px at widths up to 760px consistently across shells. A viewer mobile-menu row may expand in width and add its label; it does not redefine hover/focus colors or motion. Hover-only feedback is gated by hover-capable input; reduced motion removes transitions and press transforms.
 - Every toggle cycles `system → dark → light → system`, with the same `contrast`, `dark_mode`, and `light_mode` icon track (300ms), radial reveal (520ms), and subtle press feedback. The next mode is announced by the button label; the current mode is exposed in its title.
 - Initialize before page content paints. Synchronize preference changes across tabs and system appearance changes without animating unrelated screens. Rapid toggles must preserve the latest intended mode, including when an earlier transition fails or completes late.
+- Persist an explicit user choice before awaiting a theme snapshot so immediate navigation sees that choice. On persisted Back/Forward restoration, reconcile the saved preference and current system appearance without replaying the theme animation or accepting a stale snapshot callback.
 - Toggle by resolving the current mode and adding/removing `html.dark` on the parent page.
 - Do not pass app dark mode into the iframe as a global stylesheet.
   The commentor widget is the exception: it follows the parent theme because it is Rendro chrome inside the iframe, not publisher document content.

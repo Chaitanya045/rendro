@@ -36,10 +36,11 @@ describe("auth and error route control consistency", () => {
     expect(html).toContain("html.dark{color-scheme:dark");
   });
 
-  it("keeps landing fixed dark while primary actions remain 44px and motion-safe", () => {
+  it("keeps landing theme-aware while primary actions remain 44px and motion-safe", () => {
     const html = renderLandingPage();
 
-    expect(html).toContain('<html lang="en" class="dark">');
+    expect(html).toContain('class="rendro-theme-control"');
+    expect(html).toContain('RendroTheme.mount(document.getElementById("theme-toggle"))');
     expect(html).toContain(".button { min-height: 44px;");
     expect(html).toContain('.button:hover:not(:disabled):not([aria-disabled="true"])');
     expect(html).toContain('.button:active:not(:disabled):not([aria-disabled="true"])');
