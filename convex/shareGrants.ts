@@ -1,3 +1,4 @@
+import { requireId } from "./ids";
 import { ConvexError, v } from "convex/values";
 import { internalMutation, internalQuery } from "./_generated/server";
 
@@ -10,13 +11,17 @@ function validDocumentPath(value: string): boolean {
 export const createInternal = internalMutation({
   args: {
     organizationId: v.string(),
-    projectId: v.id("projects"),
+    projectId: v.string(),
     documentPath: v.string(),
     tokenHash: v.string(),
     expiresAt: v.number(),
     actorId: v.string(),
   },
-  handler: async (ctx, args) => {
+  handler: async (ctx, input) => {
+    const args = {
+      ...input,
+      projectId: requireId(ctx, "projects", input.projectId),
+    };
     const project = await ctx.db.get(args.projectId);
     if (!project || project.organizationId !== args.organizationId || !project.activeDeploymentId) {
       throw new ConvexError("Project has no active deployment");
@@ -63,8 +68,12 @@ export const resolveInternal = internalQuery({
 });
 
 export const listInternal = internalQuery({
-  args: { organizationId: v.string(), projectId: v.id("projects") },
-  handler: async (ctx, args) => {
+  args: { organizationId: v.string(), projectId: v.string() },
+  handler: async (ctx, input) => {
+    const args = {
+      ...input,
+      projectId: requireId(ctx, "projects", input.projectId),
+    };
     const grants = await ctx.db
       .query("shareGrants")
       .withIndex("by_organization_project", (query) => query
@@ -79,10 +88,14 @@ export const listInternal = internalQuery({
 export const revokeInternal = internalMutation({
   args: {
     organizationId: v.string(),
-    grantId: v.id("shareGrants"),
+    grantId: v.string(),
     actorId: v.string(),
   },
-  handler: async (ctx, args) => {
+  handler: async (ctx, input) => {
+    const args = {
+      ...input,
+      grantId: requireId(ctx, "shareGrants", input.grantId),
+    };
     const grant = await ctx.db.get(args.grantId);
     if (!grant || grant.organizationId !== args.organizationId) throw new ConvexError("Share not found");
     if (!grant.revokedAt) await ctx.db.patch(grant._id, { revokedAt: Date.now() });

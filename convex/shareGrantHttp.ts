@@ -1,11 +1,6 @@
-import type { Id } from "./_generated/dataModel";
 import { internal } from "./_generated/api";
-import { httpAction } from "./_generated/server";
+import { httpAction, failure } from "./httpErrors";
 import { authorizeHttpOrganization } from "./authorization";
-
-function failure(error: unknown, status = 400): Response {
-  return Response.json({ error: error instanceof Error ? error.message : String(error) }, { status });
-}
 
 async function sha256(value: string): Promise<string> {
   const bytes = new TextEncoder().encode(value);
@@ -41,7 +36,7 @@ export const createShareGrant = httpAction(async (ctx, request) => {
     const token = randomToken();
     const grant = await ctx.runMutation(internal.shareGrants.createInternal, {
       organizationId,
-      projectId: projectId as Id<"projects">,
+      projectId,
       documentPath,
       tokenHash: await sha256(token),
       expiresAt: Date.now() + expiresInSeconds * 1000,
@@ -62,7 +57,7 @@ export const listShareGrants = httpAction(async (ctx, request) => {
     await authorizeHttpOrganization(ctx, request.headers, organizationId);
     const shares = await ctx.runQuery(internal.shareGrants.listInternal, {
       organizationId,
-      projectId: projectId as Id<"projects">,
+      projectId,
     });
     return Response.json({ shares });
   } catch (error: unknown) {
@@ -83,7 +78,7 @@ export const revokeShareGrant = httpAction(async (ctx, request) => {
     const { user } = await authorizeHttpOrganization(ctx, request.headers, organizationId, ["owner", "admin"]);
     await ctx.runMutation(internal.shareGrants.revokeInternal, {
       organizationId,
-      grantId: grantId as Id<"shareGrants">,
+      grantId,
       actorId: user._id,
     });
     return Response.json({ revoked: true });

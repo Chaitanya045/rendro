@@ -1,10 +1,11 @@
+import { requireId } from "./ids";
 import { ConvexError, v } from "convex/values";
 import { internalMutation, internalQuery } from "./_generated/server";
 
 export const createInternal = internalMutation({
   args: {
     organizationId: v.string(),
-    projectId: v.optional(v.id("projects")),
+    projectId: v.optional(v.string()),
     keyId: v.string(),
     keyPrefix: v.string(),
     name: v.string(),
@@ -13,7 +14,11 @@ export const createInternal = internalMutation({
     expiresAt: v.optional(v.number()),
     actorId: v.string(),
   },
-  handler: async (ctx, args) => {
+  handler: async (ctx, input) => {
+    const args = {
+      ...input,
+      projectId: input.projectId === undefined ? undefined : requireId(ctx, "projects", input.projectId),
+    };
     const now = Date.now();
     const id = await ctx.db.insert("apiKeyCredentials", {
       organizationId: args.organizationId,

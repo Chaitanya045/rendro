@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { backendFetch } from "@/backend-fetch";
 import { CONVEX_SITE_URL } from "@/config";
 import {
   copyObject,
@@ -58,7 +59,7 @@ async function backendRequest(
   request: Request,
   init: { method?: string; body?: string } = {},
 ): Promise<Response> {
-  return fetch(`${CONVEX_SITE_URL}${path}`, {
+  return backendFetch(`${CONVEX_SITE_URL}${path}`, {
     method: init.method ?? request.method,
     headers: forwardedHeaders(request),
     body: init.body,
@@ -90,10 +91,10 @@ function parseManifest(value: unknown): DeploymentManifest | null {
 async function stagingDeployment(
   request: Request,
   identity: DeploymentIdentity,
-): Promise<{ deployment: { manifestKey: string; treeIndexKey?: string; previousDeploymentId?: string } } | null> {
+): Promise<{ deployment: { manifestKey: string; treeIndexKey?: string; previousDeploymentId?: string } } | Response> {
   const query = new URLSearchParams(identity);
   const response = await backendRequest(`/api/rendro/deployments/staging?${query}`, request, { method: "GET" });
-  if (!response.ok) return null;
+  if (!response.ok) return response;
   return response.json() as Promise<{ deployment: { manifestKey: string; treeIndexKey?: string; previousDeploymentId?: string } }>;
 }
 
@@ -181,7 +182,7 @@ app.put("/api/rendro/deployments/:deploymentId/files/*", async (c) => {
   if (!organizationId || !projectId || !filePath) return c.json({ error: "Invalid deployment file path" }, 400);
   const identity = { organizationId, projectId, deploymentId };
   const staging = await stagingDeployment(c.req.raw, identity);
-  if (!staging) return c.json({ error: "Invalid key or staging deployment" }, 401);
+  if (staging instanceof Response) return staging;
   const manifest = await loadManifest(staging.deployment.manifestKey);
   const expected = manifest?.files.find((file) => file.path === filePath);
   if (!expected) return c.json({ error: "File is not present in the deployment manifest" }, 400);
@@ -212,7 +213,8 @@ app.post("/api/rendro/deployments/:deploymentId/copy", async (c) => {
   if (!organizationId || !projectId) return c.json({ error: "Missing deployment identity" }, 400);
   const identity = { organizationId, projectId, deploymentId };
   const staging = await stagingDeployment(c.req.raw, identity);
-  if (!staging?.deployment.previousDeploymentId) {
+  if (staging instanceof Response) return staging;
+  if (!staging.deployment.previousDeploymentId) {
     return c.json({ error: "There is no previous deployment to reuse" }, 400);
   }
   let body: unknown;
@@ -251,7 +253,7 @@ app.post("/api/rendro/deployments/:deploymentId/commit", async (c) => {
   if (!organizationId || !projectId) return c.json({ error: "Missing deployment identity" }, 400);
   const identity = { organizationId, projectId, deploymentId };
   const staging = await stagingDeployment(c.req.raw, identity);
-  if (!staging) return c.json({ error: "Invalid key or staging deployment" }, 401);
+  if (staging instanceof Response) return staging;
   const manifest = await loadManifest(staging.deployment.manifestKey);
   if (!manifest) return c.json({ error: "Deployment manifest not found" }, 404);
   const prefix = `${objectRoot(identity)}/files/`;

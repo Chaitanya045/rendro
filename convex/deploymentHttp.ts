@@ -1,7 +1,7 @@
-import type { DataModel, Id } from "./_generated/dataModel";
+import type { DataModel } from "./_generated/dataModel";
 import type { GenericActionCtx } from "convex/server";
 import { internal } from "./_generated/api";
-import { httpAction } from "./_generated/server";
+import { httpAction, failure } from "./httpErrors";
 import { authorizeHttpOrganization } from "./authorization";
 import { validateApiCredential } from "./credentialHttp";
 
@@ -25,11 +25,6 @@ type Provenance = {
   cliVersion: string;
   manifestSha256: string;
 };
-
-function failure(error: unknown, status = 400): Response {
-  const message = error instanceof Error ? error.message : String(error);
-  return Response.json({ error: message || "Request failed" }, { status });
-}
 
 function objectField(body: object, name: string): unknown {
   return name in body ? body[name as keyof typeof body] : undefined;
@@ -55,14 +50,14 @@ if (
 ) return failure("Invalid deployment fields");
 const principal = await validateApiCredential(ctx, request, {
   organizationId,
-  projectId: projectId as Id<"projects">,
+  projectId,
   requiredScope: "docs:write",
 });
 if (!principal) return failure("Invalid or insufficient API key", 401);
 try {
   const deployment = await ctx.runMutation(internal.deployments.startInternal, {
     organizationId,
-    projectId: projectId as Id<"projects">,
+    projectId,
     manifestSha256,
     fileCount,
     byteCount,
@@ -81,15 +76,15 @@ const deploymentId = url.searchParams.get("deploymentId");
 if (!organizationId || !projectId || !deploymentId) return failure("Missing deployment identity");
 const principal = await validateApiCredential(ctx, request, {
   organizationId,
-  projectId: projectId as Id<"projects">,
+  projectId,
   requiredScope: "docs:write",
 });
 if (!principal) return failure("Invalid or insufficient API key", 401);
 try {
   const deployment = await ctx.runQuery(internal.deployments.getInternal, {
     organizationId,
-    projectId: projectId as Id<"projects">,
-    deploymentId: deploymentId as Id<"deployments">,
+    projectId,
+    deploymentId,
   });
   if (!deployment || deployment.status !== "staging") {
     return failure("Staging deployment not found", 404);
@@ -111,15 +106,15 @@ if (typeof organizationId !== "string" || typeof projectId !== "string" || typeo
 }
 const principal = await validateApiCredential(ctx, request, {
   organizationId,
-  projectId: projectId as Id<"projects">,
+  projectId,
   requiredScope: "docs:write",
 });
 if (!principal) return failure("Invalid or insufficient API key", 401);
 try {
   const result = await ctx.runMutation(internal.deployments.commitInternal, {
     organizationId,
-    projectId: projectId as Id<"projects">,
-    deploymentId: deploymentId as Id<"deployments">,
+    projectId,
+    deploymentId,
     actorId: `api-key:${principal.keyId}`,
   });
   return Response.json(result);
@@ -132,7 +127,7 @@ const projectId = url.searchParams.get("projectId");
 if (!organizationId || !projectId) return failure("Missing project identity");
 const apiPrincipal = await validateApiCredential(ctx, request, {
   organizationId,
-  projectId: projectId as Id<"projects">,
+  projectId,
   requiredScope: "docs:read",
 });
 let principal: { kind: "api-key"; keyId: string } | { kind: "session"; userId: string };
@@ -148,14 +143,15 @@ if (apiPrincipal) {
 }
 const project = await ctx.runQuery(internal.projects.getInternal, {
   organizationId,
-  projectId: projectId as Id<"projects">,
+  projectId,
 });
-if (!project?.activeDeploymentId) {
+if (!project) return failure("Project not found", 404);
+if (!project.activeDeploymentId) {
   return Response.json({ project, deployment: null, principal });
 }
 const deployment = await ctx.runQuery(internal.deployments.getInternal, {
   organizationId,
-  projectId: projectId as Id<"projects">,
+  projectId,
   deploymentId: project.activeDeploymentId,
 });
 return Response.json({ project, deployment, principal }); });
@@ -175,14 +171,14 @@ if (
 ) return failure("Missing deployment failure fields");
 const principal = await validateApiCredential(ctx, request, {
   organizationId,
-  projectId: projectId as Id<"projects">,
+  projectId,
   requiredScope: "docs:write",
 });
 if (!principal) return failure("Invalid or insufficient API key", 401);
 await ctx.runMutation(internal.deployments.failInternal, {
   organizationId,
-  projectId: projectId as Id<"projects">,
-  deploymentId: deploymentId as Id<"deployments">,
+  projectId,
+  deploymentId,
   reason,
 });
 return Response.json({ status: true }); });
@@ -194,18 +190,18 @@ if (!organizationId || !projectId) return failure("organizationId and projectId 
 try {
   const apiPrincipal = await validateApiCredential(ctx, request, {
     organizationId,
-    projectId: projectId as Id<"projects">,
+    projectId,
     requiredScope: "docs:read",
   });
   if (!apiPrincipal) await authorizeHttpOrganization(ctx, request.headers, organizationId);
   const project = await ctx.runQuery(internal.projects.getInternal, {
     organizationId,
-    projectId: projectId as Id<"projects">,
+    projectId,
   });
   if (!project) return failure("Project not found", 404);
   const deployments = await ctx.runQuery(internal.deployments.listInternal, {
     organizationId,
-    projectId: projectId as Id<"projects">,
+    projectId,
   });
   return Response.json({ deployments });
 } catch (error: unknown) {

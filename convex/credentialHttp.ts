@@ -1,8 +1,7 @@
-import type { Id } from "./_generated/dataModel";
 import type { GenericActionCtx } from "convex/server";
 import type { DataModel } from "./_generated/dataModel";
 import { internal } from "./_generated/api";
-import { httpAction } from "./_generated/server";
+import { httpAction, failure } from "./httpErrors";
 import { authorizeHttpOrganization } from "./authorization";
 
 const allowedScopes = new Set([
@@ -23,11 +22,6 @@ export async function sha256(value: string): Promise<string> {
   return Array.from(new Uint8Array(digest))
     .map((byte) => byte.toString(16).padStart(2, "0"))
     .join("");
-}
-
-function failure(error: unknown, status = 400): Response {
-  const message = error instanceof Error ? error.message : String(error);
-  return Response.json({ error: message || "Request failed" }, { status });
 }
 
 function allowedScopeArray(value: unknown): string[] | null {
@@ -65,10 +59,10 @@ try {
     organizationId,
     ["owner", "admin"],
   );
-  if (projectId) {
+  if (projectId !== undefined) {
     const project = await ctx.runQuery(internal.projects.getInternal, {
       organizationId,
-      projectId: projectId as Id<"projects">,
+      projectId,
     });
     if (!project) return failure("Project not found", 404);
   }
@@ -77,7 +71,7 @@ try {
   const rawKey = `rnd_live_${keyId}_${secret}`;
   await ctx.runMutation(internal.apiKeyCredentials.createInternal, {
     organizationId,
-    projectId: projectId as Id<"projects"> | undefined,
+    projectId,
     keyId,
     keyPrefix: `rnd_live_${keyId}`,
     name: name.trim(),
@@ -134,7 +128,7 @@ export async function validateApiCredential(
   request: Request,
   input: {
     organizationId: string;
-    projectId?: Id<"projects">;
+    projectId?: string;
     requiredScope: string;
   },
 ) {
@@ -154,7 +148,7 @@ const requiredScope = url.searchParams.get("scope");
 if (!organizationId || !requiredScope) return failure("organizationId and scope are required");
 const principal = await validateApiCredential(ctx, request, {
   organizationId,
-  projectId: projectId as Id<"projects"> | undefined,
+  projectId,
   requiredScope,
 });
 if (!principal) return failure("Invalid or insufficient API key", 401);

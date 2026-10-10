@@ -1,6 +1,5 @@
-import type { Id } from "./_generated/dataModel";
 import { components, internal } from "./_generated/api";
-import { httpAction } from "./_generated/server";
+import { httpAction, failure } from "./httpErrors";
 import { authorizeHttpOrganization, httpOrganizationAccess } from "./authorization";
 import { createAuth } from "./auth";
 
@@ -29,8 +28,7 @@ export const managementTeamMembers = httpAction(async (ctx, request) => {
   if (!organizationId || !teamId) return Response.json({ error: "organizationId and teamId are required" }, { status: 400, headers });
   try {
     await authorizeHttpOrganization(ctx, request.headers, organizationId, ["owner", "admin"]);
-    const auth = await createAuth(ctx).$context;
-    const team = await auth.adapter.findOne<{ organizationId: string }>({ model: "team", where: [{ field: "id", value: teamId }] });
+    const team = await ctx.runQuery(components.betterAuth.teamLookup.get, { teamId });
     if (!team || team.organizationId !== organizationId) return Response.json({ error: "Team not found" }, { status: 404, headers });
     const result = await ctx.runQuery(components.betterAuth.adapter.findMany, { model: "teamMember", where: [{ field: "teamId", value: teamId }], paginationOpts: { cursor: url.searchParams.get("cursor"), numItems: 50 } }) as { page: Array<{ _id: string; userId: string }>; isDone: boolean; continueCursor: string };
     const members = result.page;
@@ -55,12 +53,8 @@ export const managementAccess = httpAction(async (ctx, request) => {
 });
 
 function jsonError(error: unknown, fallbackStatus = 400): Response {
-  const message = error instanceof Error ? error.message : String(error);
-  const unauthorized = /authentication|required|membership|role/i.test(message);
-  return Response.json(
-    { error: message || "Request failed" },
-    { status: unauthorized ? 403 : fallbackStatus },
-  );
+  const unauthorized = error instanceof Error && /authentication|required|membership|role/i.test(error.message);
+  return failure(error, unauthorized ? 403 : fallbackStatus);
 }
 
 function organizationIdFrom(request: Request): string | null {
@@ -140,7 +134,7 @@ export const getProject = httpAction(async (ctx, request) => {
     await authorizeHttpOrganization(ctx, request.headers, organizationId);
     const project = await ctx.runQuery(internal.projects.getInternal, {
       organizationId,
-      projectId: projectId as Id<"projects">,
+      projectId,
     });
     if (!project) return Response.json({ error: "Project not found" }, { status: 404 });
     return Response.json({ project });

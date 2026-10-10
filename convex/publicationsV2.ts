@@ -1,3 +1,4 @@
+import { requireId } from "./ids";
 import { ConvexError, v } from "convex/values";
 import { internalMutation, internalQuery } from "./_generated/server";
 import { cleanPublicationPath } from "../shared/v2-paths";
@@ -7,17 +8,22 @@ const slugPattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 export const createInternal = internalMutation({
   args: {
     organizationId: v.string(),
-    projectId: v.id("projects"),
+    projectId: v.string(),
     slug: v.string(),
     pathPrefix: v.string(),
     entryFile: v.string(),
     trackingMode: v.union(v.literal("track_active"), v.literal("pinned")),
-    pinnedDeploymentId: v.optional(v.id("deployments")),
+    pinnedDeploymentId: v.optional(v.string()),
     title: v.optional(v.string()),
     description: v.optional(v.string()),
     actorId: v.string(),
   },
-  handler: async (ctx, args) => {
+  handler: async (ctx, input) => {
+    const args = {
+      ...input,
+      projectId: requireId(ctx, "projects", input.projectId),
+      pinnedDeploymentId: input.pinnedDeploymentId === undefined ? undefined : requireId(ctx, "deployments", input.pinnedDeploymentId),
+    };
     const project = await ctx.db.get(args.projectId);
     if (!project || project.organizationId !== args.organizationId) {
       throw new ConvexError("Project not found");
@@ -73,9 +79,13 @@ export const createInternal = internalMutation({
 export const listInternal = internalQuery({
   args: {
     organizationId: v.string(),
-    projectId: v.optional(v.id("projects")),
+    projectId: v.optional(v.string()),
   },
-  handler: async (ctx, args) => {
+  handler: async (ctx, input) => {
+    const args = {
+      ...input,
+      projectId: input.projectId === undefined ? undefined : requireId(ctx, "projects", input.projectId),
+    };
     const projectId = args.projectId;
     if (projectId) {
       const project = await ctx.db.get(projectId);
@@ -119,11 +129,16 @@ export const resolvePublicInternal = internalQuery({
 export const removeInternal = internalMutation({
   args: {
     organizationId: v.string(),
-    projectId: v.id("projects"),
-    publicationId: v.id("publications"),
+    projectId: v.string(),
+    publicationId: v.string(),
     actorId: v.string(),
   },
-  handler: async (ctx, args) => {
+  handler: async (ctx, input) => {
+    const args = {
+      ...input,
+      projectId: requireId(ctx, "projects", input.projectId),
+      publicationId: requireId(ctx, "publications", input.publicationId),
+    };
     const publication = await ctx.db.get(args.publicationId);
     if (
       !publication

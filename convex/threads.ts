@@ -1,3 +1,4 @@
+import { requireId } from "./ids";
 import { query, mutation } from "./_generated/server";
 import { v } from "convex/values";
 import { anchorValidator } from "./schema";
@@ -52,8 +53,9 @@ export const create = mutation({
 
 // Toggle resolved/unresolved.
 export const resolve = mutation({
-  args: { threadId: v.id("threads") },
-  handler: async (ctx, { threadId }) => {
+  args: { threadId: v.string() },
+  handler: async (ctx, input) => {
+    const threadId = requireId(ctx, "threads", input.threadId);
     const t = await ctx.db.get(threadId);
     if (!t) throw new Error("thread not found");
     await requireOrgIdentity(ctx, t.orgSlug);
@@ -63,8 +65,9 @@ export const resolve = mutation({
 
 // Toggle archived/unarchived. Archived threads are filtered client-side.
 export const archive = mutation({
-  args: { threadId: v.id("threads") },
-  handler: async (ctx, { threadId }) => {
+  args: { threadId: v.string() },
+  handler: async (ctx, input) => {
+    const threadId = requireId(ctx, "threads", input.threadId);
     const t = await ctx.db.get(threadId);
     if (!t) throw new Error("thread not found");
     await requireOrgIdentity(ctx, t.orgSlug);
@@ -74,8 +77,9 @@ export const archive = mutation({
 
 // Delete a thread and all its replies.
 export const remove = mutation({
-  args: { threadId: v.id("threads") },
-  handler: async (ctx, { threadId }) => {
+  args: { threadId: v.string() },
+  handler: async (ctx, input) => {
+    const threadId = requireId(ctx, "threads", input.threadId);
     const thread = await ctx.db.get(threadId);
     if (!thread) throw new Error("thread not found");
     await requireOrgIdentity(ctx, thread.orgSlug);

@@ -1,3 +1,4 @@
+import { requireId } from "./ids";
 import { paginationOptsValidator } from "convex/server";
 import { ConvexError, v } from "convex/values";
 import { mutation, query } from "./_generated/server";
@@ -19,12 +20,17 @@ function authorDisplay(author: { name?: string | null; email?: string | null } |
 export const list = query({
   args: {
     organizationId: v.string(),
-    projectId: v.id("projects"),
+    projectId: v.string(),
     documentPath: v.string(),
-    threadId: v.id("documentThreads"),
+    threadId: v.string(),
     paginationOpts: paginationOptsValidator,
   },
-  handler: async (ctx, args) => {
+  handler: async (ctx, input) => {
+    const args = {
+      ...input,
+      projectId: requireId(ctx, "projects", input.projectId),
+      threadId: requireId(ctx, "documentThreads", input.threadId),
+    };
     if (
       !Number.isSafeInteger(args.paginationOpts.numItems)
       || args.paginationOpts.numItems < 1
@@ -69,12 +75,17 @@ export const list = query({
 export const add = mutation({
   args: {
     organizationId: v.string(),
-    projectId: v.id("projects"),
+    projectId: v.string(),
     documentPath: v.string(),
-    threadId: v.id("documentThreads"),
+    threadId: v.string(),
     body: v.string(),
   },
-  handler: async (ctx, args) => {
+  handler: async (ctx, input) => {
+    const args = {
+      ...input,
+      projectId: requireId(ctx, "projects", input.projectId),
+      threadId: requireId(ctx, "documentThreads", input.threadId),
+    };
     const thread = await ctx.db.get(args.threadId);
     if (
       !thread

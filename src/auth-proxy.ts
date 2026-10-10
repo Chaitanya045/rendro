@@ -1,5 +1,6 @@
 import { CONVEX_SITE_URL } from "@/config";
 import { logger } from "@/logger";
+import { backendFetch } from "@/backend-fetch";
 
 const AUTH_COOKIE_NAMES = [
   "__Secure-better-auth.session_token",
@@ -73,7 +74,7 @@ export async function proxyConvexRequest(request: Request): Promise<Response> {
   if (request.method !== "GET" && request.method !== "HEAD") {
     init.body = await request.text();
   }
-  const upstream = await fetch(target, init);
+  const upstream = await backendFetch(target, init);
   const setCookies = strippedSetCookies(upstream.headers);
   if (setCookies.length === 0) return upstream;
 

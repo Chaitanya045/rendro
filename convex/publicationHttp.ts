@@ -1,21 +1,16 @@
 import type { GenericActionCtx } from "convex/server";
-import type { DataModel, Id } from "./_generated/dataModel";
+import type { DataModel } from "./_generated/dataModel";
 import { internal } from "./_generated/api";
-import { httpAction } from "./_generated/server";
+import { httpAction, failure } from "./httpErrors";
 import { authorizeHttpOrganization } from "./authorization";
 import { validateApiCredential } from "./credentialHttp";
-
-function failure(error: unknown, status = 400): Response {
-  const message = error instanceof Error ? error.message : String(error);
-  return Response.json({ error: message || "Request failed" }, { status });
-}
 
 async function publicationPrincipal(
   ctx: GenericActionCtx<DataModel>,
   request: Request,
   input: {
     organizationId: string;
-    projectId?: Id<"projects">;
+    projectId?: string;
     scope: "publications:read" | "publications:write";
     write: boolean;
   },
@@ -66,7 +61,7 @@ export const createPublication = httpAction(async (ctx: GenericActionCtx<DataMod
   ) return failure("Invalid publication fields");
   const principal = await publicationPrincipal(ctx, request, {
     organizationId,
-    projectId: projectId as Id<"projects">,
+    projectId,
     scope: "publications:write",
     write: true,
   });
@@ -74,12 +69,12 @@ export const createPublication = httpAction(async (ctx: GenericActionCtx<DataMod
   try {
     const publication = await ctx.runMutation(internal.publicationsV2.createInternal, {
       organizationId,
-      projectId: projectId as Id<"projects">,
+      projectId,
       slug,
       pathPrefix,
       entryFile,
       trackingMode,
-      pinnedDeploymentId: pinnedDeploymentId as Id<"deployments"> | undefined,
+      pinnedDeploymentId,
       title,
       description,
       actorId: principal.actorId,
@@ -97,14 +92,14 @@ export const listPublications = httpAction(async (ctx: GenericActionCtx<DataMode
   if (!organizationId) return failure("organizationId is required");
   const principal = await publicationPrincipal(ctx, request, {
     organizationId,
-    projectId: projectId as Id<"projects"> | undefined,
+    projectId,
     scope: "publications:read",
     write: false,
   });
   if (!principal) return failure("Invalid or insufficient principal", 403);
   const publications = await ctx.runQuery(internal.publicationsV2.listInternal, {
     organizationId,
-    projectId: projectId as Id<"projects"> | undefined,
+    projectId,
   });
   return Response.json({ publications });
 });
@@ -121,15 +116,15 @@ export const removePublication = httpAction(async (ctx: GenericActionCtx<DataMod
   }
   const principal = await publicationPrincipal(ctx, request, {
     organizationId,
-    projectId: projectId as Id<"projects">,
+    projectId,
     scope: "publications:write",
     write: true,
   });
   if (!principal) return failure("Invalid or insufficient principal", 403);
   await ctx.runMutation(internal.publicationsV2.removeInternal, {
     organizationId,
-    projectId: projectId as Id<"projects">,
-    publicationId: publicationId as Id<"publications">,
+    projectId,
+    publicationId,
     actorId: principal.actorId,
   });
   return Response.json({ removed: true });

@@ -6,7 +6,7 @@ import { createProject, managementTeamMembers } from "../convex/rendroHttp";
 const handler = (managementTeamMembers as unknown as { _handler: (ctx: unknown, request: Request) => Promise<Response> })._handler;
 const ctx = { runQuery: mocks.query };
 const request = (extra = "") => new Request(`https://rendro.test/api/rendro/management/team-members?organizationId=org-a&teamId=team-a${extra}`);
-beforeEach(() => { vi.resetAllMocks(); mocks.authorize.mockResolvedValue({}); mocks.findOne.mockResolvedValue({ organizationId: "org-a" }); mocks.query.mockResolvedValue({ page: [], isDone: true, continueCursor: "" }); });
+beforeEach(() => { vi.resetAllMocks(); mocks.authorize.mockResolvedValue({}); mocks.query.mockResolvedValueOnce({ organizationId: "org-a" }).mockResolvedValue({ page: [], isDone: true, continueCursor: "" }); });
 describe("management team roster", () => {
   it("keeps duplicate-project errors readable without backend stack traces", async () => {
     mocks.authorize.mockResolvedValue({ user: { _id: "user-a" } });
@@ -30,14 +30,14 @@ describe("management team roster", () => {
     expect(mocks.query).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ paginationOpts: { numItems: 50, cursor: "prior-page" } }));
   });
   it("rejects cross-organization team IDs before reading members", async () => {
-    mocks.findOne.mockResolvedValue({ organizationId: "org-b" });
+    mocks.query.mockReset().mockResolvedValue({ organizationId: "org-b" });
     expect((await handler(ctx, request())).status).toBe(404);
-    expect(mocks.query).not.toHaveBeenCalled();
+    expect(mocks.query).toHaveBeenCalledTimes(1);
   });
   it("fails closed for unauthorized callers", async () => {
     mocks.authorize.mockRejectedValue(new Error("Insufficient organization role"));
     expect((await handler(ctx, request())).status).toBe(403);
-    expect(mocks.findOne).not.toHaveBeenCalled(); expect(mocks.query).not.toHaveBeenCalled();
+    expect(mocks.query).not.toHaveBeenCalled();
   });
   it("fails closed when the cursor query fails", async () => {
     mocks.query.mockRejectedValue(new Error("Invalid cursor"));

@@ -1,3 +1,4 @@
+import { requireId } from "./ids";
 import { ConvexError, v } from "convex/values";
 import { internalMutation, internalQuery } from "./_generated/server";
 import { provenanceValidator } from "./schema";
@@ -5,14 +6,18 @@ import { provenanceValidator } from "./schema";
 export const startInternal = internalMutation({
   args: {
     organizationId: v.string(),
-    projectId: v.id("projects"),
+    projectId: v.string(),
     manifestSha256: v.string(),
     fileCount: v.number(),
     byteCount: v.number(),
     provenance: provenanceValidator,
     actorId: v.string(),
   },
-  handler: async (ctx, args) => {
+  handler: async (ctx, input) => {
+    const args = {
+      ...input,
+      projectId: requireId(ctx, "projects", input.projectId),
+    };
     const project = await ctx.db.get(args.projectId);
     if (!project || project.organizationId !== args.organizationId) {
       throw new ConvexError("Project not found");
@@ -60,10 +65,15 @@ export const startInternal = internalMutation({
 export const getInternal = internalQuery({
   args: {
     organizationId: v.string(),
-    projectId: v.id("projects"),
-    deploymentId: v.id("deployments"),
+    projectId: v.string(),
+    deploymentId: v.string(),
   },
-  handler: async (ctx, args) => {
+  handler: async (ctx, input) => {
+    const args = {
+      ...input,
+      projectId: requireId(ctx, "projects", input.projectId),
+      deploymentId: requireId(ctx, "deployments", input.deploymentId),
+    };
     const deployment = await ctx.db.get(args.deploymentId);
     if (
       !deployment
@@ -75,8 +85,12 @@ export const getInternal = internalQuery({
 });
 
 export const listInternal = internalQuery({
-  args: { organizationId: v.string(), projectId: v.id("projects") },
-  handler: async (ctx, args) => {
+  args: { organizationId: v.string(), projectId: v.string() },
+  handler: async (ctx, input) => {
+    const args = {
+      ...input,
+      projectId: requireId(ctx, "projects", input.projectId),
+    };
     const project = await ctx.db.get(args.projectId);
     if (!project || project.organizationId !== args.organizationId) {
       throw new ConvexError("Project not found");
@@ -105,11 +119,16 @@ export const latestForOrganization = internalQuery({
 export const commitInternal = internalMutation({
   args: {
     organizationId: v.string(),
-    projectId: v.id("projects"),
-    deploymentId: v.id("deployments"),
+    projectId: v.string(),
+    deploymentId: v.string(),
     actorId: v.string(),
   },
-  handler: async (ctx, args) => {
+  handler: async (ctx, input) => {
+    const args = {
+      ...input,
+      projectId: requireId(ctx, "projects", input.projectId),
+      deploymentId: requireId(ctx, "deployments", input.deploymentId),
+    };
     const project = await ctx.db.get(args.projectId);
     const deployment = await ctx.db.get(args.deploymentId);
     if (!project || project.organizationId !== args.organizationId) {
@@ -151,11 +170,16 @@ export const commitInternal = internalMutation({
 export const failInternal = internalMutation({
   args: {
     organizationId: v.string(),
-    projectId: v.id("projects"),
-    deploymentId: v.id("deployments"),
+    projectId: v.string(),
+    deploymentId: v.string(),
     reason: v.string(),
   },
-  handler: async (ctx, args) => {
+  handler: async (ctx, input) => {
+    const args = {
+      ...input,
+      projectId: requireId(ctx, "projects", input.projectId),
+      deploymentId: requireId(ctx, "deployments", input.deploymentId),
+    };
     const deployment = await ctx.db.get(args.deploymentId);
     if (
       !deployment
