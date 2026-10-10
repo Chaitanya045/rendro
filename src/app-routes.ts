@@ -7,6 +7,7 @@ import authPageRoutes from "@/routes/auth-pages";
 import organizationPageRoutes from "@/routes/organization-pages";
 import projectPageRoutes from "@/routes/project-pages";
 import deploymentRoutes from "@/routes/deployments";
+import migrationRoutes from "@/routes/migration";
 import publicationPageRoutes from "@/routes/publication-pages";
 import publicationApiRoutes from "@/routes/publication-api";
 import projectDocsRoutes from "@/routes/project-docs";
@@ -50,6 +51,7 @@ export function mountSessionRoutes<E extends AppEnv>(app: Hono<E>): void {
     }
   });
   app.route("/", deploymentRoutes);
+  app.route("/", migrationRoutes);
   app.route("/", publicationApiRoutes);
 
   app.on(["POST", "GET", "PATCH", "DELETE"], "/api/rendro/*", async (c) => {
