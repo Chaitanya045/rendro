@@ -17,11 +17,13 @@ type RepliesUpdateHandler = (
   loading: boolean,
 ) => void;
 type ErrorHandler = (error: Error) => void;
+type SlowHandler = () => void | (() => void);
 
 type PendingRequest = {
   resolve: () => void;
   reject: (error: Error) => void;
   timeout: number;
+  dismissSlow?: () => void;
 };
 
 export class ParentCommentTransport {
@@ -29,6 +31,7 @@ export class ParentCommentTransport {
   private updateHandler: UpdateHandler | null = null;
   private repliesUpdateHandler: RepliesUpdateHandler | null = null;
   private errorHandler: ErrorHandler | null = null;
+  private slowHandler: SlowHandler | null = null;
   private sequence = 0;
 
   constructor(
@@ -43,10 +46,12 @@ export class ParentCommentTransport {
     onUpdate: UpdateHandler,
     onRepliesUpdate: RepliesUpdateHandler,
     onError: ErrorHandler,
+    onSlowMutation?: SlowHandler,
   ): void {
     this.updateHandler = onUpdate;
     this.repliesUpdateHandler = onRepliesUpdate;
     this.errorHandler = onError;
+    this.slowHandler = onSlowMutation ?? null;
   }
 
   mutate(method: CommentorParentMutationMethod, args: unknown): Promise<void> {
@@ -65,21 +70,33 @@ export class ParentCommentTransport {
     this.events.removeEventListener("message", this.onMessage as EventListener);
     for (const request of this.pending.values()) {
       window.clearTimeout(request.timeout);
+      request.dismissSlow?.();
       request.reject(new Error("Comment transport closed"));
     }
     this.pending.clear();
     this.updateHandler = null;
     this.repliesUpdateHandler = null;
     this.errorHandler = null;
+    this.slowHandler = null;
   }
 
   private request(method: CommentorParentMethod, args: unknown): Promise<void> {
     const requestId = `${Date.now()}-${++this.sequence}-${Math.random().toString(36).slice(2)}`;
     return new Promise((resolve, reject) => {
+      const mutation = method.startsWith("thread.") || method === "reply.add";
       const timeout = window.setTimeout(() => {
+        if (mutation) {
+          // Convex retries disconnected mutations and may commit before its
+          // acknowledgement arrives. A deadline cannot establish failure.
+          // Keep the operation pending and accept the eventual server result;
+          // never resubmit toggles, creates or replies on a timer.
+          const pending = this.pending.get(requestId);
+          if (pending) pending.dismissSlow = this.slowHandler?.() || undefined;
+          return;
+        }
         this.pending.delete(requestId);
-        reject(new Error("Comment operation timed out"));
-      }, 10_000);
+        reject(new Error("Comments are taking longer to load. Refresh the page."));
+      }, mutation ? 60_000 : 10_000);
       this.pending.set(requestId, { resolve, reject, timeout });
       this.parent.postMessage({
         type: COMMENTOR_PARENT_REQUEST,
@@ -122,6 +139,7 @@ export class ParentCommentTransport {
     if (!request) return;
     this.pending.delete(event.data.requestId);
     window.clearTimeout(request.timeout);
+    request.dismissSlow?.();
     if (event.data.ok) request.resolve();
     else request.reject(new Error(event.data.error || "Comment operation failed"));
   };

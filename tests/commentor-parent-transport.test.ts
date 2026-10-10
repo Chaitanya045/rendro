@@ -242,3 +242,99 @@ describe("project comment parent transport", () => {
     transport.dispose();
   });
 });
+
+describe("slow comment mutations", () => {
+  afterEach(() => vi.useRealTimers());
+
+  function transportRuntime() {
+    vi.useFakeTimers();
+    vi.stubGlobal("window", { setTimeout, clearTimeout });
+    let handler!: (event: MessageEvent) => void;
+    const events = {
+      addEventListener: (_type: string, listener: EventListener) => { handler = listener as (event: MessageEvent) => void; },
+      removeEventListener: vi.fn(),
+    };
+    const postMessage = vi.fn();
+    const parent = { postMessage };
+    const transport = new ParentCommentTransport(parent, events as never, "guide.html");
+    const dismissSlow = vi.fn();
+    const slow = vi.fn(() => dismissSlow);
+    const update = vi.fn();
+    transport.subscribe(update, vi.fn(), vi.fn(), slow);
+    const respond = (ok: boolean) => {
+      const request = postMessage.mock.calls[0][0] as { requestId: string };
+      handler({ source: parent, data: { type: COMMENTOR_PARENT_RESPONSE, requestId: request.requestId, ok } } as unknown as MessageEvent);
+    };
+    const publish = () => handler({ source: parent, data: {
+      type: COMMENTOR_PARENT_UPDATE,
+      threads: [{ _id: "thread-1", resolved: true }],
+      canLoadMore: false,
+      loading: false,
+    } } as unknown as MessageEvent);
+    return { transport, slow, dismissSlow, postMessage, respond, publish, update };
+  }
+
+  it("accepts a successful resolve after a 53-second delay", async () => {
+    const { transport, slow, postMessage, respond } = transportRuntime();
+    const settled = vi.fn();
+    const operation = transport.mutate("thread.resolve", { threadId: "thread-1" }).then(settled);
+    await vi.advanceTimersByTimeAsync(53_256);
+    expect(settled).not.toHaveBeenCalled();
+    expect(slow).not.toHaveBeenCalled();
+    respond(true);
+    await operation;
+    expect(settled).toHaveBeenCalledTimes(1);
+    expect(postMessage).toHaveBeenCalledTimes(1);
+    transport.dispose();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it.each(["thread.create", "thread.resolve", "thread.archive", "thread.remove", "reply.add"] as const)(
+    "keeps %s pending after the soft deadline, offers recovery, and accepts a late result without retrying",
+    async (method) => {
+      const { transport, slow, dismissSlow, postMessage, respond, publish, update } = transportRuntime();
+      const settled = vi.fn();
+      const operation = transport.mutate(method, {}).then(settled);
+      await vi.advanceTimersByTimeAsync(120_000);
+      expect(slow).toHaveBeenCalledTimes(1);
+      expect(settled).not.toHaveBeenCalled();
+      expect(postMessage).toHaveBeenCalledTimes(1);
+      publish();
+      expect(update).toHaveBeenCalledWith([{ _id: "thread-1", resolved: true }], false, false);
+      respond(true);
+      await operation;
+      expect(settled).toHaveBeenCalledTimes(1);
+      expect(dismissSlow).toHaveBeenCalledTimes(1);
+      transport.dispose();
+    },
+  );
+
+  it("still reports an explicit server rejection after a slow mutation", async () => {
+    const { transport, respond, dismissSlow } = transportRuntime();
+    const result = transport.mutate("thread.resolve", {}).catch((error: Error) => error.message);
+    await vi.advanceTimersByTimeAsync(61_000);
+    respond(false);
+    expect(await result).toBe("Comment operation failed");
+    expect(dismissSlow).toHaveBeenCalledTimes(1);
+    transport.dispose();
+  });
+
+  it("cleans up a pending mutation when its document transport closes", async () => {
+    const { transport, slow } = transportRuntime();
+    const result = transport.mutate("thread.resolve", {}).catch((error: Error) => error.message);
+    transport.dispose();
+    expect(await result).toBe("Comment transport closed");
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(slow).not.toHaveBeenCalled();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("bounds unanswered read/control requests with a refresh message", async () => {
+    const { transport, slow } = transportRuntime();
+    const result = transport.loadMoreThreads().catch((error: Error) => error.message);
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(await result).toBe("Comments are taking longer to load. Refresh the page.");
+    expect(slow).not.toHaveBeenCalled();
+    transport.dispose();
+  });
+});

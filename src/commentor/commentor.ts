@@ -848,6 +848,11 @@ class Commentor {
             : thread), undefined, prior?.loading === true || loading);
         },
         fail,
+        () => this.toast("Still waiting for confirmation. Refresh to check before trying again.", {
+          actionLabel: "Refresh",
+          duration: 30_000,
+          onAction: () => window.location.reload(),
+        }),
       );
       return;
     }
@@ -2449,7 +2454,7 @@ class Commentor {
     this.tip.setAttribute("data-state", "closed");
   }
 
-  private toast(msg: string, options: ToastOptions = {}): void {
+  private toast(msg: string, options: ToastOptions = {}): () => void {
     let region = this.root.querySelector<HTMLElement>(".toast-region");
     if (!region) {
       region = h("div", {
@@ -2493,10 +2498,14 @@ class Commentor {
       );
     }
     region.append(el);
-    window.setTimeout(
+    const timeout = window.setTimeout(
       () => close(el),
       options.duration ?? (options.kind === "error" ? 6000 : 3000),
     );
+    return () => {
+      window.clearTimeout(timeout);
+      close(el);
+    };
   }
 }
 
