@@ -4,6 +4,7 @@ import { memoryAdapter } from "@better-auth/memory-adapter";
 import { betterAuth } from "better-auth/minimal";
 import { testUtils } from "better-auth/plugins";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { Window as DOMWindow } from "happy-dom";
 import { createAuthOptions } from "../convex/auth";
 import projectDocs from "@/routes/project-docs";
 import { sessionMiddleware } from "@/middleware/session";
@@ -162,5 +163,30 @@ describe("private sandbox asset routing", () => {
     expect(html).toContain('data-viewer="parent"');
     const tree = await f.app.request(`${base}/tree`, { headers: { Cookie: f.cookie } });
     expect(await tree.json()).toEqual({ documents: ["guide/index.html", "guide/next.html"], cursor: null });
+  });
+
+  it("routes relative and canonical document links through the shell and keeps fragment links in place", async () => {
+    const f = await fixture();
+    const { html } = await f.document();
+    const win = new DOMWindow({ url: `http://localhost${base}/files/guide/index.html`, settings: {
+      enableJavaScriptEvaluation: true, disableJavaScriptFileLoading: true, disableCSSFileLoading: true,
+    } });
+    try {
+      win.document.write(html);
+      const post = vi.spyOn(win, "postMessage");
+      const link = win.document.querySelector("a")!;
+      link.click();
+      expect(post).toHaveBeenCalledWith({ type: "doc-navigate", path: "guide/next.html" }, "*");
+      post.mockClear();
+      link.href = `${base}/files/guide/next.html`;
+      link.click();
+      expect(post).toHaveBeenCalledWith({ type: "doc-navigate", path: "guide/next.html" }, "*");
+      post.mockClear();
+      link.href = "#section";
+      link.click();
+      expect(post).not.toHaveBeenCalled();
+      expect(win.location.pathname).toBe(`${base}/files/guide/index.html`);
+      expect(win.location.hash).toBe("#section");
+    } finally { await win.happyDOM.close(); }
   });
 });

@@ -8,7 +8,7 @@ export function installViewerParent(config: ParentConfig, host: Window = window)
     const frame = host.document.getElementById("content-frame") as HTMLIFrameElement | null;
     const data = event.data;
     if (!frame?.contentWindow || event.source !== frame.contentWindow || event.origin !== "null"
-      || !data || data.type !== "viewer-renew" || typeof data.requestId !== "string"
+      || !data || data.type !== "viewer-renew" || typeof data.requestId !== "string" || data.requestId.length > 128
       || typeof data.manifestKey !== "string" || data.manifestKey.length > 2048 || pending) return;
     const src = new URL(frame.src, host.location.href);
     if (src.origin !== host.location.origin || !src.pathname.startsWith(`${config.base}/files/`)) return;
@@ -23,7 +23,7 @@ export function installViewerParent(config: ParentConfig, host: Window = window)
         if (!response.ok) return;
         const result = await response.json() as { prefix?: unknown };
         // Never turn this into a general fetch or credential broker.
-        if (typeof result.prefix === "string" && result.prefix.startsWith(`${config.base}/view/`)) {
+        if (frame.src === src.href && typeof result.prefix === "string" && result.prefix.startsWith(`${config.base}/view/`)) {
           source.postMessage({ type: "viewer-renewed", requestId: data.requestId, prefix: result.prefix }, "*");
         }
       } catch { /* Retry on the next heartbeat or resume. */ }

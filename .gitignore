@@ -9,6 +9,7 @@ dist/
 public/commentor.js
 public/commentor-parent.js
 public/lazy-tree.js
+public/private-viewer.js
 bin/
 design.html
 .DS_Store

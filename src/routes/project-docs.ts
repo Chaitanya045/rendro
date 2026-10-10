@@ -67,7 +67,19 @@ var p=window.parent;
 function loaded(){if(p!==window){p.postMessage({type:"doc-loaded",path:${inlineJson(virtualPath)}},"*");}}
 if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",loaded,{once:true});else loaded();
 document.addEventListener("keydown",function(e){var key=(e.key||"").toLowerCase();var shellShortcut=(key==="h"||e.code==="KeyH")&&(e.ctrlKey||e.metaKey)&&e.shiftKey&&!e.altKey&&!e.repeat&&!(e.getModifierState&&e.getModifierState("AltGraph"));if(shellShortcut&&!(e.target instanceof Element&&e.target.closest("input,textarea,select,[contenteditable='true'],[contenteditable='plaintext-only'],[contenteditable='']"))){e.preventDefault();p.postMessage({type:"shell-toggle"},"*");}});
-document.addEventListener("click",function(e){var a=e.target.closest("a");if(!a||!a.href)return;var u=new URL(a.href);var canonical=${inlineJson(`${options.base}/files/`)};var view=${inlineJson(`${options.base}/view/`)};var prefix=u.pathname.startsWith(canonical)?canonical:u.pathname.startsWith(view)?u.pathname.slice(0,u.pathname.indexOf("/files/",view.length)+7):null;if(u.origin!==location.origin||!prefix)return;if(u.pathname===new URL(document.baseURI).pathname&&u.hash)return;var targetPath=u.pathname.slice(prefix.length).split("/").map(decodeURIComponent).join("/");if(!targetPath)return;e.preventDefault();p.postMessage({type:"doc-navigate",path:targetPath},"*");});
+document.addEventListener("click",function(e){
+  var a=e.target instanceof Element?e.target.closest("a"):null;if(!a||!a.href)return;
+  var u=new URL(a.href),canonical=${inlineJson(`${options.base}/files/`)},view=${inlineJson(`${options.base}/view/`)};
+  if(u.origin!==location.origin)return;
+  var boundary=u.pathname.indexOf("/files/",view.length);
+  var prefix=u.pathname.startsWith(canonical)?canonical:u.pathname.startsWith(view)&&boundary>=0?u.pathname.slice(0,boundary+7):null;
+  if(!prefix)return;
+  var targetPath;try{targetPath=u.pathname.slice(prefix.length).split("/").map(decodeURIComponent).join("/");}catch{return;}
+  if(!targetPath)return;e.preventDefault();
+  // The ticket base differs from location: keep same-document anchors in place.
+  if(targetPath===${inlineJson(options.documentPath)}&&u.hash){location.hash=u.hash;return;}
+  p.postMessage({type:"doc-navigate",path:targetPath},"*");
+});
 })();
 </script>
 <script>window.COMMENTOR=${inlineJson({
