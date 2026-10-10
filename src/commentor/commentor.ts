@@ -11,11 +11,11 @@
 import { ConvexClient } from "convex/browser";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
-import { CommentorAuthPolicy } from "./auth-policy";
 import { draftAfterSuccessfulReply } from "./reply-state";
 import { PendingDeletionCoordinator } from "./delete-state";
 import { requestParentTheme } from "./theme-message";
 import { appendPlainText } from "./text";
+import { ParentCommentTransport } from "./parent-transport";
 
 // ─────────────────────────────── types ───────────────────────────────
 
@@ -24,12 +24,14 @@ interface Author {
   email: string;
 }
 interface Config {
-  convexUrl: string;
+  convexUrl?: string;
   orgSlug?: string;
   filePath?: string;
   organizationId?: string;
   projectId?: Id<"projects">;
   documentPath?: string;
+  transport?: "parent";
+  canWrite?: boolean;
   author?: Author;
 }
 type ThreadId = Id<"threads"> | Id<"documentThreads">;
@@ -40,51 +42,22 @@ function isProjectConfig(config: Config): config is Config & {
   projectId: Id<"projects">;
   documentPath: string;
 } {
-  return Boolean(config.organizationId && config.projectId && config.documentPath);
+  return Boolean(
+    config.transport === "parent"
+    && config.organizationId
+    && config.projectId
+    && config.documentPath,
+  );
 }
 
-const authPolicy = new CommentorAuthPolicy();
-
-async function requestAuthToken({
-  forceRefreshToken = false,
-}: { forceRefreshToken?: boolean } = {}): Promise<string | null> {
-  const policy = authPolicy.request(forceRefreshToken);
-  if (!policy.requestRemote) return null;
-  if (window.parent === window) {
-    const response = await fetch("/api/auth/convex/token", {
-      credentials: "same-origin",
-      headers: { Accept: "application/json" },
-    });
-    if (!response.ok) return null;
-    const payload = (await response.json()) as { token?: unknown };
-    return typeof payload.token === "string" ? payload.token : null;
-  }
-  return new Promise((resolve) => {
-    const requestId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    const timeout = window.setTimeout(() => finish(null), 10_000);
-    const finish = (token: string | null) => {
-      window.clearTimeout(timeout);
-      window.removeEventListener("message", onMessage);
-      resolve(token);
-    };
-    const onMessage = (event: MessageEvent) => {
-      if (
-        event.source !== window.parent ||
-        event.data?.type !== "commentor-auth-response" ||
-        event.data.requestId !== requestId
-      ) {
-        return;
-      }
-      finish(typeof event.data.token === "string" ? event.data.token : null);
-    };
-    window.addEventListener("message", onMessage);
-    window.parent.postMessage({
-      type: "commentor-auth-request",
-      requestId,
-      forceRefreshToken,
-      allowCachedToken: policy.allowParentCache,
-    }, "*");
+async function requestAuthToken(): Promise<string | null> {
+  const response = await fetch("/api/auth/convex/token", {
+    credentials: "same-origin",
+    headers: { Accept: "application/json" },
   });
+  if (!response.ok) return null;
+  const payload = (await response.json()) as { token?: unknown };
+  return typeof payload.token === "string" ? payload.token : null;
 }
 
 function storageGet(key: string): string | null {
@@ -135,6 +108,7 @@ interface Thread {
   resolved: boolean;
   archived?: boolean;
   replies: Reply[];
+  repliesHasMore?: boolean;
 }
 type Edge = "bottom" | "top" | "left" | "right";
 type ThreadFilter = "active" | "resolved" | "history";
@@ -511,7 +485,8 @@ const MARGIN = 16;
 
 class Commentor {
   private cfg: Config;
-  private client: ConvexClient;
+  private client: ConvexClient | null;
+  private parentTransport: ParentCommentTransport | null;
   private root: ShadowRoot;
   private dock: HTMLElement;
   private content!: HTMLElement;
@@ -542,6 +517,10 @@ class Commentor {
   private pendingDeletes = new PendingDeletionCoordinator<ThreadId>();
   private replyDrafts = new Map<ThreadId, string>();
   private pendingReplies = new Map<ThreadId, string>();
+  private expandedReplies = new Map<ThreadId, Reply[]>();
+  private replyPagination = new Map<ThreadId, { canLoadMore: boolean; loading: boolean }>();
+  private canLoadMoreThreads = false;
+  private loadingMoreThreads = false;
   private newCommentCount = 0;
   private highlightedThreadId: ThreadId | null = null;
   private commentMode = false;
@@ -555,9 +534,15 @@ class Commentor {
 
   constructor(cfg: Config) {
     this.cfg = cfg;
-    this.canWrite = Boolean(cfg.author);
-    this.client = new ConvexClient(cfg.convexUrl);
-    this.client.setAuth(requestAuthToken);
+    this.canWrite = isProjectConfig(cfg) ? cfg.canWrite === true : Boolean(cfg.author);
+    if (isProjectConfig(cfg)) {
+      this.client = null;
+      this.parentTransport = new ParentCommentTransport(window.parent, window, cfg.documentPath);
+    } else {
+      this.client = new ConvexClient(cfg.convexUrl!);
+      this.client.setAuth(requestAuthToken);
+      this.parentTransport = null;
+    }
 
     const host = document.createElement("div");
     host.id = "commentor-host";
@@ -733,7 +718,37 @@ class Commentor {
 
   // ── subscription ──
   private subscribe(): void {
-    const update = (threads: Thread[]) => {
+    const update = (
+      incomingThreads: Thread[],
+      pagination?: { canLoadMore: boolean; loading: boolean },
+      suppressNew = false,
+    ) => {
+      const wasLoadingMore = this.loadingMoreThreads;
+      if (pagination) {
+        this.canLoadMoreThreads = pagination.canLoadMore;
+        this.loadingMoreThreads = pagination.loading;
+      }
+      // The experimental client may publish an empty LoadingFirstPage state
+      // before the first real page (including after a BFCache resubscribe).
+      // Keep the current realtime view until that page arrives.
+      if (pagination?.loading && incomingThreads.length === 0) {
+        this.renderDrawerList();
+        return;
+      }
+      const currentIds = new Set(incomingThreads.map((thread) => thread._id));
+      for (const threadId of this.expandedReplies.keys()) {
+        if (currentIds.has(threadId)) continue;
+        this.expandedReplies.delete(threadId);
+        this.replyPagination.delete(threadId);
+      }
+      const threads = incomingThreads.map((thread) => {
+        const expanded = this.expandedReplies.get(thread._id);
+        const replyState = this.replyPagination.get(thread._id);
+        return expanded
+          ? { ...thread, replies: expanded, repliesHasMore: replyState?.canLoadMore ?? false }
+          : thread;
+      });
+      suppressNew ||= wasLoadingMore || pagination?.loading === true;
       const activeReply = this.root.activeElement instanceof HTMLTextAreaElement
         && this.root.activeElement.matches('[data-testid="commentor-reply-input"]')
         ? this.root.activeElement
@@ -745,14 +760,14 @@ class Commentor {
       const selectionStart = activeReply?.selectionStart ?? 0;
       const selectionEnd = activeReply?.selectionEnd ?? 0;
       this.newThreadIds = new Set(
-        this.subscriptionReady
+        this.subscriptionReady && !suppressNew
           ? threads
               .filter((thread) => !this.seenThreadIds.has(thread._id))
               .map((thread) => thread._id)
           : [],
       );
       this.newReplyIds = new Set(
-        this.subscriptionReady
+        this.subscriptionReady && !suppressNew
           ? threads.flatMap((thread) =>
               thread.replies
                 .filter((reply) => !this.seenReplyIds.has(reply._id))
@@ -803,7 +818,9 @@ class Commentor {
           replacement.setSelectionRange(selectionStart, selectionEnd);
         });
       }
-      this.subscriptionReady = true;
+      if (this.subscriptionReady || pagination?.loading !== true) {
+        this.subscriptionReady = true;
+      }
       this.newThreadIds.clear();
       this.newReplyIds.clear();
     };
@@ -811,19 +828,29 @@ class Commentor {
       console.error("[commentor] subscription error", error);
 
     if (isProjectConfig(this.cfg)) {
-      this.client.onUpdate(
-        api.documentThreads.list,
-        {
-          organizationId: this.cfg.organizationId,
-          projectId: this.cfg.projectId,
-          documentPath: this.cfg.documentPath,
+      this.parentTransport?.subscribe(
+        (threads, canLoadMore, loading) => update(
+          threads as Thread[],
+          { canLoadMore, loading },
+        ),
+        (threadId, replies, canLoadMore, loading) => {
+          const id = threadId as ThreadId;
+          const prior = this.replyPagination.get(id);
+          if (replies.length > 0 || !loading) this.expandedReplies.set(id, replies as Reply[]);
+          this.replyPagination.set(id, { canLoadMore, loading });
+          update(this.threads.map((thread) => thread._id === id
+            ? {
+                ...thread,
+                replies: this.expandedReplies.get(id) ?? thread.replies,
+                repliesHasMore: canLoadMore,
+              }
+            : thread), undefined, prior?.loading === true || loading);
         },
-        update,
         fail,
       );
       return;
     }
-    if (!this.cfg.orgSlug || !this.cfg.filePath) return;
+    if (!this.client || !this.cfg.orgSlug || !this.cfg.filePath) return;
     this.client.onUpdate(
       api.threads.list,
       { orgSlug: this.cfg.orgSlug, filePath: this.cfg.filePath },
@@ -1143,7 +1170,7 @@ class Commentor {
   }
 
   private onCommentButton(): void {
-    if (!this.cfg.author) return;
+    if (!this.canWrite) return;
     if (this.openSelectionComposer()) return;
     this.setCommentMode(!this.commentMode);
   }
@@ -1299,7 +1326,7 @@ class Commentor {
     rect: Rect,
     invoker: HTMLElement | null = null,
   ): void {
-    if (!this.cfg.author) return;
+    if (!this.canWrite) return;
     this.closeBubbles(false);
     this.hideSelectionAction(true);
     this.bubbleReturnFocus = invoker ?? this.commentsBtn;
@@ -1336,14 +1363,8 @@ class Commentor {
       post.textContent = "Posting…";
       try {
         if (isProjectConfig(this.cfg)) {
-          await this.client.mutation(api.documentThreads.create, {
-            organizationId: this.cfg.organizationId,
-            projectId: this.cfg.projectId,
-            documentPath: this.cfg.documentPath,
-            body,
-            anchor,
-          });
-        } else if (this.cfg.orgSlug && this.cfg.filePath) {
+          await this.parentTransport?.mutate("thread.create", { body, anchor });
+        } else if (this.client && this.cfg.orgSlug && this.cfg.filePath) {
           await this.client.mutation(api.threads.create, {
             orgSlug: this.cfg.orgSlug,
             filePath: this.cfg.filePath,
@@ -1507,44 +1528,71 @@ class Commentor {
 
   private removeThread(threadId: ThreadId): Promise<unknown> {
     return isProjectConfig(this.cfg)
-      ? this.client.mutation(api.documentThreads.remove, {
-          threadId: threadId as Id<"documentThreads">,
-        })
-      : this.client.mutation(api.threads.remove, {
+      ? this.parentTransport!.mutate("thread.remove", { threadId })
+      : this.client!.mutation(api.threads.remove, {
           threadId: threadId as Id<"threads">,
         });
   }
 
   private resolveThread(threadId: ThreadId): Promise<unknown> {
     return isProjectConfig(this.cfg)
-      ? this.client.mutation(api.documentThreads.resolve, {
-          threadId: threadId as Id<"documentThreads">,
-        })
-      : this.client.mutation(api.threads.resolve, {
+      ? this.parentTransport!.mutate("thread.resolve", { threadId })
+      : this.client!.mutation(api.threads.resolve, {
           threadId: threadId as Id<"threads">,
         });
   }
 
   private archiveThread(threadId: ThreadId): Promise<unknown> {
     return isProjectConfig(this.cfg)
-      ? this.client.mutation(api.documentThreads.archive, {
-          threadId: threadId as Id<"documentThreads">,
-        })
-      : this.client.mutation(api.threads.archive, {
+      ? this.parentTransport!.mutate("thread.archive", { threadId })
+      : this.client!.mutation(api.threads.archive, {
           threadId: threadId as Id<"threads">,
         });
   }
 
   private addReply(threadId: ThreadId, body: string): Promise<unknown> {
     return isProjectConfig(this.cfg)
-      ? this.client.mutation(api.documentReplies.add, {
-          threadId: threadId as Id<"documentThreads">,
-          body,
-        })
-      : this.client.mutation(api.replies.add, {
+      ? this.parentTransport!.mutate("reply.add", { threadId, body })
+      : this.client!.mutation(api.replies.add, {
           threadId: threadId as Id<"threads">,
           body,
         });
+  }
+
+  private async loadOlderThreads(): Promise<void> {
+    if (!this.parentTransport || this.loadingMoreThreads || !this.canLoadMoreThreads) return;
+    this.loadingMoreThreads = true;
+    this.renderDrawerList();
+    try {
+      await this.parentTransport.loadMoreThreads();
+    } catch (error) {
+      console.error("[commentor] older comments failed", error);
+      this.loadingMoreThreads = false;
+      this.renderDrawerList();
+      this.toast("Could not load older comments.", { kind: "error" });
+    }
+  }
+
+  private async loadOlderReplies(threadId: ThreadId): Promise<void> {
+    if (!this.parentTransport) return;
+    const thread = this.threads.find((candidate) => candidate._id === threadId);
+    const current = this.replyPagination.get(threadId) ?? {
+      canLoadMore: Boolean(thread?.repliesHasMore),
+      loading: false,
+    };
+    if (current.loading || !current.canLoadMore) return;
+    this.replyPagination.set(threadId, { ...current, loading: true });
+    this.renderDrawerList();
+    this.refreshOpenBubble();
+    try {
+      await this.parentTransport.loadMoreReplies(threadId);
+    } catch (error) {
+      console.error("[commentor] older replies failed", error);
+      this.replyPagination.set(threadId, { ...current, loading: false });
+      this.renderDrawerList();
+      this.refreshOpenBubble();
+      this.toast("Could not load older replies.", { kind: "error" });
+    }
   }
 
   private scheduleDelete(t: Thread): void {
@@ -1716,8 +1764,27 @@ class Commentor {
           r.body,
         ),
       );
+    const replyState = this.replyPagination.get(t._id) ?? {
+      canLoadMore: Boolean(t.repliesHasMore),
+      loading: false,
+    };
+    if (replyState.canLoadMore || replyState.loading) {
+      const loadOlder = h(
+        "button",
+        {
+          class: "load-older",
+          type: "button",
+          "data-testid": "commentor-load-older-replies",
+          "aria-busy": String(replyState.loading),
+          onclick: () => void this.loadOlderReplies(t._id),
+        },
+        replyState.loading ? "Loading older replies…" : "Load older replies",
+      ) as HTMLButtonElement;
+      loadOlder.disabled = replyState.loading;
+      view.append(loadOlder);
+    }
     view.append(replies);
-    if (this.canWrite && this.cfg.author) {
+    if (this.canWrite) {
       const helpId = `commentor-reply-help-${t._id}`;
       const input = h("textarea", {
         class: "reply-input",
@@ -2011,6 +2078,21 @@ class Commentor {
     }
     this.drawerList.replaceChildren();
     const visible = this.filteredThreads(this.threadFilter);
+    if (isProjectConfig(this.cfg) && (this.canLoadMoreThreads || this.loadingMoreThreads)) {
+      const loadOlder = h(
+        "button",
+        {
+          class: "load-older load-older-threads",
+          type: "button",
+          "data-testid": "commentor-load-older-threads",
+          "aria-busy": String(this.loadingMoreThreads),
+          onclick: () => void this.loadOlderThreads(),
+        },
+        this.loadingMoreThreads ? "Loading older comments…" : "Load older comments",
+      ) as HTMLButtonElement;
+      loadOlder.disabled = this.loadingMoreThreads;
+      this.drawerList.append(loadOlder);
+    }
     if (visible.length === 0) {
       const title: Record<ThreadFilter, string> = {
         active: "No active comments",
@@ -3094,6 +3176,21 @@ textarea:disabled {
   flex-direction: column;
   gap: 4px;
 }
+.load-older {
+  align-self: center;
+  margin-top: 8px;
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  min-height: 32px;
+  padding: 5px 10px;
+  border-radius: 8px;
+  font: 600 12px/1 var(--font-ui);
+  cursor: pointer;
+}
+.load-older:hover:not(:disabled) { background: var(--border-soft); color: var(--accent-hover); }
+.load-older:disabled { cursor: wait; opacity: .65; }
+.load-older-threads { flex: 0 0 auto; margin: 4px auto 8px; }
 .reply {
   padding: 6px 8px;
   border-radius: var(--radius-sm);
@@ -3355,7 +3452,7 @@ textarea:disabled {
 function boot(): void {
   const cfg = (window as unknown as { COMMENTOR?: Config }).COMMENTOR;
   const hasLegacyScope = Boolean(cfg?.orgSlug && cfg.filePath);
-  if (!cfg?.convexUrl || (!hasLegacyScope && !isProjectConfig(cfg))) {
+  if (!cfg || (!isProjectConfig(cfg) && (!cfg.convexUrl || !hasLegacyScope))) {
     console.error(
       "[commentor] not started — configure a legacy organization/file or project document scope",
     );

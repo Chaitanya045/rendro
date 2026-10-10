@@ -18,3 +18,12 @@ export function isContentFrameSource(
 ): boolean {
   return contentWindow !== null && source === contentWindow;
 }
+
+export function loadedDocumentAction(
+  loadedPath: string,
+  currentPath: string | undefined,
+  expectedPath: string | null,
+): "ignore" | "sync" | "reload" {
+  if (expectedPath) return loadedPath === expectedPath ? "sync" : "ignore";
+  return Boolean(currentPath) && loadedPath !== currentPath ? "reload" : "sync";
+}

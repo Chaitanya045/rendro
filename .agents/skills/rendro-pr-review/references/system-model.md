@@ -102,7 +102,20 @@ successful creation
 
 ### Comments
 
-The browser receives a short-lived Convex identity, but thread/reply authorship and organization/file access are derived and verified server-side. A client cannot select another author or organization. Navigation and status changes must not drop drafts or allow older subscriptions to repaint newer state.
+The trusted parent shell owns the short-lived Convex identity and the project
+comment connection. Publisher HTML runs in an opaque-origin iframe and receives
+only document-scoped comment results/operations, never the identity token. The
+parent derives scope from its selected frame, gates requests on document load,
+and rejects stale source/generation work. Every public backend page/mutation
+independently checks membership and the organization/project/document/thread
+tuple; the bridge is not a substitute for authorization.
+
+Thread/reply history uses bounded reactive pages with explicit older-history
+controls. Removal hides a tombstoned thread immediately and schedules bounded
+reply cleanup. Assess aggregate enriched payloads, not only the number of raw
+thread rows. Legacy trusted viewers retain their separate direct connection.
+Navigation, page resume, and status changes must not drop drafts, retain disposed
+connections, or let older subscriptions repaint newer state.
 
 ## Scaling dimensions
 
@@ -170,6 +183,7 @@ Generated outputs are not independent implementations. Review their canonical so
 | Canonical source | Artifact | Repository treatment |
 |---|---|---|
 | `src/commentor/` | `public/commentor.js` | ignored; must build in the release path |
+| `src/commentor/parent-entry.ts` and parent transport host | `public/commentor-parent.js` | ignored; must build in the release path |
 | `src/lazy-tree/` | `public/lazy-tree.js` | ignored; must build in the release path |
 | `src/management-query/` | `public/management-query.js` | tracked; regenerate with source changes |
 | shared select browser source | `public/select.js` | tracked; regenerate with source changes |

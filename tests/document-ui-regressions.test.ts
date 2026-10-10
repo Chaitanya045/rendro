@@ -1,18 +1,19 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { Script } from "node:vm";
-import { CommentorAuthPolicy } from "../src/commentor/auth-policy";
 import { draftAfterSuccessfulReply } from "../src/commentor/reply-state";
 import { PendingDeletionCoordinator } from "../src/commentor/delete-state";
 import { isThemeReadyMessage, requestParentTheme } from "../src/commentor/theme-message";
 import {
   injectMobileViewportScrollbarStream,
   injectMobileViewportScrollbarStyle,
+  injectHtmlHeadStream,
 } from "../src/routes/document-html";
 import { renderScopedDocumentShell } from "../src/routes/app";
 
 import {
   isContentFrameSource,
+  loadedDocumentAction,
   normalizeLoadedDocumentPath,
   validRelativeDocumentPath,
 } from "../src/lazy-tree/messages";
@@ -60,6 +61,15 @@ describe("document UI regressions", () => {
     expect(isContentFrameSource(contentFrame, null)).toBe(false);
   });
 
+  it("ignores a stale loaded message until the latest shell navigation is acknowledged", () => {
+    expect(loadedDocumentAction("project/a.html", "project/b.html", "project/b.html"))
+      .toBe("ignore");
+    expect(loadedDocumentAction("project/b.html", "project/b.html", "project/b.html"))
+      .toBe("sync");
+    expect(loadedDocumentAction("project/c.html", "project/b.html", null))
+      .toBe("reload");
+  });
+
   it("passes comment text to a text node without entity encoding", async () => {
     const appended: unknown[] = [];
     vi.stubGlobal("document", {
@@ -71,22 +81,6 @@ describe("document UI regressions", () => {
     } as unknown as ParentNode;
     appendPlainText(parent, "Use <main> & keep > visible");
     expect(appended).toEqual([{ nodeValue: "Use <main> & keep > visible" }]);
-  });
-
-  it("reports an iframe cache miss before requesting one fresh Convex token", () => {
-    const policy = new CommentorAuthPolicy();
-    expect(policy.request(false)).toEqual({
-      requestRemote: false,
-      allowParentCache: false,
-    });
-    expect(policy.request(true)).toEqual({
-      requestRemote: true,
-      allowParentCache: true,
-    });
-    expect(policy.request(true)).toEqual({
-      requestRemote: true,
-      allowParentCache: false,
-    });
   });
 
   it("clears only the submitted reply draft after realtime replacement", () => {
@@ -259,11 +253,84 @@ describe("document UI regressions", () => {
     const reader = injectMobileViewportScrollbarStream(source, 32).getReader();
     const prefix = '<!doctype html><head data-note="' + 'x'.repeat(32);
     controller.enqueue(new TextEncoder().encode(prefix));
-    expect(new TextDecoder().decode((await reader.read()).value)).toBe(prefix);
+    const first = await reader.read();
+    const second = await reader.read();
+    expect(new TextDecoder().decode(new Uint8Array([
+      ...(first.value ?? []),
+      ...(second.value ?? []),
+    ]))).toBe(prefix);
     const tail = '"></head><body>Body</body>';
     controller.enqueue(new TextEncoder().encode(tail)); controller.close();
     expect(new TextDecoder().decode((await reader.read()).value)).toBe(tail);
     expect((await reader.read()).done).toBe(true);
+  });
+
+  it("bounds one oversized storage chunk and preserves a code point split at the byte budget", async () => {
+    const encoder = new TextEncoder();
+    const original = encoder.encode(`${"x".repeat(31)}€${"y".repeat(100_000)}`);
+    const source = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(original);
+        controller.close();
+      },
+    });
+    const output = new Uint8Array(await new Response(
+      injectHtmlHeadStream(source, "<script>integration()</script>", undefined, 32),
+    ).arrayBuffer());
+    expect(output).toEqual(original);
+  });
+
+  it("injects into one oversized storage chunk while preserving all publisher bytes", async () => {
+    const markup = "<script>integration()</script>";
+    const original = `<!doctype html><head><title>Docs</title></head><body>Résumé 📖${"x".repeat(100_000)}</body>`;
+    const source = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode(original));
+        controller.close();
+      },
+    });
+    const output = await new Response(injectHtmlHeadStream(source, markup)).text();
+    expect(output.replace(markup, "")).toBe(original);
+    expect(output.match(/integration\(\)/g)).toHaveLength(1);
+  });
+
+  it("passes an invalid UTF-8 publisher prefix through without unsafe byte-offset splicing", async () => {
+    const suffix = new TextEncoder().encode("--><head></head><body>Publisher</body>");
+    const original = new Uint8Array([60, 33, 45, 45, 0xff, ...suffix]);
+    const source = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(original);
+        controller.close();
+      },
+    });
+    const output = new Uint8Array(await new Response(
+      injectHtmlHeadStream(source, "<script>integration()</script>"),
+    ).arrayBuffer());
+    expect(output).toEqual(original);
+  });
+
+  it("preserves a UTF-8 BOM while injecting at the corresponding source-byte offset", async () => {
+    const encoder = new TextEncoder();
+    const body = encoder.encode("<!doctype html><head></head><body>Résumé</body>");
+    const original = new Uint8Array([0xef, 0xbb, 0xbf, ...body]);
+    const markup = "<script>integration()</script>";
+    const source = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(original);
+        controller.close();
+      },
+    });
+    const output = new Uint8Array(await new Response(injectHtmlHeadStream(source, markup)).arrayBuffer());
+    expect(Array.from(output.slice(0, 3))).toEqual([0xef, 0xbb, 0xbf]);
+    const markupBytes = encoder.encode(markup);
+    const restored = new Uint8Array(output.byteLength - markupBytes.byteLength);
+    const markerAt = new TextDecoder("utf-8", { ignoreBOM: true }).decode(output).indexOf(markup);
+    const byteMarkerAt = encoder.encode(
+      new TextDecoder("utf-8", { ignoreBOM: true }).decode(output).slice(0, markerAt),
+    ).byteLength;
+    restored.set(output.slice(0, byteMarkerAt));
+    restored.set(output.slice(byteMarkerAt + markupBytes.byteLength), byteMarkerAt);
+    expect(restored).toEqual(original);
   });
 
   it("streams injected HTML once its bounded prefix is complete without corrupting split UTF-8", async () => {
@@ -280,13 +347,52 @@ describe("document UI regressions", () => {
     const firstRead = reader.read();
     sourceController.enqueue(bytes.slice(0, emojiStart + 2));
     sourceController.enqueue(bytes.slice(emojiStart + 2));
-    const first = await firstRead;
-    const prefix = new TextDecoder().decode(first.value);
+    const chunks = [await firstRead, await reader.read(), await reader.read(), await reader.read()];
+    const prefix = new TextDecoder().decode(new Uint8Array(chunks.flatMap((chunk) => [
+      ...(chunk.value ?? []),
+    ])));
     expect(prefix.startsWith("<!doctype html>")).toBe(true);
     expect(prefix).toContain("Résumé 📖");
     expect(prefix).toContain("data-rendro-mobile-viewport");
-    expect(first.done).toBe(false);
+    expect(chunks.every((chunk) => chunk.done === false)).toBe(true);
     await reader.cancel();
+  });
+
+  it("injects document features at a parsed head boundary without corrupting body-close lookalikes", async () => {
+    const source = '<!doctype html><body><script id="publisher-script">const bodyEnd="</body>"; globalThis.publisherRan=true;</script><p>Publisher body</p></body>';
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode(source));
+        controller.close();
+      },
+    });
+    const integrated = await new Response(injectHtmlHeadStream(
+      stream,
+      '<script data-rendro-document-features>globalThis.rendroLoaded=true;</script>',
+      "data-rendro-document-features",
+    )).text();
+    const publisherScript = integrated.match(/<script id="publisher-script">([\s\S]*?)<\/script>/)?.[1];
+    expect(publisherScript).toBe('const bodyEnd="</body>"; globalThis.publisherRan=true;');
+    expect(() => new Script(publisherScript!)).not.toThrow();
+    expect(integrated).toContain("<p>Publisher body</p></body>");
+    expect(integrated.indexOf("data-rendro-document-features")).toBeLessThan(integrated.indexOf("<body>"));
+  });
+
+  it("does not let a publisher marker lookalike disable document feature injection", async () => {
+    const source = '<!doctype html><head><script>const sample="data-rendro-document-features";</script></head><body>Publisher body</body>';
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode(source));
+        controller.close();
+      },
+    });
+    const integrated = await new Response(injectHtmlHeadStream(
+      stream,
+      '<script data-rendro-document-features>globalThis.rendroLoaded=true;</script>',
+    )).text();
+    expect(integrated).toContain('<script>const sample="data-rendro-document-features";</script>');
+    expect(integrated.match(/data-rendro-document-features/g)).toHaveLength(2);
+    expect(integrated).toContain("globalThis.rendroLoaded=true");
   });
 
   it("renders one accessible mobile More panel while keeping primary viewer actions", () => {

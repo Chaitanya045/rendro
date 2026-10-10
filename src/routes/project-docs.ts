@@ -4,7 +4,7 @@ import { CONVEX_SITE_URL, CONVEX_URL } from "@/config";
 import { getObjectStream, getObjectText } from "@/minio";
 import { renderScopedDocumentShell } from "@/routes/app";
 import { renderNotFoundPage } from "@/routes/not-found";
-import { injectMobileViewportScrollbarStyle } from "@/routes/document-html";
+import { injectHtmlHeadStream } from "@/routes/document-html";
 import { parseStoredManifest, type StoredManifest } from "@/stored-manifest";
 
 const app = new Hono<{ Variables: { user?: User } }>();
@@ -41,20 +41,7 @@ function basePath(organizationId: string, projectId: string): string {
   return `/organizations/${encodeURIComponent(organizationId)}/projects/${encodeURIComponent(projectId)}/docs`;
 }
 
-async function readStream(stream: ReadableStream<Uint8Array>): Promise<string> {
-  const reader = stream.getReader();
-  const decoder = new TextDecoder();
-  let html = "";
-  while (true) {
-    const result = await reader.read();
-    if (result.done) break;
-    if (result.value) html += decoder.decode(result.value, { stream: true });
-  }
-  return html + decoder.decode();
-}
-
-function injectDocumentFeatures(
-  html: string,
+function documentFeatures(
   options: {
     organizationId: string;
     projectId: string;
@@ -63,28 +50,31 @@ function injectDocumentFeatures(
     user: User;
   },
 ): string {
-  html = injectMobileViewportScrollbarStyle(html);
   const frameBase = `${options.base}/files/`;
   const virtualPath = `${options.projectId}/${options.documentPath}`;
-  const navigation = `<script>
+  return `<style data-rendro-mobile-viewport>
+@media (max-width: 760px) {
+  :root { scrollbar-width: none; }
+  :root::-webkit-scrollbar { display: none; width: 0; height: 0; }
+}
+</style>
+<script data-rendro-document-features>
 (function(){
 var p=window.parent;
-if(p!==window){p.postMessage({type:"doc-loaded",path:${inlineJson(virtualPath)}},"*");}
+function loaded(){if(p!==window){p.postMessage({type:"doc-loaded",path:${inlineJson(virtualPath)}},"*");}}
+if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",loaded,{once:true});else loaded();
 document.addEventListener("keydown",function(e){var key=(e.key||"").toLowerCase();var shellShortcut=(key==="h"||e.code==="KeyH")&&(e.ctrlKey||e.metaKey)&&e.shiftKey&&!e.altKey&&!e.repeat&&!(e.getModifierState&&e.getModifierState("AltGraph"));if(shellShortcut&&!(e.target instanceof Element&&e.target.closest("input,textarea,select,[contenteditable='true'],[contenteditable='plaintext-only'],[contenteditable='']"))){e.preventDefault();p.postMessage({type:"shell-toggle"},"*");}});
 document.addEventListener("click",function(e){var a=e.target.closest("a");if(!a||!a.href)return;var u=new URL(a.href);var prefix=${inlineJson(frameBase)};if(u.origin!==location.origin||!u.pathname.startsWith(prefix))return;var targetPath=u.pathname.slice(prefix.length).split("/").map(decodeURIComponent).join("/");if(!targetPath)return;e.preventDefault();p.postMessage({type:"doc-navigate",path:targetPath},"*");});
 })();
 </script>
 <script>window.COMMENTOR=${inlineJson({
-    convexUrl: CONVEX_URL,
     organizationId: options.organizationId,
     projectId: options.projectId,
     documentPath: options.documentPath,
-    author: { email: options.user.email, name: options.user.name },
+    transport: "parent",
+    canWrite: true,
   })};</script>
-<script src="/commentor.js?v=33"></script>`;
-  return /<\/body\s*>/i.test(html)
-    ? html.replace(/<\/body\s*>/i, `${navigation}</body>`)
-    : `${html}${navigation}`;
+<script defer src="/commentor.js?v=34"></script>`;
 }
 
 app.get("/organizations/:organizationId/projects/:projectId/docs/tree", async (c) => {
@@ -126,14 +116,17 @@ app.get("/organizations/:organizationId/projects/:projectId/docs/files/*", async
     "X-Content-Type-Options": "nosniff",
   };
   if (!entry.contentType.startsWith("text/html")) return new Response(stream, { headers });
-  const html = injectDocumentFeatures(await readStream(stream), {
+  const features = documentFeatures({
     organizationId,
     projectId,
     documentPath: path,
     base,
     user,
   });
-  return new Response(html, { headers });
+  // Stored publisher bytes are pristine on every request. Do not use a raw
+  // substring marker for idempotence: a code sample or script can legitimately
+  // contain our attribute name and must not disable the integration.
+  return new Response(injectHtmlHeadStream(stream, features), { headers });
 });
 
 app.get("/organizations/:organizationId/projects/:projectId/docs", async (c) => {
@@ -165,7 +158,7 @@ app.get("/organizations/:organizationId/projects/:projectId/docs", async (c) => 
     selectedPath,
     backHref: projectBase,
     backLabel: "Project",
-    shareConfig: { organizationId, projectId },
+    shareConfig: { organizationId, projectId, convexUrl: CONVEX_URL },
   }));
 });
 

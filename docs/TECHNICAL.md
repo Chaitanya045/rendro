@@ -333,6 +333,8 @@ Zero JavaScript. GPU-accelerated by the browser. Multiple open folders stack wit
 
 ### Architecture
 
+The legacy trusted same-origin viewer connects directly:
+
 ```
 Doc HTML (iframe)                    Convex
   │                                    │
@@ -359,6 +361,31 @@ the thread's organization. Thread and reply author fields are derived from JWT
 claims; the client cannot submit or override them. Worker-only API-key and
 soft-delete functions require `CONVEX_INTERNAL_SECRET`, which must match in the
 Worker and Convex environments.
+
+That direct widget authentication applies only to the legacy same-origin viewer.
+Project documentation uses an opaque, publisher-controlled sandboxed iframe:
+the parent shell owns its authenticated Convex client and real-time subscription.
+
+```text
+publisher iframe -> scoped messages -> trusted parent shell -> authenticated Convex
+publisher iframe <- scoped results  <- trusted parent shell <- reactive pages
+```
+
+The iframe receives only document-scoped comment data and operation results,
+never a JWT or session credential. The parent derives organization, project, and
+document from its trusted configuration and frame URL, allowlists comment
+operations, and confines thread mutations to that document. Server-side membership
+and thread ownership checks remain authoritative. The parent bridge is built as
+`public/commentor-parent.js` in the normal asset/deployment path.
+
+Project thread and reply history uses bounded reactive Convex pages. Explicit
+load-older controls preserve access to the full history; loaded pages remain
+subscribed rather than becoming a stale, hand-maintained snapshot. Read limits
+account for reply previews and bounded author projections as well as raw thread
+rows. Deletion hides the thread immediately using a tombstone, then removes
+replies in scheduled batches of 100 before deleting the thread record.
+Organization membership is checked by indexed organization/user lookup, not by
+searching the first page of an organization roster.
 
 ### Anchor Format
 
@@ -401,10 +428,12 @@ Local and deployed environments use the same Better Auth session and organizatio
 
 ```bash
 pnpm exec convex deploy
-pnpm deploy
+pnpm run deploy
 ```
 
-`pnpm deploy` rebuilds the browser assets before uploading the Worker. Do not
+`pnpm run deploy` rebuilds the browser assets before uploading the Worker. Use
+the explicit `run`: plain `pnpm deploy` invokes pnpm's unrelated workspace
+deployment command. For development use `pnpm run deploy --env development`. Do not
 replace it with a bare Wrangler deployment from a fresh checkout: ignored
 comment/navigation bundles are generated release artifacts, not source files.
 

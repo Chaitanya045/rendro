@@ -124,6 +124,7 @@ app.route("/", publicRoutes);
 app.get("/management-query.js", async (c) => { const assets = c.env?.ASSETS; if (assets?.fetch) return assets.fetch(c.req.raw); return c.html(renderNotFoundPage({ path: c.req.path }), 404); });
 app.get("/select.js", async (c) => { const assets = c.env?.ASSETS; if (assets?.fetch) return assets.fetch(c.req.raw); return c.html(renderNotFoundPage({ path: c.req.path }), 404); });
 app.get("/management-pages.js", async (c) => { const assets = c.env?.ASSETS; if (assets?.fetch) return assets.fetch(c.req.raw); return c.html(renderNotFoundPage({ path: c.req.path }), 404); });
+app.get("/commentor-parent.js", async (c) => { const assets = c.env?.ASSETS; if (assets?.fetch) return assets.fetch(c.req.raw); return c.html(renderNotFoundPage({ path: c.req.path }), 404); });
 app.use("*", sessionMiddleware);
 
 // Sign-out: GET → POST

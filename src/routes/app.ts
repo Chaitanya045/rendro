@@ -292,6 +292,7 @@ interface OrgTreePageOptions {
   shareConfig?: {
     organizationId: string;
     projectId: string;
+    convexUrl?: string;
   };
 }
 
@@ -307,6 +308,7 @@ export interface ScopedDocumentShellOptions {
   shareConfig?: {
     organizationId: string;
     projectId: string;
+    convexUrl?: string;
   };
 }
 
@@ -976,33 +978,9 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
       focusShellControl();
     }
   });
-  var commentorToken="",commentorTokenExpiresAt=0,commentorTokenRequest=null;
-  function commentorTokenExpiry(token){
-    try{var part=token.split(".")[1];if(!part)return 0;part=part.replace(/-/g,"+").replace(/_/g,"/");while(part.length%4)part+="=";var payload=JSON.parse(atob(part));return typeof payload.exp==="number"?payload.exp*1000:0;}catch(_){return 0;}
-  }
-  function fetchCommentorToken(forceRefresh,allowCached){
-    var now=Date.now();
-    if((!forceRefresh||allowCached)&&commentorToken&&commentorTokenExpiresAt>now+30000)return Promise.resolve(commentorToken);
-    if(commentorTokenRequest)return commentorTokenRequest;
-    commentorTokenRequest=fetch("/api/auth/convex/token",{credentials:"same-origin",headers:{Accept:"application/json"}})
-      .then(function(response){return response.ok?response.json():null;})
-      .then(function(payload){var token=payload&&typeof payload.token==="string"?payload.token:null;if(token){commentorToken=token;commentorTokenExpiresAt=commentorTokenExpiry(token);}else{commentorToken="";commentorTokenExpiresAt=0;}return token;})
-      .catch(function(){commentorToken="";commentorTokenExpiresAt=0;return null;})
-      .finally(function(){commentorTokenRequest=null;});
-    return commentorTokenRequest;
-  }
   window.addEventListener("message",function(e){
     var allowedOrigin=e.origin===window.location.origin||(window.RENDRO_DOCUMENT_BASE&&e.origin==="null");
     if(!allowedOrigin||!e.data)return;
-    if(e.data.type==="commentor-auth-request"){
-      var frame=document.getElementById("content-frame");
-      var source=e.source;
-      var requestId=typeof e.data.requestId==="string"?e.data.requestId:"";
-      if(!window.RENDRO_SHARE_CONFIG||!frame||source!==frame.contentWindow||!requestId)return;
-      fetchCommentorToken(e.data.forceRefreshToken===true,e.data.allowCachedToken===true)
-        .then(function(token){source.postMessage({type:"commentor-auth-response",requestId:requestId,token:token},"*");});
-      return;
-    }
     if(e.data.type==="commentor-theme-ready"){
       var themeFrame=document.getElementById("content-frame");
       if(!themeFrame||e.source!==themeFrame.contentWindow)return;
@@ -1065,6 +1043,7 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
 })();
 </script>
 <script>window.RENDRO_INITIAL_DOC=${inlineJson(selectedDoc)};window.RENDRO_ORG=${inlineJson(org)};window.RENDRO_DOCUMENT_BASE=${inlineJson(documentBase)};window.RENDRO_PUBLICATION_BASE=${inlineJson(isPublicDocument ? documentBase : "")};window.RENDRO_SHARE_CONFIG=${inlineJson(options.shareConfig ?? null)};</script>
+${options.shareConfig?.convexUrl ? '<script src="/commentor-parent.js?v=1"></script>' : ""}
 <script src="/lazy-tree.js?v=32"></script>
 </body>
 </html>`;

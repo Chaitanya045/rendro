@@ -8,17 +8,16 @@ const MOBILE_VIEWPORT_SCROLLBAR_STYLE = `<style data-rendro-mobile-viewport>
 </style>`;
 
 export function injectMobileViewportScrollbarStyle(html: string): string {
-  return injectStyle(html, true);
+  return injectMarkup(html, MOBILE_VIEWPORT_SCROLLBAR_STYLE, true, "data-rendro-mobile-viewport");
 }
 
-function injectStyle(html: string, complete: boolean): string {
-  if (html.includes("data-rendro-mobile-viewport")) return html;
+function markupInsertionOffset(html: string, complete: boolean): number | undefined {
   // Parse only a bounded prefix, and splice the original markup rather than
   // serializing publisher HTML. Raw text, comments and quoted attributes can
   // contain closing-tag lookalikes. A truncated/implicit head is not an anchor.
   const document = parse(html.slice(0, 64 * 1024), { sourceCodeLocationInfo: true });
   const root = document.childNodes.find((node) => node.nodeName === "html");
-  if (!root || !("childNodes" in root)) return html;
+  if (!root || !("childNodes" in root)) return undefined;
   const head = root.childNodes.find((node) => node.nodeName === "head");
   const body = root.childNodes.find((node) => node.nodeName === "body");
   const headStart = head?.sourceCodeLocation && "startTag" in head.sourceCodeLocation
@@ -33,8 +32,13 @@ function injectStyle(html: string, complete: boolean): string {
   const offset = headStart ?? body?.sourceCodeLocation?.startOffset ?? fragmentOffset;
   // If there is no explicit safe boundary in the prefix, leave the document
   // untouched: cosmetic scrollbar styling must never damage publisher content.
-  if (offset === undefined) return html;
-  return html.slice(0, offset) + MOBILE_VIEWPORT_SCROLLBAR_STYLE + html.slice(offset);
+  return offset;
+}
+
+function injectMarkup(html: string, markup: string, complete: boolean, marker?: string): string {
+  if (marker && html.includes(marker)) return html;
+  const offset = markupInsertionOffset(html, complete);
+  return offset === undefined ? html : html.slice(0, offset) + markup + html.slice(offset);
 }
 
 export async function readHtmlStream(stream: ReadableStream<Uint8Array>): Promise<string> {
@@ -53,37 +57,110 @@ export function injectMobileViewportScrollbarStream(
   stream: ReadableStream<Uint8Array>,
   maxPrefixBytes = 64 * 1024,
 ): ReadableStream<Uint8Array> {
-  const decoder = new TextDecoder();
+  return injectHtmlHeadStream(
+    stream,
+    MOBILE_VIEWPORT_SCROLLBAR_STYLE,
+    "data-rendro-mobile-viewport",
+    maxPrefixBytes,
+  );
+}
+
+/**
+ * Inserts trusted integration markup at a parser-confirmed head/body boundary
+ * while buffering at most a bounded prefix. Publisher bytes after that prefix
+ * continue streaming unchanged; raw-text/comment lookalikes are never anchors.
+ */
+export function injectHtmlHeadStream(
+  stream: ReadableStream<Uint8Array>,
+  markup: string,
+  marker?: string,
+  maxPrefixBytes = 64 * 1024,
+): ReadableStream<Uint8Array> {
   const encoder = new TextEncoder();
-  let prefix = "";
-  let prefixBytes = 0;
-  let injected = false;
+  const markupBytes = encoder.encode(markup);
+  const prefix = new Uint8Array(maxPrefixBytes);
+  let prefixLength = 0;
+  let decided = false;
+
+  const decodePrefix = (
+    bytes: Uint8Array,
+    complete: boolean,
+  ): { html: string; bomBytes: number } | null => {
+    try {
+      return {
+        html: new TextDecoder("utf-8", { fatal: true }).decode(bytes, { stream: !complete }),
+        bomBytes: bytes.length >= 3
+          && bytes[0] === 0xef
+          && bytes[1] === 0xbb
+          && bytes[2] === 0xbf ? 3 : 0,
+      };
+    } catch {
+      return null;
+    }
+  };
+
+  const emitDecision = (
+    controller: TransformStreamDefaultController<Uint8Array>,
+    complete: boolean,
+  ): boolean => {
+    const bytes = prefix.subarray(0, prefixLength);
+    // Keep an incomplete trailing code point out of the parsed string. If no
+    // safe insertion point exists, the original bytes are emitted verbatim.
+    const decoded = decodePrefix(bytes, complete);
+    // Without a one-to-one UTF-8 mapping, a parser character offset cannot be
+    // translated safely back into the publisher's original byte stream.
+    if (decoded === null) {
+      if (bytes.byteLength > 0) controller.enqueue(bytes);
+      decided = true;
+      return true;
+    }
+    const { html, bomBytes } = decoded;
+    if (marker && html.includes(marker)) {
+      controller.enqueue(bytes);
+      decided = true;
+      return true;
+    }
+    const offset = markupInsertionOffset(html, complete);
+    if (offset !== undefined) {
+      const byteOffset = bomBytes + encoder.encode(html.slice(0, offset)).byteLength;
+      if (byteOffset > 0) controller.enqueue(bytes.subarray(0, byteOffset));
+      controller.enqueue(markupBytes);
+      if (byteOffset < bytes.byteLength) controller.enqueue(bytes.subarray(byteOffset));
+      decided = true;
+      return true;
+    }
+    if (complete || prefixLength >= maxPrefixBytes) {
+      if (bytes.byteLength > 0) controller.enqueue(bytes);
+      decided = true;
+      return true;
+    }
+    return false;
+  };
+
   return stream.pipeThrough(new TransformStream<Uint8Array, Uint8Array>({
     transform(chunk, controller) {
-      const text = decoder.decode(chunk, { stream: true });
-      if (injected) {
-        if (text) controller.enqueue(encoder.encode(text));
+      if (decided) {
+        controller.enqueue(chunk);
         return;
       }
-      prefix += text;
-      prefixBytes += chunk.byteLength;
-      if (/<\/head\s*>|<body\b[^>]*>/i.test(prefix) || prefixBytes >= maxPrefixBytes) {
-        const styled = injectStyle(prefix, false);
-        // A textual match may only be a lookalike in an unfinished comment.
-        // Keep looking for a real boundary, but never buffer past the budget.
-        if (styled === prefix && !prefix.includes("data-rendro-mobile-viewport") && prefixBytes < maxPrefixBytes) return;
-        controller.enqueue(encoder.encode(styled));
-        prefix = "";
-        injected = true;
+
+      const take = Math.min(chunk.byteLength, maxPrefixBytes - prefixLength);
+      if (take > 0) {
+        prefix.set(chunk.subarray(0, take), prefixLength);
+        prefixLength += take;
       }
+      const candidate = decodePrefix(prefix.subarray(0, prefixLength), false);
+      if (
+        candidate === null
+        || /<head\b[^>]*>|<\/head\s*>|<body\b[^>]*>/i.test(candidate.html)
+        || prefixLength >= maxPrefixBytes
+      ) {
+        emitDecision(controller, false);
+      }
+      if (decided && take < chunk.byteLength) controller.enqueue(chunk.subarray(take));
     },
     flush(controller) {
-      const tail = decoder.decode();
-      if (injected) {
-        if (tail) controller.enqueue(encoder.encode(tail));
-      } else {
-        controller.enqueue(encoder.encode(injectMobileViewportScrollbarStyle(prefix + tail)));
-      }
+      if (!decided) emitDecision(controller, true);
     },
   }));
 }

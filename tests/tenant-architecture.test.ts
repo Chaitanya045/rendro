@@ -280,7 +280,8 @@ describe("private project documents", () => {
     expect(htmlResponse.headers.get("X-Content-Type-Options")).toBe("nosniff");
     expect(html).toContain("<h1>Publisher docs</h1>");
     expect(html).toContain("data-rendro-mobile-viewport");
-    expect(html).toContain('window.COMMENTOR={"convexUrl":');
+    expect(html).toContain('window.COMMENTOR={"organizationId":"org-a","projectId":"project-a","documentPath":"reference/index.html","transport":"parent","canWrite":true}');
+    expect(html).not.toContain('window.COMMENTOR={"convexUrl":');
     expect(html.match(/window\.COMMENTOR=/g)).toHaveLength(1);
 
     const assetResponse = await app.request("/organizations/org-a/projects/project-a/docs/files/reference/app.css");

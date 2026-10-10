@@ -194,6 +194,31 @@ describe("shared theme runtime", () => {
     expect(rejected.root.classList.contains("rendro-theme-rippling")).toBe(false);
   });
 
+  it("persists a pending system choice when the system color scheme changes", async () => {
+    const runtime = themeRuntime({ saved: "light", transitions: true, asyncUpdates: true });
+    const controller = runtime.api.mount(runtime.button);
+
+    runtime.button.dispatch("click");
+    expect(controller.getMode()).toBe("system");
+    expect(runtime.root.dataset.theme).toBe("light");
+    expect(runtime.storage.get("commentor-theme")).toBe("light");
+
+    runtime.setDark(true);
+    for (const [query, listeners] of runtime.mediaListeners) {
+      if (query.includes("color-scheme")) for (const listener of listeners) listener();
+    }
+
+    expect(runtime.root.dataset.theme).toBe("system");
+    expect(runtime.root.dataset.resolvedTheme).toBe("dark");
+    expect(runtime.storage.get("commentor-theme")).toBe("system");
+    expect(runtime.transitions[0]?.skipTransition).toHaveBeenCalled();
+
+    runtime.transitions[0]?.runUpdate();
+    await Promise.resolve();
+    expect(runtime.storage.get("commentor-theme")).toBe("system");
+    expect(runtime.root.dataset.theme).toBe("system");
+  });
+
   it("invalidates queued callbacks on direct updates, destruction, and reduced-motion changes", async () => {
     const direct = themeRuntime({ transitions: true, asyncUpdates: true });
     const directController = direct.api.mount(direct.button);

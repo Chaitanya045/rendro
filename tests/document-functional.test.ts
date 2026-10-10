@@ -53,39 +53,79 @@ async function commentMember() {
 }
 
 describe("document workflows", () => {
-  it("preserves replies through status changes and deletes the complete thread atomically", async () => {
-    const { backend, seeded, member } = await commentMember();
+  it("rejects every thread mutation when its supplied document scope does not match", async () => {
+    const { seeded, member } = await commentMember();
+    const actualScope = {
+      organizationId: seeded.organizationId,
+      projectId: seeded.projectId,
+      documentPath: "actual.html",
+    };
+    const wrongScope = { ...actualScope, documentPath: "other.html" };
     const threadId = await member.mutation(api.documentThreads.create, {
+      ...actualScope,
+      body: "Stay scoped",
+      anchor: { kind: "element" as const, path: ["main"] },
+    });
+    await expect(member.mutation(api.documentThreads.resolve, { ...wrongScope, threadId }))
+      .rejects.toThrow("Comment not found");
+    await expect(member.mutation(api.documentThreads.archive, { ...wrongScope, threadId }))
+      .rejects.toThrow("Comment not found");
+    await expect(member.mutation(api.documentThreads.remove, { ...wrongScope, threadId }))
+      .rejects.toThrow("Comment not found");
+    await expect(member.mutation(api.documentReplies.add, { ...wrongScope, threadId, body: "Wrong scope" }))
+      .rejects.toThrow("Comment not found");
+    const threads = await member.query(api.documentThreads.list, {
+      ...actualScope,
+      paginationOpts: { numItems: 20, cursor: null },
+    });
+    expect(threads.page).toHaveLength(1);
+    expect(threads.page[0]).toMatchObject({ resolved: false, archived: false, replies: [] });
+  });
+
+  it("preserves replies through status changes and cleans up a removed thread", async () => {
+    const { backend, seeded, member } = await commentMember();
+    const scope = {
       organizationId: seeded.organizationId,
       projectId: seeded.projectId,
       documentPath: "guide/index.html",
+    };
+    const threadId = await member.mutation(api.documentThreads.create, {
+      ...scope,
       body: "Review this section",
       anchor: { kind: "element", path: ["main", "section:nth-of-type(1)"] },
     });
-    await member.mutation(api.documentReplies.add, { threadId, body: "  First reply  " });
-    await member.mutation(api.documentReplies.add, { threadId, body: "Second reply" });
-    await member.mutation(api.documentThreads.resolve, { threadId });
-    await member.mutation(api.documentThreads.archive, { threadId });
+    await member.mutation(api.documentReplies.add, { ...scope, threadId, body: "  First reply  " });
+    await member.mutation(api.documentReplies.add, { ...scope, threadId, body: "Second reply" });
+    await member.mutation(api.documentThreads.resolve, { ...scope, threadId });
+    await member.mutation(api.documentThreads.archive, { ...scope, threadId });
 
     const listed = await member.query(api.documentThreads.list, {
       organizationId: seeded.organizationId,
       projectId: seeded.projectId,
       documentPath: "guide/index.html",
+      paginationOpts: { numItems: 20, cursor: null },
     });
-    expect(listed).toHaveLength(1);
-    expect(listed[0]).toMatchObject({ resolved: true, archived: true });
-    expect(listed[0]?.replies.map((reply) => reply.body)).toEqual(["First reply", "Second reply"]);
+    expect(listed.page).toHaveLength(1);
+    expect(listed.page[0]).toMatchObject({ resolved: true, archived: true });
+    expect(listed.page[0]?.replies.map((reply) => reply.body)).toEqual(["First reply", "Second reply"]);
 
-    await member.mutation(api.documentThreads.remove, { threadId });
-    expect(await member.query(api.documentThreads.list, {
-      organizationId: seeded.organizationId,
-      projectId: seeded.projectId,
-      documentPath: "guide/index.html",
-    })).toEqual([]);
-    await expect(member.mutation(api.documentReplies.add, { threadId, body: "Late reply" }))
-      .rejects.toThrow("Comment not found");
-    const orphanReplies = await backend.run((ctx) => ctx.db.query("documentReplies").collect());
-    expect(orphanReplies).toEqual([]);
+    vi.useFakeTimers();
+    try {
+      await member.mutation(api.documentThreads.remove, { ...scope, threadId });
+      expect(await member.query(api.documentThreads.list, {
+        organizationId: seeded.organizationId,
+        projectId: seeded.projectId,
+        documentPath: "guide/index.html",
+        paginationOpts: { numItems: 20, cursor: null },
+      })).toMatchObject({ page: [] });
+      await expect(member.mutation(api.documentReplies.add, { ...scope, threadId, body: "Late reply" }))
+        .rejects.toThrow("Comment not found");
+      await backend.finishAllScheduledFunctions(() => vi.runAllTimers());
+      const orphanReplies = await backend.run((ctx) => ctx.db.query("documentReplies").collect());
+      expect(orphanReplies).toEqual([]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("keeps a newer local reply draft when a realtime confirmation arrives", () => {
@@ -97,21 +137,25 @@ describe("document workflows", () => {
 
   it("deduplicates one author lookup across a thread and multiple replies", async () => {
     const { seeded, member } = await commentMember();
-    const threadId = await member.mutation(api.documentThreads.create, {
+    const scope = {
       organizationId: seeded.organizationId,
       projectId: seeded.projectId,
       documentPath: "reference.html",
+    };
+    const threadId = await member.mutation(api.documentThreads.create, {
+      ...scope,
       body: "Question",
       anchor: { kind: "element", path: ["article"] },
     });
-    await member.mutation(api.documentReplies.add, { threadId, body: "One" });
-    await member.mutation(api.documentReplies.add, { threadId, body: "Two" });
+    await member.mutation(api.documentReplies.add, { ...scope, threadId, body: "One" });
+    await member.mutation(api.documentReplies.add, { ...scope, threadId, body: "Two" });
     const lookup = vi.spyOn(authComponent, "getAnyUserById");
     try {
       await member.query(api.documentThreads.list, {
         organizationId: seeded.organizationId,
         projectId: seeded.projectId,
         documentPath: "reference.html",
+        paginationOpts: { numItems: 20, cursor: null },
       });
       expect(lookup).toHaveBeenCalledTimes(1);
     } finally {

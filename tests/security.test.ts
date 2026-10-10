@@ -197,6 +197,9 @@ describe("Convex authorization boundary", () => {
       anchor: { kind: "element", path: ["main", "h2"] },
     });
     await member.mutation(api.documentReplies.add, {
+      organizationId: seeded.organizationId,
+      projectId: seeded.projectId,
+      documentPath: "guide/index.html",
       threadId,
       body: "Updated in the next deployment",
     });
@@ -206,23 +209,25 @@ describe("Convex authorization boundary", () => {
       organizationId: seeded.organizationId,
       projectId: seeded.projectId,
       documentPath: "guide/index.html",
+      paginationOpts: { numItems: 20, cursor: null },
     });
     const otherDocument = await member.query(api.documentThreads.list, {
       organizationId: seeded.organizationId,
       projectId: seeded.projectId,
       documentPath: "guide/other.html",
+      paginationOpts: { numItems: 20, cursor: null },
     });
-    expect(threads).toHaveLength(1);
-    expect(threads[0]).toMatchObject({
+    expect(threads.page).toHaveLength(1);
+    expect(threads.page[0]).toMatchObject({
       authorId: seeded.userId,
       authorEmail: "member@acme.test",
       body: "Anchor this section",
     });
-    expect(threads[0].replies[0]).toMatchObject({
+    expect(threads.page[0].replies[0]).toMatchObject({
       authorId: seeded.userId,
       body: "Updated in the next deployment",
     });
-    expect(otherDocument).toEqual([]);
+    expect(otherDocument.page).toEqual([]);
     expect(authorLookup).toHaveBeenCalledTimes(1);
     authorLookup.mockRestore();
   });

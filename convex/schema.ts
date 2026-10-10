@@ -131,10 +131,12 @@ export default defineSchema({
     anchor: anchorValidator,
     resolved: v.boolean(),
     archived: v.boolean(),
+    deletedAt: v.optional(v.number()),
     createdAt: v.number(),
     updatedAt: v.number(),
   })
     .index("by_document", ["organizationId", "projectId", "documentPath", "createdAt"])
+    .index("by_active_document", ["organizationId", "projectId", "documentPath", "deletedAt", "createdAt"])
     .index("by_project", ["projectId", "createdAt"]),
 
   documentReplies: defineTable({

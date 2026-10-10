@@ -4,6 +4,7 @@
  */
 import {
   isContentFrameSource,
+  loadedDocumentAction,
   normalizeLoadedDocumentPath,
   validRelativeDocumentPath,
 } from "./messages";
@@ -407,6 +408,7 @@ function handleKeydown(e: KeyboardEvent) {
 
 // ── doc loading with history ──
 let activeDocLoadId = 0;
+let expectedLoadedPath: string | null = null;
 let docLoadTimeout: number | undefined;
 let docLoadClearTimer: number | undefined;
 let docLoadStartedAt = 0;
@@ -471,6 +473,7 @@ function loadDoc(fullPath: string, pushState: boolean) {
   if (placeholder) placeholder.style.display = "none";
 
   // Optimistic: keep production tree behavior — selected state changes immediately.
+  expectedLoadedPath = fullPath;
   syncActiveState(fullPath);
 
   const loadId = ++activeDocLoadId;
@@ -545,6 +548,32 @@ function syncActiveState(fullPath: string) {
   void navigateToDoc(relPath);
 }
 
+async function reconcileLoadedDocument(fullPath: string): Promise<void> {
+  if (!ORG) return;
+  if (DOCUMENT_BASE) {
+    await ensureScopedDocuments();
+    const relativePath = relativeDocumentPath(fullPath);
+    if (!relativePath || !scopedDocuments?.includes(relativePath)) return;
+  }
+  // Re-read expected/current state after the async manifest check: a newer
+  // shell navigation may have started while that check was in flight.
+  const action = loadedDocumentAction(
+    fullPath,
+    RENDRO_WINDOW.RENDRO_CURRENT_DOC,
+    expectedLoadedPath,
+  );
+  if (action === "ignore") return;
+  if (expectedLoadedPath === fullPath) expectedLoadedPath = null;
+  if (action === "reload") {
+    // A publisher script can navigate its own iframe without updating the
+    // parent-owned src attribute. Reload once through the shell so security-
+    // sensitive parent integrations regain an authoritative URL scope.
+    loadDoc(fullPath, false);
+    return;
+  }
+  syncActiveState(fullPath);
+}
+
 function isDocumentMessage(value: unknown): value is { type: string; path: string } {
   if (!value || typeof value !== "object") return false;
   return "type" in value
@@ -593,7 +622,7 @@ function init() {
     if (event.data.type === "doc-loaded") {
       if (!ORG) return;
       const loadedPath = normalizeLoadedDocumentPath(event.data.path, ORG);
-      if (loadedPath) syncActiveState(loadedPath);
+      if (loadedPath) void reconcileLoadedDocument(loadedPath);
     }
   });
 

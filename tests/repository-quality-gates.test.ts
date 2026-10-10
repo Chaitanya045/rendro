@@ -42,6 +42,9 @@ describe("repository quality gates", () => {
 
   it("rebuilds ignored browser assets in the canonical deployment command", () => {
     expect(scripts.deploy).toBe("pnpm build:assets && wrangler deploy --config wrangler.toml");
+    expect(scripts["build:assets"]).toContain("tsx scripts/build-commentor-parent.ts");
+    // `pnpm deploy` is a built-in workspace command, not this package script.
+    expect(readFileSync(join(root, "docs/TECHNICAL.md"), "utf8")).toContain("pnpm run deploy --env development");
   });
 
   it("allows a clean generated build and unrelated working changes", () => {

@@ -78,5 +78,5 @@ A fresh audit superseded the September dependency evidence: new advisories affec
 Tinypool, Undici, Sharp, source-map-js, and fast-copy. Migrating Vitest/coverage to
 4.1.11, updating Wrangler to 4.149.0, and refreshing the affected transitive patch
 versions produced **no known vulnerabilities**. The 502-test suite, lint, and
-typecheck passed with the new versions. The canonical `pnpm deploy` now rebuilds
+typecheck passed with the new versions. The canonical `pnpm run deploy` now rebuilds
 browser assets instead of relying on an earlier build in the operator's checkout.

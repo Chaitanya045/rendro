@@ -30,14 +30,20 @@ export async function requireOrganizationMember(
   allowedRoles?: readonly OrganizationRole[],
 ): Promise<AuthorizedOrganization> {
   const user = await authComponent.getAuthUser(ctx);
-  const { auth, headers } = await authComponent.getAuth(createAuth, ctx);
-  const organization = await auth.api.getFullOrganization({
-    query: { organizationId },
-    headers,
+  const auth = await createAuth(ctx).$context;
+  const member = await auth.adapter.findOne<AuthorizedOrganization["member"]>({
+    model: "member",
+    where: [
+      { field: "organizationId", value: organizationId },
+      { field: "userId", value: user._id },
+    ],
+  });
+  if (!member) throw new ConvexError("Organization membership required");
+  const organization = await auth.adapter.findOne<AuthorizedOrganization["organization"]>({
+    model: "organization",
+    where: [{ field: "id", value: organizationId }],
   });
   if (!organization) throw new ConvexError("Organization not found");
-  const member = organization.members.find((candidate) => candidate.userId === user._id);
-  if (!member) throw new ConvexError("Organization membership required");
   if (
     allowedRoles
     && !memberRoles(member.role).some((role) => allowedRoles.includes(role as OrganizationRole))
