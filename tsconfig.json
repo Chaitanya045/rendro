@@ -19,5 +19,5 @@
     }
   },
   "include": ["src/**/*.ts", "cli/src/**/*.ts", "tests/**/*.ts", "vitest.config.ts"],
-  "exclude": ["src/commentor/**", "scripts/**"]
+  "exclude": ["scripts/**"]
 }

@@ -13,7 +13,7 @@ import {
 
 const PAGE_SIZE = 20;
 
-export type CommentPaginationState = {
+type CommentPaginationState = {
   canLoadMore: boolean;
   loading: boolean;
 };
@@ -344,7 +344,7 @@ export class CommentorParentHost {
   };
 }
 
-export class ConvexDocumentCommentBackend implements DocumentCommentBackend {
+class ConvexDocumentCommentBackend implements DocumentCommentBackend {
   constructor(private readonly client: ConvexClient) {}
 
   private subscribePaginated(

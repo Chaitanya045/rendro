@@ -1,4 +1,4 @@
-export type PendingDeletePhase = "waiting" | "committing";
+type PendingDeletePhase = "waiting" | "committing";
 export type UndoDeleteResult = "undone" | "committing" | "missing";
 
 interface PendingDelete {
