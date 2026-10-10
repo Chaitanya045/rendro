@@ -10,6 +10,7 @@ import { createManagementQueryCache } from "@/management-query/cache";
 import { managementPagesSource } from "../scripts/management-pages-source";
 import { organizationPageStyles, projectPageStyles } from "@/routes/management-loading";
 import { organizationSwitcherRuntime } from "@/routes/organization-switcher";
+import { managementUiRuntime } from "@/ui/management-ui";
 
 const windows: Window[] = [];
 const access = { id: "org-a", name: "Acme", slug: "acme", userId: "user-a", member: { userId: "user-a", role: "owner" } };
@@ -40,9 +41,19 @@ async function setup(respond: (path: string) => Promise<unknown> = async (path) 
   win.document.write(html.replace(/<script\b[^>]*>[\s\S]*?<\/script>/g, ""));
   const request = vi.fn(respond), fetch = vi.fn(() => Promise.reject(new Error("Unexpected HTML request")));
   Object.assign(win, { fetch, RendroQueryCore: { create: createManagementQueryCache }, RendroUI: { request, busy() {}, copyText() {}, toast() {}, openDialog(id: string) { win.document.getElementById(id)?.setAttribute("open", ""); }, applyTheme() {}, setNav() {}, syncActiveNav() {}, enhancePage() {} } });
+  win.eval(managementUiRuntime);
   win.eval(renderManagementNavigationRuntime("org-a"));
   win.eval(await managementPagesSource());
   return { win, request, fetch, html, navigate: (suffix: string) => win.eval(`RendroUI.navigate(${JSON.stringify("/organizations/org-a" + suffix)})`) as Promise<boolean> };
+}
+/** Answers the shared themed confirmation dialog that replaced native confirm(). */
+async function answerConfirm(win: Window, accept: boolean) {
+  const dialog = win.document.querySelector("#cp-confirm-dialog")!;
+  expect(dialog.hasAttribute("open")).toBe(true);
+  expect(dialog.querySelector('[data-confirm-accept]')?.className).toContain("destructive");
+  dialog.querySelector<HTMLButtonElement>(accept ? "[data-confirm-accept]" : "[data-confirm-cancel]")!.click();
+  await flush();
+  expect(dialog.hasAttribute("open")).toBe(false);
 }
 afterEach(async () => { for (const win of windows.splice(0)) { win.dispatchEvent(new win.Event("pagehide")); await win.happyDOM.close(); } });
 
@@ -102,8 +113,11 @@ describe("management critical-path optimization", () => {
       expect([...row.children].map(cell => cell.tagName)).toEqual(["TD", "TD", "TD", "TD"]);
       expect([...row.children].map(cell => cell.getAttribute("data-label"))).toEqual(["Deployment", "Source", "Files", "Status"]);
     }
-    expect(rows.map(row => row.querySelector("strong")?.textContent)).toEqual(deployments.map(item => item._id));
-    expect(rows.map(row => row.querySelector(".badge")?.textContent)).toEqual(deployments.map(item => item.status));
+    // Rows lead with the release date; the ID is secondary, monospace and complete in its title.
+    expect(rows.map(row => row.querySelector("strong")?.textContent)).toEqual(deployments.map(item => new Date(item.createdAt).toLocaleString()));
+    expect(rows.map(row => row.querySelector(".cp-id")?.textContent)).toEqual(deployments.map(item => item._id));
+    expect(rows.map(row => row.querySelector(".cp-id")?.getAttribute("title"))).toEqual(deployments.map(item => item._id));
+    expect(rows.map(row => row.querySelector(".badge")?.textContent)).toEqual(["Failed", "Staging", "Active", "Superseded"]);
     expect(rows[2].querySelector(".badge")?.classList.contains("success")).toBe(true);
     expect(rows[0].textContent).toContain("3 files");
     expect(rows[0].textContent).toContain("2 KB");
@@ -224,13 +238,14 @@ describe("management critical-path optimization", () => {
       if (path.includes("remove-team-member")) { roster = []; return {}; }
       return response(path);
     });
-    Object.assign(win, { confirm: () => true });
     await navigate("/teams"); await flush();
     expect(request.mock.calls.some(([path]) => path.includes("management/team-members"))).toBe(false);
     const view = [...win.document.querySelectorAll("button")].find(button => button.textContent === "View members")!;
     view.click(); await flush();
     expect(win.document.querySelector(".team-roster")?.textContent).toContain("Other member");
     win.document.querySelector<HTMLButtonElement>('.team-roster button[aria-label^="Remove"]')!.click(); await flush();
+    expect(request.mock.calls.some(([path]) => path.includes("remove-team-member"))).toBe(false);
+    await answerConfirm(win, true);
     expect(win.document.querySelector(".team-roster")?.textContent).toContain("No members in this team");
     expect(request.mock.calls.some(([path]) => path.endsWith("/remove-member"))).toBe(false);
     expect(win.document.querySelector('select option[value="user-other"]')?.hasAttribute("disabled")).toBe(false);
@@ -242,13 +257,15 @@ describe("management critical-path optimization", () => {
       if (path.endsWith("/remove-member")) return {};
       return response(path);
     });
-    Object.assign(win, { confirm: () => false });
     await navigate("/people"); await flush();
     const remove = win.document.querySelector<HTMLButtonElement>(".remove-member")!;
     remove.click(); await flush();
+    expect(win.document.querySelector("#cp-confirm-title")?.textContent).toBe("Remove member?");
+    await answerConfirm(win, false);
     expect(request.mock.calls.some(([path]) => path.endsWith("/remove-member"))).toBe(false);
     expect(win.document.querySelectorAll("#member-list tr")).toHaveLength(2);
-    Object.assign(win, { confirm: () => true }); remove.click(); await flush();
+    remove.click(); await flush();
+    await answerConfirm(win, true);
     expect(win.document.querySelectorAll("#member-list tr")).toHaveLength(1);
     expect(win.document.querySelector(".remove-member")).toBeNull();
   });
@@ -267,7 +284,7 @@ describe("management critical-path optimization", () => {
     create.resolve({ project: { _id: "project-a" } }); await flush();
     expect(dialog.hasAttribute("open")).toBe(false);
     expect(win.location.pathname).toBe("/organizations/org-a/projects/project-a");
-    expect(win.document.querySelector("#project-id")?.textContent).toBe("project-a");
+    expect(win.document.querySelector("#project-id .cp-id")?.textContent).toBe("project-a");
   });
   it("contains long project/commit labels without pushing overview badges outside mobile rows", () => {
     expect(organizationPageStyles).toContain(".overview-row>.cell-primary{min-width:0;flex:1}");
@@ -291,7 +308,7 @@ describe("management critical-path optimization", () => {
     const { win, navigate } = await setup(async (path) => path.includes("deployments?") ? history.promise : response(path));
     await navigate("/projects/project-a/deployments"); await flush();
     expect(win.document.querySelector(".cp-page-heading")?.textContent).toBe("Deployments");
-    expect(win.document.querySelector(".command code")?.textContent).toContain("--project project-a");
+    expect(win.document.querySelector(".command code")?.textContent).toContain("--project 'project-a'");
     expect(win.document.querySelector("#deployments .loading-view")).not.toBeNull();
     await navigate("/projects"); await flush();
     history.resolve({ deployments: [] }); await flush();

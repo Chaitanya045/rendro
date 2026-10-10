@@ -1,11 +1,11 @@
 /**
- * Builds the commentor widget. The CONVEX_URL is injected at build time
- * or read from a global config on the page.
+ * Builds the commentor widget. The widget reads its configuration from
+ * window.COMMENTOR, which the document routes inject before this script.
  *
  * Run: tsx scripts/build-commentor.ts
  */
 import * as esbuild from "esbuild";
-import { readFileSync, writeFileSync } from "node:fs";
+import { writeFileSync } from "node:fs";
 
 const result = await esbuild.build({
   entryPoints: ["src/commentor/commentor.ts"],
@@ -21,14 +21,10 @@ const result = await esbuild.build({
 const code = result.outputFiles![0]!.text;
 await esbuild.stop();
 
-// Wrap so the widget can boot from window.COMMENTOR. If a legacy
-// __COMMENTOR_URL__ override exists, use it only to fill a missing config URL.
+// Wrap so the IIFE's global name stays scoped to this script.
 const wrapped = `
 // Auto-injected by Rendro — do not edit manually.
 (function() {
-  if (window.__COMMENTOR_URL__ && window.COMMENTOR && !window.COMMENTOR.convexUrl) {
-    window.COMMENTOR.convexUrl = window.__COMMENTOR_URL__;
-  }
   ${code}
 })();
 `;

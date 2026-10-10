@@ -51,15 +51,19 @@ Public capabilities have narrower invariants:
 ### Immutable deployment
 
 ```text
-start/recover staging
-  -> upload/copy delta objects
-  -> write canonical manifest
-  -> verify manifest and required objects
-  -> atomically activate project pointer
+start: validate manifest + checksum, create a new staging deployment
+       (previousDeploymentId = active), Worker writes manifest.json + tree-index.json
+  -> copy unchanged files from the previous active deployment (<=16 per request,
+     size + stored sha256 checked via HEAD) / upload changed files (validated
+     against the manifest entry's size and sha256)
+  -> commit: files/ key listing must equal manifest paths; Convex requires
+     status staging and active pointer unchanged since start
+  -> activate new deployment, previous becomes superseded (one mutation)
   -> retain superseded deployment while referenced
+on copy/upload/commit error: CLI calls /fail -> failed
 ```
 
-Retries must be idempotent. A partial upload must not become active. Retention must consider active projects, pinned publications, and unexpired shares.
+Every start creates a new staging deployment; there is no staging recovery or reuse. A partial upload must not become active. A killed CLI can leave a deployment in `staging`; retention skips staging deployments. Retention must consider active projects, pinned publications, and unexpired shares.
 
 ### Management navigation
 
@@ -146,7 +150,7 @@ Useful counterexamples for this system include:
 - an old request resolves after same-shell navigation;
 - a dialog closes or page scope disposes during a mutation/poll;
 - a cross-organization switch is blocked by unsaved work;
-- a staging deployment is retried after partial object upload;
+- a push fails or is killed after partial object upload, then is re-run;
 - a share expires between shell render and asset request;
 - an organization has more members than a Better Auth page limit;
 - a long name, key, path, email, or URL reaches a narrow mobile layout;

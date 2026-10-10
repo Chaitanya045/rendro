@@ -17,18 +17,12 @@ importers:
       '@convex-dev/better-auth':
         specifier: ^0.12.5
         version: 0.12.5(@standard-schema/spec@1.1.0)(better-auth@1.6.23(@cloudflare/workers-types@4.20260702.1)(better-sqlite3@12.11.1)(drizzle-orm@0.45.2(@cloudflare/workers-types@4.20260702.1)(@libsql/client@0.17.4)(better-sqlite3@12.11.1)(kysely@0.29.2))(react@19.2.7)(vitest@4.1.11))(convex@1.42.0(react@19.2.7))(hono@4.13.8)(react@19.2.7)(typescript@5.9.3)
-      '@edge-runtime/vm':
-        specifier: ^5.0.0
-        version: 5.0.0
       '@eslint/js':
         specifier: ^10.0.1
         version: 10.0.1(eslint@10.6.0)
       '@hono/node-server':
         specifier: ^2.1.1
         version: 2.1.1(hono@4.13.8)
-      '@libsql/client':
-        specifier: ^0.17.4
-        version: 0.17.4
       '@tanstack/query-core':
         specifier: ^5.102.8
         version: 5.102.8
@@ -44,21 +38,12 @@ importers:
       better-auth:
         specifier: ^1.6.23
         version: 1.6.23(@cloudflare/workers-types@4.20260702.1)(better-sqlite3@12.11.1)(drizzle-orm@0.45.2(@cloudflare/workers-types@4.20260702.1)(@libsql/client@0.17.4)(better-sqlite3@12.11.1)(kysely@0.29.2))(react@19.2.7)(vitest@4.1.11)
-      better-auth-cloudflare:
-        specifier: ^0.3.0
-        version: 0.3.0(@better-auth/drizzle-adapter@1.6.23(@better-auth/core@1.6.23(@better-auth/utils@0.4.2)(@better-fetch/fetch@1.3.1)(@cloudflare/workers-types@4.20260702.1)(better-call@1.3.7(zod@4.4.3))(jose@6.2.3)(kysely@0.29.2)(nanostores@1.4.0))(@better-auth/utils@0.4.2)(drizzle-orm@0.45.2(@cloudflare/workers-types@4.20260702.1)(@libsql/client@0.17.4)(better-sqlite3@12.11.1)(kysely@0.29.2)))(@cloudflare/workers-types@4.20260702.1)(@libsql/client@0.17.4)(better-auth@1.6.23(@cloudflare/workers-types@4.20260702.1)(better-sqlite3@12.11.1)(drizzle-orm@0.45.2(@cloudflare/workers-types@4.20260702.1)(@libsql/client@0.17.4)(better-sqlite3@12.11.1)(kysely@0.29.2))(react@19.2.7)(vitest@4.1.11))(better-sqlite3@12.11.1)(kysely@0.29.2)
-      better-sqlite3:
-        specifier: ^12.11.1
-        version: 12.11.1
       convex:
         specifier: ^1.42.0
         version: 1.42.0(react@19.2.7)
       convex-test:
         specifier: ^0.0.54
         version: 0.0.54(convex@1.42.0(react@19.2.7))
-      dotenv:
-        specifier: ^17.4.2
-        version: 17.4.2
       esbuild:
         specifier: ^0.28.1
         version: 0.28.1
@@ -1486,13 +1471,6 @@ packages:
   base64-js@1.5.1:
     resolution: {integrity: sha512-AKpaYlHn8t4SVbOHCy+b5+KKgvR4vrsD8vbvrbiQJps7fKDTkjkDry6ji0rUJjC0kzbNePLwzxq8iypo41qeWA==}
 
-  better-auth-cloudflare@0.3.0:
-    resolution: {integrity: sha512-u0TrMbFhHNL2IFzkCbCQYyA/beeBSivdL+vfrNywYnsVrQO1qT5CC/yKhnRdrkwXLeNi9tCeoSwWoygTMSl0Yg==}
-    peerDependencies:
-      '@better-auth/drizzle-adapter': ^1.5.0
-      '@cloudflare/workers-types': ^4.0.0
-      better-auth: ^1.5.0
-
   better-auth@1.6.23:
     resolution: {integrity: sha512-4vOaRd9UiKGKm9R+ej0jjU1es3MiJIiNc9Qq3VCnYqOZ4/nb5272QqTxWYoDxyUXl5x6A2x2we5KZKQO9teTQQ==}
     peerDependencies:
@@ -1694,10 +1672,6 @@ packages:
   detect-libc@2.1.2:
     resolution: {integrity: sha512-Btj2BOOO83o3WyH59e8MgXsxEQVcarkUOpEYrubB0urwnN10yQ364rsiByU11nZlqWYZm05i/of7io4mzihBtQ==}
     engines: {node: '>=8'}
-
-  dotenv@17.4.2:
-    resolution: {integrity: sha512-nI4U3TottKAcAD9LLud4Cb7b2QztQMUEfHbvhTH09bqXTxnSie8WnjPALV/WMCrJZ6UV/qHJ6L03OqO3LcdYZw==}
-    engines: {node: '>=12'}
 
   drizzle-orm@0.45.2:
     resolution: {integrity: sha512-kY0BSaTNYWnoDMVoyY8uxmyHjpJW1geOmBMdSSicKo9CIIWkSxMIj2rkeSR51b8KAPB7m+qysjuHme5nKP+E5Q==}
@@ -2054,11 +2028,6 @@ packages:
   make-dir@4.0.0:
     resolution: {integrity: sha512-hXdUTZYIVOt1Ex//jAQi+wTZZpUpwBj/0QsOzqegb3rGMMeJiSEu5xLHnYfBrRV4RH2+OCSOO95Is/7x1WJ4bw==}
     engines: {node: '>=10'}
-
-  mime@4.1.0:
-    resolution: {integrity: sha512-X5ju04+cAzsojXKes0B/S4tcYtFAJ6tTMuSPBEn9CPGlrWr8Fiw7qYeLT0XyH80HSoAoqWCaz+MWKh22P7G1cw==}
-    engines: {node: '>=16'}
-    hasBin: true
 
   mimic-response@3.1.0:
     resolution: {integrity: sha512-z0yWI+4FDrrweS8Zmt4Ej5HdJmky15+L2e6Wgn3+iK5fWzb6T3fhNFq2+MeTRb064c6Wr4N/wv0DzQTjNzHNGQ==}
@@ -2860,7 +2829,8 @@ snapshots:
   '@cloudflare/workerd-windows-64@1.20261006.1':
     optional: true
 
-  '@cloudflare/workers-types@4.20260702.1': {}
+  '@cloudflare/workers-types@4.20260702.1':
+    optional: true
 
   '@convex-dev/better-auth@0.12.5(@standard-schema/spec@1.1.0)(better-auth@1.6.23(@cloudflare/workers-types@4.20260702.1)(better-sqlite3@12.11.1)(drizzle-orm@0.45.2(@cloudflare/workers-types@4.20260702.1)(@libsql/client@0.17.4)(better-sqlite3@12.11.1)(kysely@0.29.2))(react@19.2.7)(vitest@4.1.11))(convex@1.42.0(react@19.2.7))(hono@4.13.8)(react@19.2.7)(typescript@5.9.3)':
     dependencies:
@@ -2884,11 +2854,13 @@ snapshots:
     dependencies:
       '@jridgewell/trace-mapping': 0.3.9
 
-  '@edge-runtime/primitives@6.0.0': {}
+  '@edge-runtime/primitives@6.0.0':
+    optional: true
 
   '@edge-runtime/vm@5.0.0':
     dependencies:
       '@edge-runtime/primitives': 6.0.0
+    optional: true
 
   '@emnapi/runtime@1.11.3':
     dependencies:
@@ -3313,10 +3285,12 @@ snapshots:
     transitivePeerDependencies:
       - bufferutil
       - utf-8-validate
+    optional: true
 
   '@libsql/core@0.17.4':
     dependencies:
       js-base64: 3.8.0
+    optional: true
 
   '@libsql/darwin-arm64@0.5.29':
     optional: true
@@ -3331,6 +3305,7 @@ snapshots:
     transitivePeerDependencies:
       - bufferutil
       - utf-8-validate
+    optional: true
 
   '@libsql/isomorphic-ws@0.1.5':
     dependencies:
@@ -3339,6 +3314,7 @@ snapshots:
     transitivePeerDependencies:
       - bufferutil
       - utf-8-validate
+    optional: true
 
   '@libsql/linux-arm-gnueabihf@0.5.29':
     optional: true
@@ -3364,7 +3340,8 @@ snapshots:
   '@napi-rs/lzma-linux-x64-gnu@1.5.1':
     optional: true
 
-  '@neon-rs/load@0.0.4': {}
+  '@neon-rs/load@0.0.4':
+    optional: true
 
   '@noble/ciphers@2.2.0': {}
 
@@ -3715,45 +3692,8 @@ snapshots:
 
   balanced-match@4.0.4: {}
 
-  base64-js@1.5.1: {}
-
-  better-auth-cloudflare@0.3.0(@better-auth/drizzle-adapter@1.6.23(@better-auth/core@1.6.23(@better-auth/utils@0.4.2)(@better-fetch/fetch@1.3.1)(@cloudflare/workers-types@4.20260702.1)(better-call@1.3.7(zod@4.4.3))(jose@6.2.3)(kysely@0.29.2)(nanostores@1.4.0))(@better-auth/utils@0.4.2)(drizzle-orm@0.45.2(@cloudflare/workers-types@4.20260702.1)(@libsql/client@0.17.4)(better-sqlite3@12.11.1)(kysely@0.29.2)))(@cloudflare/workers-types@4.20260702.1)(@libsql/client@0.17.4)(better-auth@1.6.23(@cloudflare/workers-types@4.20260702.1)(better-sqlite3@12.11.1)(drizzle-orm@0.45.2(@cloudflare/workers-types@4.20260702.1)(@libsql/client@0.17.4)(better-sqlite3@12.11.1)(kysely@0.29.2))(react@19.2.7)(vitest@4.1.11))(better-sqlite3@12.11.1)(kysely@0.29.2):
-    dependencies:
-      '@better-auth/drizzle-adapter': 1.6.23(@better-auth/core@1.6.23(@better-auth/utils@0.4.2)(@better-fetch/fetch@1.3.1)(@cloudflare/workers-types@4.20260702.1)(better-call@1.3.7(zod@4.4.3))(jose@6.2.3)(kysely@0.29.2)(nanostores@1.4.0))(@better-auth/utils@0.4.2)(drizzle-orm@0.45.2(@cloudflare/workers-types@4.20260702.1)(@libsql/client@0.17.4)(better-sqlite3@12.11.1)(kysely@0.29.2))
-      '@cloudflare/workers-types': 4.20260702.1
-      better-auth: 1.6.23(@cloudflare/workers-types@4.20260702.1)(better-sqlite3@12.11.1)(drizzle-orm@0.45.2(@cloudflare/workers-types@4.20260702.1)(@libsql/client@0.17.4)(better-sqlite3@12.11.1)(kysely@0.29.2))(react@19.2.7)(vitest@4.1.11)
-      drizzle-orm: 0.45.2(@cloudflare/workers-types@4.20260702.1)(@libsql/client@0.17.4)(better-sqlite3@12.11.1)(kysely@0.29.2)
-      mime: 4.1.0
-      zod: 4.4.3
-    transitivePeerDependencies:
-      - '@aws-sdk/client-rds-data'
-      - '@electric-sql/pglite'
-      - '@libsql/client'
-      - '@libsql/client-wasm'
-      - '@neondatabase/serverless'
-      - '@op-engineering/op-sqlite'
-      - '@opentelemetry/api'
-      - '@planetscale/database'
-      - '@prisma/client'
-      - '@tidbcloud/serverless'
-      - '@types/better-sqlite3'
-      - '@types/pg'
-      - '@types/sql.js'
-      - '@upstash/redis'
-      - '@vercel/postgres'
-      - '@xata.io/client'
-      - better-sqlite3
-      - bun-types
-      - expo-sqlite
-      - gel
-      - knex
-      - kysely
-      - mysql2
-      - pg
-      - postgres
-      - prisma
-      - sql.js
-      - sqlite3
+  base64-js@1.5.1:
+    optional: true
 
   better-auth@1.6.23(@cloudflare/workers-types@4.20260702.1)(better-sqlite3@12.11.1)(drizzle-orm@0.45.2(@cloudflare/workers-types@4.20260702.1)(@libsql/client@0.17.4)(better-sqlite3@12.11.1)(kysely@0.29.2))(react@19.2.7)(vitest@4.1.11):
     dependencies:
@@ -3796,16 +3736,19 @@ snapshots:
     dependencies:
       bindings: 1.5.0
       prebuild-install: 7.1.3
+    optional: true
 
   bindings@1.5.0:
     dependencies:
       file-uri-to-path: 1.0.0
+    optional: true
 
   bl@4.1.0:
     dependencies:
       buffer: 5.7.1
       inherits: 2.0.4
       readable-stream: 3.6.2
+    optional: true
 
   blake3-wasm@2.1.5: {}
 
@@ -3823,10 +3766,12 @@ snapshots:
     dependencies:
       base64-js: 1.5.1
       ieee754: 1.2.1
+    optional: true
 
   chai@6.3.0: {}
 
-  chownr@1.1.4: {}
+  chownr@1.1.4:
+    optional: true
 
   colorette@2.0.20: {}
 
@@ -3876,18 +3821,19 @@ snapshots:
   decompress-response@6.0.0:
     dependencies:
       mimic-response: 3.1.0
+    optional: true
 
-  deep-extend@0.6.0: {}
+  deep-extend@0.6.0:
+    optional: true
 
   deep-is@0.1.4: {}
 
   defu@6.1.7: {}
 
-  detect-libc@2.0.2: {}
+  detect-libc@2.0.2:
+    optional: true
 
   detect-libc@2.1.2: {}
-
-  dotenv@17.4.2: {}
 
   drizzle-orm@0.45.2(@cloudflare/workers-types@4.20260702.1)(@libsql/client@0.17.4)(better-sqlite3@12.11.1)(kysely@0.29.2):
     optionalDependencies:
@@ -3895,6 +3841,7 @@ snapshots:
       '@libsql/client': 0.17.4
       better-sqlite3: 12.11.1
       kysely: 0.29.2
+    optional: true
 
   end-of-stream@1.4.5:
     dependencies:
@@ -4065,7 +4012,8 @@ snapshots:
 
   esutils@2.0.3: {}
 
-  expand-template@2.0.3: {}
+  expand-template@2.0.3:
+    optional: true
 
   expect-type@1.4.0: {}
 
@@ -4091,7 +4039,8 @@ snapshots:
     dependencies:
       flat-cache: 4.0.1
 
-  file-uri-to-path@1.0.0: {}
+  file-uri-to-path@1.0.0:
+    optional: true
 
   find-up@5.0.0:
     dependencies:
@@ -4105,12 +4054,14 @@ snapshots:
 
   flatted@3.4.2: {}
 
-  fs-constants@1.0.0: {}
+  fs-constants@1.0.0:
+    optional: true
 
   fsevents@2.3.3:
     optional: true
 
-  github-from-package@0.0.0: {}
+  github-from-package@0.0.0:
+    optional: true
 
   glob-parent@6.0.2:
     dependencies:
@@ -4137,7 +4088,8 @@ snapshots:
 
   html-escaper@2.0.2: {}
 
-  ieee754@1.2.1: {}
+  ieee754@1.2.1:
+    optional: true
 
   ignore@5.3.2: {}
 
@@ -4145,9 +4097,11 @@ snapshots:
 
   imurmurhash@0.1.4: {}
 
-  inherits@2.0.4: {}
+  inherits@2.0.4:
+    optional: true
 
-  ini@1.3.8: {}
+  ini@1.3.8:
+    optional: true
 
   is-extglob@2.1.1: {}
 
@@ -4174,7 +4128,8 @@ snapshots:
 
   joycon@3.1.1: {}
 
-  js-base64@3.8.0: {}
+  js-base64@3.8.0:
+    optional: true
 
   js-tokens@10.0.0: {}
 
@@ -4211,6 +4166,7 @@ snapshots:
       '@libsql/linux-x64-gnu': 0.5.29
       '@libsql/linux-x64-musl': 0.5.29
       '@libsql/win32-x64-msvc': 0.5.29
+    optional: true
 
   locate-path@6.0.0:
     dependencies:
@@ -4230,9 +4186,8 @@ snapshots:
     dependencies:
       semver: 7.8.5
 
-  mime@4.1.0: {}
-
-  mimic-response@3.1.0: {}
+  mimic-response@3.1.0:
+    optional: true
 
   miniflare@5.20261006.1-alpha(@types/node@20.19.43):
     dependencies:
@@ -4253,7 +4208,8 @@ snapshots:
 
   minimist@1.2.8: {}
 
-  mkdirp-classic@0.5.3: {}
+  mkdirp-classic@0.5.3:
+    optional: true
 
   ms@2.1.3: {}
 
@@ -4261,13 +4217,15 @@ snapshots:
 
   nanostores@1.4.0: {}
 
-  napi-build-utils@2.0.0: {}
+  napi-build-utils@2.0.0:
+    optional: true
 
   natural-compare@1.4.0: {}
 
   node-abi@3.92.0:
     dependencies:
       semver: 7.8.5
+    optional: true
 
   obug@2.2.1: {}
 
@@ -4368,6 +4326,7 @@ snapshots:
       simple-get: 4.0.1
       tar-fs: 2.1.5
       tunnel-agent: 0.6.0
+    optional: true
 
   prelude-ls@1.2.1: {}
 
@@ -4375,7 +4334,8 @@ snapshots:
 
   process-warning@5.0.0: {}
 
-  promise-limit@2.7.0: {}
+  promise-limit@2.7.0:
+    optional: true
 
   pump@3.0.4:
     dependencies:
@@ -4392,6 +4352,7 @@ snapshots:
       ini: 1.3.8
       minimist: 1.2.8
       strip-json-comments: 2.0.1
+    optional: true
 
   react@19.2.7: {}
 
@@ -4400,6 +4361,7 @@ snapshots:
       inherits: 2.0.4
       string_decoder: 1.3.0
       util-deprecate: 1.0.2
+    optional: true
 
   real-require@0.2.0: {}
 
@@ -4441,7 +4403,8 @@ snapshots:
 
   rou3@0.7.12: {}
 
-  safe-buffer@5.2.1: {}
+  safe-buffer@5.2.1:
+    optional: true
 
   safe-stable-stringify@2.5.0: {}
 
@@ -4492,13 +4455,15 @@ snapshots:
 
   siginfo@2.0.0: {}
 
-  simple-concat@1.0.1: {}
+  simple-concat@1.0.1:
+    optional: true
 
   simple-get@4.0.1:
     dependencies:
       decompress-response: 6.0.0
       once: 1.4.0
       simple-concat: 1.0.1
+    optional: true
 
   sonic-boom@4.2.1:
     dependencies:
@@ -4515,8 +4480,10 @@ snapshots:
   string_decoder@1.3.0:
     dependencies:
       safe-buffer: 5.2.1
+    optional: true
 
-  strip-json-comments@2.0.1: {}
+  strip-json-comments@2.0.1:
+    optional: true
 
   strip-json-comments@5.0.3: {}
 
@@ -4534,6 +4501,7 @@ snapshots:
       mkdirp-classic: 0.5.3
       pump: 3.0.4
       tar-stream: 2.2.0
+    optional: true
 
   tar-stream@2.2.0:
     dependencies:
@@ -4542,6 +4510,7 @@ snapshots:
       fs-constants: 1.0.0
       inherits: 2.0.4
       readable-stream: 3.6.2
+    optional: true
 
   thread-stream@4.2.0:
     dependencies:
@@ -4573,6 +4542,7 @@ snapshots:
   tunnel-agent@0.6.0:
     dependencies:
       safe-buffer: 5.2.1
+    optional: true
 
   type-check@0.4.0:
     dependencies:
@@ -4607,7 +4577,8 @@ snapshots:
     dependencies:
       punycode: 2.3.1
 
-  util-deprecate@1.0.2: {}
+  util-deprecate@1.0.2:
+    optional: true
 
   vite@7.3.6(@types/node@20.19.43)(tsx@4.22.4):
     dependencies:

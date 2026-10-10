@@ -31,8 +31,7 @@
   ],
   "scripts": {
     "dev": "tsx watch --env-file=.env src/index.ts",
-    "build": "tsc",
-    "start": "node --env-file=.env dist/src/index.js",
+    "start": "tsx --env-file=.env src/index.ts",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "fix": "eslint --fix .",
@@ -45,28 +44,24 @@
     "cli": "tsx cli/src/index.ts",
     "cli:build": "node scripts/build-cli.mjs",
     "prepack": "node scripts/build-cli.mjs",
-    "migrate:legacy": "tsx --env-file=.env scripts/migrate-legacy-tenancy.ts",
-    "cleanup:retention": "tsx --env-file=.env scripts/cleanup-retention.ts",
+    "init:minio": "tsx --env-file=.env scripts/init-minio.ts",
+    "migrate:legacy": "tsx --env-file-if-exists=.env scripts/migrate-legacy-tenancy.ts",
+    "cleanup:retention": "tsx --env-file-if-exists=.env scripts/cleanup-retention.ts",
     "deploy": "pnpm build:assets && wrangler deploy --config wrangler.toml"
   },
   "devDependencies": {
     "@aws-sdk/client-s3": "^3.600.0",
     "@better-auth/memory-adapter": "^1.6.23",
     "@convex-dev/better-auth": "^0.12.5",
-    "@edge-runtime/vm": "^5.0.0",
     "@eslint/js": "^10.0.1",
     "@hono/node-server": "^2.1.1",
-    "@libsql/client": "^0.17.4",
     "@tanstack/query-core": "^5.102.8",
     "@tanstack/query-persist-client-core": "5.102.8",
     "@types/node": "^20.14.0",
     "@vitest/coverage-v8": "^4.1.11",
     "better-auth": "^1.6.23",
-    "better-auth-cloudflare": "^0.3.0",
-    "better-sqlite3": "^12.11.1",
     "convex": "^1.42.0",
     "convex-test": "^0.0.54",
-    "dotenv": "^17.4.2",
     "esbuild": "^0.28.1",
     "eslint": "^10.6.0",
     "happy-dom": "^20.14.5",
@@ -81,10 +76,5 @@
     "vitest": "^4.1.11",
     "wrangler": "^4.149.0",
     "zod": "^4.4.3"
-  },
-  "pnpm": {
-    "onlyBuiltDependencies": [
-      "esbuild"
-    ]
   }
 }

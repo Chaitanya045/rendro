@@ -83,7 +83,7 @@ const routes: RouteCase[] = [
     path: `/organizations/${organizationId}/projects/${projectId}/publications`,
     projectId,
     snippets: ['id="publication-list"', '>Loading publications</span>', 'class="data-table publication-table"'],
-    tableHeaders: ["Publication", "Path", "Release mode", "Status", "Actions"],
+    tableHeaders: ["Publication", "Path", "Release mode", "Actions"],
     projectTabs: true,
   },
   {

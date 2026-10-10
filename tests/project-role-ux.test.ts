@@ -6,6 +6,7 @@ import { renderProjectNavigation } from "@/routes/control-plane";
 import projectPageRoutes from "@/routes/project-pages";
 import publicationPageRoutes from "@/routes/publication-pages";
 import sharePageRoutes from "@/routes/share-pages";
+import { managementUiRuntime } from "@/ui/management-ui";
 
 const user: User = {
   id: "member-user",
@@ -75,6 +76,7 @@ class ElementMock {
     }
   }
   getAttribute(name: string): string | null { return this.attributes.get(name) ?? null; }
+  removeAttribute(name: string) { this.attributes.delete(name); if (name === "hidden") this.hidden = false; }
   addEventListener(type: string, listener: Listener) {
     this.listeners.set(type, [...(this.listeners.get(type) ?? []), listener]);
   }
@@ -208,6 +210,7 @@ async function roleRuntime(page: Page, initialRole: Role) {
     clearTimeout() {},
     confirm: () => true,
   };
+  vm.runInNewContext(managementUiRuntime, context);
   const execute = async () => {
     vm.runInNewContext(script, context);
     await flushRuntime();
@@ -363,10 +366,10 @@ describe("project role-aware UX", () => {
     expect(html).toContain('"userId":"member-user"');
     expect(html).toContain('var member=organization.member');
     expect(html).toContain('document.getElementById("share-access-note").hidden=canManage;');
-    expect(html).toContain('if(canManage){var revoke=');
-    expect(html).toContain('else action.append(h("span","cell-secondary","Owner/admin only"))');
+    expect(html).toContain('if(canManage&&!item.revokedAt&&item.expiresAt>Date.now()){var revoke=');
+    expect(html).toContain('else if(!canManage)action.append(h("span","cell-secondary","Owner/admin only"))');
     expect(html).toContain("item.documentPath");
-    expect(html).toContain("item.deploymentId.slice(0,12)");
+    expect(html).toContain("RUI.idValue(item.deploymentId)");
     expect(html).toContain("statusFor(item)");
     expect(html).toContain("Browse documentation");
     expect(html).toContain("You can view private-share history and create links from documentation. Only owners and admins can revoke links.");

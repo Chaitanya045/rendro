@@ -59,18 +59,8 @@ app.get("/docs/:key{.+}", async (c) => {
 });
 
 /**
- * GET /api/auth/me — current user info (handy for client-side checks)
- */
-app.get("/api/auth/me", (c) => {
-  const user = c.get("user");
-  if (!user) return c.json({ user: null }, 200);
-  return c.json({ user });
-});
-
-/**
  * POST /api/orgs — create the org folder in MinIO.
  */
-
 app.post("/api/orgs", async (c) => {
   const user = c.get("user");
   if (!user) return c.text("Sign in first", 401);
@@ -345,7 +335,9 @@ function renderOrgTreePage(user: User | null, org: string, selectedDoc = "", opt
   const email = user ? escapeHtml(user.email) : "Public documentation";
   const orgEsc = escapeHtml(org);
   const displayNameEsc = escapeHtml(displayName);
-  const initials = user ? (user.name || email).split(/[@\s]/)[0].slice(0, 2).toUpperCase() : "PU";
+  // Match the management shell's account avatar: first character of the
+  // display name (or email), so one account reads the same everywhere.
+  const initials = user ? escapeHtml((user.name || user.email).trim().charAt(0).toUpperCase() || "R") : "";
   const shareLabel = isPublicDocument ? "Copy public URL" : options.shareConfig ? "Share document" : "Copy signed URL";
   const sharePendingLabel = isPublicDocument ? "Copying public URL…" : options.shareConfig ? "Creating share…" : "Creating signed URL…";
   const shareDoneLabel = isPublicDocument ? "Public URL copied!" : options.shareConfig ? "Share link copied!" : "Signed URL copied!";
@@ -693,7 +685,7 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
 <header class="topbar">
   <div class="topbar-left">
     <button class="topbar-btn-icon mobile-tree-toggle" id="mobile-tree-toggle" type="button" aria-label="Open document tree" aria-expanded="false"><span class="material-symbols-outlined" aria-hidden="true">menu</span></button>
-    <span class="topbar-logo">${displayNameEsc}</span>
+    <h1 class="topbar-logo">${displayNameEsc}</h1>
     ${backMarkup}
   </div>
   <div class="topbar-actions">
@@ -1100,7 +1092,7 @@ function renderInitialIndex(_user: User, org: string, displayName: string): stri
 <body>
 <h1>${escapeHtml(displayName)}</h1>
 <p>This is the <code>${escapeHtml(org)}</code> documentation space on Rendro.</p>
-<p>Push your first docs with the CLI (set DOCSYNC_API_KEY in your CI):</p>
+<p>Push your first docs with the CLI (set RENDRO_API_KEY in your CI):</p>
 <pre><code>rendro push --source ./docs --org ${escapeHtml(org)}</code></pre>
 <p>Or start writing HTML directly in the bucket under <code>${escapeHtml(org)}/</code>.</p>
 </body>
@@ -1225,11 +1217,11 @@ ${renderThemeAssets()}
       </div>
       <div class="warning">
         <span class="material-symbols-outlined" aria-hidden="true">lock</span>
-        <div><strong>Store this securely.</strong> Add it to your CI environment as <code>DOCSYNC_API_KEY</code>. Anyone with this key can push docs to your org.</div>
+        <div><strong>Store this securely.</strong> Add it to your CI environment as <code>RENDRO_API_KEY</code>. Anyone with this key can push docs to your org.</div>
       </div>
       <pre><code># In your CI pipeline:
 rendro push --source ./docs --org ${orgEsc}
-# Set DOCSYNC_API_KEY in your CI secrets</code></pre>
+# Set RENDRO_API_KEY in your CI secrets</code></pre>
       <a class="primary-btn" href="/"><span class="material-symbols-outlined" aria-hidden="true">docs</span>View your docs</a>
     </div>
   </section>

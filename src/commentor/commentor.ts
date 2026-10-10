@@ -1,7 +1,11 @@
 // commentor.ts — a drop-in commenting widget for any HTML file.
 //
-//   <script>window.COMMENTOR = { convexUrl, orgSlug, filePath, author? };</script>
+//   <script>window.COMMENTOR = { ... };</script>
 //   <script src="/commentor.js"></script>
+//
+// Config is either a project document scope served through the parent frame
+// ({ organizationId, projectId, documentPath, transport: "parent", canWrite })
+// or a legacy direct-Convex scope ({ convexUrl, orgSlug, filePath, author? }).
 //
 // Figma-style pins + inline bubbles. The widget is a single surface that
 // DOCKS to a screen edge (magnetic, springy snap; stays where you dropped it
@@ -75,7 +79,6 @@ function storageSet(key: string, value: string): void {
     // Sandboxed document frames have an opaque origin and cannot persist UI state.
   }
 }
-
 
 type Anchor =
   | {
@@ -154,11 +157,9 @@ function h<K extends keyof HTMLElementTagNameMap>(
   return el;
 }
 
-function svg(d: string, extra = ""): SVGElement {
+function svg(d: string): SVGElement {
   const wrap = document.createElement("span");
-  wrap.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${extra}${
-    d ? `<path d="${d}"/>` : ""
-  }</svg>`;
+  wrap.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${d}"/></svg>`;
   return (
     (wrap.querySelector("svg") as SVGElement) ??
     (document.createElementNS(
@@ -173,11 +174,9 @@ const ICONS = {
     "M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z",
   list: "M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01",
   check: "M20 6L9 17l-5-5",
-  reply: "M9 14L4 9l5-5M4 9h11a4 4 0 0 1 0 8h-2",
   x: "M18 6L6 18M6 6l12 12",
   archive: "M21 8v13H3V8M1 3h22v5H1zM10 12h4",
   trash: "M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M10 11v6M14 11v6",
-  more: "M12 13a1 1 0 1 0 0-2 1 1 0 0 0 0 2zM12 6a1 1 0 1 0 0-2 1 1 0 0 0 0 2zM12 20a1 1 0 1 0 0-2 1 1 0 0 0 0 2z",
 };
 
 function clamp(lo: number, hi: number, v: number): number {
@@ -212,7 +211,6 @@ function findQuoteRange(root: Element, quote: string): Range | null {
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
   let node: Node | null;
   while ((node = walker.nextNode())) {
-    if (node.nodeType !== Node.TEXT_NODE) continue;
     const text = node as Text;
     nodes.push(text);
     const index = text.data.indexOf(exactNeedle);
@@ -499,6 +497,7 @@ class Commentor {
   private markersLayer: HTMLElement;
   private bubbleLayer: HTMLElement;
   private anchorHighlight: HTMLElement;
+  private selectionAction: HTMLButtonElement;
   private tip!: HTMLElement;
   private tipTimer = 0;
   private tipTarget: HTMLElement | null = null;
@@ -607,8 +606,8 @@ class Commentor {
           "aria-controls": "commentor-thread-list",
           "aria-selected": String(filter === this.threadFilter),
           onclick: () => this.setThreadFilter(filter),
-          onkeydown: (e: KeyboardEvent) =>
-            this.onFilterKeyDown(e, filter),
+          onkeydown: (e: Event) =>
+            this.onFilterKeyDown(e as KeyboardEvent, filter),
           tabindex: filter === this.threadFilter ? "0" : "-1",
         },
         label,
@@ -1049,20 +1048,17 @@ class Commentor {
       this.repositionDock();
     }
   }
-  // Edge class supplies the perpendicular anchor (bottom/top/left/right).
-  // Inline left (bottom/top) or top (left/right) supplies the along-edge
-  // offset — the dock's `transition: left/top` springs it into place.
   // Use left/top for ALL edges (never right/bottom). This keeps both
-  // properties numeric at all times so the CSS transition always fires
-  // from the old value to the new one — smooth snap on every edge.
+  // properties numeric at all times so the dock's `transition: left/top`
+  // always fires from the old value to the new one — smooth snap on every edge.
   //   bottom edge → top = vh - h - MARGIN, left = offset
   //   top edge    → top = MARGIN,          left = offset
   //   left edge   → left = MARGIN,         top = offset
   //   right edge  → left = vw - w - MARGIN, top = offset
-  // Position the dock using left/top for all edges. When targetW/targetH
-  // are supplied (expand), use those instead of offsetWidth/offsetHeight —
-  // the latter return the pre-transition (compact) size because the CSS
-  // width/height transition hasn't laid out the target size yet.
+  // When targetW/targetH are supplied (expand), use those instead of
+  // offsetWidth/offsetHeight — the latter return the pre-transition (compact)
+  // size because the CSS width/height transition hasn't laid out the target
+  // size yet.
   private repositionDock(targetW?: number, targetH?: number): void {
     const vw = window.innerWidth;
     const vh = window.innerHeight;
@@ -1633,13 +1629,13 @@ class Commentor {
       h("span", { class: "who", title: t.authorEmail }, t.authorName),
       h("span", { class: "when" }, timeAgo(t._creationTime)),
       t.resolved
-        ? h("span", { class: "resolved" }, svg(ICONS.check, ""), "Resolved")
+        ? h("span", { class: "resolved" }, svg(ICONS.check), "Resolved")
         : null,
       t.archived
         ? h(
             "span",
             { class: "archived-badge" },
-            svg(ICONS.archive, ""),
+            svg(ICONS.archive),
             "Archived",
           )
         : null,
@@ -1929,7 +1925,7 @@ class Commentor {
 
   private onFilterKeyDown(e: KeyboardEvent, filter: ThreadFilter): void {
     const index = THREAD_FILTERS.indexOf(filter);
-    let next = index;
+    let next: number;
     if (e.key === "ArrowRight") next = (index + 1) % THREAD_FILTERS.length;
     else if (e.key === "ArrowLeft")
       next = (index - 1 + THREAD_FILTERS.length) % THREAD_FILTERS.length;
@@ -2508,7 +2504,6 @@ const STYLES = /* css */ `
   --shadow-lg: 0 12px 32px rgba(15, 23, 42, .18);
   --radius: 16px;
   --radius-sm: 8px;
-  --panel: 380px;
   --ease-standard: cubic-bezier(.4, 0, .2, 1);
   --ease-spring: cubic-bezier(.34, 1.56, .64, 1);
   --duration-fast: 150ms;
@@ -3030,7 +3025,6 @@ textarea:disabled {
   border-color: var(--accent);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 20%, transparent);
 }
-.composer-buttons { display: flex; gap: 6px; margin-top: 8px; }
 .composer-footer, .reply-footer {
   display: flex;
   align-items: flex-end;
@@ -3185,7 +3179,9 @@ textarea:disabled {
   min-height: 32px;
   padding: 5px 10px;
   border-radius: 8px;
-  font: 600 12px/1 var(--font-ui);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
   cursor: pointer;
 }
 .load-older:hover:not(:disabled) { background: var(--border-soft); color: var(--accent-hover); }
@@ -3241,16 +3237,6 @@ textarea:disabled {
   transform: none;
 }
 .actions button svg, .reply-row button svg { width: 15px; height: 15px; }
-.busy svg { display: none; }
-.busy::before {
-  content: "";
-  width: 13px;
-  height: 13px;
-  border: 2px solid currentColor;
-  border-right-color: transparent;
-  border-radius: 50%;
-  animation: spin .8s linear infinite;
-}
 
 /* Guidance, status and tooltips */
 .hint {
@@ -3380,14 +3366,9 @@ textarea:disabled {
 @keyframes count-tint {
   50% { box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 22%, transparent); }
 }
-@keyframes spin { to { transform: rotate(360deg); } }
 @keyframes rise {
   from { opacity: 0; transform: translateX(-50%) translateY(8px); }
   to { opacity: 1; transform: translateX(-50%) translateY(0); }
-}
-@keyframes fall {
-  from { opacity: 1; transform: translateX(-50%) translateY(0); }
-  to { opacity: 0; transform: translateX(-50%) translateY(8px); }
 }
 @keyframes toast-rise {
   from { opacity: 0; transform: translateY(8px); }
@@ -3428,7 +3409,7 @@ textarea:disabled {
 }
 @media (prefers-reduced-motion: reduce) {
   .pin, .bubble, .reply, .drawer-thread, .selection-action, .anchor-highlight,
-  .count, .content, .hint, .toast, .tip, .dock, .filter-tabs::before, .busy::before,
+  .count, .content, .hint, .toast, .tip, .dock, .filter-tabs::before,
   .toolbar button, .filter-tabs button, .new-comments, .empty button, .card-action,
   .quote, .locate-link, .actions button, .reply-row button, .toast button {
     animation: none !important;

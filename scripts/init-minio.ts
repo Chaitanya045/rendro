@@ -1,6 +1,6 @@
 /**
- * Initialize MinIO: create bucket and seed with sample docs.
- * Run: bun run scripts/init-minio.ts
+ * Initialize MinIO: create bucket and seed with sample legacy slug-prefixed docs.
+ * Run: pnpm init:minio
  */
 import {
   S3Client,
@@ -122,7 +122,6 @@ Authorization: Bearer &lt;token&gt;</code></pre>
   }
 
   console.log(`\nDone! Seeded ${Object.keys(sampleDocs).length} documents.`);
-  console.log(`Browse at http://localhost:3000/acme-corp`);
 }
 
 main().catch((err) => {

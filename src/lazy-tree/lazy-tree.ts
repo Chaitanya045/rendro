@@ -1,5 +1,5 @@
 /**
- * Lazy tree — matches design.html spec with Material Symbols icons,
+ * Lazy tree — sidebar document tree with Material Symbols icons,
  * max-height animations, active indicator, and border-line indentation.
  */
 import {
@@ -268,7 +268,6 @@ function renderEmptyTree(): string {
     : ""}`;
 }
 
-
 function startTreeEntrance(items: Iterable<HTMLElement>) {
   if (reducedMotion()) return;
   Array.from(items).forEach((item, index) => {
@@ -334,9 +333,10 @@ function handleClick(e: Event) {
   if (!(e.target instanceof HTMLElement)) return;
   const target = e.target;
 
-  if (target.closest(".tree-root-retry-btn")) {
+  const rootRetry = target.closest<HTMLButtonElement>(".tree-root-retry-btn");
+  if (rootRetry) {
     e.preventDefault();
-    (target.closest(".tree-root-retry-btn") as HTMLButtonElement).disabled = true;
+    rootRetry.disabled = true;
     void loadRootTree();
     return;
   }
@@ -426,7 +426,6 @@ function announceDocumentState(message: string, assertive = false) {
   status.setAttribute("aria-live", assertive ? "assertive" : "polite");
   status.textContent = message;
 }
-
 
 function clearDocLoadingState() {
   document.documentElement.classList.remove("doc-loading", "doc-loading-error");

@@ -1,12 +1,13 @@
 import type { User } from "better-auth/types";
 import { renderThemeAssets, renderThemeButton } from "./theme";
+import { escapeHtml } from "./html";
 import { MANAGEMENT_SHELL_VERSION, renderManagementNavigationRuntime } from "./management-navigation";
 import { selectStyles } from "../ui/select-styles";
+import { managementUiRuntime, managementUiStyles } from "../ui/management-ui";
 import { organizationSwitcherRuntime, organizationSwitcherStyles, renderOrganizationLabelBootstrap } from "./organization-switcher";
 export { renderLoadingState, renderProjectNavigation, renderTableLoading } from "./management-loading";
-export type { ProjectNavigationSection } from "./management-loading";
 
-export type ControlPlaneSection =
+type ControlPlaneSection =
   | "overview"
   | "projects"
   | "people"
@@ -31,17 +32,7 @@ interface ControlPlanePageOptions {
   pageClass?: string;
 }
 
-export function escapeHtml(value: string): string {
-  return value.replace(/[&<>"']/g, (character) => ({
-    "&": "&amp;",
-    "<": "&lt;",
-    ">": "&gt;",
-    '"': "&quot;",
-    "'": "&#039;",
-  })[character] ?? character);
-}
-
-export function jsonState(value: unknown): string {
+function jsonState(value: unknown): string {
   return JSON.stringify(value).replace(/</g, "\\u003c");
 }
 function navLink(
@@ -86,6 +77,7 @@ const controlPlaneStyles = String.raw`
   --cp-text:#18181b;
   --cp-strong:#09090b;
   --cp-muted:#71717a;
+  --cp-muted-strong:#52525b;
   --cp-border:#e4e4e7;
   --cp-border-strong:#d4d4d8;
   --cp-accent:#c2410c;
@@ -94,6 +86,9 @@ const controlPlaneStyles = String.raw`
   --cp-on-accent:#fff;
   --cp-danger:#b42318;
   --cp-danger-soft:#fef3f2;
+  --cp-danger-strong:#b42318;
+  --cp-danger-hover:#912018;
+  --cp-on-danger:#fff;
   --cp-success:#15803d;
   --cp-success-soft:#f0fdf4;
   --cp-warning:#a16207;
@@ -115,6 +110,7 @@ html.dark{
   --cp-surface-2:var(--cp-container);
   --cp-strong:#fafafa;
   --cp-muted:#a1a1aa;
+  --cp-muted-strong:#a1a1aa;
   --cp-border:#27272a;
   --cp-border-strong:#3f3f46;
   --cp-accent:#fb923c;
@@ -123,6 +119,9 @@ html.dark{
   --cp-on-accent:#09090b;
   --cp-danger:#fca5a5;
   --cp-danger-soft:rgba(180,35,24,.16);
+  --cp-danger-strong:#f87171;
+  --cp-danger-hover:#fca5a5;
+  --cp-on-danger:#09090b;
   --cp-success:#86efac;
   --cp-success-soft:rgba(21,128,61,.16);
   --cp-warning:#fde68a;
@@ -146,7 +145,7 @@ a{color:inherit}
 .cp-brand{width:200px;flex:none;color:var(--cp-strong);font-size:24px;font-weight:700;line-height:32px;letter-spacing:-.04em;text-decoration:none}
 .cp-brand i{color:var(--cp-accent);font-style:normal}
 .cp-mobile-menu{display:none!important}
-.cp-drawer-head{display:none}
+.cp-drawer-head,.cp-drawer-context{display:none}
 .cp-org-switcher{min-width:0;height:36px;display:flex;align-items:center;gap:8px;padding:0 10px;border:1px solid var(--cp-border);border-radius:6px;background:var(--cp-surface);color:var(--cp-strong);font-weight:600;text-decoration:none;transition:background var(--cp-instant) var(--cp-ease),border-color var(--cp-instant) var(--cp-ease)}
 .cp-org-switcher:hover{border-color:var(--cp-border-strong);background:var(--cp-container)}
 .cp-org-mark{width:22px;height:22px;display:grid;place-items:center;border-radius:4px;background:var(--cp-accent-soft);color:var(--cp-accent);font-size:11px;font-weight:800}
@@ -252,13 +251,14 @@ select.select[multiple]{appearance:auto;background-image:none;padding-inline-end
 .data-table tbody tr:hover{background:var(--cp-container)}
 .cell-primary{display:grid;gap:2px;color:var(--cp-strong);font-weight:600}
 .cell-secondary{color:var(--cp-muted);font-size:12px;font-weight:400}
-.badge{min-height:23px;display:inline-flex;align-items:center;gap:5px;padding:3px 8px;border-radius:999px;background:var(--cp-container);color:var(--cp-muted);font-size:11px;font-weight:700;white-space:nowrap}
+.badge{min-height:23px;display:inline-flex;align-items:center;gap:5px;padding:3px 8px;border-radius:999px;background:var(--cp-container);color:var(--cp-muted-strong);font-size:11px;font-weight:700;white-space:nowrap}
 .badge.success{background:var(--cp-success-soft);color:var(--cp-success)}
 .badge.warning{background:var(--cp-warning-soft);color:var(--cp-warning)}
 .badge.danger{background:var(--cp-danger-soft);color:var(--cp-danger)}
 .badge.accent{background:var(--cp-accent-soft);color:var(--cp-accent)}
 .row-actions{display:flex;justify-content:flex-end;gap:7px}
-.access-note{margin:0 0 16px;padding:10px 12px;border:1px solid var(--cp-border);border-radius:8px;background:var(--cp-container);color:var(--cp-muted)}
+.access-note{margin:0 0 16px;padding:10px 12px;border:1px solid var(--cp-border);border-radius:8px;background:var(--cp-container);color:var(--cp-muted-strong)}
+.data-table tbody tr:hover .cell-secondary,.progress-state .cell-secondary{color:var(--cp-muted-strong)}
 
 .project-tabs{display:flex;gap:4px;margin-bottom:16px;padding-bottom:1px;border-bottom:1px solid var(--cp-border);overflow-x:auto}
 .project-tabs a{position:relative;min-height:40px;display:inline-flex;align-items:center;padding:9px 12px;border-radius:4px 4px 0 0;color:var(--cp-muted);text-decoration:none;white-space:nowrap;transition:background var(--cp-instant) var(--cp-ease),color var(--cp-instant) var(--cp-ease),transform var(--cp-instant) var(--cp-ease)}
@@ -341,6 +341,7 @@ dialog.cp-dialog[open]::backdrop{opacity:1}
 .step.complete .step-dot{transform:scale(1.03)}
 .command{display:grid;gap:10px;padding:15px;border:1px solid #27272a;border-radius:7px;background:#09090b;color:#f4f4f5}
 .command code{overflow:auto;white-space:pre-wrap;font-family:"SFMono-Regular",Consolas,monospace;font-size:12px}
+.command .button{justify-self:end}
 .secret-box{display:grid;grid-template-columns:minmax(0,1fr);gap:12px;padding:15px;border:1px solid color-mix(in srgb,var(--cp-accent) 45%,var(--cp-border));border-radius:7px;background:var(--cp-accent-soft)}
 .secret-value{display:flex;min-width:0;align-items:center;gap:9px}
 .secret-value code{min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis;padding:10px;border-radius:5px;background:var(--cp-surface);color:var(--cp-strong);font-family:"SFMono-Regular",Consolas,monospace;white-space:nowrap}
@@ -375,7 +376,15 @@ dialog.cp-dialog[open]::backdrop{opacity:1}
   .cp-icon-button,.cp-avatar{width:44px;height:44px}
   .cp-nav-link,.cp-account-menu a{min-height:44px}
   .cp-sidebar{top:0;z-index:80;width:min(320px,86vw);padding-top:12px;visibility:hidden;transform:translateX(-102%);box-shadow:var(--cp-shadow);transition:transform var(--cp-base) var(--cp-ease),visibility 0s var(--cp-base)}
-  .cp-drawer-head{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:44px;margin-bottom:20px;padding:0 8px;color:var(--cp-strong);font-weight:600}
+  .cp-drawer-head{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:44px;margin-bottom:12px;padding:0 8px;color:var(--cp-strong);font-weight:600}
+  .cp-drawer-context{display:grid;gap:8px;margin:0 0 18px;padding:0 0 16px;border-bottom:1px solid var(--cp-border)}
+  .cp-drawer-org{min-width:0;min-height:52px;display:flex;align-items:center;gap:10px;padding:6px 12px;border:1px solid var(--cp-border);border-radius:6px;color:var(--cp-strong);text-decoration:none;transition:background var(--cp-instant) var(--cp-ease),border-color var(--cp-instant) var(--cp-ease),transform var(--cp-instant) var(--cp-ease)}
+  .cp-drawer-org:hover{border-color:var(--cp-border-strong);background:var(--cp-container)}
+  .cp-drawer-org:active{transform:scale(.98)}
+  .cp-drawer-org-copy{min-width:0;flex:1;display:grid}
+  .cp-drawer-org-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600}
+  .cp-drawer-org-copy small{color:var(--cp-muted);font-size:12px;line-height:16px}
+  .cp-drawer-context .button{width:100%}
   body.nav-open{overflow:hidden}
   body.nav-open .cp-sidebar{visibility:visible;transform:none;transition-delay:0s}
   .cp-backdrop{position:fixed;z-index:70;inset:0;display:block;border:0;background:rgba(9,9,11,.42);opacity:0;pointer-events:none;transition:opacity var(--cp-base) var(--cp-ease)}
@@ -411,6 +420,7 @@ dialog.cp-dialog[open]::backdrop{opacity:1}
   .data-table .cell-secondary{font-size:12px;line-height:18px}
   .data-table td[data-label="Action"],.data-table td[data-label="Actions"]{display:flex;justify-content:flex-end;padding-top:12px}
   .data-table td[data-label="Action"]::before,.data-table td[data-label="Actions"]::before{display:none}
+  .data-table td[data-label="Action"]:empty,.data-table td[data-label="Actions"]:empty{display:none}
   .row-actions{justify-content:flex-start;margin-top:6px}
   .stepper{gap:3px}
   .step{font-size:11px}
@@ -433,7 +443,7 @@ dialog.cp-dialog[open]::backdrop{opacity:1}
 @media(prefers-reduced-motion:reduce){
   *,*::before,*::after{scroll-behavior:auto!important;animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}
   .progress-dot{animation:none}
-  .cp-content,.button:active,.cp-top-action:active,.cp-icon-button:active,.cp-avatar:active,.cp-account-menu a:active,.project-tabs a:active,.dialog-close:active,.organization-card:hover,.step-dot,.toast,.cp-account-menu{transform:none!important}
+  .cp-content,.button:active,.cp-top-action:active,.cp-drawer-org:active,.cp-icon-button:active,.cp-avatar:active,.cp-account-menu a:active,.project-tabs a:active,.dialog-close:active,.organization-card:hover,.step-dot,.toast,.cp-account-menu{transform:none!important}
 }
 `;
 
@@ -464,7 +474,7 @@ const controlPlaneRuntime = String.raw`
   var copyTimers=new WeakMap();
   async function copyText(button,value,idleLabel){if(!button||button.disabled)return false;var previous=copyTimers.get(button);if(previous){clearTimeout(previous);copyTimers.delete(button);}busy(button,true);try{await navigator.clipboard.writeText(value);busy(button,false);button.textContent="Copied";copyTimers.set(button,setTimeout(function(){button.textContent=idleLabel;copyTimers.delete(button);},1500));return true;}catch(error){busy(button,false);button.textContent=idleLabel;copyTimers.delete(button);throw error;}}
   async function request(path,options){var response=await fetch(path,Object.assign({headers:{Accept:"application/json","Content-Type":"application/json"}},options||{}));var data=null;try{data=await response.json();}catch(_error){}if(!response.ok){var message=data&&(data.message||data.error),error=new Error(typeof message==="string"?message:"Request failed. Please try again.");error.status=response.status;throw error;}return data;}
-  function toast(message,type){var region=document.getElementById("cp-toasts");if(!region)return;var node=document.createElement("div");node.className="toast"+(type?" "+type:"");node.setAttribute("role",type==="error"?"alert":"status");node.textContent=message;region.appendChild(node);requestAnimationFrame(function(){node.classList.add("visible");});setTimeout(function(){node.classList.remove("visible");setTimeout(function(){node.remove();},220);},4200);}
+  function toast(message,type){var region=document.getElementById("cp-toasts");if(!region)return;var node=document.createElement("div");node.className="toast"+(type?" "+type:"");node.textContent=message;region.appendChild(node);requestAnimationFrame(function(){node.classList.add("visible");});setTimeout(function(){node.classList.remove("visible");setTimeout(function(){node.remove();},220);},4200);}
   function openDialog(id){var dialog=document.getElementById(id);if(dialog&&typeof dialog.showModal==="function")dialog.showModal();}
   function dialogBusy(dialog){return Boolean(dialog.querySelector("[aria-busy=true]"));}
   function requestDialogClose(dialog){if(dialogBusy(dialog))return;var event=new Event("cancel",{cancelable:true});if(dialog.dispatchEvent(event))dialog.close();}
@@ -500,21 +510,28 @@ const controlPlaneRuntime = String.raw`
 export function renderControlPlanePage(options: ControlPlanePageOptions): string {
   const organizationId = options.organizationId;
   const hasSidebar = Boolean(organizationId) && !options.focused;
-  const orgLabel = organizationId ? "Organization" : "Organizations";
   const userLabel = options.user.name || options.user.email;
   const initial = userLabel.trim().charAt(0).toUpperCase() || "R";
   const state = jsonState(options.state ?? {});
   const pageClass = options.pageClass ? ` ${escapeHtml(options.pageClass)}` : "";
-  const openDocs = organizationId
-    ? `<a class="cp-top-action" data-cp-open-docs href="/organizations/${encodeURIComponent(organizationId)}/projects${options.projectId ? `/${encodeURIComponent(options.projectId)}/docs` : ""}"><span class="material-symbols-outlined" aria-hidden="true">description</span><span>Open docs</span></a>`
+  // Documentation exists only after a project's first deployment. Pages that
+  // know the project's release state reveal these links via RendroUI.setDocsLink.
+  const docsHref = organizationId
+    ? `/organizations/${encodeURIComponent(organizationId)}/projects${options.projectId ? `/${encodeURIComponent(options.projectId)}/docs` : ""}`
     : "";
-  const organizationSwitcher = `<a class="cp-org-switcher" id="cp-org-switcher" href="/organizations?choose=1" aria-label="Switch organization"><span class="cp-org-mark"${organizationId ? " data-org-mark" : ""}>R</span><span class="cp-org-name"${organizationId ? " data-org-name" : ""}>${orgLabel}</span><span class="material-symbols-outlined cp-org-caret" aria-hidden="true">unfold_more</span></a>`;
+  const openDocs = organizationId
+    ? `<a class="cp-top-action" data-cp-open-docs href="${docsHref}" hidden><span class="material-symbols-outlined" aria-hidden="true">description</span><span>Open docs</span></a>`
+    : "";
+  const organizationSwitcher = organizationId
+    ? `<a class="cp-org-switcher" id="cp-org-switcher" href="/organizations?choose=1" aria-label="Switch organization"><span class="cp-org-mark" data-org-mark>R</span><span class="cp-org-name" data-org-name>Organization</span><span class="material-symbols-outlined cp-org-caret" aria-hidden="true">unfold_more</span></a>`
+    : "";
+  const drawerContext = `<div class="cp-drawer-context"><a class="cp-drawer-org" href="/organizations?choose=1"><span class="cp-org-mark" data-org-mark aria-hidden="true">R</span><span class="cp-drawer-org-copy"><span class="cp-drawer-org-name" data-org-name>Organization</span><small>Switch organization</small></span><span class="material-symbols-outlined" aria-hidden="true">unfold_more</span></a><a class="button" data-cp-open-docs href="${docsHref}" hidden><span class="material-symbols-outlined" aria-hidden="true">description</span><span>Open docs</span></a></div>`;
   return `<!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <link rel="preload" href="/select.js?v=3" as="script">
 ${hasSidebar ? `<script defer src="/management-pages.js?v=${MANAGEMENT_SHELL_VERSION}"></script>` : ""}
 <link rel="preload" href="/management-query.js?v=4" as="script">
-<title>${escapeHtml(options.title)} — Rendro</title><link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..24,400,0,0&display=swap" rel="stylesheet">${renderThemeAssets()}<style>${controlPlaneStyles}${selectStyles}${organizationSwitcherStyles}</style></head>
+<title>${escapeHtml(options.title)} — Rendro</title><link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..24,400,0,0&display=swap" rel="stylesheet">${renderThemeAssets()}<style>${controlPlaneStyles}${managementUiStyles}${selectStyles}${organizationSwitcherStyles}</style></head>
 <body class="${hasSidebar ? "has-sidebar" : "focused-layout"}">
 <header class="cp-topbar"><div class="cp-topbar-inner">
   ${hasSidebar ? '<button class="cp-icon-button cp-mobile-menu" id="cp-menu" type="button" aria-label="Open navigation" aria-expanded="false" aria-controls="cp-navigation"><span class="material-symbols-outlined" aria-hidden="true">menu</span></button>' : ""}
@@ -525,14 +542,14 @@ ${hasSidebar ? `<script defer src="/management-pages.js?v=${MANAGEMENT_SHELL_VER
   ${renderThemeButton("cp-theme")}
   <div class="cp-account" id="cp-account"><button class="cp-avatar" id="cp-avatar" type="button" aria-label="Open account menu" aria-expanded="false" aria-controls="cp-account-menu">${escapeHtml(initial)}</button><div class="cp-account-menu" id="cp-account-menu"><span class="cp-account-email">${escapeHtml(options.user.email)}</span><a href="/account/security"><span class="material-symbols-outlined" aria-hidden="true">shield</span><span>Account security</span></a><a href="/api/auth/sign-out"><span class="material-symbols-outlined" aria-hidden="true">logout</span><span>Sign out</span></a></div></div>
 </div></header>
-<div class="cp-org-menu" id="cp-org-menu" role="menu" aria-label="Switch organization" popover="manual" hidden><p class="cp-org-menu-heading" role="presentation">Switch organization</p><p class="cp-org-menu-status" role="status"></p><div data-org-options role="presentation"></div><div class="cp-org-menu-footer" role="presentation"><a href="/organizations?choose=1" role="menuitem">Manage organizations</a></div></div>
-${hasSidebar ? `<aside class="cp-sidebar" id="cp-navigation"><div class="cp-drawer-head"><span>Navigation</span><button class="cp-icon-button" id="cp-nav-close" type="button" aria-label="Close navigation"><span class="material-symbols-outlined" aria-hidden="true">close</span></button></div>${controlNavigation(organizationId ?? "", options.active)}</aside><button class="cp-backdrop" id="cp-backdrop" type="button" aria-label="Close navigation" tabindex="-1"></button>` : ""}
+${organizationId ? '<div class="cp-org-menu" id="cp-org-menu" role="menu" aria-label="Switch organization" popover="manual" hidden><p class="cp-org-menu-heading" role="presentation">Switch organization</p><p class="cp-org-menu-status" role="status"></p><div data-org-options role="presentation"></div><div class="cp-org-menu-footer" role="presentation"><a href="/organizations?choose=1" role="menuitem">Manage organizations</a></div></div>' : ""}
+${hasSidebar ? `<aside class="cp-sidebar" id="cp-navigation"><div class="cp-drawer-head"><span>Navigation</span><button class="cp-icon-button" id="cp-nav-close" type="button" aria-label="Close navigation"><span class="material-symbols-outlined" aria-hidden="true">close</span></button></div>${drawerContext}${controlNavigation(organizationId ?? "", options.active)}</aside><button class="cp-backdrop" id="cp-backdrop" type="button" aria-label="Close navigation" tabindex="-1"></button>` : ""}
 <main class="cp-main${hasSidebar ? "" : " focused"}" data-cp-route-envelope="true" data-cp-shell-version="${MANAGEMENT_SHELL_VERSION}" data-cp-organization-id="${escapeHtml(organizationId ?? "")}" data-cp-project-id="${escapeHtml(options.projectId ?? "")}" data-cp-user-id="${escapeHtml(options.user.id)}"><div class="cp-content${pageClass}">
   <header class="cp-page-head"><div class="cp-page-copy"><p class="eyebrow">${escapeHtml(options.eyebrow)}</p><h1 class="cp-page-heading">${escapeHtml(options.heading)}</h1><p class="cp-page-description">${escapeHtml(options.description)}</p></div>${options.actions ? `<div class="cp-page-actions">${options.actions}</div>` : ""}</header>
   ${options.content}
 </div></main>
 <div class="toast-region" id="cp-toasts" aria-live="polite"></div>
 ${organizationId ? '<div class="cp-refresh-notice" id="cp-refresh-notice" hidden><span role="status">Updates may be available.</span><button class="button small" type="button" id="cp-refresh-button">Refresh</button></div>' : ""}
-<script data-cp-page-state type="application/json">${state}</script><script>window.__RENDRO_PAGE_STATE__=${state};</script><script src="/select.js?v=3"></script><script src="/management-query.js?v=4"></script><script>${controlPlaneRuntime}</script><script>${organizationSwitcherRuntime}</script><script>${renderManagementNavigationRuntime(organizationId)}</script><script data-cp-page-script>${options.script}</script>
+<script data-cp-page-state type="application/json">${state}</script><script>window.__RENDRO_PAGE_STATE__=${state};</script><script src="/select.js?v=3"></script><script src="/management-query.js?v=4"></script><script>${controlPlaneRuntime}${managementUiRuntime}</script><script>${organizationSwitcherRuntime}</script><script>${renderManagementNavigationRuntime(organizationId)}</script><script data-cp-page-script>${options.script}</script>
 </body></html>`;
 }

@@ -2,6 +2,8 @@
 
 A chronological account of every technical decision, trade-off, and phase from inception to production.
 
+> This file is history. For the current architecture, see [TECHNICAL.md](TECHNICAL.md). Phases 0–5 describe the original email-domain product; Phase 8 replaced most of it.
+
 ---
 
 ## Phase 0: Vision (Week 1)
@@ -112,7 +114,7 @@ Rebranded from "docsync" to "Rendro" — shorter, more memorable, no descriptive
 **R2 for docs:**
 - Replaced MinIO with Cloudflare R2
 - Same S3 API, zero egress, global distribution
-- `wrangler.toml` configured with R2 bucket binding
+- An R2 bucket binding was added to `wrangler.toml`, then removed as unused (94d11a9). The Worker reaches R2 through the AWS S3 client in `src/minio.ts`, configured by `MINIO_*` variables
 
 **DOMParser polyfill:**
 - AWS SDK S3 client uses `DOMParser` for XML parsing
@@ -167,7 +169,7 @@ Browser → Workers (Hono) → Convex HTTP action (better-auth + convexAdapter)
 
 **Workers side:**
 - Auth proxy: forward requests to Convex, strip Domain from Set-Cookie
-- Cookie forwarding: curated header allowlist (cookie, content-type)
+- Cookie forwarding: curated header allowlist (cookie, content-type at the time; now accept, content-type, cookie, origin, user-agent)
 - Session middleware: calls Convex `get-session` to validate cookies
 
 ### Workers I/O fix
@@ -196,7 +198,7 @@ No WebSocket, no persistent connection, fully Workers-compatible.
 
 - **Zero dependencies**: Uses only Node.js built-ins (crypto, fs, path)
 - **npm package**: 4.7KB, `npm install -g rendro`
-- **Direct download**: `curl -sL .../bin/rendro.mjs -o rendro`
+- **Direct download**: `bin/rendro.mjs` attached to GitHub releases (a 61MB standalone binary was tried and reverted)
 - **Bin entry**: `package.json` → `"bin": {"rendro": "./bin/rendro.mjs"}`
 
 ### CI/CD
@@ -208,7 +210,57 @@ No WebSocket, no persistent connection, fully Workers-compatible.
 
 ---
 
-## Current Architecture
+## Phase 6: Viewer Polish (July 10–28, 2026)
+
+- Document loading feedback went through several designs (progress bar, centered spinner, top loading line) before settling on a shimmer on the selected tree row
+- Shadcn-style dark theme, Ember accent, and a radial theme transition
+- Resizable, collapsible, auto-hiding shell with a keyboard shortcut forwarded from the document iframe
+- Path-based document URLs and signed (HMAC) document links
+- Shared "broken graph" 404 page
+- Comment review workflow: filters, quotes, and contained anchor highlights
+
+---
+
+## Phase 7: Public Folders (August 3–16, 2026)
+
+- Explicit public publishing of an uploaded folder at `/public/:org/:slug`; publishing controls were then removed from the docs UI so only the CLI could publish
+- Product landing page at `/`
+
+---
+
+## Phase 8: Projects and Immutable Deployments — v2 (August 16 – October 10, 2026)
+
+Version 2 replaced email-domain organizations with explicit Better Auth organizations and rebuilt tenancy and delivery:
+
+| Date | Change |
+|---|---|
+| Aug 17 | Better Auth on Convex with organizations, teams, invitations, email/password accounts with verification, and account security (1814b15) |
+| Aug 17 | Organization-ID tenant boundaries and projects (2eb7425) |
+| Aug 17 | Scoped, expiring, revocable API keys (ace2976) |
+| Aug 17 | Atomic immutable deployments with SHA-256 manifests (c375e0a) |
+| Aug 17 | Tracked or pinned publications at `/p/:slug` and revocable private shares at `/s/:token` (43f1ff9) |
+| Aug 17 | Legacy tenancy migration and deployment retention jobs (6c574fc) |
+| Aug 19 | Management UI and onboarding (406481e) |
+| Sep 15–20 | Application UI refinement, permission-boundary hardening, management navigation and Query Core caching (2062015, a753ac5, 7701007) |
+| Oct 10 | CLI 2.0.0 with `--organization` / `--project`, batched file reuse, failure endpoint; dependency audit fixes; isolated project comment authentication (78fcd59, af2dfbc, 688b629) |
+
+Key decisions:
+
+| Decision | Why |
+|---|---|
+| Better Auth organization IDs as the tenant key | Membership, roles, teams, and invitations in one authorization model; slugs never grant access |
+| Immutable deployment namespaces under `tenants/{orgId}/projects/{projectId}/deployments/{id}/` | Interrupted pushes cannot corrupt the active site; pinned publications keep older releases |
+| SHA-256 manifests and server-side copy | CI sends only changed files without relying on mutable object ETags |
+| Publishing is a separate, explicit operation | Uploading never makes content public |
+| Comments authenticated by the parent shell | Publisher HTML runs in an opaque-origin sandbox and never sees a token |
+
+Dated QA, performance, and release-gate reports from this phase are in [archive/](archive/README.md).
+
+---
+
+## Architecture as of July 2026
+
+Superseded by Phase 8. See [TECHNICAL.md](TECHNICAL.md) for the current architecture.
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -236,7 +288,7 @@ No WebSocket, no persistent connection, fully Workers-compatible.
    └──────────┘
 ```
 
-## Database & Storage
+## Database & Storage (July 2026)
 
 ### Convex Tables
 
@@ -266,7 +318,9 @@ rendro-docs/
     └── handbook.html
 ```
 
-## API Surface
+## API Surface (July 2026)
+
+Most of these routes are now legacy; see the endpoint inventory in [TECHNICAL.md](TECHNICAL.md).
 
 | Endpoint | Auth | Purpose |
 |---|---|---|
@@ -283,7 +337,9 @@ rendro-docs/
 | `GET /api/sync/list` | API Key | List org files |
 | `DELETE /api/sync/delete` | API Key | Soft-delete file |
 
-## Key Technical Decisions
+## Key Technical Decisions (July 2026)
+
+Phase 8 superseded #7 (soft-delete; deployments are now immutable) and #9 (email-domain orgs; Better Auth organizations replaced them).
 
 | # | Decision | Alternatives Considered | Why |
 |---|---|---|---|
@@ -307,7 +363,7 @@ rendro-docs/
 5. **better-auth state is in cookies, not DB** — OAuth state validation requires the `__Secure-better-auth.state` cookie, not just the DB entry.
 6. **fetch follows redirects by default** — use `redirect: "manual"` to prevent 302 loops causing 522 errors.
 
-## Current State (July 2026)
+## State as of July 2026
 
 - **Deployed**: `https://rendro.app` on Cloudflare Workers
 - **Auth**: Convex component (better-auth) with Google OAuth

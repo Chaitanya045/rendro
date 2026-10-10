@@ -38,7 +38,6 @@ export default tseslint.config(
       "convex/betterAuth/_generated/**",
       "dist/**",
       "node_modules/**",
-      "bun.lock",
       "public/**",
       "src/commentor/**",
       "scripts/**",

@@ -5,6 +5,7 @@ import type { User } from "better-auth/types";
 import { adminAc, memberAc, ownerAc } from "better-auth/plugins/organization/access";
 import { describe, expect, it, vi } from "vitest";
 import organizationPages from "@/routes/organization-pages";
+import { managementUiRuntime } from "@/ui/management-ui";
 
 const user = {
   id: "current-user",
@@ -181,6 +182,7 @@ describe("organization role UX", () => {
       Promise,
       Error,
     };
+    vm.runInNewContext(managementUiRuntime, context);
     vm.runInNewContext(exposed, context);
     const data = {
       organization: {
@@ -254,6 +256,7 @@ describe("organization role UX", () => {
       Promise,
       Error,
     };
+    vm.runInNewContext(managementUiRuntime, context);
     vm.runInNewContext(exposed, context);
     await context.window.__roleUx.renderPeople({
       organization: {

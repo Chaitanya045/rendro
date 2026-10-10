@@ -53,7 +53,7 @@ function hasUnsafeSegments(value: string): boolean {
   return segments.some((segment) => !segment || segment === "." || segment === "..");
 }
 
-export function normalizeSourcePrefix(orgSlug: string, value: string): string | null {
+function normalizeSourcePrefix(orgSlug: string, value: string): string | null {
   const decoded = decodeRepeatedly(value.trim());
   if (!decoded || !decoded.startsWith(`${orgSlug}/`) || !decoded.endsWith("/")) return null;
   const relative = decoded.slice(orgSlug.length + 1, -1);
