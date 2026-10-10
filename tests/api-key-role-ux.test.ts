@@ -18,7 +18,8 @@ async function runtime(role: string, requestError = false, activePage = true) {
   const recovery = { href: "" };
   const errorCopy = { textContent: "" };
   const retry = { addEventListener: vi.fn() };
-  const keyList = { innerHTML: "", querySelector: (selector: string) => selector === "p" ? errorCopy : retry };
+  const tableWrap = { hidden: false, adjacentHTML: "", insertAdjacentHTML(_position: string, html: string) { this.adjacentHTML += html; } };
+  const keyList = { innerHTML: "", closest: () => tableWrap, querySelector: (selector: string) => selector === "p" ? errorCopy : retry };
   const request = vi.fn((path: string) => {
     if (requestError) return Promise.reject(new Error("Network unavailable"));
     if (path.includes("management/access")) return Promise.resolve({ name: "QA", member: { userId: "qa", role } });
@@ -30,13 +31,13 @@ async function runtime(role: string, requestError = false, activePage = true) {
     state, ui: { request, isActive: () => activePage }, keyList, loadVersion: 0, loading: "loading", projects: new Map(),
     projectSelect: { innerHTML: "", value: "" }, renderKeys,
     document: {
-      getElementById: (id: string) => id === "api-key-create" ? create : recovery,
+      getElementById: (id: string) => id === "api-key-create" ? create : id === "keys-restricted" ? null : recovery,
       querySelectorAll: () => [],
     },
   });
   vm.runInContext(script, context);
   await vm.runInContext("load()", context);
-  return { create, recovery, keyList, request, renderKeys, retry, errorCopy, state };
+  return { create, recovery, keyList, tableWrap, request, renderKeys, retry, errorCopy, state };
 }
 
 describe("API key role-aware UI", () => {
@@ -51,8 +52,12 @@ describe("API key role-aware UI", () => {
     const ui = await runtime("member");
     expect(ui.state.userId).toBe("qa");
     expect(ui.create).toEqual({ disabled: true, hidden: true });
-    expect(ui.keyList.innerHTML).toContain("API key access is restricted");
-    expect(ui.keyList.innerHTML).not.toContain("Try again");
+    // The restriction replaces the table instead of rendering inside a seven-column body.
+    expect(ui.tableWrap.hidden).toBe(true);
+    expect(ui.keyList.innerHTML).toBe("");
+    expect(ui.tableWrap.adjacentHTML).toContain("API key access is restricted");
+    expect(ui.tableWrap.adjacentHTML).not.toContain("<td");
+    expect(ui.tableWrap.adjacentHTML).not.toContain("Try again");
     expect(ui.recovery.href).toBe("/organizations/org/projects");
     expect(ui.request).toHaveBeenCalledTimes(1);
     expect(ui.renderKeys).not.toHaveBeenCalled();
@@ -61,6 +66,8 @@ describe("API key role-aware UI", () => {
   it.each(["owner", "admin", "member, admin"])("allows %s to load keys and create credentials", async (role) => {
     const ui = await runtime(role);
     expect(ui.create).toEqual({ disabled: false, hidden: false });
+    expect(ui.tableWrap.hidden).toBe(false);
+    expect(ui.tableWrap.adjacentHTML).toBe("");
     expect(ui.request).toHaveBeenCalledTimes(3);
     expect(ui.renderKeys).toHaveBeenCalledWith([]);
   });

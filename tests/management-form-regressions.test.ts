@@ -110,6 +110,13 @@ class ElementMock {
     }
   }
   appendChild(node: ElementMock) { this.append(node); return node; }
+  before(...nodes: ElementMock[]) {
+    const parent = this.parentNode;
+    if (!parent) return;
+    const index = parent.children.indexOf(this);
+    for (const node of nodes) node.parentNode = parent;
+    parent.children.splice(index, 0, ...nodes);
+  }
   remove() { this.parentNode?.removeChild(this); }
   removeChild(node: ElementMock) {
     const index = this.children.indexOf(node);

@@ -1,6 +1,6 @@
 import { MANAGEMENT_PROJECT_PLACEHOLDER, managementLoadingPages } from "./management-loading-pages";
 
-export const MANAGEMENT_SHELL_VERSION = "16";
+export const MANAGEMENT_SHELL_VERSION = "17";
 
 export interface ManagementRouteIdentity {
   organizationId: string;
@@ -90,8 +90,8 @@ function managementNavigationRuntime(loadingPagesJson: string): string {
       if(getKey)inflightGets.set(getKey,pending);
       try{return await pending;}catch(error){if(error&&(error.status===401||error.status===403))clearQueryCache();throw error;}finally{if(mutation){pendingMutations=Math.max(0,pendingMutations-1);invalidateMutation(path,settings);}if(getKey&&inflightGets.get(getKey)===pending)inflightGets.delete(getKey);}
     }
-    function activeCall(name){return function(){if(!isActive())return name==="copyText"?Promise.resolve(false):undefined;return ui[name].apply(ui,arguments);};}
-    Object.assign(scope,{request:request,isActive:isActive,guard:function(callback){return function(){if(isActive())return callback.apply(this,arguments);};},onCleanup:onCleanup,cleanup:onCleanup,preventNavigation:preventNavigation,canLeave:canLeave,dispose:dispose,busy:activeCall("busy"),copyText:activeCall("copyText"),toast:activeCall("toast"),openDialog:activeCall("openDialog"),applyTheme:activeCall("applyTheme")});
+    function activeCall(name){return function(){if(!isActive())return name==="copyText"||name==="confirm"?Promise.resolve(false):undefined;return ui[name].apply(ui,arguments);};}
+    Object.assign(scope,{request:request,isActive:isActive,guard:function(callback){return function(){if(isActive())return callback.apply(this,arguments);};},onCleanup:onCleanup,cleanup:onCleanup,preventNavigation:preventNavigation,canLeave:canLeave,dispose:dispose,busy:activeCall("busy"),copyText:activeCall("copyText"),toast:activeCall("toast"),openDialog:activeCall("openDialog"),applyTheme:activeCall("applyTheme"),confirm:activeCall("confirm"),setDocsLink:activeCall("setDocsLink")});
     currentScope=scope;return scope;
   }
   function disposePage(){if(currentScope)currentScope.dispose();currentScope=null;}
@@ -120,6 +120,9 @@ function managementNavigationRuntime(loadingPagesJson: string): string {
     if(mode!=="pop"){var heading=content.querySelector("h1");if(heading){heading.tabIndex=-1;heading.focus({preventScroll:true});}}
     return content;
   }
+  // Documentation links are revealed by project pages only after an active
+  // deployment is observed; keep them only while staying within that project.
+  function syncDocsLinks(route){document.querySelectorAll("[data-cp-open-docs]").forEach(function(link){if(!route.projectId||link.getAttribute("data-cp-docs-project")!==route.projectId){link.hidden=true;link.removeAttribute("data-cp-docs-project");}});}
   function syncChrome(url){
     if(typeof ui.syncActiveNav==="function")ui.syncActiveNav();
     if(typeof ui.setNav==="function")ui.setNav(false,false);
@@ -142,13 +145,13 @@ function managementNavigationRuntime(loadingPagesJson: string): string {
     try{if(replace)location.replace(url.href);else location.assign(url.href);}catch(error){approvedUnload=false;throw error;}
   }
   function validateDocument(doc,responseUrl){
-    var nextMain=doc.querySelector(".cp-main[data-cp-route-envelope]"),stateNode=doc.querySelector("script[data-cp-page-state]"),scriptNode=doc.querySelector("script[data-cp-page-script]"),openDocs=doc.querySelector("[data-cp-open-docs]");
+    var nextMain=doc.querySelector(".cp-main[data-cp-route-envelope]"),stateNode=doc.querySelector("script[data-cp-page-state]"),scriptNode=doc.querySelector("script[data-cp-page-script]");
     if(!nextMain||!stateNode||!scriptNode)return null;
     if(nextMain.getAttribute("data-cp-shell-version")!==SHELL_VERSION||nextMain.getAttribute("data-cp-organization-id")!==shellOrganization||nextMain.getAttribute("data-cp-user-id")!==shellUser)return null;
     var finalRoute=supported(responseUrl),declaredProject=nextMain.getAttribute("data-cp-project-id")||"";
     if(!finalRoute||declaredProject!==(finalRoute.projectId||""))return null;
     var nextContent=nextMain.querySelector(":scope > .cp-content");if(!nextContent)return null;
-    try{return {content:nextContent,state:JSON.parse(stateNode.textContent||"{}"),script:scriptNode,title:doc.title,route:finalRoute,openDocsHref:openDocs&&openDocs.getAttribute("href")};}catch(_error){return null;}
+    try{return {content:nextContent,state:JSON.parse(stateNode.textContent||"{}"),script:scriptNode,title:doc.title,route:finalRoute};}catch(_error){return null;}
   }
   function runPageScript(source){
     document.querySelectorAll("script[data-cp-page-script]").forEach(function(node){node.remove();});
@@ -164,7 +167,7 @@ function managementNavigationRuntime(loadingPagesJson: string): string {
     if(url.pathname===location.pathname&&url.search===location.search&&url.hash!==location.hash){if(mode!=="pop")location.assign(url.href);else syncChrome(url);return true;}
     if(!(options&&options.checked)&&!canLeave(leaveDetail))return false;
     if(navigationController)navigationController.abort();navigationController=new AbortController();var version=++navigationVersion,departingScroll=window.scrollY||0;
-    disposePage();if(typeof ui.setNav==="function")ui.setNav(false,false);var pendingContent=showDestinationSkeleton(route,mode,options&&options.scrollY);setHistory(url,mode,departingScroll);syncChrome(url);var skeletonScroll=window.scrollY||0;
+    disposePage();if(typeof ui.setNav==="function")ui.setNav(false,false);syncDocsLinks(route);var pendingContent=showDestinationSkeleton(route,mode,options&&options.scrollY);setHistory(url,mode,departingScroll);syncChrome(url);var skeletonScroll=window.scrollY||0;
     var timedOut=false,timeoutId=setTimeout(function(){if(version!==navigationVersion)return;timedOut=true;navigationController.abort();hardNavigate(url,true);},15000);
     try{
       var bundle=window.RendroManagementPages,page=bundle&&bundle.version===SHELL_VERSION&&bundle.pages[route.section];
@@ -176,7 +179,6 @@ function managementNavigationRuntime(loadingPagesJson: string): string {
         state.organizationId=shellOrganization;state.projectId=route.projectId||"";state.userId=shellUser;
         pendingContent.insertAdjacentHTML("beforeend",substitute(page.dialogs));
         window.__RENDRO_PAGE_STATE__=state;document.title=page.title;
-        var docsLink=document.querySelector("[data-cp-open-docs]");if(docsLink)docsLink.setAttribute("href","/organizations/"+encodeURIComponent(shellOrganization)+"/projects"+(route.projectId?"/"+encodeURIComponent(route.projectId)+"/docs":""));
         syncChrome(url);hideRefresh();page.mount();if(typeof ui.enhancePage==="function")ui.enhancePage();
         return true;
       }
@@ -192,7 +194,6 @@ function managementNavigationRuntime(loadingPagesJson: string): string {
       if(preservePending&&pendingExpectedMarkup.get(pendingContent)!==normalizedServerMarkup(incoming)){hardNavigate(responseUrl,true);return false;}
       if(preservePending){Array.from(incoming.querySelectorAll(":scope > dialog")).forEach(function(dialog){pendingContent.append(dialog);});incoming=pendingContent;}else{if(hasLoadingContent(incoming)){incoming.classList.add("cp-navigation-pending");incoming.setAttribute("aria-busy","true");watchPendingContent(incoming);}if(current)current.replaceWith(incoming);else main.append(incoming);}
       window.__RENDRO_PAGE_STATE__=validated.state;document.title=validated.title;
-      var openDocs=document.querySelector("[data-cp-open-docs]");if(openDocs&&validated.openDocsHref)openDocs.setAttribute("href",validated.openDocsHref);
       if(responseUrl.href!==location.href){var finalState=Object.assign({},history.state||{}, {__rendroManagementIndex:historyIndex});history.replaceState(finalState,"",responseUrl.href);}
       syncChrome(responseUrl);hideRefresh();runPageScript(validated.script);if(typeof ui.enhancePage==="function")ui.enhancePage();if(restoreFocus){var heading=incoming.querySelector("h1");if(heading){heading.tabIndex=-1;heading.focus({preventScroll:true});}}
       if(mode==="pop"&&Number.isFinite(options&&options.scrollY)&&window.scrollY===skeletonScroll&&typeof window.scrollTo==="function")window.scrollTo(0,options.scrollY);
