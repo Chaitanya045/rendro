@@ -3,10 +3,13 @@ import { getRequestListener } from "@hono/node-server";
 import type { User } from "better-auth/types";
 import { build } from "esbuild";
 import { Hono } from "hono";
-import { beforeAll, expect, it } from "vitest";
+import { readFile } from "node:fs/promises";
+import { afterAll, beforeAll, expect, it, vi } from "vitest";
+import { faviconAssets } from "@/routes/favicon";
 import { securityHeaders } from "@/middleware/security-headers";
 import organizationPages from "@/routes/organization-pages";
 import { managementPagesSource } from "../scripts/management-pages-source";
+import { managementAccessFixture } from "./fixtures/management-access";
 import { browserStep, createBrowserHarness, waitForSettled } from "./helpers/browser";
 
 const harness = createBrowserHarness();
@@ -18,6 +21,10 @@ const organization = {
 };
 
 beforeAll(async () => {
+  const access = managementAccessFixture(organization, user);
+  // The page guard fetches Convex on the server before any browser API requests.
+  vi.stubGlobal("fetch", vi.fn((input: string | URL | Request) =>
+    Promise.resolve(access(input) ?? new Response(null, { status: 404 }))));
   // Build source in memory so this suite also runs before build:assets in clean CI.
   const assets = new Map<string, string>();
   for (const [path, entry] of [
@@ -29,15 +36,19 @@ beforeAll(async () => {
     }));
     assets.set(path, bundle.outputFiles[0].text);
   }
-  assets.set("/management-pages.js", await managementPagesSource());
+  assets.set("/management-pages.js", managementPagesSource());
   const app = new Hono<{ Variables: { user?: User } }>();
   app.use("*", securityHeaders);
   app.use("*", async (c, next) => { c.set("user", user); await next(); });
   for (const [path, body] of assets) app.get(path, c => c.body(body, 200, { "Content-Type": "text/javascript" }));
+  for (const [path, contentType] of Object.entries(faviconAssets)) {
+    const body = await readFile(`public${path}`);
+    app.get(path, c => c.body(body, 200, { "Content-Type": contentType }));
+  }
   app.get("/api/auth/organization/get-full-organization", c => c.json(organization));
   app.get("/api/auth/organization/list", c => c.json([organization]));
   app.get("/api/auth/organization/list-invitations", c => c.json([]));
-  app.get("/api/rendro/management/access", c => c.json({ ...organization, userId: user.id, member: organization.members[0] }));
+  app.get("/api/rendro/management/access", c => access(c.req.raw)!);
   app.get("/api/rendro/projects", c => c.json({ projects: [] }));
   app.get("/api/rendro/management/recent-deployment", c => c.json({ deployment: null }));
   app.route("/", organizationPages);
@@ -46,6 +57,8 @@ beforeAll(async () => {
     void listener(request, response).catch(error => response.destroy(error as Error));
   });
 });
+
+afterAll(() => { vi.unstubAllGlobals(); });
 
 it.each([375, 768, 1440])("exposes the org name in accessibility snapshots and passes axe at %spx", async width => {
   const page = await harness.newPage({ viewport: { width, height: 900 } });

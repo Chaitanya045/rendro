@@ -31,6 +31,9 @@ afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 describe("shared response security policy", () => {
   it.each(["/", "/sign-in", "/sign-in?error=access_denied", "/verify-email", "/sign-up", "/forgot-password", "/reset-password", "/organizations/org-a", "/account/security", "/accept-invitation/test", docsBase, "/docs/example", "/p/product", "/public/example/product", "/s/test", "/docs/unknown", "/missing"])("protects trusted HTML: %s", async path => {
     const response = await request(path, path.startsWith("/organizations") || path.startsWith("/docs") || path === "/account/security" || path.startsWith("/accept-invitation/"));
+    if (path === "/organizations/org-a" || path === "/accept-invitation/test") {
+      expect(response.status, "authorized management page must render, not a styled error").toBe(200);
+    }
     common(response);
     expect(response.headers.get("Cache-Control")).toMatch(/(?:^|,\s*)no-store(?:,|$)/);
     expect(response.headers.get("Content-Type")).toContain("text/html");
