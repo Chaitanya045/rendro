@@ -84,6 +84,7 @@ describe("session middleware Server-Timing", () => {
     expect(fetchMock.mock.calls[0]?.[1]).toEqual({
       headers: { cookie, accept: "application/json" },
       redirect: "manual",
+      signal: expect.any(AbortSignal),
     });
     const timing = first.headers.get("server-timing") ?? "";
     expect(timing).toContain("data;dur=4");
@@ -102,12 +103,12 @@ describe("session middleware Server-Timing", () => {
       headers: { cookie: "better-auth.session_token=do-not-expose" },
     });
 
-    expect(response.status).toBe(401);
+    expect(response.status).toBe(503);
     expect(response.headers.get("cache-control")).toBe("private, no-store");
-    await expect(response.json()).resolves.toEqual({ error: "Unauthorized" });
+    await expect(response.json()).resolves.toEqual({ error: "Session temporarily unavailable", retryable: true });
     const timing = response.headers.get("server-timing") ?? "";
     expectNumericMetric(timing, "session");
-    expectNumericMetric(timing, "render");
+    expect(timing).not.toContain("render;");
     expect(timing).not.toContain("session backend unavailable");
     expect(timing).not.toContain("do-not-expose");
   });

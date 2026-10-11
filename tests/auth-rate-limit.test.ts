@@ -1,5 +1,6 @@
 import { memoryAdapter } from "@better-auth/memory-adapter";
 import { betterAuth } from "better-auth/minimal";
+import { testUtils } from "better-auth/plugins";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createAuthOptions } from "../convex/auth";
 import { cacheJwksResponse } from "../convex/authHttp";
@@ -18,6 +19,7 @@ async function runtime() {
   const auth = betterAuth({
     ...configured,
     baseURL,
+    plugins: [...configured.plugins, testUtils()],
     database: memoryAdapter(database),
     advanced: { ...configured.advanced, database: { generateId: "uuid" } },
   });
@@ -40,7 +42,7 @@ async function runtime() {
     const response = await auth.handler(await verifiedAuthRequest(req, secret));
     return cacheJwksResponse(req, response);
   }
-  return { request, database };
+  return { request, database, context };
 }
 
 describe("auth rate limits", () => {
@@ -82,10 +84,36 @@ describe("auth rate limits", () => {
     ]));
   });
 
+  it("keeps authenticated session reads in their own bucket after ten failed sign-ins", async () => {
+    const { request, database, context } = await runtime();
+    const user = context.test!.createUser({ emailVerified: true });
+    await context.test!.saveUser(user);
+    const login = await context.test!.login({ userId: user.id });
+    const ip = "192.0.2.38";
+    for (let i = 0; i < 10; i++) {
+      expect((await request("/sign-in/email", ip)).status).toBe(i < 5 ? 401 : 429);
+    }
+    // Exercise the configured 120/minute session bucket, beyond the default
+    // 100/minute limit, including a query-string variant.
+    for (let i = 0; i < 120; i++) {
+      const path = i % 2 ? "/get-session?probe=1" : "/get-session";
+      const response = await request(path, ip, login.headers);
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({ user: { id: user.id } });
+    }
+    expect(database.rateLimit).toEqual(expect.arrayContaining([
+      expect.objectContaining({ key: `${ip}|/sign-in/email`, count: 5 }),
+      expect.objectContaining({ key: `${ip}|/get-session`, count: 120 }),
+    ]));
+    expect((await request("/get-session", ip, login.headers)).status).toBe(429);
+    expect((await request("/sign-in/email", ip)).status).toBe(429);
+  });
+
   it("keeps strict credential, reset and verification rules without broad exemptions", () => {
     const { rateLimit, advanced } = createAuthOptions({} as never);
     expect(rateLimit).toMatchObject({ enabled: true, storage: "database", max: 100 });
     expect(rateLimit.customRules).toMatchObject({
+      "/get-session": { window: 60, max: 120 },
       "/sign-in/email": { window: 60, max: 5 },
       "/sign-up/email": { window: 3600, max: 5 },
       "/request-password-reset": { window: 3600, max: 5 },
