@@ -1,3 +1,5 @@
+import { rewriteCssUrls } from "./css-urls";
+
 interface ParentConfig { base: string }
 interface FrameConfig extends ParentConfig { prefix: string; manifestKey: string }
 interface RenewalMessage { type?: string; requestId?: string; manifestKey?: string; prefix?: string }
@@ -85,14 +87,15 @@ export function installViewerFrame(config: FrameConfig, host: Window = window): 
         updates.push(() => element.setAttribute("srcset", replacement));
       }
     }
-    // Inline style URLs are relative to the renewed document base. Explicit
-    // ticket URLs in style text must also move to the new prefix.
+    // Chromium retains the original base in parsed CSS. Resolve each scoped
+    // URL explicitly, so even a resource first used after expiry gets the new
+    // ticket. Reassigning identical relative CSS text is not sufficient.
     base.href = replace(oldBase);
     for (const element of doc.querySelectorAll("[style],style")) {
       const style = element.getAttribute("style");
-      if (style !== null) element.setAttribute("style", style.split(prefix).join(next));
+      if (style !== null) element.setAttribute("style", rewriteCssUrls(style, replace));
       if (element.tagName === "STYLE" && element.textContent) {
-        element.textContent = element.textContent.split(prefix).join(next);
+        element.textContent = rewriteCssUrls(element.textContent, replace);
       }
     }
     for (const update of updates) update();
