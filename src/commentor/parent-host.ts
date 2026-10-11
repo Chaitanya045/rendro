@@ -1,3 +1,4 @@
+import { updateViewerActiveManifest } from "../viewer/client";
 import { commentErrorMessage, isDefinitiveCommentRejection } from "./errors";
 import { COMMENT_RECOVERY_PREFIX, syncCommentRecoveryUser } from "./recovery-session";
 import { normalizeMutationArgs, record, validAnchor } from "./mutation-args";
@@ -532,6 +533,7 @@ export function bootCommentorParentHost(frameAlreadyLoaded = false): (() => void
   const rememberLoad = () => { frameLoaded = true; };
   frame.addEventListener("load", rememberLoad);
   let host: CommentorParentHost | null = null;
+  let unsubscribeDeployment: (() => void) | undefined;
   const client = new ConvexClient(config.convexUrl);
   let checking: Promise<string | null> | null = null;
   const checkIdentity = (): Promise<string | null> => {
@@ -562,11 +564,20 @@ export function bootCommentorParentHost(frameAlreadyLoaded = false): (() => void
       const token = await requestAuthToken();
       return disposed || signedOut ? null : token;
     });
+    if (!("orgSlug" in config)) {
+      unsubscribeDeployment = client.onUpdate(api.projects.activeManifest,
+        { organizationId: config.organizationId, projectId: config.projectId },
+        manifestKey => updateViewerActiveManifest(manifestKey),
+        () => updateViewerActiveManifest(null)); // Renewal remains the fallback.
+    }
   }).catch(() => {});
   const signOut = () => {
     signedOut = true;
     syncCommentRecoveryUser(window.sessionStorage, null);
     host?.setUserId(null);
+    unsubscribeDeployment?.();
+    unsubscribeDeployment = undefined;
+    updateViewerActiveManifest(null);
     void client.close();
   };
   const focus = () => { void checkIdentity().catch(() => {}); };
@@ -578,6 +589,9 @@ export function bootCommentorParentHost(frameAlreadyLoaded = false): (() => void
     window.removeEventListener("commentor-sign-out", signOut);
     window.removeEventListener("focus", focus);
     host?.dispose();
+    unsubscribeDeployment?.();
+    unsubscribeDeployment = undefined;
+    updateViewerActiveManifest(null);
     void client.close();
   };
 }

@@ -126,7 +126,7 @@ describe("private sandbox asset routing", () => {
       const body = await response.text();
       expect(body).not.toMatch(/secret|Document unavailable/);
       if (route === "tree" || route === "renewal") expect(JSON.parse(body).retryable).toBe(true);
-      else if (route === "ticket") expect(body).toBe("Service unavailable");
+      else if (route === "ticket") expect(body).toBe("");
       else expect(body).toContain('href="">Try again</a>');
     }
     expect(f.objects).not.toHaveBeenCalled();
@@ -140,7 +140,7 @@ describe("private sandbox asset routing", () => {
       ["assets/module.js", "*/*"],
       ["image", "image/png"], ["font", "font/woff2"],
       ["stylesheet", "text/css"], ["script", "application/javascript"],
-    ])("returns plain 503 for %s (%s)", async (path, accept) => {
+    ])("returns empty 503 for %s (%s)", async (path, accept) => {
       const f = await fixture();
       const { url } = await f.document();
       f.state.failActive = () => new Response("secret upstream diagnostics", {
@@ -152,12 +152,12 @@ describe("private sandbox asset routing", () => {
         Accept: accept, ...(route === "canonical" ? { Cookie: f.cookie } : {}),
       } });
       expect(response.status).toBe(503);
-      expect(response.headers.get("Content-Type")).toBe("text/plain; charset=UTF-8");
+      expect(response.headers.get("Content-Type")).toBeNull();
       expect(response.headers.get("Retry-After")).toBe("9");
       expect(response.headers.get("Cache-Control")).toBe("private, no-store");
-      expect(response.headers.get("X-Content-Type-Options")).toBe("nosniff");
+      expect(response.headers.get("X-Content-Type-Options")).toBeNull();
       expect(response.headers.get("Access-Control-Allow-Origin")).toBeNull();
-      expect(await response.text()).toBe("Service unavailable");
+      expect(await response.text()).toBe("");
       expect(f.objects).not.toHaveBeenCalled();
     });
 

@@ -17,28 +17,38 @@ let version = 1;
 let shellLoads = 0;
 let renewals = 0;
 const assetStatuses: number[] = [];
+const deferredResponses: Array<{ path: string; status: number; type: string | null; nosniff: string | null }> = [];
 
 beforeAll(async () => {
   const assets = new Map([
     ["/private-viewer.js", await bundleBrowserAsset("src/viewer/entry.ts")],
     ["/lazy-tree.js", await bundleBrowserAsset("src/lazy-tree/lazy-tree.ts")],
   ]);
-  // Exercise the real parent bridge and durable operation state, replacing only
-  // the backend with an unacknowledged write and the widget with protocol probes.
-  const parent = await browserStep("bundle comment recovery host", () => build({ stdin: {
-    contents: `import { CommentorParentHost } from "./src/commentor/parent-host";
-      addEventListener('DOMContentLoaded', () => {
-        const backend = {
-          subscribe(scope, update) {
-            queueMicrotask(() => update([], { canLoadMore: false, loading: false }));
-            return { unsubscribe() {}, loadMore() { return false; } };
-          },
-          mutate() { document.body.dataset.pendingWrite = 'true'; return new Promise(() => {}); }
-        };
-        new CommentorParentHost(document.getElementById('content-frame'), location.origin,
-          { organizationId: 'org', projectId: 'project', convexUrl: '' }, backend, 'test').start();
-      });`, resolveDir: process.cwd(), loader: "ts",
-  }, bundle: true, write: false, platform: "browser" }));
+  // Exercise the production parent boot/client wiring; only the Convex transport
+  // is replaced. Subscription updates are delivered explicitly, never polled.
+  const parent = await browserStep("bundle comment recovery host", () => build({
+    entryPoints: ["src/commentor/parent-entry.ts"], bundle: true, write: false, platform: "browser",
+    plugins: [{ name: "convex-fixture", setup(build) {
+      build.onResolve({ filter: /^convex\/browser$/ }, () => ({ path: "convex-fixture", namespace: "fixture" }));
+      build.onLoad({ filter: /.*/, namespace: "fixture" }, () => ({ contents: `
+        import { getFunctionName } from 'convex/server';
+        export class ConvexClient {
+          constructor() { document.body.dataset.clients = String(Number(document.body.dataset.clients || 0) + 1); }
+          setAuth(fetchToken) { fetchToken(); }
+          onUpdate(query, args, update) {
+            if (getFunctionName(query) !== 'projects:activeManifest' || args.organizationId !== 'org' || args.projectId !== 'project') throw new Error('Unexpected subscription');
+            window.publishManifest = update;
+            return () => { delete window.publishManifest; };
+          }
+          onPaginatedUpdate_experimental(query, args, options, update) {
+            queueMicrotask(() => update({ results: [], status: 'Exhausted', loadMore() { return false; } }));
+            return () => {};
+          }
+          mutation() { document.body.dataset.pendingWrite = 'true'; return new Promise(() => {}); }
+          close() { return Promise.resolve(); }
+        }`, resolveDir: process.cwd(), loader: "ts" }));
+    } }],
+  }));
   assets.set("/commentor-parent.js", parent.outputFiles[0].text);
   assets.set("/commentor.js", `addEventListener('message', event => {
     if (event.source !== parent) return;
@@ -51,6 +61,9 @@ beforeAll(async () => {
   vi.spyOn(minio, "getObjectText").mockResolvedValue(JSON.stringify({ version: 1, files: [
     { path: documentPath, contentType: "text/html" },
     { path: "guide/deferred.svg", contentType: "image/svg+xml" },
+    { path: "guide/background.svg", contentType: "image/svg+xml" },
+    { path: "guide/deferred.woff2", contentType: "font/woff2" },
+    { path: "guide/import.css", contentType: "text/css" },
   ] }));
   vi.spyOn(minio, "getObjectStream").mockImplementation(key => {
     const content = key.endsWith(".svg")
@@ -75,12 +88,18 @@ beforeAll(async () => {
     }
     await next();
   });
+  app.get("/api/auth/get-session", c => c.json({ user: { id: "test" } }));
+  app.get("/api/auth/convex/token", c => c.json({ token: "fixture" }));
   app.route("/", projectDocs);
   const listener = getRequestListener(async request => {
     const path = new URL(request.url).pathname;
     if (path === base) shellLoads++;
     if (path.endsWith("/viewer-ticket")) renewals++;
     const result = await app.fetch(request);
+    if (/\/(background.svg|deferred.woff2|import.css)$/.test(path)) deferredResponses.push({
+      path: path.split("/").pop()!, status: result.status,
+      type: result.headers.get("content-type"), nosniff: result.headers.get("x-content-type-options"),
+    });
     if (path.endsWith("deferred.svg")) assetStatuses.push(result.status);
     return result;
   });
@@ -88,11 +107,11 @@ beforeAll(async () => {
     void listener(request, response).catch(error => response.destroy(error as Error));
   }, assets);
 });
-beforeEach(() => { version = 1; shellLoads = 0; renewals = 0; assetStatuses.length = 0; });
+beforeEach(() => { version = 1; shellLoads = 0; renewals = 0; assetStatuses.length = 0; deferredResponses.length = 0; });
 afterAll(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 describe("private viewer republishing", () => {
-  it.each(["deferred asset", "heartbeat"])("recovers from %s supersession at the same URL with drafts and pending operations", async trigger => {
+  it.each(["subscription", "deferred asset", "heartbeat"])("recovers from %s supersession at the same URL with drafts and pending operations", async trigger => {
     const page = await harness.newPage();
     await page.context().addCookies([{ name: "better-auth.session_token", value: "fixture.signature", url: harness.origin }]);
     await page.route(url => url.origin !== harness.origin, route => route.fulfill({
@@ -100,6 +119,13 @@ describe("private viewer republishing", () => {
       body: route.request().url().includes("cdn.tailwindcss.com") ? "window.tailwind = {};" : "",
     }));
     const violations: string[] = [];
+    const consoleMessages: string[] = [];
+    const failedRequests: string[] = [];
+    const settledRequests: string[] = [];
+    page.on("requestfinished", request => settledRequests.push(new URL(request.url()).pathname.split("/").pop()!));
+    page.on("requestfailed", request => settledRequests.push(new URL(request.url()).pathname.split("/").pop()!));
+    page.on("console", message => consoleMessages.push(message.text()));
+    page.on("requestfailed", request => failedRequests.push(`${request.url()}: ${request.failure()?.errorText}`));
     await page.exposeFunction("recordViolation", (value: string) => violations.push(value));
     await page.addInitScript(() => {
       document.addEventListener("securitypolicyviolation", event => {
@@ -124,9 +150,16 @@ describe("private viewer republishing", () => {
     const recoveryBefore = await page.evaluate(() => Object.fromEntries(Object.entries(sessionStorage).filter(([key]) => key.startsWith("commentor-"))));
     const locationBefore = page.url();
     const oldAsset = await frame.evaluate(() => new URL("deferred.svg", document.baseURI).href);
+    await browserStep("attach the single parent subscription", () => page.waitForFunction(() =>
+      typeof (window as unknown as { publishManifest?: unknown }).publishManifest === "function"));
+    expect(await page.locator("body").getAttribute("data-clients")).toBe("1");
     version = 2; // Activate a new manifest at the real route's backend boundary.
     await frame.locator("#focus-target").focus();
-    if (trigger === "deferred asset") {
+    if (trigger === "subscription") {
+      await page.evaluate(manifestKey => {
+        (window as unknown as { publishManifest: (key: string) => void }).publishManifest(manifestKey);
+      }, manifest(version));
+    } else if (trigger === "deferred asset") {
       await frame.locator("#deferred").evaluate(element => { (element as HTMLImageElement).src = "deferred.svg"; });
       await expect.poll(() => assetStatuses.includes(404), { message: "reject the superseded asset" }).toBe(true);
     } else {
@@ -138,7 +171,32 @@ describe("private viewer republishing", () => {
     expect(await frame.locator("#focus-target").evaluate(element => element === document.activeElement)).toBe(true);
     expect(await frame.locator("body").getAttribute("data-version")).toBe("1");
     expect(shellLoads).toBe(1);
-    expect(renewals).toBe(1);
+    expect(renewals).toBe(trigger === "subscription" ? 0 : 1);
+    if (trigger === "subscription") {
+      // The notice precedes every asset failure; CSS resources cannot trigger it.
+      expect(assetStatuses).toEqual([]);
+      const paths = ["background.svg", "deferred.woff2", "import.css"];
+      expect(deferredResponses).toEqual([]);
+      await frame.evaluate(() => {
+        const style = document.createElement("style");
+        style.textContent = `@import url("import.css");
+          @font-face { font-family: Deferred; src: url("deferred.woff2"); }
+          #details { background-image: url("background.svg"); font-family: Deferred; }`;
+        document.head.append(style);
+      });
+      await expect.poll(() => paths.every(path => settledRequests.includes(path)), {
+        message: "deferred background, font and import all finish or fail",
+      }).toBe(true);
+      expect(deferredResponses).toHaveLength(3);
+      for (const response of deferredResponses) {
+        expect(response.status).toBe(404);
+        expect(response.type).toBeNull();
+        expect(response.nosniff).toBeNull();
+      }
+      await browserStep("settle failed subresources", () => frame.evaluate(async () => { await document.fonts.ready; }));
+    }
+    expect(consoleMessages.filter(message => /ORB|OpaqueResponseBlocking/i.test(message))).toEqual([]);
+    expect(failedRequests.filter(message => /ORB|OpaqueResponseBlocking/i.test(message))).toEqual([]);
     expect(page.url()).toBe(locationBefore);
     expect((await page.request.get(oldAsset)).status()).toBe(404);
     const nonce = await page.locator('script[data-viewer="parent"]').evaluate(element => (element as HTMLScriptElement).nonce);

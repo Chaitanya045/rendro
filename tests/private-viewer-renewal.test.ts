@@ -1,7 +1,7 @@
 import { Window as DOMWindow, type HTMLLinkElement as DOMLinkElement, type HTMLStyleElement as DOMStyleElement } from "happy-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { viewerUpdateNotice } from "@/viewer/markup";
-import { installViewerFrame, installViewerParent } from "@/viewer/client";
+import { installViewerFrame, installViewerParent, updateViewerActiveManifest } from "@/viewer/client";
 
 const origin = "https://rendro.test";
 const base = "/organizations/org-a/projects/project-a/docs";
@@ -197,10 +197,12 @@ describe("private viewer renewal", () => {
   it("allows only the current opaque frame to request cookie-authenticated renewal", async () => {
     const bus = events();
     const source = { postMessage: vi.fn() };
-    const frame = { src: `${origin}${base}/files/guide/index.html`, contentWindow: source };
+    const frame = { dataset: {} as Record<string, string>, src: `${origin}${base}/files/guide/index.html`, contentWindow: source };
     const fetch = vi.fn().mockResolvedValue(Response.json({ prefix: `${base}/view/fresh/files/` }));
     const host = { ...bus, document: { getElementById: (id: string) => id === "content-frame" ? frame : null }, location: new URL(origin), fetch } as unknown as Window;
     installViewerParent({ base }, host);
+    expect(source.postMessage).toHaveBeenCalledWith({ type: "viewer-identify" }, "*");
+    source.postMessage.mockClear();
     const data = { type: "viewer-renew", requestId: "request-1", manifestKey: "release/manifest.json" };
     bus.emit("message", { source: {}, origin: "null", data });
     bus.emit("message", { source, origin, data });
@@ -233,18 +235,44 @@ describe("deployment update notice", () => {
     win.document.write(viewerUpdateNotice());
     const bus = events();
     const source = { postMessage: vi.fn() };
-    const frame = { src: `${origin}${base}/files/guide/index.html`, contentWindow: source };
+    const frame = { dataset: {} as Record<string, string>, src: `${origin}${base}/files/guide/index.html`, contentWindow: source };
     const notice = win.document.querySelector("aside")!;
     const fetch = vi.fn();
     const reload = vi.fn();
     const host = { ...bus, document: { getElementById: (id: string) => id === "content-frame" ? frame : notice },
       location: { href: origin, origin, reload }, fetch } as unknown as Window;
     installViewerParent({ base }, host);
+    expect(source.postMessage).toHaveBeenCalledWith({ type: "viewer-identify" }, "*");
+    source.postMessage.mockClear();
     const request = () => bus.emit("message", { source, origin: "null", data: {
       type: "viewer-renew", requestId: "renew", manifestKey: "release/manifest.json",
     } });
-    return { win, bus, frame, notice, fetch, reload, request };
+    return { win, bus, frame, notice, fetch, reload, request, host, source };
   }
+
+  it.each(["before", "after"])("compares a subscription update %s the frame reports its actual manifest", order => {
+    const f = fixture();
+    const loaded = (manifestKey: string, source = f.source, eventOrigin = "null") => f.bus.emit("message", {
+      source, origin: eventOrigin, data: { type: "viewer-loaded", manifestKey },
+    });
+    if (order === "before") updateViewerActiveManifest("new/manifest.json", f.host);
+    loaded("old/manifest.json", { postMessage: vi.fn() });
+    loaded("old/manifest.json", f.source, origin);
+    expect(f.frame.dataset.loadedManifest).toBeUndefined();
+    loaded("old/manifest.json");
+    if (order === "after") updateViewerActiveManifest("new/manifest.json", f.host);
+    expect(f.notice.hidden).toBe(false);
+    expect(f.fetch).not.toHaveBeenCalled();
+    expect(f.reload).not.toHaveBeenCalled();
+    f.bus.emit("load", { target: f.frame });
+    loaded("new/manifest.json");
+    expect(f.notice.hidden).toBe(true);
+    // A failed subscription cannot reuse an old authorized result on navigation.
+    updateViewerActiveManifest(null, f.host);
+    f.bus.emit("load", { target: f.frame });
+    loaded("another/manifest.json");
+    expect(f.notice.hidden).toBe(true);
+  });
 
   it("announces only the exact superseded signal and reloads only on user action", async () => {
     const f = fixture();

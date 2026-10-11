@@ -5,6 +5,25 @@ interface ParentConfig { base: string }
 interface FrameConfig extends ParentConfig { prefix: string; manifestKey: string }
 interface RenewalMessage { type?: string; requestId?: string; manifestKey?: string; prefix?: string }
 
+export function showViewerUpdateNotice(host: Window = window): void {
+  const notice = host.document.getElementById("viewer-update-notice");
+  if (!notice) return;
+  notice.hidden = false;
+  const status = notice.querySelector('[role="status"]');
+  if (status) status.textContent = "A newer version of this document was published.";
+}
+
+/** Called only by the parent's authenticated Convex subscription. */
+export function updateViewerActiveManifest(manifestKey: string | null, host: Window = window): void {
+  const frame = host.document.getElementById("content-frame");
+  if (!frame) return;
+  if (manifestKey === null) delete frame.dataset.activeManifest;
+  else frame.dataset.activeManifest = manifestKey;
+  if (frame.dataset.loadedManifest && manifestKey && frame.dataset.loadedManifest !== manifestKey) {
+    showViewerUpdateNotice(host);
+  }
+}
+
 export function installViewerParent(config: ParentConfig, host: Window = window): void {
   let pending = false;
   let generation = 0;
@@ -13,16 +32,23 @@ export function installViewerParent(config: ParentConfig, host: Window = window)
   host.addEventListener("load", event => {
     if (event.target !== host.document.getElementById("content-frame")) return;
     generation++;
+    const frame = host.document.getElementById("content-frame");
+    if (frame) delete frame.dataset.loadedManifest;
     if (notice) notice.hidden = true;
   }, true);
   host.addEventListener("message", (event: MessageEvent<RenewalMessage>) => {
     const frame = host.document.getElementById("content-frame") as HTMLIFrameElement | null;
     const data = event.data;
     if (!frame?.contentWindow || event.source !== frame.contentWindow || event.origin !== "null"
-      || !data || data.type !== "viewer-renew" || typeof data.requestId !== "string" || data.requestId.length > 128
-      || typeof data.manifestKey !== "string" || data.manifestKey.length > 2048 || pending) return;
+      || !data || typeof data.manifestKey !== "string" || data.manifestKey.length > 2048) return;
     const src = new URL(frame.src, host.location.href);
     if (src.origin !== host.location.origin || !src.pathname.startsWith(`${config.base}/files/`)) return;
+    if (data.type === "viewer-loaded") {
+      frame.dataset.loadedManifest = data.manifestKey;
+      updateViewerActiveManifest(frame.dataset.activeManifest ?? null, host);
+      return;
+    }
+    if (data.type !== "viewer-renew" || typeof data.requestId !== "string" || data.requestId.length > 128 || pending) return;
     pending = true;
     const source = frame.contentWindow;
     const requestedGeneration = generation;
@@ -38,11 +64,7 @@ export function installViewerParent(config: ParentConfig, host: Window = window)
         // from the old frame. The notice never navigates or steals focus itself.
         if (frame.src !== src.href || generation !== requestedGeneration) return;
         if (response.status === 409) {
-          if (result.code === "deployment_superseded" && notice) {
-            notice.hidden = false;
-            const status = notice.querySelector('[role="status"]');
-            if (status) status.textContent = "A newer version of this document was published.";
-          }
+          if (result.code === "deployment_superseded") showViewerUpdateNotice(host);
           return;
         }
         // Never turn this into a general fetch or credential broker.
@@ -53,6 +75,10 @@ export function installViewerParent(config: ParentConfig, host: Window = window)
       finally { pending = false; }
     })();
   });
+  // A fast iframe can finish before the shell's script executes. Ask it to
+  // repeat its manifest; frames still loading will announce it on load.
+  const frame = host.document.getElementById("content-frame") as HTMLIFrameElement | null;
+  frame?.contentWindow?.postMessage({ type: "viewer-identify" }, "*");
 }
 
 export function installViewerFrame(config: FrameConfig, host: Window = window): void {
@@ -60,6 +86,9 @@ export function installViewerFrame(config: FrameConfig, host: Window = window): 
   const base = doc.querySelector<HTMLBaseElement>("base[data-rendro-viewer]");
   if (!base) return;
   const origin = new URL(base.href).origin;
+  // Report the actual frame manifest, including a publish racing the shell load.
+  const reportManifest = () => host.parent.postMessage({ type: "viewer-loaded", manifestKey: config.manifestKey }, origin);
+  host.addEventListener("load", reportManifest, { once: true });
   let prefix = config.prefix;
   let managedCssUrls = new Set<string>();
   const renewStylesheet = createStylesheetRenewer();
@@ -75,6 +104,10 @@ export function installViewerFrame(config: FrameConfig, host: Window = window): 
   }
   host.addEventListener("message", (event: MessageEvent<RenewalMessage>) => {
     const data = event.data;
+    if (event.source === host.parent && event.origin === origin && data?.type === "viewer-identify") {
+      reportManifest();
+      return;
+    }
     if (event.source !== host.parent || event.origin !== origin || !data
       || data.type !== "viewer-renewed" || data.requestId !== requestId
       || typeof data.prefix !== "string" || !data.prefix.startsWith(`${config.base}/view/`)

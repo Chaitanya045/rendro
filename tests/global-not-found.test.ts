@@ -21,10 +21,10 @@ const runtimes = [
   },
 ];
 
-function expectNotFound(response: Response) {
+function expectNotFound(response: Response, asset = false) {
   expect(response.status).toBe(404);
   expect(response.headers.get("Cache-Control")).toContain("no-store");
-  expect(response.headers.get("X-Content-Type-Options")).toBe("nosniff");
+  expect(response.headers.get("X-Content-Type-Options")).toBe(asset ? null : "nosniff");
 }
 
 describe.each(runtimes)("global not-found handler: $name", ({ request }) => {
@@ -60,11 +60,11 @@ describe.each(runtimes)("global not-found handler: $name", ({ request }) => {
     { path: "/missing/script", accept: "application/javascript" },
     { path: "/missing/data", accept: "application/json" },
     { path: "/missing/data", accept: "application/problem+json" },
-  ])("returns plain text for $path (Accept: $accept)", async ({ path, accept }) => {
+  ])("returns an empty asset error for $path (Accept: $accept)", async ({ path, accept }) => {
     const response = await request(path, { headers: accept ? { Accept: accept } : {} });
-    expectNotFound(response);
-    expect(response.headers.get("Content-Type")).toContain("text/plain");
-    expect(await response.text()).toBe("Not found");
+    expectNotFound(response, true);
+    expect(response.headers.get("Content-Type")).toBeNull();
+    expect(await response.text()).toBe("");
   });
 
   it.each(["application/json", "text/html", undefined])("returns JSON for an unknown API route (Accept: %s)", async accept => {
@@ -83,11 +83,12 @@ describe.each(runtimes)("global not-found handler: $name", ({ request }) => {
 
   it.each([
     { path: "/missing/page", type: "text/html" },
-    { path: "/missing/image.png", type: "text/plain" },
+    { path: "/missing/image.png", type: null },
     { path: "/api/missing", type: "application/json" },
   ])("classifies non-GET fallback requests at $path", async ({ path, type }) => {
     const response = await request(path, { method: "POST" });
-    expectNotFound(response);
-    expect(response.headers.get("Content-Type")).toContain(type);
+    expectNotFound(response, type === null);
+    if (type === null) expect(response.headers.get("Content-Type")).toBeNull();
+    else expect(response.headers.get("Content-Type")).toContain(type);
   });
 });
