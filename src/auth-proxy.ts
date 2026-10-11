@@ -1,3 +1,4 @@
+import { sessionCache } from "@/middleware/session";
 import { CONVEX_SITE_URL } from "@/config";
 import { logger } from "@/logger";
 import { backendFetch } from "@/backend-fetch";
@@ -11,6 +12,11 @@ const API_KEY_GET_PATHS = new Set([
   "/api/rendro/deployments/active",
   "/api/rendro/deployments/staging",
   "/api/rendro/deployments",
+]);
+
+const SESSION_REVOCATION_PATHS = new Set([
+  "/api/auth/revoke-session", "/api/auth/revoke-sessions", "/api/auth/revoke-other-sessions",
+  "/api/auth/change-password", "/api/auth/reset-password", "/api/auth/delete-user",
 ]);
 
 const AUTH_COOKIE_NAMES = [
@@ -115,7 +121,25 @@ export async function proxyAuthRequest(request: Request): Promise<Response> {
     return new Response(null, { status: 302, headers: { Location: authErrorLocation(source) } });
   }
 
-  const upstream = await proxyConvexRequest(request);
+  const path = source.pathname.replace(/\/$/, "");
+  const signOut = path === "/api/auth/sign-out";
+  const revokesSessions = (request.method === "POST" && SESSION_REVOCATION_PATHS.has(path))
+    || path === "/api/auth/delete-user/callback";
+  const invalidateCaller = async () => {
+    if (signOut || revokesSessions) await sessionCache.evict(request.headers.get("cookie") ?? "");
+  };
+  await invalidateCaller();
+  let upstream: Response;
+  try {
+    upstream = await proxyConvexRequest(request);
+    // A successful mutation can target another token or all of a user's
+    // sessions. Invalidate the isolate without retaining a raw-token index.
+    // Rejected anonymous requests must not flush other users' cache entries.
+    if (revokesSessions && upstream.status >= 200 && upstream.status < 400) sessionCache.clear();
+  } finally {
+    // Also remove caller lookups started during the mutation, on errors too.
+    await invalidateCaller();
+  }
   const location = upstream.headers.get("location");
   if (upstream.status >= 300 && upstream.status < 400 && location) {
     const target = new URL(location, `${CONVEX_SITE_URL}${source.pathname}`);
@@ -131,6 +155,8 @@ export async function proxyAuthRequest(request: Request): Promise<Response> {
 }
 
 export async function proxyAuthSignOut(request: Request): Promise<Response> {
+  const cookie = request.headers.get("cookie") ?? "";
+  await sessionCache.evict(cookie);
   const headers = new Headers({ Location: "/" });
   try {
     const upstream = await fetch(`${CONVEX_SITE_URL}/api/auth/sign-out`, {
@@ -147,6 +173,7 @@ export async function proxyAuthSignOut(request: Request): Promise<Response> {
       "Auth sign-out proxy error",
     );
   }
+  await sessionCache.evict(cookie);
   appendAuthCookieCleanup(headers, new URL(request.url).hostname);
   return new Response(null, { status: 302, headers });
 }

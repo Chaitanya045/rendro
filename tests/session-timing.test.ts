@@ -60,6 +60,7 @@ describe("session middleware Server-Timing", () => {
 
   it("reports only numeric session/render timings and preserves downstream metrics", async () => {
     const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(Response.json({
+      session: { expiresAt: Date.now() + 60_000 },
       user: {
         id: "user-secret-id",
         email: "timing-user@rendro.invalid",
@@ -79,7 +80,7 @@ describe("session middleware Server-Timing", () => {
 
     expect(first.status).toBe(200);
     expect(first.headers.get("cache-control")).toBe("private, no-store");
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(String(fetchMock.mock.calls[0]?.[0])).toMatch(/\/api\/auth\/get-session$/);
     expect(fetchMock.mock.calls[0]?.[1]).toEqual({
       headers: { cookie, accept: "application/json" },

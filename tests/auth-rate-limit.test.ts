@@ -3,7 +3,7 @@ import schema from "../convex/schema";
 import authSchema from "../convex/betterAuth/schema";
 import { components } from "../convex/_generated/api";
 import { Hono } from "hono";
-import { sessionMiddleware } from "@/middleware/session";
+import { sessionCache, sessionMiddleware } from "@/middleware/session";
 import { memoryAdapter } from "@better-auth/memory-adapter";
 import { betterAuth } from "better-auth/minimal";
 import { testUtils } from "better-auth/plugins";
@@ -109,9 +109,9 @@ describe("auth rate limits", () => {
     for (let i = 0; i < 10; i++) {
       expect((await request("/sign-in/email", ip)).status).toBe(i < 5 ? 401 : 429);
     }
-    // Exercise the verified 120/minute session bucket, beyond the default
+    // Exercise the verified 600/minute session bucket, beyond the default
     // 100/minute limit, including a query-string variant.
-    for (let i = 0; i < 120; i++) {
+    for (let i = 0; i < 600; i++) {
       const path = i % 2 ? "/get-session?probe=1" : "/get-session";
       const response = await request(path, ip, login.headers);
       expect(response.status).toBe(200);
@@ -139,13 +139,14 @@ describe("auth rate limits", () => {
     for (let i = 0; i < 90; i++) {
       for (const login of sessions) expect((await app.request("/", { headers: login.headers })).status).toBe(200);
     }
-    for (let i = 90; i < 120; i++) expect((await request("/get-session", "192.0.2.99", sessions[0].headers)).status).toBe(200);
+    for (let i = 1; i < 600; i++) expect((await request("/get-session", "192.0.2.99", sessions[0].headers)).status).toBe(200);
     const limited = await request("/get-session", "192.0.2.100", sessions[0].headers);
     expect(limited.status).toBe(429);
     expect(limited.headers.get("retry-after")).toBe("60");
     const alternate = new Headers(sessions[0].headers);
     alternate.set("cookie", alternate.get("cookie")!.replace(/session_token=(.)/, (_, first: string) => `session_token=%${first.charCodeAt(0).toString(16)}`));
     expect((await request("/get-session", "192.0.2.101", alternate)).status).toBe(429);
+    await sessionCache.evict(sessions[0].headers.get("cookie")!);
     expect((await app.request("/", { headers: sessions[0].headers })).status).toBe(503);
     expect((await app.request("/", { headers: sessions[1].headers })).status).toBe(200);
     const rows = await backend.run(ctx => ctx.runQuery(components.betterAuth.adapter.findMany, { model: "rateLimit", paginationOpts: { numItems: 10, cursor: null } }));
@@ -185,6 +186,8 @@ describe("auth rate limits", () => {
     const start = Date.now();
     for (let i = 0; i < 65 * 150; i++) {
       vi.setSystemTime(start + i * 400);
+      // Keep this a backend multi-window regression; cache load has its own suite.
+      sessionCache.clear();
       expect((await app.request("/", { headers: sessions[i % 2].headers })).status, `read ${i + 1}`).toBe(200);
     }
     // /get-session must never enter Better Auth's inactivity-based IP limiter.

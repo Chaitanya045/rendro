@@ -6,6 +6,7 @@ import { viewerSessionCookie } from "@/viewer-ticket";
 import { logger } from "@/logger";
 import { authClientIpHeaders } from "@/auth-client-ip";
 import { renderSessionUnavailablePage } from "@/routes/session-unavailable";
+import { SessionCache } from "@/session-cache";
 
 type SerializedDate = string | number;
 
@@ -49,7 +50,9 @@ type LookupFailure = {
   status?: number;
   retryAfterMs?: number;
 };
-type LookupResult = { kind: "anonymous" } | { kind: "authenticated"; user: SessionUser } | LookupFailure;
+type LookupResult = { kind: "anonymous" } | { kind: "authenticated"; user: SessionUser; expiresAt: number } | LookupFailure;
+
+export const sessionCache = new SessionCache<LookupResult>();
 
 const LOOKUP_TIMEOUT_MS = 5_000;
 const RETRY_BACKOFF_MS = 150;
@@ -67,7 +70,7 @@ async function lookupSession(request: Request, cookie: string): Promise<LookupRe
   const timeout = setTimeout(() => controller.abort(), LOOKUP_TIMEOUT_MS);
   try {
     // Go directly to Convex's Better Auth HTTP handler, with the same signed
-    // ingress IP as the auth proxy. Never cache: revocation must be immediate.
+    // ingress IP as the auth proxy. Only validated, unexpired successes cache.
     const target = `${CONVEX_SITE_URL}/api/auth/get-session`;
     const res = await fetch(target, {
       headers: {
@@ -106,7 +109,18 @@ async function lookupSession(request: Request, cookie: string): Promise<LookupRe
     }
     if (data === null) return { kind: "anonymous" };
     if (data && typeof data === "object" && "user" in data && isSessionUser(data.user)) {
-      return { kind: "authenticated", user: data.user };
+      const session = "session" in data ? data.session : undefined;
+      if (!session || typeof session !== "object" || !("expiresAt" in session)
+        || !isSerializedDate(session.expiresAt)) {
+        return { kind: "failure", category: "malformed_response", status: res.status };
+      }
+      const expiresAt = new Date(session.expiresAt).getTime();
+      if (expiresAt <= Date.now()) return { kind: "anonymous" };
+      // Copy only public user fields; never retain session.token or extra data.
+      const { id, email, name, emailVerified, image, createdAt, updatedAt } = data.user;
+      return { kind: "authenticated", expiresAt, user: {
+        id, email, name, emailVerified, image: typeof image === "string" ? image : null, createdAt, updatedAt,
+      } };
     }
     return { kind: "failure", category: "malformed_response", status: res.status };
   } catch {
@@ -153,7 +167,7 @@ export async function sessionMiddleware(
   let sessionDuration: string | undefined;
   if (/(?:^|;\s*)(?:__Secure-)?better-auth\.session_token=[^;\s]+/.test(cookie)) {
     const sessionStartedAt = performance.now();
-    const result = await lookupWithRetry(c.req.raw, cookie);
+    const result = await sessionCache.lookup(cookie, () => lookupWithRetry(c.req.raw, cookie));
     sessionDuration = duration(sessionStartedAt);
     if (result.kind === "failure") {
       const retryAfter = String(Math.max(1, Math.ceil((result.retryAfterMs ?? 1_000) / 1_000)));
