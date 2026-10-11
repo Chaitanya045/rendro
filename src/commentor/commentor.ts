@@ -566,6 +566,8 @@ class Commentor {
       id: "commentor-tooltip",
       "data-testid": "commentor-tip",
       role: "tooltip",
+      "data-state": "closed",
+      "aria-hidden": "true",
     });
     this.root.append(
       this.markersLayer,
@@ -1399,6 +1401,7 @@ class Commentor {
     const textarea = h("textarea", {
       "data-testid": "commentor-composer-textarea",
       placeholder: "Add a comment…",
+      "aria-label": "Comment",
       "aria-describedby": "commentor-composer-help",
     }) as HTMLTextAreaElement;
     textarea.value = typeof savedDraft?.body === "string" ? savedDraft.body : "";
@@ -1890,6 +1893,7 @@ class Commentor {
         class: "reply-input",
         "data-testid": "commentor-reply-input",
         placeholder: "Reply…",
+        "aria-label": "Reply",
         rows: "1",
         "aria-describedby": helpId,
       }) as HTMLTextAreaElement;
@@ -2505,11 +2509,12 @@ class Commentor {
   private placeTip(target: HTMLElement, text: string): void {
     // Don't show a tooltip for an element that has scrolled out of view.
     const r = target.getBoundingClientRect();
-    if (r.bottom < 0 || r.top > window.innerHeight || r.right < 0 || r.left > window.innerWidth) {
-      this.tip.setAttribute("data-state", "closed");
+    if (!text.trim() || r.bottom < 0 || r.top > window.innerHeight || r.right < 0 || r.left > window.innerWidth) {
+      this.hideTip();
       return;
     }
     this.tip.textContent = text;
+    this.tip.setAttribute("aria-hidden", "false");
     this.tip.setAttribute("data-state", "open");
     const tw = this.tip.offsetWidth;
     const th = this.tip.offsetHeight;
@@ -2536,6 +2541,7 @@ class Commentor {
     this.tipTimer = 0;
     this.tipTarget = null;
     this.tipPreviousDescription = null;
+    this.tip.setAttribute("aria-hidden", "true");
     this.tip.setAttribute("data-state", "closed");
   }
 

@@ -105,7 +105,7 @@ ${viewerScript("navigation", { prefix: `${options.base}/files/`, ticketBase: `${
     transport: "parent",
     canWrite: true,
   })};</script>
-<script defer src="/commentor.js?v=41"></script>`;
+<script defer src="/commentor.js?v=42"></script>`;
 }
 
 app.get("/organizations/:organizationId/projects/:projectId/docs/tree", async (c) => {
