@@ -314,15 +314,12 @@ describe("unauthenticated landing", () => {
     expect(html).not.toContain("Sign in to read your team's docs.");
   });
 
-  it("uses the same product landing for an unauthenticated private document route", async () => {
+  it("redirects an unauthenticated private document route to sign-in", async () => {
     process.env.NODE_ENV = "development";
 
     const res = await workerApp.request("https://dev.rendro.app/docs/acme/reference/index.html");
-    const html = await res.text();
-
-    expect(res.status).toBe(200);
-    expect(html).toContain('<main id="main-content">');
-    expect(html).toContain('data-auth-id="hero-start"');
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toBe("/sign-in?returnTo=%2Fdocs%2Facme%2Freference%2Findex.html");
   });
 });
 

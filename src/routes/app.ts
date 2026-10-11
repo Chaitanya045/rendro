@@ -29,26 +29,26 @@ app.get("/", (c) => {
 
 app.get("/docs/:org", async (c) => {
   const user = c.get("user");
-  if (!user) return c.html(renderLandingPage());
+  if (!user) return c.redirect(`/sign-in?returnTo=${encodeURIComponent(c.req.path)}`);
   const org = emailToOrgSlug(user.email);
-  if (!org || c.req.param("org") !== org) return c.html(renderNotFoundPage({ path: c.req.path }), 404);
-  if (await orgExists(org)) return c.html(renderOrgDocs(user, org));
-  return c.html(renderCreateOrg(user, org));
+  if (!org || c.req.param("org") !== org || !(await orgExists(org))) {
+    return c.html(renderLegacyOrgNotFound(c.req.path), 404);
+  }
+  return c.html(renderOrgDocs(user, org));
 });
 
 app.get("/docs/:key{.+}", async (c) => {
   const user = c.get("user");
-  if (!user) return c.html(renderLandingPage());
+  if (!user) return c.redirect(`/sign-in?returnTo=${encodeURIComponent(c.req.path)}`);
   const org = emailToOrgSlug(user.email);
-  if (!org) return c.html(renderEmailUnsupported(user));
+  if (!org) return c.html(renderLegacyOrgNotFound(c.req.path), 404);
   const rawKey = c.req.param("key");
   const selectedDoc = decodeURIComponent(rawKey);
-  if (selectedDoc === org) {
-    if (await orgExists(org)) return c.html(renderOrgDocs(user, org));
-    return c.html(renderCreateOrg(user, org));
+  if ((selectedDoc !== org && !selectedDoc.startsWith(`${org}/`)) || !(await orgExists(org))) {
+    return c.html(renderLegacyOrgNotFound(c.req.path), 404);
   }
-  if (!selectedDoc.startsWith(`${org}/`)) return c.html(renderNotFoundPage({ path: c.req.path, homeHref: `/docs/${encodeURIComponent(org)}` }), 404);
-  if (!(await orgExists(org)) || await isDeleted(selectedDoc) || !(await headObject(selectedDoc))) {
+  if (selectedDoc === org) return c.html(renderOrgDocs(user, org));
+  if (await isDeleted(selectedDoc) || !(await headObject(selectedDoc))) {
     return c.html(renderNotFoundPage({
       path: c.req.path,
       homeHref: `/docs/${encodeURIComponent(org)}`,
@@ -102,168 +102,14 @@ app.post("/api/orgs", async (c) => {
 // ----- HTML renderers -----
 
 
-function renderEmailUnsupported(user: User): string {
-  return `<!DOCTYPE html>
-<html><head>${renderFaviconLinks()}<meta charset="UTF-8"><title>Rendro</title></head>
-<body style="font-family:system-ui;padding:2rem">
-<h1>Unsupported email domain</h1>
-<p>Your email <code>${escapeHtml(user.email)}</code> doesn't have a valid org slug. Use a work email like <code>you@company.com</code>.</p>
-<p><a href="/api/auth/sign-out">Sign out</a></p>
-</body></html>`;
+// Legacy docs remain readable during migration; new organizations use v2 onboarding.
+function renderLegacyOrgNotFound(path: string): string {
+  return renderNotFoundPage({
+    path,
+    homeHref: "/organizations?choose=1",
+    homeLabel: "Manage organizations",
+  });
 }
-
-
-function renderCreateOrg(user: User, org: string): string {
-  const email = escapeHtml(user.email);
-  const orgEsc = escapeHtml(org);
-  return `<!DOCTYPE html>
-<html><head>${renderFaviconLinks()}
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>${orgEsc} — Rendro</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet">
-${renderThemeAssets()}
-<style>
-  *{box-sizing:border-box}
-  html{color-scheme:light dark}
-  body{margin:0;min-height:100vh;background:#fafafa;color:#09090b;font:14px/20px Inter,system-ui,sans-serif}
-  html.dark body{background:#09090b;color:#fafafa}
-  .topbar{height:56px;border-bottom:1px solid #e4e4e7;background:#fff;display:flex;align-items:center;justify-content:space-between;padding:0 24px;position:sticky;top:0;z-index:10}
-  html.dark .topbar{border-color:#27272a;background:#09090b}
-  .brand{color:#c2410c;font-size:24px;line-height:32px;font-weight:700;letter-spacing:-.02em}
-  html.dark .brand{color:#fb923c}
-  .actions{display:flex;align-items:center;gap:8px}
-  .icon-btn,.secondary-btn,.primary-btn{border:0;border-radius:8px;font:inherit;font-weight:500;cursor:pointer;transition:background 200ms cubic-bezier(.4,0,.2,1),border-color 200ms cubic-bezier(.4,0,.2,1),color 200ms cubic-bezier(.4,0,.2,1),transform 150ms cubic-bezier(.4,0,.2,1),box-shadow 200ms cubic-bezier(.4,0,.2,1)}
-  .icon-btn{width:40px;height:40px;padding:0;display:grid;place-items:center;background:transparent;color:#71717a}
-  .icon-btn:hover{background:#f4f4f5;color:#09090b}
-  .icon-btn:active,.secondary-btn:active,.primary-btn:active{transform:scale(.98)}
-  .icon-btn:focus-visible,.secondary-btn:focus-visible,.primary-btn:focus-visible,input:focus-visible{outline:2px solid #c2410c;outline-offset:2px}
-  html.dark .icon-btn{color:#a1a1aa}
-  html.dark .icon-btn:hover{background:#18181b;color:#fafafa}
-  html.dark .icon-btn:focus-visible,html.dark .secondary-btn:focus-visible,html.dark .primary-btn:focus-visible,html.dark input:focus-visible{outline-color:#fb923c}
-  .secondary-btn{min-height:40px;border:1px solid #e4e4e7;background:#fff;color:#09090b;padding:0 14px}
-  .secondary-btn:hover{background:#f4f4f5;border-color:#d4d4d8}
-  html.dark .secondary-btn{border-color:#27272a;background:#09090b;color:#fafafa}
-  html.dark .secondary-btn:hover{background:#18181b;border-color:#3f3f46}
-  .page{min-height:calc(100vh - 56px);display:grid;place-items:center;padding:48px 24px}
-  .card{width:min(100%,560px);border:1px solid #e4e4e7;border-radius:18px;background:#fff;box-shadow:0 24px 70px rgba(9,9,11,.08);overflow:hidden}
-  html.dark .card{border-color:#27272a;background:#09090b;box-shadow:0 24px 70px rgba(0,0,0,.34)}
-  .card-head{padding:28px 32px 22px;border-bottom:1px solid #e4e4e7;background:linear-gradient(180deg,#fff7ed 0%,#fff 78%)}
-  html.dark .card-head{border-color:#27272a;background:linear-gradient(180deg,rgba(251,146,60,.16) 0%,#09090b 78%)}
-  .eyebrow{display:inline-flex;align-items:center;gap:8px;margin:0 0 16px;padding:6px 10px;border-radius:999px;background:#ffedd5;color:#9a3412;font-size:12px;line-height:16px;font-weight:600}
-  html.dark .eyebrow{background:rgba(251,146,60,.16);color:#fdba74}
-  h1{margin:0;color:#09090b;font-size:28px;line-height:36px;font-weight:700;letter-spacing:-.03em}
-  html.dark h1{color:#fafafa}
-  .meta{margin:8px 0 0;color:#71717a}
-  html.dark .meta{color:#a1a1aa}
-  .card-body{padding:28px 32px 32px}
-  .copy{margin:0 0 24px;color:#3f3f46}
-  html.dark .copy{color:#d4d4d8}
-  code{border:1px solid #e4e4e7;border-radius:6px;background:#f4f4f5;color:#09090b;padding:2px 6px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px}
-  html.dark code{border-color:#27272a;background:#18181b;color:#fafafa}
-  label{display:block;margin:16px 0 6px;color:#09090b;font-weight:600}
-  html.dark label{color:#fafafa}
-  input{width:100%;height:44px;border:1px solid #e4e4e7;border-radius:10px;background:#fff;color:#09090b;padding:0 12px;font:inherit;transition:border-color 200ms cubic-bezier(.4,0,.2,1),box-shadow 200ms cubic-bezier(.4,0,.2,1),background 200ms cubic-bezier(.4,0,.2,1)}
-  input[readonly]{background:#f4f4f5;color:#71717a}
-  input:hover{border-color:#c2410c}
-  html.dark input{border-color:#27272a;background:#09090b;color:#fafafa}
-  html.dark input[readonly]{background:#18181b;color:#a1a1aa}
-  html.dark input:hover{border-color:#fb923c}
-  .primary-btn{position:relative;display:inline-flex;align-items:center;justify-content:center;gap:8px;width:100%;min-height:46px;margin-top:24px;background:#c2410c;color:#fff;padding:0 18px;overflow:hidden;box-shadow:0 0 0 rgba(194,65,12,0)}
-  .primary-btn:hover{background:#b45309;box-shadow:0 8px 24px rgba(194,65,12,.16);transform:translateY(-1px)}
-  .primary-btn:disabled{cursor:wait;opacity:1}
-  html.dark .primary-btn{background:#fb923c;color:#09090b}
-  html.dark .primary-btn:hover{background:#fdba74;box-shadow:0 8px 24px rgba(251,146,60,.16)}
-  .btn-status{position:relative;display:grid;place-items:center;width:20px;height:20px;flex:0 0 20px}
-  .btn-spinner,.btn-check{grid-area:1/1;transition:opacity 150ms cubic-bezier(.4,0,.2,1),transform 200ms cubic-bezier(.4,0,.2,1)}
-  .btn-spinner{width:18px;height:18px;border:2px solid currentColor;border-right-color:transparent;border-radius:999px;opacity:0;transform:scale(.76) rotate(0deg)}
-  .btn-check{font-size:20px;line-height:20px;opacity:0;transform:scale(.76) rotate(-80deg)}
-  .primary-btn[data-state="loading"] .btn-spinner{opacity:1;transform:scale(1) rotate(0deg);animation:rendroCreateSpin 1100ms linear infinite}
-  .primary-btn[data-state="done"] .btn-spinner{opacity:0;transform:scale(.7) rotate(90deg);animation:none}
-  .primary-btn[data-state="done"] .btn-check{opacity:1;transform:scale(1) rotate(0deg);transition-delay:60ms}
-  .btn-label-wrap{position:relative;display:grid;place-items:center;min-width:84px;height:20px;overflow:hidden}
-  .btn-label{grid-area:1/1;transition:opacity 150ms cubic-bezier(.4,0,.2,1),transform 200ms cubic-bezier(.4,0,.2,1)}
-  .btn-label-loading,.btn-label-done{opacity:0;transform:translateY(6px)}
-  .primary-btn[data-state="loading"] .btn-label-idle,.primary-btn[data-state="done"] .btn-label-idle{opacity:0;transform:translateY(-6px)}
-  .primary-btn[data-state="loading"] .btn-label-loading{opacity:1;transform:translateY(0)}
-  .primary-btn[data-state="done"] .btn-label-loading{opacity:0;transform:translateY(-6px)}
-  .primary-btn[data-state="done"] .btn-label-done{opacity:1;transform:translateY(0)}
-  html.org-created-exit .topbar,html.org-created-exit .page{opacity:0;transform:translateY(-8px);transition:opacity 200ms cubic-bezier(.4,0,.2,1),transform 200ms cubic-bezier(.4,0,.2,1)}
-  .error{display:none;margin:14px 0 0;color:#b42318;font-weight:500}
-  html.dark .error{color:#fca5a5}
-  @keyframes rendroCreateSpin{to{transform:scale(1) rotate(360deg)}}
-  @media (prefers-reduced-motion:reduce){.icon-btn,.secondary-btn,.primary-btn,input,.btn-spinner,.btn-check,.btn-label{transition:none}.primary-btn:hover{transform:none}.primary-btn[data-state="loading"] .btn-spinner{animation:none}html.org-created-exit .topbar,html.org-created-exit .page{transition:none}}
-  @media (max-width:640px){.topbar{padding:0 16px}.page{padding:24px 16px;place-items:start center}.card-head,.card-body{padding-left:20px;padding-right:20px}h1{font-size:24px;line-height:32px}}
-</style>
-</head><body>
-<header class="topbar">
-  <div class="brand">Rendro</div>
-  <div class="actions">
-    ${renderThemeButton()}
-    <form method="get" action="/api/auth/sign-out"><button class="secondary-btn" type="submit">Sign out</button></form>
-  </div>
-</header>
-<main class="page">
-  <section class="card" aria-labelledby="create-org-title">
-    <div class="card-head">
-      <p class="eyebrow"><span class="material-symbols-outlined" aria-hidden="true" style="font-size:18px">folder_managed</span> New workspace</p>
-      <h1 id="create-org-title">Create your org</h1>
-      <p class="meta">Signed in as ${email}</p>
-    </div>
-    <div class="card-body">
-      <p class="copy">No docs found for <code>${orgEsc}</code>. Create this org to generate an upload key and publish your docs.</p>
-      <form id="create-org-form" method="post" action="/api/orgs">
-        <label for="org">Org slug</label>
-        <input id="org" name="org" value="${orgEsc}" readonly>
-        <label for="displayName">Display name</label>
-        <input id="displayName" name="displayName" value="${orgEsc}" autocomplete="organization">
-        <button class="primary-btn" id="create-org-submit" type="submit" data-state="idle" aria-live="polite"><span class="btn-status" aria-hidden="true"><span class="btn-spinner"></span><span class="material-symbols-outlined btn-check">check_circle</span></span><span class="btn-label-wrap"><span class="btn-label btn-label-idle">Create org</span><span class="btn-label btn-label-loading">Creating org</span><span class="btn-label btn-label-done">Created</span></span></button>
-        <p class="error" id="create-org-error" role="alert"></p>
-      </form>
-    </div>
-  </section>
-</main>
-<script>
-  (function(){
-    var root=document.documentElement;
-    window.RendroTheme.mount(document.getElementById("theme-toggle"));
-
-    var form=document.getElementById("create-org-form");
-    var button=document.getElementById("create-org-submit");
-    var error=document.getElementById("create-org-error");
-    if(form&&button&&error){
-      form.addEventListener("submit",async function(event){
-        event.preventDefault();
-        button.disabled=true;
-        button.dataset.state="loading";
-        button.setAttribute("aria-busy","true");
-        error.style.display="none";
-        error.textContent="";
-        try{
-          var res=await fetch(form.action,{method:"POST",body:new FormData(form),headers:{Accept:"text/html"}});
-          var html=await res.text();
-          if(!res.ok)throw new Error(html||"Create org failed");
-          button.dataset.state="done";
-          button.setAttribute("aria-busy","false");
-          var reduceMotion=matchMedia("(prefers-reduced-motion: reduce)").matches;
-          if(!reduceMotion)document.documentElement.classList.add("org-created-exit");
-          setTimeout(function(){document.open();document.write(html);document.close();},reduceMotion?0:220);
-        }catch(err){
-          button.disabled=false;
-          button.dataset.state="idle";
-          button.setAttribute("aria-busy","false");
-          error.textContent=err instanceof Error?err.message:"Create org failed";
-          error.style.display="block";
-        }
-      });
-    }
-  })();
-</script>
-</body></html>`;
-}
-
-
 
 export interface PublicShellPublication {
   orgSlug: string;

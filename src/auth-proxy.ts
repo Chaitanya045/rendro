@@ -87,8 +87,30 @@ export async function proxyConvexRequest(request: Request): Promise<Response> {
   });
 }
 
-export function proxyAuthRequest(request: Request): Promise<Response> {
-  return proxyConvexRequest(request);
+function authErrorLocation(url: URL): string {
+  const code = url.searchParams.get("error") || "unknown_error";
+  return `/sign-in?error=${encodeURIComponent(code)}`;
+}
+
+export async function proxyAuthRequest(request: Request): Promise<Response> {
+  const source = new URL(request.url);
+  if (source.pathname.replace(/\/$/, "") === "/api/auth/error") {
+    return new Response(null, { status: 302, headers: { Location: authErrorLocation(source) } });
+  }
+
+  const upstream = await proxyConvexRequest(request);
+  const location = upstream.headers.get("location");
+  if (upstream.status >= 300 && upstream.status < 400 && location) {
+    const target = new URL(location, `${CONVEX_SITE_URL}${source.pathname}`);
+    const authOrigin = new URL(CONVEX_SITE_URL).origin;
+    if ((target.origin === source.origin || target.origin === authOrigin)
+      && target.pathname.replace(/\/$/, "") === "/api/auth/error") {
+      const headers = new Headers(upstream.headers);
+      headers.set("location", authErrorLocation(target));
+      return new Response(upstream.body, { status: upstream.status, headers });
+    }
+  }
+  return upstream;
 }
 
 export async function proxyAuthSignOut(request: Request): Promise<Response> {
