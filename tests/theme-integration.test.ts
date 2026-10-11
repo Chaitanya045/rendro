@@ -89,6 +89,8 @@ describe("shared theme integration", () => {
     for (const publicDocument of [false, true]) {
       const html = renderScopedDocumentShell({ user: null, namespace: "qa", title: "QA", basePath: publicDocument ? "/p/qa" : "/organizations/org/projects/project/docs", selectedPath: "index.html", publicDocument });
       assertSharedTheme(html, "theme-toggle");
+      const main = html.slice(html.indexOf('<main class="main">'), html.indexOf("</main>"));
+      expect(main).toContain('id="sidebar-resizer" role="separator"');
       expect(html).toContain('RendroTheme.mount(document.getElementById("theme-toggle"),notifyTheme)');
       expect(html).toContain('e.source!==themeFrame.contentWindow');
     }
