@@ -124,6 +124,44 @@ existing production workflow.
 | Auth | Better Auth on Convex: Google OAuth or email/password with email verification; organizations and teams |
 | CLI | Node.js 22+ (zero runtime dependencies) |
 
+## Contributing
+
+Install dependencies with `pnpm install --frozen-lockfile`. Run the quality gates
+with `VITEST_MAX_WORKERS=1 pnpm verify` (includes the Convex typecheck and browser
+tests; install Chromium first with `pnpm exec playwright install chromium`).
+
+After changing Convex modules, schemas, or component functions, regenerate against
+your configured **DEV** deployment in the ignored `.env.local`:
+
+```bash
+npx convex codegen
+pnpm typecheck:convex
+VITEST_MAX_WORKERS=1 pnpm verify:convex
+git diff -- convex/_generated convex/betterAuth/_generated
+```
+
+Commit the exact output in both generated directories; do not edit bindings by
+hand or commit `.env.local`. After committing, run `pnpm verify:convex:generated`
+to regenerate and check both directories with `git diff --exit-code`.
+This needs the DEV backend; codegen does not deploy application changes.
+
+CI runs an offline drift guard through `pnpm verify`: both generated module
+manifests must match the source tree, and the Better Auth component API must expose
+exactly its public registered functions with the correct query/mutation/action
+kinds. Internal component functions stay inside the component. The guard detects
+missing, removed, or renamed modules/functions and visibility changes; it does not
+replace full codegen for validator, argument, return-type, or formatting changes.
+
+Full component codegen needs an authenticated backend to analyze the component
+graph ([Convex CLI docs](https://docs.convex.dev/cli/overview#update-generated-code)).
+In the pinned Convex 1.42.0 CLI, `--typecheck disable` only skips the typecheck;
+the hidden `--system-udfs` option generates standalone bindings without the
+component graph and cannot reproduce these files. An
+[anonymous local backend](https://docs.convex.dev/cli/local-deployments) can avoid
+cloud credentials, but requires downloading, provisioning, and configuring a
+backend (the documented setup uses `convex dev`), not just an offline codegen flag.
+Untrusted PR CI therefore uses the offline guard without deployment credentials.
+
 ## License
 
 MIT

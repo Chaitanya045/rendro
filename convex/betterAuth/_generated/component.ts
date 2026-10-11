@@ -23,19 +23,6 @@ import type { FunctionReference } from "convex/server";
  */
 export type ComponentApi<Name extends string | undefined = string | undefined> =
   {
-    sessionReadLimit: {
-      cleanup: FunctionReference<"mutation", "internal", { cursor?: string; cutoff?: number }, null, Name>;
-      consume: FunctionReference<"mutation", "internal", { key: string }, number, Name>;
-    };
-    teamLookup: {
-      get: FunctionReference<
-        "query",
-        "internal",
-        { teamId: string },
-        { organizationId: string } | null,
-        Name
-      >;
-    };
     adapter: {
       create: FunctionReference<
         "mutation",
@@ -1894,6 +1881,24 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
           onUpdateHandle?: string;
         },
         any,
+        Name
+      >;
+    };
+    sessionReadLimit: {
+      consume: FunctionReference<
+        "mutation",
+        "internal",
+        { key: string },
+        number,
+        Name
+      >;
+    };
+    teamLookup: {
+      get: FunctionReference<
+        "query",
+        "internal",
+        { teamId: string },
+        { organizationId: string } | null,
         Name
       >;
     };
