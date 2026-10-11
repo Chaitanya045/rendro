@@ -11,6 +11,7 @@ import { organization } from "better-auth/plugins";
 import { components } from "./_generated/api";
 import type { DataModel } from "./_generated/dataModel";
 import authConfig from "./auth.config";
+import { AUTH_CLIENT_IP_HEADER } from "../shared/auth-client-ip";
 import {
   sendAuthLinkEmail,
   sendExistingAccountNotice,
@@ -47,6 +48,7 @@ export function createAuthOptions(ctx: GenericCtx<DataModel>) {
     trustedOrigins: [siteUrl],
     database: authComponent.adapter(ctx),
     advanced: {
+      ipAddress: { ipAddressHeaders: [AUTH_CLIENT_IP_HEADER] },
       database: {
         generateId: false,
       },
@@ -99,6 +101,12 @@ export function createAuthOptions(ctx: GenericCtx<DataModel>) {
       window: 60,
       max: 100,
       customRules: {
+        // Verifier traffic is shared across users; token refresh is already
+        // session-authenticated. Exact paths keep credential endpoints limited.
+        "/convex/jwks": false,
+        "/convex/token": false,
+        "/token": false,
+        "/convex/.well-known/openid-configuration": false,
         "/get-session": { window: 60, max: 120 },
         "/sign-in/email": { window: 60, max: 5 },
         "/sign-up/email": { window: 60 * 60, max: 5 },

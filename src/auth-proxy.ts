@@ -1,6 +1,7 @@
 import { CONVEX_SITE_URL } from "@/config";
 import { logger } from "@/logger";
 import { backendFetch } from "@/backend-fetch";
+import { authClientIpHeaders } from "@/auth-client-ip";
 
 const AUTH_COOKIE_NAMES = [
   "__Secure-better-auth.session_token",
@@ -53,13 +54,14 @@ function appendAuthCookieCleanup(headers: Headers, hostname: string) {
   }
 }
 
-function proxiedHeaders(request: Request): Headers {
+async function proxiedHeaders(request: Request, target: string, method = request.method): Promise<Headers> {
   const source = request.headers;
   const headers = new Headers();
   for (const name of ["accept", "content-type", "cookie", "origin", "user-agent"]) {
     const value = source.get(name);
     if (value) headers.set(name, value);
   }
+  (await authClientIpHeaders(request, target, method)).forEach((value, name) => headers.set(name, value));
   return headers;
 }
 
@@ -68,7 +70,7 @@ export async function proxyConvexRequest(request: Request): Promise<Response> {
   const target = `${CONVEX_SITE_URL}${sourceUrl.pathname}${sourceUrl.search}`;
   const init: RequestInit = {
     method: request.method,
-    headers: proxiedHeaders(request),
+    headers: await proxiedHeaders(request, target),
     redirect: "manual",
   };
   if (request.method !== "GET" && request.method !== "HEAD") {
@@ -118,7 +120,7 @@ export async function proxyAuthSignOut(request: Request): Promise<Response> {
   try {
     const upstream = await fetch(`${CONVEX_SITE_URL}/api/auth/sign-out`, {
       method: "POST",
-      headers: proxiedHeaders(request),
+      headers: await proxiedHeaders(request, `${CONVEX_SITE_URL}/api/auth/sign-out`, "POST"),
       redirect: "manual",
     });
     for (const cookie of strippedSetCookies(upstream.headers)) {

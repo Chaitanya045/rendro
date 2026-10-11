@@ -78,6 +78,7 @@ import type { Context } from "hono";
 import { cors } from "hono/cors";
 import { sessionMiddleware } from "./middleware/session";
 import { logger } from "./logger";
+import { registerAuthClientIp } from "./auth-client-ip";
 import { renderNotFoundPage } from "./routes/not-found";
 import { mountPublicRoutes, mountSessionRoutes } from "./app-routes";
 import type { User } from "better-auth/types";
@@ -95,6 +96,8 @@ async function serveAsset(c: Context<WorkerEnv>): Promise<Response> {
 }
 
 app.use("*", async (c, next) => {
+  // Cloudflare overwrites this header at ingress. Node never trusts it.
+  registerAuthClientIp(c.req.raw, c.req.header("CF-Connecting-IP"));
   const env = c.env;
   if (env && typeof process !== "undefined") {
     for (const key of Object.keys(env)) {
