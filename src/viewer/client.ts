@@ -40,6 +40,7 @@ export function installViewerFrame(config: FrameConfig, host: Window = window): 
   if (!base) return;
   const origin = new URL(base.href).origin;
   let prefix = config.prefix;
+  let managedCssUrls = new Set<string>();
   let renewedAt = Date.now();
   let requestedAt = 0;
   let requestId = "";
@@ -59,6 +60,7 @@ export function installViewerFrame(config: FrameConfig, host: Window = window): 
     const next = data.prefix;
     const oldBase = base.href;
     function replace(value: string): string {
+      if (value.trimStart().startsWith("#")) return value;
       try {
         const url = new URL(value, oldBase);
         if (url.origin === origin && url.pathname.startsWith(prefix)) {
@@ -91,13 +93,23 @@ export function installViewerFrame(config: FrameConfig, host: Window = window): 
     // URL explicitly, so even a resource first used after expiry gets the new
     // ticket. Reassigning identical relative CSS text is not sufficient.
     base.href = replace(oldBase);
+    const nextCssUrls = new Set<string>();
+    function replaceCssUrl(value: string): string {
+      // Absolute publisher URLs do not inherit a ticket. Only absolute URLs
+      // emitted by this client in the preceding renewal belong to this rewrite.
+      if (/^(?:[a-z][a-z0-9+.-]*:|\/\/)/i.test(value.trimStart()) && !managedCssUrls.has(value)) return value;
+      const replacement = replace(value);
+      if (replacement !== value) nextCssUrls.add(replacement);
+      return replacement;
+    }
     for (const element of doc.querySelectorAll("[style],style")) {
       const style = element.getAttribute("style");
-      if (style !== null) element.setAttribute("style", rewriteCssUrls(style, replace));
+      if (style !== null) element.setAttribute("style", rewriteCssUrls(style, replaceCssUrl));
       if (element.tagName === "STYLE" && element.textContent) {
-        element.textContent = rewriteCssUrls(element.textContent, replace);
+        element.textContent = rewriteCssUrls(element.textContent, replaceCssUrl);
       }
     }
+    managedCssUrls = nextCssUrls;
     for (const update of updates) update();
     prefix = next;
     renewedAt = Date.now();

@@ -2,7 +2,7 @@ import { createServer, type Server } from "node:http";
 import { existsSync } from "node:fs";
 import { build } from "esbuild";
 import { chromium, type Browser } from "playwright";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { injectViewerHeadStream } from "@/routes/document-html";
 import { viewerScript } from "@/viewer/markup";
 import { viewerHtmlForms } from "./fixtures/private-viewer-html";
@@ -68,6 +68,14 @@ beforeAll(async () => {
     ?? (existsSync("/usr/bin/chromium") ? "/usr/bin/chromium" : undefined) });
 }, 30_000);
 
+beforeEach(() => {
+  now = epoch;
+  serial = 0;
+  tickets.clear();
+  tickets.set("initial", epoch + ttl);
+  requests.length = 0;
+});
+
 afterAll(async () => {
   await browser?.close();
   if (server) await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
@@ -118,6 +126,40 @@ describe("opaque-origin Chromium private viewer", () => {
       }
       expect(requests.some(request => request.path.includes("/view/initial/"))).toBe(false);
       expect(await frame.locator("textarea").inputValue()).toBe("Comment draft");
+    } finally { await page.close(); }
+  });
+
+  it.each([
+    ["inline image-set", '<div id="target" style=\'background-image:image-set("assets/candidate.svg" 1x, "assets/double.svg" 2x)\'></div>', "candidate.svg"],
+    ["block image-set", '<style>#target { background-image:image-set("assets/candidate.svg" 1x, "assets/double.svg" 2x) }</style><div id="target"></div>', "candidate.svg"],
+    ["inline -webkit-image-set", '<div id="target" style=\'background-image:-webkit-image-set("assets/candidate.svg" 1x)\'></div>', "candidate.svg"],
+    ["block -webkit-image-set", '<style>#target { background-image:-webkit-image-set("assets/candidate.svg" 1x) }</style><div id="target"></div>', "candidate.svg"],
+    ["string @import only", '<style>@import "assets/import.css";</style><div id="imported"></div>', "imported.svg"],
+  ])("renews isolated %s before its first image use after expiry", async (_name, markup, asset) => {
+    // No other resource URL in the style block can trigger a reparsing and hide
+    // a missed candidate/import rewrite. Layout rules live in a separate block.
+    publisherHtml = `<!doctype html><style>#hidden div { width:10px; height:10px }</style>
+      <div id="hidden" style="display:none">${markup}</div>`;
+    const page = await browser.newPage({ deviceScaleFactor: 1 });
+    try {
+      await page.goto(origin);
+      const frame = page.frames().find(frame => frame !== page.mainFrame())!;
+      for (let round = 1; round <= 3; round++) {
+        now = epoch + round * 6 * 60_000;
+        await frame.evaluate(time => { Date.now = () => time; window.dispatchEvent(new Event("focus")); }, now);
+        await frame.waitForFunction(expected => document.baseURI.includes(expected), `/view/renewed-${round}/`);
+        if (asset === "imported.svg") {
+          await expect.poll(() => requests.some(request => request.path === `${prefix(`renewed-${round}`)}guide/assets/import.css`
+            && request.status === 200)).toBe(true);
+        }
+      }
+      expect(requests.filter(request => request.path.endsWith(".svg"))).toEqual([]);
+      expect((await page.request.get(`${origin}${prefix("initial")}guide/assets/probe.svg`)).status()).toBe(404);
+      requests.length = 0;
+      await frame.locator("#hidden").evaluate(element => { (element as HTMLElement).style.display = "block"; });
+      await expect.poll(() => requests.some(request => request.path === `${prefix("renewed-3")}guide/assets/${asset}`
+        && request.status === 200)).toBe(true);
+      expect(requests.some(request => request.path.includes("/view/initial/") || request.status !== 200)).toBe(false);
     } finally { await page.close(); }
   });
 

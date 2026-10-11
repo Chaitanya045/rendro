@@ -30,6 +30,7 @@ function frameFixture() {
     <body><img src="assets/image.png" srcset="assets/small.png 1x, assets/large.png 2x">
     <img id="external" src="https://publisher.test/image.png">
     <div style="background:url(${prefix}guide/assets/image.png)"></div>
+    <div id="unchanged" style="filter:url(#id); --data:url(data:image/png;base64,AAAA); --blob:url(blob:https://rendro.test/id); --absolute:url(https://publisher.test/a.png); --protocol:url(//publisher.test/a.png); --ticket:url(${origin}${prefix}hardcoded.png)"></div>
     <textarea>Comment draft</textarea></body></html>`);
   const bus = events();
   const parent = { postMessage: vi.fn() };
@@ -47,6 +48,7 @@ describe("private viewer renewal", () => {
     vi.useFakeTimers();
     const { win, parent, renew } = frameFixture();
     const draft = win.document.querySelector("textarea")!;
+    const unchanged = win.document.querySelector("#unchanged")!.getAttribute("style");
     vi.advanceTimersByTime(4 * 60_000);
     expect(parent.postMessage).not.toHaveBeenCalled();
     for (const ticket of ["renewed", "renewed-again", "still-open"]) {
@@ -61,6 +63,7 @@ describe("private viewer renewal", () => {
       expect(win.document.querySelector("style")!.textContent).toContain(next);
       expect(win.document.querySelector("div")!.getAttribute("style")).toContain(next);
       expect(win.document.querySelector("#external")!.getAttribute("src")).toBe("https://publisher.test/image.png");
+      expect(win.document.querySelector("#unchanged")!.getAttribute("style")).toBe(unchanged);
       expect(win.document.querySelector("textarea")).toBe(draft);
       expect(draft.value).toBe("Comment draft");
     }

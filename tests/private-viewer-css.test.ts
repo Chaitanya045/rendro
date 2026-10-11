@@ -25,6 +25,40 @@ describe("CSS resource URL token rewriting", () => {
     expect(result).toContain('url("https://rendro.test/view/new/files/guide/b.png")');
   });
 
+  it("rewrites string URL candidates without touching nested descriptors or other strings", () => {
+    const css = String.raw`.a { background: image-set("a.png" 1x type("image/png"), 'b.png' type("image/png") 2x);
+mask-image: -webkit-image-set("c.png" 1x, url(d.png) 2x);
+--escaped: image\2d set(/* keep */ "e.png" 1x, var(--fallback, "ordinary") 2x);
+--source: src("f.png"); content: "ordinary"; }`;
+    const result = rewrite(css);
+    for (const name of ["a", "b", "c", "d", "e", "f"]) {
+      expect(result).toContain(`"https://rendro.test/view/new/files/guide/${name}.png"`);
+    }
+    expect(result.match(/type\("image\/png"\)/g)).toHaveLength(2);
+    expect(result).toContain('var(--fallback, "ordinary")');
+    expect(result).toContain('content: "ordinary"');
+  });
+
+  it.each([
+    '@font-face { src: url("font.woff2") format("woff2") }',
+    '.a { cursor: url("font.woff2"), auto }',
+    '.a { mask: url("font.woff2"); mask-image: url("font.woff2") }',
+    '.a { list-style-image: url("font.woff2") }',
+    '.a { border-image: url("font.woff2") 30 }',
+    '.a { content: url("font.woff2") }',
+  ])("covers URL-valued properties: %s", css => {
+    expect(rewrite(css)).toContain('url("https://rendro.test/view/new/files/guide/font.woff2")');
+    if (css.includes("format")) expect(rewrite(css)).toContain('format("woff2")');
+  });
+
+  it("preserves fragments and non-scoped URL forms in every URL context", () => {
+    for (const value of ["#id", "data:image/png;base64,AAAA", "blob:https://rendro.test/id",
+      "https://external.test/a.png", "//external.test/a.png", "/public/a.png"]) {
+      const css = `@import "${value}"; .a { filter: url("${value}"); background: image-set("${value}" 1x); --src: src("${value}") }`;
+      expect(rewrite(css)).toBe(css);
+    }
+  });
+
   it("leaves comments, ordinary strings, malformed tokens and out-of-scope URLs alone", () => {
     const css = String.raw`/* url(image.png) */ .a { content: 'url(image.png)'; --text: "theme.css";
 background: url(https://external.test/a.png), url(data:image/png;base64,AAAA), url(/public/a.png);
