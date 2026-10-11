@@ -14,7 +14,7 @@ describe("legacy viewer routes", () => {
   it("keeps old bookmarks and docs URLs, with a sandboxed shell and parent comments", async () => {
     const response = await request("/files/example/guide/hello%20world.html?mode=print", true);
     expect(response.status).toBe(302);
-    expect(response.headers.get("Location")).toBe("/docs/example/guide/hello%20world.html?mode=print");
+    expect(response.headers.get("Location")).toBe("/docs/example/guide/hello%20world.html?docQuery=%3Fmode%3Dprint");
     const shell = await request(response.headers.get("Location")!, true);
     const html = await shell.text();
     expect(shell.status).toBe(200);

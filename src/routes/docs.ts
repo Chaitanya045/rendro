@@ -45,7 +45,10 @@ app.get("/files/:key{.+}", async c => {
   const key = decodeStoragePath(c.req.path.slice("/files/".length));
   if (!org || !key || !isLegacyStorageKey(org, key)) return c.text("Forbidden", 403);
   if (await isDeleted(key) || !await headObject(key)) return c.text("Not found", 404);
-  return c.redirect(`/docs/${key.split("/").map(encodeURIComponent).join("/")}${new URL(c.req.url).search}`);
+  const search = new URL(c.req.url).search;
+  // Publisher parameters (including doc/docQuery) are data, not shell controls.
+  const query = search ? `?${new URLSearchParams({ docQuery: search })}` : "";
+  return c.redirect(`/docs/${key.split("/").map(encodeURIComponent).join("/")}${query}`);
 });
 
 app.get("/legacy-view/:org/viewer-ticket", async c => {

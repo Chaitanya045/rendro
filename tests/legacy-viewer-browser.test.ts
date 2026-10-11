@@ -22,6 +22,7 @@ const publisher = `<!doctype html><html><head><link rel="stylesheet" href="asset
 try{window.publisherProbe.cookies=parent.document.cookie}catch(e){window.publisherProbe.cookies="blocked"}
 try{window.publisherProbe.dom=parent.document.body.tagName}catch(e){window.publisherProbe.dom="blocked"}</script>
 </head><body><h1 id="top">Legacy document</h1><p id="comment-target">Selectable legacy text</p>
+<script>document.body.dataset.mode=new URLSearchParams(location.search).get("mode")||""</script>
 <img id="image" src="assets/image.svg"><a id="same" href="#bottom">Same document</a>
 <a id="next" href="next.html#destination">Next document</a>
 <a id="old-link" href="/files/example/guide/next.html#destination">Old absolute link</a>
@@ -93,7 +94,7 @@ describe("legacy opaque viewer in Chromium", () => {
     const frame = page.frames().find(frame => frame !== page.mainFrame())!;
     expect(await frame.evaluate(() => (window as unknown as { publisherProbe: unknown }).publisherProbe)).toEqual({ origin: "null", cookies: "blocked", dom: "blocked" });
     await expect.poll(() => new URL(page.url()).hash).toBe("#bottom");
-    await expect.poll(() => frame.locator("#bottom").evaluate(el => Math.abs(el.getBoundingClientRect().top) < innerHeight)).toBe(true);
+    await expect.poll(() => frame.locator("#bottom").evaluate(el => el.getBoundingClientRect().top >= 0 && el.getBoundingClientRect().top < innerHeight)).toBe(true);
     expect(await frame.evaluate(() => location.hash)).toBe("");
     await browserStep("load ticket stylesheet and image", () => frame.waitForFunction(() => getComputedStyle(document.body).color === "rgb(1, 2, 3)" && (document.getElementById("image") as HTMLImageElement).naturalWidth === 10));
     expect(assetsSeen.has("example/guide/assets/site.css")).toBe(true);
@@ -103,7 +104,7 @@ describe("legacy opaque viewer in Chromium", () => {
     await frame.evaluate(() => dispatchEvent(new Event("focus")));
     await browserStep("renew legacy assets through the authenticated parent", () => frame.waitForFunction(previous => document.baseURI !== previous, initialBase));
     await expect.poll(() => new URL(page.url()).hash).toBe("#bottom");
-    await expect.poll(() => frame.locator("#bottom").evaluate(el => Math.abs(el.getBoundingClientRect().top) < innerHeight)).toBe(true);
+    await expect.poll(() => frame.locator("#bottom").evaluate(el => el.getBoundingClientRect().top >= 0 && el.getBoundingClientRect().top < innerHeight)).toBe(true);
     expect(await frame.evaluate(() => location.hash)).toBe("");
     // Open the actual comment widget and submit via its parent transport.
     await browserStep("enable legacy comment widget", () => frame.waitForFunction(() => {
@@ -121,17 +122,39 @@ describe("legacy opaque viewer in Chromium", () => {
     await browserStep("read persisted legacy comment through bridge", () => reloaded.getByText("Legacy bridge comment", { exact: true }).first().waitFor());
     await page.close();
   });
+  it.each(["?mode=print", "?mode=print&doc=other.html&docQuery=%3Fmode%3Dwrong&tag=a&tag=b&value=%252F"])(
+    "forwards publisher queries without changing shell selection: %s", async search => {
+      const page = await open(`/files/example/guide/index.html${search}#bottom`);
+      expect(new URL(page.url()).searchParams.get("docQuery")).toBe(search);
+      expect(new URL(page.url()).searchParams.has("doc")).toBe(false);
+      const frame = page.frames().find(frame => frame !== page.mainFrame())!;
+      expect(await frame.evaluate(() => location.search)).toBe(search);
+      expect(await frame.locator("body").getAttribute("data-mode")).toBe("print");
+      await expect.poll(() => new URL(page.url()).hash).toBe("#bottom");
+      await frame.locator("#next").click();
+      await browserStep("leave query-dependent document", () => page.waitForURL("**/docs/example/guide/next.html#destination"));
+      await page.frameLocator("#content-frame").locator("#destination").waitFor();
+      await page.goBack();
+      await page.frameLocator("#content-frame").locator("#next").waitFor();
+      expect(await frame.evaluate(() => location.search)).toBe(search);
+      expect(await frame.locator("body").getAttribute("data-mode")).toBe("print");
+      await page.reload();
+      await page.frameLocator("#content-frame").locator("#next").waitFor();
+      expect(await page.frames().find(frame => frame !== page.mainFrame())!.evaluate(() => location.search)).toBe(search);
+      await page.close();
+    },
+  );
   it("preserves fragment navigation, legacy absolute links, and cross-document links", async () => {
     const page = await open("/docs/example/guide/index.html");
     const frame = page.frames().find(frame => frame !== page.mainFrame())!;
     await frame.locator("#same").click();
     await expect.poll(() => new URL(page.url()).hash).toBe("#bottom");
-    await expect.poll(() => frame.locator("#bottom").evaluate(el => Math.abs(el.getBoundingClientRect().top) < innerHeight)).toBe(true);
+    await expect.poll(() => frame.locator("#bottom").evaluate(el => el.getBoundingClientRect().top >= 0 && el.getBoundingClientRect().top < innerHeight)).toBe(true);
     expect(await frame.evaluate(() => location.hash)).toBe("");
     await frame.locator("#next").click();
     await browserStep("navigate legacy document through parent", () => page.waitForURL("**/docs/example/guide/next.html#destination"));
     await browserStep("render linked document", () => page.frameLocator("#content-frame").locator("#destination").waitFor());
-    await expect.poll(() => page.frameLocator("#content-frame").locator("#destination").evaluate(el => Math.abs(el.getBoundingClientRect().top) < innerHeight)).toBe(true);
+    await expect.poll(() => page.frameLocator("#content-frame").locator("#destination").evaluate(el => el.getBoundingClientRect().top >= 0 && el.getBoundingClientRect().top < innerHeight)).toBe(true);
     expect(await frame.evaluate(() => location.hash)).toBe("");
     await page.goBack();
     await browserStep("restore shell fragment on Back", () => page.waitForURL("**/docs/example/guide/index.html#bottom"));
