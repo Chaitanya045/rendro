@@ -20,6 +20,7 @@ import { draftAfterSuccessfulReply } from "./reply-state";
 import { PendingDeletionCoordinator } from "./delete-state";
 import { requestParentTheme } from "./theme-message";
 import { appendPlainText } from "./text";
+import { COMMENTOR_UPGRADE_NOTICE } from "./parent-protocol";
 import { CommentMutationOutcomeUnknownError, ParentCommentTransport } from "./parent-transport";
 
 // ─────────────────────────────── types ───────────────────────────────
@@ -528,6 +529,8 @@ class Commentor {
   private highlightedThreadId: ThreadId | null = null;
   private commentMode = false;
   private canWrite: boolean;
+  private parentUpgradeRequired = false;
+  private canReloadViewer = false;
   private raf = 0;
   private openThreadId: ThreadId | null = null;
   private closeTimer = 0;
@@ -537,7 +540,7 @@ class Commentor {
 
   constructor(cfg: Config) {
     this.cfg = cfg;
-    this.canWrite = isProjectConfig(cfg) ? cfg.canWrite === true : Boolean(cfg.author);
+    this.canWrite = isProjectConfig(cfg) ? false : Boolean(cfg.author);
     if (isProjectConfig(cfg)) {
       this.client = null;
       this.parentTransport = new ParentCommentTransport(window.parent, window, cfg.documentPath);
@@ -882,6 +885,19 @@ class Commentor {
           this.replyPagination.clear();
           update([], { canLoadMore: false, loading: false });
         },
+        (compatible, canReloadViewer) => {
+          this.parentUpgradeRequired = !compatible;
+          this.canReloadViewer = canReloadViewer;
+          this.canWrite = compatible && this.cfg.canWrite === true;
+          const commentButton = this.toolbar.querySelector<HTMLButtonElement>('[data-testid="commentor-comment-btn"]');
+          if (commentButton) commentButton.disabled = !this.canWrite;
+          if (!compatible) {
+            this.closeBubbles(false, true);
+            this.threads = [];
+            this.markersLayer.replaceChildren();
+          }
+          this.renderDrawerList();
+        },
       );
       return;
     }
@@ -918,9 +934,8 @@ class Commentor {
         "data-tip": "Comment (select text, or click then click an element)",
         "aria-label": "Comment",
         "aria-pressed": "false",
-        ...(this.canWrite
-          ? { onclick: () => this.onCommentButton() }
-          : { disabled: "disabled" }),
+        onclick: () => this.onCommentButton(),
+        ...(!this.canWrite ? { disabled: "disabled" } : {}),
       },
       svg(ICONS.comment),
     ) as HTMLButtonElement;
@@ -2162,6 +2177,15 @@ class Commentor {
       );
     }
     this.drawerList.replaceChildren();
+    if (this.parentUpgradeRequired) {
+      this.drawerList.append(h("div", { class: "empty", role: "status", "aria-live": "polite" },
+        h("p", undefined, COMMENTOR_UPGRADE_NOTICE),
+        ...(this.canReloadViewer
+          ? [h("button", { type: "button", onclick: () => this.parentTransport?.reloadViewer() }, "Reload page")]
+          : [h("p", undefined, "Use your browser’s Reload button to reload the full page.")]),
+      ));
+      return;
+    }
     const visible = this.filteredThreads(this.threadFilter);
     if (isProjectConfig(this.cfg) && (this.canLoadMoreThreads || this.loadingMoreThreads)) {
       const loadOlder = h(

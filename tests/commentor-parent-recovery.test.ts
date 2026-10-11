@@ -4,7 +4,7 @@ import { fixture } from "./helpers/comment-fixture";
 import { Window as StorageWindow } from "happy-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CommentorParentHost, type DocumentCommentBackend } from "../src/commentor/parent-host";
-import { COMMENTOR_PARENT_READY, COMMENTOR_PARENT_RESPONSE, COMMENTOR_PARENT_REQUEST } from "../src/commentor/parent-protocol";
+import { COMMENTOR_VIEWER_RELOAD, COMMENTOR_PARENT_READY, COMMENTOR_PARENT_RESPONSE, COMMENTOR_PARENT_REQUEST } from "../src/commentor/parent-protocol";
 import { CommentMutationOutcomeUnknownError, ParentCommentTransport } from "../src/commentor/parent-transport";
 
 function recoveryRuntime(scope = { organizationId: "org-a", projectId: "project-a" as string, documentPath: "guide.html" }, principal = "user-a") {
@@ -59,7 +59,8 @@ function recoveryRuntime(scope = { organizationId: "org-a", projectId: "project-
   const host = createHost();
   host.start(true);
   return {
-    host, createHost, transport, backend, parent, child, slow, dismissSlow, update, unsubscribes,
+    host, createHost, transport, backend, parent, child, slow, dismissSlow, update, unsubscribes, frame,
+    foreignMessage: (data: unknown) => deliver(hostListeners, {}, data),
     reload: () => {
       transport.dispose();
       const next = new ParentCommentTransport(parent, events(childListeners) as never, scope.documentPath);
@@ -454,5 +455,30 @@ describe("old widget through new parent and Convex", () => {
     }
     runtime.transport.dispose();
     runtime.host.dispose();
+  });
+});
+
+
+describe("viewer reload bridge", () => {
+  it("reloads the parent viewer only for its current scoped document", async () => {
+    const runtime = recoveryRuntime();
+    const reload = vi.fn();
+    Object.assign(window, { location: { reload } });
+    await flushMessages();
+    runtime.foreignMessage({ type: COMMENTOR_VIEWER_RELOAD });
+    await flushMessages();
+    expect(reload).not.toHaveBeenCalled();
+    runtime.parent.postMessage({ type: COMMENTOR_VIEWER_RELOAD });
+    await flushMessages();
+    expect(reload).toHaveBeenCalledOnce();
+    runtime.frame.src = "https://rendro.test/organizations/org-a/projects/other/docs/files/guide.html";
+    runtime.parent.postMessage({ type: COMMENTOR_VIEWER_RELOAD });
+    await flushMessages();
+    expect(reload).toHaveBeenCalledOnce();
+    runtime.host.dispose();
+    runtime.parent.postMessage({ type: COMMENTOR_VIEWER_RELOAD });
+    await flushMessages();
+    expect(reload).toHaveBeenCalledOnce();
+    runtime.transport.dispose();
   });
 });

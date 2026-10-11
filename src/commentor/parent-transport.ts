@@ -2,6 +2,9 @@ import { normalizeMutationArgs } from "./mutation-args";
 import { CommentOperationState, mutationKey } from "./operation-state";
 import {
   COMMENTOR_PARENT_REQUEST,
+  COMMENTOR_UPGRADE_NOTICE,
+  COMMENTOR_VIEWER_RELOAD,
+  isCommentorParentReadySignal,
   isCommentorParentError,
   isCommentorParentReady,
   isCommentorParentRepliesUpdate,
@@ -44,6 +47,9 @@ export class ParentCommentTransport {
   private errorHandler: ErrorHandler | null = null;
   private slowHandler: SlowHandler | null = null;
   private refreshHandler: (() => void) | null = null;
+  private compatible = false;
+  private canReloadViewer = false;
+  private compatibilityHandler: ((compatible: boolean, canReloadViewer: boolean) => void) | null = null;
   private sequence = 0;
   private userId: string | null | undefined;
   private identityChangeHandler: (() => void) | null = null;
@@ -65,16 +71,19 @@ export class ParentCommentTransport {
     onSlowMutation?: SlowHandler,
     onRefresh?: () => void,
     onIdentityChange?: () => void,
+    onCompatibility?: (compatible: boolean, canReloadViewer: boolean) => void,
   ): void {
     this.updateHandler = onUpdate;
     this.repliesUpdateHandler = onRepliesUpdate;
     this.errorHandler = onError;
     this.slowHandler = onSlowMutation ?? null;
     this.refreshHandler = onRefresh ?? null;
+    this.compatibilityHandler = onCompatibility ?? null;
     this.identityChangeHandler = onIdentityChange ?? null;
   }
 
   mutate(method: CommentorParentMutationMethod, args: unknown): Promise<void> {
+    if (!this.compatible) return Promise.reject(new Error(COMMENTOR_UPGRADE_NOTICE));
     const key = mutationKey(method, (args ?? {}) as Record<string, unknown>);
     const existing = this.mutations.get(key);
     if (existing) return existing;
@@ -101,6 +110,7 @@ export class ParentCommentTransport {
   }
 
   saveDraft(key: string, args: Record<string, unknown>): void {
+    if (!this.compatible) return;
     this.recovery.draft(key, args);
     void this.request("draft.save", { key, draft: args }).catch(() => {
       this.errorHandler?.(new Error("Comment draft could not be saved"));
@@ -147,6 +157,10 @@ export class ParentCommentTransport {
     this.errorHandler = null;
     this.slowHandler = null;
     this.refreshHandler = null;
+    this.identityChangeHandler = null;
+    this.compatibilityHandler = null;
+    this.compatible = false;
+    this.canReloadViewer = false;
   }
 
   private retirePending(error: Error): void {
@@ -159,7 +173,12 @@ export class ParentCommentTransport {
     this.mutations.clear();
   }
 
+  reloadViewer(): void {
+    if (this.canReloadViewer) this.parent.postMessage({ type: COMMENTOR_VIEWER_RELOAD }, "*");
+  }
+
   private request(method: CommentorParentMethod, args: unknown): Promise<void> {
+    if (!this.compatible) return Promise.reject(new Error(COMMENTOR_UPGRADE_NOTICE));
     const requestId = `${Date.now()}-${++this.sequence}-${Math.random().toString(36).slice(2)}`;
     return new Promise((resolve, reject) => {
       // Mirror CommentorParentMutationMethod: only subscription/pagination
@@ -190,7 +209,14 @@ export class ParentCommentTransport {
 
   private readonly onMessage = (event: MessageEvent): void => {
     if (event.source !== this.parent) return;
-    if (isCommentorParentReady(event.data)) {
+    if (isCommentorParentReadySignal(event.data)) {
+      this.compatible = isCommentorParentReady(event.data);
+      this.canReloadViewer = event.data.canReloadViewer === true;
+      this.compatibilityHandler?.(this.compatible, this.canReloadViewer);
+      if (!isCommentorParentReady(event.data)) {
+        this.retirePending(new CommentMutationOutcomeUnknownError());
+        return;
+      }
       if (this.parentGeneration !== null && this.parentGeneration !== event.data.parentGeneration) {
         // The replacement host cannot acknowledge requests owned by its
         // predecessor. Settle them honestly without replaying any writes.
@@ -206,6 +232,7 @@ export class ParentCommentTransport {
       }
       return;
     }
+    if (!this.compatible) return;
     if (isCommentorParentError(event.data)) {
       this.errorHandler?.(new Error(event.data.error || "Comments could not be loaded"));
       return;

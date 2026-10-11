@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import type { ParentCommentTransport } from "../src/commentor/parent-transport";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 
 const transport = vi.hoisted(() => ({
@@ -7,7 +8,10 @@ const transport = vi.hoisted(() => ({
 }));
 vi.mock("../src/commentor/parent-transport", () => ({
   ParentCommentTransport: class {
-    subscribe(onUpdate: typeof transport.publish) { transport.publish = onUpdate; }
+    subscribe(...args: Parameters<ParentCommentTransport["subscribe"]>) {
+      transport.publish = args[0];
+      args[6]?.(true, true);
+    }
     mutate = transport.mutate;
     isMutationPending() { return false; }
   },

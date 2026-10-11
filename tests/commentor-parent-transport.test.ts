@@ -8,6 +8,7 @@ import {
 import {
   COMMENTOR_PARENT_ERROR,
   COMMENTOR_PARENT_READY,
+  COMMENTOR_PROTOCOL_VERSION,
   COMMENTOR_PARENT_REQUEST,
   COMMENTOR_PARENT_RESPONSE,
   COMMENTOR_PARENT_REPLIES_UPDATE,
@@ -87,7 +88,7 @@ describe("project comment parent transport", () => {
     );
 
     loadHandler();
-    expect(postMessage).toHaveBeenCalledWith(expect.objectContaining({ type: COMMENTOR_PARENT_READY, parentGeneration: expect.any(String) }), "*");
+    expect(postMessage).toHaveBeenCalledWith(expect.objectContaining({ type: COMMENTOR_PARENT_READY, protocolVersion: COMMENTOR_PROTOCOL_VERSION, parentGeneration: expect.any(String) }), "*");
     messageHandler({
       source,
       data: { type: COMMENTOR_PARENT_REQUEST, requestId: "sub", method: "subscribe", args: { documentPath: "guide.html", organizationId: "other" } },
@@ -231,13 +232,13 @@ describe("project comment parent transport", () => {
     const transport = new ParentCommentTransport(parent, events as never, "guide.html");
     transport.subscribe(vi.fn(), vi.fn(), onError);
     expect(sent).toEqual([]);
-    handler({ source: parent, data: { type: COMMENTOR_PARENT_READY, parentGeneration: "host-1" } } as MessageEvent);
+    handler({ source: parent, data: { type: COMMENTOR_PARENT_READY, protocolVersion: COMMENTOR_PROTOCOL_VERSION, parentGeneration: "host-1" } } as MessageEvent);
     const request = sent[0] as { requestId: string };
     handler({ source: parent, data: { type: COMMENTOR_PARENT_RESPONSE, requestId: request.requestId, ok: true } } as MessageEvent);
     handler({ source: parent, data: { type: COMMENTOR_PARENT_ERROR, error: "Comments could not be loaded" } } as MessageEvent);
     await Promise.resolve();
     expect(onError).toHaveBeenCalledWith(expect.objectContaining({ message: "Comments could not be loaded" }));
-    handler({ source: parent, data: { type: COMMENTOR_PARENT_READY, parentGeneration: "host-1" } } as MessageEvent);
+    handler({ source: parent, data: { type: COMMENTOR_PARENT_READY, protocolVersion: COMMENTOR_PROTOCOL_VERSION, parentGeneration: "host-1" } } as MessageEvent);
     expect(sent).toHaveLength(2);
     expect(sent[1]).toMatchObject({ method: "subscribe", args: { documentPath: "guide.html" } });
     transport.dispose();
@@ -261,6 +262,7 @@ describe("slow comment mutations", () => {
     const dismissSlow = vi.fn();
     const slow = vi.fn(() => dismissSlow);
     const update = vi.fn();
+    handler({ source: parent, data: { type: COMMENTOR_PARENT_READY, protocolVersion: COMMENTOR_PROTOCOL_VERSION, parentGeneration: "host-1" } } as unknown as MessageEvent);
     transport.subscribe(update, vi.fn(), vi.fn(), slow);
     const respond = (ok: boolean, index = 0) => {
       const request = postMessage.mock.calls[index][0] as { requestId: string };
@@ -356,6 +358,37 @@ describe("slow comment mutations", () => {
     await vi.advanceTimersByTimeAsync(10_000);
     expect(await result).toBe("Comments are taking longer to load. Still waiting for the connection.");
     expect(slow).not.toHaveBeenCalled();
+    transport.dispose();
+  });
+});
+
+
+describe("comment protocol compatibility gate", () => {
+  it("blocks every write and draft before compatible READY, including after a downgrade", async () => {
+    let handler!: (event: MessageEvent) => void;
+    const parent = { postMessage: vi.fn() };
+    const events = {
+      addEventListener: (_type: string, listener: EventListener) => { handler = listener as typeof handler; },
+      removeEventListener: vi.fn(),
+    };
+    vi.stubGlobal("window", { setTimeout, clearTimeout });
+    const transport = new ParentCommentTransport(parent, events as never, "guide.html");
+    const methods = ["thread.create", "reply.add", "thread.resolve", "thread.archive", "thread.remove", "reply.remove"] as const;
+    const checkBlocked = async () => {
+      for (const method of methods) await expect(transport.mutate(method, {})).rejects.toThrow("Comments were updated");
+      transport.saveDraft("create", { body: "Draft" });
+      await expect(transport.refresh()).rejects.toThrow("Comments were updated");
+      expect(parent.postMessage).not.toHaveBeenCalled();
+      expect(transport.recovery.value).toEqual({ drafts: {}, operations: {} });
+    };
+    await checkBlocked();
+    handler({ source: {}, data: { type: COMMENTOR_PARENT_READY, protocolVersion: COMMENTOR_PROTOCOL_VERSION, parentGeneration: "untrusted" } } as unknown as MessageEvent);
+    await checkBlocked();
+    handler({ source: parent, data: { type: COMMENTOR_PARENT_READY } } as unknown as MessageEvent);
+    await checkBlocked();
+    handler({ source: parent, data: { type: COMMENTOR_PARENT_READY, protocolVersion: COMMENTOR_PROTOCOL_VERSION, parentGeneration: "new" } } as unknown as MessageEvent);
+    handler({ source: parent, data: { type: COMMENTOR_PARENT_READY, protocolVersion: 1, parentGeneration: "old" } } as unknown as MessageEvent);
+    await checkBlocked();
     transport.dispose();
   });
 });

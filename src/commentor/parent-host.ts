@@ -10,6 +10,8 @@ import {
   COMMENTOR_PARENT_UPDATE,
   COMMENTOR_PARENT_ERROR,
   COMMENTOR_PARENT_READY,
+  COMMENTOR_PROTOCOL_VERSION,
+  COMMENTOR_VIEWER_RELOAD,
   COMMENTOR_PARENT_REPLIES_UPDATE,
   isCommentorParentRequest,
   type CommentorParentMutationMethod,
@@ -173,7 +175,7 @@ export class CommentorParentHost {
     const source = this.frame.contentWindow;
     if (this.loadedScope && source) {
       try {
-        source.postMessage({ type: COMMENTOR_PARENT_READY, parentGeneration: this.parentGeneration, userId: this.userId, recoveryState: this.userId ? this.recovery(this.loadedScope).value : { operations: {}, drafts: {} } }, "*");
+        source.postMessage({ type: COMMENTOR_PARENT_READY, protocolVersion: COMMENTOR_PROTOCOL_VERSION, canReloadViewer: true, parentGeneration: this.parentGeneration, userId: this.userId, recoveryState: this.userId ? this.recovery(this.loadedScope).value : { operations: {}, drafts: {} } }, "*");
       } catch { this.subscriptionError(source); }
     }
   };
@@ -302,7 +304,15 @@ export class CommentorParentHost {
   }
 
   private readonly onMessage = (event: MessageEvent): void => {
-    if (event.source !== this.frame.contentWindow || !isCommentorParentRequest(event.data)) return;
+    if (event.source !== this.frame.contentWindow) return;
+    if (record(event.data)?.type === COMMENTOR_VIEWER_RELOAD) {
+      // Only the current, scoped document can reload its owning viewer. No URL
+      // is accepted, and no sandbox top-navigation permission is required.
+      const scope = this.currentScope();
+      if (scope && sameScope(scope, this.loadedScope)) window.location.reload();
+      return;
+    }
+    if (!isCommentorParentRequest(event.data)) return;
     const scope = this.currentScope();
     if (!this.userId || !scope || !sameScope(scope, this.loadedScope) || !event.source) {
       if (event.source) this.respond(event.source, event.data.requestId, false, "Comment scope is unavailable");

@@ -1,4 +1,8 @@
 import type { CommentRecoveryState } from "./operation-state";
+// Increment when the durable-write contract changes incompatibly.
+export const COMMENTOR_PROTOCOL_VERSION = 2;
+export const COMMENTOR_VIEWER_RELOAD = "commentor-viewer-reload";
+export const COMMENTOR_UPGRADE_NOTICE = "Comments were updated. Reload the page to continue.";
 export const COMMENTOR_PARENT_REQUEST = "commentor-parent-request";
 export const COMMENTOR_PARENT_RESPONSE = "commentor-parent-response";
 export const COMMENTOR_PARENT_UPDATE = "commentor-parent-update";
@@ -61,8 +65,10 @@ export type CommentorParentError = {
 
 export type CommentorParentReady = {
   type: typeof COMMENTOR_PARENT_READY;
+  protocolVersion: number;
   // Stable across resubscriptions; replaced when the parent host is recreated.
   parentGeneration: string;
+  canReloadViewer?: boolean;
   recoveryState?: CommentRecoveryState;
   userId?: string | null;
 };
@@ -129,6 +135,12 @@ export function isCommentorParentReady(value: unknown): value is CommentorParent
   if (!value || typeof value !== "object") return false;
   const candidate = value as Partial<CommentorParentReady>;
   return candidate.type === COMMENTOR_PARENT_READY
+    && candidate.protocolVersion === COMMENTOR_PROTOCOL_VERSION
     && typeof candidate.parentGeneration === "string"
     && candidate.parentGeneration.length > 0;
+}
+
+export function isCommentorParentReadySignal(value: unknown): value is { type: typeof COMMENTOR_PARENT_READY; canReloadViewer?: boolean } {
+  return Boolean(value) && typeof value === "object"
+    && (value as { type?: unknown }).type === COMMENTOR_PARENT_READY;
 }

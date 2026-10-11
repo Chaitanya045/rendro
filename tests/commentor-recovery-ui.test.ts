@@ -4,6 +4,9 @@ import { Window, type HTMLButtonElement, type HTMLTextAreaElement } from "happy-
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   COMMENTOR_PARENT_READY,
+  COMMENTOR_PROTOCOL_VERSION,
+  COMMENTOR_VIEWER_RELOAD,
+  COMMENTOR_UPGRADE_NOTICE,
   COMMENTOR_PARENT_REPLIES_UPDATE,
   COMMENTOR_PARENT_REQUEST,
   COMMENTOR_PARENT_RESPONSE,
@@ -25,12 +28,14 @@ async function flush() {
   for (let i = 0; i < 12; i++) await Promise.resolve();
 }
 
-async function widget(options: { canDelete?: boolean; replyCanDelete?: boolean; archived?: boolean; resolved?: boolean; recoveryState?: CommentRecoveryState } = { canDelete: true, replyCanDelete: true }) {
+async function widget(options: { canDelete?: boolean; replyCanDelete?: boolean; archived?: boolean; resolved?: boolean; recoveryState?: CommentRecoveryState; ready?: Record<string, unknown> | null } = { canDelete: true, replyCanDelete: true }) {
   vi.useFakeTimers();
   const win = new Window({ url: "https://rendro.test/guide.html", settings: { enableJavaScriptEvaluation: true } });
   windows.push(win);
   const requests: CommentorParentRequest[] = [];
+  const reloadViewer = vi.fn();
   const parent = { postMessage: (data: CommentorParentRequest) => {
+    if ((data as { type: string }).type === COMMENTOR_VIEWER_RELOAD) reloadViewer();
     if (data.type !== COMMENTOR_PARENT_REQUEST) return;
     requests.push(data);
     if (["draft.save", "operation.complete"].includes(data.method)) {
@@ -63,13 +68,13 @@ async function widget(options: { canDelete?: boolean; replyCanDelete?: boolean; 
   });
   win.eval(bundle);
   win.document.dispatchEvent(new win.Event("DOMContentLoaded"));
-  send({ type: COMMENTOR_PARENT_READY, parentGeneration: "host-1", recoveryState: options.recoveryState, userId: "user-a" });
+  if (options.ready !== null) send({ type: COMMENTOR_PARENT_READY, ...(options.ready ?? { protocolVersion: COMMENTOR_PROTOCOL_VERSION, parentGeneration: "host-1", recoveryState: options.recoveryState, userId: "user-a" }) });
   await flush();
   const root = win.document.getElementById("commentor-host")!.shadowRoot!;
   const button = (testId: string) => root.querySelector<HTMLButtonElement>(`[data-testid="${testId}"]`)!;
   const mutations = () => requests.filter((request) => !["subscribe", "draft.save", "operation.complete"].includes(request.method));
   const finish = () => send({ type: COMMENTOR_PARENT_RESPONSE, requestId: mutations()[0].requestId, ok: true });
-  return { win, root, button, requests, mutations, send, publish, finish };
+  return { win, root, button, requests, mutations, send, publish, finish, reloadViewer };
 }
 
 describe("comment widget recovery controls", () => {
@@ -112,7 +117,7 @@ describe("comment widget recovery controls", () => {
       finish();
       send({ type: COMMENTOR_PARENT_UPDATE, threads: [], canLoadMore: false, loading: false });
     } else {
-      send({ type: COMMENTOR_PARENT_READY, parentGeneration: "host-2" });
+      send({ type: COMMENTOR_PARENT_READY, protocolVersion: COMMENTOR_PROTOCOL_VERSION, parentGeneration: "host-2" });
       await flush();
       expect(button("commentor-delete-btn")).not.toBeNull();
       expect(root.querySelector('.toast[role="alert"]')?.textContent).toContain("outcome is unknown");
@@ -139,7 +144,7 @@ describe("comment widget recovery controls", () => {
       permissions.canDelete = canDelete;
       permissions.replyCanDelete = replyCanDelete;
       if (recovery === "refresh") root.querySelector<HTMLButtonElement>(".toast button")!.click();
-      else send({ type: COMMENTOR_PARENT_READY, parentGeneration: "host-2" });
+      else send({ type: COMMENTOR_PARENT_READY, protocolVersion: COMMENTOR_PROTOCOL_VERSION, parentGeneration: "host-2" });
       await flush();
       const checkPermissions = () => {
         expect(Boolean(root.querySelector('[data-testid="commentor-delete-btn"]'))).toBe(canDelete === true);
@@ -179,7 +184,7 @@ describe("comment widget recovery controls", () => {
       await flush();
       expect(root.querySelector('[data-testid="commentor-composer"]')?.getAttribute("data-state")).toBe("closed");
     } else {
-      send({ type: COMMENTOR_PARENT_READY, parentGeneration: "host-2" });
+      send({ type: COMMENTOR_PARENT_READY, protocolVersion: COMMENTOR_PROTOCOL_VERSION, parentGeneration: "host-2" });
       await flush();
       expect(button("commentor-composer-post").disabled).toBe(false);
       expect(input.disabled).toBe(false);
@@ -199,7 +204,7 @@ describe("comment widget recovery controls", () => {
     button("commentor-reply-send").click();
     await vi.advanceTimersByTimeAsync(60_001);
     expect(button("commentor-reply-send").disabled).toBe(true);
-    send({ type: COMMENTOR_PARENT_READY, parentGeneration: "host-2" });
+    send({ type: COMMENTOR_PARENT_READY, protocolVersion: COMMENTOR_PROTOCOL_VERSION, parentGeneration: "host-2" });
     await flush();
     expect(button("commentor-reply-send").disabled).toBe(false);
     const restored = root.querySelector<HTMLTextAreaElement>('[data-testid="commentor-reply-input"]')!;
@@ -235,7 +240,7 @@ describe("safe resubmission through rendered recovery controls", () => {
       expect(mutations()).toHaveLength(1);
       const original = mutations()[0].args as Record<string, unknown>;
       expect(original.clientOperationId).toMatch(/^[a-f0-9-]{36}$/);
-      send({ type: COMMENTOR_PARENT_READY, parentGeneration: "restored-host" });
+      send({ type: COMMENTOR_PARENT_READY, protocolVersion: COMMENTOR_PROTOCOL_VERSION, parentGeneration: "restored-host" });
       await flush();
       expect(button(testId).disabled).toBe(false);
       button(testId).click();
@@ -335,9 +340,60 @@ describe("editable rejected drafts and identity changes", () => {
     const composer = root.querySelector<HTMLTextAreaElement>('[data-testid="commentor-composer-textarea"]')!;
     composer.value = "Private comment";
     composer.dispatchEvent(new win.Event("input"));
-    send({ type: COMMENTOR_PARENT_READY, parentGeneration: "other-account", userId, recoveryState: { operations: {}, drafts: {} } });
+    send({ type: COMMENTOR_PARENT_READY, protocolVersion: COMMENTOR_PROTOCOL_VERSION, parentGeneration: "other-account", userId, recoveryState: { operations: {}, drafts: {} } });
     await flush();
     expect(root.querySelector('[data-testid="commentor-composer-textarea"]')).toBeNull();
     expect(root.querySelector<HTMLTextAreaElement>('[data-testid="commentor-reply-input"]')?.value ?? "").toBe("");
+  });
+});
+
+
+describe("comment widget asset skew", () => {
+  it.each([
+    {}, // v1 parent: no generation or protocol version
+    { parentGeneration: "v4" }, // generation alone is not a durable-write contract
+    { parentGeneration: "old", protocolVersion: COMMENTOR_PROTOCOL_VERSION - 1 },
+    { parentGeneration: "future", protocolVersion: COMMENTOR_PROTOCOL_VERSION + 1 },
+    { protocolVersion: COMMENTOR_PROTOCOL_VERSION }, // malformed READY
+  ])("shows an accessible upgrade notice for incompatible READY %j", async (ready) => {
+    const { root, button, requests, publish } = await widget({ ready });
+    button("commentor-panel-btn").click();
+    expect(root.querySelector('[role="status"]')?.textContent).toContain(COMMENTOR_UPGRADE_NOTICE);
+    expect(root.querySelector('[role="status"]')?.textContent).toContain("browser’s Reload button");
+    expect(root.querySelector('a[target="_top"]')).toBeNull();
+    expect(button("commentor-comment-btn").disabled).toBe(true);
+    button("commentor-comment-btn").click();
+    publish(); // Legacy snapshots cannot restore writable controls.
+    await flush();
+    expect(requests).toEqual([]);
+    expect(root.querySelector('[data-testid="commentor-resolve-btn"]')).toBeNull();
+    expect(root.querySelector('[role="status"]')?.textContent).toContain(COMMENTOR_UPGRADE_NOTICE);
+  });
+
+  it("uses the advertised parent reload capability for an incompatible version", async () => {
+    const { root, button, reloadViewer, requests } = await widget({ ready: {
+      parentGeneration: "future", protocolVersion: COMMENTOR_PROTOCOL_VERSION + 1, canReloadViewer: true,
+    } });
+    button("commentor-panel-btn").click();
+    const reload = root.querySelector<HTMLButtonElement>('[role="status"] button')!;
+    expect(reload.textContent).toBe("Reload page");
+    reload.click();
+    expect(reloadViewer).toHaveBeenCalledOnce();
+    expect(requests).toEqual([]);
+  });
+
+  it("enables comments only after the compatible parent handshake", async () => {
+    const { root, button, send, requests, mutations, finish } = await widget({ ready: null });
+    expect(button("commentor-comment-btn").disabled).toBe(true);
+    expect(requests).toEqual([]);
+    send({ type: COMMENTOR_PARENT_READY });
+    send({ type: COMMENTOR_PARENT_READY, protocolVersion: COMMENTOR_PROTOCOL_VERSION, parentGeneration: "new", userId: "user-a" });
+    await flush();
+    expect(root.querySelector('[role="status"]')).toBeNull();
+    expect(button("commentor-comment-btn").disabled).toBe(false);
+    button("commentor-resolve-btn").click();
+    expect(mutations()).toHaveLength(1);
+    finish();
+    await flush();
   });
 });
