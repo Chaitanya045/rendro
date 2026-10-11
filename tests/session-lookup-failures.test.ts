@@ -4,6 +4,7 @@ import { betterAuth } from "better-auth/minimal";
 import { testUtils } from "better-auth/plugins";
 import type { User } from "better-auth/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createAuthOptions } from "../convex/auth";
 import { sessionMiddleware } from "@/middleware/session";
 import { logger } from "@/logger";
 
@@ -201,6 +202,35 @@ describe("session lookup failures", () => {
     const response = await fixture.app.request("/organizations", { headers });
     expect(response.status).toBe(302);
     expect(response.headers.get("location")).toBe("/sign-in");
+    expect(logger.warn).not.toHaveBeenCalled();
+  });
+
+  it.each(["valid", "expired", "malformed"])("ignores malformed unused cache cookies with a real %s session", async (state) => {
+    vi.useRealTimers();
+    const configured = createAuthOptions({ runMutation: () => Promise.resolve(0) } as never);
+    const auth = betterAuth({
+      ...configured,
+      baseURL: "http://localhost:3000",
+      database: memoryAdapter({ user: [], session: [], rateLimit: [] }),
+      plugins: [...configured.plugins, testUtils()],
+    });
+    const context = await auth.$context;
+    const member = context.test!.createUser({ emailVerified: true });
+    await context.test!.saveUser(member);
+    const login = await context.test!.login({ userId: member.id });
+    if (state === "expired") await context.internalAdapter.updateSession(login.session.token, { expiresAt: new Date(Date.now() - 1_000) });
+    const tokenCookie = state === "malformed" ? "better-auth.session_token=%broken.signature" : login.headers.get("cookie")!;
+    const headers = { cookie: `${tokenCookie}; better-auth.session_data=malformed; __Secure-better-auth.session_data=malformed; better-auth.session_data.0=malformed; __Secure-better-auth.session_data.1=malformed; unrelated=secret` };
+    const fetchMock = vi.fn((_: string, init: RequestInit) => {
+      expect(new Headers(init.headers).get("cookie")).not.toMatch(/session_data|unrelated/);
+      return auth.handler(new Request("http://localhost:3000/api/auth/get-session", init));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const fixture = app();
+    for (let i = 0; i < 2; i++) {
+      expect((await fixture.app.request("/organizations", { headers })).status).toBe(state === "valid" ? 200 : 302);
+    }
+    expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(logger.warn).not.toHaveBeenCalled();
   });
 

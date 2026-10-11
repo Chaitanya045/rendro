@@ -7,6 +7,7 @@ import {
   betterAuth,
   type BetterAuthOptions,
 } from "better-auth/minimal";
+import { sessionReadLimit } from "./sessionReadLimit";
 import { organization } from "better-auth/plugins";
 import { components } from "./_generated/api";
 import type { DataModel } from "./_generated/dataModel";
@@ -107,7 +108,8 @@ export function createAuthOptions(ctx: GenericCtx<DataModel>) {
         "/convex/token": false,
         "/token": false,
         "/convex/.well-known/openid-configuration": false,
-        "/get-session": { window: 60, max: 120 },
+        // Generous shared-IP backstop; the verified session bucket is below.
+        "/get-session": { window: 60, max: 6_000 },
         "/sign-in/email": { window: 60, max: 5 },
         "/sign-up/email": { window: 60 * 60, max: 5 },
         "/request-password-reset": { window: 60 * 60, max: 5 },
@@ -115,6 +117,10 @@ export function createAuthOptions(ctx: GenericCtx<DataModel>) {
       },
     },
     plugins: [
+      sessionReadLimit((key) => {
+        if (!("runMutation" in ctx)) throw new Error("Session HTTP reads require a mutation-capable context");
+        return ctx.runMutation(components.betterAuth.sessionReadLimit.consume, { key });
+      }),
       organization({
         teams: { enabled: true },
         requireEmailVerificationOnInvitation: true,

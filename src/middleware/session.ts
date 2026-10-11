@@ -1,6 +1,7 @@
 import type { Context, Next } from "hono";
 import type { User } from "better-auth/types";
 import { CONVEX_SITE_URL } from "@/config";
+import { viewerSessionCookie } from "@/viewer-ticket";
 import { logger } from "@/logger";
 import { authClientIpHeaders } from "@/auth-client-ip";
 import { renderSessionUnavailablePage } from "@/routes/session-unavailable";
@@ -138,12 +139,15 @@ export async function sessionMiddleware(
     path.startsWith("/api/auth/")
     || path.startsWith("/api/rendro/")
     || path.startsWith("/api/sync/")
+    // These routes authorize exclusively through the encrypted ticket, then
+    // freshly revalidate its session and membership in Convex on every request.
+    || /^\/organizations\/[^/]+\/projects\/[^/]+\/docs\/view\/[^/]+\/files\//.test(path)
   ) {
     await next();
     return;
   }
 
-  const cookie = c.req.raw.headers.get("cookie") || "";
+  const cookie = viewerSessionCookie(c.req.raw.headers.get("cookie") || "");
   let sessionDuration: string | undefined;
   if (/(?:^|;\s*)(?:__Secure-)?better-auth\.session_token=[^;\s]+/.test(cookie)) {
     const sessionStartedAt = performance.now();
