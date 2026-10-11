@@ -1,9 +1,8 @@
-import { build } from "esbuild";
 import type { BrowserContextOptions, Frame, Page } from "playwright";
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { injectViewerHeadStream } from "@/routes/document-html";
 import { viewerScript } from "@/viewer/markup";
-import { browserStep, createBrowserHarness } from "./helpers/browser";
+import { browserStep, bundleBrowserAsset, createBrowserHarness } from "./helpers/browser";
 import { viewerHtmlForms } from "./fixtures/private-viewer-html";
 
 const base = "/organizations/org/projects/project/docs";
@@ -38,7 +37,7 @@ async function renew(page: Page, frame: Frame, round: number, minutes = round * 
 }
 
 beforeAll(async () => {
-  const bundle = await browserStep("bundle viewer fixture", () => build({ entryPoints: ["src/viewer/entry.ts"], bundle: true, write: false, format: "iife", platform: "browser" }));
+  const bundle = await bundleBrowserAsset("src/viewer/entry.ts");
   await harness.start((request, response) => {
     void (async () => {
       const url = new URL(request.url!, harness.origin);
@@ -47,7 +46,7 @@ beforeAll(async () => {
         response.writeHead(status, { "Content-Type": type, "Cache-Control": "no-store", "Access-Control-Allow-Origin": "null" });
         response.end(body);
       };
-      if (url.pathname === "/private-viewer.js") return send(200, "text/javascript", bundle.outputFiles[0].text);
+      if (url.pathname === "/private-viewer.js") return send(200, "text/javascript", bundle);
       if (url.pathname === "/") return send(200, "text/html", `<!doctype html>
         <iframe id="content-frame" sandbox="allow-scripts" src="${base}/files/guide/index.html"></iframe>
         ${viewerScript("parent", { base })}`);

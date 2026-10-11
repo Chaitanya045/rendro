@@ -8,9 +8,9 @@ import { afterAll, beforeAll, expect, it, vi } from "vitest";
 import schema from "../convex/schema";
 import authSchema from "../convex/betterAuth/schema";
 import { components, internal } from "../convex/_generated/api";
-import { browserStep, createBrowserHarness } from "./helpers/browser";
+import { browserStep, bundleBrowserAsset, createBrowserHarness } from "./helpers/browser";
 
-// Run the actual local server entry point, including static assets, auth proxy,
+// Run the actual local server entry point, including the auth proxy,
 // session middleware and all routes. Only remote services are local substitutes:
 // Convex HTTP actions/component adapter run in convex-test; S3 serves two objects.
 const harness = createBrowserHarness();
@@ -22,6 +22,15 @@ backend.registerComponent("betterAuth", authSchema, import.meta.glob("../convex/
 const objects = new Map<string, string>();
 
 beforeAll(async () => {
+  const assets = new Map<string, string>();
+  for (const [path, entry] of [
+    ["/private-viewer.js", "src/viewer/entry.ts"],
+    ["/lazy-tree.js", "src/lazy-tree/lazy-tree.ts"],
+    ["/commentor.js", "src/commentor/commentor.ts"],
+    ["/commentor-parent.js", "src/commentor/parent-entry.ts"],
+  ]) {
+    assets.set(path, await bundleBrowserAsset(entry));
+  }
   const reservation = createServer();
   reservation.listen(0, "127.0.0.1");
   await once(reservation, "listening");
@@ -51,7 +60,7 @@ beforeAll(async () => {
     });
     proxy.on("error", error => response.destroy(error));
     request.pipe(proxy);
-  });
+  }, assets);
   vi.stubEnv("SITE_URL", harness.origin);
   const now = Date.now();
   const user = await backend.mutation(components.betterAuth.adapter.create, { input: { model: "user", data: {
