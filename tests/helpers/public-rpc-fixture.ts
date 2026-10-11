@@ -1,4 +1,6 @@
 // Loaded only by the isolated local-runtime test, never by the app deployment.
+import type { RegisteredQuery, RegisteredMutation } from "convex/server";
+import type { QueryCtx, MutationCtx } from "../../convex/_generated/server";
 import * as threads from "../../convex/threads";
 import * as replies from "../../convex/replies";
 import { v } from "convex/values";
@@ -62,21 +64,26 @@ export const page = query({
 
 // Exercise the actual registered legacy handlers and real database lookups.
 // Only authentication is synthetic; no deployment/session credentials are used.
+// Convex exposes _handler at runtime (also used by convex-test), but omits it
+// from the published declarations. Keep this test-only access typed by its args.
+function handler<Args extends Record<string, unknown>, Result>(registered: RegisteredQuery<"public", Args, Result> | RegisteredMutation<"public", Args, Result>) {
+  return (registered as unknown as { _handler: (ctx: QueryCtx | MutationCtx, args: Args) => Result })._handler;
+}
 const legacyAuth = { getUserIdentity: async () => ({ subject: "author", email: "author@example.test", tokenIdentifier: "test|author", issuer: "test" }) };
 export const legacyList = query({
   args: { orgSlug: v.string() },
-  handler: (ctx, args) => threads.list._handler({ ...ctx, auth: legacyAuth }, { ...args, filePath: "index.html" }),
+  handler: (ctx, args) => handler(threads.list)({ ...ctx, auth: legacyAuth }, { ...args, filePath: "index.html" }),
 });
 export const legacyMutation = mutation({
   args: { method: v.string(), orgSlug: v.string(), threadId: v.string(), replyId: v.string() },
   handler: (ctx, args) => {
     const context = { ...ctx, auth: legacyAuth };
-    if (args.method === "threads:create") return threads.create._handler(context, { orgSlug: args.orgSlug, filePath: "index.html", body: "Test", anchor: { kind: "element", path: ["main"] } });
-    if (args.method === "threads:resolve") return threads.resolve._handler(context, { threadId: args.threadId });
-    if (args.method === "threads:archive") return threads.archive._handler(context, { threadId: args.threadId });
-    if (args.method === "threads:remove") return threads.remove._handler(context, { threadId: args.threadId });
-    if (args.method === "replies:add") return replies.add._handler(context, { threadId: args.threadId, body: "Test" });
-    if (args.method === "replies:remove") return replies.remove._handler(context, { threadId: args.threadId, replyId: args.replyId });
+    if (args.method === "threads:create") return handler(threads.create)(context, { orgSlug: args.orgSlug, filePath: "index.html", body: "Test", anchor: { kind: "element", path: ["main"] } });
+    if (args.method === "threads:resolve") return handler(threads.resolve)(context, { threadId: args.threadId });
+    if (args.method === "threads:archive") return handler(threads.archive)(context, { threadId: args.threadId });
+    if (args.method === "threads:remove") return handler(threads.remove)(context, { threadId: args.threadId });
+    if (args.method === "replies:add") return handler(replies.add)(context, { threadId: args.threadId, body: "Test" });
+    if (args.method === "replies:remove") return handler(replies.remove)(context, { threadId: args.threadId, replyId: args.replyId });
     throw new Error("Unknown probe method");
   },
 });
