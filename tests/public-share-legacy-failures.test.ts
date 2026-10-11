@@ -21,15 +21,15 @@ afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers(
 async function errorResponse(response: Response, status: number, asset: boolean, retryAfter = "1") {
   expect(response.status).toBe(status);
   expect(response.headers.get("Cache-Control")).toBe("private, no-store");
-  expect(response.headers.get("X-Content-Type-Options")).toBe("nosniff");
+  expect(response.headers.get("X-Content-Type-Options")).toBe(asset ? null : "nosniff");
   expect(response.headers.get("Retry-After")).toBe(status === 503 ? retryAfter : null);
   expect(response.headers.has("Location")).toBe(false);
   expect(response.headers.has("Set-Cookie")).toBe(false);
   const body = await response.text();
   expect(body).not.toContain("private-backend-detail");
   if (asset) {
-    expect(response.headers.get("Content-Type")).toContain("text/plain");
-    expect(body).toBe(status === 503 ? "Service unavailable" : "Not found");
+    expect(response.headers.get("Content-Type")).toBeNull();
+    expect(body).toBe("");
   } else {
     expect(response.headers.get("Content-Type")).toContain("text/html");
     const nonce = response.headers.get("Content-Security-Policy")?.match(/'nonce-([^']+)'/)?.[1];

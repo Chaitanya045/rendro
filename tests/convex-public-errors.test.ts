@@ -24,6 +24,7 @@ type Endpoint = { name: string; kind: "query" | "mutation"; args: (f: Fixture) =
 const document = (f: Fixture) => ({ ...f.scope });
 const thread = (f: Fixture) => ({ ...f.scope, threadId: f.threadId });
 const endpoints: Endpoint[] = [
+  { name: "projects:activeDeployment", kind: "query", args: f => ({ organizationId: f.scope.organizationId, projectId: f.scope.projectId }), ids: ["projectId"] },
   { name: "documentThreads:list", kind: "query", args: f => ({ ...document(f), paginationOpts }), ids: ["projectId"] },
   { name: "documentThreads:create", kind: "mutation", args: f => ({ ...document(f), body: "Test", anchor }), ids: ["projectId"] },
   ...["resolve", "archive", "remove"].map(name => ({ name: `documentThreads:${name}`, kind: "mutation" as const, args: thread, ids: ["projectId", "threadId"] })),
@@ -88,13 +89,13 @@ describe("public Convex application error contract", () => {
     vi.stubEnv("CONVEX_INTERNAL_SECRET", "correct-secret");
     const service = endpoint.name.startsWith("apiKeys:") || endpoint.name.startsWith("deletedFiles:");
     const args = { ...endpoint.args(f) };
-    if (!endpoint.name.startsWith("document") && endpoint.ids.length) args.threadId = "malformed";
-    await failure(call(f.backend, endpoint, args), service ? "forbidden" : "unauthenticated");
+    if (!/^(document|projects:)/.test(endpoint.name) && endpoint.ids.length) args.threadId = "malformed";
+    await failure(call(f.backend, endpoint, args), service ? "forbidden" : endpoint.name === "projects:activeDeployment" ? "not_found" : "unauthenticated");
   });
 
   it.each(endpoints.filter(endpoint => endpoint.ids.length))("$name covers every ID with malformed, wrong-table, missing and cross-org values", async endpoint => {
     const f = await fixture();
-    const legacy = !endpoint.name.startsWith("document");
+    const legacy = !/^(document|projects:)/.test(endpoint.name);
     const viewer = legacy ? f.backend.withIdentity({ subject: "legacy", email: "author@example.test" }) : f.viewers.author;
     const records = await f.backend.run(async ctx => {
       const project = { organizationId: f.data.otherOrgId, slug: "other", name: "Other", createdBy: "author", createdAt: Date.now() };

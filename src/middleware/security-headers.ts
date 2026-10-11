@@ -58,7 +58,11 @@ function documentRoute(path: string): boolean {
 export const securityHeaders: MiddlewareHandler = async (c, next) => {
   const nonce = Buffer.from(crypto.getRandomValues(new Uint8Array(18))).toString("base64");
   await nonceContext.run(nonce, next);
-  c.header("X-Content-Type-Options", "nosniff");
+  // Only the shared asset-error helper may opt an empty, untyped failure out.
+  // HTML (including styled document errors) always retains nosniff and CSP.
+  const emptyAssetError = c.get("emptyAssetError") === true && c.res.status >= 400
+    && c.res.body === null && !c.res.headers.has("Content-Type");
+  c.header("X-Content-Type-Options", emptyAssetError ? undefined : "nosniff");
   if (new URL(c.req.url).protocol === "https:") {
     c.header("Strict-Transport-Security", "max-age=15552000");
   }

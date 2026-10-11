@@ -192,6 +192,8 @@ app.on("GET", [
   const documentUrl = `${frameBase}${path.split("/").map(encodeURIComponent).join("/")}`;
   const features = viewerScript("frame", {
     base, prefix: frameBase, manifestKey: active.deployment.manifestKey,
+    // The storage boundary above validated this deployment-scoped key.
+    deploymentId: active.deployment.manifestKey.split("/").at(-2),
   }, c.req.url) + documentFeatures({ organizationId, projectId, documentPath: path, base, url: c.req.url });
   // Keep the iframe's canonical src so tree/deep links and comment authorization
   // retain their existing identity. Relative resources inherit the ticket base.

@@ -74,7 +74,7 @@ describe.each(["public", "share", "private ticket", "private cookie"])("%s asset
     ["missing.PNG", "*/*"], ["missing.woff2", "*/*"], ["missing.CSS", "*/*"], ["missing.mjs", "*/*"],
     ["missing", "image/avif,image/webp,*/*;q=0.8"], ["missing", "font/woff2"],
     ["missing", "text/css,*/*;q=0.1"], ["missing", "application/javascript"],
-  ])("uses plain nosniff failures for %s (%s)", async (path, accept) => {
+  ])("uses empty untyped failures for %s (%s)", async (path, accept) => {
     const { app, viewers, backend } = await createAssetFixture();
     const viewer = viewers.find(viewer => viewer.name === name)!;
     const headers = { Accept: accept, ...(viewer.cookie ? { Cookie: fixtureCookie } : {}) };
@@ -82,10 +82,11 @@ describe.each(["public", "share", "private ticket", "private cookie"])("%s asset
       if (denied) backend.mockImplementation(() => Promise.resolve(new Response(null, { status: 403 })));
       const result = await app.request(viewer.prefix + path, { headers });
       expect(result.status).toBe(404);
-      expect(result.headers.get("Content-Type")).toBe("text/plain; charset=UTF-8");
-      expect(result.headers.get("X-Content-Type-Options")).toBe("nosniff");
+      expect(result.headers.get("Content-Type")).toBeNull();
+      expect(result.headers.get("X-Content-Type-Options")).toBeNull();
       expect(result.headers.get("Cache-Control")).toBe("private, no-store");
-      expect(await result.text()).toBe("Not found");
+      expect(result.headers.get("Content-Length")).toBe("0");
+      expect(await result.text()).toBe("");
     }
     const document = await app.request(viewer.prefix + "missing.html", { headers: { ...headers, Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8" } });
     expect(document.status).toBe(404);
@@ -94,13 +95,13 @@ describe.each(["public", "share", "private ticket", "private cookie"])("%s asset
   });
 });
 
-it("preserves a forbidden status for plain asset errors", async () => {
+it("preserves a forbidden status for empty asset errors", async () => {
   const app = new Hono();
   app.get("/*", c => assetError(c, () => "<h1>Forbidden</h1>", 403));
   const result = await app.request("/image%2Epng");
   expect(result.status).toBe(403);
-  expect(result.headers.get("X-Content-Type-Options")).toBe("nosniff");
-  expect(await result.text()).toBe("Forbidden");
+  expect(result.headers.get("X-Content-Type-Options")).toBeNull();
+  expect(await result.text()).toBe("");
 });
 
 it.each([400, 401, 403, 404, 429, 500, 502, 503, 504] as const)("preserves status %s and retry headers without caching asset errors", async status => {
@@ -114,10 +115,11 @@ it.each([400, 401, 403, 404, 429, 500, 502, 503, 504] as const)("preserves statu
   for (const path of ["image.png", "font.woff2", "style.css", "script.js"]) {
     const response = await app.request(`/${path}`);
     expect(response.status).toBe(status);
-    expect(response.headers.get("Content-Type")).toBe("text/plain; charset=UTF-8");
+    expect(response.headers.get("Content-Type")).toBeNull();
+    expect(response.headers.get("Content-Length")).toBe("0");
     expect(response.headers.get("Retry-After")).toBe("9");
     expect(response.headers.get("Cache-Control")).toBe("private, no-store");
-    expect(response.headers.get("X-Content-Type-Options")).toBe("nosniff");
+    expect(response.headers.get("X-Content-Type-Options")).toBeNull();
     expect(await response.text()).not.toMatch(/<[^>]+>/);
   }
   expect(html).not.toHaveBeenCalled();

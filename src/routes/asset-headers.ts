@@ -52,9 +52,13 @@ export function assetError(c: Context, html: () => string, status: ClientErrorSt
   const resource = (!htmlRequest && /(?:^|,)\s*(?:image\/|font\/|text\/css|(?:application|text)\/(?:javascript|ecmascript)|application\/(?:json|[\w.+-]+\+json|font-|x-font-|vnd.ms-fontobject))/i.test(accept))
     || /\.(?:avif|bmp|gif|ico|jpe?g|png|svg|webp|woff2?|ttf|otf|eot|css|m?js|json)$/i.test(path);
   if (resource) {
-    const message = status === 403 ? "Forbidden" : status === 404 ? "Not found"
-      : status === 503 ? "Service unavailable" : "Request failed";
-    return c.text(message, status);
+    // An empty untyped response avoids Chromium ORB for opaque no-cors loads.
+    // Keep the denial status and never grant error-response CORS access.
+    c.set("emptyAssetError", true);
+    c.header("Content-Type", undefined);
+    c.header("X-Content-Type-Options", undefined);
+    c.header("Content-Length", "0");
+    return c.body(null, status);
   }
   return c.html(html(), status);
 }
