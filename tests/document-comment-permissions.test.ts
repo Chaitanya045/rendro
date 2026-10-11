@@ -30,7 +30,7 @@ describe("project comment permissions", () => {
   it.each(["member", "outsider"])("denies %s deletion and archive without changing records or scheduling cleanup", async (name) => {
     const { backend, viewers, scope, threadId, replyId } = await fixture();
     const viewer = viewers[name];
-    const error = name === "member" ? "Only the comment author" : "Comment not found";
+    const error = name === "member" ? "Forbidden" : "Comment not found";
     await expect(viewer.mutation(api.documentThreads.remove, { ...scope, threadId })).rejects.toThrow(error);
     await expect(viewer.mutation(api.documentThreads.archive, { ...scope, threadId })).rejects.toThrow(error);
     await expect(viewer.mutation(api.documentReplies.remove, { ...scope, threadId, replyId })).rejects.toThrow(error);
@@ -58,9 +58,9 @@ describe("project comment permissions", () => {
         update: { role: "member" },
       },
     }));
-    await expect(viewers.admin.mutation(api.documentThreads.remove, { ...scope, threadId })).rejects.toThrow("Only the comment author");
-    await expect(viewers.admin.mutation(api.documentThreads.archive, { ...scope, threadId })).rejects.toThrow("Only the comment author");
-    await expect(viewers.admin.mutation(api.documentReplies.remove, { ...scope, threadId, replyId })).rejects.toThrow("Only the comment author");
+    await expect(viewers.admin.mutation(api.documentThreads.remove, { ...scope, threadId })).rejects.toThrow("Forbidden");
+    await expect(viewers.admin.mutation(api.documentThreads.archive, { ...scope, threadId })).rejects.toThrow("Forbidden");
+    await expect(viewers.admin.mutation(api.documentReplies.remove, { ...scope, threadId, replyId })).rejects.toThrow("Forbidden");
     expect((await viewers.admin.query(api.documentThreads.list, { ...scope, paginationOpts })).page[0].canDelete).toBe(false);
     expect((await viewers.admin.query(api.documentReplies.list, { ...scope, threadId, paginationOpts })).page[0].canDelete).toBe(false);
   });

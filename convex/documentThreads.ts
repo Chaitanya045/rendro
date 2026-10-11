@@ -1,3 +1,4 @@
+import { publicPaginate } from "./publicPagination";
 import { publicError } from "./publicErrors";
 import { validateClientOperationId, validateCommentAuthor } from "./commentOperations";
 import { requireId } from "./ids";
@@ -53,7 +54,7 @@ function validAnchor(anchor:
 
 function assertValidPageSize(numItems: number): void {
   if (!Number.isSafeInteger(numItems) || numItems < 1 || numItems > DOCUMENT_THREAD_PAGE_SIZE) {
-    throw publicError("invalid_input", `Page size must be between 1 and ${DOCUMENT_THREAD_PAGE_SIZE}`);
+    publicError("invalid_input");
   }
 }
 
@@ -94,17 +95,16 @@ export const list = query({
     assertValidPageSize(args.paginationOpts.numItems);
     const project = await ctx.db.get(args.projectId);
     if (!project || project.organizationId !== args.organizationId) {
-      throw publicError("not_found");
+      publicError("not_found");
     }
-    const threadsPage = await ctx.db
+    const threadsPage = await publicPaginate(ctx.db
       .query("documentThreads")
       .withIndex("by_active_document", (index) => index
         .eq("organizationId", args.organizationId)
         .eq("projectId", args.projectId)
         .eq("documentPath", args.documentPath)
         .eq("deletedAt", undefined))
-      .order("desc")
-      .paginate({
+      .order("desc"), {
         ...args.paginationOpts,
         maximumRowsRead: MAX_REACTIVE_PAGE_ROWS,
         maximumBytesRead: MAX_PAGE_BYTES_READ,
@@ -167,12 +167,12 @@ export const create = mutation({
     const args = { ...input, projectId: requireId(ctx, "projects", input.projectId) };
     const project = await ctx.db.get(args.projectId);
     if (!project || project.organizationId !== args.organizationId) {
-      throw publicError("not_found");
+      publicError("not_found");
     }
     const body = args.body.trim();
-    if (!body || body.length > 10_000) throw publicError("invalid_input", "Comment body is invalid");
-    if (!validDocumentPath(args.documentPath)) throw publicError("invalid_input", "Document path is invalid");
-    if (!validAnchor(args.anchor)) throw publicError("invalid_input", "Comment anchor is invalid");
+    if (!body || body.length > 10_000) publicError("invalid_input");
+    if (!validDocumentPath(args.documentPath)) publicError("invalid_input");
+    if (!validAnchor(args.anchor)) publicError("invalid_input");
     validateCommentAuthor(args.expectedAuthorId, authorized.user._id);
     validateClientOperationId(args.clientOperationId);
     // Authorization and scope validation precede the indexed dedup lookup.
@@ -214,13 +214,13 @@ async function applyStatus(
   clientOperationId: string | undefined,
 ): Promise<boolean> {
   if (clientOperationId !== undefined) {
-    if (target === undefined) throw publicError("invalid_input", "An operation ID requires an explicit status target");
+    if (target === undefined) publicError("invalid_input");
     const receipt = await ctx.db.query("commentStatusReceipts").withIndex("by_operation", (q) => q
       .eq("organizationId", thread.organizationId).eq("projectId", thread.projectId)
       .eq("documentPath", thread.documentPath).eq("threadId", thread._id)
       .eq("authorId", authorId).eq("clientOperationId", clientOperationId)).unique();
     if (receipt) {
-      if (receipt.field !== field || receipt.target !== target) throw publicError("conflict", "Operation arguments changed");
+      if (receipt.field !== field || receipt.target !== target) publicError("conflict");
       return receipt.target;
     }
     await ctx.db.insert("commentStatusReceipts", {
@@ -257,7 +257,7 @@ export const resolve = mutation({
     const scope = { ...input, projectId: requireId(ctx, "projects", input.projectId) };
     const thread = await ctx.db.get(threadId);
     if (!thread || thread.deletedAt !== undefined || !threadMatchesScope(thread, scope)) {
-      throw publicError("not_found");
+      publicError("not_found");
     }
     return applyStatus(ctx, thread, authorized.user._id, "resolved", input.resolved, input.clientOperationId);
   },
@@ -273,7 +273,7 @@ export const archive = mutation({
     const scope = { ...input, projectId: requireId(ctx, "projects", input.projectId) };
     const thread = await ctx.db.get(threadId);
     if (!thread || thread.deletedAt !== undefined || !threadMatchesScope(thread, scope)) {
-      throw publicError("not_found");
+      publicError("not_found");
     }
     requireCommentAuthorOrAdmin(authorized, thread.authorId);
     return applyStatus(ctx, thread, authorized.user._id, "archived", input.archived, input.clientOperationId);
@@ -290,9 +290,9 @@ export const remove = mutation({
     const scope = { ...input, projectId: requireId(ctx, "projects", input.projectId) };
     const thread = await ctx.db.get(threadId);
     const project = await ctx.db.get(scope.projectId);
-    if (!project || project.organizationId !== scope.organizationId) throw publicError("not_found");
-    if (!thread) throw publicError("not_found");
-    if (!threadMatchesScope(thread, scope)) throw publicError("not_found");
+    if (!project || project.organizationId !== scope.organizationId) publicError("not_found");
+    if (!thread) publicError("not_found");
+    if (!threadMatchesScope(thread, scope)) publicError("not_found");
     requireCommentAuthorOrAdmin(authorized, thread.authorId);
     if (thread.deletedAt !== undefined) return;
     await ctx.db.patch(threadId, { deletedAt: Date.now() });

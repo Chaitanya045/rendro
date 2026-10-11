@@ -33,7 +33,7 @@ export function canDeleteComment(authorized: AuthorizedOrganization, authorId: s
 
 export function requireCommentAuthorOrAdmin(authorized: AuthorizedOrganization, authorId: string): void {
   if (!canDeleteComment(authorized, authorId)) {
-    throw publicError("forbidden", "Only the comment author or organization admins can modify this comment");
+    publicError("forbidden");
   }
 }
 
@@ -43,9 +43,9 @@ export async function requireOrganizationMember(
   allowedRoles?: readonly OrganizationRole[],
 ): Promise<AuthorizedOrganization> {
   const identity = await ctx.auth.getUserIdentity();
-  if (!identity || typeof identity.sessionId !== "string") throw publicError("unauthenticated");
+  if (!identity || typeof identity.sessionId !== "string") publicError("unauthenticated");
   const user = await authComponent.safeGetAuthUser(ctx);
-  if (!user) throw publicError("unauthenticated");
+  if (!user) publicError("unauthenticated");
   const auth = await createAuth(ctx).$context;
   const member = await auth.adapter.findOne<AuthorizedOrganization["member"]>({
     model: "member",
@@ -54,17 +54,17 @@ export async function requireOrganizationMember(
       { field: "userId", value: user._id },
     ],
   });
-  if (!member) throw publicError("not_found");
+  if (!member) publicError("not_found");
   const organization = await auth.adapter.findOne<AuthorizedOrganization["organization"]>({
     model: "organization",
     where: [{ field: "id", value: organizationId }],
   });
-  if (!organization) throw publicError("not_found");
+  if (!organization) publicError("not_found");
   if (
     allowedRoles
     && !memberRoles(member.role).some((role) => allowedRoles.includes(role as OrganizationRole))
   ) {
-    throw publicError("forbidden");
+    publicError("forbidden");
   }
   return { organization, member, user };
 }

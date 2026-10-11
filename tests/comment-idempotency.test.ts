@@ -44,7 +44,7 @@ describe("document comment operation identities", () => {
       }
       expect(await backend.run((ctx) => ctx.db.get(threadId))).toMatchObject({ resolved: target, archived: target });
     }
-    await expect(viewers.member.mutation(api.documentThreads.archive, { ...scope, threadId, archived: false, clientOperationId: "archive-false" })).rejects.toThrow("Only the comment author");
+    await expect(viewers.member.mutation(api.documentThreads.archive, { ...scope, threadId, archived: false, clientOperationId: "archive-false" })).rejects.toThrow("Forbidden");
   });
 
   it("retains dedup keys after deletion so late creates cannot resurrect comments", async () => {
@@ -58,7 +58,7 @@ describe("document comment operation identities", () => {
     await viewers.author.mutation(api.documentReplies.remove, removeReply);
     expect(await viewers.author.mutation(api.documentReplies.add, reply)).toBe(replyId);
     expect((await viewers.author.query(api.documentReplies.list, { ...scope, threadId, paginationOpts: { cursor: null, numItems: 20 } })).page).toEqual([]);
-    await expect(viewers.member.mutation(api.documentReplies.remove, removeReply)).rejects.toThrow("Only the comment author");
+    await expect(viewers.member.mutation(api.documentReplies.remove, removeReply)).rejects.toThrow("Forbidden");
     vi.useFakeTimers();
     const remove = { ...scope, threadId, clientOperationId: "remove" };
     await viewers.author.mutation(api.documentThreads.remove, remove);
@@ -68,7 +68,7 @@ describe("document comment operation identities", () => {
     await viewers.author.mutation(api.documentReplies.remove, removeReply);
     expect(await viewers.author.mutation(api.documentThreads.create, create)).toBe(threadId);
     expect(await backend.run((ctx) => ctx.db.get(threadId))).toMatchObject({ deletedAt: expect.any(Number), body: "" });
-    await expect(viewers.member.mutation(api.documentThreads.remove, remove)).rejects.toThrow("Only the comment author");
+    await expect(viewers.member.mutation(api.documentThreads.remove, remove)).rejects.toThrow("Forbidden");
   });
 
   it("retains scrubbed legacy records for authorized deletion retries after cleanup", async () => {
@@ -91,9 +91,9 @@ describe("document comment operation identities", () => {
   it("validates operation ID bounds and authorizes before dedup, even for previously successful operations", async () => {
     const { backend, viewers, scope, data, threadId } = await fixture();
     for (const clientOperationId of ["", " ", "x".repeat(129)]) {
-      await expect(viewers.author.mutation(api.documentThreads.create, { ...scope, body: "No", anchor, clientOperationId })).rejects.toThrow("Client operation ID");
-      await expect(viewers.author.mutation(api.documentReplies.add, { ...scope, threadId, body: "No", clientOperationId })).rejects.toThrow("Client operation ID");
-      await expect(viewers.author.mutation(api.documentThreads.resolve, { ...scope, threadId, resolved: true, clientOperationId })).rejects.toThrow("Client operation ID");
+      await expect(viewers.author.mutation(api.documentThreads.create, { ...scope, body: "No", anchor, clientOperationId })).rejects.toThrow("Invalid input");
+      await expect(viewers.author.mutation(api.documentReplies.add, { ...scope, threadId, body: "No", clientOperationId })).rejects.toThrow("Invalid input");
+      await expect(viewers.author.mutation(api.documentThreads.resolve, { ...scope, threadId, resolved: true, clientOperationId })).rejects.toThrow("Invalid input");
     }
     const create = { ...scope, body: "Once", anchor, clientOperationId: "once" };
     await viewers.author.mutation(api.documentThreads.create, create);
@@ -131,7 +131,7 @@ describe("status operation receipts", () => {
       await viewers.author.mutation(fn, { ...scope, threadId });
       expect(await backend.run((ctx) => ctx.db.get(threadId))).toMatchObject({ [field]: target });
     }
-    await expect(viewers.author.mutation(fn, { ...scope, threadId, clientOperationId: "missing-target" })).rejects.toThrow("explicit status target");
+    await expect(viewers.author.mutation(fn, { ...scope, threadId, clientOperationId: "missing-target" })).rejects.toThrow("Invalid input");
     expect(await backend.run((ctx) => ctx.db.query("commentStatusReceipts").collect())).toHaveLength(0);
   });
 
@@ -162,6 +162,6 @@ describe("status operation receipts", () => {
       () => viewers.admin.mutation(api.documentThreads.remove, { ...args, threadId }),
       () => viewers.admin.mutation(api.documentReplies.remove, { ...args, threadId, replyId }),
     ];
-    for (const write of writes) await expect(write()).rejects.toThrow("comment session changed");
+    for (const write of writes) await expect(write()).rejects.toThrow("Forbidden");
   });
 });

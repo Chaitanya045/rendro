@@ -32,7 +32,7 @@ function matches(schema: Validator<unknown, "required" | "optional", string>, va
 function argumentsValidator<A extends PropertyValidators>(args: A) {
   const schema = v.object(args);
   return (input: ObjectType<A>) => {
-    if (!matches(schema, input)) throw publicError("invalid_input");
+    if (!matches(schema, input)) publicError("invalid_input");
     return input;
   };
 }

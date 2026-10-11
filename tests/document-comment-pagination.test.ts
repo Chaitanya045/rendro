@@ -366,22 +366,22 @@ describe("document comment pagination", () => {
       path: Array.from({ length: 64 }, () => "界".repeat(256)),
     })).resolves.toBeTruthy();
     await expect(create({ kind: "element", path: Array.from({ length: 65 }, () => "div") }))
-      .rejects.toThrow("Comment anchor is invalid");
+      .rejects.toThrow("Invalid input");
     await expect(create({ kind: "element", path: ["x".repeat(257)] }))
-      .rejects.toThrow("Comment anchor is invalid");
+      .rejects.toThrow("Invalid input");
     await expect(create({
       kind: "text-range",
       quote: "x".repeat(4_097),
       path: ["main"],
       startOffset: 0,
       endOffset: 1,
-    })).rejects.toThrow("Comment anchor is invalid");
+    })).rejects.toThrow("Invalid input");
     await expect(create({
       kind: "text-range",
       quote: "selection",
       path: ["main"],
       startOffset: -1,
       endOffset: 1,
-    })).rejects.toThrow("Comment anchor is invalid");
+    })).rejects.toThrow("Invalid input");
   });
 });

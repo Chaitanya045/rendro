@@ -1,3 +1,4 @@
+import { publicPaginate } from "./publicPagination";
 import { publicError } from "./publicErrors";
 import { validateClientOperationId, validateCommentAuthor } from "./commentOperations";
 import { requireId } from "./ids";
@@ -38,7 +39,7 @@ export const list = query({
       !Number.isSafeInteger(args.paginationOpts.numItems)
       || args.paginationOpts.numItems < 1
       || args.paginationOpts.numItems > DOCUMENT_REPLY_PAGE_SIZE
-    ) throw publicError("invalid_input", `Page size must be between 1 and ${DOCUMENT_REPLY_PAGE_SIZE}`);
+    ) publicError("invalid_input");
     const thread = await ctx.db.get(args.threadId);
     if (
       !thread
@@ -46,12 +47,11 @@ export const list = query({
       || thread.organizationId !== args.organizationId
       || thread.projectId !== args.projectId
       || thread.documentPath !== args.documentPath
-    ) throw publicError("not_found");
-    const repliesPage = await ctx.db
+    ) publicError("not_found");
+    const repliesPage = await publicPaginate(ctx.db
       .query("documentReplies")
       .withIndex("by_active_thread", (index) => index.eq("threadId", args.threadId).eq("deletedAt", undefined))
-      .order("desc")
-      .paginate({
+      .order("desc"), {
         ...args.paginationOpts,
         maximumRowsRead: MAX_REACTIVE_PAGE_ROWS,
         maximumBytesRead: MAX_PAGE_BYTES_READ,
@@ -98,9 +98,9 @@ export const add = mutation({
       || thread.organizationId !== args.organizationId
       || thread.projectId !== args.projectId
       || thread.documentPath !== args.documentPath
-    ) throw publicError("not_found");
+    ) publicError("not_found");
     const body = args.body.trim();
-    if (!body || body.length > 10_000) throw publicError("invalid_input", "Reply body is invalid");
+    if (!body || body.length > 10_000) publicError("invalid_input");
     validateCommentAuthor(args.expectedAuthorId, authorized.user._id);
     validateClientOperationId(args.clientOperationId);
     if (args.clientOperationId !== undefined) {
@@ -143,16 +143,16 @@ export const remove = mutation({
     const thread = await ctx.db.get(threadId);
     const reply = await ctx.db.get(replyId);
     const project = await ctx.db.get(scope.projectId);
-    if (!project || project.organizationId !== scope.organizationId) throw publicError("not_found");
+    if (!project || project.organizationId !== scope.organizationId) publicError("not_found");
     if (
       !thread
       || thread.organizationId !== scope.organizationId
       || thread.projectId !== scope.projectId
       || thread.documentPath !== scope.documentPath
-    ) throw publicError("not_found");
-    if (!reply) throw publicError("not_found");
-    if (reply.threadId !== threadId || reply.organizationId !== thread.organizationId) throw publicError("not_found");
-    if (thread.deletedAt !== undefined && reply.deletedAt === undefined) throw publicError("not_found");
+    ) publicError("not_found");
+    if (!reply) publicError("not_found");
+    if (reply.threadId !== threadId || reply.organizationId !== thread.organizationId) publicError("not_found");
+    if (thread.deletedAt !== undefined && reply.deletedAt === undefined) publicError("not_found");
     requireCommentAuthorOrAdmin(authorized, reply.authorId);
     if (reply.deletedAt !== undefined) return;
     // Retain scope and author proof for authorized deletion retries.

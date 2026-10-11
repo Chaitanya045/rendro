@@ -36,14 +36,19 @@ function call(backend: Pick<Fixture["backend"], "query" | "mutation">, endpoint:
     ? backend.query(makeFunctionReference<"query", Record<string, unknown>, unknown>(endpoint.name), args)
     : backend.mutation(makeFunctionReference<"mutation", Record<string, unknown>, unknown>(endpoint.name), args);
 }
-async function failure(result: Promise<unknown>, code: PublicErrorCode, exactMessage = true) {
+async function failure(result: Promise<unknown>, code: PublicErrorCode) {
   const error: unknown = await result.catch((error: unknown) => error);
   expect(error).toBeInstanceOf(ConvexError);
   const data = (error as ConvexError<{ code: string; message: string }>).data;
   expect(Object.keys(data).sort()).toEqual(["code", "message"]);
   expect(data.code).toBe(code);
-  if (exactMessage) expect(data.message).toBe(publicErrorMessages[code]);
+  expect(data.message).toBe(publicErrorMessages[code]);
+  expect((error as Error).message).toBe(publicErrorMessages[code]);
+  expect((error as Error).stack).not.toMatch(/\bat |\.ts:\d|convex\//);
   expect(data.message).not.toMatch(/convex\/|\.ts:\d|stack|trace|secret|token|org-/i);
+  // Include non-enumerable Error fields and any trace fields the harness adds.
+  return JSON.stringify(Object.fromEntries(Object.getOwnPropertyNames(error)
+    .sort().map(key => [key, Reflect.get(error as object, key)])));
 }
 
 afterEach(() => vi.unstubAllEnvs());
@@ -70,7 +75,7 @@ describe("public Convex application error contract", () => {
     const service = endpoint.name.startsWith("apiKeys:") || endpoint.name.startsWith("deletedFiles:");
     const args = { ...endpoint.args(f) };
     if (!endpoint.name.startsWith("document") && endpoint.ids.length) args.threadId = "malformed";
-    await failure(call(f.backend, endpoint, args), service ? "forbidden" : "unauthenticated", !service);
+    await failure(call(f.backend, endpoint, args), service ? "forbidden" : "unauthenticated");
   });
 
   it.each(endpoints.filter(endpoint => endpoint.ids.length))("$name covers every ID with malformed, wrong-table, missing and cross-org values", async endpoint => {
@@ -104,12 +109,25 @@ describe("public Convex application error contract", () => {
       for (const value of ["malformed-private-id", wrongTable]) {
         await failure(call(viewer, endpoint, { ...args, [id]: value }), "invalid_id");
       }
-      await failure(call(viewer, endpoint, { ...args, [id]: foreign }), "not_found");
-      await failure(call(viewer, endpoint, { ...args, [id]: missing }), "not_found");
+      const inaccessible = await failure(call(viewer, endpoint, { ...args, [id]: foreign }), "not_found");
+      const absent = await failure(call(viewer, endpoint, { ...args, [id]: missing }), "not_found");
+      expect(absent).toBe(inaccessible);
     }
     if (!legacy) {
       for (const organizationId of ["malformed", f.scope.projectId, records.missingProject, f.data.otherOrgId]) {
         await failure(call(viewer, endpoint, { ...endpoint.args(f), organizationId }), "not_found");
+      }
+    }
+  });
+
+  it.each(["documentThreads:list", "documentReplies:list"])("%s rejects empty cursor and endCursor", async name => {
+    const f = await fixture();
+    const endpoint = endpoints.find(endpoint => endpoint.name === name)!;
+    for (const field of ["cursor", "endCursor"]) {
+      for (const cursor of ["", " "] ) {
+        await failure(call(f.viewers.author, endpoint, {
+          ...endpoint.args(f), paginationOpts: { ...paginationOpts, [field]: cursor },
+        }), "invalid_input");
       }
     }
   });
@@ -135,11 +153,11 @@ describe("public Convex application error contract", () => {
 
   it("returns safe codes for permissions, validation, author changes and receipt conflicts", async () => {
     const f = await fixture();
-    await failure(f.viewers.member.mutation(api.documentThreads.archive, { ...f.scope, threadId: f.threadId }), "forbidden", false);
-    await failure(f.viewers.member.mutation(api.documentReplies.remove, { ...f.scope, threadId: f.threadId, replyId: f.replyId }), "forbidden", false);
-    await failure(f.viewers.author.mutation(api.documentThreads.create, { ...f.scope, body: " ", anchor }), "invalid_input", false);
-    await failure(f.viewers.author.mutation(api.documentReplies.add, { ...f.scope, threadId: f.threadId, body: " " }), "invalid_input", false);
-    await failure(f.viewers.author.mutation(api.documentThreads.resolve, { ...f.scope, threadId: f.threadId, expectedAuthorId: "another-user" }), "forbidden", false);
+    await failure(f.viewers.member.mutation(api.documentThreads.archive, { ...f.scope, threadId: f.threadId }), "forbidden");
+    await failure(f.viewers.member.mutation(api.documentReplies.remove, { ...f.scope, threadId: f.threadId, replyId: f.replyId }), "forbidden");
+    await failure(f.viewers.author.mutation(api.documentThreads.create, { ...f.scope, body: " ", anchor }), "invalid_input");
+    await failure(f.viewers.author.mutation(api.documentReplies.add, { ...f.scope, threadId: f.threadId, body: " " }), "invalid_input");
+    await failure(f.viewers.author.mutation(api.documentThreads.resolve, { ...f.scope, threadId: f.threadId, expectedAuthorId: "another-user" }), "forbidden");
     const operation = { ...f.scope, threadId: f.threadId, clientOperationId: "receipt", resolved: true };
     await f.viewers.author.mutation(api.documentThreads.resolve, operation);
     await failure(f.viewers.author.mutation(api.documentThreads.resolve, { ...operation, resolved: false }), "conflict");
