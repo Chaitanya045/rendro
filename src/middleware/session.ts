@@ -6,7 +6,8 @@ import { viewerSessionCookie } from "@/viewer-ticket";
 import { logger } from "@/logger";
 import { authClientIpHeaders } from "@/auth-client-ip";
 import { renderSessionUnavailablePage } from "@/routes/session-unavailable";
-import { SessionCache } from "@/session-cache";
+import { sessionCache, evictRejectedSession } from "@/session-cache";
+export { sessionCache } from "@/session-cache";
 
 type SerializedDate = string | number;
 
@@ -50,9 +51,7 @@ type LookupFailure = {
   status?: number;
   retryAfterMs?: number;
 };
-type LookupResult = { kind: "anonymous" } | { kind: "authenticated"; user: SessionUser; expiresAt: number } | LookupFailure;
-
-export const sessionCache = new SessionCache<LookupResult>();
+export type LookupResult = { kind: "anonymous" } | { kind: "authenticated"; user: SessionUser; expiresAt: number } | LookupFailure;
 
 const LOOKUP_TIMEOUT_MS = 5_000;
 const RETRY_BACKOFF_MS = 150;
@@ -81,6 +80,7 @@ async function lookupSession(request: Request, cookie: string): Promise<LookupRe
       redirect: "manual",
       signal: controller.signal,
     });
+    await evictRejectedSession(cookie, res.status);
     if (!res.ok && res.status !== 401) {
       const failure: LookupFailure = {
         kind: "failure",
@@ -131,9 +131,13 @@ async function lookupSession(request: Request, cookie: string): Promise<LookupRe
   }
 }
 
-async function lookupWithRetry(request: Request, cookie: string): Promise<LookupResult> {
+async function lookupWithRetry(request: Request, cookie: string, cached: boolean): Promise<LookupResult> {
   for (let attempt = 1; ; attempt++) {
-    const result = await lookupSession(request, cookie);
+    // Coalesce only the first read. A failed entry is removed before backoff;
+    // retries have independent deadlines and cannot retain a failed promise.
+    const result = cached && attempt === 1
+      ? await sessionCache.lookup(cookie, () => lookupSession(request, cookie))
+      : await lookupSession(request, cookie);
     if (result.kind !== "failure") return result;
     logger.warn({ category: result.category, status: result.status ?? null, attempt }, "Session lookup failed");
     const delay = Math.max(RETRY_BACKOFF_MS, result.retryAfterMs ?? 0);
@@ -150,6 +154,11 @@ export async function sessionMiddleware(
   next: Next,
 ): Promise<void> {
   const path = c.req.path;
+  const cookie = viewerSessionCookie(c.req.raw.headers.get("cookie") || "");
+  const finish = async () => {
+    await next();
+    await evictRejectedSession(cookie, c.res.status);
+  };
   if (
     path.startsWith("/api/auth/")
     || path.startsWith("/api/rendro/")
@@ -159,15 +168,20 @@ export async function sessionMiddleware(
     || /^\/legacy-view\/[^/]+\/view\/[^/]+\/files\//.test(path)
     || /^\/organizations\/[^/]+\/projects\/[^/]+\/docs\/view\/[^/]+\/files\//.test(path)
   ) {
-    await next();
+    await finish();
     return;
   }
 
-  const cookie = viewerSessionCookie(c.req.raw.headers.get("cookie") || "");
   let sessionDuration: string | undefined;
   if (/(?:^|;\s*)(?:__Secure-)?better-auth\.session_token=[^;\s]+/.test(cookie)) {
     const sessionStartedAt = performance.now();
-    const result = await sessionCache.lookup(cookie, () => lookupWithRetry(c.req.raw, cookie));
+    // Only modern scoped pages/documents redundantly validate the live session
+    // and membership downstream. All other routes (including landing, sign-in,
+    // sign-up/Get started, account pages and legacy storage) need fresh identity.
+    const cached = c.req.method === "GET" && /^(?:\/organizations\/[^/]+(?:\/|$)|\/accept-invitation\/[^/]+$)/.test(path);
+    if (!cached) await sessionCache.evict(cookie);
+    const result = await lookupWithRetry(c.req.raw, cookie, cached);
+    if (result.kind === "anonymous") await sessionCache.evict(cookie);
     sessionDuration = duration(sessionStartedAt);
     if (result.kind === "failure") {
       const retryAfter = String(Math.max(1, Math.ceil((result.retryAfterMs ?? 1_000) / 1_000)));
@@ -193,7 +207,7 @@ export async function sessionMiddleware(
   }
 
   const renderStartedAt = performance.now();
-  await next();
+  await finish();
   if (sessionDuration !== undefined) {
     c.header("Cache-Control", "private, no-store");
     appendTiming(c, "session", sessionDuration);

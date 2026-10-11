@@ -1,3 +1,4 @@
+import { evictRejectedSession } from "@/session-cache";
 export class ViewerBackendError extends Error {
   readonly unavailable = true;
   constructor(readonly retryAfter = "1") {
@@ -13,6 +14,7 @@ export async function viewerBackendJson<T>(url: string, init?: RequestInit): Pro
     return await Promise.race([
       (async () => {
         const response = await fetch(url, { ...init, signal: controller.signal, redirect: "manual" });
+        await evictRejectedSession(new Headers(init?.headers).get("cookie") ?? "", response.status);
         if (!response.ok) {
           void response.body?.cancel().catch(() => {});
           // Keep all existing controlled denials indistinguishable, including

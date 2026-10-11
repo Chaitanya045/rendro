@@ -7,7 +7,7 @@ import { sessionMiddleware } from "@/middleware/session";
 function sessionApp() {
   const app = new Hono<{ Variables: { user?: User } }>();
   app.use("*", sessionMiddleware);
-  app.get("/protected", (c) => {
+  app.get("/organizations/cache-probe", (c) => {
     const user = c.get("user");
     if (!user) return c.json({ error: "Unauthorized" }, 401);
     c.header("Server-Timing", "data;dur=4");
@@ -49,7 +49,7 @@ describe("session middleware Server-Timing", () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
 
-    const response = await sessionApp().request("/protected");
+    const response = await sessionApp().request("/organizations/cache-probe");
 
     expect(response.status).toBe(401);
     expect(fetchMock).not.toHaveBeenCalled();
@@ -75,8 +75,8 @@ describe("session middleware Server-Timing", () => {
 
     const cookie = "better-auth.session_token=credential-secret";
     const app = sessionApp();
-    const first = await app.request("/protected", { headers: { cookie } });
-    const second = await app.request("/protected", { headers: { cookie } });
+    const first = await app.request("/organizations/cache-probe", { headers: { cookie } });
+    const second = await app.request("/organizations/cache-probe", { headers: { cookie } });
 
     expect(first.status).toBe(200);
     expect(first.headers.get("cache-control")).toBe("private, no-store");
@@ -100,7 +100,7 @@ describe("session middleware Server-Timing", () => {
   it("fails closed when session lookup throws while retaining safe timing data", async () => {
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("session backend unavailable")));
 
-    const response = await sessionApp().request("/protected", {
+    const response = await sessionApp().request("/organizations/cache-probe", {
       headers: { cookie: "better-auth.session_token=do-not-expose" },
     });
 

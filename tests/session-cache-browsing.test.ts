@@ -10,7 +10,7 @@ import { components, internal } from "../convex/_generated/api";
 import { createAuthOptions } from "../convex/auth";
 import { sessionCache, sessionMiddleware } from "@/middleware/session";
 import { registerAuthClientIp } from "@/auth-client-ip";
-import projectDocs from "@/routes/project-docs";
+import { mountSessionRoutes } from "@/app-routes";
 import * as minio from "@/minio";
 
 vi.mock("@/logger", () => ({ logger: { debug() {}, warn() {}, error() {} } }));
@@ -63,9 +63,9 @@ async function fixture() {
     await next();
   });
   app.use("*", sessionMiddleware);
-  app.route("/", projectDocs);
-  app.get("/identity", c => c.json({ id: c.get("user")?.id ?? null }));
-  return { app, context, readers, backend, counts, pages, base: `/organizations/${organizationId}/projects/${projectId}/docs`, manifestKey: deployment.manifestKey };
+  app.get("/organizations/cache-probe", c => c.json({ id: c.get("user")?.id ?? null }));
+  mountSessionRoutes(app);
+  return { app, organizationId, context, readers, backend, counts, pages, base: `/organizations/${organizationId}/projects/${projectId}/docs`, manifestKey: deployment.manifestKey };
 }
 
 it.each([
@@ -105,12 +105,88 @@ it("recognizes real Convex revocation by 15s while document authorization denies
   vi.useFakeTimers({ toFake: ["Date"] });
   const start = Date.now();
   const headers = { cookie: f.readers[0].cookie };
-  expect(await (await f.app.request("/identity", { headers })).json()).toEqual({ id: f.readers[0].user.id });
+  expect(await (await f.app.request("/organizations/cache-probe", { headers })).json()).toEqual({ id: f.readers[0].user.id });
   await f.context.internalAdapter.deleteSession(f.readers[0].session.token);
   vi.setSystemTime(start + 14_999);
-  expect(await (await f.app.request("/identity", { headers })).json()).toEqual({ id: f.readers[0].user.id });
+  expect(await (await f.app.request("/organizations/cache-probe", { headers })).json()).toEqual({ id: f.readers[0].user.id });
   expect((await f.app.request(f.base, { headers })).status).toBe(404);
-  vi.setSystemTime(start + 15_000);
-  expect(await (await f.app.request("/identity", { headers })).json()).toEqual({ id: null });
+  // The authoritative document denial evicts immediately, before TTL expiry.
+  expect(await (await f.app.request("/organizations/cache-probe", { headers })).json()).toEqual({ id: null });
   expect(f.counts.session).toBe(2);
+});
+
+it.each([false, true])("ends the revoked-session redirect chain at sign-in (another warm isolate: %s)", async otherIsolate => {
+  const f = await fixture();
+  const cookie = f.readers[0].cookie;
+  const headers = { cookie };
+  const path = `/organizations/${f.organizationId}`;
+  expect((await f.app.request(path, { headers })).status).toBe(200);
+  const oldIdentity = await sessionCache.lookup(cookie, () => { throw new Error("Expected a warm identity"); });
+  await f.context.internalAdapter.deleteSession(f.readers[0].session.token);
+  const denied = await f.app.request(path, { headers });
+  expect(denied.status).toBe(302);
+  expect(denied.headers.get("location")).toBe(`/sign-in?returnTo=${encodeURIComponent(path)}`);
+  expect(await (await f.app.request("/organizations/cache-probe", { headers })).json()).toEqual({ id: null });
+  // Model landing on an isolate that has not observed the authorization denial.
+  if (otherIsolate) await sessionCache.lookup(cookie, () => Promise.resolve(oldIdentity));
+  const signIn = await f.app.request(denied.headers.get("location")!, { headers });
+  expect(signIn.status).toBe(200);
+  expect(signIn.headers.get("location")).toBeNull();
+  expect(await signIn.text()).toContain("Sign in");
+});
+
+it("evicts after membership removal and denies both management and document access", async () => {
+  const f = await fixture();
+  const reader = f.readers[1];
+  const headers = { cookie: reader.cookie };
+  const path = `/organizations/${f.organizationId}`;
+  expect((await f.app.request(path, { headers })).status).toBe(200);
+  await f.backend.mutation(components.betterAuth.adapter.deleteMany, { input: {
+    model: "member", where: [{ field: "userId", value: reader.user.id }],
+  }, paginationOpts: { numItems: 100, cursor: null } });
+  expect((await f.app.request(path, { headers })).status).toBe(404);
+  const before = f.counts.session;
+  expect((await f.app.request(f.base, { headers })).status).toBe(404);
+  expect(f.counts.session).toBe(before + 1);
+  // Better Auth's organization mutation rejects removed members with 400.
+  await f.app.request("/organizations/cache-probe", { headers });
+  const deniedMutation = await f.app.request("/api/auth/organization/update", {
+    method: "POST", headers: { ...headers, origin: "http://localhost:3000", "content-type": "application/json" },
+    body: JSON.stringify({ organizationId: f.organizationId, data: { name: "Denied update" } }),
+  });
+  expect(deniedMutation.status).toBe(400);
+  const afterDenial = f.counts.session;
+  await f.app.request("/organizations/cache-probe", { headers });
+  expect(f.counts.session).toBe(afterDenial + 1);
+  // Identity remains valid, but the redirect terminates at an access denial.
+  const signIn = await f.app.request(`/sign-in?returnTo=${encodeURIComponent(path)}`, { headers });
+  expect(signIn.status).toBe(302);
+  expect((await f.app.request(signIn.headers.get("location")!, { headers })).status).toBe(404);
+});
+
+it.each(["sign-out", "change-password"])("does not reuse identity after real %s", async operation => {
+  const f = await fixture();
+  const reader = f.readers[0];
+  const headers = { cookie: reader.cookie };
+  expect((await f.app.request(f.base, { headers })).status).toBe(200);
+  let mutationCookie = reader.cookie;
+  let body = {};
+  if (operation === "change-password") {
+    await f.context.internalAdapter.createAccount({
+      userId: reader.user.id, accountId: reader.user.id, providerId: "credential",
+      password: await f.context.password.hash("old-password-long-enough"),
+    });
+    const other = await f.context.internalAdapter.createSession(reader.user.id);
+    const signed = `${other.token}.${createHmac("sha256", process.env.AUTH_SECRET!).update(other.token).digest("base64")}`;
+    mutationCookie = `better-auth.session_token=${encodeURIComponent(signed)}`;
+    body = { currentPassword: "old-password-long-enough", newPassword: "new-password-long-enough", revokeOtherSessions: true };
+  }
+  const changed = await f.app.request(`/api/auth/${operation}`, {
+    method: "POST", headers: { cookie: mutationCookie, origin: "http://localhost:3000", "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  expect(changed.status).toBe(200);
+  expect(await f.context.internalAdapter.findSession(reader.session.token)).toBeNull();
+  expect(await (await f.app.request("/organizations/cache-probe", { headers })).json()).toEqual({ id: null });
+  expect((await f.app.request("/sign-in", { headers })).status).toBe(200);
 });

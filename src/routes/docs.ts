@@ -1,3 +1,4 @@
+import { sessionCache } from "@/session-cache";
 import { viewerBackendJson } from "@/viewer-backend";
 import { viewerErrorResponse } from "@/routes/viewer-unavailable";
 import { assetError } from "@/routes/asset-headers";
@@ -92,6 +93,7 @@ app.on("GET", ["/legacy-view/:org/files/*", "/legacy-view/:org/view/:viewerToken
     if (session !== null && (typeof session?.user?.id !== "string" || typeof session?.user?.email !== "string")) {
       throw new Error("Invalid session response");
     }
+    if (session === null) await sessionCache.evict(cookie);
     user = session?.user;
   }
   if (!user || typeof user.email !== "string" || emailToOrgSlug(user.email) !== org) return missing();

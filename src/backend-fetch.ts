@@ -1,3 +1,4 @@
+import { evictRejectedSession } from "@/session-cache";
 import { logger } from "@/logger";
 
 // Static caller names only: URLs, paths, and request data can contain secrets.
@@ -11,6 +12,7 @@ export async function backendFetch(
 ): Promise<Response> {
   try {
     const response = await fetch(url, init);
+    await evictRejectedSession(new Headers(init?.headers).get("cookie") ?? "", response.status);
     if (response.status < 500) return response;
     logger.error({ category: "UpstreamError", operation, status: response.status }, "Backend request failed");
   } catch {

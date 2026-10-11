@@ -1,4 +1,4 @@
-import { sessionCache } from "@/middleware/session";
+import { sessionCache } from "@/session-cache";
 import { CONVEX_SITE_URL } from "@/config";
 import { logger } from "@/logger";
 import { backendFetch } from "@/backend-fetch";
@@ -139,6 +139,11 @@ export async function proxyAuthRequest(request: Request): Promise<Response> {
   } finally {
     // Also remove caller lookups started during the mutation, on errors too.
     await invalidateCaller();
+  }
+  if (path === "/api/auth/get-session" && upstream.ok) {
+    // Better Auth represents authoritative missing/revoked sessions as JSON null.
+    const identity: unknown = await upstream.clone().json().catch(() => undefined);
+    if (identity === null) await sessionCache.evict(request.headers.get("cookie") ?? "");
   }
   const location = upstream.headers.get("location");
   if (upstream.status >= 300 && upstream.status < 400 && location) {

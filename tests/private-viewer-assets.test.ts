@@ -364,7 +364,8 @@ describe("private sandbox asset routing", () => {
     expect((await f.app.request(`${prefix}guide/assets/image.png`)).status).toBe(200);
     expect((await f.app.request(`${base}/viewer-ticket?manifestKey=another`, { headers: { Cookie: f.cookie } })).status).toBe(404);
     await f.revoke();
-    expect((await f.app.request(endpoint, { headers: { Cookie: f.cookie } })).status).toBe(404);
+    // The prior denial evicted identity, so revocation is visible immediately.
+    expect((await f.app.request(endpoint, { headers: { Cookie: f.cookie } })).status).toBe(401);
   });
 
   it("signals a superseded deployment only after full authorization, without extending old tickets", async () => {
@@ -396,8 +397,8 @@ describe("private sandbox asset routing", () => {
     expect(await nonmember.json()).toEqual({ error: "Not found" });
     await f.revoke();
     const revoked = await f.app.request(endpoint, { headers: { Cookie: f.cookie } });
-    expect(revoked.status).toBe(404);
-    expect(await revoked.json()).toEqual({ error: "Not found" });
+    expect(revoked.status).toBe(401);
+    expect(await revoked.json()).toEqual({ error: "Authentication required" });
   });
 
   it("keeps tree, canonical deep links, sandbox and parent comment identity", async () => {

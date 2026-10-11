@@ -4,7 +4,8 @@ import type { User } from "better-auth/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SessionCache, SESSION_CACHE_MAX_ENTRIES, sessionCacheKey } from "@/session-cache";
 import { sessionCache, sessionMiddleware } from "@/middleware/session";
-import { proxyAuthRequest, proxyAuthSignOut } from "@/auth-proxy";
+import { proxyAuthRequest, proxyAuthSignOut, proxyConvexRequest } from "@/auth-proxy";
+import { mountSessionRoutes } from "@/app-routes";
 import { logger } from "@/logger";
 
 const cookie = "better-auth.session_token=raw-secret-signed-cookie";
@@ -15,7 +16,7 @@ const payload = () => ({ user, session: { expiresAt: Date.now() + 60_000, token:
 function app() {
   const app = new Hono<{ Variables: { user?: User } }>();
   app.use("*", sessionMiddleware);
-  app.get("/", c => c.json({ id: c.get("user")?.id ?? null }));
+  app.get("/organizations/cache-probe", c => c.json({ id: c.get("user")?.id ?? null }));
   return app;
 }
 
@@ -29,7 +30,7 @@ describe("bounded isolate session cache", () => {
     const debug = vi.spyOn(logger, "debug").mockImplementation(() => {});
     const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
     vi.stubGlobal("fetch", vi.fn(() => Response.json({ ...payload(), user: { ...user, token: "extra-secret" } })));
-    await app().request("/", { headers: { cookie } });
+    await app().request("/organizations/cache-probe", { headers: { cookie } });
     // Inspect actual retained entries, including resolved promises, not just the
     // hash helper. Response session/token and extra user properties are dropped.
     const entries = (sessionCache as unknown as { entries: Map<string, { value: unknown; pending: Promise<unknown> }> }).entries;
@@ -133,7 +134,7 @@ describe("Worker cache integration", () => {
     const fetch = vi.fn(() => Response.json({ user, session: { expiresAt: shape === "ISO" ? new Date(expiry).toISOString() : expiry } }));
     vi.stubGlobal("fetch", fetch);
     const worker = app();
-    const read = () => worker.request("/", { headers: { cookie } });
+    const read = () => worker.request("/organizations/cache-probe", { headers: { cookie } });
     expect(await (await read()).json()).toEqual({ id: "reader" });
     vi.setSystemTime(expiry - 1);
     await read();
@@ -147,10 +148,10 @@ describe("Worker cache integration", () => {
     const fetch = vi.fn(() => new Response(null, { status, headers: { "Retry-After": "60" } }));
     vi.stubGlobal("fetch", fetch);
     const worker = app();
-    for (let i = 0; i < 2; i++) expect((await worker.request("/", { headers: { cookie } })).status).toBe(503);
+    for (let i = 0; i < 2; i++) expect((await worker.request("/organizations/cache-probe", { headers: { cookie } })).status).toBe(503);
     expect(fetch).toHaveBeenCalledTimes(2);
     fetch.mockImplementation(() => Response.json(payload()));
-    expect((await worker.request("/", { headers: { cookie } })).status).toBe(200);
+    expect((await worker.request("/organizations/cache-probe", { headers: { cookie } })).status).toBe(200);
   });
 
   it.each(["GET sign-out", "POST sign-out", "revoke-session", "revoke-sessions", "revoke-other-sessions", "change-password", "reset-password", "delete-user"])("evicts on %s through the Worker", async operation => {
@@ -162,12 +163,12 @@ describe("Worker cache integration", () => {
     });
     vi.stubGlobal("fetch", fetch);
     const worker = app();
-    await worker.request("/", { headers: { cookie } });
+    await worker.request("/organizations/cache-probe", { headers: { cookie } });
     const path = operation.includes("sign-out") ? "sign-out" : operation;
     const req = new Request(`http://localhost:3000/api/auth/${path}`, { method: operation === "GET sign-out" ? "GET" : "POST", headers: { cookie } });
     if (operation === "GET sign-out") await proxyAuthSignOut(req);
     else await proxyAuthRequest(req);
-    expect(await (await worker.request("/", { headers: { cookie } })).json()).toEqual({ id: null });
+    expect(await (await worker.request("/organizations/cache-probe", { headers: { cookie } })).json()).toEqual({ id: null });
     expect(fetch).toHaveBeenCalledTimes(3);
   });
 
@@ -201,20 +202,70 @@ describe("Worker cache integration", () => {
     const fetch = vi.fn(() => Response.json(payload()));
     vi.stubGlobal("fetch", fetch);
     const worker = app();
-    await worker.request("/", { headers: { cookie } });
+    await worker.request("/organizations/cache-probe", { headers: { cookie } });
     vi.setSystemTime(Date.now() + 15_000);
     fetch.mockImplementation(() => new Response(null, { status: 503, headers: { "Retry-After": "60" } }));
-    for (let i = 0; i < 2; i++) expect((await worker.request("/", { headers: { cookie } })).status).toBe(503);
+    for (let i = 0; i < 2; i++) expect((await worker.request("/organizations/cache-probe", { headers: { cookie } })).status).toBe(503);
     expect(fetch).toHaveBeenCalledTimes(3);
   });
 
   it("evicts sign-out even when upstream fails", async () => {
     const fetch = vi.fn(() => Response.json(payload()));
     vi.stubGlobal("fetch", fetch);
-    await app().request("/", { headers: { cookie } });
+    await app().request("/organizations/cache-probe", { headers: { cookie } });
     fetch.mockRejectedValueOnce(new Error("offline"));
     await proxyAuthSignOut(new Request("http://localhost:3000/api/auth/sign-out", { headers: { cookie } }));
-    await app().request("/", { headers: { cookie } });
+    await app().request("/organizations/cache-probe", { headers: { cookie } });
     expect(fetch).toHaveBeenCalledTimes(3);
   });
+});
+
+
+describe("fresh identity decisions", () => {
+  it.each(["/", "/sign-in", "/sign-up", "/get-started", "/account/security", "/docs/example", "/api/share/create?key=example/index.html", "/api/publications"])(
+    "does not authorize or redirect using a warm revoked identity on %s", async path => {
+      await sessionCache.lookup(cookie, () => Promise.resolve({ kind: "authenticated", user, expiresAt: Date.now() + 60_000 }));
+      const fetch = vi.fn(() => Response.json(null));
+      vi.stubGlobal("fetch", fetch);
+      const worker = new Hono<{ Variables: { user?: User } }>();
+      worker.use("*", sessionMiddleware);
+      mountSessionRoutes(worker);
+      const response = await worker.request(path, { headers: { cookie } });
+      expect(fetch).toHaveBeenCalledOnce();
+      if (["/", "/sign-in", "/sign-up"].includes(path)) {
+        expect(response.status).toBe(200);
+        expect(response.headers.get("location")).toBeNull();
+      } else expect([302, 401, 404]).toContain(response.status);
+      const fresh = vi.fn(() => Promise.resolve({ kind: "anonymous" as const }));
+      await sessionCache.lookup(cookie, fresh);
+      expect(fresh).toHaveBeenCalledOnce();
+    },
+  );
+
+  it.each([400, 401, 403, 404, 200])("evicts after an authoritative proxy denial (%s)", async status => {
+    await sessionCache.lookup(cookie, () => Promise.resolve({ kind: "authenticated", user, expiresAt: Date.now() + 60_000 }));
+    vi.stubGlobal("fetch", vi.fn(() => Response.json(null, { status })));
+    const request = new Request(`http://localhost:3000${status === 200 ? "/api/auth/get-session" : "/api/rendro/management/access"}`, { headers: { cookie } });
+    if (status === 200) await proxyAuthRequest(request);
+    else await proxyConvexRequest(request);
+    const fresh = vi.fn(() => Promise.resolve({ kind: "anonymous" as const }));
+    await sessionCache.lookup(cookie, fresh);
+    expect(fresh).toHaveBeenCalledOnce();
+  });
+});
+
+it("lets a new lookup proceed during backoff and does not retain the retry", async () => {
+  const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
+  const fetch = vi.fn().mockResolvedValueOnce(new Response(null, { status: 503 }))
+    .mockImplementation(() => Response.json(payload()));
+  vi.stubGlobal("fetch", fetch);
+  const worker = app();
+  const first = worker.request("/organizations/cache-probe", { headers: { cookie } });
+  await vi.waitFor(() => expect(warn).toHaveBeenCalledOnce());
+  expect((await worker.request("/organizations/cache-probe", { headers: { cookie } })).status).toBe(200);
+  expect(fetch).toHaveBeenCalledTimes(2);
+  expect((await first).status).toBe(200);
+  expect(fetch).toHaveBeenCalledTimes(3);
+  expect((await worker.request("/organizations/cache-probe", { headers: { cookie } })).status).toBe(200);
+  expect(fetch).toHaveBeenCalledTimes(3);
 });

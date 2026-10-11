@@ -1,3 +1,4 @@
+import type { LookupResult } from "@/middleware/session";
 import { viewerSessionCookie } from "@/viewer-ticket";
 
 export const SESSION_CACHE_TTL_MS = 15_000;
@@ -65,4 +66,12 @@ export class SessionCache<T extends Cacheable> {
       throw error;
     }
   }
+}
+
+export const sessionCache = new SessionCache<LookupResult>();
+
+/** Call before translating authoritative denials into redirects/opaque 404s. */
+export async function evictRejectedSession(cookie: string, status: number): Promise<void> {
+  // Better Auth also uses 400 for rejected membership/permission checks.
+  if ([400, 401, 403, 404].includes(status)) await sessionCache.evict(cookie);
 }
