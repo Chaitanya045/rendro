@@ -144,6 +144,21 @@ describe("shared response security policy", () => {
     expect(response.headers.has("Content-Security-Policy")).toBe(false);
   });
 
+  it("keeps auth error redirects in the baseline header class", async () => {
+    for (const path of ["/api/auth/error?error=access_denied", "/api/auth/callback/google"]) {
+      vi.mocked(fetch).mockResolvedValue(new Response(null, {
+        status: 302,
+        headers: { Location: "http://127.0.0.1:3211/api/auth/error?error=access_denied" },
+      }));
+      const response = await request(path);
+      common(response);
+      expect(response.status).toBe(302);
+      expect(response.headers.get("Location")).toBe("/sign-in?error=access_denied");
+      expect(response.headers.has("Content-Security-Policy")).toBe(false);
+      expect(response.headers.has("X-Frame-Options")).toBe(false);
+    }
+  });
+
   it("covers static assets and preserves their cache headers", async () => {
     const response = await worker.request("https://rendro.test/management-query.js", {}, {
       ASSETS: { fetch: () => new Response("/* asset */", { headers: { "Content-Type": "text/javascript", "Cache-Control": "public, max-age=3600" } }) },
