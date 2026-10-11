@@ -24,7 +24,7 @@ function connectionSources(): string {
   return [...sources].join(" ");
 }
 
-function appPolicy(nonce: string, path: string): string {
+function appPolicy(nonce: string, path: string, embeddedError = false): string {
   const viewerShell = /^\/(?:docs|p|public)(?:\/|$)/.test(path) || /\/docs$/.test(path);
   const dynamicStyles = viewerShell || /^\/organizations(?:\/|$)/.test(path);
   return [
@@ -42,7 +42,7 @@ function appPolicy(nonce: string, path: string): string {
     "object-src 'none'",
     "base-uri 'self'",
     "form-action 'self' https://accounts.google.com",
-    "frame-ancestors 'none'",
+    `frame-ancestors ${embeddedError ? "'self'" : "'none'"}`,
   ].join("; ");
 }
 
@@ -59,14 +59,17 @@ export const securityHeaders: MiddlewareHandler = async (c, next) => {
   await nonceContext.run(nonce, next);
   c.header("X-Content-Type-Options", "nosniff");
   if (new URL(c.req.url).protocol === "https:") {
-    c.header("Strict-Transport-Security", "max-age=15552000; includeSubDomains");
+    c.header("Strict-Transport-Security", "max-age=15552000");
   }
   // In particular, never downgrade the private viewer/share no-referrer policy.
   if (!c.res.headers.has("Referrer-Policy")) c.header("Referrer-Policy", "strict-origin-when-cross-origin");
   c.header("Permissions-Policy", permissionsPolicy);
   if (!/^text\/html(?:;|$)/i.test(c.res.headers.get("Content-Type") ?? "")) return;
 
-  if (documentRoute(c.req.path)) {
+  const document = documentRoute(c.req.path);
+  // Document routes serve publisher HTML only on success. Their HTML errors
+  // are server-authored pages and need the same nonce policy as other app HTML.
+  if (document && c.res.status < 400) {
     // Modern documents already carry an opaque-origin sandbox. Legacy private
     // /files uses same-origin auth for its comment widget; retain that contract.
     if (!c.res.headers.has("Content-Security-Policy")) {
@@ -76,7 +79,13 @@ export const securityHeaders: MiddlewareHandler = async (c, next) => {
     }
     c.header("X-Frame-Options", "SAMEORIGIN");
   } else {
-    c.header("Content-Security-Policy", appPolicy(nonce, c.req.path));
-    c.header("X-Frame-Options", "DENY");
+    // Nonces must never be reused from a stored response. Preserve private
+    // no-store policies; replace public/revalidation policies on all app shells.
+    const cacheControl = c.res.headers.get("Cache-Control") ?? "";
+    c.header("Cache-Control", /(?:^|,)\s*private\s*(?:,|$)/i.test(cacheControl)
+      ? "private, no-store" : "no-store");
+    c.header("Content-Security-Policy", appPolicy(nonce, c.res.status >= 400 ? "" : c.req.path, document));
+    // Styled document errors must remain visible inside the owning viewer.
+    c.header("X-Frame-Options", document ? "SAMEORIGIN" : "DENY");
   }
 };

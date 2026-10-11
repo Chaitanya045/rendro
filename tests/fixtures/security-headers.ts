@@ -1,5 +1,6 @@
 import { vi } from "vitest";
 import * as orgs from "@/orgs";
+import * as publications from "@/publications";
 import * as minio from "@/minio";
 
 export const docsBase = "/organizations/org-a/projects/project-a/docs";
@@ -10,6 +11,11 @@ export const publisherHtml = '<!doctype html><html><head><link rel="stylesheet" 
 /** Deterministic backend/storage boundaries; the actual HTTP routes and templates run. */
 export function mockSecurityBackend() {
   vi.spyOn(orgs, "orgExists").mockResolvedValue(true);
+  vi.spyOn(publications, "getPublication").mockResolvedValue({
+    orgSlug: "example", slug: "product", sourcePrefix: "example/",
+    title: "Product", entryFile: "index.html", createdAt: "2026-01-01", updatedAt: "2026-01-01",
+  });
+  vi.spyOn(publications, "listPublishedDocumentPaths").mockResolvedValue(["index.html"]);
   const files = [
     { path: "index.html", sha256: "a", size: 100, contentType: "text/html" },
     { path: "assets/site.css", sha256: "b", size: 20, contentType: "text/css" },

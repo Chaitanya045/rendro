@@ -938,7 +938,7 @@ function renderInitialIndex(_user: User, org: string, displayName: string): stri
 <head>${renderFaviconLinks()}
 <meta charset="UTF-8">
 <title>${escapeHtml(displayName)}</title>
-<style${nonceAttribute()}>body{font-family:system-ui;max-width:720px;margin:3rem auto;padding:0 1.5rem;line-height:1.6;color:#1a1a1a}</style>
+<style>body{font-family:system-ui;max-width:720px;margin:3rem auto;padding:0 1.5rem;line-height:1.6;color:#1a1a1a}</style>
 </head>
 <body>
 <h1>${escapeHtml(displayName)}</h1>

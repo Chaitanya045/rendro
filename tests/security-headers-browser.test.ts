@@ -5,6 +5,7 @@ import { build } from "esbuild";
 import { chromium, type Browser, type Page } from "playwright";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import worker from "@/worker";
+import { createShareToken } from "@/share-links";
 import { docsBase, mockSecurityBackend } from "./fixtures/security-headers";
 
 let server: ServerType;
@@ -87,6 +88,52 @@ describe("Chromium security header smoke", () => {
         await settled(page);
         expect(await page.locator("h1").count()).toBeGreaterThan(0);
       }
+    } finally { await page.close(); }
+  }, 20_000);
+
+  it.each([
+    ["/sign-in?error=access_denied", false, 200, "Sign in to Rendro"],
+    ["/api/auth/error?error=access_denied", false, 200, "Sign in to Rendro"],
+    ["/verify-email?verified=1", false, 200, "Email verified"],
+    ["/missing", false, 404, "Page not found"],
+    ["/docs/unknown", true, 404, "Page not found"],
+    ["/share/unknown", false, 404, "Share link unavailable"],
+    [`/share/${createShareToken("example/index.html", 100)}`, false, 410, "Share link unavailable"],
+    ["/s/test/files/missing.html", false, 404, "Page not found"],
+  ] as const)("loads styled auth/error HTML under CSP: %s", async (path, signedIn, status, heading) => {
+    const page = await pageFor(signedIn);
+    try {
+      const response = (await page.goto(origin + path))!;
+      expect(response.status()).toBe(status);
+      expect(response.headers()["cache-control"]).toContain("no-store");
+      expect(await page.locator("h1").textContent()).toBe(heading);
+      if (path.includes("error=access_denied")) expect(await page.locator("#form-error").textContent()).toContain("Google sign-in was canceled.");
+      await page.waitForFunction(() => Boolean((window as unknown as { RendroTheme?: unknown }).RendroTheme));
+      const nonce = response.headers()["content-security-policy"].match(/'nonce-([^']+)'/)![1];
+      const nonces = await page.locator("script:not([src]), style").evaluateAll(elements => elements.map(element => (element as HTMLElement).nonce));
+      expect(nonces.length).toBeGreaterThan(0);
+      expect(nonces.every(value => value === nonce)).toBe(true);
+      if (status >= 400) expect(await page.locator(".panel").evaluate(element => getComputedStyle(element).borderTopWidth)).toBe("1px");
+      await settled(page);
+    } finally { await page.close(); }
+  }, 20_000);
+
+  it("renders trusted document errors inside the opaque viewer", async () => {
+    const page = await pageFor();
+    try {
+      await page.goto(origin + "/");
+      await page.evaluate(path => {
+        const iframe = document.createElement("iframe");
+        iframe.sandbox.add("allow-scripts");
+        iframe.src = path;
+        document.body.append(iframe);
+      }, `${docsBase}/view/invalid/files/index.html`);
+      const frame = page.frameLocator("iframe");
+      await frame.locator(".panel").waitFor({ state: "visible" });
+      expect(await frame.locator("h1").textContent()).toBe("Page not found");
+      expect(await frame.locator("html").getAttribute("class")).toContain("framed");
+      expect(await frame.locator(".panel").evaluate(element => getComputedStyle(element).borderTopWidth)).toBe("1px");
+      await settled(page);
     } finally { await page.close(); }
   }, 20_000);
 

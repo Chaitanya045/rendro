@@ -1,6 +1,9 @@
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import worker from "@/worker";
+import * as orgs from "@/orgs";
+import * as minio from "@/minio";
+import * as apiKeys from "@/api-keys";
 import { securityHeaders } from "@/middleware/security-headers";
 import { nonceAttribute } from "@/middleware/html-nonce";
 import { createShareToken } from "@/share-links";
@@ -12,7 +15,7 @@ const request = (path: string, signedIn = false) => worker.request(`https://rend
 });
 function common(response: Response) {
   expect(response.headers.get("X-Content-Type-Options")).toBe("nosniff");
-  expect(response.headers.get("Strict-Transport-Security")).toBe("max-age=15552000; includeSubDomains");
+  expect(response.headers.get("Strict-Transport-Security")).toBe("max-age=15552000");
   for (const feature of ["camera", "microphone", "geolocation", "payment", "usb"]) {
     expect(response.headers.get("Permissions-Policy")).toContain(`${feature}=()`);
   }
@@ -26,9 +29,10 @@ beforeEach(mockSecurityBackend);
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 describe("shared response security policy", () => {
-  it.each(["/", "/sign-in", "/sign-up", "/forgot-password", "/reset-password", "/organizations/org-a", "/account/security", "/accept-invitation/test", docsBase, "/docs/example", "/p/product", "/s/test", "/missing"])("protects trusted HTML: %s", async path => {
+  it.each(["/", "/sign-in", "/sign-in?error=access_denied", "/verify-email", "/sign-up", "/forgot-password", "/reset-password", "/organizations/org-a", "/account/security", "/accept-invitation/test", docsBase, "/docs/example", "/p/product", "/public/example/product", "/s/test", "/docs/unknown", "/missing"])("protects trusted HTML: %s", async path => {
     const response = await request(path, path.startsWith("/organizations") || path.startsWith("/docs") || path === "/account/security" || path.startsWith("/accept-invitation/"));
     common(response);
+    expect(response.headers.get("Cache-Control")).toMatch(/(?:^|,\s*)no-store(?:,|$)/);
     expect(response.headers.get("Content-Type")).toContain("text/html");
     expect(response.headers.get("X-Frame-Options")).toBe("DENY");
     const csp = response.headers.get("Content-Security-Policy")!;
@@ -37,12 +41,49 @@ describe("shared response security policy", () => {
     expect(csp.match(/script-src [^;]+/)![0]).not.toContain("'unsafe-inline'");
     const nonce = csp.match(/'nonce-([^']+)'/)![1];
     const html = await response.text();
+    expect(html).toContain(`nonce="${nonce}"`);
     if (!csp.includes("style-src 'self' 'unsafe-inline'")) {
       for (const tag of html.matchAll(/<style\b[^>]*>/g)) expect(tag[0]).toContain(`nonce="${nonce}"`);
     }
     for (const tag of html.matchAll(/<script\b[^>]*>/g)) {
       if (!tag[0].includes(" src=")) expect(tag[0]).toContain(`nonce="${nonce}"`);
     }
+  });
+
+  it.each(["/share/unknown", "/p/product/files/missing.html", "/s/test/files/missing.html", `${docsBase}/view/invalid/files/index.html`])("uses nonces and no-store for styled document errors: %s", async path => {
+    const response = await request(path);
+    expect(response.status).toBe(404);
+    const csp = response.headers.get("Content-Security-Policy")!;
+    expect(csp).toContain("default-src 'self'");
+    expect(csp).toContain("frame-ancestors 'self'");
+    expect(csp).not.toContain("sandbox");
+    const nonce = csp.match(/'nonce-([^']+)'/)![1];
+    expect(await response.text()).toContain(`nonce="${nonce}"`);
+    expect(response.headers.get("Cache-Control")).toMatch(/(?:^|,\s*)no-store(?:,|$)/);
+  });
+
+  it.each(["/p/product/files/index.html", "/public/example/product/files/index.html", "/p/product/tree", "/public/example/product/tree", "/public/example/product/sitemap.xml", "/p/product/files/assets/site.css"])("keeps cacheable responses nonce-free: %s", async path => {
+    const response = await request(path);
+    expect(response.status).toBe(200);
+    expect(response.headers.get("Cache-Control")).toContain("public, max-age=0, must-revalidate");
+    expect(response.headers.get("Content-Security-Policy") ?? "").not.toContain("nonce-");
+    expect(await response.text()).not.toMatch(/\bnonce\s*=/i);
+  });
+
+  it("keeps the legacy API-key page non-storable without persisting its nonce in starter HTML", async () => {
+    vi.mocked(orgs.orgExists).mockResolvedValue(false);
+    vi.spyOn(apiKeys, "createOrgApiKey").mockResolvedValue("fixture-api-key");
+    const put = vi.spyOn(minio, "putObject").mockResolvedValue(undefined);
+    const response = await worker.request("https://rendro.test/api/orgs", {
+      method: "POST", headers: { Cookie: cookie, "Content-Type": "application/json" },
+      body: JSON.stringify({ org: "example", displayName: "Example" }),
+    });
+    expect(response.status).toBe(200);
+    expect(response.headers.get("Cache-Control")).toBe("private, no-store");
+    const nonce = response.headers.get("Content-Security-Policy")!.match(/'nonce-([^']+)'/)![1];
+    expect(await response.text()).toContain(`nonce="${nonce}"`);
+    expect(put).toHaveBeenCalledOnce();
+    expect(String(put.mock.calls[0][1])).not.toMatch(/\bnonce\s*=/i);
   });
 
   it("isolates nonces across concurrent requests and never stamps arbitrary scripts", async () => {
@@ -54,6 +95,7 @@ describe("shared response security policy", () => {
     const policies = responses.map(response => response.headers.get("Content-Security-Policy"));
     expect(new Set(policies).size).toBe(10);
     for (const response of responses) {
+      expect(response.headers.get("Cache-Control")).toBe("no-store");
       const nonce = response.headers.get("Content-Security-Policy")!.match(/'nonce-([^']+)'/)![1];
       expect(await response.text()).toBe(`<script nonce="${nonce}">trusted()</script><script>untrusted()</script>`);
     }
@@ -109,6 +151,7 @@ describe("shared response security policy", () => {
     common(response);
     expect(response.headers.get("Cache-Control")).toBe("public, max-age=3600");
     expect(response.headers.has("Content-Security-Policy")).toBe(false);
+    expect(await response.text()).not.toMatch(/\bnonce\s*=/i);
   });
 
   it("covers CORS preflights, redirects, and error responses", async () => {
