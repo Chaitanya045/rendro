@@ -1,3 +1,4 @@
+import { sessionCache } from "@/middleware/session";
 import { vi } from "vitest";
 import * as orgs from "@/orgs";
 import * as publications from "@/publications";
@@ -11,6 +12,7 @@ export const publisherHtml = '<!doctype html><html><head><link rel="stylesheet" 
 
 /** Deterministic backend/storage boundaries; the actual HTTP routes and templates run. */
 export function mockSecurityBackend() {
+  sessionCache.clear();
   const organization = { id: "org-a", name: "Test organization", slug: "test",
     members: [{ id: "member-a", userId: testUser.id, role: "owner", user: testUser }], invitations: [] };
   const access = managementAccessFixture(organization, testUser);
@@ -36,7 +38,7 @@ export function mockSecurityBackend() {
       return Promise.resolve(Response.json({ status: "success", value: false }));
     }
     let result: unknown = {};
-    if (url.pathname.endsWith("/get-session")) result = { user: testUser, session: { id: "session-a" } };
+    if (url.pathname.endsWith("/get-session")) result = { user: testUser, session: { id: "session-a", expiresAt: Date.now() + 60_000 } };
     else if (url.pathname.endsWith("/deployments/active")) result = { project: { name: "Test project" }, deployment: { manifestKey } };
     else if (url.pathname.endsWith("/publications/public")) result = { publication: { slug: "product", pathPrefix: "", entryFile: "index.html" }, project: { name: "Product" }, deployment: { manifestKey } };
     else if (url.pathname.endsWith("/shares/public")) result = { grant: { documentPath: "index.html", expiresAt: Date.now() + 60_000 }, project: { name: "Product" }, deployment: { manifestKey } };
