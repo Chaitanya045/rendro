@@ -69,7 +69,7 @@ export const page = query({
 function handler<Args extends Record<string, unknown>, Result>(registered: RegisteredQuery<"public", Args, Result> | RegisteredMutation<"public", Args, Result>) {
   return (registered as unknown as { _handler: (ctx: QueryCtx | MutationCtx, args: Args) => Result })._handler;
 }
-const legacyAuth = { getUserIdentity: async () => ({ subject: "author", email: "author@example.test", tokenIdentifier: "test|author", issuer: "test" }) };
+const legacyAuth = { getUserIdentity: () => Promise.resolve({ subject: "author", email: "author@example.test", tokenIdentifier: "test|author", issuer: "test" }) };
 export const legacyList = query({
   args: { orgSlug: v.string() },
   handler: (ctx, args) => handler(threads.list)({ ...ctx, auth: legacyAuth }, { ...args, filePath: "index.html" }),

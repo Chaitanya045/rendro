@@ -49,6 +49,9 @@ function call(backend: Pick<Fixture["backend"], "query" | "mutation">, endpoint:
 }
 async function failure(result: Promise<unknown>, code: PublicErrorCode) {
   const error: unknown = await result.catch((error: unknown) => error);
+  return errorEnvelope(error, code);
+}
+function errorEnvelope(error: unknown, code: PublicErrorCode) {
   expect(error).toBeInstanceOf(ConvexError);
   const data = (error as ConvexError<{ code: string; message: string }>).data;
   expect(Object.keys(data).sort()).toEqual(["code", "message"]);
@@ -156,7 +159,7 @@ describe("public Convex application error contract", () => {
       const denied = endpoint.ids.length ? { ...args, filePath: "another-document.html" } : { ...args, orgSlug: "other" };
       const code = endpoint.ids.length ? "not_found" : "forbidden";
       const error: unknown = await call(viewer, endpoint, denied).catch((error: unknown) => error);
-      await failure(Promise.reject(error), code);
+      errorEnvelope(error, code);
       expect(isDefinitiveCommentRejection(error)).toBe(true);
       expect(commentErrorMessage(error, "Fallback")).toBe(code === "not_found"
         ? "This comment is unavailable. Reload the document."
