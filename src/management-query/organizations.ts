@@ -3,7 +3,7 @@ import { experimental_createQueryPersister } from "@tanstack/query-persist-clien
 
 type Requester = (path: string, options?: RequestInit) => Promise<unknown>;
 type Identity = { userId: string; origin: string };
-export const ORGANIZATIONS_STALE_TIME = Infinity;
+export const ORGANIZATIONS_STALE_TIME = 30_000;
 const listPath = "/api/auth/organization/list";
 const changes = new Set(["create", "update", "delete", "leave", "accept-invitation", "add-member", "remove-member"]);
 type OrganizationPersister = Pick<ReturnType<typeof experimental_createQueryPersister>, "persisterFn" | "removeQueries">;
@@ -19,9 +19,8 @@ function labels(response: unknown) {
 /** Display data only. This cache must never authorize access to an organization. */
 export function createOrganizationListCache(identity: Identity, rawRequest: Requester, changed: () => void = () => {}, persistence?: OrganizationPersister) {
   const client = new QueryClient({ defaultOptions: { queries: {
-    // Membership-changing writes and authorization failures are the freshness
-    // boundary. Navigation, visibility and reconnects do not refetch this
-    // display-only list.
+    // Membership writes invalidate immediately. External changes are visible
+    // on the next menu open within 30s, without refetching on every navigation.
     staleTime: ORGANIZATIONS_STALE_TIME, gcTime: Infinity, retry: false, networkMode: "always",
   } } });
   const key = ["rendro-organization-list", identity.origin, identity.userId] as const;
@@ -63,12 +62,15 @@ export function createOrganizationListCache(identity: Identity, rawRequest: Requ
 
 export function installOrganizationListCache(identity: Identity, rawRequest: Requester) {
   let channel: BroadcastChannel | undefined;
+  let disposed = false;
   function broadcast(kind: "invalidate" | "clear") { try { channel?.postMessage({ userId: identity.userId, kind }); } catch { /* Cross-tab delivery is best effort. */ } }
   let storage;
   try {
     storage = {
       getItem: (key: string) => sessionStorage.getItem(key),
-      setItem: (key: string, value: string) => sessionStorage.setItem(key, value),
+      // The persister schedules writes after reads resolve. Fence those writes
+      // when sign-out disposes the cache, including already queued writes.
+      setItem: (key: string, value: string) => { if (!disposed) sessionStorage.setItem(key, value); },
       removeItem: (key: string) => sessionStorage.removeItem(key),
       entries: () => {
         const result: Array<[string, string]> = [];
@@ -83,21 +85,32 @@ export function installOrganizationListCache(identity: Identity, rawRequest: Req
   } catch { storage = undefined; }
   const persistence = experimental_createQueryPersister({
     storage,
-    buster: "rendro-organization-list-v1",
-    maxAge: Infinity,
+    buster: "rendro-organization-list-v2",
+    maxAge: ORGANIZATIONS_STALE_TIME,
     prefix: "rendro-organization-list-" + encodeURIComponent(identity.userId),
     refetchOnRestore: false,
   });
   const cache = createOrganizationListCache(identity, rawRequest, () => broadcast("invalidate"), persistence);
+  function dispose(notify: boolean) {
+    if (disposed) return;
+    disposed = true;
+    void cache.clear();
+    if (notify) broadcast("clear");
+    channel?.close();
+    channel = undefined;
+  }
   if (typeof BroadcastChannel !== "undefined") try {
     channel = new BroadcastChannel("rendro-organization-list");
     channel.onmessage = (event: MessageEvent<unknown>) => {
       const data = event.data && typeof event.data === "object" ? event.data as Record<string, unknown> : {};
       if (data.userId !== identity.userId) return;
       if (data.kind === "invalidate") void cache.invalidate();
-      if (data.kind === "clear") void cache.clear();
+      if (data.kind === "clear") dispose(false);
     };
   } catch { /* Restricted browsers still retain local caching and invalidation. */ }
-  window.addEventListener("commentor-sign-out", () => { void cache.clear(); broadcast("clear"); });
-  return cache.request;
+  window.addEventListener("commentor-sign-out", () => dispose(true));
+  if (document.documentElement.dataset.rendroSignedOut) dispose(false);
+  return (path: string, options?: RequestInit) => disposed
+    ? Promise.reject(new DOMException("Organization list cache disposed", "AbortError"))
+    : cache.request(path, options);
 }

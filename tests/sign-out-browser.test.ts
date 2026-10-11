@@ -66,6 +66,7 @@ beforeAll(async () => {
   app.get("/organizations/org/api-keys", c => c.html(renderApiKeyPage(reader, "org")));
   app.get("/organizations/org/projects/project/shares", c => c.html(renderSharePage(reader, "org", "project")));
   app.get("/api/rendro/management/access", c => c.json({ id: "org", name: "Fixture", userId: "reader", member: { userId: "reader", role: "owner" } }));
+  app.get("/api/auth/organization/list", c => c.json([{ id: "org", name: "Private organization", slug: "private" }]));
   app.get("/api/rendro/credentials", c => c.json({ credentials: [] }));
   app.post("/api/rendro/credentials", c => c.json({ rawKey }));
   app.get("/api/rendro/projects", c => c.json({ projects: [] }));
@@ -147,6 +148,9 @@ it.each(["broadcast", "storage", "focus", "own-form"])("scrubs the open API-key 
   tabB.on("pageerror", error => errors.push(error.message));
   await tabA.goto(`${harness.origin}/viewer`);
   await tabB.goto(`${harness.origin}/organizations/org/api-keys`);
+  await tabB.evaluate(() => (window as unknown as { RendroUI: { request: (path: string) => Promise<unknown> } }).RendroUI.request("/api/auth/organization/list"));
+  const cachedOrganizations = () => tabB.evaluate(() => Object.keys(sessionStorage).filter(key => key.startsWith("rendro-organization-list-")));
+  await expect.poll(cachedOrganizations).toHaveLength(1);
   await tabB.locator("#api-key-create").click();
   await tabB.locator('#key-form [name="name"]').fill("Fixture key");
   await tabB.locator('#key-form button[type="submit"]').click();
@@ -166,6 +170,7 @@ it.each(["broadcast", "storage", "focus", "own-form"])("scrubs the open API-key 
   await overlay.waitFor();
   expect(await tabB.locator("dialog[open]").count()).toBe(0);
   expect(await tabB.locator("#raw-key").textContent()).toBe("");
+  await expect.poll(cachedOrganizations).toEqual([]);
   expect(await tabB.locator("body").textContent()).not.toContain(rawKey);
   expect(await tabB.locator("#copy-key").evaluate((button: HTMLButtonElement) => button.onclick)).toBeNull();
   expect(await tabB.locator("#copy-env").evaluate((button: HTMLButtonElement) => button.onclick)).toBeNull();

@@ -1,3 +1,4 @@
+import { authReadWindow } from "../../shared/auth-read-window";
 import { v } from "convex/values";
 import { internal } from "./_generated/api";
 import { internalMutation, mutation } from "./_generated/server";
@@ -9,21 +10,11 @@ export const consume = mutation({
   args: { key: v.string() },
   returns: v.number(),
   handler: async (ctx, { key }) => {
-    const now = Date.now();
-    // Browsing measures 3 reads/navigation (+1 renewal): even 50/minute
-    // is <=200 reads before caching. 600 leaves 3x uncached headroom.
-    // Keep unverified callers at 120 and the fixed-window IP backstop at 6,000.
-    const max = key.startsWith("session-read-ip:") ? 6_000 : key.startsWith("session-read:") ? 600 : 120;
     const row = await ctx.db.query("rateLimit").withIndex("key", q => q.eq("key", key)).unique();
-    if (!row) {
-      await ctx.db.insert("rateLimit", { key, count: 1, lastRequest: now });
-    } else if (now - row.lastRequest >= 60_000) {
-      await ctx.db.patch(row._id, { count: 1, lastRequest: now });
-    } else if (row.count >= max) {
-      return Math.max(1, Math.ceil((60_000 - (now - row.lastRequest)) / 1_000));
-    } else {
-      await ctx.db.patch(row._id, { count: row.count + 1 });
-    }
+    const { retryAfter, ...next } = authReadWindow(key, row, Date.now());
+    if (retryAfter) return retryAfter;
+    if (row) await ctx.db.patch(row._id, next);
+    else await ctx.db.insert("rateLimit", { key, ...next });
     return 0;
   },
 });
@@ -40,7 +31,7 @@ export const cleanup = internalMutation({
       .withIndex("lastRequest", q => q.lte("lastRequest", cutoff))
       .paginate({ cursor: args.cursor ?? null, numItems: 100 });
     for (const row of batch.page) {
-      if (["session-read:", "session-read-ip:", "session-read-unverified:"].some(prefix => row.key.startsWith(prefix))) {
+      if (["session-read:", "session-read-ip:", "session-read-unverified:", "organization-read:", "organization-read-ip:", "organization-read-unverified:"].some(prefix => row.key.startsWith(prefix))) {
         await ctx.db.delete(row._id);
       }
     }

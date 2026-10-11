@@ -273,8 +273,9 @@ it.each(pages)("reuses the SSR lookup during $name controller startup, then refr
   const count = () => f.fetch.mock.calls.filter(([input]) => new URL(requestUrl(input)).pathname === new URL(initial.path, "https://rendro.test").pathname).length;
   expect([...win.document.querySelectorAll("h2")].map(node => node.textContent).join(" "), [...win.document.querySelectorAll(".empty p")].map(node => node.textContent).join(" ")).not.toMatch(/Unable to load|could not be confirmed/);
   expect(win.document.querySelector("script[data-cp-initial-data]")).toBeNull();
-  // Later dependent reads (invitations / credential choices) retain fresh authorization.
-  const initialCalls = ["overview", "people", "keys"].includes(page.name) ? 2 : 1;
+  // One load shares its freshly authorized SSR result, including dependent
+  // invitations/credential choices. A subsequent read must refresh live.
+  const initialCalls = 1;
   expect(count()).toBe(initialCalls);
   await win.eval(`window.RendroUI.request(${JSON.stringify(initial.path)})`);
   expect(count()).toBe(initialCalls + 1);

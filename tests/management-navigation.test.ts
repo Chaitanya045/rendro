@@ -46,6 +46,7 @@ function scopeRuntime(withCache = false) {
     copyText: vi.fn(),
     openDialog: vi.fn(),
     applyTheme: vi.fn(),
+    organizationContext: { dispose: vi.fn() },
   };
   const location = {
     href: "https://rendro.test/organizations/org-a/people",
@@ -179,6 +180,7 @@ describe("persistent management navigation", () => {
     expect(scope.signal.aborted).toBe(true);
     expect(signal.aborted).toBe(true);
     expect(cleanup).toHaveBeenCalledOnce();
+    expect(runtime.ui.organizationContext.dispose).toHaveBeenCalledOnce();
     resolve({ rawKey: "late-secret" });
     await rejection;
     scope.toast("stale");
@@ -223,8 +225,8 @@ describe("persistent management navigation", () => {
 
   it("loads Query Core before the route runtime and preloads it without adding React", () => {
     const html = renderedPage();
-    expect(html).toContain('<link rel="preload" href="/management-query.js?v=4" as="script">');
-    expect(html.indexOf('<script src="/management-query.js?v=4">')).toBeLessThan(html.indexOf('var SHELL_VERSION='));
+    expect(html).toContain('<link rel="preload" href="/management-query.js?v=5" as="script">');
+    expect(html.indexOf('<script src="/management-query.js?v=5">')).toBeLessThan(html.indexOf('var SHELL_VERSION='));
     expect(html).not.toContain("react-dom");
   });
 

@@ -56,6 +56,10 @@ export function createManagementQueryCache(identity: CacheIdentity, rawRequest: 
     networkMode: "always",
   } } });
   function clear() { client.clear(); }
+  function seed(path: string, data: unknown) {
+    const key = managementQueryKey(path, identity);
+    if (key) client.setQueryData(key, structuredClone(data));
+  }
   function abortError() { return new DOMException("Page navigation aborted", "AbortError"); }
   async function request(path: string, options: RequestInit, authorize: () => Promise<void>) {
     const key = managementQueryKey(path, identity);
@@ -101,5 +105,5 @@ export function createManagementQueryCache(identity: CacheIdentity, rawRequest: 
     } });
   }
   function invalidateMutation(path: string, options: RequestInit) { const impact = mutationImpact(path, options, identity); applyImpact(impact); return impact; }
-  return { request, clear, invalidate, invalidateMutation, applyImpact, canCache: (path: string) => Boolean(managementQueryKey(path, identity)) };
+  return { request, seed, clear, invalidate, invalidateMutation, applyImpact, canCache: (path: string) => Boolean(managementQueryKey(path, identity)) };
 }
