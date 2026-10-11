@@ -40,3 +40,8 @@ export function rewriteCssUrls(css: string, replace: (url: string) => string): s
     return text;
   }).join("");
 }
+
+/** Detect decoded at-keywords, including escaped/case-insensitive imports. */
+export function hasCssImports(css: string): boolean {
+  return tokenize({ css }).some(token => isTokenAtKeyword(token) && token[4].value.toLowerCase() === "import");
+}

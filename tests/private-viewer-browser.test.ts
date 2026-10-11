@@ -177,11 +177,16 @@ describe("opaque-origin Chromium private viewer", () => {
     } finally { await page.close(); }
   });
 
-  it.each(["swap.css", "nested/swap.css"])("retains the cascade through delayed, overlapping and failed %s replacement", async asset => {
+  it.each([
+    ["link", "swap.css"], ["link", "nested/swap.css"],
+    ["style", "swap.css"], ["style", "nested/swap.css"],
+  ])("retains the %s cascade through delayed, overlapping and failed %s replacement", async (kind, asset) => {
     heldAsset = asset;
     publisherHtml = `<!doctype html><head>
       <style>#probe, #cascade, #nested-probe { color: rgb(255, 0, 0) }</style>
-      <link rel="stylesheet" href="assets/swap.css" media="screen" data-publisher="preserved" crossorigin="anonymous">
+      ${kind === "link"
+        ? '<link rel="stylesheet" href="assets/swap.css" media="screen" nonce="publisher-nonce" data-publisher="preserved" crossorigin="anonymous">'
+        : '<style media="screen" nonce="publisher-nonce" data-publisher="preserved" crossorigin="anonymous">@import "assets/swap.css";</style>'}
       <style>#cascade { color: rgb(0, 0, 255) }</style>
       </head><body><p id="probe">Sheet</p><p id="cascade">Cascade order</p><p id="nested-probe">Nested sheet</p></body>`;
     const page = await browser.newPage();
@@ -190,13 +195,13 @@ describe("opaque-origin Chromium private viewer", () => {
       const frame = page.frames().find(frame => frame !== page.mainFrame())!;
       await frame.waitForFunction(() => getComputedStyle(document.getElementById("nested-probe")!).color === "rgb(128, 0, 128)");
       await frame.evaluate(() => {
-        const samples = { count: 0, wrong: [] as string[], maxLinks: 0 };
+        const samples = { count: 0, wrong: [] as string[], maxSheets: 0 };
         Object.assign(window, { sheetSamples: samples });
         const sample = () => {
           const colors = ["probe", "cascade", "nested-probe"].map(id => getComputedStyle(document.getElementById(id)!).color);
           if (colors.join(";") !== "rgb(0, 128, 0);rgb(0, 0, 255);rgb(128, 0, 128)") samples.wrong.push(colors.join(";"));
           samples.count++;
-          samples.maxLinks = Math.max(samples.maxLinks, document.querySelectorAll('link[rel="stylesheet"]').length);
+          samples.maxSheets = Math.max(samples.maxSheets, document.querySelectorAll("[data-publisher]").length);
           requestAnimationFrame(sample);
         };
         requestAnimationFrame(sample);
@@ -215,47 +220,100 @@ describe("opaque-origin Chromium private viewer", () => {
       await expect.poll(() => heldSheets.length).toBe(1);
       await sampleFrames();
       expect(await frame.evaluate(() => (window as unknown as { sheetSamples: { wrong: string[] } }).sheetSamples.wrong)).toEqual([]);
-      expect(await frame.locator("link").count()).toBe(2);
-      expect(await frame.locator("link").nth(1).getAttribute("media")).toBe("screen");
-      expect(await frame.locator("link").nth(1).getAttribute("data-publisher")).toBe("preserved");
-      expect(await frame.locator("link").nth(1).getAttribute("crossorigin")).toBe("anonymous");
+      expect(await frame.locator("[data-publisher]").count()).toBe(2);
+      expect(await frame.locator("[data-publisher]").nth(1).getAttribute("media")).toBe("screen");
+      expect(await frame.locator("[data-publisher]").nth(1).getAttribute("data-publisher")).toBe("preserved");
+      expect(await frame.locator("[data-publisher]").nth(1).getAttribute("crossorigin")).toBe("anonymous");
+      expect(await frame.locator("[data-publisher]").nth(1).evaluate(el => (el as HTMLElement).nonce)).toBe("publisher-nonce");
+      expect(await frame.locator("head").evaluate(el => [...el.querySelectorAll("style,link")].map(sheet => sheet.tagName)))
+        .toEqual(["STYLE", kind.toUpperCase(), kind.toUpperCase(), "STYLE"]);
       // A second renewal while the first replacement is loading must coalesce.
       await renew(2, 12);
       await sampleFrames();
       expect(heldSheets).toHaveLength(1);
-      expect(await frame.locator("link").count()).toBe(2);
+      expect(await frame.locator("[data-publisher]").count()).toBe(2);
       heldSheets[0].release(200);
       await expect.poll(() => heldSheets.length).toBe(2);
       expect(heldSheets[1].path).toContain("/view/renewed-2/");
       await sampleFrames();
       heldSheets[1].release(200);
-      await frame.waitForFunction(() => document.querySelectorAll("link").length === 1
-        && document.querySelector("link")!.href.includes("/view/renewed-2/"));
-      // A failed refresh keeps both parent and imported rules active.
+      await frame.waitForFunction(() => document.querySelectorAll("[data-publisher]").length === 1
+        && (document.querySelector("[data-publisher]")!.getAttribute("href") ?? document.querySelector("[data-publisher]")!.textContent!).includes("/view/renewed-2/"));
       await renew(3, 18);
       await expect.poll(() => heldSheets.length).toBe(3);
       await sampleFrames();
-      heldSheets[2].release(503);
-      await frame.waitForFunction(() => document.querySelectorAll("link").length === 1);
-      expect(await frame.locator("link").getAttribute("href")).toContain("/view/renewed-2/");
-      await sampleFrames();
+      heldSheets[2].release(200);
+      await frame.waitForFunction(() => document.querySelectorAll("[data-publisher]").length === 1
+        && (document.querySelector("[data-publisher]")!.getAttribute("href") ?? document.querySelector("[data-publisher]")!.textContent!).includes("/view/renewed-3/"));
+      // Chromium reports load on <style> when only a nested import fails.
+      // Exercise error retention on its direct import; linked sheets also
+      // propagate nested failures. Both variants above delay nested imports.
+      if (kind === "style") heldAsset = "swap.css";
+      // A failed refresh keeps both parent and imported rules active.
       await renew(4, 24);
       await expect.poll(() => heldSheets.length).toBe(4);
-      expect(heldSheets[3].path).toContain("/view/renewed-4/");
-      heldSheets[3].release(200);
-      await frame.waitForFunction(() => document.querySelectorAll("link").length === 1
-        && document.querySelector("link")!.href.includes("/view/renewed-4/"));
+      await sampleFrames();
+      heldSheets[3].release(503);
+      await frame.waitForFunction(() => document.querySelectorAll("[data-publisher]").length === 1);
+      expect(await frame.locator("[data-publisher]").evaluate(el => el.getAttribute("href") ?? el.textContent)).toContain("/view/renewed-3/");
+      await sampleFrames();
+      heldAsset = asset;
+      await renew(5, 30);
+      await expect.poll(() => heldSheets.length).toBe(5);
+      expect(heldSheets[4].path).toContain("/view/renewed-5/");
+      heldSheets[4].release(200);
+      await frame.waitForFunction(() => document.querySelectorAll("[data-publisher]").length === 1
+        && (document.querySelector("[data-publisher]")!.getAttribute("href") ?? document.querySelector("[data-publisher]")!.textContent!).includes("/view/renewed-5/"));
       await sampleFrames();
       const samples = await frame.evaluate(() => (window as unknown as {
-        sheetSamples: { count: number; wrong: string[]; maxLinks: number };
+        sheetSamples: { count: number; wrong: string[]; maxSheets: number };
       }).sheetSamples);
       expect(samples.count).toBeGreaterThan(60);
       expect(samples.wrong).toEqual([]);
-      expect(samples.maxLinks).toBe(2);
+      expect(samples.maxSheets).toBe(2);
+      expect(await frame.locator("head").evaluate(el => [...el.querySelectorAll("style,link")].map(sheet => sheet.tagName)))
+        .toEqual(["STYLE", kind.toUpperCase(), "STYLE"]);
     } finally {
       for (const pending of heldSheets) pending.release(200);
       await page.close();
     }
+  });
+
+
+  it("updates a block without imports synchronously without replacing its element or losing rules", async () => {
+    publisherHtml = `<!doctype html><head><style id="plain">
+      #probe { color: rgb(0, 128, 0); background-image: url(assets/plain.svg) }
+      </style></head><body><p id="probe">Plain block</p></body>`;
+    const page = await browser.newPage();
+    try {
+      await page.goto(origin);
+      const frame = page.frames().find(frame => frame !== page.mainFrame())!;
+      await frame.evaluate(() => {
+        const original = document.getElementById("plain");
+        const samples = { count: 0, wrong: 0 };
+        Object.assign(window, { plainSamples: samples });
+        const sample = () => {
+          samples.count++;
+          if (document.getElementById("plain") !== original
+            || getComputedStyle(document.getElementById("probe")!).color !== "rgb(0, 128, 0)") samples.wrong++;
+          requestAnimationFrame(sample);
+        };
+        requestAnimationFrame(sample);
+      });
+      for (let round = 1; round <= 3; round++) {
+        now = epoch + round * 6 * 60_000;
+        await frame.evaluate(time => { Date.now = () => time; window.dispatchEvent(new Event("focus")); }, now);
+        await frame.waitForFunction(expected => document.getElementById("plain")!.textContent!.includes(expected), `/view/renewed-${round}/`);
+        await frame.evaluate(() => new Promise<void>(resolve => {
+          let count = 0;
+          const tick = () => { if (++count === 12) resolve(); else requestAnimationFrame(tick); };
+          requestAnimationFrame(tick);
+        }));
+      }
+      const samples = await frame.evaluate(() => (window as unknown as { plainSamples: { count: number; wrong: number } }).plainSamples);
+      expect(samples.count).toBeGreaterThanOrEqual(36);
+      expect(samples.wrong).toBe(0);
+    } finally { await page.close(); }
   });
 
   it.each(viewerHtmlForms)("loads the first stylesheet with an %s document", async (_name, source) => {

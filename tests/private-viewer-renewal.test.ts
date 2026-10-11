@@ -1,4 +1,4 @@
-import { Window as DOMWindow, type HTMLLinkElement as DOMLinkElement } from "happy-dom";
+import { Window as DOMWindow, type HTMLLinkElement as DOMLinkElement, type HTMLStyleElement as DOMStyleElement } from "happy-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { installViewerFrame, installViewerParent } from "@/viewer/client";
 
@@ -33,7 +33,12 @@ function frameFixture() {
   vi.spyOn(win.HTMLLinkElement.prototype, "dispatchEvent").mockImplementation(function (this: DOMLinkElement, event) {
     return completing ? dispatch.call(this, event) : true;
   });
-  const settleSheet = (link: DOMLinkElement, type: "load" | "error") => {
+  // eslint-disable-next-line @typescript-eslint/unbound-method -- explicitly called with the style receiver below
+  const dispatchStyle = win.HTMLStyleElement.prototype.dispatchEvent;
+  vi.spyOn(win.HTMLStyleElement.prototype, "dispatchEvent").mockImplementation(function (this: DOMStyleElement, event) {
+    return completing ? dispatchStyle.call(this, event) : true;
+  });
+  const settleSheet = (link: DOMLinkElement | DOMStyleElement, type: "load" | "error") => {
     completing = true;
     try { link.dispatchEvent(new win.Event(type)); }
     finally { completing = false; }
@@ -118,6 +123,43 @@ describe("private viewer renewal", () => {
     settleSheet(links[1], "load");
     expect(win.document.querySelectorAll("link")).toHaveLength(1);
     expect(original.isConnected).toBe(false);
+  });
+
+  it("times out silent inline imports, backs off failures, and recovers with the latest ticket", () => {
+    vi.useFakeTimers();
+    const { win, renew, settleSheet } = frameFixture();
+    const original = win.document.querySelector("style")!;
+    original.textContent = String.raw`@\69mport "assets/site.css";`;
+    const attempt = (ticket: string, elapsed: number) => {
+      vi.advanceTimersByTime(elapsed);
+      win.document.dispatchEvent(new win.Event("error"));
+      renew(`${base}/view/${ticket}/files/`);
+    };
+    attempt("first", 0);
+    const timedOut = win.document.querySelectorAll("style")[1];
+    expect(timedOut.textContent).toContain("/view/first/");
+    vi.advanceTimersByTime(30_000);
+    expect(win.document.querySelectorAll("style")).toHaveLength(1);
+    expect(win.document.querySelector("style")).toBe(original);
+    // Late network events from the discarded clone cannot remove the active one.
+    settleSheet(timedOut, "load");
+    expect(original.isConnected).toBe(true);
+    attempt("during-backoff", 1_000);
+    expect(win.document.querySelectorAll("style")).toHaveLength(1);
+    attempt("retry", 60_000);
+    let replacement = win.document.querySelectorAll("style")[1];
+    expect(replacement.textContent).toContain("/view/retry/");
+    settleSheet(replacement, "error");
+    attempt("longer-backoff", 61_000);
+    expect(win.document.querySelectorAll("style")).toHaveLength(1);
+    attempt("recovered", 61_000);
+    replacement = win.document.querySelectorAll("style")[1];
+    expect(replacement.textContent).toContain("/view/recovered/");
+    settleSheet(replacement, "load");
+    expect(win.document.querySelectorAll("style")).toHaveLength(1);
+    expect(original.isConnected).toBe(false);
+    vi.advanceTimersByTime(30_000);
+    expect(replacement.isConnected).toBe(true);
   });
 
   it("recovers after tab suspension and ignores forged, stale, or out-of-scope renewal messages", () => {

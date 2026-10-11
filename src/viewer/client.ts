@@ -115,8 +115,7 @@ export function installViewerFrame(config: FrameConfig, host: Window = window): 
         if (replacement !== style) element.setAttribute("style", replacement);
       }
       if (element.tagName === "STYLE" && element.textContent) {
-        const replacement = rewriteCssUrls(element.textContent, replaceCssUrl);
-        if (replacement !== element.textContent) element.textContent = replacement;
+        renewStylesheet(element as HTMLStyleElement, css => rewriteCssUrls(css, replaceCssUrl));
       }
     }
     managedCssUrls = nextCssUrls;

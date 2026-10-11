@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { rewriteCssUrls } from "@/viewer/css-urls";
+import { hasCssImports, rewriteCssUrls } from "@/viewer/css-urls";
 
 const rewrite = (css: string) => rewriteCssUrls(css, value => {
   const url = new URL(value, "https://rendro.test/view/old/files/guide/index.html");
@@ -64,5 +64,14 @@ mask-image: -webkit-image-set("c.png" 1x, url(d.png) 2x);
 background: url(https://external.test/a.png), url(data:image/png;base64,AAAA), url(/public/a.png);
 broken: url(bad"url); }`;
     expect(rewrite(css)).toBe(css);
+  });
+});
+
+describe("CSS import detection", () => {
+  it.each(['@import "a.css";', '@IMPORT url(a.css);', String.raw`@\69mport "a.css";`])("recognizes %s", css => {
+    expect(hasCssImports(css)).toBe(true);
+  });
+  it("ignores imports inside ordinary strings and comments", () => {
+    expect(hasCssImports('/* @import "a.css"; */ .a { content: "@import b.css;"; background: url(a.png) }')).toBe(false);
   });
 });
