@@ -124,6 +124,23 @@ describe("fragment targets and bridge data", () => {
 });
 
 describe("share fragment restoration", () => {
+  it("discards an oversized initial fragment while restoring a bounded document query", async () => {
+    const win = new DOMWindow({ url: origin + "/s/fixture#" + "x".repeat(4096) });
+    try {
+      win.document.body.innerHTML = '<iframe id="content-frame"></iframe>';
+      const frame = win.document.querySelector("iframe")!;
+      win.history.replaceState({ preserved: true }, "", win.location.href);
+      installShareFragments(config, win as unknown as Window);
+      win.dispatchEvent(new win.MessageEvent("message", {
+        data: { type: "doc-loaded", path: config.documentPath, search: "?v=2", fragment: "#section" },
+        source: frame.contentWindow as DOMWindow, origin: "null",
+      }));
+      expect(win.location.hash).toBe("#section");
+      expect(new URL(win.location.href).searchParams.get("docQuery")).toBe("?v=2");
+      expect(win.history.state).toEqual({ preserved: true });
+    } finally { await win.happyDOM.close(); }
+  });
+
   it.each(["popstate", "doc-fragment"])("discards a pending initial deep link after %s", async action => {
     const win = new DOMWindow({ url: origin + "/s/fixture#old" });
     try {
@@ -131,7 +148,7 @@ describe("share fragment restoration", () => {
       const frame = win.document.querySelector("iframe")!;
       installShareFragments(config, win as unknown as Window);
       const report = (type: string, fragment: string) => win.dispatchEvent(new win.MessageEvent("message", {
-        data: { type, path: config.documentPath, fragment }, source: frame.contentWindow as DOMWindow, origin: "null",
+        data: { type, path: config.documentPath, search: "", fragment }, source: frame.contentWindow as DOMWindow, origin: "null",
       }));
       if (action === "popstate") win.dispatchEvent(new win.PopStateEvent("popstate"));
       else report("doc-fragment", "#details");
