@@ -153,7 +153,7 @@ describe("viewer fragment navigation in Chromium", { timeout: 15_000 }, () => {
       expect(await frame.locator("textarea").inputValue()).toBe("Unsent comment draft");
       expect(requests.filter(path => path === `${base}/files/${documents[0]}`).length).toBe(loads);
       expect(await page.evaluate(() => history.length)).toBe(historyLength);
-      expect(frame.url()).toBe(`${origin}${base}/files/${documents[0]}`);
+      expect(frame.url()).toBe(`${origin}${base}/files/${documents[0]}${base === "/s/fixture" ? "#details" : ""}`);
       await frame.getByRole("link", { name: "Unicode", exact: true }).click();
       await atTarget(frame, "日本語");
       await expect.poll(() => decodeURIComponent(new URL(page.url()).hash)).toBe("#日本語");
@@ -250,6 +250,63 @@ describe("viewer fragment navigation in Chromium", { timeout: 15_000 }, () => {
         expect(new URL(page.url()).searchParams.has("docQuery")).toBe(false);
       }
       expect(requests).not.toContain("ticket-request");
+    } finally { await page.close(); }
+  });
+
+  it.each([privateBase, "/p/fixture", "/s/fixture"])("restores the destination fragment through query Back/Forward and reload in %s", async base => {
+    const { page, frame } = await open(base);
+    const assertDestination = async (query: string, target: string) => {
+      await frame.waitForFunction(query => document.readyState === "complete"
+        && document.body?.dataset.initializedQuery === query, query);
+      await expect.poll(() => new URL(page.url()).hash).toBe("#" + target);
+      await atTarget(frame, target);
+      expect(new URL(frame.url()).search).toBe(query);
+      if (base === "/s/fixture") expect(new URL(frame.url()).hash).toBe("#" + target);
+    };
+    try {
+      await frame.getByRole("link", { name: "Query one", exact: true }).click();
+      await assertDestination("?v=1", "details");
+      await frame.getByRole("link", { name: "Query two", exact: true }).click();
+      await assertDestination("?v=2", "section");
+      await page.evaluate(() => history.back());
+      await assertDestination("?v=1", "details");
+      await page.evaluate(() => history.forward());
+      await assertDestination("?v=2", "section");
+      await page.evaluate(() => history.back());
+      await assertDestination("?v=1", "details");
+      await page.reload({ waitUntil: "domcontentloaded" });
+      const restored = await readyFrame(page);
+      await expect.poll(() => new URL(page.url()).hash).toBe("#details");
+      await atTarget(restored, "details");
+      expect(requests).not.toContain("ticket-request");
+    } finally { await page.close(); }
+  });
+
+  it.each(["", "#details", "#日本語"])("restores initial and replaced share fragments through history: %s", async hash => {
+    const { page, frame } = await open("/s/fixture", hash === "#日本語" ? "#details" : hash);
+    const assertOriginal = async () => {
+      await frame.waitForFunction(() => document.readyState === "complete" && document.body?.dataset.initializedQuery === "");
+      await expect.poll(() => decodeURIComponent(new URL(page.url()).hash)).toBe(hash);
+      await expect.poll(() => decodeURIComponent(new URL(frame.url()).hash)).toBe(hash);
+      if (hash) await atTarget(frame, hash.slice(1));
+      else await expect.poll(() => frame.evaluate(() => scrollY)).toBe(0);
+    };
+    try {
+      if (hash === "#日本語") {
+        await atTarget(frame, "details");
+        await frame.getByRole("link", { name: "Unicode", exact: true }).click();
+      }
+      await assertOriginal();
+      await frame.getByRole("link", { name: "Query two", exact: true }).click();
+      await frame.waitForFunction(() => document.readyState === "complete" && document.body?.dataset.initializedQuery === "?v=2");
+      await expect.poll(() => new URL(page.url()).hash).toBe("#section");
+      await atTarget(frame, "section");
+      await page.evaluate(() => history.back());
+      await assertOriginal();
+      await page.evaluate(() => history.forward());
+      await frame.waitForFunction(() => document.readyState === "complete" && document.body?.dataset.initializedQuery === "?v=2");
+      await expect.poll(() => new URL(page.url()).hash).toBe("#section");
+      await atTarget(frame, "section");
     } finally { await page.close(); }
   });
 

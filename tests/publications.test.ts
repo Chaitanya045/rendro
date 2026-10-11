@@ -220,7 +220,7 @@ describe("anonymous public routes", () => {
     const documentHtml = await document.text();
     expect(documentHtml).toContain("<h1>Public guide</h1>");
     expect(documentHtml).toContain('data-viewer="navigation"');
-    expect(documentHtml).toContain("/private-viewer.js?v=4");
+    expect(documentHtml).toContain("/private-viewer.js?v=5");
     expect(documentHtml).not.toContain("window.COMMENTOR");
     expect(documentHtml).not.toContain("commentor.js");
     expect(document.headers.get("content-security-policy")).toContain("sandbox");

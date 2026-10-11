@@ -1,6 +1,6 @@
 import { Window as DOMWindow } from "happy-dom";
 import { describe, expect, it, vi } from "vitest";
-import { classifyDocumentLink, installDocumentNavigation } from "@/viewer/navigation";
+import { classifyDocumentLink, installDocumentNavigation, installShareFragments } from "@/viewer/navigation";
 import { scrollToFragment, validFragment } from "@/viewer/fragments";
 
 const origin = "https://rendro.test";
@@ -119,6 +119,28 @@ describe("fragment targets and bridge data", () => {
       expect(scroll).not.toHaveBeenCalled();
       win.dispatchEvent(new win.MessageEvent("message", { data, source: win.parent, origin }));
       expect(scroll).toHaveBeenCalledOnce();
+    } finally { await win.happyDOM.close(); }
+  });
+});
+
+describe("share fragment restoration", () => {
+  it.each(["popstate", "doc-fragment"])("discards a pending initial deep link after %s", async action => {
+    const win = new DOMWindow({ url: origin + "/s/fixture#old" });
+    try {
+      win.document.body.innerHTML = '<iframe id="content-frame"></iframe>';
+      const frame = win.document.querySelector("iframe")!;
+      installShareFragments(config, win as unknown as Window);
+      const report = (type: string, fragment: string) => win.dispatchEvent(new win.MessageEvent("message", {
+        data: { type, path: config.documentPath, fragment }, source: frame.contentWindow as DOMWindow, origin: "null",
+      }));
+      if (action === "popstate") win.dispatchEvent(new win.PopStateEvent("popstate"));
+      else report("doc-fragment", "#details");
+      report("doc-loaded", "#details");
+      expect(win.location.hash).toBe("#details");
+      report("doc-loaded", "#section");
+      expect(win.location.hash).toBe("#section");
+      report("doc-loaded", "");
+      expect(win.location.hash).toBe("");
     } finally { await win.happyDOM.close(); }
   });
 });
