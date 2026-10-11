@@ -314,7 +314,7 @@ async function runtime(
     MutationObserver: class { observe() {} },
   };
   vm.runInNewContext(scripts.find((script) => script.includes("window.RendroUI={busy")) ?? "", context);
-  vm.runInNewContext(scripts.at(-1) ?? "", context);
+  vm.runInNewContext(html.match(/<script data-cp-page-script>([\s\S]*?)<\/script>/)?.[1] ?? "", context);
   await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
   await new Promise<void>((resolve) => setImmediate(resolve));
   await Promise.resolve(); await Promise.resolve();

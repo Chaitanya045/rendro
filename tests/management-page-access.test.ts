@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { Window } from "happy-dom";
+import { sessionMiddleware } from "@/middleware/session";
 import { createHmac } from "node:crypto";
 import { Hono } from "hono";
 import type { User } from "better-auth/types";
@@ -13,9 +16,13 @@ import apiKeyPages from "@/routes/api-key-pages";
 import publicationPages from "@/routes/publication-pages";
 import sharePages from "@/routes/share-pages";
 
+function requestUrl(input: string | URL | Request): string {
+  return typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+}
+
 // Real Convex HTTP actions, membership/session helpers and table ID validation.
 // Only transport is replaced; no authorization helper is mocked.
-async function fixture() {
+async function fixture(realSession = false) {
   const backend = convexTest(schema, import.meta.glob("../convex/**/*.ts"));
   backend.registerComponent("betterAuth", authSchema, import.meta.glob("../convex/betterAuth/**/*.ts"));
   const now = Date.now(), token = "management-page-session";
@@ -55,7 +62,8 @@ async function fixture() {
   const user: User = { id: records.userId, name: "Owner", email: "owner@example.test", emailVerified: true, createdAt: new Date(), updatedAt: new Date() };
   const app = new Hono<{ Variables: { user?: User } }>();
   app.use("*", securityHeaders);
-  app.use("*", async (c, next) => {
+  if (realSession) app.use("*", sessionMiddleware);
+  else app.use("*", async (c, next) => {
     if (c.req.header("Cookie")) c.set("user", user);
     await next();
   });
@@ -63,7 +71,7 @@ async function fixture() {
   const role = (value: string) => backend.run(ctx => ctx.runMutation(components.betterAuth.adapter.updateOne, {
     input: { model: "member", where: [{ field: "_id", value: records.memberId }], update: { role: value } },
   }));
-  return { ...records, app, backend, fetch, cookie, role, projectId: project._id, foreignProjectId: foreignProject._id, missingProjectId: missingProject._id };
+  return { ...records, user, app, backend, fetch, cookie, role, projectId: project._id, foreignProjectId: foreignProject._id, missingProjectId: missingProject._id };
 }
 
 type Page = { name: string; suffix: string; content: string; project?: boolean };
@@ -106,7 +114,8 @@ async function notFound(response: Response, requestedPath: string) {
   return html.replaceAll(`nonce="${nonce}"`, 'nonce="NORMALIZED"').replaceAll(requestedPath.split("?")[0], "/REQUESTED");
 }
 
-afterEach(() => vi.unstubAllGlobals());
+const windows: Window[] = [];
+afterEach(async () => { vi.useRealTimers(); vi.unstubAllGlobals(); for (const win of windows.splice(0)) await win.happyDOM.close(); });
 
 describe.each(pages)("$name management page authorization", page => {
   it("resolves members once and makes all inaccessible IDs indistinguishable", async () => {
@@ -174,6 +183,157 @@ it.each(["network", "redirect", "server", "invalid-json", "wrong-identity"])("fa
         : failure === "invalid-json" ? new Response("not json") : Response.json({ id: f.organizationId, userId: "someone-else" }),
   ));
   const response = await f.app.request(path(pages[0], f.organizationId), { headers: { Cookie: f.cookie } });
-  expect(response.status).toBe(502);
-  expect(await response.text()).toBe("Unable to verify workspace access. Please try again.");
+  await unavailable(response);
+});
+
+async function unavailable(response: Response, retryAfter = "1") {
+  expect(response.status).toBe(503);
+  expect(response.headers.get("Cache-Control")).toBe("private, no-store");
+  expect(response.headers.get("Retry-After")).toBe(retryAfter);
+  expect(response.headers.get("Content-Type")).toContain("text/html");
+  const html = await response.text();
+  expect(html).toContain("503 · Temporarily unavailable");
+  expect(html).toContain('class="retry" href="">Try again</a>');
+  expect(html).toContain('aria-labelledby="session-error-title"');
+  expect(html).toContain('href="/favicon.ico"');
+  expect(html).not.toContain("private backend detail");
+  const nonce = response.headers.get("Content-Security-Policy")?.match(/'nonce-([^']+)'/)?.[1];
+  expect(nonce).toBeTruthy();
+  for (const [tag] of html.matchAll(/<(?:script|style)\b[^>]*>/g)) expect(tag).toContain(`nonce="${nonce}"`);
+}
+
+it("resolves invitations only for recipients and gives the same 404 for every unavailable ID", async () => {
+  const f = await fixture(), now = Date.now();
+  const invite = (email: string, status = "pending", expiresAt = now + 60_000) => f.backend.run(ctx => ctx.runMutation(components.betterAuth.adapter.create, { input: {
+    model: "invitation", data: { organizationId: f.organizationId, inviterId: f.userId, email, role: "member", status, expiresAt, createdAt: now },
+  } }));
+  const valid = await invite("OWNER@example.test");
+  const other = await invite("other@example.test");
+  const expired = await invite("owner@example.test", "pending", now - 1000);
+  const accepted = await invite("owner@example.test", "accepted");
+  const rejected = await invite("owner@example.test", "rejected");
+  const canceled = await invite("owner@example.test", "canceled");
+  const missing = await invite("owner@example.test");
+  await f.backend.run(ctx => ctx.runMutation(components.betterAuth.adapter.deleteOne, { input: { model: "invitation", where: [{ field: "_id", value: missing._id }] } }));
+  const headers = { Cookie: f.cookie };
+  const validPath = `/accept-invitation/${valid._id}`;
+  const response = await f.app.request(validPath, { headers });
+  expect(response.status).toBe(200);
+  const invitationHtml = await response.text();
+  expect(invitationHtml).toContain('data-cp-initial-data type="application/json"');
+  const browser = await startBrowser(invitationHtml, validPath, f);
+  expect(browser.document.querySelector("#accept")).not.toBeNull();
+  expect(f.fetch.mock.calls.filter(([input]) => requestUrl(input).includes("get-invitation"))).toHaveLength(1);
+  let expected: string | undefined;
+  for (const id of ["not-a-valid-id", f.organizationId, missing._id, other._id, expired._id, accepted._id, rejected._id, canceled._id]) {
+    const url = `/accept-invitation/${id}`;
+    const body = await notFound(await f.app.request(url, { headers }), url);
+    expected ??= body;
+    expect(body).toBe(expected);
+  }
+  // Recipients need no existing organization membership. Keep a different inviter.
+  const inviter = await f.backend.run(ctx => ctx.runMutation(components.betterAuth.adapter.create, { input: { model: "user", data: { name: "Inviter", email: "inviter@example.test", emailVerified: true, createdAt: now, updatedAt: now } } }));
+  await f.backend.run(async ctx => {
+    await ctx.runMutation(components.betterAuth.adapter.create, { input: { model: "member", data: { organizationId: f.organizationId, userId: inviter._id, role: "owner", createdAt: now } } });
+    await ctx.runMutation(components.betterAuth.adapter.updateOne, { input: { model: "invitation", where: [{ field: "_id", value: valid._id }], update: { inviterId: inviter._id } } });
+    await ctx.runMutation(components.betterAuth.adapter.deleteOne, { input: { model: "member", where: [{ field: "_id", value: f.memberId }] } });
+  });
+  expect((await f.app.request(validPath, { headers })).status).toBe(200);
+  const signedOut = await f.app.request(validPath);
+  expect(signedOut.status).toBe(302);
+  expect(signedOut.headers.get("Location")).toBe(`/sign-in?returnTo=${encodeURIComponent(validPath)}`);
+});
+
+async function startBrowser(html: string, url: string, f: Awaited<ReturnType<typeof fixture>>) {
+  const win = new Window({ url: `https://rendro.test${url}`, settings: { enableJavaScriptEvaluation: true, disableJavaScriptFileLoading: true, disableCSSFileLoading: true } });
+  windows.push(win);
+  Object.assign(win, { AbortController, AbortSignal, structuredClone });
+  win.document.write(html.replace(/<script\b([^>]*)>[\s\S]*?<\/script>/g, (tag, attrs: string) => attrs.includes('type="application/json"') ? tag : ""));
+  win.fetch = ((input: string, init?: RequestInit) => f.fetch(new URL(input, win.location.href), { ...init, headers: { ...Object.fromEntries(new Headers(init?.headers)), Cookie: f.cookie } })) as unknown as typeof win.fetch;
+  for (const match of html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/g)) {
+    if (match[1].includes('type="application/json"')) continue;
+    // Model a streamed document pausing before its controller. Hydration must
+    // survive this delay, and unused data must be cleared after startup.
+    if (match[1].includes("data-cp-page-script")) await new Promise(resolve => setTimeout(resolve, 10));
+    const src = match[1].match(/src="([^"?]+)/)?.[1];
+    if (src === "/management-query.js" || src === "/select.js") win.eval(readFileSync(`public${src}`, "utf8"));
+    else if (!src) win.eval(match[2]);
+  }
+  for (let i = 0; i < 20; i++) await new Promise<void>(resolve => setTimeout(resolve, 5));
+  return win;
+}
+
+it.each(pages)("reuses the SSR lookup during $name controller startup, then refreshes live", async page => {
+  const f = await fixture(), url = path(page, f.organizationId, f.projectId);
+  const response = await f.app.request(url, { headers: { Cookie: f.cookie } });
+  const html = await response.text();
+  const initial = JSON.parse(html.match(/data-cp-initial-data type="application\/json">([\s\S]*?)<\/script>/)![1]) as { path: string };
+  const win = await startBrowser(html, url, f);
+  const count = () => f.fetch.mock.calls.filter(([input]) => new URL(requestUrl(input)).pathname === new URL(initial.path, "https://rendro.test").pathname).length;
+  expect([...win.document.querySelectorAll("h2")].map(node => node.textContent).join(" "), [...win.document.querySelectorAll(".empty p")].map(node => node.textContent).join(" ")).not.toMatch(/Unable to load|could not be confirmed/);
+  expect(win.document.querySelector("script[data-cp-initial-data]")).toBeNull();
+  // Later dependent reads (invitations / credential choices) retain fresh authorization.
+  const initialCalls = ["overview", "people", "keys"].includes(page.name) ? 2 : 1;
+  expect(count()).toBe(initialCalls);
+  await win.eval(`window.RendroUI.request(${JSON.stringify(initial.path)})`);
+  expect(count()).toBe(initialCalls + 1);
+});
+
+it.each([429, 500, 502, 503, 504])("preserves retryable recovery for upstream %s after a real successful session lookup", async status => {
+  const f = await fixture(true), transport = f.fetch.getMockImplementation()!;
+  f.fetch.mockImplementation((input, init) => requestUrl(input).includes("/get-session") ? transport(input, init)
+    : Promise.resolve(new Response("private backend detail", { status, headers: { "Retry-After": "7" } })));
+  for (const url of [path(pages[0], f.organizationId), path(pages[8], f.organizationId, f.projectId), "/accept-invitation/unavailable"]) {
+    await unavailable(await f.app.request(url, { headers: { Cookie: f.cookie } }), "7");
+  }
+  expect(f.fetch.mock.calls.some(([input]) => requestUrl(input).includes("/get-session"))).toBe(true);
+});
+
+it.each(["headers", "body"])("bounds a stalled lookup %s and aborts upstream work", async stall => {
+  const f = await fixture();
+  vi.useFakeTimers();
+  let signal: AbortSignal | undefined;
+  f.fetch.mockImplementation((_input, init) => {
+    signal = init?.signal ?? undefined;
+    return stall === "headers" ? new Promise<Response>(() => {})
+      : Promise.resolve(new Response(new ReadableStream({ start(controller) { controller.enqueue(new TextEncoder().encode('{"id":')); } })));
+  });
+  const result = f.app.request(path(pages[0], f.organizationId), { headers: { Cookie: f.cookie } });
+  await vi.advanceTimersByTimeAsync(5_001);
+  await unavailable(await result);
+  expect(signal?.aborted).toBe(true);
+});
+
+it("escapes authorized initial data without creating executable markup", async () => {
+  const f = await fixture();
+  const name = '</script><script>alert("secret")</script> & \u2028';
+  await f.backend.run(ctx => ctx.runMutation(components.betterAuth.adapter.updateOne, { input: { model: "organization", where: [{ field: "_id", value: f.organizationId }], update: { name } } }));
+  const response = await f.app.request(path(pages[4], f.organizationId), { headers: { Cookie: f.cookie } });
+  const html = await response.text();
+  expect(html).not.toContain(name);
+  const payload = html.match(/<script([^>]*data-cp-initial-data[^>]*)>([\s\S]*?)<\/script>/)!;
+  expect(payload[1]).toContain('type="application/json"');
+  expect(payload[1]).toContain('nonce="');
+  expect(JSON.parse(payload[2]).data.name).toBe(name);
+});
+
+it.each(["invalid", "0", "date"])("normalizes %s Retry-After without exposing upstream content", async kind => {
+  const f = await fixture();
+  const date = new Date(Math.ceil(Date.now() / 1000) * 1000 + 20_000);
+  f.fetch.mockResolvedValue(new Response("private backend detail", { status: 503, headers: { "Retry-After": kind === "date" ? date.toUTCString() : kind } }));
+  const response = await f.app.request(path(pages[0], f.organizationId), { headers: { Cookie: f.cookie } });
+  const seconds = response.headers.get("Retry-After")!;
+  if (kind === "date") expect(Number(seconds)).toBeGreaterThanOrEqual(19);
+  else expect(seconds).toBe("1");
+  await unavailable(response, seconds);
+});
+
+it("keeps a revoked backend session signed out without embedding initial data", async () => {
+  const f = await fixture();
+  f.fetch.mockResolvedValue(new Response(null, { status: 401 }));
+  const url = path(pages[0], f.organizationId);
+  const response = await f.app.request(url, { headers: { Cookie: f.cookie } });
+  expect(response.status).toBe(302);
+  expect(response.headers.get("Location")).toBe(`/sign-in?returnTo=${encodeURIComponent(url)}`);
+  expect(await response.text()).not.toContain("data-cp-initial-data");
 });

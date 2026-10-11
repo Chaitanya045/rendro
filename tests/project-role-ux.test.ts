@@ -183,8 +183,7 @@ async function flushRuntime() {
 
 async function roleRuntime(page: Page, initialRole: Role) {
   const html = await (await authenticatedPages().request(routeFor(page))).text();
-  const scripts = [...html.matchAll(/<script(?:[^>]*)>([\s\S]*?)<\/script>/g)].map((match) => match[1]);
-  const script = scripts.at(-1) ?? "";
+  const script = html.match(/<script data-cp-page-script>([\s\S]*?)<\/script>/)?.[1] ?? "";
   const state = JSON.parse(html.match(/window\.__RENDRO_PAGE_STATE__=([^;]+);/)?.[1] ?? "{}");
   const document = new DocumentMock();
   parseHTML(document.body, html);

@@ -86,7 +86,8 @@ function managementNavigationRuntime(loadingPagesJson: string): string {
       if(getKey&&inflightGets.has(getKey))return inflightGets.get(getKey);
       var needsAccess=method==="GET"&&(String(path).startsWith("/api/rendro/")||String(path).startsWith("/api/auth/organization/"))&&!String(path).startsWith("/api/rendro/management/access?");
       var access=needsAccess?request("/api/rendro/management/access?organizationId="+encodeURIComponent(shellOrganization)):Promise.resolve();
-      var dataRequest=queryCache&&getKey&&queryCache.canCache(getKey)?queryCache.request(path,settings,function(){return access;}):ui.request(path,settings);
+      var initial=ui.takeInitialPageData&&ui.takeInitialPageData(path,settings);
+      var dataRequest=initial?Promise.resolve(initial.data):queryCache&&getKey&&queryCache.canCache(getKey)?queryCache.request(path,settings,function(){return access;}):ui.request(path,settings);
       var pending=Promise.all([dataRequest,access]).then(function(values){var data=values[0];if(String(path).indexOf("/api/rendro/management/access?")===0&&(!data||data.id!==shellOrganization||data.userId!==shellUser||!data.member||data.member.userId!==shellUser)){clearQueryCache();var denied=new Error("Your account or organization access changed. Reload to continue.");denied.status=403;if(isActive())location.replace(location.href);throw denied;}return data;});
       if(getKey)inflightGets.set(getKey,pending);
       try{return await pending;}catch(error){if(error&&(error.status===401||error.status===403))clearQueryCache();throw error;}finally{if(mutation){pendingMutations=Math.max(0,pendingMutations-1);invalidateMutation(path,settings);}if(getKey&&inflightGets.get(getKey)===pending)inflightGets.delete(getKey);}

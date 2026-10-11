@@ -1,5 +1,7 @@
 import type { MiddlewareHandler } from "hono";
 import type { User } from "better-auth/types";
+import { managementInitialData } from "./management-initial-data";
+import { renderSessionUnavailablePage } from "./session-unavailable";
 import { renderNotFoundPage } from "./not-found";
 
 /**
@@ -14,26 +16,47 @@ export const managementPageAccess: MiddlewareHandler<{ Variables: { user?: User 
   if (!user) return next();
 
   c.header("Cache-Control", "private, no-store");
+  const invitationId = c.req.param("invitationId");
   const organizationId = c.req.param("organizationId") ?? "";
   const projectId = c.req.param("projectId")
     ?? (c.req.path.endsWith("/onboarding") ? c.req.query("projectId") : undefined);
   const query = new URLSearchParams({ organizationId });
   if (projectId !== undefined) query.set("projectId", projectId);
-  const endpoint = projectId === undefined ? "management/access" : "projects/get";
+  const path = invitationId !== undefined
+    ? `/api/auth/organization/get-invitation?${new URLSearchParams({ id: invitationId })}`
+    : `/api/rendro/${projectId === undefined ? "management/access" : "projects/get"}?${query}`;
   const headers = new Headers({ Accept: "application/json" });
   const cookie = c.req.header("Cookie");
   if (cookie) headers.set("Cookie", cookie);
 
   // Pure template rendering is also used by the offline asset build.
   const { CONVEX_SITE_URL } = await import("@/config");
-  let response: Response;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 5_000);
+  let response: Response, data: AccessData | null;
+  function unavailable(retryAfter = "1") {
+    c.header("Retry-After", retryAfter);
+    return c.html(renderSessionUnavailablePage(), 503);
+  }
   try {
-    response = await fetch(`${CONVEX_SITE_URL}/api/rendro/${endpoint}?${query}`, {
-      headers,
-      redirect: "manual",
-    });
+    // Include body consumption in the deadline, not just response headers.
+    const result = await Promise.race([
+      (async () => {
+        const response = await fetch(`${CONVEX_SITE_URL}${path}`, {
+          headers, redirect: "manual", signal: controller.signal,
+        });
+        const data = response.ok ? await response.json() as AccessData : null;
+        return { response, data };
+      })(),
+      new Promise<never>((_resolve, reject) => {
+        controller.signal.addEventListener("abort", () => reject(new Error("Lookup timeout")), { once: true });
+      }),
+    ]);
+    ({ response, data } = result);
   } catch {
-    return c.text("Unable to verify workspace access. Please try again.", 502);
+    return unavailable();
+  } finally {
+    clearTimeout(timeout);
   }
   if (response.status === 401) {
     return c.redirect(`/sign-in?returnTo=${encodeURIComponent(c.req.path)}`);
@@ -47,18 +70,35 @@ export const managementPageAccess: MiddlewareHandler<{ Variables: { user?: User 
       homeLabel: "Manage organizations",
     }), 404);
   }
-  if (!response.ok) return c.text("Unable to verify workspace access. Please try again.", 502);
+  if (!response.ok) {
+    const value = response.headers.get("Retry-After");
+    const seconds = value && /^\d+$/.test(value) ? Number(value)
+      : value ? Math.ceil((Date.parse(value) - Date.now()) / 1000) : 1;
+    return unavailable(String(Number.isSafeInteger(seconds) ? Math.max(1, seconds) : 1));
+  }
 
-  const data = await response.json().catch(() => null) as {
-    id?: string;
-    userId?: string;
-    member?: { userId?: string };
-    project?: { _id?: string; organizationId?: string };
-  } | null;
-  const resolved = projectId === undefined
-    ? data?.id === organizationId && data.userId === user.id && data.member?.userId === user.id
-    : data?.project?._id === projectId && data.project.organizationId === organizationId;
-  if (!resolved) return c.text("Unable to verify workspace access. Please try again.", 502);
+  if (invitationId !== undefined) {
+    // The backend resolves for the signed-in recipient, without membership.
+    if (!data || data.id !== invitationId || (typeof data.email !== "string" || data.email.toLowerCase() !== user.email.toLowerCase())
+      || data.status !== "pending" || !data.expiresAt || !(new Date(data.expiresAt).getTime() > Date.now())) {
+      return c.html(renderNotFoundPage({ path: c.req.path, homeHref: "/organizations?choose=1", homeLabel: "Manage organizations" }), 404);
+    }
+  } else {
+    const resolved = projectId === undefined
+      ? data?.id === organizationId && data.userId === user.id && data.member?.userId === user.id
+      : data?.project?._id === projectId && data.project.organizationId === organizationId;
+    if (!resolved) return unavailable();
+  }
 
-  await next();
+  await managementInitialData.run({ path, data }, next);
 };
+
+interface AccessData {
+  id?: string;
+  userId?: string;
+  member?: { userId?: string };
+  project?: { _id?: string; organizationId?: string };
+  email?: string;
+  status?: string;
+  expiresAt?: string | number;
+}
