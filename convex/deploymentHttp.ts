@@ -1,7 +1,8 @@
+import { apiKeyHttpAction, sessionOrApiKeyHttpAction } from "./apiKeyHttp";
 import type { DataModel } from "./_generated/dataModel";
 import type { GenericActionCtx } from "convex/server";
 import { internal } from "./_generated/api";
-import { httpAction, failure, clientFailure } from "./httpErrors";
+import { failure, clientFailure } from "./httpErrors";
 import { authorizeHttpOrganization } from "./authorization";
 import { validateApiCredential } from "./credentialHttp";
 
@@ -30,7 +31,7 @@ function objectField(body: object, name: string): unknown {
   return name in body ? body[name as keyof typeof body] : undefined;
 }
 
-export const startDeployment = httpAction(async (ctx: GenericActionCtx<DataModel>, request: Request) => { let body: unknown;
+export const startDeployment = apiKeyHttpAction(async (ctx: GenericActionCtx<DataModel>, request: Request) => { let body: unknown;
 try { body = await request.json(); } catch { return clientFailure("Invalid JSON body"); }
 if (!body || typeof body !== "object") return clientFailure("Invalid deployment body");
 const organizationId = objectField(body, "organizationId");
@@ -69,7 +70,7 @@ try {
   return failure(error, 400, "startDeployment");
 } });
 
-export const getStagingDeployment = httpAction(async (ctx: GenericActionCtx<DataModel>, request: Request) => { const url = new URL(request.url);
+export const getStagingDeployment = apiKeyHttpAction(async (ctx: GenericActionCtx<DataModel>, request: Request) => { const url = new URL(request.url);
 const organizationId = url.searchParams.get("organizationId");
 const projectId = url.searchParams.get("projectId");
 const deploymentId = url.searchParams.get("deploymentId");
@@ -94,7 +95,7 @@ try {
   return failure(error, 404, "getStagingDeployment");
 } });
 
-export const commitDeployment = httpAction(async (ctx: GenericActionCtx<DataModel>, request: Request) => { let body: unknown;
+export const commitDeployment = apiKeyHttpAction(async (ctx: GenericActionCtx<DataModel>, request: Request) => { let body: unknown;
 try { body = await request.json(); } catch { return clientFailure("Invalid JSON body"); }
 if (!body || typeof body !== "object") return clientFailure("Invalid commit body");
 const organizationId = objectField(body, "organizationId");
@@ -121,7 +122,7 @@ try {
 } catch (error: unknown) {
   return failure(error, 409, "commitDeployment");
 } });
-export const getActiveDeployment = httpAction(async (ctx: GenericActionCtx<DataModel>, request: Request) => { const url = new URL(request.url);
+export const getActiveDeployment = sessionOrApiKeyHttpAction(async (ctx: GenericActionCtx<DataModel>, request: Request) => { const url = new URL(request.url);
 const organizationId = url.searchParams.get("organizationId");
 const projectId = url.searchParams.get("projectId");
 if (!organizationId || !projectId) return clientFailure("Missing project identity");
@@ -156,7 +157,7 @@ const deployment = await ctx.runQuery(internal.deployments.getInternal, {
 });
 return Response.json({ project, deployment, principal }); });
 
-export const failDeployment = httpAction(async (ctx: GenericActionCtx<DataModel>, request: Request) => { let body: unknown;
+export const failDeployment = apiKeyHttpAction(async (ctx: GenericActionCtx<DataModel>, request: Request) => { let body: unknown;
 try { body = await request.json(); } catch { return clientFailure("Invalid JSON body"); }
 if (!body || typeof body !== "object") return clientFailure("Invalid failure body");
 const organizationId = objectField(body, "organizationId");
@@ -183,7 +184,7 @@ await ctx.runMutation(internal.deployments.failInternal, {
 });
 return Response.json({ status: true }); });
 
-export const listDeployments = httpAction(async (ctx: GenericActionCtx<DataModel>, request: Request) => { const url = new URL(request.url);
+export const listDeployments = sessionOrApiKeyHttpAction(async (ctx: GenericActionCtx<DataModel>, request: Request) => { const url = new URL(request.url);
 const organizationId = url.searchParams.get("organizationId");
 const projectId = url.searchParams.get("projectId");
 if (!organizationId || !projectId) return clientFailure("organizationId and projectId are required");

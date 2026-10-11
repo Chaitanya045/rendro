@@ -1,3 +1,4 @@
+import { sessionOrApiKeyHttpAction } from "./apiKeyHttp";
 import type { GenericActionCtx } from "convex/server";
 import type { DataModel } from "./_generated/dataModel";
 import { internal } from "./_generated/api";
@@ -35,7 +36,7 @@ async function publicationPrincipal(
   }
 }
 
-export const createPublication = httpAction(async (ctx: GenericActionCtx<DataModel>, request: Request) => {
+export const createPublication = sessionOrApiKeyHttpAction(async (ctx: GenericActionCtx<DataModel>, request: Request) => {
   let body: unknown;
   try { body = await request.json(); } catch { return clientFailure("Invalid JSON body"); }
   if (!body || typeof body !== "object") return clientFailure("Invalid publication body");
@@ -86,7 +87,7 @@ export const createPublication = httpAction(async (ctx: GenericActionCtx<DataMod
   }
 });
 
-export const listPublications = httpAction(async (ctx: GenericActionCtx<DataModel>, request: Request) => {
+export const listPublications = sessionOrApiKeyHttpAction(async (ctx: GenericActionCtx<DataModel>, request: Request) => {
   const url = new URL(request.url);
   const organizationId = url.searchParams.get("organizationId");
   const projectId = url.searchParams.get("projectId") ?? undefined;
@@ -105,7 +106,7 @@ export const listPublications = httpAction(async (ctx: GenericActionCtx<DataMode
   return Response.json({ publications });
 });
 
-export const removePublication = httpAction(async (ctx: GenericActionCtx<DataModel>, request: Request) => {
+export const removePublication = sessionOrApiKeyHttpAction(async (ctx: GenericActionCtx<DataModel>, request: Request) => {
   let body: unknown;
   try { body = await request.json(); } catch { return clientFailure("Invalid JSON body"); }
   if (!body || typeof body !== "object") return clientFailure("Invalid publication body");

@@ -1,3 +1,4 @@
+import { apiKeyRateLimiter } from "../convex/apiKeyHttp";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getFunctionName, type FunctionReference } from "convex/server";
 import { ConvexError } from "convex/values";
@@ -33,13 +34,17 @@ const routes = [
 ];
 
 beforeEach(() => {
+  vi.spyOn(apiKeyRateLimiter, "limit").mockResolvedValue({ ok: true });
   auth.authorize.mockResolvedValue({ user: { _id: "owner" } });
   vi.spyOn(console, "error").mockImplementation(() => {});
 });
 afterEach(() => { vi.restoreAllMocks(); vi.resetAllMocks(); });
 
 async function invoke(action: HttpAction, init: RequestInit, error: Error, apiKey = true) {
-  const runQuery = vi.fn().mockRejectedValue(error);
+  const runQuery = vi.fn((reference: FunctionReference<"query">) => {
+    if (getFunctionName(reference) === "apiKeyCredentials:verifiedIdInternal") return Promise.resolve("credential-id");
+    return Promise.reject(error);
+  });
   const runMutation = vi.fn((reference: FunctionReference<"mutation">) => {
     if (getFunctionName(reference) === "apiKeyCredentials:validateInternal") return Promise.resolve({ keyId: "key" });
     return Promise.reject(error);

@@ -3,6 +3,9 @@ import type { DataModel } from "./_generated/dataModel";
 import { internal } from "./_generated/api";
 import { httpAction, failure, clientFailure } from "./httpErrors";
 import { authorizeHttpOrganization } from "./authorization";
+import { apiKeyHttpAction } from "./apiKeyHttp";
+import { sha256 } from "./credentialHash";
+export { sha256 } from "./credentialHash";
 
 const allowedScopes = new Set([
   "docs:read",
@@ -14,13 +17,6 @@ const allowedScopes = new Set([
 function randomHex(byteLength: number): string {
   return Array.from(crypto.getRandomValues(new Uint8Array(byteLength)))
     .map((value) => value.toString(16).padStart(2, "0"))
-    .join("");
-}
-
-export async function sha256(value: string): Promise<string> {
-  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
-  return Array.from(new Uint8Array(digest))
-    .map((byte) => byte.toString(16).padStart(2, "0"))
     .join("");
 }
 
@@ -141,7 +137,7 @@ export async function validateApiCredential(
   });
 }
 
-export const validateCredential = httpAction(async (ctx: GenericActionCtx<DataModel>, request: Request) => { const url = new URL(request.url);
+export const validateCredential = apiKeyHttpAction(async (ctx: GenericActionCtx<DataModel>, request: Request) => { const url = new URL(request.url);
 const organizationId = url.searchParams.get("organizationId");
 const projectId = url.searchParams.get("projectId") ?? undefined;
 const requiredScope = url.searchParams.get("scope");

@@ -124,3 +124,16 @@ export const validateInternal = internalMutation({
     };
   },
 });
+
+// Verify identity independently of requested tenant/scope, so changing those
+// fields cannot obtain fresh rate-limit buckets. Never return the stored hash.
+export const verifiedIdInternal = internalQuery({
+  args: { secretHash: v.string() },
+  handler: async (ctx, { secretHash }) => {
+    const credential = await ctx.db.query("apiKeyCredentials")
+      .withIndex("by_secret_hash", q => q.eq("secretHash", secretHash)).unique();
+    if (!credential || credential.revokedAt !== undefined
+      || (credential.expiresAt !== undefined && credential.expiresAt <= Date.now())) return null;
+    return credential._id;
+  },
+});

@@ -97,5 +97,6 @@ export declare const internal: FilterApi<
 >;
 
 export declare const components: {
+  rateLimiter: import("@convex-dev/rate-limiter/_generated/component.js").ComponentApi<"rateLimiter">;
   betterAuth: import("../betterAuth/_generated/component.js").ComponentApi<"betterAuth">;
 };
