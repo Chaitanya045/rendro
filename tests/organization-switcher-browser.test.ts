@@ -116,3 +116,13 @@ it.each([375, 768, 1440])("exposes the org name in accessibility snapshots and p
   expect(pageErrors).toEqual([]);
   expect(cspViolations).toEqual([]);
 });
+
+it("serves every favicon linked by the production shell", async () => {
+  const page = await harness.newPage();
+  for (const [path, contentType] of Object.entries(faviconAssets)) {
+    const response = await page.request.get(harness.origin + path);
+    expect(response.status()).toBe(200);
+    expect(response.headers()["content-type"]).toBe(contentType);
+    expect(await response.body()).toEqual(await readFile(`public${path}`));
+  }
+});
