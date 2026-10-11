@@ -1,3 +1,4 @@
+import { build } from "esbuild";
 import { existsSync } from "node:fs";
 import { createServer, get, type RequestListener, type Server } from "node:http";
 import { chromium, type Browser, type BrowserContext, type BrowserContextOptions, type Page } from "playwright";
@@ -20,6 +21,12 @@ export async function browserStep<T>(label: string, action: () => Promise<T>, ti
   } finally {
     clearTimeout(timer);
   }
+}
+
+/** Build from source in memory; browser tests run before build:assets in CI. */
+export async function bundleBrowserAsset(entry: string): Promise<string> {
+  return browserStep(`bundle ${entry}`, async () =>
+    (await build({ entryPoints: [entry], bundle: true, write: false, format: "iife", platform: "browser" })).outputFiles[0].text);
 }
 
 /** Call after hydration or an interaction, before auditing rendered styles. */
@@ -82,13 +89,19 @@ export function createBrowserHarness() {
 
   return {
     get origin() { return origin; },
-    async start(handler: RequestListener) {
+    async start(handler: RequestListener, assets: ReadonlyMap<string, string> = new Map()) {
       if (server) throw new Error("Browser harness already started");
       server = createServer((request, response) => {
         if (request.url === "/__browser_health") {
           response.writeHead(200, { "Content-Type": "text/plain" });
           response.end("browser-fixture-ready");
-        } else handler(request, response);
+        } else {
+          const asset = assets.get(new URL(request.url!, "http://localhost").pathname);
+          if (asset !== undefined) {
+            response.writeHead(200, { "Content-Type": "text/javascript", "Cache-Control": "no-store" });
+            response.end(asset);
+          } else handler(request, response);
+        }
       });
       await browserStep("listen on an ephemeral loopback port", () => new Promise<void>((resolve, reject) => {
         server!.once("error", reject);

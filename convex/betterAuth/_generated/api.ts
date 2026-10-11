@@ -10,6 +10,7 @@
 
 import type * as adapter from "../adapter.js";
 import type * as auth from "../auth.js";
+import type * as sessionReadLimit from "../sessionReadLimit.js";
 import type * as teamLookup from "../teamLookup.js";
 
 import type {
@@ -22,6 +23,7 @@ import { anyApi, componentsGeneric } from "convex/server";
 const fullApi: ApiFromModules<{
   adapter: typeof adapter;
   auth: typeof auth;
+  sessionReadLimit: typeof sessionReadLimit;
   teamLookup: typeof teamLookup;
 }> = anyApi as any;
 

@@ -7,7 +7,7 @@ import worker from "@/worker";
 import { COMMENTOR_PARENT_READY, COMMENTOR_PROTOCOL_VERSION } from "@/commentor/parent-protocol";
 import { createShareToken } from "@/share-links";
 import { docsBase, mockSecurityBackend, testUser } from "./fixtures/security-headers";
-import { browserStep, createBrowserHarness } from "./helpers/browser";
+import { browserStep, bundleBrowserAsset, createBrowserHarness } from "./helpers/browser";
 
 const harness = createBrowserHarness();
 const violations: string[] = [];
@@ -23,8 +23,7 @@ beforeAll(async () => {
     ["/lazy-tree.js", "src/lazy-tree/lazy-tree.ts"],
     ["/commentor.js", "src/commentor/commentor.ts"],
   ]) {
-    const bundle = await browserStep(`bundle ${path}`, () => build({ entryPoints: [entry], bundle: true, write: false, format: "iife", platform: "browser" }));
-    assets.set(path, bundle.outputFiles[0].text);
+    assets.set(path, await bundleBrowserAsset(entry));
   }
   // Exercise the real parent protocol and widget with a deterministic comment
   // backend. Auth/Convex services are fixture boundaries, not live accounts.

@@ -1,4 +1,3 @@
-import { build } from "esbuild";
 import type { Frame, Page } from "playwright";
 import { Hono } from "hono";
 import type { User } from "better-auth/types";
@@ -8,7 +7,7 @@ import publicDocs from "@/routes/public-v2";
 import shareDocs from "@/routes/share-v2";
 import { securityHeaders } from "@/middleware/security-headers";
 import * as minio from "@/minio";
-import { browserStep, createBrowserHarness } from "./helpers/browser";
+import { browserStep, bundleBrowserAsset, createBrowserHarness } from "./helpers/browser";
 
 const privateBase = "/organizations/org/projects/project/docs";
 const manifestKey = "tenants/org/projects/project/deployments/deploy/manifest.json";
@@ -38,10 +37,8 @@ function publisherHtml(path: string): string {
 }
 
 beforeAll(async () => {
-  const bundle = (path: string) => browserStep(`bundle ${path}`, async () =>
-    (await build({ entryPoints: [path], bundle: true, write: false, format: "iife", platform: "browser" })).outputFiles[0].text);
-  const viewer = await bundle("src/viewer/entry.ts");
-  const tree = await bundle("src/lazy-tree/lazy-tree.ts");
+  const viewer = await bundleBrowserAsset("src/viewer/entry.ts");
+  const tree = await bundleBrowserAsset("src/lazy-tree/lazy-tree.ts");
   vi.spyOn(minio, "getObjectText").mockResolvedValue(JSON.stringify({ version: 1,
     files: documents.map(path => ({ path, contentType: "text/html", size: 100 })) }));
   vi.spyOn(minio, "getObjectStream").mockImplementation(key => {
