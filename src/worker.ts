@@ -73,6 +73,7 @@
 })();
 import { faviconAssets, faviconCacheControl } from "./routes/favicon";
 import { Hono } from "hono";
+import { redactViewerPath } from "./viewer-log";
 import type { Context } from "hono";
 import { cors } from "hono/cors";
 import { sessionMiddleware } from "./middleware/session";
@@ -105,7 +106,7 @@ app.use("*", async (c, next) => {
 });
 
 app.use("/api/sync/*", cors());
-app.use("*", async (c, next) => { const start = Date.now(); await next(); logger.debug({ method: c.req.method, path: c.req.path, status: c.res.status, ms: Date.now() - start }, "request"); });
+app.use("*", async (c, next) => { const start = Date.now(); await next(); logger.debug({ method: c.req.method, path: redactViewerPath(c.req.path), status: c.res.status, ms: Date.now() - start }, "request"); });
 // Public signed share routes intentionally bypass session middleware.
 mountPublicRoutes(app);
 
@@ -126,6 +127,7 @@ app.get("/management-query.js", serveAsset);
 app.get("/select.js", serveAsset);
 app.get("/management-pages.js", serveAsset);
 app.get("/commentor-parent.js", serveAsset);
+app.get("/private-viewer.js", serveAsset);
 app.use("*", sessionMiddleware);
 
 mountSessionRoutes(app);
@@ -144,7 +146,7 @@ app.get("*", async (c) => {
 app.notFound((c) => c.html(renderNotFoundPage({ path: c.req.path }), 404));
 
 app.onError((err, c) => {
-  logger.error({ err: { message: err.message, stack: err.stack }, path: c.req.path }, "Unhandled error");
+  logger.error({ errorType: err.name, path: redactViewerPath(c.req.path) }, "Unhandled error");
   return c.json({ error: "Internal server error" }, 500);
 });
 

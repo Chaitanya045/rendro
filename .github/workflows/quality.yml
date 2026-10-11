@@ -25,6 +25,7 @@ jobs:
           node-version: "22"
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - run: pnpm exec playwright install --with-deps chromium
       - run: pnpm verify
       # No credentials or deployed test-user creation in untrusted PR jobs.
       - run: pnpm audit --audit-level=high

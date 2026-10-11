@@ -52,7 +52,7 @@ describe.each(fixtures)("document delivery regression: %s", (_name, html) => {
       start(controller) { controller.enqueue(new TextEncoder().encode(html)); controller.close(); },
     })));
     const requests = {
-      private: () => authenticated(projectDocs).request("/organizations/org-a/projects/project-a/docs/files/index.html"),
+      private: () => authenticated(projectDocs).request("/organizations/org-a/projects/project-a/docs/files/index.html", { headers: { Cookie: "better-auth.session_token=fixture" } }),
       public: () => publicDocs.request("/p/docs/files/index.html"),
       shared: () => sharedDocs.request("/s/fixture-token/files/index.html"),
       "legacy-private": () => authenticated(legacyDocs).request("/files/example-test/docs/index.html"),

@@ -6,6 +6,15 @@ compatibility_flags = ["nodejs_compat"]
 [observability]
 enabled = true
 
+# Raw invocation URLs contain private viewer capabilities. Only our redacted
+# application request logs may be persisted; do not enable URL-bearing traces.
+[observability.logs]
+enabled = true
+invocation_logs = false
+
+[observability.traces]
+enabled = false
+
 [secrets]
 # Match the mandatory runtime settings validated in src/config.ts.
 required = ["CONVEX_INTERNAL_SECRET", "AUTH_SECRET", "MINIO_ENDPOINT", "MINIO_ACCESS_KEY", "MINIO_SECRET_KEY"]
@@ -29,3 +38,13 @@ required = ["CONVEX_INTERNAL_SECRET", "AUTH_SECRET", "MINIO_ENDPOINT", "MINIO_AC
 
 [env.development.vars]
 NODE_ENV = "production"
+
+[env.development.observability]
+enabled = true
+
+[env.development.observability.logs]
+enabled = true
+invocation_logs = false
+
+[env.development.observability.traces]
+enabled = false

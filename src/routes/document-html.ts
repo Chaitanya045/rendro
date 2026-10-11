@@ -76,8 +76,63 @@ export function injectHtmlHeadStream(
   marker?: string,
   maxPrefixBytes = 64 * 1024,
 ): ReadableStream<Uint8Array> {
+  return injectHtmlPrefixStream(stream, (html, complete) => {
+    const offset = markupInsertionOffset(html, complete);
+    return offset === undefined ? undefined : { offset, markup };
+  }, marker, maxPrefixBytes, /<head\b[^>]*>|<\/head\s*>|<body\b[^>]*>/i);
+}
+
+/**
+ * Resource bases need an earlier boundary than cosmetic integrations. Inspect
+ * the bounded head before emitting any bytes, so a publisher base is known and
+ * implicit heads get the integration before their first child, not at <body>.
+ * Valid publisher bases precede URL-bearing resources. On an oversized head,
+ * that contract lets us decide from the bounded prefix without buffering a file.
+ */
+export function injectViewerHeadStream(
+  stream: ReadableStream<Uint8Array>,
+  markup: (publisherBase: string | undefined) => string,
+  maxPrefixBytes = 64 * 1024,
+): ReadableStream<Uint8Array> {
+  return injectHtmlPrefixStream(stream, (html, complete) => {
+    const document = parse(html, { sourceCodeLocationInfo: true });
+    const root = document.childNodes.find(node => node.nodeName === "html");
+    if (!root || !("childNodes" in root)) return undefined;
+    const head = root.childNodes.find(node => node.nodeName === "head");
+    const body = root.childNodes.find(node => node.nodeName === "body");
+    const children = head && "childNodes" in head ? head.childNodes : [];
+    const headLocation = head?.sourceCodeLocation;
+    const headClosed = headLocation && "endTag" in headLocation && headLocation.endTag;
+    const bodyContent = body && "childNodes" in body ? body.childNodes[0]?.sourceCodeLocation?.startOffset : undefined;
+    const bodyElement = body && "childNodes" in body && body.childNodes.some(node =>
+      node.sourceCodeLocation && "startTag" in node.sourceCodeLocation && node.sourceCodeLocation.startTag);
+    // EOF in a partial '<title' can produce implicit body text. Only a complete
+    // element or explicit head close proves the head has ended before EOF.
+    if (!complete && !headClosed && !body?.sourceCodeLocation && !bodyElement) return undefined;
+    const publisherBase = children.find(node => node.nodeName === "base"
+      && "attrs" in node && node.attrs.some(attr => attr.name === "href"));
+    const href = publisherBase && "attrs" in publisherBase
+      ? publisherBase.attrs.find(attr => attr.name === "href")?.value : undefined;
+    const headStart = headLocation && "startTag" in headLocation ? headLocation.startTag?.endOffset : undefined;
+    const rootLocation = root.sourceCodeLocation;
+    const rootStart = rootLocation && "startTag" in rootLocation ? rootLocation.startTag?.endOffset : undefined;
+    const doctype = document.childNodes.find(node => node.nodeName === "#documentType");
+    const offset = headStart ?? children[0]?.sourceCodeLocation?.startOffset
+      ?? body?.sourceCodeLocation?.startOffset ?? bodyContent
+      ?? rootStart ?? doctype?.sourceCodeLocation?.endOffset ?? 0;
+    return { offset, markup: markup(href) };
+  }, undefined, maxPrefixBytes, />/, true);
+}
+
+function injectHtmlPrefixStream(
+  stream: ReadableStream<Uint8Array>,
+  insertion: (html: string, complete: boolean) => { offset: number; markup: string } | undefined,
+  marker: string | undefined,
+  maxPrefixBytes: number,
+  candidatePattern: RegExp,
+  decideAtLimit = false,
+): ReadableStream<Uint8Array> {
   const encoder = new TextEncoder();
-  const markupBytes = encoder.encode(markup);
   const prefix = new Uint8Array(maxPrefixBytes);
   let prefixLength = 0;
   let decided = false;
@@ -120,11 +175,12 @@ export function injectHtmlHeadStream(
       decided = true;
       return true;
     }
-    const offset = markupInsertionOffset(html, complete);
-    if (offset !== undefined) {
+    const decision = insertion(html, complete || (decideAtLimit && prefixLength >= maxPrefixBytes));
+    if (decision !== undefined) {
+      const { offset, markup } = decision;
       const byteOffset = bomBytes + encoder.encode(html.slice(0, offset)).byteLength;
       if (byteOffset > 0) controller.enqueue(bytes.subarray(0, byteOffset));
-      controller.enqueue(markupBytes);
+      controller.enqueue(encoder.encode(markup));
       if (byteOffset < bytes.byteLength) controller.enqueue(bytes.subarray(byteOffset));
       decided = true;
       return true;
@@ -152,7 +208,7 @@ export function injectHtmlHeadStream(
       const candidate = decodePrefix(prefix.subarray(0, prefixLength), false);
       if (
         candidate === null
-        || /<head\b[^>]*>|<\/head\s*>|<body\b[^>]*>/i.test(candidate.html)
+        || candidatePattern.test(candidate.html)
         || prefixLength >= maxPrefixBytes
       ) {
         emitDecision(controller, false);
