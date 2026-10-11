@@ -12,7 +12,8 @@
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
-import { extname, join, relative, resolve } from "node:path";
+import { extname, join, relative, resolve, sep } from "node:path";
+import { cleanDeploymentPath, cleanPublicationPath } from "../../shared/v2-paths";
 import { MAX_REUSED_FILES_PER_REQUEST } from "../../shared/deployment-limits";
 import { version } from "../../package.json";
 import { fetchWithRateLimit } from "./rate-limit";
@@ -145,6 +146,9 @@ async function createPublication(
     pinnedDeploymentId?: string;
   },
 ): Promise<void> {
+  const pathPrefix = cleanPublicationPath(opts.pathPrefix, true);
+  const entryFile = cleanPublicationPath(opts.entryFile, false);
+  if (pathPrefix === null || entryFile === null) throw new Error("Invalid publication path");
   const response = await requestJson<{ publication: { slug: string }; url: string }>(
     `${opts.endpoint.replace(/\/$/, "")}/api/rendro/publications`,
     opts.token,
@@ -155,8 +159,8 @@ async function createPublication(
         organizationId: opts.organizationId,
         projectId: opts.projectId,
         slug: opts.slug,
-        pathPrefix: opts.pathPrefix,
-        entryFile: opts.entryFile,
+        pathPrefix,
+        entryFile,
         title: opts.title,
         trackingMode: opts.trackingMode,
         pinnedDeploymentId: opts.pinnedDeploymentId,
@@ -221,7 +225,9 @@ async function push(opts: PushOptions): Promise<void> {
   const entries: FileEntry[] = [];
   for (const fullPath of files) {
     const bytes = await readFile(fullPath);
-    const path = relative(absSource, fullPath).split("\\").join("/");
+    const relativePath = relative(absSource, fullPath).split(sep).join("/");
+    const path = cleanDeploymentPath(relativePath);
+    if (path === null) throw new Error(`Invalid deployment path: ${JSON.stringify(relativePath)}`);
     entries.push({
       fullPath,
       path,
@@ -230,7 +236,8 @@ async function push(opts: PushOptions): Promise<void> {
       contentType: contentType(path),
     });
   }
-  entries.sort((left, right) => left.path.localeCompare(right.path));
+  // Match the server manifest ordering without locale-dependent comparisons.
+  entries.sort((left, right) => left.path < right.path ? -1 : left.path > right.path ? 1 : 0);
   const manifest = {
     version: 1 as const,
     files: entries.map(({ path, sha256: hash, size, contentType: type }) => ({
