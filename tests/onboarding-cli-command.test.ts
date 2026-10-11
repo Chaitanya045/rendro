@@ -10,7 +10,7 @@ import { version } from "../package.json";
 
 function sharedBuilder(origin: string) {
   const ui: Record<string, (...args: unknown[]) => string> = {};
-  vm.runInNewContext(managementUiRuntime, { window: { RendroUI: ui }, location: { origin } });
+  vm.runInNewContext(managementUiRuntime, { window: { RendroUI: ui }, location: { origin }, addEventListener() {} });
   return ui.cliPushCommand as (options: Record<string, string>) => string;
 }
 

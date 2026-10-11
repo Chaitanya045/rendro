@@ -104,7 +104,7 @@ async function loadRuntime(page: PageCase) {
 }
 
 describe("management page request lifecycle", () => {
-  it("does not install persistent navigation on onboarding pages with secret-leave protection", () => {
+  it("installs disposable scopes without persistent navigation on onboarding pages with secret-leave protection", () => {
     const ui: Record<string, unknown> = {};
     const windowListeners = vi.fn();
     const documentListeners = vi.fn();
@@ -139,11 +139,18 @@ describe("management page request lifecycle", () => {
     };
 
     expect(() => { vm.runInNewContext(renderManagementNavigationRuntime(), context); }).not.toThrow();
-    expect(ui.createPageScope).toBeUndefined();
+    expect(ui.createPageScope).toBeTypeOf("function");
     expect(ui.navigate).toBeUndefined();
     expect(replaceState).not.toHaveBeenCalled();
     expect(documentListeners).not.toHaveBeenCalled();
-    expect(windowListeners).not.toHaveBeenCalled();
+    expect(windowListeners).toHaveBeenCalledWith("commentor-sign-out", expect.any(Function));
+    const scope = (ui.createPageScope as () => { isActive(): boolean; signal: AbortSignal; onCleanup(callback: () => void): void })();
+    const cleanup = vi.fn();
+    scope.onCleanup(cleanup);
+    windowListeners.mock.calls.find(([name]) => name === "commentor-sign-out")![1]();
+    expect(scope.isActive()).toBe(false);
+    expect(scope.signal.aborted).toBe(true);
+    expect(cleanup).toHaveBeenCalledOnce();
   });
 
   it.each(pages)("does not paint a disposed $name page after a successful load", async (page) => {

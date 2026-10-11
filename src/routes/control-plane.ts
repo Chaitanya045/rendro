@@ -141,7 +141,7 @@ button,input,select,textarea{font:inherit}
 button,a,input,select,textarea{outline:none}
 a{color:inherit}
 .material-symbols-outlined{font-family:"Material Symbols Outlined";font-size:20px;font-style:normal;font-weight:400;line-height:1;font-variation-settings:"FILL" 0,"wght" 400,"GRAD" 0,"opsz" 24}
-:focus-visible:where(:not(.rendro-theme-control,.input,.select,.textarea,.cp-avatar,.cp-account-menu a)){border-color:var(--cp-accent)!important;box-shadow:0 0 0 3px var(--cp-focus)!important}
+:focus-visible:where(:not(.rendro-theme-control,.input,.select,.textarea,.cp-avatar,.cp-account-menu :is(a,button))){border-color:var(--cp-accent)!important;box-shadow:0 0 0 3px var(--cp-focus)!important}
 .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
 
 .cp-topbar{position:fixed;inset:0 0 auto;z-index:60;height:56px;border-bottom:1px solid var(--cp-border);background:var(--cp-surface)}
@@ -167,10 +167,10 @@ html.dark .cp-avatar{border-color:rgba(251,146,60,.35)}
 .cp-account-menu{position:absolute;right:0;top:44px;width:230px;padding:4px;border:1px solid var(--cp-border);border-radius:8px;background:var(--cp-surface);box-shadow:var(--cp-shadow);visibility:hidden;opacity:0;transform:translateY(-4px);pointer-events:none;transition:opacity var(--cp-fast) var(--cp-ease),transform var(--cp-fast) var(--cp-ease),visibility 0s var(--cp-fast)}
 .cp-account.open .cp-account-menu{visibility:visible;opacity:1;transform:none;pointer-events:auto;transition-delay:0s}
 .cp-account-email{display:block;padding:9px 10px 10px;border-bottom:1px solid var(--cp-border);color:var(--cp-muted);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.cp-account-menu a{display:flex;align-items:center;gap:8px;padding:9px 10px;border-radius:4px;color:var(--cp-strong);text-decoration:none;transition:background var(--cp-instant) var(--cp-ease),color var(--cp-instant) var(--cp-ease),transform var(--cp-instant) var(--cp-ease)}
-.cp-account-menu a:hover{background:var(--cp-container)}
-.cp-account-menu a:active{background:var(--cp-container);transform:scale(.98)}
-.cp-avatar:focus-visible,.cp-account-menu a:focus-visible{outline:2px solid var(--cp-accent);outline-offset:2px;border-color:var(--cp-border-strong)!important;box-shadow:none!important}
+.cp-account-menu form{margin:0}.cp-account-menu button{width:100%;border:0;background:transparent;font:inherit;cursor:pointer;text-align:left}.cp-account-menu :is(a,button){display:flex;align-items:center;gap:8px;padding:9px 10px;border-radius:4px;color:var(--cp-strong);text-decoration:none;transition:background var(--cp-instant) var(--cp-ease),color var(--cp-instant) var(--cp-ease),transform var(--cp-instant) var(--cp-ease)}
+.cp-account-menu :is(a,button):hover{background:var(--cp-container)}
+.cp-account-menu :is(a,button):active{background:var(--cp-container);transform:scale(.98)}
+.cp-avatar:focus-visible,.cp-account-menu :is(a,button):focus-visible{outline:2px solid var(--cp-accent);outline-offset:2px;border-color:var(--cp-border-strong)!important;box-shadow:none!important}
 .cp-icon-button:disabled,.cp-avatar:disabled{opacity:.5;cursor:not-allowed;transform:none}
 
 .cp-sidebar{position:fixed;z-index:50;left:0;top:56px;bottom:0;width:232px;padding:18px 12px;border-right:1px solid var(--cp-border);background:var(--cp-surface)}
@@ -378,7 +378,7 @@ dialog.cp-dialog[open]::backdrop{opacity:1}
   .cp-org-name{max-width:110px}
   .cp-top-action{display:none}
   .cp-icon-button,.cp-avatar{width:44px;height:44px}
-  .cp-nav-link,.cp-account-menu a{min-height:44px}
+  .cp-nav-link,.cp-account-menu :is(a,button){min-height:44px}
   .cp-sidebar{top:0;z-index:80;width:min(320px,86vw);padding-top:12px;visibility:hidden;transform:translateX(-102%);box-shadow:var(--cp-shadow);transition:transform var(--cp-base) var(--cp-ease),visibility 0s var(--cp-base)}
   .cp-drawer-head{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:44px;margin-bottom:12px;padding:0 8px;color:var(--cp-strong);font-weight:600}
   .cp-drawer-context{display:grid;gap:8px;margin:0 0 18px;padding:0 0 16px;border-bottom:1px solid var(--cp-border)}
@@ -449,7 +449,7 @@ dialog.cp-dialog[open]::backdrop{opacity:1}
 @media(prefers-reduced-motion:reduce){
   *,*::before,*::after{scroll-behavior:auto!important;animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}
   .progress-dot{animation:none}
-  .cp-content,.button:active,.cp-top-action:active,.cp-drawer-org:active,.cp-icon-button:active,.cp-avatar:active,.cp-account-menu a:active,.project-tabs a:active,.dialog-close:active,.organization-card:hover,.step-dot,.toast,.cp-account-menu{transform:none!important}
+  .cp-content,.button:active,.cp-top-action:active,.cp-drawer-org:active,.cp-icon-button:active,.cp-avatar:active,.cp-account-menu :is(a,button):active,.project-tabs a:active,.dialog-close:active,.organization-card:hover,.step-dot,.toast,.cp-account-menu{transform:none!important}
 }
 `;
 
@@ -472,6 +472,7 @@ const controlPlaneRuntime = String.raw`
   document.addEventListener("click",function(event){if(account&&!account.contains(event.target))setAccount(false,false);});
   document.addEventListener("keydown",function(event){if(event.key==="Escape"){var navWasOpen=document.body.classList.contains("nav-open"),accountWasOpen=Boolean(account&&account.classList.contains("open"));setNav(false,navWasOpen);setAccount(false,!navWasOpen&&accountWasOpen);}});
   syncNavAccess(document.body.classList.contains("nav-open"));setAccount(false,false);addEventListener("resize",function(){syncNavAccess(document.body.classList.contains("nav-open"));});
+  addEventListener("commentor-sign-out",function(){setNav(false,false);setAccount(false,false);});
   var navLinks=Array.from(document.querySelectorAll(".cp-nav-link"));
   function setActiveNav(link){navLinks.forEach(function(candidate){var active=candidate===link;candidate.classList.toggle("active",active);if(active)candidate.setAttribute("aria-current","page");else candidate.removeAttribute("aria-current");});}
   function syncActiveNav(){var path=location.pathname.replace(/\/+$/,""),best=null,bestLength=-1;navLinks.forEach(function(link){var linkPath=new URL(link.href,location.href).pathname.replace(/\/+$/,"");if((path===linkPath||path.indexOf(linkPath+"/")===0)&&linkPath.length>bestLength){best=link;bestLength=linkPath.length;}});if(best)setActiveNav(best);}
@@ -546,7 +547,7 @@ ${hasSidebar ? `<script defer src="/management-pages.js?v=${MANAGEMENT_SHELL_VER
   <script${nonceAttribute()} data-cp-org-label>${renderOrganizationLabelBootstrap(options.user.id, organizationId)}</script>
   <span class="cp-top-spacer"></span>${openDocs}
   ${renderThemeButton("cp-theme")}
-  <div class="cp-account" id="cp-account"><button class="cp-avatar" id="cp-avatar" type="button" aria-label="Open account menu" aria-expanded="false" aria-controls="cp-account-menu">${escapeHtml(initial)}</button><div class="cp-account-menu" id="cp-account-menu"><span class="cp-account-email">${escapeHtml(options.user.email)}</span><a href="/account/security"><span class="material-symbols-outlined" aria-hidden="true">shield</span><span>Account security</span></a><a href="/api/auth/sign-out"><span class="material-symbols-outlined" aria-hidden="true">logout</span><span>Sign out</span></a></div></div>
+  <div class="cp-account" id="cp-account"><button class="cp-avatar" id="cp-avatar" type="button" aria-label="Open account menu" aria-expanded="false" aria-controls="cp-account-menu">${escapeHtml(initial)}</button><div class="cp-account-menu" id="cp-account-menu"><span class="cp-account-email">${escapeHtml(options.user.email)}</span><a href="/account/security"><span class="material-symbols-outlined" aria-hidden="true">shield</span><span>Account security</span></a><form method="post" action="/api/auth/sign-out"><button type="submit"><span class="material-symbols-outlined" aria-hidden="true">logout</span><span>Sign out</span></button></form></div></div>
 </div>
 ${organizationId ? '<div class="cp-org-menu" id="cp-org-menu" role="menu" aria-label="Switch organization" popover="manual" hidden><p class="cp-org-menu-heading" role="presentation">Switch organization</p><p class="cp-org-menu-status" role="status"></p><div data-org-options role="presentation"></div><div class="cp-org-menu-footer" role="presentation"><a href="/organizations?choose=1" role="menuitem">Manage organizations</a></div></div>' : ""}
 </header>

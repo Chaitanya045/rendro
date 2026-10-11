@@ -62,6 +62,7 @@ export const organizationSwitcherRuntime = String.raw`
     menu.hidden=true;menu.removeAttribute("aria-busy");trigger.setAttribute("aria-expanded","false");list.replaceChildren();
     if(restoreFocus)trigger.focus();
   }
+  addEventListener("commentor-sign-out",function(){close(false);});
   function focusItem(which){
     var choices=items(),selected=list.querySelector('[aria-current="true"]');
     var target=which==="last"?choices[choices.length-1]:selected||choices[0];

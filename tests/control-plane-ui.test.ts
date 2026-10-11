@@ -95,7 +95,7 @@ describe("control-plane UI", () => {
       expect(mobile, route).toContain('.cp-page-actions>.primary{order:-1}');
       expect(mobile, route).toContain('grid-template-columns:minmax(76px,.38fr) minmax(0,1fr)');
       expect(mobile, route).toContain('body .button.small,body .role-select');
-      expect(mobile, route).toContain('.cp-nav-link,.cp-account-menu a{min-height:44px}');
+      expect(mobile, route).toContain('.cp-nav-link,.cp-account-menu :is(a,button){min-height:44px}');
       expect(html, route).toContain(".table-wrap{overflow:auto}");
     }
   });

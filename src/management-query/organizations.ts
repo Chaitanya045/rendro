@@ -98,9 +98,6 @@ export function installOrganizationListCache(identity: Identity, rawRequest: Req
       if (data.kind === "clear") void cache.clear();
     };
   } catch { /* Restricted browsers still retain local caching and invalidation. */ }
-  document.addEventListener("click", event => {
-    const link = event.target instanceof Element ? event.target.closest<HTMLAnchorElement>("a[href]") : null;
-    if (link?.origin === identity.origin && link.pathname === "/api/auth/sign-out") { void cache.clear(); broadcast("clear"); }
-  }, true);
+  window.addEventListener("commentor-sign-out", () => { void cache.clear(); broadcast("clear"); });
   return cache.request;
 }

@@ -210,7 +210,7 @@ async function roleRuntime(page: Page, initialRole: Role) {
     clearTimeout() {},
     confirm: () => true,
   };
-  vm.runInNewContext(managementUiRuntime, context);
+  vm.runInNewContext(managementUiRuntime, { ...context, addEventListener() {} });
   const execute = async () => {
     vm.runInNewContext(script, context);
     await flushRuntime();

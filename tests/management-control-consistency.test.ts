@@ -48,7 +48,7 @@ describe("management control consistency", () => {
       expect(html, route).toContain(".button:hover:not(:disabled):not([aria-disabled=true])");
       expect(html, route).toContain(".input:disabled,.select:disabled,.textarea:disabled");
       expect(html, route).toContain(".input[aria-invalid=true],.select[aria-invalid=true],.textarea[aria-invalid=true]");
-      expect(html, route).toContain(":focus-visible:where(:not(.rendro-theme-control,.input,.select,.textarea,.cp-avatar,.cp-account-menu a))");
+      expect(html, route).toContain(":focus-visible:where(:not(.rendro-theme-control,.input,.select,.textarea,.cp-avatar,.cp-account-menu :is(a,button)))");
       expect(html, route).toContain(".check input:focus-visible{outline:2px solid var(--cp-accent)");
       expect(html, route).toContain(".project-tabs a:active{transform:scale(.98)}");
       expect(html, route).toContain('.project-tabs a.active::after{content:"";position:absolute;inset:auto 8px 0;height:2px');
@@ -58,7 +58,7 @@ describe("management control consistency", () => {
 
   it("preserves the error ring when an invalid field receives focus", async () => {
     const html = await (await managementPages().request("/organizations/org-a/people")).text();
-    const genericFocus = html.indexOf(":focus-visible:where(:not(.rendro-theme-control,.input,.select,.textarea,.cp-avatar,.cp-account-menu a))");
+    const genericFocus = html.indexOf(":focus-visible:where(:not(.rendro-theme-control,.input,.select,.textarea,.cp-avatar,.cp-account-menu :is(a,button)))");
     const fieldFocus = html.indexOf(".input:focus,.select:focus,.textarea:focus");
     const invalid = html.indexOf(".input[aria-invalid=true],.select[aria-invalid=true],.textarea[aria-invalid=true]");
     expect(genericFocus).toBeGreaterThan(0);
@@ -70,11 +70,11 @@ describe("management control consistency", () => {
     const html = await (await managementPages().request("/organizations/org-a")).text();
     expect(html).toContain('aria-controls="cp-account-menu"');
     expect(html).toContain('class="cp-account-menu" id="cp-account-menu"');
-    expect(html).toContain(".cp-avatar:focus-visible,.cp-account-menu a:focus-visible{outline:2px solid var(--cp-accent);outline-offset:2px");
-    expect(html).toContain(".cp-account-menu a:active{background:var(--cp-container);transform:scale(.98)}");
-    expect(html).toContain(".cp-account-menu a{display:flex;align-items:center;gap:8px;padding:9px 10px;border-radius:4px;color:var(--cp-strong)");
+    expect(html).toContain(".cp-avatar:focus-visible,.cp-account-menu :is(a,button):focus-visible{outline:2px solid var(--cp-accent);outline-offset:2px");
+    expect(html).toContain(".cp-account-menu :is(a,button):active{background:var(--cp-container);transform:scale(.98)}");
+    expect(html).toContain(".cp-account-menu :is(a,button){display:flex;align-items:center;gap:8px;padding:9px 10px;border-radius:4px;color:var(--cp-strong)");
     expect(html).toContain("html.dark .cp-avatar{border-color:rgba(251,146,60,.35)}");
-    expect(html).toContain(".cp-nav-link,.cp-account-menu a{min-height:44px}");
+    expect(html).toContain(".cp-nav-link,.cp-account-menu :is(a,button){min-height:44px}");
   });
 
   it("renders every project section from one canonical navigation helper", () => {

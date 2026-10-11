@@ -69,7 +69,10 @@ describe("trusted auth client IP forwarding", () => {
     } });
     registerAuthClientIp(request, "192.0.2.10");
     await proxyAuthRequest(request);
-    await proxyAuthSignOut(request);
+    const signOut = new Request("https://rendro.test/api/auth/sign-out", { method: "POST", headers: request.headers });
+    signOut.headers.set("origin", "https://rendro.test");
+    registerAuthClientIp(signOut, "192.0.2.10");
+    await proxyAuthSignOut(signOut);
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 

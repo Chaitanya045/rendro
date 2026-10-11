@@ -35,8 +35,8 @@ export function mountPublicRoutes<E extends AppEnv>(app: Hono<E>): void {
 
 /** Auth proxy, Convex API proxy, and application routes. Mount after session middleware. */
 export function mountSessionRoutes<E extends AppEnv>(app: Hono<E>): void {
-  // Sign-out: GET → POST
-  app.get("/api/auth/sign-out", (c) => proxyAuthSignOut(c.req.raw));
+  // GET confirms; only a same-origin POST revokes the session.
+  app.on(["GET", "POST"], "/api/auth/sign-out", (c) => proxyAuthSignOut(c.req.raw));
 
   // Proxy auth to Convex
   app.on(["POST", "GET", "OPTIONS"], "/api/auth/*", async (c) => {

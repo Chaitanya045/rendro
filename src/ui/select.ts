@@ -186,10 +186,11 @@ export function installSelects(doc: Document) {
   const resize = () => opened?.position();
   const transition = (event: Event) => { if (opened && (event.target as Node)?.contains(opened.trigger)) opened.position(); };
   const close = () => opened?.close();
+  win.addEventListener("commentor-sign-out", close);
   doc.addEventListener("pointerdown", outside, true); doc.addEventListener("scroll", scroll, true); win.addEventListener("resize", resize);
   doc.addEventListener("rendro:before-route-leave", close); doc.addEventListener("close", close, true);
   doc.addEventListener("transitionend", transition);
   win.visualViewport?.addEventListener("resize", resize); win.visualViewport?.addEventListener("scroll", resize);
   const observer = new win.MutationObserver(scan); observer.observe(doc.body, { childList: true, subtree: true }); scan();
-  return { scan, destroy() { observer.disconnect(); instances.forEach((instance) => instance.destroy()); instances.clear(); doc.removeEventListener("pointerdown", outside, true); doc.removeEventListener("scroll", scroll, true); win.removeEventListener("resize", resize); doc.removeEventListener("rendro:before-route-leave", close); doc.removeEventListener("close", close, true); doc.removeEventListener("transitionend", transition); win.visualViewport?.removeEventListener("resize", resize); win.visualViewport?.removeEventListener("scroll", resize); } };
+  return { scan, destroy() { win.removeEventListener("commentor-sign-out", close); observer.disconnect(); instances.forEach((instance) => instance.destroy()); instances.clear(); doc.removeEventListener("pointerdown", outside, true); doc.removeEventListener("scroll", scroll, true); win.removeEventListener("resize", resize); doc.removeEventListener("rendro:before-route-leave", close); doc.removeEventListener("close", close, true); doc.removeEventListener("transitionend", transition); win.visualViewport?.removeEventListener("resize", resize); win.visualViewport?.removeEventListener("scroll", resize); } };
 }

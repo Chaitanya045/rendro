@@ -181,7 +181,7 @@ it.each(["sign-out", "change-password"])("does not reuse identity after real %s"
     mutationCookie = `better-auth.session_token=${encodeURIComponent(signed)}`;
     body = { currentPassword: "old-password-long-enough", newPassword: "new-password-long-enough", revokeOtherSessions: true };
   }
-  const changed = await f.app.request(`/api/auth/${operation}`, {
+  const changed = await f.app.request(`http://localhost:3000/api/auth/${operation}`, {
     method: "POST", headers: { cookie: mutationCookie, origin: "http://localhost:3000", "content-type": "application/json" },
     body: JSON.stringify(body),
   });

@@ -145,7 +145,7 @@ describe("shared response security policy", () => {
     sandbox(await request("/legacy-view/example/files/index.html", true));
   });
 
-  it.each(["/health", "/api/auth/get-session", "/api/auth/sign-out", "/p/product/tree", "/p/product/files/assets/site.css"])("adds baseline headers without an HTML CSP: %s", async path => {
+  it.each(["/health", "/api/auth/get-session", "/p/product/tree", "/p/product/files/assets/site.css"])("adds baseline headers without an HTML CSP: %s", async path => {
     const response = await request(path);
     common(response);
     expect(response.headers.has("Content-Security-Policy")).toBe(false);

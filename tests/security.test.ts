@@ -1,3 +1,4 @@
+import { seedIdentity } from "./helpers/auth-identity";
 import { describe, expect, it, vi } from "vitest";
 
 import { convexTest } from "convex-test";
@@ -49,11 +50,11 @@ describe("Convex authorization boundary", () => {
   });
 
   it("rejects an authenticated user from another domain organization", async () => {
-    const backend = makeBackend().withIdentity({
-      subject: "user_mallory",
+    const test = makeBackend();
+    const backend = test.withIdentity(await seedIdentity(test, {
       email: "mallory@other.com",
       name: "Mallory",
-    });
+    }));
 
     await expect(
       backend.mutation(api.threads.create, {
@@ -66,7 +67,8 @@ describe("Convex authorization boundary", () => {
   });
 
   it("derives thread and reply authors from signed identity claims", async () => {
-    const backend = makeBackend().withIdentity(acmeIdentity);
+    const test = makeBackend();
+    const backend = test.withIdentity(await seedIdentity(test, acmeIdentity));
     const threadId = await backend.mutation(api.threads.create, {
       orgSlug: "acme",
       filePath: "guide/index.html",
@@ -95,18 +97,17 @@ describe("Convex authorization boundary", () => {
 
   it("prevents cross-organization mutation through an opaque thread id", async () => {
     const backend = makeBackend();
-    const acme = backend.withIdentity(acmeIdentity);
+    const acme = backend.withIdentity(await seedIdentity(backend, acmeIdentity));
     const threadId = await acme.mutation(api.threads.create, {
       orgSlug: "acme",
       filePath: "guide/index.html",
       body: "Protected comment",
       anchor: { kind: "element", path: ["main"] },
     });
-    const outsider = backend.withIdentity({
-      subject: "user_outsider",
+    const outsider = backend.withIdentity(await seedIdentity(backend, {
       email: "outsider@other.com",
       name: "Outsider",
-    });
+    }));
 
     await expect(
       outsider.mutation(api.threads.resolve, { threadId }),

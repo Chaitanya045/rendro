@@ -69,15 +69,24 @@ export const page = query({
 function handler<Args extends Record<string, unknown>, Result>(registered: RegisteredQuery<"public", Args, Result> | RegisteredMutation<"public", Args, Result>) {
   return (registered as unknown as { _handler: (ctx: QueryCtx | MutationCtx, args: Args) => Result })._handler;
 }
-const legacyAuth = { getUserIdentity: () => Promise.resolve({ subject: "author", email: "author@example.test", tokenIdentifier: "test|author", issuer: "test" }) };
+const legacyAuth = { getUserIdentity: () => Promise.resolve({ subject: "author", sessionId: "session", email: "author@example.test", tokenIdentifier: "test|author", issuer: "test" }) };
+function legacyContext(ctx: QueryCtx | MutationCtx): QueryCtx | MutationCtx {
+  // This standalone envelope probe has no auth component; provide synthetic
+  // session/user reads as well as identity. Real revocation uses convex-test.
+  return { ...ctx, auth: legacyAuth, runQuery: (_ref: unknown, args: { model: string }) => {
+    if (args.model === "session") return Promise.resolve({ _id: "session", userId: "author", expiresAt: Date.now() + 60_000 });
+    if (args.model === "user") return Promise.resolve({ _id: "author" });
+    throw new Error("Unexpected auth read");
+  } } as unknown as QueryCtx | MutationCtx;
+}
 export const legacyList = query({
   args: { orgSlug: v.string() },
-  handler: (ctx, args) => handler(threads.list)({ ...ctx, auth: legacyAuth }, { ...args, filePath: "index.html" }),
+  handler: (ctx, args) => handler(threads.list)(legacyContext(ctx), { ...args, filePath: "index.html" }),
 });
 export const legacyMutation = mutation({
   args: { method: v.string(), orgSlug: v.string(), threadId: v.string(), replyId: v.string() },
   handler: (ctx, args) => {
-    const context = { ...ctx, auth: legacyAuth };
+    const context = legacyContext(ctx);
     if (args.method === "threads:create") return handler(threads.create)(context, { orgSlug: args.orgSlug, filePath: "index.html", body: "Test", anchor: { kind: "element", path: ["main"] } });
     if (args.method === "threads:resolve") return handler(threads.resolve)(context, { threadId: args.threadId });
     if (args.method === "threads:archive") return handler(threads.archive)(context, { threadId: args.threadId });

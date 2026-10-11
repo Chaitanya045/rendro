@@ -116,9 +116,9 @@ describe("Worker backend error mapping", () => {
   it("keeps sign-out transport diagnostics private", async () => {
     vi.mocked(fetch).mockRejectedValueOnce(new Error(diagnostic));
     const response = await proxyAuthSignOut(new Request("https://rendro.test/api/auth/sign-out?token=private-query", {
-      headers: { cookie: "private-cookie" },
+      method: "POST", headers: { cookie: "private-cookie", origin: "https://rendro.test" },
     }));
-    expect(response.status).toBe(302);
+    expect(response.status).toBe(502);
     expect(mocks.error.mock.calls).toEqual([[{ category: "TransportError", operation: "proxyAuthSignOut", status: null }, "Auth sign-out proxy error"]]);
     expectPrivateLogs(mocks.error.mock.calls);
   });

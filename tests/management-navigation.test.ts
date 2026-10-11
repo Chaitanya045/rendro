@@ -160,6 +160,37 @@ describe("persistent management navigation", () => {
     expect(runtime.toast).toHaveBeenCalledWith("current");
   });
 
+  it("disposes on sign-out even with blockers, aborts requests and rejects late secrets", async () => {
+    const runtime = scopeRuntime(true);
+    let resolve!: (value: unknown) => void;
+    runtime.request.mockImplementation(() => new Promise(done => { resolve = done; }));
+    const scope = runtime.ui.createPageScope();
+    const cleanup = vi.fn();
+    scope.onCleanup(cleanup);
+    scope.preventNavigation(() => false);
+    runtime.setOpenDialog(true);
+    const pending = scope.request("/api/key", { method: "POST" });
+    const rejection = expect(pending).rejects.toMatchObject({ name: "AbortError" });
+    const signal = runtime.request.mock.calls[0][1].signal;
+
+    runtime.listeners.get("commentor-sign-out")!();
+    runtime.listeners.get("commentor-sign-out")!();
+    expect(scope.isActive()).toBe(false);
+    expect(scope.signal.aborted).toBe(true);
+    expect(signal.aborted).toBe(true);
+    expect(cleanup).toHaveBeenCalledOnce();
+    resolve({ rawKey: "late-secret" });
+    await rejection;
+    scope.toast("stale");
+    expect(runtime.toast).not.toHaveBeenCalled();
+    await expect(scope.request("/api/key")).rejects.toMatchObject({ name: "AbortError" });
+    const next = runtime.ui.createPageScope();
+    expect(next.isActive()).toBe(false);
+    expect(next.signal.aborted).toBe(true);
+    await expect(runtime.ui.navigate("/organizations/org-a/people")).resolves.toBe(false);
+    expect(runtime.location.assign).not.toHaveBeenCalled();
+  });
+
   it("blocks a route swap for pending mutations, open dialogs, and page-specific guards", async () => {
     const runtime = scopeRuntime();
     let resolveMutation!: (value: unknown) => void;
