@@ -86,7 +86,7 @@ describe("project comment parent transport", () => {
     );
 
     loadHandler();
-    expect(postMessage).toHaveBeenCalledWith({ type: COMMENTOR_PARENT_READY }, "*");
+    expect(postMessage).toHaveBeenCalledWith({ type: COMMENTOR_PARENT_READY, parentGeneration: expect.any(String) }, "*");
     messageHandler({
       source,
       data: { type: COMMENTOR_PARENT_REQUEST, requestId: "sub", method: "subscribe", args: { documentPath: "guide.html", organizationId: "other" } },
@@ -230,13 +230,13 @@ describe("project comment parent transport", () => {
     const transport = new ParentCommentTransport(parent, events as never, "guide.html");
     transport.subscribe(vi.fn(), vi.fn(), onError);
     expect(sent).toEqual([]);
-    handler({ source: parent, data: { type: COMMENTOR_PARENT_READY } } as MessageEvent);
+    handler({ source: parent, data: { type: COMMENTOR_PARENT_READY, parentGeneration: "host-1" } } as MessageEvent);
     const request = sent[0] as { requestId: string };
     handler({ source: parent, data: { type: COMMENTOR_PARENT_RESPONSE, requestId: request.requestId, ok: true } } as MessageEvent);
     handler({ source: parent, data: { type: COMMENTOR_PARENT_ERROR, error: "Comments could not be loaded" } } as MessageEvent);
     await Promise.resolve();
     expect(onError).toHaveBeenCalledWith(expect.objectContaining({ message: "Comments could not be loaded" }));
-    handler({ source: parent, data: { type: COMMENTOR_PARENT_READY } } as MessageEvent);
+    handler({ source: parent, data: { type: COMMENTOR_PARENT_READY, parentGeneration: "host-1" } } as MessageEvent);
     expect(sent).toHaveLength(2);
     expect(sent[1]).toMatchObject({ method: "subscribe", args: { documentPath: "guide.html" } });
     transport.dispose();
@@ -329,11 +329,11 @@ describe("slow comment mutations", () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
-  it("bounds unanswered read/control requests with a refresh message", async () => {
+  it("bounds unanswered read/control requests without suggesting a page reload", async () => {
     const { transport, slow } = transportRuntime();
     const result = transport.loadMoreThreads().catch((error: Error) => error.message);
     await vi.advanceTimersByTimeAsync(10_000);
-    expect(await result).toBe("Comments are taking longer to load. Refresh the page.");
+    expect(await result).toBe("Comments are taking longer to load. Still waiting for the connection.");
     expect(slow).not.toHaveBeenCalled();
     transport.dispose();
   });

@@ -137,6 +137,9 @@ export class CommentorParentHost {
   private replySubscriptions = new Map<string, CommentPaginationSubscription>();
   private threadIds = new Set<string>();
   private generation = 0;
+  // Subscription refreshes must not invalidate outstanding mutation responses.
+  private connectionGeneration = 0;
+  private readonly parentGeneration = crypto.randomUUID();
 
   constructor(
     private readonly frame: HTMLIFrameElement,
@@ -154,6 +157,7 @@ export class CommentorParentHost {
   dispose(): void {
     window.removeEventListener("message", this.onMessage);
     this.frame.removeEventListener("load", this.onFrameLoad);
+    this.connectionGeneration += 1;
     this.reset();
     this.loadedScope = null;
   }
@@ -174,14 +178,19 @@ export class CommentorParentHost {
   }
 
   private readonly onFrameLoad = (): void => {
+    this.connectionGeneration += 1;
     this.reset();
     this.loadedScope = this.currentScope();
     const source = this.frame.contentWindow;
-    if (this.loadedScope && source) source.postMessage({ type: COMMENTOR_PARENT_READY }, "*");
+    if (this.loadedScope && source) source.postMessage({ type: COMMENTOR_PARENT_READY, parentGeneration: this.parentGeneration }, "*");
   };
 
   private owns(generation: number, source: MessageEventSource, scope: DocumentCommentScope): boolean {
-    return generation === this.generation
+    return generation === this.generation && this.ownsConnection(this.connectionGeneration, source, scope);
+  }
+
+  private ownsConnection(generation: number, source: MessageEventSource, scope: DocumentCommentScope): boolean {
+    return generation === this.connectionGeneration
       && source === this.activeSource
       && source === this.frame.contentWindow
       && sameScope(scope, this.activeScope)
@@ -336,11 +345,11 @@ export class CommentorParentHost {
       this.respond(event.source, event.data.requestId, false, "Comment operation is outside this document");
       return;
     }
-    const generation = this.generation;
+    const generation = this.connectionGeneration;
     void this.backend.mutate(event.data.method, scope, args).then(() => {
-      if (this.owns(generation, event.source!, scope)) this.respond(event.source!, event.data.requestId, true);
+      if (this.ownsConnection(generation, event.source!, scope)) this.respond(event.source!, event.data.requestId, true);
     }).catch(() => {
-      if (this.owns(generation, event.source!, scope)) {
+      if (this.ownsConnection(generation, event.source!, scope)) {
         this.respond(event.source!, event.data.requestId, false, "Comment operation failed");
       }
     });

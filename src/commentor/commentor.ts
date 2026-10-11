@@ -19,7 +19,7 @@ import { draftAfterSuccessfulReply } from "./reply-state";
 import { PendingDeletionCoordinator } from "./delete-state";
 import { requestParentTheme } from "./theme-message";
 import { appendPlainText } from "./text";
-import { ParentCommentTransport } from "./parent-transport";
+import { CommentMutationOutcomeUnknownError, ParentCommentTransport } from "./parent-transport";
 
 // ─────────────────────────────── types ───────────────────────────────
 
@@ -848,11 +848,21 @@ class Commentor {
             : thread), undefined, prior?.loading === true || loading);
         },
         fail,
-        () => this.toast("Still waiting for confirmation. Refresh to check before trying again.", {
+        () => this.toast("Still waiting for confirmation. Your change is pending; refreshing comments will keep waiting for its result.", {
           actionLabel: "Refresh",
           duration: 30_000,
-          onAction: () => window.location.reload(),
+          onAction: () => {
+            void this.parentTransport?.refresh().catch(() => {
+              this.toast("Comments could not be refreshed. Still waiting for confirmation.", { kind: "error" });
+            });
+          },
         }),
+        () => {
+          // The parent is replacing its reply subscriptions too. Let the new
+          // thread snapshots supply replies instead of retaining stale pages.
+          this.expandedReplies.clear();
+          this.replyPagination.clear();
+        },
       );
       return;
     }
@@ -1330,6 +1340,10 @@ class Commentor {
     invoker: HTMLElement | null = null,
   ): void {
     if (!this.canWrite) return;
+    if (this.parentTransport?.isMutationPending("thread.create")) {
+      this.toast("Still waiting for confirmation of your comment.");
+      return;
+    }
     this.closeBubbles(false);
     this.hideSelectionAction(true);
     this.bubbleReturnFocus = invoker ?? this.commentsBtn;
@@ -1386,7 +1400,7 @@ class Commentor {
         post.classList.remove("is-pending");
         post.removeAttribute("aria-busy");
         post.textContent = "Post";
-        this.toast("Could not post comment. Try again.", { kind: "error" });
+        this.toast(err instanceof CommentMutationOutcomeUnknownError ? err.message : "Could not post comment. Try again.", { kind: "error" });
         textarea.focus();
       }
     };
@@ -1518,13 +1532,17 @@ class Commentor {
       await action();
     } catch (err) {
       console.error(`[commentor] ${label.toLowerCase()} failed`, err);
-      this.toast(errorMessage, { kind: "error" });
+      this.toast(err instanceof CommentMutationOutcomeUnknownError ? err.message : errorMessage, { kind: "error" });
     } finally {
       if (button.isConnected) {
         button.disabled = false;
         button.classList.remove("is-pending");
         button.removeAttribute("aria-busy");
         button.setAttribute("aria-label", label);
+      }
+      if (this.parentTransport) {
+        this.renderDrawerList();
+        this.refreshOpenBubble();
       }
     }
   }
@@ -1607,7 +1625,7 @@ class Commentor {
         console.error("[commentor] delete failed", err);
         this.renderPins();
         this.renderDrawerList();
-        this.toast("Could not delete comment.", { kind: "error" });
+        this.toast(err instanceof CommentMutationOutcomeUnknownError ? err.message : "Could not delete comment.", { kind: "error" });
       },
     );
     if (!started) return;
@@ -1662,6 +1680,7 @@ class Commentor {
         },
         svg(ICONS.check),
       ) as HTMLButtonElement;
+      resolveButton.disabled = this.parentTransport?.isMutationPending("thread.resolve", { threadId: t._id }) ?? false;
       resolveButton.addEventListener("click", (e) => {
         e.stopPropagation();
         void this.runThreadAction(
@@ -1684,6 +1703,7 @@ class Commentor {
         },
         svg(ICONS.archive),
       ) as HTMLButtonElement;
+      archiveButton.disabled = this.parentTransport?.isMutationPending("thread.archive", { threadId: t._id }) ?? false;
       archiveButton.addEventListener("click", (e) => {
         e.stopPropagation();
         void this.runThreadAction(
@@ -1858,7 +1878,7 @@ class Commentor {
           }
         } catch (err) {
           console.error("[commentor] reply failed", err);
-          this.toast("Could not post reply.", { kind: "error" });
+          this.toast(err instanceof CommentMutationOutcomeUnknownError ? err.message : "Could not post reply.", { kind: "error" });
         } finally {
           this.pendingReplies.delete(t._id);
           this.setReplyPendingState(t._id, false);

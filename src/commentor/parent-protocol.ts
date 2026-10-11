@@ -57,6 +57,8 @@ export type CommentorParentError = {
 
 export type CommentorParentReady = {
   type: typeof COMMENTOR_PARENT_READY;
+  // Stable across resubscriptions; replaced when the parent host is recreated.
+  parentGeneration: string;
 };
 
 const METHODS = new Set<CommentorParentMethod>([
@@ -117,5 +119,8 @@ export function isCommentorParentError(value: unknown): value is CommentorParent
 
 export function isCommentorParentReady(value: unknown): value is CommentorParentReady {
   if (!value || typeof value !== "object") return false;
-  return (value as Partial<CommentorParentReady>).type === COMMENTOR_PARENT_READY;
+  const candidate = value as Partial<CommentorParentReady>;
+  return candidate.type === COMMENTOR_PARENT_READY
+    && typeof candidate.parentGeneration === "string"
+    && candidate.parentGeneration.length > 0;
 }

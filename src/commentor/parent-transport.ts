@@ -26,13 +26,22 @@ type PendingRequest = {
   dismissSlow?: () => void;
 };
 
+export class CommentMutationOutcomeUnknownError extends Error {
+  constructor() {
+    super("The comment connection was replaced before confirmation. The outcome is unknown; your change may still be saved. Check the comments before making further changes.");
+  }
+}
+
 export class ParentCommentTransport {
   private readonly pending = new Map<string, PendingRequest>();
   private updateHandler: UpdateHandler | null = null;
   private repliesUpdateHandler: RepliesUpdateHandler | null = null;
   private errorHandler: ErrorHandler | null = null;
   private slowHandler: SlowHandler | null = null;
+  private refreshHandler: (() => void) | null = null;
   private sequence = 0;
+  private parentGeneration: string | null = null;
+  private readonly mutations = new Map<string, Promise<void>>();
 
   constructor(
     private readonly parent: Pick<WindowProxy, "postMessage">,
@@ -47,15 +56,40 @@ export class ParentCommentTransport {
     onRepliesUpdate: RepliesUpdateHandler,
     onError: ErrorHandler,
     onSlowMutation?: SlowHandler,
+    onRefresh?: () => void,
   ): void {
     this.updateHandler = onUpdate;
     this.repliesUpdateHandler = onRepliesUpdate;
     this.errorHandler = onError;
     this.slowHandler = onSlowMutation ?? null;
+    this.refreshHandler = onRefresh ?? null;
   }
 
   mutate(method: CommentorParentMutationMethod, args: unknown): Promise<void> {
-    return this.request(method, args);
+    const key = this.mutationKey(method, args);
+    const existing = this.mutations.get(key);
+    if (existing) return existing;
+    const operation = this.request(method, args).finally(() => {
+      if (this.mutations.get(key) === operation) this.mutations.delete(key);
+    });
+    this.mutations.set(key, operation);
+    return operation;
+  }
+
+  isMutationPending(method: CommentorParentMutationMethod, args: unknown = {}): boolean {
+    return this.mutations.has(this.mutationKey(method, args));
+  }
+
+  private mutationKey(method: CommentorParentMutationMethod, args: unknown): string {
+    const threadId = (args as { threadId?: string } | null)?.threadId;
+    return JSON.stringify([method, threadId ?? null]);
+  }
+
+  refresh(): Promise<void> {
+    // Keep this realm, request IDs and write guards alive while the parent
+    // replaces only its subscriptions. Never replay outstanding mutations.
+    this.refreshHandler?.();
+    return this.request("subscribe", { documentPath: this.documentPath });
   }
 
   loadMoreThreads(): Promise<void> {
@@ -68,16 +102,22 @@ export class ParentCommentTransport {
 
   dispose(): void {
     this.events.removeEventListener("message", this.onMessage as EventListener);
-    for (const request of this.pending.values()) {
-      window.clearTimeout(request.timeout);
-      request.dismissSlow?.();
-      request.reject(new Error("Comment transport closed"));
-    }
-    this.pending.clear();
+    this.retirePending(new Error("Comment transport closed"));
     this.updateHandler = null;
     this.repliesUpdateHandler = null;
     this.errorHandler = null;
     this.slowHandler = null;
+    this.refreshHandler = null;
+  }
+
+  private retirePending(error: Error): void {
+    for (const request of this.pending.values()) {
+      window.clearTimeout(request.timeout);
+      request.dismissSlow?.();
+      request.reject(error);
+    }
+    this.pending.clear();
+    this.mutations.clear();
   }
 
   private request(method: CommentorParentMethod, args: unknown): Promise<void> {
@@ -95,7 +135,7 @@ export class ParentCommentTransport {
           return;
         }
         this.pending.delete(requestId);
-        reject(new Error("Comments are taking longer to load. Refresh the page."));
+        reject(new Error("Comments are taking longer to load. Still waiting for the connection."));
       }, mutation ? 60_000 : 10_000);
       this.pending.set(requestId, { resolve, reject, timeout });
       this.parent.postMessage({
@@ -110,10 +150,14 @@ export class ParentCommentTransport {
   private readonly onMessage = (event: MessageEvent): void => {
     if (event.source !== this.parent) return;
     if (isCommentorParentReady(event.data)) {
-      // A BFCache restore creates a fresh parent host while this child realm
-      // survives, so each parent-ready generation needs a fresh subscription.
+      if (this.parentGeneration !== null && this.parentGeneration !== event.data.parentGeneration) {
+        // The replacement host cannot acknowledge requests owned by its
+        // predecessor. Settle them honestly without replaying any writes.
+        this.retirePending(new CommentMutationOutcomeUnknownError());
+      }
+      this.parentGeneration = event.data.parentGeneration;
       if (this.updateHandler && this.errorHandler) {
-        void this.request("subscribe", { documentPath: this.documentPath }).catch(this.errorHandler);
+        void this.refresh().catch(this.errorHandler);
       }
       return;
     }
