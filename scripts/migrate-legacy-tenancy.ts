@@ -6,6 +6,7 @@ import {
 import { createHash, randomUUID } from "node:crypto";
 import { readFile, writeFile } from "node:fs/promises";
 import { pathToFileURL } from "node:url";
+import { decodeStoragePath } from "../shared/storage-path";
 import { cleanDeploymentPath, cleanPublicationPath } from "../shared/v2-paths";
 
 interface MigrationTarget {
@@ -78,8 +79,13 @@ function validateLegacyPaths(prefix: string, keys: string[], publications: Legac
   const prefixOrigins = new Map<string, Set<string>>();
   const check = (value: string, source: string, allowEmpty: boolean, origins?: Map<string, Set<string>>): string => {
     const publicationPath = cleanPublicationPath(value, allowEmpty);
-    const normalized = publicationPath === null || publicationPath === ""
+    // Keep the pre-migration ambiguity check even though v2 JSON paths now
+    // preserve percent signs. Decode only for refusal/collision diagnostics;
+    // never use a changed identity for destination storage.
+    const canonical = publicationPath === null || publicationPath === ""
       ? publicationPath : cleanDeploymentPath(publicationPath);
+    const normalized = canonical === null || canonical === ""
+      ? canonical : decodeStoragePath(canonical);
     if (normalized === null || normalized !== value) {
       problems.push(`${JSON.stringify(source)} → ${normalized === null ? "invalid v2 path" : JSON.stringify(normalized)}`);
     }

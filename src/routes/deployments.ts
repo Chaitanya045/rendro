@@ -10,6 +10,7 @@ import {
 } from "@/minio";
 import { readExactBody } from "@/bounded-body";
 import { MAX_REUSED_FILES_PER_REQUEST } from "../../shared/deployment-limits";
+import { decodeStoragePath } from "../../shared/storage-path";
 import { cleanDeploymentPath } from "../../shared/v2-paths";
 
 const app = new Hono();
@@ -178,7 +179,8 @@ app.put("/api/rendro/deployments/:deploymentId/files/*", async (c) => {
   const organizationId = c.req.query("organizationId");
   const projectId = c.req.query("projectId");
   const deploymentId = c.req.param("deploymentId");
-  const filePath = cleanDeploymentPath(c.req.path.slice(c.req.path.indexOf("/files/") + 7));
+  const decodedPath = decodeStoragePath(c.req.path.slice(c.req.path.indexOf("/files/") + 7));
+  const filePath = decodedPath === null ? null : cleanDeploymentPath(decodedPath);
   if (!organizationId || !projectId || !filePath) return c.json({ error: "Invalid deployment file path" }, 400);
   const identity = { organizationId, projectId, deploymentId };
   const staging = await stagingDeployment(c.req.raw, identity);

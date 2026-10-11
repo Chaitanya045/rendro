@@ -1,22 +1,5 @@
-/** Storage keys are decoded exactly once at the HTTP boundary. Never normalize
- * an ambiguous key into an authorized one: reject it before any storage access.
- * Percent signs in a canonical key are literal data, never another URL encoding. */
-export function isCanonicalStorageKey(key: string): boolean {
-  return !!key && !key.includes("\\")
-    && [...key].every(char => char.charCodeAt(0) >= 32 && char.charCodeAt(0) !== 127)
-    && key.split("/").every(part => !!part && part !== "." && part !== "..");
-}
-
-export function decodeStoragePath(encoded: string): string | null {
-  try {
-    const path = encoded.split("/").map(part => {
-      const decoded = decodeURIComponent(part);
-      // Encoded separators must not change namespace/path segmentation.
-      return decoded.includes("/") ? "" : decoded;
-    }).join("/");
-    return isCanonicalStorageKey(path) ? path : null;
-  } catch { return null; }
-}
+import { isCanonicalStorageKey } from "../shared/storage-path";
+export { decodeStoragePath, isCanonicalStorageKey } from "../shared/storage-path";
 
 /** Existing legacy data stays in place. The entire modern root is reserved;
  * ambiguous historical legacy data under it is unavailable, never migrated. */

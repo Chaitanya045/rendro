@@ -1,3 +1,5 @@
+import { cleanDeploymentPath } from "../shared/v2-paths";
+
 export type StoredManifest = {
   files: Array<{ path: string; contentType: string }>;
 };
@@ -13,6 +15,7 @@ export function parseStoredManifest(text: string | null): StoredManifest | null 
       || typeof entry !== "object"
       || !("path" in entry)
       || typeof entry.path !== "string"
+      || cleanDeploymentPath(entry.path) === null
       || !("contentType" in entry)
       || typeof entry.contentType !== "string"
     ) return null;
