@@ -2,16 +2,11 @@ import { Hono } from "hono";
 import { CONVEX_SITE_URL } from "@/config";
 import { getObjectText } from "@/minio";
 import { parseStoredManifest, type StoredManifest } from "@/stored-manifest";
+import { cleanPublicationPath } from "../../shared/v2-paths";
 
 const app = new Hono();
 
 type Deployment = { _id: string; manifestKey: string; status: string };
-
-function cleanPath(value: string, allowEmpty: boolean): string | null {
-  const path = value.trim().replace(/^\/+|\/+$/g, "");
-  if (!path) return allowEmpty ? "" : null;
-  return path.includes("\\") || path.split("/").some((part) => !part || part === "." || part === "..") ? null : path;
-}
 
 function forwardedHeaders(request: Request): Headers {
   const headers = new Headers({ Accept: "application/json", "Content-Type": "application/json" });
@@ -47,8 +42,8 @@ app.post("/api/rendro/publications", async (c) => {
     || typeof pathPrefixValue !== "string"
     || typeof entryFileValue !== "string"
   ) return c.json({ error: "Invalid publication fields" }, 400);
-  const pathPrefix = cleanPath(pathPrefixValue, true);
-  const entryFile = cleanPath(entryFileValue, false);
+  const pathPrefix = cleanPublicationPath(pathPrefixValue, true);
+  const entryFile = cleanPublicationPath(entryFileValue, false);
   if (pathPrefix === null || !entryFile) return c.json({ error: "Invalid publication path" }, 400);
   const query = new URLSearchParams({ organizationId, projectId });
   let deployment: Deployment | undefined;

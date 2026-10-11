@@ -269,6 +269,125 @@ describe("legacy migration with mocked source storage and backend HTTP", () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 
+  function expectNoDestinationWrites() {
+    expect(starts).toBe(0);
+    expect(commits).toBe(0);
+    expect(publications).toEqual([]);
+    expect(storage.putObject).not.toHaveBeenCalled();
+    expect(vi.mocked(fetch).mock.calls.some(([url, init]) =>
+      (url instanceof Request ? url.url : String(url)).includes("/api/rendro/") && ["POST", "PUT"].includes(init?.method ?? "GET"))).toBe(false);
+    expect(send).not.toHaveBeenCalledWith(expect.any(GetObjectCommand));
+  }
+
+  it.each(["docs ", " "])("never exposes a private sibling when prefix %j would shrink in v2", async (folder) => {
+    legacyPublications[0].sourcePrefix = `old-org/${folder}/`;
+    fixtures.set(`old-org/${folder}/Z file.html`, "public entry");
+    const privateFolder = folder.trim() ? `${folder.trim()}/` : "";
+    fixtures.set(`old-org/${privateFolder}Z file.html`, "private entry");
+    fixtures.set(`old-org/${privateFolder}a-last.html`, "private sibling secret");
+    expect((await legacyPublicRoutes.request("/public/old-org/legacy-docs/files/Z%20file.html")).status).toBe(200);
+    expect((await legacyPublicRoutes.request("/public/old-org/legacy-docs/files/a-last.html")).status).toBe(404);
+    await expect(main(["--map", "targets.json", ...confirmedApply])).rejects.toThrow(JSON.stringify(`old-org/${folder}/`));
+    expectNoDestinationWrites();
+    expect((await publicRoutes.request("/p/legacy-docs/files/a-last.html")).status).toBe(404);
+  });
+
+  it.each([
+    ["whitespace", " docs"],
+    ["trailing whitespace", "docs "],
+    ["leading slash", "/docs"],
+    ["repeated slashes", "docs//nested"],
+    ["dot", "docs/./nested"],
+    ["parent", "docs/../private"],
+    ["percent decoding", "%64ocs"],
+    ["repeated percent decoding", "%2564ocs"],
+    ["encoded slash", "docs%2Fnested"],
+    ["encoded dot segment", "docs/%2e%2e/private"],
+    ["extra trailing slash", "docs/"],
+    ["backslash", "docs\\nested"],
+  ])("rejects publication prefix %s before any destination write", async (_kind, folder) => {
+    legacyPublications[0].sourcePrefix = `old-org/${folder}/`;
+    fixtures.set(`old-org/${folder}/Z file.html`, "entry");
+    await expect(main(["--map", "targets.json", ...confirmedApply])).rejects.toThrow(JSON.stringify(`old-org/${folder}/`));
+    expectNoDestinationWrites();
+  });
+
+  it.each([
+    ["whitespace", " docs/a.html"],
+    ["trailing whitespace", "docs/a.html "],
+    ["leading slash", "/docs/a.html"],
+    ["repeated slashes", "docs//a.html"],
+    ["dot", "docs/./a.html"],
+    ["parent", "docs/../a.html"],
+    ["percent decoding", "docs/%61.html"],
+    ["repeated percent decoding", "docs/%2561.html"],
+    ["encoded slash", "docs%2Fa.html"],
+    ["malformed encoding", "docs/a%.html"],
+    ["trailing slash", "docs/a.html/"],
+    ["backslash", "docs\\a.html"],
+  ])("rejects file path %s, even when deleted, before destination writes", async (_kind, path) => {
+    const key = `old-org/${path}`;
+    fixtures.set(key, "deleted secret");
+    deleted.add(key);
+    await expect(main(["--map", "targets.json", ...confirmedApply])).rejects.toThrow(JSON.stringify(key));
+    expectNoDestinationWrites();
+  });
+
+  it.each([" Z file.html", "Z file.html/", "%5A file.html", "./Z file.html"])("rejects entry path %j before destination writes", async (entry) => {
+    legacyPublications[0].entryFile = entry;
+    await expect(main(["--map", "targets.json", ...confirmedApply])).rejects.toThrow(JSON.stringify(`legacy-docs entry: ${entry}`));
+    expectNoDestinationWrites();
+  });
+
+  it.each([
+    ["old-org/docs/a-last.html", "old-org/docs/%61-last.html"],
+    ["old-org/docs/a-last.html", "old-org//docs/a-last.html"],
+    ["old-org/docs/a-last.html", "old-org/docs/a-last.html "],
+  ])("lists both file paths in a normalization collision: %s and %s", async (original, alias) => {
+    fixtures.set(alias, "deleted alias");
+    deleted.add(alias);
+    const result = main(["--map", "targets.json", ...confirmedApply]);
+    await expect(result).rejects.toThrow(`collision at "docs/a-last.html": ${JSON.stringify(original)}, ${JSON.stringify(alias)}`);
+    expectNoDestinationWrites();
+  });
+
+  it("lists colliding publication prefixes before destination writes", async () => {
+    legacyPublications.push({ ...legacyPublications[0], slug: "other-docs", sourcePrefix: "old-org/docs /" });
+    fixtures.set("old-org/docs /Z file.html", "public entry");
+    await expect(main(["--map", "targets.json", ...confirmedApply])).rejects.toThrow('collision at "docs": "old-org/docs/", "old-org/docs /"');
+    expectNoDestinationWrites();
+  });
+
+  it.each([
+    ["case", "Docs", "docs"],
+    ["Unicode code points", "caf\u00e9", "cafe\u0301"],
+  ])("preserves distinct %s in prefixes, paths, and exact-key deletion state", async (_kind, first, second) => {
+    fixtures = new Map([
+      [`old-org/${first}/index.html`, "first entry"],
+      [`old-org/${second}/index.html`, "second entry"],
+      [`old-org/${first}/a.html`, "deleted secret"],
+      [`old-org/${first}/b.html`, "live first"],
+      [`old-org/${second}/b.html`, "deleted second"],
+    ]);
+    deleted.add(`old-org/${first}/a.html`);
+    deleted.add(`old-org/${second}/b.html`);
+    legacyPublications = [
+      { ...legacyPublications[0], sourcePrefix: `old-org/${first}/`, entryFile: "index.html" },
+      { ...legacyPublications[0], slug: "second-docs", sourcePrefix: `old-org/${second}/`, entryFile: "index.html" },
+    ];
+    await main(["--map", "targets.json", ...confirmedApply]);
+    const manifest = JSON.parse(objects.get(`${root}/manifest.json`) as string);
+    expect(manifest.files.map((file: { path: string }) => file.path).sort()).toEqual([
+      `${first}/index.html`, `${first}/b.html`, `${second}/index.html`,
+    ].sort());
+    for (const slug of ["legacy-docs", "second-docs"]) {
+      expect((await publicRoutes.request(`/p/${slug}/files/a.html`)).status).toBe(404);
+      expect((await publicRoutes.request(`/p/${slug}/files/index.html`)).status).toBe(200);
+    }
+    expect((await publicRoutes.request("/p/legacy-docs/files/b.html")).status).toBe(200);
+    expect((await publicRoutes.request("/p/second-docs/files/b.html")).status).toBe(404);
+  });
+
   it("keeps soft-deleted documents 404, including an idempotent rerun", async () => {
     deleted.add("old-org/docs/a-last.html");
     expect((await legacyPublicRoutes.request("/public/old-org/legacy-docs/files/a-last.html")).status).toBe(404);

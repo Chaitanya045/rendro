@@ -6,6 +6,7 @@ import {
 import { createHash, randomUUID } from "node:crypto";
 import { readFile, writeFile } from "node:fs/promises";
 import { pathToFileURL } from "node:url";
+import { cleanDeploymentPath, cleanPublicationPath } from "../shared/v2-paths";
 
 interface MigrationTarget {
   legacyOrgSlug: string;
@@ -69,6 +70,49 @@ function canPublishLegacyPath(path: string): boolean {
     && path.split("/").every(part => part && part !== "." && part !== "..");
 }
 
+// Check the complete inventory, including deleted/private objects, before any
+// destination write. Filtering first could hide an alias of a deleted path.
+function validateLegacyPaths(prefix: string, keys: string[], publications: LegacyPublication[]) {
+  const problems: string[] = [];
+  const fileOrigins = new Map<string, Set<string>>();
+  const prefixOrigins = new Map<string, Set<string>>();
+  const check = (value: string, source: string, allowEmpty: boolean, origins?: Map<string, Set<string>>): string => {
+    const publicationPath = cleanPublicationPath(value, allowEmpty);
+    const normalized = publicationPath === null || publicationPath === ""
+      ? publicationPath : cleanDeploymentPath(publicationPath);
+    if (normalized === null || normalized !== value) {
+      problems.push(`${JSON.stringify(source)} → ${normalized === null ? "invalid v2 path" : JSON.stringify(normalized)}`);
+    }
+    if (normalized !== null && origins) {
+      const sources = origins.get(normalized) ?? new Set<string>();
+      sources.add(source);
+      origins.set(normalized, sources);
+    }
+    return normalized ?? value;
+  };
+  const paths = new Map(keys.map(key => [key, check(key.slice(prefix.length), key, false, fileOrigins)]));
+  const mappings = publications.map(publication => {
+    // One terminal slash is the legacy folder delimiter, not part of the
+    // folder name. Remove exactly that delimiter, then require an identity.
+    if (!publication.sourcePrefix.endsWith("/")) {
+      problems.push(`${JSON.stringify(publication.sourcePrefix)}: missing legacy folder delimiter`);
+    }
+    const relative = publication.sourcePrefix.slice(prefix.length, -1);
+    const pathPrefix = check(relative, publication.sourcePrefix, true, prefixOrigins);
+    const entryFile = check(publication.entryFile, `${publication.slug} entry: ${publication.entryFile}`, false);
+    return { ...publication, pathPrefix, entryFile };
+  });
+  for (const origins of [fileOrigins, prefixOrigins]) {
+    for (const [path, sources] of origins) {
+      if (sources.size > 1) problems.push(`collision at ${JSON.stringify(path)}: ${[...sources].map(source => JSON.stringify(source)).join(", ")}`);
+    }
+  }
+  if (problems.length) {
+    throw new Error(`Unsafe legacy paths; refusing migration before destination writes (publications: ${publications.map(row => row.slug).join(", ") || "none"}):\n${problems.join("\n")}`);
+  }
+  return { paths, mappings };
+}
+
 interface ManifestEntry {
   path: string;
   sha256: string;
@@ -123,12 +167,12 @@ async function listLegacy(prefix: string): Promise<Array<{ key: string; size: nu
   return output;
 }
 
-async function manifestEntry(key: string, prefix: string): Promise<ManifestEntry> {
+async function manifestEntry(key: string, path: string): Promise<ManifestEntry> {
   const object = await s3.send(new GetObjectCommand({ Bucket: bucket, Key: key }));
   if (!object.Body) throw new Error(`Unable to read ${key}`);
   const bytes = await object.Body.transformToByteArray();
   return {
-    path: key.slice(prefix.length),
+    path,
     sha256: createHash("sha256").update(bytes).digest("hex"),
     size: bytes.byteLength,
     contentType: object.ContentType ?? "application/octet-stream",
@@ -177,17 +221,24 @@ async function migrateTarget(
   const keys = objects.map(object => object.key);
   const visible = await visibleLegacyKeys(keys);
   const legacy = await legacyPublications(target);
-  const included = objects.filter(object => visible.has(object.key) && legacy.every(publication =>
-    !object.key.startsWith(publication.sourcePrefix)
-      || canPublishLegacyPath(object.key.slice(publication.sourcePrefix.length))));
+  const { paths, mappings } = validateLegacyPaths(prefix, keys, legacy);
+  const visiblePaths = new Set([...visible].map(key => paths.get(key)!));
+  const included = objects.filter(object => {
+    const path = paths.get(object.key)!;
+    return visiblePaths.has(path) && mappings.every(publication => {
+      const folder = publication.pathPrefix ? `${publication.pathPrefix}/` : "";
+      return !path.startsWith(folder) || canPublishLegacyPath(path.slice(folder.length));
+    });
+  });
   console.log(`  Excluded ${objects.length - included.length} deleted or legacy-inaccessible objects`);
-  for (const publication of legacy) {
-    if (!included.some(object => object.key === publication.sourcePrefix + publication.entryFile)) {
+  for (const publication of mappings) {
+    const entry = publication.pathPrefix ? `${publication.pathPrefix}/${publication.entryFile}` : publication.entryFile;
+    if (!included.some(object => paths.get(object.key) === entry)) {
       throw new Error(`Publication ${publication.slug} has no visible entry document; refusing migration`);
     }
   }
   const files: ManifestEntry[] = [];
-  for (const object of included) files.push(await manifestEntry(object.key, prefix));
+  for (const object of included) files.push(await manifestEntry(object.key, paths.get(object.key)!));
   // Match the Worker's code-point ordering, including mixed case paths.
   files.sort((left, right) => left.path < right.path ? -1 : left.path > right.path ? 1 : 0);
   const manifest = { version: 1, files };
@@ -268,9 +319,8 @@ async function migrateTarget(
     const existing = await requestJson<{
       publications: Array<{ _id: string; slug: string; pathPrefix: string; entryFile: string; title: string; trackingMode: string; pinnedDeploymentId?: string }>;
     }>(`${endpoint}/api/rendro/publications?${query}`, target.apiKey);
-    for (const publication of legacy) {
-      if (!publication.sourcePrefix.startsWith(prefix)) continue;
-      const pathPrefix = publication.sourcePrefix.slice(prefix.length).replace(/\/$/, "");
+    for (const publication of mappings) {
+      const { pathPrefix } = publication;
       const previous = existing.publications.find((entry) => entry.slug === publication.slug);
       if (previous) {
         if (previous.pathPrefix !== pathPrefix || previous.entryFile !== publication.entryFile

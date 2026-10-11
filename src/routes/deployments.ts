@@ -9,6 +9,7 @@ import {
 } from "@/minio";
 import { readExactBody } from "@/bounded-body";
 import { MAX_REUSED_FILES_PER_REQUEST } from "../../shared/deployment-limits";
+import { cleanDeploymentPath } from "../../shared/v2-paths";
 
 const app = new Hono();
 
@@ -29,19 +30,6 @@ type DeploymentIdentity = {
   projectId: string;
   deploymentId: string;
 };
-
-function safePath(value: string): string | null {
-  let decoded: string;
-  try { decoded = decodeURIComponent(value); } catch { return null; }
-  const path = decoded.replace(/^\/+/, "");
-  if (
-    !path
-    || path.length > 1024
-    || path.includes("\\")
-    || path.split("/").some((part) => !part || part === "." || part === "..")
-  ) return null;
-  return path;
-}
 
 function objectRoot(identity: DeploymentIdentity): string {
   return `tenants/${identity.organizationId}/projects/${identity.projectId}/deployments/${identity.deploymentId}`;
@@ -85,7 +73,7 @@ function parseManifest(value: unknown): DeploymentManifest | null {
   const paths = new Set<string>();
   for (const entry of value.files as unknown[]) {
     if (!entry || typeof entry !== "object") return null;
-    const path = "path" in entry && typeof entry.path === "string" ? safePath(entry.path) : null;
+    const path = "path" in entry && typeof entry.path === "string" ? cleanDeploymentPath(entry.path) : null;
     const fileSha = "sha256" in entry && typeof entry.sha256 === "string" ? entry.sha256 : "";
     const size = "size" in entry && typeof entry.size === "number" ? entry.size : -1;
     const contentType = "contentType" in entry && typeof entry.contentType === "string"
@@ -189,7 +177,7 @@ app.put("/api/rendro/deployments/:deploymentId/files/*", async (c) => {
   const organizationId = c.req.query("organizationId");
   const projectId = c.req.query("projectId");
   const deploymentId = c.req.param("deploymentId");
-  const filePath = safePath(c.req.path.slice(c.req.path.indexOf("/files/") + 7));
+  const filePath = cleanDeploymentPath(c.req.path.slice(c.req.path.indexOf("/files/") + 7));
   if (!organizationId || !projectId || !filePath) return c.json({ error: "Invalid deployment file path" }, 400);
   const identity = { organizationId, projectId, deploymentId };
   const staging = await stagingDeployment(c.req.raw, identity);
@@ -230,7 +218,7 @@ app.post("/api/rendro/deployments/:deploymentId/copy", async (c) => {
   let body: unknown;
   try { body = await c.req.json(); } catch { return c.json({ error: "Invalid JSON body" }, 400); }
   const paths = body && typeof body === "object" && "paths" in body && Array.isArray(body.paths)
-    ? body.paths.map((value) => typeof value === "string" ? safePath(value) : null)
+    ? body.paths.map((value) => typeof value === "string" ? cleanDeploymentPath(value) : null)
     : [];
   if (paths.some((path) => !path)) return c.json({ error: "Invalid copy path" }, 400);
   if (paths.length > MAX_REUSED_FILES_PER_REQUEST) {

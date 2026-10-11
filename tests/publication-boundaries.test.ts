@@ -44,6 +44,25 @@ async function createPublication(
 }
 
 describe("publication tenant and project boundaries", () => {
+  it.each(["docs//nested", "docs/./nested", "docs/../private", "docs\\nested"])("rejects invalid v2 publication prefix %j in Convex too", async (pathPrefix) => {
+    const backend = convexTest(schema, modules);
+    const project = await createProject(backend, "org-a", "docs");
+    await expect(backend.mutation(internal.publicationsV2.createInternal, {
+      organizationId: "org-a", projectId: project._id, slug: "docs",
+      pathPrefix, entryFile: "index.html", trackingMode: "track_active", actorId: "owner",
+    })).rejects.toThrow("Invalid publication path");
+  });
+
+  it.each(["Docs", "docs", "caf\u00e9", "cafe\u0301"])("trims outer delimiters while preserving case and Unicode in %j", async (folder) => {
+    const backend = convexTest(schema, modules);
+    const project = await createProject(backend, "org-a", "docs");
+    const publication = await backend.mutation(internal.publicationsV2.createInternal, {
+      organizationId: "org-a", projectId: project._id, slug: "docs",
+      pathPrefix: ` /${folder}/ `, entryFile: " index.html ", trackingMode: "track_active", actorId: "owner",
+    });
+    expect(publication).toMatchObject({ pathPrefix: folder, entryFile: "index.html" });
+  });
+
   it("does not publish a pinned deployment before it has committed", async () => {
     const backend = convexTest(schema, modules);
     const project = await createProject(backend, "org-a", "pending");
