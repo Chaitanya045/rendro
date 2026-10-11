@@ -1,8 +1,8 @@
-import { assetHeaders } from "@/routes/asset-headers";
+import { assetError, assetHeaders } from "@/routes/asset-headers";
 import { decodeStoragePath, isCanonicalStorageKey, modernStoragePrefix, modernStorageKey } from "@/storage-boundary";
 import { Hono, type Context } from "hono";
 import { createViewerTicket, readViewerTicket, viewerSessionCookie } from "@/viewer-ticket";
-import { viewerScript } from "@/viewer/markup";
+import { viewerScript, viewerUpdateNotice } from "@/viewer/markup";
 import { escapeHtml } from "@/routes/html";
 import type { User } from "better-auth/types";
 import { CONVEX_SITE_URL, CONVEX_URL } from "@/config";
@@ -23,10 +23,11 @@ function inlineJson(value: unknown): string {
 
 type DeploymentUnavailable = { unavailable: true; retryAfter: string };
 
-function unavailableResponse(c: Context, failure: DeploymentUnavailable, json = false) {
+function unavailableResponse(c: Context, failure: DeploymentUnavailable, representation: "html" | "json" | "asset" = "html") {
   c.header("Cache-Control", "private, no-store");
   c.header("Retry-After", failure.retryAfter);
-  return json
+  if (representation === "asset") return assetError(c, renderSessionUnavailablePage, 503);
+  return representation === "json"
     ? c.json({ error: "Document temporarily unavailable", retryable: true }, 503)
     : c.html(renderSessionUnavailablePage(), 503);
 }
@@ -123,7 +124,7 @@ app.get("/organizations/:organizationId/projects/:projectId/docs/tree", async (c
   const organizationId = c.req.param("organizationId");
   const projectId = c.req.param("projectId");
   const active = await activeDeployment(organizationId, projectId, c.req.header("Cookie"));
-  if (active && "unavailable" in active) return unavailableResponse(c, active, true);
+  if (active && "unavailable" in active) return unavailableResponse(c, active, "json");
   if (!active) return c.json({ error: "Not found" }, 404);
   const manifest = await activeManifest(active);
   if (!manifest) return c.json({ error: "Manifest unavailable" }, 404);
@@ -144,9 +145,15 @@ app.get("/organizations/:organizationId/projects/:projectId/docs/viewer-ticket",
   const cookie = viewerSessionCookie(c.req.header("Cookie") ?? "");
   if (!cookie) return c.json({ error: "Authentication required" }, 401);
   const active = await activeDeployment(organizationId, projectId, cookie);
-  if (active && "unavailable" in active) return unavailableResponse(c, active, true);
-  if (!active || active.deployment.manifestKey !== c.req.query("manifestKey")) {
+  if (active && "unavailable" in active) return unavailableResponse(c, active, "json");
+  const manifestKey = c.req.query("manifestKey");
+  if (!active || !manifestKey || !modernStoragePrefix({ organizationId, projectId, manifestKey })) {
     return c.json({ error: "Not found" }, 404);
+  }
+  // Only disclose a deployment change after the backend has freshly authorized
+  // the session, membership and project. Never issue a ticket across manifests.
+  if (active.deployment.manifestKey !== manifestKey) {
+    return c.json({ code: "deployment_superseded" }, 409);
   }
   const token = await createViewerTicket({ organizationId, projectId, manifestKey: active.deployment.manifestKey, cookie });
   return c.json({ prefix: `${basePath(organizationId, projectId)}/view/${token}/files/` });
@@ -162,7 +169,7 @@ app.on("GET", [
   const projectId = c.req.param("projectId");
   const base = basePath(organizationId, projectId);
   // Never echo the request URL (which may contain a capability) in errors.
-  const missing = () => c.html(renderNotFoundPage({ path: "Document unavailable", homeHref: base, homeLabel: "Open project docs" }), 404);
+  const missing = () => assetError(c, () => renderNotFoundPage({ path: "Document unavailable", homeHref: base, homeLabel: "Open project docs" }));
   const viewerToken = c.req.param("viewerToken");
   const ticket = viewerToken ? await readViewerTicket(viewerToken, { organizationId, projectId }) : null;
   if (viewerToken ? !ticket : !c.get("user")) return missing();
@@ -173,7 +180,7 @@ app.on("GET", [
   // No authorization cache: Convex checks persisted session, membership, and
   // project ownership on every request, including nested CSS and font requests.
   const active = await activeDeployment(organizationId, projectId, cookie);
-  if (active && "unavailable" in active) return unavailableResponse(c, active);
+  if (active && "unavailable" in active) return unavailableResponse(c, active, "asset");
   if (!active || (ticket && ticket.manifestKey !== active.deployment.manifestKey)) return missing();
   const manifest = await activeManifest(active);
   const entry = manifest?.files.find((file) => file.path === path);
@@ -249,7 +256,7 @@ app.get("/organizations/:organizationId/projects/:projectId/docs", async (c) => 
     backLabel: "Project",
     shareConfig: { organizationId, projectId, convexUrl: CONVEX_URL },
   });
-  return c.html(shell.replace("</body>", viewerScript("parent", { base }) + "</body>"));
+  return c.html(shell.replace("</body>", viewerUpdateNotice() + viewerScript("parent", { base }) + "</body>"));
 });
 
 export default app;

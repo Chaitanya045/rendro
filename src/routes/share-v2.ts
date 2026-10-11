@@ -1,7 +1,7 @@
 import { decodeStoragePath } from "@/storage-boundary";
 import { validDocumentSearch } from "@/lazy-tree/messages";
 import { escapeHtml } from "@/routes/html";
-import { assetContentType, assetHeaders } from "@/routes/asset-headers";
+import { assetContentType, assetError, assetHeaders } from "@/routes/asset-headers";
 import { nonceAttribute } from "@/middleware/html-nonce";
 import { viewerScript } from "@/viewer/markup";
 import { renderFaviconLinks } from "./favicon";
@@ -31,16 +31,16 @@ async function resolveShare(token: string): Promise<ShareResolution | null> {
 app.get("/s/:token/files/*", async (c) => {
   const resolution = await resolveShare(c.req.param("token"));
   const path = decodeStoragePath(c.req.path.slice(c.req.path.indexOf("/files/") + 7));
-  if (!resolution || !path) return c.html(renderNotFoundPage({ path: c.req.path }), 404);
+  if (!resolution || !path) return assetError(c, () => renderNotFoundPage({ path: "Document unavailable" }));
   const documentPath = resolution.grant.documentPath;
   const directory = documentPath.includes("/") ? documentPath.slice(0, documentPath.lastIndexOf("/") + 1) : "";
   const type = assetContentType(path);
   const isExactDocument = path === documentPath;
   const isSameTreeAsset = !type.startsWith("text/html") && path.startsWith(directory);
-  if (!isExactDocument && !isSameTreeAsset) return c.html(renderNotFoundPage({ path: c.req.path }), 404);
+  if (!isExactDocument && !isSameTreeAsset) return assetError(c, () => renderNotFoundPage({ path: "Document unavailable" }));
   const key = `${resolution.deployment.manifestKey.slice(0, -"manifest.json".length)}files/${path}`;
   const stream = await getObjectStream(key);
-  if (!stream) return c.html(renderNotFoundPage({ path: c.req.path }), 404);
+  if (!stream) return assetError(c, () => renderNotFoundPage({ path: "Document unavailable" }));
   const body = type.startsWith("text/html")
     ? injectViewerHeadStream(injectMobileViewportScrollbarStream(stream), () => viewerScript("navigation", {
       prefix: `/s/${encodeURIComponent(c.req.param("token"))}/files/`, documentPath, singleDocument: true,

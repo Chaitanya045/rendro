@@ -1,5 +1,6 @@
 import { Window as DOMWindow, type HTMLLinkElement as DOMLinkElement, type HTMLStyleElement as DOMStyleElement } from "happy-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { viewerUpdateNotice } from "@/viewer/markup";
 import { installViewerFrame, installViewerParent } from "@/viewer/client";
 
 const origin = "https://rendro.test";
@@ -198,7 +199,7 @@ describe("private viewer renewal", () => {
     const source = { postMessage: vi.fn() };
     const frame = { src: `${origin}${base}/files/guide/index.html`, contentWindow: source };
     const fetch = vi.fn().mockResolvedValue(Response.json({ prefix: `${base}/view/fresh/files/` }));
-    const host = { ...bus, document: { getElementById: () => frame }, location: new URL(origin), fetch } as unknown as Window;
+    const host = { ...bus, document: { getElementById: (id: string) => id === "content-frame" ? frame : null }, location: new URL(origin), fetch } as unknown as Window;
     installViewerParent({ base }, host);
     const data = { type: "viewer-renew", requestId: "request-1", manifestKey: "release/manifest.json" };
     bus.emit("message", { source: {}, origin: "null", data });
@@ -222,5 +223,58 @@ describe("private viewer renewal", () => {
     resolve(Response.json({ prefix: `${base}/view/fresh/files/` }));
     await new Promise(done => setTimeout(done, 0));
     expect(source.postMessage).not.toHaveBeenCalled();
+  });
+});
+
+describe("deployment update notice", () => {
+  function fixture() {
+    const win = new DOMWindow({ url: origin });
+    windows.push(win);
+    win.document.write(viewerUpdateNotice());
+    const bus = events();
+    const source = { postMessage: vi.fn() };
+    const frame = { src: `${origin}${base}/files/guide/index.html`, contentWindow: source };
+    const notice = win.document.querySelector("aside")!;
+    const fetch = vi.fn();
+    const reload = vi.fn();
+    const host = { ...bus, document: { getElementById: (id: string) => id === "content-frame" ? frame : notice },
+      location: { href: origin, origin, reload }, fetch } as unknown as Window;
+    installViewerParent({ base }, host);
+    const request = () => bus.emit("message", { source, origin: "null", data: {
+      type: "viewer-renew", requestId: "renew", manifestKey: "release/manifest.json",
+    } });
+    return { win, bus, frame, notice, fetch, reload, request };
+  }
+
+  it("announces only the exact superseded signal and reloads only on user action", async () => {
+    const f = fixture();
+    for (const [status, body] of [[401, {}], [404, {}], [503, {}], [409, { code: "unknown" }], [200, { code: "deployment_superseded" }]] as const) {
+      f.fetch.mockResolvedValue(Response.json(body, { status }));
+      f.request();
+      await new Promise(resolve => setTimeout(resolve, 0));
+      expect(f.notice.hidden).toBe(true);
+    }
+    f.fetch.mockResolvedValue(Response.json({ code: "deployment_superseded" }, { status: 409 }));
+    f.request();
+    await vi.waitFor(() => expect(f.notice.hidden).toBe(false));
+    expect(f.notice.querySelector('[role="status"]')!.textContent).toBe("A newer version of this document was published.");
+    expect(f.reload).not.toHaveBeenCalled();
+    f.notice.querySelector("button")!.click();
+    expect(f.reload).toHaveBeenCalledOnce();
+    f.bus.emit("load", { target: f.frame });
+    expect(f.notice.hidden).toBe(true);
+  });
+
+  it.each(["different path", "same path reload"])("ignores a superseded reply after %s", async navigation => {
+    const f = fixture();
+    let resolve!: (response: Response) => void;
+    f.fetch.mockReturnValue(new Promise<Response>(done => { resolve = done; }));
+    f.request();
+    if (navigation === "different path") f.frame.src = `${origin}${base}/files/other.html`;
+    else f.bus.emit("load", { target: f.frame });
+    resolve(Response.json({ code: "deployment_superseded" }, { status: 409 }));
+    await new Promise(done => setTimeout(done, 0));
+    expect(f.notice.hidden).toBe(true);
+    expect(f.reload).not.toHaveBeenCalled();
   });
 });

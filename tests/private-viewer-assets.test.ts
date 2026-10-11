@@ -126,9 +126,59 @@ describe("private sandbox asset routing", () => {
       const body = await response.text();
       expect(body).not.toMatch(/secret|Document unavailable/);
       if (route === "tree" || route === "renewal") expect(JSON.parse(body).retryable).toBe(true);
+      else if (route === "ticket") expect(body).toBe("Service unavailable");
       else expect(body).toContain('href="">Try again</a>');
     }
     expect(f.objects).not.toHaveBeenCalled();
+  });
+
+  describe.each(["ticket", "canonical"])("%s retryable asset failures", route => {
+    it.each([
+      ["assets/image.png", "image/avif,image/webp,*/*;q=0.8"],
+      ["assets/font.woff2", "font/woff2"],
+      ["assets/site.css", "text/css,*/*;q=0.1"],
+      ["assets/module.js", "*/*"],
+      ["image", "image/png"], ["font", "font/woff2"],
+      ["stylesheet", "text/css"], ["script", "application/javascript"],
+    ])("returns plain 503 for %s (%s)", async (path, accept) => {
+      const f = await fixture();
+      const { url } = await f.document();
+      f.state.failActive = () => new Response("secret upstream diagnostics", {
+        status: 503, headers: { "Retry-After": "9" },
+      });
+      f.objects.mockClear();
+      const target = route === "ticket" ? new URL(path, url).href : `${base}/files/guide/${path}`;
+      const response = await f.app.request(target, { headers: {
+        Accept: accept, ...(route === "canonical" ? { Cookie: f.cookie } : {}),
+      } });
+      expect(response.status).toBe(503);
+      expect(response.headers.get("Content-Type")).toBe("text/plain; charset=UTF-8");
+      expect(response.headers.get("Retry-After")).toBe("9");
+      expect(response.headers.get("Cache-Control")).toBe("private, no-store");
+      expect(response.headers.get("X-Content-Type-Options")).toBe("nosniff");
+      expect(response.headers.get("Access-Control-Allow-Origin")).toBeNull();
+      expect(await response.text()).toBe("Service unavailable");
+      expect(f.objects).not.toHaveBeenCalled();
+    });
+
+    it("keeps the styled 503 page for HTML document requests", async () => {
+      const f = await fixture();
+      const { url } = await f.document();
+      f.state.failActive = () => new Response(null, { status: 503, headers: { "Retry-After": "9" } });
+      const target = route === "ticket" ? url.href : `${base}/files/guide/index.html`;
+      const response = await f.app.request(target, { headers: {
+        Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+        ...(route === "canonical" ? { Cookie: f.cookie } : {}),
+      } });
+      expect(response.status).toBe(503);
+      expect(response.headers.get("Content-Type")).toContain("text/html");
+      expect(response.headers.get("Retry-After")).toBe("9");
+      expect(response.headers.get("Cache-Control")).toBe("private, no-store");
+      expect(response.headers.get("X-Content-Type-Options")).toBe("nosniff");
+      const body = await response.text();
+      expect(body).toContain("<!DOCTYPE html>");
+      expect(body).toContain('href="">Try again</a>');
+    });
   });
 
   it.each(routes)("reserves 404 for authoritative absence/denial on %s", async route => {
@@ -297,6 +347,39 @@ describe("private sandbox asset routing", () => {
     expect((await f.app.request(`${base}/viewer-ticket?manifestKey=another`, { headers: { Cookie: f.cookie } })).status).toBe(404);
     await f.revoke();
     expect((await f.app.request(endpoint, { headers: { Cookie: f.cookie } })).status).toBe(401);
+  });
+
+  it("signals a superseded deployment only after full authorization, without extending old tickets", async () => {
+    const f = await fixture();
+    const { url } = await f.document();
+    const endpoint = `${base}/viewer-ticket?${new URLSearchParams({ manifestKey })}`;
+    f.state.manifestKey = manifestKey.replace("deploy-a/", "deploy-b/");
+    f.objects.mockClear();
+    const response = await f.app.request(endpoint, { headers: { Cookie: f.cookie } });
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({ code: "deployment_superseded" });
+    expect(response.headers.get("Cache-Control")).toBe("private, no-store");
+    expect(response.headers.get("Referrer-Policy")).toBe("no-referrer");
+    expect((await f.app.request(new URL("assets/image.png", url).href)).status).toBe(404);
+    expect(f.objects).not.toHaveBeenCalled();
+    expect((await f.document()).url.pathname).not.toBe(url.pathname);
+
+    const anonymous = await f.app.request(endpoint);
+    expect(anonymous.status).toBe(401);
+    expect(await anonymous.json()).toEqual({ error: "Authentication required" });
+    for (const denied of [endpoint.replace("org-a/projects", "org-b/projects"), endpoint.replace("project-a/docs", "project-b/docs")]) {
+      const result = await f.app.request(denied, { headers: { Cookie: f.cookie } });
+      expect(result.status).toBe(404);
+      expect(await result.json()).toEqual({ error: "Not found" });
+    }
+    f.state.member = false;
+    const nonmember = await f.app.request(endpoint, { headers: { Cookie: f.cookie } });
+    expect(nonmember.status).toBe(404);
+    expect(await nonmember.json()).toEqual({ error: "Not found" });
+    await f.revoke();
+    const revoked = await f.app.request(endpoint, { headers: { Cookie: f.cookie } });
+    expect(revoked.status).toBe(401);
+    expect(await revoked.json()).toEqual({ error: "Authentication required" });
   });
 
   it("keeps tree, canonical deep links, sandbox and parent comment identity", async () => {

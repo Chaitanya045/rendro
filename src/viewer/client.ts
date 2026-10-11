@@ -7,6 +7,14 @@ interface RenewalMessage { type?: string; requestId?: string; manifestKey?: stri
 
 export function installViewerParent(config: ParentConfig, host: Window = window): void {
   let pending = false;
+  let generation = 0;
+  const notice = host.document.getElementById("viewer-update-notice");
+  notice?.querySelector("button")?.addEventListener("click", () => host.location.reload());
+  host.addEventListener("load", event => {
+    if (event.target !== host.document.getElementById("content-frame")) return;
+    generation++;
+    if (notice) notice.hidden = true;
+  }, true);
   host.addEventListener("message", (event: MessageEvent<RenewalMessage>) => {
     const frame = host.document.getElementById("content-frame") as HTMLIFrameElement | null;
     const data = event.data;
@@ -17,14 +25,26 @@ export function installViewerParent(config: ParentConfig, host: Window = window)
     if (src.origin !== host.location.origin || !src.pathname.startsWith(`${config.base}/files/`)) return;
     pending = true;
     const source = frame.contentWindow;
+    const requestedGeneration = generation;
     void (async () => {
       try {
         const query = new URLSearchParams({ manifestKey: data.manifestKey as string });
         const response = await host.fetch(`${config.base}/viewer-ticket?${query}`, {
           credentials: "same-origin", cache: "no-store", signal: AbortSignal.timeout(15_000),
         });
-        if (!response.ok) return;
-        const result = await response.json() as { prefix?: unknown };
+        if (!response.ok && response.status !== 409) return;
+        const result = await response.json() as { prefix?: unknown; code?: unknown };
+        // A navigation (including a reload of the same path) invalidates replies
+        // from the old frame. The notice never navigates or steals focus itself.
+        if (frame.src !== src.href || generation !== requestedGeneration) return;
+        if (response.status === 409) {
+          if (result.code === "deployment_superseded" && notice) {
+            notice.hidden = false;
+            const status = notice.querySelector('[role="status"]');
+            if (status) status.textContent = "A newer version of this document was published.";
+          }
+          return;
+        }
         // Never turn this into a general fetch or credential broker.
         if (frame.src === src.href && typeof result.prefix === "string" && result.prefix.startsWith(`${config.base}/view/`)) {
           source.postMessage({ type: "viewer-renewed", requestId: data.requestId, prefix: result.prefix }, "*");

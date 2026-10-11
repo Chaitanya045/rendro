@@ -62,6 +62,18 @@ describe("legacy viewer routes", () => {
     expect((await request(url)).status).toBe(404);
     expect(minio.getObjectStream).not.toHaveBeenCalled();
   });
+  it.each(["image.png", "font.woff2", "style.css", "script.js"])("uses plain uncached errors for legacy %s requests", async path => {
+    const token = await createLegacyViewerTicket("example", cookie);
+    vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(Response.json(null))));
+    for (const prefix of [`${base}/files/`, `${base}/view/${token}/files/`]) {
+      const response = await request(prefix + path);
+      expect(response.status).toBe(404);
+      expect(response.headers.get("Content-Type")).toBe("text/plain; charset=UTF-8");
+      expect(response.headers.get("Cache-Control")).toBe("private, no-store");
+      expect(response.headers.get("X-Content-Type-Options")).toBe("nosniff");
+      expect(await response.text()).toBe("Not found");
+    }
+  });
   it("rejects expired, tampered, cross-org and cross-model tickets", async () => {
     const token = await createLegacyViewerTicket("example", cookie);
     expect(await readLegacyViewerTicket(token, "other")).toBeNull();

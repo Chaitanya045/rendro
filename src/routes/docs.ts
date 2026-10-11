@@ -1,3 +1,4 @@
+import { assetError } from "@/routes/asset-headers";
 import { decodeStoragePath, isLegacyStorageKey, isLegacyStoragePrefix, legacyStoragePrefix } from "@/storage-boundary";
 import { Hono } from "hono";
 import type { Context } from "hono";
@@ -68,7 +69,7 @@ app.on("GET", ["/legacy-view/:org/files/*", "/legacy-view/:org/view/:viewerToken
   c.header("Referrer-Policy", "no-referrer");
   const org = c.req.param("org");
   const base = `/legacy-view/${encodeURIComponent(org)}`;
-  const missing = () => c.html(renderNotFoundPage({ path: "Document unavailable", homeHref: `/docs/${encodeURIComponent(org)}`, homeLabel: "Open docs tree" }), 404);
+  const missing = () => assetError(c, () => renderNotFoundPage({ path: "Document unavailable", homeHref: `/docs/${encodeURIComponent(org)}`, homeLabel: "Open docs tree" }));
   if (!legacyStoragePrefix(org)) return missing();
   const token = c.req.param("viewerToken");
   const ticket = token ? await readLegacyViewerTicket(token, org) : null;
