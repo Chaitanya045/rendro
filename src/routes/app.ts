@@ -1,3 +1,4 @@
+import { renderCommentRecoveryLifecycle } from "../commentor/recovery-session";
 import { renderFaviconLinks } from "./favicon";
 import { Hono } from "hono";
 import { putObject, headObject } from "@/minio";
@@ -882,7 +883,8 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
 })();
 </script>
 <script>window.RENDRO_INITIAL_DOC=${inlineJson(selectedDoc)};window.RENDRO_ORG=${inlineJson(org)};window.RENDRO_DOCUMENT_BASE=${inlineJson(documentBase)};window.RENDRO_PUBLICATION_BASE=${inlineJson(isPublicDocument ? documentBase : "")};window.RENDRO_SHARE_CONFIG=${inlineJson(options.shareConfig ?? null)};</script>
-${options.shareConfig?.convexUrl ? '<script src="/commentor-parent.js?v=1"></script>' : ""}
+${renderCommentRecoveryLifecycle(user?.id ?? null)}
+${options.shareConfig?.convexUrl ? '<script src="/commentor-parent.js?v=5"></script>' : ""}
 <script src="/lazy-tree.js?v=32"></script>
 </body>
 </html>`;
@@ -1125,6 +1127,6 @@ rendro push --source ./docs --org ${orgEsc}
       .catch(function(){ setCopyFeedback("Copy failed"); });
   }
 </script>
-</body></html>`;
+${renderCommentRecoveryLifecycle(user.id)}</body></html>`;
 }
 export default app;

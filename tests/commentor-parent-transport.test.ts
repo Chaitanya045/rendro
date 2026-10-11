@@ -1,3 +1,4 @@
+import { Window as StorageWindow } from "happy-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   CommentorParentHost,
@@ -7,6 +8,7 @@ import {
 import {
   COMMENTOR_PARENT_ERROR,
   COMMENTOR_PARENT_READY,
+  COMMENTOR_PROTOCOL_VERSION,
   COMMENTOR_PARENT_REQUEST,
   COMMENTOR_PARENT_RESPONSE,
   COMMENTOR_PARENT_REPLIES_UPDATE,
@@ -35,7 +37,7 @@ describe("project comment parent transport", () => {
   it("allowlists document operations and rejects stale or cross-document thread IDs", async () => {
     let messageHandler!: (event: MessageEvent) => void;
     let loadHandler!: () => void;
-    vi.stubGlobal("window", {
+    vi.stubGlobal("window", { sessionStorage: new StorageWindow().sessionStorage,
       addEventListener: (type: string, listener: (event: MessageEvent) => void) => {
         if (type === "message") messageHandler = listener;
       },
@@ -72,7 +74,7 @@ describe("project comment parent transport", () => {
       mutate,
     };
     const config = { organizationId: "org-a", projectId: "project-a" as never, convexUrl: "https://convex.test" };
-    const host = new CommentorParentHost(frame, "https://rendro.test", config, backend);
+    const host = new CommentorParentHost(frame, "https://rendro.test", config, backend, "user-a");
     host.start();
 
     messageHandler({
@@ -86,7 +88,7 @@ describe("project comment parent transport", () => {
     );
 
     loadHandler();
-    expect(postMessage).toHaveBeenCalledWith({ type: COMMENTOR_PARENT_READY }, "*");
+    expect(postMessage).toHaveBeenCalledWith(expect.objectContaining({ type: COMMENTOR_PARENT_READY, protocolVersion: COMMENTOR_PROTOCOL_VERSION, parentGeneration: expect.any(String) }), "*");
     messageHandler({
       source,
       data: { type: COMMENTOR_PARENT_REQUEST, requestId: "sub", method: "subscribe", args: { documentPath: "guide.html", organizationId: "other" } },
@@ -164,10 +166,10 @@ describe("project comment parent transport", () => {
     expect(mutate).toHaveBeenCalledWith(
       "thread.create",
       { organizationId: "org-a", projectId: "project-a", documentPath: "guide.html" },
-      { body: "Scoped comment", anchor: { kind: "element", path: ["main"] } },
+      { body: "Scoped comment", anchor: { kind: "element", path: ["main"] }, clientOperationId: expect.any(String), expectedAuthorId: "user-a" },
     );
 
-    for (const args of [{ threadId: "other-thread", replyId: "reply" }, { threadId: "current-thread" }]) {
+    for (const args of [{ threadId: 42, replyId: "reply" }, { threadId: "current-thread" }]) {
       messageHandler({
         source,
         data: { type: COMMENTOR_PARENT_REQUEST, requestId: "invalid-reply-delete", method: "reply.remove", args },
@@ -186,7 +188,7 @@ describe("project comment parent transport", () => {
     expect(mutate).toHaveBeenLastCalledWith(
       "reply.remove",
       { organizationId: "org-a", projectId: "project-a", documentPath: "guide.html" },
-      { threadId: "current-thread", replyId: "older-reply" },
+      { threadId: "current-thread", replyId: "older-reply", clientOperationId: expect.any(String), expectedAuthorId: "user-a" },
     );
 
     fail(new Error("backend details must not cross the boundary"));
@@ -222,7 +224,7 @@ describe("project comment parent transport", () => {
     };
     const sent: unknown[] = [];
     const parent = { postMessage: (value: unknown) => sent.push(value) } as unknown as WindowProxy;
-    vi.stubGlobal("window", {
+    vi.stubGlobal("window", { sessionStorage: new StorageWindow().sessionStorage,
       setTimeout,
       clearTimeout,
     });
@@ -230,15 +232,163 @@ describe("project comment parent transport", () => {
     const transport = new ParentCommentTransport(parent, events as never, "guide.html");
     transport.subscribe(vi.fn(), vi.fn(), onError);
     expect(sent).toEqual([]);
-    handler({ source: parent, data: { type: COMMENTOR_PARENT_READY } } as MessageEvent);
+    handler({ source: parent, data: { type: COMMENTOR_PARENT_READY, protocolVersion: COMMENTOR_PROTOCOL_VERSION, parentGeneration: "host-1" } } as MessageEvent);
     const request = sent[0] as { requestId: string };
     handler({ source: parent, data: { type: COMMENTOR_PARENT_RESPONSE, requestId: request.requestId, ok: true } } as MessageEvent);
     handler({ source: parent, data: { type: COMMENTOR_PARENT_ERROR, error: "Comments could not be loaded" } } as MessageEvent);
     await Promise.resolve();
     expect(onError).toHaveBeenCalledWith(expect.objectContaining({ message: "Comments could not be loaded" }));
-    handler({ source: parent, data: { type: COMMENTOR_PARENT_READY } } as MessageEvent);
+    handler({ source: parent, data: { type: COMMENTOR_PARENT_READY, protocolVersion: COMMENTOR_PROTOCOL_VERSION, parentGeneration: "host-1" } } as MessageEvent);
     expect(sent).toHaveLength(2);
     expect(sent[1]).toMatchObject({ method: "subscribe", args: { documentPath: "guide.html" } });
+    transport.dispose();
+  });
+});
+
+describe("slow comment mutations", () => {
+  afterEach(() => vi.useRealTimers());
+
+  function transportRuntime() {
+    vi.useFakeTimers();
+    vi.stubGlobal("window", { sessionStorage: new StorageWindow().sessionStorage, setTimeout, clearTimeout });
+    let handler!: (event: MessageEvent) => void;
+    const events = {
+      addEventListener: (_type: string, listener: EventListener) => { handler = listener as (event: MessageEvent) => void; },
+      removeEventListener: vi.fn(),
+    };
+    const postMessage = vi.fn();
+    const parent = { postMessage };
+    const transport = new ParentCommentTransport(parent, events as never, "guide.html");
+    const dismissSlow = vi.fn();
+    const slow = vi.fn(() => dismissSlow);
+    const update = vi.fn();
+    handler({ source: parent, data: { type: COMMENTOR_PARENT_READY, protocolVersion: COMMENTOR_PROTOCOL_VERSION, parentGeneration: "host-1" } } as unknown as MessageEvent);
+    transport.subscribe(update, vi.fn(), vi.fn(), slow);
+    const respond = (ok: boolean, index = 0) => {
+      const request = postMessage.mock.calls[index][0] as { requestId: string };
+      handler({ source: parent, data: { type: COMMENTOR_PARENT_RESPONSE, requestId: request.requestId, ok } } as unknown as MessageEvent);
+    };
+    const publish = () => handler({ source: parent, data: {
+      type: COMMENTOR_PARENT_UPDATE,
+      threads: [{ _id: "thread-1", resolved: true }],
+      canLoadMore: false,
+      loading: false,
+    } } as unknown as MessageEvent);
+    return { transport, slow, dismissSlow, postMessage, respond, publish, update };
+  }
+
+  it("accepts a successful resolve after a 53-second delay", async () => {
+    const { transport, slow, postMessage, respond } = transportRuntime();
+    const settled = vi.fn();
+    const operation = transport.mutate("thread.resolve", { threadId: "thread-1", resolved: true }).then(settled);
+    await vi.advanceTimersByTimeAsync(53_256);
+    expect(settled).not.toHaveBeenCalled();
+    expect(slow).not.toHaveBeenCalled();
+    respond(true);
+    await operation;
+    expect(settled).toHaveBeenCalledTimes(1);
+    expect(postMessage).toHaveBeenCalledTimes(1);
+    transport.dispose();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it.each(["thread.create", "thread.resolve", "thread.archive", "thread.remove", "reply.add", "reply.remove"] as const)(
+    "keeps %s pending after the soft deadline, offers recovery, and accepts a late result without retrying",
+    async (method) => {
+      const { transport, slow, dismissSlow, postMessage, respond, publish, update } = transportRuntime();
+      const settled = vi.fn();
+      const operation = transport.mutate(method, { threadId: "thread-1", replyId: "reply-1", resolved: true, archived: true, body: "Valid", anchor: { kind: "element", path: ["main"] } }).then(settled);
+      await vi.advanceTimersByTimeAsync(120_000);
+      expect(slow).toHaveBeenCalledTimes(1);
+      expect(settled).not.toHaveBeenCalled();
+      expect(postMessage).toHaveBeenCalledTimes(1);
+      publish();
+      expect(update).toHaveBeenCalledWith([{ _id: "thread-1", resolved: true }], false, false);
+      respond(true);
+      await operation;
+      expect(settled).toHaveBeenCalledTimes(1);
+      expect(dismissSlow).toHaveBeenCalledTimes(1);
+      transport.dispose();
+    },
+  );
+
+  it("guards each reply deletion independently within the same thread", async () => {
+    const { transport, postMessage, respond } = transportRuntime();
+    const firstArgs = { threadId: "thread-1", replyId: "reply-1" };
+    const secondArgs = { threadId: "thread-1", replyId: "reply-2" };
+    const first = transport.mutate("reply.remove", firstArgs);
+    expect(transport.mutate("reply.remove", firstArgs)).toBe(first);
+    expect(transport.isMutationPending("reply.remove", secondArgs)).toBe(false);
+    const second = transport.mutate("reply.remove", secondArgs);
+    expect(second).not.toBe(first);
+    expect(postMessage).toHaveBeenCalledTimes(2);
+    respond(true);
+    await first;
+    expect(transport.isMutationPending("reply.remove", firstArgs)).toBe(false);
+    expect(transport.isMutationPending("reply.remove", secondArgs)).toBe(true);
+    respond(true, 1);
+    await second;
+    expect(transport.isMutationPending("reply.remove", secondArgs)).toBe(false);
+    transport.dispose();
+  });
+
+  it("still reports an explicit server rejection after a slow mutation", async () => {
+    const { transport, respond, dismissSlow } = transportRuntime();
+    const result = transport.mutate("thread.resolve", { threadId: "thread-1", resolved: true }).catch((error: Error) => error.message);
+    await vi.advanceTimersByTimeAsync(61_000);
+    respond(false);
+    expect(await result).toBe("Comment operation failed");
+    expect(dismissSlow).toHaveBeenCalledTimes(1);
+    transport.dispose();
+  });
+
+  it("cleans up a pending mutation when its document transport closes", async () => {
+    const { transport, slow } = transportRuntime();
+    const result = transport.mutate("thread.resolve", { threadId: "thread-1", resolved: true }).catch((error: Error) => error.message);
+    transport.dispose();
+    expect(await result).toBe("Comment transport closed");
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(slow).not.toHaveBeenCalled();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("bounds unanswered read/control requests without suggesting a page reload", async () => {
+    const { transport, slow } = transportRuntime();
+    const result = transport.loadMoreThreads().catch((error: Error) => error.message);
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(await result).toBe("Comments are taking longer to load. Still waiting for the connection.");
+    expect(slow).not.toHaveBeenCalled();
+    transport.dispose();
+  });
+});
+
+
+describe("comment protocol compatibility gate", () => {
+  it("blocks every write and draft before compatible READY, including after a downgrade", async () => {
+    let handler!: (event: MessageEvent) => void;
+    const parent = { postMessage: vi.fn() };
+    const events = {
+      addEventListener: (_type: string, listener: EventListener) => { handler = listener as typeof handler; },
+      removeEventListener: vi.fn(),
+    };
+    vi.stubGlobal("window", { setTimeout, clearTimeout });
+    const transport = new ParentCommentTransport(parent, events as never, "guide.html");
+    const methods = ["thread.create", "reply.add", "thread.resolve", "thread.archive", "thread.remove", "reply.remove"] as const;
+    const checkBlocked = async () => {
+      for (const method of methods) await expect(transport.mutate(method, {})).rejects.toThrow("Comments were updated");
+      transport.saveDraft("create", { body: "Draft" });
+      await expect(transport.refresh()).rejects.toThrow("Comments were updated");
+      expect(parent.postMessage).not.toHaveBeenCalled();
+      expect(transport.recovery.value).toEqual({ drafts: {}, operations: {} });
+    };
+    await checkBlocked();
+    handler({ source: {}, data: { type: COMMENTOR_PARENT_READY, protocolVersion: COMMENTOR_PROTOCOL_VERSION, parentGeneration: "untrusted" } } as unknown as MessageEvent);
+    await checkBlocked();
+    handler({ source: parent, data: { type: COMMENTOR_PARENT_READY } } as unknown as MessageEvent);
+    await checkBlocked();
+    handler({ source: parent, data: { type: COMMENTOR_PARENT_READY, protocolVersion: COMMENTOR_PROTOCOL_VERSION, parentGeneration: "new" } } as unknown as MessageEvent);
+    handler({ source: parent, data: { type: COMMENTOR_PARENT_READY, protocolVersion: 1, parentGeneration: "old" } } as unknown as MessageEvent);
+    await checkBlocked();
     transport.dispose();
   });
 });

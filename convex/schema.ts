@@ -122,6 +122,7 @@ export default defineSchema({
     .index("by_key_id", ["keyId"]),
 
   documentThreads: defineTable({
+    clientOperationId: v.optional(v.string()),
     organizationId: v.string(),
     projectId: v.id("projects"),
     documentPath: v.string(),
@@ -136,17 +137,38 @@ export default defineSchema({
     updatedAt: v.number(),
   })
     .index("by_document", ["organizationId", "projectId", "documentPath", "createdAt"])
+    .index("by_operation", ["organizationId", "projectId", "documentPath", "authorId", "clientOperationId"])
     .index("by_active_document", ["organizationId", "projectId", "documentPath", "deletedAt", "createdAt"])
     .index("by_project", ["projectId", "createdAt"]),
 
+  // Short-lived receipts for collaborative status writes; no comment content.
+  commentStatusReceipts: defineTable({
+    organizationId: v.string(),
+    projectId: v.id("projects"),
+    documentPath: v.string(),
+    threadId: v.id("documentThreads"),
+    authorId: v.string(),
+    clientOperationId: v.string(),
+    field: v.union(v.literal("resolved"), v.literal("archived")),
+    target: v.boolean(),
+    expiresAt: v.number(),
+  })
+    .index("by_operation", ["organizationId", "projectId", "documentPath", "threadId", "authorId", "clientOperationId"])
+    .index("by_expiry", ["expiresAt"]),
+
   documentReplies: defineTable({
+    clientOperationId: v.optional(v.string()),
+    deletedAt: v.optional(v.number()),
     threadId: v.id("documentThreads"),
     organizationId: v.string(),
     authorId: v.string(),
     body: v.string(),
     createdAt: v.number(),
     updatedAt: v.number(),
-  }).index("by_thread", ["threadId", "createdAt"]),
+  })
+    .index("by_thread", ["threadId", "createdAt"])
+    .index("by_active_thread", ["threadId", "deletedAt", "createdAt"])
+    .index("by_operation", ["organizationId", "threadId", "authorId", "clientOperationId"]),
 
   auditEvents: defineTable({
     organizationId: v.string(),

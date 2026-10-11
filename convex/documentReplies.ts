@@ -1,3 +1,4 @@
+import { validateClientOperationId, validateCommentAuthor } from "./commentOperations";
 import { requireId } from "./ids";
 import { paginationOptsValidator } from "convex/server";
 import { ConvexError, v } from "convex/values";
@@ -47,7 +48,7 @@ export const list = query({
     ) throw new ConvexError("Comment not found");
     const repliesPage = await ctx.db
       .query("documentReplies")
-      .withIndex("by_thread", (index) => index.eq("threadId", args.threadId))
+      .withIndex("by_active_thread", (index) => index.eq("threadId", args.threadId).eq("deletedAt", undefined))
       .order("desc")
       .paginate({
         ...args.paginationOpts,
@@ -79,6 +80,8 @@ export const add = mutation({
     documentPath: v.string(),
     threadId: v.string(),
     body: v.string(),
+    clientOperationId: v.optional(v.string()),
+    expectedAuthorId: v.optional(v.string()),
   },
   handler: async (ctx, input) => {
     const authorized = await requireOrganizationMember(ctx, input.organizationId);
@@ -97,8 +100,17 @@ export const add = mutation({
     ) throw new ConvexError("Comment not found");
     const body = args.body.trim();
     if (!body || body.length > 10_000) throw new ConvexError("Reply body is invalid");
+    validateCommentAuthor(args.expectedAuthorId, authorized.user._id);
+    validateClientOperationId(args.clientOperationId);
+    if (args.clientOperationId !== undefined) {
+      const existing = await ctx.db.query("documentReplies").withIndex("by_operation", (q) => q
+        .eq("organizationId", args.organizationId).eq("threadId", args.threadId)
+        .eq("authorId", authorized.user._id).eq("clientOperationId", args.clientOperationId)).unique();
+      if (existing) return existing._id;
+    }
     const now = Date.now();
     return ctx.db.insert("documentReplies", {
+      clientOperationId: args.clientOperationId,
       threadId: args.threadId,
       organizationId: thread.organizationId,
       authorId: authorized.user._id,
@@ -117,25 +129,37 @@ export const remove = mutation({
     documentPath: v.string(),
     threadId: v.string(),
     replyId: v.string(),
+    clientOperationId: v.optional(v.string()),
+    expectedAuthorId: v.optional(v.string()),
   },
   handler: async (ctx, input) => {
     const authorized = await requireOrganizationMember(ctx, input.organizationId);
+    validateCommentAuthor(input.expectedAuthorId, authorized.user._id);
+    validateClientOperationId(input.clientOperationId);
     const replyId = requireId(ctx, "documentReplies", input.replyId);
     const threadId = requireId(ctx, "documentThreads", input.threadId);
     const scope = { ...input, projectId: requireId(ctx, "projects", input.projectId) };
     const thread = await ctx.db.get(threadId);
     const reply = await ctx.db.get(replyId);
+    const project = await ctx.db.get(scope.projectId);
+    if (!project || project.organizationId !== scope.organizationId) throw new ConvexError("Comment not found");
+    if (!thread && !reply) return;
+    if (!thread && reply?.deletedAt !== undefined && reply.threadId === threadId && reply.organizationId === scope.organizationId) {
+      requireCommentAuthorOrAdmin(authorized, reply.authorId);
+      return;
+    }
     if (
       !thread
-      || thread.deletedAt !== undefined
       || thread.organizationId !== scope.organizationId
       || thread.projectId !== scope.projectId
       || thread.documentPath !== scope.documentPath
-      || !reply
-      || reply.threadId !== threadId
-      || reply.organizationId !== thread.organizationId
     ) throw new ConvexError("Comment not found");
+    if (!reply) return;
+    if (reply.threadId !== threadId || reply.organizationId !== thread.organizationId) throw new ConvexError("Comment not found");
+    if (thread.deletedAt !== undefined && reply.deletedAt === undefined) throw new ConvexError("Comment not found");
     requireCommentAuthorOrAdmin(authorized, reply.authorId);
-    await ctx.db.delete(replyId);
+    if (reply.deletedAt !== undefined) return;
+    if (reply.clientOperationId) await ctx.db.patch(replyId, { deletedAt: Date.now(), body: "" });
+    else await ctx.db.delete(replyId);
   },
 });

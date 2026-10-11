@@ -1,3 +1,4 @@
+import { renderCommentRecoveryLifecycle } from "../commentor/recovery-session";
 import { renderFaviconLinks } from "./favicon";
 import { Hono } from "hono";
 import type { User } from "better-auth/types";
@@ -208,7 +209,7 @@ html.dark{color-scheme:dark;--page:#09090b;--surface:#09090b;--surface-2:#18181b
   var initial=document.getElementById("initial-password-form");if(initial)initial.addEventListener("submit",async function(event){event.preventDefault();if(initial.dataset.inFlight==="true"||!validate(initial,"initial-error"))return;clearError("initial-error");if(initial.password.value!==initial.confirmPassword.value){errorAt("initial-error",new Error("Passwords do not match."));return;}busy(initial,true);try{await post("/api/auth/set-initial-password",{newPassword:initial.password.value});location.reload();}catch(error){busy(initial,false);errorAt("initial-error",error);}});
   var change=document.getElementById("change-password-form");if(change)change.addEventListener("submit",async function(event){event.preventDefault();if(change.dataset.inFlight==="true"||!validate(change,"change-error"))return;busy(change,true);clearError("change-error");try{await post("/api/auth/change-password",{currentPassword:change.currentPassword.value,newPassword:change.newPassword.value,revokeOtherSessions:change.revokeSessions.checked});change.reset();var message=document.getElementById("security-message");message.textContent="Password changed successfully.";}catch(error){errorAt("change-error",error);}busy(change,false);});
 })();
-</script></body></html>`;
+</script>${renderCommentRecoveryLifecycle(options.user?.id ?? null)}</body></html>`;
 }
 
 app.get("/sign-in", (c) => {

@@ -1,3 +1,8 @@
+import type { CommentRecoveryState } from "./operation-state";
+// Increment when the durable-write contract changes incompatibly.
+export const COMMENTOR_PROTOCOL_VERSION = 2;
+export const COMMENTOR_VIEWER_RELOAD = "commentor-viewer-reload";
+export const COMMENTOR_UPGRADE_NOTICE = "Comments were updated. Reload the page to continue.";
 export const COMMENTOR_PARENT_REQUEST = "commentor-parent-request";
 export const COMMENTOR_PARENT_RESPONSE = "commentor-parent-response";
 export const COMMENTOR_PARENT_UPDATE = "commentor-parent-update";
@@ -6,6 +11,8 @@ export const COMMENTOR_PARENT_READY = "commentor-parent-ready";
 export const COMMENTOR_PARENT_REPLIES_UPDATE = "commentor-parent-replies-update";
 
 export type CommentorParentMethod =
+  | "draft.save"
+  | "operation.complete"
   | "subscribe"
   | "threads.more"
   | "replies.more"
@@ -18,7 +25,7 @@ export type CommentorParentMethod =
 
 export type CommentorParentMutationMethod = Exclude<
   CommentorParentMethod,
-  "subscribe" | "threads.more" | "replies.more"
+  "subscribe" | "threads.more" | "replies.more" | "draft.save" | "operation.complete"
 >;
 
 export type CommentorParentRequest = {
@@ -33,6 +40,7 @@ export type CommentorParentResponse = {
   requestId: string;
   ok: boolean;
   error?: string;
+  rejected?: boolean;
 };
 
 export type CommentorParentUpdate = {
@@ -57,9 +65,17 @@ export type CommentorParentError = {
 
 export type CommentorParentReady = {
   type: typeof COMMENTOR_PARENT_READY;
+  protocolVersion: number;
+  // Stable across resubscriptions; replaced when the parent host is recreated.
+  parentGeneration: string;
+  canReloadViewer?: boolean;
+  recoveryState?: CommentRecoveryState;
+  userId?: string | null;
 };
 
 const METHODS = new Set<CommentorParentMethod>([
+  "draft.save",
+  "operation.complete",
   "subscribe",
   "threads.more",
   "replies.more",
@@ -117,5 +133,14 @@ export function isCommentorParentError(value: unknown): value is CommentorParent
 
 export function isCommentorParentReady(value: unknown): value is CommentorParentReady {
   if (!value || typeof value !== "object") return false;
-  return (value as Partial<CommentorParentReady>).type === COMMENTOR_PARENT_READY;
+  const candidate = value as Partial<CommentorParentReady>;
+  return candidate.type === COMMENTOR_PARENT_READY
+    && candidate.protocolVersion === COMMENTOR_PROTOCOL_VERSION
+    && typeof candidate.parentGeneration === "string"
+    && candidate.parentGeneration.length > 0;
+}
+
+export function isCommentorParentReadySignal(value: unknown): value is { type: typeof COMMENTOR_PARENT_READY; canReloadViewer?: boolean } {
+  return Boolean(value) && typeof value === "object"
+    && (value as { type?: unknown }).type === COMMENTOR_PARENT_READY;
 }
