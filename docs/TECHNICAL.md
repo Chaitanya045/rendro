@@ -344,6 +344,8 @@ Management screens gate retained data on `GET /api/rendro/management/access?orga
 | Private share (anonymous) | `/s/:token` | `/s/:token/files/<path>` | none |
 | Legacy (email-domain org) | `/docs/:org/:path` | `/files/:org/:path` | `/api/tree/:org` |
 
+Legacy `/docs/:org` and nested document URLs preserve email-domain access to existing legacy organizations during migration. Signed-out requests redirect to sign-in with a return path. Missing or inaccessible organizations return the shared styled 404, including when the requested slug matches the signed-in user's domain; they never start v1 organization creation. New organizations use the v2 management flow at `/organizations` (the 404 links to `/organizations?choose=1` so existing members can also choose **New organization**).
+
 The project and publication viewers share `renderScopedDocumentShell()` in `src/routes/app.ts`. The project shell resolves the active deployment through Convex with the session cookie, reads `manifest.json`, and selects `?doc=` or `index.html` (falling back to the first HTML file). Unknown paths return the shared 404 page.
 
 `…/docs/tree` returns HTML document paths from the active manifest in pages of 200 (`{ documents, cursor }`). `…/docs/files/*` serves only manifest entries with `Cache-Control: private, no-store`, `X-Content-Type-Options: nosniff`, and either `sandbox allow-scripts allow-forms allow-popups allow-downloads; frame-ancestors 'self'` (HTML) or `default-src 'none'` (other types) as the Content-Security-Policy. HTML responses get a small injected script for navigation messages, the shell shortcut, and the comment configuration; stored publisher bytes are never modified.

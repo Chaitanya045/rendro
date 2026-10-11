@@ -11,6 +11,8 @@ const fixtures = vi.hoisted(() => ({
   user: undefined as User | undefined,
   deleted: vi.fn(),
   stream: vi.fn(),
+  list: vi.fn(),
+  head: vi.fn(),
 }));
 vi.mock("@/middleware/session", () => ({
   sessionMiddleware: async (c: Context, next: Next) => {
@@ -19,13 +21,15 @@ vi.mock("@/middleware/session", () => ({
   },
 }));
 vi.mock("@/soft-delete", () => ({ isDeleted: fixtures.deleted }));
-vi.mock("@/minio", () => ({ getObjectStream: fixtures.stream }));
+vi.mock("@/minio", () => ({ getObjectStream: fixtures.stream, listObjects: fixtures.list, headObject: fixtures.head }));
 import worker from "@/worker";
 
 beforeEach(() => {
   fixtures.user = undefined;
   fixtures.deleted.mockReset().mockResolvedValue(false);
   fixtures.stream.mockReset().mockResolvedValue(null);
+  fixtures.list.mockReset().mockResolvedValue([]);
+  fixtures.head.mockReset().mockResolvedValue(null);
 });
 afterEach(() => vi.unstubAllGlobals());
 
@@ -84,23 +88,85 @@ describe("unavailable share pages", () => {
 });
 
 describe("protected docs error routes", () => {
-  it.each(["/docs/unknown-org", "/docs/unknown-org/guide.html"])("redirects signed-out %s to sign-in", async (path) => {
+  const user = { id: "user", email: "user@acme.test", name: "User", emailVerified: true, createdAt: new Date(), updatedAt: new Date() };
+  const paths = ["/docs/acme", "/docs/acme/guide.html"];
+
+  async function expectDocsNotFound(path: string) {
+    const response = await worker.request(path);
+    const html = await response.text();
+    expect(response.status).toBe(404);
+    expect(response.headers.get("content-type")).toContain("text/html");
+    expect(html).toContain('<h1 id="not-found-title">Page not found</h1>');
+    expect(html).toContain('<main class="page" aria-labelledby="not-found-title">');
+    expect(html).toContain('<link rel="icon" href="/favicon.ico" sizes="16x16 32x32" type="image/x-icon">');
+    expect(html).toContain('<link rel="icon" href="/favicon.svg" sizes="any" type="image/svg+xml">');
+    expect(html).toContain('href="/organizations?choose=1" target="_top">Manage organizations</a>');
+    expect(html).toContain(path);
+    expect(html).not.toContain("Create your org");
+    expect(html).not.toContain('action="/api/orgs"');
+    expect(styles(html)).toEqual(styles(renderNotFoundPage()));
+    expect(fixtures.head).not.toHaveBeenCalled();
+    expect(fixtures.deleted).not.toHaveBeenCalled();
+    return html;
+  }
+
+  it.each(paths)("redirects signed-out %s to sign-in without looking up the org", async (path) => {
     const response = await worker.request(path);
     expect(response.status).toBe(302);
     expect(response.headers.get("location")).toBe(`/sign-in?returnTo=${encodeURIComponent(path)}`);
+    expect(fixtures.list).not.toHaveBeenCalled();
+    expect(fixtures.head).not.toHaveBeenCalled();
     const signIn = await worker.request(response.headers.get("location")!);
     expect(signIn.status).toBe(200);
     expect(await signIn.text()).toContain("Sign in to Rendro");
   });
 
-  it.each(["/docs/unknown-org", "/docs/unknown-org/guide.html"])("renders the styled 404 for a signed-in user visiting %s", async (path) => {
-    fixtures.user = { id: "user", email: "user@acme.test", name: "User", emailVerified: true, createdAt: new Date(), updatedAt: new Date() };
+  it.each(paths)("returns 404 for unknown %s without a domain match", async (path) => {
+    fixtures.user = { ...user, email: "user@other.test" };
+    await expectDocsNotFound(path);
+    expect(fixtures.list).not.toHaveBeenCalled();
+  });
+
+  it.each(paths)("returns 404 for unknown %s even with a domain match", async (path) => {
+    fixtures.user = user;
+    const matchingDomain = await expectDocsNotFound(path);
+    expect(fixtures.list).toHaveBeenCalledExactlyOnceWith("acme/");
+    fixtures.user = { ...user, email: "user@other.test" };
+    expect(await expectDocsNotFound(path)).toBe(matchingDomain);
+  });
+
+  // Legacy membership is email-domain based; v2 membership is handled on /organizations routes.
+  it.each(paths)("preserves existing legacy-org member access to %s", async (path) => {
+    fixtures.user = user;
+    fixtures.list.mockResolvedValue([{ key: "acme/guide.html" }]);
+    fixtures.head.mockResolvedValue({ contentType: "text/html" });
     const response = await worker.request(path);
     const html = await response.text();
-    expect(response.status).toBe(404);
-    expect(html).toContain('<h1 id="not-found-title">Page not found</h1>');
-    expect(html).toContain(path);
-    expect(styles(html)).toEqual(styles(renderNotFoundPage()));
+    expect(response.status).toBe(200);
+    expect(html).toContain('id="content-frame"');
+    expect(html).toContain('id="tree-container"');
+    expect(html).not.toContain("Page not found");
+    expect(html).not.toContain("Create your org");
+    expect(fixtures.list).toHaveBeenCalledExactlyOnceWith("acme/");
+    if (path.endsWith("guide.html")) {
+      expect(fixtures.head).toHaveBeenCalledExactlyOnceWith("acme/guide.html");
+      expect(html).toContain('window.RENDRO_INITIAL_DOC="acme/guide.html"');
+    }
+  });
+
+  it.each(paths)("denies existing legacy-org non-members at %s without disclosing existence", async (path) => {
+    fixtures.user = { ...user, email: "user@other.test" };
+    fixtures.list.mockResolvedValue([{ key: "acme/guide.html" }]);
+    const existing = await expectDocsNotFound(path);
+    fixtures.list.mockResolvedValue([]);
+    expect(await expectDocsNotFound(path)).toBe(existing);
+    expect(fixtures.list).not.toHaveBeenCalled();
+  });
+
+  it.each(paths)("returns 404 at %s when the email cannot derive a legacy org", async (path) => {
+    fixtures.user = { ...user, email: "user@sub.acme.test" };
+    await expectDocsNotFound(path);
+    expect(fixtures.list).not.toHaveBeenCalled();
   });
 });
 
