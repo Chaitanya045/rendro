@@ -8,6 +8,7 @@ import {
   loadedDocumentAction,
   normalizeLoadedDocumentPath,
   validRelativeDocumentPath,
+  validDocumentSearch,
 } from "./messages";
 import { documentLoadAccessibility } from "./load-state";
 import { emptyTreeAction, shouldUseNativeLinkNavigation } from "./navigation";
@@ -467,7 +468,14 @@ function hideDocLoader(frame: HTMLIFrameElement | null, loadId: number) {
   announceDocumentState(accessibility.message, accessibility.assertive);
 }
 
-function loadDoc(fullPath: string, pushState: boolean, fragment = "") {
+// The shell's own query selects the document. Keep publisher queries in a
+// separate parameter so names like "doc" cannot alter the authorized path.
+function documentSearchFromLocation(): string {
+  const search = new URLSearchParams(location.search).get("docQuery") ?? "";
+  return validDocumentSearch(search) ? search : "";
+}
+
+function loadDoc(fullPath: string, pushState: boolean, fragment = "", search = "") {
   const frame = document.getElementById("content-frame") as HTMLIFrameElement | null;
   const placeholder = document.getElementById("main-placeholder");
   if (placeholder) placeholder.style.display = "none";
@@ -495,7 +503,7 @@ function loadDoc(fullPath: string, pushState: boolean, fragment = "") {
     docLoadTimeout = window.setTimeout(() => {
       if (loadId === activeDocLoadId) showDocLoadError(frame);
     }, 15000);
-    const frameUrl = documentFrameUrl(fullPath);
+    const frameUrl = documentFrameUrl(fullPath) + search;
     frame.src = frameUrl;
     // Keep src authoritative for comments/tickets, but replace the pending
     // frame navigation: the shell alone owns document history entries.
@@ -513,6 +521,8 @@ function loadDoc(fullPath: string, pushState: boolean, fragment = "") {
       url.searchParams.delete("doc");
       url.searchParams.delete("dev_user");
     }
+    if (search) url.searchParams.set("docQuery", search);
+    else url.searchParams.delete("docQuery");
     url.hash = fragment;
     history.pushState({ docPath: fullPath }, "", url);
   }
@@ -580,7 +590,7 @@ async function reconcileLoadedDocument(fullPath: string): Promise<void> {
   syncActiveState(fullPath);
 }
 
-function isDocumentMessage(value: unknown): value is { type: string; path: string; fragment?: unknown } {
+function isDocumentMessage(value: unknown): value is { type: string; path: string; search?: unknown; fragment?: unknown } {
   if (!value || typeof value !== "object") return false;
   return "type" in value
     && typeof value.type === "string"
@@ -630,8 +640,9 @@ function init() {
     if (event.data.type === "doc-navigate") {
       if (!ORG || !validRelativeDocumentPath(event.data.path)) return;
       const fragment = event.data.fragment === undefined ? "" : event.data.fragment;
-      if (!validFragment(fragment)) return;
-      loadDoc(`${ORG}/${event.data.path}`, true, fragment);
+      const search = event.data.search === undefined ? "" : event.data.search;
+      if (!validFragment(fragment) || !validDocumentSearch(search)) return;
+      loadDoc(`${ORG}/${event.data.path}`, true, fragment, search);
     }
     if (event.data.type === "doc-loaded") {
       if (!ORG) return;
@@ -643,7 +654,7 @@ function init() {
   // Browser back/forward
   window.addEventListener("popstate", (event) => {
     const docPath = documentPathFromHistory(event.state) || docFromPathname();
-    if (docPath) loadDoc(docPath, false);
+    if (docPath) loadDoc(docPath, false, location.hash, documentSearchFromLocation());
   });
 
   window.addEventListener("hashchange", () => {
@@ -655,7 +666,7 @@ function init() {
   const initialDoc = RENDRO_WINDOW.RENDRO_INITIAL_DOC || docFromPathname();
   if (initialDoc) {
     history.replaceState({ ...history.state, docPath: initialDoc }, "", location.href);
-    loadDoc(initialDoc, false);
+    loadDoc(initialDoc, false, location.hash, documentSearchFromLocation());
     return;
   }
   const params = new URLSearchParams(location.search);

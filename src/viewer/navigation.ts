@@ -13,13 +13,13 @@ export interface DocumentNavigationConfig {
 }
 
 export function classifyDocumentLink(href: string, baseURI: string, documentURL: string, config: DocumentNavigationConfig): {
-  path: string; fragment: string; sameDocument: boolean;
+  path: string; search: string; fragment: string; sameDocument: boolean;
 } | null {
   // A bare hash always refers to this document, even when the ticket/publisher
   // base points at a different URL or directory. Never navigate to that base.
   if (href.trim().startsWith("#")) {
     const fragment = new URL(href.trim(), documentURL).hash || "#";
-    return { path: config.documentPath, fragment, sameDocument: true };
+    return { path: config.documentPath, search: new URL(documentURL).search, fragment, sameDocument: true };
   }
   try {
     const url = new URL(href, baseURI);
@@ -35,7 +35,10 @@ export function classifyDocumentLink(href: string, baseURI: string, documentURL:
     const path = url.pathname.slice(prefix.length).split("/").map(decodeURIComponent).join("/");
     if (!validRelativeDocumentPath(path)) return null;
     const fragment = url.hash || (url.href.includes("#") ? "#" : "");
-    return { path, fragment, sameDocument: path === config.documentPath && fragment !== "" };
+    // URL.search normalizes absent and empty queries to "". Keep all other
+    // query bytes/order: publisher code may give them distinct meanings.
+    return { path, search: url.search, fragment,
+      sameDocument: path === config.documentPath && url.search === new URL(documentURL).search && fragment !== "" };
   } catch { return null; }
 }
 
@@ -62,16 +65,27 @@ export function installDocumentNavigation(config: DocumentNavigationConfig, host
     const href = anchor.getAttribute("href");
     if (href === null) return;
     const link = classifyDocumentLink(href, doc.baseURI, host.location.href, config);
-    if (!link || (config.singleDocument && !link.sameDocument)) return;
+    if (!link) return;
+    if (config.singleDocument && !link.sameDocument) {
+      // Shares retain native document navigation and server-enforced grant scope.
+      // Align the shell before its load handler restores the destination hash.
+      if (host.parent !== host && link.path === config.documentPath && validFragment(link.fragment)) {
+        host.parent.postMessage({ type: "doc-fragment", path: link.path, fragment: link.fragment }, origin);
+      }
+      return;
+    }
     event.preventDefault();
     if (!validFragment(link.fragment)) return;
     if (link.sameDocument) {
       scrollToFragment(link.fragment, host);
       if (host.parent !== host) host.parent.postMessage({ type: "doc-fragment", path: link.path, fragment: link.fragment }, origin);
+      // Resolve against the actual document, never the ticket/publisher base.
+      // Native hash history restores standalone documents on reload and Back.
+      else host.location.hash = link.fragment;
       return;
     }
     if (host.parent === host) { host.location.href = anchor.href; return; }
-    host.parent.postMessage({ type: "doc-navigate", path: link.path, fragment: link.fragment }, origin);
+    host.parent.postMessage({ type: "doc-navigate", path: link.path, search: link.search, fragment: link.fragment }, origin);
   });
 }
 

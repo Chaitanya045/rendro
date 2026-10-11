@@ -22,12 +22,26 @@ describe("document links with a ticket base", () => {
     [`${config.prefix}guide/page.html#details`, "guide/page.html", "#details", true],
     [`${base}/view/renewed-ticket/files/guide/other.html#details`, "guide/other.html", "#details", false],
   ])("classifies %s without losing its fragment", (href, path, fragment, sameDocument) => {
-    expect(classifyDocumentLink(href, ticketURL, documentURL, config)).toEqual({ path, fragment, sameDocument });
+    expect(classifyDocumentLink(href, ticketURL, documentURL, config)).toEqual({ path, search: "", fragment, sameDocument });
+  });
+
+  it.each([
+    ["?v=1", "page.html?v=1#details", "?v=1", true],
+    ["?v=1", "page.html?v=2#details", "?v=2", false],
+    ["?v=1", "page.html#details", "", false],
+    ["", "page.html?v=2#details", "?v=2", false],
+    ["", "page.html?#details", "", true],
+    ["?", "page.html#details", "", true],
+    ["?v=1", "#details", "?v=1", true],
+    ["?a=1&b=2", "page.html?b=2&a=1#details", "?b=2&a=1", false],
+  ])("compares normalized document query %s against %s", (query, href, search, sameDocument) => {
+    expect(classifyDocumentLink(href, ticketURL, documentURL + query, config))
+      .toEqual({ path: config.documentPath, search, fragment: "#details", sameDocument });
   });
 
   it.each([`${base}/view/test-ticket/files/`, `${base}/view/test-ticket/files/shared/`, "https://publisher.test/"])("keeps bare hashes local with base %s", baseURI => {
     expect(classifyDocumentLink("#details", new URL(baseURI, origin).href, documentURL, config))
-      .toEqual({ path: "guide/page.html", fragment: "#details", sameDocument: true });
+      .toEqual({ path: "guide/page.html", search: "", fragment: "#details", sameDocument: true });
   });
 
   it.each(["https://external.test/page.html#x", `https://external.test${config.prefix}guide/page.html#x`, "mailto:person@example.test", "/outside.html#x", "https://[invalid", "other%ZZ.html#x", "../%2e%2e/other.html#x"])("leaves external or invalid link %s alone", href => {
@@ -36,7 +50,7 @@ describe("document links with a ticket base", () => {
 
   it("honors publisher bases for non-bare links", () => {
     expect(classifyDocumentLink("page.html#x", origin + `${base}/view/test-ticket/files/shared/`, documentURL, config))
-      .toEqual({ path: "shared/page.html", fragment: "#x", sameDocument: false });
+      .toEqual({ path: "shared/page.html", search: "", fragment: "#x", sameDocument: false });
   });
 });
 
