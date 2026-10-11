@@ -1,3 +1,4 @@
+import { unavailableResponse } from "@/routes/viewer-unavailable";
 import type { Context, Next } from "hono";
 import type { User } from "better-auth/types";
 import { CONVEX_SITE_URL } from "@/config";
@@ -141,6 +142,7 @@ export async function sessionMiddleware(
     || path.startsWith("/api/sync/")
     // These routes authorize exclusively through the encrypted ticket, then
     // freshly revalidate its session and membership in Convex on every request.
+    || /^\/legacy-view\/[^/]+\/view\/[^/]+\/files\//.test(path)
     || /^\/organizations\/[^/]+\/projects\/[^/]+\/docs\/view\/[^/]+\/files\//.test(path)
   ) {
     await next();
@@ -154,11 +156,14 @@ export async function sessionMiddleware(
     const result = await lookupWithRetry(c.req.raw, cookie);
     sessionDuration = duration(sessionStartedAt);
     if (result.kind === "failure") {
+      const retryAfter = String(Math.max(1, Math.ceil((result.retryAfterMs ?? 1_000) / 1_000)));
       c.header("Cache-Control", "private, no-store");
-      c.header("Retry-After", String(Math.max(1, Math.ceil((result.retryAfterMs ?? 1_000) / 1_000))));
+      c.header("Retry-After", retryAfter);
       appendTiming(c, "session", sessionDuration);
       const wantsHtml = !path.startsWith("/api/") && c.req.header("accept")?.includes("text/html");
-      c.res = wantsHtml
+      c.res = /^\/legacy-view\/[^/]+\/files\//.test(path)
+        ? unavailableResponse(c, { unavailable: true, retryAfter }, "asset")
+        : wantsHtml
         ? c.html(renderSessionUnavailablePage(), 503)
         : c.json({ error: "Session temporarily unavailable", retryable: true }, 503);
       return;

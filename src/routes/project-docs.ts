@@ -1,6 +1,6 @@
 import { assetError, assetHeaders } from "@/routes/asset-headers";
 import { decodeStoragePath, isCanonicalStorageKey, modernStoragePrefix, modernStorageKey } from "@/storage-boundary";
-import { Hono, type Context } from "hono";
+import { Hono } from "hono";
 import { createViewerTicket, readViewerTicket, viewerSessionCookie } from "@/viewer-ticket";
 import { viewerScript, viewerUpdateNotice } from "@/viewer/markup";
 import { escapeHtml } from "@/routes/html";
@@ -8,7 +8,7 @@ import type { User } from "better-auth/types";
 import { CONVEX_SITE_URL, CONVEX_URL } from "@/config";
 import { getObjectStream, getObjectText } from "@/minio";
 import { renderScopedDocumentShell } from "@/routes/app";
-import { renderSessionUnavailablePage } from "@/routes/session-unavailable";
+import { unavailableResponse, type ViewerUnavailable } from "@/routes/viewer-unavailable";
 import { renderNotFoundPage } from "@/routes/not-found";
 import { injectViewerHeadStream } from "@/routes/document-html";
 import { parseStoredManifest, type StoredManifest } from "@/stored-manifest";
@@ -21,26 +21,15 @@ function inlineJson(value: unknown): string {
   return JSON.stringify(value).replace(/</g, "\\u003c");
 }
 
-type DeploymentUnavailable = { unavailable: true; retryAfter: string };
-
-function unavailableResponse(c: Context, failure: DeploymentUnavailable, representation: "html" | "json" | "asset" = "html") {
-  c.header("Cache-Control", "private, no-store");
-  c.header("Retry-After", failure.retryAfter);
-  if (representation === "asset") return assetError(c, renderSessionUnavailablePage, 503);
-  return representation === "json"
-    ? c.json({ error: "Document temporarily unavailable", retryable: true }, 503)
-    : c.html(renderSessionUnavailablePage(), 503);
-}
-
 async function activeDeployment(
   organizationId: string,
   projectId: string,
   cookie: string | undefined,
-): Promise<ActiveDeployment | DeploymentUnavailable | null> {
+): Promise<ActiveDeployment | ViewerUnavailable | null> {
   const query = new URLSearchParams({ organizationId, projectId });
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 5_000);
-  const unavailable: DeploymentUnavailable = { unavailable: true, retryAfter: "1" };
+  const unavailable: ViewerUnavailable = { unavailable: true, retryAfter: "1" };
   try {
     const response = await fetch(`${CONVEX_SITE_URL}/api/rendro/deployments/active?${query}`, {
       headers: { Accept: "application/json", Cookie: viewerSessionCookie(cookie ?? "") },

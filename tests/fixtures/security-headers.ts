@@ -27,10 +27,14 @@ export function mockSecurityBackend() {
   vi.spyOn(minio, "headObject").mockImplementation(key => Promise.resolve({ contentType: key.endsWith(".css") ? "text/css" : "text/html" }));
   vi.spyOn(minio, "getObjectText").mockResolvedValue(JSON.stringify({ version: 1, files }));
   vi.spyOn(minio, "getObjectStream").mockImplementation(key => Promise.resolve(new Response(key.endsWith(".css") ? "body{color:rgb(1,2,3)}" : publisherHtml).body));
-  vi.stubGlobal("fetch", vi.fn((input: string | URL | Request) => {
+  vi.stubGlobal("fetch", vi.fn((input: string | URL | Request, init?: RequestInit) => {
     const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url);
     const accessResponse = access(url);
     if (accessResponse) return Promise.resolve(accessResponse);
+    if (url.pathname === "/api/query" && typeof init?.body === "string"
+      && (JSON.parse(init.body) as { path?: string }).path === "deletedFiles:isDeleted") {
+      return Promise.resolve(Response.json({ status: "success", value: false }));
+    }
     let result: unknown = {};
     if (url.pathname.endsWith("/get-session")) result = { user: testUser, session: { id: "session-a" } };
     else if (url.pathname.endsWith("/deployments/active")) result = { project: { name: "Test project" }, deployment: { manifestKey } };

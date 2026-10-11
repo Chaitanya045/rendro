@@ -1,3 +1,5 @@
+import { viewerBackendJson } from "@/viewer-backend";
+import { viewerErrorCache, viewerErrorResponse } from "@/routes/viewer-unavailable";
 import { decodeStoragePath } from "@/storage-boundary";
 import { validDocumentSearch } from "@/lazy-tree/messages";
 import { escapeHtml } from "@/routes/html";
@@ -13,6 +15,8 @@ import { renderNotFoundPage } from "@/routes/not-found";
 import { injectMobileViewportScrollbarStream, injectViewerHeadStream } from "@/routes/document-html";
 
 const app = new Hono();
+app.use("/s/*", viewerErrorCache);
+app.onError(viewerErrorResponse);
 
 type ShareResolution = {
   grant: { documentPath: string; expiresAt: number };
@@ -21,11 +25,10 @@ type ShareResolution = {
 };
 
 async function resolveShare(token: string): Promise<ShareResolution | null> {
-  const response = await fetch(
+  return viewerBackendJson<ShareResolution>(
     `${CONVEX_SITE_URL}/api/rendro/shares/public?token=${encodeURIComponent(token)}`,
     { headers: { Accept: "application/json" } },
   );
-  return response.ok ? response.json() as Promise<ShareResolution> : null;
 }
 
 app.get("/s/:token/files/*", async (c) => {
