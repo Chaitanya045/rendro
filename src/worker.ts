@@ -80,7 +80,7 @@ import { cors } from "hono/cors";
 import { sessionMiddleware } from "./middleware/session";
 import { logger } from "./logger";
 import { registerAuthClientIp } from "./auth-client-ip";
-import { renderNotFoundPage } from "./routes/not-found";
+import { notFoundResponse } from "./routes/not-found";
 import { mountPublicRoutes, mountSessionRoutes } from "./app-routes";
 import type { User } from "better-auth/types";
 
@@ -94,7 +94,7 @@ app.use("*", securityHeaders);
 async function serveAsset(c: Context<WorkerEnv>): Promise<Response> {
   const assets = c.env?.ASSETS;
   if (assets?.fetch) return assets.fetch(c.req.raw);
-  return c.html(renderNotFoundPage({ path: c.req.path }), 404);
+  return notFoundResponse(c);
 }
 
 app.use("*", async (c, next) => {
@@ -146,9 +146,9 @@ app.get("*", async (c) => {
     const res = await assets.fetch(c.req.raw);
     if (res.status !== 404) return res;
   }
-  return c.html(renderNotFoundPage({ path: c.req.path }), 404);
+  return notFoundResponse(c);
 });
-app.notFound((c) => c.html(renderNotFoundPage({ path: c.req.path }), 404));
+app.notFound(notFoundResponse);
 
 app.onError((err, c) => {
   logger.error({ errorType: err.name, path: redactViewerPath(c.req.path) }, "Unhandled error");

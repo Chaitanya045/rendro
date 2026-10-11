@@ -10,7 +10,7 @@ import { sessionMiddleware } from "@/middleware/session";
 import { mountPublicRoutes, mountSessionRoutes } from "@/app-routes";
 import { z } from "zod/v4";
 import { logger } from "@/logger";
-import { renderNotFoundPage } from "@/routes/not-found";
+import { notFoundResponse } from "@/routes/not-found";
 import type { User } from "better-auth/types";
 
 // Only the local Node server listens on a port; Workers do not read PORT.
@@ -69,7 +69,7 @@ app.get("/api/auth/me", (c) => {
 // Auth/API proxies, management pages, legacy app routes, file streaming, and health check.
 mountSessionRoutes(app);
 
-app.notFound((c) => c.html(renderNotFoundPage({ path: c.req.path }), 404));
+app.notFound(notFoundResponse);
 
 // Error handler
 app.onError((err, c) => {

@@ -1,6 +1,18 @@
+import type { Context } from "hono";
 import { nonceAttribute } from "@/middleware/html-nonce";
+import { assetError } from "./asset-headers";
 import { renderFaviconLinks } from "./favicon";
 import { renderThemeAssets } from "./theme";
+
+/** Shared global fallback for the Worker and local Node server. */
+export function notFoundResponse(c: Context): Response {
+  if (c.req.path === "/api" || c.req.path.startsWith("/api/")) {
+    c.header("Cache-Control", "private, no-store");
+    c.header("X-Content-Type-Options", "nosniff");
+    return c.json({ error: "Not found" }, 404);
+  }
+  return assetError(c, () => renderNotFoundPage({ path: c.req.path }));
+}
 
 export interface NotFoundPageOptions {
   status?: 404 | 410;
