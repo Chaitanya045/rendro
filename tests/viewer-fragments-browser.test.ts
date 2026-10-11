@@ -1,7 +1,5 @@
-import { createServer, type Server } from "node:http";
-import { existsSync } from "node:fs";
 import { build } from "esbuild";
-import { chromium, type Browser, type Frame, type Page } from "playwright";
+import type { Frame, Page } from "playwright";
 import { Hono } from "hono";
 import type { User } from "better-auth/types";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -9,14 +7,13 @@ import projectDocs from "@/routes/project-docs";
 import publicDocs from "@/routes/public-v2";
 import shareDocs from "@/routes/share-v2";
 import * as minio from "@/minio";
+import { browserStep, createBrowserHarness } from "./helpers/browser";
 
 const privateBase = "/organizations/org/projects/project/docs";
 const manifestKey = "tenants/org/projects/project/deployments/deploy/manifest.json";
 const documents = ["guide/page.html", "guide/other.html"];
 const requests: string[] = [];
-let browser: Browser;
-let server: Server;
-let origin: string;
+const harness = createBrowserHarness();
 let publisherBase = "";
 
 function publisherHtml(path: string): string {
@@ -38,7 +35,8 @@ function publisherHtml(path: string): string {
 }
 
 beforeAll(async () => {
-  const bundle = async (path: string) => (await build({ entryPoints: [path], bundle: true, write: false, format: "iife", platform: "browser" })).outputFiles[0].text;
+  const bundle = (path: string) => browserStep(`bundle ${path}`, async () =>
+    (await build({ entryPoints: [path], bundle: true, write: false, format: "iife", platform: "browser" })).outputFiles[0].text);
   const viewer = await bundle("src/viewer/entry.ts");
   const tree = await bundle("src/lazy-tree/lazy-tree.ts");
   vi.spyOn(minio, "getObjectText").mockResolvedValue(JSON.stringify({ version: 1,
@@ -64,9 +62,9 @@ beforeAll(async () => {
   app.route("/", projectDocs);
   app.route("/", publicDocs);
   app.route("/", shareDocs);
-  server = createServer((request, response) => {
+  await harness.start((request, response) => {
     void (async () => {
-      const url = new URL(request.url!, origin);
+      const url = new URL(request.url!, harness.origin);
       // Record no ticket capabilities, only canonical document loads.
       if (url.pathname.includes("/view/")) requests.push("ticket-request");
       else requests.push(url.pathname);
@@ -75,29 +73,19 @@ beforeAll(async () => {
       response.end(Buffer.from(await result.arrayBuffer()));
     })().catch(error => response.destroy(error as Error));
   });
-  await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
-  const address = server.address();
-  if (!address || typeof address === "string") throw new Error("Missing fixture port");
-  origin = `http://127.0.0.1:${address.port}`;
-  browser = await chromium.launch({ executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH
-    ?? (existsSync("/usr/bin/chromium") ? "/usr/bin/chromium" : undefined) });
-}, 30_000);
+});
 
 beforeEach(() => { publisherBase = ""; requests.length = 0; });
 
-afterAll(async () => {
-  await browser?.close();
-  if (server) await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+afterAll(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
 
 async function newPage(): Promise<Page> {
-  const page = await browser.newPage();
-  page.setDefaultTimeout(5000);
-  page.setDefaultNavigationTimeout(5000);
+  const page = await harness.newPage();
   // No external fonts/services are needed by this isolated route fixture.
-  await page.route(url => url.origin !== origin, route => route.request().url().includes("cdn.tailwindcss.com")
+  await page.route(url => url.origin !== harness.origin, route => route.request().url().includes("cdn.tailwindcss.com")
     ? route.fulfill({ contentType: "text/javascript", body: "window.tailwind = {};" }) : route.abort());
   return page;
 }
@@ -106,37 +94,34 @@ async function readyFrame(page: Page): Promise<Frame> {
   // The shell can finish parsing before its tree starts the document request.
   // Wait for the canonical iframe and publisher initialization, not a load event
   // that may already have fired or unrelated shell resources.
-  await page.waitForFunction(() => {
+  await browserStep("wait for canonical iframe source", () => page.waitForFunction(() => {
     const src = document.querySelector<HTMLIFrameElement>("#content-frame")?.getAttribute("src");
     return Boolean(src && src !== "about:blank");
-  });
+  }));
   const frame = await (await page.locator("#content-frame").elementHandle())!.contentFrame();
   if (!frame) throw new Error("Missing document frame");
-  await frame.waitForFunction(() => document.readyState === "complete"
-    && document.body?.dataset.initializedQuery !== undefined && Boolean(document.getElementById("details")));
+  await browserStep("wait for publisher initialization", () => frame.waitForFunction(() => document.readyState === "complete"
+    && document.body?.dataset.initializedQuery !== undefined && Boolean(document.getElementById("details"))));
   // A restored scroll position can be visible before the parent's load handler
   // finishes. Let that handler and the shell's loading state settle before clicks.
-  await page.waitForFunction(() => document.querySelector("#content-frame")?.getAttribute("aria-busy") !== "true"
-    && !document.documentElement.classList.contains("doc-loading"));
+  await browserStep("wait for viewer loading state to settle", () => page.waitForFunction(() => document.querySelector("#content-frame")?.getAttribute("aria-busy") !== "true"
+    && !document.documentElement.classList.contains("doc-loading")));
   return frame;
 }
 
 async function open(base: string, hash = ""): Promise<{ page: Page; frame: Frame }> {
   const page = await newPage();
-  await page.goto(origin + base + hash, { waitUntil: "domcontentloaded" });
+  await browserStep("navigate to fixture", () => page.goto(harness.origin + base + hash, { waitUntil: "domcontentloaded" }));
   return { page, frame: await readyFrame(page) };
 }
 
 async function atTarget(frame: Frame, id: string) {
-  await frame.waitForFunction(id => Math.round(document.getElementById(id)?.getBoundingClientRect().top ?? -1) === 0, id);
+  await browserStep(`scroll to fragment ${id}`, () => frame.waitForFunction(id => Math.round(document.getElementById(id)?.getBoundingClientRect().top ?? -1) === 0, id));
 }
 
 // Uses the actual route injectors, shell, and bundled bridge/tree in Chromium's
 // opaque-origin sandbox; DOM mocks cannot detect ticket-base navigations.
-// Each scenario includes several real navigations/clicks. Use the existing
-// cross-page scenario's 15s budget instead of Vitest's 5s unit-test default;
-// individual browser conditions still fail within 5s with a useful location.
-describe("viewer fragment navigation in Chromium", { timeout: 15_000 }, () => {
+describe("viewer fragment navigation in Chromium", () => {
   it.each([privateBase, "/p/fixture", "/s/fixture"])("scrolls without a reload and restores Unicode deep links in %s", async base => {
     const { page, frame } = await open(base);
     const errors: string[] = [];
@@ -148,23 +133,23 @@ describe("viewer fragment navigation in Chromium", { timeout: 15_000 }, () => {
       for (const label of ["Bare fragment", "Explicit same page"]) {
         await frame.getByRole("link", { name: label, exact: true }).click();
         await atTarget(frame, "details");
-        await expect.poll(() => new URL(page.url()).hash).toBe("#details");
+        await browserStep("synchronize shell fragment", () => expect.poll(() => new URL(page.url()).hash).toBe("#details"));
       }
       expect(await frame.locator("textarea").inputValue()).toBe("Unsent comment draft");
       expect(requests.filter(path => path === `${base}/files/${documents[0]}`).length).toBe(loads);
       expect(await page.evaluate(() => history.length)).toBe(historyLength);
-      expect(frame.url()).toBe(`${origin}${base}/files/${documents[0]}${base === "/s/fixture" ? "#details" : ""}`);
+      expect(frame.url()).toBe(`${harness.origin}${base}/files/${documents[0]}${base === "/s/fixture" ? "#details" : ""}`);
       await frame.getByRole("link", { name: "Unicode", exact: true }).click();
       await atTarget(frame, "日本語");
-      await expect.poll(() => decodeURIComponent(new URL(page.url()).hash)).toBe("#日本語");
-      await page.reload({ waitUntil: "domcontentloaded" });
+      await browserStep("synchronize shell fragment", () => expect.poll(() => decodeURIComponent(new URL(page.url()).hash)).toBe("#日本語"));
+      await browserStep("reload document", () => page.reload({ waitUntil: "domcontentloaded" }));
       const reloaded = await readyFrame(page);
       await atTarget(reloaded, "日本語");
       await reloaded.getByRole("link", { name: "Encoded", exact: true }).click();
-      await expect.poll(() => new URL(page.url()).hash).toBe("#caf%C3%A9");
+      await browserStep("synchronize shell fragment", () => expect.poll(() => new URL(page.url()).hash).toBe("#caf%C3%A9"));
       await atTarget(reloaded, "café");
       await reloaded.getByRole("link", { name: "Legacy name", exact: true }).click();
-      await expect.poll(() => reloaded.evaluate(() => Math.round(document.getElementsByName("legacy")[0].getBoundingClientRect().top))).toBe(0);
+      await browserStep("scroll to legacy named anchor", () => expect.poll(() => reloaded.evaluate(() => Math.round(document.getElementsByName("legacy")[0].getBoundingClientRect().top))).toBe(0));
       const position = await reloaded.evaluate(() => scrollY);
       await reloaded.getByRole("link", { name: "Missing", exact: true }).click();
       expect(await reloaded.evaluate(() => scrollY)).toBe(position);
@@ -172,7 +157,7 @@ describe("viewer fragment navigation in Chromium", { timeout: 15_000 }, () => {
         await reloaded.getByRole("link", { name: "Bare fragment", exact: true }).click();
         await atTarget(reloaded, "details");
         await reloaded.getByRole("link", { name: label, exact: true }).click();
-        await expect.poll(() => reloaded.evaluate(() => scrollY)).toBe(0);
+        await browserStep("scroll to document top", () => expect.poll(() => reloaded.evaluate(() => scrollY)).toBe(0));
       }
       expect(requests).not.toContain("ticket-request");
       expect(errors).toEqual([]);
@@ -184,36 +169,39 @@ describe("viewer fragment navigation in Chromium", { timeout: 15_000 }, () => {
     try {
       await atTarget(frame, "details");
       await frame.getByRole("link", { name: "Other page", exact: true }).click();
-      await frame.waitForURL(`${origin}${base}/files/${documents[1]}`);
+      await browserStep("wait for canonical document navigation", () => frame.waitForFunction(url => location.href === url && document.readyState === "complete", `${harness.origin}${base}/files/${documents[1]}`));
       await atTarget(frame, "section");
       expect(new URL(page.url()).searchParams.get("doc")).toBe(documents[1]);
       expect(new URL(page.url()).hash).toBe("#section");
-      await page.reload({ waitUntil: "domcontentloaded" });
+      await browserStep("reload document", () => page.reload({ waitUntil: "domcontentloaded" }));
       let current = await readyFrame(page);
       await atTarget(current, "section");
       await page.evaluate(() => history.back());
-      await expect.poll(() => page.frames().find(frame => frame !== page.mainFrame())?.url()).toBe(`${origin}${base}/files/${documents[0]}`);
+      await browserStep("restore canonical document frame", () => expect.poll(() => page.frames().find(frame => frame !== page.mainFrame())?.url()).toBe(`${harness.origin}${base}/files/${documents[0]}`));
       current = page.frames().find(frame => frame !== page.mainFrame())!;
       await atTarget(current, "details");
       expect(new URL(page.url()).hash).toBe("#details");
       await page.evaluate(() => history.forward());
-      await expect.poll(() => page.frames().find(frame => frame !== page.mainFrame())?.url()).toBe(`${origin}${base}/files/${documents[1]}`);
+      await browserStep("restore canonical document frame", () => expect.poll(() => page.frames().find(frame => frame !== page.mainFrame())?.url()).toBe(`${harness.origin}${base}/files/${documents[1]}`));
       current = page.frames().find(frame => frame !== page.mainFrame())!;
       await atTarget(current, "section");
       await page.locator('.tree-item[data-path$="/guide/page.html"] .tree-link').click();
-      await expect.poll(() => page.frames().find(frame => frame !== page.mainFrame())?.url()).toBe(`${origin}${base}/files/${documents[0]}`);
+      await browserStep("restore canonical document frame", () => expect.poll(() => page.frames().find(frame => frame !== page.mainFrame())?.url()).toBe(`${harness.origin}${base}/files/${documents[0]}`));
       current = page.frames().find(frame => frame !== page.mainFrame())!;
-      await expect.poll(() => current.evaluate(() => scrollY)).toBe(0);
+      await browserStep("scroll to document top", () => expect.poll(() => current.evaluate(() => scrollY)).toBe(0));
       expect(new URL(page.url()).hash).toBe("");
     } finally { await page.close(); }
-  }, 15_000);
+  });
 
   it.each([privateBase, "/p/fixture", "/s/fixture"])("reloads changed queries and preserves publisher initialization in %s", async base => {
     const { page, frame } = await open(base);
-    const fileUrl = `${origin}${base}/files/${documents[0]}`;
+    const fileUrl = `${harness.origin}${base}/files/${documents[0]}`;
+    // loadDoc replaces its pending src navigation. Observe the committed document
+    // instead of a navigation event that Chromium can report as ERR_ABORTED.
     const initialized = async (query: string) => {
-      await frame.waitForURL(url => url.origin + url.pathname + url.search === fileUrl + query, { waitUntil: "domcontentloaded" });
-      await frame.waitForFunction(query => document.body?.dataset.initializedQuery === query, query);
+      await browserStep("wait for canonical document navigation", () => frame.waitForFunction(url => location.origin + location.pathname + location.search === url
+        && document.readyState === "complete", fileUrl + query));
+      await browserStep("wait for publisher initialization", () => frame.waitForFunction(query => document.body?.dataset.initializedQuery === query, query));
     };
     try {
       await frame.locator("textarea").fill("Old document");
@@ -232,21 +220,21 @@ describe("viewer fragment navigation in Chromium", { timeout: 15_000 }, () => {
       await atTarget(frame, "section");
       expect(await frame.locator("textarea").inputValue()).toBe("Comment draft");
       if (base !== "/s/fixture") {
-        await page.reload({ waitUntil: "domcontentloaded" });
+        await browserStep("reload document", () => page.reload({ waitUntil: "domcontentloaded" }));
         const restored = await readyFrame(page);
         expect(await restored.locator("body").getAttribute("data-initialized-query")).toBe("?v=2");
         await atTarget(restored, "section");
-        await page.goBack({ waitUntil: "domcontentloaded" });
-        await restored.waitForFunction(() => document.body?.dataset.initializedQuery === "?v=1");
+        await browserStep("restore previous history entry", () => page.goBack({ waitUntil: "domcontentloaded" }));
+        await browserStep("wait for publisher initialization", () => restored.waitForFunction(() => document.body?.dataset.initializedQuery === "?v=1"));
         await atTarget(restored, "details");
-        await page.goForward({ waitUntil: "domcontentloaded" });
-        await restored.waitForFunction(() => document.body?.dataset.initializedQuery === "?v=2");
+        await browserStep("restore next history entry", () => page.goForward({ waitUntil: "domcontentloaded" }));
+        await browserStep("wait for publisher initialization", () => restored.waitForFunction(() => document.body?.dataset.initializedQuery === "?v=2"));
         await atTarget(restored, "section");
         await restored.getByRole("link", { name: "Publisher doc query", exact: true }).click();
-        await restored.waitForFunction(() => document.body?.dataset.initializedQuery === "?doc=publisher&v=3");
+        await browserStep("wait for publisher initialization", () => restored.waitForFunction(() => document.body?.dataset.initializedQuery === "?doc=publisher&v=3"));
         expect(new URL(page.url()).searchParams.get("doc")).toBe(documents[0]);
         await page.locator('.tree-item[data-path$="/guide/other.html"] .tree-link').click();
-        await restored.waitForURL(`${origin}${base}/files/${documents[1]}`, { waitUntil: "domcontentloaded" });
+        await browserStep("wait for canonical document navigation", () => restored.waitForFunction(url => location.href === url && document.readyState === "complete", `${harness.origin}${base}/files/${documents[1]}`));
         expect(new URL(page.url()).searchParams.has("docQuery")).toBe(false);
       }
       expect(requests).not.toContain("ticket-request");
@@ -256,9 +244,9 @@ describe("viewer fragment navigation in Chromium", { timeout: 15_000 }, () => {
   it.each([privateBase, "/p/fixture", "/s/fixture"])("restores the destination fragment through query Back/Forward and reload in %s", async base => {
     const { page, frame } = await open(base);
     const assertDestination = async (query: string, target: string) => {
-      await frame.waitForFunction(query => document.readyState === "complete"
-        && document.body?.dataset.initializedQuery === query, query);
-      await expect.poll(() => new URL(page.url()).hash).toBe("#" + target);
+      await browserStep("wait for publisher initialization", () => frame.waitForFunction(query => document.readyState === "complete"
+        && document.body?.dataset.initializedQuery === query, query));
+      await browserStep("synchronize shell fragment", () => expect.poll(() => new URL(page.url()).hash).toBe("#" + target));
       await atTarget(frame, target);
       expect(new URL(frame.url()).search).toBe(query);
       if (base === "/s/fixture") expect(new URL(frame.url()).hash).toBe("#" + target);
@@ -274,9 +262,9 @@ describe("viewer fragment navigation in Chromium", { timeout: 15_000 }, () => {
       await assertDestination("?v=2", "section");
       await page.evaluate(() => history.back());
       await assertDestination("?v=1", "details");
-      await page.reload({ waitUntil: "domcontentloaded" });
+      await browserStep("reload document", () => page.reload({ waitUntil: "domcontentloaded" }));
       const restored = await readyFrame(page);
-      await expect.poll(() => new URL(page.url()).hash).toBe("#details");
+      await browserStep("synchronize shell fragment", () => expect.poll(() => new URL(page.url()).hash).toBe("#details"));
       await atTarget(restored, "details");
       expect(requests).not.toContain("ticket-request");
     } finally { await page.close(); }
@@ -285,11 +273,11 @@ describe("viewer fragment navigation in Chromium", { timeout: 15_000 }, () => {
   it.each(["", "#details", "#日本語"])("restores initial and replaced share fragments through history: %s", async hash => {
     const { page, frame } = await open("/s/fixture", hash === "#日本語" ? "#details" : hash);
     const assertOriginal = async () => {
-      await frame.waitForFunction(() => document.readyState === "complete" && document.body?.dataset.initializedQuery === "");
-      await expect.poll(() => decodeURIComponent(new URL(page.url()).hash)).toBe(hash);
-      await expect.poll(() => decodeURIComponent(new URL(frame.url()).hash)).toBe(hash);
+      await browserStep("wait for publisher initialization", () => frame.waitForFunction(() => document.readyState === "complete" && document.body?.dataset.initializedQuery === ""));
+      await browserStep("synchronize shell fragment", () => expect.poll(() => decodeURIComponent(new URL(page.url()).hash)).toBe(hash));
+      await browserStep("restore frame fragment", () => expect.poll(() => decodeURIComponent(new URL(frame.url()).hash)).toBe(hash));
       if (hash) await atTarget(frame, hash.slice(1));
-      else await expect.poll(() => frame.evaluate(() => scrollY)).toBe(0);
+      else await browserStep("scroll to document top", () => expect.poll(() => frame.evaluate(() => scrollY)).toBe(0));
     };
     try {
       if (hash === "#日本語") {
@@ -298,14 +286,14 @@ describe("viewer fragment navigation in Chromium", { timeout: 15_000 }, () => {
       }
       await assertOriginal();
       await frame.getByRole("link", { name: "Query two", exact: true }).click();
-      await frame.waitForFunction(() => document.readyState === "complete" && document.body?.dataset.initializedQuery === "?v=2");
-      await expect.poll(() => new URL(page.url()).hash).toBe("#section");
+      await browserStep("wait for publisher initialization", () => frame.waitForFunction(() => document.readyState === "complete" && document.body?.dataset.initializedQuery === "?v=2"));
+      await browserStep("synchronize shell fragment", () => expect.poll(() => new URL(page.url()).hash).toBe("#section"));
       await atTarget(frame, "section");
       await page.evaluate(() => history.back());
       await assertOriginal();
       await page.evaluate(() => history.forward());
-      await frame.waitForFunction(() => document.readyState === "complete" && document.body?.dataset.initializedQuery === "?v=2");
-      await expect.poll(() => new URL(page.url()).hash).toBe("#section");
+      await browserStep("wait for publisher initialization", () => frame.waitForFunction(() => document.readyState === "complete" && document.body?.dataset.initializedQuery === "?v=2"));
+      await browserStep("synchronize shell fragment", () => expect.poll(() => new URL(page.url()).hash).toBe("#section"));
       await atTarget(frame, "section");
     } finally { await page.close(); }
   });
@@ -324,21 +312,21 @@ describe("viewer fragment navigation in Chromium", { timeout: 15_000 }, () => {
   it.each(["", '<base href="https://publisher.test/docs/">'])("restores standalone share fragment URLs on reload and Back with base %s", async base => {
     publisherBase = base;
     const page = await newPage();
-    const fileUrl = `${origin}/s/fixture/files/${documents[0]}`;
+    const fileUrl = `${harness.origin}/s/fixture/files/${documents[0]}`;
     try {
-      await page.goto(fileUrl, { waitUntil: "domcontentloaded" });
+      await browserStep("navigate to fixture", () => page.goto(fileUrl, { waitUntil: "domcontentloaded" }));
       await page.getByRole("link", { name: "Bare fragment", exact: true }).click();
       await atTarget(page.mainFrame(), "details");
       expect(page.url()).toBe(fileUrl + "#details");
-      await page.reload({ waitUntil: "domcontentloaded" });
+      await browserStep("reload document", () => page.reload({ waitUntil: "domcontentloaded" }));
       await atTarget(page.mainFrame(), "details");
       await page.getByRole("link", { name: "Unicode", exact: true }).click();
       await atTarget(page.mainFrame(), "日本語");
       expect(decodeURIComponent(new URL(page.url()).hash)).toBe("#日本語");
-      await page.goBack({ waitUntil: "domcontentloaded" });
+      await browserStep("restore previous history entry", () => page.goBack({ waitUntil: "domcontentloaded" }));
       await atTarget(page.mainFrame(), "details");
       expect(page.url()).toBe(fileUrl + "#details");
-      await page.goForward({ waitUntil: "domcontentloaded" });
+      await browserStep("restore next history entry", () => page.goForward({ waitUntil: "domcontentloaded" }));
       await atTarget(page.mainFrame(), "日本語");
       expect(requests.filter(path => path === `/s/fixture/files/${documents[0]}`)).toHaveLength(2);
     } finally { await page.close(); }
@@ -350,8 +338,8 @@ describe("viewer fragment navigation in Chromium", { timeout: 15_000 }, () => {
     try {
       await frame.getByRole("link", { name: "Bare fragment", exact: true }).click();
       await atTarget(frame, "details");
-      await expect.poll(() => new URL(page.url()).hash).toBe("#details");
-      expect(frame.url()).toBe(`${origin}${privateBase}/files/${documents[0]}`);
+      await browserStep("synchronize shell fragment", () => expect.poll(() => new URL(page.url()).hash).toBe("#details"));
+      expect(frame.url()).toBe(`${harness.origin}${privateBase}/files/${documents[0]}`);
       expect(requests.filter(path => path === `${privateBase}/files/${documents[0]}`)).toHaveLength(1);
       expect(requests).not.toContain("ticket-request");
     } finally { await page.close(); }
