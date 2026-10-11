@@ -16,15 +16,34 @@ export const ensureMigrationProject = httpAction(async (ctx, request) => {
   const projectId = "projectId" in body ? body.projectId : undefined;
   const name = "name" in body ? body.name : undefined;
   const slug = "slug" in body ? body.slug : undefined;
+  const legacyOrgSlug = "legacyOrgSlug" in body ? body.legacyOrgSlug : undefined;
+  const manifestSha256 = "manifestSha256" in body ? body.manifestSha256 : undefined;
   if (typeof organizationId !== "string") return Response.json({ error: "organizationId is required" }, { status: 400 });
+  // A completed migration can be resumed, but never overwrite ordinary work
+  // or silently import a changed source into an already populated project.
+  const reusable = async (project: { _id: Id<"projects">; activeDeploymentId?: Id<"deployments"> }) => {
+    if (!project.activeDeploymentId) return true;
+    const deployment = await ctx.runQuery(internal.deployments.getInternal, {
+      organizationId,
+      projectId: project._id,
+      deploymentId: project.activeDeploymentId,
+    });
+    return typeof legacyOrgSlug === "string"
+      && typeof manifestSha256 === "string"
+      && deployment?.status === "active"
+      && deployment.manifestSha256 === manifestSha256
+      && deployment.provenance.source.localPathLabel === `legacy:${legacyOrgSlug}`
+      && deployment.provenance.execution.actor === "migration"
+      && deployment.provenance.cliVersion === "migration-1";
+  };
   if (typeof projectId === "string") {
     const project = await ctx.runQuery(internal.projects.getInternal, {
       organizationId,
       projectId: projectId as Id<"projects">,
     });
     if (!project) return Response.json({ error: "Project not found" }, { status: 404 });
-    if (project.activeDeploymentId) {
-      return Response.json({ error: "Migration requires a new or empty project" }, { status: 409 });
+    if (!await reusable(project)) {
+      return Response.json({ error: "Migration requires an empty project or an identical completed migration" }, { status: 409 });
     }
     return Response.json({ project, created: false });
   }
@@ -34,8 +53,8 @@ export const ensureMigrationProject = httpAction(async (ctx, request) => {
   const projects = await ctx.runQuery(internal.projects.listInternal, { organizationId });
   const existing = projects.find((project) => project.slug === slug);
   if (existing) {
-    if (existing.activeDeploymentId) {
-      return Response.json({ error: "Existing migration project already has an active deployment" }, { status: 409 });
+    if (!await reusable(existing)) {
+      return Response.json({ error: "Existing migration project does not match this migration" }, { status: 409 });
     }
     return Response.json({ project: existing, created: false });
   }

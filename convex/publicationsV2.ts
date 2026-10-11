@@ -1,19 +1,8 @@
 import { ConvexError, v } from "convex/values";
 import { internalMutation, internalQuery } from "./_generated/server";
+import { cleanPublicationPath } from "../shared/v2-paths";
 
 const slugPattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
-
-function cleanPath(value: string, allowEmpty: boolean): string {
-  const path = value.trim().replace(/^\/+|\/+$/g, "");
-  if (!path) {
-    if (allowEmpty) return "";
-    throw new ConvexError("Invalid publication path");
-  }
-  if (path.includes("\\") || path.split("/").some((part) => part === "." || part === "..")) {
-    throw new ConvexError("Invalid publication path");
-  }
-  return path;
-}
 
 export const createInternal = internalMutation({
   args: {
@@ -38,8 +27,9 @@ export const createInternal = internalMutation({
     if (await ctx.db.query("publications").withIndex("by_slug", (query) => query.eq("slug", slug)).unique()) {
       throw new ConvexError("Publication slug is already in use");
     }
-    const pathPrefix = cleanPath(args.pathPrefix, true);
-    const entryFile = cleanPath(args.entryFile, false);
+    const pathPrefix = cleanPublicationPath(args.pathPrefix, true);
+    const entryFile = cleanPublicationPath(args.entryFile, false);
+    if (pathPrefix === null || entryFile === null) throw new ConvexError("Invalid publication path");
     if (args.trackingMode === "pinned") {
       if (!args.pinnedDeploymentId) throw new ConvexError("Pinned publication requires a deployment");
       const pinned = await ctx.db.get(args.pinnedDeploymentId);

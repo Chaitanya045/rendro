@@ -83,7 +83,7 @@ Responses that performed a session lookup receive `Cache-Control: private, no-st
 3. **Redirect control**: `redirect: "manual"` leaves redirects to the browser.
 4. **Sign-out**: `GET /api/auth/sign-out` calls Convex sign-out with `POST`, then expires every known auth cookie (host and parent domain) and sends `Clear-Site-Data: "cookies"`.
 
-The generic `/api/rendro/*` proxy uses the same allowlist, so it intentionally does **not** forward `Authorization`. Routes that accept API keys (deployment and publication routes, below) are implemented in the Worker and forward `Authorization` explicitly.
+The generic `/api/rendro/*` proxy uses the same allowlist, so it intentionally does **not** forward `Authorization`. Routes that accept API keys (deployment and publication routes, below) are implemented in the Worker and forward `Authorization` explicitly. The dedicated migration project route also forwards its operator bearer secret to the secret-gated Convex action.
 
 ---
 
@@ -196,7 +196,8 @@ Request
   │   └─ /api/auth/* → Convex proxy
   ├─ 9. Worker-implemented API routes (forward Authorization)
   │   ├─ /api/rendro/deployments/check|start|fail, /:id/files/*, /:id/copy, /:id/commit
-  │   └─ /api/rendro/publications (GET, POST), /api/rendro/publications/remove
+  │   ├─ /api/rendro/publications (GET, POST), /api/rendro/publications/remove
+  │   └─ POST /api/rendro/migration/project
   ├─ 10. /api/rendro/* → generic Convex proxy (no Authorization)
   ├─ 11. Auth pages: /sign-in, /sign-up, /verify-email, /forgot-password, /reset-password, /account/security
   ├─ 12. Management pages
@@ -322,7 +323,7 @@ Convex HTTP routes (`convex/http.ts`). The Worker serves the rows marked *Worker
 | GET | `/api/rendro/shares/public` | Anonymous; used by `/s/*` |
 | GET | `/api/rendro/retention/candidates` | `RETENTION_SECRET` bearer |
 | POST | `/api/rendro/retention/purged` | `RETENTION_SECRET` bearer |
-| POST | `/api/rendro/migration/project` | `MIGRATION_SECRET` bearer |
+| POST | `/api/rendro/migration/project` | `MIGRATION_SECRET` bearer (*Worker* front) |
 
 Organization, member, team, and invitation operations use Better Auth's organization plugin endpoints under `/api/auth/organization/*`.
 
@@ -562,16 +563,37 @@ No workflow deploys the Worker or Convex, or publishes to npm.
 
 ### Legacy migration
 
-Legacy slug-prefixed objects are migrated by copy, never in place:
+Legacy migration remains supported: slug-based publications, comments, `/share`, `/public`, and `/docs/:org` remain available, and production migration verification has not been recorded. Keep the migration tool until that verification is complete. It copies slug-prefixed object bytes into immutable deployments using the same Worker start/upload/commit protocol as `rendro push`.
 
-1. Set the same random `MIGRATION_SECRET` in Convex and the operator environment. Set `RENDRO_ENDPOINT` to the target Worker origin (default `http://localhost:3000`) and the `MINIO_*` variables to the source bucket.
-2. Create a JSON array containing `legacyOrgSlug`, Better Auth `organizationId`, an organization-scoped migration `apiKey`, and optionally `projectId`, `projectName`, and `legacyApiKey`. A supplied project must be empty; otherwise the protected migration endpoint rejects it.
+1. Set the same random `MIGRATION_SECRET` in Convex and the operator environment. Set `RENDRO_ENDPOINT` to the target Worker origin (default `http://localhost:3000`) and the `MINIO_*` variables to the source bucket. Set `CONVEX_URL` and `CONVEX_INTERNAL_SECRET` to the authoritative legacy Convex database used by that Worker and bucket; apply refuses to continue if deletion state cannot be read.
+2. Create a JSON array containing `legacyOrgSlug`, Better Auth `organizationId`, an organization-scoped migration `apiKey`, and optionally `projectId`, `projectName`, and `legacyApiKey`. The current key needs `docs:write`; publication migration additionally needs `docs:read`, `publications:read`, and `publications:write`. The legacy key reads `/api/publications`. The target project must be empty or contain an identical completed migration from this legacy slug.
 3. Run `pnpm migrate:legacy -- --map targets.json` for a read-only inventory.
-4. Run again with `--apply`. The tool creates/reuses an empty dedicated project, hashes legacy objects, copies them into one immutable deployment, commits it, and recreates legacy publications as pinned mappings when `legacyApiKey` is supplied.
-5. Preserve the emitted `migration-rollback-*.json`. The migration does not delete old objects or old routes. Run `pnpm migrate:legacy -- --map targets.json --rollback migration-rollback-….json` to revoke all migrated publications; migrated bytes remain private for audit.
+4. Run again with `--apply`. For a non-local Worker, also supply `--confirm-endpoint <Worker origin>` (for example, `--confirm-endpoint https://rendro.example`). Apply and rollback print the sanitized Worker origin, source storage origin/bucket, source Convex origin, and organization/project mappings before any remote writes; the confirmation must match the displayed Worker origin. The tool queries `deletedFiles:filterFn` (the `deleted_files` table, indexed by full object key), excludes soft-deleted objects, then hashes the remaining objects and creates/reuses a dedicated project. It sends the sorted manifest to `/api/rendro/deployments/start`, reads `deployment.deploymentId`, uploads bytes through `PUT /api/rendro/deployments/:id/files/*`, then commits through `POST /api/rendro/deployments/:id/commit`. The Worker writes the manifest/tree index and validates uploaded hashes and sizes. When `legacyApiKey` is supplied, the tool reads the current legacy publication records and recreates them as pinned mappings. Removed publication records are not recreated. Files inside published folders that legacy public routes cannot serve (non-HTML or ambiguous paths) are excluded from the deployment, since v2 can serve any manifest entry. A deleted/missing entry document stops migration before destination writes. Before any destination write, the complete inventory (including private and deleted objects), publication prefixes, and entry paths must survive the shared v2 publication/deployment path functions unchanged; invalid paths and normalization collisions abort the target with the offending paths listed. The single terminal slash in a legacy folder prefix is its delimiter; extra slashes, whitespace trimming, decoding, and dot segments cannot silently change scope. Case and Unicode code points remain distinct, exactly as in v2. Deletion and publication filtering use the validated paths; the migration never repairs or remaps an unsafe source path. Deletion and publication state are checked again before publishing; changes stop publication.
+5. Preserve the emitted `migration-rollback-*.json`, which is checkpointed throughout apply, including partial failures. Run `pnpm migrate:legacy -- --map targets.json --apply --rollback migration-rollback-….json` (also supplying `--confirm-endpoint <Worker origin>` for non-local targets) to revoke publications recorded by that run (including identical mappings reused on a retry). Migrated projects and bytes remain available privately for audit. Rollback does not restore or delete deployments.
 6. Compare object/file counts and sample private/public routes before retiring legacy paths. Do not derive new organization IDs from old slugs.
 
-> **Caution:** the `--apply` path in `scripts/migrate-legacy-tenancy.ts` predates the current deployment protocol. It posts to `/api/rendro/deployments/start` without a `manifest`, reads `deployment._id` and `unchanged` from the response, and commits through `/api/rendro/deployments/commit`, none of which match the current Worker routes. Update it and rehearse against a development deployment before running it.
+Example `targets.json` (keep credential-bearing files out of version control):
+
+```json
+[
+  {
+    "legacyOrgSlug": "acme",
+    "organizationId": "<Better Auth organization ID>",
+    "apiKey": "<current scoped API key>",
+    "legacyApiKey": "<legacy API key>"
+  }
+]
+```
+
+```bash
+pnpm migrate:legacy -- --map targets.json          # default: inventory only
+pnpm migrate:legacy -- --map targets.json --apply  # local writes
+# Non-local apply or rollback additionally requires --confirm-endpoint <Worker origin>
+```
+
+The script loads `.env` when present. Dry run lists source object counts and target mappings without hashing/downloading objects, calling HTTP endpoints, or writing files; it does not validate destination credentials or publication conflicts. Repeating apply with the same source reuses the completed deployment and identical pinned publications. Changed source content, ordinary existing deployments, and conflicting publication mappings are rejected rather than overwritten. An upload or commit failure triggers a best-effort failure callback; retrying after a committed deployment resumes publication work. A killed process can leave an unused staging deployment, as with the CLI. Freeze legacy content, deletion/restore, and publication writes throughout apply and retries so the visibility snapshot and source bytes remain consistent. This is a snapshot migration, not ongoing synchronization of later legacy revocations; coordinate cutover before resuming writes.
+
+Legacy objects, publication records, comments, and routes are preserved. This tool migrates object bytes and optional publication mappings; it excludes soft-deleted objects rather than translating tombstones, and does not translate legacy comments, API keys, or HMAC share links. Documents outside live publication prefixes remain private. No share grants are created, so expired/invalid legacy HMAC links and revoked v2 grants are never converted into fresh access. Review those separately before retiring v1 routes. Publication slugs are global in v2, so duplicate legacy slugs across organizations require an explicit naming decision.
 
 ### Development QA fixtures
 
