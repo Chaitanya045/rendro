@@ -16,9 +16,9 @@ export function syncCommentRecoveryUser(storage: Storage, userId: string | null)
 
 // Installed on shells with sign-out controls, including pages without a widget.
 // Clearing before navigation also prevents BFCache from reviving another user's UI.
-export function renderCommentRecoveryLifecycle(userId: string | null): string {
+export function renderCommentRecoveryLifecycle(userId: string | null, nonceAttributes = ""): string {
   const id = JSON.stringify(userId).replace(/</g, "\\u003c");
-  return `<script>(() => {
+  return `<script${nonceAttributes}>(() => {
     const clear = () => {
       try {
         for (let i = sessionStorage.length - 1; i >= 0; i--) {

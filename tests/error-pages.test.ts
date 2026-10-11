@@ -34,7 +34,20 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 function styles(html: string) {
-  return [...html.matchAll(/<style>([\s\S]*?)<\/style>/g)].map((match) => match[1]);
+  return [...html.matchAll(/<style\b[^>]*>([\s\S]*?)<\/style>/g)].map((match) => match[1]);
+}
+
+// Compare every byte except the per-response nonce, after checking that every
+// executable/style element is authorized by that response's own policy.
+function normalizeNonces(response: Response, html: string): string {
+  const csp = response.headers.get("Content-Security-Policy")!;
+  const nonce = csp.match(/'nonce-([^']+)'/)?.[1];
+  expect(nonce).toBeTruthy();
+  expect(response.headers.get("Cache-Control")).toMatch(/(?:^|,\s*)no-store(?:,|$)/);
+  const tags = [...html.matchAll(/<(?:style|script)\b[^>]*>/g)];
+  expect(tags.length).toBeGreaterThan(0);
+  for (const [tag] of tags) expect(tag).toContain(`nonce="${nonce}"`);
+  return html.replaceAll(`nonce="${nonce}"`, 'nonce="NORMALIZED"');
 }
 
 async function expectShareError(token: string, status: number) {
@@ -50,7 +63,7 @@ async function expectShareError(token: string, status: number) {
   // Reuse the exact 404 CSS, including both themes and mobile breakpoints.
   expect(styles(html)).toEqual(styles(renderNotFoundPage()));
   expect(html).toContain('name="viewport" content="width=device-width, initial-scale=1"');
-  return html;
+  return normalizeNonces(response, html);
 }
 
 describe("unavailable share pages", () => {
@@ -107,7 +120,7 @@ describe("protected docs error routes", () => {
     expect(styles(html)).toEqual(styles(renderNotFoundPage()));
     expect(fixtures.head).not.toHaveBeenCalled();
     expect(fixtures.deleted).not.toHaveBeenCalled();
-    return html;
+    return normalizeNonces(response, html);
   }
 
   it.each(paths)("redirects signed-out %s to sign-in without looking up the org", async (path) => {
@@ -194,6 +207,7 @@ describe("auth error redirects through the Worker", () => {
     const signIn = await worker.request(response.headers.get("location")!);
     const html = await signIn.text();
     expect(signIn.status).toBe(200);
+    normalizeNonces(signIn, html);
     expect(html).toContain(`<p class="message error" id="form-error" role="alert">${message}`);
     expect(html).not.toContain("private-detail");
     expect(html).not.toContain("<script>alert(1)</script>");

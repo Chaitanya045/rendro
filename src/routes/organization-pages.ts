@@ -1,3 +1,4 @@
+import { nonceAttribute } from "@/middleware/html-nonce";
 import { Hono } from "hono";
 import type { User } from "better-auth/types";
 import { renderControlPlanePage, renderLoadingState } from "./control-plane";
@@ -230,7 +231,7 @@ function renderInvitationPage(user: User, invitationId: string): string {
     description: `Signed in as ${user.email}. Review the organization and role before accepting.`,
     focused: true,
     state: { invitationId },
-    content: `<section class="panel panel-pad invitation-card" id="invitation-state">${renderLoadingState("Loading invitation", `<span class="skeleton invitation-mark"></span><span class="skeleton-copy"><span class="skeleton skeleton-line strong medium"></span><span class="skeleton skeleton-line long"></span><span class="skeleton skeleton-line medium"></span></span><span class="skeleton skeleton-button"></span>`)}</section><style>.invitation-card{width:min(520px,100%);margin:20px auto;text-align:center}.invitation-card .loading-view{justify-items:center}.invitation-card .skeleton-copy{width:min(360px,100%);justify-items:center}.invitation-mark{width:52px;height:52px;display:grid;place-items:center;margin:0 auto 18px;border-radius:14px;background:var(--cp-accent-soft);color:var(--cp-accent);font-size:20px;font-weight:800}.invitation-card h2{margin:0;color:var(--cp-strong);font-size:24px;line-height:30px;letter-spacing:-.02em;text-wrap:balance}.invitation-copy{margin:9px auto 22px;color:var(--cp-muted)}.invitation-actions{display:flex;justify-content:center;gap:8px}</style>`,
+    content: `<section class="panel panel-pad invitation-card" id="invitation-state">${renderLoadingState("Loading invitation", `<span class="skeleton invitation-mark"></span><span class="skeleton-copy"><span class="skeleton skeleton-line strong medium"></span><span class="skeleton skeleton-line long"></span><span class="skeleton skeleton-line medium"></span></span><span class="skeleton skeleton-button"></span>`)}</section><style${nonceAttribute()}>.invitation-card{width:min(520px,100%);margin:20px auto;text-align:center}.invitation-card .loading-view{justify-items:center}.invitation-card .skeleton-copy{width:min(360px,100%);justify-items:center}.invitation-mark{width:52px;height:52px;display:grid;place-items:center;margin:0 auto 18px;border-radius:14px;background:var(--cp-accent-soft);color:var(--cp-accent);font-size:20px;font-weight:800}.invitation-card h2{margin:0;color:var(--cp-strong);font-size:24px;line-height:30px;letter-spacing:-.02em;text-wrap:balance}.invitation-copy{margin:9px auto 22px;color:var(--cp-muted)}.invitation-actions{display:flex;justify-content:center;gap:8px}</style>`,
     script: invitationScript,
   });
 }

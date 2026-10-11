@@ -26,6 +26,7 @@ function managementNavigationRuntime(loadingPagesJson: string): string {
   return String.raw`
 (function(){
   "use strict";
+  var documentNonce=document.currentScript&&document.currentScript.nonce;
   var SHELL_VERSION=${JSON.stringify(MANAGEMENT_SHELL_VERSION)},PROJECT_PLACEHOLDER=${JSON.stringify(MANAGEMENT_PROJECT_PLACEHOLDER)},loadingPages=${loadingPagesJson},ui=window.RendroUI;
   if(!ui||!window.fetch||!window.DOMParser||!window.AbortController)return;
   var main=document.querySelector(".cp-main[data-cp-route-envelope]"),currentScope=null,navigationController=null,pendingObserver=null,pendingExpectedMarkup=new WeakMap(),navigationVersion=0,currentUrl=location.href,historyIndex=Number(history.state&&history.state.__rendroManagementIndex)||0,suppressPop=false;
@@ -156,7 +157,7 @@ function managementNavigationRuntime(loadingPagesJson: string): string {
   function runPageScript(source){
     document.querySelectorAll("script[data-cp-page-script]").forEach(function(node){node.remove();});
     var script=document.createElement("script");script.setAttribute("data-cp-page-script","");
-    var nonce=source.getAttribute("nonce");if(nonce)script.setAttribute("nonce",nonce);
+    if(documentNonce)script.nonce=documentNonce;
     script.textContent=source.textContent||"";document.body.append(script);
   }
   async function navigate(rawUrl,options){

@@ -1,3 +1,4 @@
+import { securityHeaders } from "./middleware/security-headers";
 // Cloudflare Workers entry point
 // Auth is proxied to Convex HTTP actions. Database tables are in Convex component.
 
@@ -88,6 +89,7 @@ type WorkerBindings = Record<string, unknown> & { ASSETS?: AssetsBinding };
 type WorkerEnv = { Bindings: WorkerBindings; Variables: { user?: User } };
 
 const app = new Hono<WorkerEnv>();
+app.use("*", securityHeaders);
 
 async function serveAsset(c: Context<WorkerEnv>): Promise<Response> {
   const assets = c.env?.ASSETS;
