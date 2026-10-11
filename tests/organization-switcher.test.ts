@@ -1,3 +1,4 @@
+import { computeAccessibleName } from "dom-accessibility-api";
 import { Window, type HTMLButtonElement, type HTMLElement } from "happy-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { User } from "better-auth/types";
@@ -46,6 +47,16 @@ describe("header organization switcher", () => {
     expect(trigger.querySelector("[data-org-name]")?.textContent).toBe("Beta");
     expect(trigger.hasAttribute("aria-label")).toBe(false);
     expect(trigger.querySelector(".sr-only")?.textContent).toBe(", switch organization");
+  });
+
+  it("keeps the template name accessible and treats HTML special characters as text", () => {
+    const { win, trigger } = setup();
+    const name = `Acme & <img src=x onerror="alert(1)"> 'Partners'`;
+    win.sessionStorage.setItem("rendro-org-navigation-label", JSON.stringify({ userId: "u", organizationId: "org-a", name, createdAt: Date.now() }));
+    win.eval(renderOrganizationLabelBootstrap("u", "org-a"));
+    expect(computeAccessibleName(trigger as unknown as Element)).toBe(`${name} , switch organization`);
+    expect(trigger.querySelector("img")).toBeNull();
+    expect(trigger.querySelector("[data-org-name]")?.innerHTML).toContain("&amp; &lt;img");
   });
 
   it("reopens from TanStack cache, then refetches after a confirmed organization creation", async () => {

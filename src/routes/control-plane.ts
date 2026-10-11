@@ -436,7 +436,9 @@ dialog.cp-dialog[open]::backdrop{opacity:1}
 }
 @media(max-width:520px){
   .cp-org-switcher{min-width:0;padding:0 8px}
-  .cp-org-name,.cp-org-caret{display:none}
+  /* Keep the live organization label in the accessibility tree at mobile widths. */
+  .cp-org-name{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+  .cp-org-caret{display:none}
   .cp-page-actions>.button{flex:1}
   .form-actions{align-items:stretch;flex-direction:column-reverse}
   .form-actions .button{width:100%}

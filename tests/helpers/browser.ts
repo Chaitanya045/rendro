@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import { createServer, get, type RequestListener, type Server } from "node:http";
-import { chromium, type Browser, type BrowserContext, type BrowserContextOptions } from "playwright";
+import { chromium, type Browser, type BrowserContext, type BrowserContextOptions, type Page } from "playwright";
 import { afterAll, afterEach, expect } from "vitest";
 
 // Shorter than the 30s test budget so failures identify the stalled operation.
@@ -20,6 +20,22 @@ export async function browserStep<T>(label: string, action: () => Promise<T>, ti
   } finally {
     clearTimeout(timer);
   }
+}
+
+/** Call after hydration or an interaction, before auditing rendered styles. */
+export async function waitForSettled(page: Page) {
+  await browserStep("wait for fonts, animations and transitions to settle", () => page.evaluate(async () => {
+    await document.fonts.ready;
+    for (;;) {
+      // Let frame-scheduled entrance classes and style changes start their animations.
+      await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+      const animations = document.getAnimations().filter(animation =>
+        animation.playState !== "finished" && animation.playState !== "idle");
+      if (!animations.length) return;
+      // Cancellation also settles an animation; recheck for any replacement motion.
+      await Promise.allSettled(animations.map(animation => animation.finished));
+    }
+  }));
 }
 
 /** Call once at file scope. Owns one browser/server and a fresh context per page. */

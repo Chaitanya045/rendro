@@ -52,6 +52,7 @@
   },
   "devDependencies": {
     "@aws-sdk/client-s3": "^3.600.0",
+    "@axe-core/playwright": "^4.13.0",
     "@better-auth/memory-adapter": "^1.6.23",
     "@convex-dev/better-auth": "^0.12.5",
     "@csstools/css-tokenizer": "^4.0.2",
@@ -64,6 +65,7 @@
     "better-auth": "^1.6.23",
     "convex": "^1.42.0",
     "convex-test": "^0.0.54",
+    "dom-accessibility-api": "^0.7.1",
     "esbuild": "^0.28.1",
     "eslint": "^10.6.0",
     "happy-dom": "^20.14.5",
