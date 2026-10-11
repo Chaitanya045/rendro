@@ -352,7 +352,12 @@ async function push(opts: PushOptions): Promise<void> {
           reason: error instanceof Error ? error.message : String(error),
         }),
       },
-    ).catch(() => {});
+      true, // Marking a staging deployment failed is idempotent.
+    ).catch((cleanupError: unknown) => {
+      const original = error instanceof Error ? error.message : String(error);
+      const cleanup = cleanupError instanceof Error ? cleanupError.message : String(cleanupError);
+      throw new Error(`${original}\nFailed to mark deployment ${deploymentId} as failed: ${cleanup}. It may remain staging; retry deployment cleanup.`, { cause: cleanupError });
+    });
     throw error;
   }
 

@@ -1,18 +1,14 @@
-import { RateLimiter, MINUTE } from "@convex-dev/rate-limiter";
-import { components, internal } from "./_generated/api";
+import { internal } from "./_generated/api";
 import { httpAction, RateLimitedError } from "./httpErrors";
 import { sha256 } from "./credentialHash";
 import { AUTH_CLIENT_IP_HEADER, verifiedAuthRequest } from "../shared/auth-client-ip";
 
-export const apiKeyRateLimits = {
-  credential: { kind: "token bucket", rate: 6_000, period: MINUTE, capacity: 12_000 },
-  failedIp: { kind: "token bucket", rate: 120, period: MINUTE, capacity: 240 },
-} as const;
-export const apiKeyRateLimiter = new RateLimiter(components.rateLimiter, apiKeyRateLimits);
+import { apiKeyRateLimiter } from "./apiKeyRateLimits";
+export { apiKeyRateLimiter, apiKeyRateLimits } from "./apiKeyRateLimits";
 
 type Handler = Parameters<typeof httpAction>[0];
 
-function limitedAction(handler: Handler, allowSession: boolean) {
+function limitedAction(handler: Handler, allowSession: boolean, budget: "credential" | "cleanup" = "credential") {
   return httpAction(async (ctx, request) => {
     const authorization = request.headers.get("authorization");
     // Cookie-only management traffic has its own authentication path. Supplying
@@ -24,14 +20,14 @@ function limitedAction(handler: Handler, allowSession: boolean) {
     }) : null;
     let status;
     if (credentialId) {
-      status = await apiKeyRateLimiter.limit(ctx, "credential", { key: credentialId });
+      status = await apiKeyRateLimiter.limit(ctx, budget, { key: credentialId });
     } else {
       // A metadata-only request avoids consuming the original POST body.
       const verified = await verifiedAuthRequest(new Request(request.url, {
         method: request.method, headers: request.headers,
       }), process.env.CONVEX_INTERNAL_SECRET);
       const ip = verified.headers.get(AUTH_CLIENT_IP_HEADER);
-      status = await apiKeyRateLimiter.limit(ctx, "failedIp", {
+      status = await ctx.runMutation(internal.apiKeyRateLimitBuckets.consumeFailedIp, {
         key: ip ? `ip:${ip}` : "unverified",
       });
     }
@@ -44,3 +40,5 @@ function limitedAction(handler: Handler, allowSession: boolean) {
 
 export const apiKeyHttpAction = (handler: Handler) => limitedAction(handler, false);
 export const sessionOrApiKeyHttpAction = (handler: Handler) => limitedAction(handler, true);
+
+export const apiKeyCleanupHttpAction = (handler: Handler) => limitedAction(handler, false, "cleanup");

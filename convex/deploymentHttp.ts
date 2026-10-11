@@ -1,4 +1,4 @@
-import { apiKeyHttpAction, sessionOrApiKeyHttpAction } from "./apiKeyHttp";
+import { apiKeyCleanupHttpAction, apiKeyHttpAction, sessionOrApiKeyHttpAction } from "./apiKeyHttp";
 import type { DataModel } from "./_generated/dataModel";
 import type { GenericActionCtx } from "convex/server";
 import { internal } from "./_generated/api";
@@ -157,7 +157,7 @@ const deployment = await ctx.runQuery(internal.deployments.getInternal, {
 });
 return Response.json({ project, deployment, principal }); });
 
-export const failDeployment = apiKeyHttpAction(async (ctx: GenericActionCtx<DataModel>, request: Request) => { let body: unknown;
+export const failDeployment = apiKeyCleanupHttpAction(async (ctx: GenericActionCtx<DataModel>, request: Request) => { let body: unknown;
 try { body = await request.json(); } catch { return clientFailure("Invalid JSON body"); }
 if (!body || typeof body !== "object") return clientFailure("Invalid failure body");
 const organizationId = objectField(body, "organizationId");

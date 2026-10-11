@@ -30,7 +30,7 @@ describe("CLI rate-limit handling", () => {
     expect(console.error).toHaveBeenCalledWith(expect.stringContaining("Rate limited (429). Retrying"));
   });
 
-  it.each(["start", "commit", "fail", "publications"])("never retries %s POSTs by default", async path => {
+  it.each(["start", "commit", "publications"])("never retries %s POSTs by default", async path => {
     const fetchMock = vi.fn().mockResolvedValue(limited("5"));
     vi.stubGlobal("fetch", fetchMock);
     const response = await fetchWithRateLimit(`https://rendro.test/${path}`, { method: "POST", body: "{}" });

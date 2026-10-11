@@ -15,7 +15,7 @@ const headers = { authorization: `Bearer ${secret}` };
 const apiRoutes = [
   ["GET", "credentials/validate"], ["POST", "deployments/start"],
   ["GET", "deployments/active"], ["GET", "deployments/staging"],
-  ["POST", "deployments/commit"], ["POST", "deployments/fail"],
+  ["POST", "deployments/commit"],
   ["GET", "deployments"], ["GET", "publications"],
   ["POST", "publications"], ["POST", "publications/remove"],
 ];
@@ -36,6 +36,21 @@ async function expectLimited(response: Response) {
   expect(await response.json()).toEqual({ error: "Rate limit exceeded", code: "rate_limited" });
 }
 
+// Fill each shard deterministically; a single oversized debit is invalid for
+// a sharded bucket. Leave random selection enabled for actual HTTP requests.
+async function exhaustCredential(t: Awaited<ReturnType<typeof fixture>>["t"], key: string, remainingPerShard = 0) {
+  const { shards, capacity } = apiKeyRateLimits.credential;
+  const random = vi.spyOn(Math, "random");
+  try {
+    for (let shard = 0; shard < shards; shard++) {
+      random.mockReturnValue((shard + 0.1) / shards);
+      expect((await t.run(ctx => apiKeyRateLimiter.limit(ctx, "credential", {
+        key, count: capacity / shards - remainingPerShard,
+      }))).ok).toBe(true);
+    }
+  } finally { random.mockRestore(); }
+}
+
 afterEach(() => vi.restoreAllMocks());
 
 describe("authoritative API-key rate limits", () => {
@@ -43,10 +58,7 @@ describe("authoritative API-key rate limits", () => {
     const now = Date.now();
     vi.spyOn(Date, "now").mockReturnValue(now);
     const { t, credentialId } = await fixture();
-    await t.run(ctx => apiKeyRateLimiter.limit(ctx, "credential", {
-      key: credentialId, count: apiKeyRateLimits.credential.capacity - 1,
-    }));
-    expect((await t.fetch(validatePath, { headers })).status).toBe(200);
+    await exhaustCredential(t, credentialId);
     for (const [method, path] of apiRoutes) {
       // Limiting must happen even before body/identity parsing fails.
       await expectLimited(await t.fetch(`/api/rendro/${path}?organizationId=foreign&scope=other`, {
@@ -102,9 +114,7 @@ describe("authoritative API-key rate limits", () => {
     vi.spyOn(Date, "now").mockReturnValue(Date.now());
     const log = vi.spyOn(console, "error").mockImplementation(() => {});
     const { t, credentialId } = await fixture();
-    await t.run(ctx => apiKeyRateLimiter.limit(ctx, "credential", {
-      key: credentialId, count: apiKeyRateLimits.credential.capacity,
-    }));
+    await exhaustCredential(t, credentialId);
     await t.mutation(internal.apiKeyCredentials.createInternal, {
       organizationId: "org", keyId: "other", keyPrefix: "test", name: "Other",
       secretHash: await sha256("other-secret"), scopes: ["docs:read"], actorId: "owner",
@@ -123,6 +133,70 @@ describe("authoritative API-key rate limits", () => {
     expect(await response.json()).toEqual({ error: "Request failed" });
     expect(log).toHaveBeenCalledWith("HTTP request failed", { operation: "httpAction", category: "Error", status: 500 });
     expect(JSON.stringify(log.mock.calls)).not.toContain(secret);
+  });
+
+  it("keeps failure cleanup available after upload exhaustion, with its own abuse cap", async () => {
+    vi.spyOn(Date, "now").mockReturnValue(Date.now());
+    const { t, credentialId } = await fixture();
+    const project = await t.mutation(internal.projects.createInternal, {
+      organizationId: "org", name: "Docs", slug: "docs", actorId: "owner",
+    });
+    const identity = { organizationId: "org", projectId: project!._id };
+    const deployment = await t.mutation(internal.deployments.startInternal, {
+      ...identity, manifestSha256: "hash", fileCount: 1, byteCount: 1, actorId: "owner",
+      provenance: { source: { kind: "local" }, execution: { kind: "local" }, cliVersion: "test", manifestSha256: "hash" },
+    });
+    const deploymentIdentity = { ...identity, deploymentId: deployment.deploymentId };
+    await exhaustCredential(t, credentialId);
+    await expectLimited(await t.fetch(`/api/rendro/deployments/staging?${new URLSearchParams(deploymentIdentity)}`, { headers }));
+    const fail = () => t.fetch("/api/rendro/deployments/fail", {
+      method: "POST", headers, body: JSON.stringify({ ...deploymentIdentity, reason: "Upload rate limited" }),
+    });
+    for (let i = 0; i < apiKeyRateLimits.cleanup.capacity; i++) expect((await fail()).status).toBe(200);
+    expect((await t.query(internal.deployments.getInternal, deploymentIdentity))?.status).toBe("failed");
+    await expectLimited(await fail());
+    vi.mocked(Date.now).mockReturnValue(Date.now() + 1_000);
+    expect((await fail()).status).toBe(200);
+  });
+
+  it("handles 20 parallel staging authorizations and enforces the aggregate sharded budget", async () => {
+    vi.spyOn(Date, "now").mockReturnValue(Date.now());
+    const { t, credentialId } = await fixture();
+    const project = await t.mutation(internal.projects.createInternal, {
+      organizationId: "org", name: "Docs", slug: "docs", actorId: "owner",
+    });
+    const identity = { organizationId: "org", projectId: project!._id };
+    const deployment = await t.mutation(internal.deployments.startInternal, {
+      ...identity, manifestSha256: "hash", fileCount: 20, byteCount: 20, actorId: "owner",
+      provenance: { source: { kind: "local" }, execution: { kind: "local" }, cliVersion: "test", manifestSha256: "hash" },
+    });
+    const path = `/api/rendro/deployments/staging?${new URLSearchParams({ ...identity, deploymentId: deployment.deploymentId })}`;
+    const batch = () => Promise.all(Array.from({ length: 20 }, () => t.fetch(path, { headers })));
+    expect((await batch()).map(r => r.status)).toEqual(Array(20).fill(200));
+    // Reset only in the test, then leave exactly one token on each shard.
+    await t.run(ctx => apiKeyRateLimiter.reset(ctx, "credential", { key: credentialId }));
+    await exhaustCredential(t, credentialId, 1);
+    // Seed shard selection for reproducibility while still exercising the real
+    // component's two-choice distribution and concurrent HTTP actions.
+    let seed = 47;
+    vi.spyOn(Math, "random").mockImplementation(() => {
+      seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+      return seed / 2 ** 32;
+    });
+    const responses: Response[] = [];
+    for (let i = 0; i < 10; i++) responses.push(...await batch());
+    expect(responses.every(r => r.status === 200 || r.status === 429)).toBe(true);
+    const allowed = responses.filter(r => r.status === 200).length;
+    expect(allowed).toBeGreaterThanOrEqual(45);
+    expect(allowed).toBeLessThanOrEqual(50);
+    vi.mocked(Date.now).mockReturnValue(Date.now() + 1_000);
+    const refilled: Response[] = [];
+    for (let i = 0; i < 10; i++) refilled.push(...await batch());
+    expect(refilled.every(r => r.status === 200 || r.status === 429)).toBe(true);
+    const allowedAfterRefill = refilled.filter(r => r.status === 200).length;
+    expect(allowedAfterRefill).toBeGreaterThanOrEqual(90);
+    // Exactly 100 tokens/sec in aggregate, plus any unused burst tokens.
+    expect(allowedAfterRefill).toBeLessThanOrEqual(100 + 50 - allowed);
   });
 
   it("allows the CLI pattern for a 10,000-file cold deploy plus a large incremental deploy without refill", async () => {

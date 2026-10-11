@@ -9,6 +9,7 @@
  */
 
 import type * as apiKeyCredentials from "../apiKeyCredentials.js";
+import type * as apiKeyRateLimitBuckets from "../apiKeyRateLimitBuckets.js";
 import type * as apiKeys from "../apiKeys.js";
 import type * as auth from "../auth.js";
 import type * as authEmails from "../authEmails.js";
@@ -43,6 +44,7 @@ import type {
 
 declare const fullApi: ApiFromModules<{
   apiKeyCredentials: typeof apiKeyCredentials;
+  apiKeyRateLimitBuckets: typeof apiKeyRateLimitBuckets;
   apiKeys: typeof apiKeys;
   auth: typeof auth;
   authEmails: typeof authEmails;
