@@ -1,3 +1,4 @@
+import { viewerScript } from "@/viewer/markup";
 import { Hono } from "hono";
 import type { Context } from "hono";
 import { getObjectStream, putObject, headObject, listAllKeys, listImmediate, buildTree } from "@/minio";
@@ -54,20 +55,19 @@ app.get("/files/:key{.+}", async (c) => {
     }
     const decoder = new TextDecoder();
     let html = injectMobileViewportScrollbarStyle(chunks.map(c => decoder.decode(c)).join(""));
-    if (CONVEX_URL) html = injectCommentor(html, org, key, user);
+    if (CONVEX_URL) html = injectCommentor(html, org, key, user, c.req.url);
     return c.html(html);
   } catch (err) { logger.error({ err, key }, "stream failed"); return c.text("Stream failed", 500); }
 });
 
-function injectCommentor(html: string, org: string, filePath: string, user: User): string {
+function injectCommentor(html: string, org: string, filePath: string, user: User, url: string): string {
   const navScript = `<script>
 (function(){
 var p=window.parent;
-if(p!==window){p.postMessage({type:"doc-loaded",path:${JSON.stringify(filePath)}},"*");}
 document.addEventListener("keydown",function(e){var key=(e.key||"").toLowerCase();var shellShortcut=(key==="h"||e.code==="KeyH")&&(e.ctrlKey||e.metaKey)&&e.shiftKey&&!e.altKey&&!e.repeat&&!(e.getModifierState&&e.getModifierState("AltGraph"));if(shellShortcut&&!(e.target instanceof Element&&e.target.closest("input,textarea,select,[contenteditable='true'],[contenteditable='plaintext-only'],[contenteditable='']"))){e.preventDefault();p.postMessage({type:"shell-toggle"},"*");}});
-document.addEventListener("click",function(e){var a=e.target.closest("a");if(!a||!a.href)return;var u=new URL(a.href);var prefix="/files/${org}/";if(!u.pathname.startsWith(prefix))return;var targetPath=u.pathname.slice(prefix.length);if(!targetPath)return;e.preventDefault();p.postMessage({type:"doc-navigate",path:targetPath},"*");});
 })();
 </script>
+${viewerScript("navigation", { prefix: `/files/${org}/`, documentPath: filePath.slice(org.length + 1), loadedPath: filePath }, url)}
 <script>
 window.COMMENTOR = ${JSON.stringify({
   convexUrl: CONVEX_URL,

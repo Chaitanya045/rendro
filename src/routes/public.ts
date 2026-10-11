@@ -1,3 +1,4 @@
+import { viewerScript } from "@/viewer/markup";
 import { Hono } from "hono";
 import { getObjectStream } from "@/minio";
 import { isDeleted } from "@/soft-delete";
@@ -36,18 +37,17 @@ async function readStream(stream: ReadableStream<Uint8Array>): Promise<string> {
   return html + decoder.decode();
 }
 
-function injectPublicNavigation(html: string, publication: Publication, documentPath: string): string {
+function injectPublicNavigation(html: string, publication: Publication, documentPath: string, url: string): string {
   html = injectMobileViewportScrollbarStyle(html);
   const basePath = `/public/${encodeURIComponent(publication.orgSlug)}/${encodeURIComponent(publication.slug)}/files/`;
   const fullPath = `${publication.orgSlug}/${documentPath}`;
   const navigation = `<script>
 (function(){
 var p=window.parent;
-if(p!==window)p.postMessage({type:"doc-loaded",path:${JSON.stringify(fullPath)}},"*");
 document.addEventListener("keydown",function(e){var key=(e.key||"").toLowerCase();var shellShortcut=(key==="h"||e.code==="KeyH")&&(e.ctrlKey||e.metaKey)&&e.shiftKey&&!e.altKey&&!e.repeat&&!(e.getModifierState&&e.getModifierState("AltGraph"));if(shellShortcut&&!(e.target instanceof Element&&e.target.closest("input,textarea,select,[contenteditable='true'],[contenteditable='plaintext-only'],[contenteditable='']"))){e.preventDefault();p.postMessage({type:"shell-toggle"},"*");}});
-document.addEventListener("click",function(e){var a=e.target.closest("a");if(!a||!a.href)return;var u=new URL(a.href);var prefix=${JSON.stringify(basePath)};if(u.origin!==location.origin||!u.pathname.startsWith(prefix))return;var targetPath=u.pathname.slice(prefix.length).split("/").map(decodeURIComponent).join("/");if(!targetPath)return;e.preventDefault();p.postMessage({type:"doc-navigate",path:targetPath},"*");});
 })();
-</script>`;
+</script>
+${viewerScript("navigation", { prefix: basePath, documentPath, loadedPath: fullPath }, url)}`;
   const bodyClose = /<\/body\s*>/i;
   return bodyClose.test(html) ? html.replace(bodyClose, (match) => navigation + match) : html + navigation;
 }
@@ -66,7 +66,7 @@ app.get("/public/:org/:slug/files/:path{.+}", async (c) => {
   try {
     const stream = await getObjectStream(key);
     if (!stream) return c.html(renderNotFoundPage({ path: c.req.path }), 404);
-    const html = injectPublicNavigation(await readStream(stream), publication, documentPath);
+    const html = injectPublicNavigation(await readStream(stream), publication, documentPath, c.req.url);
     return c.html(html, 200, {
       "Cache-Control": "public, max-age=0, must-revalidate",
       "Content-Security-Policy": "sandbox allow-scripts allow-forms allow-popups allow-downloads; frame-ancestors 'self'",

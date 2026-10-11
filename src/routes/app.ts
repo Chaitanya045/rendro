@@ -887,7 +887,7 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
 <script${nonceAttribute()}>window.RENDRO_INITIAL_DOC=${inlineJson(selectedDoc)};window.RENDRO_ORG=${inlineJson(org)};window.RENDRO_DOCUMENT_BASE=${inlineJson(documentBase)};window.RENDRO_PUBLICATION_BASE=${inlineJson(isPublicDocument ? documentBase : "")};window.RENDRO_SHARE_CONFIG=${inlineJson(options.shareConfig ?? null)};</script>
 ${renderCommentRecoveryLifecycle(user?.id ?? null, nonceAttribute())}
 ${options.shareConfig?.convexUrl ? `<script${nonceAttribute()} src="/commentor-parent.js?v=5"></script>` : ""}
-<script src="/lazy-tree.js?v=32"></script>
+<script src="/lazy-tree.js?v=33"></script>
 </body>
 </html>`;
 }

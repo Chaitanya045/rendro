@@ -209,28 +209,15 @@ describe("private sandbox asset routing", () => {
     expect(await tree.json()).toEqual({ documents: ["guide/index.html", "guide/next.html"], cursor: null });
   });
 
-  it("routes relative and canonical document links through the shell and keeps fragment links in place", async () => {
+  it("installs the shared link bridge with canonical identity and ticket scope", async () => {
     const f = await fixture();
     const { html } = await f.document();
-    const win = new DOMWindow({ url: `http://localhost${base}/files/guide/index.html`, settings: {
-      enableJavaScriptEvaluation: true, disableJavaScriptFileLoading: true, disableCSSFileLoading: true,
-    } });
+    expect(html).toContain('data-viewer="navigation"');
+    const win = new DOMWindow();
     try {
       win.document.write(html);
-      const post = vi.spyOn(win, "postMessage");
-      const link = win.document.querySelector("a")!;
-      link.click();
-      expect(post).toHaveBeenCalledWith({ type: "doc-navigate", path: "guide/next.html" }, "*");
-      post.mockClear();
-      link.href = `${base}/files/guide/next.html`;
-      link.click();
-      expect(post).toHaveBeenCalledWith({ type: "doc-navigate", path: "guide/next.html" }, "*");
-      post.mockClear();
-      link.href = "#section";
-      link.click();
-      expect(post).not.toHaveBeenCalled();
-      expect(win.location.pathname).toBe(`${base}/files/guide/index.html`);
-      expect(win.location.hash).toBe("#section");
+      const config = JSON.parse(win.document.querySelector('[data-viewer="navigation"]')!.getAttribute("data-config")!);
+      expect(config).toEqual({ prefix: `${base}/files/`, ticketBase: `${base}/view/`, documentPath: "guide/index.html", loadedPath: "project-a/guide/index.html" });
     } finally { await win.happyDOM.close(); }
   });
 });

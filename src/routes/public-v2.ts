@@ -1,3 +1,4 @@
+import { viewerScript } from "@/viewer/markup";
 import { Hono } from "hono";
 import { CONVEX_SITE_URL } from "@/config";
 import { getObjectStream, getObjectText } from "@/minio";
@@ -68,10 +69,10 @@ async function readStream(stream: ReadableStream<Uint8Array>): Promise<string> {
   return output + decoder.decode();
 }
 
-function injectNavigation(html: string, slug: string, path: string): string {
+function injectNavigation(html: string, slug: string, path: string, url: string): string {
   html = injectMobileViewportScrollbarStyle(html);
   const basePath = `/p/${encodeURIComponent(slug)}/files/`;
-  const script = `<script>(function(){var parentWindow=window.parent;if(parentWindow!==window)parentWindow.postMessage({type:"doc-loaded",path:${JSON.stringify(path)}},location.origin);document.addEventListener("click",function(event){var anchor=event.target.closest("a");if(!anchor||!anchor.href)return;var url=new URL(anchor.href);var prefix=${JSON.stringify(basePath)};if(url.origin!==location.origin||!url.pathname.startsWith(prefix))return;var next=url.pathname.slice(prefix.length).split("/").map(decodeURIComponent).join("/");if(!next)return;event.preventDefault();parentWindow.postMessage({type:"doc-navigate",path:next},location.origin);});})();</script>`;
+  const script = viewerScript("navigation", { prefix: basePath, documentPath: path }, url);
   return /<\/body\s*>/i.test(html) ? html.replace(/<\/body\s*>/i, `${script}</body>`) : html + script;
 }
 
@@ -92,7 +93,7 @@ app.get("/p/:slug/files/*", async (c) => {
     "X-Content-Type-Options": "nosniff",
   };
   if (!entry.contentType.startsWith("text/html")) return new Response(stream, { headers });
-  const html = injectNavigation(await readStream(stream), result.publication.slug, relativePath);
+  const html = injectNavigation(await readStream(stream), result.publication.slug, relativePath, c.req.url);
   return new Response(html, {
     headers: {
       ...headers,

@@ -2,6 +2,7 @@
  * Lazy tree — sidebar document tree with Material Symbols icons,
  * max-height animations, active indicator, and border-line indentation.
  */
+import { replaceViewerFragment, sendDocumentFragment, validFragment } from "../viewer/fragments";
 import {
   isContentFrameSource,
   loadedDocumentAction,
@@ -466,7 +467,7 @@ function hideDocLoader(frame: HTMLIFrameElement | null, loadId: number) {
   announceDocumentState(accessibility.message, accessibility.assertive);
 }
 
-function loadDoc(fullPath: string, pushState: boolean) {
+function loadDoc(fullPath: string, pushState: boolean, fragment = "") {
   const frame = document.getElementById("content-frame") as HTMLIFrameElement | null;
   const placeholder = document.getElementById("main-placeholder");
   if (placeholder) placeholder.style.display = "none";
@@ -484,6 +485,7 @@ function loadDoc(fullPath: string, pushState: boolean) {
       if (loadId !== activeDocLoadId) return;
       if (docLoadTimeout !== undefined) window.clearTimeout(docLoadTimeout);
       hideDocLoader(frame, loadId);
+      sendDocumentFragment(frame, relativeDocumentPath(fullPath), location.hash);
     };
     frame.onerror = () => {
       if (loadId !== activeDocLoadId) return;
@@ -493,7 +495,11 @@ function loadDoc(fullPath: string, pushState: boolean) {
     docLoadTimeout = window.setTimeout(() => {
       if (loadId === activeDocLoadId) showDocLoadError(frame);
     }, 15000);
-    frame.src = documentFrameUrl(fullPath);
+    const frameUrl = documentFrameUrl(fullPath);
+    frame.src = frameUrl;
+    // Keep src authoritative for comments/tickets, but replace the pending
+    // frame navigation: the shell alone owns document history entries.
+    frame.contentWindow?.location.replace(frameUrl);
   }
 
   if (pushState) {
@@ -507,6 +513,7 @@ function loadDoc(fullPath: string, pushState: boolean) {
       url.searchParams.delete("doc");
       url.searchParams.delete("dev_user");
     }
+    url.hash = fragment;
     history.pushState({ docPath: fullPath }, "", url);
   }
 }
@@ -573,7 +580,7 @@ async function reconcileLoadedDocument(fullPath: string): Promise<void> {
   syncActiveState(fullPath);
 }
 
-function isDocumentMessage(value: unknown): value is { type: string; path: string } {
+function isDocumentMessage(value: unknown): value is { type: string; path: string; fragment?: unknown } {
   if (!value || typeof value !== "object") return false;
   return "type" in value
     && typeof value.type === "string"
@@ -613,10 +620,18 @@ function init() {
   window.addEventListener("message", (event) => {
     const frame = document.getElementById("content-frame") as HTMLIFrameElement | null;
     if (!isContentFrameSource(event.source, frame?.contentWindow ?? null)) return;
+    if (event.origin !== (frame?.hasAttribute("sandbox") ? "null" : location.origin)) return;
     if (!isDocumentMessage(event.data)) return;
+    if (event.data.type === "doc-fragment") {
+      if (!ORG || `${ORG}/${event.data.path}` !== RENDRO_WINDOW.RENDRO_CURRENT_DOC
+        || !validFragment(event.data.fragment)) return;
+      replaceViewerFragment(event.data.fragment);
+    }
     if (event.data.type === "doc-navigate") {
       if (!ORG || !validRelativeDocumentPath(event.data.path)) return;
-      loadDoc(`${ORG}/${event.data.path}`, true);
+      const fragment = event.data.fragment === undefined ? "" : event.data.fragment;
+      if (!validFragment(fragment)) return;
+      loadDoc(`${ORG}/${event.data.path}`, true, fragment);
     }
     if (event.data.type === "doc-loaded") {
       if (!ORG) return;
@@ -631,8 +646,15 @@ function init() {
     if (docPath) loadDoc(docPath, false);
   });
 
+  window.addEventListener("hashchange", () => {
+    const frame = document.getElementById("content-frame") as HTMLIFrameElement | null;
+    const current = RENDRO_WINDOW.RENDRO_CURRENT_DOC;
+    if (frame && current) sendDocumentFragment(frame, relativeDocumentPath(current), location.hash);
+  });
+
   const initialDoc = RENDRO_WINDOW.RENDRO_INITIAL_DOC || docFromPathname();
   if (initialDoc) {
+    history.replaceState({ ...history.state, docPath: initialDoc }, "", location.href);
     loadDoc(initialDoc, false);
     return;
   }
