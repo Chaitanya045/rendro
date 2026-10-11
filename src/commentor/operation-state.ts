@@ -18,13 +18,21 @@ export function mutationKey(method: CommentorParentMutationMethod, args: Args = 
 // Persist before dispatch; storage failure must prevent the backend write.
 export class CommentOperationState {
   value: CommentRecoveryState = { operations: {}, drafts: {} };
-  constructor(private readonly storage?: Pick<Storage, "getItem" | "setItem">, private readonly key = "") {
+  constructor(private readonly storage?: Pick<Storage, "getItem" | "setItem" | "removeItem">, private readonly key = "", private readonly userId?: string) {
     if (storage) {
       const saved = storage.getItem(key);
-      if (saved) this.value = JSON.parse(saved) as CommentRecoveryState;
+      if (saved) {
+        try {
+          const value = JSON.parse(saved);
+          if (value.userId !== userId || !value.operations || !value.drafts
+            || typeof value.operations !== "object" || Array.isArray(value.operations)
+            || typeof value.drafts !== "object" || Array.isArray(value.drafts)) throw new Error("Invalid recovery owner/state");
+          this.value = { operations: value.operations, drafts: value.drafts };
+        } catch { storage.removeItem(key); }
+      }
     }
   }
-  save(): void { this.storage?.setItem(this.key, JSON.stringify(this.value)); }
+  save(): void { this.storage?.setItem(this.key, JSON.stringify({ ...this.value, userId: this.userId })); }
   prepare(method: CommentorParentMutationMethod, args: Args): CommentOperation {
     const key = mutationKey(method, args);
     const existing = this.value.operations[key];
@@ -49,6 +57,11 @@ export class CommentOperationState {
     if (draftKey && this.value.drafts[draftKey]?.body === op.args.body) delete this.value.drafts[draftKey];
     delete this.value.operations[key];
     this.save();
+  }
+  reject(key: string, clientOperationId: string): void {
+    if (this.value.operations[key]?.clientOperationId !== clientOperationId) return;
+    delete this.value.operations[key];
+    this.save(); // Keep the editable draft on definitive rejection.
   }
   draft(key: string, args: Args): void {
     if (args.body) this.value.drafts[key] = args;

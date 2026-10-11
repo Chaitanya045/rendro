@@ -1,3 +1,6 @@
+import { COMMENT_RECOVERY_PREFIX, syncCommentRecoveryUser } from "./recovery-session";
+import { ConvexError } from "convex/values";
+import { normalizeMutationArgs, record, validAnchor } from "./mutation-args";
 import { CommentOperationState, mutationKey } from "./operation-state";
 import { ConvexClient } from "convex/browser";
 import { api } from "../../convex/_generated/api";
@@ -98,38 +101,6 @@ function sameScope(left: DocumentCommentScope | null, right: DocumentCommentScop
     && left.documentPath === right.documentPath);
 }
 
-function record(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : null;
-}
-
-function validBody(value: unknown): value is string {
-  return typeof value === "string" && value.trim().length > 0 && value.length <= 10_000;
-}
-
-function validAnchor(value: unknown): boolean {
-  const anchor = record(value);
-  if (
-    !anchor
-    || !Array.isArray(anchor.path)
-    || anchor.path.length === 0
-    || anchor.path.length > 64
-    || !anchor.path.every((part) => typeof part === "string" && Boolean(part.trim()) && part.length <= 256)
-  ) return false;
-  if (anchor.kind === "element") return true;
-  return anchor.kind === "text-range"
-    && typeof anchor.quote === "string"
-    && Boolean(anchor.quote.trim())
-    && anchor.quote.length <= 4_096
-    && Number.isSafeInteger(anchor.startOffset)
-    && (anchor.startOffset as number) >= 0
-    && (anchor.startOffset as number) <= 1_000_000
-    && Number.isSafeInteger(anchor.endOffset)
-    && (anchor.endOffset as number) >= 0
-    && (anchor.endOffset as number) <= 1_000_000;
-}
-
 export class CommentorParentHost {
   private activeScope: DocumentCommentScope | null = null;
   private loadedScope: DocumentCommentScope | null = null;
@@ -140,14 +111,25 @@ export class CommentorParentHost {
   private generation = 0;
   // Subscription refreshes must not invalidate outstanding mutation responses.
   private connectionGeneration = 0;
-  private readonly parentGeneration = crypto.randomUUID();
+  private parentGeneration = crypto.randomUUID();
 
   constructor(
     private readonly frame: HTMLIFrameElement,
     private readonly pageOrigin: string,
     private readonly config: CommentorParentConfig,
     private readonly backend: DocumentCommentBackend,
-  ) {}
+    private userId: string | null,
+  ) {
+    syncCommentRecoveryUser(window.sessionStorage, userId);
+  }
+
+  setUserId(userId: string | null): void {
+    if (this.userId === userId) return;
+    syncCommentRecoveryUser(window.sessionStorage, userId);
+    this.userId = userId;
+    this.parentGeneration = crypto.randomUUID();
+    this.onFrameLoad();
+  }
 
   start(frameAlreadyLoaded = false): void {
     window.addEventListener("message", this.onMessage);
@@ -165,7 +147,8 @@ export class CommentorParentHost {
 
   private recovery(scope: DocumentCommentScope): CommentOperationState {
     if (!window.sessionStorage) throw new Error("Durable comment storage unavailable");
-    return new CommentOperationState(window.sessionStorage, `commentor-operations:${JSON.stringify(scope)}`);
+    if (!this.userId) throw new Error("Comment authentication required");
+    return new CommentOperationState(window.sessionStorage, `${COMMENT_RECOVERY_PREFIX}${JSON.stringify([this.userId, scope])}`, this.userId);
   }
 
   private currentScope(): DocumentCommentScope | null {
@@ -190,7 +173,7 @@ export class CommentorParentHost {
     const source = this.frame.contentWindow;
     if (this.loadedScope && source) {
       try {
-        source.postMessage({ type: COMMENTOR_PARENT_READY, parentGeneration: this.parentGeneration, recoveryState: this.recovery(this.loadedScope).value }, "*");
+        source.postMessage({ type: COMMENTOR_PARENT_READY, parentGeneration: this.parentGeneration, userId: this.userId, recoveryState: this.userId ? this.recovery(this.loadedScope).value : { operations: {}, drafts: {} } }, "*");
       } catch { this.subscriptionError(source); }
     }
   };
@@ -208,13 +191,13 @@ export class CommentorParentHost {
       && sameScope(scope, this.currentScope());
   }
 
-  private respond(source: MessageEventSource, requestId: string, ok: boolean, error?: string): void {
+  private respond(source: MessageEventSource, requestId: string, ok: boolean, error?: string, rejected = !ok): void {
     if (!("postMessage" in source) || typeof source.postMessage !== "function") return;
     (source as WindowProxy).postMessage({
       type: COMMENTOR_PARENT_RESPONSE,
       requestId,
       ok,
-      ...(error ? { error } : {}),
+      ...(error ? { error, rejected } : {}),
     }, "*");
   }
 
@@ -256,16 +239,10 @@ export class CommentorParentHost {
   }
 
   private mutationArgs(method: CommentorParentMutationMethod, value: unknown): unknown | null {
-    const args = record(value);
+    const args = normalizeMutationArgs(method, value);
     if (!args) return null;
+    if (method === "thread.create") return args;
     const clientOperationId = args.clientOperationId;
-    if (clientOperationId !== undefined && (typeof clientOperationId !== "string" || !clientOperationId.trim() || clientOperationId.length > 128)) return null;
-    const operation = clientOperationId === undefined ? {} : { clientOperationId };
-    if (method === "thread.create") {
-      return validBody(args.body) && validAnchor(args.anchor)
-        ? { ...operation, body: args.body.trim(), anchor: args.anchor }
-        : null;
-    }
     const threadId = args.threadId;
     if (typeof threadId !== "string") return null;
     if (!this.threadIds.has(threadId)) {
@@ -277,17 +254,7 @@ export class CommentorParentHost {
           || pending.clientOperationId !== clientOperationId) return null;
       } catch { return null; }
     }
-    if (method === "reply.add") {
-      return validBody(args.body) ? { ...operation, threadId, body: args.body.trim() } : null;
-    }
-    if (method === "reply.remove") {
-      return typeof args.replyId === "string" ? { ...operation, threadId, replyId: args.replyId } : null;
-    }
-    if (method === "thread.resolve") return args.resolved === undefined || typeof args.resolved === "boolean"
-      ? { ...operation, threadId, resolved: args.resolved ?? true } : null;
-    if (method === "thread.archive") return args.archived === undefined || typeof args.archived === "boolean"
-      ? { ...operation, threadId, archived: args.archived ?? true } : null;
-    return { ...operation, threadId };
+    return args;
   }
 
   private loadMoreReplies(
@@ -337,7 +304,7 @@ export class CommentorParentHost {
   private readonly onMessage = (event: MessageEvent): void => {
     if (event.source !== this.frame.contentWindow || !isCommentorParentRequest(event.data)) return;
     const scope = this.currentScope();
-    if (!scope || !sameScope(scope, this.loadedScope) || !event.source) {
+    if (!this.userId || !scope || !sameScope(scope, this.loadedScope) || !event.source) {
       if (event.source) this.respond(event.source, event.data.requestId, false, "Comment scope is unavailable");
       return;
     }
@@ -390,7 +357,10 @@ export class CommentorParentHost {
     let operation;
     try {
       const state = this.recovery(scope);
-      operation = state.prepare(event.data.method, args as Record<string, unknown>);
+      const values = args as Record<string, unknown>;
+      const legacyToggle = (event.data.method === "thread.resolve" && values.resolved === undefined)
+        || (event.data.method === "thread.archive" && values.archived === undefined);
+      operation = legacyToggle ? { method: event.data.method, args: values, clientOperationId: undefined } : state.prepare(event.data.method, values);
       // Ensure writes cannot escape if durable storage is unavailable.
       state.save();
     } catch {
@@ -399,16 +369,20 @@ export class CommentorParentHost {
     }
     const generation = this.connectionGeneration;
     const key = mutationKey(operation.method, operation.args);
-    void this.backend.mutate(operation.method, scope, { ...operation.args, clientOperationId: operation.clientOperationId }).then(() => {
+    void this.backend.mutate(operation.method, scope, { ...operation.args, clientOperationId: operation.clientOperationId, expectedAuthorId: this.userId }).then(() => {
       // An abandoned acknowledgement cannot retire the durable identity: the
       // replacement widget may still hold (or save) the unconfirmed draft.
       if (this.ownsConnection(generation, event.source!, scope)) {
-        this.recovery(scope).complete(key, operation.clientOperationId);
+        if (operation.clientOperationId) this.recovery(scope).complete(key, operation.clientOperationId);
         this.respond(event.source!, event.data.requestId, true);
       }
-    }).catch(() => {
+    }).catch((error: unknown) => {
       if (this.ownsConnection(generation, event.source!, scope)) {
-        this.respond(event.source!, event.data.requestId, false, "Comment operation failed");
+        // ConvexError is an explicit application rejection: the transaction did
+        // not commit. Connection/runtime errors have an unknown outcome.
+        const rejected = error instanceof ConvexError;
+        if (rejected && operation.clientOperationId) this.recovery(scope).reject(key, operation.clientOperationId);
+        this.respond(event.source!, event.data.requestId, false, "Comment operation failed", rejected);
       }
     });
   };
@@ -469,8 +443,8 @@ class ConvexDocumentCommentBackend implements DocumentCommentBackend {
   }
 
   mutate(method: CommentorParentMutationMethod, scope: DocumentCommentScope, value: unknown): Promise<unknown> {
-    const args = value as { body?: string; anchor?: never; threadId?: string; replyId?: string; clientOperationId?: string; resolved?: boolean; archived?: boolean };
-    const operation = { clientOperationId: args.clientOperationId };
+    const args = value as { body?: string; anchor?: never; threadId?: string; replyId?: string; clientOperationId?: string; expectedAuthorId?: string; resolved?: boolean; archived?: boolean };
+    const operation = { clientOperationId: args.clientOperationId, expectedAuthorId: args.expectedAuthorId };
     if (method === "thread.create") {
       return this.client.mutation(api.documentThreads.create, {
         ...scope,
@@ -505,12 +479,58 @@ export function bootCommentorParentHost(frameAlreadyLoaded = false): (() => void
   const config = globals.RENDRO_SHARE_CONFIG;
   const frame = document.getElementById("content-frame");
   if (!config?.organizationId || !config.projectId || !config.convexUrl || !(frame instanceof HTMLIFrameElement)) return null;
+  let disposed = false;
+  let signedOut = false;
+  let frameLoaded = frameAlreadyLoaded;
+  const rememberLoad = () => { frameLoaded = true; };
+  frame.addEventListener("load", rememberLoad);
+  let host: CommentorParentHost | null = null;
   const client = new ConvexClient(config.convexUrl);
-  client.setAuth(requestAuthToken);
-  const host = new CommentorParentHost(frame, location.origin, config, new ConvexDocumentCommentBackend(client));
-  host.start(frameAlreadyLoaded);
+  let checking: Promise<string | null> | null = null;
+  const checkIdentity = (): Promise<string | null> => {
+    if (signedOut || disposed) return Promise.resolve(null);
+    if (checking) return checking;
+    checking = (async () => {
+      const response = await fetch("/api/auth/get-session?disableCookieCache=true", { credentials: "same-origin", cache: "no-store" });
+      if (!response.ok) throw new Error("Comment session could not be checked");
+      const session = await response.json() as { user?: { id?: unknown } } | null;
+      const userId = typeof session?.user?.id === "string" && session.user.id ? session.user.id : null;
+      if (!disposed && !signedOut) {
+        syncCommentRecoveryUser(window.sessionStorage, userId);
+        host?.setUserId(userId);
+      }
+      return signedOut ? null : userId;
+    })().finally(() => { checking = null; });
+    return checking;
+  };
+  // BFCache and full reloads must check the live session before hydrating drafts.
+  void checkIdentity().then((userId) => {
+    if (disposed) return;
+    host = new CommentorParentHost(frame, location.origin, config, new ConvexDocumentCommentBackend(client), userId);
+    // The iframe may have loaded while checking the session.
+    host.start(frameLoaded || document.readyState === "complete");
+    frame.removeEventListener("load", rememberLoad);
+    client.setAuth(async () => {
+      if (!await checkIdentity() || disposed || signedOut) return null;
+      const token = await requestAuthToken();
+      return disposed || signedOut ? null : token;
+    });
+  }).catch(() => {});
+  const signOut = () => {
+    signedOut = true;
+    syncCommentRecoveryUser(window.sessionStorage, null);
+    host?.setUserId(null);
+    void client.close();
+  };
+  const focus = () => { void checkIdentity().catch(() => {}); };
+  window.addEventListener("commentor-sign-out", signOut);
+  window.addEventListener("focus", focus);
   return () => {
-    host.dispose();
+    disposed = true;
+    frame.removeEventListener("load", rememberLoad);
+    window.removeEventListener("commentor-sign-out", signOut);
+    window.removeEventListener("focus", focus);
+    host?.dispose();
     void client.close();
   };
 }

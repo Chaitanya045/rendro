@@ -1,3 +1,4 @@
+import { renderCommentRecoveryLifecycle } from "../commentor/recovery-session";
 import { renderFaviconLinks } from "./favicon";
 import type { User } from "better-auth/types";
 import { renderThemeAssets, renderThemeButton } from "./theme";
@@ -552,6 +553,7 @@ ${hasSidebar ? `<div class="cp-sidebar" id="cp-navigation" role="complementary" 
 </div></main>
 <div class="toast-region" id="cp-toasts" aria-live="polite"></div>
 ${organizationId ? '<div class="cp-refresh-notice" id="cp-refresh-notice" hidden><span role="status">Updates may be available.</span><button class="button small" type="button" id="cp-refresh-button">Refresh</button></div>' : ""}
+${renderCommentRecoveryLifecycle(options.user.id)}
 <script data-cp-page-state type="application/json">${state}</script><script>window.__RENDRO_PAGE_STATE__=${state};</script><script src="/select.js?v=3"></script><script src="/management-query.js?v=4"></script><script>${controlPlaneRuntime}${managementUiRuntime}</script><script>${organizationSwitcherRuntime}</script><script>${renderManagementNavigationRuntime(organizationId)}</script><script data-cp-page-script>${options.script}</script>
 </body></html>`;
 }

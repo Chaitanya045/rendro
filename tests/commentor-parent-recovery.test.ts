@@ -1,12 +1,13 @@
+import { ConvexError } from "convex/values";
 import { api } from "../convex/_generated/api";
 import { fixture } from "./helpers/comment-fixture";
 import { Window as StorageWindow } from "happy-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CommentorParentHost, type DocumentCommentBackend } from "../src/commentor/parent-host";
-import { COMMENTOR_PARENT_READY, COMMENTOR_PARENT_RESPONSE } from "../src/commentor/parent-protocol";
+import { COMMENTOR_PARENT_READY, COMMENTOR_PARENT_RESPONSE, COMMENTOR_PARENT_REQUEST } from "../src/commentor/parent-protocol";
 import { CommentMutationOutcomeUnknownError, ParentCommentTransport } from "../src/commentor/parent-transport";
 
-function recoveryRuntime(scope = { organizationId: "org-a", projectId: "project-a" as string, documentPath: "guide.html" }) {
+function recoveryRuntime(scope = { organizationId: "org-a", projectId: "project-a" as string, documentPath: "guide.html" }, principal = "user-a") {
   vi.useFakeTimers();
   const hostListeners = new Set<EventListener>();
   const childListeners = new Set<EventListener>();
@@ -47,9 +48,9 @@ function recoveryRuntime(scope = { organizationId: "org-a", projectId: "project-
       fail = () => reject(new Error("backend rejected"));
     })),
   } satisfies DocumentCommentBackend;
-  const createHost = () => new CommentorParentHost(frame, "https://rendro.test", {
+  const createHost = (userId = principal) => new CommentorParentHost(frame, "https://rendro.test", {
     organizationId: scope.organizationId, projectId: scope.projectId as never, convexUrl: "https://convex.test",
-  }, backend);
+  }, backend, userId);
   const transport = new ParentCommentTransport(parent, events(childListeners) as never, "guide.html");
   const dismissSlow = vi.fn();
   const slow = vi.fn(() => dismissSlow);
@@ -78,7 +79,7 @@ async function flushMessages() {
 }
 
 const methods = ["thread.create", "thread.resolve", "thread.archive", "thread.remove", "reply.add", "reply.remove"] as const;
-const args = { threadId: "thread-1", replyId: "reply-1", body: "Pending write", anchor: { kind: "element", path: ["main"] } };
+const args = { resolved: true, archived: true, threadId: "thread-1", replyId: "reply-1", body: "Pending write", anchor: { kind: "element", path: ["main"] } };
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -171,12 +172,12 @@ describe("durable retries through the parent bridge and real Convex mutations", 
   it.each(methods.flatMap((method) => ["replace host", "reload iframe"].map((recovery) => ({ method, recovery }))))(
     "$method: $recovery before commit, then resubmit, has one backend effect",
     async ({ method, recovery }) => {
-      const { backend: convex, viewers, scope } = await fixture();
+      const { backend: convex, viewers, scope, data } = await fixture();
       const threadId = await viewers.author.mutation(api.documentThreads.create, {
         ...scope, body: "Original", anchor: { kind: "element", path: ["main"] }, clientOperationId: "original-thread",
       });
       const replyId = await viewers.author.mutation(api.documentReplies.add, { ...scope, threadId, body: "Original reply", clientOperationId: "original-reply" });
-      const runtime = recoveryRuntime(scope);
+      const runtime = recoveryRuntime(scope, String(data.users.find((user) => user.name === "author")!.userId));
       runtime.backend.subscribe.mockImplementation((_scope, onUpdate) => {
         onUpdate([{ _id: threadId, resolved: false, archived: false }], { canLoadMore: false, loading: false });
         return { unsubscribe: vi.fn(), loadMore: () => false };
@@ -221,6 +222,8 @@ describe("durable retries through the parent bridge and real Convex mutations", 
       await completed[1];
       await flushMessages();
       await retry;
+      if (method === "thread.resolve") await viewers.member.mutation(api.documentThreads.resolve, { ...scope, threadId, resolved: false, clientOperationId: "newer-reopen" });
+      if (method === "thread.archive") await viewers.admin.mutation(api.documentThreads.archive, { ...scope, threadId, archived: false, clientOperationId: "newer-unarchive" });
       gates[0]();
       await completed[0];
       await flushMessages();
@@ -228,8 +231,8 @@ describe("durable retries through the parent bridge and real Convex mutations", 
       const replies = await convex.run((ctx) => ctx.db.query("documentReplies").collect());
       if (method === "thread.create") expect(threads.filter((row) => row.clientOperationId === firstId)).toHaveLength(1);
       if (method === "reply.add") expect(replies.filter((row) => row.clientOperationId === firstId)).toHaveLength(1);
-      if (method === "thread.resolve") expect(threads.find((row) => row._id === threadId)?.resolved).toBe(true);
-      if (method === "thread.archive") expect(threads.find((row) => row._id === threadId)?.archived).toBe(true);
+      if (method === "thread.resolve") expect(threads.find((row) => row._id === threadId)?.resolved).toBe(false);
+      if (method === "thread.archive") expect(threads.find((row) => row._id === threadId)?.archived).toBe(false);
       if (method === "thread.remove") expect(threads.find((row) => row._id === threadId)?.deletedAt).toEqual(expect.any(Number));
       if (method === "reply.remove") expect(replies.find((row) => row._id === replyId)?.deletedAt).toEqual(expect.any(Number));
       expect(Object.keys(transport.recovery.value.operations)).toHaveLength(0);
@@ -311,6 +314,145 @@ describe("durable parent storage", () => {
     expect(next.recovery.value.drafts).toMatchObject({ create: { body: "Unsent comment" }, "thread-1": { body: "Unsent reply" } });
     expect(runtime.backend.mutate).not.toHaveBeenCalled();
     next.dispose();
+    runtime.host.dispose();
+  });
+});
+
+
+describe("round-three recovery regressions", () => {
+  it("does not hydrate another account's drafts or unresolved writes in the same tab", async () => {
+    const runtime = recoveryRuntime();
+    await flushMessages();
+    runtime.transport.saveDraft("create", { body: "A's private draft", anchor: args.anchor });
+    const pending = runtime.transport.mutate("reply.add", args).catch(() => {});
+    await flushMessages();
+    runtime.host.dispose();
+    const nextHost = runtime.createHost("user-b");
+    nextHost.start(true);
+    await flushMessages();
+    await pending;
+    expect(runtime.transport.recovery.value).toEqual({ drafts: {}, operations: {} });
+    const values = Array.from({ length: window.sessionStorage.length }, (_, i) => window.sessionStorage.getItem(window.sessionStorage.key(i)!));
+    expect(JSON.stringify(values)).not.toContain("private draft");
+    expect(JSON.stringify(values)).not.toContain("Pending write");
+    runtime.transport.dispose();
+    nextHost.dispose();
+  });
+
+  it("sign-out clears all stored recovery and in-memory operations", async () => {
+    const runtime = recoveryRuntime();
+    await flushMessages();
+    runtime.transport.saveDraft("create", { body: "Secret", anchor: args.anchor });
+    const pending = runtime.transport.mutate("reply.add", args).catch(() => {});
+    await flushMessages();
+    runtime.host.setUserId(null);
+    await flushMessages();
+    await pending;
+    expect(window.sessionStorage.length).toBe(0);
+    expect(runtime.transport.recovery.value).toEqual({ drafts: {}, operations: {} });
+    const backendCalls = runtime.backend.mutate.mock.calls.length;
+    await expect(runtime.transport.mutate("thread.create", args)).rejects.toThrow("scope is unavailable");
+    expect(runtime.backend.mutate).toHaveBeenCalledTimes(backendCalls);
+    runtime.transport.dispose();
+    runtime.host.dispose();
+  });
+
+  it.each(["thread.resolve", "thread.archive"] as const)("a matching subscription boolean does not retire an unconfirmed %s ID", async (method) => {
+    const runtime = recoveryRuntime();
+    await flushMessages();
+    const pending = runtime.transport.mutate(method, args).catch(() => {});
+    await flushMessages();
+    runtime.publishRows([{ _id: "thread-1", resolved: true, archived: true }]);
+    await flushMessages();
+    expect(Object.values(runtime.transport.recovery.value.operations)).toHaveLength(1);
+    const next = runtime.reload();
+    await flushMessages();
+    await pending;
+    expect(Object.values(next.recovery.value.operations)).toHaveLength(1);
+    next.dispose();
+    runtime.host.dispose();
+  });
+
+  it.each(["thread.create", "reply.add"] as const)("validates %s before preparing it, allowing an edited submission", async (method) => {
+    const runtime = recoveryRuntime();
+    await flushMessages();
+    await expect(runtime.transport.mutate(method, { ...args, body: "x".repeat(10_001) })).rejects.toThrow("invalid");
+    expect(runtime.backend.mutate).not.toHaveBeenCalled();
+    expect(runtime.transport.recovery.value.operations).toEqual({});
+    const corrected = runtime.transport.mutate(method, { ...args, body: "Corrected" });
+    await flushMessages();
+    expect(runtime.backend.mutate).toHaveBeenCalledTimes(1);
+    runtime.finish();
+    await corrected;
+    runtime.transport.dispose();
+    runtime.host.dispose();
+  });
+
+  it.each(["thread.create", "reply.add"] as const)("retires a definitively rejected %s identity but keeps its editable draft", async (method) => {
+    const runtime = recoveryRuntime();
+    await flushMessages();
+    runtime.backend.mutate.mockRejectedValueOnce(new ConvexError("Permission denied"));
+    await expect(runtime.transport.mutate(method, args)).rejects.toThrow("operation failed");
+    const originalId = (runtime.backend.mutate.mock.calls[0][2] as { clientOperationId: string }).clientOperationId;
+    expect(runtime.transport.recovery.value.operations).toEqual({});
+    expect(Object.values(runtime.transport.recovery.value.drafts)[0].body).toBe(args.body);
+    const next = runtime.reload();
+    await flushMessages();
+    expect(next.recovery.value.operations).toEqual({});
+    const corrected = next.mutate(method, { ...args, body: "Edited" });
+    await flushMessages();
+    expect((runtime.backend.mutate.mock.calls[1][2] as { clientOperationId: string }).clientOperationId).not.toBe(originalId);
+    runtime.finish();
+    await corrected;
+    next.dispose();
+    runtime.host.dispose();
+  });
+
+  it("keeps the identity and original payload when the backend outcome is unknown", async () => {
+    const runtime = recoveryRuntime();
+    await flushMessages();
+    const failed = runtime.transport.mutate("thread.create", args).catch(() => {});
+    await flushMessages();
+    runtime.fail();
+    await failed;
+    await expect(runtime.transport.mutate("thread.create", { ...args, body: "Changed" })).rejects.toThrow("unconfirmed");
+    const retry = runtime.transport.mutate("thread.create", args);
+    await flushMessages();
+    expect(runtime.backend.mutate.mock.calls[1][2]).toEqual(runtime.backend.mutate.mock.calls[0][2]);
+    runtime.finish();
+    await retry;
+    runtime.transport.dispose();
+    runtime.host.dispose();
+  });
+});
+
+
+describe("old widget through new parent and Convex", () => {
+  it.each(["resolved", "archived"] as const)("preserves the absent-target %s toggle", async (field) => {
+    const { viewers, scope, threadId, data } = await fixture();
+    const runtime = recoveryRuntime(scope, String(data.users.find((user) => user.name === "author")!.userId));
+    const fn = field === "resolved" ? api.documentThreads.resolve : api.documentThreads.archive;
+    runtime.backend.subscribe.mockImplementation((_scope, update) => {
+      update([{ _id: threadId, resolved: true, archived: true }], { canLoadMore: false, loading: false });
+      return { unsubscribe: vi.fn(), loadMore: () => false };
+    });
+    const results: Promise<unknown>[] = [];
+    runtime.backend.mutate.mockImplementation((_method, scope, args) => {
+      expect(args).not.toHaveProperty(field);
+      expect((args as { clientOperationId?: string }).clientOperationId).toBeUndefined();
+      const result = viewers.author.mutation(fn, { ...scope, threadId, ...args as object });
+      results.push(result);
+      return result;
+    });
+    await viewers.author.mutation(fn, { ...scope, threadId, [field]: true });
+    await flushMessages();
+    for (const target of [false, true]) {
+      runtime.parent.postMessage({ type: COMMENTOR_PARENT_REQUEST, requestId: String(target), method: field === "resolved" ? "thread.resolve" : "thread.archive", args: { threadId } });
+      await flushMessages();
+      expect(await results.at(-1)).toBe(target);
+      await flushMessages();
+    }
+    runtime.transport.dispose();
     runtime.host.dispose();
   });
 });

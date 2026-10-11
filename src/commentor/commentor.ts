@@ -875,6 +875,13 @@ class Commentor {
             this.openComposer(draft.anchor as Anchor, this.commentsBtn.getBoundingClientRect());
           }
         },
+        () => {
+          this.replyDrafts.clear();
+          this.closeBubbles(false, true);
+          this.expandedReplies.clear();
+          this.replyPagination.clear();
+          update([], { canLoadMore: false, loading: false });
+        },
       );
       return;
     }

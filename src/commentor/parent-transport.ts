@@ -1,3 +1,4 @@
+import { normalizeMutationArgs } from "./mutation-args";
 import { CommentOperationState, mutationKey } from "./operation-state";
 import {
   COMMENTOR_PARENT_REQUEST,
@@ -27,6 +28,8 @@ type PendingRequest = {
   dismissSlow?: () => void;
 };
 
+class CommentMutationRejectedError extends Error {}
+
 export class CommentMutationOutcomeUnknownError extends Error {
   constructor() {
     super("The comment connection was replaced before confirmation. The outcome is unknown; your change may still be saved. Resubmitting this action is safe; it will reuse the original operation.");
@@ -42,6 +45,8 @@ export class ParentCommentTransport {
   private slowHandler: SlowHandler | null = null;
   private refreshHandler: (() => void) | null = null;
   private sequence = 0;
+  private userId: string | null | undefined;
+  private identityChangeHandler: (() => void) | null = null;
   private parentGeneration: string | null = null;
   private readonly mutations = new Map<string, Promise<void>>();
 
@@ -59,23 +64,31 @@ export class ParentCommentTransport {
     onError: ErrorHandler,
     onSlowMutation?: SlowHandler,
     onRefresh?: () => void,
+    onIdentityChange?: () => void,
   ): void {
     this.updateHandler = onUpdate;
     this.repliesUpdateHandler = onRepliesUpdate;
     this.errorHandler = onError;
     this.slowHandler = onSlowMutation ?? null;
     this.refreshHandler = onRefresh ?? null;
+    this.identityChangeHandler = onIdentityChange ?? null;
   }
 
   mutate(method: CommentorParentMutationMethod, args: unknown): Promise<void> {
     const key = mutationKey(method, (args ?? {}) as Record<string, unknown>);
     const existing = this.mutations.get(key);
     if (existing) return existing;
+    const normalized = normalizeMutationArgs(method, args);
+    if (!normalized || (method === "thread.resolve" && normalized.resolved === undefined)
+      || (method === "thread.archive" && normalized.archived === undefined)) return Promise.reject(new CommentMutationRejectedError("Comment arguments are invalid (comments must contain 1–10,000 characters)."));
     let prepared;
-    try { prepared = this.recovery.prepare(method, args as Record<string, unknown>); }
+    try { prepared = this.recovery.prepare(method, normalized); }
     catch (error) { return Promise.reject(error); }
     const operation = this.request(method, { ...prepared.args, clientOperationId: prepared.clientOperationId }).then(() => {
       this.recovery.complete(key, prepared.clientOperationId);
+    }).catch((error: unknown) => {
+      if (error instanceof CommentMutationRejectedError) this.recovery.reject(key, prepared.clientOperationId);
+      throw error;
     }).finally(() => {
       if (this.mutations.get(key) === operation) this.mutations.delete(key);
     });
@@ -104,11 +117,10 @@ export class ParentCommentTransport {
     const all = records.flatMap((row) => [row, ...(Array.isArray(row.replies) ? row.replies : [])]) as Array<Record<string, unknown>>;
     for (const [key, op] of Object.entries(this.recovery.value.operations)) {
       const found = all.some((row) => row.clientOperationId === op.clientOperationId);
-      const thread = records.find((row) => row._id === op.args.threadId);
-      const targetReached = Boolean(thread) && ((op.method === "thread.resolve" && typeof op.args.resolved === "boolean" && thread?.resolved === op.args.resolved)
-        || (op.method === "thread.archive" && typeof op.args.archived === "boolean" && thread?.archived === op.args.archived));
+      // A matching status boolean does not identify who applied it. Status
+      // operations settle only on their own mutation acknowledgement/receipt.
       // Absence from a paginated subscription is never proof of deletion.
-      if (found || targetReached) this.complete(key, op.clientOperationId);
+      if (found && (op.method === "thread.create" || op.method === "reply.add")) this.complete(key, op.clientOperationId);
     }
   }
 
@@ -184,7 +196,10 @@ export class ParentCommentTransport {
         // predecessor. Settle them honestly without replaying any writes.
         this.retirePending(new CommentMutationOutcomeUnknownError());
       }
+      const identityChanged = this.userId !== undefined && event.data.userId !== undefined && this.userId !== event.data.userId;
+      if (event.data.userId !== undefined) this.userId = event.data.userId;
       if (event.data.recoveryState) this.recovery.value = event.data.recoveryState;
+      if (identityChanged) this.identityChangeHandler?.();
       this.parentGeneration = event.data.parentGeneration;
       if (this.updateHandler && this.errorHandler) {
         void this.refresh().catch(this.errorHandler);
@@ -217,6 +232,8 @@ export class ParentCommentTransport {
     window.clearTimeout(request.timeout);
     request.dismissSlow?.();
     if (event.data.ok) request.resolve();
-    else request.reject(new Error(event.data.error || "Comment operation failed"));
+    else request.reject(event.data.rejected === true
+      ? new CommentMutationRejectedError(event.data.error || "Comment operation failed")
+      : new Error(event.data.error || "Comment operation failed"));
   };
 }

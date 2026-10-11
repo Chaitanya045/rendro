@@ -63,7 +63,7 @@ async function widget(options: { canDelete?: boolean; replyCanDelete?: boolean; 
   });
   win.eval(bundle);
   win.document.dispatchEvent(new win.Event("DOMContentLoaded"));
-  send({ type: COMMENTOR_PARENT_READY, parentGeneration: "host-1", recoveryState: options.recoveryState });
+  send({ type: COMMENTOR_PARENT_READY, parentGeneration: "host-1", recoveryState: options.recoveryState, userId: "user-a" });
   await flush();
   const root = win.document.getElementById("commentor-host")!.shadowRoot!;
   const button = (testId: string) => root.querySelector<HTMLButtonElement>(`[data-testid="${testId}"]`)!;
@@ -293,5 +293,51 @@ describe("safe resubmission through rendered recovery controls", () => {
     expect(requests.some((r) => r.method === "operation.complete")).toBe(true);
     if (action === "create") expect(root.querySelector('.composer[data-state="open"]')).toBeNull();
     else expect(root.querySelector<HTMLTextAreaElement>('[data-testid="commentor-reply-input"]')!.value).toBe("");
+  });
+});
+
+
+describe("editable rejected drafts and identity changes", () => {
+  it.each(["create", "reply"])("allows a corrected %s after oversized validation and a definitive permission rejection", async (action) => {
+    const { win, root, button, mutations, send } = await widget();
+    if (action === "create") {
+      button("commentor-comment-btn").click();
+      win.document.querySelector("main")!.click();
+    }
+    const inputId = action === "create" ? "commentor-composer-textarea" : "commentor-reply-input";
+    const buttonId = action === "create" ? "commentor-composer-post" : "commentor-reply-send";
+    const input = () => root.querySelector<HTMLTextAreaElement>(`[data-testid="${inputId}"]`)!;
+    input().value = "x".repeat(10_001);
+    button(buttonId).click();
+    await flush();
+    expect(mutations()).toHaveLength(0);
+    input().value = "Corrected";
+    button(buttonId).click();
+    await flush();
+    expect(mutations()).toHaveLength(1);
+    send({ type: COMMENTOR_PARENT_RESPONSE, requestId: mutations()[0].requestId, ok: false, rejected: true, error: "Permission denied" });
+    await flush();
+    expect(input().value).toBe("Corrected");
+    input().value = "Edited after rejection";
+    button(buttonId).click();
+    await flush();
+    expect(mutations()).toHaveLength(2);
+    expect((mutations()[1].args as { clientOperationId: string }).clientOperationId).not.toBe((mutations()[0].args as { clientOperationId: string }).clientOperationId);
+  });
+
+  it.each(["user-b", null])("removes visible private drafts when the identity becomes %s", async (userId) => {
+    const { win, root, button, send } = await widget();
+    const reply = root.querySelector<HTMLTextAreaElement>('[data-testid="commentor-reply-input"]')!;
+    reply.value = "Private reply";
+    reply.dispatchEvent(new win.Event("input"));
+    button("commentor-comment-btn").click();
+    win.document.querySelector("main")!.click();
+    const composer = root.querySelector<HTMLTextAreaElement>('[data-testid="commentor-composer-textarea"]')!;
+    composer.value = "Private comment";
+    composer.dispatchEvent(new win.Event("input"));
+    send({ type: COMMENTOR_PARENT_READY, parentGeneration: "other-account", userId, recoveryState: { operations: {}, drafts: {} } });
+    await flush();
+    expect(root.querySelector('[data-testid="commentor-composer-textarea"]')).toBeNull();
+    expect(root.querySelector<HTMLTextAreaElement>('[data-testid="commentor-reply-input"]')?.value ?? "").toBe("");
   });
 });

@@ -73,7 +73,7 @@ describe("project comment parent transport", () => {
       mutate,
     };
     const config = { organizationId: "org-a", projectId: "project-a" as never, convexUrl: "https://convex.test" };
-    const host = new CommentorParentHost(frame, "https://rendro.test", config, backend);
+    const host = new CommentorParentHost(frame, "https://rendro.test", config, backend, "user-a");
     host.start();
 
     messageHandler({
@@ -165,7 +165,7 @@ describe("project comment parent transport", () => {
     expect(mutate).toHaveBeenCalledWith(
       "thread.create",
       { organizationId: "org-a", projectId: "project-a", documentPath: "guide.html" },
-      { body: "Scoped comment", anchor: { kind: "element", path: ["main"] }, clientOperationId: expect.any(String) },
+      { body: "Scoped comment", anchor: { kind: "element", path: ["main"] }, clientOperationId: expect.any(String), expectedAuthorId: "user-a" },
     );
 
     for (const args of [{ threadId: 42, replyId: "reply" }, { threadId: "current-thread" }]) {
@@ -187,7 +187,7 @@ describe("project comment parent transport", () => {
     expect(mutate).toHaveBeenLastCalledWith(
       "reply.remove",
       { organizationId: "org-a", projectId: "project-a", documentPath: "guide.html" },
-      { threadId: "current-thread", replyId: "older-reply", clientOperationId: expect.any(String) },
+      { threadId: "current-thread", replyId: "older-reply", clientOperationId: expect.any(String), expectedAuthorId: "user-a" },
     );
 
     fail(new Error("backend details must not cross the boundary"));
@@ -278,7 +278,7 @@ describe("slow comment mutations", () => {
   it("accepts a successful resolve after a 53-second delay", async () => {
     const { transport, slow, postMessage, respond } = transportRuntime();
     const settled = vi.fn();
-    const operation = transport.mutate("thread.resolve", { threadId: "thread-1" }).then(settled);
+    const operation = transport.mutate("thread.resolve", { threadId: "thread-1", resolved: true }).then(settled);
     await vi.advanceTimersByTimeAsync(53_256);
     expect(settled).not.toHaveBeenCalled();
     expect(slow).not.toHaveBeenCalled();
@@ -295,7 +295,7 @@ describe("slow comment mutations", () => {
     async (method) => {
       const { transport, slow, dismissSlow, postMessage, respond, publish, update } = transportRuntime();
       const settled = vi.fn();
-      const operation = transport.mutate(method, {}).then(settled);
+      const operation = transport.mutate(method, { threadId: "thread-1", replyId: "reply-1", resolved: true, archived: true, body: "Valid", anchor: { kind: "element", path: ["main"] } }).then(settled);
       await vi.advanceTimersByTimeAsync(120_000);
       expect(slow).toHaveBeenCalledTimes(1);
       expect(settled).not.toHaveBeenCalled();
@@ -332,7 +332,7 @@ describe("slow comment mutations", () => {
 
   it("still reports an explicit server rejection after a slow mutation", async () => {
     const { transport, respond, dismissSlow } = transportRuntime();
-    const result = transport.mutate("thread.resolve", {}).catch((error: Error) => error.message);
+    const result = transport.mutate("thread.resolve", { threadId: "thread-1", resolved: true }).catch((error: Error) => error.message);
     await vi.advanceTimersByTimeAsync(61_000);
     respond(false);
     expect(await result).toBe("Comment operation failed");
@@ -342,7 +342,7 @@ describe("slow comment mutations", () => {
 
   it("cleans up a pending mutation when its document transport closes", async () => {
     const { transport, slow } = transportRuntime();
-    const result = transport.mutate("thread.resolve", {}).catch((error: Error) => error.message);
+    const result = transport.mutate("thread.resolve", { threadId: "thread-1", resolved: true }).catch((error: Error) => error.message);
     transport.dispose();
     expect(await result).toBe("Comment transport closed");
     await vi.advanceTimersByTimeAsync(60_000);

@@ -36,6 +36,7 @@ export type CommentorParentResponse = {
   requestId: string;
   ok: boolean;
   error?: string;
+  rejected?: boolean;
 };
 
 export type CommentorParentUpdate = {
@@ -63,6 +64,7 @@ export type CommentorParentReady = {
   // Stable across resubscriptions; replaced when the parent host is recreated.
   parentGeneration: string;
   recoveryState?: CommentRecoveryState;
+  userId?: string | null;
 };
 
 const METHODS = new Set<CommentorParentMethod>([
