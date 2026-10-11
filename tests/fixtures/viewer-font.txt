@@ -1,0 +1,5 @@
+viewer-font.woff2 is an original test font generated for Rendro using FontTools.
+It maps U+0041 (A) to a triangle with points (100, 0), (350, 700), (600, 0)
+on a 1000-unit em, with a 700-unit advance. It contains no third-party outlines.
+The browser fixture displays AAAA and explicitly verifies this face is loaded.
+The other font extensions in route tests check headers only, not font decoding.

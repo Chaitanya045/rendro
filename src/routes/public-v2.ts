@@ -1,3 +1,4 @@
+import { assetHeaders } from "@/routes/asset-headers";
 import { viewerScript } from "@/viewer/markup";
 import { Hono } from "hono";
 import { CONVEX_SITE_URL } from "@/config";
@@ -89,8 +90,7 @@ app.get("/p/:slug/files/*", async (c) => {
   if (!stream) return c.html(renderNotFoundPage({ path: c.req.path }), 404);
   const headers = {
     "Cache-Control": "public, max-age=0, must-revalidate",
-    "Content-Type": entry.contentType,
-    "X-Content-Type-Options": "nosniff",
+    ...assetHeaders(fullPath, true, entry.contentType),
   };
   if (!entry.contentType.startsWith("text/html")) return new Response(stream, { headers });
   const html = injectNavigation(await readStream(stream), result.publication.slug, relativePath, c.req.url);
