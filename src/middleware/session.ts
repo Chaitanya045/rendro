@@ -2,6 +2,7 @@ import type { Context, Next } from "hono";
 import type { User } from "better-auth/types";
 import { CONVEX_SITE_URL } from "@/config";
 import { logger } from "@/logger";
+import { authClientIpHeaders } from "@/auth-client-ip";
 
 type SerializedDate = string | number;
 
@@ -61,8 +62,14 @@ export async function sessionMiddleware(
       // Use better-auth's built-in get-session endpoint via Convex. A fresh
       // lookup on every cookie-authenticated request keeps revoked sessions
       // fail-closed; do not add an application-side session cache here.
-      const res = await fetch(`${CONVEX_SITE_URL}/api/auth/get-session`, {
-        headers: { cookie, accept: "application/json" },
+      const target = `${CONVEX_SITE_URL}/api/auth/get-session`;
+      const headers = {
+        ...Object.fromEntries(await authClientIpHeaders(c.req.raw, target, "GET")),
+        cookie,
+        accept: "application/json",
+      };
+      const res = await fetch(target, {
+        headers,
         redirect: "manual",
       });
 

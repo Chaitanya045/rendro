@@ -1,7 +1,8 @@
 import { faviconAssets, faviconCacheControl } from "./routes/favicon";
 import { Hono } from "hono";
 import { redactViewerPath } from "./viewer-log";
-import { serve } from "@hono/node-server";
+import { serve, type HttpBindings } from "@hono/node-server";
+import { registerAuthClientIp } from "@/auth-client-ip";
 import { serveStatic } from "@hono/node-server/serve-static";
 import { cors } from "hono/cors";
 import { sessionMiddleware } from "@/middleware/session";
@@ -14,7 +15,7 @@ import type { User } from "better-auth/types";
 // Only the local Node server listens on a port; Workers do not read PORT.
 const PORT = z.coerce.number().int().min(1).max(65535).default(3000).parse(process.env.PORT);
 
-export const app = new Hono<{ Variables: { user?: User } }>();
+export const app = new Hono<{ Bindings: HttpBindings; Variables: { user?: User } }>();
 
 for (const [path, contentType] of Object.entries(faviconAssets)) {
   app.use(path, async (c, next) => {
@@ -39,6 +40,7 @@ app.use("/private-viewer.js", serveStatic({ path: "./public/private-viewer.js" }
 
 // Request timing
 app.use("*", async (c, next) => {
+  registerAuthClientIp(c.req.raw, c.env.incoming.socket.remoteAddress);
   const start = Date.now();
   await next();
   logger.debug(

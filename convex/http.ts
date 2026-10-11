@@ -2,6 +2,8 @@ import { httpRouter } from "convex/server";
 import { APIError } from "better-auth/api";
 import { httpAction, failure } from "./httpErrors";
 import { createAuth } from "./auth";
+import { verifiedAuthRequest } from "../shared/auth-client-ip";
+import { cacheJwksResponse } from "./authHttp";
 import {
   createProject,
   getProject,
@@ -112,7 +114,8 @@ http.route({ path: "/api/rendro/migration/project", method: "POST", handler: ens
 
 const authHandler = httpAction(async (ctx, request) => {
   const auth = createAuth(ctx);
-  const response = await auth.handler(request);
+  const verifiedRequest = await verifiedAuthRequest(request, process.env.CONVEX_INTERNAL_SECRET);
+  const response = await auth.handler(verifiedRequest);
   const isEmailSignUp = new URL(request.url).pathname.endsWith(
     "/api/auth/sign-up/email",
   );
@@ -122,7 +125,7 @@ const authHandler = httpAction(async (ctx, request) => {
       message: "If the address can be registered, check your email to continue.",
     });
   }
-  return response;
+  return cacheJwksResponse(request, response);
 });
 http.route({ pathPrefix: "/api/auth/", method: "GET", handler: authHandler });
 http.route({ pathPrefix: "/api/auth/", method: "POST", handler: authHandler });
