@@ -182,23 +182,36 @@ export default defineSchema({
     .index("by_organization_created", ["organizationId", "createdAt"])
     .index("by_resource", ["resourceType", "resourceId", "createdAt"]),
 
+  legacyCommentStatusReceipts: defineTable({
+    threadId: v.id("threads"), authorId: v.string(), clientOperationId: v.string(),
+    field: v.union(v.literal("resolved"), v.literal("archived")), target: v.boolean(), expiresAt: v.number(),
+  }).index("by_operation", ["threadId", "authorId", "clientOperationId"]).index("by_expiry", ["expiresAt"]),
+
   // Temporary source tables retained until the legacy migration is verified.
   threads: defineTable({
     orgSlug: v.string(),
     filePath: v.string(),
+    authorId: v.optional(v.string()),
+    clientOperationId: v.optional(v.string()),
+    deletedAt: v.optional(v.number()),
     authorEmail: v.string(),
     authorName: v.string(),
     body: v.string(),
     anchor: anchorValidator,
     resolved: v.boolean(),
     archived: v.optional(v.boolean()),
-  }).index("by_org_file", ["orgSlug", "filePath"]),
+  }).index("by_org_file", ["orgSlug", "filePath"])
+    .index("by_operation", ["orgSlug", "filePath", "authorId", "clientOperationId"]),
   replies: defineTable({
     threadId: v.id("threads"),
+    authorId: v.optional(v.string()),
+    clientOperationId: v.optional(v.string()),
+    deletedAt: v.optional(v.number()),
     authorEmail: v.string(),
     authorName: v.string(),
     body: v.string(),
-  }).index("by_thread", ["threadId"]),
+  }).index("by_thread", ["threadId"])
+    .index("by_operation", ["threadId", "authorId", "clientOperationId"]),
   api_keys: defineTable({
     orgSlug: v.string(),
     keyHash: v.string(),

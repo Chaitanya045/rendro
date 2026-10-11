@@ -1,3 +1,4 @@
+import { decodeStoragePath, legacyStoragePrefix } from "@/storage-boundary";
 import { viewerScript } from "@/viewer/markup";
 import { Hono } from "hono";
 import { getObjectStream } from "@/minio";
@@ -54,14 +55,15 @@ ${viewerScript("navigation", { prefix: basePath, documentPath, loadedPath: fullP
 
 
 async function publicationFromRoute(orgSlug: string, slug: string): Promise<Publication | null> {
+  if (!legacyStoragePrefix(orgSlug.toLowerCase())) return null;
   return getPublication(orgSlug.toLowerCase(), slug.toLowerCase());
 }
 
 app.get("/public/:org/:slug/files/:path{.+}", async (c) => {
   const publication = await publicationFromRoute(c.req.param("org"), c.req.param("slug"));
   if (!publication) return c.html(renderNotFoundPage({ path: c.req.path }), 404);
-  const documentPath = normalizeDocumentPath(c.req.param("path"));
-  const key = resolvePublishedKey(publication, c.req.param("path"));
+  const documentPath = decodeStoragePath(c.req.path.slice(c.req.path.indexOf("/files/") + 7));
+  const key = documentPath ? resolvePublishedKey(publication, documentPath) : null;
   if (!documentPath || !key || (await isDeleted(key))) return c.html(renderNotFoundPage({ path: c.req.path }), 404);
   try {
     const stream = await getObjectStream(key);

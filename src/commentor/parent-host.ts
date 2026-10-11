@@ -24,17 +24,20 @@ type CommentPaginationState = {
   loading: boolean;
 };
 
-export type DocumentCommentScope = {
+export type ProjectCommentScope = {
   organizationId: string;
   projectId: Id<"projects">;
   documentPath: string;
 };
 
+export type LegacyCommentScope = { orgSlug: string; filePath: string; documentPath: string };
+export type DocumentCommentScope = ProjectCommentScope | LegacyCommentScope;
+
 export type CommentorParentConfig = {
   organizationId: string;
   projectId: Id<"projects">;
   convexUrl: string;
-};
+} | { orgSlug: string; convexUrl: string };
 
 export interface DocumentCommentBackend {
   subscribe(
@@ -77,7 +80,7 @@ function safeRelativePath(encodedPath: string): string | null {
 export function documentCommentScopeFromFrame(
   frameUrl: string,
   pageOrigin: string,
-  config: Pick<CommentorParentConfig, "organizationId" | "projectId">,
+  config: { organizationId: string; projectId: Id<"projects"> } | { orgSlug: string },
 ): DocumentCommentScope | null {
   let url: URL;
   try {
@@ -86,6 +89,12 @@ export function documentCommentScopeFromFrame(
     return null;
   }
   if (url.origin !== pageOrigin) return null;
+  if ("orgSlug" in config) {
+    const prefix = `/legacy-view/${encodeURIComponent(config.orgSlug)}/files/`;
+    if (!url.pathname.startsWith(prefix)) return null;
+    const documentPath = safeRelativePath(url.pathname.slice(prefix.length));
+    return documentPath ? { orgSlug: config.orgSlug, documentPath, filePath: `${config.orgSlug}/${documentPath}` } : null;
+  }
   const prefix = `/organizations/${encodeURIComponent(config.organizationId)}/projects/${encodeURIComponent(config.projectId)}/docs/files/`;
   if (!url.pathname.startsWith(prefix)) return null;
   const documentPath = safeRelativePath(url.pathname.slice(prefix.length));
@@ -97,10 +106,9 @@ export function documentCommentScopeFromFrame(
 }
 
 function sameScope(left: DocumentCommentScope | null, right: DocumentCommentScope | null): boolean {
-  return Boolean(left && right
-    && left.organizationId === right.organizationId
-    && left.projectId === right.projectId
-    && left.documentPath === right.documentPath);
+  return Boolean(left && right && left.documentPath === right.documentPath
+    && ("orgSlug" in left ? "orgSlug" in right && left.orgSlug === right.orgSlug
+      : "organizationId" in right && left.organizationId === right.organizationId && left.projectId === right.projectId));
 }
 
 export class CommentorParentHost {
@@ -440,6 +448,7 @@ class ConvexDocumentCommentBackend implements DocumentCommentBackend {
     onUpdate: (threads: unknown[], state: CommentPaginationState) => void,
     onError: (error: Error) => void,
   ): CommentPaginationSubscription {
+    if ("orgSlug" in scope) throw new Error("Invalid project scope");
     return this.subscribePaginated(api.documentThreads.list, scope, false, onUpdate, onError);
   }
 
@@ -449,10 +458,12 @@ class ConvexDocumentCommentBackend implements DocumentCommentBackend {
     onUpdate: (replies: unknown[], state: CommentPaginationState) => void,
     onError: (error: Error) => void,
   ): CommentPaginationSubscription {
+    if ("orgSlug" in scope) throw new Error("Invalid project scope");
     return this.subscribePaginated(api.documentReplies.list, { ...scope, threadId }, true, onUpdate, onError);
   }
 
   mutate(method: CommentorParentMutationMethod, scope: DocumentCommentScope, value: unknown): Promise<unknown> {
+    if ("orgSlug" in scope) throw new Error("Invalid project scope");
     const args = value as { body?: string; anchor?: never; threadId?: string; replyId?: string; clientOperationId?: string; expectedAuthorId?: string; resolved?: boolean; archived?: boolean };
     const operation = { clientOperationId: args.clientOperationId, expectedAuthorId: args.expectedAuthorId };
     if (method === "thread.create") {
@@ -474,6 +485,32 @@ class ConvexDocumentCommentBackend implements DocumentCommentBackend {
   }
 }
 
+export class ConvexLegacyCommentBackend implements DocumentCommentBackend {
+  constructor(private readonly client: ConvexClient) {}
+  subscribe(scope: DocumentCommentScope, update: (threads: unknown[], state: CommentPaginationState) => void, error: (error: Error) => void): CommentPaginationSubscription {
+    if (!("orgSlug" in scope)) throw new Error("Invalid legacy scope");
+    const unsubscribe = this.client.onUpdate(api.threads.list, { orgSlug: scope.orgSlug, filePath: scope.filePath },
+      threads => update(threads, { canLoadMore: false, loading: false }), error);
+    // v1 returns all replies inline; retain that behavior without dropping any.
+    return { unsubscribe, loadMore: () => false };
+  }
+  subscribeReplies(): CommentPaginationSubscription {
+    return { unsubscribe() {}, loadMore: () => false };
+  }
+  mutate(method: CommentorParentMutationMethod, scope: DocumentCommentScope, value: unknown): Promise<unknown> {
+    if (!("orgSlug" in scope)) throw new Error("Invalid legacy scope");
+    const args = value as { body?: string; anchor?: never; threadId?: string; replyId?: string; clientOperationId?: string; expectedAuthorId?: string; resolved?: boolean; archived?: boolean };
+    const common = { orgSlug: scope.orgSlug, filePath: scope.filePath, clientOperationId: args.clientOperationId, expectedAuthorId: args.expectedAuthorId };
+    if (method === "thread.create") return this.client.mutation(api.threads.create, { ...common, body: args.body!, anchor: args.anchor! });
+    const threadId = args.threadId!;
+    if (method === "thread.resolve") return this.client.mutation(api.threads.resolve, { ...common, threadId, resolved: args.resolved });
+    if (method === "thread.archive") return this.client.mutation(api.threads.archive, { ...common, threadId, archived: args.archived });
+    if (method === "thread.remove") return this.client.mutation(api.threads.remove, { ...common, threadId });
+    if (method === "reply.remove") return this.client.mutation(api.replies.remove, { ...common, threadId, replyId: args.replyId! });
+    return this.client.mutation(api.replies.add, { ...common, threadId, body: args.body! });
+  }
+}
+
 async function requestAuthToken(): Promise<string | null> {
   const response = await fetch("/api/auth/convex/token", {
     credentials: "same-origin",
@@ -485,10 +522,10 @@ async function requestAuthToken(): Promise<string | null> {
 }
 
 export function bootCommentorParentHost(frameAlreadyLoaded = false): (() => void) | null {
-  const globals = window as Window & { RENDRO_SHARE_CONFIG?: CommentorParentConfig };
-  const config = globals.RENDRO_SHARE_CONFIG;
+  const globals = window as Window & { RENDRO_SHARE_CONFIG?: CommentorParentConfig; RENDRO_LEGACY_COMMENT_CONFIG?: CommentorParentConfig };
+  const config = globals.RENDRO_LEGACY_COMMENT_CONFIG ?? globals.RENDRO_SHARE_CONFIG;
   const frame = document.getElementById("content-frame");
-  if (!config?.organizationId || !config.projectId || !config.convexUrl || !(frame instanceof HTMLIFrameElement)) return null;
+  if (!config?.convexUrl || !(frame instanceof HTMLIFrameElement)) return null;
   let disposed = false;
   let signedOut = false;
   let frameLoaded = frameAlreadyLoaded;
@@ -516,7 +553,7 @@ export function bootCommentorParentHost(frameAlreadyLoaded = false): (() => void
   // BFCache and full reloads must check the live session before hydrating drafts.
   void checkIdentity().then((userId) => {
     if (disposed) return;
-    host = new CommentorParentHost(frame, location.origin, config, new ConvexDocumentCommentBackend(client), userId);
+    host = new CommentorParentHost(frame, location.origin, config, "orgSlug" in config ? new ConvexLegacyCommentBackend(client) : new ConvexDocumentCommentBackend(client), userId);
     // The iframe may have loaded while checking the session.
     host.start(frameLoaded || document.readyState === "complete");
     frame.removeEventListener("load", rememberLoad);

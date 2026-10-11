@@ -1,3 +1,4 @@
+import { legacyStoragePrefix } from "@/storage-boundary";
 import { listObjects } from "@/minio";
 import { logger } from "@/logger";
 
@@ -18,7 +19,7 @@ export function emailToOrgSlug(email: string): string | null {
 }
 
 export async function orgExists(org: string): Promise<boolean> {
-  if (!isValidSlug(org)) return false;
+  if (!legacyStoragePrefix(org)) return false;
   const entries = await listObjects(`${org}/`);
   return entries.length > 0;
 }

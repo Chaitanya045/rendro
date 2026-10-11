@@ -50,6 +50,7 @@ function documentRoute(path: string): boolean {
   return /^\/organizations\/[^/]+\/projects\/[^/]+\/docs\/(?:files\/|view\/[^/]+\/files\/)/.test(path)
     || /^\/(?:p|s)\/[^/]+\/files\//.test(path)
     || /^\/public\/[^/]+\/[^/]+\/files\//.test(path)
+    || /^\/legacy-view\/[^/]+\/(?:files\/|view\/[^/]+\/files\/)/.test(path)
     || /^\/(?:files\/|share\/[^/]+$)/.test(path);
 }
 
@@ -70,12 +71,8 @@ export const securityHeaders: MiddlewareHandler = async (c, next) => {
   // Document routes serve publisher HTML only on success. Their HTML errors
   // are server-authored pages and need the same nonce policy as other app HTML.
   if (document && c.res.status < 400) {
-    // Modern documents already carry an opaque-origin sandbox. Legacy private
-    // /files uses same-origin auth for its comment widget; retain that contract.
     if (!c.res.headers.has("Content-Security-Policy")) {
-      c.header("Content-Security-Policy", c.req.path.startsWith("/files/")
-        ? "frame-ancestors 'self'; object-src 'none'"
-        : "sandbox allow-scripts allow-forms allow-popups allow-downloads; frame-ancestors 'self'");
+      c.header("Content-Security-Policy", "sandbox allow-scripts allow-forms allow-popups allow-downloads; frame-ancestors 'self'");
     }
     c.header("X-Frame-Options", "SAMEORIGIN");
   } else {

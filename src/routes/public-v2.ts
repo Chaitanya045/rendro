@@ -1,4 +1,5 @@
 import { assetHeaders } from "@/routes/asset-headers";
+import { decodeStoragePath, isCanonicalStorageKey } from "@/storage-boundary";
 import { viewerScript } from "@/viewer/markup";
 import { Hono } from "hono";
 import { CONVEX_SITE_URL } from "@/config";
@@ -23,16 +24,6 @@ type PublicResolution = {
 };
 
 
-function safePath(value: string): string | null {
-  let decoded: string;
-  try { decoded = decodeURIComponent(value); } catch { return null; }
-  const path = decoded.replace(/^\/+/, "");
-  if (!path || path.includes("\\") || path.split("/").some((part) => !part || part === "." || part === "..")) {
-    return null;
-  }
-  return path;
-}
-
 async function resolvePublication(slug: string): Promise<PublicResolution | null> {
   const response = await fetch(
     `${CONVEX_SITE_URL}/api/rendro/publications/public?slug=${encodeURIComponent(slug)}`,
@@ -48,10 +39,9 @@ async function manifestFor(result: PublicResolution): Promise<StoredManifest | n
 }
 
 function publicationPath(result: PublicResolution, path: string): string | null {
-  const relative = safePath(path);
-  if (!relative) return null;
+  if (!isCanonicalStorageKey(path)) return null;
   const prefix = result.publication.pathPrefix;
-  return prefix ? `${prefix}/${relative}` : relative;
+  return prefix ? `${prefix}/${path}` : path;
 }
 
 function objectKey(result: PublicResolution, path: string): string {
@@ -80,7 +70,7 @@ function injectNavigation(html: string, slug: string, path: string, url: string)
 app.get("/p/:slug/files/*", async (c) => {
   const result = await resolvePublication(c.req.param("slug"));
   if (!result) return c.html(renderNotFoundPage({ path: c.req.path }), 404);
-  const relativePath = safePath(c.req.path.slice(c.req.path.indexOf("/files/") + 7));
+  const relativePath = decodeStoragePath(c.req.path.slice(c.req.path.indexOf("/files/") + 7));
   const fullPath = relativePath ? publicationPath(result, relativePath) : null;
   if (!relativePath || !fullPath) return c.html(renderNotFoundPage({ path: c.req.path }), 404);
   const manifest = await manifestFor(result);
@@ -126,7 +116,7 @@ app.get("/p/:slug", async (c) => {
   const manifest = await manifestFor(result);
   if (!manifest) return c.html(renderNotFoundPage({ path: c.req.path }), 404);
   const requested = c.req.query("doc");
-  const selected = requested ? safePath(requested) : result.publication.entryFile;
+  const selected = requested ?? result.publication.entryFile;
   const fullPath = selected ? publicationPath(result, selected) : null;
   if (
     !selected

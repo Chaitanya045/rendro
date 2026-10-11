@@ -9,6 +9,7 @@ export interface DocumentNavigationConfig {
   documentPath: string;
   loadedPath?: string;
   ticketBase?: string;
+  legacyPrefix?: string;
   singleDocument?: boolean;
 }
 
@@ -24,7 +25,7 @@ export function classifyDocumentLink(href: string, baseURI: string, documentURL:
   try {
     const url = new URL(href, baseURI);
     if (url.origin !== new URL(documentURL).origin) return null;
-    let prefix = config.prefix;
+    let prefix = config.legacyPrefix && url.pathname.startsWith(config.legacyPrefix) ? config.legacyPrefix : config.prefix;
     if (!url.pathname.startsWith(prefix)) {
       if (!config.ticketBase || !url.pathname.startsWith(config.ticketBase)) return null;
       const rest = url.pathname.slice(config.ticketBase.length);

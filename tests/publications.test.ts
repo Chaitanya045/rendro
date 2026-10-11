@@ -226,6 +226,24 @@ describe("anonymous public routes", () => {
     expect(document.headers.get("content-security-policy")).toContain("sandbox");
   });
 
+  it.each(["100%.html", "literal%25.html", "%2e%2e/guide.html"])(
+    "preserves literal keys in persisted publications, trees, queries and file reads: %s", async path => {
+      const content = `<h1>${path}</h1>`;
+      objects.set(`acme/repo/100%/${path}`, content);
+      const { publication } = await savePublication({
+        orgSlug: "acme", slug: "percent", sourcePrefix: "acme/repo/100%/", entryFile: path,
+      });
+      expect(await getPublication("acme", "percent")).toEqual(publication);
+      expect(await listPublishedDocumentPaths(publication)).toEqual([path]);
+      const shell = await publicRoutes.request(`https://rendro.test/public/acme/percent?doc=${encodeURIComponent(path)}`);
+      expect(shell.status).toBe(200);
+      const encoded = path.split("/").map(encodeURIComponent).join("/");
+      const document = await publicRoutes.request(`https://rendro.test/public/acme/percent/files/${encoded}`);
+      expect(document.status).toBe(200);
+      expect(await document.text()).toContain(content);
+    },
+  );
+
   it("does not expose private siblings, traversal paths, or deleted documents", async () => {
     const sibling = await publicRoutes.request("https://rendro.test/public/acme/product/files/private/secret.html");
     expect(sibling.status).toBe(404);

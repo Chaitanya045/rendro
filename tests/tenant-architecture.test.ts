@@ -24,7 +24,7 @@ const publication = {
     title: "Product docs",
   },
   project: { name: "Product", slug: "product" },
-  deployment: { manifestKey: "organizations/org-a/projects/project-a/deployments/deploy-a/manifest.json", manifestSha256: "abc" },
+  deployment: { manifestKey: "tenants/org-a/projects/project-a/deployments/deploy-a/manifest.json", manifestSha256: "abc" },
 };
 
 const manifest = JSON.stringify({
@@ -72,7 +72,7 @@ describe("deployment-backed publications", () => {
     const allowedHtml = await allowed.text();
     expect(allowedHtml).toContain("Docs");
     expect(allowedHtml).toContain("data-rendro-mobile-viewport");
-    expect(read).toHaveBeenCalledWith("organizations/org-a/projects/project-a/deployments/deploy-a/files/reference/index.html");
+    expect(read).toHaveBeenCalledWith("tenants/org-a/projects/project-a/deployments/deploy-a/files/reference/index.html");
 
     const privateSibling = await publicRoutes.request("/p/product/files/private.html");
     expect(privateSibling.status).toBe(404);
@@ -175,7 +175,7 @@ describe("publication release validation", () => {
 describe("revocable private shares", () => {
   const resolution = {
     grant: { documentPath: "guide/index.html", expiresAt: Date.now() + 60_000 },
-    deployment: { manifestKey: "organizations/org-a/projects/project-a/deployments/deploy-a/manifest.json" },
+    deployment: { manifestKey: "tenants/org-a/projects/project-a/deployments/deploy-a/manifest.json" },
     project: { name: "Private guide" },
   };
 
@@ -303,7 +303,7 @@ describe("private project documents", () => {
     }));
     vi.spyOn(minio, "getObjectStream").mockResolvedValue(stream("<body>Safe publisher content</body>"));
 
-    const response = await app.request(`/organizations/org-a/projects/project-a/docs/files/${encodeURIComponent(hostilePath)}`, { headers: { Cookie: "better-auth.session_token=fixture" } });
+    const response = await app.request(`/organizations/org-a/projects/project-a/docs/files/${hostilePath.split("/").map(encodeURIComponent).join("/")}`, { headers: { Cookie: "better-auth.session_token=fixture" } });
     const html = await response.text();
     expect(response.status).toBe(200);
     expect(html).not.toContain("</script><script>window.injected=true");

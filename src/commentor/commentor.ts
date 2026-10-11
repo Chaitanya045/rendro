@@ -6,7 +6,8 @@ import { CommentOperationConflictError } from "./operation-state";
 //
 // Config is either a project document scope served through the parent frame
 // ({ organizationId, projectId, documentPath, transport: "parent", canWrite })
-// or a legacy direct-Convex scope ({ convexUrl, orgSlug, filePath, author? }).
+// or a legacy parent scope ({ orgSlug, filePath, documentPath, transport: "parent", canWrite }).
+// The direct-Convex legacy configuration remains accepted for older integrations.
 //
 // Figma-style pins + inline bubbles. The widget is a single surface that
 // DOCKS to a screen edge (magnetic, springy snap; stays where you dropped it
@@ -43,15 +44,12 @@ interface Config {
 type ThreadId = Id<"threads"> | Id<"documentThreads">;
 type ReplyId = Id<"replies"> | Id<"documentReplies">;
 
-function isProjectConfig(config: Config): config is Config & {
-  organizationId: string;
-  projectId: Id<"projects">;
+function isParentConfig(config: Config): config is Config & {
   documentPath: string;
 } {
   return Boolean(
     config.transport === "parent"
-    && config.organizationId
-    && config.projectId
+    && ((config.organizationId && config.projectId) || (config.orgSlug && config.filePath))
     && config.documentPath,
   );
 }
@@ -540,8 +538,8 @@ class Commentor {
 
   constructor(cfg: Config) {
     this.cfg = cfg;
-    this.canWrite = isProjectConfig(cfg) ? false : Boolean(cfg.author);
-    if (isProjectConfig(cfg)) {
+    this.canWrite = isParentConfig(cfg) ? false : Boolean(cfg.author);
+    if (isParentConfig(cfg)) {
       this.client = null;
       this.parentTransport = new ParentCommentTransport(window.parent, window, cfg.documentPath);
     } else {
@@ -834,7 +832,7 @@ class Commentor {
     const fail = (error: Error) =>
       console.error("[commentor] subscription error", error);
 
-    if (isProjectConfig(this.cfg)) {
+    if (isParentConfig(this.cfg)) {
       this.parentTransport?.subscribe(
         (threads, canLoadMore, loading) => update(
           threads as Thread[],
@@ -1430,7 +1428,7 @@ class Commentor {
       post.setAttribute("aria-busy", "true");
       post.textContent = "Posting…";
       try {
-        if (isProjectConfig(this.cfg)) {
+        if (isParentConfig(this.cfg)) {
           await this.parentTransport?.mutate("thread.create", { body, anchor });
         } else if (this.client && this.cfg.orgSlug && this.cfg.filePath) {
           await this.client.mutation(api.threads.create, {
@@ -1599,7 +1597,7 @@ class Commentor {
   }
 
   private removeThread(threadId: ThreadId, clientOperationId: string): Promise<unknown> {
-    return isProjectConfig(this.cfg)
+    return isParentConfig(this.cfg)
       ? this.parentTransport!.mutate("thread.remove", { threadId, clientOperationId })
       : this.client!.mutation(api.threads.remove, {
           threadId: threadId as Id<"threads">,
@@ -1607,7 +1605,7 @@ class Commentor {
   }
 
   private resolveThread(threadId: ThreadId, resolved: boolean): Promise<unknown> {
-    return isProjectConfig(this.cfg)
+    return isParentConfig(this.cfg)
       ? this.parentTransport!.mutate("thread.resolve", { threadId, resolved })
       : this.client!.mutation(api.threads.resolve, {
           threadId: threadId as Id<"threads">,
@@ -1615,7 +1613,7 @@ class Commentor {
   }
 
   private archiveThread(threadId: ThreadId, archived: boolean): Promise<unknown> {
-    return isProjectConfig(this.cfg)
+    return isParentConfig(this.cfg)
       ? this.parentTransport!.mutate("thread.archive", { threadId, archived })
       : this.client!.mutation(api.threads.archive, {
           threadId: threadId as Id<"threads">,
@@ -1623,7 +1621,7 @@ class Commentor {
   }
 
   private addReply(threadId: ThreadId, body: string): Promise<unknown> {
-    return isProjectConfig(this.cfg)
+    return isParentConfig(this.cfg)
       ? this.parentTransport!.mutate("reply.add", { threadId, body })
       : this.client!.mutation(api.replies.add, {
           threadId: threadId as Id<"threads">,
@@ -1781,7 +1779,7 @@ class Commentor {
         svg(ICONS.trash),
       );
       actions.append(resolveButton);
-      if (t.canDelete === true || !isProjectConfig(this.cfg)) {
+      if (t.canDelete === true || !isParentConfig(this.cfg)) {
         actions.append(archiveButton, deleteButton);
       }
       head.append(actions);
@@ -1840,7 +1838,7 @@ class Commentor {
           },
           h("span", { class: "reply-who" }, r.authorName),
           r.body,
-          this.canWrite && r.canDelete === true && isProjectConfig(this.cfg)
+          this.canWrite && r.canDelete === true && isParentConfig(this.cfg)
             ? h("button", {
                 class: "card-action danger",
                 type: "button",
@@ -2187,7 +2185,7 @@ class Commentor {
       return;
     }
     const visible = this.filteredThreads(this.threadFilter);
-    if (isProjectConfig(this.cfg) && (this.canLoadMoreThreads || this.loadingMoreThreads)) {
+    if (isParentConfig(this.cfg) && (this.canLoadMoreThreads || this.loadingMoreThreads)) {
       const loadOlder = h(
         "button",
         {
@@ -3550,7 +3548,7 @@ textarea:disabled {
 function boot(): void {
   const cfg = (window as unknown as { COMMENTOR?: Config }).COMMENTOR;
   const hasLegacyScope = Boolean(cfg?.orgSlug && cfg.filePath);
-  if (!cfg || (!isProjectConfig(cfg) && (!cfg.convexUrl || !hasLegacyScope))) {
+  if (!cfg || (!isParentConfig(cfg) && (!cfg.convexUrl || !hasLegacyScope))) {
     console.error(
       "[commentor] not started — configure a legacy organization/file or project document scope",
     );

@@ -45,6 +45,7 @@ describe.each(fixtures)("document delivery regression: %s", (_name, html) => {
       orgSlug: "example-test", slug: "docs", sourcePrefix: "example-test/docs/", entryFile: "index.html",
       title: "Regression docs", createdAt: "2026-09-20", updatedAt: "2026-09-20",
     });
+    vi.spyOn(minio, "headObject").mockResolvedValue({ contentType: "text/html; charset=utf-8" });
     vi.spyOn(minio, "getObjectText").mockResolvedValue(JSON.stringify({
       version: 1, files: [{ path: "index.html", sha256: "fixture", size: html.length, contentType: "text/html; charset=utf-8" }],
     }));
@@ -55,7 +56,7 @@ describe.each(fixtures)("document delivery regression: %s", (_name, html) => {
       private: () => authenticated(projectDocs).request("/organizations/org-a/projects/project-a/docs/files/index.html", { headers: { Cookie: "better-auth.session_token=fixture" } }),
       public: () => publicDocs.request("/p/docs/files/index.html"),
       shared: () => sharedDocs.request("/s/fixture-token/files/index.html"),
-      "legacy-private": () => authenticated(legacyDocs).request("/files/example-test/docs/index.html"),
+      "legacy-private": () => authenticated(legacyDocs).request("/legacy-view/example-test/files/docs/index.html", { headers: { Cookie: "better-auth.session_token=fixture" } }),
       "legacy-public": () => legacyPublic.request("/public/example-test/docs/files/index.html"),
       "legacy-shared": () => legacyShare.request(`/share/${createShareToken("example-test/docs/index.html")}`),
     };
@@ -69,7 +70,7 @@ describe.each(fixtures)("document delivery regression: %s", (_name, html) => {
     expect(publisherScript).toBe(script);
     expect(() => new Script(publisherScript!)).not.toThrow();
     if (html.startsWith("<!doctype")) expect(output.startsWith("<!doctype html>")).toBe(true);
-    if (surface === "private" || surface === "shared") expect(response.headers.get("Cache-Control")).toBe("private, no-store");
-    if (!surface.startsWith("legacy")) expect(response.headers.get("Content-Security-Policy")).toContain("sandbox allow-scripts");
+    if (surface === "private" || surface === "shared" || surface === "legacy-private") expect(response.headers.get("Cache-Control")).toBe("private, no-store");
+    if (!surface.startsWith("legacy") || surface === "legacy-private") expect(response.headers.get("Content-Security-Policy")).toContain("sandbox allow-scripts");
   });
 });

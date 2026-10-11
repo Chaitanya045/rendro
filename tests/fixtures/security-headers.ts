@@ -24,6 +24,7 @@ export function mockSecurityBackend() {
     { path: "index.html", sha256: "a", size: 100, contentType: "text/html" },
     { path: "assets/site.css", sha256: "b", size: 20, contentType: "text/css" },
   ];
+  vi.spyOn(minio, "headObject").mockImplementation(key => Promise.resolve({ contentType: key.endsWith(".css") ? "text/css" : "text/html" }));
   vi.spyOn(minio, "getObjectText").mockResolvedValue(JSON.stringify({ version: 1, files }));
   vi.spyOn(minio, "getObjectStream").mockImplementation(key => Promise.resolve(new Response(key.endsWith(".css") ? "body{color:rgb(1,2,3)}" : publisherHtml).body));
   vi.stubGlobal("fetch", vi.fn((input: string | URL | Request) => {

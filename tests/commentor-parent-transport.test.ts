@@ -19,6 +19,13 @@ import { ParentCommentTransport } from "../src/commentor/parent-transport";
 afterEach(() => vi.unstubAllGlobals());
 
 describe("project comment parent transport", () => {
+  it("derives legacy scope from the owning frame and rejects cross-origin, cross-org and ticket claims", () => {
+    const config = { orgSlug: "example" };
+    expect(documentCommentScopeFromFrame("/legacy-view/example/files/guide/hello%20world.html", "https://rendro.test", config))
+      .toEqual({ orgSlug: "example", filePath: "example/guide/hello world.html", documentPath: "guide/hello world.html" });
+    for (const url of ["https://other.test/legacy-view/example/files/index.html", "/legacy-view/other/files/index.html", "/legacy-view/example/view/ticket/files/index.html", "/legacy-view/example/files/%2e%2e%2Fother.html", "/files/example/index.html"])
+      expect(documentCommentScopeFromFrame(url, "https://rendro.test", config)).toBeNull();
+  });
   it("derives its scope only from the trusted project frame URL", () => {
     const config = { organizationId: "org/a", projectId: "project-1" as never };
     expect(documentCommentScopeFromFrame(

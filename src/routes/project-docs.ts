@@ -1,4 +1,5 @@
 import { assetHeaders } from "@/routes/asset-headers";
+import { decodeStoragePath, isCanonicalStorageKey, modernStoragePrefix, modernStorageKey } from "@/storage-boundary";
 import { Hono } from "hono";
 import { createViewerTicket, readViewerTicket, viewerSessionCookie } from "@/viewer-ticket";
 import { viewerScript } from "@/viewer/markup";
@@ -15,11 +16,6 @@ const app = new Hono<{ Variables: { user?: User } }>();
 
 type ActiveDeployment = { project: { name: string }; deployment: { manifestKey: string } };
 
-function safePath(value: string): string | null {
-  let path: string;
-  try { path = decodeURIComponent(value).replace(/^\/+/, ""); } catch { return null; }
-  return path && !path.includes("\\") && path.split("/").every((part) => part && part !== "." && part !== "..") ? path : null;
-}
 function inlineJson(value: unknown): string {
   return JSON.stringify(value).replace(/</g, "\\u003c");
 }
@@ -35,7 +31,8 @@ async function activeDeployment(
   });
   if (!response.ok) return null;
   const active = await response.json() as ActiveDeployment | null;
-  return active?.project && active.deployment?.manifestKey ? active : null;
+  return active?.project && active.deployment?.manifestKey
+    && modernStoragePrefix({ organizationId, projectId, manifestKey: active.deployment.manifestKey }) ? active : null;
 }
 
 async function activeManifest(result: ActiveDeployment): Promise<StoredManifest | null> {
@@ -47,10 +44,11 @@ function basePath(organizationId: string, projectId: string): string {
   return `/organizations/${encodeURIComponent(organizationId)}/projects/${encodeURIComponent(projectId)}/docs`;
 }
 
-function documentFeatures(
+export function documentFeatures(
   options: {
     organizationId: string;
     projectId: string;
+    legacyOrg?: string;
     documentPath: string;
     base: string;
     url: string;
@@ -69,8 +67,9 @@ var p=window.parent;
 document.addEventListener("keydown",function(e){var key=(e.key||"").toLowerCase();var shellShortcut=(key==="h"||e.code==="KeyH")&&(e.ctrlKey||e.metaKey)&&e.shiftKey&&!e.altKey&&!e.repeat&&!(e.getModifierState&&e.getModifierState("AltGraph"));if(shellShortcut&&!(e.target instanceof Element&&e.target.closest("input,textarea,select,[contenteditable='true'],[contenteditable='plaintext-only'],[contenteditable='']"))){e.preventDefault();p.postMessage({type:"shell-toggle"},"*");}});
 })();
 </script>
-${viewerScript("navigation", { prefix: `${options.base}/files/`, ticketBase: `${options.base}/view/`, documentPath: options.documentPath, loadedPath: virtualPath }, options.url)}
+${viewerScript("navigation", { prefix: `${options.base}/files/`, ticketBase: `${options.base}/view/`, legacyPrefix: options.legacyOrg ? `/files/${encodeURIComponent(options.legacyOrg)}/` : undefined, documentPath: options.documentPath, loadedPath: virtualPath }, options.url)}
 <script>window.COMMENTOR=${inlineJson({
+    ...(options.legacyOrg ? { orgSlug: options.legacyOrg, filePath: `${options.legacyOrg}/${options.documentPath}` } : {}),
     organizationId: options.organizationId,
     projectId: options.projectId,
     documentPath: options.documentPath,
@@ -128,7 +127,7 @@ app.on("GET", [
   if (viewerToken ? !ticket : !c.get("user")) return missing();
   const cookie = ticket?.cookie ?? viewerSessionCookie(c.req.header("Cookie") ?? "");
   if (!cookie) return missing();
-  const path = safePath(c.req.path.slice(c.req.path.indexOf("/files/") + 7));
+  const path = decodeStoragePath(c.req.path.slice(c.req.path.indexOf("/files/") + 7));
   if (!path) return missing();
   // No authorization cache: Convex checks persisted session, membership, and
   // project ownership on every request, including nested CSS and font requests.
@@ -137,7 +136,8 @@ app.on("GET", [
   const manifest = await activeManifest(active);
   const entry = manifest?.files.find((file) => file.path === path);
   if (!entry) return missing();
-  const key = `${active.deployment.manifestKey.slice(0, -"manifest.json".length)}files/${path}`;
+  const key = modernStorageKey({ organizationId, projectId, manifestKey: active.deployment.manifestKey }, path);
+  if (!key) return missing();
   const stream = await getObjectStream(key);
   if (!stream) return missing();
   const headers = {
@@ -187,9 +187,10 @@ app.get("/organizations/:organizationId/projects/:projectId/docs", async (c) => 
   const documents = manifest.files
     .filter((file) => file.contentType.startsWith("text/html"))
     .map((file) => file.path);
+  // Hono has already decoded the query parameter; validate the literal key.
   const requested = c.req.query("doc");
   const selectedPath = requested
-    ? safePath(requested)
+    ? (isCanonicalStorageKey(requested) ? requested : null)
     : documents.includes("index.html") ? "index.html" : documents[0];
   if (!selectedPath || !documents.includes(selectedPath)) {
     return c.html(renderNotFoundPage({ path: c.req.path }), 404);
