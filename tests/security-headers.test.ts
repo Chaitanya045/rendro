@@ -46,7 +46,9 @@ describe("shared response security policy", () => {
       for (const tag of html.matchAll(/<style\b[^>]*>/g)) expect(tag[0]).toContain(`nonce="${nonce}"`);
     }
     for (const tag of html.matchAll(/<script\b[^>]*>/g)) {
-      if (!tag[0].includes(" src=")) expect(tag[0]).toContain(`nonce="${nonce}"`);
+      if (!tag[0].includes(" src=") || /data-viewer=|src="\/lazy-tree\.js/.test(tag[0])) {
+        expect(tag[0]).toContain(`nonce="${nonce}"`);
+      }
     }
   });
 

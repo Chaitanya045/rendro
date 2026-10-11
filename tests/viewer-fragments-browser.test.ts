@@ -2,10 +2,11 @@ import { build } from "esbuild";
 import type { Frame, Page } from "playwright";
 import { Hono } from "hono";
 import type { User } from "better-auth/types";
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import projectDocs from "@/routes/project-docs";
 import publicDocs from "@/routes/public-v2";
 import shareDocs from "@/routes/share-v2";
+import { securityHeaders } from "@/middleware/security-headers";
 import * as minio from "@/minio";
 import { browserStep, createBrowserHarness } from "./helpers/browser";
 
@@ -13,6 +14,8 @@ const privateBase = "/organizations/org/projects/project/docs";
 const manifestKey = "tenants/org/projects/project/deployments/deploy/manifest.json";
 const documents = ["guide/page.html", "guide/other.html"];
 const requests: string[] = [];
+const violations: string[] = [];
+const consoleCsp: string[] = [];
 const harness = createBrowserHarness();
 let publisherBase = "";
 
@@ -53,6 +56,7 @@ beforeAll(async () => {
     return Promise.resolve(new Response(null, { status: 404 }));
   }));
   const app = new Hono<{ Variables: { user?: User } }>();
+  app.use("*", securityHeaders);
   app.get("/private-viewer.js", c => c.body(viewer, 200, { "Content-Type": "text/javascript" }));
   app.get("/lazy-tree.js", c => c.body(tree, 200, { "Content-Type": "text/javascript" }));
   app.use("*", async (c, next) => {
@@ -75,7 +79,12 @@ beforeAll(async () => {
   });
 });
 
-beforeEach(() => { publisherBase = ""; requests.length = 0; });
+beforeEach(() => { publisherBase = ""; requests.length = 0; violations.length = 0; consoleCsp.length = 0; });
+
+afterEach(() => {
+  expect(violations, "securitypolicyviolation events across shell and publisher frames").toEqual([]);
+  expect(consoleCsp, "CSP console errors during fragment navigation").toEqual([]);
+});
 
 afterAll(() => {
   vi.restoreAllMocks();
@@ -84,6 +93,13 @@ afterAll(() => {
 
 async function newPage(): Promise<Page> {
   const page = await harness.newPage();
+  await page.exposeFunction("recordViolation", (value: string) => { violations.push(value); });
+  await page.addInitScript(() => {
+    document.addEventListener("securitypolicyviolation", event => {
+      (window as unknown as { recordViolation: (value: string) => void }).recordViolation(`${event.effectiveDirective}: ${event.blockedURI}`);
+    });
+  });
+  page.on("console", message => { if (/content security policy|violates.*policy/i.test(message.text())) consoleCsp.push(message.text()); });
   // No external fonts/services are needed by this isolated route fixture.
   await page.route(url => url.origin !== harness.origin, route => route.request().url().includes("cdn.tailwindcss.com")
     ? route.fulfill({ contentType: "text/javascript", body: "window.tailwind = {};" }) : route.abort());
@@ -111,7 +127,15 @@ async function readyFrame(page: Page): Promise<Frame> {
 
 async function open(base: string, hash = ""): Promise<{ page: Page; frame: Frame }> {
   const page = await newPage();
-  await browserStep("navigate to fixture", () => page.goto(harness.origin + base + hash, { waitUntil: "domcontentloaded" }));
+  const response = (await browserStep("navigate to fixture", () => page.goto(harness.origin + base + hash, { waitUntil: "domcontentloaded" })))!;
+  const csp = response.headers()["content-security-policy"];
+  expect(csp).toContain("frame-src 'self'");
+  expect(csp).toContain("script-src-attr 'none'");
+  expect(response.headers()["cache-control"]).toContain("no-store");
+  const nonce = csp.match(/'nonce-([^']+)'/)![1];
+  const nonces = await page.locator('script[data-viewer], script[src^="/lazy-tree.js"]').evaluateAll(elements => elements.map(element => (element as HTMLScriptElement).nonce));
+  expect(nonces.length).toBeGreaterThan(0);
+  expect(nonces.every(value => value === nonce)).toBe(true);
   return { page, frame: await readyFrame(page) };
 }
 
