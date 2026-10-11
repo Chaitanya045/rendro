@@ -242,7 +242,7 @@ describe("legacy migration with mocked source storage and backend HTTP", () => {
 
   it("resumes publication work after a failure without creating another deployment", async () => {
     failure = "publication";
-    await expect(main(["--map", "targets.json", ...confirmedApply])).rejects.toThrow("Publication unavailable");
+    await expect(main(["--map", "targets.json", ...confirmedApply])).rejects.toThrow('502 {"error":"Backend unavailable"}');
     expect(active).toBe(true); expect(failReason).toBeUndefined();
     failure = undefined;
     await main(["--map", "targets.json", ...confirmedApply]);

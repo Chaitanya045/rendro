@@ -23,6 +23,15 @@ import type { FunctionReference } from "convex/server";
  */
 export type ComponentApi<Name extends string | undefined = string | undefined> =
   {
+    teamLookup: {
+      get: FunctionReference<
+        "query",
+        "internal",
+        { teamId: string },
+        { organizationId: string } | null,
+        Name
+      >;
+    };
     adapter: {
       create: FunctionReference<
         "mutation",

@@ -1,6 +1,5 @@
-import type { Id } from "./_generated/dataModel";
 import { components, internal } from "./_generated/api";
-import { httpAction } from "./_generated/server";
+import { httpAction, failure, isApplicationError } from "./httpErrors";
 import { authorizeHttpOrganization, httpOrganizationAccess } from "./authorization";
 import { createAuth } from "./auth";
 
@@ -18,7 +17,7 @@ export const managementMembers = httpAction(async (ctx, request) => {
     const byId = new Map(users.map(user => [user.id, user]));
     const members = page.map(member => { const user = byId.get(member.userId); return { id: member._id, userId: member.userId, role: member.role, createdAt: member.createdAt, user: user ? { id: user.id, name: user.name, email: user.email } : null }; });
     return Response.json({ members, nextCursor: result.isDone ? null : result.continueCursor }, { headers });
-  } catch (error) { const forbidden = error instanceof Error && /authentication|membership|required|role/i.test(error.message); return Response.json({ error: "Unable to load organization members" }, { status: forbidden ? 403 : 503, headers }); }
+  } catch (error) { const response = failure(error, 403, "managementMembers"); response.headers.set("Cache-Control", headers["Cache-Control"]); return response; }
 });
 
 // Native Better Auth roster reads require the caller to belong to the team.
@@ -29,8 +28,7 @@ export const managementTeamMembers = httpAction(async (ctx, request) => {
   if (!organizationId || !teamId) return Response.json({ error: "organizationId and teamId are required" }, { status: 400, headers });
   try {
     await authorizeHttpOrganization(ctx, request.headers, organizationId, ["owner", "admin"]);
-    const auth = await createAuth(ctx).$context;
-    const team = await auth.adapter.findOne<{ organizationId: string }>({ model: "team", where: [{ field: "id", value: teamId }] });
+    const team = await ctx.runQuery(components.betterAuth.teamLookup.get, { teamId });
     if (!team || team.organizationId !== organizationId) return Response.json({ error: "Team not found" }, { status: 404, headers });
     const result = await ctx.runQuery(components.betterAuth.adapter.findMany, { model: "teamMember", where: [{ field: "teamId", value: teamId }], paginationOpts: { cursor: url.searchParams.get("cursor"), numItems: 50 } }) as { page: Array<{ _id: string; userId: string }>; isDone: boolean; continueCursor: string };
     const members = result.page;
@@ -48,19 +46,17 @@ export const managementAccess = httpAction(async (ctx, request) => {
     const { organization, member, userId } = await httpOrganizationAccess(ctx, request.headers, organizationId);
     return Response.json({ id: organization.id, name: organization.name, slug: organization.slug, userId, member: { id: member.id, userId: member.userId, role: member.role } }, { headers });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "";
-    const status = message.includes("Authentication required") ? 401 : message.includes("membership required") ? 403 : 503;
-    return Response.json({ error: status === 503 ? "Unable to verify organization access" : status === 401 ? "Authentication required" : "Organization membership required" }, { status, headers });
+    const response = failure(error, 403, "managementAccess");
+    if (isApplicationError(error) && error.data === "Authentication required") {
+      return Response.json({ error: error.data }, { status: 401, headers });
+    }
+    response.headers.set("Cache-Control", headers["Cache-Control"]);
+    return response;
   }
 });
 
 function jsonError(error: unknown, fallbackStatus = 400): Response {
-  const message = error instanceof Error ? error.message : String(error);
-  const unauthorized = /authentication|required|membership|role/i.test(message);
-  return Response.json(
-    { error: message || "Request failed" },
-    { status: unauthorized ? 403 : fallbackStatus },
-  );
+  return failure(error, fallbackStatus, "organizationManagement");
 }
 
 function organizationIdFrom(request: Request): string | null {
@@ -120,11 +116,6 @@ export const createProject = httpAction(async (ctx, request) => {
     });
     return Response.json({ project }, { status: 201 });
   } catch (error: unknown) {
-    // Convex wraps validation failures with stack locations. Show only the
-    // allowlisted user-facing validation message, never that server wrapper.
-    const message = error instanceof Error ? error.message : "";
-    const validation = ["A project with this slug already exists", "Project name must be 1–80 characters", "Project slug must contain lowercase letters, numbers, and hyphens"].find(value => message.includes(value));
-    if (validation) return Response.json({ error: validation }, { status: 400 });
     return jsonError(error);
   }
 });
@@ -140,7 +131,7 @@ export const getProject = httpAction(async (ctx, request) => {
     await authorizeHttpOrganization(ctx, request.headers, organizationId);
     const project = await ctx.runQuery(internal.projects.getInternal, {
       organizationId,
-      projectId: projectId as Id<"projects">,
+      projectId,
     });
     if (!project) return Response.json({ error: "Project not found" }, { status: 404 });
     return Response.json({ project });

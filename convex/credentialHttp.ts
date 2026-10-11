@@ -1,8 +1,7 @@
-import type { Id } from "./_generated/dataModel";
 import type { GenericActionCtx } from "convex/server";
 import type { DataModel } from "./_generated/dataModel";
 import { internal } from "./_generated/api";
-import { httpAction } from "./_generated/server";
+import { httpAction, failure, clientFailure } from "./httpErrors";
 import { authorizeHttpOrganization } from "./authorization";
 
 const allowedScopes = new Set([
@@ -25,11 +24,6 @@ export async function sha256(value: string): Promise<string> {
     .join("");
 }
 
-function failure(error: unknown, status = 400): Response {
-  const message = error instanceof Error ? error.message : String(error);
-  return Response.json({ error: message || "Request failed" }, { status });
-}
-
 function allowedScopeArray(value: unknown): string[] | null {
   if (!Array.isArray(value)) return null;
   const scopes: string[] = [];
@@ -41,8 +35,8 @@ function allowedScopeArray(value: unknown): string[] | null {
 }
 
 export const createCredential = httpAction(async (ctx: GenericActionCtx<DataModel>, request: Request) => { let body: unknown;
-try { body = await request.json(); } catch { return failure("Invalid JSON body"); }
-if (!body || typeof body !== "object") return failure("Invalid credential body");
+try { body = await request.json(); } catch { return clientFailure("Invalid JSON body"); }
+if (!body || typeof body !== "object") return clientFailure("Invalid credential body");
 const organizationId = "organizationId" in body ? body.organizationId : null;
 const projectId = "projectId" in body ? body.projectId : undefined;
 const name = "name" in body ? body.name : null;
@@ -57,7 +51,7 @@ if (
   || scopes.length === 0
   || (projectId !== undefined && typeof projectId !== "string")
   || (expiresAt !== undefined && (typeof expiresAt !== "number" || expiresAt <= Date.now()))
-) return failure("Invalid credential fields");
+) return clientFailure("Invalid credential fields");
 try {
   const { user } = await authorizeHttpOrganization(
     ctx,
@@ -65,19 +59,19 @@ try {
     organizationId,
     ["owner", "admin"],
   );
-  if (projectId) {
+  if (projectId !== undefined) {
     const project = await ctx.runQuery(internal.projects.getInternal, {
       organizationId,
-      projectId: projectId as Id<"projects">,
+      projectId,
     });
-    if (!project) return failure("Project not found", 404);
+    if (!project) return clientFailure("Project not found", 404);
   }
   const keyId = randomHex(8);
   const secret = randomHex(32);
   const rawKey = `rnd_live_${keyId}_${secret}`;
   await ctx.runMutation(internal.apiKeyCredentials.createInternal, {
     organizationId,
-    projectId: projectId as Id<"projects"> | undefined,
+    projectId,
     keyId,
     keyPrefix: `rnd_live_${keyId}`,
     name: name.trim(),
@@ -91,26 +85,26 @@ try {
     rawKey,
   }, { status: 201 });
 } catch (error: unknown) {
-  return failure(error, 403);
+  return failure(error, 403, "createCredential");
 } });
 
 export const listCredentials = httpAction(async (ctx: GenericActionCtx<DataModel>, request: Request) => { const organizationId = new URL(request.url).searchParams.get("organizationId");
-if (!organizationId) return failure("organizationId is required");
+if (!organizationId) return clientFailure("organizationId is required");
 try {
   await authorizeHttpOrganization(ctx, request.headers, organizationId, ["owner", "admin"]);
   const credentials = await ctx.runQuery(internal.apiKeyCredentials.listInternal, { organizationId });
   return Response.json({ credentials });
 } catch (error: unknown) {
-  return failure(error, 403);
+  return failure(error, 403, "listCredentials");
 } });
 
 export const revokeCredential = httpAction(async (ctx: GenericActionCtx<DataModel>, request: Request) => { let body: unknown;
-try { body = await request.json(); } catch { return failure("Invalid JSON body"); }
-if (!body || typeof body !== "object") return failure("Invalid revoke body");
+try { body = await request.json(); } catch { return clientFailure("Invalid JSON body"); }
+if (!body || typeof body !== "object") return clientFailure("Invalid revoke body");
 const organizationId = "organizationId" in body ? body.organizationId : null;
 const keyId = "keyId" in body ? body.keyId : null;
 if (typeof organizationId !== "string" || typeof keyId !== "string") {
-  return failure("organizationId and keyId are required");
+  return clientFailure("organizationId and keyId are required");
 }
 try {
   const { user } = await authorizeHttpOrganization(
@@ -126,7 +120,7 @@ try {
   });
   return Response.json({ status: true });
 } catch (error: unknown) {
-  return failure(error, 403);
+  return failure(error, 403, "revokeCredential");
 } });
 
 export async function validateApiCredential(
@@ -134,7 +128,7 @@ export async function validateApiCredential(
   request: Request,
   input: {
     organizationId: string;
-    projectId?: Id<"projects">;
+    projectId?: string;
     requiredScope: string;
   },
 ) {
@@ -151,11 +145,11 @@ export const validateCredential = httpAction(async (ctx: GenericActionCtx<DataMo
 const organizationId = url.searchParams.get("organizationId");
 const projectId = url.searchParams.get("projectId") ?? undefined;
 const requiredScope = url.searchParams.get("scope");
-if (!organizationId || !requiredScope) return failure("organizationId and scope are required");
+if (!organizationId || !requiredScope) return clientFailure("organizationId and scope are required");
 const principal = await validateApiCredential(ctx, request, {
   organizationId,
-  projectId: projectId as Id<"projects"> | undefined,
+  projectId,
   requiredScope,
 });
-if (!principal) return failure("Invalid or insufficient API key", 401);
+if (!principal) return clientFailure("Invalid or insufficient API key", 401);
 return Response.json({ principal }); });

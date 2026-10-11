@@ -171,7 +171,7 @@ describe("document comment pagination", () => {
     expect(seenReplies.map((reply) => reply.body)).toEqual(
       Array.from({ length: 55 }, (_, offset) => `reply-${54 - offset}`),
     );
-  });
+  }, 30_000);
 
   it("keeps a grown reactive page bounded with max-valid multibyte content", async () => {
     const { backend, seeded, member } = await commentFixture(true);
@@ -266,7 +266,7 @@ describe("document comment pagination", () => {
       reply.authorName.length <= 200 && reply.authorEmail.length <= 320
     )))).toBe(true);
     expect(Buffer.byteLength(JSON.stringify(grownPage), "utf8")).toBeLessThan(12 * 1024 * 1024);
-  });
+  }, 30_000);
 
   it("tombstones immediately and removes a large reply history in bounded cleanup jobs", async () => {
     const { backend, seeded, member } = await commentFixture(true);

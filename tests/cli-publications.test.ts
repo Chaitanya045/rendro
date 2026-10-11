@@ -14,6 +14,29 @@ interface CapturedRequest {
 }
 
 describe("publication CLI", () => {
+  it("prints clean client errors and hides upstream diagnostics", async () => {
+    let status = 400;
+    let body = JSON.stringify({ error: "Invalid ID" });
+    const server = createServer((_request, response) => {
+      response.writeHead(status, { "Content-Type": "application/json" });
+      response.end(body);
+    });
+    await new Promise<void>(done => server.listen(0, "127.0.0.1", done));
+    try {
+      const endpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+      const run = () => execFileAsync(resolve("node_modules/.bin/tsx"), [
+        "cli/src/index.ts", "publication", "list", "--organization", "org",
+        "--project", "not-an-id", "--endpoint", endpoint,
+      ], { env: { ...process.env, RENDRO_API_KEY: "test-key" } });
+      await expect(run()).rejects.toMatchObject({ code: 1, stderr: "400 Invalid ID\n" });
+      status = 500;
+      body = "ArgumentValidationError: private backend details\n at handler (convex/projects.ts:1:2)";
+      await expect(run()).rejects.toMatchObject({ code: 1, stderr: "500 Backend unavailable\n" });
+    } finally {
+      await new Promise<void>((done, reject) => server.close(error => error ? reject(error) : done()));
+    }
+  });
+
   it("creates, lists, and removes project publications through the management API", async () => {
     const requests: CapturedRequest[] = [];
     const publication = {

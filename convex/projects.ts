@@ -17,9 +17,14 @@ export const listInternal = internalQuery({
 export const getInternal = internalQuery({
   args: {
     organizationId: v.string(),
-    projectId: v.id("projects"),
+    projectId: v.string(),
   },
-  handler: async (ctx, args) => {
+  handler: async (ctx, input) => {
+    const args = {
+      ...input,
+      projectId: ctx.db.normalizeId("projects", input.projectId),
+    };
+    if (!args.projectId) return null;
     const project = await ctx.db.get(args.projectId);
     if (!project || project.organizationId !== args.organizationId) return null;
     return project;

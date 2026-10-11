@@ -110,13 +110,13 @@ describe("Convex authorization boundary", () => {
 
     await expect(
       outsider.mutation(api.threads.resolve, { threadId }),
-    ).rejects.toThrow("Forbidden");
+    ).rejects.toThrow("Comment not found");
     await expect(
       outsider.mutation(api.replies.add, { threadId, body: "tampered" }),
-    ).rejects.toThrow("Forbidden");
+    ).rejects.toThrow("Comment not found");
     await expect(
       outsider.mutation(api.threads.remove, { threadId }),
-    ).rejects.toThrow("Forbidden");
+    ).rejects.toThrow("Comment not found");
   });
 
   it("scopes document comments to an authorized project and document", async () => {

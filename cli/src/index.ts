@@ -15,6 +15,7 @@ import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { extname, join, relative, resolve } from "node:path";
 import { MAX_REUSED_FILES_PER_REQUEST } from "../../shared/deployment-limits";
 import { version } from "../../package.json";
+import { httpErrorMessage } from "./http-error";
 
 interface PushOptions {
   source: string;
@@ -122,7 +123,7 @@ async function requestJson<T>(url: string, token: string, init?: RequestInit): P
   const headers = new Headers(init?.headers);
   headers.set("Authorization", `Bearer ${token}`);
   const res = await fetch(url, { ...init, headers });
-  if (!res.ok) throw new Error(`${res.status} ${await res.text()}`);
+  if (!res.ok) throw new Error(await httpErrorMessage(res));
   return await res.json() as T;
 }
 
@@ -317,7 +318,7 @@ async function push(opts: PushOptions): Promise<void> {
         },
       );
       if (!response.ok) {
-        throw new Error(`Upload failed for ${entry.path}: ${response.status} ${await response.text()}`);
+        throw new Error(`Upload failed for ${entry.path}: ${await httpErrorMessage(response)}`);
       }
       console.log(`  ↑ ${entry.path}`);
     };

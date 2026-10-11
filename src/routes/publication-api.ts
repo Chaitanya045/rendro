@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { backendFetch } from "@/backend-fetch";
 import { CONVEX_SITE_URL } from "@/config";
 import { getObjectText } from "@/minio";
 import { parseStoredManifest, type StoredManifest } from "@/stored-manifest";
@@ -18,12 +19,12 @@ function forwardedHeaders(request: Request): Headers {
 }
 
 async function backend(path: string, request: Request, method = "GET", body?: string): Promise<Response> {
-  return fetch(`${CONVEX_SITE_URL}${path}`, {
+  return backendFetch(`${CONVEX_SITE_URL}${path}`, {
     method,
     body,
     headers: forwardedHeaders(request),
     redirect: "manual",
-  });
+  }, "publicationRequest");
 }
 
 app.post("/api/rendro/publications", async (c) => {
@@ -59,7 +60,7 @@ app.post("/api/rendro/publications", async (c) => {
     deployment = result.deployment;
   }
   if (!deployment || deployment.status === "failed" || deployment.status === "staging") {
-    return c.json({ error: "Publication requires an available deployment" }, 409);
+    return c.json({ error: "Publication requires an available deployment" }, 404);
   }
   const text = await getObjectText(deployment.manifestKey);
   const manifest: StoredManifest | null = parseStoredManifest(text);

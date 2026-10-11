@@ -1,6 +1,5 @@
-import type { Id } from "./_generated/dataModel";
 import { internal } from "./_generated/api";
-import { httpAction } from "./_generated/server";
+import { httpAction } from "./httpErrors";
 
 function authorized(request: Request): boolean {
   const secret = process.env.RETENTION_SECRET;
@@ -28,7 +27,7 @@ export const markRetentionPurged = httpAction(async (ctx, request) => {
     return Response.json({ error: "deploymentId and objectCount are required" }, { status: 400 });
   }
   const purged = await ctx.runMutation(internal.retention.markPurgedInternal, {
-    deploymentId: deploymentId as Id<"deployments">,
+    deploymentId,
     objectCount,
   });
   return Response.json({ purged });

@@ -1,3 +1,4 @@
+import { requireId } from "./ids";
 import { v } from "convex/values";
 import { internalMutation, internalQuery } from "./_generated/server";
 
@@ -32,8 +33,12 @@ export const candidatesInternal = internalQuery({
 });
 
 export const markPurgedInternal = internalMutation({
-  args: { deploymentId: v.id("deployments"), objectCount: v.number() },
-  handler: async (ctx, args) => {
+  args: { deploymentId: v.string(), objectCount: v.number() },
+  handler: async (ctx, input) => {
+    const args = {
+      ...input,
+      deploymentId: requireId(ctx, "deployments", input.deploymentId),
+    };
     const deployment = await ctx.db.get(args.deploymentId);
     if (!deployment || deployment.status === "active" || deployment.status === "staging") return false;
     const now = Date.now();

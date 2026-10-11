@@ -1,6 +1,6 @@
-import type { Id } from "./_generated/dataModel";
 import { internal } from "./_generated/api";
-import { httpAction } from "./_generated/server";
+import type { Id } from "./_generated/dataModel";
+import { httpAction } from "./httpErrors";
 
 function authorized(request: Request): boolean {
   const secret = process.env.MIGRATION_SECRET;
@@ -19,6 +19,9 @@ export const ensureMigrationProject = httpAction(async (ctx, request) => {
   const legacyOrgSlug = "legacyOrgSlug" in body ? body.legacyOrgSlug : undefined;
   const manifestSha256 = "manifestSha256" in body ? body.manifestSha256 : undefined;
   if (typeof organizationId !== "string") return Response.json({ error: "organizationId is required" }, { status: 400 });
+  if (projectId !== undefined && typeof projectId !== "string") {
+    return Response.json({ error: "Invalid project ID" }, { status: 400 });
+  }
   // A completed migration can be resumed, but never overwrite ordinary work
   // or silently import a changed source into an already populated project.
   const reusable = async (project: { _id: Id<"projects">; activeDeploymentId?: Id<"deployments"> }) => {
@@ -39,7 +42,7 @@ export const ensureMigrationProject = httpAction(async (ctx, request) => {
   if (typeof projectId === "string") {
     const project = await ctx.runQuery(internal.projects.getInternal, {
       organizationId,
-      projectId: projectId as Id<"projects">,
+      projectId,
     });
     if (!project) return Response.json({ error: "Project not found" }, { status: 404 });
     if (!await reusable(project)) {
