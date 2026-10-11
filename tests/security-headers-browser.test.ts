@@ -156,7 +156,8 @@ describe("Chromium security header smoke", () => {
   it("runs management navigation under the active document nonce", async () => {
     const page = await pageFor(true);
     try {
-      await browserStep("load organization management", () => page.goto(harness.origin + "/organizations/org-a"));
+      const response = await browserStep("load organization management", () => page.goto(harness.origin + "/organizations/org-a"));
+      expect(response?.status()).toBe(200);
       await browserStep("initialize management UI", () => page.waitForFunction(() => Boolean((window as unknown as { RendroUI?: unknown }).RendroUI)));
       // Force the fetched-page fallback, not the prebuilt controller path.
       await page.evaluate(() => { (window as unknown as { RendroManagementPages?: unknown }).RendroManagementPages = undefined; });

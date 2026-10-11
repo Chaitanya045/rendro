@@ -1,31 +1,36 @@
-import { Hono } from "hono";
 import type { User } from "better-auth/types";
-import organizationPages from "../src/routes/organization-pages";
-import projectPages from "../src/routes/project-pages";
-import publicationPages from "../src/routes/publication-pages";
-import sharePages from "../src/routes/share-pages";
-import apiKeyPages from "../src/routes/api-key-pages";
+import { renderOrganizationSection } from "../src/routes/organization-pages";
+import { renderProjectPage } from "../src/routes/project-pages";
+import { renderPublicationPage } from "../src/routes/publication-pages";
+import { renderSharePage } from "../src/routes/share-pages";
+import { renderApiKeyPage } from "../src/routes/api-key-pages";
 import { MANAGEMENT_SHELL_VERSION } from "../src/routes/management-navigation";
 
-// Generate from the real SSR routes so dialogs/controllers cannot drift between
-// initial loads and navigation. This build never connects to auth or user data.
-export async function managementPagesSource() {
-  const app = new Hono<{ Variables: { user?: User } }>();
-  app.use("*", async (c, next) => {
-    c.set("user", { id: "__RD_USER__", name: "Build fixture", email: "build@example.invalid" } as User);
-    await next();
-  });
-  for (const routes of [organizationPages, projectPages, publicationPages, sharePages, apiKeyPages]) app.route("/", routes);
-  const suffixes = { overview: "", projects: "/projects", people: "/people", teams: "/teams", settings: "/settings", "api-keys": "/api-keys", project: "/projects/__RD_PROJECT__", deployments: "/projects/__RD_PROJECT__/deployments", publications: "/projects/__RD_PROJECT__/publications", shares: "/projects/__RD_PROJECT__/shares" };
+// Generate from the same pure renderers as SSR, without session authorization
+// or backend requests. Dialogs/controllers stay identical to initial page loads.
+export function managementPagesSource() {
+  const user = { id: "__RD_USER__", name: "Build fixture", email: "build@example.invalid" } as User;
+  const org = "__RD_ORG__", project = "__RD_PROJECT__";
+  const templates = {
+    overview: () => renderOrganizationSection(user, org, "overview"),
+    projects: () => renderProjectPage(user, org),
+    people: () => renderOrganizationSection(user, org, "people"),
+    teams: () => renderOrganizationSection(user, org, "teams"),
+    settings: () => renderOrganizationSection(user, org, "settings"),
+    "api-keys": () => renderApiKeyPage(user, org),
+    project: () => renderProjectPage(user, org, project),
+    deployments: () => renderProjectPage(user, org, project, "deployments"),
+    publications: () => renderPublicationPage(user, org, project),
+    shares: () => renderSharePage(user, org, project),
+  };
   const entries = [];
-  for (const [section, suffix] of Object.entries(suffixes)) {
-    const response = await app.request(`/organizations/__RD_ORG__${suffix}`);
-    const html = await response.text();
+  for (const [section, render] of Object.entries(templates)) {
+    const html = render();
     const script = html.match(/<script data-cp-page-script>([\s\S]*?)<\/script>/)?.[1];
     const state = html.match(/<script data-cp-page-state type="application\/json">([\s\S]*?)<\/script>/)?.[1];
     const content = html.match(/<main\b[^>]*>([\s\S]*?)<\/main>/)?.[1];
     const title = html.match(/<title>([^<]*)<\/title>/)?.[1];
-    if (!response.ok || !script || !state || !content || !title) throw new Error(`Incomplete management template: ${section}`);
+    if (!script || !state || !content || !title) throw new Error(`Incomplete management template: ${section}`);
     const dialogs = [...content.matchAll(/<dialog\b[\s\S]*?<\/dialog>/g)].map((match) => match[0]).join("");
     entries.push(`${JSON.stringify(section)}:{title:${JSON.stringify(title)},state:${JSON.stringify(state)},dialogs:${JSON.stringify(dialogs)},mount:function(){${script}\n}}`);
   }

@@ -1,3 +1,4 @@
+import "./fixtures/management-page-presentation";
 import { readFileSync } from "node:fs";
 import { Hono } from "hono";
 import type { User } from "better-auth/types";

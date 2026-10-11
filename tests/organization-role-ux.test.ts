@@ -1,3 +1,4 @@
+import "./fixtures/management-page-presentation";
 /* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unsafe-argument, @typescript-eslint/require-await */
 import vm from "node:vm";
 import { Hono } from "hono";

@@ -1,3 +1,4 @@
+import "./fixtures/management-page-presentation";
 import vm from "node:vm";
 import { Hono } from "hono";
 import type { User } from "better-auth/types";

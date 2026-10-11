@@ -1,3 +1,4 @@
+import { managementPageAccess } from "./management-page-access";
 import { Hono } from "hono";
 import type { User } from "better-auth/types";
 import { renderControlPlanePage, renderTableLoading } from "./control-plane";
@@ -19,7 +20,7 @@ const shareScript = String.raw`
 })();
 `;
 
-function page(user: User, organizationId: string, projectId: string): string {
+export function renderSharePage(user: User, organizationId: string, projectId: string): string {
   return renderControlPlanePage({
     ...shareLoadingPage(organizationId, projectId),
     user,
@@ -33,13 +34,13 @@ function page(user: User, organizationId: string, projectId: string): string {
   });
 }
 
-app.get("/organizations/:organizationId/projects/:projectId/shares", (c) => {
+app.get("/organizations/:organizationId/projects/:projectId/shares", managementPageAccess, (c) => {
   const organizationId = c.req.param("organizationId");
   const projectId = c.req.param("projectId");
   const user = c.get("user");
   const returnTo = `/organizations/${encodeURIComponent(organizationId)}/projects/${encodeURIComponent(projectId)}/shares`;
   if (!user) return c.redirect(`/sign-in?returnTo=${encodeURIComponent(returnTo)}`);
-  return c.html(page(user, organizationId, projectId));
+  return c.html(renderSharePage(user, organizationId, projectId));
 });
 
 export default app;

@@ -1,3 +1,4 @@
+import { managementPageAccess } from "./management-page-access";
 import { Hono } from "hono";
 import type { User } from "better-auth/types";
 import { renderControlPlanePage, renderTableLoading } from "./control-plane";
@@ -53,7 +54,7 @@ const apiKeyScript = String.raw`
 })();
 `;
 
-function renderApiKeyPage(user: User, organizationId: string): string {
+export function renderApiKeyPage(user: User, organizationId: string): string {
   return renderControlPlanePage({
     ...apiKeyLoadingPage(),
     user,
@@ -68,7 +69,7 @@ function renderApiKeyPage(user: User, organizationId: string): string {
   });
 }
 
-app.get("/organizations/:organizationId/api-keys", (c) => {
+app.get("/organizations/:organizationId/api-keys", managementPageAccess, (c) => {
   const organizationId = c.req.param("organizationId");
   const user = c.get("user");
   const returnTo = `/organizations/${encodeURIComponent(organizationId)}/api-keys`;
