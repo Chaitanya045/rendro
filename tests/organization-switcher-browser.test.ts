@@ -7,7 +7,7 @@ import { beforeAll, expect, it } from "vitest";
 import { securityHeaders } from "@/middleware/security-headers";
 import organizationPages from "@/routes/organization-pages";
 import { managementPagesSource } from "../scripts/management-pages-source";
-import { browserStep, createBrowserHarness } from "./helpers/browser";
+import { browserStep, createBrowserHarness, waitForSettled } from "./helpers/browser";
 
 const harness = createBrowserHarness();
 const user = { id: "user-a", name: "Owner", email: "owner@example.test" } as User;
@@ -77,6 +77,7 @@ it.each([375, 768, 1440])("exposes the org name in accessibility snapshots and p
   expect(await trigger.ariaSnapshot()).toContain(`button ${JSON.stringify(expectedName)}`);
   expect(await label.evaluate(element => getComputedStyle(element).display)).not.toBe("none");
   expect(await label.evaluate(element => getComputedStyle(element).position)).toBe(width <= 520 ? "absolute" : "static");
+  await waitForSettled(page);
   // The font CSS is an empty fixture; do not let axe refetch it via CSP-blocked connect-src.
   const overviewAxe = await browserStep("axe overview audit", () => new AxeBuilder({ page }).options({ preload: false }).analyze());
   expect(overviewAxe.violations).toEqual([]);
@@ -93,6 +94,7 @@ it.each([375, 768, 1440])("exposes the org name in accessibility snapshots and p
     const drawerSwitcher = drawer.locator(".cp-drawer-org");
     expect(await drawerSwitcher.ariaSnapshot()).toContain(`link ${JSON.stringify(`${organizationName} Switch organization`)}`);
     expect(await drawerSwitcher.locator("img").count()).toBe(0);
+    await waitForSettled(page);
     const drawerAxe = await browserStep("axe expanded drawer audit", () => new AxeBuilder({ page }).options({ preload: false }).analyze());
     expect(drawerAxe.violations).toEqual([]);
     await drawer.getByRole("button", { name: "Close navigation" }).click();
