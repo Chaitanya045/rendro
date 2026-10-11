@@ -390,7 +390,6 @@ describe("round-three recovery regressions", () => {
   });
 
   it.each((["thread.create", "reply.add"] as const).flatMap(method => [
-    { method, data: "Permission denied", message: "operation failed" },
     ...[
       ["invalid_id", "This comment is unavailable"],
       ["not_found", "This comment is unavailable"],
@@ -415,6 +414,31 @@ describe("round-three recovery regressions", () => {
     expect((runtime.backend.mutate.mock.calls[1][2] as { clientOperationId: string }).clientOperationId).not.toBe(originalId);
     runtime.finish();
     await corrected;
+    next.dispose();
+    runtime.host.dispose();
+  });
+
+  it.each((["thread.create", "reply.add"] as const).flatMap(method => [
+    "unknown_code", "transient", "rate_limited", "legacy",
+  ].map(code => ({ method, code }))))("preserves $method identity across reload and retry for $code", async ({ method, code }) => {
+    const runtime = recoveryRuntime();
+    await flushMessages();
+    runtime.backend.mutate.mockRejectedValueOnce(new ConvexError(
+      code === "legacy" ? "Permission denied" : { code, message: "Safe failure" },
+    ));
+    await expect(runtime.transport.mutate(method, args)).rejects.toThrow("Comment operation failed");
+    const original = runtime.backend.mutate.mock.calls[0][2];
+    expect(Object.keys(runtime.transport.recovery.value.operations)).toHaveLength(1);
+    const next = runtime.reload();
+    await flushMessages();
+    expect(Object.keys(next.recovery.value.operations)).toHaveLength(1);
+    await expect(next.mutate(method, { ...args, body: "Changed" })).rejects.toThrow("unconfirmed");
+    const retry = next.mutate(method, args);
+    await flushMessages();
+    expect(runtime.backend.mutate.mock.calls[1][2]).toEqual(original);
+    runtime.finish();
+    await retry;
+    expect(next.recovery.value.operations).toEqual({});
     next.dispose();
     runtime.host.dispose();
   });
