@@ -2,8 +2,8 @@ import { rewriteCssUrls } from "./css-urls";
 import { createStylesheetRenewer } from "./stylesheets";
 
 interface ParentConfig { base: string }
-interface FrameConfig extends ParentConfig { prefix: string; manifestKey: string }
-interface RenewalMessage { type?: string; requestId?: string; manifestKey?: string; prefix?: string }
+interface FrameConfig extends ParentConfig { prefix: string; manifestKey: string; deploymentId: string }
+interface RenewalMessage { type?: string; requestId?: string; deploymentId?: string; manifestKey?: string; prefix?: string }
 
 export function showViewerUpdateNotice(host: Window = window): void {
   const notice = host.document.getElementById("viewer-update-notice");
@@ -14,12 +14,12 @@ export function showViewerUpdateNotice(host: Window = window): void {
 }
 
 /** Called only by the parent's authenticated Convex subscription. */
-export function updateViewerActiveManifest(manifestKey: string | null, host: Window = window): void {
+export function updateViewerActiveDeployment(deploymentId: string | null, host: Window = window): void {
   const frame = host.document.getElementById("content-frame");
   if (!frame) return;
-  if (manifestKey === null) delete frame.dataset.activeManifest;
-  else frame.dataset.activeManifest = manifestKey;
-  if (frame.dataset.loadedManifest && manifestKey && frame.dataset.loadedManifest !== manifestKey) {
+  if (deploymentId === null) delete frame.dataset.activeDeployment;
+  else frame.dataset.activeDeployment = deploymentId;
+  if (frame.dataset.loadedDeployment && deploymentId && frame.dataset.loadedDeployment !== deploymentId) {
     showViewerUpdateNotice(host);
   }
 }
@@ -33,22 +33,24 @@ export function installViewerParent(config: ParentConfig, host: Window = window)
     if (event.target !== host.document.getElementById("content-frame")) return;
     generation++;
     const frame = host.document.getElementById("content-frame");
-    if (frame) delete frame.dataset.loadedManifest;
+    if (frame) delete frame.dataset.loadedDeployment;
     if (notice) notice.hidden = true;
   }, true);
   host.addEventListener("message", (event: MessageEvent<RenewalMessage>) => {
     const frame = host.document.getElementById("content-frame") as HTMLIFrameElement | null;
     const data = event.data;
     if (!frame?.contentWindow || event.source !== frame.contentWindow || event.origin !== "null"
-      || !data || typeof data.manifestKey !== "string" || data.manifestKey.length > 2048) return;
+      || !data) return;
     const src = new URL(frame.src, host.location.href);
     if (src.origin !== host.location.origin || !src.pathname.startsWith(`${config.base}/files/`)) return;
     if (data.type === "viewer-loaded") {
-      frame.dataset.loadedManifest = data.manifestKey;
-      updateViewerActiveManifest(frame.dataset.activeManifest ?? null, host);
+      if (typeof data.deploymentId !== "string" || !data.deploymentId || data.deploymentId.length > 128) return;
+      frame.dataset.loadedDeployment = data.deploymentId;
+      updateViewerActiveDeployment(frame.dataset.activeDeployment ?? null, host);
       return;
     }
-    if (data.type !== "viewer-renew" || typeof data.requestId !== "string" || data.requestId.length > 128 || pending) return;
+    if (data.type !== "viewer-renew" || typeof data.manifestKey !== "string" || data.manifestKey.length > 2048
+      || typeof data.requestId !== "string" || data.requestId.length > 128 || pending) return;
     pending = true;
     const source = frame.contentWindow;
     const requestedGeneration = generation;
@@ -76,19 +78,23 @@ export function installViewerParent(config: ParentConfig, host: Window = window)
     })();
   });
   // A fast iframe can finish before the shell's script executes. Ask it to
-  // repeat its manifest; frames still loading will announce it on load.
+  // repeat its deployment; frames still loading will announce it on load.
   const frame = host.document.getElementById("content-frame") as HTMLIFrameElement | null;
   frame?.contentWindow?.postMessage({ type: "viewer-identify" }, "*");
 }
 
 export function installViewerFrame(config: FrameConfig, host: Window = window): void {
   const doc = host.document;
+  // Location is the actual response URL even in an opaque sandbox. Unlike
+  // document.baseURI or base.href, a publisher <base> cannot redirect it.
+  const origin = host.location.origin;
+  const reportDeployment = () => host.parent.postMessage({ type: "viewer-loaded", deploymentId: config.deploymentId }, origin);
+  host.addEventListener("load", reportDeployment, { once: true });
+  host.addEventListener("message", (event: MessageEvent<RenewalMessage>) => {
+    if (event.source === host.parent && event.origin === origin && event.data?.type === "viewer-identify") reportDeployment();
+  });
   const base = doc.querySelector<HTMLBaseElement>("base[data-rendro-viewer]");
   if (!base) return;
-  const origin = new URL(base.href).origin;
-  // Report the actual frame manifest, including a publish racing the shell load.
-  const reportManifest = () => host.parent.postMessage({ type: "viewer-loaded", manifestKey: config.manifestKey }, origin);
-  host.addEventListener("load", reportManifest, { once: true });
   let prefix = config.prefix;
   let managedCssUrls = new Set<string>();
   const renewStylesheet = createStylesheetRenewer();
@@ -104,10 +110,6 @@ export function installViewerFrame(config: FrameConfig, host: Window = window): 
   }
   host.addEventListener("message", (event: MessageEvent<RenewalMessage>) => {
     const data = event.data;
-    if (event.source === host.parent && event.origin === origin && data?.type === "viewer-identify") {
-      reportManifest();
-      return;
-    }
     if (event.source !== host.parent || event.origin !== origin || !data
       || data.type !== "viewer-renewed" || data.requestId !== requestId
       || typeof data.prefix !== "string" || !data.prefix.startsWith(`${config.base}/view/`)

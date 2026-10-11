@@ -57,6 +57,7 @@ export function assetError(c: Context, html: () => string, status: ClientErrorSt
     c.set("emptyAssetError", true);
     c.header("Content-Type", undefined);
     c.header("X-Content-Type-Options", undefined);
+    c.header("Content-Length", "0");
     return c.body(null, status);
   }
   return c.html(html(), status);

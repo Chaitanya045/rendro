@@ -85,6 +85,7 @@ describe.each(["public", "share", "private ticket", "private cookie"])("%s asset
       expect(result.headers.get("Content-Type")).toBeNull();
       expect(result.headers.get("X-Content-Type-Options")).toBeNull();
       expect(result.headers.get("Cache-Control")).toBe("private, no-store");
+      expect(result.headers.get("Content-Length")).toBe("0");
       expect(await result.text()).toBe("");
     }
     const document = await app.request(viewer.prefix + "missing.html", { headers: { ...headers, Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8" } });
@@ -115,6 +116,7 @@ it.each([400, 401, 403, 404, 429, 500, 502, 503, 504] as const)("preserves statu
     const response = await app.request(`/${path}`);
     expect(response.status).toBe(status);
     expect(response.headers.get("Content-Type")).toBeNull();
+    expect(response.headers.get("Content-Length")).toBe("0");
     expect(response.headers.get("Retry-After")).toBe("9");
     expect(response.headers.get("Cache-Control")).toBe("private, no-store");
     expect(response.headers.get("X-Content-Type-Options")).toBeNull();

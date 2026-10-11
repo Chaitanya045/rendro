@@ -14,6 +14,7 @@ const base = "/organizations/org/projects/project/docs";
 const manifest = (version: number) => `tenants/org/projects/project/deployments/deploy-${version}/manifest.json`;
 const documentPath = "guide/page.html";
 let version = 1;
+let publisherBase = "";
 let shellLoads = 0;
 let renewals = 0;
 const assetStatuses: number[] = [];
@@ -36,7 +37,7 @@ beforeAll(async () => {
           constructor() { document.body.dataset.clients = String(Number(document.body.dataset.clients || 0) + 1); }
           setAuth(fetchToken) { fetchToken(); }
           onUpdate(query, args, update) {
-            if (getFunctionName(query) !== 'projects:activeManifest' || args.organizationId !== 'org' || args.projectId !== 'project') throw new Error('Unexpected subscription');
+            if (getFunctionName(query) !== 'projects:activeDeployment' || args.organizationId !== 'org' || args.projectId !== 'project') throw new Error('Unexpected subscription');
             window.publishManifest = update;
             return () => { delete window.publishManifest; };
           }
@@ -68,7 +69,7 @@ beforeAll(async () => {
   vi.spyOn(minio, "getObjectStream").mockImplementation(key => {
     const content = key.endsWith(".svg")
       ? '<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><rect width="10" height="10" fill="green"/></svg>'
-      : `<!doctype html><html><head><title>Version ${version}</title></head><body data-version="${version}">
+      : `<!doctype html><html><head>${publisherBase}<title>Version ${version}</title></head><body data-version="${version}">
         <input id="focus-target" aria-label="Keep reading"><img id="deferred" alt="Deferred illustration">
         <div style="height:1200px"></div><h2 id="details">Details</h2></body></html>`;
     return Promise.resolve(new Response(content).body);
@@ -107,10 +108,38 @@ beforeAll(async () => {
     void listener(request, response).catch(error => response.destroy(error as Error));
   }, assets);
 });
-beforeEach(() => { version = 1; shellLoads = 0; renewals = 0; assetStatuses.length = 0; deferredResponses.length = 0; });
+beforeEach(() => { publisherBase = ""; version = 1; shellLoads = 0; renewals = 0; assetStatuses.length = 0; deferredResponses.length = 0; });
 afterAll(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 describe("private viewer republishing", () => {
+  it.each(["https://publisher.invalid/assets/", "/outside-project/"])("announces a publication with publisher base %s", async href => {
+    publisherBase = `<base href="${href}">`;
+    const page = await harness.newPage();
+    await page.context().addCookies([{ name: "better-auth.session_token", value: "fixture.signature", url: harness.origin }]);
+    await page.route(url => url.origin !== harness.origin, route => route.fulfill({
+      contentType: route.request().url().includes("cdn.tailwindcss.com") ? "text/javascript" : "text/css",
+      body: route.request().url().includes("cdn.tailwindcss.com") ? "window.tailwind = {};" : "",
+    }));
+    await page.goto(`${harness.origin}${base}?doc=${documentPath}`);
+    const frame = page.frameLocator("#content-frame");
+    await expect.poll(() => page.locator("#content-frame").getAttribute("data-loaded-deployment")).toBe("deploy-1");
+    expect(await frame.locator("base[data-rendro-viewer]").count()).toBe(0);
+    expect(await frame.locator("base").getAttribute("href")).toBe(href);
+    await page.waitForFunction(() => typeof (window as unknown as { publishManifest?: unknown }).publishManifest === "function");
+    // Exercise the repeat-identification path as well as the load announcement.
+    await page.locator("#content-frame").evaluate(element => {
+      delete (element as HTMLIFrameElement).dataset.loadedDeployment;
+      (element as HTMLIFrameElement).contentWindow!.postMessage({ type: "viewer-identify" }, "*");
+    });
+    await expect.poll(() => page.locator("#content-frame").getAttribute("data-loaded-deployment")).toBe("deploy-1");
+    version = 2;
+    await page.evaluate(() => (window as unknown as { publishManifest: (id: string) => void }).publishManifest("deploy-2"));
+    await page.getByRole("status").filter({ hasText: "A newer version of this document was published." }).waitFor();
+    expect(renewals).toBe(0);
+    expect(shellLoads).toBe(1);
+    expect(await frame.locator("body").getAttribute("data-version")).toBe("1");
+  });
+
   it.each(["subscription", "deferred asset", "heartbeat"])("recovers from %s supersession at the same URL with drafts and pending operations", async trigger => {
     const page = await harness.newPage();
     await page.context().addCookies([{ name: "better-auth.session_token", value: "fixture.signature", url: harness.origin }]);
@@ -158,7 +187,7 @@ describe("private viewer republishing", () => {
     if (trigger === "subscription") {
       await page.evaluate(manifestKey => {
         (window as unknown as { publishManifest: (key: string) => void }).publishManifest(manifestKey);
-      }, manifest(version));
+      }, `deploy-${version}`);
     } else if (trigger === "deferred asset") {
       await frame.locator("#deferred").evaluate(element => { (element as HTMLImageElement).src = "deferred.svg"; });
       await expect.poll(() => assetStatuses.includes(404), { message: "reject the superseded asset" }).toBe(true);
@@ -198,7 +227,11 @@ describe("private viewer republishing", () => {
     expect(consoleMessages.filter(message => /ORB|OpaqueResponseBlocking/i.test(message))).toEqual([]);
     expect(failedRequests.filter(message => /ORB|OpaqueResponseBlocking/i.test(message))).toEqual([]);
     expect(page.url()).toBe(locationBefore);
-    expect((await page.request.get(oldAsset)).status()).toBe(404);
+    const deniedAsset = await page.request.get(oldAsset);
+    expect(deniedAsset.status()).toBe(404);
+    expect(deniedAsset.headers()["content-length"]).toBe("0");
+    expect(deniedAsset.headers()["transfer-encoding"]).toBeUndefined();
+    expect((await deniedAsset.body()).length).toBe(0);
     const nonce = await page.locator('script[data-viewer="parent"]').evaluate(element => (element as HTMLScriptElement).nonce);
     expect(nonce).not.toBe("");
     expect(await page.locator("#viewer-update-notice").evaluate(element => (element.previousElementSibling as HTMLStyleElement).nonce)).toBe(nonce);

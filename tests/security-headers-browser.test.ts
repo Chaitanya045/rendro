@@ -200,9 +200,9 @@ describe("Chromium security header smoke", () => {
       }).toBe("rgb(1, 2, 3)");
       expect(await frame.locator("body").evaluate(() => { try { void parent.document; return false; } catch { return true; } })).toBe(true);
       await settled(page);
-      expect(await page.locator('script[src="/commentor-parent.js?v=7"]').count()).toBe(1);
+      expect(await page.locator('script[src="/commentor-parent.js?v=8"]').count()).toBe(1);
       expect(await frame.locator('script[src="/commentor.js?v=42"]').count()).toBe(1);
-      const originalNonce = await page.locator('script[src="/commentor-parent.js?v=7"]').evaluate(script => (script as HTMLScriptElement).nonce);
+      const originalNonce = await page.locator('script[src="/commentor-parent.js?v=8"]').evaluate(script => (script as HTMLScriptElement).nonce);
       expect(originalNonce).not.toBe("");
 
       // A version mismatch must reload the trusted shell via #19's message flow,
@@ -216,7 +216,7 @@ describe("Chromium security header smoke", () => {
         frame.getByRole("button", { name: "Reload page", exact: true }).click(),
       ]));
       await expect.poll(() => messages.filter(type => type === "commentor-parent-update").length).toBeGreaterThan(1);
-      const refreshedNonce = await page.locator('script[src="/commentor-parent.js?v=7"]').evaluate(script => (script as HTMLScriptElement).nonce);
+      const refreshedNonce = await page.locator('script[src="/commentor-parent.js?v=8"]').evaluate(script => (script as HTMLScriptElement).nonce);
       expect(refreshedNonce).not.toBe("");
       expect(refreshedNonce).not.toBe(originalNonce);
       await settled(page);

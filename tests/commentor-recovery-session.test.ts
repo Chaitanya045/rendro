@@ -5,8 +5,9 @@ import { renderCommentRecoveryLifecycle, syncCommentRecoveryUser } from "../src/
 import { bootCommentorParentHost } from "../src/commentor/parent-host";
 import { COMMENTOR_PARENT_READY } from "../src/commentor/parent-protocol";
 
-const clients = vi.hoisted(() => ({ setAuth: vi.fn(), close: vi.fn().mockResolvedValue(undefined) }));
+const clients = vi.hoisted(() => ({ onUpdate: vi.fn(() => () => {}), setAuth: vi.fn(), close: vi.fn().mockResolvedValue(undefined) }));
 vi.mock("convex/browser", () => ({ ConvexClient: class {
+  onUpdate = clients.onUpdate;
   setAuth = clients.setAuth;
   close = clients.close;
 } }));

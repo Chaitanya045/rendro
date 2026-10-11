@@ -1,4 +1,6 @@
-import { updateViewerActiveManifest } from "../viewer/client";
+import { ConvexError } from "convex/values";
+import { isPublicErrorData } from "../shared/public-errors";
+import { updateViewerActiveDeployment } from "../viewer/client";
 import { commentErrorMessage, isDefinitiveCommentRejection } from "./errors";
 import { COMMENT_RECOVERY_PREFIX, syncCommentRecoveryUser } from "./recovery-session";
 import { normalizeMutationArgs, record, validAnchor } from "./mutation-args";
@@ -512,14 +514,19 @@ export class ConvexLegacyCommentBackend implements DocumentCommentBackend {
   }
 }
 
-async function requestAuthToken(): Promise<string | null> {
+async function requestAuthToken(onAccessLost: () => void): Promise<string | null> {
   const response = await fetch("/api/auth/convex/token", {
     credentials: "same-origin",
     headers: { Accept: "application/json" },
   });
-  if (!response.ok) return null;
+  if (!response.ok) {
+    if (response.status === 401 || response.status === 403) onAccessLost();
+    return null;
+  }
   const payload = await response.json() as { token?: unknown };
-  return typeof payload.token === "string" ? payload.token : null;
+  if (typeof payload.token === "string" && payload.token) return payload.token;
+  onAccessLost();
+  return null;
 }
 
 export function bootCommentorParentHost(frameAlreadyLoaded = false): (() => void) | null {
@@ -534,6 +541,14 @@ export function bootCommentorParentHost(frameAlreadyLoaded = false): (() => void
   frame.addEventListener("load", rememberLoad);
   let host: CommentorParentHost | null = null;
   let unsubscribeDeployment: (() => void) | undefined;
+  let deploymentStopped = false;
+  const stopDeployment = () => {
+    deploymentStopped = true;
+    const unsubscribe = unsubscribeDeployment;
+    unsubscribeDeployment = undefined;
+    unsubscribe?.();
+    updateViewerActiveDeployment(null);
+  };
   const client = new ConvexClient(config.convexUrl);
   let checking: Promise<string | null> | null = null;
   const checkIdentity = (): Promise<string | null> => {
@@ -541,10 +556,12 @@ export function bootCommentorParentHost(frameAlreadyLoaded = false): (() => void
     if (checking) return checking;
     checking = (async () => {
       const response = await fetch("/api/auth/get-session?disableCookieCache=true", { credentials: "same-origin", cache: "no-store" });
-      if (!response.ok) throw new Error("Comment session could not be checked");
-      const session = await response.json() as { user?: { id?: unknown } } | null;
+      const denied = response.status === 401 || response.status === 403;
+      if (!response.ok && !denied) throw new Error("Comment session could not be checked");
+      const session = denied ? null : await response.json() as { user?: { id?: unknown } } | null;
       const userId = typeof session?.user?.id === "string" && session.user.id ? session.user.id : null;
       if (!disposed && !signedOut) {
+        if (!userId) stopDeployment();
         syncCommentRecoveryUser(window.sessionStorage, userId);
         host?.setUserId(userId);
       }
@@ -554,30 +571,36 @@ export function bootCommentorParentHost(frameAlreadyLoaded = false): (() => void
   };
   // BFCache and full reloads must check the live session before hydrating drafts.
   void checkIdentity().then((userId) => {
-    if (disposed) return;
+    if (disposed || signedOut) return;
     host = new CommentorParentHost(frame, location.origin, config, "orgSlug" in config ? new ConvexLegacyCommentBackend(client) : new ConvexDocumentCommentBackend(client), userId);
     // The iframe may have loaded while checking the session.
     host.start(frameLoaded || document.readyState === "complete");
     frame.removeEventListener("load", rememberLoad);
     client.setAuth(async () => {
       if (!await checkIdentity() || disposed || signedOut) return null;
-      const token = await requestAuthToken();
+      const token = await requestAuthToken(() => { if (!disposed && !signedOut) stopDeployment(); });
       return disposed || signedOut ? null : token;
     });
-    if (!("orgSlug" in config)) {
-      unsubscribeDeployment = client.onUpdate(api.projects.activeManifest,
+    if (!("orgSlug" in config) && userId && !deploymentStopped) {
+      const unsubscribe = client.onUpdate(api.projects.activeDeployment,
         { organizationId: config.organizationId, projectId: config.projectId },
-        manifestKey => updateViewerActiveManifest(manifestKey),
-        () => updateViewerActiveManifest(null)); // Renewal remains the fallback.
+        deploymentId => { if (!deploymentStopped) updateViewerActiveDeployment(deploymentId); },
+        error => {
+          if (deploymentStopped) return;
+          if (error instanceof ConvexError && isPublicErrorData(error.data)
+            && ["unauthenticated", "forbidden", "not_found"].includes(error.data.code)) stopDeployment();
+          else updateViewerActiveDeployment(null); // Transient failures retain renewal fallback.
+        });
+      // Also handle a cached denial delivered synchronously by the client.
+      if (deploymentStopped) unsubscribe();
+      else unsubscribeDeployment = unsubscribe;
     }
   }).catch(() => {});
   const signOut = () => {
     signedOut = true;
+    stopDeployment();
     syncCommentRecoveryUser(window.sessionStorage, null);
     host?.setUserId(null);
-    unsubscribeDeployment?.();
-    unsubscribeDeployment = undefined;
-    updateViewerActiveManifest(null);
     void client.close();
   };
   const focus = () => { void checkIdentity().catch(() => {}); };
@@ -589,9 +612,7 @@ export function bootCommentorParentHost(frameAlreadyLoaded = false): (() => void
     window.removeEventListener("commentor-sign-out", signOut);
     window.removeEventListener("focus", focus);
     host?.dispose();
-    unsubscribeDeployment?.();
-    unsubscribeDeployment = undefined;
-    updateViewerActiveManifest(null);
+    stopDeployment();
     void client.close();
   };
 }

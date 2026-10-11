@@ -1,7 +1,7 @@
 import { Window as DOMWindow, type HTMLLinkElement as DOMLinkElement, type HTMLStyleElement as DOMStyleElement } from "happy-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { viewerUpdateNotice } from "@/viewer/markup";
-import { installViewerFrame, installViewerParent, updateViewerActiveManifest } from "@/viewer/client";
+import { installViewerFrame, installViewerParent, updateViewerActiveDeployment } from "@/viewer/client";
 
 const origin = "https://rendro.test";
 const base = "/organizations/org-a/projects/project-a/docs";
@@ -14,10 +14,10 @@ afterEach(async () => {
 });
 
 function events() {
-  const handlers = new Map<string, (event: unknown) => void>();
+  const handlers = new Map<string, Array<(event: unknown) => void>>();
   return {
-    addEventListener: (type: string, handler: (event: unknown) => void) => handlers.set(type, handler),
-    emit: (type: string, event: unknown = {}) => handlers.get(type)?.(event),
+    addEventListener: (type: string, handler: (event: unknown) => void) => handlers.set(type, [...(handlers.get(type) ?? []), handler]),
+    emit: (type: string, event: unknown = {}) => handlers.get(type)?.forEach(handler => handler(event)),
   };
 }
 
@@ -54,14 +54,36 @@ function frameFixture() {
     <textarea>Comment draft</textarea></body></html>`);
   const bus = events();
   const parent = { postMessage: vi.fn() };
-  const host = { ...bus, document: win.document, parent, setInterval: globalThis.setInterval } as unknown as Window;
-  installViewerFrame({ base, prefix, manifestKey: "release/manifest.json" }, host);
+  const host = { ...bus, location: win.location, document: win.document, parent, setInterval: globalThis.setInterval } as unknown as Window;
+  installViewerFrame({ base, prefix, manifestKey: "release/manifest.json", deploymentId: "release" }, host);
   const renew = (next: string) => {
     const request = parent.postMessage.mock.lastCall![0];
     bus.emit("message", { source: parent, origin, data: { type: "viewer-renewed", requestId: request.requestId, prefix: next } });
   };
   return { win, bus, parent, renew, settleSheet };
 }
+
+describe("deployment identification origin", () => {
+  it.each(["https://publisher.test/assets/", "/outside-project/"])("ignores publisher base %s when choosing the parent", href => {
+    const win = new DOMWindow({ url: `${origin}${base}/files/guide.html` });
+    windows.push(win);
+    win.document.write(`<base href="${href}">`);
+    const bus = events();
+    const parent = { postMessage: vi.fn() };
+    const host = { ...bus, location: win.location, document: win.document, parent } as unknown as Window;
+    installViewerFrame({ base, prefix, manifestKey: "release/manifest.json", deploymentId: "release" }, host);
+    bus.emit("load");
+    expect(parent.postMessage).toHaveBeenCalledWith({ type: "viewer-loaded", deploymentId: "release" }, origin);
+    parent.postMessage.mockClear();
+    for (const [source, eventOrigin] of [[{}, origin], [parent, "https://publisher.test"], [parent, "null"]]) {
+      bus.emit("message", { source, origin: eventOrigin, data: { type: "viewer-identify" } });
+    }
+    expect(parent.postMessage).not.toHaveBeenCalled();
+    bus.emit("message", { source: parent, origin, data: { type: "viewer-identify" } });
+    expect(parent.postMessage).toHaveBeenCalledOnce();
+    expect(parent.postMessage).toHaveBeenCalledWith({ type: "viewer-loaded", deploymentId: "release" }, origin);
+  });
+});
 
 describe("private viewer renewal", () => {
   it("refreshes resource URLs over multiple lifetimes without replacing the document or drafts", () => {
@@ -252,25 +274,25 @@ describe("deployment update notice", () => {
 
   it.each(["before", "after"])("compares a subscription update %s the frame reports its actual manifest", order => {
     const f = fixture();
-    const loaded = (manifestKey: string, source = f.source, eventOrigin = "null") => f.bus.emit("message", {
-      source, origin: eventOrigin, data: { type: "viewer-loaded", manifestKey },
+    const loaded = (deploymentId: string, source = f.source, eventOrigin = "null") => f.bus.emit("message", {
+      source, origin: eventOrigin, data: { type: "viewer-loaded", deploymentId },
     });
-    if (order === "before") updateViewerActiveManifest("new/manifest.json", f.host);
-    loaded("old/manifest.json", { postMessage: vi.fn() });
-    loaded("old/manifest.json", f.source, origin);
-    expect(f.frame.dataset.loadedManifest).toBeUndefined();
-    loaded("old/manifest.json");
-    if (order === "after") updateViewerActiveManifest("new/manifest.json", f.host);
+    if (order === "before") updateViewerActiveDeployment("new", f.host);
+    loaded("old", { postMessage: vi.fn() });
+    loaded("old", f.source, origin);
+    expect(f.frame.dataset.loadedDeployment).toBeUndefined();
+    loaded("old");
+    if (order === "after") updateViewerActiveDeployment("new", f.host);
     expect(f.notice.hidden).toBe(false);
     expect(f.fetch).not.toHaveBeenCalled();
     expect(f.reload).not.toHaveBeenCalled();
     f.bus.emit("load", { target: f.frame });
-    loaded("new/manifest.json");
+    loaded("new");
     expect(f.notice.hidden).toBe(true);
     // A failed subscription cannot reuse an old authorized result on navigation.
-    updateViewerActiveManifest(null, f.host);
+    updateViewerActiveDeployment(null, f.host);
     f.bus.emit("load", { target: f.frame });
-    loaded("another/manifest.json");
+    loaded("another");
     expect(f.notice.hidden).toBe(true);
   });
 

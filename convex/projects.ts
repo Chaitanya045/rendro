@@ -1,3 +1,4 @@
+import { isPublicErrorData } from "../src/shared/public-errors";
 import { requireId } from "./ids";
 import { requireOrganizationMember } from "./authorization";
 import { query } from "./publicFunctions";
@@ -77,10 +78,17 @@ export const createInternal = internalMutation({
 });
 
 /** Small reactive signal for an authorized, already-open private viewer. */
-export const activeManifest = query({
+export const activeDeployment = query({
   args: { organizationId: v.string(), projectId: v.string() },
   handler: async (ctx, args) => {
-    await requireOrganizationMember(ctx, args.organizationId);
+    try {
+      await requireOrganizationMember(ctx, args.organizationId);
+    } catch (error) {
+      // This background signal has no sign-in UX: hide all access denials alike.
+      if (error instanceof ConvexError && isPublicErrorData(error.data)
+        && ["unauthenticated", "forbidden", "not_found"].includes(error.data.code)) publicError("not_found");
+      throw error;
+    }
     const projectId = requireId(ctx, "projects", args.projectId);
     const project = await ctx.db.get(projectId);
     if (!project || project.organizationId !== args.organizationId) publicError("not_found");
@@ -88,6 +96,6 @@ export const activeManifest = query({
     const deployment = await ctx.db.get(project.activeDeploymentId);
     if (!deployment || deployment.organizationId !== args.organizationId
       || deployment.projectId !== project._id || deployment.status !== "active") return null;
-    return deployment.manifestKey;
+    return deployment._id;
   },
 });
