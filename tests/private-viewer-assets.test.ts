@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { Window as DOMWindow } from "happy-dom";
 import { createAuthOptions } from "../convex/auth";
 import projectDocs from "@/routes/project-docs";
-import { sessionMiddleware } from "@/middleware/session";
+import { sessionCache, sessionMiddleware } from "@/middleware/session";
 import * as minio from "@/minio";
 import { createViewerTicket } from "@/viewer-ticket";
 import { viewerHtmlForms } from "./fixtures/private-viewer-html";
@@ -81,6 +81,23 @@ async function fixture() {
 }
 
 describe("private sandbox asset routing", () => {
+  it("measures session reads for shell, tree, content and renewal", async () => {
+    const f = await fixture();
+    const counts: number[] = [];
+    for (const path of [base, `${base}/tree`, `${base}/files/guide/index.html`, `${base}/viewer-ticket?${new URLSearchParams({ manifestKey })}`]) {
+      const before = f.state.sessionCalls;
+      expect((await f.app.request(path, { headers: { cookie: f.cookie } })).status).toBe(200);
+      counts.push(f.state.sessionCalls - before);
+    }
+    expect(counts).toEqual([1, 0, 0, 0]);
+    expect(f.state.activeCalls).toBe(4);
+    for (const path of [base, `${base}/tree`, `${base}/files/guide/index.html`, `${base}/viewer-ticket?${new URLSearchParams({ manifestKey })}`]) {
+      expect((await f.app.request(path, { headers: { cookie: f.cookie } })).status).toBe(200);
+    }
+    expect(f.state.sessionCalls).toBe(1);
+    expect(f.state.activeCalls).toBe(8);
+  });
+
   it("skips the redundant cookie lookup on ticket assets while still revalidating authorization", async () => {
     const f = await fixture();
     const { url } = await f.document();
@@ -198,6 +215,7 @@ describe("private sandbox asset routing", () => {
     const f = await fixture();
     const { url } = await f.document();
     f.state.failSession = true;
+    await sessionCache.evict(f.cookie);
     const response = await f.app.request(routePath(route, url), { headers: { Cookie: f.cookie, Accept: "text/html" } });
     expect(response.status).toBe(503);
     expect(response.headers.get("retry-after")).toBe("60");
@@ -346,6 +364,7 @@ describe("private sandbox asset routing", () => {
     expect((await f.app.request(`${prefix}guide/assets/image.png`)).status).toBe(200);
     expect((await f.app.request(`${base}/viewer-ticket?manifestKey=another`, { headers: { Cookie: f.cookie } })).status).toBe(404);
     await f.revoke();
+    // The prior denial evicted identity, so revocation is visible immediately.
     expect((await f.app.request(endpoint, { headers: { Cookie: f.cookie } })).status).toBe(401);
   });
 

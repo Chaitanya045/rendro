@@ -1,3 +1,5 @@
+import { performance as realPerformance } from "node:perf_hooks";
+import { setTimeout as realDelay } from "node:timers/promises";
 import { Hono } from "hono";
 import { memoryAdapter } from "@better-auth/memory-adapter";
 import { betterAuth } from "better-auth/minimal";
@@ -5,7 +7,7 @@ import { testUtils } from "better-auth/plugins";
 import type { User } from "better-auth/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createAuthOptions } from "../convex/auth";
-import { sessionMiddleware } from "@/middleware/session";
+import { sessionCache, sessionMiddleware } from "@/middleware/session";
 import { logger } from "@/logger";
 
 const cookie = "better-auth.session_token=secret-cookie";
@@ -23,14 +25,24 @@ function app() {
   });
   return { app, downstream };
 }
-async function request(path = "/organizations", headers = { cookie, accept: "text/html" }, method = "GET") {
+async function request(path = "/organizations/cache-probe", headers = { cookie, accept: "text/html" }, method = "GET") {
   const fixture = app();
   const pending = fixture.app.request(path, { method, headers });
-  await vi.runAllTimersAsync();
+  // Yield to native WebCrypto before draining retry/deadline timers, without
+  // advancing the fake clock merely to wait for the hash.
+  let settled = false;
+  void Promise.resolve(pending).then(() => { settled = true; });
+  const deadline = realPerformance.now() + 2_000;
+  while (!settled && realPerformance.now() < deadline) {
+    await realDelay(1);
+    await vi.runAllTimersAsync();
+  }
+  expect(settled, "request should settle while retry timers are being drained").toBe(true);
   return { ...fixture, response: await pending };
 }
 
 beforeEach(() => {
+  sessionCache.clear();
   vi.useFakeTimers();
   vi.spyOn(logger, "warn").mockImplementation(() => {});
 });
@@ -41,11 +53,22 @@ afterEach(() => {
 });
 
 describe("session lookup failures", () => {
+  it("drains backoff timers after a delayed native cookie hash", async () => {
+    const digest = crypto.subtle.digest.bind(crypto.subtle);
+    vi.spyOn(crypto.subtle, "digest").mockImplementation(async (...args) => {
+      await realDelay(50);
+      return digest(...args);
+    });
+    vi.stubGlobal("fetch", vi.fn()
+      .mockResolvedValueOnce(new Response(null, { status: 503 }))
+      .mockImplementation(() => Response.json({ user, session: { expiresAt: Date.now() + 60_000 } })));
+    expect((await request()).response.status).toBe(200);
+  });
   it.each(["", "theme=better-auth", "better-auth.state=oauth", "better-auth.session_token="])(
     "skips lookup without a session token (%s)", async (cookie) => {
       const fetchMock = vi.fn();
       vi.stubGlobal("fetch", fetchMock);
-      const { response, downstream } = await request("/organizations", { cookie, accept: "text/html" });
+      const { response, downstream } = await request("/organizations/cache-probe", { cookie, accept: "text/html" });
       expect(response.status).toBe(302);
       expect(downstream).toHaveBeenCalledOnce();
       expect(fetchMock).not.toHaveBeenCalled();
@@ -74,6 +97,8 @@ describe("session lookup failures", () => {
     ["malformed_response", () => new Response(""), 2],
     ["malformed_response", () => Response.json({ user: { ...user, createdAt: "invalid" } }), 2],
     ["malformed_response", () => Response.json({ user: null }), 2],
+    ["malformed_response", () => Response.json({ user }), 2],
+    ["malformed_response", () => Response.json({ user, session: { expiresAt: "invalid" } }), 2],
     ["unexpected_status", () => new Response(null, { status: 302, headers: { location: "/sign-in" } }), 1],
     ["unexpected_status", () => Response.json({ code: "UNKNOWN" }, { status: 401 }), 1],
     ["unexpected_status", () => new Response("forbidden", { status: 403 }), 1],
@@ -100,7 +125,7 @@ describe("session lookup failures", () => {
 
   it.each(failures.filter(([, , calls]) => calls === 2))(
     "recovers from %s after one backoff, including before an incoming write (%#)", async (_, fail) => {
-      const fetchMock = vi.fn().mockImplementationOnce(fail).mockImplementation(() => Response.json({ user }));
+      const fetchMock = vi.fn().mockImplementationOnce(fail).mockImplementation(() => Response.json({ user, session: { expiresAt: Date.now() + 60_000 } }));
       vi.stubGlobal("fetch", fetchMock);
       const { response, downstream } = await request("/api/private-action", { cookie, accept: "application/json" }, "POST");
       expect(response.status).toBe(200);
@@ -111,7 +136,7 @@ describe("session lookup failures", () => {
     },
   );
 
-  it.each(["/api/private", "/organizations"])("returns retryable JSON for %s", async (path) => {
+  it.each(["/api/private", "/organizations/cache-probe"])("returns retryable JSON for %s", async (path) => {
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("secret")));
     const { response, downstream } = await request(path, { cookie, accept: "application/json" });
     expect(response.status).toBe(503);
@@ -160,7 +185,7 @@ describe("session lookup failures", () => {
   it("waits for a short Retry-After before recovering", async () => {
     const fetchMock = vi.fn()
       .mockImplementationOnce(() => new Response(null, { status: 429, headers: { "retry-after": "1" } }))
-      .mockImplementation(() => Response.json({ user }));
+      .mockImplementation(() => Response.json({ user, session: { expiresAt: Date.now() + 60_000 } }));
     vi.stubGlobal("fetch", fetchMock);
     const start = Date.now();
     expect((await request()).response.status).toBe(200);
@@ -191,7 +216,7 @@ describe("session lookup failures", () => {
       auth.handler(new Request("http://localhost:3000/api/auth/get-session", init))));
     const fixture = app();
     const headers = login.headers;
-    expect((await fixture.app.request("/organizations", { headers })).status).toBe(200);
+    expect((await fixture.app.request("/organizations/cache-probe", { headers })).status).toBe(200);
     if (state === "expired") {
       await context.internalAdapter.updateSession(login.session.token, { expiresAt: new Date(Date.now() - 1_000) });
     } else if (state === "revoked") {
@@ -199,7 +224,9 @@ describe("session lookup failures", () => {
     } else {
       headers.set("cookie", "better-auth.session_token=invalid-signature");
     }
-    const response = await fixture.app.request("/organizations", { headers });
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(Date.now() + 15_000);
+    const response = await fixture.app.request("/organizations/cache-probe", { headers });
     expect(response.status).toBe(302);
     expect(response.headers.get("location")).toBe("/sign-in");
     expect(logger.warn).not.toHaveBeenCalled();
@@ -228,18 +255,19 @@ describe("session lookup failures", () => {
     vi.stubGlobal("fetch", fetchMock);
     const fixture = app();
     for (let i = 0; i < 2; i++) {
-      expect((await fixture.app.request("/organizations", { headers })).status).toBe(state === "valid" ? 200 : 302);
+      expect((await fixture.app.request("/organizations/cache-probe", { headers })).status).toBe(state === "valid" ? 200 : 302);
     }
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(state === "valid" ? 1 : 2);
     expect(logger.warn).not.toHaveBeenCalled();
   });
 
-  it("checks every request, recognizes secure cookies, and does not reuse a revoked session", async () => {
-    const fetchMock = vi.fn().mockImplementationOnce(() => Response.json({ user })).mockImplementation(() => Response.json(null));
+  it("recognizes secure cookies and stops reusing a revoked session within 15 seconds", async () => {
+    const fetchMock = vi.fn().mockImplementationOnce(() => Response.json({ user, session: { expiresAt: Date.now() + 60_000 } })).mockImplementation(() => Response.json(null));
     vi.stubGlobal("fetch", fetchMock);
     const headers = { cookie: `theme=dark; __Secure-${cookie}`, accept: "text/html" };
-    expect((await request("/organizations", headers)).response.status).toBe(200);
-    expect((await request("/organizations", headers)).response.status).toBe(302);
+    expect((await request("/organizations/cache-probe", headers)).response.status).toBe(200);
+    vi.setSystemTime(Date.now() + 15_000);
+    expect((await request("/organizations/cache-probe", headers)).response.status).toBe(302);
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 });

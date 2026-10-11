@@ -464,6 +464,7 @@ describe("authenticated entry", () => {
           : input.url;
       if (url.includes("/api/auth/get-session")) {
         return Promise.resolve(Response.json({
+          session: { expiresAt: Date.now() + 60_000 },
           user: {
             id: "user_owner",
             email: "owner@gmail.com",

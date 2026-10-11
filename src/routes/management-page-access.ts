@@ -32,6 +32,7 @@ export const managementPageAccess: MiddlewareHandler<{ Variables: { user?: User 
 
   // Pure template rendering is also used by the offline asset build.
   const { CONVEX_SITE_URL } = await import("@/config");
+  const { evictRejectedSession } = await import("@/session-cache");
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 5_000);
   let response: Response, data: AccessData | null;
@@ -59,6 +60,7 @@ export const managementPageAccess: MiddlewareHandler<{ Variables: { user?: User 
   } finally {
     clearTimeout(timeout);
   }
+  await evictRejectedSession(cookie, response.status);
   if (response.status === 401) {
     return c.redirect(`/sign-in?returnTo=${encodeURIComponent(c.req.path)}`);
   }
@@ -82,6 +84,7 @@ export const managementPageAccess: MiddlewareHandler<{ Variables: { user?: User 
     // The backend resolves for the signed-in recipient, without membership.
     if (!data || data.id !== invitationId || (typeof data.email !== "string" || data.email.toLowerCase() !== user.email.toLowerCase())
       || data.status !== "pending" || !data.expiresAt || !(new Date(data.expiresAt).getTime() > Date.now())) {
+      await evictRejectedSession(cookie, 403);
       return c.html(renderNotFoundPage({ path: c.req.path, homeHref: "/organizations?choose=1", homeLabel: "Manage organizations" }), 404);
     }
   } else {

@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { Window } from "happy-dom";
-import { sessionMiddleware } from "@/middleware/session";
+import { sessionCache, sessionMiddleware } from "@/middleware/session";
 import { createHmac } from "node:crypto";
 import { Hono } from "hono";
 import type { User } from "better-auth/types";
@@ -23,6 +23,7 @@ function requestUrl(input: string | URL | Request): string {
 // Real Convex HTTP actions, membership/session helpers and table ID validation.
 // Only transport is replaced; no authorization helper is mocked.
 async function fixture(realSession = false) {
+  sessionCache.clear();
   const backend = convexTest(schema, import.meta.glob("../convex/**/*.ts"));
   backend.registerComponent("betterAuth", authSchema, import.meta.glob("../convex/betterAuth/**/*.ts"));
   const now = Date.now(), token = "management-page-session";

@@ -1,3 +1,4 @@
+import { evictRejectedSession } from "@/session-cache";
 import { assetError, assetHeaders } from "@/routes/asset-headers";
 import { decodeStoragePath, isCanonicalStorageKey, modernStoragePrefix, modernStorageKey } from "@/storage-boundary";
 import { Hono } from "hono";
@@ -36,6 +37,7 @@ async function activeDeployment(
       signal: controller.signal,
       redirect: "manual",
     });
+    await evictRejectedSession(cookie ?? "", response.status);
     if (!response.ok) {
       void response.body?.cancel().catch(() => {});
       // Hide both missing and inaccessible documents without masking outages.

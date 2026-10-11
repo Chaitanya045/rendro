@@ -10,8 +10,10 @@ export const consume = mutation({
   returns: v.number(),
   handler: async (ctx, { key }) => {
     const now = Date.now();
-    // 6,000/minute supports 50 sessions at their full 120/minute allowance.
-    const max = key.startsWith("session-read-ip:") ? 6_000 : 120;
+    // Browsing measures 3 reads/navigation (+1 renewal): even 50/minute
+    // is <=200 reads before caching. 600 leaves 3x uncached headroom.
+    // Keep unverified callers at 120 and the fixed-window IP backstop at 6,000.
+    const max = key.startsWith("session-read-ip:") ? 6_000 : key.startsWith("session-read:") ? 600 : 120;
     const row = await ctx.db.query("rateLimit").withIndex("key", q => q.eq("key", key)).unique();
     if (!row) {
       await ctx.db.insert("rateLimit", { key, count: 1, lastRequest: now });

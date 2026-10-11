@@ -1,3 +1,4 @@
+import { sessionCache } from "@/middleware/session";
 import { createHmac } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { EncryptJWT } from "jose";
@@ -38,9 +39,10 @@ function noStorageReads() {
 }
 
 function backend(email: string, activeKey: string | null) {
+  sessionCache.clear();
   vi.stubGlobal("fetch", vi.fn((input: string | URL | Request) => {
     const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url);
-    if (url.pathname.endsWith("/get-session")) return Promise.resolve(Response.json({ user: { ...testUser, email } }));
+    if (url.pathname.endsWith("/get-session")) return Promise.resolve(Response.json({ user: { ...testUser, email }, session: { expiresAt: Date.now() + 60_000 } }));
     return Promise.resolve(activeKey ? Response.json({ project: { name: "Docs" }, deployment: { manifestKey: activeKey } }) : new Response(null, { status: 403 }));
   }));
 }
