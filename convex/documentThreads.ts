@@ -84,9 +84,9 @@ export const list = query({
     paginationOpts: paginationOptsValidator,
   },
   handler: async (ctx, input) => {
+    const authorized = await requireOrganizationMember(ctx, input.organizationId);
     const args = { ...input, projectId: requireId(ctx, "projects", input.projectId) };
     assertValidPageSize(args.paginationOpts.numItems);
-    const authorized = await requireOrganizationMember(ctx, args.organizationId);
     const project = await ctx.db.get(args.projectId);
     if (!project || project.organizationId !== args.organizationId) {
       throw new ConvexError("Project not found");
@@ -156,8 +156,8 @@ export const create = mutation({
     anchor: anchorValidator,
   },
   handler: async (ctx, input) => {
+    const authorized = await requireOrganizationMember(ctx, input.organizationId);
     const args = { ...input, projectId: requireId(ctx, "projects", input.projectId) };
-    const authorized = await requireOrganizationMember(ctx, args.organizationId);
     const project = await ctx.db.get(args.projectId);
     if (!project || project.organizationId !== args.organizationId) {
       throw new ConvexError("Project not found");
@@ -187,13 +187,13 @@ export const create = mutation({
 export const resolve = mutation({
   args: threadScopeArgs,
   handler: async (ctx, input) => {
+    await requireOrganizationMember(ctx, input.organizationId);
     const threadId = requireId(ctx, "documentThreads", input.threadId);
     const scope = { ...input, projectId: requireId(ctx, "projects", input.projectId) };
     const thread = await ctx.db.get(threadId);
     if (!thread || thread.deletedAt !== undefined || !threadMatchesScope(thread, scope)) {
       throw new ConvexError("Comment not found");
     }
-    await requireOrganizationMember(ctx, thread.organizationId);
     await ctx.db.patch(threadId, { resolved: !thread.resolved, updatedAt: Date.now() });
   },
 });
@@ -201,13 +201,13 @@ export const resolve = mutation({
 export const archive = mutation({
   args: threadScopeArgs,
   handler: async (ctx, input) => {
+    const authorized = await requireOrganizationMember(ctx, input.organizationId);
     const threadId = requireId(ctx, "documentThreads", input.threadId);
     const scope = { ...input, projectId: requireId(ctx, "projects", input.projectId) };
     const thread = await ctx.db.get(threadId);
     if (!thread || thread.deletedAt !== undefined || !threadMatchesScope(thread, scope)) {
       throw new ConvexError("Comment not found");
     }
-    const authorized = await requireOrganizationMember(ctx, thread.organizationId);
     requireCommentAuthorOrAdmin(authorized, thread.authorId);
     await ctx.db.patch(threadId, { archived: !thread.archived, updatedAt: Date.now() });
   },
@@ -216,11 +216,11 @@ export const archive = mutation({
 export const remove = mutation({
   args: threadScopeArgs,
   handler: async (ctx, input) => {
+    const authorized = await requireOrganizationMember(ctx, input.organizationId);
     const threadId = requireId(ctx, "documentThreads", input.threadId);
     const scope = { ...input, projectId: requireId(ctx, "projects", input.projectId) };
     const thread = await ctx.db.get(threadId);
     if (!thread || !threadMatchesScope(thread, scope)) throw new ConvexError("Comment not found");
-    const authorized = await requireOrganizationMember(ctx, thread.organizationId);
     requireCommentAuthorOrAdmin(authorized, thread.authorId);
     if (thread.deletedAt === undefined) await ctx.db.patch(threadId, { deletedAt: Date.now() });
     await ctx.scheduler.runAfter(0, internal.documentThreads.cleanupDeletedThread, { threadId });

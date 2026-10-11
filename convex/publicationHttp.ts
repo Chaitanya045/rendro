@@ -1,7 +1,7 @@
 import type { GenericActionCtx } from "convex/server";
 import type { DataModel } from "./_generated/dataModel";
 import { internal } from "./_generated/api";
-import { httpAction, failure } from "./httpErrors";
+import { httpAction, failure, clientFailure, isApplicationError } from "./httpErrors";
 import { authorizeHttpOrganization } from "./authorization";
 import { validateApiCredential } from "./credentialHttp";
 
@@ -29,15 +29,16 @@ async function publicationPrincipal(
       input.write ? ["owner", "admin"] : undefined,
     );
     return { actorId: user._id };
-  } catch {
+  } catch (error) {
+    if (!isApplicationError(error)) throw error;
     return null;
   }
 }
 
 export const createPublication = httpAction(async (ctx: GenericActionCtx<DataModel>, request: Request) => {
   let body: unknown;
-  try { body = await request.json(); } catch { return failure("Invalid JSON body"); }
-  if (!body || typeof body !== "object") return failure("Invalid publication body");
+  try { body = await request.json(); } catch { return clientFailure("Invalid JSON body"); }
+  if (!body || typeof body !== "object") return clientFailure("Invalid publication body");
   const value = (name: string): unknown => name in body ? body[name as keyof typeof body] : undefined;
   const organizationId = value("organizationId");
   const projectId = value("projectId");
@@ -58,14 +59,14 @@ export const createPublication = httpAction(async (ctx: GenericActionCtx<DataMod
     || (pinnedDeploymentId !== undefined && typeof pinnedDeploymentId !== "string")
     || (title !== undefined && typeof title !== "string")
     || (description !== undefined && typeof description !== "string")
-  ) return failure("Invalid publication fields");
+  ) return clientFailure("Invalid publication fields");
   const principal = await publicationPrincipal(ctx, request, {
     organizationId,
     projectId,
     scope: "publications:write",
     write: true,
   });
-  if (!principal) return failure("Invalid or insufficient principal", 403);
+  if (!principal) return clientFailure("Invalid or insufficient principal", 403);
   try {
     const publication = await ctx.runMutation(internal.publicationsV2.createInternal, {
       organizationId,
@@ -81,7 +82,7 @@ export const createPublication = httpAction(async (ctx: GenericActionCtx<DataMod
     });
     return Response.json({ publication, url: publication ? `/p/${publication.slug}` : null }, { status: 201 });
   } catch (error: unknown) {
-    return failure(error);
+    return failure(error, 400, "createPublication");
   }
 });
 
@@ -89,14 +90,14 @@ export const listPublications = httpAction(async (ctx: GenericActionCtx<DataMode
   const url = new URL(request.url);
   const organizationId = url.searchParams.get("organizationId");
   const projectId = url.searchParams.get("projectId") ?? undefined;
-  if (!organizationId) return failure("organizationId is required");
+  if (!organizationId) return clientFailure("organizationId is required");
   const principal = await publicationPrincipal(ctx, request, {
     organizationId,
     projectId,
     scope: "publications:read",
     write: false,
   });
-  if (!principal) return failure("Invalid or insufficient principal", 403);
+  if (!principal) return clientFailure("Invalid or insufficient principal", 403);
   const publications = await ctx.runQuery(internal.publicationsV2.listInternal, {
     organizationId,
     projectId,
@@ -106,13 +107,13 @@ export const listPublications = httpAction(async (ctx: GenericActionCtx<DataMode
 
 export const removePublication = httpAction(async (ctx: GenericActionCtx<DataModel>, request: Request) => {
   let body: unknown;
-  try { body = await request.json(); } catch { return failure("Invalid JSON body"); }
-  if (!body || typeof body !== "object") return failure("Invalid publication body");
+  try { body = await request.json(); } catch { return clientFailure("Invalid JSON body"); }
+  if (!body || typeof body !== "object") return clientFailure("Invalid publication body");
   const organizationId = "organizationId" in body ? body.organizationId : undefined;
   const projectId = "projectId" in body ? body.projectId : undefined;
   const publicationId = "publicationId" in body ? body.publicationId : undefined;
   if (typeof organizationId !== "string" || typeof projectId !== "string" || typeof publicationId !== "string") {
-    return failure("organizationId, projectId, and publicationId are required");
+    return clientFailure("organizationId, projectId, and publicationId are required");
   }
   const principal = await publicationPrincipal(ctx, request, {
     organizationId,
@@ -120,7 +121,7 @@ export const removePublication = httpAction(async (ctx: GenericActionCtx<DataMod
     scope: "publications:write",
     write: true,
   });
-  if (!principal) return failure("Invalid or insufficient principal", 403);
+  if (!principal) return clientFailure("Invalid or insufficient principal", 403);
   await ctx.runMutation(internal.publicationsV2.removeInternal, {
     organizationId,
     projectId,
@@ -132,8 +133,8 @@ export const removePublication = httpAction(async (ctx: GenericActionCtx<DataMod
 
 export const resolvePublicPublication = httpAction(async (ctx: GenericActionCtx<DataModel>, request: Request) => {
   const slug = new URL(request.url).searchParams.get("slug");
-  if (!slug) return failure("slug is required");
+  if (!slug) return clientFailure("slug is required");
   const result = await ctx.runQuery(internal.publicationsV2.resolvePublicInternal, { slug });
-  if (!result) return failure("Publication not found", 404);
+  if (!result) return clientFailure("Publication not found", 404);
   return Response.json(result);
 });

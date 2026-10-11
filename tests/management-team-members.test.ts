@@ -1,3 +1,4 @@
+import { ConvexError } from "convex/values";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({ authorize: vi.fn(), findOne: vi.fn(), findMany: vi.fn(), query: vi.fn() }));
 vi.mock("../convex/authorization", () => ({ authorizeHttpOrganization: mocks.authorize, httpOrganizationAccess: vi.fn() }));
@@ -11,7 +12,7 @@ describe("management team roster", () => {
   it("keeps duplicate-project errors readable without backend stack traces", async () => {
     mocks.authorize.mockResolvedValue({ user: { _id: "user-a" } });
     const create = (createProject as unknown as { _handler: (ctx: unknown, request: Request) => Promise<Response> })._handler;
-    const response = await create({ runMutation: vi.fn().mockRejectedValue(new Error("Uncaught ConvexError: A project with this slug already exists\n    at handler (../convex/projects.ts:49:54)")) }, new Request("https://rendro.test/api/rendro/projects", { method: "POST", body: JSON.stringify({ organizationId: "org-a", name: "Docs", slug: "docs" }) }));
+    const response = await create({ runMutation: vi.fn().mockRejectedValue(Object.assign(new ConvexError("A project with this slug already exists"), { message: "Uncaught ConvexError: A project with this slug already exists\n    at handler (../convex/projects.ts:49:54)" })) }, new Request("https://rendro.test/api/rendro/projects", { method: "POST", body: JSON.stringify({ organizationId: "org-a", name: "Docs", slug: "docs" }) }));
     expect(response.status).toBe(400);
     expect(await response.json()).toEqual({ error: "A project with this slug already exists" });
   });
@@ -35,12 +36,14 @@ describe("management team roster", () => {
     expect(mocks.query).toHaveBeenCalledTimes(1);
   });
   it("fails closed for unauthorized callers", async () => {
-    mocks.authorize.mockRejectedValue(new Error("Insufficient organization role"));
+    mocks.authorize.mockRejectedValue(new ConvexError("Insufficient organization role"));
     expect((await handler(ctx, request())).status).toBe(403);
     expect(mocks.query).not.toHaveBeenCalled();
   });
   it("fails closed when the cursor query fails", async () => {
     mocks.query.mockRejectedValue(new Error("Invalid cursor"));
-    expect((await handler(ctx, request("&cursor=invalid"))).status).toBe(400);
+    const response = await handler(ctx, request("&cursor=invalid"));
+    expect(response.status).toBe(500);
+    expect(await response.json()).toEqual({ error: "Request failed" });
   });
 });

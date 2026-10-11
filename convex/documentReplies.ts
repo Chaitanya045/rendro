@@ -26,6 +26,7 @@ export const list = query({
     paginationOpts: paginationOptsValidator,
   },
   handler: async (ctx, input) => {
+    const authorized = await requireOrganizationMember(ctx, input.organizationId);
     const args = {
       ...input,
       projectId: requireId(ctx, "projects", input.projectId),
@@ -44,7 +45,6 @@ export const list = query({
       || thread.projectId !== args.projectId
       || thread.documentPath !== args.documentPath
     ) throw new ConvexError("Comment not found");
-    const authorized = await requireOrganizationMember(ctx, thread.organizationId);
     const repliesPage = await ctx.db
       .query("documentReplies")
       .withIndex("by_thread", (index) => index.eq("threadId", args.threadId))
@@ -81,6 +81,7 @@ export const add = mutation({
     body: v.string(),
   },
   handler: async (ctx, input) => {
+    const authorized = await requireOrganizationMember(ctx, input.organizationId);
     const args = {
       ...input,
       projectId: requireId(ctx, "projects", input.projectId),
@@ -94,7 +95,6 @@ export const add = mutation({
       || thread.projectId !== args.projectId
       || thread.documentPath !== args.documentPath
     ) throw new ConvexError("Comment not found");
-    const authorized = await requireOrganizationMember(ctx, thread.organizationId);
     const body = args.body.trim();
     if (!body || body.length > 10_000) throw new ConvexError("Reply body is invalid");
     const now = Date.now();
@@ -113,12 +113,16 @@ export const add = mutation({
 export const remove = mutation({
   args: {
     organizationId: v.string(),
-    projectId: v.id("projects"),
+    projectId: v.string(),
     documentPath: v.string(),
-    threadId: v.id("documentThreads"),
-    replyId: v.id("documentReplies"),
+    threadId: v.string(),
+    replyId: v.string(),
   },
-  handler: async (ctx, { replyId, threadId, ...scope }) => {
+  handler: async (ctx, input) => {
+    const authorized = await requireOrganizationMember(ctx, input.organizationId);
+    const replyId = requireId(ctx, "documentReplies", input.replyId);
+    const threadId = requireId(ctx, "documentThreads", input.threadId);
+    const scope = { ...input, projectId: requireId(ctx, "projects", input.projectId) };
     const thread = await ctx.db.get(threadId);
     const reply = await ctx.db.get(replyId);
     if (
@@ -131,7 +135,6 @@ export const remove = mutation({
       || reply.threadId !== threadId
       || reply.organizationId !== thread.organizationId
     ) throw new ConvexError("Comment not found");
-    const authorized = await requireOrganizationMember(ctx, thread.organizationId);
     requireCommentAuthorOrAdmin(authorized, reply.authorId);
     await ctx.db.delete(replyId);
   },

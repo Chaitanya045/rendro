@@ -1,5 +1,6 @@
 import { httpRouter } from "convex/server";
-import { httpAction } from "./_generated/server";
+import { APIError } from "better-auth/api";
+import { httpAction, failure } from "./httpErrors";
 import { createAuth } from "./auth";
 import {
   createProject,
@@ -60,7 +61,8 @@ const setInitialPasswordHandler = httpAction(async (ctx, request) => {
       headers: request.headers,
     });
     return Response.json({ status: true });
-  } catch {
+  } catch (error) {
+    if (!(error instanceof APIError) || error.statusCode >= 500) return failure(error, 400, "setInitialPassword");
     return Response.json(
       { error: "Unable to set password. Sign in again and retry." },
       { status: 400 },

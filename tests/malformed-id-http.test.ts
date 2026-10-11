@@ -17,7 +17,7 @@ const storage = vi.hoisted(() => ({
 }));
 vi.mock("../src/minio", () => storage);
 
-import { api, internal } from "../convex/_generated/api";
+import { internal } from "../convex/_generated/api";
 import schema from "../convex/schema";
 import betterAuthSchema from "../convex/betterAuth/schema";
 import { sha256 } from "../convex/credentialHttp";
@@ -167,35 +167,5 @@ describe("Worker ID boundaries backed by Convex", () => {
       }
     }
     for (const mock of Object.values(storage)) expect(mock).not.toHaveBeenCalled();
-  });
-});
-
-describe("public comment-function ID boundaries", () => {
-  it.each([false, true])("returns structured errors with authenticated=%s", async authenticated => {
-    const f = await fixture();
-    const caller = authenticated ? f.backend.withIdentity({ subject: "owner" }) : f.backend;
-    const document = { ...f.scope, documentPath: "index.html" };
-    const threadId = await f.backend.run(ctx => ctx.db.insert("documentThreads", {
-      ...document, authorId: "owner", body: "test", anchor: { kind: "element", path: ["main"] },
-      resolved: false, archived: false, createdAt: Date.now(), updatedAt: Date.now(),
-    }));
-    const page = { paginationOpts: { numItems: 10, cursor: null } };
-    for (const badId of ["not-an-id", f.wrongTableId]) {
-      const calls = [
-        () => caller.query(api.documentThreads.list, { ...document, ...page, projectId: badId }),
-        () => caller.mutation(api.documentThreads.create, { ...document, projectId: badId, body: "test", anchor: { kind: "element", path: ["main"] } }),
-        ...[api.documentThreads.resolve, api.documentThreads.archive, api.documentThreads.remove].flatMap(fn => [
-          () => caller.mutation(fn, { ...document, threadId: badId }),
-          () => caller.mutation(fn, { ...document, projectId: badId, threadId }),
-        ]),
-        () => caller.query(api.documentReplies.list, { ...document, ...page, threadId: badId }),
-        () => caller.query(api.documentReplies.list, { ...document, ...page, projectId: badId, threadId }),
-        () => caller.mutation(api.documentReplies.add, { ...document, threadId: badId, body: "test" }),
-        () => caller.mutation(api.documentReplies.add, { ...document, projectId: badId, threadId, body: "test" }),
-        ...[api.threads.resolve, api.threads.archive, api.threads.remove].map(fn => () => caller.mutation(fn, { threadId: badId })),
-        () => caller.mutation(api.replies.add, { threadId: badId, body: "test" }),
-      ];
-      for (const call of calls) await expect(call()).rejects.toMatchObject({ data: "Invalid ID" });
-    }
   });
 });

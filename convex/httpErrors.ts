@@ -1,23 +1,34 @@
 import { ConvexError } from "convex/values";
 import { httpAction as registerHttpAction } from "./_generated/server";
 
-// Only explicit application errors are safe to expose. Error.message from a
-// nested Convex call includes server stack locations, even for client mistakes.
-export function failure(error: unknown, status = 400): Response {
-  if (typeof error === "string") return Response.json({ error }, { status });
-  if (error instanceof ConvexError && typeof error.data === "string") {
+// Use only for messages authored by the handler, never caught exceptions.
+export function clientFailure(message: string, status = 400): Response {
+  return Response.json({ error: message }, { status });
+}
+
+export function isApplicationError(error: unknown): error is ConvexError<string> {
+  return error instanceof ConvexError && typeof error.data === "string";
+}
+
+// ConvexError is the explicit application-error contract across function calls.
+// The supplied status applies ONLY to those errors, never infrastructure faults.
+export function failure(error: unknown, applicationStatus = 400, operation = "httpAction"): Response {
+  if (isApplicationError(error)) {
     const message = error.data;
     const code = message === "Invalid ID" ? 400
       : /authentication|membership|role/i.test(message) ? 403
-      : status >= 500 ? 400 : status;
-    return Response.json({ error: message }, { status: code });
+      : applicationStatus >= 500 ? 400 : applicationStatus;
+    return clientFailure(message, code);
   }
-  console.error("HTTP request failed", error);
-  return Response.json({ error: "Request failed" }, { status });
+  // Arbitrary exception messages, stacks, and objects may contain credentials or
+  // request data. Log only fixed categories and the caller's static operation.
+  const category = error instanceof TypeError ? "TypeError"
+    : error instanceof RangeError ? "RangeError"
+    : error instanceof Error ? "Error" : "Unknown";
+  console.error("HTTP request failed", { operation, category });
+  return Response.json({ error: "Request failed" }, { status: 500 });
 }
 
-// HTTP actions do not have database access; their queries/mutations normalize
-// client IDs. Catch their structured errors at the outer HTTP boundary too.
 export const httpAction = (handler: Parameters<typeof registerHttpAction>[0]) =>
   registerHttpAction(async (ctx, request) => {
     try {

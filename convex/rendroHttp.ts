@@ -1,5 +1,5 @@
 import { components, internal } from "./_generated/api";
-import { httpAction, failure } from "./httpErrors";
+import { httpAction, failure, isApplicationError } from "./httpErrors";
 import { authorizeHttpOrganization, httpOrganizationAccess } from "./authorization";
 import { createAuth } from "./auth";
 
@@ -17,7 +17,7 @@ export const managementMembers = httpAction(async (ctx, request) => {
     const byId = new Map(users.map(user => [user.id, user]));
     const members = page.map(member => { const user = byId.get(member.userId); return { id: member._id, userId: member.userId, role: member.role, createdAt: member.createdAt, user: user ? { id: user.id, name: user.name, email: user.email } : null }; });
     return Response.json({ members, nextCursor: result.isDone ? null : result.continueCursor }, { headers });
-  } catch (error) { const forbidden = error instanceof Error && /authentication|membership|required|role/i.test(error.message); return Response.json({ error: "Unable to load organization members" }, { status: forbidden ? 403 : 503, headers }); }
+  } catch (error) { const response = failure(error, 403, "managementMembers"); response.headers.set("Cache-Control", headers["Cache-Control"]); return response; }
 });
 
 // Native Better Auth roster reads require the caller to belong to the team.
@@ -46,15 +46,17 @@ export const managementAccess = httpAction(async (ctx, request) => {
     const { organization, member, userId } = await httpOrganizationAccess(ctx, request.headers, organizationId);
     return Response.json({ id: organization.id, name: organization.name, slug: organization.slug, userId, member: { id: member.id, userId: member.userId, role: member.role } }, { headers });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "";
-    const status = message.includes("Authentication required") ? 401 : message.includes("membership required") ? 403 : 503;
-    return Response.json({ error: status === 503 ? "Unable to verify organization access" : status === 401 ? "Authentication required" : "Organization membership required" }, { status, headers });
+    const response = failure(error, 403, "managementAccess");
+    if (isApplicationError(error) && error.data === "Authentication required") {
+      return Response.json({ error: error.data }, { status: 401, headers });
+    }
+    response.headers.set("Cache-Control", headers["Cache-Control"]);
+    return response;
   }
 });
 
 function jsonError(error: unknown, fallbackStatus = 400): Response {
-  const unauthorized = error instanceof Error && /authentication|required|membership|role/i.test(error.message);
-  return failure(error, unauthorized ? 403 : fallbackStatus);
+  return failure(error, fallbackStatus, "organizationManagement");
 }
 
 function organizationIdFrom(request: Request): string | null {
@@ -114,11 +116,6 @@ export const createProject = httpAction(async (ctx, request) => {
     });
     return Response.json({ project }, { status: 201 });
   } catch (error: unknown) {
-    // Convex wraps validation failures with stack locations. Show only the
-    // allowlisted user-facing validation message, never that server wrapper.
-    const message = error instanceof Error ? error.message : "";
-    const validation = ["A project with this slug already exists", "Project name must be 1–80 characters", "Project slug must contain lowercase letters, numbers, and hyphens"].find(value => message.includes(value));
-    if (validation) return Response.json({ error: validation }, { status: 400 });
     return jsonError(error);
   }
 });

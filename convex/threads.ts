@@ -1,8 +1,8 @@
 import { requireId } from "./ids";
 import { query, mutation } from "./_generated/server";
-import { v } from "convex/values";
+import { ConvexError, v } from "convex/values";
 import { anchorValidator } from "./schema";
-import { requireOrgIdentity } from "./security";
+import { requireIdentity, orgSlugFromEmail, requireOrgIdentity } from "./security";
 
 // List all threads for a file with their replies attached (flat).
 export const list = query({
@@ -55,10 +55,10 @@ export const create = mutation({
 export const resolve = mutation({
   args: { threadId: v.string() },
   handler: async (ctx, input) => {
+    const identity = await requireIdentity(ctx);
     const threadId = requireId(ctx, "threads", input.threadId);
     const t = await ctx.db.get(threadId);
-    if (!t) throw new Error("thread not found");
-    await requireOrgIdentity(ctx, t.orgSlug);
+    if (!t || orgSlugFromEmail(identity.email) !== t.orgSlug) throw new ConvexError("Comment not found");
     await ctx.db.patch(threadId, { resolved: !t.resolved });
   },
 });
@@ -67,10 +67,10 @@ export const resolve = mutation({
 export const archive = mutation({
   args: { threadId: v.string() },
   handler: async (ctx, input) => {
+    const identity = await requireIdentity(ctx);
     const threadId = requireId(ctx, "threads", input.threadId);
     const t = await ctx.db.get(threadId);
-    if (!t) throw new Error("thread not found");
-    await requireOrgIdentity(ctx, t.orgSlug);
+    if (!t || orgSlugFromEmail(identity.email) !== t.orgSlug) throw new ConvexError("Comment not found");
     await ctx.db.patch(threadId, { archived: !(t.archived ?? false) });
   },
 });
@@ -79,10 +79,10 @@ export const archive = mutation({
 export const remove = mutation({
   args: { threadId: v.string() },
   handler: async (ctx, input) => {
+    const identity = await requireIdentity(ctx);
     const threadId = requireId(ctx, "threads", input.threadId);
     const thread = await ctx.db.get(threadId);
-    if (!thread) throw new Error("thread not found");
-    await requireOrgIdentity(ctx, thread.orgSlug);
+    if (!thread || orgSlugFromEmail(identity.email) !== thread.orgSlug) throw new ConvexError("Comment not found");
     const replies = await ctx.db
       .query("replies")
       .withIndex("by_thread", (q) => q.eq("threadId", threadId))

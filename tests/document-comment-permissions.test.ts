@@ -151,8 +151,9 @@ describe("project comment permissions", () => {
       { ...scope, organizationId: data.otherOrgId },
       { ...scope, projectId: otherProjectId },
     ]) {
-      await expect(viewers.admin.mutation(api.documentThreads.remove, { ...wrongScope, threadId })).rejects.toThrow("Comment not found");
-      await expect(viewers.admin.mutation(api.documentReplies.remove, { ...wrongScope, threadId, replyId })).rejects.toThrow("Comment not found");
+      const error = wrongScope.organizationId === scope.organizationId ? "Comment not found" : "Organization membership required";
+      await expect(viewers.admin.mutation(api.documentThreads.remove, { ...wrongScope, threadId })).rejects.toThrow(error);
+      await expect(viewers.admin.mutation(api.documentReplies.remove, { ...wrongScope, threadId, replyId })).rejects.toThrow(error);
     }
     await expect(viewers.admin.mutation(api.documentReplies.remove, {
       ...scope, threadId: otherThreadId, replyId,
