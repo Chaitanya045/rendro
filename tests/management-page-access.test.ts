@@ -120,7 +120,7 @@ afterEach(async () => { vi.useRealTimers(); vi.unstubAllGlobals(); for (const wi
 describe.each(pages)("$name management page authorization", page => {
   it("resolves members once and makes all inaccessible IDs indistinguishable", async () => {
     const f = await fixture();
-    const headers = { Cookie: f.cookie, Authorization: "Bearer ignored-by-page-auth" };
+    const headers = { Cookie: `${f.cookie}; better-auth.session_data=malformed; __Secure-better-auth.session_data.0=malformed`, Authorization: "Bearer ignored-by-page-auth" };
     const validPath = path(page, f.organizationId, f.projectId);
     for (const role of ["owner", "admin", "member", "member, admin"]) {
       await f.role(role);

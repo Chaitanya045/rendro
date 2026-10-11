@@ -2,6 +2,18 @@ import type { BetterAuthPlugin } from "better-auth";
 import { APIError, createAuthMiddleware } from "better-auth/api";
 import { AUTH_CLIENT_IP_HEADER } from "../shared/auth-client-ip";
 
+/** Convex returns epoch milliseconds; other adapters may return Dates/ISO strings. */
+export function sessionExpiryMs(value: unknown): number {
+  try {
+    const ms = value instanceof Date ? value.getTime()
+      : typeof value === "number" ? value
+        : typeof value === "string" ? Date.parse(value) : NaN;
+    return Number.isFinite(ms) && Number.isFinite(new Date(ms).getTime()) ? ms : 0;
+  } catch {
+    return 0;
+  }
+}
+
 /** HTTP session reads only: internal authorization still reads persisted sessions. */
 export function sessionReadLimit(consume: (key: string) => Promise<number>): BetterAuthPlugin {
   return {
@@ -21,9 +33,23 @@ export function sessionReadLimit(consume: (key: string) => Promise<number>): Bet
         // Only the configured session-token cookie is eligible. OAuth state uses
         // the same HMAC secret, so a signature alone is not proof of a session.
         const token = await ctx.getSignedCookie(ctx.context.authCookies.sessionToken.name, ctx.context.secret);
-        const persisted = token ? await ctx.context.internalAdapter.findSession(token) : null;
+        const adapter = ctx.context.internalAdapter;
+        const persisted = token ? await adapter.findSession(token) : null;
+        const expiresAt = sessionExpiryMs(persisted?.session.expiresAt);
+        const resolved = persisted ? {
+          ...persisted,
+          session: { ...persisted.session, expiresAt: new Date(expiresAt) },
+        } : null;
+        // Better Auth clones context per endpoint dispatch, but its adapter is
+        // shared. Replace that reference, never mutate the shared adapter. The
+        // endpoint's unconditional findSession consumes this result (even null).
+        // Other tokens still resolve normally; the next HTTP request reads anew.
+        ctx.context.internalAdapter = {
+          ...adapter,
+          findSession: async (candidate) => candidate === token ? resolved : adapter.findSession(candidate),
+        };
         let key: string;
-        if (token && persisted && persisted.session.expiresAt.getTime() > Date.now()) {
+        if (token && persisted && expiresAt > Date.now()) {
           // Hash the decoded token, keeping the bucket stable across encodings
           // and IP changes without storing raw credentials in limiter keys.
           const hash = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(token));

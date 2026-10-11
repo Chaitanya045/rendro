@@ -26,7 +26,8 @@ export const managementPageAccess: MiddlewareHandler<{ Variables: { user?: User 
     ? `/api/auth/organization/get-invitation?${new URLSearchParams({ id: invitationId })}`
     : `/api/rendro/${projectId === undefined ? "management/access" : "projects/get"}?${query}`;
   const headers = new Headers({ Accept: "application/json" });
-  const cookie = c.req.header("Cookie");
+  const { viewerSessionCookie } = await import("@/viewer-ticket");
+  const cookie = viewerSessionCookie(c.req.header("Cookie") ?? "");
   if (cookie) headers.set("Cookie", cookie);
 
   // Pure template rendering is also used by the offline asset build.
