@@ -126,9 +126,59 @@ describe("private sandbox asset routing", () => {
       const body = await response.text();
       expect(body).not.toMatch(/secret|Document unavailable/);
       if (route === "tree" || route === "renewal") expect(JSON.parse(body).retryable).toBe(true);
+      else if (route === "ticket") expect(body).toBe("Service unavailable");
       else expect(body).toContain('href="">Try again</a>');
     }
     expect(f.objects).not.toHaveBeenCalled();
+  });
+
+  describe.each(["ticket", "canonical"])("%s retryable asset failures", route => {
+    it.each([
+      ["assets/image.png", "image/avif,image/webp,*/*;q=0.8"],
+      ["assets/font.woff2", "font/woff2"],
+      ["assets/site.css", "text/css,*/*;q=0.1"],
+      ["assets/module.js", "*/*"],
+      ["image", "image/png"], ["font", "font/woff2"],
+      ["stylesheet", "text/css"], ["script", "application/javascript"],
+    ])("returns plain 503 for %s (%s)", async (path, accept) => {
+      const f = await fixture();
+      const { url } = await f.document();
+      f.state.failActive = () => new Response("secret upstream diagnostics", {
+        status: 503, headers: { "Retry-After": "9" },
+      });
+      f.objects.mockClear();
+      const target = route === "ticket" ? new URL(path, url).href : `${base}/files/guide/${path}`;
+      const response = await f.app.request(target, { headers: {
+        Accept: accept, ...(route === "canonical" ? { Cookie: f.cookie } : {}),
+      } });
+      expect(response.status).toBe(503);
+      expect(response.headers.get("Content-Type")).toBe("text/plain; charset=UTF-8");
+      expect(response.headers.get("Retry-After")).toBe("9");
+      expect(response.headers.get("Cache-Control")).toBe("private, no-store");
+      expect(response.headers.get("X-Content-Type-Options")).toBe("nosniff");
+      expect(response.headers.get("Access-Control-Allow-Origin")).toBeNull();
+      expect(await response.text()).toBe("Service unavailable");
+      expect(f.objects).not.toHaveBeenCalled();
+    });
+
+    it("keeps the styled 503 page for HTML document requests", async () => {
+      const f = await fixture();
+      const { url } = await f.document();
+      f.state.failActive = () => new Response(null, { status: 503, headers: { "Retry-After": "9" } });
+      const target = route === "ticket" ? url.href : `${base}/files/guide/index.html`;
+      const response = await f.app.request(target, { headers: {
+        Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+        ...(route === "canonical" ? { Cookie: f.cookie } : {}),
+      } });
+      expect(response.status).toBe(503);
+      expect(response.headers.get("Content-Type")).toContain("text/html");
+      expect(response.headers.get("Retry-After")).toBe("9");
+      expect(response.headers.get("Cache-Control")).toBe("private, no-store");
+      expect(response.headers.get("X-Content-Type-Options")).toBe("nosniff");
+      const body = await response.text();
+      expect(body).toContain("<!DOCTYPE html>");
+      expect(body).toContain('href="">Try again</a>');
+    });
   });
 
   it.each(routes)("reserves 404 for authoritative absence/denial on %s", async route => {

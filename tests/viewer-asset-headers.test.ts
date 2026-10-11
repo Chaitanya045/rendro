@@ -84,6 +84,7 @@ describe.each(["public", "share", "private ticket", "private cookie"])("%s asset
       expect(result.status).toBe(404);
       expect(result.headers.get("Content-Type")).toBe("text/plain; charset=UTF-8");
       expect(result.headers.get("X-Content-Type-Options")).toBe("nosniff");
+      expect(result.headers.get("Cache-Control")).toBe("private, no-store");
       expect(await result.text()).toBe("Not found");
     }
     const document = await app.request(viewer.prefix + "missing.html", { headers: { ...headers, Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8" } });
@@ -100,4 +101,29 @@ it("preserves a forbidden status for plain asset errors", async () => {
   expect(result.status).toBe(403);
   expect(result.headers.get("X-Content-Type-Options")).toBe("nosniff");
   expect(await result.text()).toBe("Forbidden");
+});
+
+it.each([400, 401, 403, 404, 429, 500, 502, 503, 504] as const)("preserves status %s and retry headers without caching asset errors", async status => {
+  const app = new Hono();
+  const html = vi.fn(() => "<!DOCTYPE html><h1>Temporarily unavailable</h1>");
+  app.get("/*", c => {
+    c.header("Cache-Control", "public, max-age=3600");
+    c.header("Retry-After", "9");
+    return assetError(c, html, status);
+  });
+  for (const path of ["image.png", "font.woff2", "style.css", "script.js"]) {
+    const response = await app.request(`/${path}`);
+    expect(response.status).toBe(status);
+    expect(response.headers.get("Content-Type")).toBe("text/plain; charset=UTF-8");
+    expect(response.headers.get("Retry-After")).toBe("9");
+    expect(response.headers.get("Cache-Control")).toBe("private, no-store");
+    expect(response.headers.get("X-Content-Type-Options")).toBe("nosniff");
+    expect(await response.text()).not.toMatch(/<[^>]+>/);
+  }
+  expect(html).not.toHaveBeenCalled();
+  const document = await app.request("/index.html", { headers: { Accept: "text/html,image/webp,*/*" } });
+  expect(document.status).toBe(status);
+  expect(document.headers.get("Content-Type")).toContain("text/html");
+  expect(document.headers.get("Cache-Control")).toBe("private, no-store");
+  expect(await document.text()).toContain("<!DOCTYPE html>");
 });

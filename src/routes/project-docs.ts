@@ -23,10 +23,11 @@ function inlineJson(value: unknown): string {
 
 type DeploymentUnavailable = { unavailable: true; retryAfter: string };
 
-function unavailableResponse(c: Context, failure: DeploymentUnavailable, json = false) {
+function unavailableResponse(c: Context, failure: DeploymentUnavailable, representation: "html" | "json" | "asset" = "html") {
   c.header("Cache-Control", "private, no-store");
   c.header("Retry-After", failure.retryAfter);
-  return json
+  if (representation === "asset") return assetError(c, renderSessionUnavailablePage, 503);
+  return representation === "json"
     ? c.json({ error: "Document temporarily unavailable", retryable: true }, 503)
     : c.html(renderSessionUnavailablePage(), 503);
 }
@@ -123,7 +124,7 @@ app.get("/organizations/:organizationId/projects/:projectId/docs/tree", async (c
   const organizationId = c.req.param("organizationId");
   const projectId = c.req.param("projectId");
   const active = await activeDeployment(organizationId, projectId, c.req.header("Cookie"));
-  if (active && "unavailable" in active) return unavailableResponse(c, active, true);
+  if (active && "unavailable" in active) return unavailableResponse(c, active, "json");
   if (!active) return c.json({ error: "Not found" }, 404);
   const manifest = await activeManifest(active);
   if (!manifest) return c.json({ error: "Manifest unavailable" }, 404);
@@ -144,7 +145,7 @@ app.get("/organizations/:organizationId/projects/:projectId/docs/viewer-ticket",
   const cookie = viewerSessionCookie(c.req.header("Cookie") ?? "");
   if (!cookie) return c.json({ error: "Authentication required" }, 401);
   const active = await activeDeployment(organizationId, projectId, cookie);
-  if (active && "unavailable" in active) return unavailableResponse(c, active, true);
+  if (active && "unavailable" in active) return unavailableResponse(c, active, "json");
   const manifestKey = c.req.query("manifestKey");
   if (!active || !manifestKey || !modernStoragePrefix({ organizationId, projectId, manifestKey })) {
     return c.json({ error: "Not found" }, 404);
@@ -179,7 +180,7 @@ app.on("GET", [
   // No authorization cache: Convex checks persisted session, membership, and
   // project ownership on every request, including nested CSS and font requests.
   const active = await activeDeployment(organizationId, projectId, cookie);
-  if (active && "unavailable" in active) return unavailableResponse(c, active);
+  if (active && "unavailable" in active) return unavailableResponse(c, active, "asset");
   if (!active || (ticket && ticket.manifestKey !== active.deployment.manifestKey)) return missing();
   const manifest = await activeManifest(active);
   const entry = manifest?.files.find((file) => file.path === path);
