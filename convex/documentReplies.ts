@@ -1,8 +1,9 @@
+import { publicError } from "./publicErrors";
 import { validateClientOperationId, validateCommentAuthor } from "./commentOperations";
 import { requireId } from "./ids";
 import { paginationOptsValidator } from "convex/server";
-import { ConvexError, v } from "convex/values";
-import { mutation, query } from "./_generated/server";
+import { v } from "convex/values";
+import { mutation, query } from "./publicFunctions";
 import { authComponent } from "./auth";
 import { canDeleteComment, requireCommentAuthorOrAdmin, requireOrganizationMember } from "./authorization";
 
@@ -37,7 +38,7 @@ export const list = query({
       !Number.isSafeInteger(args.paginationOpts.numItems)
       || args.paginationOpts.numItems < 1
       || args.paginationOpts.numItems > DOCUMENT_REPLY_PAGE_SIZE
-    ) throw new ConvexError(`Page size must be between 1 and ${DOCUMENT_REPLY_PAGE_SIZE}`);
+    ) throw publicError("invalid_input", `Page size must be between 1 and ${DOCUMENT_REPLY_PAGE_SIZE}`);
     const thread = await ctx.db.get(args.threadId);
     if (
       !thread
@@ -45,7 +46,7 @@ export const list = query({
       || thread.organizationId !== args.organizationId
       || thread.projectId !== args.projectId
       || thread.documentPath !== args.documentPath
-    ) throw new ConvexError("Comment not found");
+    ) throw publicError("not_found");
     const repliesPage = await ctx.db
       .query("documentReplies")
       .withIndex("by_active_thread", (index) => index.eq("threadId", args.threadId).eq("deletedAt", undefined))
@@ -97,9 +98,9 @@ export const add = mutation({
       || thread.organizationId !== args.organizationId
       || thread.projectId !== args.projectId
       || thread.documentPath !== args.documentPath
-    ) throw new ConvexError("Comment not found");
+    ) throw publicError("not_found");
     const body = args.body.trim();
-    if (!body || body.length > 10_000) throw new ConvexError("Reply body is invalid");
+    if (!body || body.length > 10_000) throw publicError("invalid_input", "Reply body is invalid");
     validateCommentAuthor(args.expectedAuthorId, authorized.user._id);
     validateClientOperationId(args.clientOperationId);
     if (args.clientOperationId !== undefined) {
@@ -142,24 +143,19 @@ export const remove = mutation({
     const thread = await ctx.db.get(threadId);
     const reply = await ctx.db.get(replyId);
     const project = await ctx.db.get(scope.projectId);
-    if (!project || project.organizationId !== scope.organizationId) throw new ConvexError("Comment not found");
-    if (!thread && !reply) return;
-    if (!thread && reply?.deletedAt !== undefined && reply.threadId === threadId && reply.organizationId === scope.organizationId) {
-      requireCommentAuthorOrAdmin(authorized, reply.authorId);
-      return;
-    }
+    if (!project || project.organizationId !== scope.organizationId) throw publicError("not_found");
     if (
       !thread
       || thread.organizationId !== scope.organizationId
       || thread.projectId !== scope.projectId
       || thread.documentPath !== scope.documentPath
-    ) throw new ConvexError("Comment not found");
-    if (!reply) return;
-    if (reply.threadId !== threadId || reply.organizationId !== thread.organizationId) throw new ConvexError("Comment not found");
-    if (thread.deletedAt !== undefined && reply.deletedAt === undefined) throw new ConvexError("Comment not found");
+    ) throw publicError("not_found");
+    if (!reply) throw publicError("not_found");
+    if (reply.threadId !== threadId || reply.organizationId !== thread.organizationId) throw publicError("not_found");
+    if (thread.deletedAt !== undefined && reply.deletedAt === undefined) throw publicError("not_found");
     requireCommentAuthorOrAdmin(authorized, reply.authorId);
     if (reply.deletedAt !== undefined) return;
-    if (reply.clientOperationId) await ctx.db.patch(replyId, { deletedAt: Date.now(), body: "" });
-    else await ctx.db.delete(replyId);
+    // Retain scope and author proof for authorized deletion retries.
+    await ctx.db.patch(replyId, { deletedAt: Date.now(), body: "" });
   },
 });

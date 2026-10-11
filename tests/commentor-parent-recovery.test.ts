@@ -389,11 +389,21 @@ describe("round-three recovery regressions", () => {
     runtime.host.dispose();
   });
 
-  it.each(["thread.create", "reply.add"] as const)("retires a definitively rejected %s identity but keeps its editable draft", async (method) => {
+  it.each((["thread.create", "reply.add"] as const).flatMap(method => [
+    { method, data: "Permission denied", message: "operation failed" },
+    ...[
+      ["invalid_id", "This comment is unavailable"],
+      ["not_found", "This comment is unavailable"],
+      ["forbidden", "You do not have permission"],
+      ["unauthenticated", "Sign in again"],
+      ["invalid_input", "Check your comment"],
+      ["conflict", "This comment operation changed"],
+    ].map(([code, message]) => ({ method, data: { code, message: "private diagnostic must not reach the widget" }, message })),
+  ]))("retires a definitively rejected $method identity for $data but keeps its editable draft", async ({ method, data, message }) => {
     const runtime = recoveryRuntime();
     await flushMessages();
-    runtime.backend.mutate.mockRejectedValueOnce(new ConvexError("Permission denied"));
-    await expect(runtime.transport.mutate(method, args)).rejects.toThrow("operation failed");
+    runtime.backend.mutate.mockRejectedValueOnce(new ConvexError(data));
+    await expect(runtime.transport.mutate(method, args)).rejects.toThrow(message);
     const originalId = (runtime.backend.mutate.mock.calls[0][2] as { clientOperationId: string }).clientOperationId;
     expect(runtime.transport.recovery.value.operations).toEqual({});
     expect(Object.values(runtime.transport.recovery.value.drafts)[0].body).toBe(args.body);

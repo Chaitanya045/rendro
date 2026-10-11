@@ -1,3 +1,4 @@
+import { commentErrorMessage } from "./errors";
 import { COMMENT_RECOVERY_PREFIX, syncCommentRecoveryUser } from "./recovery-session";
 import { ConvexError } from "convex/values";
 import { normalizeMutationArgs, record, validAnchor } from "./mutation-args";
@@ -211,11 +212,11 @@ export class CommentorParentHost {
     }, "*");
   }
 
-  private subscriptionError(source: MessageEventSource): void {
+  private subscriptionError(source: MessageEventSource, error?: unknown): void {
     if (!("postMessage" in source) || typeof source.postMessage !== "function") return;
     (source as WindowProxy).postMessage({
       type: COMMENTOR_PARENT_ERROR,
-      error: "Comments could not be loaded",
+      error: commentErrorMessage(error, "Comments could not be loaded"),
     }, "*");
   }
 
@@ -242,8 +243,8 @@ export class CommentorParentHost {
           ...state,
         }, "*");
       }
-    }, () => {
-      if (this.owns(generation, source, scope)) this.subscriptionError(source);
+    }, (error) => {
+      if (this.owns(generation, source, scope)) this.subscriptionError(source, error);
     });
     this.respond(source, requestId, true);
   }
@@ -303,8 +304,8 @@ export class CommentorParentHost {
           }, "*");
         }
       },
-      () => {
-        if (this.owns(generation, source, scope)) this.subscriptionError(source);
+      (error) => {
+        if (this.owns(generation, source, scope)) this.subscriptionError(source, error);
       },
     );
     this.replySubscriptions.set(threadId, subscription);
@@ -400,7 +401,8 @@ export class CommentorParentHost {
         // not commit. Connection/runtime errors have an unknown outcome.
         const rejected = error instanceof ConvexError;
         if (rejected && operation.clientOperationId) this.recovery(scope).reject(key, operation.clientOperationId);
-        this.respond(event.source!, event.data.requestId, false, "Comment operation failed", rejected);
+        const message = commentErrorMessage(error, "Comment operation failed");
+        this.respond(event.source!, event.data.requestId, false, message, rejected);
       }
     });
   };

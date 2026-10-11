@@ -125,6 +125,16 @@ describe("Worker backend error mapping", () => {
 });
 
 describe("Convex HTTP error boundary", () => {
+  it.each([
+    ["invalid_id", 400], ["invalid_input", 400], ["not_found", 404],
+    ["unauthenticated", 401], ["forbidden", 403], ["conflict", 409],
+  ] as const)("maps structured %s failures without exposing the runtime message", async (code, status) => {
+    const error = new ConvexError({ code, message: "Safe error" });
+    error.message = diagnostic;
+    const response = failure(error, 500);
+    expect(response.status).toBe(status);
+    expect(await response.json()).toEqual({ error: "Safe error" });
+  });
   it("uses only structured application data, never wrapped stack messages", async () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
     const error = new ConvexError("Invalid ID");

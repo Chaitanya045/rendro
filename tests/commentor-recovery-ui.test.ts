@@ -323,6 +323,7 @@ describe("editable rejected drafts and identity changes", () => {
     send({ type: COMMENTOR_PARENT_RESPONSE, requestId: mutations()[0].requestId, ok: false, rejected: true, error: "Permission denied" });
     await flush();
     expect(input().value).toBe("Corrected");
+    expect(Array.from(root.querySelectorAll('.toast[role="alert"]')).at(-1)?.textContent).toContain("Permission denied");
     input().value = "Edited after rejection";
     button(buttonId).click();
     await flush();

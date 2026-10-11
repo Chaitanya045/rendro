@@ -71,7 +71,7 @@ describe("document comment operation identities", () => {
     await expect(viewers.member.mutation(api.documentThreads.remove, remove)).rejects.toThrow("Only the comment author");
   });
 
-  it("repeats physical removals successfully, including after parent cleanup", async () => {
+  it("retains scrubbed legacy records for authorized deletion retries after cleanup", async () => {
     const { backend, viewers, scope, threadId, replyId } = await fixture();
     const reply = { ...scope, threadId, replyId, clientOperationId: "remove-reply" };
     await viewers.author.mutation(api.documentReplies.remove, reply);
@@ -81,7 +81,11 @@ describe("document comment operation identities", () => {
     await backend.finishAllScheduledFunctions(() => vi.runAllTimers());
     await viewers.author.mutation(api.documentThreads.remove, { ...scope, threadId });
     await viewers.author.mutation(api.documentReplies.remove, reply);
-    await expect(viewers.outsider.mutation(api.documentThreads.remove, { ...scope, threadId })).rejects.toThrow("Organization membership required");
+    expect(await backend.run(ctx => ctx.db.get(threadId))).toMatchObject({ deletedAt: expect.any(Number), body: "" });
+    expect(await backend.run(ctx => ctx.db.get(replyId))).toMatchObject({ deletedAt: expect.any(Number), body: "" });
+    await expect(viewers.member.mutation(api.documentThreads.remove, { ...scope, threadId })).rejects.toMatchObject({ data: { code: "forbidden" } });
+    await expect(viewers.member.mutation(api.documentReplies.remove, reply)).rejects.toMatchObject({ data: { code: "forbidden" } });
+    await expect(viewers.outsider.mutation(api.documentThreads.remove, { ...scope, threadId })).rejects.toThrow("Comment not found");
   });
 
   it("validates operation ID bounds and authorizes before dedup, even for previously successful operations", async () => {
@@ -96,8 +100,8 @@ describe("document comment operation identities", () => {
     await backend.run((ctx) => ctx.runMutation(components.betterAuth.adapter.deleteOne, {
       input: { model: "member", where: [{ field: "_id", value: data.users.find((u) => u.name === "author")!.memberId }] },
     }));
-    await expect(viewers.author.mutation(api.documentThreads.create, create)).rejects.toThrow("Organization membership required");
-    await expect(viewers.outsider.mutation(api.documentThreads.create, { ...create, projectId: "malformed", clientOperationId: "" })).rejects.toThrow("Organization membership required");
+    await expect(viewers.author.mutation(api.documentThreads.create, create)).rejects.toThrow("Comment not found");
+    await expect(viewers.outsider.mutation(api.documentThreads.create, { ...create, projectId: "malformed", clientOperationId: "" })).rejects.toThrow("Comment not found");
   });
 });
 
@@ -116,7 +120,7 @@ describe("status operation receipts", () => {
     await viewers.admin.mutation(fn, op1);
     expect(await backend.run((ctx) => ctx.db.get(threadId))).toMatchObject({ [field]: true });
     expect(await backend.run((ctx) => ctx.db.query("commentStatusReceipts").collect())).toHaveLength(3);
-    await expect(viewers.outsider.mutation(fn, op1)).rejects.toThrow("Organization membership required");
+    await expect(viewers.outsider.mutation(fn, op1)).rejects.toThrow("Comment not found");
     await expect(viewers.author.mutation(fn, { ...op1, documentPath: "other.html" })).rejects.toThrow("Comment not found");
   });
 

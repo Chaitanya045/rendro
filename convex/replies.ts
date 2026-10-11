@@ -1,5 +1,5 @@
 import { requireId } from "./ids";
-import { mutation } from "./_generated/server";
+import { mutation } from "./publicFunctions";
 import { ConvexError, v } from "convex/values";
 import { authorizeLegacyThread, legacyOperationArgs, legacyBody, requireLegacyCommentAuthor } from "./legacyComments";
 

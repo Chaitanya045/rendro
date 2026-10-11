@@ -165,7 +165,7 @@ describe("comment authorization before record existence", () => {
     const f = await commentFixture();
     const caller = principal === "anonymous" ? f.backend : f.outsider;
     const scope = { ...f.scope, organizationId: principal === "outsider-own-org" ? f.ownOrg : f.organizationId };
-    const expected = principal === "anonymous" ? "Unauthenticated" : principal === "outsider" ? "Organization membership required" : "Comment not found";
+    const expected = principal === "anonymous" ? "Unauthenticated" : "Comment not found";
     for (const threadId of [f.absentThreadId, f.threadId]) {
       const args = { ...scope, threadId };
       const calls = [
@@ -174,16 +174,16 @@ describe("comment authorization before record existence", () => {
         () => caller.mutation(api.documentReplies.add, { ...args, body: "test" }),
         ...[f.absentReplyId, f.replyId].map(replyId => () => caller.mutation(api.documentReplies.remove, { ...args, replyId })),
       ];
-      for (const call of calls) await expect(call()).rejects.toMatchObject({ data: expected });
+      for (const call of calls) await expect(call()).rejects.toMatchObject({ data: { code: expected === "Unauthenticated" ? "unauthenticated" : "not_found", message: expected } });
     }
     for (const projectId of [f.projectId, await f.backend.run(async ctx => {
       const id = await ctx.db.insert("projects", { organizationId: f.organizationId, name: "Absent", slug: "absent", createdBy: f.userId, createdAt: Date.now() });
       await ctx.db.delete(id);
       return id;
     })]) {
-      const expectedProject = principal === "outsider-own-org" ? "Project not found" : expected;
-      await expect(caller.query(api.documentThreads.list, { ...scope, projectId, paginationOpts: { numItems: 10, cursor: null } })).rejects.toMatchObject({ data: expectedProject });
-      await expect(caller.mutation(api.documentThreads.create, { ...scope, projectId, body: "test", anchor: { kind: "element", path: ["main"] } })).rejects.toMatchObject({ data: expectedProject });
+      const expectedProject = expected;
+      await expect(caller.query(api.documentThreads.list, { ...scope, projectId, paginationOpts: { numItems: 10, cursor: null } })).rejects.toMatchObject({ data: { code: principal === "anonymous" ? "unauthenticated" : "not_found", message: expectedProject } });
+      await expect(caller.mutation(api.documentThreads.create, { ...scope, projectId, body: "test", anchor: { kind: "element", path: ["main"] } })).rejects.toMatchObject({ data: { code: principal === "anonymous" ? "unauthenticated" : "not_found", message: expectedProject } });
     }
   });
 
@@ -192,9 +192,9 @@ describe("comment authorization before record existence", () => {
     const caller = authenticated ? f.outsider : f.backend;
     for (const threadId of [f.absentLegacyId, f.legacyId]) {
       for (const fn of [api.threads.resolve, api.threads.archive, api.threads.remove]) {
-        await expect(caller.mutation(fn, { threadId })).rejects.toMatchObject({ data: authenticated ? "Comment not found" : "Unauthenticated" });
+        await expect(caller.mutation(fn, { threadId })).rejects.toMatchObject({ data: { code: authenticated ? "not_found" : "unauthenticated", message: authenticated ? "Comment not found" : "Unauthenticated" } });
       }
-      await expect(caller.mutation(api.replies.add, { threadId, body: "test" })).rejects.toMatchObject({ data: authenticated ? "Comment not found" : "Unauthenticated" });
+      await expect(caller.mutation(api.replies.add, { threadId, body: "test" })).rejects.toMatchObject({ data: { code: authenticated ? "not_found" : "unauthenticated", message: authenticated ? "Comment not found" : "Unauthenticated" } });
     }
   });
 
@@ -220,7 +220,7 @@ describe("comment authorization before record existence", () => {
         ...[api.threads.resolve, api.threads.archive, api.threads.remove].map(fn => () => caller.mutation(fn, { threadId: badId })),
         () => caller.mutation(api.replies.add, { threadId: badId, body: "test" }),
       ];
-      for (const call of calls) await expect(call()).rejects.toMatchObject({ data: expected });
+      for (const call of calls) await expect(call()).rejects.toMatchObject({ data: { code: authenticated ? "invalid_id" : "unauthenticated", message: expected } });
     }
   });
 });

@@ -1,3 +1,4 @@
+import { ConvexError } from "convex/values";
 import { Window as StorageWindow } from "happy-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
@@ -197,6 +198,18 @@ describe("project comment parent transport", () => {
       { organizationId: "org-a", projectId: "project-a", documentPath: "guide.html" },
       { threadId: "current-thread", replyId: "older-reply", clientOperationId: expect.any(String), expectedAuthorId: "user-a" },
     );
+
+    for (const [code, error] of [
+      ["invalid_id", "This comment is unavailable. Reload the document."],
+      ["not_found", "This comment is unavailable. Reload the document."],
+      ["unauthenticated", "Sign in again to comment."],
+      ["forbidden", "You do not have permission to change this comment."],
+      ["invalid_input", "Check your comment and try again."],
+      ["conflict", "This comment operation changed. Reload the document and try again."],
+    ]) {
+      fail(new ConvexError({ code, message: "backend details must not cross the boundary" }));
+      expect(postMessage).toHaveBeenLastCalledWith({ type: COMMENTOR_PARENT_ERROR, error }, "*");
+    }
 
     fail(new Error("backend details must not cross the boundary"));
     expect(postMessage).toHaveBeenCalledWith(

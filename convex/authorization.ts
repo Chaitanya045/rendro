@@ -1,4 +1,5 @@
 import type { GenericCtx } from "@convex-dev/better-auth";
+import { publicError } from "./publicErrors";
 import { ConvexError } from "convex/values";
 import type { DataModel } from "./_generated/dataModel";
 import { authComponent, createAuth } from "./auth";
@@ -32,7 +33,7 @@ export function canDeleteComment(authorized: AuthorizedOrganization, authorId: s
 
 export function requireCommentAuthorOrAdmin(authorized: AuthorizedOrganization, authorId: string): void {
   if (!canDeleteComment(authorized, authorId)) {
-    throw new ConvexError("Only the comment author or organization admins can modify this comment");
+    throw publicError("forbidden", "Only the comment author or organization admins can modify this comment");
   }
 }
 
@@ -41,7 +42,10 @@ export async function requireOrganizationMember(
   organizationId: string,
   allowedRoles?: readonly OrganizationRole[],
 ): Promise<AuthorizedOrganization> {
-  const user = await authComponent.getAuthUser(ctx);
+  const identity = await ctx.auth.getUserIdentity();
+  if (!identity || typeof identity.sessionId !== "string") throw publicError("unauthenticated");
+  const user = await authComponent.safeGetAuthUser(ctx);
+  if (!user) throw publicError("unauthenticated");
   const auth = await createAuth(ctx).$context;
   const member = await auth.adapter.findOne<AuthorizedOrganization["member"]>({
     model: "member",
@@ -50,17 +54,17 @@ export async function requireOrganizationMember(
       { field: "userId", value: user._id },
     ],
   });
-  if (!member) throw new ConvexError("Organization membership required");
+  if (!member) throw publicError("not_found");
   const organization = await auth.adapter.findOne<AuthorizedOrganization["organization"]>({
     model: "organization",
     where: [{ field: "id", value: organizationId }],
   });
-  if (!organization) throw new ConvexError("Organization not found");
+  if (!organization) throw publicError("not_found");
   if (
     allowedRoles
     && !memberRoles(member.role).some((role) => allowedRoles.includes(role as OrganizationRole))
   ) {
-    throw new ConvexError("Insufficient organization role");
+    throw publicError("forbidden");
   }
   return { organization, member, user };
 }
