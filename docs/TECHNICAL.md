@@ -83,7 +83,7 @@ Responses that performed a session lookup receive `Cache-Control: private, no-st
 3. **Redirect control**: `redirect: "manual"` leaves redirects to the browser.
 4. **Sign-out**: `GET /api/auth/sign-out` calls Convex sign-out with `POST`, then expires every known auth cookie (host and parent domain) and sends `Clear-Site-Data: "cookies"`.
 
-The generic `/api/rendro/*` proxy uses the same allowlist, so it intentionally does **not** forward `Authorization`. Routes that accept API keys (deployment and publication routes, below) are implemented in the Worker and forward `Authorization` explicitly. The dedicated migration project route also forwards its operator bearer secret to the secret-gated Convex action.
+The generic `/api/rendro/*` proxy uses the same header allowlist, with an exact GET-path exception for `/api/rendro/credentials/validate`, `/api/rendro/deployments/active`, `/api/rendro/deployments/staging`, and `/api/rendro/deployments`: these forward `Authorization` for scoped API-key validation. Other generic and Better Auth routes remain cookie-only. Dedicated deployment write and publication routes forward `Authorization` explicitly; deployment commits go through the Worker's storage checks. Pass-through requests retain authenticated client-IP forwarding. The dedicated migration project route also forwards its operator bearer secret to the secret-gated Convex action.
 
 ---
 
@@ -119,7 +119,7 @@ Enforcement layers:
 | Expiry | Optional; the UI offers 30 days, 90 days (default), 1 year, or never |
 | Management | Owners and admins create, list, and revoke keys |
 
-Validation checks organization, optional project binding, required scope, expiry, and revocation on every request, and records `lastUsedAt`.
+Validation checks organization, optional project binding, required scope, expiry, and revocation on every request, and records `lastUsedAt` only on success. `GET /api/rendro/credentials/validate` returns 200 with the principal for an accepted key, 401 for missing, malformed, expired, revoked, or insufficient keys, and 400 when organization or scope is missing. Unexpected backend failures remain sanitized server errors (502 through the Worker). The CLI uses `/api/rendro/deployments/check` for its preflight; that endpoint also permits member sessions and returns 403 when neither identity authorizes the request.
 
 | Operation | Scope |
 |---|---|
