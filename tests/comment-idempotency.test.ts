@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { api, components } from "../convex/_generated/api";
+import { api, components, internal } from "../convex/_generated/api";
 import { fixture } from "./helpers/comment-fixture";
 
 const anchor = { kind: "element" as const, path: ["main"] };
@@ -98,5 +98,66 @@ describe("document comment operation identities", () => {
     }));
     await expect(viewers.author.mutation(api.documentThreads.create, create)).rejects.toThrow("Organization membership required");
     await expect(viewers.outsider.mutation(api.documentThreads.create, { ...create, projectId: "malformed", clientOperationId: "" })).rejects.toThrow("Organization membership required");
+  });
+});
+
+
+describe("status operation receipts", () => {
+  it.each(["resolved", "archived"] as const)("replaying %s cannot undo a newer opposite action, even with changed arguments", async (field) => {
+    const { backend, viewers, scope, threadId } = await fixture();
+    const fn = field === "resolved" ? api.documentThreads.resolve : api.documentThreads.archive;
+    const op1 = { ...scope, threadId, [field]: true, clientOperationId: "op1" };
+    expect(await viewers.author.mutation(fn, op1)).toBe(true);
+    expect(await viewers.admin.mutation(fn, { ...op1, [field]: false, clientOperationId: "op2" })).toBe(false);
+    expect(await viewers.author.mutation(fn, op1)).toBe(true);
+    expect(await backend.run((ctx) => ctx.db.get(threadId))).toMatchObject({ [field]: false });
+    await expect(viewers.author.mutation(fn, { ...op1, [field]: false })).rejects.toThrow("Operation arguments changed");
+    // Author scoping: another authorized author can use the same opaque ID.
+    await viewers.admin.mutation(fn, op1);
+    expect(await backend.run((ctx) => ctx.db.get(threadId))).toMatchObject({ [field]: true });
+    expect(await backend.run((ctx) => ctx.db.query("commentStatusReceipts").collect())).toHaveLength(3);
+    await expect(viewers.outsider.mutation(fn, op1)).rejects.toThrow("Organization membership required");
+    await expect(viewers.author.mutation(fn, { ...op1, documentPath: "other.html" })).rejects.toThrow("Comment not found");
+  });
+
+  it.each(["resolved", "archived"] as const)("preserves legacy %s toggles and requires a target with an ID", async (field) => {
+    const { backend, viewers, scope, threadId } = await fixture();
+    const fn = field === "resolved" ? api.documentThreads.resolve : api.documentThreads.archive;
+    for (const target of [true, false]) {
+      await viewers.author.mutation(fn, { ...scope, threadId });
+      expect(await backend.run((ctx) => ctx.db.get(threadId))).toMatchObject({ [field]: target });
+    }
+    await expect(viewers.author.mutation(fn, { ...scope, threadId, clientOperationId: "missing-target" })).rejects.toThrow("explicit status target");
+    expect(await backend.run((ctx) => ctx.db.query("commentStatusReceipts").collect())).toHaveLength(0);
+  });
+
+  it("cleans expired receipts in bounded batches while retaining live receipts", async () => {
+    const { backend, scope, threadId } = await fixture();
+    vi.useFakeTimers();
+    await backend.run(async (ctx) => {
+      for (let i = 0; i < 102; i++) await ctx.db.insert("commentStatusReceipts", {
+        ...scope, threadId, authorId: "author", clientOperationId: String(i), field: "resolved", target: true,
+        expiresAt: Date.now() + (i === 101 ? 60_000 : -1),
+      });
+    });
+    await backend.mutation(internal.documentThreads.cleanupStatusReceipts, {});
+    expect(await backend.run((ctx) => ctx.db.query("commentStatusReceipts").collect())).toHaveLength(2);
+    await backend.finishAllScheduledFunctions(() => vi.runAllTimers());
+    expect(await backend.run((ctx) => ctx.db.query("commentStatusReceipts").collect())).toMatchObject([{ clientOperationId: "101" }]);
+  });
+
+  it("rejects queued writes if token refresh changes the authenticated author", async () => {
+    const { viewers, scope, data, threadId, replyId } = await fixture();
+    const expectedAuthorId = data.users.find((user) => user.name === "author")!.userId;
+    const args = { ...scope, expectedAuthorId, clientOperationId: "queued" };
+    const writes = [
+      () => viewers.admin.mutation(api.documentThreads.create, { ...args, body: "Private", anchor }),
+      () => viewers.admin.mutation(api.documentReplies.add, { ...args, threadId, body: "Private" }),
+      () => viewers.admin.mutation(api.documentThreads.resolve, { ...args, threadId, resolved: true }),
+      () => viewers.admin.mutation(api.documentThreads.archive, { ...args, threadId, archived: true }),
+      () => viewers.admin.mutation(api.documentThreads.remove, { ...args, threadId }),
+      () => viewers.admin.mutation(api.documentReplies.remove, { ...args, threadId, replyId }),
+    ];
+    for (const write of writes) await expect(write()).rejects.toThrow("comment session changed");
   });
 });

@@ -1,4 +1,4 @@
-import { validateClientOperationId } from "./commentOperations";
+import { validateClientOperationId, validateCommentAuthor } from "./commentOperations";
 import { requireId } from "./ids";
 import { paginationOptsValidator } from "convex/server";
 import { ConvexError, v } from "convex/values";
@@ -81,6 +81,7 @@ export const add = mutation({
     threadId: v.string(),
     body: v.string(),
     clientOperationId: v.optional(v.string()),
+    expectedAuthorId: v.optional(v.string()),
   },
   handler: async (ctx, input) => {
     const authorized = await requireOrganizationMember(ctx, input.organizationId);
@@ -99,6 +100,7 @@ export const add = mutation({
     ) throw new ConvexError("Comment not found");
     const body = args.body.trim();
     if (!body || body.length > 10_000) throw new ConvexError("Reply body is invalid");
+    validateCommentAuthor(args.expectedAuthorId, authorized.user._id);
     validateClientOperationId(args.clientOperationId);
     if (args.clientOperationId !== undefined) {
       const existing = await ctx.db.query("documentReplies").withIndex("by_operation", (q) => q
@@ -128,9 +130,11 @@ export const remove = mutation({
     threadId: v.string(),
     replyId: v.string(),
     clientOperationId: v.optional(v.string()),
+    expectedAuthorId: v.optional(v.string()),
   },
   handler: async (ctx, input) => {
     const authorized = await requireOrganizationMember(ctx, input.organizationId);
+    validateCommentAuthor(input.expectedAuthorId, authorized.user._id);
     validateClientOperationId(input.clientOperationId);
     const replyId = requireId(ctx, "documentReplies", input.replyId);
     const threadId = requireId(ctx, "documentThreads", input.threadId);

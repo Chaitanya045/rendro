@@ -141,6 +141,21 @@ export default defineSchema({
     .index("by_active_document", ["organizationId", "projectId", "documentPath", "deletedAt", "createdAt"])
     .index("by_project", ["projectId", "createdAt"]),
 
+  // Short-lived receipts for collaborative status writes; no comment content.
+  commentStatusReceipts: defineTable({
+    organizationId: v.string(),
+    projectId: v.id("projects"),
+    documentPath: v.string(),
+    threadId: v.id("documentThreads"),
+    authorId: v.string(),
+    clientOperationId: v.string(),
+    field: v.union(v.literal("resolved"), v.literal("archived")),
+    target: v.boolean(),
+    expiresAt: v.number(),
+  })
+    .index("by_operation", ["organizationId", "projectId", "documentPath", "threadId", "authorId", "clientOperationId"])
+    .index("by_expiry", ["expiresAt"]),
+
   documentReplies: defineTable({
     clientOperationId: v.optional(v.string()),
     deletedAt: v.optional(v.number()),

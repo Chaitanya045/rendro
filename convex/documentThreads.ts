@@ -1,10 +1,10 @@
-import { validateClientOperationId } from "./commentOperations";
+import { validateClientOperationId, validateCommentAuthor } from "./commentOperations";
 import { requireId } from "./ids";
 import { paginationOptsValidator } from "convex/server";
 import { ConvexError, v } from "convex/values";
-import { internalMutation, mutation, query } from "./_generated/server";
+import { internalMutation, mutation, query, type MutationCtx } from "./_generated/server";
 import { internal } from "./_generated/api";
-import type { Id } from "./_generated/dataModel";
+import type { Doc, Id } from "./_generated/dataModel";
 import { authComponent } from "./auth";
 import { canDeleteComment, requireCommentAuthorOrAdmin, requireOrganizationMember } from "./authorization";
 import { anchorValidator } from "./schema";
@@ -63,6 +63,7 @@ function authorDisplay(author: { name?: string | null; email?: string | null } |
 
 const threadScopeArgs = {
   clientOperationId: v.optional(v.string()),
+  expectedAuthorId: v.optional(v.string()),
   organizationId: v.string(),
   projectId: v.string(),
   documentPath: v.string(),
@@ -157,6 +158,7 @@ export const create = mutation({
     body: v.string(),
     anchor: anchorValidator,
     clientOperationId: v.optional(v.string()),
+    expectedAuthorId: v.optional(v.string()),
   },
   handler: async (ctx, input) => {
     const authorized = await requireOrganizationMember(ctx, input.organizationId);
@@ -169,6 +171,7 @@ export const create = mutation({
     if (!body || body.length > 10_000) throw new ConvexError("Comment body is invalid");
     if (!validDocumentPath(args.documentPath)) throw new ConvexError("Document path is invalid");
     if (!validAnchor(args.anchor)) throw new ConvexError("Comment anchor is invalid");
+    validateCommentAuthor(args.expectedAuthorId, authorized.user._id);
     validateClientOperationId(args.clientOperationId);
     // Authorization and scope validation precede the indexed dedup lookup.
     if (args.clientOperationId !== undefined) {
@@ -196,11 +199,57 @@ export const create = mutation({
   },
 });
 
+// Status retry receipts have a 30-day retention window, including no-op writes.
+// Daily indexed cleanup deletes at most 100 rows per transaction and schedules
+// another batch when needed. Receipts contain no comment body or draft content.
+export const STATUS_RECEIPT_TTL_MS = 30 * 24 * 60 * 60 * 1_000;
+async function applyStatus(
+  ctx: MutationCtx,
+  thread: Doc<"documentThreads">,
+  authorId: string,
+  field: "resolved" | "archived",
+  target: boolean | undefined,
+  clientOperationId: string | undefined,
+): Promise<boolean> {
+  if (clientOperationId !== undefined) {
+    if (target === undefined) throw new ConvexError("An operation ID requires an explicit status target");
+    const receipt = await ctx.db.query("commentStatusReceipts").withIndex("by_operation", (q) => q
+      .eq("organizationId", thread.organizationId).eq("projectId", thread.projectId)
+      .eq("documentPath", thread.documentPath).eq("threadId", thread._id)
+      .eq("authorId", authorId).eq("clientOperationId", clientOperationId)).unique();
+    if (receipt) {
+      if (receipt.field !== field || receipt.target !== target) throw new ConvexError("Operation arguments changed");
+      return receipt.target;
+    }
+    await ctx.db.insert("commentStatusReceipts", {
+      organizationId: thread.organizationId, projectId: thread.projectId,
+      documentPath: thread.documentPath, threadId: thread._id, authorId,
+      clientOperationId, field, target, expiresAt: Date.now() + STATUS_RECEIPT_TTL_MS,
+    });
+  }
+  // Older widgets/parents omit both the ID and target and expect a toggle.
+  const applied = target ?? !thread[field];
+  if (thread[field] !== applied) await ctx.db.patch(thread._id, { [field]: applied, updatedAt: Date.now() });
+  return applied;
+}
+
+export const cleanupStatusReceipts = internalMutation({
+  args: {},
+  handler: async (ctx): Promise<null> => {
+    const expired = await ctx.db.query("commentStatusReceipts")
+      .withIndex("by_expiry", (q) => q.lte("expiresAt", Date.now())).take(100);
+    await Promise.all(expired.map((receipt) => ctx.db.delete(receipt._id)));
+    if (expired.length === 100) await ctx.scheduler.runAfter(0, internal.documentThreads.cleanupStatusReceipts, {});
+    return null;
+  },
+});
+
 // Resolving/reopening is collaborative triage, available to any current member.
 export const resolve = mutation({
   args: { ...threadScopeArgs, resolved: v.optional(v.boolean()) },
   handler: async (ctx, input) => {
-    await requireOrganizationMember(ctx, input.organizationId);
+    const authorized = await requireOrganizationMember(ctx, input.organizationId);
+    validateCommentAuthor(input.expectedAuthorId, authorized.user._id);
     validateClientOperationId(input.clientOperationId);
     const threadId = requireId(ctx, "documentThreads", input.threadId);
     const scope = { ...input, projectId: requireId(ctx, "projects", input.projectId) };
@@ -208,8 +257,7 @@ export const resolve = mutation({
     if (!thread || thread.deletedAt !== undefined || !threadMatchesScope(thread, scope)) {
       throw new ConvexError("Comment not found");
     }
-    if (thread.resolved === (input.resolved ?? true)) return;
-    await ctx.db.patch(threadId, { resolved: input.resolved ?? true, updatedAt: Date.now() });
+    return applyStatus(ctx, thread, authorized.user._id, "resolved", input.resolved, input.clientOperationId);
   },
 });
 
@@ -217,6 +265,7 @@ export const archive = mutation({
   args: { ...threadScopeArgs, archived: v.optional(v.boolean()) },
   handler: async (ctx, input) => {
     const authorized = await requireOrganizationMember(ctx, input.organizationId);
+    validateCommentAuthor(input.expectedAuthorId, authorized.user._id);
     validateClientOperationId(input.clientOperationId);
     const threadId = requireId(ctx, "documentThreads", input.threadId);
     const scope = { ...input, projectId: requireId(ctx, "projects", input.projectId) };
@@ -225,8 +274,7 @@ export const archive = mutation({
       throw new ConvexError("Comment not found");
     }
     requireCommentAuthorOrAdmin(authorized, thread.authorId);
-    if (thread.archived === (input.archived ?? true)) return;
-    await ctx.db.patch(threadId, { archived: input.archived ?? true, updatedAt: Date.now() });
+    return applyStatus(ctx, thread, authorized.user._id, "archived", input.archived, input.clientOperationId);
   },
 });
 
@@ -234,6 +282,7 @@ export const remove = mutation({
   args: threadScopeArgs,
   handler: async (ctx, input) => {
     const authorized = await requireOrganizationMember(ctx, input.organizationId);
+    validateCommentAuthor(input.expectedAuthorId, authorized.user._id);
     validateClientOperationId(input.clientOperationId);
     const threadId = requireId(ctx, "documentThreads", input.threadId);
     const scope = { ...input, projectId: requireId(ctx, "projects", input.projectId) };
