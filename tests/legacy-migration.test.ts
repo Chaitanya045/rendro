@@ -8,26 +8,32 @@ const disk = vi.hoisted(() => ({
   readFile: vi.fn<(path: string, encoding: string) => Promise<string>>(),
   writeFile: vi.fn<(path: string, contents: string, options?: { flag?: string; mode?: number }) => Promise<void>>(),
 }));
-const storage = vi.hoisted(() => ({ getObjectText: vi.fn(), putObject: vi.fn(), listAllKeys: vi.fn(), headObject: vi.fn(), copyObject: vi.fn() }));
+const storage = vi.hoisted(() => ({ getObjectText: vi.fn(), putObject: vi.fn(), listAllKeys: vi.fn(), headObject: vi.fn(), copyObject: vi.fn(), getObjectStream: vi.fn() }));
 vi.mock("node:fs/promises", () => disk);
 vi.mock("../src/minio", () => storage);
 import deploymentRoutes from "../src/routes/deployments";
 import migrationRoutes from "../src/routes/migration";
 import publicationRoutes from "../src/routes/publication-api";
+import legacyPublicRoutes from "../src/routes/public";
+import publicRoutes from "../src/routes/public-v2";
 
 const target = { legacyOrgSlug: "old-org", organizationId: "org", apiKey: "scoped-key", legacyApiKey: "legacy-key" };
-const fixtures = new Map([
+const initialFixtures = [
   ["old-org/docs/a-last.html", "<h1>Last</h1>"],
   ["old-org/docs/Z file.html", "<h1>First</h1>"],
-]);
+] as const;
+let fixtures: Map<string, string>;
 const root = "tenants/org/projects/project/deployments/deployment";
 const app = new Hono().route("/", deploymentRoutes).route("/", migrationRoutes).route("/", publicationRoutes);
+let deleted: Set<string>;
+let legacyPublications: Array<{ orgSlug: string; slug: string; sourcePrefix: string; entryFile: string; title: string; createdAt: string; updatedAt: string }>;
+let visibilityFailure: "unavailable" | "malformed" | undefined;
 let main: typeof migrationMain;
 let active: boolean;
 let starts: number;
 let commits: number;
 let failReason: string | undefined;
-let failure: "upload" | "commit" | "publication" | "start" | "source-change" | "destination-change" | undefined;
+let failure: "upload" | "commit" | "publication" | "start" | "source-change" | "destination-change" | "visibility-change" | "publication-removal" | undefined;
 let sourceChanged: boolean;
 let publications: Array<Record<string, unknown>>;
 let objects: Map<string, string | Uint8Array>;
@@ -45,9 +51,19 @@ beforeEach(async () => {
   vi.spyOn(console, "log").mockImplementation(() => {});
   active = false; starts = 0; commits = 0; failReason = undefined; failure = undefined;
   sourceChanged = false;
+  fixtures = new Map(initialFixtures);
+  deleted = new Set(); visibilityFailure = undefined;
+  legacyPublications = [{ orgSlug: "old-org", slug: "legacy-docs", sourcePrefix: "old-org/docs/", entryFile: "Z file.html", title: "Legacy docs", createdAt: "2026-01-01", updatedAt: "2026-01-01" }];
   publications = []; objects = new Map();
   disk.readFile.mockResolvedValue(JSON.stringify([target]));
   disk.writeFile.mockResolvedValue(undefined);
+  storage.getObjectStream.mockImplementation((key: string) => {
+    const publication = legacyPublications.find(row => key === `__rendro/publications/${row.orgSlug}/${row.slug}.json`);
+    const value = publication ? JSON.stringify(publication) : objects.get(key) ?? fixtures.get(key);
+    return Promise.resolve(value === undefined ? null : new ReadableStream<Uint8Array>({
+      start(controller) { controller.enqueue(typeof value === "string" ? Buffer.from(value) : value); controller.close(); },
+    }));
+  });
   storage.putObject.mockImplementation((key: string, bytes: string | Uint8Array) => {
     objects.set(key, bytes); return Promise.resolve();
   });
@@ -58,9 +74,9 @@ beforeEach(async () => {
   send = vi.spyOn(source, "send").mockImplementation((command: unknown) => {
     if (command instanceof ListObjectsV2Command) {
       expect(command.input.Prefix).toBe("old-org/");
-      const index = command.input.ContinuationToken ? 1 : 0;
+      const index = Number(command.input.ContinuationToken ?? 0);
       const [Key, bytes] = [...fixtures][index];
-      return Promise.resolve({ Contents: [{ Key, Size: Buffer.byteLength(bytes) }], NextContinuationToken: index === 0 ? "next" : undefined });
+      return Promise.resolve({ Contents: [{ Key, Size: Buffer.byteLength(bytes) }], NextContinuationToken: index + 1 < fixtures.size ? String(index + 1) : undefined });
     }
     if (command instanceof GetObjectCommand) {
       const bytes = fixtures.get(command.input.Key!);
@@ -74,15 +90,24 @@ beforeEach(async () => {
     if (url.origin === "https://worker.test") {
       if (url.pathname === "/api/publications") {
         expect(new Headers(init?.headers).get("Authorization")).toBe("Bearer legacy-key");
-        return Response.json({ publications: [
-          { slug: "legacy-docs", sourcePrefix: "old-org/docs/", entryFile: "Z file.html", title: "Legacy docs" },
-          { slug: "foreign", sourcePrefix: "another-org/docs/", entryFile: "index.html", title: "Foreign" },
-        ] });
+        return Response.json({ publications: legacyPublications });
       }
       if (failure === "upload" && init?.method === "PUT") return new Response("Upload unavailable", { status: 503 });
       return app.request(url.href, init);
     }
+    if (url.origin === "http://127.0.0.1:3210") {
+      const body = JSON.parse(init?.body as string);
+      expect(body.args[0].internalSecret).toBe("test-convex-internal-secret-32-chars");
+      if (body.path === "deletedFiles:isDeleted") return Response.json({ status: "success", value: deleted.has(body.args[0].fileKey) });
+      expect(body.path).toBe("deletedFiles:filterFn");
+      if (visibilityFailure === "unavailable") return Response.json({ status: "error" }, { status: 503 });
+      return Response.json({ status: "success", value: visibilityFailure === "malformed" ? null : body.args[0].keys.filter((key: string) => !deleted.has(key)) });
+    }
     expect(url.origin).toBe("http://127.0.0.1:3211");
+    if (url.pathname.endsWith("/publications/public")) {
+      const publication = publications.find(row => row.slug === url.searchParams.get("slug"));
+      return publication ? Response.json({ publication, project: { name: "Legacy", slug: "legacy" }, deployment: { manifestKey: `${root}/manifest.json`, manifestSha256: "manifest" } }) : new Response("Not found", { status: 404 });
+    }
     const body = JSON.parse(typeof init?.body === "string" ? init.body : "{}") as Record<string, unknown>;
     const path = url.pathname;
     expect(new Headers(init?.headers).get("Authorization")).toBe(
@@ -99,8 +124,10 @@ beforeEach(async () => {
     if (path.endsWith("/deployments/start")) {
       if (failure === "start") return new Response("Invalid key", { status: 401 });
       starts++;
+      if (failure === "visibility-change") deleted.add("old-org/docs/a-last.html");
+      if (failure === "publication-removal") legacyPublications = [];
       if (failure === "source-change") sourceChanged = true;
-      expect(body.fileCount).toBe(2);
+      expect(body.fileCount).toBeGreaterThan(0);
       expect(body.manifest).toBeUndefined(); // Worker strips manifest after validating its checksum.
       return Response.json({ deployment: { deploymentId: "deployment", objectRoot: root, manifestKey: `${root}/manifest.json`, treeIndexKey: `${root}/tree-index.json`, ...(failure === "destination-change" ? { previousDeploymentId: "ordinary-deployment" } : {}) } });
     }
@@ -239,6 +266,74 @@ describe("legacy migration with mocked source storage and backend HTTP", () => {
     send.mockRejectedValueOnce(new Error("Storage unavailable"));
     await expect(main(["--map", "targets.json", "--apply"])).rejects.toThrow("Storage unavailable");
     expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("keeps soft-deleted documents 404, including an idempotent rerun", async () => {
+    deleted.add("old-org/docs/a-last.html");
+    expect((await legacyPublicRoutes.request("/public/old-org/legacy-docs/files/a-last.html")).status).toBe(404);
+    for (let run = 0; run < 2; run++) {
+      await main(["--map", "targets.json", "--apply"]);
+      expect((await publicRoutes.request("/p/legacy-docs/files/a-last.html")).status).toBe(404);
+      expect((await publicRoutes.request("/p/legacy-docs/files/Z%20file.html")).status).toBe(200);
+      const manifest = JSON.parse(objects.get(`${root}/manifest.json`) as string);
+      expect(manifest.files.map((file: { path: string }) => file.path)).toEqual(["docs/Z file.html"]);
+      expect(objects.has(`${root}/files/docs/a-last.html`)).toBe(false);
+    }
+    expect(starts).toBe(1); expect(publications).toHaveLength(1);
+  });
+
+  it("does not republish a removed publication even though its source objects remain", async () => {
+    legacyPublications = [];
+    expect((await legacyPublicRoutes.request("/public/old-org/legacy-docs/files/a-last.html")).status).toBe(404);
+    await main(["--map", "targets.json", "--apply"]);
+    expect(publications).toEqual([]);
+    expect((await publicRoutes.request("/p/legacy-docs/files/a-last.html")).status).toBe(404);
+  });
+
+  it("keeps private documents and non-HTML files inaccessible anonymously and creates no shares", async () => {
+    fixtures.set("old-org/private/secret.html", "private");
+    fixtures.set("old-org/docs/secret.json", "private asset");
+    expect((await legacyPublicRoutes.request("/public/old-org/legacy-docs/files/secret.json")).status).toBe(404);
+    await main(["--map", "targets.json", "--apply"]);
+    expect(objects.has(`${root}/files/private/secret.html`)).toBe(true);
+    expect(objects.has(`${root}/files/docs/secret.json`)).toBe(false);
+    expect((await publicRoutes.request("/p/legacy-docs/files/secret.json")).status).toBe(404);
+    expect((await publicRoutes.request("/p/legacy-docs/files/private/secret.html")).status).toBe(404);
+    expect((await publicRoutes.request("/p/private/files/secret.html")).status).toBe(404);
+    expect(vi.mocked(fetch).mock.calls.some(([url]) => String(url).includes("/shares"))).toBe(false);
+  });
+
+  it("migrates privately without a legacy API key, still excluding deleted files", async () => {
+    disk.readFile.mockResolvedValue(JSON.stringify([{ ...target, legacyApiKey: undefined }]));
+    deleted.add("old-org/docs/a-last.html");
+    await main(["--map", "targets.json", "--apply"]);
+    expect(publications).toEqual([]);
+    expect(objects.has(`${root}/files/docs/a-last.html`)).toBe(false);
+  });
+
+  it.each(["unavailable", "malformed"] as const)("fails closed before remote writes when deletion state is %s", async (mode) => {
+    visibilityFailure = mode;
+    await expect(main(["--map", "targets.json", "--apply"])).rejects.toThrow("Cannot establish legacy visibility");
+    expect(starts).toBe(0); expect(storage.putObject).not.toHaveBeenCalled();
+    expect(vi.mocked(fetch).mock.calls.some(([url]) => String(url).includes("/migration/project"))).toBe(false);
+  });
+
+  it("requires authoritative source deletion credentials", async () => {
+    vi.stubEnv("CONVEX_INTERNAL_SECRET", "");
+    await expect(main(["--map", "targets.json", "--apply"])).rejects.toThrow("Cannot establish legacy visibility");
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("refuses publications whose entry document was deleted before writing", async () => {
+    deleted.add("old-org/docs/Z file.html");
+    await expect(main(["--map", "targets.json", "--apply"])).rejects.toThrow("no visible entry document");
+    expect(starts).toBe(0); expect(publications).toEqual([]);
+  });
+
+  it.each(["visibility-change", "publication-removal"] as const)("refuses publication when legacy visibility changes during upload: %s", async (mode) => {
+    failure = mode;
+    await expect(main(["--map", "targets.json", "--apply"])).rejects.toThrow("Legacy visibility changed");
+    expect(publications).toEqual([]);
   });
 
   it("requires explicit apply for rollback as well as migration writes", async () => {

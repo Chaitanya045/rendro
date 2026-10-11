@@ -16,6 +16,59 @@ interface MigrationTarget {
   legacyApiKey?: string;
 }
 
+interface LegacyPublication {
+  slug: string;
+  sourcePrefix: string;
+  entryFile: string;
+  title: string;
+}
+
+// Do not use soft-delete.ts's permissive fallback: an unavailable deletion
+// database must stop a migration, never turn all stored objects into live files.
+async function visibleLegacyKeys(keys: string[]): Promise<Set<string>> {
+  const convexUrl = process.env.CONVEX_URL?.replace(/\/$/, "");
+  const internalSecret = process.env.CONVEX_INTERNAL_SECRET;
+  if (!convexUrl || !internalSecret) {
+    throw new Error("Cannot establish legacy visibility: CONVEX_URL and CONVEX_INTERNAL_SECRET must identify the source deleted_files database");
+  }
+  const visible = new Set<string>();
+  for (let offset = 0; offset < keys.length; offset += 100) {
+    const batch = keys.slice(offset, offset + 100);
+    try {
+      const response = await fetch(`${convexUrl}/api/query`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ path: "deletedFiles:filterFn", args: [{ keys: batch, internalSecret }] }),
+        redirect: "error",
+      });
+      const result = await response.json() as { status?: unknown; value?: unknown } | null;
+      if (!response.ok || result?.status !== "success" || !Array.isArray(result.value)
+        || result.value.some(key => typeof key !== "string" || !batch.includes(key))) {
+        throw new Error("Invalid deletion query result");
+      }
+      for (const key of result.value as string[]) visible.add(key);
+    } catch {
+      throw new Error("Cannot establish legacy visibility from deleted_files; refusing migration. Check the source CONVEX_URL and CONVEX_INTERNAL_SECRET");
+    }
+  }
+  return visible;
+}
+
+async function legacyPublications(target: MigrationTarget): Promise<LegacyPublication[]> {
+  if (!target.legacyApiKey) return [];
+  const result = await requestJson<{ publications: LegacyPublication[] }>(
+    `${endpoint}/api/publications`, target.legacyApiKey,
+  );
+  return result.publications.filter(publication => publication.sourcePrefix.startsWith(`${target.legacyOrgSlug}/`));
+}
+
+function canPublishLegacyPath(path: string): boolean {
+  // v1 exposes only normalized HTML document paths. v2 serves any manifest
+  // entry, including assets: conservatively exclude ambiguous encoded paths.
+  return path === path.trim() && /\.html$/i.test(path) && !/[\\%\x00-\x1f]/.test(path)
+    && path.split("/").every(part => part && part !== "." && part !== "..");
+}
+
 interface ManifestEntry {
   path: string;
   sha256: string;
@@ -121,8 +174,20 @@ async function migrateTarget(
   };
   if (!apply) return rollback;
 
+  const keys = objects.map(object => object.key);
+  const visible = await visibleLegacyKeys(keys);
+  const legacy = await legacyPublications(target);
+  const included = objects.filter(object => visible.has(object.key) && legacy.every(publication =>
+    !object.key.startsWith(publication.sourcePrefix)
+      || canPublishLegacyPath(object.key.slice(publication.sourcePrefix.length))));
+  console.log(`  Excluded ${objects.length - included.length} deleted or legacy-inaccessible objects`);
+  for (const publication of legacy) {
+    if (!included.some(object => object.key === publication.sourcePrefix + publication.entryFile)) {
+      throw new Error(`Publication ${publication.slug} has no visible entry document; refusing migration`);
+    }
+  }
   const files: ManifestEntry[] = [];
-  for (const object of objects) files.push(await manifestEntry(object.key, prefix));
+  for (const object of included) files.push(await manifestEntry(object.key, prefix));
   // Match the Worker's code-point ordering, including mixed case paths.
   files.sort((left, right) => left.path < right.path ? -1 : left.path > right.path ? 1 : 0);
   const manifest = { version: 1, files };
@@ -192,13 +257,18 @@ async function migrateTarget(
   await checkpoint(rollback);
 
   if (target.legacyApiKey) {
-    const legacy = await requestJson<{
-      publications: Array<{ slug: string; sourcePrefix: string; entryFile: string; title: string }>;
-    }>(`${endpoint}/api/publications`, target.legacyApiKey);
+    // Recheck before making anything public. Operators must freeze legacy
+    // content, deletion, and publication writes for the entire migration.
+    const currentVisible = await visibleLegacyKeys(keys);
+    const currentPublications = await legacyPublications(target);
+    if (keys.some(key => currentVisible.has(key) !== visible.has(key))
+      || JSON.stringify(currentPublications) !== JSON.stringify(legacy)) {
+      throw new Error("Legacy visibility changed during migration; refusing publication. Freeze legacy writes and review the destination before retrying");
+    }
     const existing = await requestJson<{
       publications: Array<{ _id: string; slug: string; pathPrefix: string; entryFile: string; title: string; trackingMode: string; pinnedDeploymentId?: string }>;
     }>(`${endpoint}/api/rendro/publications?${query}`, target.apiKey);
-    for (const publication of legacy.publications) {
+    for (const publication of legacy) {
       if (!publication.sourcePrefix.startsWith(prefix)) continue;
       const pathPrefix = publication.sourcePrefix.slice(prefix.length).replace(/\/$/, "");
       const previous = existing.publications.find((entry) => entry.slug === publication.slug);
