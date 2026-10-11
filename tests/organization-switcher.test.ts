@@ -35,6 +35,7 @@ describe("header organization switcher", () => {
   it("derives its name from the current visible organization through hydration and switching", async () => {
     const { win, trigger, menu } = setup();
     expect(trigger.hasAttribute("aria-label")).toBe(false);
+    expect(menu.closest("header")).not.toBeNull();
     expect(trigger.querySelector("[data-org-mark]")?.getAttribute("aria-hidden")).toBe("true");
     expect(trigger.querySelector(".sr-only")?.textContent).toBe(", switch organization");
     win.sessionStorage.setItem("rendro-org-navigation-label", JSON.stringify({ userId: "u", organizationId: "org-a", name: "Acme & Sons", createdAt: Date.now() }));

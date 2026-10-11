@@ -38,7 +38,7 @@ describe("control-plane UI", () => {
     const app = authenticatedPages();
     for (const suffix of ["", "/projects/project-a", "/projects/project-a/deployments"]) {
       const html = await (await app.request("/organizations/org-a" + suffix)).text();
-      expect(html).toContain('<aside class="cp-sidebar" id="cp-navigation" aria-label="Workspace navigation">');
+      expect(html).toContain('<div class="cp-sidebar" id="cp-navigation" role="complementary" aria-label="Workspace navigation">');
       if (!suffix) {
         expect(html).toContain('aria-labelledby="workspace-status-title"');
         expect(html).toContain('<h2 id="workspace-status-title">Workspace status</h2>');

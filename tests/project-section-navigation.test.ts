@@ -107,6 +107,7 @@ describe("mobile navigation access", () => {
     vm.runInContext(script, context);
     vm.runInContext("setNav(true,false)", context);
     expect(regions.every((region) => region.inert)).toBe(true);
+    expect(attributes.get("role")).toBe("dialog");
     expect(attributes.get("aria-modal")).toBe("true");
     expect(attributes.get("aria-label")).toBe("Organization navigation");
     expect(nav.inert).toBe(false);
@@ -120,6 +121,7 @@ describe("mobile navigation access", () => {
     vm.runInContext("syncNavAccess(true)", context);
     expect(regions.some((region) => region.inert)).toBe(false);
     expect(nav.inert).toBe(false);
+    expect(attributes.get("role")).toBe("complementary");
     expect(attributes.has("aria-modal")).toBe(false);
     expect(attributes.has("aria-hidden")).toBe(false);
     expect(attributes.get("aria-label")).toBe("Workspace navigation");
