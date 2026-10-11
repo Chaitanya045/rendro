@@ -140,7 +140,21 @@ describe("private viewer republishing", () => {
     expect(await frame.locator("body").getAttribute("data-version")).toBe("1");
   });
 
-  it.each(["subscription", "deferred asset", "heartbeat"])("recovers from %s supersession at the same URL with drafts and pending operations", async trigger => {
+  it.each(["subscription", "deferred asset", "heartbeat", "malicious reload loop"])("recovers after %s at the same URL with drafts and pending operations", async trigger => {
+    if (trigger === "malicious reload loop") publisherBase = `<script>
+      function requestReload() {
+        document.body.dataset.reloadRequests = String(Number(document.body.dataset.reloadRequests || 0) + 1);
+        if (!navigator.userActivation.hasBeenActive) {
+          document.body.dataset.unactivatedRequests = String(Number(document.body.dataset.unactivatedRequests || 0) + 1);
+        }
+        parent.postMessage({ type: 'commentor-viewer-reload' }, '*');
+      }
+      addEventListener('load', () => {
+        // Send an initial burst before automation can confer user activation.
+        for (let i = 0; i < 100; i++) requestReload();
+        setInterval(requestReload, 10);
+      });
+    </script>`;
     const page = await harness.newPage();
     await page.context().addCookies([{ name: "better-auth.session_token", value: "fixture.signature", url: harness.origin }]);
     await page.route(url => url.origin !== harness.origin, route => route.fulfill({
@@ -165,6 +179,10 @@ describe("private viewer republishing", () => {
     await browserStep("open current private deployment", () => page.goto(url));
     let frame = (await (await page.locator("#content-frame").elementHandle())!.contentFrame())!;
     await browserStep("initialize comment bridge", () => frame.waitForFunction(() => document.body.dataset.subscribe === "true"));
+    if (trigger === "malicious reload loop") {
+      await frame.waitForFunction(() => Number(document.body.dataset.reloadRequests) >= 125);
+      expect(Number(await frame.locator("body").getAttribute("data-unactivated-requests"))).toBeGreaterThanOrEqual(100);
+    }
     await frame.evaluate(() => {
       const args = { body: "Pending comment", anchor: { kind: "element", path: ["#details"] } };
       parent.postMessage({ type: "commentor-parent-request", requestId: "draft", method: "draft.save", args: { key: "create", draft: args } }, "*");
@@ -184,7 +202,19 @@ describe("private viewer republishing", () => {
     expect(await page.locator("body").getAttribute("data-clients")).toBe("1");
     version = 2; // Activate a new manifest at the real route's backend boundary.
     await frame.locator("#focus-target").focus();
-    if (trigger === "subscription") {
+    if (trigger === "malicious reload loop") {
+      // The published script keeps requesting reloads before and after the
+      // reader's gesture. Observe another batch to catch repeated announcements.
+      await page.locator("#viewer-update-notice").evaluate(notice => {
+        notice.dataset.mutations = "0";
+        new MutationObserver(records => {
+          notice.dataset.mutations = String(Number(notice.dataset.mutations) + records.length);
+        }).observe(notice, { childList: true, subtree: true, attributes: true, attributeFilter: ["hidden"] });
+      });
+      const requests = await frame.evaluate(() => Number(document.body.dataset.reloadRequests));
+      await frame.waitForFunction(count => Number(document.body.dataset.reloadRequests) >= count + 25, requests);
+      expect(await page.locator("#viewer-update-notice").getAttribute("data-mutations")).toBe("0");
+    } else if (trigger === "subscription") {
       await page.evaluate(manifestKey => {
         (window as unknown as { publishManifest: (key: string) => void }).publishManifest(manifestKey);
       }, `deploy-${version}`);
@@ -195,12 +225,12 @@ describe("private viewer republishing", () => {
       await page.clock.setFixedTime(Date.now() + 6 * 60_000);
       await frame.evaluate(() => dispatchEvent(new Event("focus")));
     }
-    await browserStep("announce new publication", () => page.getByRole("status").filter({ hasText: "A newer version of this document was published." }).waitFor());
+    await browserStep("announce new publication", () => page.getByRole("status").filter({ hasText: trigger === "malicious reload loop" ? "Reload this document to continue." : "A newer version of this document was published." }).waitFor());
     expect(await page.getByRole("button", { name: "Reload", exact: true }).count()).toBe(1);
     expect(await frame.locator("#focus-target").evaluate(element => element === document.activeElement)).toBe(true);
     expect(await frame.locator("body").getAttribute("data-version")).toBe("1");
     expect(shellLoads).toBe(1);
-    expect(renewals).toBe(trigger === "subscription" ? 0 : 1);
+    expect(renewals).toBe(trigger === "subscription" || trigger === "malicious reload loop" ? 0 : 1);
     if (trigger === "subscription") {
       // The notice precedes every asset failure; CSS resources cannot trigger it.
       expect(assetStatuses).toEqual([]);
@@ -250,7 +280,10 @@ describe("private viewer republishing", () => {
     expect(Object.values(restored.operations)).toEqual([expect.objectContaining({ clientOperationId: "pending-before-republish" })]);
     await frame.locator("#deferred").evaluate(element => { (element as HTMLImageElement).src = "deferred.svg"; });
     await browserStep("load deferred asset from the current deployment", () => frame.waitForFunction(() => (document.getElementById("deferred") as HTMLImageElement).naturalWidth === 10));
-    expect(await page.locator("#viewer-update-notice").isVisible()).toBe(false);
+    if (trigger === "malicious reload loop") {
+      await frame.waitForFunction(() => Number(document.body.dataset.reloadRequests) >= 125);
+      expect(await page.getByRole("button", { name: "Reload", exact: true }).count()).toBe(1);
+    } else expect(await page.locator("#viewer-update-notice").isVisible()).toBe(false);
     expect(shellLoads).toBe(2);
     expect(violations).toEqual([]);
   });

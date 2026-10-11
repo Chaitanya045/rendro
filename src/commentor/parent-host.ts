@@ -1,6 +1,6 @@
 import { ConvexError } from "convex/values";
 import { isPublicErrorData } from "../shared/public-errors";
-import { updateViewerActiveDeployment } from "../viewer/client";
+import { showViewerUpdateNotice, updateViewerActiveDeployment } from "../viewer/client";
 import { commentErrorMessage, isDefinitiveCommentRejection } from "./errors";
 import { COMMENT_RECOVERY_PREFIX, syncCommentRecoveryUser } from "./recovery-session";
 import { normalizeMutationArgs, record, validAnchor } from "./mutation-args";
@@ -317,10 +317,11 @@ export class CommentorParentHost {
   private readonly onMessage = (event: MessageEvent): void => {
     if (event.source !== this.frame.contentWindow) return;
     if (record(event.data)?.type === COMMENTOR_VIEWER_RELOAD) {
-      // Only the current, scoped document can reload its owning viewer. No URL
-      // is accepted, and no sandbox top-navigation permission is required.
+      // Publisher code shares this opaque frame with the widget. Neither the
+      // source check nor a claimed gesture can authorize navigation. Only the
+      // reader's Reload button in the parent-owned notice can reload the page.
       const scope = this.currentScope();
-      if (scope && sameScope(scope, this.loadedScope)) window.location.reload();
+      if (scope && sameScope(scope, this.loadedScope)) showViewerUpdateNotice(window, "Reload this document to continue.");
       return;
     }
     if (!isCommentorParentRequest(event.data)) return;

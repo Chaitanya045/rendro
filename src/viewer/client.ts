@@ -5,12 +5,13 @@ interface ParentConfig { base: string }
 interface FrameConfig extends ParentConfig { prefix: string; manifestKey: string; deploymentId: string }
 interface RenewalMessage { type?: string; requestId?: string; deploymentId?: string; manifestKey?: string; prefix?: string }
 
-export function showViewerUpdateNotice(host: Window = window): void {
+export function showViewerUpdateNotice(host: Window = window, message = "A newer version of this document was published."): void {
   const notice = host.document.getElementById("viewer-update-notice");
-  if (!notice) return;
+  // Repeated requests must not rewrite the live region or disturb the reader.
+  if (!notice || !notice.hidden) return;
   notice.hidden = false;
   const status = notice.querySelector('[role="status"]');
-  if (status) status.textContent = "A newer version of this document was published.";
+  if (status) status.textContent = message;
 }
 
 /** Called only by the parent's authenticated Convex subscription. */
@@ -28,7 +29,12 @@ export function installViewerParent(config: ParentConfig, host: Window = window)
   let pending = false;
   let generation = 0;
   const notice = host.document.getElementById("viewer-update-notice");
-  notice?.querySelector("button")?.addEventListener("click", () => host.location.reload());
+  const reload = notice?.querySelector("button");
+  reload?.addEventListener("click", () => {
+    if (notice?.hidden || reload.disabled) return;
+    reload.disabled = true;
+    host.location.reload();
+  });
   host.addEventListener("load", event => {
     if (event.target !== host.document.getElementById("content-frame")) return;
     generation++;

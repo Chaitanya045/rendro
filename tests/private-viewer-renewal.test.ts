@@ -310,6 +310,7 @@ describe("deployment update notice", () => {
     expect(f.notice.querySelector('[role="status"]')!.textContent).toBe("A newer version of this document was published.");
     expect(f.reload).not.toHaveBeenCalled();
     f.notice.querySelector("button")!.click();
+    f.notice.querySelector("button")!.click();
     expect(f.reload).toHaveBeenCalledOnce();
     f.bus.emit("load", { target: f.frame });
     expect(f.notice.hidden).toBe(true);

@@ -498,25 +498,37 @@ describe("old widget through new parent and Convex", () => {
 
 
 describe("viewer reload bridge", () => {
-  it("reloads the parent viewer only for its current scoped document", async () => {
-    const runtime = recoveryRuntime();
+  it.each([false, true])("only offers one notice for the current scoped document (legacy=%s)", async legacy => {
+    const runtime = recoveryRuntime(undefined, undefined, legacy);
     const reload = vi.fn();
-    Object.assign(window, { location: { reload } });
+    const dom = new StorageWindow();
+    dom.document.body.innerHTML = '<aside id="viewer-update-notice" hidden><span role="status" aria-live="polite"></span><button>Reload</button></aside>';
+    Object.assign(window, { location: { reload }, document: dom.document });
+    const notice = dom.document.querySelector("aside")!;
     await flushMessages();
     runtime.foreignMessage({ type: COMMENTOR_VIEWER_RELOAD });
     await flushMessages();
-    expect(reload).not.toHaveBeenCalled();
+    expect(notice.hidden).toBe(true);
     runtime.parent.postMessage({ type: COMMENTOR_VIEWER_RELOAD });
     await flushMessages();
-    expect(reload).toHaveBeenCalledOnce();
+    expect(notice.hidden).toBe(false);
+    const announcement = notice.querySelector('[role="status"]')!.firstChild;
+    for (let i = 0; i < 1_000; i++) runtime.parent.postMessage({ type: COMMENTOR_VIEWER_RELOAD, userActivation: true });
+    await flushMessages();
+    expect(notice.querySelector('[role="status"]')!.firstChild).toBe(announcement);
+    expect(dom.document.querySelectorAll("#viewer-update-notice")).toHaveLength(1);
+    expect(reload).not.toHaveBeenCalled();
+    notice.hidden = true;
     runtime.frame.src = "https://rendro.test/organizations/org-a/projects/other/docs/files/guide.html";
     runtime.parent.postMessage({ type: COMMENTOR_VIEWER_RELOAD });
     await flushMessages();
-    expect(reload).toHaveBeenCalledOnce();
+    expect(notice.hidden).toBe(true);
     runtime.host.dispose();
     runtime.parent.postMessage({ type: COMMENTOR_VIEWER_RELOAD });
     await flushMessages();
-    expect(reload).toHaveBeenCalledOnce();
+    expect(notice.hidden).toBe(true);
+    expect(reload).not.toHaveBeenCalled();
     runtime.transport.dispose();
+    await dom.happyDOM.close();
   });
 });

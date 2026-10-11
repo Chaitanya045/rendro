@@ -389,7 +389,7 @@ describe("comment widget asset skew", () => {
     } });
     button("commentor-panel-btn").click();
     const reload = root.querySelector<HTMLButtonElement>('[role="status"] button')!;
-    expect(reload.textContent).toBe("Reload page");
+    expect(reload.textContent).toBe("Show reload notice");
     reload.click();
     expect(reloadViewer).toHaveBeenCalledOnce();
     expect(requests).toEqual([]);

@@ -1,6 +1,7 @@
 import type { CommentRecoveryState } from "./operation-state";
 // Increment when the durable-write contract changes incompatibly.
 export const COMMENTOR_PROTOCOL_VERSION = 2;
+// Untrusted request to show parent-owned UI, never permission to navigate.
 export const COMMENTOR_VIEWER_RELOAD = "commentor-viewer-reload";
 export const COMMENTOR_UPGRADE_NOTICE = "Comments were updated. Reload the page to continue.";
 export const COMMENTOR_PARENT_REQUEST = "commentor-parent-request";
