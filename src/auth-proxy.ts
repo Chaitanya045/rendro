@@ -1,3 +1,4 @@
+import { renderSignOutPage } from "@/routes/sign-out";
 import { sessionCache } from "@/session-cache";
 import { CONVEX_SITE_URL } from "@/config";
 import { logger } from "@/logger";
@@ -122,11 +123,11 @@ export async function proxyAuthRequest(request: Request): Promise<Response> {
   }
 
   const path = source.pathname.replace(/\/$/, "");
-  const signOut = path === "/api/auth/sign-out";
+  if (path === "/api/auth/sign-out") return proxyAuthSignOut(request);
   const revokesSessions = (request.method === "POST" && SESSION_REVOCATION_PATHS.has(path))
     || path === "/api/auth/delete-user/callback";
   const invalidateCaller = async () => {
-    if (signOut || revokesSessions) await sessionCache.evict(request.headers.get("cookie") ?? "");
+    if (revokesSessions) await sessionCache.evict(request.headers.get("cookie") ?? "");
   };
   await invalidateCaller();
   let upstream: Response;
@@ -161,24 +162,47 @@ export async function proxyAuthRequest(request: Request): Promise<Response> {
 
 export async function proxyAuthSignOut(request: Request): Promise<Response> {
   const cookie = request.headers.get("cookie") ?? "";
+  const source = new URL(request.url);
+  const json = request.headers.get("accept")?.includes("application/json");
+  const reply = (state: "confirm" | "failed" | "complete", status: number, headers = new Headers()) => {
+    headers.set("Cache-Control", "no-store");
+    headers.set("Content-Type", json ? "application/json" : "text/html; charset=utf-8");
+    return new Response(json ? JSON.stringify(state === "complete" ? { success: true } : { error: "Sign-out was not completed. Please try again." })
+      : renderSignOutPage(state), { status, headers });
+  };
   await sessionCache.evict(cookie);
-  const headers = new Headers({ Location: "/" });
   try {
-    const upstream = await fetch(`${CONVEX_SITE_URL}/api/auth/sign-out`, {
-      method: "POST",
-      headers: await proxiedHeaders(request, `${CONVEX_SITE_URL}/api/auth/sign-out`, "POST"),
-      redirect: "manual",
-    });
-    for (const cookie of strippedSetCookies(upstream.headers)) {
-      headers.append("Set-Cookie", cookie);
+    // GET is safe to follow/prefetch; only the confirmation form can sign out.
+    if (request.method !== "POST") {
+      const headers = new Headers({ Allow: "POST" });
+      return reply("confirm", request.method === "GET" ? 200 : 405, headers);
     }
+    // Validate the browser's origin before setting the trusted upstream origin.
+    // Never manufacture trust for a missing, opaque or cross-origin request.
+    if (request.headers.get("origin") !== source.origin) return reply("failed", 403);
+    const target = `${CONVEX_SITE_URL}/api/auth/sign-out`;
+    const upstreamHeaders = await proxiedHeaders(request, target, "POST");
+    upstreamHeaders.set("origin", source.origin);
+    upstreamHeaders.set("content-type", "application/json");
+    const upstream = await fetch(target, {
+      method: "POST", headers: upstreamHeaders, body: "{}", redirect: "manual",
+      signal: AbortSignal.timeout(5_000),
+    });
+    if (!upstream.ok) {
+      logger.error({ category: "UpstreamError", operation: "proxyAuthSignOut", status: upstream.status }, "Auth sign-out proxy error");
+      return reply("failed", 502);
+    }
+    const headers = new Headers();
+    for (const cookie of strippedSetCookies(upstream.headers)) headers.append("Set-Cookie", cookie);
+    // Cleanup is safe only after the server acknowledged revocation. On any
+    // failure retain cookies so a retry can still identify and revoke the session.
+    appendAuthCookieCleanup(headers, source.hostname);
+    return reply("complete", 200, headers);
   } catch {
-    logger.error(
-      { category: "TransportError", operation: "proxyAuthSignOut", status: null },
-      "Auth sign-out proxy error",
-    );
+    logger.error({ category: "TransportError", operation: "proxyAuthSignOut", status: null }, "Auth sign-out proxy error");
+    return reply("failed", 502);
+  } finally {
+    // Also evict lookups that began while sign-out was in flight, on every path.
+    await sessionCache.evict(cookie);
   }
-  await sessionCache.evict(cookie);
-  appendAuthCookieCleanup(headers, new URL(request.url).hostname);
-  return new Response(null, { status: 302, headers });
 }

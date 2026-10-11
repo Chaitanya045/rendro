@@ -10,36 +10,93 @@ export function clearCommentRecovery(storage: Storage): void {
 }
 
 export function syncCommentRecoveryUser(storage: Storage, userId: string | null): void {
-  if (!userId || storage.getItem(OWNER_KEY) !== userId) clearCommentRecovery(storage);
+  if (userId && storage.getItem(OWNER_KEY) !== userId) clearCommentRecovery(storage);
   if (userId) storage.setItem(OWNER_KEY, userId);
 }
 
-// Installed on shells with sign-out controls, including pages without a widget.
-// Clearing before navigation also prevents BFCache from reviving another user's UI.
-export function renderCommentRecoveryLifecycle(userId: string | null, nonceAttributes = ""): string {
+// Shared by authenticated shells and the native POST success page. No navigation
+// is triggered in other tabs; focus/pageshow remain authoritative backstops.
+export function renderCommentRecoveryLifecycle(userId: string | null, nonceAttributes = "", completedSignOut = false): string {
   const id = JSON.stringify(userId).replace(/</g, "\\u003c");
   return `<script${nonceAttributes}>(() => {
+    const userId = ${id};
+    const key = "rendro-sign-out";
+    let signedOut = false;
+    let channel;
+    let lastSignal;
+    try { lastSignal = localStorage.getItem(key); } catch {}
     const clear = () => {
-      try {
-        for (let i = sessionStorage.length - 1; i >= 0; i--) {
-          const key = sessionStorage.key(i);
-          if (key?.startsWith("commentor-operations:") || key === "commentor-recovery-user") sessionStorage.removeItem(key);
-        }
-      } catch {}
+      if (signedOut) return;
+      signedOut = true;
+      document.documentElement.dataset.rendroSignedOut = "true";
       window.dispatchEvent(new Event("commentor-sign-out"));
+      if (!userId) return;
+      // Leave drafts in their user-bound sessionStorage namespace. The host
+      // stops writes/subscriptions and won't expose them to a different user.
+      const notice = document.createElement("section");
+      notice.setAttribute("role", "status");
+      notice.id = "rendro-signed-out";
+      notice.style.cssText = "position:fixed;inset:0;z-index:2147483647;display:grid;place-content:center;gap:16px;padding:24px;background:#fafafa;color:#18181b;font:16px system-ui";
+      const heading = document.createElement("h1");
+      heading.textContent = "You're signed out";
+      const link = document.createElement("a");
+      link.href = "/sign-in";
+      link.textContent = "Sign in";
+      for (const child of document.body.children) child.inert = true;
+      notice.append(heading, link);
+      document.body.append(notice);
+    };
+    window.addEventListener("commentor-sign-out", clear);
+    const broadcast = () => {
+      clear();
+      try { channel?.postMessage("signed-out"); } catch {}
+      // Also publish to storage: a receiving tab may lack BroadcastChannel.
+      try { localStorage.setItem(key, crypto.randomUUID()); } catch {}
     };
     try {
-      const userId = ${id};
-      if (!userId || sessionStorage.getItem("commentor-recovery-user") !== userId) clear();
+      if (userId && sessionStorage.getItem("commentor-recovery-user") !== userId) {
+        for (let i = sessionStorage.length - 1; i >= 0; i--) {
+          const name = sessionStorage.key(i);
+          if (name?.startsWith("commentor-operations:") || name === "commentor-recovery-user") sessionStorage.removeItem(name);
+        }
+      }
       if (userId) sessionStorage.setItem("commentor-recovery-user", userId);
     } catch {}
-    const signOut = (event) => {
-      const control = event.target?.closest?.("a[href], form[action]");
-      if (!control) return;
-      const url = new URL(control.getAttribute("href") || control.getAttribute("action"), location.href);
-      if (url.origin === location.origin && url.pathname === "/api/auth/sign-out") clear();
-    };
-    document.addEventListener("click", signOut, true);
-    document.addEventListener("submit", signOut, true);
+    try {
+      channel = new BroadcastChannel(key);
+      channel.onmessage = event => { if (event.data === "signed-out") clear(); };
+    } catch {}
+    window.addEventListener("storage", event => {
+      if (event.key === key && event.newValue) clear();
+    });
+    window.addEventListener("pageshow", event => {
+      if (!event.persisted) return;
+      try { if (localStorage.getItem(key) !== lastSignal) clear(); } catch {}
+    });
+    document.addEventListener("submit", async event => {
+      const form = event.target;
+      if (!(form instanceof HTMLFormElement) || form.method.toLowerCase() !== "post") return;
+      const url = new URL(form.action, location.href);
+      if (url.origin !== location.origin || url.pathname !== "/api/auth/sign-out") return;
+      event.preventDefault();
+      if (form.dataset.submitting) return;
+      form.dataset.submitting = "true";
+      const button = form.querySelector('button[type="submit"]');
+      if (button) button.disabled = true;
+      try {
+        const response = await fetch(url.href, { method: "POST", credentials: "same-origin", headers: { Accept: "application/json" } });
+        if (!response.ok || (await response.json()).success !== true) throw new Error();
+        broadcast();
+        if (!userId) location.assign("/sign-in");
+      } catch {
+        let message = form.querySelector('[role="alert"]');
+        if (!message) { message = document.createElement("p"); message.setAttribute("role", "alert"); form.append(message); }
+        message.textContent = "Sign-out wasn't completed. Please try again.";
+      } finally {
+        delete form.dataset.submitting;
+        if (button) button.disabled = false;
+      }
+    });
+    ${completedSignOut ? "broadcast();" : ""}
   })();</script>`;
 }

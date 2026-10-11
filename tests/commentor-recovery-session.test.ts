@@ -35,30 +35,38 @@ describe("comment recovery session ownership", () => {
     }
   });
 
-  it.each(["a", "form"])("the rendered %s sign-out control clears all document namespaces without clearing unrelated storage", (tag) => {
+  it("keeps drafts until successful sign-out and delivers local teardown only after success", async () => {
     const win = windowFixture();
     const storage = win.sessionStorage as unknown as Storage;
     syncCommentRecoveryUser(storage, "A");
-    storage.setItem('commentor-operations:["A","doc1"]', "private");
-    storage.setItem('commentor-operations:["A","doc2"]', "private");
+    storage.setItem('commentor-operations:["A","doc1"]', "private draft");
     storage.setItem("unrelated", "keep");
+    const fetch = vi.fn().mockResolvedValueOnce(Response.json({}, { status: 502 })).mockResolvedValueOnce(Response.json({ success: true }));
+    Object.assign(win, { fetch });
     win.eval(renderCommentRecoveryLifecycle("A").replace(/^<script>|<\/script>$/g, ""));
-    expect(storage.length).toBe(4);
-    const control = win.document.createElement(tag);
-    control.setAttribute(tag === "a" ? "href" : "action", "/api/auth/sign-out");
-    win.document.body.append(control);
-    control.dispatchEvent(new win.Event(tag === "a" ? "click" : "submit", { bubbles: true }));
-    expect(storage.length).toBe(1);
+    const teardown = vi.fn();
+    win.addEventListener("commentor-sign-out", teardown);
+    win.document.body.innerHTML = '<form method="post" action="/api/auth/sign-out"><button type="submit">Sign out</button></form>';
+    const form = win.document.querySelector("form")!;
+    form.dispatchEvent(new win.Event("submit", { bubbles: true, cancelable: true }));
+    await flush();
+    expect(teardown).not.toHaveBeenCalled();
+    expect(form.textContent).toContain("Please try again");
+    form.dispatchEvent(new win.Event("submit", { bubbles: true, cancelable: true }));
+    await flush();
+    expect(teardown).toHaveBeenCalledOnce();
+    expect(storage.getItem('commentor-operations:["A","doc1"]')).toBe("private draft");
     expect(storage.getItem("unrelated")).toBe("keep");
+    expect(win.document.getElementById("rendro-signed-out")?.textContent).toContain("Sign in");
   });
 
-  it("keeps same-user recovery on navigation and clears it on a different server-rendered identity or signed-out page", () => {
+  it("keeps same-user recovery on navigation and clears it only on a different server-rendered identity", () => {
     const win = windowFixture();
     for (const userId of ["B", null]) {
       syncCommentRecoveryUser(win.sessionStorage as unknown as Storage, "A");
       win.sessionStorage.setItem("commentor-operations:legacy", "private");
       win.eval(renderCommentRecoveryLifecycle(userId).replace(/^<script>|<\/script>$/g, ""));
-      expect(win.sessionStorage.getItem("commentor-operations:legacy")).toBeNull();
+      expect(win.sessionStorage.getItem("commentor-operations:legacy")).toBe(userId ? null : "private");
     }
   });
 
@@ -91,7 +99,7 @@ describe("comment recovery session ownership", () => {
     // An actual sign-out event clears and invalidates this host immediately.
     storage.setItem("commentor-operations:B", "private");
     win.dispatchEvent(new win.Event("commentor-sign-out"));
-    expect(storage.length).toBe(0);
+    expect(storage.getItem("commentor-operations:B")).toBe("private");
     expect(source.postMessage).toHaveBeenLastCalledWith(expect.objectContaining({ userId: null, recoveryState: { operations: {}, drafts: {} } }), "*");
     dispose();
   });

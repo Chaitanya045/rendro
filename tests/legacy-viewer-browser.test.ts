@@ -1,3 +1,4 @@
+import { registerAuth, seedIdentity } from "./helpers/auth-identity";
 import { getRequestListener } from "@hono/node-server";
 import { readFile } from "node:fs/promises";
 import { build } from "esbuild";
@@ -14,7 +15,8 @@ import { browserStep, createBrowserHarness } from "./helpers/browser";
 const harness = createBrowserHarness();
 const modules = import.meta.glob("../convex/**/*.ts");
 const backend = convexTest(schema, modules);
-const author = backend.withIdentity({ subject: testUser.id, email: testUser.email, name: testUser.name });
+registerAuth(backend);
+let author: ReturnType<typeof backend.withIdentity>;
 const scope = { orgSlug: "example", filePath: "example/guide/index.html" };
 const assetsSeen = new Set<string>();
 const publisher = `<!doctype html><html><head><link rel="stylesheet" href="assets/site.css">
@@ -29,6 +31,9 @@ try{window.publisherProbe.dom=parent.document.body.tagName}catch(e){window.publi
 <div style="height:1500px"></div><h2 id="bottom">Bottom</h2></body></html>`;
 
 beforeAll(async () => {
+  const identity = await seedIdentity(backend, testUser);
+  testUser.id = identity.subject;
+  author = backend.withIdentity(identity);
   mockSecurityBackend();
   vi.spyOn(deletion, "isDeleted").mockResolvedValue(false);
   vi.spyOn(minio, "listImmediate").mockResolvedValue({ entries: [], isTruncated: false });

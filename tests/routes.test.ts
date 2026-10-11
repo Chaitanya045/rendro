@@ -404,7 +404,9 @@ describe("worker auth sign-out", () => {
     vi.stubGlobal("fetch", fakeFetch);
 
     const res = await workerApp.request("https://dev.rendro.app/api/auth/sign-out", {
+      method: "POST",
       headers: {
+        origin: "https://dev.rendro.app",
         cookie: [
           "__Secure-better-auth.session_token=session",
           "__Secure-better-auth.state=oauth-state",
@@ -414,8 +416,7 @@ describe("worker auth sign-out", () => {
       },
     });
 
-    expect(res.status).toBe(302);
-    expect(res.headers.get("location")).toBe("/");
+    expect(res.status).toBe(200);
     const setCookies = res.headers.getSetCookie?.() ?? [res.headers.get("set-cookie") ?? ""];
     const joined = setCookies.join("\n");
     expect(joined).toContain("__Secure-better-auth.session_token=;");
@@ -429,18 +430,17 @@ describe("worker auth sign-out", () => {
     expect(calls.some((call) => call.includes("/api/auth/sign-out"))).toBe(true);
   });
 
-  it("still clears site cookies when upstream sign-out fails", async () => {
+  it("retains cookies and offers retry when upstream sign-out fails", async () => {
     const fakeFetch: typeof fetch = () =>
       Promise.reject(new Error("Convex unavailable"));
     vi.stubGlobal("fetch", fakeFetch);
 
-    const res = await workerApp.request("https://dev.rendro.app/api/auth/sign-out");
-
-    expect(res.status).toBe(302);
-    expect(res.headers.get("location")).toBe("/");
-    expect(res.headers.get("clear-site-data")).toBe("\"cookies\"");
-    const setCookies = res.headers.getSetCookie?.() ?? [res.headers.get("set-cookie") ?? ""];
-    expect(setCookies.join("\n")).toContain("__Secure-better-auth.state=;");
+    const res = await workerApp.request("https://dev.rendro.app/api/auth/sign-out", { method: "POST", headers: { origin: "https://dev.rendro.app" } });
+    expect(res.status).toBe(502);
+    expect(res.headers.has("location")).toBe(false);
+    expect(res.headers.has("clear-site-data")).toBe(false);
+    expect(res.headers.has("set-cookie")).toBe(false);
+    expect(await res.text()).toContain("Try again");
   });
 });
 

@@ -12,12 +12,14 @@ const anchor = { kind: "element" as const, path: ["main"] };
 const paginationOpts = { cursor: null, numItems: 10 };
 async function fixture() {
   const f = await projectFixture();
+  const legacyIdentity = { subject: f.data.users[0].userId, sessionId: f.data.users[0].sessionId, email: "author@example.test" };
+  const memberIdentity = { subject: f.data.users[1].userId, sessionId: f.data.users[1].sessionId, email: "member@example.test" };
   const legacy = await f.backend.run(async ctx => {
-    const legacyThreadId = await ctx.db.insert("threads", { orgSlug: "example", filePath: "index.html", body: "Thread", anchor, authorId: "legacy", authorEmail: "author@example.test", authorName: "Author", resolved: false });
-    const legacyReplyId = await ctx.db.insert("replies", { threadId: legacyThreadId, body: "Reply", authorId: "legacy", authorEmail: "author@example.test", authorName: "Author" });
+    const legacyThreadId = await ctx.db.insert("threads", { orgSlug: "example", filePath: "index.html", body: "Thread", anchor, authorId: legacyIdentity.subject, authorEmail: "author@example.test", authorName: "Author", resolved: false });
+    const legacyReplyId = await ctx.db.insert("replies", { threadId: legacyThreadId, body: "Reply", authorId: legacyIdentity.subject, authorEmail: "author@example.test", authorName: "Author" });
     return { legacyThreadId, legacyReplyId };
   });
-  return { ...f, ...legacy };
+  return { ...f, ...legacy, legacyIdentity, memberIdentity };
 }
 type Fixture = Awaited<ReturnType<typeof fixture>>;
 type Endpoint = { name: string; kind: "query" | "mutation"; args: (f: Fixture) => Record<string, unknown>; ids: string[] };
@@ -96,7 +98,7 @@ describe("public Convex application error contract", () => {
   it.each(endpoints.filter(endpoint => endpoint.ids.length))("$name covers every ID with malformed, wrong-table, missing and cross-org values", async endpoint => {
     const f = await fixture();
     const legacy = !/^(document|projects:)/.test(endpoint.name);
-    const viewer = legacy ? f.backend.withIdentity({ subject: "legacy", email: "author@example.test" }) : f.viewers.author;
+    const viewer = legacy ? f.backend.withIdentity(f.legacyIdentity) : f.viewers.author;
     const records = await f.backend.run(async ctx => {
       const project = { organizationId: f.data.otherOrgId, slug: "other", name: "Other", createdBy: "author", createdAt: Date.now() };
       const projectId = await ctx.db.insert("projects", project);
@@ -155,7 +157,7 @@ describe("public Convex application error contract", () => {
   describe("legacy producer and widget error contract", () => {
     it.each(endpoints.filter(endpoint => /^(threads|replies):/.test(endpoint.name)))("$name classifies actual failures as definitive without displaying diagnostics", async endpoint => {
       const f = await fixture();
-      const viewer = f.backend.withIdentity({ subject: "legacy", email: "author@example.test" });
+      const viewer = f.backend.withIdentity(f.legacyIdentity);
       const args = endpoint.args(f);
       const denied = endpoint.ids.length ? { ...args, filePath: "another-document.html" } : { ...args, orgSlug: "other" };
       const code = endpoint.ids.length ? "not_found" : "forbidden";
@@ -169,8 +171,8 @@ describe("public Convex application error contract", () => {
 
     it("rejects legacy validation, author changes, status receipt conflicts and tombstoned records safely", async () => {
       const f = await fixture();
-      const author = f.backend.withIdentity({ subject: "legacy", email: "author@example.test" });
-      const member = f.backend.withIdentity({ subject: "member", email: "member@example.test" });
+      const author = f.backend.withIdentity(f.legacyIdentity);
+      const member = f.backend.withIdentity(f.memberIdentity);
       const scope = { orgSlug: "example", filePath: "index.html" };
       const thread = { ...scope, threadId: f.legacyThreadId };
       const reply = { ...thread, replyId: f.legacyReplyId };

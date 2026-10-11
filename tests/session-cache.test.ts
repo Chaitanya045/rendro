@@ -154,7 +154,7 @@ describe("Worker cache integration", () => {
     expect((await worker.request("/organizations/cache-probe", { headers: { cookie } })).status).toBe(200);
   });
 
-  it.each(["GET sign-out", "POST sign-out", "revoke-session", "revoke-sessions", "revoke-other-sessions", "change-password", "reset-password", "delete-user"])("evicts on %s through the Worker", async operation => {
+  it.each(["POST sign-out", "revoke-session", "revoke-sessions", "revoke-other-sessions", "change-password", "reset-password", "delete-user"])("evicts on %s through the Worker", async operation => {
     let revoked = false;
     const fetch = vi.fn((url: string | URL | Request) => {
       if ((typeof url === "string" ? url : url instanceof URL ? url.href : url.url).endsWith("/get-session")) return Response.json(revoked ? null : payload());
@@ -165,9 +165,8 @@ describe("Worker cache integration", () => {
     const worker = app();
     await worker.request("/organizations/cache-probe", { headers: { cookie } });
     const path = operation.includes("sign-out") ? "sign-out" : operation;
-    const req = new Request(`http://localhost:3000/api/auth/${path}`, { method: operation === "GET sign-out" ? "GET" : "POST", headers: { cookie } });
-    if (operation === "GET sign-out") await proxyAuthSignOut(req);
-    else await proxyAuthRequest(req);
+    const req = new Request(`http://localhost:3000/api/auth/${path}`, { method: "POST", headers: { cookie, origin: "http://localhost:3000" } });
+    await proxyAuthRequest(req);
     expect(await (await worker.request("/organizations/cache-probe", { headers: { cookie } })).json()).toEqual({ id: null });
     expect(fetch).toHaveBeenCalledTimes(3);
   });
@@ -214,7 +213,7 @@ describe("Worker cache integration", () => {
     vi.stubGlobal("fetch", fetch);
     await app().request("/organizations/cache-probe", { headers: { cookie } });
     fetch.mockRejectedValueOnce(new Error("offline"));
-    await proxyAuthSignOut(new Request("http://localhost:3000/api/auth/sign-out", { headers: { cookie } }));
+    await proxyAuthSignOut(new Request("http://localhost:3000/api/auth/sign-out", { method: "POST", headers: { cookie, origin: "http://localhost:3000" } }));
     await app().request("/organizations/cache-probe", { headers: { cookie } });
     expect(fetch).toHaveBeenCalledTimes(3);
   });

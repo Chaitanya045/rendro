@@ -207,7 +207,7 @@ function renderOrgTreePage(user: User | null, org: string, selectedDoc = "", opt
       <div class="avatar-menu" id="avatar-menu" hidden>
         <div class="avatar-menu-email">${escapeHtml(email)}</div>
         <a href="/account/security" class="avatar-menu-item"><span class="material-symbols-outlined" aria-hidden="true">shield</span> Account security</a>
-        <a href="/api/auth/sign-out" class="avatar-menu-item"><span class="material-symbols-outlined" aria-hidden="true">logout</span> Sign out</a>
+        <form method="post" action="/api/auth/sign-out"><button type="submit" class="avatar-menu-item"><span class="material-symbols-outlined" aria-hidden="true">logout</span> Sign out</button></form>
       </div>
     </div>`
     : "";
@@ -1054,7 +1054,7 @@ ${renderThemeAssets()}
   <div class="brand">Rendro</div>
   <div class="actions">
     ${renderThemeButton()}
-    <form method="get" action="/api/auth/sign-out"><button class="secondary-btn" type="submit">Sign out</button></form>
+    <form method="post" action="/api/auth/sign-out"><button class="secondary-btn" type="submit">Sign out</button></form>
   </div>
 </header>
 <main class="page">

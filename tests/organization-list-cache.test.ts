@@ -90,7 +90,7 @@ describe("organization display list cache", () => {
     await request("/api/auth/organization/create", { method: "POST" });
     expect(channels[0].postMessage).toHaveBeenCalledWith({ userId: identity.userId, kind: "invalidate" });
     await request(path); win.document.body.innerHTML = '<a href="/api/auth/sign-out">Sign out</a>';
-    win.document.querySelector("a")!.dispatchEvent(new win.MouseEvent("click", { bubbles: true }));
+    win.dispatchEvent(new win.Event("commentor-sign-out"));
     expect(channels[0].postMessage).toHaveBeenCalledWith({ userId: identity.userId, kind: "clear" });
     await request(path); win.dispatchEvent(new win.Event("pagehide")); await request(path); expect(raw).toHaveBeenCalledTimes(5);
   });

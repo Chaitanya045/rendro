@@ -340,7 +340,7 @@ describe("round-three recovery regressions", () => {
     nextHost.dispose();
   });
 
-  it("sign-out clears all stored recovery and in-memory operations", async () => {
+  it("sign-out retains local drafts but clears live recovery and rejects further operations", async () => {
     const runtime = recoveryRuntime();
     await flushMessages();
     runtime.transport.saveDraft("create", { body: "Secret", anchor: args.anchor });
@@ -349,7 +349,7 @@ describe("round-three recovery regressions", () => {
     runtime.host.setUserId(null);
     await flushMessages();
     await pending;
-    expect(window.sessionStorage.length).toBe(0);
+    expect(window.sessionStorage.length).toBeGreaterThan(0);
     expect(runtime.transport.recovery.value).toEqual({ drafts: {}, operations: {} });
     const backendCalls = runtime.backend.mutate.mock.calls.length;
     await expect(runtime.transport.mutate("thread.create", args)).rejects.toThrow("scope is unavailable");

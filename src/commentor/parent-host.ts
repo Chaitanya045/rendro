@@ -530,6 +530,7 @@ async function requestAuthToken(onAccessLost: () => void): Promise<string | null
 }
 
 export function bootCommentorParentHost(frameAlreadyLoaded = false): (() => void) | null {
+  if (document.documentElement.dataset.rendroSignedOut === "true") return null;
   const globals = window as Window & { RENDRO_SHARE_CONFIG?: CommentorParentConfig; RENDRO_LEGACY_COMMENT_CONFIG?: CommentorParentConfig };
   const config = globals.RENDRO_LEGACY_COMMENT_CONFIG ?? globals.RENDRO_SHARE_CONFIG;
   const frame = document.getElementById("content-frame");
@@ -561,7 +562,7 @@ export function bootCommentorParentHost(frameAlreadyLoaded = false): (() => void
       const session = denied ? null : await response.json() as { user?: { id?: unknown } } | null;
       const userId = typeof session?.user?.id === "string" && session.user.id ? session.user.id : null;
       if (!disposed && !signedOut) {
-        if (!userId) stopDeployment();
+        if (!userId) { signOut(); return null; }
         syncCommentRecoveryUser(window.sessionStorage, userId);
         host?.setUserId(userId);
       }
@@ -597,11 +598,12 @@ export function bootCommentorParentHost(frameAlreadyLoaded = false): (() => void
     }
   }).catch(() => {});
   const signOut = () => {
+    if (signedOut || disposed) return;
     signedOut = true;
     stopDeployment();
-    syncCommentRecoveryUser(window.sessionStorage, null);
     host?.setUserId(null);
     void client.close();
+    window.dispatchEvent(new Event("commentor-sign-out"));
   };
   const focus = () => { void checkIdentity().catch(() => {}); };
   window.addEventListener("commentor-sign-out", signOut);
