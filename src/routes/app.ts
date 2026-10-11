@@ -344,6 +344,8 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
   .tree-folder[data-depth="3"].open>.tree-item{top:calc(var(--tree-row-height) * 3);z-index:7}
   .tree-folder[data-depth="4"].open>.tree-item{top:calc(var(--tree-row-height) * 4);z-index:6}
   .tree-folder[data-depth="5"].open>.tree-item{top:calc(var(--tree-row-height) * 5);z-index:5}
+  .document-navigation-notice{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);z-index:1000;width:max-content;max-width:calc(100vw - 32px);padding:12px 16px;border:1px solid #e4e4e7;border-radius:8px;background:#fff;color:#09090b;box-shadow:0 4px 16px #0002}
+  html.dark .document-navigation-notice{background:#09090b;color:#fafafa;border-color:#27272a}
   .load-more-btn{display:inline-flex;align-items:center;justify-content:center;min-height:36px;padding:6px 10px;border:1px solid #e4e4e7;border-radius:6px;background:transparent;color:#c2410c;font:600 12px/20px Inter,system-ui,sans-serif;text-decoration:none;cursor:pointer;transition:background-color 150ms cubic-bezier(.4,0,.2,1),border-color 150ms cubic-bezier(.4,0,.2,1),transform 150ms cubic-bezier(.4,0,.2,1)}
   .load-more-btn:hover:not(:disabled){background:#f4f4f5;border-color:#d4d4d8}
   .load-more-btn:active:not(:disabled){transform:scale(.98)}
@@ -839,7 +841,7 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
     if(e.data.type!=="shell-toggle")return;
     var shellFrame=document.getElementById("content-frame");
     if(!shellFrame||e.source!==shellFrame.contentWindow)return;
-    if(navigator.userActivation&&!navigator.userActivation.isActive)return;
+    if(!navigator.userActivation||navigator.userActivation.isActive!==true)return;
     if(performance.now()-lastFrameToggle<1000)return;
     lastFrameToggle=performance.now();
     setShellHidden(!root.classList.contains("shell-hidden"));
@@ -897,7 +899,7 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
 <script${nonceAttribute()}>window.RENDRO_INITIAL_DOC=${inlineJson(selectedDoc)};window.RENDRO_ORG=${inlineJson(org)};window.RENDRO_DOCUMENT_BASE=${inlineJson(documentBase)};window.RENDRO_PUBLICATION_BASE=${inlineJson(isPublicDocument ? documentBase : "")};window.RENDRO_SHARE_CONFIG=${inlineJson(options.shareConfig ?? null)};window.RENDRO_LEGACY_COMMENT_CONFIG=${inlineJson(options.legacyCommentConfig ?? null)};</script>
 ${renderCommentRecoveryLifecycle(user?.id ?? null, nonceAttribute())}
 ${options.shareConfig?.convexUrl || options.legacyCommentConfig?.convexUrl ? `<script${nonceAttribute()} src="/commentor-parent.js?v=10"></script>` : ""}
-<script${nonceAttribute()} src="/lazy-tree.js?v=36"></script>
+<script${nonceAttribute()} src="/lazy-tree.js?v=37"></script>
 </body>
 </html>`;
 }

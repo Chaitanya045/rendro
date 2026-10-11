@@ -395,7 +395,7 @@ function handleClick(e: Event) {
   const path = item.dataset.path;
   if (path) {
     e.preventDefault();
-    loadDoc(path, true);
+    loadDoc(path, navigationGate.confirm());
   }
 }
 
@@ -475,7 +475,51 @@ function documentSearchFromLocation(): string {
   return validDocumentSearch(search) ? search : "";
 }
 
-function loadDoc(fullPath: string, pushState: boolean | "replace", fragment = "", search = "") {
+const navigationGate = createDocumentNavigationGate();
+let navigationNotice: HTMLElement | undefined;
+let navigationNoticeShown = false;
+
+function clearNavigationNotice() {
+  navigationNotice?.remove();
+  navigationNotice = undefined;
+  navigationNoticeShown = false;
+}
+
+function offerDocumentNavigation(fullPath: string, search: string, fragment: string) {
+  // Freeze the first request until the reader acts or the document changes.
+  // Floods cannot rewrite a focused button's destination, grow a queue, or
+  // repeatedly announce a prompt. Dismissal suppresses it for this document.
+  if (navigationNoticeShown) return;
+  navigationNoticeShown = true;
+  const notice = document.createElement("div");
+  notice.id = "document-navigation-notice";
+  notice.className = "document-navigation-notice";
+  const label = document.createElement("p");
+  label.id = "document-navigation-destination";
+  label.setAttribute("role", "status");
+  label.style.cssText = "margin:0 0 8px;overflow-wrap:anywhere;max-height:6em;overflow:auto";
+  label.textContent = `Open linked document ${relativeDocumentPath(fullPath)}${search}${fragment}?`;
+  const open = document.createElement("button");
+  open.type = "button";
+  open.className = "load-more-btn";
+  open.setAttribute("aria-describedby", label.id);
+  open.textContent = "Open linked document";
+  open.addEventListener("click", () => {
+    loadDoc(fullPath, navigationGate.confirm(), fragment, search);
+  });
+  const dismiss = document.createElement("button");
+  dismiss.type = "button";
+  dismiss.className = "load-more-btn";
+  dismiss.textContent = "Dismiss";
+  dismiss.style.marginLeft = "12px";
+  dismiss.addEventListener("click", () => { notice.remove(); navigationNotice = undefined; });
+  notice.append(label, open, dismiss);
+  navigationNotice = notice;
+  document.body.append(notice);
+}
+
+function loadDoc(fullPath: string, pushState: false | "push" | "replace", fragment = "", search = "") {
+  clearNavigationNotice();
   const frame = document.getElementById("content-frame") as HTMLIFrameElement | null;
   const placeholder = document.getElementById("main-placeholder");
   if (placeholder) placeholder.style.display = "none";
@@ -607,7 +651,8 @@ function init() {
       && activeEl
     ) refreshIndicator(false);
   });
-  const acceptNavigation = createDocumentNavigationGate();
+  // This shell survives iframe replacement. Never recreate its gate on load.
+  window.setInterval(navigationGate.observe, 100);
   const updateFragment = coalesceMessage((update: { path: string; fragment: string; loadId: number }) => {
     if (update.loadId === activeDocLoadId && update.path === RENDRO_WINDOW.RENDRO_CURRENT_DOC) {
       replaceViewerFragment(update.fragment);
@@ -633,8 +678,9 @@ function init() {
       targetUrl.hash = fragment;
       const target = JSON.stringify([fullPath, search, targetUrl.hash]);
       const current = JSON.stringify([RENDRO_WINDOW.RENDRO_CURRENT_DOC, documentSearchFromLocation(), location.hash]);
-      const action = acceptNavigation(target, current);
-      if (action) loadDoc(fullPath, action === "push" ? true : "replace", fragment, search);
+      const action = navigationGate.request(target, current);
+      if (action === "confirm") offerDocumentNavigation(fullPath, search, fragment);
+      else if (action) loadDoc(fullPath, action, fragment, search);
     }
     if (event.data.type === "doc-loaded") {
       if (!ORG) return;
@@ -645,6 +691,7 @@ function init() {
 
   // Browser back/forward
   window.addEventListener("popstate", (event) => {
+    navigationGate.suspend();
     const docPath = documentPathFromHistory(event.state) || docFromPathname();
     if (docPath) loadDoc(docPath, false, location.hash, documentSearchFromLocation());
   });

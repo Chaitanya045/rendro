@@ -509,13 +509,59 @@ Client (lazy-tree.js, ~25KB IIFE built from src/lazy-tree/)
   │   ├─ On iframe load, keep tree feedback for the rest of the 520ms minimum window
   │   └─ history.pushState (?doc=<path> for scoped viewers, /docs/:org/:path for legacy)
   ├─ postMessage listener (current content iframe only)
-  │   ├─ doc-navigate → loadDoc(path, pushState)
-  │   ├─ doc-loaded → syncActiveState(path)
+  │   ├─ doc-navigate → parent authorization / confirmation → loadDoc(path, push/replace)
+  │   ├─ doc-loaded → acknowledge expected path (no navigation or tree fetch)
   │   └─ shell-toggle → Ctrl/Cmd+Shift+H inside the iframe toggles the shell
   └─ popstate / initial URL → loadDoc(path)
 ```
 
 The script URLs carry `?v=` cache-busting versions that change with each rebuild; read the current value in `src/routes/app.ts` rather than copying it.
+
+### Document navigation authorization
+
+The private, public and legacy tree shells own one navigation gate for their
+entire lifetime. A valid `doc-navigate` from the current content frame requires
+`navigator.userActivation.isActive === true` and an unused activation. The shell
+marks it used before replacing the iframe. Every 100ms it observes activation;
+only an observed `false` rearms the gate, and another request still requires
+`true`. Time alone never authorizes navigation, so this does not depend on a
+browser-specific activation timeout. Suspended/background polling fails closed.
+Back/Forward also marks the current activation used before restoring a document.
+Traversal ends the history burst separately: a subsequent parent-confirmed link
+starts a new entry so that Back can return to that restored document.
+
+An unverified or already-used activation offers a small parent-owned “Open
+linked document” notice. Its bounded path/query/fragment is assigned with
+`textContent`, never HTML. The first destination stays fixed while visible;
+repeated requests do not rewrite it, steal focus, or add notices. Dismissal
+suppresses notices until the next parent document navigation. The native button
+works with mouse and keyboard even when the activation API is absent. Shell
+`toggle` messages also fail closed when the API is absent. Share viewers retain
+their native, document-scoped navigation path.
+
+A first authorized navigation pushes history; explicit parent confirmations or
+tree selections while activation remains consumed replace that entry. Fragment
+reports also replace, never push. One Back therefore returns before the burst.
+Without the activation API, only parent controls can navigate, and confirmations
+within five seconds of the previous navigation replace its history entry. Rapid
+legitimate document links during one activation (about five seconds in Chromium)
+may need confirmation. A false-to-true transition missed between polling ticks
+also needs confirmation; this conservative trade-off preserves ordinary first
+mouse/keyboard links without treating iframe gesture claims as authority.
+
+**Why not consume activation directly?** The [HTML activation model](https://html.spec.whatwg.org/multipage/interaction.html#tracking-user-activation)
+consumes activation across the frame tree, but `UserActivation` only exposes
+read-only state. Its direct consume command is WebDriver-only, unavailable to
+page code. [Chromium documents `window.open()` consumption](https://developer.chrome.com/blog/user-activation),
+and [Firefox's window implementation](https://searchfox.org/mozilla-central/source/dom/base/nsGlobalWindowOuter.cpp)
+consumes when opening a new window, not when reusing an existing one.
+[WebKit documents consuming window/share flows](https://webkit.org/blog/13862/the-user-activation-api/)
+and also lists notification permission and payment-request UI. These operations
+have visible effects; attempting an invalid call or reusing a window is not a
+portable side-effect-free consume primitive. We therefore use observed
+inactivity, not a popup, permission prompt, or guessed timeout. The activation
+path applies to modern Chromium, [Firefox 120+](https://www.mozilla.org/en-US/firefox/120.0/releasenotes/),
+and [Safari 16.4+](https://webkit.org/blog/13966/webkit-features-in-safari-16-4/).
 
 ### Document Loading Lifecycle
 

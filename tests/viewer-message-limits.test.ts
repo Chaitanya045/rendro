@@ -2,36 +2,84 @@ import { describe, expect, it, vi } from "vitest";
 import { coalesceMessage, createDocumentNavigationGate, createMessageRateLimit } from "@/viewer/message-limits";
 
 describe("parent-owned message limits", () => {
-  it("rejects script navigation, duplicates and bursts without trusting message gesture claims", () => {
+  function fixture(supported = true) {
     let now = 0;
     const activation = { isActive: false };
-    const host = { performance: { now: () => now }, navigator: { userActivation: activation } } as unknown as Window;
-    const accept = createDocumentNavigationGate(host);
-    expect(accept("other?x#y", "current")).toBeNull();
+    const host = { performance: { now: () => now }, navigator: supported ? { userActivation: activation } : {} } as unknown as Window;
+    return { gate: createDocumentNavigationGate(host), activation, advance: (time: number) => { now = time; } };
+  }
+
+  it("requires positive activation and ignores current targets without spending authorization", () => {
+    const { gate, activation } = fixture();
+    expect(gate.request("other?x#y", "current")).toBe("confirm");
     activation.isActive = true;
-    expect(accept("current", "current")).toBeNull();
-    expect(accept("other?x#y", "current")).toBe("push");
-    for (let i = 0; i < 100; i++) expect(accept(`other?${i}`, "other?x#y")).toBeNull();
-    now = 1000;
-    expect(accept("other?x#y", "other?x#y")).toBeNull();
-    expect(accept("next", "other?x#y")).toBe("push");
-    now = 2000;
-    activation.isActive = false;
-    expect(accept("current", "next")).toBeNull();
-    activation.isActive = true;
-    expect(accept("other?x#y", "current")).toBe("push");
+    expect(gate.request("current", "current")).toBeNull();
+    expect(gate.request("other?x#y", "current")).toBe("push");
+    expect(gate.request("next", "other?x#y")).toBe("confirm");
   });
 
-  it("bounds unsupported browsers and replaces sustained navigation history", () => {
-    let now = 0;
-    const host = { performance: { now: () => now }, navigator: {} } as unknown as Window;
-    const accept = createDocumentNavigationGate(host);
-    expect(accept("first", "start")).toBe("replace");
-    expect(accept("second", "first")).toBeNull();
-    now = 1000;
-    expect(accept("second", "first")).toBe("replace");
-    now = 6000;
-    expect(accept("third", "second")).toBe("replace");
+  it("does not rearm with elapsed time or iframe replacement while activation stays true", () => {
+    const { gate, activation, advance } = fixture();
+    activation.isActive = true;
+    expect(gate.request("first", "start")).toBe("push");
+    for (const time of [1100, 2200, 3400, 4500, 6000, 60_000]) {
+      advance(time);
+      gate.observe();
+      expect(gate.request(`frame-${time}`, "first")).toBe("confirm");
+    }
+  });
+
+  it("rearms only after observing inactivity and requires a subsequent activation", () => {
+    const { gate, activation } = fixture();
+    activation.isActive = true;
+    expect(gate.request("first", "start")).toBe("push");
+    activation.isActive = false;
+    gate.observe();
+    expect(gate.request("second", "first")).toBe("confirm");
+    activation.isActive = true;
+    expect(gate.request("second", "first")).toBe("push");
+  });
+
+  it("coalesces confirmations and prevents their activation authorizing another frame", () => {
+    const { gate, activation } = fixture();
+    activation.isActive = true;
+    expect(gate.request("first", "start")).toBe("push");
+    expect(gate.confirm()).toBe("replace");
+    expect(gate.request("third", "second")).toBe("confirm");
+    expect(gate.confirm()).toBe("replace");
+    activation.isActive = false;
+    gate.observe();
+    activation.isActive = true;
+    expect(gate.confirm()).toBe("push");
+    expect(gate.request("fourth", "third")).toBe("confirm");
+  });
+
+  it("blocks activation reuse after Back/Forward, even with no preceding message navigation", () => {
+    const { gate, activation } = fixture();
+    activation.isActive = true;
+    gate.suspend();
+    expect(gate.request("next", "restored")).toBe("confirm");
+    expect(gate.confirm()).toBe("push");
+    expect(gate.request("another", "next")).toBe("confirm");
+    expect(gate.confirm()).toBe("replace");
+    gate.suspend();
+    expect(gate.request("next", "restored")).toBe("confirm");
+    expect(gate.confirm()).toBe("push");
+  });
+
+  it("fails closed without the API, allowing only parent confirmations and grouping their history", () => {
+    const { gate, advance } = fixture(false);
+    expect(gate.request("first", "start")).toBe("confirm");
+    expect(gate.confirm()).toBe("push");
+    for (const time of [1100, 2200, 3400, 4500]) {
+      advance(time);
+      gate.observe();
+      expect(gate.request("next", "first")).toBe("confirm");
+    }
+    expect(gate.confirm()).toBe("replace");
+    advance(10_000);
+    expect(gate.request("next", "first")).toBe("confirm");
+    expect(gate.confirm()).toBe("push");
   });
 
   it("coalesces floods with one timer and delivers the final fragment", () => {

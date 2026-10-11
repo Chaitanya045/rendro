@@ -33,17 +33,50 @@ export function coalesceMessage<T>(apply: (value: T) => void, host: Window = win
   return update;
 }
 
-/** Activation is browser-owned; publisher-provided gesture claims are never used. */
-export function createDocumentNavigationGate(host: Window = window): (target: string, current: string) => "push" | "replace" | null {
-  let last = -Infinity;
-  return (target, current) => {
-    const time = host.performance.now();
-    if (host.navigator.userActivation?.isActive === false || target === current
-      || time - last < 1000) return null;
-    // Drop bursts rather than queueing reloads. Without activation support,
-    // never let script navigation accumulate parent history entries.
-    const action = host.navigator.userActivation ? "push" : "replace";
-    last = time;
-    return action;
+/**
+ * One authorization per observed activation, owned by the shell, never the frame.
+ * There is no side-effect-free web API to consume browser activation. Polling
+ * observes its end without assuming any browser's transient-activation duration.
+ * If a rapid second click hides that transition, request parent confirmation.
+ */
+export function createDocumentNavigationGate(host: Window = window) {
+  let consumed = false;
+  let hasNavigation = false;
+  let lastNavigation = -Infinity;
+  const observe = () => {
+    if (host.navigator.userActivation?.isActive === false) {
+      consumed = false;
+      hasNavigation = false;
+    }
+  };
+  const consume = (): "push" | "replace" => {
+    observe();
+    // Without the API, only explicit parent UI can navigate; group rapid
+    // confirmations conservatively without ever using elapsed time as authority.
+    const inBurst = hasNavigation && (host.navigator.userActivation
+      ? consumed : host.performance.now() - lastNavigation < 5000);
+    consumed = true;
+    hasNavigation = true;
+    lastNavigation = host.performance.now();
+    return inBurst ? "replace" : "push";
+  };
+  return {
+    observe,
+    request(target: string, current: string): "push" | "confirm" | null {
+      observe();
+      if (target === current) return null;
+      if (host.navigator.userActivation?.isActive !== true || consumed) return "confirm";
+      consume();
+      return "push";
+    },
+    // Call only from trusted parent controls, never from message data.
+    confirm: consume,
+    // Back/Forward must not let the restored frame reuse the browser gesture.
+    suspend() {
+      consumed = true;
+      // Traversal ends the history burst without granting frame authorization.
+      // A later parent-confirmed link must preserve the restored entry for Back.
+      hasNavigation = false;
+    },
   };
 }
