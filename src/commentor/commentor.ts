@@ -1,3 +1,4 @@
+import { commentErrorMessage } from "./errors";
 import { CommentOperationConflictError } from "./operation-state";
 // commentor.ts — a drop-in commenting widget for any HTML file.
 //
@@ -22,7 +23,7 @@ import { PendingDeletionCoordinator } from "./delete-state";
 import { requestParentTheme } from "./theme-message";
 import { appendPlainText } from "./text";
 import { COMMENTOR_UPGRADE_NOTICE } from "./parent-protocol";
-import { CommentMutationOutcomeUnknownError, ParentCommentTransport } from "./parent-transport";
+import { CommentMutationRejectedError, CommentMutationOutcomeUnknownError, ParentCommentTransport } from "./parent-transport";
 
 // ─────────────────────────────── types ───────────────────────────────
 
@@ -829,8 +830,10 @@ class Commentor {
       this.newThreadIds.clear();
       this.newReplyIds.clear();
     };
-    const fail = (error: Error) =>
+    const fail = (error: Error) => {
       console.error("[commentor] subscription error", error);
+      this.toast(isParentConfig(this.cfg) ? error.message : commentErrorMessage(error, "Comments could not be loaded"), { kind: "error" });
+    };
 
     if (isParentConfig(this.cfg)) {
       this.parentTransport?.subscribe(
@@ -1449,7 +1452,7 @@ class Commentor {
         post.classList.remove("is-pending");
         post.removeAttribute("aria-busy");
         post.textContent = "Post";
-        this.toast((err instanceof CommentMutationOutcomeUnknownError || err instanceof CommentOperationConflictError) ? err.message : "Could not post comment. Try again.", { kind: "error" });
+        this.toast((err instanceof CommentMutationRejectedError || err instanceof CommentMutationOutcomeUnknownError || err instanceof CommentOperationConflictError) ? err.message : commentErrorMessage(err, "Could not post comment. Try again."), { kind: "error" });
         textarea.focus();
       }
     };
@@ -1581,7 +1584,7 @@ class Commentor {
       await action();
     } catch (err) {
       console.error(`[commentor] ${label.toLowerCase()} failed`, err);
-      this.toast((err instanceof CommentMutationOutcomeUnknownError || err instanceof CommentOperationConflictError) ? err.message : errorMessage, { kind: "error" });
+      this.toast((err instanceof CommentMutationRejectedError || err instanceof CommentMutationOutcomeUnknownError || err instanceof CommentOperationConflictError) ? err.message : commentErrorMessage(err, errorMessage), { kind: "error" });
     } finally {
       if (button.isConnected) {
         button.disabled = false;
@@ -1675,7 +1678,7 @@ class Commentor {
         console.error("[commentor] delete failed", err);
         this.renderPins();
         this.renderDrawerList();
-        this.toast((err instanceof CommentMutationOutcomeUnknownError || err instanceof CommentOperationConflictError) ? err.message : "Could not delete comment.", { kind: "error" });
+        this.toast((err instanceof CommentMutationRejectedError || err instanceof CommentMutationOutcomeUnknownError || err instanceof CommentOperationConflictError) ? err.message : commentErrorMessage(err, "Could not delete comment."), { kind: "error" });
       },
     );
     if (!started) return;
@@ -1931,7 +1934,7 @@ class Commentor {
           }
         } catch (err) {
           console.error("[commentor] reply failed", err);
-          this.toast((err instanceof CommentMutationOutcomeUnknownError || err instanceof CommentOperationConflictError) ? err.message : "Could not post reply.", { kind: "error" });
+          this.toast((err instanceof CommentMutationRejectedError || err instanceof CommentMutationOutcomeUnknownError || err instanceof CommentOperationConflictError) ? err.message : commentErrorMessage(err, "Could not post reply."), { kind: "error" });
         } finally {
           this.pendingReplies.delete(t._id);
           this.setReplyPendingState(t._id, false);

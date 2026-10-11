@@ -241,19 +241,19 @@ describe("Convex authorization boundary", () => {
         keyHash: "hash",
         internalSecret: "attacker",
       }),
-    ).rejects.toThrow("Unauthorized service call");
+    ).rejects.toThrow("Forbidden");
     await expect(
       backend.mutation(api.deletedFiles.mark, {
         orgSlug: "acme",
         fileKey: "acme/index.html",
         internalSecret: "attacker",
       }),
-    ).rejects.toThrow("Unauthorized service call");
+    ).rejects.toThrow("Forbidden");
     await expect(
       backend.query(api.apiKeys.validate, {
         keyHash: "hash",
         internalSecret: "attacker",
       }),
-    ).rejects.toThrow("Unauthorized service call");
+    ).rejects.toThrow("Forbidden");
   });
 });

@@ -7,7 +7,7 @@ import { CommentorParentHost, type DocumentCommentBackend } from "../src/comment
 import { COMMENTOR_VIEWER_RELOAD, COMMENTOR_PARENT_READY, COMMENTOR_PARENT_RESPONSE, COMMENTOR_PARENT_REQUEST } from "../src/commentor/parent-protocol";
 import { CommentMutationOutcomeUnknownError, ParentCommentTransport } from "../src/commentor/parent-transport";
 
-function recoveryRuntime(scope = { organizationId: "org-a", projectId: "project-a" as string, documentPath: "guide.html" }, principal = "user-a") {
+function recoveryRuntime(scope = { organizationId: "org-a", projectId: "project-a" as string, documentPath: "guide.html" }, principal = "user-a", legacy = false) {
   vi.useFakeTimers();
   const hostListeners = new Set<EventListener>();
   const childListeners = new Set<EventListener>();
@@ -25,7 +25,7 @@ function recoveryRuntime(scope = { organizationId: "org-a", projectId: "project-
   const child = { postMessage: vi.fn((data: unknown) => deliver(childListeners, parent, data)) };
   let frameLoad!: () => void;
   const frame = {
-    src: `https://rendro.test/organizations/${scope.organizationId}/projects/${scope.projectId}/docs/files/${scope.documentPath}`,
+    src: legacy ? `https://rendro.test/legacy-view/example/files/${scope.documentPath}` : `https://rendro.test/organizations/${scope.organizationId}/projects/${scope.projectId}/docs/files/${scope.documentPath}`,
     contentWindow: child,
     addEventListener: (_type: string, listener: () => void) => { frameLoad = listener; },
     removeEventListener: vi.fn(),
@@ -48,7 +48,7 @@ function recoveryRuntime(scope = { organizationId: "org-a", projectId: "project-
       fail = () => reject(new Error("backend rejected"));
     })),
   } satisfies DocumentCommentBackend;
-  const createHost = (userId = principal) => new CommentorParentHost(frame, "https://rendro.test", {
+  const createHost = (userId = principal) => new CommentorParentHost(frame, "https://rendro.test", legacy ? { orgSlug: "example", convexUrl: "https://convex.test" } : {
     organizationId: scope.organizationId, projectId: scope.projectId as never, convexUrl: "https://convex.test",
   }, backend, userId);
   const transport = new ParentCommentTransport(parent, events(childListeners) as never, "guide.html");
@@ -389,24 +389,61 @@ describe("round-three recovery regressions", () => {
     runtime.host.dispose();
   });
 
-  it.each(["thread.create", "reply.add"] as const)("retires a definitively rejected %s identity but keeps its editable draft", async (method) => {
-    const runtime = recoveryRuntime();
-    await flushMessages();
-    runtime.backend.mutate.mockRejectedValueOnce(new ConvexError("Permission denied"));
-    await expect(runtime.transport.mutate(method, args)).rejects.toThrow("operation failed");
-    const originalId = (runtime.backend.mutate.mock.calls[0][2] as { clientOperationId: string }).clientOperationId;
-    expect(runtime.transport.recovery.value.operations).toEqual({});
-    expect(Object.values(runtime.transport.recovery.value.drafts)[0].body).toBe(args.body);
-    const next = runtime.reload();
-    await flushMessages();
-    expect(next.recovery.value.operations).toEqual({});
-    const corrected = next.mutate(method, { ...args, body: "Edited" });
-    await flushMessages();
-    expect((runtime.backend.mutate.mock.calls[1][2] as { clientOperationId: string }).clientOperationId).not.toBe(originalId);
-    runtime.finish();
-    await corrected;
-    next.dispose();
-    runtime.host.dispose();
+  describe.each([false, true])("legacy=%s error recovery", legacy => {
+    it.each((["thread.create", "reply.add"] as const).flatMap(method => [
+      ...[
+        ["invalid_id", "This comment is unavailable"],
+        ["not_found", "This comment is unavailable"],
+        ["forbidden", "You do not have permission"],
+        ["unauthenticated", "Sign in again"],
+        ["invalid_input", "Check your comment"],
+        ["conflict", "This comment operation changed"],
+      ].map(([code, message]) => ({ method, data: { code, message: "private diagnostic must not reach the widget" }, message })),
+    ]))("retires a definitively rejected $method identity for $data but keeps its editable draft", async ({ method, data, message }) => {
+      const runtime = recoveryRuntime(undefined, undefined, legacy);
+      await flushMessages();
+      runtime.backend.mutate.mockRejectedValueOnce(new ConvexError(data));
+      await expect(runtime.transport.mutate(method, args)).rejects.toThrow(message);
+      const originalId = (runtime.backend.mutate.mock.calls[0][2] as { clientOperationId: string }).clientOperationId;
+      expect(runtime.transport.recovery.value.operations).toEqual({});
+      expect(Object.values(runtime.transport.recovery.value.drafts)[0].body).toBe(args.body);
+      const next = runtime.reload();
+      await flushMessages();
+      expect(next.recovery.value.operations).toEqual({});
+      const corrected = next.mutate(method, { ...args, body: "Edited" });
+      await flushMessages();
+      expect((runtime.backend.mutate.mock.calls[1][2] as { clientOperationId: string }).clientOperationId).not.toBe(originalId);
+      runtime.finish();
+      await corrected;
+      next.dispose();
+      runtime.host.dispose();
+    });
+
+    it.each((["thread.create", "reply.add"] as const).flatMap(method => [
+      "unknown_code", "transient", "rate_limited", "legacy",
+    ].map(code => ({ method, code }))))("preserves $method identity across reload and retry for $code", async ({ method, code }) => {
+      const runtime = recoveryRuntime(undefined, undefined, legacy);
+      await flushMessages();
+      runtime.backend.mutate.mockRejectedValueOnce(new ConvexError(
+        code === "legacy" ? "Permission denied" : { code, message: "Safe failure" },
+      ));
+      await expect(runtime.transport.mutate(method, args)).rejects.toThrow("Comment operation failed");
+      const original = runtime.backend.mutate.mock.calls[0][2];
+      expect(Object.keys(runtime.transport.recovery.value.operations)).toHaveLength(1);
+      const next = runtime.reload();
+      await flushMessages();
+      expect(Object.keys(next.recovery.value.operations)).toHaveLength(1);
+      await expect(next.mutate(method, { ...args, body: "Changed" })).rejects.toThrow("unconfirmed");
+      const retry = next.mutate(method, args);
+      await flushMessages();
+      expect(runtime.backend.mutate.mock.calls[1][2]).toEqual(original);
+      runtime.finish();
+      await retry;
+      expect(next.recovery.value.operations).toEqual({});
+      next.dispose();
+      runtime.host.dispose();
+    });
+
   });
 
   it("keeps the identity and original payload when the backend outcome is unknown", async () => {

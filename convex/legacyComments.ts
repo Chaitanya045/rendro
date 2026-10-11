@@ -1,4 +1,5 @@
-import { ConvexError, v } from "convex/values";
+import { v } from "convex/values";
+import { publicError } from "./publicErrors";
 import type { Doc } from "./_generated/dataModel";
 import type { QueryCtx, MutationCtx } from "./_generated/server";
 import { requireId } from "./ids";
@@ -24,7 +25,7 @@ export async function authorizeLegacyThread(ctx: QueryCtx | MutationCtx, input: 
   // Authenticate before validating an opaque ID or revealing record existence.
   const identity = await requireIdentity(ctx);
   const thread = await ctx.db.get(requireId(ctx, "threads", input.threadId));
-  if (!thread || orgSlugFromEmail(identity.email) !== thread.orgSlug) throw new ConvexError("Comment not found");
+  if (!thread || orgSlugFromEmail(identity.email) !== thread.orgSlug) publicError("not_found");
   validateCommentAuthor(input.expectedAuthorId, identity.subject);
   validateClientOperationId(input.clientOperationId);
   validateLegacyScope(thread, input);
@@ -33,7 +34,7 @@ export async function authorizeLegacyThread(ctx: QueryCtx | MutationCtx, input: 
 
 export function validateLegacyScope(thread: Doc<"threads">, input: LegacyOperation) {
   if ((input.orgSlug !== undefined && input.orgSlug !== thread.orgSlug)
-    || (input.filePath !== undefined && input.filePath !== thread.filePath)) throw new ConvexError("Comment not found");
+    || (input.filePath !== undefined && input.filePath !== thread.filePath)) publicError("not_found");
 }
 
 // v1 has no trusted organization binding: never infer admin rights from a slug.
@@ -41,10 +42,10 @@ export function canModifyLegacyComment(identity: AuthenticatedIdentity, comment:
   return comment.authorId ? comment.authorId === identity.subject : comment.authorEmail.toLowerCase() === identity.email;
 }
 export function requireLegacyCommentAuthor(identity: AuthenticatedIdentity, comment: { authorId?: string; authorEmail: string }): void {
-  if (!canModifyLegacyComment(identity, comment)) throw new ConvexError("Only the comment author can modify this legacy comment");
+  if (!canModifyLegacyComment(identity, comment)) publicError("forbidden");
 }
 export function legacyBody(value: string): string {
   const body = value.trim();
-  if (!body || body.length > 10_000) throw new ConvexError("Comment body is invalid");
+  if (!body || body.length > 10_000) publicError("invalid_input");
   return body;
 }

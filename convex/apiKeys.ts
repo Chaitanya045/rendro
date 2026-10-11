@@ -1,4 +1,4 @@
-import { mutation, query } from "./_generated/server";
+import { mutation, query } from "./publicFunctions";
 import { v } from "convex/values";
 import { requireInternalSecret } from "./security";
 

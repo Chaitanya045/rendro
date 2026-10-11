@@ -1,5 +1,5 @@
+import { commentErrorMessage, isDefinitiveCommentRejection } from "./errors";
 import { COMMENT_RECOVERY_PREFIX, syncCommentRecoveryUser } from "./recovery-session";
-import { ConvexError } from "convex/values";
 import { normalizeMutationArgs, record, validAnchor } from "./mutation-args";
 import { CommentOperationState, mutationKey } from "./operation-state";
 import { ConvexClient } from "convex/browser";
@@ -211,11 +211,11 @@ export class CommentorParentHost {
     }, "*");
   }
 
-  private subscriptionError(source: MessageEventSource): void {
+  private subscriptionError(source: MessageEventSource, error?: unknown): void {
     if (!("postMessage" in source) || typeof source.postMessage !== "function") return;
     (source as WindowProxy).postMessage({
       type: COMMENTOR_PARENT_ERROR,
-      error: "Comments could not be loaded",
+      error: commentErrorMessage(error, "Comments could not be loaded"),
     }, "*");
   }
 
@@ -242,8 +242,8 @@ export class CommentorParentHost {
           ...state,
         }, "*");
       }
-    }, () => {
-      if (this.owns(generation, source, scope)) this.subscriptionError(source);
+    }, (error) => {
+      if (this.owns(generation, source, scope)) this.subscriptionError(source, error);
     });
     this.respond(source, requestId, true);
   }
@@ -303,8 +303,8 @@ export class CommentorParentHost {
           }, "*");
         }
       },
-      () => {
-        if (this.owns(generation, source, scope)) this.subscriptionError(source);
+      (error) => {
+        if (this.owns(generation, source, scope)) this.subscriptionError(source, error);
       },
     );
     this.replySubscriptions.set(threadId, subscription);
@@ -396,11 +396,11 @@ export class CommentorParentHost {
       }
     }).catch((error: unknown) => {
       if (this.ownsConnection(generation, event.source!, scope)) {
-        // ConvexError is an explicit application rejection: the transaction did
-        // not commit. Connection/runtime errors have an unknown outcome.
-        const rejected = error instanceof ConvexError;
+        // Only known definitive rejections release the durable operation identity.
+        const rejected = isDefinitiveCommentRejection(error);
         if (rejected && operation.clientOperationId) this.recovery(scope).reject(key, operation.clientOperationId);
-        this.respond(event.source!, event.data.requestId, false, "Comment operation failed", rejected);
+        const message = commentErrorMessage(error, "Comment operation failed");
+        this.respond(event.source!, event.data.requestId, false, message, rejected);
       }
     });
   };

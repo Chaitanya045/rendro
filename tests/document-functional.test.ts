@@ -121,8 +121,10 @@ describe("document workflows", () => {
       await expect(member.mutation(api.documentReplies.add, { ...scope, threadId, body: "Late reply" }))
         .rejects.toThrow("Comment not found");
       await backend.finishAllScheduledFunctions(() => vi.runAllTimers());
-      const orphanReplies = await backend.run((ctx) => ctx.db.query("documentReplies").collect());
-      expect(orphanReplies).toEqual([]);
+      const retainedReplies = await backend.run((ctx) => ctx.db.query("documentReplies").collect());
+      expect(retainedReplies).toHaveLength(2);
+      expect(retainedReplies.every(reply => reply.threadId === threadId && reply.deletedAt !== undefined && reply.body === "")).toBe(true);
+      expect(await backend.run(ctx => ctx.db.get(threadId))).toMatchObject({ deletedAt: expect.any(Number), body: "", anchor: { kind: "element", path: [] } });
     } finally {
       vi.useRealTimers();
     }

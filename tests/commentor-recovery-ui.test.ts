@@ -4,6 +4,7 @@ import { Window, type HTMLButtonElement, type HTMLTextAreaElement } from "happy-
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   COMMENTOR_PARENT_READY,
+  COMMENTOR_PARENT_ERROR,
   COMMENTOR_PROTOCOL_VERSION,
   COMMENTOR_VIEWER_RELOAD,
   COMMENTOR_UPGRADE_NOTICE,
@@ -28,7 +29,7 @@ async function flush() {
   for (let i = 0; i < 12; i++) await Promise.resolve();
 }
 
-async function widget(options: { canDelete?: boolean; replyCanDelete?: boolean; archived?: boolean; resolved?: boolean; recoveryState?: CommentRecoveryState; ready?: Record<string, unknown> | null } = { canDelete: true, replyCanDelete: true }) {
+async function widget(options: { legacy?: boolean; canDelete?: boolean; replyCanDelete?: boolean; archived?: boolean; resolved?: boolean; recoveryState?: CommentRecoveryState; ready?: Record<string, unknown> | null } = { canDelete: true, replyCanDelete: true }) {
   vi.useFakeTimers();
   const win = new Window({ url: "https://rendro.test/guide.html", settings: { enableJavaScriptEvaluation: true } });
   windows.push(win);
@@ -53,7 +54,7 @@ async function widget(options: { canDelete?: boolean; replyCanDelete?: boolean; 
     setTimeout, clearTimeout,
     requestAnimationFrame: () => 0,
     cancelAnimationFrame: () => {},
-    COMMENTOR: { transport: "parent", organizationId: "org-a", projectId: "project-a", documentPath: "guide.html", canWrite: true },
+    COMMENTOR: { transport: "parent", ...(options.legacy ? { orgSlug: "example", filePath: "example/guide.html" } : { organizationId: "org-a", projectId: "project-a" }), documentPath: "guide.html", canWrite: true },
   });
   win.document.body.innerHTML = "<main>Document</main>";
   const send = (data: unknown) => win.dispatchEvent(new win.MessageEvent("message", { source: parent as never, data }));
@@ -78,6 +79,16 @@ async function widget(options: { canDelete?: boolean; replyCanDelete?: boolean; 
 }
 
 describe("comment widget recovery controls", () => {
+  it.each([false, true])("displays subscription failures for a legacy=%s parent and recovers", async legacy => {
+    const { root, send, publish, button } = await widget({ legacy });
+    send({ type: COMMENTOR_PARENT_ERROR, error: "Sign in again to comment." });
+    await flush();
+    expect(root.querySelector('.toast[role="alert"]')?.textContent).toBe("Sign in again to comment.");
+    publish();
+    await flush();
+    expect(button("commentor-resolve-btn")).not.toBeNull();
+  });
+
   it.each(["resolve", "archive", "unarchive", "delete-reply"])("Refresh preserves the %s guard across rendered controls and accepts the late result", async (action) => {
     const { root, button, requests, mutations, finish } = await widget({
       canDelete: true, replyCanDelete: true, archived: action === "unarchive",
@@ -323,6 +334,7 @@ describe("editable rejected drafts and identity changes", () => {
     send({ type: COMMENTOR_PARENT_RESPONSE, requestId: mutations()[0].requestId, ok: false, rejected: true, error: "Permission denied" });
     await flush();
     expect(input().value).toBe("Corrected");
+    expect(Array.from(root.querySelectorAll('.toast[role="alert"]')).at(-1)?.textContent).toContain("Permission denied");
     input().value = "Edited after rejection";
     button(buttonId).click();
     await flush();

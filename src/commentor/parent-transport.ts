@@ -31,7 +31,7 @@ type PendingRequest = {
   dismissSlow?: () => void;
 };
 
-class CommentMutationRejectedError extends Error {}
+export class CommentMutationRejectedError extends Error {}
 
 export class CommentMutationOutcomeUnknownError extends Error {
   constructor() {

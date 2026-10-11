@@ -1,3 +1,4 @@
+import { isPublicErrorData, type PublicErrorData } from "../src/shared/public-errors";
 import { ConvexError } from "convex/values";
 import { httpAction as registerHttpAction } from "./_generated/server";
 
@@ -12,8 +13,8 @@ export function clientFailure(message: string, status = 400): Response {
   return Response.json({ error: message }, { status });
 }
 
-export function isApplicationError(error: unknown): error is ConvexError<string> {
-  return error instanceof ConvexError && typeof error.data === "string";
+export function isApplicationError(error: unknown): error is ConvexError<string | PublicErrorData> {
+  return error instanceof ConvexError && (typeof error.data === "string" || isPublicErrorData(error.data));
 }
 
 // ConvexError is the explicit application-error contract across function calls.
@@ -26,6 +27,12 @@ export function failure(error: unknown, applicationStatus = 400, operation = "ht
     });
   }
   if (isApplicationError(error)) {
+    if (isPublicErrorData(error.data)) {
+      const { code, message } = error.data;
+      const status = code === "not_found" ? 404 : code === "unauthenticated" ? 401
+        : code === "forbidden" ? 403 : code === "conflict" ? 409 : 400;
+      return clientFailure(message, status);
+    }
     const message = error.data;
     const code = message === "Invalid ID" ? 400
       : /authentication|membership|role/i.test(message) ? 403

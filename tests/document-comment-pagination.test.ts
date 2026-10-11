@@ -123,7 +123,7 @@ describe("document comment pagination", () => {
     await expect(outsider.query(api.documentThreads.list, {
       ...scope,
       paginationOpts: { numItems: 20, cursor: first.continueCursor },
-    })).rejects.toThrow("Organization membership required");
+    })).rejects.toThrow("Comment not found");
     const crossDocumentCursor = await member.query(api.documentThreads.list, {
       ...scope,
       documentPath: "another-document.html",
@@ -268,7 +268,7 @@ describe("document comment pagination", () => {
     expect(Buffer.byteLength(JSON.stringify(grownPage), "utf8")).toBeLessThan(12 * 1024 * 1024);
   }, 30_000);
 
-  it("tombstones immediately and removes a large reply history in bounded cleanup jobs", async () => {
+  it("tombstones immediately and scrubs a large reply history in bounded cleanup jobs", async () => {
     const { backend, seeded, member } = await commentFixture(true);
     const scope = {
       organizationId: seeded.organizationId,
@@ -322,13 +322,20 @@ describe("document comment pagination", () => {
           .collect(),
       }));
       expect(afterOneBatch.thread?.deletedAt).toEqual(expect.any(Number));
-      expect(afterOneBatch.replies).toHaveLength(151);
+      expect(afterOneBatch.replies.filter(reply => reply.deletedAt === undefined)).toHaveLength(151);
+      expect(afterOneBatch.replies.filter(reply => reply.deletedAt !== undefined).every(reply => reply.body === "")).toBe(true);
 
       await backend.finishAllScheduledFunctions(() => vi.runAllTimers());
-      expect(await backend.run((ctx) => ctx.db.get(threadId))).toBeNull();
-      expect(await backend.run((ctx) => ctx.db
+      expect(await backend.run((ctx) => ctx.db.get(threadId))).toMatchObject({ deletedAt: expect.any(Number), body: "", anchor: { kind: "element", path: [] } });
+      const retained = await backend.run((ctx) => ctx.db
         .query("documentReplies")
         .withIndex("by_thread", (index) => index.eq("threadId", threadId))
+        .collect());
+      expect(retained).toHaveLength(251);
+      expect(retained.every(reply => reply.deletedAt !== undefined && reply.body === "")).toBe(true);
+      expect(await backend.run((ctx) => ctx.db
+        .query("documentReplies")
+        .withIndex("by_active_thread", (index) => index.eq("threadId", threadId).eq("deletedAt", undefined))
         .collect())).toEqual([]);
     } finally {
       vi.useRealTimers();
@@ -359,22 +366,22 @@ describe("document comment pagination", () => {
       path: Array.from({ length: 64 }, () => "界".repeat(256)),
     })).resolves.toBeTruthy();
     await expect(create({ kind: "element", path: Array.from({ length: 65 }, () => "div") }))
-      .rejects.toThrow("Comment anchor is invalid");
+      .rejects.toThrow("Invalid input");
     await expect(create({ kind: "element", path: ["x".repeat(257)] }))
-      .rejects.toThrow("Comment anchor is invalid");
+      .rejects.toThrow("Invalid input");
     await expect(create({
       kind: "text-range",
       quote: "x".repeat(4_097),
       path: ["main"],
       startOffset: 0,
       endOffset: 1,
-    })).rejects.toThrow("Comment anchor is invalid");
+    })).rejects.toThrow("Invalid input");
     await expect(create({
       kind: "text-range",
       quote: "selection",
       path: ["main"],
       startOffset: -1,
       endOffset: 1,
-    })).rejects.toThrow("Comment anchor is invalid");
+    })).rejects.toThrow("Invalid input");
   });
 });

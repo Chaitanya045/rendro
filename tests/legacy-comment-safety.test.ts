@@ -19,9 +19,9 @@ describe("legacy comment bridge backend", () => {
     const replyId = await member.mutation(api.replies.add, { ...scope, threadId, body: "Reply" });
     const listed = await member.query(api.threads.list, scope);
     expect(listed[0]).toMatchObject({ canDelete: false, replies: [{ _id: replyId, canDelete: true }] });
-    await expect(member.mutation(api.threads.archive, { ...scope, threadId })).rejects.toThrow("Only the comment author");
-    await expect(member.mutation(api.threads.remove, { ...scope, threadId })).rejects.toThrow("Only the comment author");
-    await expect(author.mutation(api.replies.remove, { ...scope, threadId, replyId })).rejects.toThrow("Only the comment author");
+    await expect(member.mutation(api.threads.archive, { ...scope, threadId })).rejects.toMatchObject({ data: { code: "forbidden", message: "Forbidden" } });
+    await expect(member.mutation(api.threads.remove, { ...scope, threadId })).rejects.toMatchObject({ data: { code: "forbidden", message: "Forbidden" } });
+    await expect(author.mutation(api.replies.remove, { ...scope, threadId, replyId })).rejects.toMatchObject({ data: { code: "forbidden", message: "Forbidden" } });
     await expect(outsider.mutation(api.replies.add, { ...scope, threadId, body: "No" })).rejects.toThrow("Comment not found");
     await member.mutation(api.threads.resolve, { ...scope, threadId, resolved: true });
     await author.mutation(api.threads.archive, { ...scope, threadId, archived: true });
@@ -39,7 +39,7 @@ describe("legacy comment bridge backend", () => {
     const add = { ...scope, threadId, body: "Reply", clientOperationId: "reply-1", expectedAuthorId: "author" };
     const replyId = await author.mutation(api.replies.add, add);
     expect(await author.mutation(api.replies.add, add)).toBe(replyId);
-    await expect(author.mutation(api.threads.create, { ...create, expectedAuthorId: "other" })).rejects.toThrow("session changed");
+    await expect(author.mutation(api.threads.create, { ...create, expectedAuthorId: "other" })).rejects.toMatchObject({ data: { code: "forbidden", message: "Forbidden" } });
     await expect(author.mutation(api.threads.remove, { ...scope, filePath: "example/other.html", threadId })).rejects.toThrow("Comment not found");
     await author.mutation(api.threads.remove, { ...scope, threadId, clientOperationId: "remove" });
     await author.mutation(api.threads.remove, { ...scope, threadId, clientOperationId: "remove" });

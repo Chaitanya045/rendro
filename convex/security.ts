@@ -1,4 +1,4 @@
-import { ConvexError } from "convex/values";
+import { publicError } from "./publicErrors";
 import type { QueryCtx, MutationCtx } from "./_generated/server";
 
 type AuthCtx = Pick<QueryCtx | MutationCtx, "auth">;
@@ -11,7 +11,7 @@ export interface AuthenticatedIdentity {
 
 export async function requireIdentity(ctx: AuthCtx): Promise<AuthenticatedIdentity> {
   const identity = await ctx.auth.getUserIdentity();
-  if (!identity?.email) throw new ConvexError("Unauthenticated");
+  if (!identity?.email) publicError("unauthenticated");
   return {
     subject: identity.subject,
     email: identity.email.toLowerCase(),
@@ -35,7 +35,7 @@ export async function requireOrgIdentity(
 ): Promise<AuthenticatedIdentity> {
   const identity = await requireIdentity(ctx);
   if (orgSlugFromEmail(identity.email) !== orgSlug) {
-    throw new ConvexError("Forbidden");
+    publicError("forbidden");
   }
   return identity;
 }
@@ -43,11 +43,11 @@ export async function requireOrgIdentity(
 export function requireInternalSecret(provided: string): void {
   const expected = process.env.CONVEX_INTERNAL_SECRET;
   if (!expected || provided.length !== expected.length) {
-    throw new ConvexError("Unauthorized service call");
+    publicError("forbidden");
   }
   let difference = 0;
   for (let index = 0; index < expected.length; index += 1) {
     difference |= provided.charCodeAt(index) ^ expected.charCodeAt(index);
   }
-  if (difference !== 0) throw new ConvexError("Unauthorized service call");
+  if (difference !== 0) publicError("forbidden");
 }

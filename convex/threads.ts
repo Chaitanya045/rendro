@@ -1,7 +1,9 @@
-import { query, mutation, internalMutation, type MutationCtx } from "./_generated/server";
+import { internalMutation, type MutationCtx } from "./_generated/server";
+import { query, mutation } from "./publicFunctions";
 import { internal } from "./_generated/api";
 import type { Doc } from "./_generated/dataModel";
-import { ConvexError, v } from "convex/values";
+import { v } from "convex/values";
+import { publicError } from "./publicErrors";
 import { anchorValidator } from "./schema";
 import { validAnchor } from "../src/commentor/mutation-args";
 import { authorizeLegacyComment, canModifyLegacyComment, requireLegacyCommentAuthor, legacyOperationArgs, authorizeLegacyThread, legacyBody } from "./legacyComments";
@@ -25,8 +27,8 @@ export const create = mutation({
   handler: async (ctx, args) => {
     const identity = await authorizeLegacyComment(ctx, args.orgSlug, args);
     const body = legacyBody(args.body);
-    if (!args.filePath || args.filePath.includes("\\") || args.filePath.split("/").some(part => !part || part === "." || part === "..")) throw new ConvexError("Document path is invalid");
-    if (!validAnchor(args.anchor)) throw new ConvexError("Comment anchor is invalid");
+    if (!args.filePath || args.filePath.includes("\\") || args.filePath.split("/").some(part => !part || part === "." || part === "..")) publicError("invalid_input");
+    if (!validAnchor(args.anchor)) publicError("invalid_input");
     if (args.clientOperationId) {
       const previous = await ctx.db.query("threads").withIndex("by_operation", q => q.eq("orgSlug", args.orgSlug).eq("filePath", args.filePath).eq("authorId", identity.subject).eq("clientOperationId", args.clientOperationId)).unique();
       if (previous) return previous._id;
@@ -42,10 +44,10 @@ export const create = mutation({
 const statusArgs = { ...legacyOperationArgs, threadId: v.string() };
 async function applyStatus(ctx: MutationCtx, thread: Doc<"threads">, authorId: string, field: "resolved" | "archived", target: boolean | undefined, operation?: string) {
   if (operation) {
-    if (target === undefined) throw new ConvexError("An operation ID requires an explicit status target");
+    if (target === undefined) publicError("invalid_input");
     const receipt = await ctx.db.query("legacyCommentStatusReceipts").withIndex("by_operation", q => q.eq("threadId", thread._id).eq("authorId", authorId).eq("clientOperationId", operation)).unique();
     if (receipt) {
-      if (receipt.field !== field || receipt.target !== target) throw new ConvexError("Operation arguments changed");
+      if (receipt.field !== field || receipt.target !== target) publicError("conflict");
       return receipt.target;
     }
     await ctx.db.insert("legacyCommentStatusReceipts", { threadId: thread._id, authorId, clientOperationId: operation, field, target, expiresAt: Date.now() + 30 * 24 * 60 * 60_000 });
@@ -58,7 +60,7 @@ export const resolve = mutation({
   args: { ...statusArgs, resolved: v.optional(v.boolean()) },
   handler: async (ctx, input) => {
     const { thread, identity } = await authorizeLegacyThread(ctx, input);
-    if (thread.deletedAt !== undefined) throw new ConvexError("Comment not found");
+    if (thread.deletedAt !== undefined) publicError("not_found");
     return applyStatus(ctx, thread, identity.subject, "resolved", input.resolved, input.clientOperationId);
   },
 });
@@ -66,7 +68,7 @@ export const archive = mutation({
   args: { ...statusArgs, archived: v.optional(v.boolean()) },
   handler: async (ctx, input) => {
     const { thread, identity } = await authorizeLegacyThread(ctx, input);
-    if (thread.deletedAt !== undefined) throw new ConvexError("Comment not found");
+    if (thread.deletedAt !== undefined) publicError("not_found");
     requireLegacyCommentAuthor(identity, thread);
     return applyStatus(ctx, thread, identity.subject, "archived", input.archived, input.clientOperationId);
   },
