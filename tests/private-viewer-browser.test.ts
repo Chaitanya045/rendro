@@ -1,10 +1,9 @@
-import { createServer, type Server } from "node:http";
-import { existsSync } from "node:fs";
 import { build } from "esbuild";
-import { chromium, type Browser } from "playwright";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import type { BrowserContextOptions, Frame, Page } from "playwright";
+import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { injectViewerHeadStream } from "@/routes/document-html";
 import { viewerScript } from "@/viewer/markup";
+import { browserStep, createBrowserHarness } from "./helpers/browser";
 import { viewerHtmlForms } from "./fixtures/private-viewer-html";
 
 const base = "/organizations/org/projects/project/docs";
@@ -18,15 +17,31 @@ const requests: Array<{ path: string; status: number }> = [];
 let publisherHtml = "";
 let heldAsset = "";
 const heldSheets: Array<{ path: string; release: (status: number) => void }> = [];
-let browser: Browser;
-let server: Server;
-let origin: string;
+const harness = createBrowserHarness();
+
+async function openViewer(options: BrowserContextOptions = {}) {
+  const page = await harness.newPage(options);
+  // Install before any viewer code reads Date.now(), including in opaque frames.
+  // Keep rendering/timers real; only the ticket clock advances explicitly.
+  await page.clock.setFixedTime(epoch);
+  await browserStep("navigate to fixture and load viewer frame", () => page.goto(harness.origin));
+  return page;
+}
+
+async function renew(page: Page, frame: Frame, round: number, minutes = round * 6) {
+  now = epoch + minutes * 60_000;
+  await browserStep(`renew ticket ${round} and apply its prefix`, async () => {
+    await page.clock.setFixedTime(now);
+    await frame.evaluate(() => window.dispatchEvent(new Event("focus")));
+    await frame.waitForFunction(expected => document.baseURI.includes(expected), `/view/renewed-${round}/`);
+  });
+}
 
 beforeAll(async () => {
-  const bundle = await build({ entryPoints: ["src/viewer/entry.ts"], bundle: true, write: false, format: "iife", platform: "browser" });
-  server = createServer((request, response) => {
+  const bundle = await browserStep("bundle viewer fixture", () => build({ entryPoints: ["src/viewer/entry.ts"], bundle: true, write: false, format: "iife", platform: "browser" }));
+  await harness.start((request, response) => {
     void (async () => {
-      const url = new URL(request.url!, origin);
+      const url = new URL(request.url!, harness.origin);
       const send = (status: number, type: string, body: string) => {
         requests.push({ path: url.pathname, status });
         response.writeHead(status, { "Content-Type": type, "Cache-Control": "no-store", "Access-Control-Allow-Origin": "null" });
@@ -67,14 +82,7 @@ beforeAll(async () => {
       send(404, "text/plain", "missing");
     })().catch(error => { response.destroy(error as Error); });
   });
-  await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
-  const address = server.address();
-  if (!address || typeof address === "string") throw new Error("Missing fixture port");
-  origin = `http://127.0.0.1:${address.port}`;
-  // CI installs Playwright Chromium; developer hosts may use a local Chromium.
-  browser = await chromium.launch({ executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH
-    ?? (existsSync("/usr/bin/chromium") ? "/usr/bin/chromium" : undefined) });
-}, 30_000);
+});
 
 beforeEach(() => {
   now = epoch;
@@ -84,11 +92,6 @@ beforeEach(() => {
   requests.length = 0;
   heldAsset = "";
   heldSheets.length = 0;
-});
-
-afterAll(async () => {
-  await browser?.close();
-  if (server) await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
 });
 
 describe("opaque-origin Chromium private viewer", () => {
@@ -103,9 +106,8 @@ describe("opaque-origin Chromium private viewer", () => {
         <div id="inline" style="background-image: u\72l(assets/inline\(escaped\).svg)"></div>
         <div id="block"></div><div id="linked"></div><div id="nested"></div><div id="imported"></div>
       </div><textarea>Comment draft</textarea></body></html>`;
-    const page = await browser.newPage();
+    const page = await openViewer();
     try {
-      await page.goto(origin);
       const frame = page.frames().find(frame => frame !== page.mainFrame())!;
       // Parent sees a true opaque-origin postMessage, not a same-origin DOM mock.
       await page.evaluate(() => {
@@ -114,22 +116,22 @@ describe("opaque-origin Chromium private viewer", () => {
         });
       });
       for (let round = 1; round <= 3; round++) {
-        now = epoch + round * 6 * 60_000;
-        await frame.evaluate(time => { Date.now = () => time; window.dispatchEvent(new Event("focus")); }, now);
-        await frame.waitForFunction(expected => document.baseURI.includes(expected), `/view/renewed-${round}/`);
-        await frame.waitForFunction(() => [...document.querySelectorAll<HTMLLinkElement>('link[rel="stylesheet"]')]
-          .every(link => link.sheet !== null));
+        await renew(page, frame, round);
+        await browserStep(`load linked and imported styles for ticket ${round}`, () => frame.waitForFunction(expected =>
+          [...document.querySelectorAll<HTMLLinkElement>('link[rel="stylesheet"]')].every(link => link.sheet !== null)
+          && ["linked", "nested", "imported"].every(id => getComputedStyle(document.getElementById(id)!).backgroundImage.includes(expected)),
+        `/view/renewed-${round}/`));
         await expect.poll(() => requests.some(request => request.path.includes(`/view/renewed-${round}/`)
-          && request.path.endsWith("/nested/theme.css") && request.status === 200)).toBe(true);
+          && request.path.endsWith("/nested/theme.css") && request.status === 200), { message: `serve nested sheet for ticket ${round}` }).toBe(true);
       }
       expect(await page.locator("body").getAttribute("data-frame-origin")).toBe("null");
       expect(requests.filter(request => request.path.endsWith(".svg"))).toEqual([]);
       // Server-side fake clock enforces TTL: the original capability now fails.
-      const expired = await page.request.get(`${origin}${prefix("initial")}guide/assets/probe.svg`);
+      const expired = await page.request.get(`${harness.origin}${prefix("initial")}guide/assets/probe.svg`);
       expect(expired.status()).toBe(404);
       requests.length = 0;
       await frame.locator("#hidden").evaluate(element => { (element as HTMLElement).style.display = "block"; });
-      await expect.poll(() => requests.filter(request => request.path.endsWith(".svg") && request.status === 200).length).toBe(5);
+      await expect.poll(() => requests.filter(request => request.path.endsWith(".svg") && request.status === 200).length, { message: "load all five images after expiry" }).toBe(5);
       for (const resource of ["inline(escaped).svg", "block.svg", "linked.svg", "nested.svg", "imported.svg"]) {
         expect(requests.some(request => decodeURIComponent(request.path) === `${prefix("renewed-3")}guide/assets/${resource}`
           && request.status === 200), resource).toBe(true);
@@ -150,29 +152,28 @@ describe("opaque-origin Chromium private viewer", () => {
     // a missed candidate/import rewrite. Layout rules live in a separate block.
     publisherHtml = `<!doctype html><style>#hidden div { width:10px; height:10px }</style>
       <div id="hidden" style="display:none">${markup}</div>`;
-    const page = await browser.newPage({ deviceScaleFactor: 1 });
+    const page = await openViewer({ deviceScaleFactor: 1 });
     try {
-      await page.goto(origin);
       const frame = page.frames().find(frame => frame !== page.mainFrame())!;
       // Force CSS resolution without fetching the hidden image, reproducing a
       // document whose styles were inspected before its deferred first paint.
       expect(await frame.evaluate(() => getComputedStyle(document.querySelector("#target, #imported")!).backgroundImage))
         .toContain("/view/initial/");
       for (let round = 1; round <= 3; round++) {
-        now = epoch + round * 6 * 60_000;
-        await frame.evaluate(time => { Date.now = () => time; window.dispatchEvent(new Event("focus")); }, now);
-        await frame.waitForFunction(expected => document.baseURI.includes(expected), `/view/renewed-${round}/`);
+        await renew(page, frame, round);
         if (asset === "imported.svg") {
           await expect.poll(() => requests.some(request => request.path === `${prefix(`renewed-${round}`)}guide/assets/import.css`
-            && request.status === 200)).toBe(true);
+            && request.status === 200), { message: `serve imported sheet for ticket ${round}` }).toBe(true);
+          await browserStep(`apply imported sheet for ticket ${round}`, () => frame.waitForFunction(expected =>
+            getComputedStyle(document.getElementById("imported")!).backgroundImage.includes(expected), `/view/renewed-${round}/`));
         }
       }
       expect(requests.filter(request => request.path.endsWith(".svg"))).toEqual([]);
-      expect((await page.request.get(`${origin}${prefix("initial")}guide/assets/probe.svg`)).status()).toBe(404);
+      expect((await page.request.get(`${harness.origin}${prefix("initial")}guide/assets/probe.svg`)).status()).toBe(404);
       requests.length = 0;
       await frame.locator("#hidden").evaluate(element => { (element as HTMLElement).style.display = "block"; });
       await expect.poll(() => requests.some(request => request.path === `${prefix("renewed-3")}guide/assets/${asset}`
-        && request.status === 200)).toBe(true);
+        && request.status === 200), { message: `load ${asset} with the renewed ticket after expiry` }).toBe(true);
       expect(requests.some(request => request.path.includes("/view/initial/") || request.status !== 200)).toBe(false);
     } finally { await page.close(); }
   });
@@ -189,11 +190,11 @@ describe("opaque-origin Chromium private viewer", () => {
         : '<style media="screen" nonce="publisher-nonce" data-publisher="preserved" crossorigin="anonymous">@import "assets/swap.css";</style>'}
       <style>#cascade { color: rgb(0, 0, 255) }</style>
       </head><body><p id="probe">Sheet</p><p id="cascade">Cascade order</p><p id="nested-probe">Nested sheet</p></body>`;
-    const page = await browser.newPage();
+    const page = await openViewer();
     try {
-      await page.goto(origin);
       const frame = page.frames().find(frame => frame !== page.mainFrame())!;
-      await frame.waitForFunction(() => getComputedStyle(document.getElementById("nested-probe")!).color === "rgb(128, 0, 128)");
+      await browserStep("apply initial nested stylesheet", () => frame.waitForFunction(() =>
+        getComputedStyle(document.getElementById("nested-probe")!).color === "rgb(128, 0, 128)"));
       await frame.evaluate(() => {
         const samples = { count: 0, wrong: [] as string[], maxSheets: 0 };
         Object.assign(window, { sheetSamples: samples });
@@ -206,18 +207,13 @@ describe("opaque-origin Chromium private viewer", () => {
         };
         requestAnimationFrame(sample);
       });
-      const sampleFrames = () => frame.evaluate(() => new Promise<void>(resolve => {
+      const sampleFrames = () => browserStep("sample cascade across 12 rendered frames", () => frame.evaluate(() => new Promise<void>(resolve => {
         let count = 0;
         const tick = () => { if (++count === 12) resolve(); else requestAnimationFrame(tick); };
         requestAnimationFrame(tick);
-      }));
-      const renew = async (round: number, minutes: number) => {
-        now = epoch + minutes * 60_000;
-        await frame.evaluate(time => { Date.now = () => time; window.dispatchEvent(new Event("focus")); }, now);
-        await frame.waitForFunction(expected => document.baseURI.includes(expected), `/view/renewed-${round}/`);
-      };
-      await renew(1, 6);
-      await expect.poll(() => heldSheets.length).toBe(1);
+      })));
+      await renew(page, frame, 1, 6);
+      await expect.poll(() => heldSheets.length, { message: "receive held stylesheet request 1" }).toBe(1);
       await sampleFrames();
       expect(await frame.evaluate(() => (window as unknown as { sheetSamples: { wrong: string[] } }).sheetSamples.wrong)).toEqual([]);
       expect(await frame.locator("[data-publisher]").count()).toBe(2);
@@ -228,42 +224,43 @@ describe("opaque-origin Chromium private viewer", () => {
       expect(await frame.locator("head").evaluate(el => [...el.querySelectorAll("style,link")].map(sheet => sheet.tagName)))
         .toEqual(["STYLE", kind.toUpperCase(), kind.toUpperCase(), "STYLE"]);
       // A second renewal while the first replacement is loading must coalesce.
-      await renew(2, 12);
+      await renew(page, frame, 2, 12);
       await sampleFrames();
       expect(heldSheets).toHaveLength(1);
       expect(await frame.locator("[data-publisher]").count()).toBe(2);
       heldSheets[0].release(200);
-      await expect.poll(() => heldSheets.length).toBe(2);
+      await expect.poll(() => heldSheets.length, { message: "receive held stylesheet request 2" }).toBe(2);
       expect(heldSheets[1].path).toContain("/view/renewed-2/");
       await sampleFrames();
       heldSheets[1].release(200);
-      await frame.waitForFunction(() => document.querySelectorAll("[data-publisher]").length === 1
-        && (document.querySelector("[data-publisher]")!.getAttribute("href") ?? document.querySelector("[data-publisher]")!.textContent!).includes("/view/renewed-2/"));
-      await renew(3, 18);
-      await expect.poll(() => heldSheets.length).toBe(3);
+      await browserStep("commit stylesheet replacement 2", () => frame.waitForFunction(() => document.querySelectorAll("[data-publisher]").length === 1
+        && (document.querySelector("[data-publisher]")!.getAttribute("href") ?? document.querySelector("[data-publisher]")!.textContent!).includes("/view/renewed-2/")));
+      await renew(page, frame, 3, 18);
+      await expect.poll(() => heldSheets.length, { message: "receive held stylesheet request 3" }).toBe(3);
       await sampleFrames();
       heldSheets[2].release(200);
-      await frame.waitForFunction(() => document.querySelectorAll("[data-publisher]").length === 1
-        && (document.querySelector("[data-publisher]")!.getAttribute("href") ?? document.querySelector("[data-publisher]")!.textContent!).includes("/view/renewed-3/"));
+      await browserStep("commit stylesheet replacement 3", () => frame.waitForFunction(() => document.querySelectorAll("[data-publisher]").length === 1
+        && (document.querySelector("[data-publisher]")!.getAttribute("href") ?? document.querySelector("[data-publisher]")!.textContent!).includes("/view/renewed-3/")));
       // Chromium reports load on <style> when only a nested import fails.
       // Exercise error retention on its direct import; linked sheets also
       // propagate nested failures. Both variants above delay nested imports.
       if (kind === "style") heldAsset = "swap.css";
       // A failed refresh keeps both parent and imported rules active.
-      await renew(4, 24);
-      await expect.poll(() => heldSheets.length).toBe(4);
+      await renew(page, frame, 4, 24);
+      await expect.poll(() => heldSheets.length, { message: "receive held stylesheet request 4" }).toBe(4);
       await sampleFrames();
       heldSheets[3].release(503);
-      await frame.waitForFunction(() => document.querySelectorAll("[data-publisher]").length === 1);
+      await browserStep("discard failed stylesheet replacement", () => frame.waitForFunction(() =>
+        document.querySelectorAll("[data-publisher]").length === 1));
       expect(await frame.locator("[data-publisher]").evaluate(el => el.getAttribute("href") ?? el.textContent)).toContain("/view/renewed-3/");
       await sampleFrames();
       heldAsset = asset;
-      await renew(5, 30);
-      await expect.poll(() => heldSheets.length).toBe(5);
+      await renew(page, frame, 5, 30);
+      await expect.poll(() => heldSheets.length, { message: "receive held stylesheet request 5" }).toBe(5);
       expect(heldSheets[4].path).toContain("/view/renewed-5/");
       heldSheets[4].release(200);
-      await frame.waitForFunction(() => document.querySelectorAll("[data-publisher]").length === 1
-        && (document.querySelector("[data-publisher]")!.getAttribute("href") ?? document.querySelector("[data-publisher]")!.textContent!).includes("/view/renewed-5/"));
+      await browserStep("commit stylesheet replacement 5", () => frame.waitForFunction(() => document.querySelectorAll("[data-publisher]").length === 1
+        && (document.querySelector("[data-publisher]")!.getAttribute("href") ?? document.querySelector("[data-publisher]")!.textContent!).includes("/view/renewed-5/")));
       await sampleFrames();
       const samples = await frame.evaluate(() => (window as unknown as {
         sheetSamples: { count: number; wrong: string[]; maxSheets: number };
@@ -284,9 +281,8 @@ describe("opaque-origin Chromium private viewer", () => {
     publisherHtml = `<!doctype html><head><style id="plain">
       #probe { color: rgb(0, 128, 0); background-image: url(assets/plain.svg) }
       </style></head><body><p id="probe">Plain block</p></body>`;
-    const page = await browser.newPage();
+    const page = await openViewer();
     try {
-      await page.goto(origin);
       const frame = page.frames().find(frame => frame !== page.mainFrame())!;
       await frame.evaluate(() => {
         const original = document.getElementById("plain");
@@ -301,14 +297,14 @@ describe("opaque-origin Chromium private viewer", () => {
         requestAnimationFrame(sample);
       });
       for (let round = 1; round <= 3; round++) {
-        now = epoch + round * 6 * 60_000;
-        await frame.evaluate(time => { Date.now = () => time; window.dispatchEvent(new Event("focus")); }, now);
-        await frame.waitForFunction(expected => document.getElementById("plain")!.textContent!.includes(expected), `/view/renewed-${round}/`);
-        await frame.evaluate(() => new Promise<void>(resolve => {
+        await renew(page, frame, round);
+        await browserStep(`rewrite plain stylesheet for ticket ${round}`, () => frame.waitForFunction(expected =>
+          document.getElementById("plain")!.textContent!.includes(expected), `/view/renewed-${round}/`));
+        await browserStep("sample plain stylesheet across 12 rendered frames", () => frame.evaluate(() => new Promise<void>(resolve => {
           let count = 0;
           const tick = () => { if (++count === 12) resolve(); else requestAnimationFrame(tick); };
           requestAnimationFrame(tick);
-        }));
+        })));
       }
       const samples = await frame.evaluate(() => (window as unknown as { plainSamples: { count: number; wrong: number } }).plainSamples);
       expect(samples.count).toBeGreaterThanOrEqual(36);
@@ -320,9 +316,8 @@ describe("opaque-origin Chromium private viewer", () => {
     now = epoch;
     publisherHtml = source;
     requests.length = 0;
-    const page = await browser.newPage();
+    const page = await openViewer();
     try {
-      await page.goto(origin);
       expect(requests.some(request => request.path === `${prefix("initial")}guide/assets/site.css` && request.status === 200)).toBe(true);
       expect(requests.some(request => request.path === `${base}/files/guide/assets/site.css`)).toBe(false);
     } finally { await page.close(); }

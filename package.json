@@ -36,6 +36,7 @@
     "lint": "eslint .",
     "fix": "eslint --fix .",
     "test": "vitest run",
+    "test:browser": "vitest run --project browser",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "verify": "pnpm typecheck && pnpm lint && pnpm test && pnpm build:assets && git diff --check && pnpm verify:assets",
