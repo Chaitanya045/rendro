@@ -1,3 +1,4 @@
+import { CommentOperationState, mutationKey } from "./operation-state";
 import {
   COMMENTOR_PARENT_REQUEST,
   isCommentorParentError,
@@ -28,11 +29,12 @@ type PendingRequest = {
 
 export class CommentMutationOutcomeUnknownError extends Error {
   constructor() {
-    super("The comment connection was replaced before confirmation. The outcome is unknown; your change may still be saved. Check the comments before making further changes.");
+    super("The comment connection was replaced before confirmation. The outcome is unknown; your change may still be saved. Resubmitting this action is safe; it will reuse the original operation.");
   }
 }
 
 export class ParentCommentTransport {
+  readonly recovery = new CommentOperationState();
   private readonly pending = new Map<string, PendingRequest>();
   private updateHandler: UpdateHandler | null = null;
   private repliesUpdateHandler: RepliesUpdateHandler | null = null;
@@ -66,10 +68,15 @@ export class ParentCommentTransport {
   }
 
   mutate(method: CommentorParentMutationMethod, args: unknown): Promise<void> {
-    const key = this.mutationKey(method, args);
+    const key = mutationKey(method, (args ?? {}) as Record<string, unknown>);
     const existing = this.mutations.get(key);
     if (existing) return existing;
-    const operation = this.request(method, args).finally(() => {
+    let prepared;
+    try { prepared = this.recovery.prepare(method, args as Record<string, unknown>); }
+    catch (error) { return Promise.reject(error); }
+    const operation = this.request(method, { ...prepared.args, clientOperationId: prepared.clientOperationId }).then(() => {
+      this.recovery.complete(key, prepared.clientOperationId);
+    }).finally(() => {
       if (this.mutations.get(key) === operation) this.mutations.delete(key);
     });
     this.mutations.set(key, operation);
@@ -77,16 +84,32 @@ export class ParentCommentTransport {
   }
 
   isMutationPending(method: CommentorParentMutationMethod, args: unknown = {}): boolean {
-    return this.mutations.has(this.mutationKey(method, args));
+    return this.mutations.has(mutationKey(method, (args ?? {}) as Record<string, unknown>));
   }
 
-  private mutationKey(method: CommentorParentMutationMethod, args: unknown): string {
-    const target = args as { threadId?: string; replyId?: string } | null;
-    return JSON.stringify([
-      method,
-      target?.threadId ?? null,
-      method === "reply.remove" ? target?.replyId ?? null : null,
-    ]);
+  saveDraft(key: string, args: Record<string, unknown>): void {
+    this.recovery.draft(key, args);
+    void this.request("draft.save", { key, draft: args }).catch(() => {
+      this.errorHandler?.(new Error("Comment draft could not be saved"));
+    });
+  }
+
+  private complete(key: string, id: string): void {
+    this.recovery.complete(key, id);
+    void this.request("operation.complete", { key, clientOperationId: id }).catch(() => {});
+  }
+
+  private reconcile(rows: unknown[]): void {
+    const records = rows as Array<Record<string, unknown>>;
+    const all = records.flatMap((row) => [row, ...(Array.isArray(row.replies) ? row.replies : [])]) as Array<Record<string, unknown>>;
+    for (const [key, op] of Object.entries(this.recovery.value.operations)) {
+      const found = all.some((row) => row.clientOperationId === op.clientOperationId);
+      const thread = records.find((row) => row._id === op.args.threadId);
+      const targetReached = Boolean(thread) && ((op.method === "thread.resolve" && typeof op.args.resolved === "boolean" && thread?.resolved === op.args.resolved)
+        || (op.method === "thread.archive" && typeof op.args.archived === "boolean" && thread?.archived === op.args.archived));
+      // Absence from a paginated subscription is never proof of deletion.
+      if (found || targetReached) this.complete(key, op.clientOperationId);
+    }
   }
 
   refresh(): Promise<void> {
@@ -129,7 +152,7 @@ export class ParentCommentTransport {
     return new Promise((resolve, reject) => {
       // Mirror CommentorParentMutationMethod: only subscription/pagination
       // requests may time out. Every write must keep its guard and late ack.
-      const mutation = method !== "subscribe" && method !== "threads.more" && method !== "replies.more";
+      const mutation = method !== "subscribe" && method !== "threads.more" && method !== "replies.more" && method !== "draft.save" && method !== "operation.complete";
       const timeout = window.setTimeout(() => {
         if (mutation) {
           // Convex retries disconnected mutations and may commit before its
@@ -161,6 +184,7 @@ export class ParentCommentTransport {
         // predecessor. Settle them honestly without replaying any writes.
         this.retirePending(new CommentMutationOutcomeUnknownError());
       }
+      if (event.data.recoveryState) this.recovery.value = event.data.recoveryState;
       this.parentGeneration = event.data.parentGeneration;
       if (this.updateHandler && this.errorHandler) {
         void this.refresh().catch(this.errorHandler);
@@ -172,6 +196,7 @@ export class ParentCommentTransport {
       return;
     }
     if (isCommentorParentRepliesUpdate(event.data)) {
+      this.reconcile(event.data.replies);
       this.repliesUpdateHandler?.(
         event.data.threadId,
         event.data.replies,
@@ -181,6 +206,7 @@ export class ParentCommentTransport {
       return;
     }
     if (isCommentorParentUpdate(event.data)) {
+      this.reconcile(event.data.threads);
       this.updateHandler?.(event.data.threads, event.data.canLoadMore, event.data.loading);
       return;
     }

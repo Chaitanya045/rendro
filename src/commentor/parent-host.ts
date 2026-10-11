@@ -1,3 +1,4 @@
+import { CommentOperationState, mutationKey } from "./operation-state";
 import { ConvexClient } from "convex/browser";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
@@ -162,6 +163,11 @@ export class CommentorParentHost {
     this.loadedScope = null;
   }
 
+  private recovery(scope: DocumentCommentScope): CommentOperationState {
+    if (!window.sessionStorage) throw new Error("Durable comment storage unavailable");
+    return new CommentOperationState(window.sessionStorage, `commentor-operations:${JSON.stringify(scope)}`);
+  }
+
   private currentScope(): DocumentCommentScope | null {
     return documentCommentScopeFromFrame(this.frame.src, this.pageOrigin, this.config);
   }
@@ -182,7 +188,11 @@ export class CommentorParentHost {
     this.reset();
     this.loadedScope = this.currentScope();
     const source = this.frame.contentWindow;
-    if (this.loadedScope && source) source.postMessage({ type: COMMENTOR_PARENT_READY, parentGeneration: this.parentGeneration }, "*");
+    if (this.loadedScope && source) {
+      try {
+        source.postMessage({ type: COMMENTOR_PARENT_READY, parentGeneration: this.parentGeneration, recoveryState: this.recovery(this.loadedScope).value }, "*");
+      } catch { this.subscriptionError(source); }
+    }
   };
 
   private owns(generation: number, source: MessageEventSource, scope: DocumentCommentScope): boolean {
@@ -248,20 +258,36 @@ export class CommentorParentHost {
   private mutationArgs(method: CommentorParentMutationMethod, value: unknown): unknown | null {
     const args = record(value);
     if (!args) return null;
+    const clientOperationId = args.clientOperationId;
+    if (clientOperationId !== undefined && (typeof clientOperationId !== "string" || !clientOperationId.trim() || clientOperationId.length > 128)) return null;
+    const operation = clientOperationId === undefined ? {} : { clientOperationId };
     if (method === "thread.create") {
       return validBody(args.body) && validAnchor(args.anchor)
-        ? { body: args.body.trim(), anchor: args.anchor }
+        ? { ...operation, body: args.body.trim(), anchor: args.anchor }
         : null;
     }
     const threadId = args.threadId;
-    if (typeof threadId !== "string" || !this.threadIds.has(threadId)) return null;
+    if (typeof threadId !== "string") return null;
+    if (!this.threadIds.has(threadId)) {
+      // An acknowledged deletion can disappear from the page before a retry.
+      // Only a durable removal from this document may bypass the visible IDs.
+      try {
+        const pending = this.activeScope && this.recovery(this.activeScope).value.operations[mutationKey(method, args)];
+        if ((method !== "thread.remove" && method !== "reply.remove") || !pending
+          || pending.clientOperationId !== clientOperationId) return null;
+      } catch { return null; }
+    }
     if (method === "reply.add") {
-      return validBody(args.body) ? { threadId, body: args.body.trim() } : null;
+      return validBody(args.body) ? { ...operation, threadId, body: args.body.trim() } : null;
     }
     if (method === "reply.remove") {
-      return typeof args.replyId === "string" ? { threadId, replyId: args.replyId } : null;
+      return typeof args.replyId === "string" ? { ...operation, threadId, replyId: args.replyId } : null;
     }
-    return { threadId };
+    if (method === "thread.resolve") return args.resolved === undefined || typeof args.resolved === "boolean"
+      ? { ...operation, threadId, resolved: args.resolved ?? true } : null;
+    if (method === "thread.archive") return args.archived === undefined || typeof args.archived === "boolean"
+      ? { ...operation, threadId, archived: args.archived ?? true } : null;
+    return { ...operation, threadId };
   }
 
   private loadMoreReplies(
@@ -340,14 +366,46 @@ export class CommentorParentHost {
       this.loadMoreReplies(event.source, event.data.requestId, scope, event.data.args);
       return;
     }
+    if (event.data.method === "draft.save" || event.data.method === "operation.complete") {
+      const args = record(event.data.args);
+      try {
+        const state = this.recovery(scope);
+        if (typeof args?.key !== "string" || args.key.length > 256) throw new Error("Invalid state key");
+        if (event.data.method === "draft.save") {
+          const draft = record(args.draft);
+          if (!draft || typeof draft.body !== "string" || draft.body.length > 10_000
+            || (args.key !== "create" && !this.threadIds.has(args.key))
+            || (args.key === "create" && !validAnchor(draft.anchor))) throw new Error("Invalid draft");
+          state.draft(args.key, draft);
+        } else if (typeof args.clientOperationId === "string") state.complete(args.key, args.clientOperationId);
+        this.respond(event.source, event.data.requestId, true);
+      } catch { this.respond(event.source, event.data.requestId, false, "Comment recovery state could not be saved"); }
+      return;
+    }
     const args = this.mutationArgs(event.data.method, event.data.args);
     if (!args) {
       this.respond(event.source, event.data.requestId, false, "Comment operation is outside this document");
       return;
     }
+    let operation;
+    try {
+      const state = this.recovery(scope);
+      operation = state.prepare(event.data.method, args as Record<string, unknown>);
+      // Ensure writes cannot escape if durable storage is unavailable.
+      state.save();
+    } catch {
+      this.respond(event.source, event.data.requestId, false, "Comment recovery state could not be saved");
+      return;
+    }
     const generation = this.connectionGeneration;
-    void this.backend.mutate(event.data.method, scope, args).then(() => {
-      if (this.ownsConnection(generation, event.source!, scope)) this.respond(event.source!, event.data.requestId, true);
+    const key = mutationKey(operation.method, operation.args);
+    void this.backend.mutate(operation.method, scope, { ...operation.args, clientOperationId: operation.clientOperationId }).then(() => {
+      // An abandoned acknowledgement cannot retire the durable identity: the
+      // replacement widget may still hold (or save) the unconfirmed draft.
+      if (this.ownsConnection(generation, event.source!, scope)) {
+        this.recovery(scope).complete(key, operation.clientOperationId);
+        this.respond(event.source!, event.data.requestId, true);
+      }
     }).catch(() => {
       if (this.ownsConnection(generation, event.source!, scope)) {
         this.respond(event.source!, event.data.requestId, false, "Comment operation failed");
@@ -411,22 +469,24 @@ class ConvexDocumentCommentBackend implements DocumentCommentBackend {
   }
 
   mutate(method: CommentorParentMutationMethod, scope: DocumentCommentScope, value: unknown): Promise<unknown> {
-    const args = value as { body?: string; anchor?: never; threadId?: string; replyId?: string };
+    const args = value as { body?: string; anchor?: never; threadId?: string; replyId?: string; clientOperationId?: string; resolved?: boolean; archived?: boolean };
+    const operation = { clientOperationId: args.clientOperationId };
     if (method === "thread.create") {
       return this.client.mutation(api.documentThreads.create, {
         ...scope,
+        ...operation,
         body: args.body!,
         anchor: args.anchor!,
       });
     }
     const threadId = args.threadId as Id<"documentThreads">;
-    if (method === "thread.resolve") return this.client.mutation(api.documentThreads.resolve, { ...scope, threadId });
-    if (method === "thread.archive") return this.client.mutation(api.documentThreads.archive, { ...scope, threadId });
-    if (method === "thread.remove") return this.client.mutation(api.documentThreads.remove, { ...scope, threadId });
+    if (method === "thread.resolve") return this.client.mutation(api.documentThreads.resolve, { ...scope, ...operation, threadId, resolved: args.resolved });
+    if (method === "thread.archive") return this.client.mutation(api.documentThreads.archive, { ...scope, ...operation, threadId, archived: args.archived });
+    if (method === "thread.remove") return this.client.mutation(api.documentThreads.remove, { ...scope, ...operation, threadId });
     if (method === "reply.remove") {
-      return this.client.mutation(api.documentReplies.remove, { ...scope, threadId, replyId: args.replyId as Id<"documentReplies"> });
+      return this.client.mutation(api.documentReplies.remove, { ...scope, ...operation, threadId, replyId: args.replyId as Id<"documentReplies"> });
     }
-    return this.client.mutation(api.documentReplies.add, { ...scope, threadId, body: args.body! });
+    return this.client.mutation(api.documentReplies.add, { ...scope, ...operation, threadId, body: args.body! });
   }
 }
 

@@ -1,9 +1,12 @@
+import { api } from "../convex/_generated/api";
+import { fixture } from "./helpers/comment-fixture";
+import { Window as StorageWindow } from "happy-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CommentorParentHost, type DocumentCommentBackend } from "../src/commentor/parent-host";
 import { COMMENTOR_PARENT_READY, COMMENTOR_PARENT_RESPONSE } from "../src/commentor/parent-protocol";
 import { CommentMutationOutcomeUnknownError, ParentCommentTransport } from "../src/commentor/parent-transport";
 
-function recoveryRuntime() {
+function recoveryRuntime(scope = { organizationId: "org-a", projectId: "project-a" as string, documentPath: "guide.html" }) {
   vi.useFakeTimers();
   const hostListeners = new Set<EventListener>();
   const childListeners = new Set<EventListener>();
@@ -11,7 +14,7 @@ function recoveryRuntime() {
     addEventListener: (_type: string, listener: EventListener) => listeners.add(listener),
     removeEventListener: (_type: string, listener: EventListener) => listeners.delete(listener),
   });
-  vi.stubGlobal("window", { ...events(hostListeners), setTimeout, clearTimeout });
+  vi.stubGlobal("window", { sessionStorage: new StorageWindow().sessionStorage, ...events(hostListeners), setTimeout, clearTimeout });
   const deliver = (listeners: Set<EventListener>, source: unknown, data: unknown) => {
     void Promise.resolve().then(() => {
       for (const listener of listeners) listener({ source, data } as MessageEvent);
@@ -19,10 +22,11 @@ function recoveryRuntime() {
   };
   const parent = { postMessage: vi.fn((data: unknown) => deliver(hostListeners, child, data)) };
   const child = { postMessage: vi.fn((data: unknown) => deliver(childListeners, parent, data)) };
+  let frameLoad!: () => void;
   const frame = {
-    src: "https://rendro.test/organizations/org-a/projects/project-a/docs/files/guide.html",
+    src: `https://rendro.test/organizations/${scope.organizationId}/projects/${scope.projectId}/docs/files/${scope.documentPath}`,
     contentWindow: child,
-    addEventListener: vi.fn(),
+    addEventListener: (_type: string, listener: () => void) => { frameLoad = listener; },
     removeEventListener: vi.fn(),
   } as unknown as HTMLIFrameElement;
   let finish!: () => void;
@@ -38,13 +42,13 @@ function recoveryRuntime() {
       return { unsubscribe, loadMore: () => false };
     }),
     subscribeReplies: vi.fn(),
-    mutate: vi.fn(() => new Promise<void>((resolve, reject) => {
+    mutate: vi.fn<DocumentCommentBackend["mutate"]>(() => new Promise<void>((resolve, reject) => {
       finish = resolve;
       fail = () => reject(new Error("backend rejected"));
     })),
   } satisfies DocumentCommentBackend;
   const createHost = () => new CommentorParentHost(frame, "https://rendro.test", {
-    organizationId: "org-a", projectId: "project-a" as never, convexUrl: "https://convex.test",
+    organizationId: scope.organizationId, projectId: scope.projectId as never, convexUrl: "https://convex.test",
   }, backend);
   const transport = new ParentCommentTransport(parent, events(childListeners) as never, "guide.html");
   const dismissSlow = vi.fn();
@@ -55,7 +59,15 @@ function recoveryRuntime() {
   host.start(true);
   return {
     host, createHost, transport, backend, parent, child, slow, dismissSlow, update, unsubscribes,
+    reload: () => {
+      transport.dispose();
+      const next = new ParentCommentTransport(parent, events(childListeners) as never, scope.documentPath);
+      next.subscribe(update, vi.fn(), vi.fn(), slow);
+      frameLoad();
+      return next;
+    },
     finish: () => finish(), fail: () => fail(),
+    publishRows: (rows: unknown[]) => publish(rows, { canLoadMore: false, loading: false }),
     publish: () => publish([{ _id: "thread-1", resolved: true }], { canLoadMore: false, loading: false }),
   };
 }
@@ -151,5 +163,154 @@ describe("comment recovery across parent subscriptions and generations", () => {
     expect(vi.getTimerCount()).toBe(0);
     transport.dispose();
     replacement.dispose();
+  });
+});
+
+
+describe("durable retries through the parent bridge and real Convex mutations", () => {
+  it.each(methods.flatMap((method) => ["replace host", "reload iframe"].map((recovery) => ({ method, recovery }))))(
+    "$method: $recovery before commit, then resubmit, has one backend effect",
+    async ({ method, recovery }) => {
+      const { backend: convex, viewers, scope } = await fixture();
+      const threadId = await viewers.author.mutation(api.documentThreads.create, {
+        ...scope, body: "Original", anchor: { kind: "element", path: ["main"] }, clientOperationId: "original-thread",
+      });
+      const replyId = await viewers.author.mutation(api.documentReplies.add, { ...scope, threadId, body: "Original reply", clientOperationId: "original-reply" });
+      const runtime = recoveryRuntime(scope);
+      runtime.backend.subscribe.mockImplementation((_scope, onUpdate) => {
+        onUpdate([{ _id: threadId, resolved: false, archived: false }], { canLoadMore: false, loading: false });
+        return { unsubscribe: vi.fn(), loadMore: () => false };
+      });
+      const gates: Array<() => void> = [];
+      const completed: Promise<unknown>[] = [];
+      const functions = {
+        "thread.create": api.documentThreads.create, "thread.resolve": api.documentThreads.resolve,
+        "thread.archive": api.documentThreads.archive, "thread.remove": api.documentThreads.remove,
+        "reply.add": api.documentReplies.add, "reply.remove": api.documentReplies.remove,
+      };
+      runtime.backend.mutate.mockImplementation((method, scope, args) => {
+        const gate = new Promise<void>((resolve) => gates.push(resolve));
+        const result = gate.then(() => viewers.author.mutation(functions[method], { ...scope, ...args as object } as never));
+        completed.push(result);
+        return result;
+      });
+      await flushMessages();
+      let transport = runtime.transport;
+      const action = { threadId, replyId, body: "Pending write", anchor: { kind: "element", path: ["main"] }, resolved: true, archived: true };
+      const first = transport.mutate(method, action).catch((error: Error) => error);
+      await flushMessages();
+      const firstId = (runtime.backend.mutate.mock.calls[0][2] as { clientOperationId: string }).clientOperationId;
+      expect(firstId).toMatch(/^[a-f0-9-]{36}$/);
+      let host = runtime.host;
+      if (recovery === "replace host") {
+        host.dispose();
+        host = runtime.createHost();
+        host.start(true);
+      } else transport = runtime.reload();
+      await flushMessages();
+      expect(await first).toBeInstanceOf(Error);
+      expect(runtime.backend.mutate).toHaveBeenCalledTimes(1);
+      if (method === "thread.create") expect(transport.recovery.value.drafts.create.body).toBe(action.body);
+      if (method === "reply.add") expect(transport.recovery.value.drafts[threadId].body).toBe(action.body);
+      const retry = transport.mutate(method, action);
+      await flushMessages();
+      expect(runtime.backend.mutate).toHaveBeenCalledTimes(2);
+      expect((runtime.backend.mutate.mock.calls[1][2] as { clientOperationId: string }).clientOperationId).toBe(firstId);
+      // Commit the retry first, then the abandoned original request.
+      gates[1]();
+      await completed[1];
+      await flushMessages();
+      await retry;
+      gates[0]();
+      await completed[0];
+      await flushMessages();
+      const threads = await convex.run((ctx) => ctx.db.query("documentThreads").collect());
+      const replies = await convex.run((ctx) => ctx.db.query("documentReplies").collect());
+      if (method === "thread.create") expect(threads.filter((row) => row.clientOperationId === firstId)).toHaveLength(1);
+      if (method === "reply.add") expect(replies.filter((row) => row.clientOperationId === firstId)).toHaveLength(1);
+      if (method === "thread.resolve") expect(threads.find((row) => row._id === threadId)?.resolved).toBe(true);
+      if (method === "thread.archive") expect(threads.find((row) => row._id === threadId)?.archived).toBe(true);
+      if (method === "thread.remove") expect(threads.find((row) => row._id === threadId)?.deletedAt).toEqual(expect.any(Number));
+      if (method === "reply.remove") expect(replies.find((row) => row._id === replyId)?.deletedAt).toEqual(expect.any(Number));
+      expect(Object.keys(transport.recovery.value.operations)).toHaveLength(0);
+      if (method === "thread.remove") await convex.finishAllScheduledFunctions(() => vi.runAllTimers());
+      transport.dispose();
+      host.dispose();
+    },
+  );
+});
+
+
+describe("durable parent storage", () => {
+  it.each(["thread.create", "reply.add"] as const)("an abandoned %s acknowledgement cannot erase the ID before a subsequent iframe reload", async (method) => {
+    const runtime = recoveryRuntime();
+    await flushMessages();
+    const pending = runtime.transport.mutate(method, args).catch((error: Error) => error);
+    await flushMessages();
+    const original = runtime.backend.mutate.mock.calls[0][2] as { clientOperationId: string };
+    runtime.host.dispose();
+    const replacement = runtime.createHost();
+    replacement.start(true);
+    await flushMessages();
+    await pending;
+    runtime.finish();
+    await flushMessages();
+    runtime.transport.saveDraft(method === "thread.create" ? "create" : "thread-1", args);
+    await flushMessages();
+    const next = runtime.reload();
+    await flushMessages();
+    const retry = next.mutate(method, args).catch((error: Error) => error);
+    await flushMessages();
+    expect((runtime.backend.mutate.mock.calls[1][2] as { clientOperationId: string }).clientOperationId).toBe(original.clientOperationId);
+    next.dispose();
+    await retry;
+    replacement.dispose();
+  });
+
+  it("does not dispatch a backend write when durable storage fails", async () => {
+    const runtime = recoveryRuntime();
+    await flushMessages();
+    vi.spyOn(window.sessionStorage, "setItem").mockImplementation(() => { throw new Error("Storage full"); });
+    await expect(runtime.transport.mutate("thread.create", args)).rejects.toThrow("recovery state could not be saved");
+    expect(runtime.backend.mutate).not.toHaveBeenCalled();
+    runtime.transport.dispose();
+    runtime.host.dispose();
+  });
+
+  it.each(["thread.create", "reply.add"] as const)("subscription confirmation clears the stored %s draft and ID before an iframe reload", async (method) => {
+    const runtime = recoveryRuntime();
+    await flushMessages();
+    const pending = runtime.transport.mutate(method, args).catch((error: Error) => error);
+    await flushMessages();
+    const sent = runtime.backend.mutate.mock.calls[0][2] as { clientOperationId: string };
+    const row = { _id: "result", clientOperationId: sent.clientOperationId };
+    runtime.publishRows(method === "thread.create" ? [row] : [{ _id: "thread-1", replies: [row] }]);
+    await flushMessages();
+    expect(runtime.transport.recovery.value).toEqual({ operations: {}, drafts: {} });
+    const next = runtime.reload();
+    await flushMessages();
+    await pending;
+    expect(next.recovery.value).toEqual({ operations: {}, drafts: {} });
+    // A deliberately new action now gets a new identity.
+    const newAction = next.mutate(method, args).catch((error: Error) => error);
+    await flushMessages();
+    expect((runtime.backend.mutate.mock.calls[1][2] as { clientOperationId: string }).clientOperationId).not.toBe(sent.clientOperationId);
+    next.dispose();
+    await newAction;
+    runtime.host.dispose();
+  });
+
+  it("persists unsent drafts in the parent across iframe reload", async () => {
+    const runtime = recoveryRuntime();
+    await flushMessages();
+    runtime.transport.saveDraft("create", { body: "Unsent comment", anchor: args.anchor });
+    runtime.transport.saveDraft("thread-1", { body: "Unsent reply" });
+    await flushMessages();
+    const next = runtime.reload();
+    await flushMessages();
+    expect(next.recovery.value.drafts).toMatchObject({ create: { body: "Unsent comment" }, "thread-1": { body: "Unsent reply" } });
+    expect(runtime.backend.mutate).not.toHaveBeenCalled();
+    next.dispose();
+    runtime.host.dispose();
   });
 });

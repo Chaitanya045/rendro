@@ -1,3 +1,4 @@
+import { Window as StorageWindow } from "happy-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   CommentorParentHost,
@@ -35,7 +36,7 @@ describe("project comment parent transport", () => {
   it("allowlists document operations and rejects stale or cross-document thread IDs", async () => {
     let messageHandler!: (event: MessageEvent) => void;
     let loadHandler!: () => void;
-    vi.stubGlobal("window", {
+    vi.stubGlobal("window", { sessionStorage: new StorageWindow().sessionStorage,
       addEventListener: (type: string, listener: (event: MessageEvent) => void) => {
         if (type === "message") messageHandler = listener;
       },
@@ -86,7 +87,7 @@ describe("project comment parent transport", () => {
     );
 
     loadHandler();
-    expect(postMessage).toHaveBeenCalledWith({ type: COMMENTOR_PARENT_READY, parentGeneration: expect.any(String) }, "*");
+    expect(postMessage).toHaveBeenCalledWith(expect.objectContaining({ type: COMMENTOR_PARENT_READY, parentGeneration: expect.any(String) }), "*");
     messageHandler({
       source,
       data: { type: COMMENTOR_PARENT_REQUEST, requestId: "sub", method: "subscribe", args: { documentPath: "guide.html", organizationId: "other" } },
@@ -164,10 +165,10 @@ describe("project comment parent transport", () => {
     expect(mutate).toHaveBeenCalledWith(
       "thread.create",
       { organizationId: "org-a", projectId: "project-a", documentPath: "guide.html" },
-      { body: "Scoped comment", anchor: { kind: "element", path: ["main"] } },
+      { body: "Scoped comment", anchor: { kind: "element", path: ["main"] }, clientOperationId: expect.any(String) },
     );
 
-    for (const args of [{ threadId: "other-thread", replyId: "reply" }, { threadId: "current-thread" }]) {
+    for (const args of [{ threadId: 42, replyId: "reply" }, { threadId: "current-thread" }]) {
       messageHandler({
         source,
         data: { type: COMMENTOR_PARENT_REQUEST, requestId: "invalid-reply-delete", method: "reply.remove", args },
@@ -186,7 +187,7 @@ describe("project comment parent transport", () => {
     expect(mutate).toHaveBeenLastCalledWith(
       "reply.remove",
       { organizationId: "org-a", projectId: "project-a", documentPath: "guide.html" },
-      { threadId: "current-thread", replyId: "older-reply" },
+      { threadId: "current-thread", replyId: "older-reply", clientOperationId: expect.any(String) },
     );
 
     fail(new Error("backend details must not cross the boundary"));
@@ -222,7 +223,7 @@ describe("project comment parent transport", () => {
     };
     const sent: unknown[] = [];
     const parent = { postMessage: (value: unknown) => sent.push(value) } as unknown as WindowProxy;
-    vi.stubGlobal("window", {
+    vi.stubGlobal("window", { sessionStorage: new StorageWindow().sessionStorage,
       setTimeout,
       clearTimeout,
     });
@@ -248,7 +249,7 @@ describe("slow comment mutations", () => {
 
   function transportRuntime() {
     vi.useFakeTimers();
-    vi.stubGlobal("window", { setTimeout, clearTimeout });
+    vi.stubGlobal("window", { sessionStorage: new StorageWindow().sessionStorage, setTimeout, clearTimeout });
     let handler!: (event: MessageEvent) => void;
     const events = {
       addEventListener: (_type: string, listener: EventListener) => { handler = listener as (event: MessageEvent) => void; },

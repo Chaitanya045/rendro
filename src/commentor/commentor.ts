@@ -1,3 +1,4 @@
+import { CommentOperationConflictError } from "./operation-state";
 // commentor.ts — a drop-in commenting widget for any HTML file.
 //
 //   <script>window.COMMENTOR = { ... };</script>
@@ -516,6 +517,7 @@ class Commentor {
   private newReplyIds = new Set<ReplyId>();
   private subscriptionReady = false;
   private pendingDeletes = new PendingDeletionCoordinator<ThreadId>();
+  private composerHasSubmitted = false;
   private replyDrafts = new Map<ThreadId, string>();
   private pendingReplies = new Map<ThreadId, string>();
   private expandedReplies = new Map<ThreadId, Reply[]>();
@@ -736,6 +738,7 @@ class Commentor {
         this.renderDrawerList();
         return;
       }
+      this.syncRecoveryDrafts();
       const currentIds = new Set(incomingThreads.map((thread) => thread._id));
       for (const threadId of this.expandedReplies.keys()) {
         if (currentIds.has(threadId)) continue;
@@ -862,6 +865,15 @@ class Commentor {
           // thread snapshots supply replies instead of retaining stale pages.
           this.expandedReplies.clear();
           this.replyPagination.clear();
+          this.syncRecoveryDrafts();
+          const operations = Object.values(this.parentTransport?.recovery?.value.operations ?? {});
+          if (operations.some((op) => !this.parentTransport?.isMutationPending(op.method, op.args))) {
+            this.toast(new CommentMutationOutcomeUnknownError().message, { kind: "error" });
+          }
+          const draft = this.parentTransport?.recovery?.value.drafts.create;
+          if (draft && !this.bubbleLayer.querySelector('.composer[data-state="open"]')) {
+            this.openComposer(draft.anchor as Anchor, this.commentsBtn.getBoundingClientRect());
+          }
         },
       );
       return;
@@ -1333,6 +1345,17 @@ class Commentor {
     });
   }
 
+  private syncRecoveryDrafts(): void {
+    const state = this.parentTransport?.recovery?.value;
+    if (!state) return;
+    this.replyDrafts.clear();
+    for (const [key, draft] of Object.entries(state.drafts)) {
+      if (key !== "create") this.replyDrafts.set(key as ThreadId, String(draft.body));
+    }
+    const composer = this.bubbleLayer.querySelector('.composer[data-state="open"]');
+    if (composer && this.composerHasSubmitted && !state.drafts.create) this.closeBubbles(true, true);
+  }
+
   // ── bubbles ──
   private openComposer(
     anchor: Anchor,
@@ -1344,6 +1367,9 @@ class Commentor {
       this.toast("Still waiting for confirmation of your comment.");
       return;
     }
+    const savedDraft = this.parentTransport?.recovery?.value.drafts.create;
+    if (savedDraft) anchor = savedDraft.anchor as Anchor;
+    this.composerHasSubmitted = Boolean(Object.values(this.parentTransport?.recovery?.value.operations ?? {}).some((op) => op.method === "thread.create"));
     this.closeBubbles(false);
     this.hideSelectionAction(true);
     this.bubbleReturnFocus = invoker ?? this.commentsBtn;
@@ -1352,6 +1378,8 @@ class Commentor {
       placeholder: "Add a comment…",
       "aria-describedby": "commentor-composer-help",
     }) as HTMLTextAreaElement;
+    textarea.value = typeof savedDraft?.body === "string" ? savedDraft.body : "";
+    textarea.addEventListener("input", () => this.parentTransport?.saveDraft("create", { body: textarea.value, anchor }));
     const post = h(
       "button",
       {
@@ -1372,6 +1400,7 @@ class Commentor {
     const submit = async () => {
       const body = textarea.value.trim();
       if (!body || post.disabled) return;
+      this.composerHasSubmitted = true;
       textarea.disabled = true;
       post.disabled = true;
       cancel.disabled = true;
@@ -1400,7 +1429,7 @@ class Commentor {
         post.classList.remove("is-pending");
         post.removeAttribute("aria-busy");
         post.textContent = "Post";
-        this.toast(err instanceof CommentMutationOutcomeUnknownError ? err.message : "Could not post comment. Try again.", { kind: "error" });
+        this.toast((err instanceof CommentMutationOutcomeUnknownError || err instanceof CommentOperationConflictError) ? err.message : "Could not post comment. Try again.", { kind: "error" });
         textarea.focus();
       }
     };
@@ -1532,7 +1561,7 @@ class Commentor {
       await action();
     } catch (err) {
       console.error(`[commentor] ${label.toLowerCase()} failed`, err);
-      this.toast(err instanceof CommentMutationOutcomeUnknownError ? err.message : errorMessage, { kind: "error" });
+      this.toast((err instanceof CommentMutationOutcomeUnknownError || err instanceof CommentOperationConflictError) ? err.message : errorMessage, { kind: "error" });
     } finally {
       if (button.isConnected) {
         button.disabled = false;
@@ -1547,25 +1576,25 @@ class Commentor {
     }
   }
 
-  private removeThread(threadId: ThreadId): Promise<unknown> {
+  private removeThread(threadId: ThreadId, clientOperationId: string): Promise<unknown> {
     return isProjectConfig(this.cfg)
-      ? this.parentTransport!.mutate("thread.remove", { threadId })
+      ? this.parentTransport!.mutate("thread.remove", { threadId, clientOperationId })
       : this.client!.mutation(api.threads.remove, {
           threadId: threadId as Id<"threads">,
         });
   }
 
-  private resolveThread(threadId: ThreadId): Promise<unknown> {
+  private resolveThread(threadId: ThreadId, resolved: boolean): Promise<unknown> {
     return isProjectConfig(this.cfg)
-      ? this.parentTransport!.mutate("thread.resolve", { threadId })
+      ? this.parentTransport!.mutate("thread.resolve", { threadId, resolved })
       : this.client!.mutation(api.threads.resolve, {
           threadId: threadId as Id<"threads">,
         });
   }
 
-  private archiveThread(threadId: ThreadId): Promise<unknown> {
+  private archiveThread(threadId: ThreadId, archived: boolean): Promise<unknown> {
     return isProjectConfig(this.cfg)
-      ? this.parentTransport!.mutate("thread.archive", { threadId })
+      ? this.parentTransport!.mutate("thread.archive", { threadId, archived })
       : this.client!.mutation(api.threads.archive, {
           threadId: threadId as Id<"threads">,
         });
@@ -1617,15 +1646,16 @@ class Commentor {
   }
 
   private scheduleDelete(t: Thread): void {
+    const clientOperationId = crypto.randomUUID();
     const started = this.pendingDeletes.begin(
       t._id,
       5000,
-      () => this.removeThread(t._id),
+      () => this.removeThread(t._id, clientOperationId),
       (err) => {
         console.error("[commentor] delete failed", err);
         this.renderPins();
         this.renderDrawerList();
-        this.toast(err instanceof CommentMutationOutcomeUnknownError ? err.message : "Could not delete comment.", { kind: "error" });
+        this.toast((err instanceof CommentMutationOutcomeUnknownError || err instanceof CommentOperationConflictError) ? err.message : "Could not delete comment.", { kind: "error" });
       },
     );
     if (!started) return;
@@ -1686,7 +1716,7 @@ class Commentor {
         void this.runThreadAction(
           resolveButton,
           resolveActionLabel,
-          () => this.resolveThread(t._id),
+          () => this.resolveThread(t._id, !t.resolved),
           `Could not ${resolveLabel.toLowerCase()} comment.`,
         );
       });
@@ -1709,7 +1739,7 @@ class Commentor {
         void this.runThreadAction(
           archiveButton,
           archiveActionLabel,
-          () => this.archiveThread(t._id),
+          () => this.archiveThread(t._id, !t.archived),
           `Could not ${archiveLabel.toLowerCase()} comment.`,
         );
       });
@@ -1844,6 +1874,7 @@ class Commentor {
       input.addEventListener("input", () => {
         if (input.value) this.replyDrafts.set(t._id, input.value);
         else this.replyDrafts.delete(t._id);
+        this.parentTransport?.saveDraft(t._id, { body: input.value });
       });
       const send = h(
         "button",
@@ -1880,7 +1911,7 @@ class Commentor {
           }
         } catch (err) {
           console.error("[commentor] reply failed", err);
-          this.toast(err instanceof CommentMutationOutcomeUnknownError ? err.message : "Could not post reply.", { kind: "error" });
+          this.toast((err instanceof CommentMutationOutcomeUnknownError || err instanceof CommentOperationConflictError) ? err.message : "Could not post reply.", { kind: "error" });
         } finally {
           this.pendingReplies.delete(t._id);
           this.setReplyPendingState(t._id, false);

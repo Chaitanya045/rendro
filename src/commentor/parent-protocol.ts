@@ -1,3 +1,4 @@
+import type { CommentRecoveryState } from "./operation-state";
 export const COMMENTOR_PARENT_REQUEST = "commentor-parent-request";
 export const COMMENTOR_PARENT_RESPONSE = "commentor-parent-response";
 export const COMMENTOR_PARENT_UPDATE = "commentor-parent-update";
@@ -6,6 +7,8 @@ export const COMMENTOR_PARENT_READY = "commentor-parent-ready";
 export const COMMENTOR_PARENT_REPLIES_UPDATE = "commentor-parent-replies-update";
 
 export type CommentorParentMethod =
+  | "draft.save"
+  | "operation.complete"
   | "subscribe"
   | "threads.more"
   | "replies.more"
@@ -18,7 +21,7 @@ export type CommentorParentMethod =
 
 export type CommentorParentMutationMethod = Exclude<
   CommentorParentMethod,
-  "subscribe" | "threads.more" | "replies.more"
+  "subscribe" | "threads.more" | "replies.more" | "draft.save" | "operation.complete"
 >;
 
 export type CommentorParentRequest = {
@@ -59,9 +62,12 @@ export type CommentorParentReady = {
   type: typeof COMMENTOR_PARENT_READY;
   // Stable across resubscriptions; replaced when the parent host is recreated.
   parentGeneration: string;
+  recoveryState?: CommentRecoveryState;
 };
 
 const METHODS = new Set<CommentorParentMethod>([
+  "draft.save",
+  "operation.complete",
   "subscribe",
   "threads.more",
   "replies.more",

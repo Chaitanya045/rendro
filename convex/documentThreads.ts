@@ -1,3 +1,4 @@
+import { validateClientOperationId } from "./commentOperations";
 import { requireId } from "./ids";
 import { paginationOptsValidator } from "convex/server";
 import { ConvexError, v } from "convex/values";
@@ -61,6 +62,7 @@ function authorDisplay(author: { name?: string | null; email?: string | null } |
 }
 
 const threadScopeArgs = {
+  clientOperationId: v.optional(v.string()),
   organizationId: v.string(),
   projectId: v.string(),
   documentPath: v.string(),
@@ -122,7 +124,7 @@ export const list = query({
         authorById(thread.authorId),
         ctx.db
           .query("documentReplies")
-          .withIndex("by_thread", (index) => index.eq("threadId", thread._id))
+          .withIndex("by_active_thread", (index) => index.eq("threadId", thread._id).eq("deletedAt", undefined))
           .order("desc")
           .take(DOCUMENT_REPLY_PREVIEW_SIZE + 1),
       ]);
@@ -154,6 +156,7 @@ export const create = mutation({
     documentPath: v.string(),
     body: v.string(),
     anchor: anchorValidator,
+    clientOperationId: v.optional(v.string()),
   },
   handler: async (ctx, input) => {
     const authorized = await requireOrganizationMember(ctx, input.organizationId);
@@ -166,8 +169,18 @@ export const create = mutation({
     if (!body || body.length > 10_000) throw new ConvexError("Comment body is invalid");
     if (!validDocumentPath(args.documentPath)) throw new ConvexError("Document path is invalid");
     if (!validAnchor(args.anchor)) throw new ConvexError("Comment anchor is invalid");
+    validateClientOperationId(args.clientOperationId);
+    // Authorization and scope validation precede the indexed dedup lookup.
+    if (args.clientOperationId !== undefined) {
+      const existing = await ctx.db.query("documentThreads").withIndex("by_operation", (q) => q
+        .eq("organizationId", args.organizationId).eq("projectId", args.projectId)
+        .eq("documentPath", args.documentPath).eq("authorId", authorized.user._id)
+        .eq("clientOperationId", args.clientOperationId)).unique();
+      if (existing) return existing._id;
+    }
     const now = Date.now();
     return ctx.db.insert("documentThreads", {
+      clientOperationId: args.clientOperationId,
       organizationId: args.organizationId,
       projectId: args.projectId,
       documentPath: args.documentPath,
@@ -185,23 +198,26 @@ export const create = mutation({
 
 // Resolving/reopening is collaborative triage, available to any current member.
 export const resolve = mutation({
-  args: threadScopeArgs,
+  args: { ...threadScopeArgs, resolved: v.optional(v.boolean()) },
   handler: async (ctx, input) => {
     await requireOrganizationMember(ctx, input.organizationId);
+    validateClientOperationId(input.clientOperationId);
     const threadId = requireId(ctx, "documentThreads", input.threadId);
     const scope = { ...input, projectId: requireId(ctx, "projects", input.projectId) };
     const thread = await ctx.db.get(threadId);
     if (!thread || thread.deletedAt !== undefined || !threadMatchesScope(thread, scope)) {
       throw new ConvexError("Comment not found");
     }
-    await ctx.db.patch(threadId, { resolved: !thread.resolved, updatedAt: Date.now() });
+    if (thread.resolved === (input.resolved ?? true)) return;
+    await ctx.db.patch(threadId, { resolved: input.resolved ?? true, updatedAt: Date.now() });
   },
 });
 
 export const archive = mutation({
-  args: threadScopeArgs,
+  args: { ...threadScopeArgs, archived: v.optional(v.boolean()) },
   handler: async (ctx, input) => {
     const authorized = await requireOrganizationMember(ctx, input.organizationId);
+    validateClientOperationId(input.clientOperationId);
     const threadId = requireId(ctx, "documentThreads", input.threadId);
     const scope = { ...input, projectId: requireId(ctx, "projects", input.projectId) };
     const thread = await ctx.db.get(threadId);
@@ -209,7 +225,8 @@ export const archive = mutation({
       throw new ConvexError("Comment not found");
     }
     requireCommentAuthorOrAdmin(authorized, thread.authorId);
-    await ctx.db.patch(threadId, { archived: !thread.archived, updatedAt: Date.now() });
+    if (thread.archived === (input.archived ?? true)) return;
+    await ctx.db.patch(threadId, { archived: input.archived ?? true, updatedAt: Date.now() });
   },
 });
 
@@ -217,12 +234,17 @@ export const remove = mutation({
   args: threadScopeArgs,
   handler: async (ctx, input) => {
     const authorized = await requireOrganizationMember(ctx, input.organizationId);
+    validateClientOperationId(input.clientOperationId);
     const threadId = requireId(ctx, "documentThreads", input.threadId);
     const scope = { ...input, projectId: requireId(ctx, "projects", input.projectId) };
     const thread = await ctx.db.get(threadId);
-    if (!thread || !threadMatchesScope(thread, scope)) throw new ConvexError("Comment not found");
+    const project = await ctx.db.get(scope.projectId);
+    if (!project || project.organizationId !== scope.organizationId) throw new ConvexError("Comment not found");
+    if (!thread) return;
+    if (!threadMatchesScope(thread, scope)) throw new ConvexError("Comment not found");
     requireCommentAuthorOrAdmin(authorized, thread.authorId);
-    if (thread.deletedAt === undefined) await ctx.db.patch(threadId, { deletedAt: Date.now() });
+    if (thread.deletedAt !== undefined) return;
+    await ctx.db.patch(threadId, { deletedAt: Date.now() });
     await ctx.scheduler.runAfter(0, internal.documentThreads.cleanupDeletedThread, { threadId });
   },
 });
@@ -234,15 +256,20 @@ export const cleanupDeletedThread = internalMutation({
     if (!thread || thread.deletedAt === undefined) return null;
     const replies = await ctx.db
       .query("documentReplies")
-      .withIndex("by_thread", (index) => index.eq("threadId", threadId))
+      .withIndex("by_active_thread", (index) => index.eq("threadId", threadId).eq("deletedAt", undefined))
       .take(DOCUMENT_REPLY_CLEANUP_BATCH_SIZE + 1);
     await Promise.all(replies
       .slice(0, DOCUMENT_REPLY_CLEANUP_BATCH_SIZE)
-      .map((reply) => ctx.db.delete(reply._id)));
+      .map((reply) => reply.clientOperationId
+        ? ctx.db.patch(reply._id, { deletedAt: Date.now(), body: "" })
+        : ctx.db.delete(reply._id)));
     if (replies.length > DOCUMENT_REPLY_CLEANUP_BATCH_SIZE) {
       await ctx.scheduler.runAfter(0, internal.documentThreads.cleanupDeletedThread, { threadId });
     } else {
-      await ctx.db.delete(threadId);
+      // Keep the dedup key after deletion: a delayed create retry must never
+      // resurrect a deleted comment. Legacy records still use physical cleanup.
+      if (thread.clientOperationId) await ctx.db.patch(threadId, { body: "", anchor: { kind: "element", path: [] } });
+      else await ctx.db.delete(threadId);
     }
     return null;
   },

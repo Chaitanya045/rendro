@@ -1,3 +1,4 @@
+import { mutationKey, type CommentRecoveryState } from "../src/commentor/operation-state";
 import { buildSync } from "esbuild";
 import { Window, type HTMLButtonElement, type HTMLTextAreaElement } from "happy-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -24,7 +25,7 @@ async function flush() {
   for (let i = 0; i < 12; i++) await Promise.resolve();
 }
 
-async function widget(options: { canDelete?: boolean; replyCanDelete?: boolean; archived?: boolean } = { canDelete: true, replyCanDelete: true }) {
+async function widget(options: { canDelete?: boolean; replyCanDelete?: boolean; archived?: boolean; resolved?: boolean; recoveryState?: CommentRecoveryState } = { canDelete: true, replyCanDelete: true }) {
   vi.useFakeTimers();
   const win = new Window({ url: "https://rendro.test/guide.html", settings: { enableJavaScriptEvaluation: true } });
   windows.push(win);
@@ -32,6 +33,9 @@ async function widget(options: { canDelete?: boolean; replyCanDelete?: boolean; 
   const parent = { postMessage: (data: CommentorParentRequest) => {
     if (data.type !== COMMENTOR_PARENT_REQUEST) return;
     requests.push(data);
+    if (["draft.save", "operation.complete"].includes(data.method)) {
+      void Promise.resolve().then(() => send({ type: COMMENTOR_PARENT_RESPONSE, requestId: data.requestId, ok: true }));
+    }
     if (data.method === "subscribe") {
       void Promise.resolve().then(() => {
         send({ type: COMMENTOR_PARENT_RESPONSE, requestId: data.requestId, ok: true });
@@ -52,18 +56,18 @@ async function widget(options: { canDelete?: boolean; replyCanDelete?: boolean; 
     type: COMMENTOR_PARENT_UPDATE, canLoadMore: false, loading: false,
     threads: [{
       _id: "thread-1", _creationTime: Date.now(), authorName: "Author", authorEmail: "author@test.com",
-      body: "Comment", anchor: { kind: "element", path: ["main"] }, resolved: false,
+      body: "Comment", anchor: { kind: "element", path: ["main"] }, resolved: options.resolved ?? false,
       archived: options.archived ?? false, canDelete: options.canDelete,
       replies: [{ _id: "reply-1", _creationTime: Date.now(), authorName: "Reply author", body: "Reply", canDelete: options.replyCanDelete }],
     }],
   });
   win.eval(bundle);
   win.document.dispatchEvent(new win.Event("DOMContentLoaded"));
-  send({ type: COMMENTOR_PARENT_READY, parentGeneration: "host-1" });
+  send({ type: COMMENTOR_PARENT_READY, parentGeneration: "host-1", recoveryState: options.recoveryState });
   await flush();
   const root = win.document.getElementById("commentor-host")!.shadowRoot!;
   const button = (testId: string) => root.querySelector<HTMLButtonElement>(`[data-testid="${testId}"]`)!;
-  const mutations = () => requests.filter((request) => request.method !== "subscribe");
+  const mutations = () => requests.filter((request) => !["subscribe", "draft.save", "operation.complete"].includes(request.method));
   const finish = () => send({ type: COMMENTOR_PARENT_RESPONSE, requestId: mutations()[0].requestId, ok: true });
   return { win, root, button, requests, mutations, send, publish, finish };
 }
@@ -207,5 +211,87 @@ describe("comment widget recovery controls", () => {
     finish();
     await flush();
     expect(restored.value).toBe("Draft to preserve");
+  });
+});
+
+
+describe("safe resubmission through rendered recovery controls", () => {
+  it.each(["create", "reply", "resolve", "reopen", "archive", "unarchive", "delete", "delete-reply"])(
+    "%s resubmits the original ID and target after BFCache host replacement",
+    async (action) => {
+      const { win, root, button, mutations, send } = await widget({ canDelete: true, replyCanDelete: true, archived: action === "unarchive", resolved: action === "reopen" });
+      if (action === "unarchive") root.querySelector<HTMLButtonElement>('[data-filter="history"]')!.click();
+      if (action === "reopen") root.querySelector<HTMLButtonElement>('[data-filter="resolved"]')!.click();
+      if (action === "create") {
+        button("commentor-comment-btn").click();
+        win.document.querySelector("main")!.click();
+        root.querySelector<HTMLTextAreaElement>('[data-testid="commentor-composer-textarea"]')!.value = "Persist me";
+      }
+      if (action === "reply") root.querySelector<HTMLTextAreaElement>('[data-testid="commentor-reply-input"]')!.value = "Persist me";
+      const testId = action === "create" ? "commentor-composer-post" : action === "reply" ? "commentor-reply-send"
+        : `commentor-${action === "unarchive" ? "archive" : action === "reopen" ? "resolve" : action}-btn`;
+      button(testId).click();
+      if (action === "delete") await vi.advanceTimersByTimeAsync(5001);
+      expect(mutations()).toHaveLength(1);
+      const original = mutations()[0].args as Record<string, unknown>;
+      expect(original.clientOperationId).toMatch(/^[a-f0-9-]{36}$/);
+      send({ type: COMMENTOR_PARENT_READY, parentGeneration: "restored-host" });
+      await flush();
+      expect(button(testId).disabled).toBe(false);
+      button(testId).click();
+      if (action === "delete") await vi.advanceTimersByTimeAsync(5001);
+      expect(mutations()).toHaveLength(2);
+      expect(mutations()[1].args).toEqual(original);
+      if (action === "reopen") expect(original.resolved).toBe(false);
+      if (action === "unarchive") expect(original.archived).toBe(false);
+      expect(root.querySelector('.toast[role="alert"]')?.textContent).toContain("Resubmitting this action is safe");
+    },
+  );
+
+  it.each(["create", "reply"])("restores the %s draft and operation ID in a new iframe widget", async (action) => {
+    const first = await widget();
+    if (action === "create") {
+      first.button("commentor-comment-btn").click();
+      first.win.document.querySelector("main")!.click();
+    }
+    const inputId = action === "create" ? "commentor-composer-textarea" : "commentor-reply-input";
+    const buttonId = action === "create" ? "commentor-composer-post" : "commentor-reply-send";
+    const input = first.root.querySelector<HTMLTextAreaElement>(`[data-testid="${inputId}"]`)!;
+    input.value = "Draft across reload";
+    input.dispatchEvent(new first.win.Event("input"));
+    expect(first.requests.some((r) => r.method === "draft.save")).toBe(true);
+    first.button(buttonId).click();
+    const original = first.mutations()[0];
+    const args = original.args as Record<string, unknown>;
+    const method = action === "create" ? "thread.create" : "reply.add";
+    const recoveryState: CommentRecoveryState = {
+      operations: { [mutationKey(method, args)]: { method, args, clientOperationId: args.clientOperationId as string } },
+      drafts: { [action === "create" ? "create" : "thread-1"]: args },
+    };
+    const next = await widget({ canDelete: true, replyCanDelete: true, recoveryState });
+    expect(next.root.querySelector<HTMLTextAreaElement>(`[data-testid="${inputId}"]`)!.value).toBe("Draft across reload");
+    next.button(buttonId).click();
+    expect(next.mutations()).toHaveLength(1);
+    expect(next.mutations()[0].args).toEqual(args);
+  });
+
+  it.each(["create", "reply"])("clears the recovered %s draft when its operation appears in the subscription", async (action) => {
+    const method = action === "create" ? "thread.create" : "reply.add";
+    const args = { body: "Confirmed draft", anchor: { kind: "element", path: ["main"] }, ...(action === "reply" ? { threadId: "thread-1" } : {}) };
+    const recoveryState: CommentRecoveryState = {
+      operations: { [mutationKey(method, args)]: { method, args, clientOperationId: "confirmed" } },
+      drafts: { [action === "create" ? "create" : "thread-1"]: args },
+    };
+    const { root, send, requests } = await widget({ canDelete: true, replyCanDelete: true, recoveryState });
+    send({ type: COMMENTOR_PARENT_UPDATE, canLoadMore: false, loading: false, threads: [{
+      _id: "thread-1", _creationTime: Date.now(), authorName: "Author", body: "Confirmed draft",
+      anchor: args.anchor, resolved: false, canDelete: true,
+      ...(action === "create" ? { clientOperationId: "confirmed" } : {}),
+      replies: action === "reply" ? [{ _id: "reply-2", _creationTime: Date.now(), authorName: "Author", body: "Confirmed draft", clientOperationId: "confirmed" }] : [],
+    }] });
+    await flush();
+    expect(requests.some((r) => r.method === "operation.complete")).toBe(true);
+    if (action === "create") expect(root.querySelector('.composer[data-state="open"]')).toBeNull();
+    else expect(root.querySelector<HTMLTextAreaElement>('[data-testid="commentor-reply-input"]')!.value).toBe("");
   });
 });
