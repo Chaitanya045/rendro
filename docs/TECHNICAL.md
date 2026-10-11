@@ -397,6 +397,14 @@ the current frame source and expected origin, and hashes are bounded to 4096
 characters and used only as data (never raw selectors or HTML).
 
 Private shares use the same fragment bridge with their single-document shell.
+Their shell records the granted path in `doc` and the publisher query in
+`docQuery`, matching private/public viewer query encoding. Queries (including the
+leading `?`) are bounded to 4096 characters and cannot contain literal fragments
+or line breaks. The share route rejects invalid queries and any `doc` other than
+the grant's document; query keys and encoded traversal strings remain data, never
+paths or share tokens. The iframe reports its query and fragment after native
+loads/history restoration; the shell replaces the current entry without adding
+history entries. Reload and copied URLs restore the same query and fragment.
 They synchronize parent deep links without broadening the grant to other HTML
 files. Legacy `/share/:token` serves the document directly and retains native
 browser fragment handling.

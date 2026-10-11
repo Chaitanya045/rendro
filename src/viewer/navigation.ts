@@ -1,8 +1,8 @@
-import { validRelativeDocumentPath } from "../lazy-tree/messages";
+import { validDocumentSearch, validRelativeDocumentPath } from "../lazy-tree/messages";
 import { shouldUseNativeLinkNavigation } from "../lazy-tree/navigation";
 import { replaceViewerFragment, scrollToFragment, sendDocumentFragment, validFragment } from "./fragments";
 
-interface FragmentMessage { type?: unknown; path?: unknown; fragment?: unknown }
+interface FragmentMessage { type?: unknown; path?: unknown; search?: unknown; fragment?: unknown }
 
 export interface DocumentNavigationConfig {
   prefix: string;
@@ -55,7 +55,7 @@ export function installDocumentNavigation(config: DocumentNavigationConfig, host
   });
   function loaded() {
     if (host.parent !== host) host.parent.postMessage({ type: "doc-loaded", path: config.loadedPath ?? config.documentPath,
-      fragment: host.location.hash }, origin);
+      search: host.location.search, fragment: host.location.hash }, origin);
   }
   if (config.singleDocument) {
     // Report the destination after native navigation/restoration, never while
@@ -77,6 +77,7 @@ export function installDocumentNavigation(config: DocumentNavigationConfig, host
     if (href === null) return;
     const link = classifyDocumentLink(href, doc.baseURI, host.location.href, config);
     if (!link) return;
+    if (!validDocumentSearch(link.search)) { event.preventDefault(); return; }
     if (config.singleDocument && !link.sameDocument) {
       // Shares retain native document navigation and server-enforced grant scope.
       // The destination reports its own fragment once it has loaded.
@@ -115,8 +116,16 @@ export function installShareFragments(config: DocumentNavigationConfig, host: Wi
   });
   host.addEventListener("message", (event: MessageEvent<FragmentMessage>) => {
     if (event.source !== frame.contentWindow || event.origin !== "null" || event.data?.path !== config.documentPath) return;
-    if (event.data.type === "doc-loaded" && validFragment(event.data.fragment)) {
-      replaceViewerFragment(initialFragment ?? event.data.fragment, host);
+    if (event.data.type === "doc-loaded" && validFragment(event.data.fragment) && validDocumentSearch(event.data.search)) {
+      // The iframe owns native history. Replace only after its destination loads;
+      // changing the outgoing shell entry would corrupt Back/Forward restoration.
+      // Query bytes are nested data, never part of the grant path or token.
+      const url = new URL(host.location.href);
+      url.searchParams.set("doc", config.documentPath);
+      if (event.data.search) url.searchParams.set("docQuery", event.data.search);
+      else url.searchParams.delete("docQuery");
+      url.hash = validFragment(initialFragment) ? initialFragment : event.data.fragment;
+      host.history.replaceState(host.history.state, "", url);
       initialFragment = undefined;
       send();
     }

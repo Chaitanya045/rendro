@@ -273,6 +273,8 @@ describe("viewer fragment navigation in Chromium", () => {
       await browserStep("synchronize shell fragment", () => expect.poll(() => new URL(page.url()).hash).toBe("#" + target));
       await atTarget(frame, target);
       expect(new URL(frame.url()).search).toBe(query);
+      expect(new URL(page.url()).searchParams.get("doc")).toBe(documents[0]);
+      expect(new URL(page.url()).searchParams.get("docQuery")).toBe(query);
       if (base === "/s/fixture") expect(new URL(frame.url()).hash).toBe("#" + target);
     };
     try {
@@ -288,10 +290,108 @@ describe("viewer fragment navigation in Chromium", () => {
       await assertDestination("?v=1", "details");
       await browserStep("reload document", () => page.reload({ waitUntil: "domcontentloaded" }));
       const restored = await readyFrame(page);
+      expect(await restored.locator("body").getAttribute("data-initialized-query")).toBe("?v=1");
+      expect(new URL(page.url()).searchParams.get("docQuery")).toBe("?v=1");
       await browserStep("synchronize shell fragment", () => expect.poll(() => new URL(page.url()).hash).toBe("#details"));
       await atTarget(restored, "details");
       expect(requests).not.toContain("ticket-request");
     } finally { await page.close(); }
+  });
+
+  it.each([privateBase, "/p/fixture", "/s/fixture"])("reopens query document state after reload and a copied URL in %s", async base => {
+    const { page, frame } = await open(base);
+    await frame.getByRole("link", { name: "Query two", exact: true }).click();
+    await browserStep("synchronize query destination", () => expect.poll(() => new URL(page.url()).hash).toBe("#section"));
+    const copiedUrl = page.url();
+    expect(new URL(copiedUrl).searchParams.get("doc")).toBe(documents[0]);
+    expect(new URL(copiedUrl).searchParams.get("docQuery")).toBe("?v=2");
+    await browserStep("reload query destination", () => page.reload({ waitUntil: "domcontentloaded" }));
+    const restored = await readyFrame(page);
+    expect(new URL(restored.url()).pathname).toBe(`${base}/files/${documents[0]}`);
+    expect(await restored.locator("body").getAttribute("data-initialized-query")).toBe("?v=2");
+    await atTarget(restored, "section");
+    const copied = await newPage(); // The shared harness creates a fresh context.
+    await browserStep("open copied URL", () => copied.goto(copiedUrl, { waitUntil: "domcontentloaded" }));
+    const copiedFrame = await readyFrame(copied);
+    expect(new URL(copiedFrame.url()).pathname).toBe(`${base}/files/${documents[0]}`);
+    expect(await copiedFrame.locator("body").getAttribute("data-initialized-query")).toBe("?v=2");
+    await atTarget(copiedFrame, "section");
+    expect(new URL(copied.url()).hash).toBe("#section");
+    expect(requests).not.toContain("ticket-request");
+  });
+
+  it.each([
+    ["encoded traversal and token/path keys", "?next=%2e%2e%2fother.html&token=another&doc=guide%2Fother.html&docQuery=%3Fv%3D9"],
+    ["HTML attribute characters", '?value="<iframe src=/s/another>&amp;plus=+&literal=%2B'],
+    ["maximum query length", "?v=" + "x".repeat(4093)],
+  ])("keeps share query data scoped through navigation, reload and copying: %s", async (_label, query) => {
+    const { page, frame } = await open("/s/fixture");
+    const expected = new URL("https://fixture.test/" + query).search;
+    await frame.getByRole("link", { name: "Query two", exact: true }).evaluate((link, query) => {
+      link.setAttribute("href", "page.html" + query + "#section");
+    }, query);
+    await frame.getByRole("link", { name: "Query two", exact: true }).click();
+    await browserStep("synchronize bounded publisher query", () => expect.poll(() => new URL(page.url()).searchParams.get("docQuery")).toBe(expected));
+    const copiedUrl = page.url();
+    for (const destination of [page, await newPage()]) {
+      await browserStep("restore scoped query URL", () => destination === page
+        ? destination.reload({ waitUntil: "domcontentloaded" })
+        : destination.goto(copiedUrl, { waitUntil: "domcontentloaded" }));
+      const restored = await readyFrame(destination);
+      expect(await restored.locator("body").getAttribute("data-initialized-query")).toBe(expected);
+      expect(new URL(restored.url()).pathname).toBe("/s/fixture/files/" + documents[0]);
+      expect(new URL(destination.url()).pathname).toBe("/s/fixture");
+      expect(new URL(destination.url()).searchParams.get("doc")).toBe(documents[0]);
+      expect(await destination.locator("iframe").count()).toBe(1);
+      await atTarget(restored, "section");
+    }
+    expect(requests.some(path => path.startsWith("/s/another"))).toBe(false);
+    expect(requests).not.toContain("/s/fixture/files/" + documents[1]);
+  });
+
+  it("rejects oversized share query links and forged loaded messages without altering history", async () => {
+    const { page, frame } = await open("/s/fixture", "#details");
+    await atTarget(frame, "details");
+    await browserStep("synchronize initial share URL", () => expect.poll(() => new URL(page.url()).searchParams.get("doc")).toBe(documents[0]));
+    const url = page.url();
+    const historyLength = await page.evaluate(() => history.length);
+    const loads = requests.filter(path => path.includes("/files/")).length;
+    await frame.getByRole("link", { name: "Query two", exact: true }).evaluate(link => {
+      link.setAttribute("href", "page.html?" + "x".repeat(4096) + "#section");
+    });
+    await frame.getByRole("link", { name: "Query two", exact: true }).click();
+    expect(await frame.locator("body").getAttribute("data-initialized-query")).toBe("");
+    await page.evaluate(() => {
+      const frame = document.getElementById("content-frame") as HTMLIFrameElement;
+      const data = { type: "doc-loaded", path: "guide/page.html", search: "?v=2", fragment: "#section" };
+      for (const event of [
+        { data, source: window, origin: "null" },
+        { data, source: frame.contentWindow, origin: location.origin },
+        { data: { ...data, path: "guide/other.html" }, source: frame.contentWindow, origin: "null" },
+        ...[undefined, null, {}, "v=2", "?v=2#injected", "?v=2\n", "?" + "x".repeat(4096)].map(search => ({
+          data: { ...data, search }, source: frame.contentWindow, origin: "null",
+        })),
+      ]) window.dispatchEvent(new MessageEvent("message", event));
+    });
+    expect(page.url()).toBe(url);
+    expect(await page.evaluate(() => history.length)).toBe(historyLength);
+    expect(requests.filter(path => path.includes("/files/"))).toHaveLength(loads);
+    await atTarget(frame, "details");
+  });
+
+  it.each([
+    ["oversized query", { docQuery: "?" + "x".repeat(4096) }, 400],
+    ["literal fragment", { docQuery: "?v=2#injected" }, 400],
+    ["line break", { docQuery: "?v=2\r\n" }, 400],
+    ["missing query marker", { docQuery: "../other.html" }, 400],
+    ["another document", { doc: "guide/other.html", docQuery: "?v=2" }, 404],
+    ["encoded path traversal", { doc: "guide/%2e%2e/other.html" }, 404],
+  ] as const)("rejects invalid share shell state: %s", async (_label, params, status) => {
+    const page = await newPage();
+    const response = await browserStep("open invalid share URL", () => page.goto(harness.origin + "/s/fixture?" + new URLSearchParams(params).toString()));
+    expect(response?.status()).toBe(status);
+    expect(await page.locator("#content-frame").count()).toBe(0);
+    expect(requests.some(path => path.includes("/files/"))).toBe(false);
   });
 
   it.each(["", "#details", "#日本語"])("restores initial and replaced share fragments through history: %s", async hash => {
@@ -300,6 +400,7 @@ describe("viewer fragment navigation in Chromium", () => {
       await browserStep("wait for publisher initialization", () => frame.waitForFunction(() => document.readyState === "complete" && document.body?.dataset.initializedQuery === ""));
       await browserStep("synchronize shell fragment", () => expect.poll(() => decodeURIComponent(new URL(page.url()).hash)).toBe(hash));
       await browserStep("restore frame fragment", () => expect.poll(() => decodeURIComponent(new URL(frame.url()).hash)).toBe(hash));
+      expect(new URL(page.url()).searchParams.has("docQuery")).toBe(false);
       if (hash) await atTarget(frame, hash.slice(1));
       else await browserStep("scroll to document top", () => expect.poll(() => frame.evaluate(() => scrollY)).toBe(0));
     };
