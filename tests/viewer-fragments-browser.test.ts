@@ -1,4 +1,5 @@
 import type { Frame, Page } from "playwright";
+import AxeBuilder from "@axe-core/playwright";
 import { Hono } from "hono";
 import type { User } from "better-auth/types";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -266,6 +267,85 @@ describe("viewer fragment navigation in Chromium", () => {
     await page.goBack();
     await readyFrame(page);
     expect(new URL(page.url()).searchParams.has("docQuery")).toBe(false);
+    await page.close();
+  });
+
+  it.each([privateBase, "/p/fixture"])("recovers later document and query links through parent Review after dismissal in %s", async base => {
+    const page = await newPage();
+    await page.addInitScript(() => { Object.defineProperty(navigator, "userActivation", { value: undefined }); });
+    await page.goto(harness.origin + base);
+    let frame = await readyFrame(page);
+    const notice = page.locator("#document-navigation-notice");
+    const review = page.getByRole("button", { name: "Review linked document", exact: true });
+    for (const link of ["Other page", "Query two"]) {
+      await frame.getByRole("link", { name: "Query one", exact: true }).click();
+      await notice.waitFor();
+      // Document requests must not move focus into the parent notice.
+      expect(await page.evaluate(() => document.activeElement?.id)).toBe("content-frame");
+      await notice.getByRole("button", { name: "Dismiss", exact: true }).click();
+      await frame.getByRole("link", { name: link, exact: true }).click();
+      // Drain posted messages before the parent-owned reopen action.
+      await page.waitForFunction(() => (window as unknown as { activations: boolean[] }).activations.length >= 2);
+      expect(await notice.count()).toBe(0);
+      expect(await page.evaluate(() => document.activeElement?.id)).toBe("content-frame");
+      expect((await new AxeBuilder({ page }).include("#document-navigation-review").options({ preload: false }).analyze()).violations).toEqual([]);
+      await review.press("Enter");
+      const destination = link === "Other page" ? "guide/other.html#section" : "guide/page.html?v=2#section";
+      expect(await notice.locator("p").textContent()).toBe(`Open linked document ${destination}?`);
+      expect((await new AxeBuilder({ page }).include("#document-navigation-notice").options({ preload: false }).analyze()).violations).toEqual([]);
+      await notice.getByRole("button", { name: "Open linked document", exact: true }).press("Enter");
+      frame = await readyFrame(page);
+      expect(new URL(page.url()).searchParams.get("doc")).toBe(link === "Other page" ? documents[1] : documents[0]);
+      expect(new URL(page.url()).searchParams.get("docQuery")).toBe(link === "Other page" ? null : "?v=2");
+      expect(new URL(page.url()).hash).toBe("#section");
+      expect(await review.count()).toBe(0);
+      await page.evaluate(() => { (window as unknown as { activations: boolean[] }).activations = []; });
+    }
+    await page.close();
+  });
+
+  it.each([privateBase, "/p/fixture"])("never reopens or mutates dismissed UI under duplicate and changing-target floods in %s", async base => {
+    const page = await newPage();
+    await page.addInitScript(() => { Object.defineProperty(navigator, "userActivation", { value: undefined }); });
+    await page.goto(harness.origin + base);
+    const frame = await readyFrame(page);
+    const initialUrl = page.url();
+    const notice = page.locator("#document-navigation-notice");
+    const review = page.getByRole("button", { name: "Review linked document", exact: true });
+    await frame.getByRole("link", { name: "Query one", exact: true }).click();
+    await notice.getByRole("button", { name: "Dismiss", exact: true }).click();
+    for (let round = 0; round < 3; round++) {
+      await review.evaluate(element => {
+        const state = window as unknown as { reviewMutations: number };
+        state.reviewMutations = 0;
+        new MutationObserver(records => { state.reviewMutations += records.length; })
+          .observe(element, { subtree: true, childList: true, attributes: true, characterData: true });
+      });
+      await frame.getByRole("textbox").focus();
+      const before = await page.evaluate(() => (window as unknown as { activations: boolean[] }).activations.length);
+      await frame.evaluate(() => {
+        for (let i = 0; i < 1000; i++) {
+          parent.postMessage({ type: "doc-navigate", path: "guide/other.html", search: `?v=${i}`, fragment: "#section" }, location.origin);
+          parent.postMessage({ type: "doc-navigate", path: "guide/other.html", search: `?v=${i}`, fragment: "#section" }, location.origin);
+        }
+      });
+      await page.waitForFunction(count => (window as unknown as { activations: boolean[] }).activations.length === count, before + 2000);
+      expect(await notice.count()).toBe(0);
+      expect(await review.count()).toBe(1);
+      expect(await page.evaluate(() => (window as unknown as { reviewMutations: number }).reviewMutations)).toBe(0);
+      expect(await page.evaluate(() => document.activeElement?.id)).toBe("content-frame");
+      expect(page.url()).toBe(initialUrl);
+      expect(requests.filter(path => path.includes("/files/")).length).toBe(1);
+      // A genuine later link remains available on every reader-driven reopening.
+      await frame.getByRole("link", { name: "Query two", exact: true }).click();
+      await page.waitForFunction(count => (window as unknown as { activations: boolean[] }).activations.length === count, before + 2001);
+      await review.click();
+      expect(await notice.locator("p").textContent()).toBe("Open linked document guide/page.html?v=2#section?");
+      if (round < 2) await notice.getByRole("button", { name: "Dismiss", exact: true }).click();
+    }
+    await notice.getByRole("button", { name: "Open linked document", exact: true }).click();
+    await readyFrame(page);
+    expect(new URL(page.url()).searchParams.get("docQuery")).toBe("?v=2");
     await page.close();
   });
 

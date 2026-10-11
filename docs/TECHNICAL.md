@@ -569,7 +569,14 @@ An unverified or already-used activation offers a small parent-owned “Open
 linked document” notice. Its bounded path/query/fragment is assigned with
 `textContent`, never HTML. The first destination stays fixed while visible;
 repeated requests do not rewrite it, steal focus, or add notices. Dismissal
-suppresses notices until the next parent document navigation. The native button
+leaves a parent-owned “Review linked document” button. While dismissed, later
+requests replace one bounded pending destination (path, query and fragment),
+de-duplicating identical targets without changing the DOM or announcing updates.
+Only the reader's Review action reopens the prompt and freezes that destination
+for confirmation; frame messages and elapsed time cannot reopen it. This avoids
+timer-driven nagging while preserving access to later links even without the
+activation API. Parent document navigation clears both the prompt and pending
+destination. Focus moves only for explicit parent Review/Dismiss actions. The native button
 works with mouse and keyboard even when the activation API is absent. Shell
 `toggle` messages also fail closed when the API is absent. Share viewers retain
 their native, document-scoped navigation path.

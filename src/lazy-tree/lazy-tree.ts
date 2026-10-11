@@ -3,6 +3,7 @@
  * max-height animations, active indicator, and border-line indentation.
  */
 import { coalesceMessage, createDocumentNavigationGate } from "../viewer/message-limits";
+import { createNavigationConfirmation, type DocumentNavigationTarget } from "../viewer/navigation-confirmation";
 import { replaceViewerFragment, sendDocumentFragment, validFragment } from "../viewer/fragments";
 import {
   isContentFrameSource,
@@ -476,21 +477,21 @@ function documentSearchFromLocation(): string {
 }
 
 const navigationGate = createDocumentNavigationGate();
+const navigationConfirmation = createNavigationConfirmation();
 let navigationNotice: HTMLElement | undefined;
-let navigationNoticeShown = false;
 
 function clearNavigationNotice() {
   navigationNotice?.remove();
   navigationNotice = undefined;
-  navigationNoticeShown = false;
+  navigationConfirmation.reset();
 }
 
 function offerDocumentNavigation(fullPath: string, search: string, fragment: string) {
-  // Freeze the first request until the reader acts or the document changes.
-  // Floods cannot rewrite a focused button's destination, grow a queue, or
-  // repeatedly announce a prompt. Dismissal suppresses it for this document.
-  if (navigationNoticeShown) return;
-  navigationNoticeShown = true;
+  const target = navigationConfirmation.request({ fullPath, search, fragment });
+  if (target) showNavigationConfirmation(target);
+}
+
+function showNavigationConfirmation({ fullPath, search, fragment }: DocumentNavigationTarget) {
   const notice = document.createElement("div");
   notice.id = "document-navigation-notice";
   notice.className = "document-navigation-notice";
@@ -512,7 +513,28 @@ function offerDocumentNavigation(fullPath: string, search: string, fragment: str
   dismiss.className = "load-more-btn";
   dismiss.textContent = "Dismiss";
   dismiss.style.marginLeft = "12px";
-  dismiss.addEventListener("click", () => { notice.remove(); navigationNotice = undefined; });
+  dismiss.addEventListener("click", () => {
+    if (!navigationConfirmation.dismiss()) return;
+    const collapsed = document.createElement("div");
+    collapsed.id = "document-navigation-review";
+    collapsed.className = "document-navigation-notice";
+    const review = document.createElement("button");
+    review.type = "button";
+    review.className = "load-more-btn";
+    review.textContent = "Review linked document";
+    review.addEventListener("click", () => {
+      const target = navigationConfirmation.reopen();
+      if (!target) return;
+      collapsed.remove();
+      showNavigationConfirmation(target);
+      // Focus moves only in response to the reader's explicit parent action.
+      navigationNotice?.querySelector("button")?.focus();
+    });
+    collapsed.append(review);
+    notice.replaceWith(collapsed);
+    navigationNotice = collapsed;
+    review.focus();
+  });
   notice.append(label, open, dismiss);
   navigationNotice = notice;
   document.body.append(notice);
