@@ -18,6 +18,7 @@ describe.skipIf(!binary)("isolated Convex RPC envelopes", () => {
   let server: ChildProcess | undefined;
   let directory: string;
   let url: string;
+  let legacy: { threadId: string; foreignThreadId: string; missingThreadId: string; foreignReplyId: string; missingReplyId: string };
   let log: Awaited<ReturnType<typeof open>> | undefined;
 
   async function freePort() {
@@ -83,7 +84,9 @@ describe.skipIf(!binary)("isolated Convex RPC envelopes", () => {
         sourceMap: bundle.outputFiles.find(file => file.path.endsWith(".map"))!.text }],
     });
     expect(pushed).toEqual({});
-    expect(await rpc("mutation", "seed", {})).toMatchObject({ status: "success" });
+    const seeded = await rpc("mutation", "seed", {});
+    expect(seeded).toMatchObject({ status: "success" });
+    legacy = seeded.value as typeof legacy;
   }, 30_000);
 
   afterAll(async () => {
@@ -104,6 +107,25 @@ describe.skipIf(!binary)("isolated Convex RPC envelopes", () => {
       safeFailure(inaccessible, code);
       expect(normalized(missing)).toBe(normalized(inaccessible));
     }
+  });
+
+
+  it.each(["threads:list", "threads:create", "threads:resolve", "threads:archive", "threads:remove", "replies:add", "replies:remove"])("%s actual legacy envelopes hide missing versus inaccessible records and server frames", async method => {
+    const envelopes = [];
+    for (const missing of [true, false]) {
+      // List/create have no record lookup: compare two denied organization scopes.
+      const orgSlug = missing ? "missing-org" : "other";
+      const result = method === "threads:list"
+        ? await rpc("query", "legacyList", { orgSlug })
+        : await rpc("mutation", "legacyMutation", {
+          method, orgSlug,
+          threadId: method === "replies:remove" ? legacy.threadId : missing ? legacy.missingThreadId : legacy.foreignThreadId,
+          replyId: missing ? legacy.missingReplyId : legacy.foreignReplyId,
+        });
+      safeFailure(result, ["threads:list", "threads:create"].includes(method) ? "forbidden" : "not_found");
+      envelopes.push(normalized(result));
+    }
+    expect(envelopes[0]).toBe(envelopes[1]);
   });
 
   it("retains diagnostic frames for unexpected errors after an expected error", async () => {

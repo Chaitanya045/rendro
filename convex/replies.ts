@@ -1,6 +1,7 @@
 import { requireId } from "./ids";
 import { mutation } from "./publicFunctions";
-import { ConvexError, v } from "convex/values";
+import { v } from "convex/values";
+import { publicError } from "./publicErrors";
 import { authorizeLegacyThread, legacyOperationArgs, legacyBody, requireLegacyCommentAuthor } from "./legacyComments";
 
 export const add = mutation({
@@ -13,7 +14,7 @@ export const add = mutation({
       const previous = await ctx.db.query("replies").withIndex("by_operation", q => q.eq("threadId", threadId).eq("authorId", identity.subject).eq("clientOperationId", input.clientOperationId)).unique();
       if (previous) return previous._id;
     }
-    if (thread.deletedAt !== undefined) throw new ConvexError("Comment not found");
+    if (thread.deletedAt !== undefined) publicError("not_found");
     return ctx.db.insert("replies", { threadId, body, authorId: identity.subject, clientOperationId: input.clientOperationId, authorEmail: identity.email, authorName: identity.name });
   },
 });
@@ -23,7 +24,7 @@ export const remove = mutation({
     const { thread, identity } = await authorizeLegacyThread(ctx, input);
     const threadId = thread._id;
     const reply = await ctx.db.get(requireId(ctx, "replies", input.replyId));
-    if (!reply || reply.threadId !== threadId) throw new ConvexError("Comment not found");
+    if (!reply || reply.threadId !== threadId) publicError("not_found");
     requireLegacyCommentAuthor(identity, reply);
     if (reply.deletedAt === undefined) await ctx.db.patch(reply._id, { body: "", deletedAt: Date.now() });
   },

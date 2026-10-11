@@ -4,11 +4,21 @@ import { makeFunctionReference } from "convex/server";
 import { ConvexError } from "convex/values";
 import { authComponent } from "../convex/auth";
 import { api } from "../convex/_generated/api";
-import { fixture } from "./helpers/comment-fixture";
+import { fixture as projectFixture } from "./helpers/comment-fixture";
+import { commentErrorMessage, isDefinitiveCommentRejection } from "../src/commentor/errors";
 import { publicErrorMessages, type PublicErrorCode } from "../src/shared/public-errors";
 
 const anchor = { kind: "element" as const, path: ["main"] };
 const paginationOpts = { cursor: null, numItems: 10 };
+async function fixture() {
+  const f = await projectFixture();
+  const legacy = await f.backend.run(async ctx => {
+    const legacyThreadId = await ctx.db.insert("threads", { orgSlug: "example", filePath: "index.html", body: "Thread", anchor, authorId: "legacy", authorEmail: "author@example.test", authorName: "Author", resolved: false });
+    const legacyReplyId = await ctx.db.insert("replies", { threadId: legacyThreadId, body: "Reply", authorId: "legacy", authorEmail: "author@example.test", authorName: "Author" });
+    return { legacyThreadId, legacyReplyId };
+  });
+  return { ...f, ...legacy };
+}
 type Fixture = Awaited<ReturnType<typeof fixture>>;
 type Endpoint = { name: string; kind: "query" | "mutation"; args: (f: Fixture) => Record<string, unknown>; ids: string[] };
 const document = (f: Fixture) => ({ ...f.scope });
@@ -22,8 +32,9 @@ const endpoints: Endpoint[] = [
   { name: "documentReplies:remove", kind: "mutation", args: f => ({ ...thread(f), replyId: f.replyId }), ids: ["projectId", "threadId", "replyId"] },
   { name: "threads:list", kind: "query", args: () => ({ orgSlug: "example", filePath: "index.html" }), ids: [] },
   { name: "threads:create", kind: "mutation", args: () => ({ orgSlug: "example", filePath: "index.html", body: "Test", anchor }), ids: [] },
-  ...["resolve", "archive", "remove"].map(name => ({ name: `threads:${name}`, kind: "mutation" as const, args: () => ({}), ids: ["threadId"] })),
-  { name: "replies:add", kind: "mutation", args: () => ({ body: "Test" }), ids: ["threadId"] },
+  ...["resolve", "archive", "remove"].map(name => ({ name: `threads:${name}`, kind: "mutation" as const, args: (f: Fixture) => ({ threadId: f.legacyThreadId }), ids: ["threadId"] })),
+  { name: "replies:add", kind: "mutation", args: f => ({ threadId: f.legacyThreadId, body: "Test" }), ids: ["threadId"] },
+  { name: "replies:remove", kind: "mutation", args: f => ({ threadId: f.legacyThreadId, replyId: f.legacyReplyId }), ids: ["threadId", "replyId"] },
   { name: "apiKeys:create", kind: "mutation", args: () => ({ orgSlug: "example", keyHash: "hash", internalSecret: "wrong" }), ids: [] },
   { name: "apiKeys:validate", kind: "query", args: () => ({ keyHash: "hash", internalSecret: "wrong" }), ids: [] },
   { name: "deletedFiles:mark", kind: "mutation", args: () => ({ orgSlug: "example", fileKey: "key", internalSecret: "wrong" }), ids: [] },
@@ -99,12 +110,16 @@ describe("public Convex application error contract", () => {
       const foreignLegacy = await ctx.db.insert("threads", old);
       const missingLegacy = await ctx.db.insert("threads", old);
       await ctx.db.delete(missingLegacy);
-      return { projectId, missingProject, foreignThread, missingThread, foreignReply, missingReply, foreignLegacy, missingLegacy };
+      const oldReply = { threadId: foreignLegacy, body: "private-body", authorEmail: "other@other.test", authorName: "Other" };
+      const foreignLegacyReply = await ctx.db.insert("replies", oldReply);
+      const missingLegacyReply = await ctx.db.insert("replies", oldReply);
+      await ctx.db.delete(missingLegacyReply);
+      return { foreignLegacyReply, missingLegacyReply, projectId, missingProject, foreignThread, missingThread, foreignReply, missingReply, foreignLegacy, missingLegacy };
     });
     for (const id of endpoint.ids) {
       const args = endpoint.args(f);
-      const missing = id === "projectId" ? records.missingProject : id === "replyId" ? records.missingReply : legacy ? records.missingLegacy : records.missingThread;
-      const foreign = id === "projectId" ? records.projectId : id === "replyId" ? records.foreignReply : legacy ? records.foreignLegacy : records.foreignThread;
+      const missing = id === "projectId" ? records.missingProject : id === "replyId" ? (legacy ? records.missingLegacyReply : records.missingReply) : legacy ? records.missingLegacy : records.missingThread;
+      const foreign = id === "projectId" ? records.projectId : id === "replyId" ? (legacy ? records.foreignLegacyReply : records.foreignReply) : legacy ? records.foreignLegacy : records.foreignThread;
       const wrongTable = id === "projectId" ? f.threadId : f.scope.projectId;
       for (const value of ["malformed-private-id", wrongTable]) {
         await failure(call(viewer, endpoint, { ...args, [id]: value }), "invalid_id");
@@ -130,6 +145,65 @@ describe("public Convex application error contract", () => {
         }), "invalid_input");
       }
     }
+  });
+
+
+  describe("legacy producer and widget error contract", () => {
+    it.each(endpoints.filter(endpoint => /^(threads|replies):/.test(endpoint.name)))("$name classifies actual failures as definitive without displaying diagnostics", async endpoint => {
+      const f = await fixture();
+      const viewer = f.backend.withIdentity({ subject: "legacy", email: "author@example.test" });
+      const args = endpoint.args(f);
+      const denied = endpoint.ids.length ? { ...args, filePath: "another-document.html" } : { ...args, orgSlug: "other" };
+      const code = endpoint.ids.length ? "not_found" : "forbidden";
+      const error: unknown = await call(viewer, endpoint, denied).catch((error: unknown) => error);
+      await failure(Promise.reject(error), code);
+      expect(isDefinitiveCommentRejection(error)).toBe(true);
+      expect(commentErrorMessage(error, "Fallback")).toBe(code === "not_found"
+        ? "This comment is unavailable. Reload the document."
+        : "You do not have permission to change this comment.");
+    });
+
+    it("rejects legacy validation, author changes, status receipt conflicts and tombstoned records safely", async () => {
+      const f = await fixture();
+      const author = f.backend.withIdentity({ subject: "legacy", email: "author@example.test" });
+      const member = f.backend.withIdentity({ subject: "member", email: "member@example.test" });
+      const scope = { orgSlug: "example", filePath: "index.html" };
+      const thread = { ...scope, threadId: f.legacyThreadId };
+      const reply = { ...thread, replyId: f.legacyReplyId };
+      const create = { ...scope, body: "Test", anchor };
+      for (const body of [" ", "x".repeat(10_001)]) {
+        await failure(author.mutation(api.threads.create, { ...create, body }), "invalid_input");
+        await failure(author.mutation(api.replies.add, { ...thread, body }), "invalid_input");
+      }
+      for (const filePath of ["", "../private.html", "a//b", "a\\b"]) {
+        await failure(author.mutation(api.threads.create, { ...create, filePath }), "invalid_input");
+      }
+      await failure(author.mutation(api.threads.create, { ...create, anchor: { kind: "element", path: [] } }), "invalid_input");
+      for (const endpoint of endpoints.filter(endpoint => /^(threads|replies):/.test(endpoint.name) && endpoint.kind === "mutation")) {
+        await failure(call(author, endpoint, { ...endpoint.args(f), expectedAuthorId: "changed" }), "forbidden");
+        for (const clientOperationId of [" ", "x".repeat(129)]) {
+          await failure(call(author, endpoint, { ...endpoint.args(f), clientOperationId }), "invalid_input");
+        }
+      }
+      await failure(member.mutation(api.threads.archive, thread), "forbidden");
+      await failure(member.mutation(api.threads.remove, thread), "forbidden");
+      await failure(member.mutation(api.replies.remove, reply), "forbidden");
+      for (const field of ["resolved", "archived"] as const) {
+        const endpoint = field === "resolved" ? api.threads.resolve : api.threads.archive;
+        await failure(author.mutation(endpoint, { ...thread, clientOperationId: field }), "invalid_input");
+        await author.mutation(endpoint, { ...thread, clientOperationId: field, [field]: true });
+        await failure(author.mutation(endpoint, { ...thread, clientOperationId: field, [field]: false }), "conflict");
+      }
+      await failure(author.mutation(api.threads.archive, { ...thread, clientOperationId: "resolved", archived: true }), "conflict");
+      const anotherThread = await author.mutation(api.threads.create, create);
+      const inaccessible = await failure(author.mutation(api.replies.remove, { ...reply, threadId: anotherThread }), "not_found");
+      await f.backend.run(ctx => ctx.db.delete(f.legacyReplyId));
+      expect(await failure(author.mutation(api.replies.remove, { ...reply, threadId: anotherThread }), "not_found")).toBe(inaccessible);
+      await author.mutation(api.threads.remove, thread);
+      await failure(author.mutation(api.threads.resolve, thread), "not_found");
+      await failure(author.mutation(api.threads.archive, thread), "not_found");
+      await failure(author.mutation(api.replies.add, { ...thread, body: "Test" }), "not_found");
+    });
   });
 
   it("safely rejects missing, malformed, wrong-table session identities", async () => {

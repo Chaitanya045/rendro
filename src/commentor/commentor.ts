@@ -832,7 +832,7 @@ class Commentor {
     };
     const fail = (error: Error) => {
       console.error("[commentor] subscription error", error);
-      this.toast(isProjectConfig(this.cfg) ? error.message : commentErrorMessage(error, "Comments could not be loaded"), { kind: "error" });
+      this.toast(isParentConfig(this.cfg) ? error.message : commentErrorMessage(error, "Comments could not be loaded"), { kind: "error" });
     };
 
     if (isParentConfig(this.cfg)) {

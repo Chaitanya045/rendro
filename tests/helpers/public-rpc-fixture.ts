@@ -1,4 +1,6 @@
 // Loaded only by the isolated local-runtime test, never by the app deployment.
+import * as threads from "../../convex/threads";
+import * as replies from "../../convex/replies";
 import { v } from "convex/values";
 import { query, mutation } from "../../convex/publicFunctions";
 import { publicError } from "../../convex/publicErrors";
@@ -37,6 +39,16 @@ export const seed = mutation({ args: {}, handler: async ctx => {
       threadId, organizationId: "org", authorId: "author", body: "test", createdAt: i, updatedAt: i,
     });
   }
+  const thread = { orgSlug: "example", filePath: "index.html", body: "Test", authorId: "author", authorEmail: "author@example.test", authorName: "Author", anchor: { kind: "element" as const, path: ["main"] }, resolved: false };
+  const threadId = await ctx.db.insert("threads", thread);
+  const foreignThreadId = await ctx.db.insert("threads", { ...thread, orgSlug: "other" });
+  const missingThreadId = await ctx.db.insert("threads", thread);
+  await ctx.db.delete(missingThreadId);
+  const reply = { threadId, body: "Test", authorId: "author", authorEmail: "author@example.test", authorName: "Author" };
+  const foreignReplyId = await ctx.db.insert("replies", { ...reply, threadId: foreignThreadId });
+  const missingReplyId = await ctx.db.insert("replies", reply);
+  await ctx.db.delete(missingReplyId);
+  return { threadId, foreignThreadId, missingThreadId, foreignReplyId, missingReplyId };
 } });
 export const page = query({
   args: {
@@ -46,4 +58,25 @@ export const page = query({
   handler: (ctx, args) => publicPaginate(ctx.db.query(args.table), {
     cursor: args.cursor, endCursor: args.endCursor, numItems: 1,
   }),
+});
+
+// Exercise the actual registered legacy handlers and real database lookups.
+// Only authentication is synthetic; no deployment/session credentials are used.
+const legacyAuth = { getUserIdentity: async () => ({ subject: "author", email: "author@example.test", tokenIdentifier: "test|author", issuer: "test" }) };
+export const legacyList = query({
+  args: { orgSlug: v.string() },
+  handler: (ctx, args) => threads.list._handler({ ...ctx, auth: legacyAuth }, { ...args, filePath: "index.html" }),
+});
+export const legacyMutation = mutation({
+  args: { method: v.string(), orgSlug: v.string(), threadId: v.string(), replyId: v.string() },
+  handler: (ctx, args) => {
+    const context = { ...ctx, auth: legacyAuth };
+    if (args.method === "threads:create") return threads.create._handler(context, { orgSlug: args.orgSlug, filePath: "index.html", body: "Test", anchor: { kind: "element", path: ["main"] } });
+    if (args.method === "threads:resolve") return threads.resolve._handler(context, { threadId: args.threadId });
+    if (args.method === "threads:archive") return threads.archive._handler(context, { threadId: args.threadId });
+    if (args.method === "threads:remove") return threads.remove._handler(context, { threadId: args.threadId });
+    if (args.method === "replies:add") return replies.add._handler(context, { threadId: args.threadId, body: "Test" });
+    if (args.method === "replies:remove") return replies.remove._handler(context, { threadId: args.threadId, replyId: args.replyId });
+    throw new Error("Unknown probe method");
+  },
 });
