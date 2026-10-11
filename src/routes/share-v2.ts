@@ -1,5 +1,6 @@
 import { validDocumentSearch } from "@/lazy-tree/messages";
 import { escapeHtml } from "@/routes/html";
+import { assetContentType, assetHeaders } from "@/routes/asset-headers";
 import { nonceAttribute } from "@/middleware/html-nonce";
 import { viewerScript } from "@/viewer/markup";
 import { renderFaviconLinks } from "./favicon";
@@ -34,31 +35,13 @@ function safePath(value: string): string | null {
     : null;
 }
 
-function contentType(path: string): string {
-  const extension = path.slice(path.lastIndexOf(".")).toLowerCase();
-  return ({
-    ".css": "text/css; charset=utf-8",
-    ".gif": "image/gif",
-    ".html": "text/html; charset=utf-8",
-    ".jpeg": "image/jpeg",
-    ".jpg": "image/jpeg",
-    ".js": "application/javascript; charset=utf-8",
-    ".json": "application/json; charset=utf-8",
-    ".png": "image/png",
-    ".svg": "image/svg+xml",
-    ".webp": "image/webp",
-    ".woff": "font/woff",
-    ".woff2": "font/woff2",
-  } as Record<string, string>)[extension] ?? "application/octet-stream";
-}
-
 app.get("/s/:token/files/*", async (c) => {
   const resolution = await resolveShare(c.req.param("token"));
   const path = safePath(c.req.path.slice(c.req.path.indexOf("/files/") + 7));
   if (!resolution || !path) return c.html(renderNotFoundPage({ path: c.req.path }), 404);
   const documentPath = resolution.grant.documentPath;
   const directory = documentPath.includes("/") ? documentPath.slice(0, documentPath.lastIndexOf("/") + 1) : "";
-  const type = contentType(path);
+  const type = assetContentType(path);
   const isExactDocument = path === documentPath;
   const isSameTreeAsset = !type.startsWith("text/html") && path.startsWith(directory);
   if (!isExactDocument && !isSameTreeAsset) return c.html(renderNotFoundPage({ path: c.req.path }), 404);
@@ -72,12 +55,11 @@ app.get("/s/:token/files/*", async (c) => {
   return new Response(body, {
     headers: {
       "Cache-Control": "private, no-store",
-      "Content-Type": type,
+      ...assetHeaders(path, true, type),
       "Content-Security-Policy": type.startsWith("text/html")
         ? "sandbox allow-scripts allow-forms allow-popups allow-downloads; frame-ancestors 'self'"
         : "default-src 'none'",
       "Referrer-Policy": "no-referrer",
-      "X-Content-Type-Options": "nosniff",
       "X-Robots-Tag": "noindex, nofollow, noarchive",
     },
   });

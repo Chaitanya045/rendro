@@ -1,3 +1,4 @@
+import { assetHeaders } from "@/routes/asset-headers";
 import { Hono } from "hono";
 import { createViewerTicket, readViewerTicket, viewerSessionCookie } from "@/viewer-ticket";
 import { viewerScript } from "@/viewer/markup";
@@ -142,13 +143,10 @@ app.on("GET", [
   const headers = {
     "Cache-Control": "private, no-store",
     "Referrer-Policy": "no-referrer",
-    // Fonts/module requests from the opaque sandbox carry Origin: null.
-    ...(ticket ? { "Access-Control-Allow-Origin": "null" } : {}),
-    "Content-Type": entry.contentType,
+    ...assetHeaders(path, Boolean(ticket), entry.contentType),
     "Content-Security-Policy": entry.contentType.startsWith("text/html")
       ? "sandbox allow-scripts allow-forms allow-popups allow-downloads; frame-ancestors 'self'"
       : "default-src 'none'",
-    "X-Content-Type-Options": "nosniff",
   };
   if (!entry.contentType.startsWith("text/html")) return new Response(stream, { headers });
   const token = viewerToken ?? await createViewerTicket({ organizationId, projectId, manifestKey: active.deployment.manifestKey, cookie });

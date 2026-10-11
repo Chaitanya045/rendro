@@ -409,6 +409,16 @@ They synchronize parent deep links without broadening the grant to other HTML
 files. Legacy `/share/:token` serves the document directly and retains native
 browser fragment handling.
 
+### Viewer asset MIME and CORS
+
+`src/routes/asset-headers.ts` supplies MIME, `nosniff`, and opaque-origin CORS headers for public (`/p/:slug/files/*`), share (`/s/:token/files/*`), and private project assets. Font extensions are case-insensitive and override older manifest MIME values: `.woff2` → `font/woff2`, `.woff` → `font/woff`, `.ttf` → `font/ttf`, `.otf` → `font/otf`, and `.eot` → `application/vnd.ms-fontobject`. Other manifest MIME values are preserved; shares use the shared extension map. This correction does not require republishing existing deployments.
+
+After their existing access checks, public and share files send the fixed `Access-Control-Allow-Origin: null`, matching ticket-authorized private files. All three publisher documents have an opaque sandbox origin. The fixed allowance serves this origin without extending CORS reads to every website origin (`*`) or reflecting caller input. Shares remain token-scoped and `private, no-store`; public files retain public revalidation caching. CORS is not authorization: any opaque origin that possesses a share/ticket URL can use that capability, subject to the existing revocation, scope, session, and membership checks. Cookie-authenticated canonical private file URLs still send **no** CORS allowance; private relative resources must use the injected ticket base. No viewer file response enables `Access-Control-Allow-Credentials`.
+
+The allowance applies uniformly to font requests, `<img crossorigin="anonymous">`, `<script type="module">`, and ordinary publisher `fetch()` GETs, including HTML reads within the route's existing scope. Opaque-origin requests must be non-credentialed (default same-origin credentials or explicit `credentials: "omit"`). Credentialed cross-origin reads and preflight-requiring methods/custom headers remain unsupported; these read-only routes do not add OPTIONS handlers or expose application APIs. Root-relative/external resources remain subject to their destination's CORS policy; private publisher fetches should resolve relative paths against the current `document.baseURI` to inherit the ticket. None of these headers changes the sandbox, CSP, referrer policies, or access validation.
+
+`tests/viewer-asset-headers.test.ts` covers every font MIME across public/share/private-ticket/private-cookie routes, other CORS resources, fixed origins, and denied responses. `tests/viewer-fonts-browser.test.ts` uses the shared isolated Chromium harness, real viewer routes/shells and a local original font fixture to verify loaded font faces, anonymous images, modules and fetches in all three opaque viewers without CORS errors or subresource cookies.
+
 ### Private viewer asset authorization
 
 The project iframe remains an **opaque-origin sandbox**, both in the shell attribute and the HTML response CSP. It never gets `allow-same-origin`; Better Auth's SameSite cookie policy is unchanged. The trusted parent can initiate a cookie-authenticated document navigation, but requests made by the sandbox itself cannot depend on that cookie.
