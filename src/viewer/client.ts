@@ -1,4 +1,5 @@
 import { rewriteCssUrls } from "./css-urls";
+import { createStylesheetRenewer } from "./stylesheets";
 
 interface ParentConfig { base: string }
 interface FrameConfig extends ParentConfig { prefix: string; manifestKey: string }
@@ -41,6 +42,7 @@ export function installViewerFrame(config: FrameConfig, host: Window = window): 
   const origin = new URL(base.href).origin;
   let prefix = config.prefix;
   let managedCssUrls = new Set<string>();
+  const renewStylesheet = createStylesheetRenewer();
   let renewedAt = Date.now();
   let requestedAt = 0;
   let requestId = "";
@@ -75,6 +77,10 @@ export function installViewerFrame(config: FrameConfig, host: Window = window): 
     const updates: Array<() => void> = [];
     for (const element of doc.querySelectorAll("img,source,video,audio,link,object,input[type=image]")) {
       for (const attribute of ["src", "href", "poster", "data"]) {
+        if (attribute === "href" && element.tagName === "LINK" && (element as HTMLLinkElement).relList.contains("stylesheet")) {
+          renewStylesheet(element as HTMLLinkElement, replace);
+          continue;
+        }
         const value = element.getAttribute(attribute);
         if (value === null) continue;
         const replacement = replace(value);
@@ -104,9 +110,13 @@ export function installViewerFrame(config: FrameConfig, host: Window = window): 
     }
     for (const element of doc.querySelectorAll("[style],style")) {
       const style = element.getAttribute("style");
-      if (style !== null) element.setAttribute("style", rewriteCssUrls(style, replaceCssUrl));
+      if (style !== null) {
+        const replacement = rewriteCssUrls(style, replaceCssUrl);
+        if (replacement !== style) element.setAttribute("style", replacement);
+      }
       if (element.tagName === "STYLE" && element.textContent) {
-        element.textContent = rewriteCssUrls(element.textContent, replaceCssUrl);
+        const replacement = rewriteCssUrls(element.textContent, replaceCssUrl);
+        if (replacement !== element.textContent) element.textContent = replacement;
       }
     }
     managedCssUrls = nextCssUrls;

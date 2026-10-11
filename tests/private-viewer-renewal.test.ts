@@ -1,4 +1,4 @@
-import { Window as DOMWindow } from "happy-dom";
+import { Window as DOMWindow, type HTMLLinkElement as DOMLinkElement } from "happy-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { installViewerFrame, installViewerParent } from "@/viewer/client";
 
@@ -8,6 +8,7 @@ const prefix = `${base}/view/initial/files/`;
 const windows: DOMWindow[] = [];
 afterEach(async () => {
   vi.useRealTimers();
+  vi.restoreAllMocks();
   for (const win of windows.splice(0)) await win.happyDOM.close();
 });
 
@@ -24,6 +25,19 @@ function frameFixture() {
     disableCSSFileLoading: true, disableJavaScriptFileLoading: true,
   } });
   windows.push(win);
+  // Happy DOM synchronously emits an error for disabled CSS loading. Suppress
+  // its synthetic network events; each test controls completion explicitly.
+  // eslint-disable-next-line @typescript-eslint/unbound-method -- explicitly called with the link receiver below
+  const dispatch = win.HTMLLinkElement.prototype.dispatchEvent;
+  let completing = false;
+  vi.spyOn(win.HTMLLinkElement.prototype, "dispatchEvent").mockImplementation(function (this: DOMLinkElement, event) {
+    return completing ? dispatch.call(this, event) : true;
+  });
+  const settleSheet = (link: DOMLinkElement, type: "load" | "error") => {
+    completing = true;
+    try { link.dispatchEvent(new win.Event(type)); }
+    finally { completing = false; }
+  };
   win.document.write(`<html><head><base data-rendro-viewer href="${origin}${prefix}guide/index.html">
     <link rel="stylesheet" href="assets/site.css">
     <style>.image{background:url(${prefix}guide/assets/image.png)}</style></head>
@@ -40,13 +54,13 @@ function frameFixture() {
     const request = parent.postMessage.mock.lastCall![0];
     bus.emit("message", { source: parent, origin, data: { type: "viewer-renewed", requestId: request.requestId, prefix: next } });
   };
-  return { win, bus, parent, renew };
+  return { win, bus, parent, renew, settleSheet };
 }
 
 describe("private viewer renewal", () => {
   it("refreshes resource URLs over multiple lifetimes without replacing the document or drafts", () => {
     vi.useFakeTimers();
-    const { win, parent, renew } = frameFixture();
+    const { win, parent, renew, settleSheet } = frameFixture();
     const draft = win.document.querySelector("textarea")!;
     const unchanged = win.document.querySelector("#unchanged")!.getAttribute("style");
     vi.advanceTimersByTime(4 * 60_000);
@@ -57,7 +71,12 @@ describe("private viewer renewal", () => {
       const next = `${base}/view/${ticket}/files/`;
       renew(next);
       expect(win.document.baseURI).toBe(`${origin}${next}guide/index.html`);
-      expect(win.document.querySelector("link")!.href).toBe(`${origin}${next}guide/assets/site.css`);
+      const links = win.document.querySelectorAll("link");
+      expect(links).toHaveLength(2);
+      expect(links[1].href).toBe(`${origin}${next}guide/assets/site.css`);
+      settleSheet(links[1], "load");
+      expect(win.document.querySelectorAll("link")).toHaveLength(1);
+      expect(win.document.querySelector("link")).toBe(links[1]);
       expect(win.document.querySelector("img")!.src).toBe(`${origin}${next}guide/assets/image.png`);
       expect(win.document.querySelector("img")!.srcset).toContain(`${next}guide/assets/large.png 2x`);
       expect(win.document.querySelector("style")!.textContent).toContain(next);
@@ -67,6 +86,38 @@ describe("private viewer renewal", () => {
       expect(win.document.querySelector("textarea")).toBe(draft);
       expect(draft.value).toBe("Comment draft");
     }
+  });
+
+  it("backs off failed stylesheet replacements and retries from the latest ticket", () => {
+    vi.useFakeTimers();
+    const { win, renew, settleSheet } = frameFixture();
+    const original = win.document.querySelector("link")!;
+    const attempt = (ticket: string, elapsed: number) => {
+      vi.advanceTimersByTime(elapsed);
+      win.document.dispatchEvent(new win.Event("error"));
+      renew(`${base}/view/${ticket}/files/`);
+    };
+    attempt("first", 0);
+    let links = win.document.querySelectorAll("link");
+    expect(links).toHaveLength(2);
+    settleSheet(links[1], "error");
+    expect(win.document.querySelector("link")).toBe(original);
+    attempt("during-backoff", 31_000);
+    expect(win.document.querySelectorAll("link")).toHaveLength(1);
+    attempt("retry", 31_000);
+    links = win.document.querySelectorAll("link");
+    expect(links).toHaveLength(2);
+    expect(links[1].href).toContain("/view/retry/");
+    settleSheet(links[1], "error");
+    attempt("longer-backoff", 61_000);
+    expect(win.document.querySelectorAll("link")).toHaveLength(1);
+    attempt("recovered", 61_000);
+    links = win.document.querySelectorAll("link");
+    expect(links).toHaveLength(2);
+    expect(links[1].href).toContain("/view/recovered/");
+    settleSheet(links[1], "load");
+    expect(win.document.querySelectorAll("link")).toHaveLength(1);
+    expect(original.isConnected).toBe(false);
   });
 
   it("recovers after tab suspension and ignores forged, stale, or out-of-scope renewal messages", () => {

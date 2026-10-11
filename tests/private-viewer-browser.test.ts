@@ -16,6 +16,8 @@ let serial = 0;
 const tickets = new Map([["initial", epoch + ttl]]);
 const requests: Array<{ path: string; status: number }> = [];
 let publisherHtml = "";
+let heldAsset = "";
+const heldSheets: Array<{ path: string; release: (status: number) => void }> = [];
 let browser: Browser;
 let server: Server;
 let origin: string;
@@ -51,6 +53,12 @@ beforeAll(async () => {
       if (match) {
         if ((tickets.get(match[1]) ?? 0) <= now) return send(404, "text/plain", "expired");
         const asset = decodeURIComponent(match[2]);
+        if (asset === heldAsset && match[1] !== "initial") {
+          const status = await new Promise<number>(release => heldSheets.push({ path: url.pathname, release }));
+          if (status !== 200) return send(status, "text/plain", "replacement failed");
+        }
+        if (asset === "swap.css") return send(200, "text/css", '@import "nested/swap.css"; #probe, #cascade { color: rgb(0, 128, 0) }');
+        if (asset === "nested/swap.css") return send(200, "text/css", '#nested-probe { color: rgb(128, 0, 128) }');
         if (asset === "site.css") return send(200, "text/css", '@import "nested/theme.css"; #linked { background-image: url(linked.svg) }');
         if (asset === "nested/theme.css") return send(200, "text/css", '#nested { background-image: url(../nested.svg) }');
         if (asset === "import.css") return send(200, "text/css", '#imported { background-image: url(imported.svg) }');
@@ -74,6 +82,8 @@ beforeEach(() => {
   tickets.clear();
   tickets.set("initial", epoch + ttl);
   requests.length = 0;
+  heldAsset = "";
+  heldSheets.length = 0;
 });
 
 afterAll(async () => {
@@ -144,6 +154,10 @@ describe("opaque-origin Chromium private viewer", () => {
     try {
       await page.goto(origin);
       const frame = page.frames().find(frame => frame !== page.mainFrame())!;
+      // Force CSS resolution without fetching the hidden image, reproducing a
+      // document whose styles were inspected before its deferred first paint.
+      expect(await frame.evaluate(() => getComputedStyle(document.querySelector("#target, #imported")!).backgroundImage))
+        .toContain("/view/initial/");
       for (let round = 1; round <= 3; round++) {
         now = epoch + round * 6 * 60_000;
         await frame.evaluate(time => { Date.now = () => time; window.dispatchEvent(new Event("focus")); }, now);
@@ -161,6 +175,87 @@ describe("opaque-origin Chromium private viewer", () => {
         && request.status === 200)).toBe(true);
       expect(requests.some(request => request.path.includes("/view/initial/") || request.status !== 200)).toBe(false);
     } finally { await page.close(); }
+  });
+
+  it.each(["swap.css", "nested/swap.css"])("retains the cascade through delayed, overlapping and failed %s replacement", async asset => {
+    heldAsset = asset;
+    publisherHtml = `<!doctype html><head>
+      <style>#probe, #cascade, #nested-probe { color: rgb(255, 0, 0) }</style>
+      <link rel="stylesheet" href="assets/swap.css" media="screen" data-publisher="preserved" crossorigin="anonymous">
+      <style>#cascade { color: rgb(0, 0, 255) }</style>
+      </head><body><p id="probe">Sheet</p><p id="cascade">Cascade order</p><p id="nested-probe">Nested sheet</p></body>`;
+    const page = await browser.newPage();
+    try {
+      await page.goto(origin);
+      const frame = page.frames().find(frame => frame !== page.mainFrame())!;
+      await frame.waitForFunction(() => getComputedStyle(document.getElementById("nested-probe")!).color === "rgb(128, 0, 128)");
+      await frame.evaluate(() => {
+        const samples = { count: 0, wrong: [] as string[], maxLinks: 0 };
+        Object.assign(window, { sheetSamples: samples });
+        const sample = () => {
+          const colors = ["probe", "cascade", "nested-probe"].map(id => getComputedStyle(document.getElementById(id)!).color);
+          if (colors.join(";") !== "rgb(0, 128, 0);rgb(0, 0, 255);rgb(128, 0, 128)") samples.wrong.push(colors.join(";"));
+          samples.count++;
+          samples.maxLinks = Math.max(samples.maxLinks, document.querySelectorAll('link[rel="stylesheet"]').length);
+          requestAnimationFrame(sample);
+        };
+        requestAnimationFrame(sample);
+      });
+      const sampleFrames = () => frame.evaluate(() => new Promise<void>(resolve => {
+        let count = 0;
+        const tick = () => { if (++count === 12) resolve(); else requestAnimationFrame(tick); };
+        requestAnimationFrame(tick);
+      }));
+      const renew = async (round: number, minutes: number) => {
+        now = epoch + minutes * 60_000;
+        await frame.evaluate(time => { Date.now = () => time; window.dispatchEvent(new Event("focus")); }, now);
+        await frame.waitForFunction(expected => document.baseURI.includes(expected), `/view/renewed-${round}/`);
+      };
+      await renew(1, 6);
+      await expect.poll(() => heldSheets.length).toBe(1);
+      await sampleFrames();
+      expect(await frame.evaluate(() => (window as unknown as { sheetSamples: { wrong: string[] } }).sheetSamples.wrong)).toEqual([]);
+      expect(await frame.locator("link").count()).toBe(2);
+      expect(await frame.locator("link").nth(1).getAttribute("media")).toBe("screen");
+      expect(await frame.locator("link").nth(1).getAttribute("data-publisher")).toBe("preserved");
+      expect(await frame.locator("link").nth(1).getAttribute("crossorigin")).toBe("anonymous");
+      // A second renewal while the first replacement is loading must coalesce.
+      await renew(2, 12);
+      await sampleFrames();
+      expect(heldSheets).toHaveLength(1);
+      expect(await frame.locator("link").count()).toBe(2);
+      heldSheets[0].release(200);
+      await expect.poll(() => heldSheets.length).toBe(2);
+      expect(heldSheets[1].path).toContain("/view/renewed-2/");
+      await sampleFrames();
+      heldSheets[1].release(200);
+      await frame.waitForFunction(() => document.querySelectorAll("link").length === 1
+        && document.querySelector("link")!.href.includes("/view/renewed-2/"));
+      // A failed refresh keeps both parent and imported rules active.
+      await renew(3, 18);
+      await expect.poll(() => heldSheets.length).toBe(3);
+      await sampleFrames();
+      heldSheets[2].release(503);
+      await frame.waitForFunction(() => document.querySelectorAll("link").length === 1);
+      expect(await frame.locator("link").getAttribute("href")).toContain("/view/renewed-2/");
+      await sampleFrames();
+      await renew(4, 24);
+      await expect.poll(() => heldSheets.length).toBe(4);
+      expect(heldSheets[3].path).toContain("/view/renewed-4/");
+      heldSheets[3].release(200);
+      await frame.waitForFunction(() => document.querySelectorAll("link").length === 1
+        && document.querySelector("link")!.href.includes("/view/renewed-4/"));
+      await sampleFrames();
+      const samples = await frame.evaluate(() => (window as unknown as {
+        sheetSamples: { count: number; wrong: string[]; maxLinks: number };
+      }).sheetSamples);
+      expect(samples.count).toBeGreaterThan(60);
+      expect(samples.wrong).toEqual([]);
+      expect(samples.maxLinks).toBe(2);
+    } finally {
+      for (const pending of heldSheets) pending.release(200);
+      await page.close();
+    }
   });
 
   it.each(viewerHtmlForms)("loads the first stylesheet with an %s document", async (_name, source) => {
