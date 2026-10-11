@@ -183,7 +183,7 @@ describe("organization role UX", () => {
       Promise,
       Error,
     };
-    vm.runInNewContext(managementUiRuntime, context);
+    vm.runInNewContext(managementUiRuntime, { ...context, addEventListener() {} });
     vm.runInNewContext(exposed, context);
     const data = {
       organization: {
@@ -257,7 +257,7 @@ describe("organization role UX", () => {
       Promise,
       Error,
     };
-    vm.runInNewContext(managementUiRuntime, context);
+    vm.runInNewContext(managementUiRuntime, { ...context, addEventListener() {} });
     vm.runInNewContext(exposed, context);
     await context.window.__roleUx.renderPeople({
       organization: {

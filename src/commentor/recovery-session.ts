@@ -30,21 +30,37 @@ export function renderCommentRecoveryLifecycle(userId: string | null, nonceAttri
       signedOut = true;
       document.documentElement.dataset.rendroSignedOut = "true";
       window.dispatchEvent(new Event("commentor-sign-out"));
+      // Modal dialogs occupy the top layer and escape ancestor inertness.
+      // Close them (without cancel guards) so their cleanup hooks also run.
+      document.querySelectorAll("dialog[open]").forEach(dialog => dialog.close());
+      document.querySelectorAll("[popover]").forEach(popover => {
+        if (typeof popover.hidePopover === "function") popover.hidePopover();
+        popover.hidden = true;
+      });
       if (!userId) return;
       // Leave drafts in their user-bound sessionStorage namespace. The host
       // stops writes/subscriptions and won't expose them to a different user.
       const notice = document.createElement("section");
       notice.setAttribute("role", "status");
+      notice.setAttribute("aria-live", "polite");
+      notice.setAttribute("aria-labelledby", "rendro-signed-out-heading");
+      notice.tabIndex = -1;
       notice.id = "rendro-signed-out";
       notice.style.cssText = "position:fixed;inset:0;z-index:2147483647;display:grid;place-content:center;gap:16px;padding:24px;background:#fafafa;color:#18181b;font:16px system-ui";
       const heading = document.createElement("h1");
+      heading.id = "rendro-signed-out-heading";
       heading.textContent = "You're signed out";
       const link = document.createElement("a");
       link.href = "/sign-in";
       link.textContent = "Sign in";
-      for (const child of document.body.children) child.inert = true;
+      for (const child of document.body.children) {
+        child.inert = true;
+        // Also hide private viewer frames, comment surfaces and non-native menus.
+        child.style.setProperty("display", "none", "important");
+      }
       notice.append(heading, link);
       document.body.append(notice);
+      notice.focus({ preventScroll: true });
     };
     window.addEventListener("commentor-sign-out", clear);
     const broadcast = () => {
@@ -69,8 +85,20 @@ export function renderCommentRecoveryLifecycle(userId: string | null, nonceAttri
     window.addEventListener("storage", event => {
       if (event.key === key && event.newValue) clear();
     });
+    let checking = false;
+    const recheck = async () => {
+      if (!userId || signedOut || checking) return;
+      checking = true;
+      try {
+        const response = await fetch("/api/auth/get-session?disableCookieCache=true", { credentials: "same-origin", cache: "no-store" });
+        if (response.status === 401 || response.status === 403) clear();
+        else if (response.ok && (await response.json())?.user?.id !== userId) clear();
+      } catch {} finally { checking = false; }
+    };
+    window.addEventListener("focus", recheck);
     window.addEventListener("pageshow", event => {
       if (!event.persisted) return;
+      void recheck();
       try { if (localStorage.getItem(key) !== lastSignal) clear(); } catch {}
     });
     document.addEventListener("submit", async event => {

@@ -472,6 +472,20 @@ describe("management navigation regressions", () => {
     await navigation;
   });
 
+  it("aborts pending navigation on sign-out and never mounts its late response", async () => {
+    const runtime = navigationRuntime();
+    const teams = `${new URL(runtime.initialUrl).origin}/organizations/org-a/teams`;
+    const navigation = runtime.ui.navigate(teams);
+    const signal = runtime.fetchMock.mock.calls[0][1].signal;
+    runtime.listeners.get("commentor-sign-out")!({});
+    expect(signal?.aborted).toBe(true);
+    runtime.resolveFetch(0, { label: "late-private-page" }, teams);
+    await expect(navigation).resolves.toBe(false);
+    expect(runtime.appendedScripts).toEqual([]);
+    expect(runtime.assignLocation).not.toHaveBeenCalled();
+    expect(runtime.replaceLocation).not.toHaveBeenCalled();
+  });
+
   it("deduplicates an in-flight scoped GET but fetches it again after settlement", async () => {
     const runtime = navigationRuntime();
     const scope = runtime.ui.createPageScope();

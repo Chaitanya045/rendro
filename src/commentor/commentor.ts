@@ -883,7 +883,10 @@ class Commentor {
         },
         () => {
           this.replyDrafts.clear();
-          this.closeBubbles(false, true);
+          this.closeBubbles(false);
+          this.hideSelectionAction(true);
+          this.hideTip();
+          this.collapseDrawer(true);
           this.expandedReplies.clear();
           this.replyPagination.clear();
           update([], { canLoadMore: false, loading: false });

@@ -93,7 +93,8 @@ export const managementUiRuntime = String.raw`
   }
   function setDocsLink(href,projectId){document.querySelectorAll("[data-cp-open-docs]").forEach(function(link){if(href){link.setAttribute("href",href);link.setAttribute("data-cp-docs-project",projectId||"");link.hidden=false;}else{link.hidden=true;link.removeAttribute("data-cp-docs-project");}});}
   var dialog=null,resolver=null,returnFocus=null;
-  function finish(result){var resolve=resolver;resolver=null;var target=returnFocus;returnFocus=null;if(dialog&&dialog.open)dialog.close();if(target&&target.isConnected&&typeof target.focus==="function")target.focus({preventScroll:true});if(resolve)resolve(result);}
+  function finish(result){var resolve=resolver;resolver=null;var target=returnFocus;returnFocus=null;if(dialog&&dialog.open)dialog.close();if(!document.documentElement.dataset.rendroSignedOut&&target&&target.isConnected&&typeof target.focus==="function")target.focus({preventScroll:true});if(resolve)resolve(result);}
+  addEventListener("commentor-sign-out",function(){finish(false);});
   function confirmDialog(){
     if(dialog&&dialog.isConnected)return dialog;
     dialog=document.createElement("dialog");dialog.className="cp-dialog cp-confirm-dialog";dialog.id="cp-confirm-dialog";dialog.dataset.dialogReady="true";

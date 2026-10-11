@@ -1,6 +1,6 @@
 import { MANAGEMENT_PROJECT_PLACEHOLDER, managementLoadingPages } from "./management-loading-pages";
 
-export const MANAGEMENT_SHELL_VERSION = "18";
+export const MANAGEMENT_SHELL_VERSION = "19";
 
 export interface ManagementRouteIdentity {
   organizationId: string;
@@ -32,7 +32,8 @@ function managementNavigationRuntime(loadingPagesJson: string): string {
   var main=document.querySelector(".cp-main[data-cp-route-envelope]"),currentScope=null,navigationController=null,pendingObserver=null,pendingExpectedMarkup=new WeakMap(),navigationVersion=0,currentUrl=location.href,historyIndex=Number(history.state&&history.state.__rendroManagementIndex)||0,suppressPop=false;
   if(!main)return;
   var shellOrganization=main.getAttribute("data-cp-organization-id")||"",shellUser=main.getAttribute("data-cp-user-id")||"";
-  if(!shellOrganization||main.getAttribute("data-cp-shell-version")!==SHELL_VERSION)return;
+  if(main.getAttribute("data-cp-shell-version")!==SHELL_VERSION)return;
+  var signedOut=Boolean(document.documentElement&&document.documentElement.dataset.rendroSignedOut);
 
   function routeIdentity(url){
     var match=url.pathname.match(/^\/organizations\/([^/]+)(?:\/(projects)(?:\/([^/]+)(?:\/(deployments|publications|shares))?)?|\/(people|teams|settings|api-keys))?\/?$/);
@@ -40,8 +41,7 @@ function managementNavigationRuntime(loadingPagesJson: string): string {
     try{return {organizationId:decodeURIComponent(match[1]),projectId:match[3]?decodeURIComponent(match[3]):"",section:match[5]||(match[3]?(match[4]||"project"):(match[2]||"overview"))};}catch(_error){return null;}
   }
   function supported(url){var route=routeIdentity(url);return url.origin===location.origin&&route&&route.organizationId===shellOrganization?route:null;}
-  if(!supported(new URL(location.href)))return;
-  var queryCache=window.RendroQueryCore&&shellUser?window.RendroQueryCore.create({userId:shellUser,organizationId:shellOrganization,origin:location.origin},function(path,options){return ui.request(path,options);}):null,cacheChannel=null;
+  var queryCache=!signedOut&&supported(new URL(location.href))&&window.RendroQueryCore&&shellUser?window.RendroQueryCore.create({userId:shellUser,organizationId:shellOrganization,origin:location.origin},function(path,options){return ui.request(path,options);}):null,cacheChannel=null;
   function clearQueryCache(){if(queryCache)queryCache.clear();}
   function invalidateMutation(path,options){if(!queryCache)return;var impact=queryCache.invalidateMutation(path,options);if(cacheChannel)try{cacheChannel.postMessage(impact);}catch(_error){}}
   function offerRefresh(){var notice=document.querySelector("#cp-refresh-notice");if(notice)notice.hidden=false;}
@@ -65,7 +65,7 @@ function managementNavigationRuntime(loadingPagesJson: string): string {
     if(currentScope&&currentScope.active)currentScope.dispose();
     var controller=new AbortController(),cleanups=[],blockers=[],pendingMutations=0,inflightGets=new Map();
     var scope={active:true,signal:controller.signal};
-    function isActive(){return scope.active&&currentScope===scope;}
+    function isActive(){return !signedOut&&scope.active&&currentScope===scope;}
     function onCleanup(callback){if(typeof callback!=="function")return function(){};if(!isActive()){callback();return function(){};}cleanups.push(callback);return function(){var index=cleanups.indexOf(callback);if(index>=0)cleanups.splice(index,1);};}
     function preventNavigation(check){if(typeof check!=="function")return function(){};var removed=false;function remove(){if(removed)return;removed=true;var index=blockers.indexOf(check);if(index>=0)blockers.splice(index,1);}blockers.push(check);onCleanup(remove);return remove;}
     function canLeave(detail){
@@ -75,7 +75,7 @@ function managementNavigationRuntime(loadingPagesJson: string): string {
       for(var index=0;index<blockers.length;index+=1){if(blockers[index](detail)===false)return false;}
       return true;
     }
-    function dispose(){if(!scope.active)return;scope.active=false;controller.abort();while(cleanups.length){try{cleanups.pop()();}catch(_error){}}}
+    function dispose(){if(!scope.active)return;scope.active=false;controller.abort();inflightGets.clear();while(cleanups.length){try{cleanups.pop()();}catch(_error){}}}
     async function request(path,options){
       if(!isActive())throw new DOMException("Page navigation aborted","AbortError");
       var settings=Object.assign({},options||{}),method=String(settings.method||"GET").toUpperCase(),mutation=method!=="GET"&&method!=="HEAD";
@@ -84,17 +84,17 @@ function managementNavigationRuntime(loadingPagesJson: string): string {
       var plainGet=method==="GET"&&(!options||Object.keys(options).every(function(key){return key==="method";}));
       var getKey=plainGet?String(path):"";
       if(getKey&&inflightGets.has(getKey))return inflightGets.get(getKey);
-      var needsAccess=method==="GET"&&(String(path).startsWith("/api/rendro/")||String(path).startsWith("/api/auth/organization/"))&&!String(path).startsWith("/api/rendro/management/access?");
+      var needsAccess=Boolean(shellOrganization)&&method==="GET"&&(String(path).startsWith("/api/rendro/")||String(path).startsWith("/api/auth/organization/"))&&!String(path).startsWith("/api/rendro/management/access?");
       var access=needsAccess?request("/api/rendro/management/access?organizationId="+encodeURIComponent(shellOrganization)):Promise.resolve();
       var initial=ui.takeInitialPageData&&ui.takeInitialPageData(path,settings);
       var dataRequest=initial?Promise.resolve(initial.data):queryCache&&getKey&&queryCache.canCache(getKey)?queryCache.request(path,settings,function(){return access;}):ui.request(path,settings);
-      var pending=Promise.all([dataRequest,access]).then(function(values){var data=values[0];if(String(path).indexOf("/api/rendro/management/access?")===0&&(!data||data.id!==shellOrganization||data.userId!==shellUser||!data.member||data.member.userId!==shellUser)){clearQueryCache();var denied=new Error("Your account or organization access changed. Reload to continue.");denied.status=403;if(isActive())location.replace(location.href);throw denied;}return data;});
+      var pending=Promise.all([dataRequest,access]).then(function(values){if(!isActive())throw new DOMException("Page scope disposed","AbortError");var data=values[0];if(String(path).indexOf("/api/rendro/management/access?")===0&&(!data||data.id!==shellOrganization||data.userId!==shellUser||!data.member||data.member.userId!==shellUser)){clearQueryCache();var denied=new Error("Your account or organization access changed. Reload to continue.");denied.status=403;if(isActive())location.replace(location.href);throw denied;}return data;});
       if(getKey)inflightGets.set(getKey,pending);
       try{return await pending;}catch(error){if(error&&(error.status===401||error.status===403))clearQueryCache();throw error;}finally{if(mutation){pendingMutations=Math.max(0,pendingMutations-1);invalidateMutation(path,settings);}if(getKey&&inflightGets.get(getKey)===pending)inflightGets.delete(getKey);}
     }
     function activeCall(name){return function(){if(!isActive())return name==="copyText"||name==="confirm"?Promise.resolve(false):undefined;return ui[name].apply(ui,arguments);};}
     Object.assign(scope,{request:request,isActive:isActive,guard:function(callback){return function(){if(isActive())return callback.apply(this,arguments);};},onCleanup:onCleanup,cleanup:onCleanup,preventNavigation:preventNavigation,canLeave:canLeave,dispose:dispose,busy:activeCall("busy"),copyText:activeCall("copyText"),toast:activeCall("toast"),openDialog:activeCall("openDialog"),applyTheme:activeCall("applyTheme"),confirm:activeCall("confirm"),setDocsLink:activeCall("setDocsLink")});
-    currentScope=scope;return scope;
+    currentScope=scope;if(signedOut)scope.dispose();return scope;
   }
   function disposePage(){if(currentScope)currentScope.dispose();currentScope=null;}
   function canLeave(detail){
@@ -102,6 +102,17 @@ function managementNavigationRuntime(loadingPagesJson: string): string {
     return document.dispatchEvent(new CustomEvent("rendro:before-route-leave",{cancelable:true,detail:detail}));
   }
   ui.createPageScope=createPageScope;
+  addEventListener("commentor-sign-out",function(){
+    if(signedOut)return;signedOut=true;navigationVersion++;
+    if(navigationController)navigationController.abort();
+    if(pendingObserver)pendingObserver.disconnect();pendingObserver=null;
+    disposePage();clearQueryCache();
+    if(cacheChannel){cacheChannel.close();cacheChannel=null;}
+    if(ui.clearInitialPageData)ui.clearInitialPageData();
+    window.__RENDRO_PAGE_STATE__=null;
+  });
+  // Onboarding and the organization chooser need disposal, but retain native navigation.
+  if(!supported(new URL(location.href)))return;
 
   function materialize(value,route){return String(value||"").split(PROJECT_PLACEHOLDER).join(encodeURIComponent(route.projectId||""));}
   function hasLoadingContent(content){return Boolean(content&&content.querySelector(".loading-view,.skeleton-table-row"));}
@@ -162,6 +173,7 @@ function managementNavigationRuntime(loadingPagesJson: string): string {
     script.textContent=source.textContent||"";document.body.append(script);
   }
   async function navigate(rawUrl,options){
+    if(signedOut)return false;
     resetUnloadApproval();
     var url=new URL(rawUrl,location.href),route=supported(url),mode=options&&options.mode||"push";
     var leaveDetail={kind:mode==="pop"?"history":"navigation",url:url.href};
