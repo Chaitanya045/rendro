@@ -1,3 +1,5 @@
+import { viewerBackendJson } from "@/viewer-backend";
+import { viewerErrorResponse } from "@/routes/viewer-unavailable";
 import { assetError } from "@/routes/asset-headers";
 import { decodeStoragePath, isLegacyStorageKey, isLegacyStoragePrefix, legacyStoragePrefix } from "@/storage-boundary";
 import { Hono } from "hono";
@@ -17,6 +19,10 @@ import { documentFeatures } from "@/routes/project-docs";
 import { escapeHtml } from "@/routes/html";
 
 const app = new Hono<{ Variables: { user?: User } }>();
+app.onError((error, c) => {
+  if (c.req.path.startsWith("/legacy-view/")) return viewerErrorResponse(error, c);
+  throw error;
+});
 
 // GET /api/share/create?key=:org/:path — create a signed public document URL.
 app.get("/api/share/create", async (c) => {
@@ -80,10 +86,12 @@ app.on("GET", ["/legacy-view/:org/files/*", "/legacy-view/:org/view/:viewerToken
   if (ticket) {
     // Revalidate the persisted legacy session on every resource request. Never
     // trust ambient cookies in place of the identity bound into the ticket.
-    const response = await fetch(`${CONVEX_SITE_URL}/api/auth/get-session?disableCookieCache=true`, {
+    const session = await viewerBackendJson<{ user?: User }>(`${CONVEX_SITE_URL}/api/auth/get-session?disableCookieCache=true`, {
       headers: { cookie, accept: "application/json" }, redirect: "manual",
     });
-    const session = response.ok ? await response.json() as { user?: User } | null : null;
+    if (session !== null && (typeof session?.user?.id !== "string" || typeof session?.user?.email !== "string")) {
+      throw new Error("Invalid session response");
+    }
     user = session?.user;
   }
   if (!user || typeof user.email !== "string" || emailToOrgSlug(user.email) !== org) return missing();
@@ -91,7 +99,7 @@ app.on("GET", ["/legacy-view/:org/files/*", "/legacy-view/:org/view/:viewerToken
   if (!path) return missing();
   const key = `${org}/${path}`;
   if (!isLegacyStorageKey(org, key) || (ticket && !key.startsWith(ticket.storagePrefix))) return missing();
-  if (await isDeleted(key)) return missing();
+  if (await isDeleted(key, true)) return missing();
   const object = await headObject(key);
   if (!object) return missing();
   const stream = await getObjectStream(key);

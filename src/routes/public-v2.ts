@@ -1,3 +1,5 @@
+import { viewerBackendJson } from "@/viewer-backend";
+import { viewerErrorCache, viewerErrorResponse } from "@/routes/viewer-unavailable";
 import { assetError, assetHeaders } from "@/routes/asset-headers";
 import { decodeStoragePath, isCanonicalStorageKey } from "@/storage-boundary";
 import { viewerScript } from "@/viewer/markup";
@@ -10,6 +12,8 @@ import { injectMobileViewportScrollbarStyle } from "@/routes/document-html";
 import { parseStoredManifest, type StoredManifest } from "@/stored-manifest";
 
 const app = new Hono();
+app.use("/p/*", viewerErrorCache);
+app.onError(viewerErrorResponse);
 
 type PublicResolution = {
   publication: {
@@ -25,12 +29,10 @@ type PublicResolution = {
 
 
 async function resolvePublication(slug: string): Promise<PublicResolution | null> {
-  const response = await fetch(
+  return viewerBackendJson<PublicResolution>(
     `${CONVEX_SITE_URL}/api/rendro/publications/public?slug=${encodeURIComponent(slug)}`,
     { headers: { Accept: "application/json" } },
   );
-  if (!response.ok) return null;
-  return response.json() as Promise<PublicResolution>;
 }
 
 async function manifestFor(result: PublicResolution): Promise<StoredManifest | null> {
