@@ -24,6 +24,18 @@ function memberRoles(role: string): string[] {
   return role.split(",").map((value) => value.trim()).filter(Boolean);
 }
 
+/** Call only after organization membership has been verified. */
+export function canDeleteComment(authorized: AuthorizedOrganization, authorId: string): boolean {
+  return authorized.user._id === authorId
+    || memberRoles(authorized.member.role).some((role) => role === "owner" || role === "admin");
+}
+
+export function requireCommentAuthorOrAdmin(authorized: AuthorizedOrganization, authorId: string): void {
+  if (!canDeleteComment(authorized, authorId)) {
+    throw new ConvexError("Only the comment author or organization admins can modify this comment");
+  }
+}
+
 export async function requireOrganizationMember(
   ctx: GenericCtx<DataModel>,
   organizationId: string,

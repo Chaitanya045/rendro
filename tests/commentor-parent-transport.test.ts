@@ -167,6 +167,28 @@ describe("project comment parent transport", () => {
       { body: "Scoped comment", anchor: { kind: "element", path: ["main"] } },
     );
 
+    for (const args of [{ threadId: "other-thread", replyId: "reply" }, { threadId: "current-thread" }]) {
+      messageHandler({
+        source,
+        data: { type: COMMENTOR_PARENT_REQUEST, requestId: "invalid-reply-delete", method: "reply.remove", args },
+      } as MessageEvent);
+      expect(postMessage).toHaveBeenCalledWith(expect.objectContaining({ requestId: "invalid-reply-delete", ok: false }), "*");
+    }
+    expect(mutate).toHaveBeenCalledTimes(1);
+    messageHandler({
+      source,
+      data: {
+        type: COMMENTOR_PARENT_REQUEST, requestId: "delete-reply", method: "reply.remove",
+        args: { threadId: "current-thread", replyId: "older-reply", organizationId: "other", documentPath: "other.html" },
+      },
+    } as MessageEvent);
+    await Promise.resolve();
+    expect(mutate).toHaveBeenLastCalledWith(
+      "reply.remove",
+      { organizationId: "org-a", projectId: "project-a", documentPath: "guide.html" },
+      { threadId: "current-thread", replyId: "older-reply" },
+    );
+
     fail(new Error("backend details must not cross the boundary"));
     expect(postMessage).toHaveBeenCalledWith(
       { type: COMMENTOR_PARENT_ERROR, error: "Comments could not be loaded" },
@@ -178,14 +200,14 @@ describe("project comment parent transport", () => {
       source,
       data: { type: COMMENTOR_PARENT_REQUEST, requestId: "transition", method: "subscribe", args: {} },
     } as MessageEvent);
-    expect(mutate).toHaveBeenCalledTimes(1);
+    expect(mutate).toHaveBeenCalledTimes(2);
     expect(subscribe).toHaveBeenCalledTimes(1);
     expect(postMessage).toHaveBeenCalledWith(expect.objectContaining({ requestId: "transition", ok: false }), "*");
     messageHandler({
       source,
       data: { type: COMMENTOR_PARENT_REQUEST, requestId: "transition-mutation", method: "thread.resolve", args: { threadId: "current-thread" } },
     } as MessageEvent);
-    expect(mutate).toHaveBeenCalledTimes(1);
+    expect(mutate).toHaveBeenCalledTimes(2);
     expect(postMessage).toHaveBeenCalledWith(expect.objectContaining({ requestId: "transition-mutation", ok: false }), "*");
     loadHandler();
     expect(unsubscribe).toHaveBeenCalledTimes(1);

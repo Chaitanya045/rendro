@@ -13,7 +13,8 @@ export type CommentorParentMethod =
   | "thread.resolve"
   | "thread.archive"
   | "thread.remove"
-  | "reply.add";
+  | "reply.add"
+  | "reply.remove";
 
 export type CommentorParentMutationMethod = Exclude<
   CommentorParentMethod,
@@ -67,6 +68,7 @@ const METHODS = new Set<CommentorParentMethod>([
   "thread.archive",
   "thread.remove",
   "reply.add",
+  "reply.remove",
 ]);
 
 export function isCommentorParentRequest(value: unknown): value is CommentorParentRequest {

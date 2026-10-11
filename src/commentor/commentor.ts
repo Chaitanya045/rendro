@@ -92,6 +92,7 @@ type Anchor =
 interface Reply {
   _id: ReplyId;
   _creationTime: number;
+  canDelete?: boolean;
   authorEmail: string;
   authorName: string;
   body: string;
@@ -104,6 +105,7 @@ interface Thread {
   organizationId?: string;
   projectId?: Id<"projects">;
   documentPath?: string;
+  canDelete?: boolean;
   authorEmail: string;
   authorName: string;
   body: string;
@@ -1701,7 +1703,10 @@ class Commentor {
         },
         svg(ICONS.trash),
       );
-      actions.append(resolveButton, archiveButton, deleteButton);
+      actions.append(resolveButton);
+      if (t.canDelete === true || !isProjectConfig(this.cfg)) {
+        actions.append(archiveButton, deleteButton);
+      }
       head.append(actions);
     }
     if (inBubble) {
@@ -1758,6 +1763,25 @@ class Commentor {
           },
           h("span", { class: "reply-who" }, r.authorName),
           r.body,
+          this.canWrite && r.canDelete === true && isProjectConfig(this.cfg)
+            ? h("button", {
+                class: "card-action danger",
+                type: "button",
+                "data-tip": "Delete reply",
+                "aria-label": `Delete reply by ${r.authorName}`,
+                "data-testid": "commentor-delete-reply-btn",
+                onclick: (event: Event) => {
+                  event.stopPropagation();
+                  const button = event.currentTarget as HTMLButtonElement;
+                  void this.runThreadAction(
+                    button,
+                    `Delete reply by ${r.authorName}`,
+                    () => this.parentTransport!.mutate("reply.remove", { threadId: t._id, replyId: r._id }),
+                    "Could not delete reply.",
+                  );
+                },
+              }, svg(ICONS.trash))
+            : null,
         ),
       );
     const replyState = this.replyPagination.get(t._id) ?? {

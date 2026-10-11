@@ -4,7 +4,7 @@ import { internalMutation, mutation, query } from "./_generated/server";
 import { internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import { authComponent } from "./auth";
-import { requireOrganizationMember } from "./authorization";
+import { canDeleteComment, requireCommentAuthorOrAdmin, requireOrganizationMember } from "./authorization";
 import { anchorValidator } from "./schema";
 
 export const DOCUMENT_THREAD_PAGE_SIZE = 20;
@@ -84,7 +84,7 @@ export const list = query({
   },
   handler: async (ctx, args) => {
     assertValidPageSize(args.paginationOpts.numItems);
-    await requireOrganizationMember(ctx, args.organizationId);
+    const authorized = await requireOrganizationMember(ctx, args.organizationId);
     const project = await ctx.db.get(args.projectId);
     if (!project || project.organizationId !== args.organizationId) {
       throw new ConvexError("Project not found");
@@ -129,11 +129,13 @@ export const list = query({
         const replyAuthor = await authorById(reply.authorId);
         return {
           ...reply,
+          canDelete: canDeleteComment(authorized, reply.authorId),
           ...authorDisplay(replyAuthor),
         };
       }));
       return {
         ...thread,
+        canDelete: canDeleteComment(authorized, thread.authorId),
         ...authorDisplay(author),
         replies: enrichedReplies,
         repliesHasMore: newestReplies.length > DOCUMENT_REPLY_PREVIEW_SIZE,
@@ -178,6 +180,7 @@ export const create = mutation({
   },
 });
 
+// Resolving/reopening is collaborative triage, available to any current member.
 export const resolve = mutation({
   args: threadScopeArgs,
   handler: async (ctx, { threadId, ...scope }) => {
@@ -197,7 +200,8 @@ export const archive = mutation({
     if (!thread || thread.deletedAt !== undefined || !threadMatchesScope(thread, scope)) {
       throw new ConvexError("Comment not found");
     }
-    await requireOrganizationMember(ctx, thread.organizationId);
+    const authorized = await requireOrganizationMember(ctx, thread.organizationId);
+    requireCommentAuthorOrAdmin(authorized, thread.authorId);
     await ctx.db.patch(threadId, { archived: !thread.archived, updatedAt: Date.now() });
   },
 });
@@ -207,7 +211,8 @@ export const remove = mutation({
   handler: async (ctx, { threadId, ...scope }) => {
     const thread = await ctx.db.get(threadId);
     if (!thread || !threadMatchesScope(thread, scope)) throw new ConvexError("Comment not found");
-    await requireOrganizationMember(ctx, thread.organizationId);
+    const authorized = await requireOrganizationMember(ctx, thread.organizationId);
+    requireCommentAuthorOrAdmin(authorized, thread.authorId);
     if (thread.deletedAt === undefined) await ctx.db.patch(threadId, { deletedAt: Date.now() });
     await ctx.scheduler.runAfter(0, internal.documentThreads.cleanupDeletedThread, { threadId });
   },
