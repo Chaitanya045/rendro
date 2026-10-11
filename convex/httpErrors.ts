@@ -1,6 +1,12 @@
 import { ConvexError } from "convex/values";
 import { httpAction as registerHttpAction } from "./_generated/server";
 
+export class RateLimitedError extends Error {
+  constructor(readonly retryAfterMs: number) {
+    super("Rate limit exceeded");
+  }
+}
+
 // Use only for messages authored by the handler, never caught exceptions.
 export function clientFailure(message: string, status = 400): Response {
   return Response.json({ error: message }, { status });
@@ -13,6 +19,12 @@ export function isApplicationError(error: unknown): error is ConvexError<string>
 // ConvexError is the explicit application-error contract across function calls.
 // The supplied status applies ONLY to those errors, never infrastructure faults.
 export function failure(error: unknown, applicationStatus = 400, operation = "httpAction"): Response {
+  if (error instanceof RateLimitedError) {
+    return Response.json({ error: "Rate limit exceeded", code: "rate_limited" }, {
+      status: 429,
+      headers: { "Retry-After": String(Math.max(1, Math.ceil(error.retryAfterMs / 1000))) },
+    });
+  }
   if (isApplicationError(error)) {
     const message = error.data;
     const code = message === "Invalid ID" ? 400

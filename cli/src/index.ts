@@ -15,6 +15,7 @@ import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { extname, join, relative, resolve } from "node:path";
 import { MAX_REUSED_FILES_PER_REQUEST } from "../../shared/deployment-limits";
 import { version } from "../../package.json";
+import { fetchWithRateLimit } from "./rate-limit";
 import { httpErrorMessage } from "./http-error";
 
 interface PushOptions {
@@ -119,10 +120,10 @@ function deploymentProvenance(source: string, manifestSha256: string) {
   };
 }
 
-async function requestJson<T>(url: string, token: string, init?: RequestInit): Promise<T> {
+async function requestJson<T>(url: string, token: string, init?: RequestInit, idempotent?: boolean): Promise<T> {
   const headers = new Headers(init?.headers);
   headers.set("Authorization", `Bearer ${token}`);
-  const res = await fetch(url, { ...init, headers });
+  const res = await fetchWithRateLimit(url, { ...init, headers }, idempotent);
   if (!res.ok) throw new Error(await httpErrorMessage(res));
   return await res.json() as T;
 }
@@ -299,6 +300,7 @@ async function push(opts: PushOptions): Promise<void> {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ paths }),
           },
+          true, // Re-copying immutable manifest files to the same staging keys is safe.
         );
       }
     }
@@ -306,7 +308,7 @@ async function push(opts: PushOptions): Promise<void> {
     const upload = async (entry: FileEntry) => {
       const encodedPath = entry.path.split("/").map(encodeURIComponent).join("/");
       const bytes = await readFile(entry.fullPath);
-      const response = await fetch(
+      const response = await fetchWithRateLimit(
         `${cleanEndpoint}/api/rendro/deployments/${encodedDeploymentId}/files/${encodedPath}?${deploymentQuery}`,
         {
           method: "PUT",
@@ -316,6 +318,7 @@ async function push(opts: PushOptions): Promise<void> {
           },
           body: bytes,
         },
+        true, // Replay the same bytes to the same manifest-checked object key.
       );
       if (!response.ok) {
         throw new Error(`Upload failed for ${entry.path}: ${await httpErrorMessage(response)}`);
@@ -349,7 +352,12 @@ async function push(opts: PushOptions): Promise<void> {
           reason: error instanceof Error ? error.message : String(error),
         }),
       },
-    ).catch(() => {});
+      true, // Marking a staging deployment failed is idempotent.
+    ).catch((cleanupError: unknown) => {
+      const original = error instanceof Error ? error.message : String(error);
+      const cleanup = cleanupError instanceof Error ? cleanupError.message : String(cleanupError);
+      throw new Error(`${original}\nFailed to mark deployment ${deploymentId} as failed: ${cleanup}. It may remain staging; retry deployment cleanup.`, { cause: cleanupError });
+    });
     throw error;
   }
 

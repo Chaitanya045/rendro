@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { authClientIpHeaders } from "@/auth-client-ip";
 import { backendFetch } from "@/backend-fetch";
 import { CONVEX_SITE_URL } from "@/config";
 import { getObjectText } from "@/minio";
@@ -19,10 +20,13 @@ function forwardedHeaders(request: Request): Headers {
 }
 
 async function backend(path: string, request: Request, method = "GET", body?: string): Promise<Response> {
-  return backendFetch(`${CONVEX_SITE_URL}${path}`, {
+  const target = `${CONVEX_SITE_URL}${path}`;
+  const headers = forwardedHeaders(request);
+  (await authClientIpHeaders(request, target, method)).forEach((value, name) => headers.set(name, value));
+  return backendFetch(target, {
     method,
     body,
-    headers: forwardedHeaders(request),
+    headers,
     redirect: "manual",
   }, "publicationRequest");
 }

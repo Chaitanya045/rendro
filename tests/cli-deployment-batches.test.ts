@@ -19,6 +19,7 @@ it.each(["source", "bundle"])("%s pushes unchanged documents in bounded copy req
   await Promise.all(files.map(file => writeFile(join(source, file.path), content)));
   const batches: string[][] = [];
   let commits = 0;
+  const copyAttempts: number[] = [];
   const server = createServer((request, response) => {
     const chunks: Buffer[] = [];
     request.on("data", (chunk: Buffer) => chunks.push(chunk));
@@ -32,6 +33,12 @@ it.each(["source", "bundle"])("%s pushes unchanged documents in bounded copy req
       } else if (request.url === "/api/rendro/deployments/start") {
         response.end(JSON.stringify({ deployment: { deploymentId: "next" } }));
       } else if (request.url?.includes("/next/copy?")) {
+        copyAttempts.push(Date.now());
+        if (copyAttempts.length === 1) {
+          response.setHeader("Retry-After", "1");
+          response.writeHead(429).end(JSON.stringify({ error: "Rate limit exceeded", code: "rate_limited" }));
+          return;
+        }
         const { paths } = JSON.parse(Buffer.concat(chunks).toString()) as { paths: string[] };
         batches.push(paths);
         if (paths.length > MAX_REUSED_FILES_PER_REQUEST) response.writeHead(400).end("{}");
@@ -49,10 +56,13 @@ it.each(["source", "bundle"])("%s pushes unchanged documents in bounded copy req
     if (kind === "bundle") {
       await build({ entryPoints: ["cli/src/index.ts"], bundle: true, platform: "node", target: "node22", format: "esm", outfile: entry });
     }
-    const { stdout } = await promisify(execFile)(executable, [entry, "push", "--source", source, "--organization", "org", "--project", "project", "--endpoint", endpoint], { env: { ...process.env, RENDRO_API_KEY: "disposable-test-key" } });
+    const { stdout, stderr } = await promisify(execFile)(executable, [entry, "push", "--source", source, "--organization", "org", "--project", "project", "--endpoint", endpoint], { env: { ...process.env, RENDRO_API_KEY: "disposable-test-key" } });
     expect(batches.map(batch => batch.length)).toEqual([16, 16, 8]);
     expect(batches.flat()).toEqual(files.map(file => file.path));
     expect(commits).toBe(1);
+    expect(copyAttempts).toHaveLength(4);
+    expect(copyAttempts[1] - copyAttempts[0]).toBeGreaterThanOrEqual(1_000);
+    expect(stderr).toContain("Rate limited (429). Retrying");
     expect(stdout).toContain("0 uploaded, 40 reused, 40 total");
   } finally {
     await new Promise<void>((done, fail) => server.close(error => error ? fail(error) : done()));

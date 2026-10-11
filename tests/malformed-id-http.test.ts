@@ -1,3 +1,4 @@
+import rateLimiterTest from "./convex-rate-limiter";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { convexTest } from "convex-test";
 import { ConvexError } from "convex/values";
@@ -33,6 +34,7 @@ const provenance = { source: { kind: "local" as const }, execution: { kind: "loc
 
 async function fixture() {
   const backend = convexTest(schema, modules);
+  rateLimiterTest.register(backend);
   backend.registerComponent("betterAuth", betterAuthSchema, import.meta.glob("../convex/betterAuth/**/*.ts"));
   const project = await backend.mutation(internal.projects.createInternal, {
     organizationId: "org", name: "Docs", slug: "docs", actorId: "owner",

@@ -1,3 +1,4 @@
+import rateLimiterTest from "./convex-rate-limiter";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { inspect } from "node:util";
 import { convexTest } from "convex-test";
@@ -18,6 +19,7 @@ const path = "/api/rendro/credentials/validate";
 // forwarding, Convex HTTP actions, and hashed-key database validation are real.
 async function fixture(scopes = ["docs:read"]) {
   const backend = convexTest(schema, modules);
+  rateLimiterTest.register(backend);
   backend.registerComponent("betterAuth", betterAuthSchema, import.meta.glob("../convex/betterAuth/**/*.ts"));
   const project = await backend.mutation(internal.projects.createInternal, {
     organizationId: "org-test", name: "Docs", slug: "docs", actorId: "owner",
