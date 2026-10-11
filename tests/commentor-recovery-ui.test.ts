@@ -1,5 +1,6 @@
 import { mutationKey, type CommentRecoveryState } from "../src/commentor/operation-state";
 import { buildSync } from "esbuild";
+import { computeAccessibleName } from "dom-accessibility-api";
 import { Window, type HTMLButtonElement, type HTMLTextAreaElement } from "happy-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
@@ -407,5 +408,42 @@ describe("comment widget asset skew", () => {
     expect(mutations()).toHaveLength(1);
     finish();
     await flush();
+  });
+});
+
+
+describe("comment widget accessible labels", () => {
+  it("gives comment and reply drafts explicit names independent of placeholders", async () => {
+    const { win, root, button } = await widget();
+    button("commentor-comment-btn").click();
+    win.document.querySelector("main")!.click();
+    for (const [testId, name] of [["commentor-composer-textarea", "Comment"], ["commentor-reply-input", "Reply"]]) {
+      const input = root.querySelector<HTMLTextAreaElement>(`[data-testid="${testId}"]`)!;
+      input.value = "Unsent draft";
+      input.removeAttribute("placeholder");
+      expect(computeAccessibleName(input as unknown as Element)).toBe(name);
+      expect(root.getElementById(input.getAttribute("aria-describedby")!)?.textContent).toBeTruthy();
+    }
+  });
+
+  it("hides empty and dismissed tooltips and names open tooltips", async () => {
+    const { win, root, button } = await widget();
+    const tip = root.querySelector('[role="tooltip"]')!;
+    const trigger = button("commentor-comment-btn");
+    expect(tip.textContent).toBe("");
+    expect(tip.getAttribute("aria-hidden")).toBe("true");
+    trigger.setAttribute("aria-describedby", "existing-description");
+    trigger.dispatchEvent(new win.FocusEvent("focusin", { bubbles: true }));
+    await vi.advanceTimersByTimeAsync(150);
+    expect(computeAccessibleName(tip as unknown as Element)).toBe(trigger.getAttribute("data-tip"));
+    expect(tip.getAttribute("aria-hidden")).toBe("false");
+    trigger.dispatchEvent(new win.FocusEvent("focusout", { bubbles: true }));
+    expect(tip.getAttribute("aria-hidden")).toBe("true");
+    expect(trigger.getAttribute("aria-describedby")).toBe("existing-description");
+    trigger.setAttribute("data-tip", "   ");
+    trigger.dispatchEvent(new win.FocusEvent("focusin", { bubbles: true }));
+    await vi.advanceTimersByTimeAsync(150);
+    expect(tip.getAttribute("aria-hidden")).toBe("true");
+    expect(trigger.getAttribute("aria-describedby")).toBe("existing-description");
   });
 });

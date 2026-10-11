@@ -1,7 +1,7 @@
 import { build } from "esbuild";
 import { existsSync } from "node:fs";
 import { createServer, get, type RequestListener, type Server } from "node:http";
-import { chromium, type Browser, type BrowserContext, type BrowserContextOptions, type Page } from "playwright";
+import { chromium, type Browser, type BrowserContext, type BrowserContextOptions, type Frame, type Page } from "playwright";
 import { afterAll, afterEach, expect } from "vitest";
 
 // Shorter than the 30s test budget so failures identify the stalled operation.
@@ -30,7 +30,7 @@ export async function bundleBrowserAsset(entry: string): Promise<string> {
 }
 
 /** Call after hydration or an interaction, before auditing rendered styles. */
-export async function waitForSettled(page: Page) {
+export async function waitForSettled(page: Page | Frame) {
   await browserStep("wait for fonts, animations and transitions to settle", () => page.evaluate(async () => {
     await document.fonts.ready;
     for (;;) {

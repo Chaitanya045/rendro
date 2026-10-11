@@ -1,3 +1,5 @@
+import AxeBuilder from "@axe-core/playwright";
+import * as minio from "@/minio";
 import { getRequestListener } from "@hono/node-server";
 import { readFile } from "node:fs/promises";
 import { build } from "esbuild";
@@ -7,7 +9,7 @@ import worker from "@/worker";
 import { COMMENTOR_PARENT_READY, COMMENTOR_PROTOCOL_VERSION } from "@/commentor/parent-protocol";
 import { createShareToken } from "@/share-links";
 import { docsBase, mockSecurityBackend, testUser } from "./fixtures/security-headers";
-import { browserStep, bundleBrowserAsset, createBrowserHarness } from "./helpers/browser";
+import { browserStep, bundleBrowserAsset, createBrowserHarness, waitForSettled } from "./helpers/browser";
 
 const harness = createBrowserHarness();
 const violations: string[] = [];
@@ -15,6 +17,7 @@ const consoleCsp: string[] = [];
 
 beforeAll(async () => {
   mockSecurityBackend();
+  vi.spyOn(minio, "listImmediate").mockResolvedValue({ entries: [], isTruncated: false });
   // verify runs tests before build:assets, so a clean CI checkout has none of
   // these ignored bundles. Build from source instead of reading stale local JS.
   const assets = new Map<string, string>();
@@ -31,7 +34,7 @@ beforeAll(async () => {
     import { CommentorParentHost } from "./src/commentor/parent-host";
     addEventListener("DOMContentLoaded", () => {
       const host = new CommentorParentHost(document.getElementById("content-frame"), location.origin,
-        window.RENDRO_SHARE_CONFIG, {
+        window.RENDRO_SHARE_CONFIG ?? window.RENDRO_LEGACY_COMMENT_CONFIG, {
           subscribe(scope, update) { update([], { canLoadMore:false, loading:false }); return { unsubscribe(){}, loadMore(){return false;} }; },
           subscribeReplies(scope, id, update) { update([], { canLoadMore:false, loading:false }); return { unsubscribe(){}, loadMore(){return false;} }; },
           async mutate(){ return null; }
@@ -198,7 +201,7 @@ describe("Chromium security header smoke", () => {
       expect(await frame.locator("body").evaluate(() => { try { void parent.document; return false; } catch { return true; } })).toBe(true);
       await settled(page);
       expect(await page.locator('script[src="/commentor-parent.js?v=6"]').count()).toBe(1);
-      expect(await frame.locator('script[src="/commentor.js?v=41"]').count()).toBe(1);
+      expect(await frame.locator('script[src="/commentor.js?v=42"]').count()).toBe(1);
       const originalNonce = await page.locator('script[src="/commentor-parent.js?v=6"]').evaluate(script => (script as HTMLScriptElement).nonce);
       expect(originalNonce).not.toBe("");
 
@@ -218,5 +221,80 @@ describe("Chromium security header smoke", () => {
       expect(refreshedNonce).not.toBe(originalNonce);
       await settled(page);
     } finally { await page.close(); }
+  });
+});
+
+
+describe("viewer accessibility under CSP", () => {
+  it.each([
+    ["share", "/s/test", false],
+    ["public", "/p/product", false],
+    ["legacy public", "/public/example/product", false],
+    ["legacy private", "/docs/example/index.html", true],
+    ["private", `${docsBase}?doc=index.html`, true],
+  ] as const)("exposes one main document landmark in the %s shell", async (_name, path, signedIn) => {
+    const page = await pageFor(signedIn);
+    const response = await browserStep("load viewer shell", () => page.goto(harness.origin + path));
+    expect(response?.status()).toBe(200);
+    await browserStep("load the primary document", () => page.frameLocator("#content-frame").locator("h1").waitFor());
+    await waitForSettled(page);
+    expect(await page.getByRole("main").count()).toBe(1);
+    expect(await page.locator("main #content-frame").count()).toBe(1);
+    if (_name === "share") {
+      const viewport = page.viewportSize()!;
+      expect(await page.locator("#content-frame").boundingBox()).toEqual({ x: 0, y: 48, width: viewport.width, height: viewport.height - 48 });
+    }
+    // Publisher HTML has its own semantics; audit the Rendro shell only.
+    const result = await browserStep("axe viewer landmarks", () => new AxeBuilder({ page })
+      .options({ preload: false, iframes: false })
+      .withRules(["landmark-one-main", "landmark-no-duplicate-main", "landmark-main-is-top-level"])
+      .analyze());
+    expect(result.violations).toEqual([]);
+    expect(result.incomplete).toEqual([]);
+    expect(result.passes.map(rule => rule.id)).toContain("landmark-one-main");
+    await settled(page);
+  });
+
+  it("labels a drafted composer and exposes only named, open tooltips", async () => {
+    const page = await pageFor(true);
+    await browserStep("open private document", () => page.goto(`${harness.origin}${docsBase}?doc=index.html`));
+    const content = page.frameLocator("#content-frame");
+    const comment = content.getByTestId("commentor-comment-btn");
+    await expect.poll(() => comment.isEnabled()).toBe(true);
+    const frame = page.frames().find(candidate => candidate !== page.mainFrame())!;
+    const tip = content.getByTestId("commentor-tip");
+    expect(await tip.textContent()).toBe("");
+    expect(await content.getByRole("tooltip").count()).toBe(0);
+    await comment.click();
+    await content.locator("p").click();
+    const textarea = content.getByRole("textbox", { name: "Comment", exact: true });
+    await textarea.fill("Unsent accessibility regression draft");
+    await page.mouse.move(0, 0);
+    await waitForSettled(frame);
+    expect(await textarea.inputValue()).toBe("Unsent accessibility regression draft");
+    expect(await content.getByRole("tooltip").count()).toBe(0);
+    const audit = () => browserStep("axe comment labels and tooltips", () => new AxeBuilder({ page })
+      .include(["#content-frame", "#commentor-host"])
+      .options({ preload: false })
+      .withRules(["label", "label-title-only", "aria-tooltip-name"])
+      .analyze());
+    const closed = await audit();
+    expect(closed.violations).toEqual([]);
+    expect(closed.incomplete).toEqual([]);
+    expect(closed.passes.map(rule => rule.id)).toContain("label-title-only");
+
+    await comment.focus();
+    await browserStep("show the keyboard tooltip", () => content.getByRole("tooltip").waitFor());
+    await waitForSettled(frame);
+    expect(await content.getByRole("tooltip", { name: await comment.getAttribute("data-tip") ?? "" }).count()).toBe(1);
+    const opened = await audit();
+    expect(opened.violations).toEqual([]);
+    expect(opened.incomplete).toEqual([]);
+    expect(opened.passes.map(rule => rule.id)).toContain("aria-tooltip-name");
+    await textarea.focus();
+    await waitForSettled(frame);
+    expect(await content.getByRole("tooltip").count()).toBe(0);
+    expect((await audit()).violations).toEqual([]);
+    await settled(page);
   });
 });
