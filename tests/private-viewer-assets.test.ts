@@ -299,6 +299,39 @@ describe("private sandbox asset routing", () => {
     expect((await f.app.request(endpoint, { headers: { Cookie: f.cookie } })).status).toBe(401);
   });
 
+  it("signals a superseded deployment only after full authorization, without extending old tickets", async () => {
+    const f = await fixture();
+    const { url } = await f.document();
+    const endpoint = `${base}/viewer-ticket?${new URLSearchParams({ manifestKey })}`;
+    f.state.manifestKey = manifestKey.replace("deploy-a/", "deploy-b/");
+    f.objects.mockClear();
+    const response = await f.app.request(endpoint, { headers: { Cookie: f.cookie } });
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({ code: "deployment_superseded" });
+    expect(response.headers.get("Cache-Control")).toBe("private, no-store");
+    expect(response.headers.get("Referrer-Policy")).toBe("no-referrer");
+    expect((await f.app.request(new URL("assets/image.png", url).href)).status).toBe(404);
+    expect(f.objects).not.toHaveBeenCalled();
+    expect((await f.document()).url.pathname).not.toBe(url.pathname);
+
+    const anonymous = await f.app.request(endpoint);
+    expect(anonymous.status).toBe(401);
+    expect(await anonymous.json()).toEqual({ error: "Authentication required" });
+    for (const denied of [endpoint.replace("org-a/projects", "org-b/projects"), endpoint.replace("project-a/docs", "project-b/docs")]) {
+      const result = await f.app.request(denied, { headers: { Cookie: f.cookie } });
+      expect(result.status).toBe(404);
+      expect(await result.json()).toEqual({ error: "Not found" });
+    }
+    f.state.member = false;
+    const nonmember = await f.app.request(endpoint, { headers: { Cookie: f.cookie } });
+    expect(nonmember.status).toBe(404);
+    expect(await nonmember.json()).toEqual({ error: "Not found" });
+    await f.revoke();
+    const revoked = await f.app.request(endpoint, { headers: { Cookie: f.cookie } });
+    expect(revoked.status).toBe(401);
+    expect(await revoked.json()).toEqual({ error: "Authentication required" });
+  });
+
   it("keeps tree, canonical deep links, sandbox and parent comment identity", async () => {
     const f = await fixture();
     const shell = await f.app.request(`${base}?doc=guide%2Fnext.html`, { headers: { Cookie: f.cookie } });

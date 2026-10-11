@@ -1,4 +1,4 @@
-import { assetHeaders } from "@/routes/asset-headers";
+import { assetError, assetHeaders } from "@/routes/asset-headers";
 import { decodeStoragePath, isCanonicalStorageKey } from "@/storage-boundary";
 import { viewerScript } from "@/viewer/markup";
 import { Hono } from "hono";
@@ -69,15 +69,15 @@ function injectNavigation(html: string, slug: string, path: string, url: string)
 
 app.get("/p/:slug/files/*", async (c) => {
   const result = await resolvePublication(c.req.param("slug"));
-  if (!result) return c.html(renderNotFoundPage({ path: c.req.path }), 404);
+  if (!result) return assetError(c, () => renderNotFoundPage({ path: "Document unavailable" }));
   const relativePath = decodeStoragePath(c.req.path.slice(c.req.path.indexOf("/files/") + 7));
   const fullPath = relativePath ? publicationPath(result, relativePath) : null;
-  if (!relativePath || !fullPath) return c.html(renderNotFoundPage({ path: c.req.path }), 404);
+  if (!relativePath || !fullPath) return assetError(c, () => renderNotFoundPage({ path: "Document unavailable" }));
   const manifest = await manifestFor(result);
   const entry = manifest?.files.find((file) => file.path === fullPath);
-  if (!entry) return c.html(renderNotFoundPage({ path: c.req.path }), 404);
+  if (!entry) return assetError(c, () => renderNotFoundPage({ path: "Document unavailable" }));
   const stream = await getObjectStream(objectKey(result, fullPath));
-  if (!stream) return c.html(renderNotFoundPage({ path: c.req.path }), 404);
+  if (!stream) return assetError(c, () => renderNotFoundPage({ path: "Document unavailable" }));
   const headers = {
     "Cache-Control": "public, max-age=0, must-revalidate",
     ...assetHeaders(fullPath, true, entry.contentType),
