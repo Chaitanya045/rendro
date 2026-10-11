@@ -1,16 +1,25 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { inspect } from "node:util";
 import { ConvexError } from "convex/values";
 const mocks = vi.hoisted(() => ({ error: vi.fn(), getObjectText: vi.fn(), listAllKeys: vi.fn() }));
 vi.mock("../src/logger", () => ({ logger: { error: mocks.error } }));
 vi.mock("../src/minio", () => ({ ...mocks, putObject: vi.fn(), copyObject: vi.fn(), headObject: vi.fn() }));
 import deploymentApp from "../src/routes/deployments";
 import publicationApp from "../src/routes/publication-api";
-import { proxyConvexRequest } from "../src/auth-proxy";
+import { proxyAuthSignOut, proxyConvexRequest } from "../src/auth-proxy";
+import { backendFetch } from "../src/backend-fetch";
 import { sha256 } from "../convex/credentialHttp";
 import { failure, httpAction } from "../convex/httpErrors";
 import { httpErrorMessage } from "../cli/src/http-error";
 
-const diagnostic = "ArgumentValidationError: internal details\n    at handler (convex/deployments.ts:12:3)";
+const privateMarkers = ["private-body-marker", "private-secret", "private-token", "private-cookie", "private-query", "private-password"];
+const diagnostic = `ArgumentValidationError: ${privateMarkers.join(" ")}\n    at handler (convex/deployments.ts:12:3)`;
+function expectPrivateLogs(calls: unknown) {
+  // inspect includes non-enumerable Error messages/stacks, unlike JSON.stringify.
+  const output = inspect(calls, { depth: null });
+  for (const marker of privateMarkers) expect(output).not.toContain(marker);
+  expect(output).not.toContain("ArgumentValidationError");
+}
 const query = "?organizationId=org&projectId=project";
 const manifest = { version: 1, files: [] };
 beforeEach(() => {
@@ -24,7 +33,8 @@ async function sanitized(response: Response) {
   expect(response.status).toBe(502);
   expect(await response.json()).toEqual({ error: "Backend unavailable" });
   expect(response.headers.has("x-internal-detail")).toBe(false);
-  expect(mocks.error).toHaveBeenCalledWith({ status: 500, body: diagnostic }, "Backend request failed");
+  expect(mocks.error).toHaveBeenCalledWith({ category: "UpstreamError", operation: expect.stringMatching(/^(proxyConvexRequest|deploymentRequest|publicationRequest)$/), status: 500 }, "Backend request failed");
+  expectPrivateLogs(mocks.error.mock.calls);
 }
 
 describe("Worker backend error mapping", () => {
@@ -71,22 +81,72 @@ describe("Worker backend error mapping", () => {
     expect(mocks.error).not.toHaveBeenCalled();
   });
 
-  it("also maps network failures without exposing the exception", async () => {
-    vi.mocked(fetch).mockRejectedValueOnce(new Error(diagnostic));
-    const response = await proxyConvexRequest(new Request("https://rendro.test/api/rendro/projects/get"));
+  it.each([500, 503, 599])("logs only fixed metadata for upstream %s", async status => {
+    const upstream = Response.json({ error: diagnostic, code: "private-secret" }, {
+      status, headers: { "set-cookie": "private-cookie", "x-internal-detail": "private-token" },
+    });
+    vi.mocked(fetch).mockResolvedValueOnce(upstream);
+    const response = await backendFetch("https://user:private-password@backend.test/private-secret?token=private-query", {
+      method: "POST", body: diagnostic,
+      headers: { authorization: "Bearer private-token", cookie: "private-cookie" },
+    }, "deploymentRequest");
     expect(response.status).toBe(502);
     expect(await response.json()).toEqual({ error: "Backend unavailable" });
-    expect(mocks.error).toHaveBeenCalled();
+    expect(mocks.error.mock.calls).toEqual([[{ category: "UpstreamError", operation: "deploymentRequest", status }, "Backend request failed"]]);
+    expectPrivateLogs(mocks.error.mock.calls);
+    expect(upstream.bodyUsed).toBe(false);
+  });
+
+  it.each([
+    new Error(diagnostic, { cause: { token: "private-token" } }),
+    new TypeError(diagnostic),
+    { message: diagnostic, token: "private-token" },
+    diagnostic,
+  ])("maps transport failures without logging exceptions (%#)", async error => {
+    vi.mocked(fetch).mockRejectedValueOnce(error);
+    const response = await proxyConvexRequest(new Request("https://rendro.test/api/rendro/projects/get?token=private-query", {
+      headers: { cookie: "private-cookie" },
+    }));
+    expect(response.status).toBe(502);
+    expect(await response.json()).toEqual({ error: "Backend unavailable" });
+    expect(mocks.error.mock.calls).toEqual([[{ category: "TransportError", operation: "proxyConvexRequest", status: null }, "Backend request failed"]]);
+    expectPrivateLogs(mocks.error.mock.calls);
+  });
+
+  it("keeps sign-out transport diagnostics private", async () => {
+    vi.mocked(fetch).mockRejectedValueOnce(new Error(diagnostic));
+    const response = await proxyAuthSignOut(new Request("https://rendro.test/api/auth/sign-out?token=private-query", {
+      headers: { cookie: "private-cookie" },
+    }));
+    expect(response.status).toBe(302);
+    expect(mocks.error.mock.calls).toEqual([[{ category: "TransportError", operation: "proxyAuthSignOut", status: null }, "Auth sign-out proxy error"]]);
+    expectPrivateLogs(mocks.error.mock.calls);
   });
 });
 
 describe("Convex HTTP error boundary", () => {
   it("uses only structured application data, never wrapped stack messages", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
     const error = new ConvexError("Invalid ID");
     error.message = diagnostic;
     const response = failure(error, 409);
     expect(response.status).toBe(400);
     expect(await response.json()).toEqual({ error: "Invalid ID" });
+    expect(console.error).not.toHaveBeenCalled();
+  });
+  it.each([
+    [new Error(diagnostic), "Error"],
+    [new TypeError(diagnostic), "TypeError"],
+    [new RangeError(diagnostic), "RangeError"],
+    [new ConvexError({ message: diagnostic, token: "private-token" }), "Error"],
+    [{ message: diagnostic, token: "private-token" }, "Unknown"],
+  ])("logs only safe Convex failure metadata (%#)", async (error, category) => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    const response = failure(error, 409, "commitDeployment");
+    expect(response.status).toBe(500);
+    expect(await response.json()).toEqual({ error: "Request failed" });
+    expect(log.mock.calls).toEqual([["HTTP request failed", { operation: "commitDeployment", category, status: 500 }]]);
+    expectPrivateLogs(log.mock.calls);
   });
   it("catches unexpected failures outside local handler catches", async () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
@@ -95,7 +155,8 @@ describe("Convex HTTP error boundary", () => {
     const response = await handler({}, new Request("https://rendro.test/api/rendro/deployments/active"));
     expect(response.status).toBe(500);
     expect(await response.json()).toEqual({ error: "Request failed" });
-    expect(console.error).toHaveBeenCalled();
+    expect(console.error).toHaveBeenCalledWith("HTTP request failed", { category: "Error", operation: "httpAction", status: 500 });
+    expectPrivateLogs(vi.mocked(console.error).mock.calls);
   });
 });
 

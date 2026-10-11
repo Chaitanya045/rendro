@@ -74,7 +74,7 @@ export async function proxyConvexRequest(request: Request): Promise<Response> {
   if (request.method !== "GET" && request.method !== "HEAD") {
     init.body = await request.text();
   }
-  const upstream = await backendFetch(target, init);
+  const upstream = await backendFetch(target, init, "proxyConvexRequest");
   const setCookies = strippedSetCookies(upstream.headers);
   if (setCookies.length === 0) return upstream;
 
@@ -102,9 +102,9 @@ export async function proxyAuthSignOut(request: Request): Promise<Response> {
     for (const cookie of strippedSetCookies(upstream.headers)) {
       headers.append("Set-Cookie", cookie);
     }
-  } catch (error: unknown) {
+  } catch {
     logger.error(
-      { error: error instanceof Error ? error.message : String(error) },
+      { category: "TransportError", operation: "proxyAuthSignOut", status: null },
       "Auth sign-out proxy error",
     );
   }

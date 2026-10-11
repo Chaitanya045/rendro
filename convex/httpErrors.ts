@@ -25,7 +25,7 @@ export function failure(error: unknown, applicationStatus = 400, operation = "ht
   const category = error instanceof TypeError ? "TypeError"
     : error instanceof RangeError ? "RangeError"
     : error instanceof Error ? "Error" : "Unknown";
-  console.error("HTTP request failed", { operation, category });
+  console.error("HTTP request failed", { operation, category, status: 500 });
   return Response.json({ error: "Request failed" }, { status: 500 });
 }
 

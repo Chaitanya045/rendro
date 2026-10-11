@@ -24,7 +24,7 @@ async function backend(path: string, request: Request, method = "GET", body?: st
     body,
     headers: forwardedHeaders(request),
     redirect: "manual",
-  });
+  }, "publicationRequest");
 }
 
 app.post("/api/rendro/publications", async (c) => {

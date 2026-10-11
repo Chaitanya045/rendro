@@ -54,7 +54,7 @@ async function invoke(action: HttpAction, init: RequestInit, error: Error, apiKe
 async function expectPrivateFailure(response: Response) {
   expect(response.status).toBe(500);
   expect(await response.json()).toEqual({ error: "Request failed" });
-  expect(console.error).toHaveBeenCalledWith("HTTP request failed", { operation: expect.any(String), category: "Error" });
+  expect(console.error).toHaveBeenCalledWith("HTTP request failed", { operation: expect.any(String), category: "Error", status: 500 });
   expect(JSON.stringify(vi.mocked(console.error).mock.calls)).not.toContain(secret);
 }
 

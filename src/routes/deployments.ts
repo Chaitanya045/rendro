@@ -64,7 +64,7 @@ async function backendRequest(
     headers: forwardedHeaders(request),
     body: init.body,
     redirect: "manual",
-  });
+  }, "deploymentRequest");
 }
 
 function parseManifest(value: unknown): DeploymentManifest | null {
