@@ -49,8 +49,8 @@ export function assetError(c: Context, html: () => string, status: ClientErrorSt
   try { path = decodeURIComponent(path); } catch { /* Invalid paths still fail closed. */ }
   // Browser document Accept headers also advertise image formats.
   const htmlRequest = /(?:^|,)\s*(?:text\/html|application\/xhtml\+xml)(?:\s*[;,]|$)/i.test(accept);
-  const resource = (!htmlRequest && /(?:^|,)\s*(?:image\/|font\/|text\/css|(?:application|text)\/(?:javascript|ecmascript)|application\/(?:font-|x-font-|vnd.ms-fontobject))/i.test(accept))
-    || /\.(?:avif|bmp|gif|ico|jpe?g|png|svg|webp|woff2?|ttf|otf|eot|css|m?js)$/i.test(path);
+  const resource = (!htmlRequest && /(?:^|,)\s*(?:image\/|font\/|text\/css|(?:application|text)\/(?:javascript|ecmascript)|application\/(?:json|[\w.+-]+\+json|font-|x-font-|vnd.ms-fontobject))/i.test(accept))
+    || /\.(?:avif|bmp|gif|ico|jpe?g|png|svg|webp|woff2?|ttf|otf|eot|css|m?js|json)$/i.test(path);
   if (resource) {
     const message = status === 403 ? "Forbidden" : status === 404 ? "Not found"
       : status === 503 ? "Service unavailable" : "Request failed";
