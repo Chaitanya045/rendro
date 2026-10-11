@@ -82,10 +82,12 @@ beforeAll(async () => {
       MINIO_ENDPOINT: `${harness.origin}/mock-storage`, MINIO_BUCKET: "docs",
     },
   });
-  await expect.poll(() => new Promise<number>(resolve => {
+  await vi.waitFor(async () => {
+    expect(await new Promise<number>(resolve => {
     const probe = get(`http://127.0.0.1:${port}/health`, response => { response.resume(); resolve(response.statusCode ?? 0); });
     probe.on("error", () => resolve(0));
-  })).toBe(200);
+    })).toBe(200);
+  }, { timeout: 10_000, interval: 100 });
 });
 
 afterAll(async () => {
@@ -99,11 +101,15 @@ afterAll(async () => {
 
 it("signs in and browses management and docs without a 503 on the real local server", async () => {
   const page = await harness.newPage();
+  // convex-test provides HTTP actions, not the realtime WebSocket protocol.
+  // Keep comment subscriptions offline; auth/session HTTP remains real.
+  await page.routeWebSocket(/.*/, socket => socket.close());
   const failures: string[] = [];
   page.on("response", response => {
     if (response.status() >= 500) failures.push(`${response.status()} ${new URL(response.url()).pathname}`);
   });
   await page.route(url => url.hostname === "fonts.googleapis.com", route => route.fulfill({ contentType: "text/css", body: "" }));
+  await page.route(url => url.hostname === "cdn.tailwindcss.com", route => route.fulfill({ contentType: "text/javascript", body: "" }));
   const orgPath = `/organizations/${organizationId}`;
   await page.goto(`${harness.origin}/sign-in?returnTo=${encodeURIComponent(orgPath)}`);
   await page.locator("#email").fill("stack@example.test");
