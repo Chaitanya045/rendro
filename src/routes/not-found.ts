@@ -1,3 +1,4 @@
+import { nonceAttribute } from "@/middleware/html-nonce";
 import { renderFaviconLinks } from "./favicon";
 import { renderThemeAssets } from "./theme";
 
@@ -35,11 +36,11 @@ export function renderNotFoundPage(options: NotFoundPageOptions = {}): string {
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 ${renderThemeAssets()}
-<script>
+<script${nonceAttribute()}>
   addEventListener("message",function(event){if(event.source!==window.parent||window.parent===window)return;var data=event.data||{};if(data.type==="rendro-theme")window.RendroUI.applyTheme(data.theme,false,false);});
   if(window.parent!==window){document.documentElement.classList.add("framed");window.parent.postMessage({type:"commentor-theme-ready"},"*");}
 </script>
-<style>
+<style${nonceAttribute()}>
   *{box-sizing:border-box}
   :root{color-scheme:light;--page:#fafafa;--surface:#fff;--container:#f4f4f5;--text:#18181b;--strong:#09090b;--muted:#71717a;--border:#e4e4e7;--border-strong:#d4d4d8;--accent:#c2410c;--accent-hover:#9a3412;--accent-soft:#ffedd5;--on-accent:#fff;--focus:rgba(194,65,12,.2)}
   html.dark{color-scheme:dark;--page:#09090b;--surface:#09090b;--container:#18181b;--text:#e4e4e7;--strong:#fafafa;--muted:#a1a1aa;--border:#27272a;--border-strong:#3f3f46;--accent:#fb923c;--accent-hover:#fdba74;--accent-soft:rgba(251,146,60,.16);--on-accent:#09090b;--focus:rgba(251,146,60,.23)}
@@ -76,7 +77,7 @@ ${renderThemeAssets()}
     </section>
   </main>
 </body>
-<script>
+<script${nonceAttribute()}>
   (function(){
     var button=document.getElementById("go-back");
     if(!button)return;

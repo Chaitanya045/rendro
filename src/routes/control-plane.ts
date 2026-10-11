@@ -1,4 +1,5 @@
 import { renderCommentRecoveryLifecycle } from "../commentor/recovery-session";
+import { nonceAttribute } from "@/middleware/html-nonce";
 import { renderFaviconLinks } from "./favicon";
 import type { User } from "better-auth/types";
 import { renderThemeAssets, renderThemeButton } from "./theme";
@@ -533,13 +534,13 @@ export function renderControlPlanePage(options: ControlPlanePageOptions): string
 <link rel="preload" href="/select.js?v=3" as="script">
 ${hasSidebar ? `<script defer src="/management-pages.js?v=${MANAGEMENT_SHELL_VERSION}"></script>` : ""}
 <link rel="preload" href="/management-query.js?v=4" as="script">
-<title>${escapeHtml(options.title)} — Rendro</title><link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..24,400,0,0&display=swap" rel="stylesheet">${renderThemeAssets()}<style>${controlPlaneStyles}${managementUiStyles}${selectStyles}${organizationSwitcherStyles}</style></head>
+<title>${escapeHtml(options.title)} — Rendro</title><link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..24,400,0,0&display=swap" rel="stylesheet">${renderThemeAssets()}<style${nonceAttribute()}>${controlPlaneStyles}${managementUiStyles}${selectStyles}${organizationSwitcherStyles}</style></head>
 <body class="${hasSidebar ? "has-sidebar" : "focused-layout"}">
 <header class="cp-topbar"><div class="cp-topbar-inner">
   ${hasSidebar ? '<button class="cp-icon-button cp-mobile-menu" id="cp-menu" type="button" aria-label="Open navigation" aria-expanded="false" aria-controls="cp-navigation"><span class="material-symbols-outlined" aria-hidden="true">menu</span></button>' : ""}
   <a class="cp-brand" href="${organizationId ? `/organizations/${encodeURIComponent(organizationId)}` : "/organizations"}">Rendro<i>.</i></a>
   ${organizationSwitcher}
-  <script data-cp-org-label>${renderOrganizationLabelBootstrap(options.user.id, organizationId)}</script>
+  <script${nonceAttribute()} data-cp-org-label>${renderOrganizationLabelBootstrap(options.user.id, organizationId)}</script>
   <span class="cp-top-spacer"></span>${openDocs}
   ${renderThemeButton("cp-theme")}
   <div class="cp-account" id="cp-account"><button class="cp-avatar" id="cp-avatar" type="button" aria-label="Open account menu" aria-expanded="false" aria-controls="cp-account-menu">${escapeHtml(initial)}</button><div class="cp-account-menu" id="cp-account-menu"><span class="cp-account-email">${escapeHtml(options.user.email)}</span><a href="/account/security"><span class="material-symbols-outlined" aria-hidden="true">shield</span><span>Account security</span></a><a href="/api/auth/sign-out"><span class="material-symbols-outlined" aria-hidden="true">logout</span><span>Sign out</span></a></div></div>
@@ -553,7 +554,7 @@ ${hasSidebar ? `<div class="cp-sidebar" id="cp-navigation" role="complementary" 
 </div></main>
 <div class="toast-region" id="cp-toasts" aria-live="polite"></div>
 ${organizationId ? '<div class="cp-refresh-notice" id="cp-refresh-notice" hidden><span role="status">Updates may be available.</span><button class="button small" type="button" id="cp-refresh-button">Refresh</button></div>' : ""}
-${renderCommentRecoveryLifecycle(options.user.id)}
-<script data-cp-page-state type="application/json">${state}</script><script>window.__RENDRO_PAGE_STATE__=${state};</script><script src="/select.js?v=3"></script><script src="/management-query.js?v=4"></script><script>${controlPlaneRuntime}${managementUiRuntime}</script><script>${organizationSwitcherRuntime}</script><script>${renderManagementNavigationRuntime(organizationId)}</script><script data-cp-page-script>${options.script}</script>
+${renderCommentRecoveryLifecycle(options.user.id, nonceAttribute())}
+<script${nonceAttribute()} data-cp-page-state type="application/json">${state}</script><script${nonceAttribute()}>window.__RENDRO_PAGE_STATE__=${state};</script><script src="/select.js?v=3"></script><script src="/management-query.js?v=4"></script><script${nonceAttribute()}>${controlPlaneRuntime}${managementUiRuntime}</script><script${nonceAttribute()}>${organizationSwitcherRuntime}</script><script${nonceAttribute()}>${renderManagementNavigationRuntime(organizationId)}</script><script${nonceAttribute()} data-cp-page-script>${options.script}</script>
 </body></html>`;
 }

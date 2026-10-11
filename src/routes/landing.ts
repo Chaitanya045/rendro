@@ -1,3 +1,4 @@
+import { nonceAttribute } from "@/middleware/html-nonce";
 import { renderFaviconLinks } from "./favicon";
 import { renderThemeAssets, renderThemeButton } from "./theme";
 
@@ -21,7 +22,7 @@ export function renderLandingPage(): string {
   <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20,400,0,0" rel="stylesheet">
   <title>Rendro — Documentation that ships with your code</title>
   ${renderThemeAssets()}
-  <style>
+  <style${nonceAttribute()}>
     :root {
       color-scheme: light;
       --surface: #ffffff;
@@ -374,7 +375,7 @@ export function renderLandingPage(): string {
       </nav>
     </div>
   </footer>
-  <script>
+  <script${nonceAttribute()}>
     (function () {
       window.RendroTheme.mount(document.getElementById("theme-toggle"));
       var reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;

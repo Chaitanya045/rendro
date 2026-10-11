@@ -1,3 +1,4 @@
+import { nonceAttribute } from "@/middleware/html-nonce";
 import { mobileViewportStyles } from "./viewport";
 
 export const sharedThemeStyles = String.raw`
@@ -83,7 +84,7 @@ export const sharedThemeRuntime = String.raw`
 })();`;
 
 export function renderThemeAssets(): string {
-  return `<style data-rendro-theme>${sharedThemeStyles}</style><script data-rendro-theme>${sharedThemeRuntime}</script>`;
+  return `<style${nonceAttribute()} data-rendro-theme>${sharedThemeStyles}</style><script${nonceAttribute()} data-rendro-theme>${sharedThemeRuntime}</script>`;
 }
 
 // Shells share markup as well as behavior: page-local button classes must not

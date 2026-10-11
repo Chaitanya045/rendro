@@ -1,4 +1,5 @@
 import { renderCommentRecoveryLifecycle } from "../commentor/recovery-session";
+import { nonceAttribute } from "@/middleware/html-nonce";
 import { renderFaviconLinks } from "./favicon";
 import { Hono } from "hono";
 import { putObject, headObject } from "@/minio";
@@ -112,6 +113,7 @@ function renderLegacyOrgNotFound(path: string): string {
   });
 }
 
+
 export interface PublicShellPublication {
   orgSlug: string;
   slug: string;
@@ -215,10 +217,10 @@ function renderOrgTreePage(user: User | null, org: string, selectedDoc = "", opt
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet">
 ${renderThemeAssets()}
 <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
-<script>
+<script${nonceAttribute()}>
 tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e4e7","background":"#ffffff","surface-container-high":"#f4f4f5","on-secondary-fixed":"#09090b","on-surface-variant":"#71717a","primary":"#c2410c","primary-fixed-dim":"#fed7aa","surface":"#ffffff","surface-container-low":"#fafafa","secondary-container":"#ffedd5","on-secondary-container":"#09090b","on-surface":"#09090b","outline":"#71717a","on-primary":"#ffffff","surface-container":"#f4f4f5"},fontFamily:{"body-md":["Inter"]},fontSize:{"body-md":["14px",{lineHeight:"20px",fontWeight:"400"}],"headline-sm":["20px",{lineHeight:"28px",fontWeight:"600"}],"headline-md":["24px",{lineHeight:"32px",fontWeight:"600"}]}}}}
 </script>
-<style>
+<style${nonceAttribute()}>
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
   :root{--sidebar-expanded-width:280px;--sidebar-width:var(--sidebar-expanded-width);--tree-row-height:33px;--viewer-focus:#c2410c}
   body{display:flow-root;font-family:Inter,system-ui,sans-serif;background:#fff;color:#09090b;overflow:hidden;height:100vh;font-size:14px;line-height:20px}
@@ -575,7 +577,7 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
     src="about:blank" title="Document content" style="display:none"${sandboxAttribute}></iframe>
 </main>
 
-<script>
+<script${nonceAttribute()}>
 (function(){
   var root=document.documentElement;
   function normalizedTheme(){return window.RendroTheme.getMode();}
@@ -882,9 +884,9 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
   document.addEventListener("click",function(){setAvatarMenu(false);setMobileMore(false,false);});
 })();
 </script>
-<script>window.RENDRO_INITIAL_DOC=${inlineJson(selectedDoc)};window.RENDRO_ORG=${inlineJson(org)};window.RENDRO_DOCUMENT_BASE=${inlineJson(documentBase)};window.RENDRO_PUBLICATION_BASE=${inlineJson(isPublicDocument ? documentBase : "")};window.RENDRO_SHARE_CONFIG=${inlineJson(options.shareConfig ?? null)};</script>
-${renderCommentRecoveryLifecycle(user?.id ?? null)}
-${options.shareConfig?.convexUrl ? '<script src="/commentor-parent.js?v=5"></script>' : ""}
+<script${nonceAttribute()}>window.RENDRO_INITIAL_DOC=${inlineJson(selectedDoc)};window.RENDRO_ORG=${inlineJson(org)};window.RENDRO_DOCUMENT_BASE=${inlineJson(documentBase)};window.RENDRO_PUBLICATION_BASE=${inlineJson(isPublicDocument ? documentBase : "")};window.RENDRO_SHARE_CONFIG=${inlineJson(options.shareConfig ?? null)};</script>
+${renderCommentRecoveryLifecycle(user?.id ?? null, nonceAttribute())}
+${options.shareConfig?.convexUrl ? `<script${nonceAttribute()} src="/commentor-parent.js?v=5"></script>` : ""}
 <script src="/lazy-tree.js?v=32"></script>
 </body>
 </html>`;
@@ -936,7 +938,7 @@ function renderInitialIndex(_user: User, org: string, displayName: string): stri
 <head>${renderFaviconLinks()}
 <meta charset="UTF-8">
 <title>${escapeHtml(displayName)}</title>
-<style>body{font-family:system-ui;max-width:720px;margin:3rem auto;padding:0 1.5rem;line-height:1.6;color:#1a1a1a}</style>
+<style${nonceAttribute()}>body{font-family:system-ui;max-width:720px;margin:3rem auto;padding:0 1.5rem;line-height:1.6;color:#1a1a1a}</style>
 </head>
 <body>
 <h1>${escapeHtml(displayName)}</h1>
@@ -972,7 +974,7 @@ function renderApiKeyPage(user: User, org: string, apiKey: string): string {
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet">
 ${renderThemeAssets()}
-<style>
+<style${nonceAttribute()}>
   *{box-sizing:border-box}
   html{color-scheme:light dark}
   body{margin:0;min-height:100vh;background:#fafafa;color:#09090b;font:14px/20px Inter,system-ui,sans-serif}
@@ -1061,7 +1063,7 @@ ${renderThemeAssets()}
     <div class="card-body">
       <p class="copy">Copy this one-time API key now. You’ll use it from CI or the CLI to upload docs into <code>${orgEsc}</code>.</p>
       <div class="key-panel">
-        <div class="key-label"><span>Upload API key</span><button type="button" class="copy-btn" id="api-copy-btn" onclick="copyKey()" aria-label="Copy API key"><span class="material-symbols-outlined copy-icon" aria-hidden="true">content_copy</span><span class="copy-label-window" aria-hidden="true"><span class="copy-label-track"><span class="copy-label">Copy key</span><span class="copy-label" id="copy-feedback-label">API key copied!</span></span></span></button></div>
+        <div class="key-label"><span>Upload API key</span><button type="button" class="copy-btn" id="api-copy-btn" aria-label="Copy API key"><span class="material-symbols-outlined copy-icon" aria-hidden="true">content_copy</span><span class="copy-label-window" aria-hidden="true"><span class="copy-label-track"><span class="copy-label">Copy key</span><span class="copy-label" id="copy-feedback-label">API key copied!</span></span></span></button></div>
         <div class="key-box" id="api-key">${escapeHtml(apiKey)}</div>
       </div>
       <div class="warning">
@@ -1075,11 +1077,12 @@ rendro push --source ./docs --org ${orgEsc}
     </div>
   </section>
 </main>
-<script>
+<script${nonceAttribute()}>
   (function(){
     var root=document.documentElement;
     window.RendroTheme.mount(document.getElementById("theme-toggle"));
   })();
+  document.getElementById("api-copy-btn").addEventListener("click", copyKey);
   var copyFeedbackTimer;
   function setCopyFeedback(message) {
     var btn = document.getElementById("api-copy-btn");
@@ -1127,6 +1130,6 @@ rendro push --source ./docs --org ${orgEsc}
       .catch(function(){ setCopyFeedback("Copy failed"); });
   }
 </script>
-${renderCommentRecoveryLifecycle(user.id)}</body></html>`;
+${renderCommentRecoveryLifecycle(user.id, nonceAttribute())}</body></html>`;
 }
 export default app;
