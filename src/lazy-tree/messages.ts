@@ -27,3 +27,9 @@ export function loadedDocumentAction(
   if (expectedPath) return loadedPath === expectedPath ? "sync" : "ignore";
   return Boolean(currentPath) && loadedPath !== currentPath ? "reload" : "sync";
 }
+
+/** Queries stay separate from authorized paths and cannot introduce a fragment. */
+export function validDocumentSearch(value: unknown): value is string {
+  return typeof value === "string" && value.length <= 4096
+    && (value === "" || (value.startsWith("?") && !/[#\r\n]/.test(value)));
+}

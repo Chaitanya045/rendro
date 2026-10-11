@@ -52,6 +52,7 @@ function documentFeatures(
     projectId: string;
     documentPath: string;
     base: string;
+    url: string;
   },
 ): string {
   const virtualPath = `${options.projectId}/${options.documentPath}`;
@@ -64,24 +65,10 @@ function documentFeatures(
 <script data-rendro-document-features>
 (function(){
 var p=window.parent;
-function loaded(){if(p!==window){p.postMessage({type:"doc-loaded",path:${inlineJson(virtualPath)}},"*");}}
-if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",loaded,{once:true});else loaded();
 document.addEventListener("keydown",function(e){var key=(e.key||"").toLowerCase();var shellShortcut=(key==="h"||e.code==="KeyH")&&(e.ctrlKey||e.metaKey)&&e.shiftKey&&!e.altKey&&!e.repeat&&!(e.getModifierState&&e.getModifierState("AltGraph"));if(shellShortcut&&!(e.target instanceof Element&&e.target.closest("input,textarea,select,[contenteditable='true'],[contenteditable='plaintext-only'],[contenteditable='']"))){e.preventDefault();p.postMessage({type:"shell-toggle"},"*");}});
-document.addEventListener("click",function(e){
-  var a=e.target instanceof Element?e.target.closest("a"):null;if(!a||!a.href)return;
-  var u=new URL(a.href),canonical=${inlineJson(`${options.base}/files/`)},view=${inlineJson(`${options.base}/view/`)};
-  if(u.origin!==location.origin)return;
-  var boundary=u.pathname.indexOf("/files/",view.length);
-  var prefix=u.pathname.startsWith(canonical)?canonical:u.pathname.startsWith(view)&&boundary>=0?u.pathname.slice(0,boundary+7):null;
-  if(!prefix)return;
-  var targetPath;try{targetPath=u.pathname.slice(prefix.length).split("/").map(decodeURIComponent).join("/");}catch{return;}
-  if(!targetPath)return;e.preventDefault();
-  // The ticket base differs from location: keep same-document anchors in place.
-  if(targetPath===${inlineJson(options.documentPath)}&&u.hash){location.hash=u.hash;return;}
-  p.postMessage({type:"doc-navigate",path:targetPath},"*");
-});
 })();
 </script>
+${viewerScript("navigation", { prefix: `${options.base}/files/`, ticketBase: `${options.base}/view/`, documentPath: options.documentPath, loadedPath: virtualPath }, options.url)}
 <script>window.COMMENTOR=${inlineJson({
     organizationId: options.organizationId,
     projectId: options.projectId,
@@ -169,7 +156,7 @@ app.on("GET", [
   const documentUrl = `${frameBase}${path.split("/").map(encodeURIComponent).join("/")}`;
   const features = viewerScript("frame", {
     base, prefix: frameBase, manifestKey: active.deployment.manifestKey,
-  }) + documentFeatures({ organizationId, projectId, documentPath: path, base });
+  }, c.req.url) + documentFeatures({ organizationId, projectId, documentPath: path, base, url: c.req.url });
   // Keep the iframe's canonical src so tree/deep links and comment authorization
   // retain their existing identity. Relative resources inherit the ticket base.
   return new Response(injectViewerHeadStream(stream, publisherBase => {

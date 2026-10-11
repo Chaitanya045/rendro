@@ -377,6 +377,30 @@ The project and publication viewers share `renderScopedDocumentShell()` in `src/
 
 `…/docs/tree` returns HTML document paths from the active manifest in pages of 200 (`{ documents, cursor }`). `…/docs/files/*` serves only manifest entries with `Cache-Control: private, no-store`, `X-Content-Type-Options: nosniff`, and either `sandbox allow-scripts allow-forms allow-popups allow-downloads; frame-ancestors 'self'` (HTML) or `default-src 'none'` (other types) as the Content-Security-Policy. HTML responses get a small injected script for navigation messages, the shell shortcut, and the comment configuration; stored publisher bytes are never modified.
 
+### Document fragments
+
+Private project, publication (including legacy publication), and legacy docs use
+one link bridge from `src/viewer/navigation.ts`. Bare `#fragment` links refer to
+the current document independently of the injected ticket/publisher base. Explicit
+same-document links scroll in place, without navigating the iframe or touching
+comment anchors/drafts. Targets are percent-decoded and matched by ID, then legacy
+`<a name>`; empty `#` and an unmatched case-insensitive `#top` scroll to the top.
+Missing targets do nothing.
+
+Fragment-only clicks use **`history.replaceState`** in the parent, preserving its
+existing state and avoiding a history entry per heading. Document changes retain
+the tree's existing `pushState`, now including the destination fragment. The iframe's
+pending navigation uses `location.replace` so it cannot add a second history entry. The parent
+passes its hash to the frame after load, including on reload and document
+back/forward; tree clicks clear the previous document's hash. Bridge messages check
+the current frame source and expected origin, and hashes are bounded to 4096
+characters and used only as data (never raw selectors or HTML).
+
+Private shares use the same fragment bridge with their single-document shell.
+They synchronize parent deep links without broadening the grant to other HTML
+files. Legacy `/share/:token` serves the document directly and retains native
+browser fragment handling.
+
 ### Private viewer asset authorization
 
 The project iframe remains an **opaque-origin sandbox**, both in the shell attribute and the HTML response CSP. It never gets `allow-same-origin`; Better Auth's SameSite cookie policy is unchanged. The trusted parent can initiate a cookie-authenticated document navigation, but requests made by the sandbox itself cannot depend on that cookie.
