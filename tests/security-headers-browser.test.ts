@@ -1,4 +1,5 @@
 import { serve, type ServerType } from "@hono/node-server";
+import { once } from "node:events";
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { build } from "esbuild";
@@ -16,6 +17,17 @@ const consoleCsp: string[] = [];
 
 beforeAll(async () => {
   mockSecurityBackend();
+  // verify runs tests before build:assets, so a clean CI checkout has none of
+  // these ignored bundles. Build from source instead of reading stale local JS.
+  const assets = new Map<string, string>();
+  for (const [path, entry] of [
+    ["/private-viewer.js", "src/viewer/entry.ts"],
+    ["/lazy-tree.js", "src/lazy-tree/lazy-tree.ts"],
+    ["/commentor.js", "src/commentor/commentor.ts"],
+  ]) {
+    const bundle = await build({ entryPoints: [entry], bundle: true, write: false, format: "iife", platform: "browser" });
+    assets.set(path, bundle.outputFiles[0].text);
+  }
   // Exercise the real parent protocol and widget with a deterministic comment
   // backend. Auth/Convex services are fixture boundaries, not live accounts.
   const parent = await build({ stdin: { contents: `
@@ -29,21 +41,32 @@ beforeAll(async () => {
         });
       host.start();
     });`, resolveDir: process.cwd(), loader: "ts" }, bundle: true, write: false, platform: "browser" });
+  assets.set("/commentor-parent.js", parent.outputFiles[0].text);
   server = serve({ hostname: "127.0.0.1", port: 0, fetch: request => worker.fetch(request, {
     ASSETS: { fetch: async (assetRequest: Request) => {
       const path = new URL(assetRequest.url).pathname;
-      if (path === "/commentor-parent.js") return new Response(parent.outputFiles[0].text, { headers: { "Content-Type": "text/javascript" } });
+      if (assets.has(path)) return new Response(assets.get(path), { headers: { "Content-Type": "text/javascript" } });
       try {
         return new Response(await readFile(`public${path}`), { headers: { "Content-Type": path.endsWith(".js") ? "text/javascript" : path.endsWith(".svg") ? "image/svg+xml" : "image/webp" } });
       } catch { return new Response(null, { status: 404 }); }
     } },
   }) });
-  await new Promise<void>(resolve => server.on("listening", resolve));
+  if (!server.listening) await once(server, "listening", { signal: AbortSignal.timeout(5_000) });
   const address = server.address();
   if (!address || typeof address === "string") throw new Error("Missing fixture port");
   origin = `http://127.0.0.1:${address.port}`;
   browser = await chromium.launch({ executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH
-    ?? (existsSync("/usr/bin/chromium") ? "/usr/bin/chromium" : undefined) });
+    ?? (!process.env.CI && existsSync("/usr/bin/chromium") ? "/usr/bin/chromium" : undefined) });
+  const probe = await browser.newContext();
+  try {
+    const health = await probe.request.get(`${origin}/health`, { timeout: 5_000 });
+    expect(health.status(), "fixture server health check").toBe(200);
+    for (const path of assets.keys()) {
+      const response = await probe.request.get(origin + path, { timeout: 5_000 });
+      expect(response.status(), `fixture asset ${path}`).toBe(200);
+      expect(response.headers()["content-type"], `fixture asset MIME ${path}`).toBe("text/javascript");
+    }
+  } finally { await probe.close(); }
 }, 30_000);
 
 afterAll(async () => {
@@ -54,6 +77,8 @@ afterAll(async () => {
 
 async function pageFor(signedIn = false): Promise<Page> {
   const page = await browser.newPage({ ignoreHTTPSErrors: true });
+  page.setDefaultTimeout(5_000);
+  page.setDefaultNavigationTimeout(5_000);
   if (signedIn) await page.context().addCookies([{ name: "better-auth.session_token", value: "test-session", url: origin }]);
   await page.exposeFunction("recordViolation", (directive: string) => { violations.push(directive); });
   await page.addInitScript(() => {
@@ -65,15 +90,18 @@ async function pageFor(signedIn = false): Promise<Page> {
   if (!process.env.CSP_SMOKE_EXTERNAL) {
     // Offline CI: test origin allowances without depending on font/CDN uptime.
     // CSP_SMOKE_EXTERNAL=1 runs the same smoke against the real CDN/font assets.
-    await page.route("https://fonts.googleapis.com/**", route => route.fulfill({ contentType: "text/css", body: "" }));
-    await page.route("https://cdn.tailwindcss.com/**", route => route.fulfill({ contentType: "text/javascript", body: "window.tailwind={}" }));
-    await page.route("https://cdn.tailwindcss.com?**", route => route.fulfill({ contentType: "text/javascript", body: "window.tailwind={}" }));
+    await page.route(url => url.origin !== origin, route => {
+      const url = new URL(route.request().url());
+      if (url.hostname === "cdn.tailwindcss.com") return route.fulfill({ contentType: "text/javascript", body: "window.tailwind={}" });
+      if (url.hostname === "fonts.googleapis.com") return route.fulfill({ contentType: "text/css", body: "" });
+      return route.abort("blockedbyclient");
+    });
   }
   return page;
 }
 
 async function settled(page: Page) {
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("load");
   expect(violations).toEqual([]);
   expect(consoleCsp).toEqual([]);
 }
@@ -155,6 +183,7 @@ describe("Chromium security header smoke", () => {
 
   it("loads the opaque viewer, ticket CSS and comments postMessage bridge", async () => {
     const page = await pageFor(true);
+    let step = "install message observers before navigation";
     try {
       const messages: string[] = [];
       await page.exposeFunction("recordCommentMessage", (type: string) => { messages.push(type); });
@@ -166,16 +195,27 @@ describe("Chromium security header smoke", () => {
           }
         });
       });
+      step = "load viewer shell";
       await page.goto(origin + docsBase);
       if (process.env.CSP_SMOKE_EXTERNAL) expect(await page.evaluate(() => typeof (window as unknown as { tailwind?: unknown }).tailwind)).toBe("object");
-      const frameElement = page.locator("#content-frame");
-      await frameElement.waitFor({ state: "visible" });
-      const frame = page.frames().find(frame => frame.url().includes("/files/index.html"))!;
+      step = "tree script selects a document and reveals the iframe";
+      await page.locator("#content-frame").waitFor({ state: "visible" });
+      const frame = page.frameLocator("#content-frame");
+      step = "opaque document and comment widget load";
       await frame.locator("#commentor-host").waitFor({ state: "attached" });
-      await expect.poll(() => messages.includes("commentor-parent-update")).toBe(true);
-      expect(await frame.evaluate(() => getComputedStyle(document.body).color)).toBe("rgb(1, 2, 3)");
-      expect(await frame.evaluate(() => { try { void parent.document; return false; } catch { return true; } })).toBe(true);
+      step = "parent READY handshake delivers a comment update";
+      await expect.poll(() => messages.includes("commentor-parent-update"), {
+        timeout: 5_000, message: "commentor-parent-update must arrive after the READY handshake",
+      }).toBe(true);
+      step = "ticket stylesheet applies inside the opaque document";
+      await expect.poll(() => frame.locator("body").evaluate(body => getComputedStyle(body).color), {
+        timeout: 5_000, message: "ticket CSS must set the document body color",
+      }).toBe("rgb(1, 2, 3)");
+      expect(await frame.locator("body").evaluate(() => { try { void parent.document; return false; } catch { return true; } })).toBe(true);
+      step = "check shell and iframe CSP violations";
       await settled(page);
+    } catch (error) {
+      throw new Error(`Security-header viewer smoke stalled/failed at: ${step}`, { cause: error });
     } finally { await page.close(); }
   }, 20_000);
 });
