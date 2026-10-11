@@ -139,7 +139,7 @@ async function migrateTarget(
     console.log(`${target.legacyOrgSlug}: reusing completed migration ${deploymentId}`);
   } else {
     const started = await requestJson<{
-      deployment: { deploymentId: string };
+      deployment: { deploymentId: string; previousDeploymentId?: string };
     }>(`${endpoint}/api/rendro/deployments/start`, target.apiKey, {
       method: "POST",
       body: JSON.stringify({
@@ -162,6 +162,11 @@ async function migrateTarget(
     const deploymentUrl = `${endpoint}/api/rendro/deployments/${encodeURIComponent(deploymentId)}`;
     try {
       await checkpoint(rollback);
+      // The project can gain an active deployment after ensureProject checks it.
+      // Never let migration replace that work, even if start would permit it.
+      if (started.deployment.previousDeploymentId) {
+        throw new Error("Migration project gained an active deployment; retry after reviewing the destination");
+      }
       for (const file of files) {
         const object = await s3.send(new GetObjectCommand({ Bucket: bucket, Key: prefix + file.path }));
         if (!object.Body) throw new Error(`Unable to read ${prefix + file.path}`);

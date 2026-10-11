@@ -196,8 +196,8 @@ Request
   │   └─ /api/auth/* → Convex proxy
   ├─ 9. Worker-implemented API routes (forward Authorization)
   │   ├─ /api/rendro/deployments/check|start|fail, /:id/files/*, /:id/copy, /:id/commit
-   │   ├─ /api/rendro/publications (GET, POST), /api/rendro/publications/remove
-   │   └─ POST /api/rendro/migration/project
+  │   ├─ /api/rendro/publications (GET, POST), /api/rendro/publications/remove
+  │   └─ POST /api/rendro/migration/project
   ├─ 10. /api/rendro/* → generic Convex proxy (no Authorization)
   ├─ 11. Auth pages: /sign-in, /sign-up, /verify-email, /forgot-password, /reset-password, /account/security
   ├─ 12. Management pages
@@ -563,7 +563,7 @@ No workflow deploys the Worker or Convex, or publishes to npm.
 
 ### Legacy migration
 
-Legacy migration is still needed: slug-based publications, comments, `/share`, `/public`, and `/docs/:org` remain available, and production migration verification has not been recorded. Keep the migration tool until that verification is complete. It copies slug-prefixed object bytes into immutable deployments using the same Worker start/upload/commit protocol as `rendro push`.
+Legacy migration remains supported: slug-based publications, comments, `/share`, `/public`, and `/docs/:org` remain available, and production migration verification has not been recorded. Keep the migration tool until that verification is complete. It copies slug-prefixed object bytes into immutable deployments using the same Worker start/upload/commit protocol as `rendro push`.
 
 1. Set the same random `MIGRATION_SECRET` in Convex and the operator environment. Set `RENDRO_ENDPOINT` to the target Worker origin (default `http://localhost:3000`) and the `MINIO_*` variables to the source bucket.
 2. Create a JSON array containing `legacyOrgSlug`, Better Auth `organizationId`, an organization-scoped migration `apiKey`, and optionally `projectId`, `projectName`, and `legacyApiKey`. The current key needs `docs:write`; publication migration additionally needs `docs:read`, `publications:read`, and `publications:write`. The legacy key reads `/api/publications`. The target project must be empty or contain an identical completed migration from this legacy slug.

@@ -1,9 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Hono } from "hono";
+import type { main as migrationMain } from "../scripts/migrate-legacy-tenancy";
 import { createHash } from "node:crypto";
 import { GetObjectCommand, ListObjectsV2Command, S3Client } from "@aws-sdk/client-s3";
 
-const disk = vi.hoisted(() => ({ readFile: vi.fn(), writeFile: vi.fn() }));
+const disk = vi.hoisted(() => ({
+  readFile: vi.fn<(path: string, encoding: string) => Promise<string>>(),
+  writeFile: vi.fn<(path: string, contents: string, options?: { flag?: string; mode?: number }) => Promise<void>>(),
+}));
 const storage = vi.hoisted(() => ({ getObjectText: vi.fn(), putObject: vi.fn(), listAllKeys: vi.fn(), headObject: vi.fn(), copyObject: vi.fn() }));
 vi.mock("node:fs/promises", () => disk);
 vi.mock("../src/minio", () => storage);
@@ -13,17 +17,17 @@ import publicationRoutes from "../src/routes/publication-api";
 
 const target = { legacyOrgSlug: "old-org", organizationId: "org", apiKey: "scoped-key", legacyApiKey: "legacy-key" };
 const fixtures = new Map([
-  ["old-org/docs/z.html", "<h1>Last</h1>"],
-  ["old-org/docs/A file.html", "<h1>First</h1>"],
+  ["old-org/docs/a-last.html", "<h1>Last</h1>"],
+  ["old-org/docs/Z file.html", "<h1>First</h1>"],
 ]);
 const root = "tenants/org/projects/project/deployments/deployment";
 const app = new Hono().route("/", deploymentRoutes).route("/", migrationRoutes).route("/", publicationRoutes);
-let main: typeof import("../scripts/migrate-legacy-tenancy").main;
+let main: typeof migrationMain;
 let active: boolean;
 let starts: number;
 let commits: number;
 let failReason: string | undefined;
-let failure: "upload" | "commit" | "publication" | "start" | undefined;
+let failure: "upload" | "commit" | "publication" | "start" | "source-change" | "destination-change" | undefined;
 let sourceChanged: boolean;
 let publications: Array<Record<string, unknown>>;
 let objects: Map<string, string | Uint8Array>;
@@ -49,7 +53,9 @@ beforeEach(async () => {
   });
   storage.getObjectText.mockImplementation((key: string) => Promise.resolve(objects.get(key) ?? null));
   storage.listAllKeys.mockImplementation((prefix: string) => Promise.resolve([...objects.keys()].filter(key => key.startsWith(prefix))));
-  send = vi.spyOn(S3Client.prototype, "send").mockImplementation((command: unknown) => {
+  // Select the promise overload; the script never uses the SDK's callback form.
+  const source = S3Client.prototype as { send(command: unknown): Promise<unknown> };
+  send = vi.spyOn(source, "send").mockImplementation((command: unknown) => {
     if (command instanceof ListObjectsV2Command) {
       expect(command.input.Prefix).toBe("old-org/");
       const index = command.input.ContinuationToken ? 1 : 0;
@@ -69,7 +75,7 @@ beforeEach(async () => {
       if (url.pathname === "/api/publications") {
         expect(new Headers(init?.headers).get("Authorization")).toBe("Bearer legacy-key");
         return Response.json({ publications: [
-          { slug: "legacy-docs", sourcePrefix: "old-org/docs/", entryFile: "A file.html", title: "Legacy docs" },
+          { slug: "legacy-docs", sourcePrefix: "old-org/docs/", entryFile: "Z file.html", title: "Legacy docs" },
           { slug: "foreign", sourcePrefix: "another-org/docs/", entryFile: "index.html", title: "Foreign" },
         ] });
       }
@@ -93,9 +99,10 @@ beforeEach(async () => {
     if (path.endsWith("/deployments/start")) {
       if (failure === "start") return new Response("Invalid key", { status: 401 });
       starts++;
+      if (failure === "source-change") sourceChanged = true;
       expect(body.fileCount).toBe(2);
       expect(body.manifest).toBeUndefined(); // Worker strips manifest after validating its checksum.
-      return Response.json({ deployment: { deploymentId: "deployment", objectRoot: root, manifestKey: `${root}/manifest.json`, treeIndexKey: `${root}/tree-index.json` } });
+      return Response.json({ deployment: { deploymentId: "deployment", objectRoot: root, manifestKey: `${root}/manifest.json`, treeIndexKey: `${root}/tree-index.json`, ...(failure === "destination-change" ? { previousDeploymentId: "ordinary-deployment" } : {}) } });
     }
     if (path.endsWith("/deployments/staging")) {
       expect(url.searchParams.get("deploymentId")).toBe("deployment");
@@ -148,10 +155,10 @@ describe("legacy migration with mocked source storage and backend HTTP", () => {
     await main(["--map", "targets.json", "--apply"]);
     expect(starts).toBe(1); expect(commits).toBe(1);
     const manifest = JSON.parse(objects.get(`${root}/manifest.json`) as string);
-    expect(manifest.files.map((file: { path: string }) => file.path)).toEqual(["docs/A file.html", "docs/z.html"]);
+    expect(manifest.files.map((file: { path: string }) => file.path)).toEqual(["docs/Z file.html", "docs/a-last.html"]);
     expect(objects.has(`${root}/tree-index.json`)).toBe(true);
-    expect(Buffer.from(objects.get(`${root}/files/docs/A file.html`) as Uint8Array).toString()).toBe(fixtures.get("old-org/docs/A file.html"));
-    expect(storage.putObject).toHaveBeenCalledWith(`${root}/files/docs/A file.html`, expect.any(Uint8Array), "text/html", { sha256: manifest.files[0].sha256 });
+    expect(Buffer.from(objects.get(`${root}/files/docs/Z file.html`) as Uint8Array).toString()).toBe(fixtures.get("old-org/docs/Z file.html"));
+    expect(storage.putObject).toHaveBeenCalledWith(`${root}/files/docs/Z file.html`, expect.any(Uint8Array), "text/html", { sha256: manifest.files[0].sha256 });
     expect(publications).toEqual([expect.objectContaining({ slug: "legacy-docs", pathPrefix: "docs", trackingMode: "pinned", pinnedDeploymentId: "deployment" })]);
     expect(records()).toEqual([expect.objectContaining({ deploymentId: "deployment", publicationIds: ["publication"] })]);
   });
@@ -181,6 +188,27 @@ describe("legacy migration with mocked source storage and backend HTTP", () => {
     await expect(main(["--map", "targets.json", "--apply"])).rejects.toThrow(step === "upload" ? "Upload unavailable" : "Active deployment changed");
     expect(failReason).toContain(step === "upload" ? "Upload unavailable" : "Active deployment changed");
     expect(commits).toBe(0); expect(publications).toHaveLength(0);
+    expect(records()[0].deploymentId).toBe("deployment");
+  });
+
+  it("does not overwrite a deployment activated between project validation and start", async () => {
+    failure = "destination-change";
+    await expect(main(["--map", "targets.json", "--apply"])).rejects.toThrow("gained an active deployment");
+    expect(starts).toBe(1); expect(commits).toBe(0);
+    expect(failReason).toContain("gained an active deployment");
+    expect([...objects.keys()].some(key => key.includes("/files/"))).toBe(false);
+    expect(publications).toHaveLength(0);
+    expect(records()[0].deploymentId).toBe("deployment");
+  });
+
+  it("rejects source changes between hashing and upload without activating corrupt bytes", async () => {
+    failure = "source-change";
+    await expect(main(["--map", "targets.json", "--apply"])).rejects.toThrow("does not match its manifest entry");
+    expect(starts).toBe(1); expect(commits).toBe(0);
+    expect(active).toBe(false);
+    expect(failReason).toContain("does not match its manifest entry");
+    expect([...objects.keys()].some(key => key.includes("/files/"))).toBe(false);
+    expect(publications).toHaveLength(0);
     expect(records()[0].deploymentId).toBe("deployment");
   });
 
