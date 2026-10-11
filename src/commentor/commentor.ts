@@ -2186,7 +2186,7 @@ class Commentor {
       this.drawerList.append(h("div", { class: "empty", role: "status", "aria-live": "polite" },
         h("p", undefined, COMMENTOR_UPGRADE_NOTICE),
         ...(this.canReloadViewer
-          ? [h("button", { type: "button", onclick: () => this.parentTransport?.reloadViewer() }, "Reload page")]
+          ? [h("button", { type: "button", onclick: () => this.parentTransport?.requestViewerReload() }, "Show reload notice")]
           : [h("p", undefined, "Use your browser’s Reload button to reload the full page.")]),
       ));
       return;

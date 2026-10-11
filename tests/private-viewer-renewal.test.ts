@@ -217,6 +217,8 @@ describe("private viewer renewal", () => {
   });
 
   it("allows only the current opaque frame to request cookie-authenticated renewal", async () => {
+    let now = 0;
+    vi.spyOn(Date, "now").mockImplementation(() => now);
     const bus = events();
     const source = { postMessage: vi.fn() };
     const frame = { dataset: {} as Record<string, string>, src: `${origin}${base}/files/guide/index.html`, contentWindow: source };
@@ -234,12 +236,17 @@ describe("private viewer renewal", () => {
     expect(fetch).toHaveBeenCalledWith(`${base}/viewer-ticket?manifestKey=release%2Fmanifest.json`, expect.objectContaining({ credentials: "same-origin", cache: "no-store" }));
     expect(source.postMessage).toHaveBeenCalledWith({ type: "viewer-renewed", requestId: "request-1", prefix: `${base}/view/fresh/files/` }, "*");
 
+    // Completed responses do not reopen the parent renewal budget.
+    for (let i = 0; i < 100; i++) bus.emit("message", { source, origin: "null", data });
+    expect(fetch).toHaveBeenCalledOnce();
+    now += 30_000;
     source.postMessage.mockClear();
     fetch.mockResolvedValue(new Response(null, { status: 401 }));
     bus.emit("message", { source, origin: "null", data });
     await new Promise(resolve => setTimeout(resolve, 0));
     expect(source.postMessage).not.toHaveBeenCalled();
 
+    now += 30_000;
     let resolve!: (response: Response) => void;
     fetch.mockReturnValue(new Promise<Response>(done => { resolve = done; }));
     bus.emit("message", { source, origin: "null", data });
@@ -297,18 +304,22 @@ describe("deployment update notice", () => {
   });
 
   it("announces only the exact superseded signal and reloads only on user action", async () => {
+    let now = 0;
+    vi.spyOn(Date, "now").mockImplementation(() => now);
     const f = fixture();
     for (const [status, body] of [[401, {}], [404, {}], [503, {}], [409, { code: "unknown" }], [200, { code: "deployment_superseded" }]] as const) {
       f.fetch.mockResolvedValue(Response.json(body, { status }));
       f.request();
       await new Promise(resolve => setTimeout(resolve, 0));
       expect(f.notice.hidden).toBe(true);
+      now += 30_000;
     }
     f.fetch.mockResolvedValue(Response.json({ code: "deployment_superseded" }, { status: 409 }));
     f.request();
     await vi.waitFor(() => expect(f.notice.hidden).toBe(false));
     expect(f.notice.querySelector('[role="status"]')!.textContent).toBe("A newer version of this document was published.");
     expect(f.reload).not.toHaveBeenCalled();
+    f.notice.querySelector("button")!.click();
     f.notice.querySelector("button")!.click();
     expect(f.reload).toHaveBeenCalledOnce();
     f.bus.emit("load", { target: f.frame });

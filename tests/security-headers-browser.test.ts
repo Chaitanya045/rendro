@@ -8,7 +8,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import worker from "@/worker";
 import { COMMENTOR_PARENT_READY, COMMENTOR_PROTOCOL_VERSION } from "@/commentor/parent-protocol";
 import { createShareToken } from "@/share-links";
-import { docsBase, mockSecurityBackend, testUser } from "./fixtures/security-headers";
+import { docsBase, mockSecurityBackend, publisherHtml, testUser } from "./fixtures/security-headers";
 import { browserStep, bundleBrowserAsset, createBrowserHarness, waitForSettled } from "./helpers/browser";
 
 const harness = createBrowserHarness();
@@ -200,23 +200,26 @@ describe("Chromium security header smoke", () => {
       }).toBe("rgb(1, 2, 3)");
       expect(await frame.locator("body").evaluate(() => { try { void parent.document; return false; } catch { return true; } })).toBe(true);
       await settled(page);
-      expect(await page.locator('script[src="/commentor-parent.js?v=8"]').count()).toBe(1);
-      expect(await frame.locator('script[src="/commentor.js?v=42"]').count()).toBe(1);
-      const originalNonce = await page.locator('script[src="/commentor-parent.js?v=8"]').evaluate(script => (script as HTMLScriptElement).nonce);
+      expect(await page.locator('script[src="/commentor-parent.js?v=10"]').count()).toBe(1);
+      expect(await frame.locator('script[src="/commentor.js?v=43"]').count()).toBe(1);
+      const originalNonce = await page.locator('script[src="/commentor-parent.js?v=10"]').evaluate(script => (script as HTMLScriptElement).nonce);
       expect(originalNonce).not.toBe("");
 
-      // A version mismatch must reload the trusted shell via #19's message flow,
-      // without granting the opaque document top-navigation permissions.
+      // A version mismatch may only request the parent-owned notice. Reload
+      // requires a second, trusted action outside the opaque document.
       await page.locator("#content-frame").evaluate((element, ready) => {
         (element as HTMLIFrameElement).contentWindow!.postMessage(ready, "*");
       }, { type: COMMENTOR_PARENT_READY, protocolVersion: COMMENTOR_PROTOCOL_VERSION + 1, parentGeneration: "future", canReloadViewer: true });
       await frame.getByTestId("commentor-panel-btn").click();
-      await browserStep("reload the full viewer through the comment bridge", () => Promise.all([
+      await frame.getByRole("button", { name: "Show reload notice", exact: true }).click();
+      await page.getByRole("status").filter({ hasText: "Reload this document to continue." }).waitFor();
+      expect(await page.locator('script[src="/commentor-parent.js?v=10"]').evaluate(script => (script as HTMLScriptElement).nonce)).toBe(originalNonce);
+      await browserStep("reload through the parent-owned notice", () => Promise.all([
         page.waitForNavigation({ waitUntil: "load" }),
-        frame.getByRole("button", { name: "Reload page", exact: true }).click(),
+        page.getByRole("button", { name: "Reload", exact: true }).click(),
       ]));
       await expect.poll(() => messages.filter(type => type === "commentor-parent-update").length).toBeGreaterThan(1);
-      const refreshedNonce = await page.locator('script[src="/commentor-parent.js?v=8"]').evaluate(script => (script as HTMLScriptElement).nonce);
+      const refreshedNonce = await page.locator('script[src="/commentor-parent.js?v=10"]').evaluate(script => (script as HTMLScriptElement).nonce);
       expect(refreshedNonce).not.toBe("");
       expect(refreshedNonce).not.toBe(originalNonce);
       await settled(page);
@@ -224,6 +227,62 @@ describe("Chromium security header smoke", () => {
   });
 });
 
+
+describe("untrusted reload requests across viewer shells", () => {
+  it.each([
+    ["share", "/s/test", false, false],
+    ["public", "/p/product", false, false],
+    ["legacy public", "/public/example/product", false, false],
+    ["legacy private", "/docs/example/index.html", true, true],
+    ["private", `${docsBase}?doc=index.html`, true, true],
+  ] as const)("never navigates the %s shell without a parent gesture", async (_name, path, signedIn, offersNotice) => {
+    const stream = vi.mocked(minio.getObjectStream);
+    const original = stream.getMockImplementation()!;
+    stream.mockImplementation(key => key.endsWith(".css") ? original(key) : Promise.resolve(new Response(
+      publisherHtml.replace("</body>", `<script>
+        function requestReload() {
+          document.body.dataset.reloadRequests = String(Number(document.body.dataset.reloadRequests || 0) + 1);
+          if (!navigator.userActivation.hasBeenActive) {
+            document.body.dataset.unactivatedRequests = String(Number(document.body.dataset.unactivatedRequests || 0) + 1);
+          }
+          parent.postMessage({ type: 'commentor-viewer-reload', userActivation: true }, '*');
+        }
+        addEventListener('load', () => {
+          // Send an initial burst before automation can confer user activation.
+          for (let i = 0; i < 100; i++) requestReload();
+          setInterval(requestReload, 10);
+        });
+      </script></body>`),
+    ).body));
+    try {
+      const page = await pageFor(signedIn);
+      let navigations = 0;
+      page.on("request", request => {
+        if (request.isNavigationRequest() && request.frame() === page.mainFrame()) navigations++;
+      });
+      await page.goto(harness.origin + path);
+      let frame = (await (await page.locator("#content-frame").elementHandle())!.contentFrame())!;
+      await frame.waitForFunction(() => Number(document.body.dataset.reloadRequests) >= 125);
+      expect(Number(await frame.locator("body").getAttribute("data-unactivated-requests"))).toBeGreaterThanOrEqual(100);
+      expect(navigations).toBe(1);
+      const notice = page.getByRole("complementary", { name: "Document update" });
+      expect(await notice.count()).toBe(offersNotice ? 1 : 0);
+      if (offersNotice) {
+        expect(await notice.getByRole("status").getAttribute("aria-live")).toBe("polite");
+        const url = page.url();
+        const reload = notice.getByRole("button", { name: "Reload", exact: true });
+        await reload.focus();
+        await Promise.all([page.waitForEvent("load"), page.keyboard.press("Enter")]);
+        frame = (await (await page.locator("#content-frame").elementHandle())!.contentFrame())!;
+        await frame.waitForFunction(() => Number(document.body.dataset.reloadRequests) >= 125);
+        expect(page.url()).toBe(url);
+        expect(navigations).toBe(2);
+        expect(await notice.count()).toBe(1);
+      }
+      await settled(page);
+    } finally { stream.mockImplementation(original); }
+  });
+});
 
 describe("viewer accessibility under CSP", () => {
   it.each([

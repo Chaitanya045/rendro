@@ -154,10 +154,13 @@ describe("share fragment restoration", () => {
       else report("doc-fragment", "#details");
       report("doc-loaded", "#details");
       expect(win.location.hash).toBe("#details");
+      // Happy DOM emits hashchange for replaceState; drain it before the next report.
+      await new Promise(resolve => setTimeout(resolve, 0));
       report("doc-loaded", "#section");
-      expect(win.location.hash).toBe("#section");
+      await vi.waitFor(() => expect(win.location.hash).toBe("#section"));
+      await new Promise(resolve => setTimeout(resolve, 0));
       report("doc-loaded", "");
-      expect(win.location.hash).toBe("");
+      await vi.waitFor(() => expect(win.location.hash).toBe(""));
     } finally { await win.happyDOM.close(); }
   });
 });

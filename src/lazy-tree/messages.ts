@@ -1,5 +1,5 @@
 export function validRelativeDocumentPath(path: string): boolean {
-  return Boolean(path)
+  return path.length <= 4096 && Boolean(path)
     && !path.includes("\\")
     && path.split("/").every((part) => Boolean(part) && part !== "." && part !== "..");
 }
@@ -17,15 +17,6 @@ export function isContentFrameSource(
   contentWindow: WindowProxy | null,
 ): boolean {
   return contentWindow !== null && source === contentWindow;
-}
-
-export function loadedDocumentAction(
-  loadedPath: string,
-  currentPath: string | undefined,
-  expectedPath: string | null,
-): "ignore" | "sync" | "reload" {
-  if (expectedPath) return loadedPath === expectedPath ? "sync" : "ignore";
-  return Boolean(currentPath) && loadedPath !== currentPath ? "reload" : "sync";
 }
 
 /** Queries stay separate from authorized paths and cannot introduce a fragment. */

@@ -1,6 +1,6 @@
 import { decodeStoragePath, isLegacyStorageKey, legacyStoragePrefix } from "@/storage-boundary";
 import { CONVEX_URL } from "@/config";
-import { viewerScript } from "@/viewer/markup";
+import { viewerScript, viewerUpdateNotice } from "@/viewer/markup";
 import { renderCommentRecoveryLifecycle } from "../commentor/recovery-session";
 import { nonceAttribute } from "@/middleware/html-nonce";
 import { renderFaviconLinks } from "./favicon";
@@ -158,7 +158,7 @@ export interface ScopedDocumentShellOptions {
 function renderOrgDocs(user: User, org: string, selectedDoc = ""): string {
   logOrgAccess(org, user.email, "view");
   return renderOrgTreePage(user, org, selectedDoc, { sandboxed: true, legacyCommentConfig: { orgSlug: org, convexUrl: CONVEX_URL } })
-    .replace("</body>", viewerScript("parent", { base: `/legacy-view/${encodeURIComponent(org)}` }) + "</body>");
+    .replace("</body>", viewerUpdateNotice() + viewerScript("parent", { base: `/legacy-view/${encodeURIComponent(org)}` }) + "</body>");
 }
 
 export function renderPublicOrgDocs(publication: PublicShellPublication, selectedPath: string): string {
@@ -344,6 +344,8 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
   .tree-folder[data-depth="3"].open>.tree-item{top:calc(var(--tree-row-height) * 3);z-index:7}
   .tree-folder[data-depth="4"].open>.tree-item{top:calc(var(--tree-row-height) * 4);z-index:6}
   .tree-folder[data-depth="5"].open>.tree-item{top:calc(var(--tree-row-height) * 5);z-index:5}
+  .document-navigation-notice{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);z-index:1000;width:max-content;max-width:calc(100vw - 32px);padding:12px 16px;border:1px solid #e4e4e7;border-radius:8px;background:#fff;color:#09090b;box-shadow:0 4px 16px #0002}
+  html.dark .document-navigation-notice{background:#09090b;color:#fafafa;border-color:#27272a}
   .load-more-btn{display:inline-flex;align-items:center;justify-content:center;min-height:36px;padding:6px 10px;border:1px solid #e4e4e7;border-radius:6px;background:transparent;color:#c2410c;font:600 12px/20px Inter,system-ui,sans-serif;text-decoration:none;cursor:pointer;transition:background-color 150ms cubic-bezier(.4,0,.2,1),border-color 150ms cubic-bezier(.4,0,.2,1),transform 150ms cubic-bezier(.4,0,.2,1)}
   .load-more-btn:hover:not(:disabled){background:#f4f4f5;border-color:#d4d4d8}
   .load-more-btn:active:not(:disabled){transform:scale(.98)}
@@ -824,18 +826,24 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
       focusShellControl();
     }
   });
+  var lastFrameToggle=-Infinity,lastThemeReady=-Infinity;
   window.addEventListener("message",function(e){
     var allowedOrigin=e.origin===window.location.origin||(window.RENDRO_DOCUMENT_BASE&&e.origin==="null");
     if(!allowedOrigin||!e.data)return;
     if(e.data.type==="commentor-theme-ready"){
       var themeFrame=document.getElementById("content-frame");
       if(!themeFrame||e.source!==themeFrame.contentWindow)return;
+      if(performance.now()-lastThemeReady<100)return;
+      lastThemeReady=performance.now();
       notifyTheme(root.dataset.theme||normalizedTheme());
       return;
     }
     if(e.data.type!=="shell-toggle")return;
     var shellFrame=document.getElementById("content-frame");
     if(!shellFrame||e.source!==shellFrame.contentWindow)return;
+    if(!navigator.userActivation||navigator.userActivation.isActive!==true)return;
+    if(performance.now()-lastFrameToggle<1000)return;
+    lastFrameToggle=performance.now();
     setShellHidden(!root.classList.contains("shell-hidden"));
     if(!root.classList.contains("shell-hidden"))focusShellControl();
   });
@@ -890,8 +898,8 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
 </script>
 <script${nonceAttribute()}>window.RENDRO_INITIAL_DOC=${inlineJson(selectedDoc)};window.RENDRO_ORG=${inlineJson(org)};window.RENDRO_DOCUMENT_BASE=${inlineJson(documentBase)};window.RENDRO_PUBLICATION_BASE=${inlineJson(isPublicDocument ? documentBase : "")};window.RENDRO_SHARE_CONFIG=${inlineJson(options.shareConfig ?? null)};window.RENDRO_LEGACY_COMMENT_CONFIG=${inlineJson(options.legacyCommentConfig ?? null)};</script>
 ${renderCommentRecoveryLifecycle(user?.id ?? null, nonceAttribute())}
-${options.shareConfig?.convexUrl || options.legacyCommentConfig?.convexUrl ? `<script${nonceAttribute()} src="/commentor-parent.js?v=8"></script>` : ""}
-<script${nonceAttribute()} src="/lazy-tree.js?v=35"></script>
+${options.shareConfig?.convexUrl || options.legacyCommentConfig?.convexUrl ? `<script${nonceAttribute()} src="/commentor-parent.js?v=10"></script>` : ""}
+<script${nonceAttribute()} src="/lazy-tree.js?v=37"></script>
 </body>
 </html>`;
 }

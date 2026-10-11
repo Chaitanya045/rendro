@@ -21,6 +21,7 @@ export function replaceViewerFragment(fragment: string, host: Window = window): 
   if (!validFragment(fragment)) return;
   const url = new URL(host.location.href);
   url.hash = fragment;
+  if (url.href === host.location.href) return;
   host.history.replaceState(host.history.state, "", url);
 }
 

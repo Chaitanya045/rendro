@@ -456,7 +456,7 @@ The server uses a dedicated parser-based streaming injector to establish the tic
 - **Ticket:** a randomized, authenticated-encrypted JWE (`dir` / `A256GCM`), valid for 15 minutes. A domain-separated SHA-256 key is derived from the Worker's existing `AUTH_SECRET`; rotating that secret invalidates outstanding viewer tickets. The encrypted payload binds the organization, project, active manifest, and only the signed session-token cookie. No readable session material, API key, or cached session-data cookie is exposed to publisher code.
 - **Every request:** decrypt and validate the ticket, then ask Convex for the active deployment using the recovered session-token cookie. Convex freshly checks the persisted session, organization membership, and project ownership. The active manifest must still match the ticket, and the requested path must appear in that manifest before R2 is read. There is no authorization cache. Session revocation, membership removal, or changing the active deployment denies subsequent requests; already-rendered bytes cannot be recalled.
 - **Responses:** private assets and renewal responses are `private, no-store` with `Referrer-Policy: no-referrer`. Ticket-authorized responses permit `Access-Control-Allow-Origin: null` for opaque-origin fonts/modules, without credentialed CORS. The ticket is a scoped read capability, not a session replacement or permission to call application/comment APIs.
-- **Renewal:** `private-viewer.js` asks the trusted parent for a replacement after five minutes, checking once a minute and on focus, visibility, pageshow, or resource errors. The parent accepts messages only from its current opaque content frame and calls cookie-authenticated `…/docs/viewer-ticket?manifestKey=…`. A ticket cannot renew itself. New URLs replace the base and current image/media/stylesheet URLs in place. CSS Syntax tokenization resolves scoped `url()` values (quoted, unquoted, and escaped), string candidates in `image-set()` / `-webkit-image-set()`, `src()` strings, and `@import` strings in inline styles and `<style>` blocks to explicit renewed URLs; Chromium otherwise retains the old base in parsed CSS. URL tokens are handled across properties, including font sources (preserving `format()`), cursor, masks, list/border images, and generated content. Fragment-only references such as `filter: url(#id)` and data/blob/absolute/protocol-relative publisher URLs remain unchanged; only absolute CSS URLs previously emitted by the renewal client are renewed again. For each scoped stylesheet link, an adjacent clone retains the same attributes/media and cascade position while loading the renewed `href`. The active sheet is removed only after the replacement loads; a failed replacement is discarded and retried on a later renewal with exponential backoff (one minute, capped at fifteen). Per-link serialization coalesces overlapping renewals to the latest ticket, keeping at most one pending clone per active sheet. Reloading the parent reloads its `@import` graph, including nested imports; the link load event waits for these sheets, and nested CSS/image/font URLs inherit the new ticket. This keeps deferred resources working without reloading the document or losing comment drafts. Resuming a suspended tab can briefly fail a resource before renewal retries it. Offline, revoked, and expired-session viewers fail closed; reload the shell after signing in again. Superseded deployments also fail closed: after fresh session, membership and project authorization, renewal for a different project-scoped manifest returns `409 { code: "deployment_superseded" }` without issuing a ticket. The trusted shell announces "A newer version of this document was published." with a non-blocking Reload button. Renewal heartbeats and resource-error-triggered renewals both detect this state. Reload is user-initiated and preserves the entire current shell URL (document path, publisher query and fragment), along with the existing user/document-scoped sessionStorage comment drafts and pending operation identities. Stale responses after frame navigation are ignored; there is no automatic reload loop.
+- **Renewal:** `private-viewer.js` asks the trusted parent for a replacement after five minutes, checking once a minute and on focus, visibility, pageshow, or resource errors. The parent accepts messages only from its current opaque content frame and calls cookie-authenticated `…/docs/viewer-ticket?manifestKey=…`. A ticket cannot renew itself. New URLs replace the base and current image/media/stylesheet URLs in place. CSS Syntax tokenization resolves scoped `url()` values (quoted, unquoted, and escaped), string candidates in `image-set()` / `-webkit-image-set()`, `src()` strings, and `@import` strings in inline styles and `<style>` blocks to explicit renewed URLs; Chromium otherwise retains the old base in parsed CSS. URL tokens are handled across properties, including font sources (preserving `format()`), cursor, masks, list/border images, and generated content. Fragment-only references such as `filter: url(#id)` and data/blob/absolute/protocol-relative publisher URLs remain unchanged; only absolute CSS URLs previously emitted by the renewal client are renewed again. For each scoped stylesheet link, an adjacent clone retains the same attributes/media and cascade position while loading the renewed `href`. The active sheet is removed only after the replacement loads; a failed replacement is discarded and retried on a later renewal with exponential backoff (one minute, capped at fifteen). Per-link serialization coalesces overlapping renewals to the latest ticket, keeping at most one pending clone per active sheet. Reloading the parent reloads its `@import` graph, including nested imports; the link load event waits for these sheets, and nested CSS/image/font URLs inherit the new ticket. This keeps deferred resources working without reloading the document or losing comment drafts. Resuming a suspended tab can briefly fail a resource before renewal retries it. Offline, revoked, and expired-session viewers fail closed; reload the shell after signing in again. Superseded deployments also fail closed: after fresh session, membership and project authorization, renewal for a different project-scoped manifest returns `409 { code: "deployment_superseded" }` without issuing a ticket. The trusted shell announces "A newer version of this document was published." with a non-blocking Reload button. Renewal heartbeats and resource-error-triggered renewals both detect this state. Reload is user-initiated and preserves the entire current shell URL (document path, publisher query and fragment), along with the existing user/document-scoped sessionStorage comment drafts and pending operation identities. Stale responses after frame navigation are ignored; there is no automatic reload loop. The comment bridge’s `commentor-viewer-reload` message is also only a request for this parent-owned notice: publisher code and the widget share an opaque frame, so neither the sender nor claimed user activation authorizes navigation. Repeated requests leave the visible notice and its polite announcement unchanged. Private and legacy private shells provide the Reload control; share and public shells ignore this message. Widget-version recovery first offers the notice, then waits for the reader’s parent-side Reload.
 
 **Publisher URL contract:** use document-relative URLs (including relative paths inside CSS). URLs hard-coded to the canonical private `…/docs/files/` prefix and absolute/root-relative asset URLs cannot inherit the ticket and are not rewritten. An existing publisher `<base href>` is resolved against the canonical document URL: if it points within this project's private file tree, the injected base preserves its path/query/fragment through the ticket route. External or out-of-tree bases are left in control and receive no ticket base or renewal client activation. Publisher base markup is preserved, and (as required by HTML) must precede URL-bearing resources. Publisher scripts must not replace the managed ticket base. Configure the documentation generator's relative asset/base setting before publishing. Publisher JavaScript should resolve new resources against `document.baseURI` at request time rather than retaining ticket URLs beyond their lifetime. The renewal client updates common DOM resource attributes and styles, not arbitrary URL strings held in application state. Open the project shell for long-lived viewing; standalone file tabs have no trusted parent to renew tickets.
 
@@ -509,13 +509,59 @@ Client (lazy-tree.js, ~25KB IIFE built from src/lazy-tree/)
   │   ├─ On iframe load, keep tree feedback for the rest of the 520ms minimum window
   │   └─ history.pushState (?doc=<path> for scoped viewers, /docs/:org/:path for legacy)
   ├─ postMessage listener (current content iframe only)
-  │   ├─ doc-navigate → loadDoc(path, pushState)
-  │   ├─ doc-loaded → syncActiveState(path)
+  │   ├─ doc-navigate → parent authorization / confirmation → loadDoc(path, push/replace)
+  │   ├─ doc-loaded → acknowledge expected path (no navigation or tree fetch)
   │   └─ shell-toggle → Ctrl/Cmd+Shift+H inside the iframe toggles the shell
   └─ popstate / initial URL → loadDoc(path)
 ```
 
 The script URLs carry `?v=` cache-busting versions that change with each rebuild; read the current value in `src/routes/app.ts` rather than copying it.
+
+### Document navigation authorization
+
+The private, public and legacy tree shells own one navigation gate for their
+entire lifetime. A valid `doc-navigate` from the current content frame requires
+`navigator.userActivation.isActive === true` and an unused activation. The shell
+marks it used before replacing the iframe. Every 100ms it observes activation;
+only an observed `false` rearms the gate, and another request still requires
+`true`. Time alone never authorizes navigation, so this does not depend on a
+browser-specific activation timeout. Suspended/background polling fails closed.
+Back/Forward also marks the current activation used before restoring a document.
+Traversal ends the history burst separately: a subsequent parent-confirmed link
+starts a new entry so that Back can return to that restored document.
+
+An unverified or already-used activation offers a small parent-owned “Open
+linked document” notice. Its bounded path/query/fragment is assigned with
+`textContent`, never HTML. The first destination stays fixed while visible;
+repeated requests do not rewrite it, steal focus, or add notices. Dismissal
+suppresses notices until the next parent document navigation. The native button
+works with mouse and keyboard even when the activation API is absent. Shell
+`toggle` messages also fail closed when the API is absent. Share viewers retain
+their native, document-scoped navigation path.
+
+A first authorized navigation pushes history; explicit parent confirmations or
+tree selections while activation remains consumed replace that entry. Fragment
+reports also replace, never push. One Back therefore returns before the burst.
+Without the activation API, only parent controls can navigate, and confirmations
+within five seconds of the previous navigation replace its history entry. Rapid
+legitimate document links during one activation (about five seconds in Chromium)
+may need confirmation. A false-to-true transition missed between polling ticks
+also needs confirmation; this conservative trade-off preserves ordinary first
+mouse/keyboard links without treating iframe gesture claims as authority.
+
+**Why not consume activation directly?** The [HTML activation model](https://html.spec.whatwg.org/multipage/interaction.html#tracking-user-activation)
+consumes activation across the frame tree, but `UserActivation` only exposes
+read-only state. Its direct consume command is WebDriver-only, unavailable to
+page code. [Chromium documents `window.open()` consumption](https://developer.chrome.com/blog/user-activation),
+and [Firefox's window implementation](https://searchfox.org/mozilla-central/source/dom/base/nsGlobalWindowOuter.cpp)
+consumes when opening a new window, not when reusing an existing one.
+[WebKit documents consuming window/share flows](https://webkit.org/blog/13862/the-user-activation-api/)
+and also lists notification permission and payment-request UI. These operations
+have visible effects; attempting an invalid call or reusing a window is not a
+portable side-effect-free consume primitive. We therefore use observed
+inactivity, not a popup, permission prompt, or guessed timeout. The activation
+path applies to modern Chromium, [Firefox 120+](https://www.mozilla.org/en-US/firefox/120.0/releasenotes/),
+and [Safari 16.4+](https://webkit.org/blog/13966/webkit-features-in-safari-16-4/).
 
 ### Document Loading Lifecycle
 

@@ -17,6 +17,9 @@ const violations: string[] = [];
 const consoleCsp: string[] = [];
 const harness = createBrowserHarness();
 let publisherBase = "";
+let navigationAttack = false;
+let chainedNavigation = false;
+let missingActivationAttack = false;
 
 function publisherHtml(path: string): string {
   return `<!doctype html><html><head><meta charset="utf-8">${publisherBase}<title>Fragment fixture</title>
@@ -32,7 +35,30 @@ function publisherHtml(path: string): string {
     <h2 id="details">Details</h2><section></section><h2 id="section">Section</h2>
     <section></section><h2 id="日本語">Unicode target</h2><section></section>
     <h2 id="café">Encoded target</h2><section></section><a name="legacy">Named target</a><section></section>
-    <script>document.body.dataset.initializedQuery = location.search;</script>
+    <script>document.body.dataset.initializedQuery = location.search;
+    ${navigationAttack ? `
+      function flood(){for(let i=0;i<100;i++) {
+        parent.postMessage({type:'doc-navigate',path:'guide/other.html',search:'?forged='+i,fragment:'#section'},location.origin);
+        parent.postMessage({type:'doc-loaded',path:'guide/other.html'},location.origin);
+      }}
+      flood();
+      window.addEventListener('click', flood);
+    ` : ""}
+    ${chainedNavigation ? `
+      // Every replacement document tries the next hop, beyond the old 1s gate.
+      if (location.search) {
+        let hop = Number(new URLSearchParams(location.search).get('hop') || 0);
+        setInterval(() => parent.postMessage({type:'doc-navigate',path:'guide/other.html',search:'?hop='+ ++hop},location.origin), 1100);
+      }
+    ` : ""}
+    ${missingActivationAttack ? `
+      let attempt = 0;
+      setInterval(() => {
+        parent.postMessage({type:'doc-navigate',path:'guide/other.html',search:attempt++ ? '?later' : '?value=<img src=x onerror=alert(1)>',fragment:'#section'},location.origin);
+        parent.postMessage({type:'shell-toggle'},location.origin);
+      }, 200);
+    ` : ""}
+    </script>
     </body></html>`;
 }
 
@@ -76,7 +102,7 @@ beforeAll(async () => {
   });
 });
 
-beforeEach(() => { publisherBase = ""; requests.length = 0; violations.length = 0; consoleCsp.length = 0; });
+beforeEach(() => { navigationAttack = false; chainedNavigation = false; missingActivationAttack = false; publisherBase = ""; requests.length = 0; violations.length = 0; consoleCsp.length = 0; });
 
 afterEach(() => {
   expect(violations, "securitypolicyviolation events across shell and publisher frames").toEqual([]);
@@ -92,6 +118,10 @@ async function newPage(): Promise<Page> {
   const page = await harness.newPage();
   await page.exposeFunction("recordViolation", (value: string) => { violations.push(value); });
   await page.addInitScript(() => {
+    (window as unknown as { activations: boolean[] }).activations = [];
+    addEventListener("message", event => {
+      if (event.data?.type === "doc-navigate") (window as unknown as { activations: boolean[] }).activations.push(navigator.userActivation?.isActive ?? false);
+    });
     document.addEventListener("securitypolicyviolation", event => {
       (window as unknown as { recordViolation: (value: string) => void }).recordViolation(`${event.effectiveDirective}: ${event.blockedURI}`);
     });
@@ -143,6 +173,172 @@ async function atTarget(frame: Frame, id: string) {
 // Uses the actual route injectors, shell, and bundled bridge/tree in Chromium's
 // opaque-origin sandbox; DOM mocks cannot detect ticket-base navigations.
 describe("viewer fragment navigation in Chromium", () => {
+  it.each([privateBase, "/p/fixture", "/s/fixture"])("ignores forged navigation and load-report loops without a gesture in %s", async base => {
+    navigationAttack = true;
+    // Playwright's evaluate (including the nonce checks in open()) grants
+    // activation. Let the publisher attack run before any evaluated assertions.
+    const page = await newPage();
+    await page.goto(harness.origin + base);
+    const url = page.url();
+    const loads = requests.filter(path => path.includes("/files/")).length;
+    // No evaluate-generated input occurs until all unsolicited messages settle.
+    await page.waitForTimeout(1200);
+    expect(new URL(page.url()).pathname).toBe(new URL(url).pathname);
+    expect(new URL(page.url()).searchParams.has("docQuery")).toBe(false);
+    expect(requests.filter(path => path.includes("/files/")).length).toBe(loads);
+    expect(await page.evaluate(() => history.length)).toBe(2);
+    await page.close();
+  });
+
+  it.each([privateBase, "/p/fixture"])("propagates real opaque-frame click activation and bounds its message burst in %s", async base => {
+    navigationAttack = true;
+    const page = await newPage();
+    await page.goto(harness.origin + base);
+    await page.waitForTimeout(600);
+    const frame = page.frames().find(candidate => candidate.parentFrame() === page.mainFrame())!;
+    let navigations = 0;
+    page.on("framenavigated", navigated => { if (navigated === frame) navigations++; });
+    await frame.getByRole("link", { name: "Query one", exact: true }).click();
+    await readyFrame(page);
+    expect(new URL(page.url()).searchParams.get("docQuery")).toBe("?v=1");
+    expect(navigations).toBe(1);
+    expect(await page.evaluate(() => history.length)).toBe(3);
+    expect(await page.evaluate(() => (window as unknown as { activations: boolean[] }).activations.includes(true))).toBe(true);
+    navigationAttack = false;
+    await page.goBack();
+    await readyFrame(page);
+    expect(new URL(page.url()).searchParams.has("docQuery")).toBe(false);
+    await page.close();
+  });
+
+  it.each([privateBase, "/p/fixture"])("allows only one navigation across delayed replacement-frame requests in %s", async base => {
+    chainedNavigation = true;
+    const page = await newPage();
+    await page.goto(harness.origin + base);
+    await page.waitForTimeout(600);
+    const frame = page.frames().find(candidate => candidate.parentFrame() === page.mainFrame())!;
+    let navigations = 0;
+    page.on("framenavigated", candidate => { if (candidate === frame) navigations++; });
+    const initialUrl = page.url();
+    const loads = requests.filter(path => path.includes("/files/")).length;
+    await frame.getByRole("link", { name: "Query one", exact: true }).click();
+    // No evaluations or further input: those can grant activation in Playwright.
+    // The replacement keeps attempting hops throughout and beyond the full window.
+    await page.waitForTimeout(5700);
+    expect(navigations).toBe(1);
+    expect(requests.filter(path => path.includes("/files/")).length).toBe(loads + 1);
+    expect(new URL(page.url()).searchParams.get("docQuery")).toBe("?v=1");
+    expect(await page.locator("#document-navigation-notice").count()).toBe(1);
+    expect(await page.evaluate(() => history.length)).toBe(3);
+    await page.goBack();
+    await readyFrame(page);
+    expect(new URL(page.url()).searchParams.has("docQuery")).toBe(false);
+    expect(page.url()).toBe(initialUrl);
+    expect(new URL(frame.url()).pathname).toBe(`${base}/files/${documents[0]}`);
+    expect(await page.locator("#document-navigation-notice").count()).toBe(0);
+    await page.close();
+  });
+
+  it.each([privateBase, "/p/fixture"])("uses deduplicated text-only parent confirmation without userActivation in %s", async base => {
+    missingActivationAttack = true;
+    const page = await newPage();
+    await page.addInitScript(() => { Object.defineProperty(navigator, "userActivation", { value: undefined }); });
+    await page.goto(harness.origin + base);
+    await page.waitForTimeout(1600);
+    expect(new URL(page.url()).searchParams.has("docQuery")).toBe(false);
+    const notice = page.locator("#document-navigation-notice");
+    expect(await notice.count()).toBe(1);
+    expect(await notice.locator("p").textContent()).toBe("Open linked document guide/other.html?value=<img src=x onerror=alert(1)>#section?");
+    expect(await notice.locator("img").count()).toBe(0);
+    expect(await page.locator("html").getAttribute("class")).not.toContain("shell-hidden");
+    expect(requests.filter(path => path.includes("/files/")).length).toBe(1);
+    // Parent native button supports keyboard activation even without the API.
+    await notice.getByRole("button", { name: "Open linked document", exact: true }).press("Enter");
+    await readyFrame(page);
+    expect(new URL(page.url()).searchParams.get("doc")).toBe(documents[1]);
+    expect(new URL(page.url()).searchParams.get("docQuery")).toBe("?value=<img src=x onerror=alert(1)>");
+    expect(new URL(page.url()).hash).toBe("#section");
+    await page.waitForTimeout(400);
+    await notice.getByRole("button", { name: "Dismiss", exact: true }).click();
+    await page.waitForTimeout(600);
+    expect(await notice.count()).toBe(0);
+    expect(requests.filter(path => path.includes("/files/")).length).toBe(2);
+    await page.goBack();
+    await readyFrame(page);
+    expect(new URL(page.url()).searchParams.has("docQuery")).toBe(false);
+    await page.close();
+  });
+
+  it("coalesces a rapid legitimate confirmed link so one Back returns before the burst", async () => {
+    const { page, frame } = await open(privateBase);
+    await frame.getByRole("link", { name: "Query one", exact: true }).click();
+    await readyFrame(page);
+    await frame.getByRole("link", { name: "Query two", exact: true }).click();
+    await page.getByRole("button", { name: "Open linked document", exact: true }).click();
+    await readyFrame(page);
+    expect(new URL(page.url()).searchParams.get("docQuery")).toBe("?v=2");
+    expect(await page.evaluate(() => history.length)).toBe(3);
+    await page.goBack();
+    await readyFrame(page);
+    expect(new URL(page.url()).searchParams.has("docQuery")).toBe(false);
+    await page.goForward();
+    await readyFrame(page);
+    expect(new URL(page.url()).searchParams.get("docQuery")).toBe("?v=2");
+    await page.goBack();
+    await readyFrame(page);
+    await frame.getByRole("link", { name: "Query two", exact: true }).click();
+    await page.getByRole("button", { name: "Open linked document", exact: true }).click();
+    await readyFrame(page);
+    await page.goBack();
+    await readyFrame(page);
+    expect(new URL(page.url()).searchParams.has("docQuery")).toBe(false);
+    await page.close();
+  });
+
+  it("allows two legitimate sequential clicks after observing activation expiry", async () => {
+    const { page, frame } = await open(privateBase);
+    await frame.getByRole("link", { name: "Query one", exact: true }).click();
+    await readyFrame(page);
+    await page.waitForTimeout(5300);
+    await frame.getByRole("link", { name: "Query two", exact: true }).click();
+    await readyFrame(page);
+    expect(new URL(page.url()).searchParams.get("docQuery")).toBe("?v=2");
+    expect(await page.locator("#document-navigation-notice").count()).toBe(0);
+    expect(await page.evaluate(() => history.length)).toBe(4);
+    await page.close();
+  });
+
+  it.each([privateBase, "/p/fixture"])("propagates keyboard Enter activation from an opaque-frame link in %s", async base => {
+    const page = await newPage();
+    await page.goto(harness.origin + base);
+    await page.waitForTimeout(600);
+    const frame = page.frames().find(candidate => candidate.parentFrame() === page.mainFrame())!;
+    await frame.getByRole("link", { name: "Other page", exact: true }).press("Enter");
+    await readyFrame(page);
+    expect(new URL(page.url()).searchParams.get("doc")).toBe(documents[1]);
+    expect(new URL(page.url()).hash).toBe("#section");
+    expect(await page.evaluate(() => (window as unknown as { activations: boolean[] }).activations)).toEqual([true]);
+    expect(await page.evaluate(() => history.length)).toBe(3);
+    await page.close();
+  });
+
+  it.each([privateBase, "/p/fixture", "/s/fixture"])("coalesces fragment floods without history growth in %s", async base => {
+    const { page, frame } = await open(base);
+    const historyLength = await page.evaluate(() => {
+      const replace = history.replaceState.bind(history);
+      (window as unknown as { replaces: number }).replaces = 0;
+      history.replaceState = (...args) => { (window as unknown as { replaces: number }).replaces++; replace(...args); };
+      return history.length;
+    });
+    await frame.evaluate(() => {
+      for (let i = 0; i < 1000; i++) parent.postMessage({ type: "doc-fragment", path: "guide/page.html", fragment: `#flood-${i}` }, location.origin);
+    });
+    await expect.poll(() => new URL(page.url()).hash).toBe("#flood-999");
+    expect(await page.evaluate(() => (window as unknown as { replaces: number }).replaces)).toBeLessThanOrEqual(3);
+    expect(await page.evaluate(() => history.length)).toBe(historyLength);
+    await page.close();
+  });
+
   it.each([privateBase, "/p/fixture", "/s/fixture"])("scrolls without a reload and restores Unicode deep links in %s", async base => {
     const { page, frame } = await open(base);
     const errors: string[] = [];
@@ -236,6 +432,7 @@ describe("viewer fragment navigation in Chromium", () => {
       await atTarget(frame, "details");
       expect(await frame.locator("textarea").inputValue()).toBe("Keep same query draft");
       expect(requests.filter(path => path === `${base}/files/${documents[0]}`).length).toBe(loads);
+      await page.waitForTimeout(5300); // Let the parent observe the end of Chromium activation.
       await frame.getByRole("link", { name: "Query two", exact: true }).click();
       await initialized("?v=2");
       await atTarget(frame, "section");
@@ -251,6 +448,7 @@ describe("viewer fragment navigation in Chromium", () => {
         await browserStep("restore next history entry", () => page.goForward({ waitUntil: "domcontentloaded" }));
         await browserStep("wait for publisher initialization", () => restored.waitForFunction(() => document.body?.dataset.initializedQuery === "?v=2"));
         await atTarget(restored, "section");
+        await page.waitForTimeout(5300); // Back/Forward also consumes the parent navigation authorization.
         await restored.getByRole("link", { name: "Publisher doc query", exact: true }).click();
         await browserStep("wait for publisher initialization", () => restored.waitForFunction(() => document.body?.dataset.initializedQuery === "?doc=publisher&v=3"));
         expect(new URL(page.url()).searchParams.get("doc")).toBe(documents[0]);
@@ -277,6 +475,7 @@ describe("viewer fragment navigation in Chromium", () => {
     try {
       await frame.getByRole("link", { name: "Query one", exact: true }).click();
       await assertDestination("?v=1", "details");
+      await page.waitForTimeout(5300); // Let the parent observe the end of Chromium activation.
       await frame.getByRole("link", { name: "Query two", exact: true }).click();
       await assertDestination("?v=2", "section");
       await page.evaluate(() => history.back());
@@ -407,6 +606,7 @@ describe("viewer fragment navigation in Chromium", () => {
         await frame.getByRole("link", { name: "Unicode", exact: true }).click();
       }
       await assertOriginal();
+      await page.waitForTimeout(5300); // Let the parent observe the end of Chromium activation.
       await frame.getByRole("link", { name: "Query two", exact: true }).click();
       await browserStep("wait for publisher initialization", () => frame.waitForFunction(() => document.readyState === "complete" && document.body?.dataset.initializedQuery === "?v=2"));
       await browserStep("synchronize shell fragment", () => expect.poll(() => new URL(page.url()).hash).toBe("#section"));

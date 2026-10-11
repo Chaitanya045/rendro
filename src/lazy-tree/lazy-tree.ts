@@ -2,10 +2,10 @@
  * Lazy tree — sidebar document tree with Material Symbols icons,
  * max-height animations, active indicator, and border-line indentation.
  */
+import { coalesceMessage, createDocumentNavigationGate } from "../viewer/message-limits";
 import { replaceViewerFragment, sendDocumentFragment, validFragment } from "../viewer/fragments";
 import {
   isContentFrameSource,
-  loadedDocumentAction,
   normalizeLoadedDocumentPath,
   validRelativeDocumentPath,
   validDocumentSearch,
@@ -395,7 +395,7 @@ function handleClick(e: Event) {
   const path = item.dataset.path;
   if (path) {
     e.preventDefault();
-    loadDoc(path, true);
+    loadDoc(path, navigationGate.confirm());
   }
 }
 
@@ -475,7 +475,51 @@ function documentSearchFromLocation(): string {
   return validDocumentSearch(search) ? search : "";
 }
 
-function loadDoc(fullPath: string, pushState: boolean, fragment = "", search = "") {
+const navigationGate = createDocumentNavigationGate();
+let navigationNotice: HTMLElement | undefined;
+let navigationNoticeShown = false;
+
+function clearNavigationNotice() {
+  navigationNotice?.remove();
+  navigationNotice = undefined;
+  navigationNoticeShown = false;
+}
+
+function offerDocumentNavigation(fullPath: string, search: string, fragment: string) {
+  // Freeze the first request until the reader acts or the document changes.
+  // Floods cannot rewrite a focused button's destination, grow a queue, or
+  // repeatedly announce a prompt. Dismissal suppresses it for this document.
+  if (navigationNoticeShown) return;
+  navigationNoticeShown = true;
+  const notice = document.createElement("div");
+  notice.id = "document-navigation-notice";
+  notice.className = "document-navigation-notice";
+  const label = document.createElement("p");
+  label.id = "document-navigation-destination";
+  label.setAttribute("role", "status");
+  label.style.cssText = "margin:0 0 8px;overflow-wrap:anywhere;max-height:6em;overflow:auto";
+  label.textContent = `Open linked document ${relativeDocumentPath(fullPath)}${search}${fragment}?`;
+  const open = document.createElement("button");
+  open.type = "button";
+  open.className = "load-more-btn";
+  open.setAttribute("aria-describedby", label.id);
+  open.textContent = "Open linked document";
+  open.addEventListener("click", () => {
+    loadDoc(fullPath, navigationGate.confirm(), fragment, search);
+  });
+  const dismiss = document.createElement("button");
+  dismiss.type = "button";
+  dismiss.className = "load-more-btn";
+  dismiss.textContent = "Dismiss";
+  dismiss.style.marginLeft = "12px";
+  dismiss.addEventListener("click", () => { notice.remove(); navigationNotice = undefined; });
+  notice.append(label, open, dismiss);
+  navigationNotice = notice;
+  document.body.append(notice);
+}
+
+function loadDoc(fullPath: string, pushState: false | "push" | "replace", fragment = "", search = "") {
+  clearNavigationNotice();
   const frame = document.getElementById("content-frame") as HTMLIFrameElement | null;
   const placeholder = document.getElementById("main-placeholder");
   if (placeholder) placeholder.style.display = "none";
@@ -524,7 +568,7 @@ function loadDoc(fullPath: string, pushState: boolean, fragment = "", search = "
     if (search) url.searchParams.set("docQuery", search);
     else url.searchParams.delete("docQuery");
     url.hash = fragment;
-    history.pushState({ docPath: fullPath }, "", url);
+    history[pushState === "replace" ? "replaceState" : "pushState"]({ docPath: fullPath }, "", url);
   }
 }
 
@@ -564,30 +608,10 @@ function syncActiveState(fullPath: string) {
   void navigateToDoc(relPath);
 }
 
-async function reconcileLoadedDocument(fullPath: string): Promise<void> {
-  if (!ORG) return;
-  if (DOCUMENT_BASE) {
-    await ensureScopedDocuments();
-    const relativePath = relativeDocumentPath(fullPath);
-    if (!relativePath || !scopedDocuments?.includes(relativePath)) return;
-  }
-  // Re-read expected/current state after the async manifest check: a newer
-  // shell navigation may have started while that check was in flight.
-  const action = loadedDocumentAction(
-    fullPath,
-    RENDRO_WINDOW.RENDRO_CURRENT_DOC,
-    expectedLoadedPath,
-  );
-  if (action === "ignore") return;
-  if (expectedLoadedPath === fullPath) expectedLoadedPath = null;
-  if (action === "reload") {
-    // A publisher script can navigate its own iframe without updating the
-    // parent-owned src attribute. Reload once through the shell so security-
-    // sensitive parent integrations regain an authoritative URL scope.
-    loadDoc(fullPath, false);
-    return;
-  }
-  syncActiveState(fullPath);
+function reconcileLoadedDocument(fullPath: string): void {
+  // A load report is an acknowledgement, never authority to navigate or fetch
+  // tree data. The shell already selected and scoped the document in loadDoc.
+  if (fullPath === expectedLoadedPath) expectedLoadedPath = null;
 }
 
 function isDocumentMessage(value: unknown): value is { type: string; path: string; search?: unknown; fragment?: unknown } {
@@ -627,6 +651,13 @@ function init() {
       && activeEl
     ) refreshIndicator(false);
   });
+  // This shell survives iframe replacement. Never recreate its gate on load.
+  window.setInterval(navigationGate.observe, 100);
+  const updateFragment = coalesceMessage((update: { path: string; fragment: string; loadId: number }) => {
+    if (update.loadId === activeDocLoadId && update.path === RENDRO_WINDOW.RENDRO_CURRENT_DOC) {
+      replaceViewerFragment(update.fragment);
+    }
+  });
   window.addEventListener("message", (event) => {
     const frame = document.getElementById("content-frame") as HTMLIFrameElement | null;
     if (!isContentFrameSource(event.source, frame?.contentWindow ?? null)) return;
@@ -635,29 +666,38 @@ function init() {
     if (event.data.type === "doc-fragment") {
       if (!ORG || `${ORG}/${event.data.path}` !== RENDRO_WINDOW.RENDRO_CURRENT_DOC
         || !validFragment(event.data.fragment)) return;
-      replaceViewerFragment(event.data.fragment);
+      updateFragment({ path: `${ORG}/${event.data.path}`, fragment: event.data.fragment, loadId: activeDocLoadId });
     }
     if (event.data.type === "doc-navigate") {
       if (!ORG || !validRelativeDocumentPath(event.data.path)) return;
       const fragment = event.data.fragment === undefined ? "" : event.data.fragment;
       const search = event.data.search === undefined ? "" : event.data.search;
       if (!validFragment(fragment) || !validDocumentSearch(search)) return;
-      loadDoc(`${ORG}/${event.data.path}`, true, fragment, search);
+      const fullPath = `${ORG}/${event.data.path}`;
+      const targetUrl = new URL(location.href);
+      targetUrl.hash = fragment;
+      const target = JSON.stringify([fullPath, search, targetUrl.hash]);
+      const current = JSON.stringify([RENDRO_WINDOW.RENDRO_CURRENT_DOC, documentSearchFromLocation(), location.hash]);
+      const action = navigationGate.request(target, current);
+      if (action === "confirm") offerDocumentNavigation(fullPath, search, fragment);
+      else if (action) loadDoc(fullPath, action, fragment, search);
     }
     if (event.data.type === "doc-loaded") {
       if (!ORG) return;
       const loadedPath = normalizeLoadedDocumentPath(event.data.path, ORG);
-      if (loadedPath) void reconcileLoadedDocument(loadedPath);
+      if (loadedPath) reconcileLoadedDocument(loadedPath);
     }
   });
 
   // Browser back/forward
   window.addEventListener("popstate", (event) => {
+    navigationGate.suspend();
     const docPath = documentPathFromHistory(event.state) || docFromPathname();
     if (docPath) loadDoc(docPath, false, location.hash, documentSearchFromLocation());
   });
 
   window.addEventListener("hashchange", () => {
+    updateFragment.cancel();
     const frame = document.getElementById("content-frame") as HTMLIFrameElement | null;
     const current = RENDRO_WINDOW.RENDRO_CURRENT_DOC;
     if (frame && current) sendDocumentFragment(frame, relativeDocumentPath(current), location.hash);

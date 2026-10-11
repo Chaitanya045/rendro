@@ -1,3 +1,4 @@
+import { createMessageRateLimit } from "./message-limits";
 import { rewriteCssUrls } from "./css-urls";
 import { createStylesheetRenewer } from "./stylesheets";
 
@@ -5,12 +6,13 @@ interface ParentConfig { base: string }
 interface FrameConfig extends ParentConfig { prefix: string; manifestKey: string; deploymentId: string }
 interface RenewalMessage { type?: string; requestId?: string; deploymentId?: string; manifestKey?: string; prefix?: string }
 
-export function showViewerUpdateNotice(host: Window = window): void {
+export function showViewerUpdateNotice(host: Window = window, message = "A newer version of this document was published."): void {
   const notice = host.document.getElementById("viewer-update-notice");
-  if (!notice) return;
+  // Repeated requests must not rewrite the live region or disturb the reader.
+  if (!notice || !notice.hidden) return;
   notice.hidden = false;
   const status = notice.querySelector('[role="status"]');
-  if (status) status.textContent = "A newer version of this document was published.";
+  if (status) status.textContent = message;
 }
 
 /** Called only by the parent's authenticated Convex subscription. */
@@ -26,9 +28,16 @@ export function updateViewerActiveDeployment(deploymentId: string | null, host: 
 
 export function installViewerParent(config: ParentConfig, host: Window = window): void {
   let pending = false;
+  // Match the ticket/heartbeat clock while enforcing the budget in the parent.
+  const allowRenewal = createMessageRateLimit(30_000, () => Date.now());
   let generation = 0;
   const notice = host.document.getElementById("viewer-update-notice");
-  notice?.querySelector("button")?.addEventListener("click", () => host.location.reload());
+  const reload = notice?.querySelector("button");
+  reload?.addEventListener("click", () => {
+    if (notice?.hidden || reload.disabled) return;
+    reload.disabled = true;
+    host.location.reload();
+  });
   host.addEventListener("load", event => {
     if (event.target !== host.document.getElementById("content-frame")) return;
     generation++;
@@ -50,7 +59,7 @@ export function installViewerParent(config: ParentConfig, host: Window = window)
       return;
     }
     if (data.type !== "viewer-renew" || typeof data.manifestKey !== "string" || data.manifestKey.length > 2048
-      || typeof data.requestId !== "string" || data.requestId.length > 128 || pending) return;
+      || typeof data.requestId !== "string" || data.requestId.length > 128 || pending || !allowRenewal()) return;
     pending = true;
     const source = frame.contentWindow;
     const requestedGeneration = generation;

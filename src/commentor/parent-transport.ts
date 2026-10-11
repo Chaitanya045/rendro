@@ -173,7 +173,8 @@ export class ParentCommentTransport {
     this.mutations.clear();
   }
 
-  reloadViewer(): void {
+  // Compatibility message name; the parent only offers its own Reload control.
+  requestViewerReload(): void {
     if (this.canReloadViewer) this.parent.postMessage({ type: COMMENTOR_VIEWER_RELOAD }, "*");
   }
 
