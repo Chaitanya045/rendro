@@ -1,3 +1,4 @@
+import { decodeStoragePath } from "@/storage-boundary";
 import { validDocumentSearch } from "@/lazy-tree/messages";
 import { escapeHtml } from "@/routes/html";
 import { assetContentType, assetHeaders } from "@/routes/asset-headers";
@@ -27,17 +28,9 @@ async function resolveShare(token: string): Promise<ShareResolution | null> {
   return response.ok ? response.json() as Promise<ShareResolution> : null;
 }
 
-function safePath(value: string): string | null {
-  let path: string;
-  try { path = decodeURIComponent(value).replace(/^\/+/, ""); } catch { return null; }
-  return path && !path.includes("\\") && path.split("/").every((part) => part && part !== "." && part !== "..")
-    ? path
-    : null;
-}
-
 app.get("/s/:token/files/*", async (c) => {
   const resolution = await resolveShare(c.req.param("token"));
-  const path = safePath(c.req.path.slice(c.req.path.indexOf("/files/") + 7));
+  const path = decodeStoragePath(c.req.path.slice(c.req.path.indexOf("/files/") + 7));
   if (!resolution || !path) return c.html(renderNotFoundPage({ path: c.req.path }), 404);
   const documentPath = resolution.grant.documentPath;
   const directory = documentPath.includes("/") ? documentPath.slice(0, documentPath.lastIndexOf("/") + 1) : "";

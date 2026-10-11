@@ -1,4 +1,4 @@
-import { isLegacyStorageKey, isLegacyStoragePrefix, legacyStoragePrefix } from "@/storage-boundary";
+import { isCanonicalStorageKey, isLegacyStorageKey, isLegacyStoragePrefix, legacyStoragePrefix } from "@/storage-boundary";
 import {
   deleteObject,
   getObjectStream,
@@ -31,41 +31,15 @@ export class PublicationError extends Error {
   }
 }
 
-function decodeRepeatedly(value: string): string | null {
-  let decoded = value;
-  try {
-    for (let pass = 0; pass < 3; pass++) {
-      const next = decodeURIComponent(decoded);
-      if (next === decoded) return decoded;
-      decoded = next;
-    }
-    return decoded.includes("%") ? null : decoded;
-  } catch {
-    return null;
-  }
-}
-
-function hasUnsafeSegments(value: string): boolean {
-  if (!value || value.includes("\\")) return true;
-  for (const character of value) {
-    if (character.charCodeAt(0) < 32) return true;
-  }
-  const segments = value.split("/");
-  return segments.some((segment) => !segment || segment === "." || segment === "..");
-}
-
 function normalizeSourcePrefix(orgSlug: string, value: string): string | null {
-  const decoded = decodeRepeatedly(value.trim());
-  if (!decoded || !isLegacyStoragePrefix(orgSlug, decoded) || !decoded.endsWith("/")) return null;
-  const relative = decoded.slice(orgSlug.length + 1, -1);
-  return hasUnsafeSegments(relative) ? null : `${orgSlug}/${relative}/`;
+  if (!isLegacyStoragePrefix(orgSlug, value)) return null;
+  const relative = value.slice(orgSlug.length + 1, -1);
+  return isCanonicalStorageKey(relative) ? value : null;
 }
 
+/** Accept a canonical key, including literal percent signs; never URL-decode it. */
 export function normalizeDocumentPath(value: string): string | null {
-  const decoded = decodeRepeatedly(value.trim().replace(/^\/+/, ""));
-  if (!decoded || decoded.endsWith("/") || hasUnsafeSegments(decoded)) return null;
-  if (!decoded.toLowerCase().endsWith(".html")) return null;
-  return decoded;
+  return isCanonicalStorageKey(value) && value.toLowerCase().endsWith(".html") ? value : null;
 }
 
 function recordKey(orgSlug: string, slug: string): string {

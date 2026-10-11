@@ -1,5 +1,5 @@
 import { assetHeaders } from "@/routes/asset-headers";
-import { decodeStoragePath, modernStoragePrefix, modernStorageKey } from "@/storage-boundary";
+import { decodeStoragePath, isCanonicalStorageKey, modernStoragePrefix, modernStorageKey } from "@/storage-boundary";
 import { Hono } from "hono";
 import { createViewerTicket, readViewerTicket, viewerSessionCookie } from "@/viewer-ticket";
 import { viewerScript } from "@/viewer/markup";
@@ -187,9 +187,10 @@ app.get("/organizations/:organizationId/projects/:projectId/docs", async (c) => 
   const documents = manifest.files
     .filter((file) => file.contentType.startsWith("text/html"))
     .map((file) => file.path);
+  // Hono has already decoded the query parameter; validate the literal key.
   const requested = c.req.query("doc");
   const selectedPath = requested
-    ? decodeStoragePath(requested)
+    ? (isCanonicalStorageKey(requested) ? requested : null)
     : documents.includes("index.html") ? "index.html" : documents[0];
   if (!selectedPath || !documents.includes(selectedPath)) {
     return c.html(renderNotFoundPage({ path: c.req.path }), 404);

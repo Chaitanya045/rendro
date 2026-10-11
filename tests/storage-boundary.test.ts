@@ -2,6 +2,7 @@ import { createHmac } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { EncryptJWT } from "jose";
 import worker from "@/worker";
+import { decodeStoragePath, isCanonicalStorageKey, modernStorageKey } from "@/storage-boundary";
 import { AUTH_SECRET } from "@/config";
 import * as minio from "@/minio";
 import * as deletion from "@/soft-delete";
@@ -99,7 +100,6 @@ describe("disjoint storage authorization", () => {
     "tenants/org-b/projects/project-a/deployments/deploy-a/manifest.json",
     "tenants/org-a/projects/project-b/deployments/deploy-a/manifest.json",
     "tenants/org-a/projects/project-a/deployments/../manifest.json",
-    "tenants/org-a/projects/project-a/deployments/%252e%252e/manifest.json",
     "tenants/org-a/projects/project-a/deployments//manifest.json",
   ])("rejects modern scopes outside their canonical project namespace: %s", async key => {
     backend(testUser.email, key);
@@ -111,13 +111,108 @@ describe("disjoint storage authorization", () => {
     noStorageReads();
   });
 
-  it.each(["%2e%2e%2findex.html", "%252e%252e/index.html", "guide//index.html", "guide%2findex.html", "%255cindex.html", "%00index.html"])(
+  it.each(["%2e%2e/index.html", "%2e%2e%2findex.html", "guide//index.html", "guide%2findex.html", "%5cindex.html", "%00index.html", "%7findex.html", "%2findex.html"])(
     "rejects ambiguous and encoded traversal in both ticket readers: %s", async path => {
       const legacy = await createLegacyViewerTicket("example", cookie);
       const modern = await createViewerTicket(scope);
       expect((await request(`/legacy-view/example/view/${legacy}/files/${path}`)).status).toBe(404);
       expect((await request(`${docsBase}/view/${modern}/files/${path}`)).status).toBe(404);
       noStorageReads();
+    },
+  );
+
+  it.each(["100%.html", "literal%25.html", "%2e%2e/index.html", "%5cindex.html", "Case.html", "case.html", "é.html", "e\u0301.html", "folder./index.html"])(
+    "preserves literal storage keys through upload, legacy access and existing shares: %s", async path => {
+      const key = `example/${path}`;
+      const encoded = path.split("/").map(encodeURIComponent).join("/");
+      const content = `<h1>${path}</h1>`;
+      const objects = new Map<string, string>();
+      vi.spyOn(apiKeys, "validateApiKey").mockResolvedValue("example");
+      vi.spyOn(deletion, "unmarkDeleted").mockResolvedValue(undefined);
+      vi.spyOn(minio, "putObject").mockImplementation((key, body) => { objects.set(key, String(body)); return Promise.resolve(); });
+      vi.mocked(minio.headObject).mockImplementation(key => Promise.resolve(objects.has(key) ? { contentType: "text/html" } : null));
+      vi.mocked(minio.getObjectStream).mockImplementation(key => Promise.resolve(objects.has(key) ? new Response(objects.get(key)).body : null));
+      const uploaded = await worker.fetch(new Request("https://rendro.test/api/sync/upload", {
+        method: "POST", headers: { Authorization: "Bearer fixture", "Content-Type": "application/json" },
+        body: JSON.stringify({ key, content }),
+      }), {});
+      expect(uploaded.status).toBe(200);
+      expect([...objects.keys()]).toEqual([key]);
+      const bookmark = await request(`/files/example/${encoded}`, true);
+      expect(bookmark.status).toBe(302);
+      expect(bookmark.headers.get("location")).toBe(`/docs/example/${encoded}`);
+      expect((await request(bookmark.headers.get("location")!, true)).status).toBe(200);
+      const ticket = await createLegacyViewerTicket("example", cookie);
+      // An existing share is signed directly, independently of the current issuer.
+      const payload = Buffer.from(JSON.stringify({ k: key, e: Math.floor(Date.now() / 1000) + 60 })).toString("base64url");
+      const signature = createHmac("sha256", AUTH_SECRET).update(payload).digest("base64url");
+      for (const url of [
+        `/legacy-view/example/files/${encoded}`,
+        `/legacy-view/example/view/${ticket}/files/${encoded}`,
+        `/share/${payload}.${signature}`,
+        `/public/example/product/files/${encoded}`,
+      ]) {
+        const response = await request(url, true);
+        expect(response.status, url).toBe(200);
+        expect(await response.text()).toContain(content);
+      }
+      expect(vi.mocked(minio.getObjectStream).mock.calls.map(([key]) => key)).toEqual(Array(4).fill(key));
+      const checked = await worker.fetch(new Request(`https://rendro.test/api/sync/check?key=${encodeURIComponent(key)}`, {
+        headers: { Authorization: "Bearer fixture" },
+      }), {});
+      expect(checked.status).toBe(200);
+      expect(await checked.json()).toMatchObject({ exists: true });
+      expect(minio.headObject).toHaveBeenLastCalledWith(key);
+    },
+  );
+
+  it.each(["%252e%252e/index.html", "%255cindex.html", "%252findex.html"])(
+    "contains double encodings as literal keys in both ticket readers: %s", async encoded => {
+      const path = decodeURIComponent(encoded);
+      const legacy = await createLegacyViewerTicket("example", cookie);
+      const modern = await createViewerTicket(scope);
+      const key = modernStorageKey(scope, path)!;
+      vi.mocked(minio.getObjectText).mockResolvedValue(JSON.stringify({ version: 1, files: [{ path, contentType: "text/html" }] }));
+      for (const url of [
+        `/legacy-view/example/view/${legacy}/files/${encoded}`,
+        `${docsBase}/view/${modern}/files/${encoded}`,
+      ]) expect((await request(url)).status).toBe(200);
+      expect(vi.mocked(minio.getObjectStream).mock.calls.map(([key]) => key)).toEqual([`example/${path}`, key]);
+      expect(key).toBe(manifestKey.replace("manifest.json", `files/${path}`));
+    },
+  );
+
+  it.each(["100%.html", "literal%25.html", "%2e%2e/index.html", "%2findex.html"])(
+    "decodes modern file URLs and shell queries only once: %s", async path => {
+      const encoded = path.split("/").map(encodeURIComponent).join("/");
+      const key = modernStorageKey(scope, path)!;
+      vi.mocked(minio.getObjectText).mockResolvedValue(JSON.stringify({ version: 1, files: [{ path, contentType: "text/html" }] }));
+      const originalFetch = globalThis.fetch;
+      vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+        const response = await originalFetch(input, init);
+        const result = await response.json();
+        if (result.grant) result.grant.documentPath = path;
+        return Response.json(result);
+      }));
+      for (const base of [docsBase, "/p/product", "/s/fixture"]) {
+        expect((await request(`${base}?doc=${encodeURIComponent(path)}`, true)).status).toBe(200);
+        expect((await request(`${base}/files/${encoded}`, true)).status).toBe(200);
+      }
+      expect(vi.mocked(minio.getObjectStream).mock.calls.map(([key]) => key)).toEqual(Array(3).fill(key));
+    },
+  );
+
+  it("treats percent-encoded-looking deployment IDs as literal scoped keys", async () => {
+    const key = "tenants/org-a/projects/project-a/deployments/%252e%252e/manifest.json";
+    const scoped = { ...scope, manifestKey: key };
+    await expect(createViewerTicket(scoped)).resolves.toEqual(expect.any(String));
+    expect(modernStorageKey(scoped, "index.html")).toBe(key.replace("manifest.json", "files/index.html"));
+  });
+
+  it.each(["../index.html", "/index.html", "guide//index.html", "guide/./index.html", "guide/../index.html", "\\index.html", "\0index.html", "\x1findex.html", "\x7findex.html"])(
+    "rejects structurally unsafe canonical keys: %s", path => {
+      expect(isCanonicalStorageKey(path)).toBe(false);
+      expect(decodeStoragePath(path.split("/").map(encodeURIComponent).join("/"))).toBeNull();
     },
   );
 

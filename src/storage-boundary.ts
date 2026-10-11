@@ -1,7 +1,8 @@
 /** Storage keys are decoded exactly once at the HTTP boundary. Never normalize
- * an ambiguous key into an authorized one: reject it before any storage access. */
+ * an ambiguous key into an authorized one: reject it before any storage access.
+ * Percent signs in a canonical key are literal data, never another URL encoding. */
 export function isCanonicalStorageKey(key: string): boolean {
-  return !!key && !/[\\%]/.test(key)
+  return !!key && !key.includes("\\")
     && [...key].every(char => char.charCodeAt(0) >= 32 && char.charCodeAt(0) !== 127)
     && key.split("/").every(part => !!part && part !== "." && part !== "..");
 }
