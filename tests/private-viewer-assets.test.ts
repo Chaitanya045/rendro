@@ -37,15 +37,18 @@ async function fixture() {
   await context.test!.saveUser(user);
   const login = await context.test!.login({ userId: user.id });
   const cookie = login.headers.get("cookie")!;
-  const state = { member: true, manifestKey, activeCalls: 0 };
+  const state = { member: true, manifestKey, activeCalls: 0, sessionCalls: 0, failSession: false, failActive: undefined as (() => Promise<Response> | Response) | undefined };
   const backend = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
     const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url);
     const headers = new Headers(init?.headers);
     if (url.pathname === "/api/auth/get-session") {
+      state.sessionCalls++;
+      if (state.failSession) return new Response(null, { status: 503, headers: { "Retry-After": "60" } });
       return auth.handler(new Request("http://localhost:3000/api/auth/get-session", { headers }));
     }
     if (url.pathname === "/api/rendro/deployments/active") {
       state.activeCalls++;
+      if (state.failActive) return state.failActive();
       // Real persisted Better Auth session validation, with mutable membership
       // and project/deployment results at the Convex HTTP boundary.
       const session = await auth.api.getSession({ headers });
@@ -78,6 +81,105 @@ async function fixture() {
 }
 
 describe("private sandbox asset routing", () => {
+  it("skips the redundant cookie lookup on ticket assets while still revalidating authorization", async () => {
+    const f = await fixture();
+    const { url } = await f.document();
+    f.state.sessionCalls = 0;
+    const activeBefore = f.state.activeCalls;
+    f.state.failSession = true;
+    const headers = { Cookie: f.cookie };
+    expect((await f.app.request(new URL("assets/site.css", url).href, { headers })).status).toBe(200);
+    expect(f.state.sessionCalls).toBe(0);
+    expect(f.state.activeCalls).toBe(activeBefore + 1);
+    f.state.member = false;
+    expect((await f.app.request(new URL("assets/site.css", url).href, { headers })).status).toBe(404);
+    expect(f.state.sessionCalls).toBe(0);
+    expect(f.state.activeCalls).toBe(activeBefore + 2);
+  });
+
+  const routes = ["shell", "canonical", "tree", "renewal", "ticket"] as const;
+  function routePath(route: typeof routes[number], ticketUrl: URL) {
+    return route === "shell" ? base : route === "canonical" ? `${base}/files/guide/index.html`
+      : route === "tree" ? `${base}/tree` : route === "renewal" ? `${base}/viewer-ticket?manifestKey=${manifestKey}`
+        : new URL("assets/site.css", ticketUrl).href;
+  }
+  it.each(routes)("returns retryable 503 for downstream authorization failures on %s", async route => {
+    const f = await fixture();
+    const { url } = await f.document();
+    const failures = [
+      () => new Response(null, { status: 429, headers: { "Retry-After": "60" } }),
+      () => new Response(null, { status: 500 }),
+      () => new Response(null, { status: 503 }),
+      () => new Response(null, { status: 302, headers: { Location: "/sign-in" } }),
+      () => Promise.reject(new Error("secret backend error")),
+      () => new Response("secret malformed JSON"),
+      () => Response.json({ project: {}, deployment: {} }),
+    ];
+    f.objects.mockClear();
+    for (const fail of failures) {
+      f.state.failActive = fail;
+      const response = await f.app.request(routePath(route, url), { headers: route === "ticket" ? {} : { Cookie: f.cookie } });
+      expect(response.status).toBe(503);
+      expect(response.headers.get("retry-after")).toBe(fail === failures[0] ? "60" : "1");
+      expect(response.headers.get("cache-control")).toBe("private, no-store");
+      expect(response.headers.get("location")).toBeNull();
+      const body = await response.text();
+      expect(body).not.toMatch(/secret|Document unavailable/);
+      if (route === "tree" || route === "renewal") expect(JSON.parse(body).retryable).toBe(true);
+      else expect(body).toContain('href="">Try again</a>');
+    }
+    expect(f.objects).not.toHaveBeenCalled();
+  });
+
+  it.each(routes)("reserves 404 for authoritative absence/denial on %s", async route => {
+    const f = await fixture();
+    const { url } = await f.document();
+    for (const fail of [
+      ...[401, 403, 404].map(status => () => new Response(null, { status })),
+      () => Response.json(null),
+      () => Response.json({ project: { name: "Docs" }, deployment: null }),
+    ]) {
+      f.state.failActive = fail;
+      expect((await f.app.request(routePath(route, url), { headers: route === "ticket" ? {} : { Cookie: f.cookie } })).status).toBe(404);
+    }
+  });
+
+  it.each(routes.filter(route => route !== "ticket"))("returns 503 for middleware lookup failures on %s", async route => {
+    const f = await fixture();
+    const { url } = await f.document();
+    f.state.failSession = true;
+    const response = await f.app.request(routePath(route, url), { headers: { Cookie: f.cookie, Accept: "text/html" } });
+    expect(response.status).toBe(503);
+    expect(response.headers.get("retry-after")).toBe("60");
+  });
+
+  it.each([false, true])("bounds downstream authorization timeout including body reads (%s)", async bodyStalls => {
+    const f = await fixture();
+    const { url } = await f.document();
+    vi.useFakeTimers();
+    const fetchMock = vi.fn((_url: string, init: RequestInit) => {
+      const signal = init.signal!;
+      if (bodyStalls) return Promise.resolve(new Response(new ReadableStream({
+        start(controller) { signal.addEventListener("abort", () => controller.error(new Error("timeout"))); },
+      })));
+      return new Promise((_, reject) => signal.addEventListener("abort", () => reject(new Error("timeout"))));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const pending = f.app.request(new URL("assets/site.css", url).href);
+    // Ticket decryption uses native WebCrypto before the fetch deadline starts.
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+    await vi.runAllTimersAsync();
+    expect((await pending).status).toBe(503);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("ignores unused cache cookies on the downstream shell and tree lookups too", async () => {
+    const f = await fixture();
+    const headers = { Cookie: `${f.cookie}; better-auth.session_data=malformed` };
+    expect((await f.app.request(base, { headers })).status).toBe(200);
+    expect((await f.app.request(`${base}/tree`, { headers })).status).toBe(200);
+  });
+
   it.each(viewerHtmlForms)("establishes the ticket before resources with %s", async (_name, source) => {
     const f = await fixture();
     f.objects.mockImplementation(() => Promise.resolve(new Response(source).body));

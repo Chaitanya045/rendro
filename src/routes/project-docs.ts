@@ -1,6 +1,6 @@
 import { assetHeaders } from "@/routes/asset-headers";
 import { decodeStoragePath, isCanonicalStorageKey, modernStoragePrefix, modernStorageKey } from "@/storage-boundary";
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import { createViewerTicket, readViewerTicket, viewerSessionCookie } from "@/viewer-ticket";
 import { viewerScript } from "@/viewer/markup";
 import { escapeHtml } from "@/routes/html";
@@ -8,6 +8,7 @@ import type { User } from "better-auth/types";
 import { CONVEX_SITE_URL, CONVEX_URL } from "@/config";
 import { getObjectStream, getObjectText } from "@/minio";
 import { renderScopedDocumentShell } from "@/routes/app";
+import { renderSessionUnavailablePage } from "@/routes/session-unavailable";
 import { renderNotFoundPage } from "@/routes/not-found";
 import { injectViewerHeadStream } from "@/routes/document-html";
 import { parseStoredManifest, type StoredManifest } from "@/stored-manifest";
@@ -20,19 +21,57 @@ function inlineJson(value: unknown): string {
   return JSON.stringify(value).replace(/</g, "\\u003c");
 }
 
+type DeploymentUnavailable = { unavailable: true; retryAfter: string };
+
+function unavailableResponse(c: Context, failure: DeploymentUnavailable, json = false) {
+  c.header("Cache-Control", "private, no-store");
+  c.header("Retry-After", failure.retryAfter);
+  return json
+    ? c.json({ error: "Document temporarily unavailable", retryable: true }, 503)
+    : c.html(renderSessionUnavailablePage(), 503);
+}
+
 async function activeDeployment(
   organizationId: string,
   projectId: string,
   cookie: string | undefined,
-): Promise<ActiveDeployment | null> {
+): Promise<ActiveDeployment | DeploymentUnavailable | null> {
   const query = new URLSearchParams({ organizationId, projectId });
-  const response = await fetch(`${CONVEX_SITE_URL}/api/rendro/deployments/active?${query}`, {
-    headers: cookie ? { Accept: "application/json", Cookie: cookie } : { Accept: "application/json" },
-  });
-  if (!response.ok) return null;
-  const active = await response.json() as ActiveDeployment | null;
-  return active?.project && active.deployment?.manifestKey
-    && modernStoragePrefix({ organizationId, projectId, manifestKey: active.deployment.manifestKey }) ? active : null;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 5_000);
+  const unavailable: DeploymentUnavailable = { unavailable: true, retryAfter: "1" };
+  try {
+    const response = await fetch(`${CONVEX_SITE_URL}/api/rendro/deployments/active?${query}`, {
+      headers: { Accept: "application/json", Cookie: viewerSessionCookie(cookie ?? "") },
+      signal: controller.signal,
+      redirect: "manual",
+    });
+    if (!response.ok) {
+      void response.body?.cancel().catch(() => {});
+      // Hide both missing and inaccessible documents without masking outages.
+      if ([401, 403, 404].includes(response.status)) return null;
+      const retryAfter = response.headers.get("Retry-After");
+      if (retryAfter) {
+        const seconds = Number(retryAfter);
+        const delay = Number.isFinite(seconds) ? seconds : (Date.parse(retryAfter) - Date.now()) / 1_000;
+        if (Number.isFinite(delay)) unavailable.retryAfter = String(Math.max(1, Math.ceil(delay)));
+      }
+      return unavailable;
+    }
+    const active = await response.json() as Partial<ActiveDeployment> | null;
+    if (active === null || (typeof active?.project?.name === "string" && active.deployment === null)) return null;
+    if (typeof active?.project?.name !== "string" || typeof active.deployment?.manifestKey !== "string"
+      || !active.deployment.manifestKey) return unavailable;
+    if (!modernStoragePrefix({ organizationId, projectId, manifestKey: active.deployment.manifestKey })) return null;
+    return active as ActiveDeployment;
+  } catch {
+    // Network errors, timeouts (including body reads), and malformed payloads
+    // are retryable. Never expose exception text or ticket/session material.
+    return unavailable;
+  } finally {
+    clearTimeout(timeout);
+  }
+
 }
 
 async function activeManifest(result: ActiveDeployment): Promise<StoredManifest | null> {
@@ -84,6 +123,7 @@ app.get("/organizations/:organizationId/projects/:projectId/docs/tree", async (c
   const organizationId = c.req.param("organizationId");
   const projectId = c.req.param("projectId");
   const active = await activeDeployment(organizationId, projectId, c.req.header("Cookie"));
+  if (active && "unavailable" in active) return unavailableResponse(c, active, true);
   if (!active) return c.json({ error: "Not found" }, 404);
   const manifest = await activeManifest(active);
   if (!manifest) return c.json({ error: "Manifest unavailable" }, 404);
@@ -104,6 +144,7 @@ app.get("/organizations/:organizationId/projects/:projectId/docs/viewer-ticket",
   const cookie = viewerSessionCookie(c.req.header("Cookie") ?? "");
   if (!cookie) return c.json({ error: "Authentication required" }, 401);
   const active = await activeDeployment(organizationId, projectId, cookie);
+  if (active && "unavailable" in active) return unavailableResponse(c, active, true);
   if (!active || active.deployment.manifestKey !== c.req.query("manifestKey")) {
     return c.json({ error: "Not found" }, 404);
   }
@@ -132,6 +173,7 @@ app.on("GET", [
   // No authorization cache: Convex checks persisted session, membership, and
   // project ownership on every request, including nested CSS and font requests.
   const active = await activeDeployment(organizationId, projectId, cookie);
+  if (active && "unavailable" in active) return unavailableResponse(c, active);
   if (!active || (ticket && ticket.manifestKey !== active.deployment.manifestKey)) return missing();
   const manifest = await activeManifest(active);
   const entry = manifest?.files.find((file) => file.path === path);
@@ -181,6 +223,7 @@ app.get("/organizations/:organizationId/projects/:projectId/docs", async (c) => 
   const base = basePath(organizationId, projectId);
   if (!user) return c.redirect(`/sign-in?returnTo=${encodeURIComponent(base)}`);
   const active = await activeDeployment(organizationId, projectId, c.req.header("Cookie"));
+  if (active && "unavailable" in active) return unavailableResponse(c, active);
   if (!active) return c.html(renderNotFoundPage({ path: c.req.path }), 404);
   const manifest = await activeManifest(active);
   if (!manifest) return c.html(renderNotFoundPage({ path: c.req.path }), 404);

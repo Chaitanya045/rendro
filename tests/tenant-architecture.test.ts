@@ -243,7 +243,7 @@ describe("private project documents", () => {
     vi.spyOn(minio, "getObjectText").mockResolvedValue(manifest);
 
     const response = await app.request("/organizations/org-a/projects/project-a/docs", {
-      headers: { Cookie: "better-auth.session=abc" },
+      headers: { Cookie: "better-auth.session_token=abc; unrelated=ignored" },
     });
     const html = await response.text();
     expect(response.status).toBe(200);
@@ -254,7 +254,7 @@ describe("private project documents", () => {
     expect(html).toContain('sandbox="allow-scripts allow-forms allow-popups allow-downloads"');
     expect(fetchMock).toHaveBeenCalledWith(
       expect.stringContaining("/api/rendro/deployments/active?organizationId=org-a&projectId=project-a"),
-      expect.objectContaining({ headers: expect.objectContaining({ Cookie: "better-auth.session=abc" }) }),
+      expect.objectContaining({ headers: expect.objectContaining({ Cookie: "better-auth.session_token=abc" }) }),
     );
 
     const invalid = await app.request("/organizations/org-a/projects/project-a/docs?doc=reference%2Fapp.css");

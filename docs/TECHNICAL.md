@@ -68,9 +68,13 @@ Account linking trusts Google only when the local email is verified and the emai
 
 ### Session middleware
 
-`src/middleware/session.ts` runs on every route registered after it. If the request carries a `better-auth` cookie, it calls Convex `GET /api/auth/get-session` and sets `c.get("user")`. There is no application-side session cache, and Better Auth's cookie cache is disabled, so expiry and revocation take effect on the next request.
+`src/middleware/session.ts` runs on every route registered after it. If the request carries a session-token cookie, it calls Convex `GET /api/auth/get-session` and sets `c.get("user")`. There is no application-side session cache, and Better Auth's cookie cache is disabled, so expiry and revocation take effect on the next request.
 
-Requests under `/api/auth/`, `/api/rendro/`, and `/api/sync/` skip the lookup; Convex authorizes those calls itself.
+Requests under `/api/auth/`, `/api/rendro/`, and `/api/sync/` skip the lookup; Convex authorizes those calls itself. Ticketed viewer assets (`…/docs/view/:ticket/files/*`) also skip this redundant Worker lookup, even if cookies accompany the request: their ticket is decrypted and its session/membership/project access is freshly revalidated by Convex on every request. Only session-token cookies are forwarded for Worker session and viewer authorization reads; unused `session_data` cookies (including secure/chunked variants) cannot poison these reads.
+
+HTTP `/get-session` reads have an atomic 120-request/60-second bucket in the Better Auth component, keyed by `session-read:` plus SHA-256 of the decoded session token **after Better Auth verifies its HMAC signature**. Raw tokens and client-supplied identifiers are never stored as rate-limit keys. The key stays the same across IP changes and alternate cookie encodings. An unsigned/missing token uses a 120/minute verified-IP fallback (unverified direct callers share `no-trusted-ip`). The existing signed-IP limiter remains as a generous 6,000/minute session-read abuse ceiling; sign-in, sign-up, password reset, verification, and exact-path verifier exemptions are unchanged. This adds no session cache or revocation latency.
+
+Session lookup infrastructure failures return retryable 503 responses, with one bounded retry of the lookup GET only. Viewer downstream deployment/session-authorization reads likewise distinguish authoritative denial/absence (404) from 429, 5xx, network errors, a five-second timeout including body reads, and malformed responses (503 with `Retry-After`, styled retry HTML or JSON). Failures never replay protected writes or discard the session cookie.
 
 Responses that performed a session lookup receive `Cache-Control: private, no-store`. Responses that pass through the middleware also receive numeric `Server-Timing` metrics: `session;dur=…` (when a lookup ran) and `render;dur=…`. The metrics contain no identity or response data.
 
