@@ -108,8 +108,9 @@ export function createAuthOptions(ctx: GenericCtx<DataModel>) {
         "/convex/token": false,
         "/token": false,
         "/convex/.well-known/openid-configuration": false,
-        // Generous shared-IP backstop; the verified session bucket is below.
-        "/get-session": { window: 60, max: 6_000 },
+        // The plugin applies real fixed windows; Better Auth resets only
+        // after inactivity and would exhaust a busy shared IP indefinitely.
+        "/get-session": false,
         "/sign-in/email": { window: 60, max: 5 },
         "/sign-up/email": { window: 60 * 60, max: 5 },
         "/request-password-reset": { window: 60 * 60, max: 5 },
