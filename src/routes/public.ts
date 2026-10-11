@@ -1,3 +1,4 @@
+import { legacyStoragePrefix } from "@/storage-boundary";
 import { viewerScript } from "@/viewer/markup";
 import { Hono } from "hono";
 import { getObjectStream } from "@/minio";
@@ -54,6 +55,7 @@ ${viewerScript("navigation", { prefix: basePath, documentPath, loadedPath: fullP
 
 
 async function publicationFromRoute(orgSlug: string, slug: string): Promise<Publication | null> {
+  if (!legacyStoragePrefix(orgSlug.toLowerCase())) return null;
   return getPublication(orgSlug.toLowerCase(), slug.toLowerCase());
 }
 

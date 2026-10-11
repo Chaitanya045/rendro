@@ -1,3 +1,4 @@
+import { isLegacyStorageKey, isLegacyStoragePrefix, legacyStoragePrefix } from "@/storage-boundary";
 import {
   deleteObject,
   getObjectStream,
@@ -55,7 +56,7 @@ function hasUnsafeSegments(value: string): boolean {
 
 function normalizeSourcePrefix(orgSlug: string, value: string): string | null {
   const decoded = decodeRepeatedly(value.trim());
-  if (!decoded || !decoded.startsWith(`${orgSlug}/`) || !decoded.endsWith("/")) return null;
+  if (!decoded || !isLegacyStoragePrefix(orgSlug, decoded) || !decoded.endsWith("/")) return null;
   const relative = decoded.slice(orgSlug.length + 1, -1);
   return hasUnsafeSegments(relative) ? null : `${orgSlug}/${relative}/`;
 }
@@ -102,7 +103,7 @@ function isPublication(value: unknown): value is Publication {
 }
 
 export async function getPublication(orgSlug: string, slug: string): Promise<Publication | null> {
-  if (!isValidSlug(orgSlug) || !isValidSlug(slug)) return null;
+  if (!legacyStoragePrefix(orgSlug) || !isValidSlug(slug)) return null;
   const stream = await getObjectStream(recordKey(orgSlug, slug));
   if (!stream) return null;
   try {
@@ -114,7 +115,7 @@ export async function getPublication(orgSlug: string, slug: string): Promise<Pub
 }
 
 export async function listPublications(orgSlug: string): Promise<Publication[]> {
-  if (!isValidSlug(orgSlug)) return [];
+  if (!legacyStoragePrefix(orgSlug)) return [];
   const keys = await listAllKeys(`${PUBLICATION_RECORD_PREFIX}/${orgSlug}/`);
   const rows = await Promise.all(
     keys
@@ -130,6 +131,7 @@ export async function listPublications(orgSlug: string): Promise<Publication[]> 
 }
 
 export async function listPublishedDocumentPaths(publication: Publication): Promise<string[]> {
+  if (!isLegacyStoragePrefix(publication.orgSlug, publication.sourcePrefix)) return [];
   const keys = (await listAllKeys(publication.sourcePrefix)).filter((key) => key.endsWith(".html"));
   const visible = await filterDeleted(keys);
   return visible
@@ -146,7 +148,7 @@ export async function savePublication(input: {
   entryFile: string;
 }): Promise<{ publication: Publication; documentCount: number }> {
   const { orgSlug } = input;
-  if (!isValidSlug(orgSlug)) throw new PublicationError("Invalid organization", 400);
+  if (!legacyStoragePrefix(orgSlug)) throw new PublicationError("Invalid organization", 400);
   const slug = input.slug.trim().toLowerCase();
   if (!isValidSlug(slug)) throw new PublicationError("Invalid public slug", 400);
   const sourcePrefix = normalizeSourcePrefix(orgSlug, input.sourcePrefix);
@@ -196,5 +198,5 @@ export function resolvePublishedKey(publication: Publication, path: string): str
   const normalized = normalizeDocumentPath(path);
   if (!normalized) return null;
   const key = `${publication.sourcePrefix}${normalized}`;
-  return key.startsWith(publication.sourcePrefix) ? key : null;
+  return isLegacyStorageKey(publication.orgSlug, key) && key.startsWith(publication.sourcePrefix) ? key : null;
 }

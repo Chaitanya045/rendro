@@ -1,3 +1,4 @@
+import { isLegacyStorageKey } from "@/storage-boundary";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { AUTH_SECRET } from "@/config";
 
@@ -40,7 +41,7 @@ function encodeDocPath(key: string): string {
 }
 
 export function isShareableDocKey(key: string): boolean {
-  return key.endsWith(".html") && !key.includes("..") && !key.includes("\\") && !key.includes("\0");
+  return isLegacyStorageKey(key.split("/")[0], key) && key.endsWith(".html") && !key.includes("..") && !key.includes("\\") && !key.includes("\0");
 }
 
 export function createShareToken(key: string, nowSeconds = Math.floor(Date.now() / 1000)): string {

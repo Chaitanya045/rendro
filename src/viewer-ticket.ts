@@ -1,3 +1,4 @@
+import { legacyStoragePrefix, modernStoragePrefix } from "@/storage-boundary";
 import { EncryptJWT, jwtDecrypt } from "jose";
 import { AUTH_SECRET } from "@/config";
 
@@ -25,6 +26,7 @@ async function ticketKey(domain = audience): Promise<Uint8Array> {
 export async function createViewerTicket(input: ViewerTicket): Promise<string> {
   const cookie = viewerSessionCookie(input.cookie);
   if (!cookie) throw new Error("Viewer session required");
+  if (!modernStoragePrefix(input)) throw new Error("Invalid viewer storage scope");
   return new EncryptJWT({ ...input, cookie })
     .setProtectedHeader({ alg: "dir", enc: "A256GCM" })
     .setAudience(audience).setIssuedAt().setExpirationTime(`${VIEWER_TICKET_SECONDS}s`)
@@ -43,7 +45,8 @@ export async function readViewerTicket(
       || typeof payload.manifestKey !== "string" || !payload.manifestKey
       || typeof payload.cookie !== "string" || !payload.cookie
       || viewerSessionCookie(payload.cookie) !== payload.cookie) return null;
-    return { ...scope, manifestKey: payload.manifestKey, cookie: payload.cookie };
+    const ticket = { ...scope, manifestKey: payload.manifestKey, cookie: payload.cookie };
+    return modernStoragePrefix(ticket) ? ticket : null;
   } catch { return null; }
 }
 
@@ -52,17 +55,20 @@ const legacyAudience = "rendro:legacy-document-viewer:v1";
 export async function createLegacyViewerTicket(orgSlug: string, sessionCookie: string): Promise<string> {
   const cookie = viewerSessionCookie(sessionCookie);
   if (!cookie) throw new Error("Viewer session required");
-  return new EncryptJWT({ orgSlug, cookie }).setProtectedHeader({ alg: "dir", enc: "A256GCM" })
+  const storagePrefix = legacyStoragePrefix(orgSlug);
+  if (!storagePrefix) throw new Error("Invalid legacy storage scope");
+  return new EncryptJWT({ orgSlug, storagePrefix, cookie }).setProtectedHeader({ alg: "dir", enc: "A256GCM" })
     .setAudience(legacyAudience).setIssuedAt().setExpirationTime(`${VIEWER_TICKET_SECONDS}s`)
     .encrypt(await ticketKey(legacyAudience));
 }
-export async function readLegacyViewerTicket(token: string, orgSlug: string): Promise<{ cookie: string } | null> {
+export async function readLegacyViewerTicket(token: string, orgSlug: string): Promise<{ cookie: string; storagePrefix: string } | null> {
   try {
     const { payload } = await jwtDecrypt(token, await ticketKey(legacyAudience), {
       audience: legacyAudience, keyManagementAlgorithms: ["dir"], contentEncryptionAlgorithms: ["A256GCM"],
       requiredClaims: ["exp", "iat"], maxTokenAge: VIEWER_TICKET_SECONDS,
     });
-    return payload.orgSlug === orgSlug && typeof payload.cookie === "string" && payload.cookie
-      && viewerSessionCookie(payload.cookie) === payload.cookie ? { cookie: payload.cookie } : null;
+    const storagePrefix = legacyStoragePrefix(orgSlug);
+    return storagePrefix && payload.storagePrefix === storagePrefix && payload.orgSlug === orgSlug && typeof payload.cookie === "string" && payload.cookie
+      && viewerSessionCookie(payload.cookie) === payload.cookie ? { cookie: payload.cookie, storagePrefix } : null;
   } catch { return null; }
 }

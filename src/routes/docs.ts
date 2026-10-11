@@ -1,4 +1,4 @@
-import { viewerScript } from "@/viewer/markup";
+import { decodeStoragePath, isLegacyStorageKey, isLegacyStoragePrefix, legacyStoragePrefix } from "@/storage-boundary";
 import { Hono } from "hono";
 import type { Context } from "hono";
 import { getObjectStream, putObject, headObject, listAllKeys, listImmediate, buildTree } from "@/minio";
@@ -26,7 +26,7 @@ app.get("/api/share/create", async (c) => {
 
   const key = c.req.query("key");
   if (!key) return c.text("Missing key", 400);
-  if (!key.startsWith(`${org}/`) || !isShareableDocKey(key)) {
+  if (!isLegacyStorageKey(org, key) || !isShareableDocKey(key)) {
     return c.text("Forbidden", 403);
   }
   if (await isDeleted(key)) return c.text("Not found", 404);
@@ -35,13 +35,6 @@ app.get("/api/share/create", async (c) => {
   return c.json({ url: createShareUrl(new URL(c.req.url).origin, key) });
 });
 
-function safeLegacyPath(encoded: string): string | null {
-  try {
-    const path = encoded.split("/").map(decodeURIComponent).join("/");
-    return path && !path.includes("\\") && path.split("/").every(part => part && part !== "." && part !== "..") ? path : null;
-  } catch { return null; }
-}
-
 // Old bookmarks enter the trusted shell; the shell owns comment authentication.
 app.get("/files/:key{.+}", async c => {
   c.header("Cache-Control", "private, no-store");
@@ -49,8 +42,8 @@ app.get("/files/:key{.+}", async c => {
   const user = c.get("user");
   if (!user) return c.text("Sign in first", 401);
   const org = emailToOrgSlug(user.email);
-  const key = safeLegacyPath(c.req.path.slice("/files/".length));
-  if (!org || !key?.startsWith(`${org}/`)) return c.text("Forbidden", 403);
+  const key = decodeStoragePath(c.req.path.slice("/files/".length));
+  if (!org || !key || !isLegacyStorageKey(org, key)) return c.text("Forbidden", 403);
   if (await isDeleted(key) || !await headObject(key)) return c.text("Not found", 404);
   return c.redirect(`/docs/${key.split("/").map(encodeURIComponent).join("/")}${new URL(c.req.url).search}`);
 });
@@ -62,7 +55,7 @@ app.get("/legacy-view/:org/viewer-ticket", async c => {
   const user = c.get("user");
   const cookie = viewerSessionCookie(c.req.header("Cookie") ?? "");
   if (!user || !cookie || emailToOrgSlug(user.email) !== org) return c.text("Unauthorized", 401);
-  if (c.req.query("manifestKey") !== org) return c.text("Not found", 404);
+  if (!legacyStoragePrefix(org) || c.req.query("manifestKey") !== org) return c.text("Not found", 404);
   const token = await createLegacyViewerTicket(org, cookie);
   return c.json({ prefix: `/legacy-view/${encodeURIComponent(org)}/view/${token}/files/` });
 });
@@ -73,6 +66,7 @@ app.on("GET", ["/legacy-view/:org/files/*", "/legacy-view/:org/view/:viewerToken
   const org = c.req.param("org");
   const base = `/legacy-view/${encodeURIComponent(org)}`;
   const missing = () => c.html(renderNotFoundPage({ path: "Document unavailable", homeHref: `/docs/${encodeURIComponent(org)}`, homeLabel: "Open docs tree" }), 404);
+  if (!legacyStoragePrefix(org)) return missing();
   const token = c.req.param("viewerToken");
   const ticket = token ? await readLegacyViewerTicket(token, org) : null;
   if (token && !ticket) return missing();
@@ -89,9 +83,10 @@ app.on("GET", ["/legacy-view/:org/files/*", "/legacy-view/:org/view/:viewerToken
     user = session?.user;
   }
   if (!user || typeof user.email !== "string" || emailToOrgSlug(user.email) !== org) return missing();
-  const path = safeLegacyPath(c.req.path.slice(c.req.path.indexOf("/files/") + 7));
+  const path = decodeStoragePath(c.req.path.slice(c.req.path.indexOf("/files/") + 7));
   if (!path) return missing();
   const key = `${org}/${path}`;
+  if (!isLegacyStorageKey(org, key) || (ticket && !key.startsWith(ticket.storagePrefix))) return missing();
   if (await isDeleted(key)) return missing();
   const object = await headObject(key);
   if (!object) return missing();
@@ -133,7 +128,8 @@ app.on("GET", ["/legacy-view/:org/files/*", "/legacy-view/:org/view/:viewerToken
 async function authOrg(c: Context): Promise<string | null> {
   const header = c.req.header("Authorization");
   if (!header?.startsWith("Bearer ")) return null;
-  return await validateApiKey(header.slice(7));
+  const org = await validateApiKey(header.slice(7));
+  return org && legacyStoragePrefix(org) ? org : null;
 }
 
 // POST /api/sync/upload — uploads + clears deleted status
@@ -142,7 +138,7 @@ app.post("/api/sync/upload", async (c) => {
   if (!org) return c.text("Unauthorized", 401);
   const body = await c.req.json<{ key: string; content: string; contentType?: string }>();
   if (!body.key || body.content === undefined) return c.text("Missing key or content", 400);
-  if (!body.key.startsWith(`${org}/`)) return c.text(`Key must start with "${org}/"`, 400);
+  if (!isLegacyStorageKey(org, body.key)) return c.text(`Key must start with "${org}/"`, 400);
   await putObject(body.key, body.content, body.contentType ?? "text/html");
   await unmarkDeleted(body.key);
   return c.json({ ok: true, key: body.key, bucket: MINIO_BUCKET });
@@ -155,7 +151,7 @@ app.get("/api/sync/check", async (c) => {
   const key = c.req.query("key");
   const hash = c.req.query("hash");
   if (!key) return c.text("Missing key", 400);
-  if (!key.startsWith(`${org}/`)) return c.text(`Key must start with "${org}/"`, 400);
+  if (!isLegacyStorageKey(org, key)) return c.text(`Key must start with "${org}/"`, 400);
   if (await isDeleted(key)) return c.json({ exists: false, deleted: true });
   const obj = await headObject(key);
   if (!obj) return c.json({ exists: false });
@@ -167,7 +163,7 @@ app.get("/api/sync/list", async (c) => {
   const org = await authOrg(c);
   if (!org) return c.text("Unauthorized", 401);
   const prefix = c.req.query("prefix") || `${org}/`;
-  if (!prefix.startsWith(`${org}/`)) return c.text(`Prefix must be under ${org}/`, 400);
+  if (!isLegacyStoragePrefix(org, prefix)) return c.text(`Prefix must be under ${org}/`, 400);
   if (prefix.includes("..")) return c.text("Invalid path", 400);
   const keys = await listAllKeys(prefix);
   return c.json({ keys: await filterDeleted(keys) });
@@ -179,7 +175,7 @@ app.delete("/api/sync/delete", async (c) => {
   if (!org) return c.text("Unauthorized", 401);
   const key = c.req.query("key");
   if (!key) return c.text("Missing key", 400);
-  if (!key.startsWith(`${org}/`) || key.includes("..")) return c.text(`Key must be under ${org}/`, 400);
+  if (!isLegacyStorageKey(org, key) || key.includes("..")) return c.text(`Key must be under ${org}/`, 400);
   await markDeleted(org, key);
   return c.json({ deleted: true, key });
 });
@@ -193,7 +189,7 @@ app.get("/api/tree/:org", async (c) => {
   if (!userOrg || userOrg !== c.req.param("org")) return c.text("Forbidden", 403);
   const org = c.req.param("org");
   const prefix = c.req.query("prefix") || `${org}/`;
-  if (!prefix.startsWith(`${org}/`)) return c.text(`Prefix must be under ${org}/`, 400);
+  if (!isLegacyStoragePrefix(org, prefix)) return c.text(`Prefix must be under ${org}/`, 400);
   if (prefix.includes("..")) return c.text("Invalid path", 400);
 
   const limit = parseInt(c.req.query("limit") || "100", 10);

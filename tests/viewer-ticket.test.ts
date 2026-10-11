@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { createViewerTicket, readViewerTicket, viewerSessionCookie, VIEWER_TICKET_SECONDS } from "@/viewer-ticket";
 import { redactViewerPath } from "@/viewer-log";
 
-const scope = { organizationId: "org-a", projectId: "project-a", manifestKey: "deploy-a/manifest.json" };
+const scope = { organizationId: "org-a", projectId: "project-a", manifestKey: "tenants/org-a/projects/project-a/deployments/deploy-a/manifest.json" };
 const cookie = "__Secure-better-auth.session_token=private-session-material";
 afterEach(() => { vi.useRealTimers(); });
 

@@ -1,3 +1,4 @@
+import { decodeStoragePath, isLegacyStorageKey, legacyStoragePrefix } from "@/storage-boundary";
 import { CONVEX_URL } from "@/config";
 import { viewerScript } from "@/viewer/markup";
 import { renderCommentRecoveryLifecycle } from "../commentor/recovery-session";
@@ -35,7 +36,7 @@ app.get("/docs/:org", async (c) => {
   const user = c.get("user");
   if (!user) return c.redirect(`/sign-in?returnTo=${encodeURIComponent(c.req.path)}`);
   const org = emailToOrgSlug(user.email);
-  if (!org || c.req.param("org") !== org || !(await orgExists(org))) {
+  if (!org || !legacyStoragePrefix(org) || c.req.param("org") !== org || !(await orgExists(org))) {
     return c.html(renderLegacyOrgNotFound(c.req.path), 404);
   }
   return c.html(renderOrgDocs(user, org));
@@ -45,10 +46,9 @@ app.get("/docs/:key{.+}", async (c) => {
   const user = c.get("user");
   if (!user) return c.redirect(`/sign-in?returnTo=${encodeURIComponent(c.req.path)}`);
   const org = emailToOrgSlug(user.email);
-  if (!org) return c.html(renderLegacyOrgNotFound(c.req.path), 404);
-  const rawKey = c.req.param("key");
-  const selectedDoc = decodeURIComponent(rawKey);
-  if ((selectedDoc !== org && !selectedDoc.startsWith(`${org}/`)) || !(await orgExists(org))) {
+  if (!org || !legacyStoragePrefix(org)) return c.html(renderLegacyOrgNotFound(c.req.path), 404);
+  const selectedDoc = decodeStoragePath(c.req.path.slice("/docs/".length));
+  if ((!selectedDoc || (selectedDoc !== org && !isLegacyStorageKey(org, selectedDoc))) || !(await orgExists(org))) {
     return c.html(renderLegacyOrgNotFound(c.req.path), 404);
   }
   if (selectedDoc === org) return c.html(renderOrgDocs(user, org));
@@ -87,7 +87,7 @@ app.post("/api/orgs", async (c) => {
   const org = (body.org ?? emailToOrgSlug(user.email) ?? "").toLowerCase();
   const displayName = body.displayName?.trim() || org;
 
-  if (!org.match(/^[a-z0-9]+(-[a-z0-9]+)*$/)) {
+  if (!legacyStoragePrefix(org)) {
     return c.text("Invalid org slug. Use lowercase letters, numbers, and hyphens.", 400);
   }
   if (await orgExists(org)) {

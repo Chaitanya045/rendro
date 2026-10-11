@@ -66,7 +66,7 @@ describe("legacy viewer routes", () => {
     const token = await createLegacyViewerTicket("example", cookie);
     expect(await readLegacyViewerTicket(token, "other")).toBeNull();
     expect(await readLegacyViewerTicket(token.slice(0, -8) + "AAAAAAAA", "example")).toBeNull();
-    const scope = { organizationId: "example", projectId: "example", manifestKey: "example" };
+    const scope = { organizationId: "example", projectId: "example", manifestKey: "tenants/example/projects/example/deployments/deploy-a/manifest.json" };
     expect(await readViewerTicket(token, scope)).toBeNull();
     expect(await readLegacyViewerTicket(await createViewerTicket({ ...scope, cookie }), "example")).toBeNull();
     vi.useFakeTimers(); vi.setSystemTime(Date.now() + 16 * 60_000);
