@@ -1,3 +1,4 @@
+import { renderFaviconLinks } from "./favicon";
 import { Hono } from "hono";
 import type { User } from "better-auth/types";
 import { renderThemeAssets, renderThemeButton } from "./theme";
@@ -130,7 +131,7 @@ function renderAuthPage(
     ? `<div class="auth-context-mobile"><strong>Organization invitation</strong>Sign in with the exact email address that received the invitation.</div>`
     : "";
   return `<!DOCTYPE html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<html lang="en"><head>${renderFaviconLinks()}<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${page === "security" ? "Account security" : "Authentication"} — Rendro</title>
 <link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..24,400,0,0&display=swap" rel="stylesheet">
 ${renderThemeAssets()}

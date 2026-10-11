@@ -1,9 +1,10 @@
+import { renderFaviconLinks } from "./favicon";
 import { renderThemeAssets, renderThemeButton } from "./theme";
 
 export function renderLandingPage(): string {
   return `<!DOCTYPE html>
 <html lang="en">
-<head>
+<head>${renderFaviconLinks()}
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="description" content="Rendro turns plain HTML in your repository into a navigable documentation workspace with contextual comments and controlled publishing.">

@@ -1,3 +1,4 @@
+import { renderFaviconLinks } from "./favicon";
 import { Hono } from "hono";
 import { putObject, headObject } from "@/minio";
 import { emailToOrgSlug, orgExists, logOrgAccess } from "@/orgs";
@@ -103,7 +104,7 @@ app.post("/api/orgs", async (c) => {
 
 function renderEmailUnsupported(user: User): string {
   return `<!DOCTYPE html>
-<html><head><meta charset="UTF-8"><title>Rendro</title></head>
+<html><head>${renderFaviconLinks()}<meta charset="UTF-8"><title>Rendro</title></head>
 <body style="font-family:system-ui;padding:2rem">
 <h1>Unsupported email domain</h1>
 <p>Your email <code>${escapeHtml(user.email)}</code> doesn't have a valid org slug. Use a work email like <code>you@company.com</code>.</p>
@@ -116,7 +117,7 @@ function renderCreateOrg(user: User, org: string): string {
   const email = escapeHtml(user.email);
   const orgEsc = escapeHtml(org);
   return `<!DOCTYPE html>
-<html><head>
+<html><head>${renderFaviconLinks()}
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${orgEsc} — Rendro</title>
@@ -359,7 +360,7 @@ function renderOrgTreePage(user: User | null, org: string, selectedDoc = "", opt
     : "";
   return `<!DOCTYPE html>
 <html lang="en">
-<head>
+<head>${renderFaviconLinks()}
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${displayNameEsc} — Rendro</title>
@@ -715,9 +716,9 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
     </div>
   </div>
 </aside>
-<div class="sidebar-resizer" id="sidebar-resizer" role="separator" aria-orientation="vertical" aria-controls="doc-sidebar" aria-label="Resize document tree" aria-valuemin="220" aria-valuemax="420" aria-valuenow="280" aria-valuetext="Document tree 280 pixels wide" tabindex="0"><span class="resizer-sparks resizer-sparks-top" aria-hidden="true"></span><span class="resizer-sparks resizer-sparks-bottom" aria-hidden="true"></span></div>
 
 <main class="main">
+<div class="sidebar-resizer" id="sidebar-resizer" role="separator" aria-orientation="vertical" aria-controls="doc-sidebar" aria-label="Resize document tree" aria-valuemin="220" aria-valuemax="420" aria-valuenow="280" aria-valuetext="Document tree 280 pixels wide" tabindex="0"><span class="resizer-sparks resizer-sparks-top" aria-hidden="true"></span><span class="resizer-sparks resizer-sparks-bottom" aria-hidden="true"></span></div>
   <div class="main-placeholder" id="main-placeholder">
     <div class="ph-icon"><span class="material-symbols-outlined" style="font-size:32px;color:#71717a">edit_document</span></div>
     <h2>Select a document</h2>
@@ -1084,7 +1085,7 @@ function renderTreeSkeleton(): string {
 function renderInitialIndex(_user: User, org: string, displayName: string): string {
   return `<!DOCTYPE html>
 <html lang="en">
-<head>
+<head>${renderFaviconLinks()}
 <meta charset="UTF-8">
 <title>${escapeHtml(displayName)}</title>
 <style>body{font-family:system-ui;max-width:720px;margin:3rem auto;padding:0 1.5rem;line-height:1.6;color:#1a1a1a}</style>
@@ -1116,7 +1117,7 @@ function renderApiKeyPage(user: User, org: string, apiKey: string): string {
   const email = escapeHtml(user.email);
   const orgEsc = escapeHtml(org);
   return `<!DOCTYPE html>
-<html><head>
+<html><head>${renderFaviconLinks()}
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${orgEsc} — Rendro</title>

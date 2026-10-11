@@ -74,7 +74,7 @@ export function projectLoading(projectId: string, section: "overview" | "deploym
   }
   if (section === "deployments") {
     return renderLoadingState("Loading project deployments", `${renderDeploymentHistoryPanel()}
-      <aside class="panel skeleton-card deployments-panel"><span class="skeleton skeleton-line strong medium"></span><span class="skeleton skeleton-line long"></span><span class="skeleton skeleton-field"></span></aside>`);
+      <div class="panel skeleton-card deployments-panel"><span class="skeleton skeleton-line strong medium"></span><span class="skeleton skeleton-line long"></span><span class="skeleton skeleton-field"></span></div>`);
   }
   return renderLoadingState("Loading project overview", `<div class="skeleton-tabs"><span class="skeleton skeleton-line"></span><span class="skeleton skeleton-line"></span><span class="skeleton skeleton-line"></span><span class="skeleton skeleton-line"></span></div>
     <div class="project-overview">

@@ -122,7 +122,7 @@ describe("documentation entry points", () => {
 
   it("carries the organization name and docs link into the mobile drawer", async () => {
     const html = await (await pages().request("/organizations/org-a/people")).text();
-    const drawer = html.slice(html.indexOf('<aside class="cp-sidebar"'), html.indexOf("</aside>"));
+    const drawer = html.slice(html.indexOf('<div class="cp-sidebar"'), html.indexOf('<button class="cp-backdrop"'));
     expect(drawer).toContain('class="cp-drawer-org-name" data-org-name');
     expect(drawer).toContain("data-cp-open-docs");
     expect(drawer).toContain('href="/organizations?choose=1"');

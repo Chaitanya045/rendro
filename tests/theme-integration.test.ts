@@ -14,6 +14,8 @@ import { mobileViewportStyles } from "@/routes/viewport";
 import { renderLandingPage } from "@/routes/landing";
 
 function assertSharedTheme(html: string, buttonId?: "theme-toggle" | "cp-theme") {
+  expect(html).toContain('<link rel="icon" href="/favicon.ico" sizes="16x16 32x32" type="image/x-icon">');
+  expect(html).toContain('<link rel="icon" href="/favicon.svg" sizes="any" type="image/svg+xml">');
   expect(html).toContain(sharedThemeRuntime);
   expect(html).toContain(mobileViewportStyles);
   expect(html.match(/<script data-rendro-theme>/g)).toHaveLength(1);
@@ -87,6 +89,8 @@ describe("shared theme integration", () => {
     for (const publicDocument of [false, true]) {
       const html = renderScopedDocumentShell({ user: null, namespace: "qa", title: "QA", basePath: publicDocument ? "/p/qa" : "/organizations/org/projects/project/docs", selectedPath: "index.html", publicDocument });
       assertSharedTheme(html, "theme-toggle");
+      const main = html.slice(html.indexOf('<main class="main">'), html.indexOf("</main>"));
+      expect(main).toContain('id="sidebar-resizer" role="separator"');
       expect(html).toContain('RendroTheme.mount(document.getElementById("theme-toggle"),notifyTheme)');
       expect(html).toContain('e.source!==themeFrame.contentWindow');
     }

@@ -1,3 +1,4 @@
+import { renderFaviconLinks } from "./favicon";
 import type { User } from "better-auth/types";
 import { renderThemeAssets, renderThemeButton } from "./theme";
 import { escapeHtml } from "./html";
@@ -454,7 +455,7 @@ const controlPlaneRuntime = String.raw`
   var themeController=window.RendroTheme.mount(document.getElementById("cp-theme"));
   function applyTheme(mode,persist,animate){themeController.apply(mode,persist,animate);}
   var nav=document.querySelector(".cp-sidebar"),menuButton=document.getElementById("cp-menu");
-  function syncNavAccess(open){if(!nav)return;var mobile=matchMedia("(max-width:760px)").matches;nav.inert=mobile&&!open;if(mobile)nav.setAttribute("aria-hidden",String(!open));else nav.removeAttribute("aria-hidden");document.querySelectorAll(".cp-topbar,.cp-main").forEach(function(region){region.inert=mobile&&open;});if(mobile&&open){nav.setAttribute("role","dialog");nav.setAttribute("aria-modal","true");nav.setAttribute("aria-label","Organization navigation");}else{nav.removeAttribute("role");nav.removeAttribute("aria-modal");nav.removeAttribute("aria-label");}}
+  function syncNavAccess(open){if(!nav)return;var mobile=matchMedia("(max-width:760px)").matches;nav.inert=mobile&&!open;if(mobile)nav.setAttribute("aria-hidden",String(!open));else nav.removeAttribute("aria-hidden");document.querySelectorAll(".cp-topbar,.cp-main").forEach(function(region){region.inert=mobile&&open;});if(mobile&&open){nav.setAttribute("role","dialog");nav.setAttribute("aria-modal","true");nav.setAttribute("aria-label","Organization navigation");}else{nav.setAttribute("role","complementary");nav.removeAttribute("aria-modal");nav.setAttribute("aria-label","Workspace navigation");}}
   function setNav(open,restoreFocus){document.body.classList.toggle("nav-open",open);if(menuButton)menuButton.setAttribute("aria-expanded",String(open));syncNavAccess(open);if(open&&nav&&matchMedia("(max-width:760px)").matches){var first=nav.querySelector("button,a[href]");if(first)first.focus();}if(!open&&restoreFocus&&menuButton)menuButton.focus();}
   if(menuButton)menuButton.addEventListener("click",function(){setNav(!document.body.classList.contains("nav-open"),false);});
   var navClose=document.getElementById("cp-nav-close");if(navClose)navClose.addEventListener("click",function(){setNav(false,true);});
@@ -523,11 +524,11 @@ export function renderControlPlanePage(options: ControlPlanePageOptions): string
     ? `<a class="cp-top-action" data-cp-open-docs href="${docsHref}" hidden><span class="material-symbols-outlined" aria-hidden="true">description</span><span>Open docs</span></a>`
     : "";
   const organizationSwitcher = organizationId
-    ? `<a class="cp-org-switcher" id="cp-org-switcher" href="/organizations?choose=1" aria-label="Switch organization"><span class="cp-org-mark" data-org-mark>R</span><span class="cp-org-name" data-org-name>Organization</span><span class="material-symbols-outlined cp-org-caret" aria-hidden="true">unfold_more</span></a>`
+    ? `<a class="cp-org-switcher" id="cp-org-switcher" href="/organizations?choose=1"><span class="cp-org-mark" data-org-mark aria-hidden="true">R</span><span class="cp-org-name" data-org-name>Organization</span><span class="sr-only">, switch organization</span><span class="material-symbols-outlined cp-org-caret" aria-hidden="true">unfold_more</span></a>`
     : "";
   const drawerContext = `<div class="cp-drawer-context"><a class="cp-drawer-org" href="/organizations?choose=1"><span class="cp-org-mark" data-org-mark aria-hidden="true">R</span><span class="cp-drawer-org-copy"><span class="cp-drawer-org-name" data-org-name>Organization</span><small>Switch organization</small></span><span class="material-symbols-outlined" aria-hidden="true">unfold_more</span></a><a class="button" data-cp-open-docs href="${docsHref}" hidden><span class="material-symbols-outlined" aria-hidden="true">description</span><span>Open docs</span></a></div>`;
   return `<!DOCTYPE html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<html lang="en"><head>${renderFaviconLinks()}<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <link rel="preload" href="/select.js?v=3" as="script">
 ${hasSidebar ? `<script defer src="/management-pages.js?v=${MANAGEMENT_SHELL_VERSION}"></script>` : ""}
 <link rel="preload" href="/management-query.js?v=4" as="script">
@@ -541,9 +542,10 @@ ${hasSidebar ? `<script defer src="/management-pages.js?v=${MANAGEMENT_SHELL_VER
   <span class="cp-top-spacer"></span>${openDocs}
   ${renderThemeButton("cp-theme")}
   <div class="cp-account" id="cp-account"><button class="cp-avatar" id="cp-avatar" type="button" aria-label="Open account menu" aria-expanded="false" aria-controls="cp-account-menu">${escapeHtml(initial)}</button><div class="cp-account-menu" id="cp-account-menu"><span class="cp-account-email">${escapeHtml(options.user.email)}</span><a href="/account/security"><span class="material-symbols-outlined" aria-hidden="true">shield</span><span>Account security</span></a><a href="/api/auth/sign-out"><span class="material-symbols-outlined" aria-hidden="true">logout</span><span>Sign out</span></a></div></div>
-</div></header>
+</div>
 ${organizationId ? '<div class="cp-org-menu" id="cp-org-menu" role="menu" aria-label="Switch organization" popover="manual" hidden><p class="cp-org-menu-heading" role="presentation">Switch organization</p><p class="cp-org-menu-status" role="status"></p><div data-org-options role="presentation"></div><div class="cp-org-menu-footer" role="presentation"><a href="/organizations?choose=1" role="menuitem">Manage organizations</a></div></div>' : ""}
-${hasSidebar ? `<aside class="cp-sidebar" id="cp-navigation"><div class="cp-drawer-head"><span>Navigation</span><button class="cp-icon-button" id="cp-nav-close" type="button" aria-label="Close navigation"><span class="material-symbols-outlined" aria-hidden="true">close</span></button></div>${drawerContext}${controlNavigation(organizationId ?? "", options.active)}</aside><button class="cp-backdrop" id="cp-backdrop" type="button" aria-label="Close navigation" tabindex="-1"></button>` : ""}
+</header>
+${hasSidebar ? `<div class="cp-sidebar" id="cp-navigation" role="complementary" aria-label="Workspace navigation"><div class="cp-drawer-head"><span>Navigation</span><button class="cp-icon-button" id="cp-nav-close" type="button" aria-label="Close navigation"><span class="material-symbols-outlined" aria-hidden="true">close</span></button></div>${drawerContext}${controlNavigation(organizationId ?? "", options.active)}</div><button class="cp-backdrop" id="cp-backdrop" type="button" aria-label="Close navigation" tabindex="-1"></button>` : ""}
 <main class="cp-main${hasSidebar ? "" : " focused"}" data-cp-route-envelope="true" data-cp-shell-version="${MANAGEMENT_SHELL_VERSION}" data-cp-organization-id="${escapeHtml(organizationId ?? "")}" data-cp-project-id="${escapeHtml(options.projectId ?? "")}" data-cp-user-id="${escapeHtml(options.user.id)}"><div class="cp-content${pageClass}">
   <header class="cp-page-head"><div class="cp-page-copy"><p class="eyebrow">${escapeHtml(options.eyebrow)}</p><h1 class="cp-page-heading">${escapeHtml(options.heading)}</h1><p class="cp-page-description">${escapeHtml(options.description)}</p></div>${options.actions ? `<div class="cp-page-actions">${options.actions}</div>` : ""}</header>
   ${options.content}
