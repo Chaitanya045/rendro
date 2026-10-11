@@ -89,7 +89,7 @@ document.addEventListener("click",function(e){
     transport: "parent",
     canWrite: true,
   })};</script>
-<script defer src="/commentor.js?v=37"></script>`;
+<script defer src="/commentor.js?v=38"></script>`;
 }
 
 app.get("/organizations/:organizationId/projects/:projectId/docs/tree", async (c) => {

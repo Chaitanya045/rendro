@@ -65,8 +65,8 @@ async function flushMessages() {
   for (let i = 0; i < 12; i++) await Promise.resolve();
 }
 
-const methods = ["thread.create", "thread.resolve", "thread.archive", "thread.remove", "reply.add"] as const;
-const args = { threadId: "thread-1", body: "Pending write", anchor: { kind: "element", path: ["main"] } };
+const methods = ["thread.create", "thread.resolve", "thread.archive", "thread.remove", "reply.add", "reply.remove"] as const;
+const args = { threadId: "thread-1", replyId: "reply-1", body: "Pending write", anchor: { kind: "element", path: ["main"] } };
 
 afterEach(() => {
   vi.unstubAllGlobals();

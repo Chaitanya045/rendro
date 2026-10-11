@@ -3,6 +3,7 @@ import { Window, type HTMLButtonElement, type HTMLTextAreaElement } from "happy-
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   COMMENTOR_PARENT_READY,
+  COMMENTOR_PARENT_REPLIES_UPDATE,
   COMMENTOR_PARENT_REQUEST,
   COMMENTOR_PARENT_RESPONSE,
   COMMENTOR_PARENT_UPDATE,
@@ -23,7 +24,7 @@ async function flush() {
   for (let i = 0; i < 12; i++) await Promise.resolve();
 }
 
-async function widget() {
+async function widget(options: { canDelete?: boolean; replyCanDelete?: boolean; archived?: boolean } = { canDelete: true, replyCanDelete: true }) {
   vi.useFakeTimers();
   const win = new Window({ url: "https://rendro.test/guide.html", settings: { enableJavaScriptEvaluation: true } });
   windows.push(win);
@@ -51,7 +52,9 @@ async function widget() {
     type: COMMENTOR_PARENT_UPDATE, canLoadMore: false, loading: false,
     threads: [{
       _id: "thread-1", _creationTime: Date.now(), authorName: "Author", authorEmail: "author@test.com",
-      body: "Comment", anchor: { kind: "element", path: ["main"] }, resolved: false, archived: false, replies: [],
+      body: "Comment", anchor: { kind: "element", path: ["main"] }, resolved: false,
+      archived: options.archived ?? false, canDelete: options.canDelete,
+      replies: [{ _id: "reply-1", _creationTime: Date.now(), authorName: "Reply author", body: "Reply", canDelete: options.replyCanDelete }],
     }],
   });
   win.eval(bundle);
@@ -66,9 +69,14 @@ async function widget() {
 }
 
 describe("comment widget recovery controls", () => {
-  it.each(["resolve", "archive"])("Refresh preserves the %s guard across rendered controls and accepts the late result", async (action) => {
-    const { root, button, requests, mutations, finish } = await widget();
-    button(`commentor-${action}-btn`).click();
+  it.each(["resolve", "archive", "unarchive", "delete-reply"])("Refresh preserves the %s guard across rendered controls and accepts the late result", async (action) => {
+    const { root, button, requests, mutations, finish } = await widget({
+      canDelete: true, replyCanDelete: true, archived: action === "unarchive",
+    });
+    if (action === "unarchive") root.querySelector<HTMLButtonElement>('[data-filter="history"]')!.click();
+    const testId = `commentor-${action === "unarchive" ? "archive" : action}-btn`;
+    button(testId).click();
+    button(testId).click();
     await vi.advanceTimersByTimeAsync(60_001);
     expect(root.querySelector(".toast")?.textContent).not.toMatch(/try(?:ing)? again/i);
     const refresh = root.querySelector<HTMLButtonElement>(".toast button")!;
@@ -76,13 +84,72 @@ describe("comment widget recovery controls", () => {
     refresh.click();
     await flush();
     expect(requests.filter((request) => request.method === "subscribe")).toHaveLength(2);
-    const replacement = button(`commentor-${action}-btn`);
+    const replacement = button(testId);
     expect(replacement.disabled).toBe(true);
     replacement.click();
     expect(mutations()).toHaveLength(1);
     finish();
     await flush();
-    expect(button(`commentor-${action}-btn`).disabled).toBe(false);
+    expect(button(testId).disabled).toBe(false);
+  });
+
+  it.each(["refresh", "replace host"])("settles an in-flight thread deletion after %s without replaying it", async (recovery) => {
+    const { root, button, mutations, send, finish } = await widget();
+    const remove = button("commentor-delete-btn");
+    remove.click();
+    remove.click();
+    await vi.advanceTimersByTimeAsync(65_001);
+    expect(mutations()).toHaveLength(1);
+    expect(mutations()[0].method).toBe("thread.remove");
+    if (recovery === "refresh") {
+      root.querySelector<HTMLButtonElement>(".toast button")!.click();
+      await flush();
+      expect(root.querySelector('[data-testid="commentor-delete-btn"]')).toBeNull();
+      finish();
+      send({ type: COMMENTOR_PARENT_UPDATE, threads: [], canLoadMore: false, loading: false });
+    } else {
+      send({ type: COMMENTOR_PARENT_READY, parentGeneration: "host-2" });
+      await flush();
+      expect(button("commentor-delete-btn")).not.toBeNull();
+      expect(root.querySelector('.toast[role="alert"]')?.textContent).toContain("outcome is unknown");
+      finish();
+    }
+    await flush();
+    expect(mutations()).toHaveLength(1);
+    expect(root.querySelector('.toast[role="status"]')?.getAttribute("data-state")).toBe("closed");
+  });
+
+  describe.each(["refresh", "replace host"])("permissions after %s", (recovery) => {
+    it.each([
+      [false, false], [undefined, undefined], [true, false], [false, true],
+    ])("uses fresh thread (%s) and reply (%s) permissions even after a late ack", async (canDelete, replyCanDelete) => {
+      const permissions = { canDelete: true as boolean | undefined, replyCanDelete: true as boolean | undefined };
+      const { root, button, mutations, send, finish } = await widget(permissions);
+      // An expanded reply page from the old subscription must not override
+      // permissions supplied by the replacement subscription.
+      send({ type: COMMENTOR_PARENT_REPLIES_UPDATE, threadId: "thread-1", canLoadMore: false, loading: false,
+        replies: [{ _id: "reply-1", _creationTime: Date.now(), authorName: "Reply author", body: "Reply", canDelete: true }],
+      });
+      button("commentor-resolve-btn").click();
+      await vi.advanceTimersByTimeAsync(60_001);
+      permissions.canDelete = canDelete;
+      permissions.replyCanDelete = replyCanDelete;
+      if (recovery === "refresh") root.querySelector<HTMLButtonElement>(".toast button")!.click();
+      else send({ type: COMMENTOR_PARENT_READY, parentGeneration: "host-2" });
+      await flush();
+      const checkPermissions = () => {
+        expect(Boolean(root.querySelector('[data-testid="commentor-delete-btn"]'))).toBe(canDelete === true);
+        expect(Boolean(root.querySelector('[data-testid="commentor-archive-btn"]'))).toBe(canDelete === true);
+        expect(Boolean(root.querySelector('[data-testid="commentor-delete-reply-btn"]'))).toBe(replyCanDelete === true);
+        expect(button("commentor-resolve-btn")).not.toBeNull();
+      };
+      checkPermissions();
+      finish();
+      await flush();
+      checkPermissions();
+      expect(button("commentor-resolve-btn").disabled).toBe(false);
+      expect(mutations()).toHaveLength(1);
+    });
   });
 
   it.each(["refresh", "replace host"])("preserves a create draft and reconciles its pending controls on %s", async (recovery) => {

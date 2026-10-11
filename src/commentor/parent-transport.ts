@@ -81,8 +81,12 @@ export class ParentCommentTransport {
   }
 
   private mutationKey(method: CommentorParentMutationMethod, args: unknown): string {
-    const threadId = (args as { threadId?: string } | null)?.threadId;
-    return JSON.stringify([method, threadId ?? null]);
+    const target = args as { threadId?: string; replyId?: string } | null;
+    return JSON.stringify([
+      method,
+      target?.threadId ?? null,
+      method === "reply.remove" ? target?.replyId ?? null : null,
+    ]);
   }
 
   refresh(): Promise<void> {
@@ -123,7 +127,9 @@ export class ParentCommentTransport {
   private request(method: CommentorParentMethod, args: unknown): Promise<void> {
     const requestId = `${Date.now()}-${++this.sequence}-${Math.random().toString(36).slice(2)}`;
     return new Promise((resolve, reject) => {
-      const mutation = method.startsWith("thread.") || method === "reply.add";
+      // Mirror CommentorParentMutationMethod: only subscription/pagination
+      // requests may time out. Every write must keep its guard and late ack.
+      const mutation = method !== "subscribe" && method !== "threads.more" && method !== "replies.more";
       const timeout = window.setTimeout(() => {
         if (mutation) {
           // Convex retries disconnected mutations and may commit before its

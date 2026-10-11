@@ -261,8 +261,8 @@ describe("slow comment mutations", () => {
     const slow = vi.fn(() => dismissSlow);
     const update = vi.fn();
     transport.subscribe(update, vi.fn(), vi.fn(), slow);
-    const respond = (ok: boolean) => {
-      const request = postMessage.mock.calls[0][0] as { requestId: string };
+    const respond = (ok: boolean, index = 0) => {
+      const request = postMessage.mock.calls[index][0] as { requestId: string };
       handler({ source: parent, data: { type: COMMENTOR_PARENT_RESPONSE, requestId: request.requestId, ok } } as unknown as MessageEvent);
     };
     const publish = () => handler({ source: parent, data: {
@@ -289,7 +289,7 @@ describe("slow comment mutations", () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
-  it.each(["thread.create", "thread.resolve", "thread.archive", "thread.remove", "reply.add"] as const)(
+  it.each(["thread.create", "thread.resolve", "thread.archive", "thread.remove", "reply.add", "reply.remove"] as const)(
     "keeps %s pending after the soft deadline, offers recovery, and accepts a late result without retrying",
     async (method) => {
       const { transport, slow, dismissSlow, postMessage, respond, publish, update } = transportRuntime();
@@ -308,6 +308,26 @@ describe("slow comment mutations", () => {
       transport.dispose();
     },
   );
+
+  it("guards each reply deletion independently within the same thread", async () => {
+    const { transport, postMessage, respond } = transportRuntime();
+    const firstArgs = { threadId: "thread-1", replyId: "reply-1" };
+    const secondArgs = { threadId: "thread-1", replyId: "reply-2" };
+    const first = transport.mutate("reply.remove", firstArgs);
+    expect(transport.mutate("reply.remove", firstArgs)).toBe(first);
+    expect(transport.isMutationPending("reply.remove", secondArgs)).toBe(false);
+    const second = transport.mutate("reply.remove", secondArgs);
+    expect(second).not.toBe(first);
+    expect(postMessage).toHaveBeenCalledTimes(2);
+    respond(true);
+    await first;
+    expect(transport.isMutationPending("reply.remove", firstArgs)).toBe(false);
+    expect(transport.isMutationPending("reply.remove", secondArgs)).toBe(true);
+    respond(true, 1);
+    await second;
+    expect(transport.isMutationPending("reply.remove", secondArgs)).toBe(false);
+    transport.dispose();
+  });
 
   it("still reports an explicit server rejection after a slow mutation", async () => {
     const { transport, respond, dismissSlow } = transportRuntime();

@@ -9,6 +9,7 @@ vi.mock("../src/commentor/parent-transport", () => ({
   ParentCommentTransport: class {
     subscribe(onUpdate: typeof transport.publish) { transport.publish = onUpdate; }
     mutate = transport.mutate;
+    isMutationPending() { return false; }
   },
 }));
 

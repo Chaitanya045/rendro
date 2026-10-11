@@ -1795,6 +1795,8 @@ class Commentor {
                 "data-tip": "Delete reply",
                 "aria-label": `Delete reply by ${r.authorName}`,
                 "data-testid": "commentor-delete-reply-btn",
+                ...(this.parentTransport!.isMutationPending("reply.remove", { threadId: t._id, replyId: r._id })
+                  ? { disabled: "" } : {}),
                 onclick: (event: Event) => {
                   event.stopPropagation();
                   const button = event.currentTarget as HTMLButtonElement;
