@@ -44,6 +44,7 @@ describe("encrypted private viewer capabilities", () => {
     expect(redactViewerPath("/organizations/a/projects/b/docs/view/ciphertext/files/site.css"))
       .toBe("/organizations/a/projects/b/docs/view/[redacted]/files/site.css");
     expect(redactViewerPath("/docs/view/malformed" )).toBe("/docs/view/[redacted]");
+    expect(redactViewerPath("/legacy-view/example/view/ciphertext/files/site.css")).toBe("/legacy-view/example/view/[redacted]/files/site.css");
     expect(redactViewerPath("/docs/files/index.html")).toBe("/docs/files/index.html");
   });
 });

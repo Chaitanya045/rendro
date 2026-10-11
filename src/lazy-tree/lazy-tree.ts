@@ -50,7 +50,7 @@ function docUrl(fullPath: string): string {
 function documentFrameUrl(fullPath: string): string {
   return DOCUMENT_BASE
     ? `${DOCUMENT_BASE}/files/${encodePath(relativeDocumentPath(fullPath))}`
-    : `/files/${encodePath(fullPath)}`;
+    : `/legacy-view/${encodeURIComponent(ORG ?? "")}/files/${encodePath(relativeDocumentPath(fullPath))}`;
 }
 
 function docFromPathname(): string {

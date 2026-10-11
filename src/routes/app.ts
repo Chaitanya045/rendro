@@ -1,3 +1,5 @@
+import { CONVEX_URL } from "@/config";
+import { viewerScript } from "@/viewer/markup";
 import { renderCommentRecoveryLifecycle } from "../commentor/recovery-session";
 import { nonceAttribute } from "@/middleware/html-nonce";
 import { renderFaviconLinks } from "./favicon";
@@ -128,6 +130,7 @@ interface OrgTreePageOptions {
   backHref?: string;
   backLabel?: string;
   sandboxed?: boolean;
+  legacyCommentConfig?: { orgSlug: string; convexUrl: string };
   publicDocument?: boolean;
   shareConfig?: {
     organizationId: string;
@@ -154,7 +157,8 @@ export interface ScopedDocumentShellOptions {
 
 function renderOrgDocs(user: User, org: string, selectedDoc = ""): string {
   logOrgAccess(org, user.email, "view");
-  return renderOrgTreePage(user, org, selectedDoc);
+  return renderOrgTreePage(user, org, selectedDoc, { sandboxed: true, legacyCommentConfig: { orgSlug: org, convexUrl: CONVEX_URL } })
+    .replace("</body>", viewerScript("parent", { base: `/legacy-view/${encodeURIComponent(org)}` }) + "</body>");
 }
 
 export function renderPublicOrgDocs(publication: PublicShellPublication, selectedPath: string): string {
@@ -884,9 +888,9 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
   document.addEventListener("click",function(){setAvatarMenu(false);setMobileMore(false,false);});
 })();
 </script>
-<script${nonceAttribute()}>window.RENDRO_INITIAL_DOC=${inlineJson(selectedDoc)};window.RENDRO_ORG=${inlineJson(org)};window.RENDRO_DOCUMENT_BASE=${inlineJson(documentBase)};window.RENDRO_PUBLICATION_BASE=${inlineJson(isPublicDocument ? documentBase : "")};window.RENDRO_SHARE_CONFIG=${inlineJson(options.shareConfig ?? null)};</script>
+<script${nonceAttribute()}>window.RENDRO_INITIAL_DOC=${inlineJson(selectedDoc)};window.RENDRO_ORG=${inlineJson(org)};window.RENDRO_DOCUMENT_BASE=${inlineJson(documentBase)};window.RENDRO_PUBLICATION_BASE=${inlineJson(isPublicDocument ? documentBase : "")};window.RENDRO_SHARE_CONFIG=${inlineJson(options.shareConfig ?? null)};window.RENDRO_LEGACY_COMMENT_CONFIG=${inlineJson(options.legacyCommentConfig ?? null)};</script>
 ${renderCommentRecoveryLifecycle(user?.id ?? null, nonceAttribute())}
-${options.shareConfig?.convexUrl ? `<script${nonceAttribute()} src="/commentor-parent.js?v=5"></script>` : ""}
+${options.shareConfig?.convexUrl || options.legacyCommentConfig?.convexUrl ? `<script${nonceAttribute()} src="/commentor-parent.js?v=5"></script>` : ""}
 <script${nonceAttribute()} src="/lazy-tree.js?v=34"></script>
 </body>
 </html>`;

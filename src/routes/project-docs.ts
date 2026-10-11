@@ -47,10 +47,11 @@ function basePath(organizationId: string, projectId: string): string {
   return `/organizations/${encodeURIComponent(organizationId)}/projects/${encodeURIComponent(projectId)}/docs`;
 }
 
-function documentFeatures(
+export function documentFeatures(
   options: {
     organizationId: string;
     projectId: string;
+    legacyOrg?: string;
     documentPath: string;
     base: string;
     url: string;
@@ -69,8 +70,9 @@ var p=window.parent;
 document.addEventListener("keydown",function(e){var key=(e.key||"").toLowerCase();var shellShortcut=(key==="h"||e.code==="KeyH")&&(e.ctrlKey||e.metaKey)&&e.shiftKey&&!e.altKey&&!e.repeat&&!(e.getModifierState&&e.getModifierState("AltGraph"));if(shellShortcut&&!(e.target instanceof Element&&e.target.closest("input,textarea,select,[contenteditable='true'],[contenteditable='plaintext-only'],[contenteditable='']"))){e.preventDefault();p.postMessage({type:"shell-toggle"},"*");}});
 })();
 </script>
-${viewerScript("navigation", { prefix: `${options.base}/files/`, ticketBase: `${options.base}/view/`, documentPath: options.documentPath, loadedPath: virtualPath }, options.url)}
+${viewerScript("navigation", { prefix: `${options.base}/files/`, ticketBase: `${options.base}/view/`, legacyPrefix: options.legacyOrg ? `/files/${encodeURIComponent(options.legacyOrg)}/` : undefined, documentPath: options.documentPath, loadedPath: virtualPath }, options.url)}
 <script>window.COMMENTOR=${inlineJson({
+    ...(options.legacyOrg ? { orgSlug: options.legacyOrg, filePath: `${options.legacyOrg}/${options.documentPath}` } : {}),
     organizationId: options.organizationId,
     projectId: options.projectId,
     documentPath: options.documentPath,

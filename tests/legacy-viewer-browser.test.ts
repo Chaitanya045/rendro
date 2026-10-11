@@ -1,0 +1,142 @@
+import { getRequestListener } from "@hono/node-server";
+import { readFile } from "node:fs/promises";
+import { build } from "esbuild";
+import { getFunctionName, makeFunctionReference } from "convex/server";
+import { convexTest } from "convex-test";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import worker from "@/worker";
+import * as minio from "@/minio";
+import * as deletion from "@/soft-delete";
+import { api } from "../convex/_generated/api";
+import schema from "../convex/schema";
+import { mockSecurityBackend, testUser } from "./fixtures/security-headers";
+import { browserStep, createBrowserHarness } from "./helpers/browser";
+const harness = createBrowserHarness();
+const modules = import.meta.glob("../convex/**/*.ts");
+const backend = convexTest(schema, modules);
+const author = backend.withIdentity({ subject: testUser.id, email: testUser.email, name: testUser.name });
+const scope = { orgSlug: "example", filePath: "example/guide/index.html" };
+const assetsSeen = new Set<string>();
+const publisher = `<!doctype html><html><head><link rel="stylesheet" href="assets/site.css">
+<script>window.publisherProbe={origin:window.origin};
+try{window.publisherProbe.cookies=parent.document.cookie}catch(e){window.publisherProbe.cookies="blocked"}
+try{window.publisherProbe.dom=parent.document.body.tagName}catch(e){window.publisherProbe.dom="blocked"}</script>
+</head><body><h1 id="top">Legacy document</h1><p id="comment-target">Selectable legacy text</p>
+<img id="image" src="assets/image.svg"><a id="same" href="#bottom">Same document</a>
+<a id="next" href="next.html#destination">Next document</a>
+<a id="old-link" href="/files/example/guide/next.html#destination">Old absolute link</a>
+<div style="height:1500px"></div><h2 id="bottom">Bottom</h2></body></html>`;
+
+beforeAll(async () => {
+  mockSecurityBackend();
+  vi.spyOn(deletion, "isDeleted").mockResolvedValue(false);
+  vi.spyOn(minio, "listImmediate").mockResolvedValue({ entries: [], isTruncated: false });
+  vi.mocked(minio.headObject).mockImplementation(key => Promise.resolve({ contentType: key.endsWith(".css") ? "text/css" : key.endsWith(".svg") ? "image/svg+xml" : "text/html" }));
+  vi.mocked(minio.getObjectStream).mockImplementation(key => {
+    assetsSeen.add(key);
+    const content = key.endsWith(".css") ? 'body{color:rgb(1,2,3)}' : key.endsWith(".svg")
+      ? '<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><rect width="10" height="10" fill="green"/></svg>'
+      : key.endsWith("next.html") ? '<!doctype html><h1 id="destination">Next legacy document</h1>' : publisher;
+    return Promise.resolve(new Response(content).body);
+  });
+  const assets = new Map<string, string>();
+  for (const [path, entry] of [["/private-viewer.js", "src/viewer/entry.ts"], ["/lazy-tree.js", "src/lazy-tree/lazy-tree.ts"], ["/commentor.js", "src/commentor/commentor.ts"]]) {
+    const bundle = await browserStep(`bundle ${path}`, () => build({ entryPoints: [entry], bundle: true, write: false, format: "iife", platform: "browser" }));
+    assets.set(path, bundle.outputFiles[0].text);
+  }
+  // Only the Convex network transport is replaced: the real bridge, adapter,
+  // widget, routes and v1 backend mutations/queries run end to end.
+  const parent = await browserStep("bundle legacy comment transport fixture", () => build({ stdin: { contents: `
+    import { CommentorParentHost, ConvexLegacyCommentBackend } from "./src/commentor/parent-host";
+    import { getFunctionName } from "convex/server";
+    const listeners=new Set();
+    async function call(kind,fn,args){const r=await fetch('/__legacy-comments',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({kind,name:getFunctionName(fn),args})});if(!r.ok)throw new Error('fixture operation failed');return r.json()}
+    const client={onUpdate(fn,args,update,error){let live=true;const refresh=()=>call('query',fn,args).then(v=>{if(live)update(v)},error);listeners.add(refresh);void refresh();return()=>{live=false;listeners.delete(refresh)}},async mutation(fn,args){const result=await call('mutation',fn,args);await Promise.all([...listeners].map(f=>f()));return result}};
+    addEventListener('DOMContentLoaded',()=>{
+      const host=new CommentorParentHost(document.getElementById('content-frame'),location.origin,window.RENDRO_LEGACY_COMMENT_CONFIG,new ConvexLegacyCommentBackend(client),${JSON.stringify(testUser.id)});host.start();
+    });`, resolveDir: process.cwd(), loader: "ts" }, bundle: true, write: false, platform: "browser" }));
+  assets.set("/commentor-parent.js", parent.outputFiles[0].text);
+  const allowed = new Set([api.threads.list, api.threads.create, api.threads.resolve, api.threads.archive, api.threads.remove, api.replies.add, api.replies.remove].map(getFunctionName));
+  const listener = getRequestListener(async request => {
+    if (new URL(request.url).pathname === "/__legacy-comments") {
+      if (!request.headers.get("cookie")?.includes("better-auth.session_token=test-session")) return new Response(null, { status: 401 });
+      const input = await request.json() as { kind: string; name: string; args: Record<string, unknown> };
+      if (!allowed.has(input.name)) return new Response(null, { status: 403 });
+      const result = input.kind === "query" ? await author.query(makeFunctionReference<"query">(input.name), input.args)
+        : await author.mutation(makeFunctionReference<"mutation">(input.name), input.args);
+      return Response.json(result ?? null);
+    }
+    return worker.fetch(request, { ASSETS: { fetch: async (req: Request) => {
+      const path = new URL(req.url).pathname;
+      if (assets.has(path)) return new Response(assets.get(path), { headers: { "Content-Type": "text/javascript" } });
+      try { return new Response(await readFile(`public${path}`), { headers: { "Content-Type": path.endsWith(".js") ? "text/javascript" : "image/svg+xml" } }); }
+      catch { return new Response(null, { status: 404 }); }
+    } } });
+  });
+  await harness.start((request, response) => { void listener(request, response).catch(error => response.destroy(error as Error)); });
+});
+afterAll(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+
+async function open(path: string) {
+  const page = await harness.newPage();
+  await page.context().addCookies([{ name: "better-auth.session_token", value: "test-session", url: harness.origin }, { name: "parent-marker", value: "private", url: harness.origin }]);
+  await page.route(url => ["cdn.tailwindcss.com", "fonts.googleapis.com"].includes(url.hostname), route => route.fulfill({ contentType: new URL(route.request().url()).hostname === "cdn.tailwindcss.com" ? "text/javascript" : "text/css", body: new URL(route.request().url()).hostname === "cdn.tailwindcss.com" ? "window.tailwind={}" : "" }));
+  await browserStep("open legacy URL and follow viewer redirect", () => page.goto(harness.origin + path));
+  await browserStep("load legacy publisher iframe", () => page.frameLocator("#content-frame").locator("h1").waitFor());
+  return page;
+}
+
+describe("legacy opaque viewer in Chromium", () => {
+  it("runs publisher scripts with no parent access, loads assets, and creates/reads a legacy comment through the bridge", async () => {
+    const page = await open("/files/example/guide/index.html#bottom");
+    expect(new URL(page.url()).pathname).toBe("/docs/example/guide/index.html");
+    const frame = page.frames().find(frame => frame !== page.mainFrame())!;
+    expect(await frame.evaluate(() => (window as unknown as { publisherProbe: unknown }).publisherProbe)).toEqual({ origin: "null", cookies: "blocked", dom: "blocked" });
+    await expect.poll(() => new URL(page.url()).hash).toBe("#bottom");
+    await expect.poll(() => frame.locator("#bottom").evaluate(el => Math.abs(el.getBoundingClientRect().top) < innerHeight)).toBe(true);
+    expect(await frame.evaluate(() => location.hash)).toBe("");
+    await browserStep("load ticket stylesheet and image", () => frame.waitForFunction(() => getComputedStyle(document.body).color === "rgb(1, 2, 3)" && (document.getElementById("image") as HTMLImageElement).naturalWidth === 10));
+    expect(assetsSeen.has("example/guide/assets/site.css")).toBe(true);
+    expect(assetsSeen.has("example/guide/assets/image.svg")).toBe(true);
+    const initialBase = await frame.evaluate(() => document.baseURI);
+    await page.clock.setFixedTime(Date.now() + 6 * 60_000);
+    await frame.evaluate(() => dispatchEvent(new Event("focus")));
+    await browserStep("renew legacy assets through the authenticated parent", () => frame.waitForFunction(previous => document.baseURI !== previous, initialBase));
+    await expect.poll(() => new URL(page.url()).hash).toBe("#bottom");
+    await expect.poll(() => frame.locator("#bottom").evaluate(el => Math.abs(el.getBoundingClientRect().top) < innerHeight)).toBe(true);
+    expect(await frame.evaluate(() => location.hash)).toBe("");
+    // Open the actual comment widget and submit via its parent transport.
+    await browserStep("enable legacy comment widget", () => frame.waitForFunction(() => {
+      const button = document.querySelector("#commentor-host")?.shadowRoot?.querySelector('[data-testid="commentor-comment-btn"]') as HTMLButtonElement | null;
+      return button && !button.disabled;
+    }));
+    await frame.getByTestId("commentor-comment-btn").click();
+    await frame.locator("#comment-target").click();
+    await frame.locator("textarea").fill("Legacy bridge comment");
+    await frame.getByTestId("commentor-composer-post").click();
+    await expect.poll(async () => (await author.query(api.threads.list, scope)).map(thread => thread.body)).toContain("Legacy bridge comment");
+    await page.reload();
+    const reloaded = page.frameLocator("#content-frame");
+    await reloaded.getByTestId("commentor-panel-btn").click();
+    await browserStep("read persisted legacy comment through bridge", () => reloaded.getByText("Legacy bridge comment", { exact: true }).first().waitFor());
+    await page.close();
+  });
+  it("preserves fragment navigation, legacy absolute links, and cross-document links", async () => {
+    const page = await open("/docs/example/guide/index.html");
+    const frame = page.frames().find(frame => frame !== page.mainFrame())!;
+    await frame.locator("#same").click();
+    await expect.poll(() => new URL(page.url()).hash).toBe("#bottom");
+    await expect.poll(() => frame.locator("#bottom").evaluate(el => Math.abs(el.getBoundingClientRect().top) < innerHeight)).toBe(true);
+    expect(await frame.evaluate(() => location.hash)).toBe("");
+    await frame.locator("#next").click();
+    await browserStep("navigate legacy document through parent", () => page.waitForURL("**/docs/example/guide/next.html#destination"));
+    await browserStep("render linked document", () => page.frameLocator("#content-frame").locator("#destination").waitFor());
+    await expect.poll(() => page.frameLocator("#content-frame").locator("#destination").evaluate(el => Math.abs(el.getBoundingClientRect().top) < innerHeight)).toBe(true);
+    expect(await frame.evaluate(() => location.hash)).toBe("");
+    await page.goBack();
+    await browserStep("restore shell fragment on Back", () => page.waitForURL("**/docs/example/guide/index.html#bottom"));
+    await page.frameLocator("#content-frame").locator("#old-link").click();
+    await browserStep("resolve old absolute link through parent", () => page.waitForURL("**/docs/example/guide/next.html#destination"));
+    await page.close();
+  });
+});

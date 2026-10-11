@@ -132,12 +132,14 @@ describe("shared response security policy", () => {
     expect(await response.text()).toContain('<script>window.publisherLoaded=true</script>');
   });
 
-  it("sandboxes legacy public share HTML but preserves the legacy private comment auth contract", async () => {
+  it("sandboxes legacy public shares and redirects private bookmarks into the isolated viewer", async () => {
     const token = createShareToken("example/index.html");
     sandbox(await request(`/share/${token}`));
     const response = await request("/files/example/index.html", true);
     common(response);
-    expect(response.headers.get("Content-Security-Policy")).toBe("frame-ancestors 'self'; object-src 'none'");
+    expect(response.status).toBe(302);
+    expect(response.headers.get("Location")).toBe("/docs/example/index.html");
+    sandbox(await request("/legacy-view/example/files/index.html", true));
   });
 
   it.each(["/health", "/api/auth/get-session", "/api/auth/sign-out", "/p/product/tree", "/p/product/files/assets/site.css"])("adds baseline headers without an HTML CSP: %s", async path => {

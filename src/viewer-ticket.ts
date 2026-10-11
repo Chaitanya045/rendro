@@ -16,9 +16,9 @@ export function viewerSessionCookie(cookie: string): string {
     .filter(part => /^(?:__Secure-)?better-auth\.session_token=.+$/.test(part)).join("; ");
 }
 
-async function ticketKey(): Promise<Uint8Array> {
+async function ticketKey(domain = audience): Promise<Uint8Array> {
   return new Uint8Array(await crypto.subtle.digest(
-    "SHA-256", new TextEncoder().encode(`${audience}:${AUTH_SECRET}`),
+    "SHA-256", new TextEncoder().encode(`${domain}:${AUTH_SECRET}`),
   ));
 }
 
@@ -44,5 +44,25 @@ export async function readViewerTicket(
       || typeof payload.cookie !== "string" || !payload.cookie
       || viewerSessionCookie(payload.cookie) !== payload.cookie) return null;
     return { ...scope, manifestKey: payload.manifestKey, cookie: payload.cookie };
+  } catch { return null; }
+}
+
+// A separate audience/key prevents legacy capabilities from authorizing v2 reads.
+const legacyAudience = "rendro:legacy-document-viewer:v1";
+export async function createLegacyViewerTicket(orgSlug: string, sessionCookie: string): Promise<string> {
+  const cookie = viewerSessionCookie(sessionCookie);
+  if (!cookie) throw new Error("Viewer session required");
+  return new EncryptJWT({ orgSlug, cookie }).setProtectedHeader({ alg: "dir", enc: "A256GCM" })
+    .setAudience(legacyAudience).setIssuedAt().setExpirationTime(`${VIEWER_TICKET_SECONDS}s`)
+    .encrypt(await ticketKey(legacyAudience));
+}
+export async function readLegacyViewerTicket(token: string, orgSlug: string): Promise<{ cookie: string } | null> {
+  try {
+    const { payload } = await jwtDecrypt(token, await ticketKey(legacyAudience), {
+      audience: legacyAudience, keyManagementAlgorithms: ["dir"], contentEncryptionAlgorithms: ["A256GCM"],
+      requiredClaims: ["exp", "iat"], maxTokenAge: VIEWER_TICKET_SECONDS,
+    });
+    return payload.orgSlug === orgSlug && typeof payload.cookie === "string" && payload.cookie
+      && viewerSessionCookie(payload.cookie) === payload.cookie ? { cookie: payload.cookie } : null;
   } catch { return null; }
 }

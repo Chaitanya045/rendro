@@ -2,15 +2,18 @@ import { viewerScript } from "@/viewer/markup";
 import { Hono } from "hono";
 import type { Context } from "hono";
 import { getObjectStream, putObject, headObject, listAllKeys, listImmediate, buildTree } from "@/minio";
-import { MINIO_BUCKET, CONVEX_URL } from "@/config";
+import { MINIO_BUCKET, CONVEX_SITE_URL } from "@/config";
 import { validateApiKey } from "@/api-keys";
 import { markDeleted, isDeleted, unmarkDeleted, filterDeleted } from "@/soft-delete";
 import { emailToOrgSlug } from "@/orgs";
 import type { User } from "better-auth/types";
 import { createShareUrl, isShareableDocKey } from "@/share-links";
-import { logger } from "@/logger";
 import { renderNotFoundPage } from "@/routes/not-found";
-import { injectMobileViewportScrollbarStyle } from "@/routes/document-html";
+import { injectViewerHeadStream } from "@/routes/document-html";
+import { createLegacyViewerTicket, readLegacyViewerTicket, viewerSessionCookie } from "@/viewer-ticket";
+import { viewerScript } from "@/viewer/markup";
+import { documentFeatures } from "@/routes/project-docs";
+import { escapeHtml } from "@/routes/html";
 
 const app = new Hono<{ Variables: { user?: User } }>();
 
@@ -32,56 +35,98 @@ app.get("/api/share/create", async (c) => {
   return c.json({ url: createShareUrl(new URL(c.req.url).origin, key) });
 });
 
-// GET /files/:key{.+} — stream a file (session-based auth)
-app.get("/files/:key{.+}", async (c) => {
+function safeLegacyPath(encoded: string): string | null {
+  try {
+    const path = encoded.split("/").map(decodeURIComponent).join("/");
+    return path && !path.includes("\\") && path.split("/").every(part => part && part !== "." && part !== "..") ? path : null;
+  } catch { return null; }
+}
+
+// Old bookmarks enter the trusted shell; the shell owns comment authentication.
+app.get("/files/:key{.+}", async c => {
+  c.header("Cache-Control", "private, no-store");
+  c.header("Referrer-Policy", "no-referrer");
   const user = c.get("user");
   if (!user) return c.text("Sign in first", 401);
   const org = emailToOrgSlug(user.email);
-  if (!org) return c.text("Invalid email", 400);
-  const rawKey = c.req.param("key");
-  if (!rawKey) return c.text("Bad request", 400);
-  const key = decodeURIComponent(rawKey);
-  if (!key.startsWith(`${org}/`)) { logger.warn({ email: user.email, key }, "cross-org"); return c.text("Forbidden", 403); }
-  try {
-    const stream = await getObjectStream(key);
-    if (!stream) return c.html(renderNotFoundPage({ path: c.req.path, homeHref: `/docs/${encodeURIComponent(org)}`, homeLabel: "Open docs tree" }), 404);
-    // Read full body for commentor injection
-    const reader = stream.getReader();
-    const chunks: Uint8Array[] = [];
-    while (true) {
-      const result: { done?: boolean; value?: Uint8Array } = await reader.read();
-      if (result.done) break;
-      if (result.value) chunks.push(result.value);
-    }
-    const decoder = new TextDecoder();
-    let html = injectMobileViewportScrollbarStyle(chunks.map(c => decoder.decode(c)).join(""));
-    if (CONVEX_URL) html = injectCommentor(html, org, key, user, c.req.url);
-    return c.html(html);
-  } catch (err) { logger.error({ err, key }, "stream failed"); return c.text("Stream failed", 500); }
+  const key = safeLegacyPath(c.req.path.slice("/files/".length));
+  if (!org || !key?.startsWith(`${org}/`)) return c.text("Forbidden", 403);
+  if (await isDeleted(key) || !await headObject(key)) return c.text("Not found", 404);
+  return c.redirect(`/docs/${key.split("/").map(encodeURIComponent).join("/")}${new URL(c.req.url).search}`);
 });
 
-function injectCommentor(html: string, org: string, filePath: string, user: User, url: string): string {
-  const navScript = `<script>
-(function(){
-var p=window.parent;
-document.addEventListener("keydown",function(e){var key=(e.key||"").toLowerCase();var shellShortcut=(key==="h"||e.code==="KeyH")&&(e.ctrlKey||e.metaKey)&&e.shiftKey&&!e.altKey&&!e.repeat&&!(e.getModifierState&&e.getModifierState("AltGraph"));if(shellShortcut&&!(e.target instanceof Element&&e.target.closest("input,textarea,select,[contenteditable='true'],[contenteditable='plaintext-only'],[contenteditable='']"))){e.preventDefault();p.postMessage({type:"shell-toggle"},"*");}});
-})();
-</script>
-${viewerScript("navigation", { prefix: `/files/${org}/`, documentPath: filePath.slice(org.length + 1), loadedPath: filePath }, url)}
-<script>
-window.COMMENTOR = ${JSON.stringify({
-  convexUrl: CONVEX_URL,
-  orgSlug: org,
-  filePath,
-  author: { email: user.email, name: user.name },
-})};
-</script>
-<script src="/commentor.js?v=41"></script>`;
-  if (html.includes("</body>")) {
-    return html.replace("</body>", navScript + "</body>");
+app.get("/legacy-view/:org/viewer-ticket", async c => {
+  c.header("Cache-Control", "private, no-store");
+  c.header("Referrer-Policy", "no-referrer");
+  const org = c.req.param("org");
+  const user = c.get("user");
+  const cookie = viewerSessionCookie(c.req.header("Cookie") ?? "");
+  if (!user || !cookie || emailToOrgSlug(user.email) !== org) return c.text("Unauthorized", 401);
+  if (c.req.query("manifestKey") !== org) return c.text("Not found", 404);
+  const token = await createLegacyViewerTicket(org, cookie);
+  return c.json({ prefix: `/legacy-view/${encodeURIComponent(org)}/view/${token}/files/` });
+});
+
+app.on("GET", ["/legacy-view/:org/files/*", "/legacy-view/:org/view/:viewerToken/files/*"], async c => {
+  c.header("Cache-Control", "private, no-store");
+  c.header("Referrer-Policy", "no-referrer");
+  const org = c.req.param("org");
+  const base = `/legacy-view/${encodeURIComponent(org)}`;
+  const missing = () => c.html(renderNotFoundPage({ path: "Document unavailable", homeHref: `/docs/${encodeURIComponent(org)}`, homeLabel: "Open docs tree" }), 404);
+  const token = c.req.param("viewerToken");
+  const ticket = token ? await readLegacyViewerTicket(token, org) : null;
+  if (token && !ticket) return missing();
+  const cookie = ticket?.cookie ?? viewerSessionCookie(c.req.header("Cookie") ?? "");
+  if (!cookie) return missing();
+  let user = c.get("user");
+  if (ticket) {
+    // Revalidate the persisted legacy session on every resource request. Never
+    // trust ambient cookies in place of the identity bound into the ticket.
+    const response = await fetch(`${CONVEX_SITE_URL}/api/auth/get-session?disableCookieCache=true`, {
+      headers: { cookie, accept: "application/json" }, redirect: "manual",
+    });
+    const session = response.ok ? await response.json() as { user?: User } | null : null;
+    user = session?.user;
   }
-  return html + navScript;
-}
+  if (!user || typeof user.email !== "string" || emailToOrgSlug(user.email) !== org) return missing();
+  const path = safeLegacyPath(c.req.path.slice(c.req.path.indexOf("/files/") + 7));
+  if (!path) return missing();
+  const key = `${org}/${path}`;
+  if (await isDeleted(key)) return missing();
+  const object = await headObject(key);
+  if (!object) return missing();
+  const stream = await getObjectStream(key);
+  if (!stream) return missing();
+  const contentType = object.contentType ?? "text/html";
+  const html = /^text\/html(?:;|$)/i.test(contentType);
+  const headers = {
+    "Content-Type": contentType, "Cache-Control": "private, no-store", "Referrer-Policy": "no-referrer",
+    ...(ticket ? { "Access-Control-Allow-Origin": "null" } : {}),
+    // Sandbox other active document types too (e.g. a directly opened SVG).
+    "Content-Security-Policy": "sandbox allow-scripts allow-forms allow-popups allow-downloads; frame-ancestors 'self'",
+    "X-Content-Type-Options": "nosniff",
+  };
+  if (!html) return new Response(stream, { headers });
+  const frameToken = token ?? await createLegacyViewerTicket(org, cookie);
+  const prefix = `${base}/view/${frameToken}/files/`;
+  const encodedPath = path.split("/").map(encodeURIComponent).join("/");
+  const features = viewerScript("frame", { base, prefix, manifestKey: org }, c.req.url)
+    + documentFeatures({ organizationId: org, projectId: org, legacyOrg: org, documentPath: path, base, url: c.req.url });
+  return new Response(injectViewerHeadStream(stream, publisherBase => {
+    let href = prefix + encodedPath;
+    if (publisherBase !== undefined) {
+      // Resolve legacy authored bases against the original /files URL.
+      const canonical = new URL(`/files/${encodeURIComponent(org)}/${encodedPath}`, c.req.url);
+      try {
+        const resolved = new URL(publisherBase, canonical);
+        const originalPrefix = `/files/${encodeURIComponent(org)}/`;
+        if (resolved.origin !== canonical.origin || !resolved.pathname.startsWith(originalPrefix)) return features;
+        href = prefix + resolved.pathname.slice(originalPrefix.length) + resolved.search + resolved.hash;
+      } catch { return features; }
+    }
+    return `<base data-rendro-viewer href="${escapeHtml(href)}">` + features;
+  }), { headers });
+});
 
 // ----- Sync API (CLI) — per-org API key auth -----
 

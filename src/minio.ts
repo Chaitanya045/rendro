@@ -244,10 +244,11 @@ export async function copyObject(sourceKey: string, destinationKey: string): Pro
 
 export async function headObject(
   key: string,
-): Promise<{ etag?: string; size?: number; metadata?: Record<string, string> } | null> {
+): Promise<{ etag?: string; size?: number; contentType?: string; metadata?: Record<string, string> } | null> {
   try {
     const response = await s3.send(new HeadObjectCommand({ Bucket: MINIO_BUCKET, Key: key }));
     return {
+      contentType: response.ContentType,
       etag: response.ETag?.replace(/"/g, ""),
       size: response.ContentLength,
       metadata: response.Metadata,
