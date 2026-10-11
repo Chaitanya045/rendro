@@ -13,7 +13,6 @@ import { renderScopedDocumentShell } from "../src/routes/app";
 
 import {
   isContentFrameSource,
-  loadedDocumentAction,
   normalizeLoadedDocumentPath,
   validRelativeDocumentPath,
 } from "../src/lazy-tree/messages";
@@ -61,14 +60,6 @@ describe("document UI regressions", () => {
     expect(isContentFrameSource(contentFrame, null)).toBe(false);
   });
 
-  it("ignores a stale loaded message until the latest shell navigation is acknowledged", () => {
-    expect(loadedDocumentAction("project/a.html", "project/b.html", "project/b.html"))
-      .toBe("ignore");
-    expect(loadedDocumentAction("project/b.html", "project/b.html", "project/b.html"))
-      .toBe("sync");
-    expect(loadedDocumentAction("project/c.html", "project/b.html", null))
-      .toBe("reload");
-  });
 
   it("passes comment text to a text node without entity encoding", async () => {
     const appended: unknown[] = [];

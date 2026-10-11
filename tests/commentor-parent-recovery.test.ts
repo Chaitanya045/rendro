@@ -88,6 +88,24 @@ afterEach(() => {
 });
 
 describe("comment recovery across parent subscriptions and generations", () => {
+  it("bounds forged subscriptions and preserves draft persistence after exhausting the backend budget", async () => {
+    const runtime = recoveryRuntime();
+    await flushMessages();
+    for (let i = 0; i < 100; i++) runtime.parent.postMessage({
+      type: COMMENTOR_PARENT_REQUEST, requestId: `flood-${i}`, method: "subscribe", args: { documentPath: "guide.html" },
+    });
+    await flushMessages();
+    expect(runtime.backend.subscribe).toHaveBeenCalledTimes(20);
+    runtime.transport.saveDraft("create", { body: "Still recoverable", anchor: { kind: "element", path: ["main"] } });
+    await flushMessages();
+    expect(Object.values(window.sessionStorage).some(value => String(value).includes("Still recoverable"))).toBe(true);
+    await vi.advanceTimersByTimeAsync(1000);
+    await runtime.transport.refresh();
+    expect(runtime.backend.subscribe).toHaveBeenCalledTimes(21);
+    runtime.transport.dispose();
+    runtime.host.dispose();
+  });
+
   it.each(methods)("refresh keeps one uncommitted %s and reconciles its late acknowledgement", async (method) => {
     const runtime = recoveryRuntime();
     const { host, transport, backend, child, slow, dismissSlow, update } = runtime;

@@ -17,6 +17,7 @@ const backend = convexTest(schema, modules);
 const author = backend.withIdentity({ subject: testUser.id, email: testUser.email, name: testUser.name });
 const scope = { orgSlug: "example", filePath: "example/guide/index.html" };
 const assetsSeen = new Set<string>();
+let attackNavigation = false;
 const publisher = `<!doctype html><html><head><link rel="stylesheet" href="assets/site.css">
 <script>window.publisherProbe={origin:window.origin};
 try{window.publisherProbe.cookies=parent.document.cookie}catch(e){window.publisherProbe.cookies="blocked"}
@@ -38,7 +39,7 @@ beforeAll(async () => {
     const content = key.endsWith(".css") ? 'body{color:rgb(1,2,3)}' : key.endsWith(".svg")
       ? '<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><rect width="10" height="10" fill="green"/></svg>'
       : key.endsWith("next.html") ? '<!doctype html><h1 id="destination">Next legacy document</h1>' : publisher;
-    return Promise.resolve(new Response(content).body);
+    return Promise.resolve(new Response(content + (attackNavigation && key.endsWith(".html") ? `<script>for(let i=0;i<100;i++){parent.postMessage({type:"doc-navigate",path:"guide/next.html",search:"?forged="+i},location.origin);parent.postMessage({type:"doc-loaded",path:"guide/next.html"},location.origin);parent.postMessage({type:"shell-toggle"},location.origin)}</script>` : "")).body);
   });
   const assets = new Map<string, string>();
   for (const [path, entry] of [["/private-viewer.js", "src/viewer/entry.ts"], ["/lazy-tree.js", "src/lazy-tree/lazy-tree.ts"], ["/commentor.js", "src/commentor/commentor.ts"]]) {
@@ -88,6 +89,36 @@ async function open(path: string) {
 }
 
 describe("legacy opaque viewer in Chromium", () => {
+  it("ignores forged navigation in the legacy public shell", async () => {
+    attackNavigation = true;
+    try {
+      const page = await open("/p/product");
+      await page.waitForTimeout(1200);
+      expect(new URL(page.url()).pathname).toBe("/p/product");
+      expect(new URL(page.url()).searchParams.has("docQuery")).toBe(false);
+      expect(await page.evaluate(() => history.length)).toBe(2);
+      await page.close();
+    } finally { attackNavigation = false; }
+  });
+
+  it.each(["click", "Enter"])("blocks legacy message floods and accepts a real %s navigation", async input => {
+    attackNavigation = true;
+    try {
+      const page = await open("/files/example/guide/index.html");
+      await page.waitForTimeout(600);
+      expect(new URL(page.url()).pathname).toBe("/docs/example/guide/index.html");
+      expect(new URL(page.url()).searchParams.has("docQuery")).toBe(false);
+      const frame = page.frames().find(candidate => candidate.parentFrame() === page.mainFrame())!;
+      if (input === "click") await frame.locator("#next").click();
+      else await frame.locator("#next").press("Enter");
+      await page.waitForURL("**/docs/example/guide/next.html#destination");
+      await page.waitForTimeout(600);
+      expect(new URL(page.url()).searchParams.has("docQuery")).toBe(false);
+      expect(await page.evaluate(() => history.length)).toBe(3);
+      await page.close();
+    } finally { attackNavigation = false; }
+  });
+
   it("runs publisher scripts with no parent access, loads assets, and creates/reads a legacy comment through the bridge", async () => {
     const page = await open("/files/example/guide/index.html#bottom");
     expect(new URL(page.url()).pathname).toBe("/docs/example/guide/index.html");
@@ -158,6 +189,7 @@ describe("legacy opaque viewer in Chromium", () => {
     expect(await frame.evaluate(() => location.hash)).toBe("");
     await page.goBack();
     await browserStep("restore shell fragment on Back", () => page.waitForURL("**/docs/example/guide/index.html#bottom"));
+    await page.waitForTimeout(1000); // A separate gesture after the parent navigation cooldown.
     await page.frameLocator("#content-frame").locator("#old-link").click();
     await browserStep("resolve old absolute link through parent", () => page.waitForURL("**/docs/example/guide/next.html#destination"));
     await page.close();

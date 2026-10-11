@@ -125,6 +125,18 @@ export class CommentorParentHost {
   // Subscription refreshes must not invalidate outstanding mutation responses.
   private connectionGeneration = 0;
   private parentGeneration = crypto.randomUUID();
+  private requestTokens = 20;
+  private requestBudgetAt = performance.now();
+  private mutationsInFlight = 0;
+
+  private allowBackendRequest(): boolean {
+    const now = performance.now();
+    this.requestTokens = Math.min(20, this.requestTokens + (now - this.requestBudgetAt) / 1000);
+    this.requestBudgetAt = now;
+    if (this.requestTokens < 1) return false;
+    this.requestTokens--;
+    return true;
+  }
 
   constructor(
     private readonly frame: HTMLIFrameElement,
@@ -336,6 +348,7 @@ export class CommentorParentHost {
         this.respond(event.source, event.data.requestId, false, "Comment scope is unavailable");
         return;
       }
+      if (!this.allowBackendRequest()) return;
       this.subscribe(event.source, event.data.requestId, scope);
       return;
     }
@@ -343,6 +356,10 @@ export class CommentorParentHost {
       this.respond(event.source, event.data.requestId, false, "Comment scope is unavailable");
       return;
     }
+    // Local recovery writes remain available even while backend requests are
+    // throttled. A withheld reply keeps pending mutations retryable (#19).
+    if (event.data.method !== "draft.save" && event.data.method !== "operation.complete"
+      && (this.mutationsInFlight >= 20 || !this.allowBackendRequest())) return;
     if (event.data.method === "threads.more") {
       if (!this.threadSubscription?.loadMore()) {
         this.respond(event.source, event.data.requestId, false, "No older comments are available");
@@ -391,6 +408,7 @@ export class CommentorParentHost {
     }
     const generation = this.connectionGeneration;
     const key = mutationKey(operation.method, operation.args);
+    this.mutationsInFlight++;
     void this.backend.mutate(operation.method, scope, { ...operation.args, clientOperationId: operation.clientOperationId, expectedAuthorId: this.userId }).then(() => {
       // An abandoned acknowledgement cannot retire the durable identity: the
       // replacement widget may still hold (or save) the unconfirmed draft.
@@ -406,7 +424,7 @@ export class CommentorParentHost {
         const message = commentErrorMessage(error, "Comment operation failed");
         this.respond(event.source!, event.data.requestId, false, message, rejected);
       }
-    });
+    }).finally(() => { this.mutationsInFlight--; });
   };
 }
 

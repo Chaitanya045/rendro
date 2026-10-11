@@ -1,3 +1,4 @@
+import { createMessageRateLimit } from "./message-limits";
 import { rewriteCssUrls } from "./css-urls";
 import { createStylesheetRenewer } from "./stylesheets";
 
@@ -27,6 +28,8 @@ export function updateViewerActiveDeployment(deploymentId: string | null, host: 
 
 export function installViewerParent(config: ParentConfig, host: Window = window): void {
   let pending = false;
+  // Match the ticket/heartbeat clock while enforcing the budget in the parent.
+  const allowRenewal = createMessageRateLimit(30_000, () => Date.now());
   let generation = 0;
   const notice = host.document.getElementById("viewer-update-notice");
   const reload = notice?.querySelector("button");
@@ -56,7 +59,7 @@ export function installViewerParent(config: ParentConfig, host: Window = window)
       return;
     }
     if (data.type !== "viewer-renew" || typeof data.manifestKey !== "string" || data.manifestKey.length > 2048
-      || typeof data.requestId !== "string" || data.requestId.length > 128 || pending) return;
+      || typeof data.requestId !== "string" || data.requestId.length > 128 || pending || !allowRenewal()) return;
     pending = true;
     const source = frame.contentWindow;
     const requestedGeneration = generation;

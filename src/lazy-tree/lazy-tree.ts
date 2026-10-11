@@ -2,10 +2,10 @@
  * Lazy tree — sidebar document tree with Material Symbols icons,
  * max-height animations, active indicator, and border-line indentation.
  */
+import { coalesceMessage, createDocumentNavigationGate } from "../viewer/message-limits";
 import { replaceViewerFragment, sendDocumentFragment, validFragment } from "../viewer/fragments";
 import {
   isContentFrameSource,
-  loadedDocumentAction,
   normalizeLoadedDocumentPath,
   validRelativeDocumentPath,
   validDocumentSearch,
@@ -475,7 +475,7 @@ function documentSearchFromLocation(): string {
   return validDocumentSearch(search) ? search : "";
 }
 
-function loadDoc(fullPath: string, pushState: boolean, fragment = "", search = "") {
+function loadDoc(fullPath: string, pushState: boolean | "replace", fragment = "", search = "") {
   const frame = document.getElementById("content-frame") as HTMLIFrameElement | null;
   const placeholder = document.getElementById("main-placeholder");
   if (placeholder) placeholder.style.display = "none";
@@ -524,7 +524,7 @@ function loadDoc(fullPath: string, pushState: boolean, fragment = "", search = "
     if (search) url.searchParams.set("docQuery", search);
     else url.searchParams.delete("docQuery");
     url.hash = fragment;
-    history.pushState({ docPath: fullPath }, "", url);
+    history[pushState === "replace" ? "replaceState" : "pushState"]({ docPath: fullPath }, "", url);
   }
 }
 
@@ -564,30 +564,10 @@ function syncActiveState(fullPath: string) {
   void navigateToDoc(relPath);
 }
 
-async function reconcileLoadedDocument(fullPath: string): Promise<void> {
-  if (!ORG) return;
-  if (DOCUMENT_BASE) {
-    await ensureScopedDocuments();
-    const relativePath = relativeDocumentPath(fullPath);
-    if (!relativePath || !scopedDocuments?.includes(relativePath)) return;
-  }
-  // Re-read expected/current state after the async manifest check: a newer
-  // shell navigation may have started while that check was in flight.
-  const action = loadedDocumentAction(
-    fullPath,
-    RENDRO_WINDOW.RENDRO_CURRENT_DOC,
-    expectedLoadedPath,
-  );
-  if (action === "ignore") return;
-  if (expectedLoadedPath === fullPath) expectedLoadedPath = null;
-  if (action === "reload") {
-    // A publisher script can navigate its own iframe without updating the
-    // parent-owned src attribute. Reload once through the shell so security-
-    // sensitive parent integrations regain an authoritative URL scope.
-    loadDoc(fullPath, false);
-    return;
-  }
-  syncActiveState(fullPath);
+function reconcileLoadedDocument(fullPath: string): void {
+  // A load report is an acknowledgement, never authority to navigate or fetch
+  // tree data. The shell already selected and scoped the document in loadDoc.
+  if (fullPath === expectedLoadedPath) expectedLoadedPath = null;
 }
 
 function isDocumentMessage(value: unknown): value is { type: string; path: string; search?: unknown; fragment?: unknown } {
@@ -627,6 +607,12 @@ function init() {
       && activeEl
     ) refreshIndicator(false);
   });
+  const acceptNavigation = createDocumentNavigationGate();
+  const updateFragment = coalesceMessage((update: { path: string; fragment: string; loadId: number }) => {
+    if (update.loadId === activeDocLoadId && update.path === RENDRO_WINDOW.RENDRO_CURRENT_DOC) {
+      replaceViewerFragment(update.fragment);
+    }
+  });
   window.addEventListener("message", (event) => {
     const frame = document.getElementById("content-frame") as HTMLIFrameElement | null;
     if (!isContentFrameSource(event.source, frame?.contentWindow ?? null)) return;
@@ -635,19 +621,25 @@ function init() {
     if (event.data.type === "doc-fragment") {
       if (!ORG || `${ORG}/${event.data.path}` !== RENDRO_WINDOW.RENDRO_CURRENT_DOC
         || !validFragment(event.data.fragment)) return;
-      replaceViewerFragment(event.data.fragment);
+      updateFragment({ path: `${ORG}/${event.data.path}`, fragment: event.data.fragment, loadId: activeDocLoadId });
     }
     if (event.data.type === "doc-navigate") {
       if (!ORG || !validRelativeDocumentPath(event.data.path)) return;
       const fragment = event.data.fragment === undefined ? "" : event.data.fragment;
       const search = event.data.search === undefined ? "" : event.data.search;
       if (!validFragment(fragment) || !validDocumentSearch(search)) return;
-      loadDoc(`${ORG}/${event.data.path}`, true, fragment, search);
+      const fullPath = `${ORG}/${event.data.path}`;
+      const targetUrl = new URL(location.href);
+      targetUrl.hash = fragment;
+      const target = JSON.stringify([fullPath, search, targetUrl.hash]);
+      const current = JSON.stringify([RENDRO_WINDOW.RENDRO_CURRENT_DOC, documentSearchFromLocation(), location.hash]);
+      const action = acceptNavigation(target, current);
+      if (action) loadDoc(fullPath, action === "push" ? true : "replace", fragment, search);
     }
     if (event.data.type === "doc-loaded") {
       if (!ORG) return;
       const loadedPath = normalizeLoadedDocumentPath(event.data.path, ORG);
-      if (loadedPath) void reconcileLoadedDocument(loadedPath);
+      if (loadedPath) reconcileLoadedDocument(loadedPath);
     }
   });
 
@@ -658,6 +650,7 @@ function init() {
   });
 
   window.addEventListener("hashchange", () => {
+    updateFragment.cancel();
     const frame = document.getElementById("content-frame") as HTMLIFrameElement | null;
     const current = RENDRO_WINDOW.RENDRO_CURRENT_DOC;
     if (frame && current) sendDocumentFragment(frame, relativeDocumentPath(current), location.hash);

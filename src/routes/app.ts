@@ -824,18 +824,24 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
       focusShellControl();
     }
   });
+  var lastFrameToggle=-Infinity,lastThemeReady=-Infinity;
   window.addEventListener("message",function(e){
     var allowedOrigin=e.origin===window.location.origin||(window.RENDRO_DOCUMENT_BASE&&e.origin==="null");
     if(!allowedOrigin||!e.data)return;
     if(e.data.type==="commentor-theme-ready"){
       var themeFrame=document.getElementById("content-frame");
       if(!themeFrame||e.source!==themeFrame.contentWindow)return;
+      if(performance.now()-lastThemeReady<100)return;
+      lastThemeReady=performance.now();
       notifyTheme(root.dataset.theme||normalizedTheme());
       return;
     }
     if(e.data.type!=="shell-toggle")return;
     var shellFrame=document.getElementById("content-frame");
     if(!shellFrame||e.source!==shellFrame.contentWindow)return;
+    if(navigator.userActivation&&!navigator.userActivation.isActive)return;
+    if(performance.now()-lastFrameToggle<1000)return;
+    lastFrameToggle=performance.now();
     setShellHidden(!root.classList.contains("shell-hidden"));
     if(!root.classList.contains("shell-hidden"))focusShellControl();
   });
@@ -890,8 +896,8 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
 </script>
 <script${nonceAttribute()}>window.RENDRO_INITIAL_DOC=${inlineJson(selectedDoc)};window.RENDRO_ORG=${inlineJson(org)};window.RENDRO_DOCUMENT_BASE=${inlineJson(documentBase)};window.RENDRO_PUBLICATION_BASE=${inlineJson(isPublicDocument ? documentBase : "")};window.RENDRO_SHARE_CONFIG=${inlineJson(options.shareConfig ?? null)};window.RENDRO_LEGACY_COMMENT_CONFIG=${inlineJson(options.legacyCommentConfig ?? null)};</script>
 ${renderCommentRecoveryLifecycle(user?.id ?? null, nonceAttribute())}
-${options.shareConfig?.convexUrl || options.legacyCommentConfig?.convexUrl ? `<script${nonceAttribute()} src="/commentor-parent.js?v=9"></script>` : ""}
-<script${nonceAttribute()} src="/lazy-tree.js?v=35"></script>
+${options.shareConfig?.convexUrl || options.legacyCommentConfig?.convexUrl ? `<script${nonceAttribute()} src="/commentor-parent.js?v=10"></script>` : ""}
+<script${nonceAttribute()} src="/lazy-tree.js?v=36"></script>
 </body>
 </html>`;
 }
