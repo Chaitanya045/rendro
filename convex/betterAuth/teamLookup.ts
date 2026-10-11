@@ -4,6 +4,7 @@ import { query } from "./_generated/server";
 // Component IDs must be normalized inside the component's database context.
 export const get = query({
   args: { teamId: v.string() },
+  returns: v.union(v.object({ organizationId: v.string() }), v.null()),
   handler: async (ctx, { teamId }) => {
     const id = ctx.db.normalizeId("team", teamId);
     if (!id) return null;

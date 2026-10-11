@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import schema from "../convex/schema";
 import authSchema from "../convex/betterAuth/schema";
 import { components } from "../convex/_generated/api";
+import { internal as authInternal } from "../convex/betterAuth/_generated/api";
 import { createAuthOptions } from "../convex/auth";
 import { sessionExpiryMs } from "../convex/sessionReadLimit";
 import { sessionMiddleware } from "@/middleware/session";
@@ -110,23 +111,24 @@ describe("production Convex session adapter", () => {
 
   it("cleans expired custom windows in bounded indexed batches and preserves credential buckets", async () => {
     vi.useFakeTimers();
-    const f = await fixture();
+    // Run within the component, just like its own cron and continuations.
+    const backend = convexTest(authSchema, import.meta.glob("../convex/betterAuth/**/*.ts"));
     const now = Date.now();
     for (let i = 0; i < 240; i++) {
-      await f.backend.mutation(components.betterAuth.adapter.create, { input: { model: "rateLimit", data: {
+      await backend.run(ctx => ctx.db.insert("rateLimit", {
         key: i < 110 ? `192.0.2.${i}|/sign-in/email` : `${["session-read:", "session-read-ip:", "session-read-unverified:"][i % 3]}${i}`,
         count: 5, lastRequest: now - 60_000,
-      } } });
+      }));
     }
     for (const key of ["session-read:current", "session-read-ip:current", "session-read-unverified:current", "192.0.2.1|/request-password-reset", "192.0.2.1|/send-verification-email"]) {
-      await f.backend.mutation(components.betterAuth.adapter.create, { input: { model: "rateLimit", data: { key, count: 5, lastRequest: now - 59_999 } } });
+      await backend.run(ctx => ctx.db.insert("rateLimit", { key, count: 5, lastRequest: now - 59_999 }));
     }
-    await f.backend.mutation(components.betterAuth.sessionReadLimit.cleanup, {});
+    await backend.mutation(authInternal.sessionReadLimit.cleanup, {});
     // First page contains only built-in buckets: continuation must still run.
-    await f.backend.finishAllScheduledFunctions(vi.runAllTimers);
-    const rows = await f.backend.query(components.betterAuth.adapter.findMany, { model: "rateLimit", paginationOpts: { numItems: 300, cursor: null } });
-    expect(rows.page).toHaveLength(115);
-    expect(rows.page.filter((row: { key: string }) => row.key.startsWith("session-read"))).toHaveLength(3);
-    expect(rows.page.every((row: { count: number }) => row.count === 5)).toBe(true);
+    await backend.finishAllScheduledFunctions(vi.runAllTimers);
+    const rows = await backend.run(ctx => ctx.db.query("rateLimit").collect());
+    expect(rows).toHaveLength(115);
+    expect(rows.filter(row => row.key.startsWith("session-read"))).toHaveLength(3);
+    expect(rows.every(row => row.count === 5)).toBe(true);
   });
 });
