@@ -9,6 +9,7 @@ import authSchema from "../convex/betterAuth/schema";
 import { components, internal } from "../convex/_generated/api";
 import { createAuthOptions } from "../convex/auth";
 import { sessionCache, sessionMiddleware } from "@/middleware/session";
+import { registerAuthClientIp } from "@/auth-client-ip";
 import projectDocs from "@/routes/project-docs";
 import * as minio from "@/minio";
 
@@ -55,6 +56,12 @@ async function fixture() {
     return response;
   }));
   const app = new Hono<{ Variables: { user?: User } }>();
+  app.use("*", async (c, next) => {
+    // Model the Worker's trusted ingress registration, not a raw forwarding
+    // header (which intentionally cannot select a rate-limit bucket).
+    registerAuthClientIp(c.req.raw, "192.0.2.60");
+    await next();
+  });
   app.use("*", sessionMiddleware);
   app.route("/", projectDocs);
   app.get("/identity", c => c.json({ id: c.get("user")?.id ?? null }));
@@ -72,7 +79,7 @@ it.each([
     vi.setSystemTime(start + i * interval);
     await Promise.all(f.readers.map(async reader => {
       const path = f.pages[i % 8];
-      const headers = { cookie: reader.cookie, "cf-connecting-ip": "192.0.2.60" };
+      const headers = { cookie: reader.cookie };
       // Shell/tree/content fan-out plus an intentionally pessimistic renewal on
       // EVERY navigation (the real viewer renews much less often).
       const responses = await Promise.all([
@@ -89,7 +96,8 @@ it.each([
   expect(f.counts).toEqual({ session: expectedReads, authorization: rounds * 8, errors: [] });
   const rows = await f.backend.query(components.betterAuth.adapter.findMany, { model: "rateLimit", paginationOpts: { numItems: 20, cursor: null } });
   expect(rows.page.filter((row: { key: string }) => row.key.startsWith("session-read:"))).toHaveLength(2);
-  expect(rows.page.filter((row: { key: string }) => row.key.startsWith("session-read-ip:"))).toHaveLength(1);
+  expect(rows.page.filter((row: { key: string }) => row.key.startsWith("session-read-ip:")).map((row: { key: string }) => row.key))
+    .toEqual(["session-read-ip:192.0.2.60"]);
 }, 120_000);
 
 it("recognizes real Convex revocation by 15s while document authorization denies immediately", async () => {
