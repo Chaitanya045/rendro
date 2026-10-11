@@ -17,6 +17,7 @@ import publicationRoutes from "../src/routes/publication-api";
 import legacyPublicRoutes from "../src/routes/public";
 import publicRoutes from "../src/routes/public-v2";
 
+const confirmedApply = ["--apply", "--confirm-endpoint", "https://worker.test"];
 const target = { legacyOrgSlug: "old-org", organizationId: "org", apiKey: "scoped-key", legacyApiKey: "legacy-key" };
 const initialFixtures = [
   ["old-org/docs/a-last.html", "<h1>Last</h1>"],
@@ -96,7 +97,7 @@ beforeEach(async () => {
       return app.request(url.href, init);
     }
     if (url.origin === "http://127.0.0.1:3210") {
-      const body = JSON.parse(init?.body as string);
+      const body = JSON.parse(init?.body as string) as { path: string; args: Array<{ internalSecret: string; fileKey: string; keys: string[] }> };
       expect(body.args[0].internalSecret).toBe("test-convex-internal-secret-32-chars");
       if (body.path === "deletedFiles:isDeleted") return Response.json({ status: "success", value: deleted.has(body.args[0].fileKey) });
       expect(body.path).toBe("deletedFiles:filterFn");
@@ -179,7 +180,7 @@ describe("legacy migration with mocked source storage and backend HTTP", () => {
   });
 
   it("applies through current Worker start/upload/commit routes and creates pinned publications", async () => {
-    await main(["--map", "targets.json", "--apply"]);
+    await main(["--map", "targets.json", ...confirmedApply]);
     expect(starts).toBe(1); expect(commits).toBe(1);
     const manifest = JSON.parse(objects.get(`${root}/manifest.json`) as string);
     expect(manifest.files.map((file: { path: string }) => file.path)).toEqual(["docs/Z file.html", "docs/a-last.html"]);
@@ -192,9 +193,9 @@ describe("legacy migration with mocked source storage and backend HTTP", () => {
 
   it("reuses an identical completed deployment and publication on a repeated apply", async () => {
     vi.spyOn(Date, "now").mockReturnValue(123456789);
-    await main(["--map", "targets.json", "--apply"]);
+    await main(["--map", "targets.json", ...confirmedApply]);
     const writes = storage.putObject.mock.calls.length;
-    await main(["--map", "targets.json", "--apply"]);
+    await main(["--map", "targets.json", ...confirmedApply]);
     expect(starts).toBe(1); expect(commits).toBe(1);
     expect(storage.putObject).toHaveBeenCalledTimes(writes);
     expect(publications).toHaveLength(1);
@@ -204,15 +205,15 @@ describe("legacy migration with mocked source storage and backend HTTP", () => {
   });
 
   it("rejects changed sources on a repeated apply without writing another deployment", async () => {
-    await main(["--map", "targets.json", "--apply"]);
+    await main(["--map", "targets.json", ...confirmedApply]);
     sourceChanged = true;
-    await expect(main(["--map", "targets.json", "--apply"])).rejects.toThrow("409");
+    await expect(main(["--map", "targets.json", ...confirmedApply])).rejects.toThrow("409");
     expect(starts).toBe(1); expect(commits).toBe(1); expect(publications).toHaveLength(1);
   });
 
   it.each(["upload", "commit"] as const)("marks staging failed on %s errors and preserves the original error", async (step) => {
     failure = step;
-    await expect(main(["--map", "targets.json", "--apply"])).rejects.toThrow(step === "upload" ? "Upload unavailable" : "Active deployment changed");
+    await expect(main(["--map", "targets.json", ...confirmedApply])).rejects.toThrow(step === "upload" ? "Upload unavailable" : "Active deployment changed");
     expect(failReason).toContain(step === "upload" ? "Upload unavailable" : "Active deployment changed");
     expect(commits).toBe(0); expect(publications).toHaveLength(0);
     expect(records()[0].deploymentId).toBe("deployment");
@@ -220,7 +221,7 @@ describe("legacy migration with mocked source storage and backend HTTP", () => {
 
   it("does not overwrite a deployment activated between project validation and start", async () => {
     failure = "destination-change";
-    await expect(main(["--map", "targets.json", "--apply"])).rejects.toThrow("gained an active deployment");
+    await expect(main(["--map", "targets.json", ...confirmedApply])).rejects.toThrow("gained an active deployment");
     expect(starts).toBe(1); expect(commits).toBe(0);
     expect(failReason).toContain("gained an active deployment");
     expect([...objects.keys()].some(key => key.includes("/files/"))).toBe(false);
@@ -230,7 +231,7 @@ describe("legacy migration with mocked source storage and backend HTTP", () => {
 
   it("rejects source changes between hashing and upload without activating corrupt bytes", async () => {
     failure = "source-change";
-    await expect(main(["--map", "targets.json", "--apply"])).rejects.toThrow("does not match its manifest entry");
+    await expect(main(["--map", "targets.json", ...confirmedApply])).rejects.toThrow("does not match its manifest entry");
     expect(starts).toBe(1); expect(commits).toBe(0);
     expect(active).toBe(false);
     expect(failReason).toContain("does not match its manifest entry");
@@ -241,30 +242,30 @@ describe("legacy migration with mocked source storage and backend HTTP", () => {
 
   it("resumes publication work after a failure without creating another deployment", async () => {
     failure = "publication";
-    await expect(main(["--map", "targets.json", "--apply"])).rejects.toThrow("Publication unavailable");
+    await expect(main(["--map", "targets.json", ...confirmedApply])).rejects.toThrow("Publication unavailable");
     expect(active).toBe(true); expect(failReason).toBeUndefined();
     failure = undefined;
-    await main(["--map", "targets.json", "--apply"]);
+    await main(["--map", "targets.json", ...confirmedApply]);
     expect(starts).toBe(1); expect(publications).toHaveLength(1);
   });
 
   it("rejects conflicting publication mappings without changing them", async () => {
-    await main(["--map", "targets.json", "--apply"]);
+    await main(["--map", "targets.json", ...confirmedApply]);
     publications[0].trackingMode = "track_active";
-    await expect(main(["--map", "targets.json", "--apply"])).rejects.toThrow("conflicts with the migration");
+    await expect(main(["--map", "targets.json", ...confirmedApply])).rejects.toThrow("conflicts with the migration");
     expect(publications).toHaveLength(1);
     expect(records()[0].publicationIds).toEqual([]);
   });
 
   it("stops before uploads when start rejects the credential", async () => {
     failure = "start";
-    await expect(main(["--map", "targets.json", "--apply"])).rejects.toThrow("401 Invalid key");
+    await expect(main(["--map", "targets.json", ...confirmedApply])).rejects.toThrow("401 Invalid key");
     expect(storage.putObject).not.toHaveBeenCalled(); expect(failReason).toBeUndefined();
   });
 
   it("does not create projects when source storage cannot be read", async () => {
     send.mockRejectedValueOnce(new Error("Storage unavailable"));
-    await expect(main(["--map", "targets.json", "--apply"])).rejects.toThrow("Storage unavailable");
+    await expect(main(["--map", "targets.json", ...confirmedApply])).rejects.toThrow("Storage unavailable");
     expect(fetch).not.toHaveBeenCalled();
   });
 
@@ -272,7 +273,7 @@ describe("legacy migration with mocked source storage and backend HTTP", () => {
     deleted.add("old-org/docs/a-last.html");
     expect((await legacyPublicRoutes.request("/public/old-org/legacy-docs/files/a-last.html")).status).toBe(404);
     for (let run = 0; run < 2; run++) {
-      await main(["--map", "targets.json", "--apply"]);
+      await main(["--map", "targets.json", ...confirmedApply]);
       expect((await publicRoutes.request("/p/legacy-docs/files/a-last.html")).status).toBe(404);
       expect((await publicRoutes.request("/p/legacy-docs/files/Z%20file.html")).status).toBe(200);
       const manifest = JSON.parse(objects.get(`${root}/manifest.json`) as string);
@@ -285,7 +286,7 @@ describe("legacy migration with mocked source storage and backend HTTP", () => {
   it("does not republish a removed publication even though its source objects remain", async () => {
     legacyPublications = [];
     expect((await legacyPublicRoutes.request("/public/old-org/legacy-docs/files/a-last.html")).status).toBe(404);
-    await main(["--map", "targets.json", "--apply"]);
+    await main(["--map", "targets.json", ...confirmedApply]);
     expect(publications).toEqual([]);
     expect((await publicRoutes.request("/p/legacy-docs/files/a-last.html")).status).toBe(404);
   });
@@ -294,45 +295,45 @@ describe("legacy migration with mocked source storage and backend HTTP", () => {
     fixtures.set("old-org/private/secret.html", "private");
     fixtures.set("old-org/docs/secret.json", "private asset");
     expect((await legacyPublicRoutes.request("/public/old-org/legacy-docs/files/secret.json")).status).toBe(404);
-    await main(["--map", "targets.json", "--apply"]);
+    await main(["--map", "targets.json", ...confirmedApply]);
     expect(objects.has(`${root}/files/private/secret.html`)).toBe(true);
     expect(objects.has(`${root}/files/docs/secret.json`)).toBe(false);
     expect((await publicRoutes.request("/p/legacy-docs/files/secret.json")).status).toBe(404);
     expect((await publicRoutes.request("/p/legacy-docs/files/private/secret.html")).status).toBe(404);
     expect((await publicRoutes.request("/p/private/files/secret.html")).status).toBe(404);
-    expect(vi.mocked(fetch).mock.calls.some(([url]) => String(url).includes("/shares"))).toBe(false);
+    expect(vi.mocked(fetch).mock.calls.some(([url]) => (url instanceof Request ? url.url : String(url)).includes("/shares"))).toBe(false);
   });
 
   it("migrates privately without a legacy API key, still excluding deleted files", async () => {
     disk.readFile.mockResolvedValue(JSON.stringify([{ ...target, legacyApiKey: undefined }]));
     deleted.add("old-org/docs/a-last.html");
-    await main(["--map", "targets.json", "--apply"]);
+    await main(["--map", "targets.json", ...confirmedApply]);
     expect(publications).toEqual([]);
     expect(objects.has(`${root}/files/docs/a-last.html`)).toBe(false);
   });
 
   it.each(["unavailable", "malformed"] as const)("fails closed before remote writes when deletion state is %s", async (mode) => {
     visibilityFailure = mode;
-    await expect(main(["--map", "targets.json", "--apply"])).rejects.toThrow("Cannot establish legacy visibility");
+    await expect(main(["--map", "targets.json", ...confirmedApply])).rejects.toThrow("Cannot establish legacy visibility");
     expect(starts).toBe(0); expect(storage.putObject).not.toHaveBeenCalled();
-    expect(vi.mocked(fetch).mock.calls.some(([url]) => String(url).includes("/migration/project"))).toBe(false);
+    expect(vi.mocked(fetch).mock.calls.some(([url]) => (url instanceof Request ? url.url : String(url)).includes("/migration/project"))).toBe(false);
   });
 
   it("requires authoritative source deletion credentials", async () => {
     vi.stubEnv("CONVEX_INTERNAL_SECRET", "");
-    await expect(main(["--map", "targets.json", "--apply"])).rejects.toThrow("Cannot establish legacy visibility");
+    await expect(main(["--map", "targets.json", ...confirmedApply])).rejects.toThrow("Cannot establish legacy visibility");
     expect(fetch).not.toHaveBeenCalled();
   });
 
   it("refuses publications whose entry document was deleted before writing", async () => {
     deleted.add("old-org/docs/Z file.html");
-    await expect(main(["--map", "targets.json", "--apply"])).rejects.toThrow("no visible entry document");
+    await expect(main(["--map", "targets.json", ...confirmedApply])).rejects.toThrow("no visible entry document");
     expect(starts).toBe(0); expect(publications).toEqual([]);
   });
 
   it.each(["visibility-change", "publication-removal"] as const)("refuses publication when legacy visibility changes during upload: %s", async (mode) => {
     failure = mode;
-    await expect(main(["--map", "targets.json", "--apply"])).rejects.toThrow("Legacy visibility changed");
+    await expect(main(["--map", "targets.json", ...confirmedApply])).rejects.toThrow("Legacy visibility changed");
     expect(publications).toEqual([]);
   });
 
@@ -342,19 +343,85 @@ describe("legacy migration with mocked source storage and backend HTTP", () => {
   });
 
   it("rolls back recorded publications through the authenticated Worker route", async () => {
-    await main(["--map", "targets.json", "--apply"]);
+    await main(["--map", "targets.json", ...confirmedApply]);
     const saved = records();
     disk.readFile.mockResolvedValueOnce(JSON.stringify([target])).mockResolvedValueOnce(JSON.stringify(saved));
-    await main(["--map", "targets.json", "--apply", "--rollback", "record.json"]);
+    await main(["--map", "targets.json", ...confirmedApply, "--rollback", "record.json"]);
     expect(publications).toHaveLength(0);
     expect(active).toBe(true);
+  });
+
+  it.each([{ confirmation: [] }, { confirmation: ["--confirm-endpoint", "https://wrong.test"] }])("requires matching confirmation before any non-local apply writes: %j", async ({ confirmation }) => {
+    await expect(main(["--map", "targets.json", "--apply", ...confirmation])).rejects.toThrow("Non-local writes require --confirm-endpoint https://worker.test");
+    expect(console.log).toHaveBeenCalledWith("Destination Worker: https://worker.test");
+    expect(fetch).not.toHaveBeenCalled(); expect(send).not.toHaveBeenCalled();
+    expect(disk.writeFile).not.toHaveBeenCalled();
+  });
+
+  it("requires matching confirmation for non-local rollback", async () => {
+    disk.readFile.mockResolvedValueOnce(JSON.stringify([target])).mockResolvedValueOnce(JSON.stringify([
+      { ...target, projectId: "project", publicationIds: ["publication"] },
+    ]));
+    await expect(main(["--map", "targets.json", "--apply", "--rollback", "record.json"])).rejects.toThrow("Non-local writes require");
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("prints sanitized source and destination details before the first apply and rollback writes", async () => {
+    const assertSummaryBeforeWrites = () => {
+      const writes = vi.mocked(fetch).mock.calls.flatMap(([url, init], index) =>
+        (url instanceof Request ? url.url : String(url)).includes("/api/rendro/") && ["POST", "PUT"].includes(init?.method ?? "GET")
+          ? [vi.mocked(fetch).mock.invocationCallOrder[index]] : []);
+      expect(writes.length).toBeGreaterThan(0);
+      for (const line of [
+        "Destination Worker: https://worker.test",
+        "Source storage: http://localhost:9000; bucket: docs",
+        "Source legacy Convex: http://127.0.0.1:3210",
+      ]) {
+        const index = vi.mocked(console.log).mock.calls.findIndex(([value]) => value === line);
+        expect(index).toBeGreaterThanOrEqual(0);
+        expect(vi.mocked(console.log).mock.invocationCallOrder[index]).toBeLessThan(Math.min(...writes));
+      }
+      const mapping = vi.mocked(console.log).mock.calls.findIndex(([value]) => String(value).includes("old-org/ → organization org, project"));
+      expect(mapping).toBeGreaterThanOrEqual(0);
+      expect(vi.mocked(console.log).mock.invocationCallOrder[mapping]).toBeLessThan(Math.min(...writes));
+    };
+    await main(["--map", "targets.json", ...confirmedApply]);
+    assertSummaryBeforeWrites();
+    const saved = records();
+    vi.mocked(console.log).mockClear(); vi.mocked(fetch).mockClear();
+    disk.readFile.mockResolvedValueOnce(JSON.stringify([target])).mockResolvedValueOnce(JSON.stringify(saved));
+    await main(["--map", "targets.json", ...confirmedApply, "--rollback", "record.json"]);
+    assertSummaryBeforeWrites();
+    expect(console.log).toHaveBeenCalledWith("  old-org/ → organization org, project project");
+  });
+
+  it("never prints URL credentials, paths, query secrets, or fragments in the environment summary", async () => {
+    vi.stubEnv("RENDRO_ENDPOINT", "https://operator:worker-password@worker.test/secret-path?token=worker-token#worker-fragment");
+    vi.stubEnv("MINIO_ENDPOINT", "https://operator:storage-password@storage.test/secret-path?token=storage-token#storage-fragment");
+    vi.stubEnv("CONVEX_URL", "https://operator:convex-password@convex.test/secret-path?token=convex-token#convex-fragment");
+    vi.resetModules();
+    const script = await import("../scripts/migrate-legacy-tenancy");
+    await script.main(["--map", "targets.json"]);
+    const output = vi.mocked(console.log).mock.calls.flat().join("\n");
+    expect(output).toContain("Destination Worker: https://worker.test");
+    expect(output).toContain("Source storage: https://storage.test; bucket: docs");
+    expect(output).toContain("Source legacy Convex: https://convex.test");
+    expect(output).not.toMatch(/operator|password|secret-path|token|fragment/);
+  });
+
+  it("keeps local apply available without endpoint confirmation", async () => {
+    vi.stubEnv("RENDRO_ENDPOINT", "http://localhost:3000");
+    vi.resetModules();
+    const script = await import("../scripts/migrate-legacy-tenancy");
+    send.mockRejectedValueOnce(new Error("Inventory reached"));
+    await expect(script.main(["--map", "targets.json", "--apply"])).rejects.toThrow("Inventory reached");
   });
 
   it("requires the migration secret before any apply storage or HTTP calls", async () => {
     vi.stubEnv("MIGRATION_SECRET", "");
     vi.resetModules();
     const script = await import("../scripts/migrate-legacy-tenancy");
-    await expect(script.main(["--map", "targets.json", "--apply"])).rejects.toThrow("MIGRATION_SECRET is required");
+    await expect(script.main(["--map", "targets.json", ...confirmedApply])).rejects.toThrow("MIGRATION_SECRET is required");
     expect(fetch).not.toHaveBeenCalled(); expect(send).not.toHaveBeenCalled();
     expect(disk.writeFile).not.toHaveBeenCalled();
   });

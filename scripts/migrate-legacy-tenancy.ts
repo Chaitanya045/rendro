@@ -329,12 +329,35 @@ async function rollbackMigration(
   console.log("Rollback complete. Migrated projects and objects remain private for audit; legacy data was never changed.");
 }
 
+function sanitizedOrigin(value: string | undefined, fallback: string): string {
+  if (!value) return fallback;
+  try { return new URL(value).origin; } catch { return "<invalid endpoint>"; }
+}
+
+function printEnvironment(targets: MigrationTarget[], records?: RollbackRecord[]): void {
+  console.log(`Destination Worker: ${sanitizedOrigin(endpoint, "<unset>")}`);
+  console.log(`Source storage: ${sanitizedOrigin(process.env.MINIO_ENDPOINT, `AWS SDK default (region ${process.env.MINIO_REGION ?? "us-east-1"})`)}; bucket: ${bucket}`);
+  console.log(`Source legacy Convex: ${sanitizedOrigin(process.env.CONVEX_URL, "<unset>")}`);
+  for (const target of records ?? targets) {
+    console.log(`  ${target.legacyOrgSlug}/ → organization ${target.organizationId}, project ${target.projectId ?? `<new: legacy-${target.legacyOrgSlug}>`}`);
+  }
+}
+
+function confirmDestination(args: string[]): void {
+  const destination = new URL(endpoint);
+  if (["localhost", "127.0.0.1", "[::1]"].includes(destination.hostname)) return;
+  const index = args.indexOf("--confirm-endpoint");
+  if (index < 0 || args[index + 1] !== destination.origin) {
+    throw new Error(`Non-local writes require --confirm-endpoint ${destination.origin} after reviewing the source and destination summary`);
+  }
+}
+
 export async function main(args = process.argv.slice(2)): Promise<void> {
   const apply = args.includes("--apply");
   const mapArg = args.indexOf("--map");
   const mapPath = mapArg >= 0 ? args[mapArg + 1] : undefined;
   if (!mapPath || mapPath.startsWith("--")) {
-    throw new Error("Usage: migrate-legacy-tenancy --map <targets.json> [--apply [--rollback <record.json>]]");
+    throw new Error("Usage: migrate-legacy-tenancy --map <targets.json> [--apply [--confirm-endpoint <origin>] [--rollback <record.json>]]");
   }
   const targets = JSON.parse(await readFile(mapPath, "utf8")) as MigrationTarget[];
   const rollbackArg = args.indexOf("--rollback");
@@ -345,9 +368,13 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
   if (rollbackPath) {
     if (!apply) throw new Error("--rollback changes publications and requires --apply");
     const records = JSON.parse(await readFile(rollbackPath, "utf8")) as RollbackRecord[];
+    printEnvironment(targets, records);
+    confirmDestination(args);
     await rollbackMigration(targets, records);
     return;
   }
+  printEnvironment(targets);
+  if (apply) confirmDestination(args);
   if (apply && !migrationSecret) throw new Error("MIGRATION_SECRET is required with --apply");
   const rollback: RollbackRecord[] = [];
   const recordPath = `migration-rollback-${Date.now()}-${randomUUID()}.json`;
