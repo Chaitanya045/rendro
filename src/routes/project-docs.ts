@@ -7,7 +7,7 @@ import { CONVEX_SITE_URL, CONVEX_URL } from "@/config";
 import { getObjectStream, getObjectText } from "@/minio";
 import { renderScopedDocumentShell } from "@/routes/app";
 import { renderNotFoundPage } from "@/routes/not-found";
-import { injectHtmlHeadStream } from "@/routes/document-html";
+import { injectViewerHeadStream } from "@/routes/document-html";
 import { parseStoredManifest, type StoredManifest } from "@/stored-manifest";
 
 const app = new Hono<{ Variables: { user?: User } }>();
@@ -167,12 +167,26 @@ app.on("GET", [
   const token = viewerToken ?? await createViewerTicket({ organizationId, projectId, manifestKey: active.deployment.manifestKey, cookie });
   const frameBase = `${base}/view/${token}/files/`;
   const documentUrl = `${frameBase}${path.split("/").map(encodeURIComponent).join("/")}`;
-  const features = `<base data-rendro-viewer href="${escapeHtml(documentUrl)}">` + viewerScript("frame", {
+  const features = viewerScript("frame", {
     base, prefix: frameBase, manifestKey: active.deployment.manifestKey,
   }) + documentFeatures({ organizationId, projectId, documentPath: path, base });
   // Keep the iframe's canonical src so tree/deep links and comment authorization
   // retain their existing identity. Relative resources inherit the ticket base.
-  return new Response(injectHtmlHeadStream(stream, features), { headers });
+  return new Response(injectViewerHeadStream(stream, publisherBase => {
+    let href = documentUrl;
+    if (publisherBase !== undefined) {
+      // Preserve publisher base semantics. A base resolving inside this private
+      // file tree gets the same path through the ticket; external/out-of-tree
+      // bases remain publisher-controlled and don't get a scoped replacement.
+      const canonical = new URL(`${base}/files/${path.split("/").map(encodeURIComponent).join("/")}`, c.req.url);
+      try {
+        const resolved = new URL(publisherBase, canonical);
+        if (resolved.origin !== canonical.origin || !resolved.pathname.startsWith(`${base}/files/`)) return features;
+        href = frameBase + resolved.pathname.slice(`${base}/files/`.length) + resolved.search + resolved.hash;
+      } catch { return features; }
+    }
+    return `<base data-rendro-viewer href="${escapeHtml(href)}">` + features;
+  }), { headers });
 });
 
 app.get("/organizations/:organizationId/projects/:projectId/docs", async (c) => {

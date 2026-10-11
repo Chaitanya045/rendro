@@ -10,6 +10,7 @@ import projectDocs from "@/routes/project-docs";
 import { sessionMiddleware } from "@/middleware/session";
 import * as minio from "@/minio";
 import { createViewerTicket } from "@/viewer-ticket";
+import { viewerHtmlForms } from "./fixtures/private-viewer-html";
 
 const base = "/organizations/org-a/projects/project-a/docs";
 const manifestKey = "tenants/org-a/projects/project-a/deployments/deploy-a/manifest.json";
@@ -77,6 +78,49 @@ async function fixture() {
 }
 
 describe("private sandbox asset routing", () => {
+  it.each(viewerHtmlForms)("establishes the ticket before resources with %s", async (_name, source) => {
+    const f = await fixture();
+    f.objects.mockImplementation(() => Promise.resolve(new Response(source).body));
+    const { html, url } = await f.document();
+    expect(html.indexOf("<base ")).toBeLessThan(html.toLowerCase().indexOf("<link "));
+    const win = new DOMWindow({ url: `http://localhost${base}/files/guide/index.html`, settings: {
+      disableCSSFileLoading: true, disableJavaScriptFileLoading: true,
+    } });
+    try {
+      win.document.write(html);
+      expect(new URL(win.document.querySelector("link")!.getAttribute("href")!, win.document.baseURI).href)
+        .toBe(new URL("assets/site.css", url).href);
+    } finally { await win.happyDOM.close(); }
+  });
+
+  it.each([
+    ["../shared/", "shared/"],
+    [`${base}/files/shared/`, "shared/"],
+    ["https://publisher.test/docs/", undefined],
+    ["/public/", undefined],
+  ])("respects publisher base %s", async (publisherBase, scopedPath) => {
+    const f = await fixture();
+    const source = `<!doctype html><title>Docs</title><base href="${publisherBase}"><link rel="stylesheet" href="site.css"><body>Docs`;
+    f.objects.mockImplementation(() => Promise.resolve(new Response(source).body));
+    const response = await f.app.request(`${base}/files/guide/index.html`, { headers: { Cookie: f.cookie } });
+    const html = await response.text();
+    const win = new DOMWindow({ url: `http://localhost${base}/files/guide/index.html`, settings: {
+      disableCSSFileLoading: true, disableJavaScriptFileLoading: true,
+    } });
+    try {
+      win.document.write(html);
+      expect(html).toContain(`<base href="${publisherBase}">`);
+      const href = new URL(win.document.querySelector("link")!.getAttribute("href")!, win.document.baseURI).href;
+      if (scopedPath) {
+        expect(href).toContain(`${base}/view/`);
+        expect(href).toMatch(new RegExp(`/files/${scopedPath}site.css$`));
+      } else {
+        expect(html).not.toContain("<base data-rendro-viewer");
+        expect(href).toBe(new URL("site.css", new URL(publisherBase, "http://localhost")).href);
+      }
+    } finally { await win.happyDOM.close(); }
+  });
+
   it("loads CSS, image, nested CSS and font without cookies from the real document base (original regression)", async () => {
     const f = await fixture();
     const { html, url, response } = await f.document();
