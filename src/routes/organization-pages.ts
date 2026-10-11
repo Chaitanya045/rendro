@@ -1,3 +1,4 @@
+import { managementPageAccess } from "./management-page-access";
 import { nonceAttribute } from "@/middleware/html-nonce";
 import { Hono } from "hono";
 import type { User } from "better-auth/types";
@@ -158,7 +159,7 @@ function organizationDialogs(section: OrganizationPageSection): string {
   return "";
 }
 
-function renderOrganizationSection(user: User, organizationId: string, section: OrganizationPageSection): string {
+export function renderOrganizationSection(user: User, organizationId: string, section: OrganizationPageSection): string {
   const heading = organizationSectionHeading(section, organizationId);
   const loadingPage = renderOrganizationLoadingPage(organizationId, section);
   return renderControlPlanePage({
@@ -242,7 +243,7 @@ app.get("/organizations", (c) => {
   return c.html(renderOrganizationsPage(user));
 });
 
-app.get("/organizations/:organizationId/onboarding", (c) => {
+app.get("/organizations/:organizationId/onboarding", managementPageAccess, (c) => {
   const user = c.get("user");
   const organizationId = c.req.param("organizationId");
   if (!user) return c.redirect(signInHref(organizationRoute(organizationId, "/onboarding")));
@@ -254,7 +255,7 @@ for (const [path, section] of [
   ["/organizations/:organizationId/teams", "teams"],
   ["/organizations/:organizationId/settings", "settings"],
 ] as const) {
-  app.get(path, (c) => {
+  app.get(path, managementPageAccess, (c) => {
     const user = c.get("user");
     const organizationId = c.req.param("organizationId");
     if (!user) return c.redirect(signInHref(organizationRoute(organizationId, `/${section}`)));
@@ -262,7 +263,7 @@ for (const [path, section] of [
   });
 }
 
-app.get("/organizations/:organizationId", (c) => {
+app.get("/organizations/:organizationId", managementPageAccess, (c) => {
   const user = c.get("user");
   const organizationId = c.req.param("organizationId");
   if (!user) return c.redirect(signInHref(organizationRoute(organizationId)));

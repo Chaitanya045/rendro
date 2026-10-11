@@ -1,3 +1,4 @@
+import "./fixtures/management-page-presentation";
 import { Hono } from "hono";
 import type { User } from "better-auth/types";
 import { describe, expect, it } from "vitest";

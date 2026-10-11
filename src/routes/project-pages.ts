@@ -1,3 +1,4 @@
+import { managementPageAccess } from "./management-page-access";
 import { Hono } from "hono";
 import type { User } from "better-auth/types";
 import { renderControlPlanePage } from "./control-plane";
@@ -84,7 +85,7 @@ const projectPageScript = String.raw`
 })();
 `;
 
-function renderProjectPage(user: User, organizationId: string, projectId = "", section: "overview" | "deployments" = "overview"): string {
+export function renderProjectPage(user: User, organizationId: string, projectId = "", section: "overview" | "deployments" = "overview"): string {
   const loadingPage = renderProjectLoadingPage(organizationId, projectId, section);
   return renderControlPlanePage({
     user,
@@ -102,7 +103,7 @@ function renderProjectPage(user: User, organizationId: string, projectId = "", s
   });
 }
 
-app.get("/organizations/:organizationId/projects", (c) => {
+app.get("/organizations/:organizationId/projects", managementPageAccess, (c) => {
   const organizationId = c.req.param("organizationId");
   const user = c.get("user");
   const returnTo = `/organizations/${encodeURIComponent(organizationId)}/projects`;
@@ -110,7 +111,7 @@ app.get("/organizations/:organizationId/projects", (c) => {
   return c.html(renderProjectPage(user, organizationId));
 });
 
-app.get("/organizations/:organizationId/projects/:projectId", (c) => {
+app.get("/organizations/:organizationId/projects/:projectId", managementPageAccess, (c) => {
   const organizationId = c.req.param("organizationId");
   const projectId = c.req.param("projectId");
   const user = c.get("user");
@@ -119,7 +120,7 @@ app.get("/organizations/:organizationId/projects/:projectId", (c) => {
   return c.html(renderProjectPage(user, organizationId, projectId));
 });
 
-app.get("/organizations/:organizationId/projects/:projectId/deployments", (c) => {
+app.get("/organizations/:organizationId/projects/:projectId/deployments", managementPageAccess, (c) => {
   const organizationId = c.req.param("organizationId");
   const projectId = c.req.param("projectId");
   const user = c.get("user");

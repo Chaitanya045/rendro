@@ -1,3 +1,4 @@
+import "./fixtures/management-page-presentation";
 /* Async mocks model network completion and rejection without real I/O. */
 /* eslint-disable @typescript-eslint/require-await */
 import { Window, type HTMLButtonElement, type HTMLInputElement, type HTMLSelectElement, type HTMLElement } from "happy-dom";
@@ -43,7 +44,7 @@ async function setup(respond: (path: string) => Promise<unknown> = async (path) 
   Object.assign(win, { fetch, RendroQueryCore: { create: createManagementQueryCache }, RendroUI: { request, busy() {}, copyText() {}, toast() {}, openDialog(id: string) { win.document.getElementById(id)?.setAttribute("open", ""); }, applyTheme() {}, setNav() {}, syncActiveNav() {}, enhancePage() {} } });
   win.eval(managementUiRuntime);
   win.eval(renderManagementNavigationRuntime("org-a"));
-  win.eval(await managementPagesSource());
+  win.eval(managementPagesSource());
   return { win, request, fetch, html, navigate: (suffix: string) => win.eval(`RendroUI.navigate(${JSON.stringify("/organizations/org-a" + suffix)})`) as Promise<boolean> };
 }
 /** Answers the shared themed confirmation dialog that replaced native confirm(). */

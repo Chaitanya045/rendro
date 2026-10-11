@@ -1,3 +1,4 @@
+import "./fixtures/management-page-presentation";
 import { describe, expect, it } from "vitest";
 import vm from "node:vm";
 import type { User } from "better-auth/types";
