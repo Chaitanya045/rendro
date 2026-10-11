@@ -3,6 +3,16 @@ import { logger } from "@/logger";
 import { backendFetch } from "@/backend-fetch";
 import { authClientIpHeaders } from "@/auth-client-ip";
 
+// Only these pass-through API-key reads accept bearer credentials. Keep auth
+// and management routes cookie-only; deployment writes use dedicated Worker
+// handlers (including storage validation before commit).
+const API_KEY_GET_PATHS = new Set([
+  "/api/rendro/credentials/validate",
+  "/api/rendro/deployments/active",
+  "/api/rendro/deployments/staging",
+  "/api/rendro/deployments",
+]);
+
 const AUTH_COOKIE_NAMES = [
   "__Secure-better-auth.session_token",
   "better-auth.session_token",
@@ -68,9 +78,14 @@ async function proxiedHeaders(request: Request, target: string, method = request
 export async function proxyConvexRequest(request: Request): Promise<Response> {
   const sourceUrl = new URL(request.url);
   const target = `${CONVEX_SITE_URL}${sourceUrl.pathname}${sourceUrl.search}`;
+  const requestHeaders = await proxiedHeaders(request, target);
+  if (request.method === "GET" && API_KEY_GET_PATHS.has(sourceUrl.pathname)) {
+    const authorization = request.headers.get("authorization");
+    if (authorization) requestHeaders.set("authorization", authorization);
+  }
   const init: RequestInit = {
     method: request.method,
-    headers: await proxiedHeaders(request, target),
+    headers: requestHeaders,
     redirect: "manual",
   };
   if (request.method !== "GET" && request.method !== "HEAD") {
