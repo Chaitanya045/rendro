@@ -21,6 +21,9 @@ let publisherBase = "";
 let navigationAttack = false;
 let chainedNavigation = false;
 let missingActivationAttack = false;
+const activationModes = [privateBase, "/p/fixture"].flatMap(base =>
+  [false, true].map(missing => ({ base, missing })));
+
 
 function publisherHtml(path: string): string {
   return `<!doctype html><html><head><meta charset="utf-8">${publisherBase}<title>Fragment fixture</title>
@@ -37,6 +40,11 @@ function publisherHtml(path: string): string {
     <section></section><h2 id="日本語">Unicode target</h2><section></section>
     <h2 id="café">Encoded target</h2><section></section><a name="legacy">Named target</a><section></section>
     <script>document.body.dataset.initializedQuery = location.search;
+    addEventListener('message', event => {
+      if (event.source === parent && event.data?.type === 'fixture-navigate') {
+        parent.postMessage({type:'doc-navigate',path:'guide/other.html',search:event.data.search,fragment:'#section'},location.origin);
+      }
+    });
     ${navigationAttack ? `
       function flood(){for(let i=0;i<100;i++) {
         parent.postMessage({type:'doc-navigate',path:'guide/other.html',search:'?forged='+i,fragment:'#section'},location.origin);
@@ -346,6 +354,130 @@ describe("viewer fragment navigation in Chromium", () => {
     await notice.getByRole("button", { name: "Open linked document", exact: true }).click();
     await readyFrame(page);
     expect(new URL(page.url()).searchParams.get("docQuery")).toBe("?v=2");
+    await page.close();
+  });
+
+  it.each(activationModes)("reserves expired Review, Dismiss and Open activation in $base (missing API: $missing)", async ({ base, missing }) => {
+    const page = await newPage();
+    if (missing) await page.addInitScript(() => { Object.defineProperty(navigator, "userActivation", { value: undefined }); });
+    await page.goto(harness.origin + base);
+    const frame = await readyFrame(page);
+    const initialUrl = page.url();
+    const notice = page.locator("#document-navigation-notice");
+    // Drain setup's automation activation before sending an unsolicited request.
+    await page.waitForFunction(() => navigator.userActivation?.isActive !== true);
+    await frame.waitForFunction(() => {
+      if (navigator.userActivation?.isActive) return false;
+      parent.postMessage({ type: "doc-navigate", path: "guide/other.html", search: "?shown", fragment: "#section" }, location.origin);
+      return true;
+    });
+    await notice.waitFor();
+    await notice.getByRole("button", { name: "Dismiss", exact: true }).click();
+    await frame.waitForFunction(() => {
+      parent.postMessage({ type: "doc-navigate", path: "guide/other.html", search: "?reviewed", fragment: "#section" }, location.origin);
+      return true;
+    });
+    await page.waitForFunction(() => (window as unknown as { activations: boolean[] }).activations.length === 2);
+    expect(page.url()).toBe(initialUrl);
+    expect(await notice.count()).toBe(0);
+    const review = page.getByRole("button", { name: "Review linked document", exact: true });
+    // Schedule a real frame message as soon as Review receives input.
+    await review.evaluate(button => button.addEventListener("click", () => {
+      document.querySelector<HTMLIFrameElement>("#content-frame")!.contentWindow!.postMessage({ type: "fixture-navigate", search: "?attack-review" }, "*");
+    }, { once: true }));
+    await page.waitForFunction(() => navigator.userActivation?.isActive !== true);
+    await page.waitForTimeout(150); // Allow the gate's inactivity observer to run.
+    await review.click();
+    await page.waitForFunction(() => (window as unknown as { activations: boolean[] }).activations.length === 3);
+    expect(page.url()).toBe(initialUrl);
+    expect(await notice.locator("p").textContent()).toBe("Open linked document guide/other.html?reviewed#section?");
+    expect(await page.evaluate(() => (window as unknown as { activations: boolean[] }).activations.at(-1))).toBe(!missing);
+    // Attack on pointerdown, before Open's click, and again from the replacement.
+    const open = notice.getByRole("button", { name: "Open linked document", exact: true });
+    await open.evaluate(button => button.addEventListener("pointerdown", () => {
+      document.querySelector<HTMLIFrameElement>("#content-frame")!.contentWindow!.postMessage({ type: "fixture-navigate", search: "?attack-open" }, "*");
+    }, { once: true }));
+    await open.hover();
+    await page.mouse.down();
+    await page.waitForFunction(() => (window as unknown as { activations: boolean[] }).activations.length === 4);
+    expect(page.url()).toBe(initialUrl);
+    expect(await notice.locator("p").textContent()).toBe("Open linked document guide/other.html?reviewed#section?");
+    await page.mouse.up();
+    const replacement = await readyFrame(page);
+    expect(new URL(page.url()).searchParams.get("docQuery")).toBe("?reviewed");
+    expect(new URL(page.url()).hash).toBe("#section");
+    await replacement.waitForFunction(() => {
+      parent.postMessage({ type: "doc-navigate", path: "guide/other.html", search: "?attack-replacement" }, location.origin);
+      return true;
+    });
+    await notice.waitFor();
+    expect(new URL(page.url()).searchParams.get("docQuery")).toBe("?reviewed");
+    expect(await page.evaluate(() => history.length)).toBe(3);
+    await page.close();
+  });
+
+  it.each(activationModes.flatMap(mode => ["tree", "theme", "comment"].map(control => ({ ...mode, control }))))(
+    "reserves $control input before same-gesture frame messages in $base (missing API: $missing)", async ({ base, missing, control }) => {
+      const page = await newPage();
+      if (missing) await page.addInitScript(() => { Object.defineProperty(navigator, "userActivation", { value: undefined }); });
+      await page.goto(harness.origin + base);
+      await readyFrame(page);
+      const initialUrl = page.url();
+      // The deployed comment toolbar lives inside the document. Model a parent
+      // comment surface in a shadow root to exercise composed parent input too.
+      if (control === "comment") await page.evaluate(() => {
+        const host = document.createElement("div");
+        host.id = "parent-comment-fixture";
+        host.style.cssText = "position:fixed;top:60px;right:10px;z-index:1000";
+        const button = document.createElement("button");
+        button.textContent = "Comment";
+        host.attachShadow({ mode: "open" }).append(button);
+        document.body.append(host);
+      });
+      const target = page.locator(control === "tree" ? ".tree-folder > .tree-item" : control === "theme" ? "#theme-toggle" : "#parent-comment-fixture button").first();
+      await target.evaluate(element => element.addEventListener("pointerdown", () => {
+        document.querySelector<HTMLIFrameElement>("#content-frame")!.contentWindow!.postMessage({ type: "fixture-navigate", search: "?parent-attack" }, "*");
+      }, { once: true }));
+      await page.waitForFunction(() => navigator.userActivation?.isActive !== true);
+      await page.waitForTimeout(150);
+      await target.hover();
+      await page.mouse.down();
+      await page.waitForFunction(() => (window as unknown as { activations: boolean[] }).activations.length === 1);
+      expect(page.url()).toBe(initialUrl);
+      expect(await page.locator("#document-navigation-notice").count()).toBe(1);
+      await page.mouse.up();
+      expect(await page.evaluate(() => (window as unknown as { activations: boolean[] }).activations)).toEqual([!missing]);
+      expect(await page.evaluate(() => history.length)).toBe(2);
+      await page.close();
+    });
+
+  it.each([false, true])("keeps sign-in and dialog teardown usable with a pending confirmation (dismissed: %s)", async dismissed => {
+    const page = await newPage();
+    await page.goto(harness.origin + privateBase);
+    const frame = await readyFrame(page);
+    await page.waitForFunction(() => navigator.userActivation?.isActive !== true);
+    await frame.waitForFunction(() => {
+      if (navigator.userActivation?.isActive) return false;
+      parent.postMessage({ type: "doc-navigate", path: "guide/other.html", search: "?pending" }, location.origin);
+      return true;
+    });
+    await page.locator("#document-navigation-notice").waitFor();
+    if (dismissed) await page.getByRole("button", { name: "Dismiss", exact: true }).click();
+    await page.evaluate(() => {
+      const dialog = document.createElement("dialog");
+      dialog.textContent = "Private dialog";
+      document.body.append(dialog);
+      dialog.showModal();
+      window.dispatchEvent(new Event("commentor-sign-out"));
+    });
+    const overlay = page.locator("#rendro-signed-out");
+    await overlay.waitFor();
+    expect(await page.locator("dialog[open]").count()).toBe(0);
+    expect(await overlay.evaluate(element => document.activeElement === element)).toBe(true);
+    await page.route("**/sign-in", route => route.fulfill({ contentType: "text/html", body: "<h1>Sign in</h1>" }));
+    await page.keyboard.press("Tab");
+    await page.keyboard.press("Enter");
+    await page.waitForURL("**/sign-in");
     await page.close();
   });
 

@@ -477,6 +477,16 @@ function documentSearchFromLocation(): string {
 }
 
 const navigationGate = createDocumentNavigationGate();
+// Activation propagates out of the opaque document frame, but its input events
+// do not. Reserve all parent input before any control handles it, including
+// pointerup/touchend for non-mouse activation and click for assistive input.
+// https://html.spec.whatwg.org/multipage/interaction.html#activation-triggering-input-event
+// These passive observers must not interfere with controls or sign-out teardown.
+for (const type of ["pointerdown", "pointerup", "mousedown", "keydown", "touchend", "click"]) {
+  window.addEventListener(type, event => {
+    if (event.isTrusted) navigationGate.reserveParentInput();
+  }, { capture: true, passive: true });
+}
 const navigationConfirmation = createNavigationConfirmation();
 let navigationNotice: HTMLElement | undefined;
 

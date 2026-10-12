@@ -5,6 +5,17 @@ const first = { fullPath: "org/first.html", search: "?v=1", fragment: "#first" }
 const second = { fullPath: "org/second.html", search: "?v=2", fragment: "#second" };
 
 describe("parent-owned navigation confirmation", () => {
+  it("copies requests and displayed snapshots so external mutation cannot retarget Open", () => {
+    const confirmation = createNavigationConfirmation();
+    const request = { ...first };
+    const displayed = confirmation.request(request)!;
+    Object.assign(request, second);
+    expect(displayed).toEqual(first);
+    Object.assign(displayed, second);
+    confirmation.dismiss();
+    expect(confirmation.reopen()).toEqual(first);
+  });
+
   it("freezes the visible destination through duplicate and different requests", () => {
     const confirmation = createNavigationConfirmation();
     expect(confirmation.request(first)).toEqual(first);

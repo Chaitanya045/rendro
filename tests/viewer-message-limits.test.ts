@@ -54,6 +54,48 @@ describe("parent-owned message limits", () => {
     expect(gate.request("fourth", "third")).toBe("confirm");
   });
 
+  it("reserves parent input until observed inactivity without creating a history burst", () => {
+    const { gate, activation, advance } = fixture();
+    activation.isActive = true;
+    gate.reserveParentInput();
+    expect(gate.request("current", "current")).toBeNull();
+    for (const time of [0, 5000, 60_000]) {
+      advance(time);
+      gate.observe();
+      gate.reserveParentInput();
+      expect(gate.request("attack", "current")).toBe("confirm");
+    }
+    expect(gate.confirm()).toBe("push");
+    expect(gate.request("another", "current")).toBe("confirm");
+    activation.isActive = false;
+    gate.observe();
+    activation.isActive = true;
+    expect(gate.request("document-link", "current")).toBe("push");
+  });
+
+  it("parent input neither ends a navigation burst nor renews its fallback timestamp", () => {
+    for (const supported of [true, false]) {
+      const { gate, activation, advance } = fixture(supported);
+      activation.isActive = true;
+      expect(gate.confirm()).toBe("push");
+      advance(4000);
+      gate.reserveParentInput();
+      expect(gate.request("attack", "current")).toBe("confirm");
+      advance(5001);
+      expect(gate.confirm()).toBe(supported ? "replace" : "push");
+    }
+  });
+
+  it("parent input after traversal preserves the restored history entry", () => {
+    const { gate, activation } = fixture();
+    activation.isActive = true;
+    gate.confirm();
+    gate.suspend();
+    gate.reserveParentInput();
+    expect(gate.request("attack", "restored")).toBe("confirm");
+    expect(gate.confirm()).toBe("push");
+  });
+
   it("blocks activation reuse after Back/Forward, even with no preceding message navigation", () => {
     const { gate, activation } = fixture();
     activation.isActive = true;
