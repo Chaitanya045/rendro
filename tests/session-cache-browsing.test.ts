@@ -104,55 +104,59 @@ async function fixture() {
   return { reuseAuth: () => vi.spyOn(authModule, "createAuth").mockReturnValue(auth), app, organizationId, context, readers, backend, counts, pages, base: `/organizations/${organizationId}/projects/${projectId}/docs`, manifestKey: deployment.manifestKey };
 }
 
-it.each([
-  ["round-4 observed volume", 91, 600_000 / 91, 62],
-  ["round-4 1.2s cadence without page-load overhead", 500, 1_200, 78],
-])("serves owner and member for ten minutes: %s", (_label, rounds, interval, expectedReads) => runCase(async state => {
-  const f = await fixture();
-  if (state.stopped) return;
-  vi.useFakeTimers({ toFake: ["Date"] });
-  const start = Date.now();
-  // Keep every cadence timestamp: ceil(15_000 / interval) rounds per cache
-  // refresh yields 2 * ceil(rounds / ceil(15_000 / interval)) = 62 / 78 reads.
-  // Hits never extend TTL. The first >=15s (and all eight document paths) use
-  // real shell/tree/file/ticket fan-out, including a cold and refreshed cache.
-  // Remaining requests still run real Worker middleware and fresh production
-  // authorization; only session-irrelevant document work is omitted.
-  const fullRounds = Math.max(8, Math.ceil(15_000 / interval) + 1);
-  for (let i = 0; i < rounds && !state.stopped; i++) {
-    vi.setSystemTime(start + i * interval);
-    const fullFanout = i < fullRounds;
-    // Reuse the real Better Auth instance after the full-fidelity window.
-    // Reconstructing its plugins per authorization dominates this in-process
-    // fixture. Each call still dispatches getSession and reads session/member/
-    // organization/user rows afresh; neither results nor limiter are mocked.
-    if (i === fullRounds) f.reuseAuth();
-    const results = await Promise.allSettled(f.readers.flatMap(reader => {
-      const path = f.pages[i % 8];
-      const headers = { cookie: reader.cookie };
-      const paths = fullFanout ? [
-        `${f.base}?${new URLSearchParams({ doc: path })}`, `${f.base}/tree`,
-        `${f.base}/files/${path.split("/").map(encodeURIComponent).join("/")}`,
-        `${f.base}/viewer-ticket?${new URLSearchParams({ manifestKey: f.manifestKey })}`,
-      ] : Array<string>(4).fill("/organizations/browsing-probe");
-      return paths.map(async path => {
-        const response = await f.app.request(path, { headers });
-        expect(response.status).toBe(200);
-        if (fullFanout) await response.text();
-        else expect(await response.json()).toEqual({ id: reader.user.id, authorizedId: reader.user.id });
-      });
-    }));
-    // Unlike Promise.all, a failed assertion cannot leave sibling requests
-    // running after cleanup. Rethrow only after the entire round has settled.
-    for (const result of results) if (result.status === "rejected") throw result.reason;
-  }
-  if (state.stopped) return;
-  expect(f.counts).toEqual({ session: expectedReads, authorization: rounds * 8, errors: [] });
-  const rows = await f.backend.query(components.betterAuth.adapter.findMany, { model: "rateLimit", paginationOpts: { numItems: 20, cursor: null } });
-  expect(rows.page.filter((row: { key: string }) => row.key.startsWith("session-read:"))).toHaveLength(2);
-  expect(rows.page.filter((row: { key: string }) => row.key.startsWith("session-read-ip:")).map((row: { key: string }) => row.key))
-    .toEqual(["session-read-ip:192.0.2.60"]);
-}), 120_000);
+for (const [label, rounds, interval, expectedReads, timeout] of [
+  ["round-4 observed volume", 91, 600_000 / 91, 62, 120_000],
+  // The stressed maximum was 101.148s (~101s). Keep at least 3x headroom,
+  // as in #69 / PR #72: 360s gives 3.56x without reducing request coverage.
+  ["round-4 1.2s cadence without page-load overhead", 500, 1_200, 78, 360_000],
+] as const) {
+  it(`serves owner and member for ten minutes: ${label}`, () => runCase(async state => {
+    const f = await fixture();
+    if (state.stopped) return;
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const start = Date.now();
+    // Keep every cadence timestamp: ceil(15_000 / interval) rounds per cache
+    // refresh yields 2 * ceil(rounds / ceil(15_000 / interval)) = 62 / 78 reads.
+    // Hits never extend TTL. The first >=15s (and all eight document paths) use
+    // real shell/tree/file/ticket fan-out, including a cold and refreshed cache.
+    // Remaining requests still run real Worker middleware and fresh production
+    // authorization; only session-irrelevant document work is omitted.
+    const fullRounds = Math.max(8, Math.ceil(15_000 / interval) + 1);
+    for (let i = 0; i < rounds && !state.stopped; i++) {
+      vi.setSystemTime(start + i * interval);
+      const fullFanout = i < fullRounds;
+      // Reuse the real Better Auth instance after the full-fidelity window.
+      // Reconstructing its plugins per authorization dominates this in-process
+      // fixture. Each call still dispatches getSession and reads session/member/
+      // organization/user rows afresh; neither results nor limiter are mocked.
+      if (i === fullRounds) f.reuseAuth();
+      const results = await Promise.allSettled(f.readers.flatMap(reader => {
+        const path = f.pages[i % 8];
+        const headers = { cookie: reader.cookie };
+        const paths = fullFanout ? [
+          `${f.base}?${new URLSearchParams({ doc: path })}`, `${f.base}/tree`,
+          `${f.base}/files/${path.split("/").map(encodeURIComponent).join("/")}`,
+          `${f.base}/viewer-ticket?${new URLSearchParams({ manifestKey: f.manifestKey })}`,
+        ] : Array<string>(4).fill("/organizations/browsing-probe");
+        return paths.map(async path => {
+          const response = await f.app.request(path, { headers });
+          expect(response.status).toBe(200);
+          if (fullFanout) await response.text();
+          else expect(await response.json()).toEqual({ id: reader.user.id, authorizedId: reader.user.id });
+        });
+      }));
+      // Unlike Promise.all, a failed assertion cannot leave sibling requests
+      // running after cleanup. Rethrow only after the entire round has settled.
+      for (const result of results) if (result.status === "rejected") throw result.reason;
+    }
+    if (state.stopped) return;
+    expect(f.counts).toEqual({ session: expectedReads, authorization: rounds * 8, errors: [] });
+    const rows = await f.backend.query(components.betterAuth.adapter.findMany, { model: "rateLimit", paginationOpts: { numItems: 20, cursor: null } });
+    expect(rows.page.filter((row: { key: string }) => row.key.startsWith("session-read:"))).toHaveLength(2);
+    expect(rows.page.filter((row: { key: string }) => row.key.startsWith("session-read-ip:")).map((row: { key: string }) => row.key))
+      .toEqual(["session-read-ip:192.0.2.60"]);
+  }), timeout);
+}
 
 it.each([false, true])("recognizes real Convex revocation by 15s while document authorization denies immediately (reused auth: %s)", reuseAuth => runCase(async () => {
   const f = await fixture();
