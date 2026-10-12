@@ -182,6 +182,84 @@ async function atTarget(frame: Frame, id: string) {
 // Uses the actual route injectors, shell, and bundled bridge/tree in Chromium's
 // opaque-origin sandbox; DOM mocks cannot detect ticket-base navigations.
 describe("viewer fragment navigation in Chromium", () => {
+  const confinedPaths = [
+    { path: "../outside.html", rejected: true },
+    { path: "guide/../../outside.html", rejected: true },
+    { path: "guide\\..\\outside.html", rejected: true },
+    { path: "https://outside.test/page.html", rejected: true },
+    { path: "//outside.test/page.html", rejected: true },
+    { path: "/organizations/other/projects/other/docs/files/page.html", rejected: true },
+    { path: "%2e%2e/outside.html", rejected: false },
+    { path: "%2E%2E%2Foutside.html", rejected: false },
+    { path: "%252e%252e%252foutside.html", rejected: false },
+    { path: "%2f%2foutside.test/page.html", rejected: false },
+    { path: "javascript:alert(1)", rejected: false },
+    { path: "data:text/html,outside", rejected: false },
+    { path: "organizations/other/projects/other/docs/files/page.html", rejected: false },
+    { path: "other-project/guide/page.html", rejected: false },
+  ];
+
+  it.each(activationModes.flatMap(mode => confinedPaths.map(path => ({ ...mode, ...path }))))(
+    "confines frame-requested $path in $base (missing activation API: $missing)", async ({ base, missing, path, rejected }) => {
+      const page = await newPage();
+      if (missing) await page.addInitScript(() => { Object.defineProperty(navigator, "userActivation", { value: undefined }); });
+      await page.goto(harness.origin + base);
+      const frame = await readyFrame(page);
+      const initialUrl = page.url();
+      const initialSrc = await page.locator("#content-frame").getAttribute("src");
+      const navigations: string[] = [];
+      page.on("request", request => { if (request.isNavigationRequest()) navigations.push(request.url()); });
+      const encoded = path.split("/").map(encodeURIComponent).join("/");
+      const expectedPath = `${base}/files/${encoded}`;
+      const response = rejected ? undefined : page.waitForResponse(response => new URL(response.url()).pathname === expectedPath);
+      await frame.locator("textarea").click();
+      await frame.evaluate(path => parent.postMessage({
+        type: "doc-navigate", path, search: "?doc=outside&next=https://outside.test/", fragment: "#section",
+        // Extra frame-controlled URL/target fields must never choose the parent route.
+        url: "https://outside.test/", target: "_top",
+      }, location.origin), path);
+      await page.waitForFunction(() => (window as unknown as { activations: boolean[] }).activations.length === 1);
+      if (rejected) {
+        expect(page.url()).toBe(initialUrl);
+        expect(await page.locator("#content-frame").getAttribute("src")).toBe(initialSrc);
+        expect(await page.locator("#document-navigation-notice").count()).toBe(0);
+        expect(navigations).toEqual([]);
+      } else {
+        // These strings can be literal filenames, but may never be interpreted
+        // as traversal, a scheme, or an alternate route/namespace.
+        if (missing) {
+          expect(page.url()).toBe(initialUrl);
+          await page.getByRole("button", { name: "Open linked document", exact: true }).click();
+        }
+        expect((await response)!.status()).toBe(404);
+        const shell = new URL(page.url());
+        expect(shell.origin).toBe(harness.origin);
+        expect(shell.pathname).toBe(base);
+        expect(shell.searchParams.get("doc")).toBe(path);
+        expect(shell.searchParams.get("docQuery")).toBe("?doc=outside&next=https://outside.test/");
+        expect(shell.hash).toBe("#section");
+        expect(navigations.length).toBeGreaterThan(0);
+        expect(navigations.every(url => new URL(url).origin === harness.origin && new URL(url).pathname === expectedPath)).toBe(true);
+        expect(new URL((await page.locator("#content-frame").getAttribute("src"))!, harness.origin).pathname).toBe(expectedPath);
+      }
+      await page.close();
+    });
+
+  it.each([privateBase, "/p/fixture"])("blocks native parent/top navigation even with a document gesture in %s", async base => {
+    const { page, frame } = await open(base);
+    const initialUrl = page.url();
+    await frame.locator("textarea").click();
+    expect(await frame.evaluate(() => {
+      return [parent, top!].map(target => {
+        try { target.location.href = "/outside-viewer"; return "navigated"; }
+        catch (error) { return (error as DOMException).name; }
+      });
+    })).toEqual(["SecurityError", "SecurityError"]);
+    expect(page.url()).toBe(initialUrl);
+    expect(await page.locator("#content-frame").getAttribute("sandbox")).not.toMatch(/allow-top-navigation/);
+    await page.close();
+  });
+
   it.each([privateBase, "/p/fixture", "/s/fixture"])("ignores forged navigation and load-report loops without a gesture in %s", async base => {
     navigationAttack = true;
     // Playwright's evaluate (including the nonce checks in open()) grants

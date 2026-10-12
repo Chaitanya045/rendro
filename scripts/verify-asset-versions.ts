@@ -3,6 +3,7 @@ import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
 import { MANAGEMENT_SHELL_VERSION } from "../src/routes/management-navigation";
 import { MANAGEMENT_QUERY_VERSION, SELECT_VERSION } from "../src/routes/management-asset-versions";
+import { COMMENTOR_PARENT_VERSION, LAZY_TREE_VERSION, PRIVATE_VIEWER_VERSION } from "../src/viewer/asset-versions";
 import { recordAssetVersion, verifyAssetHistory, type AssetVersionLedger } from "./asset-version-ledger";
 
 const manifest = "scripts/asset-versions.json";
@@ -22,6 +23,9 @@ for (const [path, version] of Object.entries({
   "public/management-pages.js": MANAGEMENT_SHELL_VERSION,
   "public/management-query.js": MANAGEMENT_QUERY_VERSION,
   "public/select.js": SELECT_VERSION,
+  "public/lazy-tree.js": LAZY_TREE_VERSION,
+  "public/private-viewer.js": PRIVATE_VIEWER_VERSION,
+  "public/commentor-parent.js": COMMENTOR_PARENT_VERSION,
 })) {
   if (!record && !ledger[path]?.[version]) {
     throw new Error(`${path} v${version} is unrecorded. Rebuild and run pnpm record:assets.`);

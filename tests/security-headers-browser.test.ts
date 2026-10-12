@@ -200,9 +200,9 @@ describe("Chromium security header smoke", () => {
       }).toBe("rgb(1, 2, 3)");
       expect(await frame.locator("body").evaluate(() => { try { void parent.document; return false; } catch { return true; } })).toBe(true);
       await settled(page);
-      expect(await page.locator('script[src="/commentor-parent.js?v=10"]').count()).toBe(1);
+      expect(await page.locator('script[src="/commentor-parent.js?v=11"]').count()).toBe(1);
       expect(await frame.locator('script[src="/commentor.js?v=43"]').count()).toBe(1);
-      const originalNonce = await page.locator('script[src="/commentor-parent.js?v=10"]').evaluate(script => (script as HTMLScriptElement).nonce);
+      const originalNonce = await page.locator('script[src="/commentor-parent.js?v=11"]').evaluate(script => (script as HTMLScriptElement).nonce);
       expect(originalNonce).not.toBe("");
 
       // A version mismatch may only request the parent-owned notice. Reload
@@ -213,13 +213,13 @@ describe("Chromium security header smoke", () => {
       await frame.getByTestId("commentor-panel-btn").click();
       await frame.getByRole("button", { name: "Show reload notice", exact: true }).click();
       await page.getByRole("status").filter({ hasText: "Reload this document to continue." }).waitFor();
-      expect(await page.locator('script[src="/commentor-parent.js?v=10"]').evaluate(script => (script as HTMLScriptElement).nonce)).toBe(originalNonce);
+      expect(await page.locator('script[src="/commentor-parent.js?v=11"]').evaluate(script => (script as HTMLScriptElement).nonce)).toBe(originalNonce);
       await browserStep("reload through the parent-owned notice", () => Promise.all([
         page.waitForNavigation({ waitUntil: "load" }),
         page.getByRole("button", { name: "Reload", exact: true }).click(),
       ]));
       await expect.poll(() => messages.filter(type => type === "commentor-parent-update").length).toBeGreaterThan(1);
-      const refreshedNonce = await page.locator('script[src="/commentor-parent.js?v=10"]').evaluate(script => (script as HTMLScriptElement).nonce);
+      const refreshedNonce = await page.locator('script[src="/commentor-parent.js?v=11"]').evaluate(script => (script as HTMLScriptElement).nonce);
       expect(refreshedNonce).not.toBe("");
       expect(refreshedNonce).not.toBe(originalNonce);
       await settled(page);

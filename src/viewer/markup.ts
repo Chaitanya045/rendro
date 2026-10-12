@@ -1,9 +1,11 @@
 import { nonceAttribute } from "@/middleware/html-nonce";
 import { escapeHtml } from "@/routes/html";
+import { PRIVATE_VIEWER_VERSION } from "./asset-versions";
 
 export function viewerScript(mode: "parent" | "frame" | "navigation" | "share", config: Record<string, unknown>, documentUrl?: string): string {
   // Publisher bases can be cross-origin: integration code must stay app-owned.
-  const src = documentUrl ? new URL("/private-viewer.js?v=11", documentUrl).href : "/private-viewer.js?v=11";
+  const asset = `/private-viewer.js?v=${PRIVATE_VIEWER_VERSION}`;
+  const src = documentUrl ? new URL(asset, documentUrl).href : asset;
   // Request nonces belong only to trusted shells, never publisher documents.
   const nonce = mode === "parent" || mode === "share" ? nonceAttribute() : "";
   return `<script${nonce} src="${escapeHtml(src)}" data-viewer="${mode}" data-config="${escapeHtml(JSON.stringify(config))}"></script>`;
