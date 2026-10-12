@@ -225,8 +225,8 @@ describe("persistent management navigation", () => {
 
   it("loads Query Core before the route runtime and preloads it without adding React", () => {
     const html = renderedPage();
-    expect(html).toContain('<link rel="preload" href="/management-query.js?v=5" as="script">');
-    expect(html.indexOf('<script src="/management-query.js?v=5">')).toBeLessThan(html.indexOf('var SHELL_VERSION='));
+    expect(html).toContain('<link rel="preload" href="/management-query.js?v=6" as="script">');
+    expect(html.indexOf('<script src="/management-query.js?v=6">')).toBeLessThan(html.indexOf('var SHELL_VERSION='));
     expect(html).not.toContain("react-dom");
   });
 

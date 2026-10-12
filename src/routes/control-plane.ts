@@ -1,3 +1,4 @@
+import { MANAGEMENT_QUERY_VERSION, SELECT_VERSION } from "./management-asset-versions";
 import { managementRequestScript } from "./management-request";
 import { renderManagementInitialData, managementInitialDataRuntime } from "./management-initial-data";
 import { renderCommentRecoveryLifecycle } from "../commentor/recovery-session";
@@ -536,9 +537,9 @@ export function renderControlPlanePage(options: ControlPlanePageOptions): string
   const drawerContext = `<div class="cp-drawer-context"><a class="cp-drawer-org" href="/organizations?choose=1"><span class="cp-org-mark" data-org-mark aria-hidden="true">R</span><span class="cp-drawer-org-copy"><span class="cp-drawer-org-name" data-org-name>Organization</span><small>Switch organization</small></span><span class="material-symbols-outlined" aria-hidden="true">unfold_more</span></a><a class="button" data-cp-open-docs href="${docsHref}" hidden><span class="material-symbols-outlined" aria-hidden="true">description</span><span>Open docs</span></a></div>`;
   return `<!DOCTYPE html>
 <html lang="en"><head>${renderFaviconLinks()}<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<link rel="preload" href="/select.js?v=3" as="script">
+<link rel="preload" href="/select.js?v=${SELECT_VERSION}" as="script">
 ${hasSidebar ? `<script defer src="/management-pages.js?v=${MANAGEMENT_SHELL_VERSION}"></script>` : ""}
-<link rel="preload" href="/management-query.js?v=5" as="script">
+<link rel="preload" href="/management-query.js?v=${MANAGEMENT_QUERY_VERSION}" as="script">
 <title>${escapeHtml(options.title)} — Rendro</title><link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..24,400,0,0&display=swap" rel="stylesheet">${renderThemeAssets()}<style${nonceAttribute()}>${controlPlaneStyles}${managementUiStyles}${selectStyles}${organizationSwitcherStyles}</style></head>
 <body class="${hasSidebar ? "has-sidebar" : "focused-layout"}">
 <header class="cp-topbar"><div class="cp-topbar-inner">
@@ -560,6 +561,6 @@ ${hasSidebar ? `<div class="cp-sidebar" id="cp-navigation" role="complementary" 
 <div class="toast-region" id="cp-toasts" aria-live="polite"></div>
 ${organizationId ? '<div class="cp-refresh-notice" id="cp-refresh-notice" hidden><span role="status">Updates may be available.</span><button class="button small" type="button" id="cp-refresh-button">Refresh</button></div>' : ""}
 ${renderCommentRecoveryLifecycle(options.user.id, nonceAttribute())}
-${renderManagementInitialData()}<script${nonceAttribute()} data-cp-page-state type="application/json">${state}</script><script${nonceAttribute()}>window.__RENDRO_PAGE_STATE__=${state};</script><script src="/select.js?v=3"></script><script src="/management-query.js?v=5"></script><script${nonceAttribute()}>${controlPlaneRuntime}${managementInitialDataRuntime}${managementUiRuntime}</script><script${nonceAttribute()}>${organizationSwitcherRuntime}</script><script${nonceAttribute()}>${renderManagementNavigationRuntime(organizationId)}</script><script${nonceAttribute()} data-cp-page-script>${options.script}</script><script${nonceAttribute()}>window.RendroUI.clearInitialPageData();</script>
+${renderManagementInitialData()}<script${nonceAttribute()} data-cp-page-state type="application/json">${state}</script><script${nonceAttribute()}>window.__RENDRO_PAGE_STATE__=${state};</script><script src="/select.js?v=${SELECT_VERSION}"></script><script src="/management-query.js?v=${MANAGEMENT_QUERY_VERSION}"></script><script${nonceAttribute()}>${controlPlaneRuntime}${managementInitialDataRuntime}${managementUiRuntime}</script><script${nonceAttribute()}>${organizationSwitcherRuntime}</script><script${nonceAttribute()}>${renderManagementNavigationRuntime(organizationId)}</script><script${nonceAttribute()} data-cp-page-script>${options.script}</script><script${nonceAttribute()}>window.RendroUI.clearInitialPageData();</script>
 </body></html>`;
 }
