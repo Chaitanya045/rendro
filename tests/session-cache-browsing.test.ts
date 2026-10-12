@@ -8,13 +8,37 @@ import schema from "../convex/schema";
 import authSchema from "../convex/betterAuth/schema";
 import { components, internal } from "../convex/_generated/api";
 import { createAuthOptions } from "../convex/auth";
+import * as authModule from "../convex/auth";
+import { httpOrganizationAccess } from "../convex/authorization";
 import { sessionCache, sessionMiddleware } from "@/middleware/session";
 import { registerAuthClientIp } from "@/auth-client-ip";
 import { mountSessionRoutes } from "@/app-routes";
 import * as minio from "@/minio";
 
 vi.mock("@/logger", () => ({ logger: { debug() {}, warn() {}, error() {} } }));
-afterEach(() => { sessionCache.clear(); vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers(); });
+// Vitest timeouts do not cancel async bodies. Stop the round loop and drain
+// work (including fixture setup) before another test can share Date/fetch/cache.
+let activeCase: { stopped: boolean; done?: Promise<void> } | undefined;
+function runCase(work: (state: { stopped: boolean }) => Promise<void>) {
+  const state = { stopped: false, done: undefined as Promise<void> | undefined };
+  activeCase = state;
+  state.done = work(state);
+  return state.done;
+}
+afterEach(async () => {
+  try {
+    if (activeCase) {
+      activeCase.stopped = true;
+      await activeCase.done?.catch(() => {});
+    }
+  } finally {
+    activeCase = undefined;
+    sessionCache.clear();
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  }
+});
 
 async function fixture() {
   sessionCache.clear();
@@ -25,7 +49,7 @@ async function fixture() {
   const organization = await backend.mutation(components.betterAuth.adapter.create, { input: { model: "organization", data: {
     name: "Browsing", slug: "browsing", createdAt: Date.now(),
   } } });
-  const organizationId = organization._id;
+  const organizationId = organization._id as string;
   const readers = [];
   for (const role of ["owner", "member"]) {
     const user = await context.internalAdapter.createUser({ name: role, email: `${role}@example.test`, emailVerified: true });
@@ -64,44 +88,79 @@ async function fixture() {
   });
   app.use("*", sessionMiddleware);
   app.get("/organizations/cache-probe", c => c.json({ id: c.get("user")?.id ?? null }));
+  app.get("/organizations/browsing-probe", async c => {
+    // Retain fresh production session + membership authorization, but omit
+    // project/manifest reads, HTML rendering, streams and ticket encryption.
+    // This is the production navigation guard used by document authorization;
+    // getSession already reads the user, so omit its extra getAnyUserById read.
+    const authorized = await httpOrganizationAccess(
+      { runQuery: backend.query, runMutation: backend.mutation } as never,
+      c.req.raw.headers, organizationId,
+    );
+    counts.authorization++;
+    return c.json({ id: c.get("user")?.id, authorizedId: authorized.userId });
+  });
   mountSessionRoutes(app);
-  return { app, organizationId, context, readers, backend, counts, pages, base: `/organizations/${organizationId}/projects/${projectId}/docs`, manifestKey: deployment.manifestKey };
+  return { reuseAuth: () => vi.spyOn(authModule, "createAuth").mockReturnValue(auth), app, organizationId, context, readers, backend, counts, pages, base: `/organizations/${organizationId}/projects/${projectId}/docs`, manifestKey: deployment.manifestKey };
 }
 
-it.each([
-  ["round-4 observed volume", 91, 600_000 / 91, 62],
-  ["round-4 1.2s cadence without page-load overhead", 500, 1_200, 78],
-])("serves owner and member for ten minutes: %s", async (_label, rounds, interval, expectedReads) => {
-  const f = await fixture();
-  vi.useFakeTimers({ toFake: ["Date"] });
-  const start = Date.now();
-  for (let i = 0; i < rounds; i++) {
-    vi.setSystemTime(start + i * interval);
-    await Promise.all(f.readers.map(async reader => {
-      const path = f.pages[i % 8];
-      const headers = { cookie: reader.cookie };
-      // Shell/tree/content fan-out plus an intentionally pessimistic renewal on
-      // EVERY navigation (the real viewer renews much less often).
-      const responses = await Promise.all([
-        `${f.base}?${new URLSearchParams({ doc: path })}`, `${f.base}/tree`,
-        `${f.base}/files/${path.split("/").map(encodeURIComponent).join("/")}`,
-        `${f.base}/viewer-ticket?${new URLSearchParams({ manifestKey: f.manifestKey })}`,
-      ].map(path => Promise.resolve(f.app.request(path, { headers }))));
-      for (const response of responses) {
-        expect(response.status).toBe(200);
-        await response.text();
-      }
-    }));
-  }
-  expect(f.counts).toEqual({ session: expectedReads, authorization: rounds * 8, errors: [] });
-  const rows = await f.backend.query(components.betterAuth.adapter.findMany, { model: "rateLimit", paginationOpts: { numItems: 20, cursor: null } });
-  expect(rows.page.filter((row: { key: string }) => row.key.startsWith("session-read:"))).toHaveLength(2);
-  expect(rows.page.filter((row: { key: string }) => row.key.startsWith("session-read-ip:")).map((row: { key: string }) => row.key))
-    .toEqual(["session-read-ip:192.0.2.60"]);
-}, 120_000);
+for (const [label, rounds, interval, expectedReads, timeout] of [
+  ["round-4 observed volume", 91, 600_000 / 91, 62, 120_000],
+  // The stressed maximum was 101.148s (~101s). Keep at least 3x headroom,
+  // as in #69 / PR #72: 360s gives 3.56x without reducing request coverage.
+  ["round-4 1.2s cadence without page-load overhead", 500, 1_200, 78, 360_000],
+] as const) {
+  it(`serves owner and member for ten minutes: ${label}`, () => runCase(async state => {
+    const f = await fixture();
+    if (state.stopped) return;
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const start = Date.now();
+    // Keep every cadence timestamp: ceil(15_000 / interval) rounds per cache
+    // refresh yields 2 * ceil(rounds / ceil(15_000 / interval)) = 62 / 78 reads.
+    // Hits never extend TTL. The first >=15s (and all eight document paths) use
+    // real shell/tree/file/ticket fan-out, including a cold and refreshed cache.
+    // Remaining requests still run real Worker middleware and fresh production
+    // authorization; only session-irrelevant document work is omitted.
+    const fullRounds = Math.max(8, Math.ceil(15_000 / interval) + 1);
+    for (let i = 0; i < rounds && !state.stopped; i++) {
+      vi.setSystemTime(start + i * interval);
+      const fullFanout = i < fullRounds;
+      // Reuse the real Better Auth instance after the full-fidelity window.
+      // Reconstructing its plugins per authorization dominates this in-process
+      // fixture. Each call still dispatches getSession and reads session/member/
+      // organization/user rows afresh; neither results nor limiter are mocked.
+      if (i === fullRounds) f.reuseAuth();
+      const results = await Promise.allSettled(f.readers.flatMap(reader => {
+        const path = f.pages[i % 8];
+        const headers = { cookie: reader.cookie };
+        const paths = fullFanout ? [
+          `${f.base}?${new URLSearchParams({ doc: path })}`, `${f.base}/tree`,
+          `${f.base}/files/${path.split("/").map(encodeURIComponent).join("/")}`,
+          `${f.base}/viewer-ticket?${new URLSearchParams({ manifestKey: f.manifestKey })}`,
+        ] : Array<string>(4).fill("/organizations/browsing-probe");
+        return paths.map(async path => {
+          const response = await f.app.request(path, { headers });
+          expect(response.status).toBe(200);
+          if (fullFanout) await response.text();
+          else expect(await response.json()).toEqual({ id: reader.user.id, authorizedId: reader.user.id });
+        });
+      }));
+      // Unlike Promise.all, a failed assertion cannot leave sibling requests
+      // running after cleanup. Rethrow only after the entire round has settled.
+      for (const result of results) if (result.status === "rejected") throw result.reason;
+    }
+    if (state.stopped) return;
+    expect(f.counts).toEqual({ session: expectedReads, authorization: rounds * 8, errors: [] });
+    const rows = await f.backend.query(components.betterAuth.adapter.findMany, { model: "rateLimit", paginationOpts: { numItems: 20, cursor: null } });
+    expect(rows.page.filter((row: { key: string }) => row.key.startsWith("session-read:"))).toHaveLength(2);
+    expect(rows.page.filter((row: { key: string }) => row.key.startsWith("session-read-ip:")).map((row: { key: string }) => row.key))
+      .toEqual(["session-read-ip:192.0.2.60"]);
+  }), timeout);
+}
 
-it("recognizes real Convex revocation by 15s while document authorization denies immediately", async () => {
+it.each([false, true])("recognizes real Convex revocation by 15s while document authorization denies immediately (reused auth: %s)", reuseAuth => runCase(async () => {
   const f = await fixture();
+  if (reuseAuth) f.reuseAuth();
   vi.useFakeTimers({ toFake: ["Date"] });
   const start = Date.now();
   const headers = { cookie: f.readers[0].cookie };
@@ -113,9 +172,9 @@ it("recognizes real Convex revocation by 15s while document authorization denies
   // The authoritative document denial evicts immediately, before TTL expiry.
   expect(await (await f.app.request("/organizations/cache-probe", { headers })).json()).toEqual({ id: null });
   expect(f.counts.session).toBe(2);
-});
+}));
 
-it.each([false, true])("ends the revoked-session redirect chain at sign-in (another warm isolate: %s)", async otherIsolate => {
+it.each([false, true])("ends the revoked-session redirect chain at sign-in (another warm isolate: %s)", otherIsolate => runCase(async () => {
   const f = await fixture();
   const cookie = f.readers[0].cookie;
   const headers = { cookie };
@@ -133,10 +192,11 @@ it.each([false, true])("ends the revoked-session redirect chain at sign-in (anot
   expect(signIn.status).toBe(200);
   expect(signIn.headers.get("location")).toBeNull();
   expect(await signIn.text()).toContain("Sign in");
-});
+}));
 
-it("evicts after membership removal and denies both management and document access", async () => {
+it.each([false, true])("evicts after membership removal and denies both management and document access (reused auth: %s)", reuseAuth => runCase(async () => {
   const f = await fixture();
+  if (reuseAuth) f.reuseAuth();
   const reader = f.readers[1];
   const headers = { cookie: reader.cookie };
   const path = `/organizations/${f.organizationId}`;
@@ -162,9 +222,9 @@ it("evicts after membership removal and denies both management and document acce
   const signIn = await f.app.request(`/sign-in?returnTo=${encodeURIComponent(path)}`, { headers });
   expect(signIn.status).toBe(302);
   expect((await f.app.request(signIn.headers.get("location")!, { headers })).status).toBe(404);
-});
+}));
 
-it.each(["sign-out", "change-password"])("does not reuse identity after real %s", async operation => {
+it.each(["sign-out", "change-password"])("does not reuse identity after real %s", operation => runCase(async () => {
   const f = await fixture();
   const reader = f.readers[0];
   const headers = { cookie: reader.cookie };
@@ -189,4 +249,4 @@ it.each(["sign-out", "change-password"])("does not reuse identity after real %s"
   expect(await f.context.internalAdapter.findSession(reader.session.token)).toBeNull();
   expect(await (await f.app.request("/organizations/cache-probe", { headers })).json()).toEqual({ id: null });
   expect((await f.app.request("/sign-in", { headers })).status).toBe(200);
-});
+}));
