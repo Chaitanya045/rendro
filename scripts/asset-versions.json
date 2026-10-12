@@ -1,0 +1,13 @@
+{
+  "public/management-pages.js": {
+    "19": "c83bba87ee3c834a4a38716bffe504a6601a013e6680442e819e76aab2262952",
+    "20": "318693f6390f43e745870d43a5719fefd0a5bc8c4356e9a00439e4cfd858de14"
+  },
+  "public/management-query.js": {
+    "5": "f8968d2e72f46d017f548fe67abbe2fa60d2290daa3b89ac39256fa9c8fb4801",
+    "6": "b0974abdff8f9c800a179e434f4773199929befaa6141b1e8c5e4fc8d30d5aaa"
+  },
+  "public/select.js": {
+    "3": "fbaef4c65ece8872760ad97cdc28f992408eedd728e685a2b086e4b79a98ff4d"
+  }
+}

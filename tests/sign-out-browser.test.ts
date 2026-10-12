@@ -1,6 +1,7 @@
 import type { User } from "better-auth/types";
 import { renderApiKeyPage } from "@/routes/api-key-pages";
 import { renderSharePage } from "@/routes/share-pages";
+import { renderProjectPage } from "@/routes/project-pages";
 import { getRequestListener } from "@hono/node-server";
 import { build } from "esbuild";
 import { Hono } from "hono";
@@ -64,8 +65,10 @@ beforeAll(async () => {
     window.lateWrite = () => parent.postMessage({type:'commentor-parent-request',requestId:'write',method:'reply.add',args:{documentPath:'guide.html',threadId:'thread',body:'Late'}}, '*');
   </script>`));
   app.get("/organizations/org/api-keys", c => c.html(renderApiKeyPage(reader, "org")));
+  app.get("/organizations/org/projects", c => c.html(renderProjectPage(reader, "org")));
   app.get("/organizations/org/projects/project/shares", c => c.html(renderSharePage(reader, "org", "project")));
   app.get("/api/rendro/management/access", c => c.json({ id: "org", name: "Fixture", userId: "reader", member: { userId: "reader", role: "owner" } }));
+  app.get("/api/auth/organization/list", c => c.json([{ id: "org", name: "Private organization", slug: "private" }]));
   app.get("/api/rendro/credentials", c => c.json({ credentials: [] }));
   app.post("/api/rendro/credentials", c => c.json({ rawKey }));
   app.get("/api/rendro/projects", c => c.json({ projects: [] }));
@@ -82,6 +85,49 @@ beforeAll(async () => {
 });
 
 type Transport = { subscriptions: number; closes: number; writes: number; updates: number };
+it("refetches HTML for a cached v19 controller and clears state on sign-out", async () => {
+  const page = await harness.newPage();
+  await page.route("https://fonts.googleapis.com/**", route => route.fulfill({ contentType: "text/css", body: "" }));
+  // Pin the pre-#75 version and its incompatible organization-context contract.
+  // Using the current version here would hide the missing-bump regression.
+  await page.route("**/management-pages.js?*", route => route.fulfill({ contentType: "text/javascript", body: `
+    window.RendroManagementPages={version:"19",pages:{projects:{
+      state:'{}',dialogs:'',title:'Stale projects',mount:function(){
+        window.staleControllerMounted=true;
+        window.RendroUI.organizationContext={display:function(){return {name:"Stale organization"};}};
+      }
+    }}};
+  ` }));
+  const errors: string[] = [];
+  page.on("pageerror", error => errors.push(error.message));
+  await page.goto(`${harness.origin}/organizations/org/api-keys`);
+  await expect.poll(() => page.evaluate(() => (window as unknown as { RendroManagementPages: { version: string } }).RendroManagementPages?.version)).toBe("19");
+  const [refreshedHtml] = await Promise.all([
+    page.waitForResponse(response => response.url() === `${harness.origin}/organizations/org/projects` && response.request().resourceType() === "fetch"),
+    page.getByRole("link", { name: "Projects", exact: true }).click(),
+  ]);
+  expect(refreshedHtml.status()).toBe(200);
+  await expect.poll(() => page.locator("#project-list").count()).toBe(1);
+  type ManagementWindow = {
+    staleControllerMounted?: boolean;
+    __RENDRO_PAGE_STATE__: unknown;
+    RendroUI: {
+      request(path: string): Promise<unknown>;
+      organizationContext: { display(id: string): unknown };
+    };
+  };
+  await page.evaluate(() => (window as unknown as ManagementWindow).RendroUI.request("/api/auth/organization/list"));
+  await expect.poll(() => page.evaluate(() => (window as unknown as ManagementWindow).RendroUI.organizationContext.display("org"))).not.toBeNull();
+  expect(await page.evaluate(() => (window as unknown as ManagementWindow).staleControllerMounted)).toBeUndefined();
+  expect(await page.evaluate(() => (window as unknown as ManagementWindow).__RENDRO_PAGE_STATE__)).not.toBeNull();
+  await page.locator('form[action="/api/auth/sign-out"]').evaluate((form: HTMLFormElement) => form.requestSubmit());
+  await page.locator("#rendro-signed-out").waitFor();
+  expect(await page.evaluate(() => (window as unknown as ManagementWindow).__RENDRO_PAGE_STATE__)).toBeNull();
+  expect(await page.evaluate(() => (window as unknown as ManagementWindow).RendroUI.organizationContext.display("org"))).toBeNull();
+  expect(await page.evaluate(() => Object.keys(sessionStorage).filter(key => key.startsWith("rendro-organization-list-")))).toEqual([]);
+  expect(errors).toEqual([]);
+});
+
 it.each(["broadcast", "storage", "native-form"])("tears down a background viewer within 2 seconds via %s and signs back in without a loop", async mode => {
   const tabA = await harness.newPage();
   const context = tabA.context();
@@ -147,6 +193,9 @@ it.each(["broadcast", "storage", "focus", "own-form"])("scrubs the open API-key 
   tabB.on("pageerror", error => errors.push(error.message));
   await tabA.goto(`${harness.origin}/viewer`);
   await tabB.goto(`${harness.origin}/organizations/org/api-keys`);
+  await tabB.evaluate(() => (window as unknown as { RendroUI: { request: (path: string) => Promise<unknown> } }).RendroUI.request("/api/auth/organization/list"));
+  const cachedOrganizations = () => tabB.evaluate(() => Object.keys(sessionStorage).filter(key => key.startsWith("rendro-organization-list-")));
+  await expect.poll(cachedOrganizations).toHaveLength(1);
   await tabB.locator("#api-key-create").click();
   await tabB.locator('#key-form [name="name"]').fill("Fixture key");
   await tabB.locator('#key-form button[type="submit"]').click();
@@ -166,6 +215,7 @@ it.each(["broadcast", "storage", "focus", "own-form"])("scrubs the open API-key 
   await overlay.waitFor();
   expect(await tabB.locator("dialog[open]").count()).toBe(0);
   expect(await tabB.locator("#raw-key").textContent()).toBe("");
+  await expect.poll(cachedOrganizations).toEqual([]);
   expect(await tabB.locator("body").textContent()).not.toContain(rawKey);
   expect(await tabB.locator("#copy-key").evaluate((button: HTMLButtonElement) => button.onclick)).toBeNull();
   expect(await tabB.locator("#copy-env").evaluate((button: HTMLButtonElement) => button.onclick)).toBeNull();

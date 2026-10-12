@@ -14,22 +14,41 @@ export function sessionExpiryMs(value: unknown): number {
   }
 }
 
-/** HTTP session reads only: internal authorization still reads persisted sessions. */
+// Exact read-only endpoints. Invitation writes and all credential endpoints keep
+// Better Auth's strict IP limits. Query parameters cannot split these buckets.
+export const organizationReadPaths = [
+  "/organization/get-full-organization",
+  "/organization/list",
+  "/organization/list-invitations",
+] as const;
+
+/** HTTP reads only: internal authorization still reads persisted sessions. */
 export function sessionReadLimit(consume: (key: string) => Promise<number>): BetterAuthPlugin {
+  return authReadLimit(consume, false);
+}
+
+export function organizationReadLimit(consume: (key: string) => Promise<number>): BetterAuthPlugin {
+  return authReadLimit(consume, true);
+}
+
+function authReadLimit(consume: (key: string) => Promise<number>, organizationReads: boolean): BetterAuthPlugin {
+  const prefix = organizationReads ? "organization-read" : "session-read";
   return {
-    id: "rendro-session-read-limit",
+    id: `rendro-${prefix}-limit`,
     hooks: { before: [{
-      matcher: (ctx) => ctx.path === "/get-session" && !!ctx.request,
+      matcher: (ctx) => !!ctx.request && (organizationReads
+        ? organizationReadPaths.some(path => path === ctx.path) && ctx.request.method === "GET"
+        : ctx.path === "/get-session"),
       handler: createAuthMiddleware(async (ctx) => {
         const ip = ctx.headers?.get(AUTH_CLIENT_IP_HEADER) ?? "no-trusted-ip";
         async function enforce(key: string) {
           const retryAfter = await consume(key);
           if (retryAfter) throw new APIError("TOO_MANY_REQUESTS", {
-            message: "Too many session reads",
+            message: organizationReads ? "Too many organization reads" : "Too many session reads",
           }, { "Retry-After": String(retryAfter) });
         }
         // Bound even invalid signed-cookie probes before hitting the session store.
-        await enforce(`session-read-ip:${ip}`);
+        await enforce(`${prefix}-ip:${ip}`);
         // Only the configured session-token cookie is eligible. OAuth state uses
         // the same HMAC secret, so a signature alone is not proof of a session.
         const token = await ctx.getSignedCookie(ctx.context.authCookies.sessionToken.name, ctx.context.secret);
@@ -50,12 +69,13 @@ export function sessionReadLimit(consume: (key: string) => Promise<number>): Bet
         };
         let key: string;
         if (token && persisted && expiresAt > Date.now()) {
-          // Hash the decoded token, keeping the bucket stable across encodings
-          // and IP changes without storing raw credentials in limiter keys.
-          const hash = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(token));
-          key = `session-read:${Array.from(new Uint8Array(hash), b => b.toString(16).padStart(2, "0")).join("")}`;
+          // Session reads use the token; organization reads use the verified user
+          // so opening fresh sessions cannot multiply the allowance. Hash both
+          // to avoid storing credentials or identity in limiter keys.
+          const hash = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(organizationReads ? persisted.user.id : token));
+          key = `${prefix}:${Array.from(new Uint8Array(hash), b => b.toString(16).padStart(2, "0")).join("")}`;
         } else {
-          key = `session-read-unverified:${ip}`;
+          key = `${prefix}-unverified:${ip}`;
         }
         await enforce(key);
       }),

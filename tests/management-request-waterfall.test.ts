@@ -50,11 +50,26 @@ function organizationContext() {
   });
   return root.organizationContext as {
     request: (ui: { request: (path: string) => unknown; isActive: () => boolean }, id: string) => Promise<Record<string, unknown>>;
+    dispose: () => void;
+    remember: (organization: { id: string; name: string }) => unknown;
     display: (id: string) => { name: string; mark: string } | null;
   };
 }
 
 describe("management request waterfall", () => {
+  it("clears organization display data on disposal and prevents late reads from restoring it", async () => {
+    const context = organizationContext(), late = deferred<Record<string, unknown>>();
+    context.remember({ id: "org-a", name: "Private organization" });
+    expect(context.display("org-a")?.name).toBe("Private organization");
+    const pending = context.request({ isActive: () => true, request: () => late.promise }, "org-a");
+    context.dispose();
+    expect(context.display("org-a")).toBeNull();
+    late.resolve({ id: "org-a", name: "Late organization" });
+    await pending;
+    context.remember({ id: "org-b", name: "Stale caller" });
+    expect(context.display("org-a")).toBeNull();
+    expect(context.display("org-b")).toBeNull();
+  });
   it("loads members beyond the full-organization join's first 100 without duplicates", async () => {
     const context = organizationContext(), all = Array.from({ length: 121 }, (_, i) => ({ id: `member-${i}` }));
     const paths: string[] = [];

@@ -1,6 +1,6 @@
 import { MANAGEMENT_PROJECT_PLACEHOLDER, managementLoadingPages } from "./management-loading-pages";
 
-export const MANAGEMENT_SHELL_VERSION = "19";
+export const MANAGEMENT_SHELL_VERSION = "20";
 
 export interface ManagementRouteIdentity {
   organizationId: string;
@@ -63,7 +63,7 @@ function managementNavigationRuntime(loadingPagesJson: string): string {
   }
   function createPageScope(){
     if(currentScope&&currentScope.active)currentScope.dispose();
-    var controller=new AbortController(),cleanups=[],blockers=[],pendingMutations=0,inflightGets=new Map();
+    var controller=new AbortController(),cleanups=[],blockers=[],pendingMutations=0,inflightGets=new Map(),readBatch=null;
     var scope={active:true,signal:controller.signal};
     function isActive(){return !signedOut&&scope.active&&currentScope===scope;}
     function onCleanup(callback){if(typeof callback!=="function")return function(){};if(!isActive()){callback();return function(){};}cleanups.push(callback);return function(){var index=cleanups.indexOf(callback);if(index>=0)cleanups.splice(index,1);};}
@@ -75,25 +75,32 @@ function managementNavigationRuntime(loadingPagesJson: string): string {
       for(var index=0;index<blockers.length;index+=1){if(blockers[index](detail)===false)return false;}
       return true;
     }
-    function dispose(){if(!scope.active)return;scope.active=false;controller.abort();inflightGets.clear();while(cleanups.length){try{cleanups.pop()();}catch(_error){}}}
+    function dispose(){if(!scope.active)return;scope.active=false;controller.abort();inflightGets.clear();readBatch=null;while(cleanups.length){try{cleanups.pop()();}catch(_error){}}}
+    // A controller load may contain sequential reads. Share its identity check
+    // only until that explicit load finishes; mutations immediately discard it.
+    function beginReadBatch(){var batch={access:null};readBatch=batch;return function(){if(readBatch===batch)readBatch=null;};}
     async function request(path,options){
       if(!isActive())throw new DOMException("Page navigation aborted","AbortError");
       var settings=Object.assign({},options||{}),method=String(settings.method||"GET").toUpperCase(),mutation=method!=="GET"&&method!=="HEAD";
       settings.signal=composeSignals(controller.signal,settings.signal);
-      if(mutation){pendingMutations+=1;invalidateMutation(path,settings);}
+      if(mutation){readBatch=null;pendingMutations+=1;invalidateMutation(path,settings);}
       var plainGet=method==="GET"&&(!options||Object.keys(options).every(function(key){return key==="method";}));
       var getKey=plainGet?String(path):"";
       if(getKey&&inflightGets.has(getKey))return inflightGets.get(getKey);
+      var accessRead=method==="GET"&&String(path)==="/api/rendro/management/access?organizationId="+encodeURIComponent(shellOrganization),batch=readBatch;
+      if(accessRead&&batch&&batch.access)return batch.access;
       var needsAccess=Boolean(shellOrganization)&&method==="GET"&&(String(path).startsWith("/api/rendro/")||String(path).startsWith("/api/auth/organization/"))&&!String(path).startsWith("/api/rendro/management/access?");
       var access=needsAccess?request("/api/rendro/management/access?organizationId="+encodeURIComponent(shellOrganization)):Promise.resolve();
       var initial=ui.takeInitialPageData&&ui.takeInitialPageData(path,settings);
+      if(initial&&queryCache&&getKey)queryCache.seed(path,initial.data);
       var dataRequest=initial?Promise.resolve(initial.data):queryCache&&getKey&&queryCache.canCache(getKey)?queryCache.request(path,settings,function(){return access;}):ui.request(path,settings);
       var pending=Promise.all([dataRequest,access]).then(function(values){if(!isActive())throw new DOMException("Page scope disposed","AbortError");var data=values[0];if(String(path).indexOf("/api/rendro/management/access?")===0&&(!data||data.id!==shellOrganization||data.userId!==shellUser||!data.member||data.member.userId!==shellUser)){clearQueryCache();var denied=new Error("Your account or organization access changed. Reload to continue.");denied.status=403;if(isActive())location.replace(location.href);throw denied;}return data;});
+      if(accessRead&&batch){batch.access=pending;pending.catch(function(){if(batch.access===pending)batch.access=null;});}
       if(getKey)inflightGets.set(getKey,pending);
       try{return await pending;}catch(error){if(error&&(error.status===401||error.status===403))clearQueryCache();throw error;}finally{if(mutation){pendingMutations=Math.max(0,pendingMutations-1);invalidateMutation(path,settings);}if(getKey&&inflightGets.get(getKey)===pending)inflightGets.delete(getKey);}
     }
     function activeCall(name){return function(){if(!isActive())return name==="copyText"||name==="confirm"?Promise.resolve(false):undefined;return ui[name].apply(ui,arguments);};}
-    Object.assign(scope,{request:request,isActive:isActive,guard:function(callback){return function(){if(isActive())return callback.apply(this,arguments);};},onCleanup:onCleanup,cleanup:onCleanup,preventNavigation:preventNavigation,canLeave:canLeave,dispose:dispose,busy:activeCall("busy"),copyText:activeCall("copyText"),toast:activeCall("toast"),openDialog:activeCall("openDialog"),applyTheme:activeCall("applyTheme"),confirm:activeCall("confirm"),setDocsLink:activeCall("setDocsLink")});
+    Object.assign(scope,{beginReadBatch:beginReadBatch,request:request,isActive:isActive,guard:function(callback){return function(){if(isActive())return callback.apply(this,arguments);};},onCleanup:onCleanup,cleanup:onCleanup,preventNavigation:preventNavigation,canLeave:canLeave,dispose:dispose,busy:activeCall("busy"),copyText:activeCall("copyText"),toast:activeCall("toast"),openDialog:activeCall("openDialog"),applyTheme:activeCall("applyTheme"),confirm:activeCall("confirm"),setDocsLink:activeCall("setDocsLink")});
     currentScope=scope;if(signedOut)scope.dispose();return scope;
   }
   function disposePage(){if(currentScope)currentScope.dispose();currentScope=null;}
@@ -107,6 +114,7 @@ function managementNavigationRuntime(loadingPagesJson: string): string {
     if(navigationController)navigationController.abort();
     if(pendingObserver)pendingObserver.disconnect();pendingObserver=null;
     disposePage();clearQueryCache();
+    if(ui.organizationContext)ui.organizationContext.dispose();
     if(cacheChannel){cacheChannel.close();cacheChannel=null;}
     if(ui.clearInitialPageData)ui.clearInitialPageData();
     window.__RENDRO_PAGE_STATE__=null;

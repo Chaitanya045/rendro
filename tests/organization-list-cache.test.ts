@@ -32,11 +32,13 @@ describe("organization display list cache", () => {
     expect(await menu).toMatchObject({ name: "AbortError" }); expect(await chooser).toEqual(orgs);
     expect(await cache.request(path)).toEqual(orgs); expect(raw).toHaveBeenCalledOnce();
   });
-  it("does not refetch because time passes", async () => {
+  it("reuses quick navigation but refreshes external membership changes within 30 seconds", async () => {
     vi.useFakeTimers(); const { cache, raw } = setup(); await cache.request(path);
-    expect(ORGANIZATIONS_STALE_TIME).toBe(Infinity);
-    vi.advanceTimersByTime(365 * 24 * 60 * 60_000); await cache.request(path);
+    expect(ORGANIZATIONS_STALE_TIME).toBe(30_000);
+    vi.advanceTimersByTime(29_999); await cache.request(path);
     expect(raw).toHaveBeenCalledOnce();
+    raw.mockResolvedValue([]); vi.advanceTimersByTime(1);
+    expect(await cache.request(path)).toEqual([]); expect(raw).toHaveBeenCalledTimes(2);
   });
   it.each(["create", "update", "delete", "leave", "accept-invitation", "add-member", "remove-member"])("invalidates after %s", async action => {
     const { cache, raw, changed } = setup(); await cache.request(path);
@@ -78,7 +80,7 @@ describe("organization display list cache", () => {
     vi.stubGlobal("window", win); vi.stubGlobal("document", win.document); vi.stubGlobal("Element", win.Element);
     const channels: { onmessage: ((event: { data: unknown }) => void) | null; postMessage: ReturnType<typeof vi.fn> }[] = [];
     vi.stubGlobal("BroadcastChannel", class {
-      onmessage = null; postMessage = vi.fn(); constructor() { channels.push(this); }
+      onmessage = null; postMessage = vi.fn(); close() {} constructor() { channels.push(this); }
     });
     const raw = vi.fn().mockResolvedValue(orgs), request = installOrganizationListCache(identity, raw);
     await request(path); await request(path); expect(raw).toHaveBeenCalledTimes(1);
@@ -89,16 +91,54 @@ describe("organization display list cache", () => {
     win.document.dispatchEvent(new win.Event("visibilitychange")); await request(path); expect(raw).toHaveBeenCalledTimes(2);
     await request("/api/auth/organization/create", { method: "POST" });
     expect(channels[0].postMessage).toHaveBeenCalledWith({ userId: identity.userId, kind: "invalidate" });
-    await request(path); win.document.body.innerHTML = '<a href="/api/auth/sign-out">Sign out</a>';
+    await request(path); win.dispatchEvent(new win.Event("pagehide")); await request(path); expect(raw).toHaveBeenCalledTimes(4);
     win.dispatchEvent(new win.Event("commentor-sign-out"));
     expect(channels[0].postMessage).toHaveBeenCalledWith({ userId: identity.userId, kind: "clear" });
-    await request(path); win.dispatchEvent(new win.Event("pagehide")); await request(path); expect(raw).toHaveBeenCalledTimes(5);
+    await expect(request(path)).rejects.toMatchObject({ name: "AbortError" });
+    expect(raw).toHaveBeenCalledTimes(4);
+  });
+  it.each(["persisted", "queued", "in-flight"])("clears %s organization data on sign-out and isolates the next account", async phase => {
+    vi.useFakeTimers();
+    const win = new Window({ url: identity.origin }); windows.push(win);
+    vi.stubGlobal("window", win); vi.stubGlobal("document", win.document);
+    vi.stubGlobal("sessionStorage", win.sessionStorage);
+    vi.stubGlobal("BroadcastChannel", class { onmessage = null; postMessage() {} close() {} });
+    const raw = vi.fn().mockResolvedValue(orgs);
+    let finish!: (value: unknown) => void;
+    if (phase === "in-flight") raw.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+    const request = installOrganizationListCache(identity, raw);
+    const pending = request(path).catch((error: unknown) => error);
+    if (phase === "in-flight") await vi.waitFor(() => expect(raw).toHaveBeenCalledOnce());
+    else expect(await pending).toEqual(orgs);
+    if (phase === "persisted") {
+      await vi.runAllTimersAsync();
+      expect(win.sessionStorage.length).toBe(1);
+    }
+
+    win.dispatchEvent(new win.Event("commentor-sign-out"));
+    if (phase === "in-flight") { finish(orgs); expect(await pending).toBeInstanceOf(Error); }
+    await vi.runAllTimersAsync();
+    expect(win.sessionStorage.length).toBe(0);
+    await expect(request(path)).rejects.toMatchObject({ name: "AbortError" });
+    expect(raw).toHaveBeenCalledOnce();
+
+    const nextOrgs = [{ id: "org-b", name: "Beta", slug: "beta" }];
+    const nextRaw = vi.fn().mockResolvedValue(nextOrgs);
+    const next = installOrganizationListCache({ ...identity, userId: "user-b" }, nextRaw);
+    expect(await next(path)).toEqual(nextOrgs); expect(nextRaw).toHaveBeenCalledOnce();
+    await vi.runAllTimersAsync();
+    expect(win.sessionStorage.getItem(win.sessionStorage.key(0)!)).not.toContain("Alpha");
+    // Returning to the original account must also fetch, not restore pre-sign-out data.
+    const returningRaw = vi.fn().mockResolvedValue([]);
+    expect(await installOrganizationListCache(identity, returningRaw)(path)).toEqual([]);
+    expect(returningRaw).toHaveBeenCalledOnce();
+    vi.useRealTimers();
   });
   it("restores the sanitized list across a full-page navigation and removes it after an organization change", async () => {
     const win = new Window({ url: identity.origin }); windows.push(win);
     vi.stubGlobal("window", win); vi.stubGlobal("document", win.document); vi.stubGlobal("Element", win.Element);
     vi.stubGlobal("sessionStorage", win.sessionStorage);
-    vi.stubGlobal("BroadcastChannel", class { onmessage = null; postMessage() {} });
+    vi.stubGlobal("BroadcastChannel", class { onmessage = null; postMessage() {} close() {} });
     const firstRaw = vi.fn().mockResolvedValue([{ ...orgs[0], role: "owner", members: ["private"] }]);
     const first = installOrganizationListCache(identity, firstRaw);
     expect(await first(path)).toEqual(orgs); await new Promise<void>(resolve => setTimeout(resolve, 0));

@@ -1,9 +1,11 @@
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { copyFileSync, mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
+import type { AssetVersionLedger } from "../scripts/asset-version-ledger";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const scripts = JSON.parse(readFileSync(join(root, "package.json"), "utf8")).scripts as Record<string, string>;
@@ -14,14 +16,27 @@ function assetFixture(): string {
   const directory = mkdtempSync(join(tmpdir(), "rendro-asset-gate-"));
   fixtures.push(directory);
   mkdirSync(join(directory, "public"));
-  for (const name of assets) writeFileSync(join(directory, "public", name), "const version = 1;\n");
+  mkdirSync(join(directory, "scripts"));
+  for (const name of ["verify-asset-versions.ts", "asset-version-ledger.ts"]) {
+    copyFileSync(join(root, "scripts", name), join(directory, "scripts", name));
+  }
+  for (const name of ["src", "node_modules"]) symlinkSync(join(root, name), join(directory, name));
+  const ledger = JSON.parse(readFileSync(join(root, "scripts/asset-versions.json"), "utf8")) as AssetVersionLedger;
+  const content = "const version = 1;\n";
+  for (const name of assets) {
+    writeFileSync(join(directory, "public", name), content);
+    for (const version of Object.keys(ledger[`public/${name}`])) {
+      ledger[`public/${name}`][version] = createHash("sha256").update(content).digest("hex");
+    }
+  }
+  writeFileSync(join(directory, "scripts/asset-versions.json"), JSON.stringify(ledger));
   execFileSync("git", ["init", "--quiet"], { cwd: directory });
   execFileSync("git", ["add", "public"], { cwd: directory });
   return directory;
 }
 
-function checkAssets(directory: string) {
-  return spawnSync("sh", ["-c", scripts["verify:assets"]], { cwd: directory, encoding: "utf8" });
+function checkAssets(directory: string, base = "") {
+  return spawnSync("sh", ["-c", scripts["verify:assets"]], { cwd: directory, encoding: "utf8", env: { ...process.env, ASSET_VERSION_BASE: base } });
 }
 
 afterEach(() => { for (const directory of fixtures.splice(0)) rmSync(directory, { recursive: true, force: true }); });
@@ -49,7 +64,8 @@ describe("repository quality gates", () => {
 
   it("allows a clean generated build and unrelated working changes", () => {
     const directory = assetFixture();
-    expect(checkAssets(directory).status).toBe(0);
+    const result = checkAssets(directory);
+    expect(result.status, result.stdout + result.stderr).toBe(0);
     writeFileSync(join(directory, "unrelated.ts"), "const unrelated = true;\n");
     execFileSync("git", ["add", "unrelated.ts"], { cwd: directory });
     writeFileSync(join(directory, "unrelated.ts"), "const unrelated = false;\n");
@@ -62,6 +78,34 @@ describe("repository quality gates", () => {
     expect(spawnSync("git", ["diff", "--check"], { cwd: directory }).status).toBe(0);
     const result = checkAssets(directory);
     expect(result.status, result.stderr).toBe(1);
-    expect(result.stdout).toContain(name);
+    expect(result.stdout + result.stderr).toContain(name);
+  });
+
+  it("rejects changed bundle bytes even after they are staged", () => {
+    const directory = assetFixture();
+    writeFileSync(join(directory, "public/management-query.js"), "const changed = true;\n");
+    execFileSync("git", ["add", "public"], { cwd: directory });
+    expect(spawnSync("git", ["diff", "--exit-code", "--", "public"], { cwd: directory }).status).toBe(0);
+    const result = checkAssets(directory);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("without a version bump");
+  });
+
+  it("rejects rewriting the ledger to bless an existing version in CI", () => {
+    const directory = assetFixture();
+    execFileSync("git", ["add", "scripts/asset-versions.json"], { cwd: directory });
+    execFileSync("git", ["-c", "user.name=Fixture", "-c", "user.email=fixture@example.test", "commit", "--quiet", "-m", "Baseline"], { cwd: directory });
+    const manifest = join(directory, "scripts/asset-versions.json");
+    const ledger = JSON.parse(readFileSync(manifest, "utf8")) as AssetVersionLedger;
+    const changed = "const changed = true;\n";
+    for (const version of Object.keys(ledger["public/management-query.js"])) {
+      ledger["public/management-query.js"][version] = createHash("sha256").update(changed).digest("hex");
+    }
+    writeFileSync(manifest, JSON.stringify(ledger));
+    writeFileSync(join(directory, "public/management-query.js"), changed);
+    execFileSync("git", ["add", "public", "scripts/asset-versions.json"], { cwd: directory });
+    const result = checkAssets(directory, "HEAD");
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("recorded hashes are immutable");
   });
 });

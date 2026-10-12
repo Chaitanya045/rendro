@@ -1,3 +1,5 @@
+import { MANAGEMENT_QUERY_VERSION, SELECT_VERSION } from "./management-asset-versions";
+import { managementRequestScript } from "./management-request";
 import { renderManagementInitialData, managementInitialDataRuntime } from "./management-initial-data";
 import { renderCommentRecoveryLifecycle } from "../commentor/recovery-session";
 import { nonceAttribute } from "@/middleware/html-nonce";
@@ -480,7 +482,7 @@ const controlPlaneRuntime = String.raw`
   function busy(button,on){if(!button)return;button.disabled=on;button.setAttribute("aria-busy",String(on));}
   var copyTimers=new WeakMap();
   async function copyText(button,value,idleLabel){if(!button||button.disabled)return false;var previous=copyTimers.get(button);if(previous){clearTimeout(previous);copyTimers.delete(button);}busy(button,true);try{await navigator.clipboard.writeText(value);busy(button,false);button.textContent="Copied";copyTimers.set(button,setTimeout(function(){button.textContent=idleLabel;copyTimers.delete(button);},1500));return true;}catch(error){busy(button,false);button.textContent=idleLabel;copyTimers.delete(button);throw error;}}
-  async function request(path,options){var initial=window.RendroUI.takeInitialPageData&&window.RendroUI.takeInitialPageData(path,options);if(initial)return initial.data;var response=await fetch(path,Object.assign({headers:{Accept:"application/json","Content-Type":"application/json"}},options||{}));var data=null;try{data=await response.json();}catch(_error){}if(!response.ok){var message=data&&(data.message||data.error),error=new Error(typeof message==="string"?message:"Request failed. Please try again.");error.status=response.status;throw error;}return data;}
+${managementRequestScript}
   function toast(message,type){var region=document.getElementById("cp-toasts");if(!region)return;var node=document.createElement("div");node.className="toast"+(type?" "+type:"");node.textContent=message;region.appendChild(node);requestAnimationFrame(function(){node.classList.add("visible");});setTimeout(function(){node.classList.remove("visible");setTimeout(function(){node.remove();},220);},4200);}
   function openDialog(id){var dialog=document.getElementById(id);if(dialog&&typeof dialog.showModal==="function")dialog.showModal();}
   function dialogBusy(dialog){return Boolean(dialog.querySelector("[aria-busy=true]"));}
@@ -535,9 +537,9 @@ export function renderControlPlanePage(options: ControlPlanePageOptions): string
   const drawerContext = `<div class="cp-drawer-context"><a class="cp-drawer-org" href="/organizations?choose=1"><span class="cp-org-mark" data-org-mark aria-hidden="true">R</span><span class="cp-drawer-org-copy"><span class="cp-drawer-org-name" data-org-name>Organization</span><small>Switch organization</small></span><span class="material-symbols-outlined" aria-hidden="true">unfold_more</span></a><a class="button" data-cp-open-docs href="${docsHref}" hidden><span class="material-symbols-outlined" aria-hidden="true">description</span><span>Open docs</span></a></div>`;
   return `<!DOCTYPE html>
 <html lang="en"><head>${renderFaviconLinks()}<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<link rel="preload" href="/select.js?v=3" as="script">
+<link rel="preload" href="/select.js?v=${SELECT_VERSION}" as="script">
 ${hasSidebar ? `<script defer src="/management-pages.js?v=${MANAGEMENT_SHELL_VERSION}"></script>` : ""}
-<link rel="preload" href="/management-query.js?v=4" as="script">
+<link rel="preload" href="/management-query.js?v=${MANAGEMENT_QUERY_VERSION}" as="script">
 <title>${escapeHtml(options.title)} — Rendro</title><link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..24,400,0,0&display=swap" rel="stylesheet">${renderThemeAssets()}<style${nonceAttribute()}>${controlPlaneStyles}${managementUiStyles}${selectStyles}${organizationSwitcherStyles}</style></head>
 <body class="${hasSidebar ? "has-sidebar" : "focused-layout"}">
 <header class="cp-topbar"><div class="cp-topbar-inner">
@@ -559,6 +561,6 @@ ${hasSidebar ? `<div class="cp-sidebar" id="cp-navigation" role="complementary" 
 <div class="toast-region" id="cp-toasts" aria-live="polite"></div>
 ${organizationId ? '<div class="cp-refresh-notice" id="cp-refresh-notice" hidden><span role="status">Updates may be available.</span><button class="button small" type="button" id="cp-refresh-button">Refresh</button></div>' : ""}
 ${renderCommentRecoveryLifecycle(options.user.id, nonceAttribute())}
-${renderManagementInitialData()}<script${nonceAttribute()} data-cp-page-state type="application/json">${state}</script><script${nonceAttribute()}>window.__RENDRO_PAGE_STATE__=${state};</script><script src="/select.js?v=3"></script><script src="/management-query.js?v=4"></script><script${nonceAttribute()}>${controlPlaneRuntime}${managementInitialDataRuntime}${managementUiRuntime}</script><script${nonceAttribute()}>${organizationSwitcherRuntime}</script><script${nonceAttribute()}>${renderManagementNavigationRuntime(organizationId)}</script><script${nonceAttribute()} data-cp-page-script>${options.script}</script><script${nonceAttribute()}>window.RendroUI.clearInitialPageData();</script>
+${renderManagementInitialData()}<script${nonceAttribute()} data-cp-page-state type="application/json">${state}</script><script${nonceAttribute()}>window.__RENDRO_PAGE_STATE__=${state};</script><script src="/select.js?v=${SELECT_VERSION}"></script><script src="/management-query.js?v=${MANAGEMENT_QUERY_VERSION}"></script><script${nonceAttribute()}>${controlPlaneRuntime}${managementInitialDataRuntime}${managementUiRuntime}</script><script${nonceAttribute()}>${organizationSwitcherRuntime}</script><script${nonceAttribute()}>${renderManagementNavigationRuntime(organizationId)}</script><script${nonceAttribute()} data-cp-page-script>${options.script}</script><script${nonceAttribute()}>window.RendroUI.clearInitialPageData();</script>
 </body></html>`;
 }

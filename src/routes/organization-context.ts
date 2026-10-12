@@ -7,9 +7,9 @@ export const organizationContextScript = String.raw`
 (function(root){
   "use strict";
   if(root.organizationContext)return;
-  var inFlight=new Map(),displayNames=new Map();
-  function active(ui){return !ui.isActive||ui.isActive();}
-  function remember(organization){if(organization&&organization.id)displayNames.set(String(organization.id),{name:organization.name||"Organization",mark:(organization.name||"R").charAt(0).toUpperCase()});return organization;}
+  var inFlight=new Map(),displayNames=new Map(),disposed=false;
+  function active(ui){return !disposed&&(!ui.isActive||ui.isActive());}
+  function remember(organization){if(!disposed&&organization&&organization.id)displayNames.set(String(organization.id),{name:organization.name||"Organization",mark:(organization.name||"R").charAt(0).toUpperCase()});return organization;}
   async function completeMembers(ui,key,organization){
     if(!organization||!organization.members||organization.members.length<100)return organization;
     // Better Auth's full-organization join silently caps the roster at 100.
@@ -36,6 +36,7 @@ export const organizationContextScript = String.raw`
       inFlight.set(key,entry);
       return entry.promise;
     },
+    dispose:function(){disposed=true;inFlight.clear();displayNames.clear();},
     display:function(organizationId){return displayNames.get(String(organizationId))||null;},
     remember:remember
   };

@@ -7,7 +7,7 @@ import {
   betterAuth,
   type BetterAuthOptions,
 } from "better-auth/minimal";
-import { sessionReadLimit } from "./sessionReadLimit";
+import { organizationReadLimit, organizationReadPaths, sessionReadLimit } from "./sessionReadLimit";
 import { organization } from "better-auth/plugins";
 import { components } from "./_generated/api";
 import type { DataModel } from "./_generated/dataModel";
@@ -111,6 +111,9 @@ export function createAuthOptions(ctx: GenericCtx<DataModel>) {
         // The plugin applies real fixed windows; Better Auth resets only
         // after inactivity and would exhaust a busy shared IP indefinitely.
         "/get-session": false,
+        ...Object.fromEntries(organizationReadPaths.map(path => [path, (request: Request) =>
+          request.method === "GET" ? false : { window: 60, max: 100 }])),
+        "/organization/invite-member": { window: 60, max: 10 },
         "/sign-in/email": { window: 60, max: 5 },
         "/sign-up/email": { window: 60 * 60, max: 5 },
         "/request-password-reset": { window: 60 * 60, max: 5 },
@@ -120,6 +123,10 @@ export function createAuthOptions(ctx: GenericCtx<DataModel>) {
     plugins: [
       sessionReadLimit((key) => {
         if (!("runMutation" in ctx)) throw new Error("Session HTTP reads require a mutation-capable context");
+        return ctx.runMutation(components.betterAuth.sessionReadLimit.consume, { key });
+      }),
+      organizationReadLimit((key) => {
+        if (!("runMutation" in ctx)) throw new Error("Organization HTTP reads require a mutation-capable context");
         return ctx.runMutation(components.betterAuth.sessionReadLimit.consume, { key });
       }),
       organization({
