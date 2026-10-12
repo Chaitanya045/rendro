@@ -554,6 +554,26 @@ The script URLs carry `?v=` cache-busting versions that change with each rebuild
 
 ### Document navigation authorization
 
+Any browser-recognized activation gesture inside the opaque document frame can
+authorize document navigation, including interaction with the in-frame comment
+toolbar or widget. This is accepted by design: the publisher controls that frame
+and can overlay or intercept its input, so a widget gesture there is a document
+gesture. The widget is not a separate trusted input boundary.
+
+Parent-owned UI input is reserved before its control handles it and never
+authorizes a document-requested navigation. This includes Review, Open, Dismiss,
+the sidebar, the theme toggle and the sign-out overlay. Open explicitly confirms
+only the immutable destination displayed by the parent; its activation cannot
+authorize a different document request.
+
+Navigation remains confined to the current project/deployment namespace.
+`validRelativeDocumentPath` rejects literal traversal and malformed path segments;
+the shell prepends its own `ORG` namespace and encodes each path segment beneath
+the fixed document route. Encoded traversal, schemes and foreign org/project
+prefixes cannot replace that route or namespace. The server separately enforces
+deployment/publication scope. The parent updates only its viewer route, and the
+opaque iframe sandbox does not permit top navigation, even with activation.
+
 The private, public and legacy tree shells own one navigation gate for their
 entire lifetime. A valid `doc-navigate` from the current content frame requires
 `navigator.userActivation.isActive === true` and an unused activation. The shell
@@ -569,7 +589,14 @@ An unverified or already-used activation offers a small parent-owned “Open
 linked document” notice. Its bounded path/query/fragment is assigned with
 `textContent`, never HTML. The first destination stays fixed while visible;
 repeated requests do not rewrite it, steal focus, or add notices. Dismissal
-suppresses notices until the next parent document navigation. The native button
+leaves a parent-owned “Review linked document” button. While dismissed, later
+requests replace one bounded pending destination (path, query and fragment),
+de-duplicating identical targets without changing the DOM or announcing updates.
+Only the reader's Review action reopens the prompt and freezes that destination
+for confirmation; frame messages and elapsed time cannot reopen it. This avoids
+timer-driven nagging while preserving access to later links even without the
+activation API. Parent document navigation clears both the prompt and pending
+destination. Focus moves only for explicit parent Review/Dismiss actions. The native button
 works with mouse and keyboard even when the activation API is absent. Shell
 `toggle` messages also fail closed when the API is absent. Share viewers retain
 their native, document-scoped navigation path.
@@ -708,7 +735,7 @@ deployment command. For development use `pnpm run deploy --env development`. Do 
 replace it with a bare Wrangler deployment from a fresh checkout: ignored
 comment/navigation bundles are generated release artifacts, not source files.
 
-`public/management-query.js`, `public/select.js`, and `public/management-pages.js` are tracked; `pnpm verify` rebuilds them and fails if they drift from source. `public/commentor.js`, `public/commentor-parent.js`, `public/lazy-tree.js`, `public/private-viewer.js`, and `bin/rendro.mjs` are ignored and built in the release path. When management controllers or templates change, rebuild assets and bump `MANAGEMENT_SHELL_VERSION` in `src/routes/management-navigation.ts`; a shell whose version does not match the loaded bundle refetches current HTML, falling back to full navigation if that HTML is incompatible. Bump `MANAGEMENT_QUERY_VERSION` or `SELECT_VERSION` in `src/routes/management-asset-versions.ts` when those bundles change. After `pnpm build:assets`, run `pnpm record:assets` to append the new version’s SHA-256 to `scripts/asset-versions.json`. The recorder and `pnpm verify:assets` reject changed bytes at an existing version. CI also compares the ledger against the PR base (or previous push), rejecting rewritten or deleted historical hashes. Builds never update the ledger automatically.
+`public/management-query.js`, `public/select.js`, and `public/management-pages.js` are tracked; `pnpm verify` rebuilds them and fails if they drift from source. `public/commentor.js`, `public/commentor-parent.js`, `public/lazy-tree.js`, `public/private-viewer.js`, and `bin/rendro.mjs` are ignored and built in the release path. When management controllers or templates change, rebuild assets and bump `MANAGEMENT_SHELL_VERSION` in `src/routes/management-navigation.ts`; a shell whose version does not match the loaded bundle refetches current HTML, falling back to full navigation if that HTML is incompatible. Bump `MANAGEMENT_QUERY_VERSION` or `SELECT_VERSION` in `src/routes/management-asset-versions.ts` when those bundles change. After `pnpm build:assets`, run `pnpm record:assets` to append the new version’s SHA-256 to `scripts/asset-versions.json`. The recorder and `pnpm verify:assets` reject changed bytes at an existing version. CI also compares the ledger against the PR base (or previous push), rejecting rewritten or deleted historical hashes. The viewer versions (`LAZY_TREE_VERSION`, `PRIVATE_VIEWER_VERSION`, and `COMMENTOR_PARENT_VERSION` in `src/viewer/asset-versions.ts`) also use this ledger and recording workflow, even though their built bundles are ignored. Bump the corresponding version before recording changed bytes. Builds never update the ledger automatically.
 
 ### Environment Variables (Workers)
 

@@ -9,7 +9,7 @@ import type { AssetVersionLedger } from "../scripts/asset-version-ledger";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const scripts = JSON.parse(readFileSync(join(root, "package.json"), "utf8")).scripts as Record<string, string>;
-const assets = ["management-query.js", "select.js", "management-pages.js"];
+const assets = ["management-query.js", "select.js", "management-pages.js", "lazy-tree.js", "private-viewer.js", "commentor-parent.js"];
 const fixtures: string[] = [];
 
 function assetFixture(): string {

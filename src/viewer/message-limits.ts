@@ -41,11 +41,13 @@ export function coalesceMessage<T>(apply: (value: T) => void, host: Window = win
  */
 export function createDocumentNavigationGate(host: Window = window) {
   let consumed = false;
+  let parentInput = false;
   let hasNavigation = false;
   let lastNavigation = -Infinity;
   const observe = () => {
     if (host.navigator.userActivation?.isActive === false) {
       consumed = false;
+      parentInput = false;
       hasNavigation = false;
     }
   };
@@ -62,10 +64,16 @@ export function createDocumentNavigationGate(host: Window = window) {
   };
   return {
     observe,
+    // Reserve parent gestures without recording navigation or changing its burst.
+    // Only observing inactivity can distinguish a later document activation.
+    reserveParentInput() {
+      observe();
+      parentInput = true;
+    },
     request(target: string, current: string): "push" | "confirm" | null {
       observe();
       if (target === current) return null;
-      if (host.navigator.userActivation?.isActive !== true || consumed) return "confirm";
+      if (host.navigator.userActivation?.isActive !== true || consumed || parentInput) return "confirm";
       consume();
       return "push";
     },

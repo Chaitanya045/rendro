@@ -1,6 +1,7 @@
 import { decodeStoragePath, isLegacyStorageKey, legacyStoragePrefix } from "@/storage-boundary";
 import { CONVEX_URL } from "@/config";
 import { viewerScript, viewerUpdateNotice } from "@/viewer/markup";
+import { COMMENTOR_PARENT_VERSION, LAZY_TREE_VERSION } from "@/viewer/asset-versions";
 import { renderCommentRecoveryLifecycle } from "../commentor/recovery-session";
 import { nonceAttribute } from "@/middleware/html-nonce";
 import { renderFaviconLinks } from "./favicon";
@@ -899,8 +900,8 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
 </script>
 <script${nonceAttribute()}>window.RENDRO_INITIAL_DOC=${inlineJson(selectedDoc)};window.RENDRO_ORG=${inlineJson(org)};window.RENDRO_DOCUMENT_BASE=${inlineJson(documentBase)};window.RENDRO_PUBLICATION_BASE=${inlineJson(isPublicDocument ? documentBase : "")};window.RENDRO_SHARE_CONFIG=${inlineJson(options.shareConfig ?? null)};window.RENDRO_LEGACY_COMMENT_CONFIG=${inlineJson(options.legacyCommentConfig ?? null)};</script>
 ${renderCommentRecoveryLifecycle(user?.id ?? null, nonceAttribute())}
-${options.shareConfig?.convexUrl || options.legacyCommentConfig?.convexUrl ? `<script${nonceAttribute()} src="/commentor-parent.js?v=10"></script>` : ""}
-<script${nonceAttribute()} src="/lazy-tree.js?v=37"></script>
+${options.shareConfig?.convexUrl || options.legacyCommentConfig?.convexUrl ? `<script${nonceAttribute()} src="/commentor-parent.js?v=${COMMENTOR_PARENT_VERSION}"></script>` : ""}
+<script${nonceAttribute()} src="/lazy-tree.js?v=${LAZY_TREE_VERSION}"></script>
 </body>
 </html>`;
 }

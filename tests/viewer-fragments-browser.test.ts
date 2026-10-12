@@ -1,4 +1,5 @@
 import type { Frame, Page } from "playwright";
+import AxeBuilder from "@axe-core/playwright";
 import { Hono } from "hono";
 import type { User } from "better-auth/types";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -20,6 +21,9 @@ let publisherBase = "";
 let navigationAttack = false;
 let chainedNavigation = false;
 let missingActivationAttack = false;
+const activationModes = [privateBase, "/p/fixture"].flatMap(base =>
+  [false, true].map(missing => ({ base, missing })));
+
 
 function publisherHtml(path: string): string {
   return `<!doctype html><html><head><meta charset="utf-8">${publisherBase}<title>Fragment fixture</title>
@@ -36,6 +40,11 @@ function publisherHtml(path: string): string {
     <section></section><h2 id="日本語">Unicode target</h2><section></section>
     <h2 id="café">Encoded target</h2><section></section><a name="legacy">Named target</a><section></section>
     <script>document.body.dataset.initializedQuery = location.search;
+    addEventListener('message', event => {
+      if (event.source === parent && event.data?.type === 'fixture-navigate') {
+        parent.postMessage({type:'doc-navigate',path:'guide/other.html',search:event.data.search,fragment:'#section'},location.origin);
+      }
+    });
     ${navigationAttack ? `
       function flood(){for(let i=0;i<100;i++) {
         parent.postMessage({type:'doc-navigate',path:'guide/other.html',search:'?forged='+i,fragment:'#section'},location.origin);
@@ -173,6 +182,84 @@ async function atTarget(frame: Frame, id: string) {
 // Uses the actual route injectors, shell, and bundled bridge/tree in Chromium's
 // opaque-origin sandbox; DOM mocks cannot detect ticket-base navigations.
 describe("viewer fragment navigation in Chromium", () => {
+  const confinedPaths = [
+    { path: "../outside.html", rejected: true },
+    { path: "guide/../../outside.html", rejected: true },
+    { path: "guide\\..\\outside.html", rejected: true },
+    { path: "https://outside.test/page.html", rejected: true },
+    { path: "//outside.test/page.html", rejected: true },
+    { path: "/organizations/other/projects/other/docs/files/page.html", rejected: true },
+    { path: "%2e%2e/outside.html", rejected: false },
+    { path: "%2E%2E%2Foutside.html", rejected: false },
+    { path: "%252e%252e%252foutside.html", rejected: false },
+    { path: "%2f%2foutside.test/page.html", rejected: false },
+    { path: "javascript:alert(1)", rejected: false },
+    { path: "data:text/html,outside", rejected: false },
+    { path: "organizations/other/projects/other/docs/files/page.html", rejected: false },
+    { path: "other-project/guide/page.html", rejected: false },
+  ];
+
+  it.each(activationModes.flatMap(mode => confinedPaths.map(path => ({ ...mode, ...path }))))(
+    "confines frame-requested $path in $base (missing activation API: $missing)", async ({ base, missing, path, rejected }) => {
+      const page = await newPage();
+      if (missing) await page.addInitScript(() => { Object.defineProperty(navigator, "userActivation", { value: undefined }); });
+      await page.goto(harness.origin + base);
+      const frame = await readyFrame(page);
+      const initialUrl = page.url();
+      const initialSrc = await page.locator("#content-frame").getAttribute("src");
+      const navigations: string[] = [];
+      page.on("request", request => { if (request.isNavigationRequest()) navigations.push(request.url()); });
+      const encoded = path.split("/").map(encodeURIComponent).join("/");
+      const expectedPath = `${base}/files/${encoded}`;
+      const response = rejected ? undefined : page.waitForResponse(response => new URL(response.url()).pathname === expectedPath);
+      await frame.locator("textarea").click();
+      await frame.evaluate(path => parent.postMessage({
+        type: "doc-navigate", path, search: "?doc=outside&next=https://outside.test/", fragment: "#section",
+        // Extra frame-controlled URL/target fields must never choose the parent route.
+        url: "https://outside.test/", target: "_top",
+      }, location.origin), path);
+      await page.waitForFunction(() => (window as unknown as { activations: boolean[] }).activations.length === 1);
+      if (rejected) {
+        expect(page.url()).toBe(initialUrl);
+        expect(await page.locator("#content-frame").getAttribute("src")).toBe(initialSrc);
+        expect(await page.locator("#document-navigation-notice").count()).toBe(0);
+        expect(navigations).toEqual([]);
+      } else {
+        // These strings can be literal filenames, but may never be interpreted
+        // as traversal, a scheme, or an alternate route/namespace.
+        if (missing) {
+          expect(page.url()).toBe(initialUrl);
+          await page.getByRole("button", { name: "Open linked document", exact: true }).click();
+        }
+        expect((await response)!.status()).toBe(404);
+        const shell = new URL(page.url());
+        expect(shell.origin).toBe(harness.origin);
+        expect(shell.pathname).toBe(base);
+        expect(shell.searchParams.get("doc")).toBe(path);
+        expect(shell.searchParams.get("docQuery")).toBe("?doc=outside&next=https://outside.test/");
+        expect(shell.hash).toBe("#section");
+        expect(navigations.length).toBeGreaterThan(0);
+        expect(navigations.every(url => new URL(url).origin === harness.origin && new URL(url).pathname === expectedPath)).toBe(true);
+        expect(new URL((await page.locator("#content-frame").getAttribute("src"))!, harness.origin).pathname).toBe(expectedPath);
+      }
+      await page.close();
+    });
+
+  it.each([privateBase, "/p/fixture"])("blocks native parent/top navigation even with a document gesture in %s", async base => {
+    const { page, frame } = await open(base);
+    const initialUrl = page.url();
+    await frame.locator("textarea").click();
+    expect(await frame.evaluate(() => {
+      return [parent, top!].map(target => {
+        try { target.location.href = "/outside-viewer"; return "navigated"; }
+        catch (error) { return (error as DOMException).name; }
+      });
+    })).toEqual(["SecurityError", "SecurityError"]);
+    expect(page.url()).toBe(initialUrl);
+    expect(await page.locator("#content-frame").getAttribute("sandbox")).not.toMatch(/allow-top-navigation/);
+    await page.close();
+  });
+
   it.each([privateBase, "/p/fixture", "/s/fixture"])("ignores forged navigation and load-report loops without a gesture in %s", async base => {
     navigationAttack = true;
     // Playwright's evaluate (including the nonce checks in open()) grants
@@ -266,6 +353,209 @@ describe("viewer fragment navigation in Chromium", () => {
     await page.goBack();
     await readyFrame(page);
     expect(new URL(page.url()).searchParams.has("docQuery")).toBe(false);
+    await page.close();
+  });
+
+  it.each([privateBase, "/p/fixture"])("recovers later document and query links through parent Review after dismissal in %s", async base => {
+    const page = await newPage();
+    await page.addInitScript(() => { Object.defineProperty(navigator, "userActivation", { value: undefined }); });
+    await page.goto(harness.origin + base);
+    let frame = await readyFrame(page);
+    const notice = page.locator("#document-navigation-notice");
+    const review = page.getByRole("button", { name: "Review linked document", exact: true });
+    for (const link of ["Other page", "Query two"]) {
+      await frame.getByRole("link", { name: "Query one", exact: true }).click();
+      await notice.waitFor();
+      // Document requests must not move focus into the parent notice.
+      expect(await page.evaluate(() => document.activeElement?.id)).toBe("content-frame");
+      await notice.getByRole("button", { name: "Dismiss", exact: true }).click();
+      await frame.getByRole("link", { name: link, exact: true }).click();
+      // Drain posted messages before the parent-owned reopen action.
+      await page.waitForFunction(() => (window as unknown as { activations: boolean[] }).activations.length >= 2);
+      expect(await notice.count()).toBe(0);
+      expect(await page.evaluate(() => document.activeElement?.id)).toBe("content-frame");
+      expect((await new AxeBuilder({ page }).include("#document-navigation-review").options({ preload: false }).analyze()).violations).toEqual([]);
+      await review.press("Enter");
+      const destination = link === "Other page" ? "guide/other.html#section" : "guide/page.html?v=2#section";
+      expect(await notice.locator("p").textContent()).toBe(`Open linked document ${destination}?`);
+      expect((await new AxeBuilder({ page }).include("#document-navigation-notice").options({ preload: false }).analyze()).violations).toEqual([]);
+      await notice.getByRole("button", { name: "Open linked document", exact: true }).press("Enter");
+      frame = await readyFrame(page);
+      expect(new URL(page.url()).searchParams.get("doc")).toBe(link === "Other page" ? documents[1] : documents[0]);
+      expect(new URL(page.url()).searchParams.get("docQuery")).toBe(link === "Other page" ? null : "?v=2");
+      expect(new URL(page.url()).hash).toBe("#section");
+      expect(await review.count()).toBe(0);
+      await page.evaluate(() => { (window as unknown as { activations: boolean[] }).activations = []; });
+    }
+    await page.close();
+  });
+
+  it.each([privateBase, "/p/fixture"])("never reopens or mutates dismissed UI under duplicate and changing-target floods in %s", async base => {
+    const page = await newPage();
+    await page.addInitScript(() => { Object.defineProperty(navigator, "userActivation", { value: undefined }); });
+    await page.goto(harness.origin + base);
+    const frame = await readyFrame(page);
+    const initialUrl = page.url();
+    const notice = page.locator("#document-navigation-notice");
+    const review = page.getByRole("button", { name: "Review linked document", exact: true });
+    await frame.getByRole("link", { name: "Query one", exact: true }).click();
+    await notice.getByRole("button", { name: "Dismiss", exact: true }).click();
+    for (let round = 0; round < 3; round++) {
+      await review.evaluate(element => {
+        const state = window as unknown as { reviewMutations: number };
+        state.reviewMutations = 0;
+        new MutationObserver(records => { state.reviewMutations += records.length; })
+          .observe(element, { subtree: true, childList: true, attributes: true, characterData: true });
+      });
+      await frame.getByRole("textbox").focus();
+      const before = await page.evaluate(() => (window as unknown as { activations: boolean[] }).activations.length);
+      await frame.evaluate(() => {
+        for (let i = 0; i < 1000; i++) {
+          parent.postMessage({ type: "doc-navigate", path: "guide/other.html", search: `?v=${i}`, fragment: "#section" }, location.origin);
+          parent.postMessage({ type: "doc-navigate", path: "guide/other.html", search: `?v=${i}`, fragment: "#section" }, location.origin);
+        }
+      });
+      await page.waitForFunction(count => (window as unknown as { activations: boolean[] }).activations.length === count, before + 2000);
+      expect(await notice.count()).toBe(0);
+      expect(await review.count()).toBe(1);
+      expect(await page.evaluate(() => (window as unknown as { reviewMutations: number }).reviewMutations)).toBe(0);
+      expect(await page.evaluate(() => document.activeElement?.id)).toBe("content-frame");
+      expect(page.url()).toBe(initialUrl);
+      expect(requests.filter(path => path.includes("/files/")).length).toBe(1);
+      // A genuine later link remains available on every reader-driven reopening.
+      await frame.getByRole("link", { name: "Query two", exact: true }).click();
+      await page.waitForFunction(count => (window as unknown as { activations: boolean[] }).activations.length === count, before + 2001);
+      await review.click();
+      expect(await notice.locator("p").textContent()).toBe("Open linked document guide/page.html?v=2#section?");
+      if (round < 2) await notice.getByRole("button", { name: "Dismiss", exact: true }).click();
+    }
+    await notice.getByRole("button", { name: "Open linked document", exact: true }).click();
+    await readyFrame(page);
+    expect(new URL(page.url()).searchParams.get("docQuery")).toBe("?v=2");
+    await page.close();
+  });
+
+  it.each(activationModes)("reserves expired Review, Dismiss and Open activation in $base (missing API: $missing)", async ({ base, missing }) => {
+    const page = await newPage();
+    if (missing) await page.addInitScript(() => { Object.defineProperty(navigator, "userActivation", { value: undefined }); });
+    await page.goto(harness.origin + base);
+    const frame = await readyFrame(page);
+    const initialUrl = page.url();
+    const notice = page.locator("#document-navigation-notice");
+    // Drain setup's automation activation before sending an unsolicited request.
+    await page.waitForFunction(() => navigator.userActivation?.isActive !== true);
+    await frame.waitForFunction(() => {
+      if (navigator.userActivation?.isActive) return false;
+      parent.postMessage({ type: "doc-navigate", path: "guide/other.html", search: "?shown", fragment: "#section" }, location.origin);
+      return true;
+    });
+    await notice.waitFor();
+    await notice.getByRole("button", { name: "Dismiss", exact: true }).click();
+    await frame.waitForFunction(() => {
+      parent.postMessage({ type: "doc-navigate", path: "guide/other.html", search: "?reviewed", fragment: "#section" }, location.origin);
+      return true;
+    });
+    await page.waitForFunction(() => (window as unknown as { activations: boolean[] }).activations.length === 2);
+    expect(page.url()).toBe(initialUrl);
+    expect(await notice.count()).toBe(0);
+    const review = page.getByRole("button", { name: "Review linked document", exact: true });
+    // Schedule a real frame message as soon as Review receives input.
+    await review.evaluate(button => button.addEventListener("click", () => {
+      document.querySelector<HTMLIFrameElement>("#content-frame")!.contentWindow!.postMessage({ type: "fixture-navigate", search: "?attack-review" }, "*");
+    }, { once: true }));
+    await page.waitForFunction(() => navigator.userActivation?.isActive !== true);
+    await page.waitForTimeout(150); // Allow the gate's inactivity observer to run.
+    await review.click();
+    await page.waitForFunction(() => (window as unknown as { activations: boolean[] }).activations.length === 3);
+    expect(page.url()).toBe(initialUrl);
+    expect(await notice.locator("p").textContent()).toBe("Open linked document guide/other.html?reviewed#section?");
+    expect(await page.evaluate(() => (window as unknown as { activations: boolean[] }).activations.at(-1))).toBe(!missing);
+    // Attack on pointerdown, before Open's click, and again from the replacement.
+    const open = notice.getByRole("button", { name: "Open linked document", exact: true });
+    await open.evaluate(button => button.addEventListener("pointerdown", () => {
+      document.querySelector<HTMLIFrameElement>("#content-frame")!.contentWindow!.postMessage({ type: "fixture-navigate", search: "?attack-open" }, "*");
+    }, { once: true }));
+    await open.hover();
+    await page.mouse.down();
+    await page.waitForFunction(() => (window as unknown as { activations: boolean[] }).activations.length === 4);
+    expect(page.url()).toBe(initialUrl);
+    expect(await notice.locator("p").textContent()).toBe("Open linked document guide/other.html?reviewed#section?");
+    await page.mouse.up();
+    const replacement = await readyFrame(page);
+    expect(new URL(page.url()).searchParams.get("docQuery")).toBe("?reviewed");
+    expect(new URL(page.url()).hash).toBe("#section");
+    await replacement.waitForFunction(() => {
+      parent.postMessage({ type: "doc-navigate", path: "guide/other.html", search: "?attack-replacement" }, location.origin);
+      return true;
+    });
+    await notice.waitFor();
+    expect(new URL(page.url()).searchParams.get("docQuery")).toBe("?reviewed");
+    expect(await page.evaluate(() => history.length)).toBe(3);
+    await page.close();
+  });
+
+  it.each(activationModes.flatMap(mode => ["tree", "theme", "comment"].map(control => ({ ...mode, control }))))(
+    "reserves $control input before same-gesture frame messages in $base (missing API: $missing)", async ({ base, missing, control }) => {
+      const page = await newPage();
+      if (missing) await page.addInitScript(() => { Object.defineProperty(navigator, "userActivation", { value: undefined }); });
+      await page.goto(harness.origin + base);
+      await readyFrame(page);
+      const initialUrl = page.url();
+      // The deployed comment toolbar lives inside the document. Model a parent
+      // comment surface in a shadow root to exercise composed parent input too.
+      if (control === "comment") await page.evaluate(() => {
+        const host = document.createElement("div");
+        host.id = "parent-comment-fixture";
+        host.style.cssText = "position:fixed;top:60px;right:10px;z-index:1000";
+        const button = document.createElement("button");
+        button.textContent = "Comment";
+        host.attachShadow({ mode: "open" }).append(button);
+        document.body.append(host);
+      });
+      const target = page.locator(control === "tree" ? ".tree-folder > .tree-item" : control === "theme" ? "#theme-toggle" : "#parent-comment-fixture button").first();
+      await target.evaluate(element => element.addEventListener("pointerdown", () => {
+        document.querySelector<HTMLIFrameElement>("#content-frame")!.contentWindow!.postMessage({ type: "fixture-navigate", search: "?parent-attack" }, "*");
+      }, { once: true }));
+      await page.waitForFunction(() => navigator.userActivation?.isActive !== true);
+      await page.waitForTimeout(150);
+      await target.hover();
+      await page.mouse.down();
+      await page.waitForFunction(() => (window as unknown as { activations: boolean[] }).activations.length === 1);
+      expect(page.url()).toBe(initialUrl);
+      expect(await page.locator("#document-navigation-notice").count()).toBe(1);
+      await page.mouse.up();
+      expect(await page.evaluate(() => (window as unknown as { activations: boolean[] }).activations)).toEqual([!missing]);
+      expect(await page.evaluate(() => history.length)).toBe(2);
+      await page.close();
+    });
+
+  it.each([false, true])("keeps sign-in and dialog teardown usable with a pending confirmation (dismissed: %s)", async dismissed => {
+    const page = await newPage();
+    await page.goto(harness.origin + privateBase);
+    const frame = await readyFrame(page);
+    await page.waitForFunction(() => navigator.userActivation?.isActive !== true);
+    await frame.waitForFunction(() => {
+      if (navigator.userActivation?.isActive) return false;
+      parent.postMessage({ type: "doc-navigate", path: "guide/other.html", search: "?pending" }, location.origin);
+      return true;
+    });
+    await page.locator("#document-navigation-notice").waitFor();
+    if (dismissed) await page.getByRole("button", { name: "Dismiss", exact: true }).click();
+    await page.evaluate(() => {
+      const dialog = document.createElement("dialog");
+      dialog.textContent = "Private dialog";
+      document.body.append(dialog);
+      dialog.showModal();
+      window.dispatchEvent(new Event("commentor-sign-out"));
+    });
+    const overlay = page.locator("#rendro-signed-out");
+    await overlay.waitFor();
+    expect(await page.locator("dialog[open]").count()).toBe(0);
+    expect(await overlay.evaluate(element => document.activeElement === element)).toBe(true);
+    await page.route("**/sign-in", route => route.fulfill({ contentType: "text/html", body: "<h1>Sign in</h1>" }));
+    await page.keyboard.press("Tab");
+    await page.keyboard.press("Enter");
+    await page.waitForURL("**/sign-in");
     await page.close();
   });
 

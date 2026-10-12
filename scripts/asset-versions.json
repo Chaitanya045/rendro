@@ -9,5 +9,14 @@
   },
   "public/select.js": {
     "3": "fbaef4c65ece8872760ad97cdc28f992408eedd728e685a2b086e4b79a98ff4d"
+  },
+  "public/lazy-tree.js": {
+    "38": "80d9861e10b85e4774e4e280cd2bd7db963e0dd237dca88b52a1e23f0e96f1cc"
+  },
+  "public/private-viewer.js": {
+    "12": "b85cc51bda960eb83e8d264f02afb7923830a6db63d678f8d300207422d5f6e5"
+  },
+  "public/commentor-parent.js": {
+    "11": "a611dba0b6d7d2db70518d99d80936bc4eecd4a805dec63c3987a99a15d74457"
   }
 }
