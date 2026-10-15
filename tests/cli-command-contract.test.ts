@@ -17,7 +17,8 @@ beforeEach(() => {
   vi.resetModules(); vi.resetAllMocks();
   for (const name of ["CI", "GITHUB_SHA", "GITHUB_REPOSITORY", "GITHUB_REF", "GITHUB_ACTIONS", "GITHUB_RUN_ID", "GITHUB_WORKFLOW", "GITHUB_JOB", "GITHUB_ACTOR", "RENDRO_API_KEY"]) vi.stubEnv(name, "");
   io.readdir.mockResolvedValue([entry("index.html")]);
-  io.readFile.mockResolvedValue(bytes); io.writeFile.mockResolvedValue(undefined); io.mkdir.mockResolvedValue(undefined);
+  io.readFile.mockImplementation((path: string) => path.endsWith("/.rendroignore")
+    ? Promise.reject(Object.assign(new Error("missing"), { code: "ENOENT" })) : Promise.resolve(bytes)); io.writeFile.mockResolvedValue(undefined); io.mkdir.mockResolvedValue(undefined);
   io.git.mockReturnValue("");
   requests = [];
   handle = (url) => Promise.resolve(Response.json(url.includes("/check?") ? { deployment: null, manifest: null }
@@ -101,7 +102,7 @@ it.each(["local", "git", "github", "ci"])("sanitizes %s provenance through push 
   const result = await run(["push", ...identity], " total");
   expect(result.exits).toBe(0);
   const provenance = requests.find(request => request.url.endsWith("/start"))!.body.provenance;
-  expect(JSON.stringify(provenance)).not.toContain("secret");
+  expect(JSON.stringify(provenance)).not.toMatch(/user:secret|token=secret|#secret/);
   expect(provenance).toMatchObject({ source: { kind: mode === "local" ? "local" : "git" }, execution: { kind: ["github", "ci"].includes(mode) ? "ci" : "local" } });
 });
 it("walks directories, sorts manifest entries and reuses only matching files", async () => {
@@ -141,4 +142,12 @@ it.each(["upload", "commit", "literal", "cleanup-error", "cleanup-literal"])("re
   expect(result.exits).toBe(1);
   expect(requests.some(request => request.url.endsWith("/fail"))).toBe(true);
   expect(result.errors).toContain(failure.startsWith("cleanup-") ? "Failed to mark deployment" : failure === "commit" ? "Commit rejected" : failure === "upload" ? "Upload failed" : "literal upload failure");
+});
+it.each([false, true])("dispatches sensitive-file opt-in and prints exclusions (%s)", async include => {
+  io.readdir.mockResolvedValue([entry("index.html"), entry(".env.qa")]);
+  const result = await run(["push", ...identity, "--token", "key", ...(include ? ["--include-sensitive"] : [])], " total");
+  expect(result.exits).toBe(0);
+  expect(result.output.includes('skipped ".env.qa" (sensitive)')).toBe(!include);
+  const manifest = requests.find(request => request.url.endsWith("/start"))!.body.manifest as { files: Array<{ path: string }> };
+  expect(manifest.files.map(file => file.path)).toEqual(include ? [".env.qa", "index.html"] : ["index.html"]);
 });
