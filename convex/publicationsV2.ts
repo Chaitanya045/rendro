@@ -48,6 +48,8 @@ export const createInternal = internalMutation({
       !deployment
       || deployment.organizationId !== args.organizationId
       || deployment.projectId !== project._id
+      || deployment.purgeState === "purging"
+      || deployment.purgedAt !== undefined
       || deployment.status === "failed"
       || deployment.status === "staging"
     ) throw new ConvexError("Publication deployment not found");
@@ -67,7 +69,7 @@ export const createInternal = internalMutation({
       pathPrefix,
       entryFile,
       trackingMode: args.trackingMode,
-      pinnedDeploymentId: args.pinnedDeploymentId,
+      pinnedDeploymentId: args.trackingMode === "pinned" ? args.pinnedDeploymentId : undefined,
       title: args.title?.trim() || project.name,
       description: args.description?.trim() || undefined,
       createdBy: args.actorId,
@@ -133,7 +135,7 @@ export const resolvePublicInternal = internalQuery({
       : project.activeDeploymentId;
     if (!deploymentId) return null;
     const deployment = await ctx.db.get(deploymentId);
-    if (!deployment || deployment.status === "failed" || deployment.status === "staging") return null;
+    if (!deployment || deployment.purgeState === "purging" || deployment.purgedAt !== undefined || deployment.status === "failed" || deployment.status === "staging") return null;
     return {
       publication: {
         slug: publication.slug,

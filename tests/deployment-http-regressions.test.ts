@@ -8,7 +8,7 @@ import app from "../src/routes/deployments";
 describe("deployment HTTP regression", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(Response.json({ deployment: { manifestKey: "manifest", previousDeploymentId: "previous" } }))));
+    vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(Response.json({ deployment: { stagingExpiresAt: Date.now() + 3_600_000, manifestKey: "manifest", previousDeploymentId: "previous" } }))));
     storage.getObjectText.mockResolvedValue(JSON.stringify({ version: 1, files: Array.from({ length: 200 }, (_, index) => ({ path: `${String(index).padStart(3, "0")}.html`, size: 1, sha256: "a".repeat(64) })) }));
     storage.headObject.mockResolvedValue({ size: 1, metadata: { sha256: "a".repeat(64) } });
   });
@@ -53,5 +53,36 @@ describe("deployment HTTP regression", () => {
     const response = await app.request("/api/rendro/deployments/fail", { method: "POST", body: "{}" });
     expect(response.status).toBe(401);
     expect(new Headers(vi.mocked(fetch).mock.calls[0][1]?.headers).has("authorization")).toBe(false);
+  });
+});
+
+describe("staging writes after slow requests", () => {
+  it("does not upload a body that finishes after the authorized lease", async () => {
+    vi.clearAllMocks();
+    const clock = vi.spyOn(Date, "now").mockReturnValue(99);
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    const sha256 = Buffer.from(await crypto.subtle.digest("SHA-256", new TextEncoder().encode("x"))).toString("hex");
+    vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(Response.json({ deployment: { manifestKey: "manifest", stagingExpiresAt: 100 } }))));
+    storage.getObjectText.mockResolvedValue(JSON.stringify({ version: 1, files: [{ path: "index.html", size: 1, sha256 }] }));
+    const stream = new ReadableStream({ pull(controller) { clock.mockReturnValue(101); controller.enqueue(new TextEncoder().encode("x")); controller.close(); } });
+    try {
+      const response = await app.request("/api/rendro/deployments/staging/files/index.html?organizationId=org&projectId=project", { method: "PUT", body: stream, duplex: "half" } as RequestInit);
+      expect(response.status).toBe(500);
+      expect(storage.putObject).not.toHaveBeenCalled();
+    } finally { clock.mockRestore(); errors.mockRestore(); }
+  });
+
+  it("does not copy an object after its lease elapses during source validation", async () => {
+    vi.clearAllMocks();
+    const clock = vi.spyOn(Date, "now").mockReturnValue(99);
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(Response.json({ deployment: { manifestKey: "manifest", previousDeploymentId: "previous", stagingExpiresAt: 100 } }))));
+    storage.getObjectText.mockResolvedValue(JSON.stringify({ version: 1, files: [{ path: "index.html", size: 1, sha256: "a".repeat(64) }] }));
+    storage.headObject.mockImplementation(() => { clock.mockReturnValue(101); return Promise.resolve({ size: 1, metadata: { sha256: "a".repeat(64) } }); });
+    try {
+      const response = await app.request("/api/rendro/deployments/staging/copy?organizationId=org&projectId=project", { method: "POST", body: JSON.stringify({ paths: ["index.html"] }) });
+      expect(response.status).toBe(500);
+      expect(storage.copyObject).not.toHaveBeenCalled();
+    } finally { clock.mockRestore(); errors.mockRestore(); }
   });
 });

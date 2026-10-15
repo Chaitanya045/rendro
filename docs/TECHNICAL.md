@@ -215,7 +215,8 @@ The application schema (`convex/schema.ts`) owns:
 |---|---|
 | `organizationTombstones` | Permanent deletion barrier shared by session and capability authorization |
 | `projects` | Organization-scoped documentation products and active deployment pointer |
-| `deployments` | Immutable manifest metadata, status, provenance, predecessor, retention state |
+| `deployments` | Immutable manifest metadata, status, provenance, predecessor, staging lease and purge claim |
+| `retentionProgress` | Durable cursor, status phase and fixed cutoff for the retention scan |
 | `publications` | Indexed global public slug, project/path mapping, tracked or pinned release mode |
 | `shareGrants` | Hashed, expiring, revocable private document capabilities pinned to a deployment |
 | `apiKeyCredentials` | Hashed organization/project credentials with scopes, expiry, revocation, and last-used timestamp |
@@ -384,7 +385,9 @@ Sequence used by `rendro push` (`cli/src/index.ts`):
 6. `commit` lists the deployment's `files/` prefix and requires it to equal the manifest's paths exactly (409 otherwise). The Worker then sends a short-lived storage attestation (see below). Convex verifies it against the stored deployment inside the commit mutation and requires the deployment to still be `staging` and the project's active deployment to still equal `previousDeploymentId` ("Active deployment changed; rebase and retry"). It marks the previous deployment `superseded`, the new one `active`, and moves the project pointer in one mutation.
 7. If copy, upload, or commit throws, the CLI calls `fail` with the error message and exits non-zero.
 
-Deployment statuses: `staging` → `active` → `superseded`, or `staging` → `failed`.
+Deployment statuses: `staging` → `active` → `superseded`, or `staging` → `failed`. Retention sets the separate optional `purgeState: "purging"` before deleting bytes, then `purgedAt` after verified deletion. Neither state permits new pins or shares.
+
+A staging deployment starts with a one-hour lease (`stagingExpiresAt`). Each authorized staging read before upload/copy/commit renews it transactionally when ten minutes of the lease have elapsed, avoiding a write on every file. An expired lease cannot be renewed or committed; restart the push. Rows created before this field existed use `createdAt + one hour` without a backfill. Storage writes check their returned lease immediately before dispatch (including after slow body reads) and carry an abort signal bounded by the remaining lease and five minutes. Retention waits another 24 hours after lease expiry before claiming failed/abandoned staging storage, allowing in-flight writes to drain. Explicit failure preserves this drain deadline. Abandoned staging rows become failed with reason `Staging lease expired` when claimed. Deploy the lease-aware Worker before enabling the new cleanup job; legacy upload workers do not enforce write deadlines.
 
 Convex also serves `GET /api/rendro/deployments/active` and `GET /api/rendro/deployments` (latest 100) for sessions and `docs:read` keys, and `GET /api/rendro/deployments/staging` for the Worker.
 
@@ -880,7 +883,7 @@ for commands, reports, and the pending Chromium/subprocess collectors.
 1. On a copy, upload, or commit error, the CLI calls `/api/rendro/deployments/fail` itself, so the new deployment is marked `failed` and the active deployment is unchanged.
 2. Re-run the same `rendro push` command. It starts a new staging deployment; unchanged files are copied from the active deployment again.
 3. If commit returns "Active deployment changed; rebase and retry", another push activated first. Re-run the push.
-4. A process killed before it can call `/fail` leaves a deployment in `staging`. It never becomes active, and retention does not purge staging deployments.
+4. A process killed before it can call `/fail` leaves a deployment in `staging`. It never becomes active; its one-hour lease expires and retention cleans it after the additional 24-hour drain period.
 5. Confirm the project page shows the new deployment as `active`; the predecessor becomes `superseded`.
 6. Never change the project pointer or copy files manually. Commit is the atomic boundary.
 
@@ -896,7 +899,15 @@ Operators should privately review historical deployment provenance for embedded 
 
 ### Retention
 
-`pnpm cleanup:retention` purges failed deployments older than 24 hours and superseded deployments older than 30 days, up to 50 per run. Active and staging deployments, deployments pinned by a publication, and deployments referenced by unexpired, unrevoked shares are excluded. `.github/workflows/retention.yml` runs daily. Required secrets: `CONVEX_SITE_URL`, `RETENTION_SECRET`, and `R2_ENDPOINT`/`R2_ACCESS_KEY`/`R2_SECRET_KEY`/`R2_BUCKET` (mapped to `MINIO_*`). Convex records `deployment.purged` audit events.
+`pnpm cleanup:retention` scans failed deployments older than 24 hours, superseded deployments older than 30 days (both measured from creation), and expired staging leases after their 24-hour drain period. Failed rows also honor the staging drain deadline. Active deployments and project active pointers are protected. Publication pins and unexpired, unrevoked shares protect their deployment with indexed existence checks (`by_pinned_deployment`, `by_deployment_live`), without collecting a project's publications or an organization's shares.
+
+The operator-only `GET /retention/candidates` is a non-cacheable claim operation. One Convex transaction reads at most 50 candidates, rechecks references, claims them, and persists the scan cursor. `by_retention` selects status + absent `purgedAt` + creation time; `by_staging_expiry` selects staging + absent `purgedAt` + lease expiry, including legacy missing values. Purged tombstones never enter the scan. Empty/protected pages still advance. A fixed cutoff and rotating failed/superseded/staging phases finish one traversal before restarting; a later run resumes from `retentionProgress` even if the previous process died. Rows added behind a cursor are visited on the next traversal.
+
+Claims set `purgeState: "purging"` and a token before any storage deletion. Publication/share mutations read that state in their transaction; Convex conflict handling ensures that either the reference protects the bytes or the claim blocks the reference. Public resolvers also reject purging and purged rows. Claim worker ownership expires after 30 minutes, but **purging never reverts to readable/pinnable**: another scan can issue a replacement token and retry the immutable prefix. A lost claim response, interrupted deletion, per-object error, or failed finalization is therefore recoverable. Finalization requires the current token and is idempotent, emitting one `deployment.purged` audit event. Its object count describes the successful attempt, not previously deleted objects from interrupted attempts.
+
+The script drains up to 100 metadata pages, 1,000 storage-list pages or ten minutes per run, stopping at the first bound or completed scan. Each HTTP/storage call has a 30-second deadline; an in-flight call may extend the wall-time bound. It re-lists a prefix from the beginning after each successful delete and checks `DeleteObjects.Errors`, then verifies the prefix is empty before finalization. Errors keep claims retryable, allow other candidates to proceed, and fail the job. `.github/workflows/retention.yml` runs daily with a 15-minute job timeout and serializes runs. Required secrets: `CONVEX_SITE_URL`, `RETENTION_SECRET`, and `R2_ENDPOINT`/`R2_ACCESS_KEY`/`R2_SECRET_KEY`/`R2_BUCKET` (mapped to `MINIO_*`).
+
+Rollout: release the optional schema fields/indexes and claim-aware Convex endpoints, then the lease-aware Worker, then the cleanup script/workflow. Keep cleanup disabled during mixed-version rollout; the old script cannot finalize tokenized claims, but still must not run alongside the new protocol. All old deployment rows remain readable without backfill. To roll back, stop the cleanup workflow and preserve purging claims/tombstones until outstanding deletions have been reconciled; never clear a purging flag to restore a potentially partially deleted deployment.
 
 ### Legacy migration
 
@@ -962,6 +973,6 @@ Fixture runs test deployed HTTP authorization. They do not replace signed-in mul
 1. There is no search. Rendro does not index document content.
 2. Publisher HTML is rendered in sandboxed iframes and can still produce its own internal scroll behavior.
 3. Publication slugs are global, so product naming policy must account for collisions.
-4. Retention cleanup needs R2 credentials in the scheduled GitHub environment, and does not remove abandoned `staging` deployments.
+4. Retention cleanup needs R2 credentials in the scheduled GitHub environment; bounded runs may take multiple daily invocations to finish a large backlog.
 5. Legacy slug-based routes remain only for the staged migration window and must be removed after production verification.
 6. The first Convex HTTP action after a cold start can add latency.

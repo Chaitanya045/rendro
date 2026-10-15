@@ -75,10 +75,23 @@ export default defineSchema({
     failureReason: v.optional(v.string()),
     previousDeploymentId: v.optional(v.id("deployments")),
     purgedAt: v.optional(v.number()),
+    stagingExpiresAt: v.optional(v.number()),
+    purgeState: v.optional(v.literal("purging")),
+    purgeToken: v.optional(v.string()),
+    purgeClaimUntil: v.optional(v.number()),
   })
+    .index("by_retention", ["status", "purgedAt", "createdAt"])
+    .index("by_staging_expiry", ["status", "purgedAt", "stagingExpiresAt"])
     .index("by_project_created", ["projectId", "createdAt"])
     .index("by_organization_activated", ["organizationId", "activatedAt"])
     .index("by_organization_status", ["organizationId", "status"]),
+
+  retentionProgress: defineTable({
+    name: v.string(),
+    phase: v.number(),
+    cursor: v.union(v.string(), v.null()),
+    cutoff: v.number(),
+  }).index("by_name", ["name"]),
 
   publications: defineTable({
     organizationId: v.string(),
@@ -94,6 +107,7 @@ export default defineSchema({
     createdAt: v.number(),
     updatedAt: v.number(),
   })
+    .index("by_pinned_deployment", ["pinnedDeploymentId"])
     .index("by_slug", ["slug"])
     .index("by_organization", ["organizationId", "createdAt"])
     .index("by_project", ["projectId", "createdAt"]),
@@ -109,6 +123,7 @@ export default defineSchema({
     createdBy: v.string(),
     createdAt: v.number(),
   })
+    .index("by_deployment_live", ["deploymentId", "revokedAt", "expiresAt"])
     .index("by_token_hash", ["tokenHash"])
     .index("by_organization", ["organizationId", "createdAt"])
     .index("by_organization_project", ["organizationId", "projectId", "createdAt"]),

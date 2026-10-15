@@ -53,7 +53,7 @@ beforeEach(() => {
     const body = JSON.parse(typeof init?.body === "string" ? init.body : "{}");
     const deployment = (id: string) => ({
       _id: id, deploymentId: id, status: "active", objectRoot: root(id),
-      manifestKey: `${root(id)}/manifest.json`, treeIndexKey: `${root(id)}/tree.json`,
+      stagingExpiresAt: Date.now() + 3_600_000, manifestKey: `${root(id)}/manifest.json`, treeIndexKey: `${root(id)}/tree.json`,
       previousDeploymentId: active ?? undefined,
     });
     if (path.endsWith("/deployments/start")) return respond({ deployment: deployment(String(++next)) });

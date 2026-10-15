@@ -8,13 +8,8 @@ function authorized(request: Request): boolean {
 
 export const listRetentionCandidates = httpAction(async (ctx, request) => {
   if (!authorized(request)) return Response.json({ error: "Unauthorized" }, { status: 401 });
-  const now = Date.now();
-  const deployments = await ctx.runQuery(internal.retention.candidatesInternal, {
-    failedBefore: now - 24 * 60 * 60 * 1000,
-    supersededBefore: now - 30 * 24 * 60 * 60 * 1000,
-    limit: 50,
-  });
-  return Response.json({ deployments });
+  const result = await ctx.runMutation(internal.retention.candidatesInternal, { token: crypto.randomUUID() });
+  return Response.json(result, { headers: { "Cache-Control": "no-store" } });
 });
 
 export const markRetentionPurged = httpAction(async (ctx, request) => {
@@ -23,12 +18,11 @@ export const markRetentionPurged = httpAction(async (ctx, request) => {
   try { body = await request.json(); } catch { return Response.json({ error: "Invalid JSON" }, { status: 400 }); }
   const deploymentId = body && typeof body === "object" && "deploymentId" in body ? body.deploymentId : undefined;
   const objectCount = body && typeof body === "object" && "objectCount" in body ? body.objectCount : undefined;
-  if (typeof deploymentId !== "string" || typeof objectCount !== "number") {
-    return Response.json({ error: "deploymentId and objectCount are required" }, { status: 400 });
+  const purgeToken = body && typeof body === "object" && "purgeToken" in body ? body.purgeToken : undefined;
+  if (typeof deploymentId !== "string" || typeof purgeToken !== "string"
+    || typeof objectCount !== "number" || !Number.isSafeInteger(objectCount) || objectCount < 0) {
+    return Response.json({ error: "deploymentId, purgeToken and non-negative integer objectCount are required" }, { status: 400 });
   }
-  const purged = await ctx.runMutation(internal.retention.markPurgedInternal, {
-    deploymentId,
-    objectCount,
-  });
+  const purged = await ctx.runMutation(internal.retention.markPurgedInternal, { deploymentId, objectCount, purgeToken });
   return Response.json({ purged });
 }, "bearer");

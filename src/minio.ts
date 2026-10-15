@@ -193,6 +193,7 @@ export async function putObject(
   body: string | Uint8Array,
   contentType = "text/html",
   metadata?: Record<string, string>,
+  abortSignal?: AbortSignal,
 ): Promise<void> {
   await s3.send(
     new PutObjectCommand({
@@ -202,6 +203,7 @@ export async function putObject(
       ContentType: contentType,
       Metadata: metadata,
     }),
+    { abortSignal },
   );
 }
 
@@ -232,13 +234,13 @@ export async function getObjectText(key: string): Promise<string | null> {
   }
 }
 
-export async function copyObject(sourceKey: string, destinationKey: string): Promise<void> {
+export async function copyObject(sourceKey: string, destinationKey: string, abortSignal?: AbortSignal): Promise<void> {
   const encodedSource = encodeURIComponent(sourceKey).replaceAll("%2F", "/");
   await s3.send(new CopyObjectCommand({
     Bucket: MINIO_BUCKET,
     CopySource: `${MINIO_BUCKET}/${encodedSource}`,
     Key: destinationKey,
-  }));
+  }), { abortSignal });
 }
 
 

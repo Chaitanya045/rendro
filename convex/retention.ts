@@ -1,46 +1,60 @@
 import { requireId } from "./ids";
 import { v } from "convex/values";
-import { internalMutation, internalQuery } from "./_generated/server";
+import { internalMutation } from "./_generated/server";
+import { FAILED_RETENTION_MS, PURGE_CLAIM_MS, STAGING_DRAIN_MS, SUPERSEDED_RETENTION_MS, stagingExpiry } from "./retentionPolicy";
 
-export const candidatesInternal = internalQuery({
-  args: {
-    failedBefore: v.number(),
-    supersededBefore: v.number(),
-    limit: v.number(),
-  },
-  handler: async (ctx, args) => {
-    const deployments = await ctx.db.query("deployments").order("asc").take(2_000);
-    const candidates = [];
-    for (const deployment of deployments) {
-      if (candidates.length >= Math.min(args.limit, 100)) break;
-      if (deployment.purgedAt || deployment.status === "active" || deployment.status === "staging") continue;
-      if (deployment.status === "failed" && deployment.createdAt > args.failedBefore) continue;
-      if (deployment.status === "superseded" && deployment.createdAt > args.supersededBefore) continue;
-      const publications = await ctx.db
-        .query("publications")
-        .withIndex("by_project", (query) => query.eq("projectId", deployment.projectId))
-        .collect();
-      if (publications.some((publication) => publication.pinnedDeploymentId === deployment._id)) continue;
-      const grants = await ctx.db
-        .query("shareGrants")
-        .withIndex("by_organization", (query) => query.eq("organizationId", deployment.organizationId))
-        .collect();
-      if (grants.some((grant) => grant.deploymentId === deployment._id && !grant.revokedAt && grant.expiresAt > Date.now())) continue;
-      candidates.push(deployment);
+const phases = ["failed", "superseded", "staging"] as const;
+
+// Selection, reference checks, claims, and continuation are one transaction.
+// Empty pages still advance. A bounded run can stop anywhere and resume tomorrow.
+export const candidatesInternal = internalMutation({
+  args: { token: v.string() },
+  handler: async (ctx, { token }) => {
+    const now = Date.now();
+    const progress = await ctx.db.query("retentionProgress").withIndex("by_name", q => q.eq("name", "deployments")).unique();
+    const phase = progress?.phase ?? 0;
+    const cutoff = progress?.cutoff ?? now;
+    const status = phases[phase];
+    const query = status === "staging"
+      ? ctx.db.query("deployments").withIndex("by_staging_expiry", q => q.eq("status", "staging").eq("purgedAt", undefined).lte("stagingExpiresAt", cutoff - STAGING_DRAIN_MS))
+      : ctx.db.query("deployments").withIndex("by_retention", q => q.eq("status", status).eq("purgedAt", undefined)
+        .lte("createdAt", cutoff - (status === "failed" ? FAILED_RETENTION_MS : SUPERSEDED_RETENTION_MS)));
+    const page = await query.paginate({ cursor: progress?.cursor ?? null, numItems: 50 });
+    const deployments = [];
+    for (const deployment of page.page) {
+      if ((deployment.purgeClaimUntil ?? 0) > now) continue;
+      // Also drain in-flight writes after an explicit failure, including old rows.
+      if (status !== "superseded" && stagingExpiry(deployment) + STAGING_DRAIN_MS > now) continue;
+      const project = await ctx.db.get(deployment.projectId);
+      if (project?.activeDeploymentId === deployment._id) continue;
+      if (await ctx.db.query("publications").withIndex("by_pinned_deployment", q => q.eq("pinnedDeploymentId", deployment._id)).first()) continue;
+      if (await ctx.db.query("shareGrants").withIndex("by_deployment_live", q => q.eq("deploymentId", deployment._id)
+        .eq("revokedAt", undefined).gt("expiresAt", now)).first()) continue;
+      await ctx.db.patch(deployment._id, {
+        ...(status === "staging" ? { status: "failed" as const, failureReason: "Staging lease expired" } : {}),
+        purgeState: "purging", purgeToken: token, purgeClaimUntil: now + PURGE_CLAIM_MS,
+      });
+      deployments.push({ _id: deployment._id, organizationId: deployment.organizationId, projectId: deployment.projectId, purgeToken: token });
     }
-    return candidates;
+    const cycleComplete = page.isDone && phase === phases.length - 1;
+    const next = {
+      name: "deployments",
+      phase: page.isDone ? (phase + 1) % phases.length : phase,
+      cursor: page.isDone ? null : page.continueCursor,
+      cutoff: cycleComplete ? now : cutoff,
+    };
+    if (progress) await ctx.db.patch(progress._id, next);
+    else await ctx.db.insert("retentionProgress", next);
+    return { deployments, cycleComplete, scanned: page.page.length };
   },
 });
 
 export const markPurgedInternal = internalMutation({
-  args: { deploymentId: v.string(), objectCount: v.number() },
-  handler: async (ctx, input) => {
-    const args = {
-      ...input,
-      deploymentId: requireId(ctx, "deployments", input.deploymentId),
-    };
-    const deployment = await ctx.db.get(args.deploymentId);
-    if (!deployment || deployment.status === "active" || deployment.status === "staging") return false;
+  args: { deploymentId: v.string(), purgeToken: v.string(), objectCount: v.number() },
+  handler: async (ctx, args) => {
+    const deployment = await ctx.db.get(requireId(ctx, "deployments", args.deploymentId));
+    if (!deployment || deployment.purgeState !== "purging" || deployment.purgeToken !== args.purgeToken) return false;
+    if (deployment.purgedAt !== undefined) return true;
     const now = Date.now();
     await ctx.db.patch(deployment._id, { purgedAt: now });
     await ctx.db.insert("auditEvents", {

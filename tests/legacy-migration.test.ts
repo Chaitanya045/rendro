@@ -131,13 +131,13 @@ beforeEach(async () => {
       if (failure === "source-change") sourceChanged = true;
       expect(body.fileCount).toBeGreaterThan(0);
       expect(body.manifest).toBeUndefined(); // Worker strips manifest after validating its checksum.
-      return Response.json({ deployment: { deploymentId: "deployment", objectRoot: root, manifestKey: `${root}/manifest.json`, treeIndexKey: `${root}/tree-index.json`, ...(failure === "destination-change" ? { previousDeploymentId: "ordinary-deployment" } : {}) } });
+      return Response.json({ deployment: { deploymentId: "deployment", objectRoot: root, stagingExpiresAt: Date.now() + 3_600_000, manifestKey: `${root}/manifest.json`, treeIndexKey: `${root}/tree-index.json`, ...(failure === "destination-change" ? { previousDeploymentId: "ordinary-deployment" } : {}) } });
     }
     if (path.endsWith("/deployments/staging")) {
       expect(url.searchParams.get("deploymentId")).toBe("deployment");
       expect(url.searchParams.get("organizationId")).toBe("org");
       expect(url.searchParams.get("projectId")).toBe("project");
-      return Response.json({ deployment: { manifestKey: `${root}/manifest.json` } });
+      return Response.json({ deployment: { stagingExpiresAt: Date.now() + 3_600_000, manifestKey: `${root}/manifest.json` } });
     }
     if (path.endsWith("/deployments/commit")) {
       expect(body).toEqual({ organizationId: "org", projectId: "project", deploymentId: "deployment" });
@@ -187,7 +187,7 @@ describe("legacy migration with mocked source storage and backend HTTP", () => {
     expect(manifest.files.map((file: { path: string }) => file.path)).toEqual(["docs/Z file.html", "docs/a-last.html"]);
     expect(objects.has(`${root}/tree-index.json`)).toBe(true);
     expect(Buffer.from(objects.get(`${root}/files/docs/Z file.html`) as Uint8Array).toString()).toBe(fixtures.get("old-org/docs/Z file.html"));
-    expect(storage.putObject).toHaveBeenCalledWith(`${root}/files/docs/Z file.html`, expect.any(Uint8Array), "text/html", { sha256: manifest.files[0].sha256 });
+    expect(storage.putObject).toHaveBeenCalledWith(`${root}/files/docs/Z file.html`, expect.any(Uint8Array), "text/html", { sha256: manifest.files[0].sha256 }, expect.any(AbortSignal));
     expect(publications).toEqual([expect.objectContaining({ slug: "legacy-docs", pathPrefix: "docs", trackingMode: "pinned", pinnedDeploymentId: "deployment" })]);
     expect(records()).toEqual([expect.objectContaining({ deploymentId: "deployment", publicationIds: ["publication"] })]);
   });

@@ -29,6 +29,11 @@ export const createInternal = internalMutation({
     if (!project || project.organizationId !== args.organizationId || !project.activeDeploymentId) {
       throw new ConvexError("Project has no active deployment");
     }
+    const deployment = await ctx.db.get(project.activeDeploymentId);
+    if (!deployment || deployment.projectId !== project._id || deployment.organizationId !== args.organizationId
+      || deployment.status !== "active" || deployment.purgeState === "purging" || deployment.purgedAt !== undefined) {
+      throw new ConvexError("Project has no active deployment");
+    }
     if (!validDocumentPath(args.documentPath)) throw new ConvexError("Invalid document path");
     if (args.expiresAt <= Date.now()) throw new ConvexError("Share expiry must be in the future");
     const now = Date.now();
@@ -66,7 +71,7 @@ export const resolveInternal = internalQuery({
       || await isOrganizationDeleted(ctx, grant.organizationId)) return null;
     const deployment = await ctx.db.get(grant.deploymentId);
     const project = await ctx.db.get(grant.projectId);
-    if (!deployment || !project || deployment.status === "failed" || deployment.status === "staging") return null;
+    if (!deployment || !project || deployment.purgeState === "purging" || deployment.purgedAt !== undefined || deployment.status === "failed" || deployment.status === "staging") return null;
     return {
       grant: { documentPath: grant.documentPath, expiresAt: grant.expiresAt },
       deployment: { manifestKey: deployment.manifestKey },

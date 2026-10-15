@@ -83,12 +83,12 @@ const principal = await validateApiCredential(ctx, request, {
 });
 if (!principal) return clientFailure("Invalid or insufficient API key", 401);
 try {
-  const deployment = await ctx.runQuery(internal.deployments.getInternal, {
+  const deployment = await ctx.runMutation(internal.deployments.refreshStagingInternal, {
     organizationId,
     projectId,
     deploymentId,
   });
-  if (!deployment || deployment.status !== "staging") {
+  if (!deployment) {
     return clientFailure("Staging deployment not found", 404);
   }
   return Response.json({ deployment, principal });

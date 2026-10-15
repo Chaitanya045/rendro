@@ -96,7 +96,7 @@ it("keeps operator-secret routes independent of browser-cookie admission", async
   for (const body of ["invalid-json", null, {}, { deploymentId: "deployment" }]) {
     expect((await invoke(retention.markRetentionPurged, body, "", bearer)).status).toBe(400);
   }
-  expect((await invoke(retention.markRetentionPurged, { deploymentId: "deployment", objectCount: 0 }, "", bearer)).status).toBe(200);
+  expect((await invoke(retention.markRetentionPurged, { deploymentId: "deployment", objectCount: 0, purgeToken: "claim" }, "", bearer)).status).toBe(200);
   for (const body of ["invalid-json", null, {}, { organizationId: "org" }, { organizationId: "org", projectId: 1 }]) {
     expect((await invoke(ensureMigrationProject, body, "", bearer)).status).toBe(400);
   }
