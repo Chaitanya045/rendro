@@ -392,10 +392,13 @@ Convex also serves `GET /api/rendro/deployments/active` and `GET /api/rendro/dep
 
 `cli/src/source-files.ts` filters before hashing or uploading, with zero runtime
 dependencies. The case-insensitive sensitive defaults at every depth are `.env`,
-`.env.*`, `.npmrc`, `.pypirc`, `.netrc`, `.git-credentials`, `*.pem`, `*.key`, `id_*`,
-and `.aws/` / `.ssh/` directories. `--include-sensitive` overrides only these
-defaults, including those two hidden directories. Other dot-directories and
-`node_modules` remain excluded, and symlinks/non-regular files are never followed.
+`.env.*`, `.envrc`, `.envrc.*`, `.npmrc`, `.pypirc`, `.netrc`, `.git-credentials`,
+`*.pem`, `*.key`, and `id_*`. `--include-sensitive` overrides only these filename
+defaults. Dot-directories stay excluded by default, including under that flag; an
+explicit ignore negation such as `!.environment/` permits ordinary dot-directories.
+The case-insensitive directory names `.git`, `.ssh`, `.aws`, and `node_modules`
+are always excluded, even under negation or sensitive opt-in. Symlinks/non-regular
+files are never followed.
 Skipped files/directories produce JSON-quoted relative-path `skipped` lines with
 a reason; directory pruning avoids reading excluded contents.
 
@@ -406,8 +409,9 @@ Ignore files themselves are never uploaded and nested ignore files are not read.
 `**`, root-relative slash patterns, directory-only trailing slashes, ordered `!`
 negation, and escaped leading `#`/`!`. Other glob syntax is literal. Matching is
 case-sensitive. Directory pruning follows gitignore's parent rule: a negated
-child cannot resurrect an excluded parent. Sensitive defaults cannot be negated
-without the opt-in flag. See the [README subset and examples](../README.md#source-filtering).
+child cannot resurrect an excluded parent. Negation can override default
+dot-directory exclusion but never the protected directory set. Sensitive filename
+defaults cannot be negated without the opt-in flag. See the [README subset and examples](../README.md#source-filtering).
 
 `cli/src/content-type.ts` records extension-derived MIME essences without an
 assumed charset. For recognized text types (including JSON/maps and SVG), only

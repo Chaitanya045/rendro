@@ -20,10 +20,10 @@ it.each([false, true])("pushes byte-exact assets and prints exclusions (bundle=%
   };
   for (const [path, bytes] of Object.entries(assets)) await writeFile(join(root, path), bytes);
   await mkdir(join(root, ".aws"));
-  for (const path of [".env", ".env.qa", ".npmrc", "private.key", "id_rsa", ".aws/credentials", "omit.txt"]) {
+  for (const path of [".env", ".env.qa", ".envrc", ".envrc.local", ".npmrc", "private.key", "id_rsa", ".aws/credentials", "omit.txt"]) {
     await writeFile(join(root, path), "SYNTHETIC_SENSITIVE_CONTENT");
   }
-  await writeFile(join(root, ".rendroignore"), "omit.txt\n!.env\n");
+  await writeFile(join(root, ".rendroignore"), "omit.txt\n!.env\n!.envrc\n!.envrc.local\n");
   const result = await captureCliPush(root, { bundle });
   expect(result.manifest.files.map(file => file.path)).toEqual(Object.keys(assets).sort());
   expect(result.manifestSha256).toBe(createHash("sha256").update(JSON.stringify(result.manifest)).digest("hex"));
@@ -34,7 +34,7 @@ it.each([false, true])("pushes byte-exact assets and prints exclusions (bundle=%
     expect(file.size).toBe(assets[file.path].length);
     expect(result.uploads.get(file.path)).toEqual({ bytes: assets[file.path], contentType: file.contentType });
   }
-  for (const path of [".env", ".env.qa", ".npmrc", "private.key", "id_rsa", ".aws/", "omit.txt", ".rendroignore"]) {
+  for (const path of [".env", ".env.qa", ".envrc", ".envrc.local", ".npmrc", "private.key", "id_rsa", ".aws/", "omit.txt", ".rendroignore"]) {
     expect(result.stdout).toContain(`skipped ${JSON.stringify(path)}`);
   }
   expect(result.stdout + result.stderr).not.toContain("SYNTHETIC_SENSITIVE_CONTENT");
@@ -42,7 +42,7 @@ it.each([false, true])("pushes byte-exact assets and prints exclusions (bundle=%
 
   await writeFile(join(root, ".rendroignore"), "omit.txt\n.env\n");
   const included = await captureCliPush(root, { bundle, flags: ["--include-sensitive"] });
-  expect([...included.uploads.keys()].sort()).toEqual([...Object.keys(assets), ".env.qa", ".npmrc", "private.key", "id_rsa", ".aws/credentials"].sort());
+  expect([...included.uploads.keys()].sort()).toEqual([...Object.keys(assets), ".env.qa", ".envrc", ".envrc.local", ".npmrc", "private.key", "id_rsa"].sort());
   expect(included.stdout).toContain('skipped ".env" (.rendroignore)');
   expect(included.stdout).not.toContain('(sensitive)');
 });
@@ -60,4 +60,22 @@ it("stops before deployment when .rendroignore cannot be read", async () => {
   await mkdir(join(root, ".rendroignore"));
   await writeFile(join(root, "index.html"), "<p>docs</p>");
   await expect(captureCliPush(root)).rejects.toMatchObject({ code: 1, stderr: expect.stringContaining("EISDIR"), requests: [] });
+});
+
+it.each([false, true].flatMap(bundle => [false, true].flatMap(includeSensitive =>
+  [false, true].map(negate => ({ bundle, includeSensitive, negate })),
+)))("selects dot-directories with bundle=$bundle, includeSensitive=$includeSensitive, negate=$negate", async ({ bundle, includeSensitive, negate }) => {
+  for (const dir of [".environment", ".cache", ".git", ".ssh", ".aws", "node_modules"]) {
+    await mkdir(join(root, dir));
+    await writeFile(join(root, dir, "index.html"), `<p>${dir}</p>`);
+  }
+  await writeFile(join(root, "index.html"), "<p>root</p>");
+  if (negate) await writeFile(join(root, ".rendroignore"), "!.environment/\n!.git/\n!.ssh/\n!.aws/\n!node_modules/\n");
+  // One subprocess per case keeps cold CLI startup within the test budget.
+  const result = await captureCliPush(root, { bundle, flags: includeSensitive ? ["--include-sensitive"] : [] });
+  const expected = negate ? [".environment/index.html", "index.html"] : ["index.html"];
+  expect(result.manifest.files.map(file => file.path)).toEqual(expected);
+  expect([...result.uploads.keys()].sort()).toEqual(expected);
+  if (negate) expect(result.uploads.get(".environment/index.html")?.bytes).toEqual(Buffer.from("<p>.environment</p>"));
+  expect(result.commits).toBe(1);
 });

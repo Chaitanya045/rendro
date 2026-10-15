@@ -102,14 +102,18 @@ A publication created without `--pin` follows the project's active deployment. W
 ### Source filtering
 
 By default, `push` skips these names at every depth (case-insensitive): `.env`,
-`.env.*`, `.npmrc`, `.pypirc`, `.netrc`, `.git-credentials`, `*.pem`, `*.key`,
-`id_*` (including SSH private/public key names), and `.aws/` / `.ssh/` directories.
+`.env.*`, `.envrc`, `.envrc.*`, `.npmrc`, `.pypirc`, `.netrc`, `.git-credentials`,
+`*.pem`, `*.key`, `id_*` (including SSH private/public key names).
 Each exclusion prints a `skipped` line with its relative path and reason;
 excluded directories are listed once without reading their contents.
-`--include-sensitive` permits these names, including traversal of `.aws/` and
-`.ssh/`. Other dot-directories and `node_modules` remain excluded. Symbolic links
-and non-regular files are never followed/uploaded. Ordinary dotfiles such as
-`.nojekyll` remain eligible.
+`--include-sensitive` permits these filenames, still honoring `.rendroignore`.
+Dot-directories are skipped by default, even with `--include-sensitive`. An explicit
+`.rendroignore` negation such as `!.environment/` can re-include an ordinary
+dot-directory. Metadata/credential directories `.git/`, `.ssh/`, `.aws/`, and
+`node_modules/` (case-insensitive) are always excluded; neither negation nor the
+flag can include them. Symbolic links and non-regular files are never
+followed/uploaded. Ordinary dotfiles such as `.nojekyll` and `.environment` remain
+eligible.
 
 Place `.rendroignore` in the **source root** (for example `docs/.rendroignore` for
 `--source ./docs`). It applies with or without `--include-sensitive` and is never
@@ -122,7 +126,7 @@ The dependency-free matcher supports this gitignore-style subset:
 - `*` matches within one path segment, `?` matches one non-slash character, and a whole segment `**` matches across directories (including zero directories before a following segment).
 - Patterns without `/` match names at any depth. A leading `/`, or an internal `/`, anchors a pattern to the source root.
 - A trailing `/` matches directories only. Excluded directories are pruned.
-- `!` negates an earlier ignore rule; the last matching rule wins. Re-include an excluded parent before re-including a child. Negation cannot override sensitive defaults without `--include-sensitive`.
+- `!` negates an earlier ignore rule or the default dot-directory exclusion; the last matching rule wins. Re-include an excluded parent before re-including a child. Negation cannot override sensitive defaults without `--include-sensitive`.
 - Matching is case-sensitive. `\#` and `\!` escape a leading comment/negation marker. Character classes, brace expansion, other backslash escapes, and nested ignore files are unsupported; other metacharacters are literal.
 
 ```gitignore
@@ -132,6 +136,7 @@ The dependency-free matcher supports this gitignore-style subset:
 assets/**/scratch-?.txt
 *.txt
 !LICENSE.txt
+!.environment/
 ```
 
 These are filename safeguards, not content-based secret detection. Review the

@@ -2,8 +2,8 @@ import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { createIgnoreMatcher } from "./ignore";
 
-const sensitiveDirectories = new Set([".aws", ".ssh"]);
-const sensitiveFiles = /^(?:\.env(?:\..*)?|\.npmrc|\.pypirc|\.netrc|\.git-credentials|id_.*|.*\.(?:pem|key))$/i;
+const excludedDirectories = new Set([".git", ".aws", ".ssh", "node_modules"]);
+const sensitiveFiles = /^(?:\.env(?:\..*)?|\.envrc(?:\..*)?|\.npmrc|\.pypirc|\.netrc|\.git-credentials|id_.*|.*\.(?:pem|key))$/i;
 
 /** Filter before reading/hashing file contents. Never follow symbolic links. */
 export async function sourceFiles(
@@ -24,12 +24,12 @@ export async function sourceFiles(
     for (const entry of await readdir(dir, { withFileTypes: true })) {
       const path = prefix + entry.name;
       const directory = entry.isDirectory();
-      const sensitiveDirectory = directory && sensitiveDirectories.has(entry.name.toLowerCase());
+      const dotDirectory = directory && entry.name.startsWith(".");
       let reason: string | undefined;
       if (entry.name === ".rendroignore") reason = "ignore file";
-      else if (!includeSensitive && (sensitiveDirectory || sensitiveFiles.test(entry.name))) reason = "sensitive";
-      else if (ignored(path, directory)) reason = ".rendroignore";
-      else if (directory && (entry.name === "node_modules" || (entry.name.startsWith(".") && !sensitiveDirectory))) reason = "excluded directory";
+      else if (directory && excludedDirectories.has(entry.name.toLowerCase())) reason = "excluded directory";
+      else if (!includeSensitive && sensitiveFiles.test(entry.name)) reason = "sensitive";
+      else if (ignored(path, directory, dotDirectory)) reason = dotDirectory ? "excluded directory" : ".rendroignore";
       else if (!directory && !entry.isFile()) reason = "not a regular file";
       if (reason) {
         skipped(path + (directory ? "/" : ""), reason);

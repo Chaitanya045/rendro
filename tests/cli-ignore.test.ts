@@ -26,3 +26,9 @@ it.each([
 ])("matches %j against %j (directory=%s)", (pattern, path, directory, expected) => {
   expect(createIgnoreMatcher(pattern)(path, directory)).toBe(expected);
 });
+
+it("lets ordered rules override a default directory exclusion", () => {
+  expect(createIgnoreMatcher("")(".environment", true, true)).toBe(true);
+  expect(createIgnoreMatcher("!.environment/")(".environment", true, true)).toBe(false);
+  expect(createIgnoreMatcher("!.environment/\n.environment/")(".environment", true, true)).toBe(true);
+});

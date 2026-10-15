@@ -2,7 +2,7 @@
  * The walker prunes ignored directories, so negate a parent before its children.
  * Other glob syntax is literal; backslash only escapes a leading # or !.
  */
-export function createIgnoreMatcher(text: string): (path: string, directory: boolean) => boolean {
+export function createIgnoreMatcher(text: string): (path: string, directory: boolean, defaultIgnored?: boolean) => boolean {
   const rules: Array<{ expression: RegExp; directory: boolean; negate: boolean }> = [];
   for (let line of text.split(/\r?\n/)) {
     line = line.trim();
@@ -29,8 +29,8 @@ export function createIgnoreMatcher(text: string): (path: string, directory: boo
     }).join("");
     rules.push({ expression: new RegExp(prefix + pattern + "$"), directory, negate });
   }
-  return (path, directory) => {
-    let ignored = false;
+  return (path, directory, defaultIgnored = false) => {
+    let ignored = defaultIgnored;
     for (const rule of rules) {
       if ((!rule.directory || directory) && rule.expression.test(path)) ignored = !rule.negate;
     }
