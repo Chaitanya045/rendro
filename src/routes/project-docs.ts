@@ -1,5 +1,5 @@
 import { evictRejectedSession } from "@/session-cache";
-import { assetError, assetHeaders } from "@/routes/asset-headers";
+import { assetError, assetHeaders, isHtmlAsset } from "@/routes/asset-headers";
 import { decodeStoragePath, isCanonicalStorageKey, modernStoragePrefix, modernStorageKey } from "@/storage-boundary";
 import { Hono } from "hono";
 import { createViewerTicket, readViewerTicket, viewerSessionCookie } from "@/viewer-ticket";
@@ -119,7 +119,7 @@ app.get("/organizations/:organizationId/projects/:projectId/docs/tree", async (c
   if (!active) return c.json({ error: "Not found" }, 404);
   const manifest = await activeManifest(active);
   if (!manifest) return c.json({ error: "Manifest unavailable" }, 404);
-  const documents = manifest.files.filter((file) => file.contentType.startsWith("text/html")).map((file) => file.path);
+  const documents = manifest.files.filter((file) => isHtmlAsset(file.path, file.contentType)).map((file) => file.path);
   const offset = Math.max(0, Number.parseInt(c.req.query("cursor") ?? "0", 10) || 0);
   const page = documents.slice(offset, offset + 200);
   return c.json({ documents: page, cursor: offset + page.length < documents.length ? String(offset + page.length) : null });
@@ -183,12 +183,9 @@ app.on("GET", [
   const headers = {
     "Cache-Control": "private, no-store",
     "Referrer-Policy": "no-referrer",
-    ...assetHeaders(path, Boolean(ticket), entry.contentType),
-    "Content-Security-Policy": entry.contentType.startsWith("text/html")
-      ? "sandbox allow-scripts allow-forms allow-popups allow-downloads; frame-ancestors 'self'"
-      : "default-src 'none'",
+    ...assetHeaders(path, Boolean(ticket), entry.contentType, true),
   };
-  if (!entry.contentType.startsWith("text/html")) return new Response(stream, { headers });
+  if (!isHtmlAsset(path, entry.contentType)) return new Response(stream, { headers });
   const token = viewerToken ?? await createViewerTicket({ organizationId, projectId, manifestKey: active.deployment.manifestKey, cookie });
   const frameBase = `${base}/view/${token}/files/`;
   const documentUrl = `${frameBase}${path.split("/").map(encodeURIComponent).join("/")}`;
@@ -228,7 +225,7 @@ app.get("/organizations/:organizationId/projects/:projectId/docs", async (c) => 
   const manifest = await activeManifest(active);
   if (!manifest) return c.html(renderNotFoundPage({ path: c.req.path }), 404);
   const documents = manifest.files
-    .filter((file) => file.contentType.startsWith("text/html"))
+    .filter((file) => isHtmlAsset(file.path, file.contentType))
     .map((file) => file.path);
   // Hono has already decoded the query parameter; validate the literal key.
   const requested = c.req.query("doc");

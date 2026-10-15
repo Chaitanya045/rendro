@@ -2,7 +2,7 @@ import type { WorkerPublication } from "../../shared/resolver-dto";
 import { signResolverRequest } from "../../shared/resolver-auth";
 import { ViewerBackendError, viewerBackendJson } from "@/viewer-backend";
 import { viewerErrorCache, viewerErrorResponse } from "@/routes/viewer-unavailable";
-import { assetError, assetHeaders } from "@/routes/asset-headers";
+import { assetError, assetHeaders, isHtmlAsset } from "@/routes/asset-headers";
 import { decodeStoragePath, isCanonicalStorageKey } from "@/storage-boundary";
 import { viewerScript } from "@/viewer/markup";
 import { Hono } from "hono";
@@ -71,16 +71,17 @@ app.get("/p/:slug/files/*", async (c) => {
   if (!entry) return assetError(c, () => renderNotFoundPage({ path: "Document unavailable" }));
   const stream = await getObjectStream(objectKey(result, fullPath));
   if (!stream) return assetError(c, () => renderNotFoundPage({ path: "Document unavailable" }));
+  const htmlAsset = isHtmlAsset(fullPath, entry.contentType);
   const headers = {
     "Cache-Control": "public, max-age=0, must-revalidate",
-    ...assetHeaders(fullPath, true, entry.contentType),
+    // readStream fully decodes HTML as UTF-8; its output is re-encoded below.
+    ...assetHeaders(fullPath, true, htmlAsset ? "text/html; charset=utf-8" : entry.contentType),
   };
-  if (!entry.contentType.startsWith("text/html")) return new Response(stream, { headers });
+  if (!htmlAsset) return new Response(stream, { headers });
   const html = injectNavigation(await readStream(stream), result.publication.slug, relativePath, c.req.url);
   return new Response(html, {
     headers: {
       ...headers,
-      "Content-Security-Policy": "sandbox allow-scripts allow-forms allow-popups allow-downloads; frame-ancestors 'self'",
       "Referrer-Policy": "strict-origin-when-cross-origin",
     },
   });
@@ -93,7 +94,7 @@ app.get("/p/:slug/tree", async (c) => {
   if (!manifest) return c.json({ error: "Manifest unavailable" }, 404);
   const prefix = result.publication.pathPrefix ? `${result.publication.pathPrefix}/` : "";
   const documents = manifest.files
-    .filter((file) => file.contentType.startsWith("text/html") && file.path.startsWith(prefix))
+    .filter((file) => isHtmlAsset(file.path, file.contentType) && file.path.startsWith(prefix))
     .map((file) => file.path.slice(prefix.length));
   const offset = Math.max(0, Number.parseInt(c.req.query("cursor") ?? "0", 10) || 0);
   const page = documents.slice(offset, offset + 200);
@@ -114,7 +115,7 @@ app.get("/p/:slug", async (c) => {
   if (
     !selected
     || !fullPath
-    || !manifest.files.some((file) => file.path === fullPath && file.contentType.startsWith("text/html"))
+    || !manifest.files.some((file) => file.path === fullPath && isHtmlAsset(file.path, file.contentType))
   ) {
     return c.html(renderNotFoundPage({ path: c.req.path }), 404);
   }
