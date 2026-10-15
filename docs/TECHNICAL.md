@@ -827,7 +827,7 @@ Both production (top-level) and `development` declare the same required secrets:
 
 | Workflow | Trigger | Runs |
 |---|---|---|
-| `.github/workflows/quality.yml` | Pull requests, pushes to `main`/`development`, manual | Independent `verify` (`pnpm verify`, dependency audit) and `e2e` (Playwright Test/workerd, three browser engines) jobs; read-only permissions, no deployment credentials |
+| `.github/workflows/quality.yml` | Pull requests, pushes to `main`/`development`, manual | Independent `verify` (`pnpm verify`, dependency audit), `coverage` (`pnpm coverage`, summary artifacts), and `e2e` (Playwright Test/workerd, three browser engines) jobs; read-only permissions, no deployment credentials |
 | `.github/workflows/release.yml` | `v*` tags | Builds `bin/rendro.mjs` and attaches it to a GitHub release |
 | `.github/workflows/retention.yml` | Daily cron, manual | `pnpm cleanup:retention` |
 
@@ -847,6 +847,15 @@ assertion evidence for epic #99. Its validator runs in `pnpm verify` and checks
 the actual Hono registrations against page families and explicit non-page
 exclusions. See [UI transition registry](BROWSER_TESTS.md#ui-transition-registry-99--102)
 for status semantics, the audit baseline, and `scripts/ui-transition-report.ts`.
+
+Source coverage includes authored Worker/Node, Convex, CLI, shared, and script code,
+with root-anchored filters and generated-code exclusions. The coverage gate
+merges Istanbul shards, checks the complete source manifest, and prevents
+per-file uncovered counters from exceeding `coverage-debt.json`. New files must
+be fully covered; stale ledger entries must be removed, and CI rejects ledger
+increases relative to the base revision. Coverage runs separately from verify
+to preserve its 15-minute budget. See [source coverage and debt](BROWSER_TESTS.md#source-coverage-and-debt-gate)
+for commands, reports, and the pending Chromium/subprocess collectors.
 
 ---
 

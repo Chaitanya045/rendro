@@ -106,6 +106,14 @@ describe("shared response security policy", () => {
     }
   });
 
+  it("adds the fallback sandbox when a document response has no CSP", async () => {
+    const path = "/p/example/files/index.html";
+    const app = new Hono().use(securityHeaders).get(path, c => c.html("<h1>Publisher document</h1>"));
+    const response = await app.request(`https://rendro.test${path}`);
+    sandbox(response);
+    expect(await response.text()).toBe("<h1>Publisher document</h1>");
+  });
+
   it("skips HSTS on HTTP, even with a spoofed forwarded protocol", async () => {
     const response = await worker.request("http://localhost/", { headers: { "X-Forwarded-Proto": "https" } });
     expect(response.headers.has("Strict-Transport-Security")).toBe(false);

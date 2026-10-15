@@ -234,3 +234,91 @@ The validator also checks schema, unique IDs, inventory retention, source/test-f
 existence, and enabled AST test declarations (not matching strings in comments).
 Reviewers must still verify that the cited test actually asserts the described
 edge; automated name checks cannot establish semantic coverage.
+
+## Source coverage and debt gate
+
+Install Chromium as above, then run the full suite and coverage gate locally:
+
+```sh
+VITEST_MAX_WORKERS=2 pnpm coverage
+```
+
+The quality workflow runs this in a separate `coverage` job (20-minute budget)
+and uploads both the Vitest and merged JSON summaries plus LCOV, including on
+failure. `pnpm verify` keeps its existing 15-minute CI budget: the audit's full
+coverage run alone took about six minutes, so running the suite again inside
+verify would leave insufficient headroom. Vitest honors `VITEST_MAX_WORKERS`;
+use two workers on the shared development host.
+
+`scripts/coverage-policy.ts` is the shared source policy: authored `.ts` in
+`src` (including `src/index.ts`), `convex`, `cli/src`, and `shared`, and `.ts`/`.mjs`
+in `scripts`. Declaration files, both Convex `_generated` trees, and
+`convex/betterAuth/schema.generated.ts` are excluded. Vitest filters are rooted
+at the absolute repository path and require end-of-path because its
+`contains: true` matcher otherwise selects nested trees and `.tsx` suffixes.
+The gate independently globs the source manifest without directory expansion.
+Generated browser/CLI bundles and tests are outside the source denominator.
+
+The gate reads Istanbul JSON counter reports, canonicalizes relative paths,
+absolute paths within this checkout, and `file:` URLs to repository-relative
+source paths, then merges by source location rather than counter ID. Reports
+must come from the same source revision and compatible transforms: mismatched
+statement/function/branch maps, malformed counts, missing reports, and reports
+with no included sources fail. Remapped end-of-line columns and implicit branch
+locations are preserved; negative inferred branch hits are treated as zero,
+matching Istanbul's uncovered classification and preventing cancellation of
+positive hits from another shard. Paths outside this checkout fail; producers on
+other machines must emit repository-relative paths. Never guess source identity
+by stripping arbitrary absolute-path prefixes.
+
+Every manifest file must appear in at least one shard. Missing files receive
+zero-hit counters from the source AST (using esbuild source maps and the same
+`ast-v8-to-istanbul` converter as Vitest) and fail the gate even if debt exists.
+`coverage/merged/coverage-final.json` and `coverage/merged/coverage-summary.json`
+contain the combined result, including those zeroes. The console prints summed
+covered/total counts for statements, branches, functions, and lines; percentages
+are computed from those totals, never averaged across files. An empty executable
+denominator is N/A, not evidence of tested behavior.
+
+`coverage-debt.json` version 1 records uncovered counter counts per file and
+metric from a real full run. A file outside the ledger must have zero uncovered
+counters in all four metrics; an existing entry cannot regress on any metric.
+A fully covered or removed file's entry must be deleted. After improving tests,
+shrink the ledger using the same complete reports:
+
+```sh
+pnpm exec tsx scripts/coverage-gate.ts --update-ledger coverage/coverage-final.json
+```
+
+This command refuses new debt or increased counters and writes nothing if any
+check fails. There is deliberately no bootstrap/reset/grow option. CI also
+compares the checked-in ledger against `COVERAGE_DEBT_BASE` (PR base or previous
+push), so hand-editing the ledger cannot introduce or increase allowances. The
+initial rollout is the only base revision without a ledger. Review ledger
+reductions alongside the tests that justify them. **The ledger must be empty
+to close epic #99.** Passing this temporary debt gate is not 100% coverage.
+
+### Additional coverage shards (#104 and #107)
+
+The current Playwright suites execute Chromium outside Vitest's Node collector.
+Inline controller strings, browser bundles, and CLI/server subprocesses remain
+measurement gaps even when their functional tests pass. Do not exclude these
+authored sources or run operational scripts against real services to raise the
+score.
+
+Chromium collection (#104) will collect before navigation, retain navigation and
+iframe coverage, and remap bundle execution through source maps. Subprocess
+collection (#107) will use isolated `NODE_V8_COVERAGE` outputs and remap CLI/server
+execution. Both producers must use the same revision, converter, original source
+locations, and compatible counter maps as the unit shard. Then add each required
+report explicitly to the gate command after all producers succeed, for example:
+
+```sh
+pnpm exec tsx scripts/coverage-gate.ts \
+  coverage/unit/coverage-final.json \
+  coverage/chromium/coverage-final.json \
+  coverage/subprocess/coverage-final.json
+```
+
+These extra shards do not exist yet. Do not discover them through an optional
+wildcard: explicitly naming required reports makes a missing producer fail.
