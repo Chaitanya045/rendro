@@ -1,0 +1,497 @@
+{
+  "version": 1,
+  "files": {
+    "cli/src/http-error.ts": {
+      "statements": 0,
+      "branches": 1,
+      "functions": 0,
+      "lines": 0
+    },
+    "cli/src/rate-limit.ts": {
+      "statements": 0,
+      "branches": 1,
+      "functions": 0,
+      "lines": 0
+    },
+    "convex/apiKeys.ts": {
+      "statements": 10,
+      "branches": 4,
+      "functions": 3,
+      "lines": 5
+    },
+    "convex/authEmails.ts": {
+      "statements": 19,
+      "branches": 18,
+      "functions": 6,
+      "lines": 18
+    },
+    "convex/betterAuth/adapter.ts": {
+      "statements": 1,
+      "branches": 2,
+      "functions": 0,
+      "lines": 1
+    },
+    "convex/betterAuth/teamLookup.ts": {
+      "statements": 0,
+      "branches": 1,
+      "functions": 0,
+      "lines": 0
+    },
+    "convex/convex.config.ts": {
+      "statements": 3,
+      "branches": 0,
+      "functions": 0,
+      "lines": 3
+    },
+    "convex/deletedFiles.ts": {
+      "statements": 18,
+      "branches": 7,
+      "functions": 5,
+      "lines": 9
+    },
+    "convex/documentReplies.ts": {
+      "statements": 1,
+      "branches": 5,
+      "functions": 0,
+      "lines": 1
+    },
+    "convex/documentThreads.ts": {
+      "statements": 3,
+      "branches": 7,
+      "functions": 0,
+      "lines": 1
+    },
+    "convex/publicFunctions.ts": {
+      "statements": 2,
+      "branches": 2,
+      "functions": 0,
+      "lines": 1
+    },
+    "convex/qaPermissionFixtures.ts": {
+      "statements": 207,
+      "branches": 103,
+      "functions": 26,
+      "lines": 166
+    },
+    "convex/qaWorkspaceFixtures.ts": {
+      "statements": 74,
+      "branches": 24,
+      "functions": 6,
+      "lines": 48
+    },
+    "convex/retention.ts": {
+      "statements": 10,
+      "branches": 10,
+      "functions": 0,
+      "lines": 5
+    },
+    "convex/security.ts": {
+      "statements": 8,
+      "branches": 6,
+      "functions": 0,
+      "lines": 4
+    },
+    "convex/sessionReadLimit.ts": {
+      "statements": 1,
+      "branches": 1,
+      "functions": 0,
+      "lines": 1
+    },
+    "convex/threads.ts": {
+      "statements": 6,
+      "branches": 2,
+      "functions": 3,
+      "lines": 3
+    },
+    "scripts/build-cli.mjs": {
+      "statements": 3,
+      "branches": 0,
+      "functions": 0,
+      "lines": 3
+    },
+    "scripts/build-commentor-parent.ts": {
+      "statements": 3,
+      "branches": 0,
+      "functions": 0,
+      "lines": 3
+    },
+    "scripts/build-commentor.ts": {
+      "statements": 6,
+      "branches": 0,
+      "functions": 0,
+      "lines": 6
+    },
+    "scripts/build-lazy-tree.ts": {
+      "statements": 3,
+      "branches": 0,
+      "functions": 0,
+      "lines": 3
+    },
+    "scripts/build-management-pages.ts": {
+      "statements": 3,
+      "branches": 0,
+      "functions": 0,
+      "lines": 3
+    },
+    "scripts/build-management-query.ts": {
+      "statements": 3,
+      "branches": 0,
+      "functions": 0,
+      "lines": 3
+    },
+    "scripts/build-private-viewer.ts": {
+      "statements": 3,
+      "branches": 0,
+      "functions": 0,
+      "lines": 3
+    },
+    "scripts/build-select.ts": {
+      "statements": 3,
+      "branches": 0,
+      "functions": 0,
+      "lines": 3
+    },
+    "scripts/cleanup-retention.ts": {
+      "statements": 34,
+      "branches": 24,
+      "functions": 5,
+      "lines": 30
+    },
+    "scripts/init-minio.ts": {
+      "statements": 15,
+      "branches": 10,
+      "functions": 2,
+      "lines": 15
+    },
+    "scripts/management-pages-source.ts": {
+      "statements": 1,
+      "branches": 1,
+      "functions": 0,
+      "lines": 0
+    },
+    "scripts/migrate-legacy-tenancy.ts": {
+      "statements": 12,
+      "branches": 22,
+      "functions": 1,
+      "lines": 5
+    },
+    "scripts/run-permission-qa.mjs": {
+      "statements": 12,
+      "branches": 16,
+      "functions": 1,
+      "lines": 11
+    },
+    "scripts/run-workspace-qa.mjs": {
+      "statements": 15,
+      "branches": 15,
+      "functions": 0,
+      "lines": 11
+    },
+    "scripts/verify-asset-versions.ts": {
+      "statements": 16,
+      "branches": 12,
+      "functions": 0,
+      "lines": 15
+    },
+    "shared/auth-client-ip.ts": {
+      "statements": 0,
+      "branches": 1,
+      "functions": 0,
+      "lines": 0
+    },
+    "shared/v2-paths.ts": {
+      "statements": 0,
+      "branches": 1,
+      "functions": 0,
+      "lines": 0
+    },
+    "src/bounded-body.ts": {
+      "statements": 2,
+      "branches": 2,
+      "functions": 0,
+      "lines": 0
+    },
+    "src/commentor/commentor.ts": {
+      "statements": 977,
+      "branches": 658,
+      "functions": 157,
+      "lines": 856
+    },
+    "src/commentor/delete-state.ts": {
+      "statements": 8,
+      "branches": 6,
+      "functions": 1,
+      "lines": 4
+    },
+    "src/commentor/errors.ts": {
+      "statements": 1,
+      "branches": 1,
+      "functions": 0,
+      "lines": 1
+    },
+    "src/commentor/mutation-args.ts": {
+      "statements": 3,
+      "branches": 16,
+      "functions": 0,
+      "lines": 1
+    },
+    "src/commentor/operation-state.ts": {
+      "statements": 3,
+      "branches": 5,
+      "functions": 0,
+      "lines": 1
+    },
+    "src/commentor/parent-entry.ts": {
+      "statements": 13,
+      "branches": 7,
+      "functions": 4,
+      "lines": 10
+    },
+    "src/commentor/parent-host.ts": {
+      "statements": 97,
+      "branches": 85,
+      "functions": 15,
+      "lines": 65
+    },
+    "src/commentor/parent-protocol.ts": {
+      "statements": 6,
+      "branches": 10,
+      "functions": 0,
+      "lines": 0
+    },
+    "src/commentor/parent-transport.ts": {
+      "statements": 9,
+      "branches": 11,
+      "functions": 4,
+      "lines": 6
+    },
+    "src/commentor/recovery-session.ts": {
+      "statements": 0,
+      "branches": 1,
+      "functions": 0,
+      "lines": 0
+    },
+    "src/convex-internal.ts": {
+      "statements": 5,
+      "branches": 4,
+      "functions": 0,
+      "lines": 2
+    },
+    "src/index.ts": {
+      "statements": 4,
+      "branches": 3,
+      "functions": 2,
+      "lines": 4
+    },
+    "src/lazy-tree/lazy-tree.ts": {
+      "statements": 549,
+      "branches": 361,
+      "functions": 71,
+      "lines": 460
+    },
+    "src/lazy-tree/messages.ts": {
+      "statements": 0,
+      "branches": 1,
+      "functions": 0,
+      "lines": 0
+    },
+    "src/management-query/browser.ts": {
+      "statements": 1,
+      "branches": 0,
+      "functions": 0,
+      "lines": 1
+    },
+    "src/management-query/cache.ts": {
+      "statements": 8,
+      "branches": 7,
+      "functions": 1,
+      "lines": 3
+    },
+    "src/management-query/organizations.ts": {
+      "statements": 6,
+      "branches": 12,
+      "functions": 0,
+      "lines": 0
+    },
+    "src/middleware/security-headers.ts": {
+      "statements": 2,
+      "branches": 3,
+      "functions": 0,
+      "lines": 0
+    },
+    "src/middleware/session.ts": {
+      "statements": 0,
+      "branches": 3,
+      "functions": 1,
+      "lines": 0
+    },
+    "src/minio.ts": {
+      "statements": 61,
+      "branches": 50,
+      "functions": 9,
+      "lines": 55
+    },
+    "src/orgs.ts": {
+      "statements": 3,
+      "branches": 3,
+      "functions": 0,
+      "lines": 0
+    },
+    "src/publications.ts": {
+      "statements": 12,
+      "branches": 14,
+      "functions": 1,
+      "lines": 3
+    },
+    "src/routes/app.ts": {
+      "statements": 11,
+      "branches": 20,
+      "functions": 2,
+      "lines": 8
+    },
+    "src/routes/auth-pages.ts": {
+      "statements": 1,
+      "branches": 3,
+      "functions": 0,
+      "lines": 0
+    },
+    "src/routes/control-plane.ts": {
+      "statements": 0,
+      "branches": 4,
+      "functions": 0,
+      "lines": 0
+    },
+    "src/routes/document-html.ts": {
+      "statements": 5,
+      "branches": 11,
+      "functions": 0,
+      "lines": 3
+    },
+    "src/routes/html.ts": {
+      "statements": 0,
+      "branches": 1,
+      "functions": 0,
+      "lines": 0
+    },
+    "src/routes/management-navigation.ts": {
+      "statements": 0,
+      "branches": 1,
+      "functions": 0,
+      "lines": 0
+    },
+    "src/routes/management-page-access.ts": {
+      "statements": 2,
+      "branches": 1,
+      "functions": 0,
+      "lines": 2
+    },
+    "src/routes/publications.ts": {
+      "statements": 8,
+      "branches": 8,
+      "functions": 0,
+      "lines": 3
+    },
+    "src/session-cache.ts": {
+      "statements": 0,
+      "branches": 3,
+      "functions": 0,
+      "lines": 0
+    },
+    "src/share-links.ts": {
+      "statements": 5,
+      "branches": 4,
+      "functions": 0,
+      "lines": 3
+    },
+    "src/soft-delete.ts": {
+      "statements": 5,
+      "branches": 3,
+      "functions": 3,
+      "lines": 4
+    },
+    "src/storage-boundary.ts": {
+      "statements": 1,
+      "branches": 3,
+      "functions": 0,
+      "lines": 0
+    },
+    "src/ui/management-ui.ts": {
+      "statements": 0,
+      "branches": 1,
+      "functions": 0,
+      "lines": 0
+    },
+    "src/ui/select-browser.ts": {
+      "statements": 1,
+      "branches": 0,
+      "functions": 0,
+      "lines": 1
+    },
+    "src/ui/select.ts": {
+      "statements": 38,
+      "branches": 64,
+      "functions": 8,
+      "lines": 2
+    },
+    "src/viewer-backend.ts": {
+      "statements": 0,
+      "branches": 0,
+      "functions": 1,
+      "lines": 0
+    },
+    "src/viewer-ticket.ts": {
+      "statements": 1,
+      "branches": 1,
+      "functions": 0,
+      "lines": 0
+    },
+    "src/viewer/client.ts": {
+      "statements": 9,
+      "branches": 12,
+      "functions": 2,
+      "lines": 0
+    },
+    "src/viewer/css-urls.ts": {
+      "statements": 2,
+      "branches": 3,
+      "functions": 0,
+      "lines": 0
+    },
+    "src/viewer/entry.ts": {
+      "statements": 11,
+      "branches": 10,
+      "functions": 0,
+      "lines": 7
+    },
+    "src/viewer/fragments.ts": {
+      "statements": 2,
+      "branches": 3,
+      "functions": 0,
+      "lines": 0
+    },
+    "src/viewer/message-limits.ts": {
+      "statements": 1,
+      "branches": 1,
+      "functions": 1,
+      "lines": 1
+    },
+    "src/viewer/navigation.ts": {
+      "statements": 40,
+      "branches": 44,
+      "functions": 1,
+      "lines": 23
+    },
+    "src/viewer/stylesheets.ts": {
+      "statements": 8,
+      "branches": 5,
+      "functions": 0,
+      "lines": 4
+    },
+    "src/worker.ts": {
+      "statements": 53,
+      "branches": 34,
+      "functions": 8,
+      "lines": 29
+    }
+  }
+}

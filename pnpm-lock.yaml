@@ -41,12 +41,18 @@ importers:
       '@tanstack/query-persist-client-core':
         specifier: 5.102.8
         version: 5.102.8
+      '@types/istanbul-lib-coverage':
+        specifier: 2.0.6
+        version: 2.0.6
       '@types/node':
         specifier: ^20.14.0
         version: 20.19.43
       '@vitest/coverage-v8':
         specifier: ^4.1.11
         version: 4.1.11(vitest@4.1.11)
+      ast-v8-to-istanbul:
+        specifier: 1.0.7
+        version: 1.0.7
       better-auth:
         specifier: ^1.6.23
         version: 1.6.23(@cloudflare/workers-types@4.20260702.1)(better-sqlite3@12.11.1)(drizzle-orm@0.45.2(@cloudflare/workers-types@4.20260702.1)(@libsql/client@0.17.4)(better-sqlite3@12.11.1)(kysely@0.29.2))(react@19.2.7)(vitest@4.1.11)
@@ -71,6 +77,9 @@ importers:
       hono:
         specifier: ^4.13.8
         version: 4.13.8
+      istanbul-lib-coverage:
+        specifier: 3.2.2
+        version: 3.2.2
       jose:
         specifier: ^6.2.3
         version: 6.2.3
@@ -86,6 +95,9 @@ importers:
       playwright:
         specifier: ^1.64.0
         version: 1.64.0
+      tinyglobby:
+        specifier: 0.2.17
+        version: 0.2.17
       tsx:
         specifier: ^4.19.0
         version: 4.22.4
@@ -1371,6 +1383,9 @@ packages:
 
   '@types/estree@1.0.9':
     resolution: {integrity: sha512-GhdPgy1el4/ImP05X05Uw4cw2/M93BCUmnEvWZNStlCzEKME4Fkk+YpoA5OiHNQmoS7Cafb8Xa3Pya8m1Qrzeg==}
+
+  '@types/istanbul-lib-coverage@2.0.6':
+    resolution: {integrity: sha512-2QF/t/auWm0lsy8XtKVPG19v3sSOQlJe/YHZgfjb/KBBHOGSV+J2q/S671rcq9uTBrLAXmZpqJiaQbMT+zNU1w==}
 
   '@types/json-schema@7.0.15':
     resolution: {integrity: sha512-5+fP8P8MFNC+AyZCDxrB2pkZFPGzqQWUzpSeuuVLvm8VMcorNYavBqoFcxK8bQz4Qsbn4oUEEem4wDLfcysGHA==}
@@ -3583,6 +3598,8 @@ snapshots:
   '@types/esrecurse@4.3.1': {}
 
   '@types/estree@1.0.9': {}
+
+  '@types/istanbul-lib-coverage@2.0.6': {}
 
   '@types/json-schema@7.0.15': {}
 

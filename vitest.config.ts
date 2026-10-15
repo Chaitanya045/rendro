@@ -1,3 +1,5 @@
+import { fileURLToPath } from "node:url";
+import { coveragePolicy } from "./scripts/coverage-policy";
 import { defineConfig } from "vitest/config";
 
 export default defineConfig({
@@ -32,8 +34,10 @@ export default defineConfig({
     ],
     coverage: {
       provider: "v8",
-      include: ["src/**/*.ts"],
-      exclude: ["src/index.ts"],
+      ...coveragePolicy(fileURLToPath(new URL(".", import.meta.url))),
+      excludeAfterRemap: true,
+      reporter: ["json", "json-summary", "lcov", "text"],
+      reportOnFailure: true,
     },
   },
   resolve: {
