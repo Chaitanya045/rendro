@@ -43,5 +43,6 @@ it("keeps email callbacks and exact organization read/write rate rules wired to 
 
 it("refuses HTTP limiter consumption in a read-only auth context", () => {
   createAuthOptions({} as never);
+  expect(consumers).toHaveLength(2);
   for (const consume of consumers) expect(() => consume("test")).toThrow("mutation-capable context");
 });

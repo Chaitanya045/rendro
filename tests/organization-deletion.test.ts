@@ -31,10 +31,14 @@ async function fixture(transactionLimits: { documentsWritten: number } | boolean
   const cookie = `better-auth.session_token=${encodeURIComponent(`${session.token}.${createHmac("sha256", process.env.AUTH_SECRET!).update(session.token).digest("base64")}`)}`;
   const headers = { cookie, origin: "http://localhost:3000", "content-type": "application/json" };
   const post = (path: string, body: unknown) => t.fetch(path, { method: "POST", headers, body: JSON.stringify(body) });
+  const organization = (organizationId: string) => t.query(components.betterAuth.adapter.findOne, {
+    model: "organization", where: [{ field: "_id", value: organizationId }],
+  });
   async function seed(slug: string) {
     const response = await post("/api/auth/organization/create", { name: slug, slug });
     expect(response.status).toBe(200);
     const organizationId = (await response.json()).id as string;
+    expect(await organization(organizationId)).toMatchObject({ _id: organizationId, slug });
     const actorId = user.id;
     const project = (await t.mutation(internal.projects.createInternal, { organizationId, name: "Docs", slug: "docs", actorId }))!;
     const scope = { organizationId, projectId: project._id };
@@ -76,11 +80,12 @@ async function fixture(transactionLimits: { documentsWritten: number } | boolean
     await t.run(ctx => ctx.db.patch(oldKey, { revokedAt: 1 }));
     return { ...scope, actorId, start, active, staging, publication, share, revoked, oldKey, keys, token, tokenHash, slug };
   }
-  return { t, auth, context, user, session, cookie, headers, post, seed };
+  return { t, auth, context, user, session, cookie, headers, post, seed, organization };
 }
 
 type Resources = Awaited<ReturnType<Awaited<ReturnType<typeof fixture>>["seed"]>>;
 async function access(f: Awaited<ReturnType<typeof fixture>>, r: Resources, allowed: boolean) {
+  expect(r.keys).toHaveLength(2);
   const query = new URLSearchParams({ organizationId: r.organizationId, projectId: r.projectId });
   for (const key of r.keys) {
     const headers = { authorization: `Bearer ${key.secret}` };
@@ -114,11 +119,6 @@ describe("organization deletion lifecycle", () => {
     const f = await fixture(), r = await f.seed("deleted"), other = await f.seed("untouched");
     await access(f, r, true);
     const ticket = await createViewerTicket({ ...r, manifestKey: r.active.manifestKey, cookie: f.cookie });
-    const response = await f.post("/api/auth/organization/delete", { organizationId: r.organizationId });
-    expect(response.status).toBe(200);
-    await access(f, r, false);
-    await access(f, other, true);
-    expect(await f.t.query(components.betterAuth.adapter.findOne, { model: "organization", where: [{ field: "id", value: r.organizationId }] })).toBeNull();
     const snapshot = () => f.t.run(async ctx => ({
       tombstones: await ctx.db.query("organizationTombstones").collect(),
       keys: await ctx.db.query("apiKeyCredentials").withIndex("by_organization", q => q.eq("organizationId", r.organizationId)).collect(),
@@ -126,8 +126,24 @@ describe("organization deletion lifecycle", () => {
       publications: await ctx.db.query("publications").withIndex("by_organization", q => q.eq("organizationId", r.organizationId)).collect(),
       audit: await ctx.db.query("auditEvents").collect(),
     }));
+    const initial = await snapshot();
+    expect(initial.tombstones).toHaveLength(0);
+    expect(initial.keys).toHaveLength(3);
+    expect(initial.shares).toHaveLength(2);
+    expect(initial.publications).toHaveLength(2);
+    const response = await f.post("/api/auth/organization/delete", { organizationId: r.organizationId });
+    expect(response.status).toBe(200);
+    await access(f, r, false);
+    await access(f, other, true);
+    expect(await f.organization(r.organizationId)).toBeNull();
+    expect(await f.organization(other.organizationId)).toMatchObject({ _id: other.organizationId });
     const before = await snapshot();
-    expect(before.tombstones).toHaveLength(1);
+    expect(before.tombstones).toEqual([expect.objectContaining({ organizationId: r.organizationId, deletedBy: r.actorId })]);
+    expect(before.keys.map(key => key._id)).toEqual(initial.keys.map(key => key._id));
+    expect(before.shares.map(share => share._id)).toEqual(initial.shares.map(share => share._id));
+    expect(before.audit.filter(event => event.action === "organization.deleted")).toEqual([
+      expect.objectContaining({ organizationId: r.organizationId, resourceId: r.organizationId, actorId: r.actorId }),
+    ]);
     expect(before.keys.every(key => key.revokedAt !== undefined)).toBe(true);
     expect(before.shares.every(share => share.revokedAt !== undefined)).toBe(true);
     expect(before.publications).toEqual([]);
@@ -158,6 +174,7 @@ describe("organization deletion lifecycle", () => {
 
   it("denies surviving capabilities and preauthorized writes using only a tombstone", async () => {
     const f = await fixture(), r = await f.seed("partial");
+    await access(f, r, true);
     await f.t.run(ctx => ctx.db.insert("organizationTombstones", { organizationId: r.organizationId, deletedAt: Date.now(), deletedBy: r.actorId }));
     await access(f, r, false);
     const scope = { organizationId: r.organizationId, projectId: r.projectId };
@@ -172,6 +189,7 @@ describe("organization deletion lifecycle", () => {
     expect(await f.t.query(internal.deployments.latestForOrganization, { organizationId: r.organizationId })).toBeNull();
     const signed = f.t.withIdentity({ subject: f.user.id, sessionId: f.session.id });
     await expect(signed.query(api.projects.activeDeployment, scope)).rejects.toMatchObject({ data: { code: "not_found" } });
+    expect(await f.t.run(ctx => ctx.db.get(r.keys[0].id))).toMatchObject({ _id: r.keys[0].id, secretHash: r.keys[0].secretHash });
     expect(await f.t.run(ctx => ctx.db.get(r.keys[0].id))).not.toHaveProperty("revokedAt");
     expect(await f.t.run(ctx => ctx.db.get(r.publication._id))).not.toBeNull();
   });
@@ -186,6 +204,7 @@ describe("organization deletion lifecycle", () => {
     const response = await f.post("/api/auth/organization/delete", { organizationId: r.organizationId });
     expect(response.status).toBe(400);
     expect((await response.json()).message).toContain("could not safely complete");
+    expect(await f.organization(r.organizationId)).toMatchObject({ _id: r.organizationId });
     expect(await f.t.query(internal.organizationLifecycle.isDeletedInternal, { organizationId: r.organizationId })).toBe(false);
     await access(f, r, true);
     // Exactly the configured bound succeeds; the sentinel row above was not
@@ -198,7 +217,14 @@ describe("organization deletion lifecycle", () => {
         + (await ctx.db.query("publications").collect()).length;
       for (const project of projects.filter(p => p.slug.startsWith("extra-")).slice(0, count - deletionResourceLimit)) await ctx.db.delete(project._id);
     });
+    const resourceCount = await f.t.run(async ctx => (await Promise.all([
+      ctx.db.query("projects").collect(), ctx.db.query("deployments").collect(),
+      ctx.db.query("apiKeyCredentials").collect(), ctx.db.query("shareGrants").collect(),
+      ctx.db.query("publications").collect(),
+    ])).reduce((count, rows) => count + rows.length, 0));
+    expect(resourceCount).toBe(deletionResourceLimit);
     expect((await f.post("/api/auth/organization/delete", { organizationId: r.organizationId })).status).toBe(200);
+    expect(await f.organization(r.organizationId)).toBeNull();
     await access(f, r, false);
   });
 
@@ -209,6 +235,7 @@ describe("organization deletion lifecycle", () => {
     const response = await f.post("/api/auth/organization/delete", { organizationId: r.organizationId });
     expect(response.status).toBe(400);
     limits.documentsWritten = 8_192;
+    expect(await f.organization(r.organizationId)).toMatchObject({ _id: r.organizationId });
     expect(await f.t.query(internal.organizationLifecycle.isDeletedInternal, { organizationId: r.organizationId })).toBe(false);
     for (const key of r.keys) expect(await f.t.run(ctx => ctx.db.get(key.id))).not.toHaveProperty("revokedAt");
     await access(f, r, true);
@@ -223,8 +250,10 @@ describe("organization deletion lifecycle", () => {
     }));
     expect((await request()).status).toBe(500);
     expect(remove).toHaveBeenCalled();
+    expect(await f.organization(r.organizationId)).toMatchObject({ _id: r.organizationId });
     await access(f, r, false);
     expect((await request()).status).toBe(200);
+    expect(await f.organization(r.organizationId)).toBeNull();
     expect(await f.t.run(ctx => ctx.db.query("organizationTombstones").collect())).toHaveLength(1);
   });
 
@@ -237,6 +266,7 @@ describe("organization deletion lifecycle", () => {
     expect((await f.t.fetch("/api/auth/organization/delete", { method: "POST", headers: { origin: "http://localhost:3000", "content-type": "application/json" }, body: JSON.stringify({ organizationId: r.organizationId }) })).status).toBe(401);
     await f.t.mutation(components.betterAuth.adapter.updateOne, { input: { model: "member", where: [{ field: "organizationId", value: r.organizationId }], update: { role: "admin" } } });
     expect((await f.post("/api/auth/organization/delete", { organizationId: r.organizationId })).status).toBe(403);
+    expect(await f.organization(r.organizationId)).toMatchObject({ _id: r.organizationId });
     expect(await f.t.query(internal.organizationLifecycle.isDeletedInternal, { organizationId: r.organizationId })).toBe(false);
     await access(f, r, true);
   });
@@ -255,6 +285,7 @@ describe("organization capability boundary regressions", () => {
     const args = { organizationId: r.organizationId, keyId: r.keys[0].keyId, actorId: r.actorId };
     await f.t.mutation(internal.apiKeyCredentials.revokeInternal, args);
     const first = await f.t.run(ctx => ctx.db.get(r.keys[0].id));
+    expect(first).toMatchObject({ _id: r.keys[0].id, revokedAt: expect.any(Number) });
     await f.t.mutation(internal.apiKeyCredentials.revokeInternal, args);
     expect(await f.t.run(ctx => ctx.db.get(r.keys[0].id))).toEqual(first);
   });
@@ -292,16 +323,23 @@ describe("organization capability boundary regressions", () => {
     expect(titled).toMatchObject({ title: "Release", description: "Notes" });
     expect(await f.t.query(internal.publicationsV2.listInternal, { organizationId: r.organizationId })).toHaveLength(3);
     const resolve = () => f.t.query(internal.publicationsV2.resolvePublicInternal, { slug: r.slug });
+    expect(await resolve()).not.toBeNull();
     for (const status of ["failed", "staging"] as const) {
       await f.t.run(ctx => ctx.db.patch(r.active.deploymentId, { status }));
       expect(await resolve()).toBeNull();
       await expect(f.t.mutation(internal.publicationsV2.createInternal, { ...args, slug: "pinned", trackingMode: "pinned", pinnedDeploymentId: r.active.deploymentId })).rejects.toThrow("Pinned deployment not found");
+      await f.t.run(ctx => ctx.db.patch(r.active.deploymentId, { status: "active" }));
+      expect(await resolve()).not.toBeNull();
     }
-    await f.t.run(ctx => ctx.db.delete(r.active.deploymentId));
-    expect(await resolve()).toBeNull();
-    await f.t.run(ctx => ctx.db.patch(r.projectId, { activeDeploymentId: undefined }));
-    expect(await resolve()).toBeNull();
-    await f.t.run(ctx => ctx.db.delete(r.projectId));
+  });
+
+  it.each(["deployment", "active pointer", "project"])("rejects a publication with a missing %s independently", async missing => {
+    const f = await fixture(), r = await f.seed("publication-missing");
+    const resolve = () => f.t.query(internal.publicationsV2.resolvePublicInternal, { slug: r.slug });
+    expect(await resolve()).toMatchObject({ publication: { _id: r.publication._id }, deployment: { _id: r.active.deploymentId } });
+    if (missing === "deployment") await f.t.run(ctx => ctx.db.delete(r.active.deploymentId));
+    if (missing === "active pointer") await f.t.run(ctx => ctx.db.patch(r.projectId, { activeDeploymentId: undefined }));
+    if (missing === "project") await f.t.run(ctx => ctx.db.delete(r.projectId));
     expect(await resolve()).toBeNull();
   });
 
@@ -315,23 +353,29 @@ describe("organization capability boundary regressions", () => {
     const revoke = { organizationId: r.organizationId, grantId: r.share._id, actorId: r.actorId };
     await f.t.mutation(internal.shareGrants.revokeInternal, revoke);
     const first = await f.t.run(ctx => ctx.db.get(r.share._id));
+    expect(first).toMatchObject({ _id: r.share._id, revokedAt: expect.any(Number) });
     await f.t.mutation(internal.shareGrants.revokeInternal, revoke);
     expect(await f.t.run(ctx => ctx.db.get(r.share._id))).toEqual(first);
     await f.t.run(ctx => ctx.db.delete(r.share._id));
     await expect(f.t.mutation(internal.shareGrants.revokeInternal, revoke)).rejects.toThrow("Share not found");
     const valid = (await f.t.mutation(internal.shareGrants.createInternal, args))!;
     const resolve = () => f.t.query(internal.shareGrants.resolveInternal, { tokenHash: args.tokenHash });
+    expect(await resolve()).not.toBeNull();
     for (const status of ["failed", "staging"] as const) {
       await f.t.run(ctx => ctx.db.patch(r.active.deploymentId, { status }));
       expect(await resolve()).toBeNull();
+      await f.t.run(ctx => ctx.db.patch(r.active.deploymentId, { status: "active" }));
+      expect(await resolve()).not.toBeNull();
     }
-    await f.t.run(ctx => ctx.db.patch(r.active.deploymentId, { status: "active" }));
     await f.t.run(ctx => ctx.db.patch(valid._id, { expiresAt: Date.now() - 1 }));
     expect(await resolve()).toBeNull();
-    await f.t.run(ctx => ctx.db.patch(valid._id, { expiresAt: Date.now() + 60_000 }));
-    await f.t.run(ctx => ctx.db.delete(r.projectId));
-    expect(await resolve()).toBeNull();
-    await f.t.run(ctx => ctx.db.delete(r.active.deploymentId));
+  });
+
+  it.each(["project", "deployment"])("rejects a share with a missing %s independently", async missing => {
+    const f = await fixture(), r = await f.seed("share-missing");
+    const resolve = () => f.t.query(internal.shareGrants.resolveInternal, { tokenHash: r.tokenHash });
+    expect(await resolve()).toMatchObject({ grant: { _id: r.share._id }, deployment: { _id: r.active.deploymentId } });
+    await f.t.run(ctx => ctx.db.delete(missing === "project" ? r.projectId : r.active.deploymentId));
     expect(await resolve()).toBeNull();
   });
 
@@ -347,9 +391,12 @@ describe("organization capability boundary regressions", () => {
       expect(await signed.query(api.projects.activeDeployment, scope)).toBeNull();
       await f.t.run(ctx => ctx.db.patch(r.active.deploymentId, { ...scope, status: "active" }));
     }
-    await f.t.run(ctx => ctx.db.delete(r.active.deploymentId));
-    expect(await signed.query(api.projects.activeDeployment, scope)).toBeNull();
+    expect(await signed.query(api.projects.activeDeployment, scope)).toBe(r.active.deploymentId);
     await f.t.run(ctx => ctx.db.patch(r.projectId, { activeDeploymentId: undefined }));
+    expect(await signed.query(api.projects.activeDeployment, scope)).toBeNull();
+    await f.t.run(ctx => ctx.db.patch(r.projectId, { activeDeploymentId: r.active.deploymentId }));
+    expect(await signed.query(api.projects.activeDeployment, scope)).toBe(r.active.deploymentId);
+    await f.t.run(ctx => ctx.db.delete(r.active.deploymentId));
     expect(await signed.query(api.projects.activeDeployment, scope)).toBeNull();
     const getUser = vi.spyOn(authComponent, "safeGetAuthUser").mockRejectedValueOnce(new Error("Storage unavailable"));
     await expect(signed.query(api.projects.activeDeployment, scope)).rejects.toThrow();
