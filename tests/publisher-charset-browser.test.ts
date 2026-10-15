@@ -1,3 +1,8 @@
+import { mkdtemp, writeFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { createHash } from "node:crypto";
+import { captureCliPush } from "./helpers/cli-push";
 import { getRequestListener } from "@hono/node-server";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import * as minio from "@/minio";
@@ -68,4 +73,50 @@ describe.each(["stored charset", "in-band charset"])("%s", mode => {
       expect(await page.evaluate(() => self.origin)).toBe("null");
     },
   );
+});
+
+// Feed the real CLI's manifest and upload bytes into the existing Worker fixture.
+// Storage/auth remain substituted, while browser decoding and Worker delivery run.
+it.each(["fresh", "reused", "existing UTF-8"])("renders CLI CSS café € through Worker routes (%s)", async mode => {
+  const root = await mkdtemp(join(tmpdir(), "rendro-cli-charset-"));
+  try {
+    const css = mode === "existing UTF-8"
+      ? Buffer.from('p::before { content: "café €"; }')
+      : Buffer.from('@charset "windows-1252"; p::before { content: "caf\xe9 \x80"; }', "latin1");
+    const html = Buffer.from('<!doctype html><meta charset="utf-8"><link rel="stylesheet" href="style.css"><p>Publisher text</p>');
+    await writeFile(join(root, "style.css"), css);
+    await writeFile(join(root, "index.html"), html);
+    const previous = [{ path: "style.css", contentType: "text/css; charset=utf-8", size: css.length,
+      sha256: createHash("sha256").update(css).digest("hex") }];
+    const capture = await captureCliPush(root, { previous: mode === "reused" ? previous : undefined });
+    const cssType = mode === "existing UTF-8" ? previous[0].contentType : "text/css";
+    expect(capture.manifest.files.find(file => file.path === "style.css")?.contentType).toBe("text/css");
+    if (mode === "reused") {
+      expect(capture.copied).toEqual(["style.css"]);
+      expect(capture.uploads.has("style.css")).toBe(false);
+    } else expect(capture.uploads.get("style.css")).toEqual({ bytes: css, contentType: "text/css" });
+    const { routes } = await publisherIsolationFixture();
+    // Old manifests are still valid; exercise them unchanged as well.
+    const manifest = mode === "existing UTF-8" ? { ...capture.manifest, files: capture.manifest.files.map(file =>
+      file.path === "style.css" ? previous[0] : { ...file, contentType: "text/html; charset=utf-8" }) } : capture.manifest;
+    vi.mocked(minio.getObjectText).mockResolvedValue(JSON.stringify(manifest));
+    // Copied objects retain old storage metadata. Modern routes use the manifest.
+    vi.mocked(minio.headObject).mockResolvedValue({ contentType: "text/css; charset=utf-8" });
+    vi.mocked(minio.getObjectStream).mockImplementation(key => Promise.resolve(new Response(new Uint8Array(key.endsWith("/style.css")
+      ? capture.uploads.get("style.css")?.bytes ?? css : capture.uploads.get("index.html")!.bytes)).body));
+    for (const name of ["public", "private", "private ticket"]) {
+      const page = await harness.newPage();
+      await page.context().addCookies([{ name: cookie.split("=")[0], value: cookie.split("=")[1], url: harness.origin }]);
+      const stylesheet = page.waitForResponse(response => new URL(response.url()).pathname.endsWith("/style.css"));
+      await page.goto(harness.origin + routes.find(route => route.name === name)!.url(0));
+      const sheet = await stylesheet;
+      expect(sheet.status(), name).toBe(200);
+      expect(sheet.headers()["content-type"], name).toBe(cssType);
+      expect(await (await page.request.get(sheet.url())).body(), name).toEqual(css);
+      expect(await page.locator("p").evaluate(element => getComputedStyle(element, "::before").content), name).toBe('"café €"');
+      expect(await page.evaluate(() => self.origin), name).toBe("null");
+    }
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });

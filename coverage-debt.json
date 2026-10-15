@@ -1,18 +1,6 @@
 {
   "version": 1,
   "files": {
-    "cli/src/http-error.ts": {
-      "statements": 0,
-      "branches": 1,
-      "functions": 0,
-      "lines": 0
-    },
-    "cli/src/rate-limit.ts": {
-      "statements": 0,
-      "branches": 1,
-      "functions": 0,
-      "lines": 0
-    },
     "convex/authEmails.ts": {
       "statements": 19,
       "branches": 18,
