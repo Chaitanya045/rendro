@@ -2,7 +2,7 @@ import { getRequestListener } from '@hono/node-server';
 import type { User } from 'better-auth/types';
 import { Hono } from 'hono';
 import type { Page, Route } from 'playwright';
-import { afterAll, beforeAll, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, expect, it, vi } from 'vitest';
 import { securityHeaders } from '@/middleware/security-headers';
 import organizationPages from '@/routes/organization-pages';
 import projectPages from '@/routes/project-pages';
@@ -13,6 +13,8 @@ import { managementPagesSource } from '../scripts/management-pages-source';
 import { managementAccessFixture } from './fixtures/management-access';
 import { browserStep, bundleBrowserAsset, createBrowserHarness } from './helpers/browser';
 
+const heldDocuments = new Map<string, { arrived: boolean; ready: Promise<void>; release(): void }>();
+afterEach(() => { for (const held of heldDocuments.values()) held.release(); heldDocuments.clear(); });
 const harness = createBrowserHarness();
 const user = { id: 'user-a', name: 'Owner', email: 'owner@example.test' } as User;
 const organization = { id: 'org-a', name: 'Acme', slug: 'acme', members: [{ id: 'member-a', userId: user.id, role: 'owner', user }], teams: [] };
@@ -37,6 +39,16 @@ beforeAll(async () => {
   const app = new Hono<{ Variables: { user?: User } }>();
   app.use('*', securityHeaders);
   app.use('*', async (c, next) => { c.set('user', user); await next(); });
+  app.use('*', async (c, next) => {
+    const url = new URL(c.req.url);
+    const held = heldDocuments.get(url.pathname + url.search);
+    if (held) {
+      held.arrived = true;
+      await held.ready;
+      return c.html('<p>Destination loaded</p>');
+    }
+    await next();
+  });
   app.get('/api/rendro/management/access', c => access(c.req.raw)!);
   app.get('/api/auth/organization/get-full-organization', c => c.json(organization));
   app.get('/api/auth/organization/list', c => c.json([organization]));
@@ -84,6 +96,23 @@ async function writes(page: Page, endpoint: string) {
     async settle(body: unknown, status = 200) {
       await expect.poll(() => pending.length).toBe(1);
       await pending.shift()!.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
+    },
+  };
+}
+
+// Hold the destination response at the fixture server while the old form is visible.
+function holdDocument(page: Page, path: string) {
+  let release!: () => void;
+  const ready = new Promise<void>(resolve => { release = resolve; });
+  const held = { arrived: false, ready, release };
+  heldDocuments.set(path, held);
+  return {
+    async wait() { await expect.poll(() => held.arrived).toBe(true); },
+    async release() {
+      held.release();
+      await page.waitForURL(harness.origin + path);
+      await page.getByText('Destination loaded', { exact: true }).waitFor();
+      heldDocuments.delete(path);
     },
   };
 }
@@ -189,6 +218,43 @@ it.each(dialogs)('$name blocks Cancel and Escape while pending, restores drafts 
   else await dialog.waitFor({ state: 'hidden' });
 });
 
+it('invitations reset before refresh and preserve a reopened draft when the held list arrives', async () => {
+  const page = await open(`${base}/people`);
+  await page.getByText('No pending invitations.', { exact: true }).waitFor();
+  const requests = await writes(page, '/api/auth/organization/invite-member');
+  const refreshes: Route[] = [];
+  await page.route('**/api/auth/organization/list-invitations?*', route => { refreshes.push(route); });
+  await page.locator('#organization-page-action').click();
+  await page.locator('[name=email]').fill('sent@example.test');
+  await page.locator('#invite-form button[type=submit]').click();
+  await requests.settle({});
+  await page.locator('#invite-dialog').waitFor({ state: 'hidden' });
+  await expect.poll(() => refreshes.length).toBe(1);
+  await page.locator('#organization-page-action').click();
+  expect(await page.locator('[name=email]').count()).toBe(1);
+  expect(await page.locator('[name=email]').inputValue()).toBe('');
+  expect(await page.locator('#invite-form button[type=submit]').isEnabled()).toBe(true);
+  await page.locator('[name=email]').fill('draft@example.test');
+  await page.locator('#add-invite-row').click();
+  await page.locator('[name=email]').nth(1).fill('second@example.test');
+  await page.locator('[name=role]').nth(1).selectOption('admin');
+  await refreshes.shift()!.fulfill({ json: [{ ...invitation, email: 'sent@example.test' }] });
+  await page.locator('#invitation-list').getByText('sent@example.test', { exact: true }).waitFor();
+  expect(await page.locator('[name=email]').evaluateAll(inputs => inputs.map(input => (input as HTMLInputElement).value))).toEqual(['draft@example.test', 'second@example.test']);
+  expect(await page.locator('[name=role]').nth(1).inputValue()).toBe('admin');
+  expect(await page.locator('#invite-dialog').getAttribute('open')).not.toBeNull();
+  await page.locator('#invite-form button[type=submit]').click();
+  await requests.settle({});
+  await requests.settle({});
+  await page.locator('#invite-dialog').waitFor({ state: 'hidden' });
+  await expect.poll(() => refreshes.length).toBe(1);
+  await refreshes.shift()!.fulfill({ json: [{ ...invitation, email: 'second@example.test' }] });
+  await page.locator('#invitation-list').getByText('second@example.test', { exact: true }).waitFor();
+  expect(requests.bodies.map(body => [body.email, body.role])).toEqual([
+    ['sent@example.test', 'member'], ['draft@example.test', 'member'], ['second@example.test', 'admin'],
+  ]);
+});
+
 it('invitations retain only failed rows and do not resend successful rows on retry', async () => {
   const page = await open(`${base}/people`);
   const requests = await writes(page, '/api/auth/organization/invite-member');
@@ -208,9 +274,11 @@ it('invitations retain only failed rows and do not resend successful rows on ret
   expect(await page.locator('[name=email]').count()).toBe(1);
   expect(await page.locator('[name=email]').inputValue()).toBe('retry@example.test');
   expect(await page.locator('[name=email]').getAttribute('aria-invalid')).toBe('true');
+  await page.route('**/api/auth/organization/list-invitations?*', route => route.fulfill({ json: [{ ...invitation, email: 'retry@example.test' }] }));
   await button.click();
   await requests.settle({});
   await page.locator('#invite-dialog').waitFor({ state: 'hidden' });
+  await page.locator('#invitation-list').getByText('retry@example.test', { exact: true }).waitFor();
   expect(requests.bodies.map(body => body.email)).toEqual(['sent@example.test', 'retry@example.test', 'retry@example.test']);
 });
 
@@ -258,7 +326,7 @@ it.each([
   { name: 'first organization', path: '/organizations', form: 'organization', endpoint: '/api/auth/organization/create', result: { id: 'org-a' }, destination: `${base}/onboarding` },
   { name: 'organization creation', path: '/organizations?choose=1', form: 'organization', endpoint: '/api/auth/organization/create', result: { id: 'org-a' }, destination: base },
   { name: 'onboarding project', path: `${base}/onboarding`, form: 'project', endpoint: '/api/rendro/projects', result: { project }, destination: `${base}/onboarding?projectId=project-a` },
-])('$name resets before successful navigation and supports a later second submission', async spec => {
+])('$name stays completed during delayed navigation and supports a fresh submission', async spec => {
   const page = await open(spec.path, spec.name === 'first organization');
   const requests = await writes(page, spec.endpoint);
   for (let round = 0; round < 2; round++) {
@@ -266,12 +334,6 @@ it.each([
     if (spec.name === 'organization creation') await page.locator('#show-create').click();
     await fill(page, spec.form, { name: `Docs ${round}` });
     const button = page.locator(`#${spec.form}-form button[type=submit]`);
-    await page.evaluate(formId => {
-      window.addEventListener('beforeunload', () => {
-        const button = document.querySelector(`#${formId}-form button[type=submit]`) as HTMLButtonElement;
-        sessionStorage.setItem('test-departing-button', JSON.stringify({ busy: button.getAttribute('aria-busy'), disabled: button.disabled }));
-      });
-    }, spec.form);
     await button.click();
     await expect.poll(() => requests.bodies.length).toBe(round * 2 + 1);
     await page.keyboard.press('Escape');
@@ -279,10 +341,26 @@ it.each([
     await requests.settle({ message: 'Permission denied' }, 403);
     await expect.poll(() => button.getAttribute('aria-busy')).toBe('false');
     expect(await button.isEnabled()).toBe(true);
+    expect(await page.locator(`#${spec.form}-form [name=name]`).inputValue()).toBe(`Docs ${round}`);
+    expect(await page.locator(`#${spec.form}-form [name=slug]`).inputValue()).toBe(`docs-${round}`);
+    const box = (await button.boundingBox())!;
+    await page.evaluate(formId => {
+      window.addEventListener('beforeunload', () => {
+        const form = document.getElementById(`${formId}-form`) as HTMLFormElement;
+        const button = form.querySelector('button[type=submit]') as HTMLButtonElement;
+        sessionStorage.setItem('completed-controls', JSON.stringify([{ disabled: button.disabled, busy: button.getAttribute('aria-busy') }]));
+        // Re-enter after success even though native activation is disabled.
+        form.requestSubmit();
+      }, { once: true });
+    }, spec.form);
+    const destination = holdDocument(page, spec.destination);
     await button.click();
     await requests.settle(spec.result);
-    await page.waitForURL(harness.origin + spec.destination);
-    expect(await page.evaluate(() => JSON.parse(sessionStorage.getItem('test-departing-button')!) as unknown)).toEqual({ busy: 'false', disabled: false });
+    await destination.wait();
+    await browserStep('native click during delayed navigation', () => page.mouse.click(box.x + box.width / 2, box.y + box.height / 2));
+    await browserStep('release destination', () => destination.release());
+    expect(await page.evaluate(() => JSON.parse(sessionStorage.getItem('completed-controls')!) as unknown)).toEqual([{ disabled: true, busy: 'true' }]);
+    expect(requests.bodies).toHaveLength(round * 2 + 2);
   }
   expect(requests.bodies).toHaveLength(4);
 });
@@ -335,10 +413,11 @@ it('private share creation can repeat after success and denial without retaining
   await expect.poll(() => button.getAttribute('aria-label')).toBe('Share document');
 });
 
-it.each(['accept', 'reject'])('invitation %s resets both response controls before navigation and remains retryable', async action => {
+it.each(['accept', 'reject'])('invitation %s locks both response controls during delayed navigation and remains retryable', async action => {
   const path = '/accept-invitation/invitation-a';
   const page = await open(path);
   const requests = await writes(page, `/api/auth/organization/${action}-invitation`);
+  const otherResponse = await writes(page, `/api/auth/organization/${action === 'accept' ? 'reject' : 'accept'}-invitation`);
   for (let round = 0; round < 2; round++) {
     if (round) await page.goto(harness.origin + path);
     const button = page.locator(`#${action}`);
@@ -347,14 +426,25 @@ it.each(['accept', 'reject'])('invitation %s resets both response controls befor
     await expect.poll(() => button.getAttribute('aria-busy')).toBe('false');
     expect(await page.locator('#accept').isEnabled()).toBe(true);
     expect(await page.locator('#reject').isEnabled()).toBe(true);
-    await page.evaluate(() => window.addEventListener('beforeunload', () => {
-      sessionStorage.setItem('test-response-controls', JSON.stringify(Array.from(document.querySelectorAll('.invitation-actions button')).map(button => ({ busy: button.getAttribute('aria-busy'), disabled: (button as HTMLButtonElement).disabled }))));
-    }));
+    const boxes = await Promise.all(['#accept', '#reject'].map(selector => page.locator(selector).boundingBox()));
+    await page.evaluate(() => {
+      window.addEventListener('beforeunload', () => {
+        const controls = Array.from(document.querySelectorAll<HTMLButtonElement>('.invitation-actions button'));
+        sessionStorage.setItem('completed-controls', JSON.stringify(controls.map(button => ({ disabled: button.disabled, busy: button.getAttribute('aria-busy') }))));
+        controls.forEach(button => button.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+      }, { once: true });
+    });
+    const destination = holdDocument(page, action === 'accept' ? base : '/organizations');
     await button.click();
     await requests.settle({ member: { organizationId: 'org-a' } });
-    await page.waitForURL(harness.origin + base);
-    const controls = await page.evaluate(() => JSON.parse(sessionStorage.getItem('test-response-controls')!) as { busy: string; disabled: boolean }[]);
-    expect(controls.every(button => button.busy !== 'true' && !button.disabled)).toBe(true);
+    await destination.wait();
+    for (const box of boxes) await browserStep('native response click during delayed navigation', () => page.mouse.click(box!.x + box!.width / 2, box!.y + box!.height / 2));
+    await browserStep('release destination', () => destination.release());
+    const controls = await page.evaluate(() => JSON.parse(sessionStorage.getItem('completed-controls')!) as { disabled: boolean; busy: string | null }[]);
+    expect(controls.every(button => button.disabled)).toBe(true);
+    expect(controls.filter(button => button.busy === 'true')).toHaveLength(1);
+    expect(otherResponse.bodies).toHaveLength(0);
+    expect(requests.bodies).toHaveLength(round * 2 + 2);
   }
   expect(requests.bodies).toHaveLength(4);
 });

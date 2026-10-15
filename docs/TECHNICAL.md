@@ -132,14 +132,17 @@ and Escape cannot dismiss it until the request settles. Enhanced navigation is
 also blocked. Success and failure release the submit control before the dialog
 is reused; page-scope disposal releases any remaining busy controls and aborts
 requests, and inactive controllers cannot apply late results. Organization and
-first-project creation, plus invitation acceptance/decline, release controls
-before their full-document success navigation as well.
+first-project creation, plus invitation acceptance/decline, keep controls disabled
+and retain a logical submission guard after success until a fresh form is initialized.
+A delayed destination document cannot allow duplicate writes; denial restores retry.
 
 The People form and Add another person action each bind one handler
 for the lifetime of the persistent dialog. Reloading the invitation list must not accumulate
 listeners. Successful invitation rows are removed; partial failures retain only
 failed rows for retry. An entirely successful batch releases Send invitations
-before closing and refreshing the list.
+and synchronously initializes one empty row before closing and refreshing the list.
+List rendering never resets an initialized form, so reopening and editing while
+a refresh is pending preserves the new draft.
 
 The dialog audit for #133 covers project, team, publication and API-key creation,
 the separate one-time-key reveal, and the shared destructive confirmation.
@@ -148,7 +151,8 @@ Settings, organization creation, first-project/credential onboarding and
 invitation responses are inline forms; document sharing is a toolbar action,
 not a management dialog. Sharing already clears its pending guard in `finally`.
 `tests/management-dialog-reuse-browser.test.ts` exercises these real controllers
-in isolated Chromium with held success/denial responses, repeated submission,
+in isolated Chromium with held success/denial responses, invitation-list refreshes,
+and destination documents, repeated submission,
 pending Cancel/Escape where a dialog exists, and scope teardown. This uses local
 fixtures only; it does not send invitations or create credentials on a deployment.
 

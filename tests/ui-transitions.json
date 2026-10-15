@@ -4385,7 +4385,7 @@
           "tests": [
             {
               "file": "tests/management-dialog-reuse-browser.test.ts",
-              "name": "$name resets before successful navigation and supports a later second submission",
+              "name": "$name stays completed during delayed navigation and supports a fresh submission",
               "kind": "browser"
             }
           ]
@@ -4402,7 +4402,7 @@
           "tests": [
             {
               "file": "tests/management-dialog-reuse-browser.test.ts",
-              "name": "$name resets before successful navigation and supports a later second submission",
+              "name": "$name stays completed during delayed navigation and supports a fresh submission",
               "kind": "browser"
             }
           ]
@@ -4419,7 +4419,7 @@
           "tests": [
             {
               "file": "tests/management-dialog-reuse-browser.test.ts",
-              "name": "$name resets before successful navigation and supports a later second submission",
+              "name": "$name stays completed during delayed navigation and supports a fresh submission",
               "kind": "browser"
             }
           ]
@@ -4428,7 +4428,7 @@
           "id": "UI-031-E07",
           "from": "Form ready",
           "trigger": "Submit, settle, and reuse",
-          "expected": "Organization creation resets busy state before navigating; returning supports another submission.",
+          "expected": "Organization creation stays disabled after success while the destination loads and ignores duplicate submissions; a fresh form supports another submission.",
           "inventoryRefs": [
             "UI-031"
           ],
@@ -4436,7 +4436,7 @@
           "tests": [
             {
               "file": "tests/management-dialog-reuse-browser.test.ts",
-              "name": "$name resets before successful navigation and supports a later second submission",
+              "name": "$name stays completed during delayed navigation and supports a fresh submission",
               "kind": "browser"
             }
           ]
@@ -6243,6 +6243,11 @@
               "file": "tests/management-dialog-reuse-browser.test.ts",
               "name": "invitations retain only failed rows and do not resend successful rows on retry",
               "kind": "browser"
+            },
+            {
+              "file": "tests/management-dialog-reuse-browser.test.ts",
+              "name": "invitations reset before refresh and preserve a reopened draft when the held list arrives",
+              "kind": "browser"
             }
           ]
         },
@@ -6631,7 +6636,7 @@
           "id": "UI-052-E09",
           "from": "Form ready",
           "trigger": "Submit, settle, and reuse",
-          "expected": "Invitation acceptance and decline restore both controls after denial and before successful document navigation; returning permits another response.",
+          "expected": "Invitation acceptance and decline restore both controls after denial, keep both disabled after success while the destination loads, and ignore duplicate responses; a fresh page permits another response.",
           "inventoryRefs": [
             "UI-052"
           ],
@@ -6639,7 +6644,7 @@
           "tests": [
             {
               "file": "tests/management-dialog-reuse-browser.test.ts",
-              "name": "invitation %s resets both response controls before navigation and remains retryable",
+              "name": "invitation %s locks both response controls during delayed navigation and remains retryable",
               "kind": "browser"
             }
           ]
@@ -6693,7 +6698,7 @@
           "id": "UI-053-E02",
           "from": "Form ready",
           "trigger": "Submit, settle, and reuse",
-          "expected": "Invitation acceptance and decline restore both controls after denial and before successful document navigation; returning permits another response.",
+          "expected": "Invitation acceptance and decline restore both controls after denial, keep both disabled after success while the destination loads, and ignore duplicate responses; a fresh page permits another response.",
           "inventoryRefs": [
             "UI-053"
           ],
@@ -6701,7 +6706,7 @@
           "tests": [
             {
               "file": "tests/management-dialog-reuse-browser.test.ts",
-              "name": "invitation %s resets both response controls before navigation and remains retryable",
+              "name": "invitation %s locks both response controls during delayed navigation and remains retryable",
               "kind": "browser"
             }
           ]
@@ -8347,7 +8352,7 @@
           "tests": [
             {
               "file": "tests/management-dialog-reuse-browser.test.ts",
-              "name": "$name resets before successful navigation and supports a later second submission",
+              "name": "$name stays completed during delayed navigation and supports a fresh submission",
               "kind": "browser"
             }
           ]
@@ -8375,7 +8380,7 @@
           "tests": [
             {
               "file": "tests/management-dialog-reuse-browser.test.ts",
-              "name": "$name resets before successful navigation and supports a later second submission",
+              "name": "$name stays completed during delayed navigation and supports a fresh submission",
               "kind": "browser"
             }
           ]
@@ -8395,7 +8400,7 @@
           "id": "UI-071-E07",
           "from": "Form ready",
           "trigger": "Submit, settle, and reuse",
-          "expected": "First-project creation resets busy state before navigating to credential setup; returning supports another submission.",
+          "expected": "First-project creation retains the exact draft after denial and stays disabled after success while credential setup loads; a fresh form supports another submission.",
           "inventoryRefs": [
             "UI-071"
           ],
@@ -8403,7 +8408,7 @@
           "tests": [
             {
               "file": "tests/management-dialog-reuse-browser.test.ts",
-              "name": "$name resets before successful navigation and supports a later second submission",
+              "name": "$name stays completed during delayed navigation and supports a fresh submission",
               "kind": "browser"
             }
           ]
