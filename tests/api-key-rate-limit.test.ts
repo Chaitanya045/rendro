@@ -1,3 +1,5 @@
+import { commitProof } from "./helpers/storage-proof";
+import { STORAGE_ATTESTATION_HEADER } from "../shared/storage-attestation";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { convexTest } from "convex-test";
 import rateLimiterTest from "./convex-rate-limiter";
@@ -224,7 +226,7 @@ describe("authoritative API-key rate limits", () => {
         expect((await t.fetch(stagingPath, { headers })).status).toBe(200);
       }
       expect((await t.fetch("/api/rendro/deployments/commit", {
-        method: "POST", headers, body: JSON.stringify(deploymentIdentity),
+        method: "POST", headers: { ...headers, [STORAGE_ATTESTATION_HEADER]: (await commitProof(t, deploymentIdentity))! }, body: JSON.stringify(deploymentIdentity),
       })).status).toBe(200);
     }
   }, 120_000);

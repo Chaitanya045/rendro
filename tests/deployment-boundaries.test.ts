@@ -1,3 +1,4 @@
+import { commitWithProof } from "./helpers/storage-proof";
 import { describe, expect, it } from "vitest";
 import { convexTest } from "convex-test";
 import { internal } from "../convex/_generated/api";
@@ -94,7 +95,7 @@ describe("deployment tenant and project boundaries", () => {
     const backend = convexTest(schema, modules);
     const ownedProject = await project(backend, "org-a", "committed");
     const deployment = await staging(backend, "org-a", ownedProject._id);
-    await backend.mutation(internal.deployments.commitInternal, {
+    await commitWithProof(backend, {
       organizationId: "org-a",
       projectId: ownedProject._id,
       deploymentId: deployment.deploymentId,

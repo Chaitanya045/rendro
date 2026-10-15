@@ -1,3 +1,4 @@
+import { verifyStorageValidation } from "../shared/storage-attestation";
 import { isOrganizationDeleted, requireActiveOrganization } from "./organizationLifecycle";
 import { sanitizeProvenance } from "../shared/provenance";
 import { requireId } from "./ids";
@@ -129,6 +130,7 @@ export const commitInternal = internalMutation({
     projectId: v.string(),
     deploymentId: v.string(),
     actorId: v.string(),
+    attestation: v.optional(v.string()),
   },
   handler: async (ctx, input) => {
     await requireActiveOrganization(ctx, input.organizationId);
@@ -152,6 +154,11 @@ export const commitInternal = internalMutation({
     }
     if (project.activeDeploymentId !== deployment.previousDeploymentId) {
       throw new ConvexError("Active deployment changed; rebase and retry");
+    }
+    if (!await verifyStorageValidation({
+      purpose: "deployment-commit", ...deployment, deploymentId: deployment._id,
+    }, args.attestation, process.env.CONVEX_INTERNAL_SECRET)) {
+      throw new ConvexError("Worker storage validation is required");
     }
     const activatedAt = Date.now();
     if (project.activeDeploymentId) {

@@ -1,3 +1,4 @@
+import { commitWithProof } from "./helpers/storage-proof";
 import rateLimiterTest from "./convex-rate-limiter";
 import { spawn, type ChildProcess } from "node:child_process";
 import { createServer, get, request as httpRequest } from "node:http";
@@ -83,7 +84,7 @@ beforeAll(async () => {
   const deployment = await backend.mutation(internal.deployments.startInternal, {
     organizationId, projectId, actorId: user._id, manifestSha256: "a".repeat(64), fileCount: 1, byteCount: 100, provenance: { source: { kind: "local" }, execution: { kind: "local" }, cliVersion: "test", manifestSha256: "a".repeat(64) },
   });
-  await backend.mutation(internal.deployments.commitInternal, { organizationId, projectId, deploymentId: deployment.deploymentId, actorId: user._id });
+  await commitWithProof(backend, { organizationId, projectId, deploymentId: deployment.deploymentId, actorId: user._id });
   const document = "<!doctype html><html><head><title>Stack guide</title></head><body><h1>Local stack document loaded</h1></body></html>";
   objects.set(`/mock-storage/docs/${deployment.manifestKey}`, JSON.stringify({ version: 1, files: [{ path: "index.html", contentType: "text/html", sha256: "b".repeat(64), size: document.length }] }));
   objects.set(`/mock-storage/docs/${deployment.objectRoot}/files/index.html`, document);

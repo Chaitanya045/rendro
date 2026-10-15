@@ -1,3 +1,4 @@
+import { commitWithProof, publishWithProof } from "./helpers/storage-proof";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { convexTest } from "convex-test";
 import rateLimiterTest from "./convex-rate-limiter";
@@ -27,8 +28,8 @@ async function fixture(inputProvenance = provenance) {
   const project = (await t.mutation(internal.projects.createInternal, { organizationId: "private-org", name: "Docs", slug: "private-project", actorId: "private-creator" }))!;
   const scope = { organizationId: project.organizationId, projectId: project._id };
   const deployment = await t.mutation(internal.deployments.startInternal, { ...scope, manifestSha256: "manifest-sha", fileCount: 1, byteCount: 1, provenance: inputProvenance, actorId: "private-actor" });
-  await t.mutation(internal.deployments.commitInternal, { ...scope, deploymentId: deployment.deploymentId, actorId: "private-actor" });
-  const publication = (await t.mutation(internal.publicationsV2.createInternal, { ...scope, slug: "docs", entryFile: "index.html", pathPrefix: "private-prefix", trackingMode: "track_active", title: "Public docs", description: "private-description", actorId: "private-creator" }))!;
+  await commitWithProof(t, { ...scope, deploymentId: deployment.deploymentId, actorId: "private-actor" });
+  const publication = (await publishWithProof(t, { ...scope, slug: "docs", entryFile: "index.html", pathPrefix: "private-prefix", trackingMode: "track_active", title: "Public docs", description: "private-description", actorId: "private-creator" }))!;
   const grant = (await t.mutation(internal.shareGrants.createInternal, { ...scope, tokenHash: await sha256("synthetic-share-token"), documentPath: "index.html", expiresAt: Date.now() + 600_000, actorId: "private-creator" }))!;
   const publicPublication = { publication: { slug: "docs", entryFile: "index.html", title: "Public docs" } };
   const publicShare = { grant: { documentPath: "index.html", expiresAt: grant.expiresAt }, project: { name: "Docs" } };
@@ -185,7 +186,7 @@ describe("minimal publication/share resolver responses", () => {
     const f = await fixture();
     const publication = { ...f.scope, slug: "new-docs", pathPrefix: "", entryFile: "index.html", trackingMode: "track_active" as const, actorId: "owner" };
     for (const input of [{ ...publication, organizationId: "outsider" }, { ...publication, slug: "INVALID!" }, { ...publication, slug: "docs" }, { ...publication, trackingMode: "pinned" as const }]) {
-      await expect(f.t.mutation(internal.publicationsV2.createInternal, input)).rejects.toThrow();
+      await expect(publishWithProof(f.t, input)).rejects.toThrow();
     }
     expect(await f.t.query(internal.publicationsV2.listInternal, { organizationId: f.scope.organizationId })).toHaveLength(1);
     const grant = { ...f.scope, tokenHash: "new-hash", documentPath: "index.html", expiresAt: Date.now() + 60_000, actorId: "owner" };
@@ -200,13 +201,13 @@ describe("minimal publication/share resolver responses", () => {
     const input = { ...f.scope, manifestSha256: "sha", fileCount: -1, byteCount: 0, provenance, actorId: "owner" };
     await expect(f.t.mutation(internal.deployments.startInternal, input)).rejects.toThrow("non-negative");
     const commit = { ...f.scope, deploymentId: f.deployment.deploymentId, actorId: "owner" };
-    await expect(f.t.mutation(internal.deployments.commitInternal, { ...commit, organizationId: "outsider" })).rejects.toThrow("Project not found");
-    await expect(f.t.mutation(internal.deployments.commitInternal, commit)).rejects.toThrow("staging");
+    await expect(commitWithProof(f.t, { ...commit, organizationId: "outsider" })).rejects.toThrow("Project not found");
+    await expect(commitWithProof(f.t, commit)).rejects.toThrow("staging");
     const sibling = (await f.t.mutation(internal.projects.createInternal, { organizationId: f.scope.organizationId, name: "Sibling", slug: "sibling", actorId: "owner" }))!;
-    await expect(f.t.mutation(internal.deployments.commitInternal, { ...commit, projectId: sibling._id })).rejects.toThrow("Deployment not found");
+    await expect(commitWithProof(f.t, { ...commit, projectId: sibling._id })).rejects.toThrow("Deployment not found");
     const next = await f.t.mutation(internal.deployments.startInternal, { ...input, fileCount: 0 });
     await f.t.run(ctx => ctx.db.patch(f.deployment.deploymentId, { status: "superseded" }));
-    expect(await f.t.mutation(internal.deployments.commitInternal, { ...commit, deploymentId: next.deploymentId })).toHaveProperty("deploymentId", next.deploymentId);
+    expect(await commitWithProof(f.t, { ...commit, deploymentId: next.deploymentId })).toHaveProperty("deploymentId", next.deploymentId);
     await f.t.run(ctx => ctx.db.delete(f.scope.projectId));
     expect(await f.t.query(internal.deployments.latestForOrganization, { organizationId: f.scope.organizationId })).toBeNull();
   });

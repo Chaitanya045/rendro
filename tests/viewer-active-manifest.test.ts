@@ -1,3 +1,4 @@
+import { commitWithProof } from "./helpers/storage-proof";
 import { describe, expect, it } from "vitest";
 import { api, components, internal } from "../convex/_generated/api";
 import { publicErrorMessages } from "../src/shared/public-errors";
@@ -11,7 +12,7 @@ async function deployedFixture() {
       ...args, actorId: f.data.users[0].userId, manifestSha256: "hash", fileCount: 1, byteCount: 1,
       provenance: { source: { kind: "local" }, execution: { kind: "local" }, cliVersion: "test", manifestSha256: "hash" },
     });
-    await f.backend.mutation(internal.deployments.commitInternal, {
+    await commitWithProof(f.backend, {
       ...args, deploymentId: deployment.deploymentId, actorId: f.data.users[0].userId,
     });
     return deployment.deploymentId;

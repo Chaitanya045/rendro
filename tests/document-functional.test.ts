@@ -1,3 +1,4 @@
+import { commitWithProof } from "./helpers/storage-proof";
 import { describe, expect, it, vi } from "vitest";
 import { convexTest } from "convex-test";
 import { api, components, internal } from "../convex/_generated/api";
@@ -185,14 +186,14 @@ describe("deployment workflow", () => {
     const first = await backend.mutation(internal.deployments.startInternal, {
       organizationId: "org-functional", projectId: project._id, manifestSha256: "first", fileCount: 1, byteCount: 10, provenance, actorId: "qa",
     });
-    await backend.mutation(internal.deployments.commitInternal, {
+    await commitWithProof(backend, {
       organizationId: "org-functional", projectId: project._id, deploymentId: first.deploymentId, actorId: "qa",
     });
     const second = await backend.mutation(internal.deployments.startInternal, {
       organizationId: "org-functional", projectId: project._id, manifestSha256: "second", fileCount: 2, byteCount: 20,
       provenance: { ...provenance, manifestSha256: "second" }, actorId: "qa",
     });
-    await backend.mutation(internal.deployments.commitInternal, {
+    await commitWithProof(backend, {
       organizationId: "org-functional", projectId: project._id, deploymentId: second.deploymentId, actorId: "qa",
     });
     const deployments = await backend.query(internal.deployments.listInternal, {

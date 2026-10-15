@@ -1,3 +1,5 @@
+import { STORAGE_ATTESTATION_HEADER } from "../../shared/storage-attestation";
+import { commitWithProof, publishWithProof, publicationProof } from "./storage-proof";
 import { createHmac } from "node:crypto";
 import { convexTest } from "convex-test";
 import schema from "../../convex/schema";
@@ -34,12 +36,12 @@ export async function cookieWriteFixture() {
     organizationId, projectId, manifestSha256: "a".repeat(64), fileCount: 1, byteCount: 1, actorId: user._id,
     provenance: { source: { kind: "local" }, execution: { kind: "local" }, cliVersion: "test", manifestSha256: "a".repeat(64) },
   });
-  await backend.mutation(internal.deployments.commitInternal, { organizationId, projectId, deploymentId: deployment.deploymentId, actorId: user._id });
+  await commitWithProof(backend, { organizationId, projectId, deploymentId: deployment.deploymentId, actorId: user._id });
   await backend.mutation(internal.apiKeyCredentials.createInternal, {
     organizationId, keyId: "key", keyPrefix: "test", name: "test", secretHash: await sha256("valid-key"), actorId: user._id,
     scopes: ["docs:read", "docs:write", "publications:read", "publications:write"],
   });
-  const publication = await backend.mutation(internal.publicationsV2.createInternal, {
+  const publication = await publishWithProof(backend, {
     organizationId, projectId, slug: "existing", pathPrefix: "", entryFile: "index.html", trackingMode: "track_active", actorId: user._id,
   });
   const grant = await backend.mutation(internal.shareGrants.createInternal, {
@@ -55,8 +57,9 @@ export async function cookieWriteFixture() {
     "/api/rendro/publications/remove": { organizationId, projectId, publicationId: publication!._id },
     "/api/auth/set-initial-password": { newPassword: "local-test-initial-password" },
   };
+  const proof = await publicationProof(backend, { organizationId, projectId, pathPrefix: "", entryFile: "index.html", trackingMode: "track_active" });
   const post = (path: string, overrides: Record<string, string> = {}) => backend.fetch(path, {
-    method: "POST", headers: admissionHeaders({ cookie, ...overrides }), body: JSON.stringify(bodies[path]),
+    method: "POST", headers: admissionHeaders({ cookie, [STORAGE_ATTESTATION_HEADER]: proof!, ...overrides }), body: JSON.stringify(bodies[path]),
   });
   return { backend, post, bodies, session, user, cookie, organizationId, projectId };
 }

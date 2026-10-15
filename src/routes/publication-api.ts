@@ -1,14 +1,15 @@
 import { Hono } from "hono";
 import { authClientIpHeaders } from "@/auth-client-ip";
 import { backendFetch } from "@/backend-fetch";
-import { CONVEX_SITE_URL } from "@/config";
+import { signStorageValidation, STORAGE_ATTESTATION_HEADER } from "../../shared/storage-attestation";
+import { CONVEX_INTERNAL_SECRET, CONVEX_SITE_URL } from "@/config";
 import { getObjectText } from "@/minio";
 import { parseStoredManifest, type StoredManifest } from "@/stored-manifest";
 import { cleanPublicationPath } from "../../shared/v2-paths";
 
 const app = new Hono();
 
-type Deployment = { _id: string; manifestKey: string; status: string };
+type Deployment = { _id: string; manifestKey: string; manifestSha256: string; fileCount: number; status: string };
 
 function forwardedHeaders(request: Request): Headers {
   const headers = new Headers({ Accept: "application/json" });
@@ -19,9 +20,10 @@ function forwardedHeaders(request: Request): Headers {
   return headers;
 }
 
-async function backend(path: string, request: Request, method = "GET", body?: string): Promise<Response> {
+async function backend(path: string, request: Request, method = "GET", body?: string, attestation?: string): Promise<Response> {
   const target = `${CONVEX_SITE_URL}${path}`;
   const headers = forwardedHeaders(request);
+  if (attestation) headers.set(STORAGE_ATTESTATION_HEADER, attestation);
   (await authClientIpHeaders(request, target, method)).forEach((value, name) => headers.set(name, value));
   return backendFetch(target, {
     method,
@@ -72,7 +74,12 @@ app.post("/api/rendro/publications", async (c) => {
   if (!manifest?.files.some((file) => file.path === fullEntry && file.contentType.startsWith("text/html"))) {
     return c.json({ error: "Publication entry file is not present in the selected deployment path" }, 400);
   }
-  return backend("/api/rendro/publications", c.req.raw, "POST", JSON.stringify(body));
+  const attestation = await signStorageValidation({
+    purpose: "publication-entry", organizationId, projectId, deploymentId: deployment._id,
+    manifestKey: deployment.manifestKey, manifestSha256: deployment.manifestSha256, fileCount: deployment.fileCount,
+    pathPrefix, entryFile, trackingMode: trackingMode === "pinned" ? "pinned" : "track_active",
+  }, CONVEX_INTERNAL_SECRET);
+  return backend("/api/rendro/publications", c.req.raw, "POST", JSON.stringify(body), attestation);
 });
 
 // Keep the CLI credential on all publication operations, not only creation.
