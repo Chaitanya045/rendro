@@ -82,7 +82,7 @@ try {
   }, { status: 201 });
 } catch (error: unknown) {
   return failure(error, 403, "createCredential");
-} });
+} }, "cookie-json");
 
 export const listCredentials = httpAction(async (ctx: GenericActionCtx<DataModel>, request: Request) => { const organizationId = new URL(request.url).searchParams.get("organizationId");
 if (!organizationId) return clientFailure("organizationId is required");
@@ -117,7 +117,7 @@ try {
   return Response.json({ status: true });
 } catch (error: unknown) {
   return failure(error, 403, "revokeCredential");
-} });
+} }, "cookie-json");
 
 export async function validateApiCredential(
   ctx: GenericActionCtx<DataModel>,

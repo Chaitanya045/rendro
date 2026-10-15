@@ -94,7 +94,7 @@ describe("HTTP ID boundaries", () => {
     for (const field of route.fields) {
       for (const badId of ["not-an-id", "", f.wrongTableId]) {
         for (const principal of ["key", "session", "invalid", "fallback"] as const) {
-          const headers = new Headers({ "Content-Type": "application/json" });
+          const headers = new Headers({ origin: process.env.SITE_URL!, "Content-Type": "application/json" });
           headers.set("authorization", `Bearer ${principal === "key" ? "valid-key" : "invalid-key"}`);
           if (principal === "session" || principal === "fallback") headers.set("cookie", "session=valid");
           if (principal === "session") headers.delete("authorization");

@@ -12,7 +12,7 @@ describe("management team roster", () => {
   it("keeps duplicate-project errors readable without backend stack traces", async () => {
     mocks.authorize.mockResolvedValue({ user: { _id: "user-a" } });
     const create = (createProject as unknown as { _handler: (ctx: unknown, request: Request) => Promise<Response> })._handler;
-    const response = await create({ runMutation: vi.fn().mockRejectedValue(Object.assign(new ConvexError("A project with this slug already exists"), { message: "Uncaught ConvexError: A project with this slug already exists\n    at handler (../convex/projects.ts:49:54)" })) }, new Request("https://rendro.test/api/rendro/projects", { method: "POST", body: JSON.stringify({ organizationId: "org-a", name: "Docs", slug: "docs" }) }));
+    const response = await create({ runMutation: vi.fn().mockRejectedValue(Object.assign(new ConvexError("A project with this slug already exists"), { message: "Uncaught ConvexError: A project with this slug already exists\n    at handler (../convex/projects.ts:49:54)" })) }, new Request("https://rendro.test/api/rendro/projects", { method: "POST", headers: { origin: process.env.SITE_URL!, "content-type": "application/json" }, body: JSON.stringify({ organizationId: "org-a", name: "Docs", slug: "docs" }) }));
     expect(response.status).toBe(400);
     expect(await response.json()).toEqual({ error: "A project with this slug already exists" });
   });

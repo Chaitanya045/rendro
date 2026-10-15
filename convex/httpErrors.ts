@@ -1,3 +1,4 @@
+import { requireCookieWrite, RequestAdmissionError, httpActionPolicies, type HttpPolicy } from "../shared/request-admission";
 import { isPublicErrorData, type PublicErrorData } from "../src/shared/public-errors";
 import { ConvexError } from "convex/values";
 import { httpAction as registerHttpAction } from "./_generated/server";
@@ -20,6 +21,7 @@ export function isApplicationError(error: unknown): error is ConvexError<string 
 // ConvexError is the explicit application-error contract across function calls.
 // The supplied status applies ONLY to those errors, never infrastructure faults.
 export function failure(error: unknown, applicationStatus = 400, operation = "httpAction"): Response {
+  if (error instanceof RequestAdmissionError) return clientFailure(error.message, error.status);
   if (error instanceof RateLimitedError) {
     return Response.json({ error: "Rate limit exceeded", code: "rate_limited" }, {
       status: 429,
@@ -48,11 +50,16 @@ export function failure(error: unknown, applicationStatus = 400, operation = "ht
   return Response.json({ error: "Request failed" }, { status: 500 });
 }
 
-export const httpAction = (handler: Parameters<typeof registerHttpAction>[0]) =>
-  registerHttpAction(async (ctx, request) => {
+export const httpAction = (handler: Parameters<typeof registerHttpAction>[0], policy: HttpPolicy = "read") => {
+  const action = registerHttpAction(async (ctx, request) => {
     try {
+      if (policy === "cookie-json") requireCookieWrite(request, process.env.SITE_URL);
       return await handler(ctx, request);
     } catch (error) {
       return failure(error, 500);
     }
   });
+
+  httpActionPolicies.set(action, policy);
+  return action;
+};

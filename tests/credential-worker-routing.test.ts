@@ -156,7 +156,7 @@ describe("API-key requests through the production Worker router", () => {
       return Promise.resolve(Response.json({ ok: true }));
     });
     expect((await worker.request(`https://rendro.test${route}`, {
-      method, headers: { authorization: `Bearer ${f.key}`, cookie: "session=test" },
+      method, headers: { origin: process.env.SITE_URL!, "content-type": "application/json", authorization: `Bearer ${f.key}`, cookie: "session=test" },
     })).status).toBe(200);
     expect(fetch).toHaveBeenCalledOnce();
   });

@@ -123,14 +123,24 @@ The fast burst regression runs the production fixed-window reducer for **two use
 
 Release requires a **Convex deploy** for the auth options/plugin and component mutation/cleanup, plus the Worker/client asset release. No schema migration is needed.
 
+### Cookie-authenticated write admission
+
+Custom Convex HTTP writes declare their admission policy at registration. The shared `shared/request-admission.ts` helper requires an exact match to the origin of Better Auth's configured `SITE_URL`, rejects absent/opaque/foreign origins and `Sec-Fetch-Site: cross-site`, and requires `application/json` for JSON bodies (charset parameters are allowed). Origin checks never replace persisted session, membership, role, or scope authorization. Initial-password setup additionally reads the persisted session and checks its creation time against Better Auth's `sessionConfig.freshAge` (24 hours by default); stale sessions must sign in again.
+
+Scoped bearer-key and operator-secret actions do not use cookie authority and are exempt. Mixed publication actions apply cookie admission before any session fallback; merely supplying an Authorization header does not exempt that fallback. The Worker also checks its cookie writes, including legacy organization/publication writes, using `SITE_URL` when set or the trusted ingress URL origin. Bodyless legacy DELETEs require origin checks but no JSON body. Dedicated and generic proxies preserve Origin and Fetch Metadata; publication proxies retain the original content type so rewriting a JSON body cannot grant admission.
+
+Release Worker header forwarding before or alongside the Convex admission checks. No schema migration or management asset version bump is required.
+
+Management controllers and account forms submit JSON to relative application URLs, allowing the browser to supply Origin. Browser regressions cover those mutations and same-site sibling rejection; HTTP tests also cover opaque origins. `tests/request-policy-matrix.test.ts` inventories actual Convex HTTP registrations, Worker mutation registrations, and public state-changing RPCs. Comment RPCs use explicit session JWTs and legacy internal RPCs use an explicit secret; ambient cookies do not authorize them.
+
 ### Workers Proxy Details
 
 `src/auth-proxy.ts` handles four concerns:
 
-1. **Header allowlist**: only `accept`, `content-type`, `cookie`, `origin`, and `user-agent` are forwarded. `Host` and `cf-*` headers are excluded.
+1. **Header allowlist**: only `accept`, `content-type`, `cookie`, `origin`, `sec-fetch-site`, and `user-agent` are forwarded. `Host` and `cf-*` headers are excluded.
 2. **Domain stripping**: Convex sets `Domain=convex.site` on cookies. The Worker strips the Domain attribute so cookies bind to the Worker origin.
 3. **Redirect control**: `redirect: "manual"` leaves redirects to the browser.
-4. **Sign-out**: `GET /api/auth/sign-out` calls Convex sign-out with `POST`, then expires every known auth cookie (host and parent domain) and sends `Clear-Site-Data: "cookies"`.
+4. **Sign-out**: `GET /api/auth/sign-out` shows confirmation; a same-origin `POST` calls Convex sign-out, then expires every known auth cookie (host and parent domain) and sends `Clear-Site-Data: "cookies"`.
 
 The generic `/api/rendro/*` proxy uses the same header allowlist, with an exact GET-path exception for `/api/rendro/credentials/validate`, `/api/rendro/deployments/active`, `/api/rendro/deployments/staging`, and `/api/rendro/deployments`: these forward `Authorization` for scoped API-key validation. Other generic and Better Auth routes remain cookie-only. Dedicated deployment write and publication routes forward `Authorization` explicitly; deployment commits go through the Worker's storage checks. Pass-through requests retain authenticated client-IP forwarding. The dedicated migration project route also forwards its operator bearer secret to the secret-gated Convex action.
 
@@ -241,7 +251,7 @@ Request
   │   └─ /management-query.js, /select.js, /management-pages.js, /commentor-parent.js, /private-viewer.js
   ├─ 7. Session middleware
   ├─ 8. Auth
-  │   ├─ GET /api/auth/sign-out → POST to Convex, cookie cleanup
+  │   ├─ GET /api/auth/sign-out confirms; same-origin POST → Convex, cookie cleanup
   │   └─ /api/auth/* → Convex proxy
   ├─ 9. Worker-implemented API routes (forward Authorization)
   │   ├─ /api/rendro/deployments/check|start|fail, /:id/files/*, /:id/copy, /:id/commit

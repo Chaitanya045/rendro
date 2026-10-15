@@ -11,8 +11,8 @@ const app = new Hono();
 type Deployment = { _id: string; manifestKey: string; status: string };
 
 function forwardedHeaders(request: Request): Headers {
-  const headers = new Headers({ Accept: "application/json", "Content-Type": "application/json" });
-  for (const name of ["authorization", "cookie", "user-agent"]) {
+  const headers = new Headers({ Accept: "application/json" });
+  for (const name of ["authorization", "cookie", "content-type", "origin", "sec-fetch-site", "user-agent"]) {
     const value = request.headers.get(name);
     if (value) headers.set(name, value);
   }

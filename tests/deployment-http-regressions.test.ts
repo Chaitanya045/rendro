@@ -37,11 +37,13 @@ describe("deployment HTTP regression", () => {
 
   it("forwards the scoped CLI credential and exact failure identity to Convex", async () => {
     const body = JSON.stringify({ organizationId: "org", projectId: "project", deploymentId: "staging", reason: "Upload interrupted" });
-    const response = await app.request("/api/rendro/deployments/fail", { method: "POST", headers: { Authorization: "Bearer disposable-test-key", "Content-Type": "application/json" }, body });
+    const response = await app.request("/api/rendro/deployments/fail", { method: "POST", headers: { Authorization: "Bearer disposable-test-key", "Content-Type": "application/json", origin: "https://rendro.test", "sec-fetch-site": "same-origin" }, body });
     expect(response.status).toBe(200);
     const [url, init] = vi.mocked(fetch).mock.calls[0];
     expect(url).toBe("http://127.0.0.1:3211/api/rendro/deployments/fail");
     expect(new Headers(init?.headers).get("authorization")).toBe("Bearer disposable-test-key");
+    expect(new Headers(init?.headers).get("origin")).toBe("https://rendro.test");
+    expect(new Headers(init?.headers).get("sec-fetch-site")).toBe("same-origin");
     expect(init?.body).toBe(body);
     expect(init?.redirect).toBe("manual");
   });

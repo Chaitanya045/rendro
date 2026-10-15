@@ -75,7 +75,7 @@ describe.each(runtimes)("global not-found handler: $name", ({ request }) => {
   });
 
   it("preserves JSON errors from matched API routes", async () => {
-    const response = await request("/api/rendro/publications", { method: "POST", body: "invalid JSON" });
+    const response = await request("/api/rendro/publications", { method: "POST", headers: { origin: process.env.SITE_URL!, "content-type": "application/json" }, body: "invalid JSON" });
     expect(response.status).toBe(400);
     expect(response.headers.get("Content-Type")).toContain("application/json");
     expect(await response.json()).toEqual({ error: "Invalid JSON body" });

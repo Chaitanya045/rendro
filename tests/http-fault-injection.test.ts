@@ -52,7 +52,7 @@ async function invoke(action: HttpAction, init: RequestInit, error: Error, apiKe
   const ctx = { runQuery, runMutation };
   const handler = (action as unknown as { _handler: (ctx: unknown, request: Request) => Promise<Response> })._handler;
   const response = await handler(ctx, new Request(`https://rendro.test/test?${new URLSearchParams({ ...identity, token: secret })}`, {
-    ...init, headers: { "content-type": "application/json", ...(apiKey ? { authorization: `Bearer ${secret}` } : {}) },
+    ...init, headers: { origin: process.env.SITE_URL!, "content-type": "application/json", ...(apiKey ? { authorization: `Bearer ${secret}` } : {}) },
   }));
   return { response, runQuery, runMutation };
 }

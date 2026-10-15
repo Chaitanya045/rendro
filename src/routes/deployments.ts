@@ -49,7 +49,7 @@ async function sha256(bytes: Uint8Array | string): Promise<string> {
 
 function forwardedHeaders(request: Request): Headers {
   const headers = new Headers({ Accept: "application/json" });
-  for (const name of ["authorization", "content-type", "cookie", "user-agent"]) {
+  for (const name of ["authorization", "content-type", "cookie", "origin", "sec-fetch-site", "user-agent"]) {
     const value = request.headers.get(name);
     if (value) headers.set(name, value);
   }
@@ -59,10 +59,10 @@ function forwardedHeaders(request: Request): Headers {
 async function backendRequest(
   path: string,
   request: Request,
-  init: { method?: string; body?: string } = {},
+  init: { method: string; body?: string },
 ): Promise<Response> {
   const target = `${CONVEX_SITE_URL}${path}`;
-  const method = init.method ?? request.method;
+  const method = init.method;
   const headers = forwardedHeaders(request);
   (await authClientIpHeaders(request, target, method)).forEach((value, name) => headers.set(name, value));
   return backendFetch(target, {

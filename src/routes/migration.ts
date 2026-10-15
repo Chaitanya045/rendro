@@ -7,8 +7,10 @@ const app = new Hono();
 // operator secret only to the dedicated, secret-gated migration action.
 app.post("/api/rendro/migration/project", async (c) => {
   const headers = new Headers({ "Content-Type": "application/json" });
-  const authorization = c.req.header("Authorization");
-  if (authorization) headers.set("Authorization", authorization);
+  for (const name of ["authorization", "origin", "sec-fetch-site"]) {
+    const value = c.req.header(name);
+    if (value) headers.set(name, value);
+  }
   return fetch(`${CONVEX_SITE_URL}/api/rendro/migration/project`, {
     method: "POST",
     headers,

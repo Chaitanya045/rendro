@@ -74,7 +74,7 @@ function appendAuthCookieCleanup(headers: Headers, hostname: string) {
 async function proxiedHeaders(request: Request, target: string, method = request.method): Promise<Headers> {
   const source = request.headers;
   const headers = new Headers();
-  for (const name of ["accept", "content-type", "cookie", "origin", "user-agent"]) {
+  for (const name of ["accept", "content-type", "cookie", "origin", "sec-fetch-site", "user-agent"]) {
     const value = source.get(name);
     if (value) headers.set(name, value);
   }
