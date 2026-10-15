@@ -275,7 +275,7 @@
     {
       "id": "R27",
       "surface": "`/docs/:org`, `/docs/:org/:path`",
-      "variants": "Legacy private tree-only or selected doc; domain-bound legacy authorization; migration navigation",
+      "variants": "Legacy private tree-only or selected doc; operator-mapped live membership authorization; migration navigation",
       "sourceNote": "`app.ts:36`, `:46`",
       "routes": [
         "GET /docs/:org",
@@ -323,8 +323,8 @@
     {
       "id": "R32",
       "surface": "`POST /api/orgs` response",
-      "variants": "Still-reachable legacy creation result with one-time key/copy and starter index; invalid/existing/sign-in variants; not the modern onboarding entry point",
-      "sourceNote": "`app.ts:70`, `renderApiKeyPage:980`, `renderInitialIndex:949`",
+      "variants": "Retired endpoint returns 410 JSON with rendro@2 migration guidance; no key or starter document creation",
+      "sourceNote": "src/legacy-access.ts: retiredLegacy",
       "routes": [
         "POST /api/orgs"
       ]
@@ -498,19 +498,19 @@
     },
     {
       "route": "POST /api/sync/upload",
-      "reason": "JSON API or upload/mutation response consumed by controllers/CLI; not a standalone HTML page."
+      "reason": "Retired legacy CLI endpoint; returns 410 JSON migration guidance."
     },
     {
       "route": "GET /api/sync/check",
-      "reason": "JSON API or upload/mutation response consumed by controllers/CLI; not a standalone HTML page."
+      "reason": "Retired legacy CLI endpoint; returns 410 JSON migration guidance."
     },
     {
       "route": "GET /api/sync/list",
-      "reason": "JSON API or upload/mutation response consumed by controllers/CLI; not a standalone HTML page."
+      "reason": "Retired legacy CLI endpoint; returns 410 JSON migration guidance."
     },
     {
       "route": "DELETE /api/sync/delete",
-      "reason": "JSON API or upload/mutation response consumed by controllers/CLI; not a standalone HTML page."
+      "reason": "Retired legacy CLI endpoint; returns 410 JSON migration guidance."
     },
     {
       "route": "GET /api/tree/:org",
@@ -587,6 +587,14 @@
     {
       "route": "GET /api/auth/me",
       "reason": "Node JSON identity endpoint, not an HTML page."
+    },
+    {
+      "route": "DELETE /api/legacy/content",
+      "reason": "Owner/admin soft deletion revokes content and legacy signed shares; JSON response."
+    },
+    {
+      "route": "ALL /api/publications*",
+      "reason": "Rejects retired legacy credentials before publication handling."
     }
   ],
   "testSkips": [
@@ -16648,7 +16656,7 @@
     },
     {
       "id": "UI-157",
-      "title": "Legacy organization creation result and one-time key",
+      "title": "Retired legacy namespace creation",
       "area": "Pages and entry",
       "routes": [
         "POST /api/orgs"
@@ -16674,29 +16682,26 @@
         "firefox",
         "webkit"
       ],
-      "status": "untested",
+      "status": "unit",
       "auditEvidence": "NOT_IN_AUDIT",
-      "auditNote": "Additional family from the modernization inventory/route ledger.",
+      "auditNote": "Self-service creation and one-time key page removed for #84. The endpoint returns 410 JSON.",
       "edges": [
         {
           "id": "UI-157-E01",
-          "from": "Legacy organization creation submitted",
-          "trigger": "Resolve or reject POST /api/orgs",
-          "expected": "Legacy organization creation result and one-time key",
-          "inventoryRefs": [],
-          "status": "untested",
-          "tests": []
-        },
-        {
-          "id": "UI-157-E02",
-          "from": "Legacy organization form submitted",
-          "trigger": "POST /api/orgs succeeds or fails",
-          "expected": "Show one-time key/copy and starter index on success; reject invalid/existing/anonymous requests",
+          "from": "Legacy client",
+          "trigger": "POST /api/orgs",
+          "expected": "410 migration guidance without storage or key persistence",
           "inventoryRefs": [
             "R32"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "unit",
+          "tests": [
+            {
+              "file": "tests/security-headers.test.ts",
+              "name": "retires self-service namespace creation without writing starter HTML or keys",
+              "kind": "unit"
+            }
+          ]
         }
       ]
     },

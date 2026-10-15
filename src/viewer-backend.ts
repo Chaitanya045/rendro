@@ -6,8 +6,8 @@ export class ViewerBackendError extends Error {
   }
 }
 
-/** A failed lookup must never look like an authoritative denial or missing row. */
-export async function viewerBackendJson<T>(url: string, init?: RequestInit): Promise<T | null> {
+/** Null means an HTTP denial; successful lookups must contain an object. */
+export async function viewerBackendJson<T extends object>(url: string, init?: RequestInit): Promise<T | null> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 5_000);
   try {
@@ -25,7 +25,11 @@ export async function viewerBackendJson<T>(url: string, init?: RequestInit): Pro
             : value ? Math.ceil((Date.parse(value) - Date.now()) / 1_000) : 1;
           throw new ViewerBackendError(String(Number.isSafeInteger(seconds) ? Math.max(1, seconds) : 1));
         }
-        return await response.json() as T | null;
+        const data: unknown = await response.json();
+        // All callers expect object envelopes and validate their required fields.
+        // Never confuse malformed success with the denial sentinel above.
+        if (data === null || typeof data !== "object" || Array.isArray(data)) throw new ViewerBackendError();
+        return data as T;
       })(),
       // Include stalled response bodies even when the transport ignores abort.
       new Promise<never>((_resolve, reject) => {

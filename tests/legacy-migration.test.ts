@@ -18,7 +18,7 @@ import legacyPublicRoutes from "../src/routes/public";
 import publicRoutes from "../src/routes/public-v2";
 
 const confirmedApply = ["--apply", "--confirm-endpoint", "https://worker.test"];
-const target = { legacyOrgSlug: "old-org", organizationId: "org", apiKey: "scoped-key", legacyApiKey: "legacy-key" };
+const target = { legacyOrgSlug: "old-org", organizationId: "org", apiKey: "scoped-key", legacySessionCookie: "better-auth.session_token=legacy-session" };
 const initialFixtures = [
   ["old-org/docs/a-last.html", "<h1>Last</h1>"],
   ["old-org/docs/Z file.html", "<h1>First</h1>"],
@@ -90,7 +90,7 @@ beforeEach(async () => {
     const url = new URL(input instanceof Request ? input.url : String(input));
     if (url.origin === "https://worker.test") {
       if (url.pathname === "/api/publications") {
-        expect(new Headers(init?.headers).get("Authorization")).toBe("Bearer legacy-key");
+        expect(new Headers(init?.headers).get("Cookie")).toBe("better-auth.session_token=legacy-session");
         return Response.json({ publications: legacyPublications });
       }
       if (failure === "upload" && init?.method === "PUT") return new Response("Upload unavailable", { status: 503 });
@@ -99,6 +99,7 @@ beforeEach(async () => {
     if (url.origin === "http://127.0.0.1:3210") {
       const body = JSON.parse(init?.body as string) as { path: string; args: Array<{ internalSecret: string; fileKey: string; keys: string[] }> };
       expect(body.args[0].internalSecret).toBe("test-convex-internal-secret-32-chars");
+      if (body.path === "legacyAccess:resolve") return Response.json({ status: "success", value: "org" });
       if (body.path === "deletedFiles:isDeleted") return Response.json({ status: "success", value: deleted.has(body.args[0].fileKey) });
       expect(body.path).toBe("deletedFiles:filterFn");
       if (visibilityFailure === "unavailable") return Response.json({ status: "error" }, { status: 503 });
@@ -424,7 +425,7 @@ describe("legacy migration with mocked source storage and backend HTTP", () => {
   });
 
   it("migrates privately without a legacy API key, still excluding deleted files", async () => {
-    disk.readFile.mockResolvedValue(JSON.stringify([{ ...target, legacyApiKey: undefined }]));
+    disk.readFile.mockResolvedValue(JSON.stringify([{ ...target, legacySessionCookie: undefined }]));
     deleted.add("old-org/docs/a-last.html");
     await main(["--map", "targets.json", ...confirmedApply]);
     expect(publications).toEqual([]);
@@ -544,4 +545,95 @@ describe("legacy migration with mocked source storage and backend HTTP", () => {
     expect(fetch).not.toHaveBeenCalled(); expect(send).not.toHaveBeenCalled();
     expect(disk.writeFile).not.toHaveBeenCalled();
   });
+});
+
+it("stops publication migration when the mapped-member session expires", async () => {
+  const original = vi.mocked(fetch).getMockImplementation()!;
+  vi.mocked(fetch).mockImplementation((input, init) => (input instanceof Request ? input.url : input.toString()).includes("/api/publications?")
+    ? Promise.resolve(new Response(null, { status: 404 })) : original(input, init));
+  await expect(main(["--map", "targets.json", ...confirmedApply])).rejects.toThrow("Legacy publication lookup failed (404)");
+  expect(starts).toBe(0);
+});
+it.each([[], ["--map"], ["--map", "--apply"], ["--map", "targets.json", "--rollback"], ["--map", "targets.json", "--rollback", "--apply"]].map(args => [args]))("rejects incomplete operator arguments (%j)", async args => {
+  await expect(main(args)).rejects.toThrow();
+  expect(fetch).not.toHaveBeenCalled();
+});
+it("requires a legacy folder delimiter before migration", async () => {
+  legacyPublications[0].sourcePrefix = "old-org/docs";
+  await expect(main(["--map", "targets.json", ...confirmedApply])).rejects.toThrow("missing legacy folder delimiter");
+});
+it("rejects unsafe paths without a publication mapping", async () => {
+  legacyPublications = [];
+  fixtures.set("old-org/a//b.html", "bad");
+  await expect(main(["--map", "targets.json", ...confirmedApply])).rejects.toThrow("publications: none");
+});
+it("handles empty object pages and skips incomplete object listings", async () => {
+  send.mockResolvedValueOnce({}).mockResolvedValueOnce({ Contents: [{ Size: 1 }, { Key: "old-org/a.html" }] });
+  await main(["--map", "targets.json"]);
+  await main(["--map", "targets.json"]);
+  expect(fetch).not.toHaveBeenCalled();
+});
+it.each([1, 3])("stops on a missing source body during read %s", async missingRead => {
+  const original = send.getMockImplementation() as (command: unknown) => Promise<unknown>;
+  let reads = 0;
+  send.mockImplementation((command: unknown) => command instanceof GetObjectCommand && ++reads === missingRead
+    ? Promise.resolve({}) : original(command));
+  await expect(main(["--map", "targets.json", ...confirmedApply])).rejects.toThrow("Unable to read");
+});
+it("uses a fallback media type and accepts root-folder legacy publications", async () => {
+  legacyPublications[0].sourcePrefix = "old-org/";
+  legacyPublications[0].entryFile = "docs/Z file.html";
+  const original = send.getMockImplementation() as (command: unknown) => Promise<unknown>;
+  send.mockImplementation(async (command: unknown) => {
+    const result = await original(command) as { ContentType?: string };
+    if (command instanceof GetObjectCommand && command.input.Key?.endsWith("a-last.html")) delete result.ContentType;
+    return result;
+  });
+  await main(["--map", "targets.json", ...confirmedApply]);
+  expect(commits).toBe(1);
+});
+it("refuses rollback without matching target credentials", async () => {
+  disk.readFile.mockImplementation(path => Promise.resolve(JSON.stringify(path === "targets.json" ? [target] : [{ legacyOrgSlug: "other", organizationId: "org", projectId: "project", publicationIds: [] }])));
+  await expect(main(["--map", "targets.json", ...confirmedApply, "--rollback", "record.json"])).rejects.toThrow("Missing target credentials");
+});
+it("prints sanitized fallback and invalid source origins", async () => {
+  vi.stubEnv("MINIO_ENDPOINT", undefined);
+  vi.stubEnv("CONVEX_URL", "not a URL");
+  vi.stubEnv("RENDRO_ENDPOINT", undefined);
+  vi.stubEnv("MINIO_ACCESS_KEY", undefined);
+  vi.resetModules();
+  await (await import("../scripts/migrate-legacy-tenancy")).main(["--map", "targets.json"]);
+  expect(console.log).toHaveBeenCalledWith(expect.stringContaining("AWS SDK default"));
+  expect(console.log).toHaveBeenCalledWith("Source legacy Convex: <invalid endpoint>");
+  vi.stubEnv("CONVEX_URL", undefined);
+  await main(["--map", "targets.json"]);
+  expect(console.log).toHaveBeenCalledWith("Source legacy Convex: <unset>");
+});
+it.each([new Error("CLI failure"), "CLI failure"])("exits unsuccessfully on a direct CLI failure (%#)", async error => {
+  vi.resetModules();
+  const exit = vi.spyOn(process, "exit").mockImplementation(() => undefined as never);
+  const log = vi.spyOn(console, "error").mockImplementation(() => {});
+  vi.spyOn(process, "argv", "get").mockReturnValue(["node", new URL("../scripts/migrate-legacy-tenancy.ts", import.meta.url).pathname, "--map", "targets.json"]);
+  disk.readFile.mockRejectedValue(error);
+  await import("../scripts/migrate-legacy-tenancy");
+  await vi.waitFor(() => expect(exit).toHaveBeenCalledWith(1));
+  expect(log).toHaveBeenCalledWith("CLI failure");
+});
+
+it("rejects duplicate source rows instead of committing an invalid manifest", async () => {
+  const original = send.getMockImplementation() as (command: unknown) => Promise<unknown>;
+  send.mockImplementation((command: unknown) => command instanceof ListObjectsV2Command
+    ? Promise.resolve({ Contents: [{ Key: "old-org/docs/Z file.html", Size: 1 }, { Key: "old-org/docs/Z file.html", Size: 1 }] })
+    : original(command));
+  await expect(main(["--map", "targets.json", ...confirmedApply])).rejects.toThrow();
+  expect(commits).toBe(0);
+});
+it("records non-Error source failures safely in the failure callback", async () => {
+  const rejectSource = vi.fn<() => Promise<unknown>>().mockRejectedValue("source unavailable");
+  const original = send.getMockImplementation() as (command: unknown) => Promise<unknown>;
+  let reads = 0;
+  send.mockImplementation((command: unknown) => command instanceof GetObjectCommand && ++reads === 3
+    ? rejectSource() : original(command));
+  await expect(main(["--map", "targets.json", ...confirmedApply])).rejects.toBe("source unavailable");
+  expect(failReason).toContain("source unavailable");
 });

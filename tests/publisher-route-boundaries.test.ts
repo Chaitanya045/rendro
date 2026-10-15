@@ -6,8 +6,6 @@ import docs from "@/routes/docs";
 import projectDocs from "@/routes/project-docs";
 import * as minio from "@/minio";
 import * as deletion from "@/soft-delete";
-import * as keys from "@/api-keys";
-import * as orgs from "@/orgs";
 import * as publications from "@/publications";
 import * as boundary from "@/storage-boundary";
 import * as tickets from "@/viewer-ticket";
@@ -26,12 +24,9 @@ afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 it("keeps legacy share creation gated by identity, scope, deletion and object existence", async () => {
   expect((await request("/api/share/create", false)).status).toBe(401);
-  const slug = vi.spyOn(orgs, "emailToOrgSlug").mockReturnValueOnce(null);
-  expect((await request("/api/share/create")).status).toBe(400);
-  slug.mockRestore();
   expect((await request("/api/share/create")).status).toBe(400);
   for (const key of ["other/index.html", "example/image.svg"]) {
-    expect((await request(`/api/share/create?key=${key}`)).status).toBe(403);
+    expect((await request(`/api/share/create?key=${key}`)).status).toBe(key.startsWith("other/") ? 404 : 403);
   }
   vi.mocked(deletion.isDeleted).mockResolvedValueOnce(true);
   expect((await request("/api/share/create?key=example/index.html")).status).toBe(404);
@@ -42,7 +37,7 @@ it("keeps legacy share creation gated by identity, scope, deletion and object ex
   const { url } = await result.json() as { url: string };
   expect(verifyShareToken(new URL(url).pathname.slice("/share/".length))).toMatchObject({ ok: true, key: "example/index.html" });
   vi.mocked(minio.headObject).mockRejectedValueOnce(new Error("storage unavailable"));
-  expect((await request("/api/share/create?key=example/index.html")).status).toBe(500);
+  expect((await request("/api/share/create?key=example/index.html")).status).toBe(503);
 });
 
 it("denies anonymous and deleted/missing legacy bookmarks", async () => {
@@ -53,44 +48,15 @@ it("denies anonymous and deleted/missing legacy bookmarks", async () => {
   expect((await request("/files/example/index.html")).status).toBe(404);
 });
 
-it("keeps legacy sync operations scoped and distinguishes missing, deleted and matching objects", async () => {
-  vi.spyOn(keys, "validateApiKey").mockResolvedValue("example");
-  const headers = { Authorization: "Bearer fixture-key", "Content-Type": "application/json" };
-  const sync = (path: string, init: RequestInit = {}) => request(`/api/sync/${path}`, false, { ...init, headers });
-  vi.spyOn(minio, "putObject").mockResolvedValue(undefined);
-  vi.spyOn(deletion, "unmarkDeleted").mockResolvedValue(undefined);
-  vi.spyOn(deletion, "markDeleted").mockResolvedValue(undefined);
-  vi.spyOn(minio, "listAllKeys").mockResolvedValue(["example/index.html"]);
-  vi.spyOn(deletion, "filterDeleted").mockImplementation(values => Promise.resolve(values));
+it("retires legacy sync operations before credential or storage work", async () => {
   for (const [path, method] of [["upload", "POST"], ["check", "GET"], ["list", "GET"], ["delete", "DELETE"]]) {
-    expect((await request(`/api/sync/${path}`, false, { method })).status).toBe(401);
+    for (const headers of [{}, { Authorization: "Bearer fixture-key" }] as Array<Record<string, string>>) {
+      const response = await request(`/api/sync/${path}`, false, { method, headers });
+      expect(response.status).toBe(410);
+      expect(await response.json()).toMatchObject({ error: expect.stringContaining("rendro@2") });
+    }
   }
-  for (const body of [{}, { key: "example/index.html" }, { key: "other/index.html", content: "" }]) {
-    expect((await sync("upload", { method: "POST", body: JSON.stringify(body) })).status).toBe(400);
-  }
-  for (const contentType of [undefined, "image/svg+xml"]) {
-    expect((await sync("upload", { method: "POST", body: JSON.stringify({ key: "example/index.html", content: "fixture", contentType }) })).status).toBe(200);
-    expect(minio.putObject).toHaveBeenLastCalledWith("example/index.html", "fixture", contentType ?? "text/html");
-  }
-  expect((await sync("check")).status).toBe(400);
-  expect((await sync("check?key=other/index.html")).status).toBe(400);
-  vi.mocked(deletion.isDeleted).mockResolvedValueOnce(true);
-  expect(await (await sync("check?key=example/index.html")).json()).toEqual({ exists: false, deleted: true });
-  vi.mocked(minio.headObject).mockResolvedValueOnce(null);
-  expect(await (await sync("check?key=example/index.html")).json()).toEqual({ exists: false });
-  vi.mocked(minio.headObject).mockResolvedValue({ etag: "checksum", size: 7 });
-  for (const hash of ["", "checksum", "different"]) {
-    expect(await (await sync(`check?key=example/index.html&hash=${hash}`)).json()).toEqual({ exists: true, etag: "checksum", size: 7, match: hash !== "different" });
-  }
-  for (const path of ["list", "list?prefix=example/guide/"]) {
-    expect(await (await sync(path)).json()).toEqual({ keys: ["example/index.html"] });
-  }
-  for (const prefix of ["other/", "example/a..b/"]) expect((await sync(`list?prefix=${prefix}`)).status).toBe(400);
-  for (const suffix of ["", "?key=other/index.html", "?key=example/a..b.html"]) {
-    expect((await sync(`delete${suffix}`, { method: "DELETE" })).status).toBe(400);
-  }
-  expect(await (await sync("delete?key=example/index.html", { method: "DELETE" })).json()).toEqual({ deleted: true, key: "example/index.html" });
-  expect(deletion.markDeleted).toHaveBeenCalledWith("example", "example/index.html");
+  expect(minio.getObjectStream).not.toHaveBeenCalled();
 });
 
 it("filters deleted tree entries while preserving file and directory metadata and pagination", async () => {
@@ -198,7 +164,7 @@ it("keeps legacy publication and share failures opaque and handles storage strea
   vi.mocked(deletion.isDeleted).mockResolvedValueOnce(true);
   expect((await request(share, false)).status).toBe(404);
   vi.mocked(minio.getObjectStream).mockRejectedValue(new Error("storage unavailable"));
-  for (const path of [share, "/public/example/product/files/index.html"]) expect((await request(path, false)).status).toBe(500);
+  for (const path of [share, "/public/example/product/files/index.html"]) expect((await request(path, false)).status).toBe(503);
   for (const query of ["?doc=unknown.html", "?doc=image.svg"]) expect((await request(`/public/example/product${query}`, false)).status).toBe(404);
   expect((await request("/public/example/product/files/%ZZ", false)).status).toBe(404);
   vi.mocked(publications.getPublication).mockResolvedValue(null);

@@ -1,3 +1,4 @@
+import { ViewerBackendError } from "./viewer-backend";
 import { isCanonicalStorageKey, isLegacyStorageKey, isLegacyStoragePrefix, legacyStoragePrefix } from "@/storage-boundary";
 import {
   deleteObject,
@@ -53,7 +54,7 @@ async function readText(stream: ReadableStream<Uint8Array>): Promise<string> {
   while (true) {
     const result = await reader.read();
     if (result.done) break;
-    if (result.value) text += decoder.decode(result.value, { stream: true });
+    text += decoder.decode(result.value, { stream: true });
   }
   return text + decoder.decode();
 }
@@ -82,9 +83,10 @@ export async function getPublication(orgSlug: string, slug: string): Promise<Pub
   if (!stream) return null;
   try {
     const parsed: unknown = JSON.parse(await readText(stream));
-    return isPublication(parsed) ? parsed : null;
+    if (!isPublication(parsed) || parsed.orgSlug !== orgSlug || parsed.slug !== slug) throw new ViewerBackendError();
+    return parsed;
   } catch {
-    return null;
+    throw new ViewerBackendError();
   }
 }
 

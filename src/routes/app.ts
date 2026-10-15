@@ -6,11 +6,10 @@ import { renderCommentRecoveryLifecycle } from "../commentor/recovery-session";
 import { nonceAttribute } from "@/middleware/html-nonce";
 import { renderFaviconLinks } from "./favicon";
 import { Hono } from "hono";
-import { putObject, headObject } from "@/minio";
-import { emailToOrgSlug, orgExists, logOrgAccess } from "@/orgs";
+import { headObject } from "@/minio";
+import { logOrgAccess } from "@/orgs";
 import type { User } from "better-auth/types";
-import { logger } from "@/logger";
-import { createOrgApiKey } from "@/api-keys";
+import { legacyRequestMember, legacyUnavailable, retiredLegacy } from "@/legacy-access";
 import { isDeleted } from "@/soft-delete";
 import { renderNotFoundPage } from "@/routes/not-found";
 import { renderLandingPage } from "@/routes/landing";
@@ -18,6 +17,7 @@ import { renderThemeAssets, renderThemeButton } from "./theme";
 import { menuSurfaceStyles } from "../ui/menu-styles";
 
 const app = new Hono<{ Variables: { user?: User } }>();
+app.onError(legacyUnavailable);
 
 /**
  * The public root is the product landing page. Authenticated users enter
@@ -36,8 +36,8 @@ app.get("/", (c) => {
 app.get("/docs/:org", async (c) => {
   const user = c.get("user");
   if (!user) return c.redirect(`/sign-in?returnTo=${encodeURIComponent(c.req.path)}`);
-  const org = emailToOrgSlug(user.email);
-  if (!org || !legacyStoragePrefix(org) || c.req.param("org") !== org || !(await orgExists(org))) {
+  const org = c.req.param("org");
+  if (!org || !legacyStoragePrefix(org) || c.req.param("org") !== org || !(await legacyRequestMember(c, org))) {
     return c.html(renderLegacyOrgNotFound(c.req.path), 404);
   }
   return c.html(renderOrgDocs(user, org));
@@ -46,13 +46,12 @@ app.get("/docs/:org", async (c) => {
 app.get("/docs/:key{.+}", async (c) => {
   const user = c.get("user");
   if (!user) return c.redirect(`/sign-in?returnTo=${encodeURIComponent(c.req.path)}`);
-  const org = emailToOrgSlug(user.email);
-  if (!org || !legacyStoragePrefix(org)) return c.html(renderLegacyOrgNotFound(c.req.path), 404);
   const selectedDoc = decodeStoragePath(c.req.path.slice("/docs/".length));
-  if ((!selectedDoc || (selectedDoc !== org && !isLegacyStorageKey(org, selectedDoc))) || !(await orgExists(org))) {
+  if (!selectedDoc) return c.html(renderLegacyOrgNotFound(c.req.path), 404);
+  const org = selectedDoc.split("/")[0];
+  if (!isLegacyStorageKey(org, selectedDoc) || !await legacyRequestMember(c, org)) {
     return c.html(renderLegacyOrgNotFound(c.req.path), 404);
   }
-  if (selectedDoc === org) return c.html(renderOrgDocs(user, org));
   if (await isDeleted(selectedDoc) || !(await headObject(selectedDoc))) {
     return c.html(renderNotFoundPage({
       path: c.req.path,
@@ -64,45 +63,7 @@ app.get("/docs/:key{.+}", async (c) => {
   return c.html(renderOrgDocs(user, org, selectedDoc));
 });
 
-/**
- * POST /api/orgs — create the org folder in MinIO.
- */
-app.post("/api/orgs", async (c) => {
-  const user = c.get("user");
-  if (!user) return c.text("Sign in first", 401);
-
-  const contentType = c.req.header("content-type") ?? "";
-  let body: { org?: string; displayName?: string };
-  if (contentType.includes("application/json")) {
-    body = await c.req.json<{ org?: string; displayName?: string }>()
-      .catch((): { org?: string; displayName?: string } => ({}));
-  } else {
-    const form = await c.req.formData().catch((): FormData | null => null);
-    const orgValue = form?.get("org");
-    const displayNameValue = form?.get("displayName");
-    body = {
-      org: typeof orgValue === "string" ? orgValue : undefined,
-      displayName: typeof displayNameValue === "string" ? displayNameValue : undefined,
-    };
-  }
-  const org = (body.org ?? emailToOrgSlug(user.email) ?? "").toLowerCase();
-  const displayName = body.displayName?.trim() || org;
-
-  if (!legacyStoragePrefix(org)) {
-    return c.text("Invalid org slug. Use lowercase letters, numbers, and hyphens.", 400);
-  }
-  if (await orgExists(org)) {
-    return c.redirect(`/?org=${encodeURIComponent(org)}`, 303);
-  }
-
-  const apiKey = await createOrgApiKey(org);
-  const indexHtml = renderInitialIndex(user, org, displayName);
-  await putObject(`${org}/index.html`, indexHtml, "text/html");
-  logOrgAccess(org, user.email, "create");
-  logger.info({ org, user: user.email }, "org created");
-
-  return c.html(renderApiKeyPage(user, org, apiKey));
-});
+app.post("/api/orgs", retiredLegacy);
 
 // ----- HTML renderers -----
 
@@ -130,7 +91,6 @@ interface OrgTreePageOptions {
   displayName?: string;
   backHref?: string;
   backLabel?: string;
-  sandboxed?: boolean;
   legacyCommentConfig?: { orgSlug: string; convexUrl: string };
   publicDocument?: boolean;
   shareConfig?: {
@@ -158,7 +118,7 @@ export interface ScopedDocumentShellOptions {
 
 function renderOrgDocs(user: User, org: string, selectedDoc = ""): string {
   logOrgAccess(org, user.email, "view");
-  return renderOrgTreePage(user, org, selectedDoc, { sandboxed: true, legacyCommentConfig: { orgSlug: org, convexUrl: CONVEX_URL } })
+  return renderOrgTreePage(user, org, selectedDoc, { legacyCommentConfig: { orgSlug: org, convexUrl: CONVEX_URL } })
     .replace("</body>", viewerUpdateNotice() + viewerScript("parent", { base: `/legacy-view/${encodeURIComponent(org)}` }) + "</body>");
 }
 
@@ -174,7 +134,6 @@ export function renderScopedDocumentShell(options: ScopedDocumentShellOptions): 
     displayName: options.title,
     backHref: options.backHref,
     backLabel: options.backLabel,
-    sandboxed: true,
     publicDocument: options.publicDocument,
     shareConfig: options.shareConfig,
   });
@@ -196,9 +155,7 @@ function renderOrgTreePage(user: User | null, org: string, selectedDoc = "", opt
   const shareLabel = isPublicDocument ? "Copy public URL" : options.shareConfig ? "Share document" : "Copy signed URL";
   const sharePendingLabel = isPublicDocument ? "Copying public URL…" : options.shareConfig ? "Creating share…" : "Creating signed URL…";
   const shareDoneLabel = isPublicDocument ? "Public URL copied!" : options.shareConfig ? "Share link copied!" : "Signed URL copied!";
-  const sandboxAttribute = options.sandboxed || publication
-    ? ' sandbox="allow-scripts allow-forms allow-popups allow-downloads"'
-    : "";
+  const sandboxAttribute = ' sandbox="allow-scripts allow-forms allow-popups allow-downloads"';
   const backMarkup = options.backHref
     ? `<a class="topbar-btn topbar-btn-back" href="${escapeHtml(options.backHref)}" aria-label="${escapeHtml(options.backLabel ?? "Back")}"><span class="material-symbols-outlined" aria-hidden="true">arrow_back</span><span class="topbar-back-label">${escapeHtml(options.backLabel ?? "Back")}</span></a>`
     : "";
@@ -946,24 +903,6 @@ function renderTreeSkeleton(): string {
   </div>`;
 }
 
-function renderInitialIndex(_user: User, org: string, displayName: string): string {
-  return `<!DOCTYPE html>
-<html lang="en">
-<head>${renderFaviconLinks()}
-<meta charset="UTF-8">
-<title>${escapeHtml(displayName)}</title>
-<style>body{font-family:system-ui;max-width:720px;margin:3rem auto;padding:0 1.5rem;line-height:1.6;color:#1a1a1a}</style>
-</head>
-<body>
-<h1>${escapeHtml(displayName)}</h1>
-<p>This is the <code>${escapeHtml(org)}</code> documentation space on Rendro.</p>
-<p>Push your first docs with the CLI (set RENDRO_API_KEY in your CI):</p>
-<pre><code>rendro push --source ./docs --org ${escapeHtml(org)}</code></pre>
-<p>Or start writing HTML directly in the bucket under <code>${escapeHtml(org)}/</code>.</p>
-</body>
-</html>`;
-}
-
 function inlineJson(value: unknown): string {
   return JSON.stringify(value).replace(/</g, "\\u003c");
 }
@@ -977,173 +916,4 @@ function escapeHtml(s: string): string {
 }
 
 
-function renderApiKeyPage(user: User, org: string, apiKey: string): string {
-  const email = escapeHtml(user.email);
-  const orgEsc = escapeHtml(org);
-  return `<!DOCTYPE html>
-<html><head>${renderFaviconLinks()}
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>${orgEsc} — Rendro</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet">
-${renderThemeAssets()}
-<style${nonceAttribute()}>
-  *{box-sizing:border-box}
-  html{color-scheme:light dark}
-  body{margin:0;min-height:100vh;background:#fafafa;color:#09090b;font:14px/20px Inter,system-ui,sans-serif}
-  html.dark body{background:#09090b;color:#fafafa}
-  .topbar{height:56px;border-bottom:1px solid #e4e4e7;background:#fff;display:flex;align-items:center;justify-content:space-between;padding:0 24px;position:sticky;top:0;z-index:10}
-  html.dark .topbar{border-color:#27272a;background:#09090b}
-  .brand{color:#c2410c;font-size:24px;line-height:32px;font-weight:700;letter-spacing:-.02em}
-  html.dark .brand{color:#fb923c}
-  .actions{display:flex;align-items:center;gap:8px}
-  .icon-btn,.secondary-btn,.primary-btn{border:0;border-radius:8px;font:inherit;font-weight:500;cursor:pointer;transition:background 200ms cubic-bezier(.4,0,.2,1),border-color 200ms cubic-bezier(.4,0,.2,1),color 200ms cubic-bezier(.4,0,.2,1),transform 150ms cubic-bezier(.4,0,.2,1),box-shadow 200ms cubic-bezier(.4,0,.2,1)}
-  .icon-btn{width:40px;height:40px;padding:0;display:grid;place-items:center;background:transparent;color:#71717a}
-  .icon-btn:hover{background:#f4f4f5;color:#09090b}
-  .icon-btn:active,.secondary-btn:active,.primary-btn:active{transform:scale(.98)}
-  .icon-btn:focus-visible,.secondary-btn:focus-visible,.primary-btn:focus-visible{outline:2px solid #c2410c;outline-offset:2px}
-  html.dark .icon-btn{color:#a1a1aa}
-  html.dark .icon-btn:hover{background:#18181b;color:#fafafa}
-  html.dark .icon-btn:focus-visible,html.dark .secondary-btn:focus-visible,html.dark .primary-btn:focus-visible{outline-color:#fb923c}
-  .secondary-btn{min-height:40px;border:1px solid #e4e4e7;background:#fff;color:#09090b;padding:0 14px}
-  .secondary-btn:hover{background:#f4f4f5;border-color:#d4d4d8}
-  html.dark .secondary-btn{border-color:#27272a;background:#09090b;color:#fafafa}
-  html.dark .secondary-btn:hover{background:#18181b;border-color:#3f3f46}
-  .page{min-height:calc(100vh - 56px);display:grid;place-items:center;padding:48px 24px}
-  .card{width:min(100%,720px);border:1px solid #e4e4e7;border-radius:18px;background:#fff;box-shadow:0 24px 70px rgba(9,9,11,.08);overflow:hidden;animation:rendroApiCardEnter 300ms cubic-bezier(.4,0,.2,1) both}
-  html.dark .card{border-color:#27272a;background:#09090b;box-shadow:0 24px 70px rgba(0,0,0,.34)}
-  .card-head{padding:28px 32px 22px;border-bottom:1px solid #e4e4e7;background:linear-gradient(180deg,#fff7ed 0%,#fff 78%)}
-  html.dark .card-head{border-color:#27272a;background:linear-gradient(180deg,rgba(251,146,60,.16) 0%,#09090b 78%)}
-  .eyebrow{display:inline-flex;align-items:center;gap:8px;margin:0 0 16px;padding:6px 10px;border-radius:999px;background:#ffedd5;color:#9a3412;font-size:12px;line-height:16px;font-weight:600}
-  html.dark .eyebrow{background:rgba(251,146,60,.16);color:#fdba74}
-  h1{margin:0;color:#09090b;font-size:28px;line-height:36px;font-weight:700;letter-spacing:-.03em}
-  html.dark h1{color:#fafafa}
-  .meta{margin:8px 0 0;color:#71717a}
-  html.dark .meta{color:#a1a1aa}
-  .card-body{padding:28px 32px 32px}
-  .copy{margin:0 0 20px;color:#3f3f46;font-size:15px;line-height:24px}
-  html.dark .copy{color:#d4d4d8}
-  .key-panel{border:1px solid #e4e4e7;border-radius:14px;background:#fafafa;padding:16px;margin:0 0 16px}
-  html.dark .key-panel{border-color:#27272a;background:#18181b}
-  .key-label{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:0 0 10px;color:#71717a;font-size:12px;line-height:16px;font-weight:600;text-transform:uppercase;letter-spacing:.06em}
-  html.dark .key-label{color:#a1a1aa}
-  .key-box{border:1px solid #e4e4e7;border-radius:10px;background:#fff;color:#09090b;padding:14px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;line-height:20px;word-break:break-all;user-select:all}
-  html.dark .key-box{border-color:#27272a;background:#09090b;color:#fafafa}
-  .copy-btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:40px;border:1px solid #e4e4e7;border-radius:8px;background:#fff;color:#09090b;padding:0 14px;font:inherit;font-weight:500;cursor:pointer;transition:background 200ms cubic-bezier(.4,0,.2,1),border-color 200ms cubic-bezier(.4,0,.2,1),transform 150ms cubic-bezier(.4,0,.2,1),color 200ms cubic-bezier(.4,0,.2,1)}
-  .copy-btn:hover{background:#f4f4f5;border-color:#d4d4d8}
-  .copy-btn:active{transform:scale(.98)}
-  .copy-btn.is-feedback{background:#f4f4f5;color:#09090b;border-color:#d4d4d8}
-  html.dark .copy-btn{border-color:#27272a;background:#09090b;color:#fafafa}
-  html.dark .copy-btn:hover,html.dark .copy-btn.is-feedback{background:#18181b;border-color:#3f3f46;color:#fafafa}
-  .copy-icon{transition:transform 180ms cubic-bezier(.4,0,.2,1),opacity 180ms ease}
-  .copy-btn.is-feedback .copy-icon{transform:scale(1.08)}
-  .copy-label-window{height:16px;line-height:16px;overflow:hidden;display:inline-flex;align-items:flex-start}
-  .copy-label-track{display:flex;flex-direction:column;transition:transform 300ms cubic-bezier(.4,0,.2,1);will-change:transform}
-  .copy-label{height:16px;white-space:nowrap}
-  .copy-btn.is-feedback .copy-label-track{transform:translateY(-16px)}
-  .warning{display:flex;gap:12px;border:1px solid #fed7aa;border-radius:14px;background:#fff7ed;color:#3f3f46;padding:14px 16px;margin:18px 0 20px}
-  .warning strong{display:block;color:#09090b;margin-bottom:2px}
-  html.dark .warning{border-color:rgba(251,146,60,.24);background:rgba(251,146,60,.12);color:#d4d4d8}
-  html.dark .warning strong{color:#fafafa}
-  code{border:1px solid #e4e4e7;border-radius:6px;background:#f4f4f5;color:#09090b;padding:2px 6px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px}
-  html.dark code{border-color:#27272a;background:#18181b;color:#fafafa}
-  pre{margin:0 0 24px;border:1px solid #27272a;border-radius:14px;background:#09090b;color:#fafafa;padding:16px;overflow-x:auto;font:13px/20px ui-monospace,SFMono-Regular,Menlo,monospace}
-  html.dark pre{border-color:#3f3f46;background:#18181b}
-  .primary-btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:46px;border-radius:10px;background:#c2410c;color:#fff;padding:0 18px;text-decoration:none}
-  .primary-btn:hover{background:#9a3412;box-shadow:0 10px 30px rgba(194,65,12,.22)}
-  html.dark .primary-btn{background:#fb923c;color:#09090b}
-  html.dark .primary-btn:hover{background:#fdba74;box-shadow:0 10px 30px rgba(251,146,60,.18)}
-  .material-symbols-outlined{font-size:20px;line-height:20px}
-  @keyframes rendroApiCardEnter{from{opacity:0;transform:translateY(8px) scale(.985)}to{opacity:1;transform:translateY(0) scale(1)}}
-  @media (prefers-reduced-motion:reduce){.icon-btn,.secondary-btn,.primary-btn,.copy-btn,.copy-label-track,.copy-icon{transition:none}.card{animation:none}}
-  @media (max-width:640px){.topbar{padding:0 16px}.page{padding:24px 16px;place-items:start center}.card-head,.card-body{padding-left:20px;padding-right:20px}h1{font-size:24px;line-height:32px}.key-label{align-items:flex-start;flex-direction:column}}
-</style>
-</head><body>
-<header class="topbar">
-  <div class="brand">Rendro</div>
-  <div class="actions">
-    ${renderThemeButton()}
-    <form method="post" action="/api/auth/sign-out"><button class="secondary-btn" type="submit">Sign out</button></form>
-  </div>
-</header>
-<main class="page">
-  <section class="card" aria-labelledby="api-key-title">
-    <div class="card-head">
-      <p class="eyebrow"><span class="material-symbols-outlined" aria-hidden="true">check_circle</span> Org created</p>
-      <h1 id="api-key-title">${orgEsc} is ready</h1>
-      <p class="meta">Signed in as ${email}</p>
-    </div>
-    <div class="card-body">
-      <p class="copy">Copy this one-time API key now. You’ll use it from CI or the CLI to upload docs into <code>${orgEsc}</code>.</p>
-      <div class="key-panel">
-        <div class="key-label"><span>Upload API key</span><button type="button" class="copy-btn" id="api-copy-btn" aria-label="Copy API key"><span class="material-symbols-outlined copy-icon" aria-hidden="true">content_copy</span><span class="copy-label-window" aria-hidden="true"><span class="copy-label-track"><span class="copy-label">Copy key</span><span class="copy-label" id="copy-feedback-label">API key copied!</span></span></span></button></div>
-        <div class="key-box" id="api-key">${escapeHtml(apiKey)}</div>
-      </div>
-      <div class="warning">
-        <span class="material-symbols-outlined" aria-hidden="true">lock</span>
-        <div><strong>Store this securely.</strong> Add it to your CI environment as <code>RENDRO_API_KEY</code>. Anyone with this key can push docs to your org.</div>
-      </div>
-      <pre><code># In your CI pipeline:
-rendro push --source ./docs --org ${orgEsc}
-# Set RENDRO_API_KEY in your CI secrets</code></pre>
-      <a class="primary-btn" href="/"><span class="material-symbols-outlined" aria-hidden="true">docs</span>View your docs</a>
-    </div>
-  </section>
-</main>
-<script${nonceAttribute()}>
-  (function(){
-    var root=document.documentElement;
-    window.RendroTheme.mount(document.getElementById("theme-toggle"));
-  })();
-  document.getElementById("api-copy-btn").addEventListener("click", copyKey);
-  var copyFeedbackTimer;
-  function setCopyFeedback(message) {
-    var btn = document.getElementById("api-copy-btn");
-    var label = document.getElementById("copy-feedback-label");
-    var icon = btn && btn.querySelector(".copy-icon");
-    if (!btn || !label) return;
-    label.textContent = message;
-    if (icon) icon.textContent = message === "API key copied!" ? "check" : "error";
-    btn.classList.add("is-feedback");
-    btn.setAttribute("aria-label", message);
-    if (copyFeedbackTimer !== undefined) window.clearTimeout(copyFeedbackTimer);
-    copyFeedbackTimer = window.setTimeout(function(){
-      btn.classList.remove("is-feedback");
-      btn.setAttribute("aria-label","Copy API key");
-      if (icon) icon.textContent = "content_copy";
-    },1500);
-  }
-  async function copyApiKeyText(text) {
-    try {
-      if (navigator.clipboard && window.isSecureContext) {
-        await navigator.clipboard.writeText(text);
-        return;
-      }
-    } catch {}
-    var ta = document.createElement("textarea");
-    ta.value = text;
-    ta.setAttribute("readonly","");
-    ta.style.position = "fixed";
-    ta.style.top = "-999px";
-    ta.style.left = "-999px";
-    document.body.appendChild(ta);
-    ta.select();
-    ta.setSelectionRange(0,text.length);
-    try {
-      if (!document.execCommand("copy")) throw new Error("copy failed");
-    } finally {
-      ta.remove();
-    }
-  }
-  function copyKey() {
-    var el = document.getElementById("api-key");
-    if (!el) return;
-    copyApiKeyText(el.textContent || "")
-      .then(function(){ setCopyFeedback("API key copied!"); })
-      .catch(function(){ setCopyFeedback("Copy failed"); });
-  }
-</script>
-${renderCommentRecoveryLifecycle(user.id, nonceAttribute())}</body></html>`;
-}
 export default app;

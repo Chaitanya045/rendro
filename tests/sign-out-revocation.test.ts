@@ -8,7 +8,7 @@ import { sessionCache } from "@/session-cache";
 import { fixture } from "./helpers/comment-fixture";
 
 const origin = "http://localhost:3000";
-afterEach(() => { vi.unstubAllGlobals(); sessionCache.clear(); });
+afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); sessionCache.clear(); });
 async function runtime() {
   const f = await fixture();
   const user = f.data.users[0];
@@ -107,6 +107,7 @@ describe("sign-out with the real Better Auth handler", () => {
     expect(claims.exp! - claims.iat!).toBe(900);
     expect(claims.sessionId).toBe(f.user.sessionId);
     const caller = f.backend.withIdentity({ ...claims, subject: claims.sub! });
+    vi.stubEnv("LEGACY_ORGANIZATION_MAP", JSON.stringify({ example: f.scope.organizationId }));
     const legacyScope = { orgSlug: "example", filePath: "guide.html" };
     const anchor = { kind: "element" as const, path: ["main"] };
     await caller.mutation(api.threads.create, { ...legacyScope, body: "Before", anchor });

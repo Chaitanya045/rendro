@@ -79,7 +79,7 @@ describe("cookie write admission", () => {
     const write = vi.fn(() => new Response(null, { status: 204 }));
     app.use("*", writeAdmission);
     app.all("*", write);
-    for (const [method, path] of [["POST", "/api/orgs"], ["POST", "/api/publications"], ["DELETE", "/api/publications/docs"], ["POST", "/api/rendro/publications"], ["POST", "/api/auth/set-initial-password"]]) {
+    for (const [method, path] of [["DELETE", "/api/legacy/content"], ["POST", "/api/publications"], ["DELETE", "/api/publications/docs"], ["POST", "/api/rendro/publications"], ["POST", "/api/auth/set-initial-password"]]) {
       for (const bad of badHeaders) {
         if (method === "DELETE" && "content-type" in bad) continue;
         const count = write.mock.calls.length;
@@ -93,6 +93,6 @@ describe("cookie write admission", () => {
     }
     expect((await app.request(origin + "/health")).status).toBe(204);
     vi.stubEnv("SITE_URL", undefined);
-    expect((await app.request(origin + "/api/orgs", { method: "POST", headers: headers({ origin }) })).status).toBe(204);
+    expect((await app.request(origin + "/api/rendro/projects", { method: "POST", headers: headers({ origin }) })).status).toBe(204);
   });
 });

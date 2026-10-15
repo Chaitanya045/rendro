@@ -1,4 +1,4 @@
-import { seedIdentity } from "./helpers/auth-identity";
+import { seedLegacyMember, seedIdentity } from "./helpers/auth-identity";
 import { describe, expect, it, vi } from "vitest";
 
 import { convexTest } from "convex-test";
@@ -49,7 +49,7 @@ describe("Convex authorization boundary", () => {
     ).rejects.toThrow("Unauthenticated");
   });
 
-  it("rejects an authenticated user from another domain organization", async () => {
+  it("rejects an authenticated user without mapped organization membership", async () => {
     const test = makeBackend();
     const backend = test.withIdentity(await seedIdentity(test, {
       email: "mallory@other.com",
@@ -63,12 +63,15 @@ describe("Convex authorization boundary", () => {
         body: "cross-org write",
         anchor: { kind: "element", path: ["main"] },
       }),
-    ).rejects.toThrow("Forbidden");
+    ).rejects.toThrow("Comment not found");
   });
 
   it("derives thread and reply authors from signed identity claims", async () => {
     const test = makeBackend();
-    const backend = test.withIdentity(await seedIdentity(test, acmeIdentity));
+    process.env.LEGACY_ORGANIZATION_MAP = "{}";
+    const identity = await seedIdentity(test, acmeIdentity);
+    await seedLegacyMember(test, identity.subject, "acme");
+    const backend = test.withIdentity(identity);
     const threadId = await backend.mutation(api.threads.create, {
       orgSlug: "acme",
       filePath: "guide/index.html",
@@ -97,7 +100,10 @@ describe("Convex authorization boundary", () => {
 
   it("prevents cross-organization mutation through an opaque thread id", async () => {
     const backend = makeBackend();
-    const acme = backend.withIdentity(await seedIdentity(backend, acmeIdentity));
+    process.env.LEGACY_ORGANIZATION_MAP = "{}";
+    const identity = await seedIdentity(backend, acmeIdentity);
+    await seedLegacyMember(backend, identity.subject, "acme");
+    const acme = backend.withIdentity(identity);
     const threadId = await acme.mutation(api.threads.create, {
       orgSlug: "acme",
       filePath: "guide/index.html",
@@ -233,16 +239,9 @@ describe("Convex authorization boundary", () => {
     authorLookup.mockRestore();
   });
 
-  it("rejects direct API-key and deleted-file calls without the service secret", async () => {
+  it("rejects direct deleted-file calls without the service secret", async () => {
     const backend = makeBackend();
 
-    await expect(
-      backend.mutation(api.apiKeys.create, {
-        orgSlug: "acme",
-        keyHash: "hash",
-        internalSecret: "attacker",
-      }),
-    ).rejects.toThrow("Forbidden");
     await expect(
       backend.mutation(api.deletedFiles.mark, {
         orgSlug: "acme",
@@ -250,11 +249,6 @@ describe("Convex authorization boundary", () => {
         internalSecret: "attacker",
       }),
     ).rejects.toThrow("Forbidden");
-    await expect(
-      backend.query(api.apiKeys.validate, {
-        keyHash: "hash",
-        internalSecret: "attacker",
-      }),
-    ).rejects.toThrow("Forbidden");
+
   });
 });

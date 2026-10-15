@@ -1,3 +1,4 @@
+import type * as LegacyAccessModule from "@/legacy-access";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Hono } from "hono";
 import type { User } from "better-auth/types";
@@ -41,8 +42,10 @@ vi.mock("@/soft-delete", () => ({
   isDeleted: vi.fn((key: string) => Promise.resolve(deleted.has(key))),
 }));
 
-vi.mock("@/api-keys", () => ({
-  validateApiKey: vi.fn((key: string) => Promise.resolve(key === "valid-key" ? "acme" : null)),
+vi.mock("@/legacy-access", async importOriginal => ({
+  ...await importOriginal<typeof LegacyAccessModule>(),
+  legacyOrganization: vi.fn((org: string) => Promise.resolve(org === "acme" ? "mapped-org" : null)),
+  legacyRequestMember: vi.fn((c, org: string) => Promise.resolve(org === "acme" && c.req.header("Cookie") === "better-auth.session_token=member")),
 }));
 
 import publicRoutes from "@/routes/public";
@@ -127,9 +130,9 @@ describe("publication persistence", () => {
 });
 
 describe("publication management routes", () => {
-  it("requires authentication and derives the organization from the API key", async () => {
+  it("requires explicit mapped session membership and retires key access", async () => {
     const unauthorized = await publicationRoutes.request("https://rendro.test/api/publications");
-    expect(unauthorized.status).toBe(401);
+    expect(unauthorized.status).toBe(404);
 
     const crossOrg = await publicationRoutes.request("https://rendro.test/api/publications", {
       method: "POST",
@@ -140,13 +143,13 @@ describe("publication management routes", () => {
         entryFile: "index.html",
       }),
     });
-    expect(crossOrg.status).toBe(400);
+    expect(crossOrg.status).toBe(410);
   });
 
   it("creates, lists, and unpublishes a folder", async () => {
-    const create = await publicationRoutes.request("https://rendro.test/api/publications", {
+    const create = await publicationRoutes.request("https://rendro.test/api/publications?org=acme", {
       method: "POST",
-      headers: { Authorization: "Bearer valid-key", "Content-Type": "application/json" },
+      headers: { Cookie: "better-auth.session_token=member", "Content-Type": "application/json" },
       body: JSON.stringify({
         slug: "product",
         sourcePrefix: "acme/repo/product/",
@@ -160,14 +163,14 @@ describe("publication management routes", () => {
       url: "https://rendro.test/public/acme/product",
     });
 
-    const list = await publicationRoutes.request("https://rendro.test/api/publications", {
-      headers: { Authorization: "Bearer valid-key" },
+    const list = await publicationRoutes.request("https://rendro.test/api/publications?org=acme", {
+      headers: { Cookie: "better-auth.session_token=member" },
     });
     await expect(list.json()).resolves.toMatchObject({ publications: [{ slug: "product" }] });
 
-    const remove = await publicationRoutes.request("https://rendro.test/api/publications/product", {
+    const remove = await publicationRoutes.request("https://rendro.test/api/publications/product?org=acme", {
       method: "DELETE",
-      headers: { Authorization: "Bearer valid-key" },
+      headers: { Cookie: "better-auth.session_token=member" },
     });
     expect(remove.status).toBe(200);
     expect(await getPublication("acme", "product")).toBeNull();
@@ -277,6 +280,64 @@ describe("private tree routes", () => {
     });
     app.route("/", docsRoutes);
     const crossOrg = await app.request("https://rendro.test/api/tree/other?prefix=other%2F");
-    expect(crossOrg.status).toBe(403);
+    expect(crossOrg.status).toBe(404);
   });
+});
+
+describe("legacy publication metadata failures", () => {
+  it("validates metadata identity and refuses corrupted records", async () => {
+    const input = { orgSlug: "acme", slug: "product", sourcePrefix: "acme/repo/product/", entryFile: "index.html" };
+    const { publication } = await savePublication(input);
+    for (const value of ["{", "null", JSON.stringify({ ...publication, slug: "different" }), JSON.stringify({ ...publication, orgSlug: "other" })]) {
+      objects.set("__rendro/publications/acme/product.json", value);
+      await expect(getPublication("acme", "product")).rejects.toThrow();
+    }
+    expect(await getPublication("tenants", "product")).toBeNull();
+    expect(await getPublication("acme", "bad/slug")).toBeNull();
+  });
+  it("validates publication inputs and reports authoritative absence", async () => {
+    const { listPublications, removePublication, resolvePublishedKey } = await import("@/publications");
+    const input = { orgSlug: "acme", slug: "product", sourcePrefix: "acme/repo/product/", entryFile: "index.html" };
+    expect(await listPublications("tenants")).toEqual([]);
+    for (const patch of [{ orgSlug: "tenants" }, { slug: "bad/slug" }, { sourcePrefix: "acme/" }, { entryFile: "a.txt" }, { sourcePrefix: "other/" }]) {
+      await expect(savePublication({ ...input, ...patch })).rejects.toMatchObject({ status: 400 });
+    }
+    await expect(savePublication({ ...input, entryFile: "missing.html" })).rejects.toMatchObject({ status: 404 });
+    deleted.add("acme/repo/product/index.html");
+    await expect(savePublication(input)).rejects.toMatchObject({ status: 404 });
+    deleted.clear();
+    const { publication } = await savePublication(input);
+    objects.set("__rendro/publications/acme/missing.json", "");
+    objects.delete("__rendro/publications/acme/missing.json");
+    const minio = await import("@/minio");
+    vi.mocked(minio.listAllKeys).mockResolvedValueOnce(["__rendro/publications/acme/guide.txt", "__rendro/publications/acme/missing.json"]);
+    expect(await listPublications("acme")).toEqual([]);
+    expect(await removePublication("acme", "missing")).toBe(false);
+    expect(await listPublishedDocumentPaths({ ...publication, sourcePrefix: "other/" })).toEqual([]);
+    expect(resolvePublishedKey(publication, "file.txt")).toBeNull();
+    expect(resolvePublishedKey({ ...publication, sourcePrefix: "other/" }, "index.html")).toBeNull();
+    // Reverse overlap: an existing child folder prevents publishing its parent.
+    await savePublication({ ...input, slug: "product", sourcePrefix: "acme/repo/product/" });
+    objects.set("acme/repo/index.html", "<h1>Root</h1>");
+    await expect(savePublication({ ...input, slug: "parent", sourcePrefix: "acme/repo/" })).rejects.toMatchObject({ status: 409 });
+  });
+  it("rejects malformed publication requests before writing", async () => {
+    const url = "https://rendro.test/api/publications?org=acme";
+    const headers = { Cookie: "better-auth.session_token=member", "Content-Type": "application/json" };
+    for (const body of ["{", "null", "[]", '{}', '{"slug":1}', '{"slug":"docs","sourcePrefix":"acme/repo/","entryFile":"index.html","title":5}']) {
+      expect((await publicationRoutes.request(url, { method: "POST", headers, body })).status).toBe(400);
+    }
+    expect((await publicationRoutes.request("/api/publications", { method: "POST" })).status).toBe(404);
+    expect((await publicationRoutes.request("/api/publications/missing?org=acme", { method: "DELETE", headers })).status).toBe(404);
+    expect((await publicationRoutes.request(url, { method: "POST", headers, body: JSON.stringify({ slug: "docs", sourcePrefix: "other/", entryFile: "index.html" }) })).status).toBe(400);
+  });
+});
+
+it("sorts multiple disjoint legacy publications", async () => {
+  const { listPublications } = await import("@/publications");
+  for (const slug of ["z", "a"]) {
+    objects.set(`acme/${slug}/index.html`, "<h1>Document</h1>");
+    await savePublication({ orgSlug: "acme", slug, sourcePrefix: `acme/${slug}/`, entryFile: "index.html" });
+  }
+  expect((await listPublications("acme")).map(row => row.slug)).toEqual(["a", "z"]);
 });

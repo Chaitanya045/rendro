@@ -21,11 +21,12 @@ export const workerMutationPolicies = {
   "POST /api/rendro/*": "convex",
   "PATCH /api/rendro/*": "convex",
   "DELETE /api/rendro/*": "convex",
-  "POST /api/orgs": "cookie-json",
+  "DELETE /api/legacy/content": "cookie-bodyless",
+  "POST /api/orgs": "retired",
   "POST /api/publications": "mixed-json",
   "DELETE /api/publications/:slug": "mixed-bodyless",
-  "POST /api/sync/upload": "bearer",
-  "DELETE /api/sync/delete": "bearer",
+  "POST /api/sync/upload": "retired",
+  "DELETE /api/sync/delete": "retired",
 } as const;
 
 export const writeAdmission: MiddlewareHandler = async (c, next) => {
@@ -33,13 +34,13 @@ export const writeAdmission: MiddlewareHandler = async (c, next) => {
   const key = `${c.req.method} ${path}` as keyof typeof workerMutationPolicies;
   const policy = workerMutationPolicies[key];
   // Proxies with Authorization defer credential selection to Convex. Legacy
-  // publication handlers select bearer exclusively when that header is present.
-  if (policy === "cookie-json" || ((policy === "mixed-json" || policy === "mixed-bodyless")
+  // publication handlers reject retired credentials when that header is present.
+  if (policy === "cookie-json" || policy === "cookie-bodyless" || ((policy === "mixed-json" || policy === "mixed-bodyless")
     && !c.req.raw.headers.has("authorization"))) {
     try {
       // Worker ingress supplies the URL host. SITE_URL, when configured, pins
       // it further; Convex always requires its configured canonical SITE_URL.
-      requireCookieWrite(c.req.raw, process.env.SITE_URL ?? new URL(c.req.url).origin, policy !== "mixed-bodyless");
+      requireCookieWrite(c.req.raw, process.env.SITE_URL ?? new URL(c.req.url).origin, policy !== "mixed-bodyless" && policy !== "cookie-bodyless");
     } catch (error) {
       if (!(error instanceof RequestAdmissionError)) throw error;
       return c.json({ error: error.message }, error.status);

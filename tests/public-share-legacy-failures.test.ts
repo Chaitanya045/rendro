@@ -55,13 +55,13 @@ for (const viewer of viewers) describe(`${viewer.name} viewer backend failures`,
     it.each([400, 401, 403, 404, 410])("preserves indistinguishable denials for upstream %s", async status => {
       const base = await viewer.base();
       vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(new Response("private-backend-detail", { status }))));
-      await errorResponse(await request(base + suffix), 404, asset);
+      await errorResponse(await request(base + suffix), viewer.name === "legacy" ? 503 : 404, asset);
       expect(minio.getObjectStream).not.toHaveBeenCalled();
     });
-    it("keeps revoked, expired or absent resolutions at 404", async () => {
+    it.each([null, false, 0, "", "invalid", [], {}, { deployment: {} }])("treats malformed success %j as retryable", async data => {
       const base = await viewer.base();
-      vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(Response.json(null))));
-      await errorResponse(await request(base + suffix), 404, asset);
+      vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(Response.json(data))));
+      await errorResponse(await request(base + suffix), 503, asset);
       expect(minio.getObjectStream).not.toHaveBeenCalled();
     });
     it.each([408, 429, 500, 502, 503, 504])("returns retryable 503 for upstream %s", async status => {
@@ -128,6 +128,14 @@ it.each(["/p/product", "/s/share-token", "/s/tree", "/p/product/files/tree"])("r
   vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(new Response(null, { status: 503 }))));
   await errorResponse(await request(path), 503, false);
 });
+it.each(["/p/product", "/p/product/tree", "/s/share-token"])("treats null success at %s as retryable", async path => {
+  vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(Response.json(null))));
+  const response = await request(path);
+  expect(response.status).toBe(503);
+  expect(response.headers.get("Retry-After")).toBe("1");
+  expect(response.headers.get("Cache-Control")).toBe("private, no-store");
+  expect(minio.getObjectStream).not.toHaveBeenCalled();
+});
 it.each([404, 503])("returns uncached public tree errors (%s)", async status => {
   vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(new Response(null, { status }))));
   const response = await request("/p/product/tree");
@@ -144,8 +152,10 @@ it("ignores an ambient session when revalidating a legacy ticket", async () => {
   const base = await viewers[2].base();
   const original = vi.mocked(fetch).getMockImplementation()!;
   vi.mocked(fetch).mockImplementation((input, init) => {
-    expect((input instanceof Request ? input.url : input.toString())).toContain("disableCookieCache=true");
-    expect(new Headers(init?.headers).get("cookie")).toBe(cookie);
+    if (!(input instanceof Request ? input.url : input.toString()).endsWith("/api/query")) {
+      expect((input instanceof Request ? input.url : input.toString())).toContain("management/access");
+      expect(new Headers(init?.headers).get("cookie")).toBe(cookie);
+    }
     return original(input, init);
   });
   expect((await request(base + "/files/index.html", { cookie: "better-auth.session_token=unrelated" })).status).toBe(200);
@@ -167,6 +177,13 @@ it.each(["/p/product", "/s/share-token"])("keeps missing %s shells uncached", as
   vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(new Response(null, { status: 404 }))));
   await errorResponse(await request(path), 404, false);
 });
+it("preserves an authoritative denial when discarding its body fails", async () => {
+  const cancel = vi.fn(() => Promise.reject(new Error("private-backend-detail")));
+  vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(new Response(new ReadableStream({ cancel }), { status: 403 }))));
+  await errorResponse(await request("/s/share-token"), 404, false);
+  expect(cancel).toHaveBeenCalledOnce();
+  expect(minio.getObjectStream).not.toHaveBeenCalled();
+});
 it.each(["/p/product", "/p/product/files/index.html", "/p/product/files/assets/site.css"])("returns 503 for failed manifest reads at %s", async path => {
   vi.mocked(minio.getObjectText).mockRejectedValue(new Error("private-backend-detail"));
   await errorResponse(await request(path), 503, path.endsWith(".css"));
@@ -174,7 +191,7 @@ it.each(["/p/product", "/p/product/files/index.html", "/p/product/files/assets/s
 it.each([false, true])("honors a real legacy deletion result (%s)", async deleted => {
   vi.mocked(deletion.isDeleted).mockRestore();
   const original = vi.mocked(fetch).getMockImplementation()!;
-  vi.mocked(fetch).mockImplementation((input, init) => (input instanceof Request ? input.url : input.toString()).endsWith("/api/query")
+  vi.mocked(fetch).mockImplementation((input, init) => (input instanceof Request ? input.url : input.toString()).endsWith("/api/query") && JSON.parse(init?.body as string).path === "deletedFiles:isDeleted"
     ? Promise.resolve(Response.json({ status: "success", value: deleted })) : original(input, init));
   const response = await request(await viewers[2].base() + "/files/index.html");
   if (deleted) await errorResponse(response, 404, false);

@@ -1,7 +1,6 @@
 import { Hono, type Context } from "hono";
 import type { User } from "better-auth/types";
-import { validateApiKey } from "@/api-keys";
-import { emailToOrgSlug } from "@/orgs";
+import { legacyRequestMember, legacyUnavailable, retiredLegacy } from "@/legacy-access";
 import {
   listPublications,
   PublicationError,
@@ -12,14 +11,14 @@ import {
 
 const app = new Hono<{ Variables: { user?: User } }>();
 
-async function authenticatedOrg(c: Context<{ Variables: { user?: User } }>): Promise<string | null> {
-  const authorization = c.req.header("Authorization");
-  if (authorization !== undefined) {
-    if (!authorization.startsWith("Bearer ")) return null;
-    return validateApiKey(authorization.slice("Bearer ".length));
-  }
-  const user = c.get("user");
-  return user ? emailToOrgSlug(user.email) : null;
+app.onError(legacyUnavailable);
+app.use("/api/publications*", async (c, next) => {
+  if (c.req.header("Authorization") !== undefined) return retiredLegacy();
+  await next();
+});
+async function authenticatedOrg(c: Context, destructive = false): Promise<string | null> {
+  const org = c.req.query("org");
+  return org && await legacyRequestMember(c, org, destructive) ? org : null;
 }
 
 function publicUrl(c: Context, publication: Publication): string {
@@ -37,14 +36,14 @@ function serialize(c: Context, publication: Publication, documentCount?: number)
 
 app.get("/api/publications", async (c) => {
   const orgSlug = await authenticatedOrg(c);
-  if (!orgSlug) return c.text("Unauthorized", 401);
+  if (!orgSlug) return c.text("Not found", 404);
   const publications = await listPublications(orgSlug);
   return c.json({ publications: publications.map((publication) => serialize(c, publication)) });
 });
 
 app.post("/api/publications", async (c) => {
   const orgSlug = await authenticatedOrg(c);
-  if (!orgSlug) return c.text("Unauthorized", 401);
+  if (!orgSlug) return c.text("Not found", 404);
 
   let body: unknown;
   try {
@@ -79,8 +78,8 @@ app.post("/api/publications", async (c) => {
 });
 
 app.delete("/api/publications/:slug", async (c) => {
-  const orgSlug = await authenticatedOrg(c);
-  if (!orgSlug) return c.text("Unauthorized", 401);
+  const orgSlug = await authenticatedOrg(c, true);
+  if (!orgSlug) return c.text("Not found", 404);
   const removed = await removePublication(orgSlug, c.req.param("slug"));
   if (!removed) return c.text("Publication not found", 404);
   return c.json({ unpublished: true, slug: c.req.param("slug") });

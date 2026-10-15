@@ -13,12 +13,6 @@
       "functions": 0,
       "lines": 0
     },
-    "convex/apiKeys.ts": {
-      "statements": 10,
-      "branches": 4,
-      "functions": 3,
-      "lines": 5
-    },
     "convex/authEmails.ts": {
       "statements": 19,
       "branches": 18,
@@ -42,12 +36,6 @@
       "branches": 0,
       "functions": 0,
       "lines": 3
-    },
-    "convex/deletedFiles.ts": {
-      "statements": 18,
-      "branches": 7,
-      "functions": 5,
-      "lines": 9
     },
     "convex/documentReplies.ts": {
       "statements": 1,
@@ -85,23 +73,11 @@
       "functions": 0,
       "lines": 5
     },
-    "convex/security.ts": {
-      "statements": 8,
-      "branches": 6,
-      "functions": 0,
-      "lines": 4
-    },
     "convex/sessionReadLimit.ts": {
       "statements": 1,
       "branches": 1,
       "functions": 0,
       "lines": 1
-    },
-    "convex/threads.ts": {
-      "statements": 6,
-      "branches": 2,
-      "functions": 3,
-      "lines": 3
     },
     "scripts/build-cli.mjs": {
       "statements": 3,
@@ -168,12 +144,6 @@
       "branches": 1,
       "functions": 0,
       "lines": 0
-    },
-    "scripts/migrate-legacy-tenancy.ts": {
-      "statements": 12,
-      "branches": 22,
-      "functions": 1,
-      "lines": 5
     },
     "scripts/run-permission-qa.mjs": {
       "statements": 12,
@@ -271,12 +241,6 @@
       "functions": 0,
       "lines": 0
     },
-    "src/convex-internal.ts": {
-      "statements": 5,
-      "branches": 4,
-      "functions": 0,
-      "lines": 2
-    },
     "src/index.ts": {
       "statements": 4,
       "branches": 3,
@@ -331,24 +295,6 @@
       "functions": 9,
       "lines": 55
     },
-    "src/orgs.ts": {
-      "statements": 3,
-      "branches": 3,
-      "functions": 0,
-      "lines": 0
-    },
-    "src/publications.ts": {
-      "statements": 12,
-      "branches": 14,
-      "functions": 1,
-      "lines": 3
-    },
-    "src/routes/app.ts": {
-      "statements": 11,
-      "branches": 20,
-      "functions": 2,
-      "lines": 8
-    },
     "src/routes/auth-pages.ts": {
       "statements": 1,
       "branches": 3,
@@ -385,12 +331,6 @@
       "functions": 0,
       "lines": 2
     },
-    "src/routes/publications.ts": {
-      "statements": 8,
-      "branches": 8,
-      "functions": 0,
-      "lines": 3
-    },
     "src/session-cache.ts": {
       "statements": 0,
       "branches": 3,
@@ -402,12 +342,6 @@
       "branches": 4,
       "functions": 0,
       "lines": 3
-    },
-    "src/soft-delete.ts": {
-      "statements": 5,
-      "branches": 3,
-      "functions": 3,
-      "lines": 4
     },
     "src/storage-boundary.ts": {
       "statements": 1,
@@ -432,12 +366,6 @@
       "branches": 64,
       "functions": 8,
       "lines": 2
-    },
-    "src/viewer-backend.ts": {
-      "statements": 0,
-      "branches": 0,
-      "functions": 1,
-      "lines": 0
     },
     "src/viewer-ticket.ts": {
       "statements": 1,

@@ -15,7 +15,7 @@ interface MigrationTarget {
   projectId?: string;
   projectName?: string;
   apiKey: string;
-  legacyApiKey?: string;
+  legacySessionCookie?: string;
 }
 
 interface LegacyPublication {
@@ -25,8 +25,7 @@ interface LegacyPublication {
   title: string;
 }
 
-// Do not use soft-delete.ts's permissive fallback: an unavailable deletion
-// database must stop a migration, never turn all stored objects into live files.
+// An unavailable deletion database must stop migration, never expose deleted files.
 async function visibleLegacyKeys(keys: string[]): Promise<Set<string>> {
   const convexUrl = process.env.CONVEX_URL?.replace(/\/$/, "");
   const internalSecret = process.env.CONVEX_INTERNAL_SECRET;
@@ -57,10 +56,12 @@ async function visibleLegacyKeys(keys: string[]): Promise<Set<string>> {
 }
 
 async function legacyPublications(target: MigrationTarget): Promise<LegacyPublication[]> {
-  if (!target.legacyApiKey) return [];
-  const result = await requestJson<{ publications: LegacyPublication[] }>(
-    `${endpoint}/api/publications`, target.legacyApiKey,
-  );
+  if (!target.legacySessionCookie) return [];
+  const response = await fetch(`${endpoint}/api/publications?${new URLSearchParams({ org: target.legacyOrgSlug })}`, {
+    headers: { Cookie: target.legacySessionCookie }, redirect: "error",
+  });
+  if (!response.ok) throw new Error(`Legacy publication lookup failed (${response.status})`);
+  const result = await response.json() as { publications: LegacyPublication[] };
   return result.publications.filter(publication => publication.sourcePrefix.startsWith(`${target.legacyOrgSlug}/`));
 }
 
@@ -186,11 +187,10 @@ async function manifestEntry(key: string, path: string): Promise<ManifestEntry> 
 }
 
 async function ensureProject(target: MigrationTarget, manifestSha256: string): Promise<{ _id: string; activeDeploymentId?: string }> {
-  if (!migrationSecret) throw new Error("MIGRATION_SECRET is required with --apply");
   const slug = `legacy-${target.legacyOrgSlug}`.replace(/[^a-z0-9-]+/g, "-").slice(0, 48).replace(/-+$/, "");
   const result = await requestJson<{ project: { _id: string; activeDeploymentId?: string } }>(
     `${endpoint}/api/rendro/migration/project`,
-    migrationSecret,
+    migrationSecret!, // main rejects missing credentials before any apply work.
     {
       method: "POST",
       body: JSON.stringify({
@@ -215,7 +215,7 @@ async function migrateTarget(
   const objects = await listLegacy(prefix);
   console.log(`${target.legacyOrgSlug}: ${objects.length} legacy objects`);
   console.log(`  ${prefix} → organization ${target.organizationId}, project ${target.projectId ?? `<new: legacy-${target.legacyOrgSlug}>`}`);
-  console.log(`  Publications: ${target.legacyApiKey ? "recreate as pinned mappings" : "skip (no legacyApiKey)"}`);
+  console.log(`  Publications: ${target.legacySessionCookie ? "recreate as pinned mappings" : "skip (no legacySessionCookie)"}`);
   const rollback: RollbackRecord = {
     legacyOrgSlug: target.legacyOrgSlug,
     organizationId: target.organizationId,
@@ -313,7 +313,7 @@ async function migrateTarget(
   rollback.deploymentId = deploymentId;
   await checkpoint(rollback);
 
-  if (target.legacyApiKey) {
+  if (target.legacySessionCookie) {
     // Recheck before making anything public. Operators must freeze legacy
     // content, deletion, and publication writes for the entire migration.
     const currentVisible = await visibleLegacyKeys(keys);
