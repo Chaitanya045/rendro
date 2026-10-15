@@ -41,6 +41,6 @@ it("keeps share shells and files confined to their capability", async () => {
   expect((await shareRoutes.request("/s/test?doc=index.html&docQuery=invalid")).status).toBe(400);
   expect((await shareRoutes.request("/s/test?doc=index.html&docQuery=%3Fx%3D1")).status).toBe(200);
   expect((await shareRoutes.request("/s/test/files/other.html")).status).toBe(404);
-  vi.mocked(fetch).mockResolvedValue(Response.json(null));
+  vi.mocked(fetch).mockResolvedValue(new Response(null, { status: 404 }));
   expect((await shareRoutes.request("/s/test")).status).toBe(404);
 });

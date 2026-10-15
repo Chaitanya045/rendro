@@ -86,6 +86,8 @@ A component cron runs every five minutes, paging 100 rows at a time through the 
 
 Session lookup infrastructure failures return retryable 503 responses, with one bounded retry of the lookup GET only. Viewer downstream deployment/session-authorization reads likewise distinguish authoritative denial/absence (404) from 429, 5xx, network errors, a five-second timeout including body reads, and malformed responses (503 with `Retry-After`, styled retry HTML or JSON). Failures never replay protected writes or discard the session cookie.
 
+The shared viewer backend reader reserves its `null` result for HTTP denials. Successful management-access, publication/share resolver and legacy RPC responses must be JSON objects, with required fields validated by the caller. A 200 response containing `null`, a primitive, an array or invalid required fields is retryable unavailability, not a missing resource. A valid legacy RPC envelope may still contain `value: null` for an absent mapping or a completed mutation.
+
 Responses that performed a session lookup receive `Cache-Control: private, no-store`. Responses that pass through the middleware also receive numeric `Server-Timing` metrics: `session;dur=…` (when a lookup ran) and `render;dur=…`. The metrics contain no identity or response data.
 
 ### Organization lookup limits and request counts (#71)
@@ -330,7 +332,7 @@ The AWS SDK S3 client uses browser XML APIs for parsing ListObjectsV2 responses.
 
 ### Convex access from the Worker
 
-The Worker never opens a WebSocket to Convex. It calls Convex HTTP actions at `CONVEX_SITE_URL` for auth and `/api/rendro/*`. The legacy `api-keys.ts` and `soft-delete.ts` modules call the Convex query/mutation HTTP API at `CONVEX_URL` with `CONVEX_INTERNAL_SECRET`, through `src/convex-internal.ts`:
+The Worker never opens a WebSocket to Convex. It calls Convex HTTP actions at `CONVEX_SITE_URL` for auth and `/api/rendro/*`. The legacy `legacy-access.ts` and `soft-delete.ts` modules call the Convex query/mutation HTTP API at `CONVEX_URL` with `CONVEX_INTERNAL_SECRET`, through `src/convex-internal.ts`:
 
 ```typescript
 POST ${CONVEX_URL}/api/query     Body: { "path": "module:function", "args": [{ ... }] }

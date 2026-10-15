@@ -172,6 +172,31 @@ describe("legacy Worker authorization and persistence", () => {
     for (const path of [...await privatePaths(), ...publicPaths()]) expect((await request(path)).status, path).toBe(503);
     expect(minio.getObjectStream).not.toHaveBeenCalled();
   });
+  it.each([null, false, 0, "", [], {}, { id: "org-id", userId: "user", member: { userId: "user", role: null } }])("returns retryable 503 for malformed management success %j", async data => {
+    const original = vi.mocked(fetch).getMockImplementation()!;
+    vi.mocked(fetch).mockImplementation((input, init) => (input instanceof Request ? input.url : input.toString()).includes("management/access")
+      ? Promise.resolve(Response.json(data)) : original(input, init));
+    for (const path of await privatePaths()) {
+      const response = await request(path);
+      expect(response.status, path).toBe(503);
+      expect(response.headers.get("Retry-After"), path).toBe("1");
+      expect(response.headers.get("Cache-Control"), path).toBe("private, no-store");
+    }
+    expect(minio.getObjectStream).not.toHaveBeenCalled();
+    expect(minio.headObject).not.toHaveBeenCalled();
+    expect(minio.listImmediate).not.toHaveBeenCalled();
+  });
+  it.each([401, 403, 404])("keeps genuine management denial %s opaque", async status => {
+    const original = vi.mocked(fetch).getMockImplementation()!;
+    vi.mocked(fetch).mockImplementation((input, init) => (input instanceof Request ? input.url : input.toString()).includes("management/access")
+      ? Promise.resolve(new Response(null, { status })) : original(input, init));
+    for (const path of await privatePaths()) {
+      const response = await request(path);
+      expect(response.status, path).toBe(404);
+      expect(response.headers.get("Retry-After"), path).toBeNull();
+    }
+    expect(minio.getObjectStream).not.toHaveBeenCalled();
+  });
   it("checks deletion on anonymous content reads and fails closed on invalid metadata", async () => {
     for (const value of [true, null, {}, "false"]) {
       deleted = value;
