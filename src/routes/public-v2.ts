@@ -80,11 +80,13 @@ app.get("/p/:slug/files/*", async (c) => {
   if (!entry) return assetError(c, () => renderNotFoundPage({ path: "Document unavailable" }));
   const stream = await getObjectStream(objectKey(result, fullPath));
   if (!stream) return assetError(c, () => renderNotFoundPage({ path: "Document unavailable" }));
+  const htmlAsset = isHtmlAsset(fullPath, entry.contentType);
   const headers = {
     "Cache-Control": "public, max-age=0, must-revalidate",
-    ...assetHeaders(fullPath, true, entry.contentType),
+    // readStream fully decodes HTML as UTF-8; its output is re-encoded below.
+    ...assetHeaders(fullPath, true, htmlAsset ? "text/html" : entry.contentType),
   };
-  if (!isHtmlAsset(fullPath, entry.contentType)) return new Response(stream, { headers });
+  if (!htmlAsset) return new Response(stream, { headers });
   const html = injectNavigation(await readStream(stream), result.publication.slug, relativePath, c.req.url);
   return new Response(html, {
     headers: {
