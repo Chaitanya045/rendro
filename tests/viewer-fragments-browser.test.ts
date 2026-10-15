@@ -172,6 +172,44 @@ async function readyFrame(page: Page): Promise<Frame> {
   return frame;
 }
 
+// Unlike Playwright's evaluated scripts, these fixture operations must not grant
+// activation. Keep CDP local to this Chromium test and release each session.
+async function withoutActivation(page: Page, action: () => unknown, label: string): Promise<void> {
+  const session = await page.context().newCDPSession(page);
+  try {
+    await browserStep(label, async () => {
+      const result = await session.send("Runtime.evaluate", {
+        expression: `(${action.toString()})()`, userGesture: false, awaitPromise: true,
+      });
+      if (result.exceptionDetails) throw new Error(result.exceptionDetails.text);
+    });
+  } finally {
+    await session.detach();
+  }
+}
+
+// Observe the native getter without a gesture, and resolve only after the shell
+// has read false. Polling isActive ourselves could beat the gate's observer.
+async function waitForObservedActivationExpiry(page: Page): Promise<void> {
+  await withoutActivation(page, () => new Promise<void>(resolve => {
+    const activation = navigator.userActivation;
+    if (!activation) { resolve(); return; }
+    const read = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(activation), "isActive")!.get!.bind(activation);
+    Object.defineProperty(activation, "isActive", {
+      configurable: true,
+      get() {
+        const active = read() as boolean;
+        if (!active) {
+          Reflect.deleteProperty(activation, "isActive");
+          // The gate finishes resetting its reservation in this same task.
+          queueMicrotask(resolve);
+        }
+        return active;
+      },
+    });
+  }), "wait for shell to observe native activation expiry");
+}
+
 async function open(base: string, hash = ""): Promise<{ page: Page; frame: Frame }> {
   const page = await newPage();
   const response = (await browserStep("navigate to fixture", () => page.goto(harness.origin + base + hash, { waitUntil: "domcontentloaded" })))!;
@@ -554,8 +592,7 @@ describe("viewer fragment navigation in Chromium", () => {
     await review.evaluate(button => button.addEventListener("click", () => {
       document.querySelector<HTMLIFrameElement>("#content-frame")!.contentWindow!.postMessage({ type: "fixture-navigate", search: "?attack-review" }, "*");
     }, { once: true }));
-    await page.waitForFunction(() => navigator.userActivation?.isActive !== true);
-    await page.waitForTimeout(150); // Allow the gate's inactivity observer to run.
+    await waitForObservedActivationExpiry(page);
     await review.click();
     await page.waitForFunction(() => (window as unknown as { activations: boolean[] }).activations.length === 3);
     expect(page.url()).toBe(initialUrl);
