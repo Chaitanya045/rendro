@@ -21,3 +21,7 @@ dist-check/
 dist-check/
 *.tmp
 paseo.json
+
+# Playwright Test E2E artifacts
+test-results/
+playwright-report/
