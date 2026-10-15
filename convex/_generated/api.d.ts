@@ -44,6 +44,7 @@ import type * as rendroHttp from "../rendroHttp.js";
 import type * as replies from "../replies.js";
 import type * as retention from "../retention.js";
 import type * as retentionHttp from "../retentionHttp.js";
+import type * as retentionPolicy from "../retentionPolicy.js";
 import type * as security from "../security.js";
 import type * as sessionReadLimit from "../sessionReadLimit.js";
 import type * as shareGrantHttp from "../shareGrantHttp.js";
@@ -93,6 +94,7 @@ declare const fullApi: ApiFromModules<{
   replies: typeof replies;
   retention: typeof retention;
   retentionHttp: typeof retentionHttp;
+  retentionPolicy: typeof retentionPolicy;
   security: typeof security;
   sessionReadLimit: typeof sessionReadLimit;
   shareGrantHttp: typeof shareGrantHttp;

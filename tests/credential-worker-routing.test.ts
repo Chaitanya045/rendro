@@ -118,7 +118,7 @@ describe("API-key requests through the production Worker router", () => {
       const response = await f.request(route);
       expect(response.status).toBe(200);
       const result = await response.json();
-      if (route.endsWith("staging")) expect(result.deployment._id).toBe(deployment.deploymentId);
+      if (route.endsWith("staging")) expect(result.deployment).toEqual({ manifestKey: deployment.manifestKey, treeIndexKey: deployment.treeIndexKey, stagingExpiresAt: deployment.stagingExpiresAt });
       else if (route.endsWith("active")) expect(result.principal).toEqual({ kind: "api-key", keyId: f.keyId });
       else expect(result.deployments).toHaveLength(1);
       await f.backend.mutation(internal.apiKeyCredentials.revokeInternal, {

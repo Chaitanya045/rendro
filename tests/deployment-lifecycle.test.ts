@@ -38,7 +38,7 @@ async function stage(
   return backend.mutation(internal.deployments.startInternal, {
     organizationId,
     projectId,
-    manifestSha256,
+    manifestSha256: "a".repeat(64),
     fileCount: 2,
     byteCount: 100,
     provenance: { ...provenance, manifestSha256 },
@@ -139,12 +139,11 @@ describe("immutable deployment lifecycle", () => {
       pinnedDeploymentId: first.deploymentId,
       actorId: "user-a",
     });
-    const candidates = await backend.query(internal.retention.candidatesInternal, {
-      failedBefore: Date.now() + 1,
-      supersededBefore: Date.now() + 1,
-      limit: 50,
-    });
-    expect(candidates.map((candidate) => candidate._id)).not.toContain(first.deploymentId);
+    await backend.run(ctx => ctx.db.patch(first.deploymentId, { createdAt: Date.now() - 31 * 86_400_000 }));
+    await backend.mutation(internal.retention.candidatesInternal, { token: "failed-phase" });
+    const candidates = await backend.mutation(internal.retention.candidatesInternal, { token: "test" });
+    expect(candidates.scanned).toBe(1);
+    expect(candidates.deployments.map((candidate) => candidate._id)).not.toContain(first.deploymentId);
   });
 });
 

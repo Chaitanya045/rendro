@@ -143,6 +143,19 @@ it.each(["upload", "commit", "literal", "cleanup-error", "cleanup-literal"])("re
   expect(requests.some(request => request.url.endsWith("/fail"))).toBe(true);
   expect(result.errors).toContain(failure.startsWith("cleanup-") ? "Failed to mark deployment" : failure === "commit" ? "Commit rejected" : failure === "upload" ? "Upload failed" : "literal upload failure");
 });
+
+it.each(["upload", "commit"])("reports an expired %s lease as actionable conflict and attempts cleanup", async phase => {
+  const fallback = handle;
+  handle = (url, init) => url.includes(phase === "upload" ? "/files/" : "/commit?")
+    ? Promise.resolve(Response.json({ error: "Staging lease expired. Run rendro push again to start a new deployment." }, { status: 409 }))
+    : fallback(url, init);
+  const result = await run(["push", ...identity, "--token", "key"], "never");
+  expect(result.exits).toBe(1);
+  expect(result.errors).toContain("409 Staging lease expired. Run rendro push again to start a new deployment.");
+  expect(result.errors).not.toContain("Backend unavailable");
+  expect(requests.some(request => request.url.endsWith("/fail"))).toBe(true);
+  expect(requests.some(request => request.url.includes("/commit?"))).toBe(phase === "commit");
+});
 it.each([false, true])("dispatches sensitive-file opt-in and prints exclusions (%s)", async include => {
   io.readdir.mockResolvedValue([entry("index.html"), entry(".env.qa")]);
   const result = await run(["push", ...identity, "--token", "key", ...(include ? ["--include-sensitive"] : [])], " total");

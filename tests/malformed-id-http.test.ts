@@ -72,7 +72,7 @@ const routes: Route[] = [
   { path: "shares", method: "GET", fields: ["projectId"], body: scope },
   { path: "shares", method: "POST", fields: ["projectId"], body: f => ({ ...f.scope, documentPath: "index.html", expiresInSeconds: 600 }) },
   { path: "shares/revoke", method: "POST", fields: ["grantId"], body: () => ({ organizationId: "org" }) },
-  { path: "retention/purged", method: "POST", fields: ["deploymentId"], body: () => ({ objectCount: 0 }) },
+  { path: "retention/purged", method: "POST", fields: ["deploymentId"], body: () => ({ objectCount: 0, purgeToken: "test" }) },
   { path: "migration/project", method: "POST", fields: ["projectId"], body: scope },
   { path: "management/team-members", method: "GET", fields: ["teamId"], body: () => ({ organizationId: "org" }) },
 ];

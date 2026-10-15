@@ -145,8 +145,8 @@ describe("authoritative API-key rate limits", () => {
     });
     const identity = { organizationId: "org", projectId: project!._id };
     const deployment = await t.mutation(internal.deployments.startInternal, {
-      ...identity, manifestSha256: "hash", fileCount: 1, byteCount: 1, actorId: "owner",
-      provenance: { source: { kind: "local" }, execution: { kind: "local" }, cliVersion: "test", manifestSha256: "hash" },
+      ...identity, manifestSha256: "a".repeat(64), fileCount: 1, byteCount: 1, actorId: "owner",
+      provenance: { source: { kind: "local" }, execution: { kind: "local" }, cliVersion: "test", manifestSha256: "a".repeat(64) },
     });
     const deploymentIdentity = { ...identity, deploymentId: deployment.deploymentId };
     await exhaustCredential(t, credentialId);
@@ -169,8 +169,8 @@ describe("authoritative API-key rate limits", () => {
     });
     const identity = { organizationId: "org", projectId: project!._id };
     const deployment = await t.mutation(internal.deployments.startInternal, {
-      ...identity, manifestSha256: "hash", fileCount: 20, byteCount: 20, actorId: "owner",
-      provenance: { source: { kind: "local" }, execution: { kind: "local" }, cliVersion: "test", manifestSha256: "hash" },
+      ...identity, manifestSha256: "a".repeat(64), fileCount: 20, byteCount: 20, actorId: "owner",
+      provenance: { source: { kind: "local" }, execution: { kind: "local" }, cliVersion: "test", manifestSha256: "a".repeat(64) },
     });
     const path = `/api/rendro/deployments/staging?${new URLSearchParams({ ...identity, deploymentId: deployment.deploymentId })}`;
     const batch = () => Promise.all(Array.from({ length: 20 }, () => t.fetch(path, { headers })));
@@ -213,8 +213,8 @@ describe("authoritative API-key rate limits", () => {
       expect((await t.fetch(`/api/rendro/deployments/active?${query}`, { headers })).status).toBe(200);
       const start = await t.fetch("/api/rendro/deployments/start", {
         method: "POST", headers, body: JSON.stringify({ ...identity,
-          manifestSha256: "hash", fileCount: changed + reused, byteCount: 1,
-          provenance: { source: { kind: "local" }, execution: { kind: "local" }, cliVersion: "test", manifestSha256: "hash" },
+          manifestSha256: "a".repeat(64), fileCount: changed + reused, byteCount: 1,
+          provenance: { source: { kind: "local" }, execution: { kind: "local" }, cliVersion: "test", manifestSha256: "a".repeat(64) },
         }),
       });
       expect(start.status).toBe(201);

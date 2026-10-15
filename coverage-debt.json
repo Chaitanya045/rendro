@@ -55,12 +55,6 @@
       "functions": 6,
       "lines": 48
     },
-    "convex/retention.ts": {
-      "statements": 10,
-      "branches": 10,
-      "functions": 0,
-      "lines": 5
-    },
     "convex/sessionReadLimit.ts": {
       "statements": 1,
       "branches": 1,
@@ -115,12 +109,6 @@
       "functions": 0,
       "lines": 3
     },
-    "scripts/cleanup-retention.ts": {
-      "statements": 34,
-      "branches": 24,
-      "functions": 5,
-      "lines": 30
-    },
     "scripts/init-minio.ts": {
       "statements": 15,
       "branches": 10,
@@ -160,12 +148,6 @@
     "shared/v2-paths.ts": {
       "statements": 0,
       "branches": 1,
-      "functions": 0,
-      "lines": 0
-    },
-    "src/bounded-body.ts": {
-      "statements": 2,
-      "branches": 2,
       "functions": 0,
       "lines": 0
     },
@@ -276,12 +258,6 @@
       "branches": 3,
       "functions": 1,
       "lines": 0
-    },
-    "src/minio.ts": {
-      "statements": 61,
-      "branches": 50,
-      "functions": 9,
-      "lines": 55
     },
     "src/routes/auth-pages.ts": {
       "statements": 1,

@@ -18,7 +18,7 @@ import { createViewerTicket } from "../src/viewer-ticket";
 import * as storage from "../src/minio";
 
 const modules = import.meta.glob("../convex/**/*.ts");
-const provenance = { source: { kind: "local" as const }, execution: { kind: "local" as const }, cliVersion: "test", manifestSha256: "manifest" };
+const provenance = { source: { kind: "local" as const }, execution: { kind: "local" as const }, cliVersion: "test", manifestSha256: "a".repeat(64) };
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 async function fixture(transactionLimits: { documentsWritten: number } | boolean = true) {
@@ -43,7 +43,7 @@ async function fixture(transactionLimits: { documentsWritten: number } | boolean
     const actorId = user.id;
     const project = (await t.mutation(internal.projects.createInternal, { organizationId, name: "Docs", slug: "docs", actorId }))!;
     const scope = { organizationId, projectId: project._id };
-    const start = { ...scope, manifestSha256: "manifest", fileCount: 1, byteCount: 1, provenance, actorId };
+    const start = { ...scope, manifestSha256: "a".repeat(64), fileCount: 1, byteCount: 1, provenance, actorId };
     const first = await t.mutation(internal.deployments.startInternal, start);
     await commitWithProof(t, { ...scope, deploymentId: first.deploymentId, actorId });
     const active = await t.mutation(internal.deployments.startInternal, start);
@@ -153,8 +153,17 @@ describe("organization deletion lifecycle", () => {
     await f.t.mutation(internal.organizationLifecycle.deleteInternal, { organizationId: r.organizationId, actorId: r.actorId });
     expect(await snapshot()).toEqual(before);
     expect((await f.post("/api/auth/organization/delete", { organizationId: r.organizationId })).status).toBe(400);
-    const candidates = await f.t.query(internal.retention.candidatesInternal, { failedBefore: Date.now() + 1, supersededBefore: Date.now() + 1, limit: 50 });
-    expect(candidates.filter(d => d.organizationId === r.organizationId)).toHaveLength(4);
+    // Once retention ages and upload drain deadlines pass, tombstoned rows
+    // remain reclaimable through the operator's transactional claim API.
+    await f.t.run(async ctx => {
+      const deployments = await ctx.db.query("deployments").withIndex("by_organization_status", q => q.eq("organizationId", r.organizationId)).collect();
+      for (const deployment of deployments) await ctx.db.patch(deployment._id, {
+        createdAt: Date.now() - 31 * 86_400_000, stagingExpiresAt: Date.now() - 2 * 86_400_000,
+      });
+    });
+    const failed = await f.t.mutation(internal.retention.candidatesInternal, { token: "failed" });
+    const superseded = await f.t.mutation(internal.retention.candidatesInternal, { token: "superseded" });
+    expect([...failed.deployments, ...superseded.deployments].filter(d => d.organizationId === r.organizationId)).toHaveLength(4);
 
     // A ticket issued before deletion must reauthorize at Convex before R2.
     vi.stubGlobal("fetch", vi.fn((input: string | URL | Request, init?: RequestInit) => {
@@ -185,6 +194,7 @@ describe("organization deletion lifecycle", () => {
     await expect(f.t.mutation(internal.shareGrants.createInternal, { ...scope, tokenHash: "new", documentPath: "index.html", expiresAt: Date.now() + 60_000, actorId: r.actorId })).rejects.toThrow("Organization membership required");
     await expect(f.t.mutation(internal.deployments.startInternal, r.start)).rejects.toThrow("Organization membership required");
     await expect(commitWithProof(f.t, { ...scope, deploymentId: r.staging.deploymentId, actorId: r.actorId })).rejects.toThrow("Organization membership required");
+    await expect(f.t.mutation(internal.deployments.refreshStagingInternal, { ...scope, deploymentId: r.staging.deploymentId })).rejects.toThrow("Organization membership required");
     expect(await f.t.query(internal.projects.getInternal, scope)).toBeNull();
     expect(await f.t.query(internal.deployments.getInternal, { ...scope, deploymentId: r.active.deploymentId })).toBeNull();
     expect(await f.t.query(internal.deployments.latestForOrganization, { organizationId: r.organizationId })).toBeNull();

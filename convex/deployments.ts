@@ -4,6 +4,7 @@ import { sanitizeProvenance } from "../shared/provenance";
 import { requireId } from "./ids";
 import { ConvexError, v } from "convex/values";
 import { internalMutation, internalQuery } from "./_generated/server";
+import { STAGING_LEASE_MS, stagingExpiry } from "./retentionPolicy";
 import { provenanceValidator } from "./schema";
 
 export const startInternal = internalMutation({
@@ -29,6 +30,21 @@ export const startInternal = internalMutation({
     if (args.fileCount < 0 || args.byteCount < 0) {
       throw new ConvexError("Deployment counts must be non-negative");
     }
+    if (args.manifestSha256.length !== 64 || !/^[a-f0-9]{64}$/.test(args.manifestSha256)) throw new ConvexError("manifestSha256 must be 64 lowercase hexadecimal characters");
+    // Match the provenance display/storage caps from #123, rejecting oversized
+    // inputs before sanitation. All storage keys are derived from bounded IDs.
+    const strings: [string | undefined, number][] = [
+      [args.organizationId, 256], [input.projectId, 256], [args.actorId, 256],
+      [args.provenance.source.repository, 2048], [args.provenance.source.commit, 128],
+      [args.provenance.source.ref, 256], [args.provenance.source.localPathLabel, 512],
+      [args.provenance.execution.provider, 256], [args.provenance.execution.runId, 256],
+      [args.provenance.execution.workflow, 256], [args.provenance.execution.job, 256],
+      [args.provenance.execution.actor, 256], [args.provenance.cliVersion, 64],
+      [args.provenance.manifestSha256, 128],
+    ];
+    if (strings.some(([value, cap]) => value !== undefined && value.length > cap)) {
+      throw new ConvexError("Deployment string exceeds its length limit");
+    }
     const createdAt = Date.now();
     const deploymentId = await ctx.db.insert("deployments", {
       organizationId: args.organizationId,
@@ -41,6 +57,7 @@ export const startInternal = internalMutation({
       provenance: sanitizeProvenance(args.provenance),
       createdBy: args.actorId,
       createdAt,
+      stagingExpiresAt: createdAt + STAGING_LEASE_MS,
       previousDeploymentId: project.activeDeploymentId,
     });
     const objectRoot = `tenants/${args.organizationId}/projects/${args.projectId}/deployments/${deploymentId}`;
@@ -58,6 +75,7 @@ export const startInternal = internalMutation({
     });
     return {
       deploymentId,
+      stagingExpiresAt: createdAt + STAGING_LEASE_MS,
       objectRoot,
       manifestKey,
       treeIndexKey,
@@ -152,6 +170,7 @@ export const commitInternal = internalMutation({
     if (deployment.status !== "staging") {
       throw new ConvexError("Only a staging deployment can be committed");
     }
+    if (stagingExpiry(deployment) <= Date.now()) throw new ConvexError({ code: "conflict", message: "Staging lease expired. Run rendro push again to start a new deployment." });
     if (project.activeDeploymentId !== deployment.previousDeploymentId) {
       throw new ConvexError("Active deployment changed; rebase and retry");
     }
@@ -208,5 +227,30 @@ export const failInternal = internalMutation({
       failureReason: args.reason.slice(0, 500),
     });
     return true;
+  },
+});
+
+// Upload/copy authorization renews the lease in the same transaction that reads
+// staging state. Expired leases cannot be resurrected, even before the janitor runs.
+export const refreshStagingInternal = internalMutation({
+  args: { organizationId: v.string(), projectId: v.string(), deploymentId: v.string() },
+  handler: async (ctx, input) => {
+    await requireActiveOrganization(ctx, input.organizationId);
+    const projectId = requireId(ctx, "projects", input.projectId);
+    const deployment = await ctx.db.get(requireId(ctx, "deployments", input.deploymentId));
+    if (!deployment || deployment.organizationId !== input.organizationId || deployment.projectId !== projectId
+      || deployment.status !== "staging") return null;
+    if (stagingExpiry(deployment) <= Date.now()) throw new ConvexError({ code: "conflict", message: "Staging lease expired. Run rendro push again to start a new deployment." });
+    const staging = {
+      manifestKey: deployment.manifestKey,
+      treeIndexKey: deployment.treeIndexKey,
+      previousDeploymentId: deployment.previousDeploymentId,
+    };
+    if (stagingExpiry(deployment) > Date.now() + STAGING_LEASE_MS - 10 * 60 * 1000) {
+      return { ...staging, stagingExpiresAt: stagingExpiry(deployment) };
+    }
+    const stagingExpiresAt = Date.now() + STAGING_LEASE_MS;
+    await ctx.db.patch(deployment._id, { stagingExpiresAt });
+    return { ...staging, stagingExpiresAt };
   },
 });

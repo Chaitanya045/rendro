@@ -52,3 +52,26 @@ describe("manifest-bounded request body reader", () => {
     expect(nonEmpty.cancel).toHaveBeenCalledOnce();
   });
 });
+
+it("rejects invalid sizes and pre-aborted reads without locking the stream", async () => {
+  for (const size of [-1, 0.5, Infinity]) expect(await readExactBody(null, size)).toBeNull();
+  const abort = new AbortController();
+  abort.abort(new Error("cancelled"));
+  const body = new ReadableStream<Uint8Array>();
+  await expect(readExactBody(body, 1, abort.signal)).rejects.toThrow("cancelled");
+  expect(body.locked).toBe(false);
+});
+
+it("preserves the abort reason even if transport cancellation rejects", async () => {
+  const abort = new AbortController();
+  const body = new ReadableStream<Uint8Array>({ cancel: () => Promise.reject(new Error("transport closed")) });
+  const result = readExactBody(body, 1, abort.signal);
+  abort.abort(new Error("lease expired"));
+  await expect(result).rejects.toThrow("lease expired");
+  expect(body.locked).toBe(false);
+});
+
+it("ignores empty reader values without counting them toward the body size", async () => {
+  const body = new ReadableStream<Uint8Array>({ start(c) { c.enqueue(undefined); c.enqueue(new Uint8Array([1])); c.close(); } });
+  expect(await readExactBody(body, 1)).toEqual(new Uint8Array([1]));
+});

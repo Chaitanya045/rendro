@@ -19,7 +19,7 @@ const scope = "?organizationId=org&projectId=project";
 const headers = { authorization: "Bearer key", origin: "https://rendro.test", "sec-fetch-site": "same-origin", "content-type": "application/json" };
 const post = (body: unknown) => ({ method: "POST", headers, body: body === "invalid-json" ? "{" : JSON.stringify(body) });
 beforeEach(() => {
-  vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(Response.json({ deployment: { manifestKey: "manifest", previousDeploymentId: "previous" } }))));
+  vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(Response.json({ deployment: { stagingExpiresAt: Date.now() + 3_600_000, manifestKey: "manifest", previousDeploymentId: "previous" } }))));
   storage.getObjectText.mockResolvedValue(JSON.stringify(manifest));
   storage.headObject.mockResolvedValue({ size: 1, metadata: { sha256: file.sha256 } });
   storage.putObject.mockResolvedValue(undefined);
@@ -46,7 +46,7 @@ it("rejects malformed deployment fields, manifests and checksums before upstream
 it.each([new Error("storage failed"), "storage failed"])("fails a deployment when initializing storage fails (%#)", async error => {
   const hash = createHash("sha256").update(JSON.stringify(manifest)).digest("hex");
   storage.putObject.mockRejectedValue(error);
-  vi.mocked(fetch).mockResolvedValue(Response.json({ deployment: { deploymentId: "deployment", manifestKey: "manifest", treeIndexKey: "tree" } }));
+  vi.mocked(fetch).mockResolvedValue(Response.json({ deployment: { deploymentId: "deployment", stagingExpiresAt: Date.now() + 3_600_000, manifestKey: "manifest", treeIndexKey: "tree" } }));
   expect((await deployments.request("/api/rendro/deployments/start", post({ organizationId: "org", projectId: "project", manifest, manifestSha256: hash }))).status).toBe(502);
   expect(fetch).toHaveBeenCalledTimes(2);
   const init = vi.mocked(fetch).mock.calls[1][1]!;
@@ -66,7 +66,7 @@ it("rejects missing manifest objects, malformed stored JSON and unlisted uploads
 });
 it("rejects copy and commit requests without identity and handles absent predecessor", async () => {
   for (const operation of ["copy", "commit"]) expect((await deployments.request(`/api/rendro/deployments/id/${operation}`, post({}))).status).toBe(400);
-  vi.mocked(fetch).mockResolvedValue(Response.json({ deployment: { manifestKey: "manifest" } }));
+  vi.mocked(fetch).mockResolvedValue(Response.json({ deployment: { stagingExpiresAt: Date.now() + 3_600_000, manifestKey: "manifest" } }));
   expect((await deployments.request(`/api/rendro/deployments/id/copy${scope}`, post({}))).status).toBe(400);
 });
 it("validates copy requests and source metadata before copying", async () => {
