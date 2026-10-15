@@ -1,9 +1,10 @@
+import { requireLegacyMember } from "./legacyAccess";
 import { v } from "convex/values";
 import { publicError } from "./publicErrors";
 import type { Doc } from "./_generated/dataModel";
 import type { QueryCtx, MutationCtx } from "./_generated/server";
 import { requireId } from "./ids";
-import { requireIdentity, orgSlugFromEmail, requireOrgIdentity, type AuthenticatedIdentity } from "./security";
+import { requireIdentity, type AuthenticatedIdentity } from "./security";
 import { validateClientOperationId, validateCommentAuthor } from "./commentOperations";
 
 export const legacyOperationArgs = {
@@ -15,19 +16,21 @@ export type LegacyOperation = {
 };
 
 export async function authorizeLegacyComment(ctx: QueryCtx | MutationCtx, orgSlug: string, input: LegacyOperation = {}) {
-  const identity = await requireOrgIdentity(ctx, orgSlug);
+  const identity = await requireIdentity(ctx);
+  const authorized = await requireLegacyMember(ctx, orgSlug);
+  const role = authorized.member.role;
+  const result = { ...identity, admin: role.split(",").some(value => ["owner", "admin"].includes(value.trim())) };
   validateCommentAuthor(input.expectedAuthorId, identity.subject);
   validateClientOperationId(input.clientOperationId);
-  return identity;
+  return result;
 }
 
 export async function authorizeLegacyThread(ctx: QueryCtx | MutationCtx, input: LegacyOperation & { threadId: string }) {
   // Authenticate before validating an opaque ID or revealing record existence.
-  const identity = await requireIdentity(ctx);
+  await requireIdentity(ctx);
   const thread = await ctx.db.get(requireId(ctx, "threads", input.threadId));
-  if (!thread || orgSlugFromEmail(identity.email) !== thread.orgSlug) publicError("not_found");
-  validateCommentAuthor(input.expectedAuthorId, identity.subject);
-  validateClientOperationId(input.clientOperationId);
+  if (!thread) publicError("not_found");
+  const identity = await authorizeLegacyComment(ctx, thread.orgSlug, input);
   validateLegacyScope(thread, input);
   return { thread, identity };
 }
@@ -37,11 +40,11 @@ export function validateLegacyScope(thread: Doc<"threads">, input: LegacyOperati
     || (input.filePath !== undefined && input.filePath !== thread.filePath)) publicError("not_found");
 }
 
-// v1 has no trusted organization binding: never infer admin rights from a slug.
-export function canModifyLegacyComment(identity: AuthenticatedIdentity, comment: { authorId?: string; authorEmail: string }): boolean {
-  return comment.authorId ? comment.authorId === identity.subject : comment.authorEmail.toLowerCase() === identity.email;
+// Modern comment rules: the author or a live mapped organization administrator.
+export function canModifyLegacyComment(identity: AuthenticatedIdentity & { admin?: boolean }, comment: { authorId?: string; authorEmail: string }): boolean {
+  return identity.admin === true || (comment.authorId ? comment.authorId === identity.subject : comment.authorEmail.toLowerCase() === identity.email);
 }
-export function requireLegacyCommentAuthor(identity: AuthenticatedIdentity, comment: { authorId?: string; authorEmail: string }): void {
+export function requireLegacyCommentAuthor(identity: AuthenticatedIdentity & { admin?: boolean }, comment: { authorId?: string; authorEmail: string }): void {
   if (!canModifyLegacyComment(identity, comment)) publicError("forbidden");
 }
 export function legacyBody(value: string): string {

@@ -12,6 +12,7 @@ const anchor = { kind: "element" as const, path: ["main"] };
 const paginationOpts = { cursor: null, numItems: 10 };
 async function fixture() {
   const f = await projectFixture();
+  vi.stubEnv("LEGACY_ORGANIZATION_MAP", JSON.stringify({ example: f.data.organizationId }));
   const legacyIdentity = { subject: f.data.users[0].userId, sessionId: f.data.users[0].sessionId, email: "author@example.test" };
   const memberIdentity = { subject: f.data.users[1].userId, sessionId: f.data.users[1].sessionId, email: "member@example.test" };
   const legacy = await f.backend.run(async ctx => {
@@ -26,6 +27,7 @@ type Endpoint = { name: string; kind: "query" | "mutation"; args: (f: Fixture) =
 const document = (f: Fixture) => ({ ...f.scope });
 const thread = (f: Fixture) => ({ ...f.scope, threadId: f.threadId });
 const endpoints: Endpoint[] = [
+  { name: "legacyAccess:resolve", kind: "query", args: () => ({ orgSlug: "example", internalSecret: "wrong" }), ids: [] },
   { name: "projects:activeDeployment", kind: "query", args: f => ({ organizationId: f.scope.organizationId, projectId: f.scope.projectId }), ids: ["projectId"] },
   { name: "documentThreads:list", kind: "query", args: f => ({ ...document(f), paginationOpts }), ids: ["projectId"] },
   { name: "documentThreads:create", kind: "mutation", args: f => ({ ...document(f), body: "Test", anchor }), ids: ["projectId"] },
@@ -38,10 +40,8 @@ const endpoints: Endpoint[] = [
   ...["resolve", "archive", "remove"].map(name => ({ name: `threads:${name}`, kind: "mutation" as const, args: (f: Fixture) => ({ threadId: f.legacyThreadId }), ids: ["threadId"] })),
   { name: "replies:add", kind: "mutation", args: f => ({ threadId: f.legacyThreadId, body: "Test" }), ids: ["threadId"] },
   { name: "replies:remove", kind: "mutation", args: f => ({ threadId: f.legacyThreadId, replyId: f.legacyReplyId }), ids: ["threadId", "replyId"] },
-  { name: "apiKeys:create", kind: "mutation", args: () => ({ orgSlug: "example", keyHash: "hash", internalSecret: "wrong" }), ids: [] },
-  { name: "apiKeys:validate", kind: "query", args: () => ({ keyHash: "hash", internalSecret: "wrong" }), ids: [] },
   { name: "deletedFiles:mark", kind: "mutation", args: () => ({ orgSlug: "example", fileKey: "key", internalSecret: "wrong" }), ids: [] },
-  ...["isDeleted", "unmark"].map(name => ({ name: `deletedFiles:${name}`, kind: name === "isDeleted" ? "query" as const : "mutation" as const, args: () => ({ fileKey: "key", internalSecret: "wrong" }), ids: [] })),
+  ...["isDeleted"].map(name => ({ name: `deletedFiles:${name}`, kind: name === "isDeleted" ? "query" as const : "mutation" as const, args: () => ({ fileKey: "key", internalSecret: "wrong" }), ids: [] })),
   { name: "deletedFiles:filterFn", kind: "query", args: () => ({ keys: [], internalSecret: "wrong" }), ids: [] },
 ];
 
@@ -89,7 +89,7 @@ describe("public Convex application error contract", () => {
   it.each(endpoints)("$name safely rejects unauthenticated callers", async endpoint => {
     const f = await fixture();
     vi.stubEnv("CONVEX_INTERNAL_SECRET", "correct-secret");
-    const service = endpoint.name.startsWith("apiKeys:") || endpoint.name.startsWith("deletedFiles:");
+    const service = endpoint.name.startsWith("legacyAccess:") || endpoint.name.startsWith("deletedFiles:");
     const args = { ...endpoint.args(f) };
     if (!/^(document|projects:)/.test(endpoint.name) && endpoint.ids.length) args.threadId = "malformed";
     await failure(call(f.backend, endpoint, args), service ? "forbidden" : endpoint.name === "projects:activeDeployment" ? "not_found" : "unauthenticated");
@@ -160,13 +160,11 @@ describe("public Convex application error contract", () => {
       const viewer = f.backend.withIdentity(f.legacyIdentity);
       const args = endpoint.args(f);
       const denied = endpoint.ids.length ? { ...args, filePath: "another-document.html" } : { ...args, orgSlug: "other" };
-      const code = endpoint.ids.length ? "not_found" : "forbidden";
+      const code = "not_found";
       const error: unknown = await call(viewer, endpoint, denied).catch((error: unknown) => error);
       errorEnvelope(error, code);
       expect(isDefinitiveCommentRejection(error)).toBe(true);
-      expect(commentErrorMessage(error, "Fallback")).toBe(code === "not_found"
-        ? "This comment is unavailable. Reload the document."
-        : "You do not have permission to change this comment.");
+      expect(commentErrorMessage(error, "Fallback")).toBe("This comment is unavailable. Reload the document.");
     });
 
     it("rejects legacy validation, author changes, status receipt conflicts and tombstoned records safely", async () => {

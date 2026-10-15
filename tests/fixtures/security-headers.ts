@@ -1,6 +1,5 @@
 import { sessionCache } from "@/middleware/session";
 import { vi } from "vitest";
-import * as orgs from "@/orgs";
 import * as publications from "@/publications";
 import * as minio from "@/minio";
 import { managementAccessFixture } from "./management-access";
@@ -16,7 +15,6 @@ export function mockSecurityBackend() {
   const organization = { id: "org-a", name: "Test organization", slug: "test",
     members: [{ id: "member-a", userId: testUser.id, role: "owner", user: testUser }], invitations: [] };
   const access = managementAccessFixture(organization, testUser);
-  vi.spyOn(orgs, "orgExists").mockResolvedValue(true);
   vi.spyOn(publications, "getPublication").mockResolvedValue({
     orgSlug: "example", slug: "product", sourcePrefix: "example/",
     title: "Product", entryFile: "index.html", createdAt: "2026-01-01", updatedAt: "2026-01-01",
@@ -31,6 +29,10 @@ export function mockSecurityBackend() {
   vi.spyOn(minio, "getObjectStream").mockImplementation(key => Promise.resolve(new Response(key.endsWith(".css") ? "body{color:rgb(1,2,3)}" : publisherHtml).body));
   vi.stubGlobal("fetch", vi.fn((input: string | URL | Request, init?: RequestInit) => {
     const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url);
+    if (url.pathname === "/api/query" && typeof init?.body === "string") {
+      const payload = JSON.parse(init.body);
+      if (payload.path === "legacyAccess:resolve") return Promise.resolve(Response.json({ status: "success", value: payload.args[0].orgSlug === "example" ? "org-a" : null }));
+    }
     const accessResponse = access(url);
     if (accessResponse) return Promise.resolve(accessResponse);
     if (url.pathname === "/api/query" && typeof init?.body === "string"

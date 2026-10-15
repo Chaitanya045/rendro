@@ -1,3 +1,4 @@
+import { legacyOrganization, legacyUnavailable } from "@/legacy-access";
 import { assetHeaders } from "@/routes/asset-headers";
 import { decodeStoragePath, legacyStoragePrefix } from "@/storage-boundary";
 import { viewerScript } from "@/viewer/markup";
@@ -17,6 +18,7 @@ import { renderPublicOrgDocs } from "@/routes/app";
 import { injectMobileViewportScrollbarStyle } from "@/routes/document-html";
 
 const app = new Hono();
+app.onError(legacyUnavailable);
 
 function escapeHtml(value: string): string {
   return value
@@ -57,6 +59,7 @@ ${viewerScript("navigation", { prefix: basePath, documentPath, loadedPath: fullP
 
 async function publicationFromRoute(orgSlug: string, slug: string): Promise<Publication | null> {
   if (!legacyStoragePrefix(orgSlug.toLowerCase())) return null;
+  if (!await legacyOrganization(orgSlug.toLowerCase())) return null;
   return getPublication(orgSlug.toLowerCase(), slug.toLowerCase());
 }
 
@@ -78,7 +81,7 @@ app.get("/public/:org/:slug/files/:path{.+}", async (c) => {
     });
   } catch (error) {
     logger.error({ error, key }, "public document stream failed");
-    return c.text("Stream failed", 500);
+    return legacyUnavailable(new Error("Storage unavailable"), c);
   }
 });
 

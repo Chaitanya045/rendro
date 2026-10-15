@@ -93,9 +93,17 @@ A publication created without `--pin` follows the project's active deployment. W
 
 ## Migrating from 1.x
 
-The legacy `rendro@1.0.0` uses `--org` / `--repo` and is not compatible with the
-project-based commands above. Verify server compatibility before migrating an
-existing production workflow.
+Legacy writes are retired. `rendro@1.x`, self-service namespace/key creation,
+and legacy key authorization are no longer supported. `/api/sync/upload`,
+`/api/sync/delete`, `/api/sync/check`, `/api/sync/list`, and legacy publication
+requests carrying credentials return **410 Gone**. Use `rendro@2` organization/project deployments.
+
+Legacy private reads, new publications/shares, and v1 comments require a live
+member session in an explicitly operator-mapped Better Auth organization. Email
+domains grant no access. Existing anonymous publication/share links work only
+while that mapping points to an existing, non-tombstoned organization and the
+target remains visible. Unmapped namespaces return 404; unavailable backends
+return retryable 503. See the [legacy operator runbook](docs/TECHNICAL.md#legacy-operator-runbook).
 
 - Create a project and scoped API key; use the organization and project IDs, not legacy slugs.
 - Replace `--org` / `--repo` with `--organization` / `--project`, and specify the endpoint.

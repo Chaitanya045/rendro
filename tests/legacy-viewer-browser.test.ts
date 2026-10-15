@@ -1,4 +1,4 @@
-import { registerAuth, seedIdentity } from "./helpers/auth-identity";
+import { seedLegacyMember, registerAuth, seedIdentity } from "./helpers/auth-identity";
 import { getRequestListener } from "@hono/node-server";
 import { readFile } from "node:fs/promises";
 import { build } from "esbuild";
@@ -32,7 +32,9 @@ try{window.publisherProbe.dom=parent.document.body.tagName}catch(e){window.publi
 <div style="height:1500px"></div><h2 id="bottom">Bottom</h2></body></html>`;
 
 beforeAll(async () => {
+  process.env.LEGACY_ORGANIZATION_MAP = "{}";
   const identity = await seedIdentity(backend, testUser);
+  await seedLegacyMember(backend, identity.subject, "example");
   testUser.id = identity.subject;
   author = backend.withIdentity(identity);
   mockSecurityBackend();
@@ -94,6 +96,17 @@ async function open(path: string) {
 }
 
 describe("legacy opaque viewer in Chromium", () => {
+  it("returns migration guidance instead of a legacy key page", async () => {
+    const page = await open("/docs/example/guide/index.html");
+    const result = await browserStep("submit retired namespace creation", () => page.evaluate(async () => {
+      const response = await fetch("/api/orgs", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ org: "example" }) });
+      return { status: response.status, body: await response.json() };
+    }));
+    expect(result.status).toBe(410);
+    expect(result.body.error).toContain("rendro@2");
+    expect(await page.locator("#content-frame").count()).toBe(1);
+    expect(await page.getByText("Your API key", { exact: true }).count()).toBe(0);
+  });
   it("ignores forged navigation in the legacy public shell", async () => {
     attackNavigation = true;
     try {

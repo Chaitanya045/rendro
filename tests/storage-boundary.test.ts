@@ -7,7 +7,6 @@ import { decodeStoragePath, isCanonicalStorageKey, modernStorageKey } from "@/st
 import { AUTH_SECRET } from "@/config";
 import * as minio from "@/minio";
 import * as deletion from "@/soft-delete";
-import * as apiKeys from "@/api-keys";
 import { createLegacyViewerTicket, createViewerTicket, readLegacyViewerTicket } from "@/viewer-ticket";
 import { mockSecurityBackend, docsBase, testUser } from "./fixtures/security-headers";
 
@@ -124,22 +123,13 @@ describe("disjoint storage authorization", () => {
   );
 
   it.each(["100%.html", "literal%25.html", "%2e%2e/index.html", "%5cindex.html", "Case.html", "case.html", "é.html", "e\u0301.html", "folder./index.html"])(
-    "preserves literal storage keys through upload, legacy access and existing shares: %s", async path => {
+    "preserves existing literal storage keys through legacy access and shares: %s", async path => {
       const key = `example/${path}`;
       const encoded = path.split("/").map(encodeURIComponent).join("/");
       const content = `<h1>${path}</h1>`;
-      const objects = new Map<string, string>();
-      vi.spyOn(apiKeys, "validateApiKey").mockResolvedValue("example");
-      vi.spyOn(deletion, "unmarkDeleted").mockResolvedValue(undefined);
-      vi.spyOn(minio, "putObject").mockImplementation((key, body) => { objects.set(key, String(body)); return Promise.resolve(); });
+      const objects = new Map([[key, content]]);
       vi.mocked(minio.headObject).mockImplementation(key => Promise.resolve(objects.has(key) ? { contentType: "text/html" } : null));
       vi.mocked(minio.getObjectStream).mockImplementation(key => Promise.resolve(objects.has(key) ? new Response(objects.get(key)).body : null));
-      const uploaded = await worker.fetch(new Request("https://rendro.test/api/sync/upload", {
-        method: "POST", headers: { Authorization: "Bearer fixture", "Content-Type": "application/json" },
-        body: JSON.stringify({ key, content }),
-      }), {});
-      expect(uploaded.status).toBe(200);
-      expect([...objects.keys()]).toEqual([key]);
       const bookmark = await request(`/files/example/${encoded}`, true);
       expect(bookmark.status).toBe(302);
       expect(bookmark.headers.get("location")).toBe(`/docs/example/${encoded}`);
@@ -159,12 +149,7 @@ describe("disjoint storage authorization", () => {
         expect(await response.text()).toContain(content);
       }
       expect(vi.mocked(minio.getObjectStream).mock.calls.map(([key]) => key)).toEqual(Array(4).fill(key));
-      const checked = await worker.fetch(new Request(`https://rendro.test/api/sync/check?key=${encodeURIComponent(key)}`, {
-        headers: { Authorization: "Bearer fixture" },
-      }), {});
-      expect(checked.status).toBe(200);
-      expect(await checked.json()).toMatchObject({ exists: true });
-      expect(minio.headObject).toHaveBeenLastCalledWith(key);
+
     },
   );
 
@@ -219,13 +204,12 @@ describe("disjoint storage authorization", () => {
   );
 
   it("rejects colliding legacy API keys before sync reads or writes", async () => {
-    vi.spyOn(apiKeys, "validateApiKey").mockResolvedValue("tenants");
     vi.spyOn(minio, "putObject").mockResolvedValue(undefined);
     const response = await worker.fetch(new Request("https://rendro.test/api/sync/upload", {
       method: "POST", headers: { Authorization: "Bearer fixture", "Content-Type": "application/json" },
       body: JSON.stringify({ key: modernKey, content: "replacement" }),
     }), {});
-    expect(response.status).toBe(401);
+    expect(response.status).toBe(410);
     expect(minio.putObject).not.toHaveBeenCalled();
     noStorageReads();
   });

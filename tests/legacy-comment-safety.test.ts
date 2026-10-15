@@ -1,4 +1,4 @@
-import { registerAuth, seedIdentity } from "./helpers/auth-identity";
+import { seedLegacyMember, registerAuth, seedIdentity } from "./helpers/auth-identity";
 import { describe, expect, it } from "vitest";
 import { convexTest } from "convex-test";
 import { api } from "../convex/_generated/api";
@@ -7,11 +7,15 @@ const modules = import.meta.glob("../convex/**/*.ts");
 const scope = { orgSlug: "example", filePath: "example/guide/index.html" };
 const anchor = { kind: "element" as const, path: ["main", "h1"] };
 async function fixture() {
+  process.env.LEGACY_ORGANIZATION_MAP = "{}";
   const backend = convexTest(schema, modules);
   registerAuth(backend);
   const identity = await seedIdentity(backend, { email: "author@example.com", name: "Author" });
+  await seedLegacyMember(backend, identity.subject, "example");
   const author = backend.withIdentity(identity);
-  const member = backend.withIdentity(await seedIdentity(backend, { email: "member@example.com", name: "Member" }));
+  const memberIdentity = await seedIdentity(backend, { email: "member@example.com", name: "Member" });
+  await seedLegacyMember(backend, memberIdentity.subject, "example");
+  const member = backend.withIdentity(memberIdentity);
   const outsider = backend.withIdentity(await seedIdentity(backend, { email: "outsider@other.com" }));
   return { backend, author, member, outsider, authorId: identity.subject };
 }

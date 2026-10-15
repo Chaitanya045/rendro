@@ -8,17 +8,25 @@ import { anchorValidator } from "./schema";
 import { validAnchor } from "../src/commentor/mutation-args";
 import { authorizeLegacyComment, canModifyLegacyComment, requireLegacyCommentAuthor, legacyOperationArgs, authorizeLegacyThread, legacyBody } from "./legacyComments";
 
-// Retain the v1 complete thread/reply list and original file keys.
+// The v1 response has no cursor. Reject oversized histories rather than truncate.
+export const legacyCommentLimit = 100;
 export const list = query({
   args: { orgSlug: v.string(), filePath: v.string() },
   handler: async (ctx, { orgSlug, filePath }) => {
     const identity = await authorizeLegacyComment(ctx, orgSlug);
-    const threads = await ctx.db.query("threads").withIndex("by_org_file", q => q.eq("orgSlug", orgSlug).eq("filePath", filePath)).order("asc").collect();
-    return Promise.all(threads.filter(t => t.deletedAt === undefined).map(async t => ({
-      ...t, canDelete: canModifyLegacyComment(identity, t),
-      replies: (await ctx.db.query("replies").withIndex("by_thread", q => q.eq("threadId", t._id)).order("asc").collect())
-        .filter(r => r.deletedAt === undefined).map(r => ({ ...r, canDelete: canModifyLegacyComment(identity, r) })),
-    })));
+    const threads = await ctx.db.query("threads").withIndex("by_org_file", q => q.eq("orgSlug", orgSlug).eq("filePath", filePath)).order("asc").take(legacyCommentLimit + 1);
+    let count = threads.length;
+    if (count > legacyCommentLimit) publicError("invalid_input");
+    const result = [];
+    for (const thread of threads) {
+      if (thread.deletedAt !== undefined) continue;
+      const replies = await ctx.db.query("replies").withIndex("by_thread", q => q.eq("threadId", thread._id)).order("asc").take(legacyCommentLimit - count + 1);
+      count += replies.length;
+      if (count > legacyCommentLimit) publicError("invalid_input");
+      result.push({ ...thread, canDelete: canModifyLegacyComment(identity, thread), replies: replies
+        .filter(reply => reply.deletedAt === undefined).map(reply => ({ ...reply, canDelete: canModifyLegacyComment(identity, reply) })) });
+    }
+    return result;
   },
 });
 
@@ -80,7 +88,8 @@ export const remove = mutation({
     const threadId = thread._id;
     requireLegacyCommentAuthor(identity, thread);
     if (thread.deletedAt !== undefined) return;
-    const replies = await ctx.db.query("replies").withIndex("by_thread", q => q.eq("threadId", threadId)).collect();
+    const replies = await ctx.db.query("replies").withIndex("by_thread", q => q.eq("threadId", threadId)).take(legacyCommentLimit + 1);
+    if (replies.length > legacyCommentLimit) publicError("invalid_input");
     await Promise.all(replies.map(r => ctx.db.patch(r._id, { body: "", deletedAt: Date.now() })));
     // Keep identity-only tombstones so a delayed retry cannot resurrect a write.
     await ctx.db.patch(threadId, { body: "", anchor: { kind: "element", path: [] }, deletedAt: Date.now() });

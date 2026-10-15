@@ -99,10 +99,10 @@ it("forwards Origin and Fetch Metadata through operator and generic proxies", as
 it("preserves admission failures and sanitizes unexpected middleware errors", async () => {
   const app = new Hono<{ Variables: { user?: User } }>();
   app.use("*", writeAdmission);
-  app.post("/api/orgs", () => new Response("write"));
+  app.post("/api/rendro/projects", () => new Response("write"));
   app.onError(() => new Response("server error", { status: 500 }));
   vi.spyOn(admission, "requireCookieWrite").mockImplementation(() => { throw new Error("Unexpected admission failure"); });
-  expect((await app.request("/api/orgs", post({}))).status).toBe(500);
+  expect((await app.request("/api/rendro/projects", post({}))).status).toBe(500);
 });
 it("keeps proxy exceptions on the mounted routes as backend errors", async () => {
   const app = new Hono<{ Variables: { user?: User } }>();

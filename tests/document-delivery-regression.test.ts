@@ -1,3 +1,4 @@
+import * as legacyAccess from "@/legacy-access";
 import { Hono } from "hono";
 import type { User } from "better-auth/types";
 import { Script } from "node:vm";
@@ -40,6 +41,8 @@ describe.each(fixtures)("document delivery regression: %s", (_name, html) => {
       publication: { slug: "docs", pathPrefix: "", entryFile: "index.html" },
       grant: { documentPath: "index.html", expiresAt: Date.now() + 60_000 },
     }))));
+    vi.spyOn(legacyAccess, "legacyOrganization").mockResolvedValue("org-a");
+    vi.spyOn(legacyAccess, "legacyMember").mockResolvedValue(true);
     vi.spyOn(softDelete, "isDeleted").mockResolvedValue(false);
     vi.spyOn(publications, "getPublication").mockResolvedValue({
       orgSlug: "example-test", slug: "docs", sourcePrefix: "example-test/docs/", entryFile: "index.html",

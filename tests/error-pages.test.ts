@@ -1,3 +1,4 @@
+import type * as LegacyAccessModule from "@/legacy-access";
 import { memoryAdapter } from "@better-auth/memory-adapter";
 import { betterAuth } from "better-auth/minimal";
 import type { User } from "better-auth/types";
@@ -9,6 +10,7 @@ import { renderNotFoundPage } from "@/routes/not-found";
 
 const fixtures = vi.hoisted(() => ({
   user: undefined as User | undefined,
+  member: false,
   deleted: vi.fn(),
   stream: vi.fn(),
   list: vi.fn(),
@@ -20,12 +22,18 @@ vi.mock("@/middleware/session", () => ({
     await next();
   },
 }));
+vi.mock("@/legacy-access", async importOriginal => ({
+  ...await importOriginal<typeof LegacyAccessModule>(),
+  legacyRequestMember: () => Promise.resolve(fixtures.member),
+  legacyOrganization: () => Promise.resolve("mapped-org"),
+}));
 vi.mock("@/soft-delete", () => ({ isDeleted: fixtures.deleted }));
 vi.mock("@/minio", () => ({ getObjectStream: fixtures.stream, listObjects: fixtures.list, headObject: fixtures.head }));
 import worker from "@/worker";
 
 beforeEach(() => {
   fixtures.user = undefined;
+  fixtures.member = false;
   fixtures.deleted.mockReset().mockResolvedValue(false);
   fixtures.stream.mockReset().mockResolvedValue(null);
   fixtures.list.mockReset().mockResolvedValue([]);
@@ -143,14 +151,15 @@ describe("protected docs error routes", () => {
   it.each(paths)("returns 404 for unknown %s even with a domain match", async (path) => {
     fixtures.user = user;
     const matchingDomain = await expectDocsNotFound(path);
-    expect(fixtures.list).toHaveBeenCalledExactlyOnceWith("acme/");
+    expect(fixtures.list).not.toHaveBeenCalled();
     fixtures.user = { ...user, email: "user@other.test" };
     expect(await expectDocsNotFound(path)).toBe(matchingDomain);
   });
 
-  // Legacy membership is email-domain based; v2 membership is handled on /organizations routes.
+  // Explicit mapped membership gates legacy routes.
   it.each(paths)("preserves existing legacy-org member access to %s", async (path) => {
     fixtures.user = user;
+    fixtures.member = true;
     fixtures.list.mockResolvedValue([{ key: "acme/guide.html" }]);
     fixtures.head.mockResolvedValue({ contentType: "text/html" });
     const response = await worker.request(path);
@@ -160,7 +169,7 @@ describe("protected docs error routes", () => {
     expect(html).toContain('id="tree-container"');
     expect(html).not.toContain("Page not found");
     expect(html).not.toContain("Create your org");
-    expect(fixtures.list).toHaveBeenCalledExactlyOnceWith("acme/");
+    expect(fixtures.list).not.toHaveBeenCalled();
     if (path.endsWith("guide.html")) {
       expect(fixtures.head).toHaveBeenCalledExactlyOnceWith("acme/guide.html");
       expect(html).toContain('window.RENDRO_INITIAL_DOC="acme/guide.html"');
@@ -176,7 +185,7 @@ describe("protected docs error routes", () => {
     expect(fixtures.list).not.toHaveBeenCalled();
   });
 
-  it.each(paths)("returns 404 at %s when the email cannot derive a legacy org", async (path) => {
+  it.each(paths)("returns 404 at %s without mapped membership regardless of email", async (path) => {
     fixtures.user = { ...user, email: "user@sub.acme.test" };
     await expectDocsNotFound(path);
     expect(fixtures.list).not.toHaveBeenCalled();

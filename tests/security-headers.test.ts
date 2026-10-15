@@ -1,9 +1,7 @@
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import worker from "@/worker";
-import * as orgs from "@/orgs";
 import * as minio from "@/minio";
-import * as apiKeys from "@/api-keys";
 import { securityHeaders } from "@/middleware/security-headers";
 import { nonceAttribute } from "@/middleware/html-nonce";
 import { createShareToken } from "@/share-links";
@@ -75,20 +73,12 @@ describe("shared response security policy", () => {
     expect(await response.text()).not.toMatch(/\bnonce\s*=/i);
   });
 
-  it("keeps the legacy API-key page non-storable without persisting its nonce in starter HTML", async () => {
-    vi.mocked(orgs.orgExists).mockResolvedValue(false);
-    vi.spyOn(apiKeys, "createOrgApiKey").mockResolvedValue("fixture-api-key");
+  it("retires self-service namespace creation without writing starter HTML or keys", async () => {
     const put = vi.spyOn(minio, "putObject").mockResolvedValue(undefined);
-    const response = await worker.request("https://rendro.test/api/orgs", {
-      method: "POST", headers: { origin: process.env.SITE_URL!, Cookie: cookie, "Content-Type": "application/json" },
-      body: JSON.stringify({ org: "example", displayName: "Example" }),
-    });
-    expect(response.status).toBe(200);
-    expect(response.headers.get("Cache-Control")).toBe("private, no-store");
-    const nonce = response.headers.get("Content-Security-Policy")!.match(/'nonce-([^']+)'/)![1];
-    expect(await response.text()).toContain(`nonce="${nonce}"`);
-    expect(put).toHaveBeenCalledOnce();
-    expect(String(put.mock.calls[0][1])).not.toMatch(/\bnonce\s*=/i);
+    const response = await worker.request("https://rendro.test/api/orgs", { method: "POST", headers: { Cookie: cookie } });
+    expect(response.status).toBe(410);
+    expect(await response.json()).toMatchObject({ error: expect.stringContaining("rendro@2") });
+    expect(put).not.toHaveBeenCalled();
   });
 
   it("isolates nonces across concurrent requests and never stamps arbitrary scripts", async () => {

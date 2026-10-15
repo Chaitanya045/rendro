@@ -55,13 +55,13 @@ for (const viewer of viewers) describe(`${viewer.name} viewer backend failures`,
     it.each([400, 401, 403, 404, 410])("preserves indistinguishable denials for upstream %s", async status => {
       const base = await viewer.base();
       vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(new Response("private-backend-detail", { status }))));
-      await errorResponse(await request(base + suffix), 404, asset);
+      await errorResponse(await request(base + suffix), viewer.name === "legacy" ? 503 : 404, asset);
       expect(minio.getObjectStream).not.toHaveBeenCalled();
     });
     it("keeps revoked, expired or absent resolutions at 404", async () => {
       const base = await viewer.base();
       vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(Response.json(null))));
-      await errorResponse(await request(base + suffix), 404, asset);
+      await errorResponse(await request(base + suffix), viewer.name === "legacy" ? 503 : 404, asset);
       expect(minio.getObjectStream).not.toHaveBeenCalled();
     });
     it.each([408, 429, 500, 502, 503, 504])("returns retryable 503 for upstream %s", async status => {
@@ -144,8 +144,10 @@ it("ignores an ambient session when revalidating a legacy ticket", async () => {
   const base = await viewers[2].base();
   const original = vi.mocked(fetch).getMockImplementation()!;
   vi.mocked(fetch).mockImplementation((input, init) => {
-    expect((input instanceof Request ? input.url : input.toString())).toContain("disableCookieCache=true");
-    expect(new Headers(init?.headers).get("cookie")).toBe(cookie);
+    if (!(input instanceof Request ? input.url : input.toString()).endsWith("/api/query")) {
+      expect((input instanceof Request ? input.url : input.toString())).toContain("management/access");
+      expect(new Headers(init?.headers).get("cookie")).toBe(cookie);
+    }
     return original(input, init);
   });
   expect((await request(base + "/files/index.html", { cookie: "better-auth.session_token=unrelated" })).status).toBe(200);
@@ -174,7 +176,7 @@ it.each(["/p/product", "/p/product/files/index.html", "/p/product/files/assets/s
 it.each([false, true])("honors a real legacy deletion result (%s)", async deleted => {
   vi.mocked(deletion.isDeleted).mockRestore();
   const original = vi.mocked(fetch).getMockImplementation()!;
-  vi.mocked(fetch).mockImplementation((input, init) => (input instanceof Request ? input.url : input.toString()).endsWith("/api/query")
+  vi.mocked(fetch).mockImplementation((input, init) => (input instanceof Request ? input.url : input.toString()).endsWith("/api/query") && JSON.parse(init?.body as string).path === "deletedFiles:isDeleted"
     ? Promise.resolve(Response.json({ status: "success", value: deleted })) : original(input, init));
   const response = await request(await viewers[2].base() + "/files/index.html");
   if (deleted) await errorResponse(response, 404, false);

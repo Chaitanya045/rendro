@@ -3,7 +3,7 @@ import worker from "@/worker";
 import * as minio from "@/minio";
 import * as deletion from "@/soft-delete";
 import { createLegacyViewerTicket, createViewerTicket, readLegacyViewerTicket, readViewerTicket } from "@/viewer-ticket";
-import { mockSecurityBackend, testUser } from "./fixtures/security-headers";
+import { mockSecurityBackend } from "./fixtures/security-headers";
 const cookie = "better-auth.session_token=test-session";
 const base = "/legacy-view/example";
 const request = (path: string, signedIn = false) => worker.fetch(new Request(`https://rendro.test${path}`, { headers: signedIn ? { cookie } : {} }), {});
@@ -52,19 +52,19 @@ describe("legacy viewer routes", () => {
     const token = await createLegacyViewerTicket("example", cookie);
     const url = `${base}/view/${token}/files/index.html`;
     vi.mocked(minio.getObjectStream).mockClear();
-    vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(Response.json(null))));
+    const original = vi.mocked(fetch).getMockImplementation()!;
+    vi.mocked(fetch).mockImplementation((input, init) => (input instanceof Request ? input.url : input.toString()).includes("management/access")
+      ? Promise.resolve(new Response(null, { status: 403 })) : original(input, init));
     expect((await request(url)).status).toBe(404);
     expect(minio.getObjectStream).not.toHaveBeenCalled();
-    vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(Response.json({ user: { ...testUser, email: "outsider@other.com" } }))));
-    expect((await request(url)).status).toBe(404);
-    vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(Response.json({ user: testUser }))));
+    vi.mocked(fetch).mockImplementation(original);
     vi.mocked(deletion.isDeleted).mockResolvedValue(true);
     expect((await request(url)).status).toBe(404);
     expect(minio.getObjectStream).not.toHaveBeenCalled();
   });
   it.each(["image.png", "font.woff2", "style.css", "script.js"])("uses empty uncached errors for legacy %s requests", async path => {
     const token = await createLegacyViewerTicket("example", cookie);
-    vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(Response.json(null))));
+    vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(Response.json({ status: "success", value: null }))));
     for (const prefix of [`${base}/files/`, `${base}/view/${token}/files/`]) {
       const response = await request(prefix + path);
       expect(response.status).toBe(404);

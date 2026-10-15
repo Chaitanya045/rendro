@@ -41,8 +41,7 @@ it("enumerates every registered Worker mutation, including dedicated and wildcar
 
 it("inventories public state-changing RPCs, whose authority is explicit JWT or internal secret", async () => {
   const declared = {
-    "apiKeys:create": "internal-secret",
-    "deletedFiles:mark": "internal-secret", "deletedFiles:unmark": "internal-secret",
+    "deletedFiles:mark": "internal-secret",
     "documentReplies:add": "session-jwt", "documentReplies:remove": "session-jwt",
     "documentThreads:create": "session-jwt", "documentThreads:resolve": "session-jwt", "documentThreads:archive": "session-jwt", "documentThreads:remove": "session-jwt",
     "replies:add": "session-jwt", "replies:remove": "session-jwt",

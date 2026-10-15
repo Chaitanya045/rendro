@@ -1,3 +1,4 @@
+import { legacyOrganization, legacyUnavailable } from "@/legacy-access";
 import { assetHeaders } from "@/routes/asset-headers";
 import { Hono } from "hono";
 import { getObjectStream } from "@/minio";
@@ -8,6 +9,7 @@ import { renderNotFoundPage } from "@/routes/not-found";
 import { injectMobileViewportScrollbarStyle, readHtmlStream } from "@/routes/document-html";
 
 const app = new Hono();
+app.onError(legacyUnavailable);
 
 app.get("/share/:token", async (c) => {
   const token = c.req.param("token");
@@ -23,6 +25,7 @@ app.get("/share/:token", async (c) => {
   if (!result.ok) return unavailable(result.reason === "expired" ? 410 : 404);
 
   const key = result.key;
+  if (!await legacyOrganization(key.split("/")[0])) return unavailable();
   if (await isDeleted(key)) return unavailable();
 
   try {
@@ -34,7 +37,7 @@ app.get("/share/:token", async (c) => {
     return c.html(html, 200, assetHeaders(key, false, "text/html; charset=utf-8"));
   } catch (err) {
     logger.error({ err, key }, "share stream failed");
-    return c.text("Stream failed", 500);
+    return legacyUnavailable(new Error("Storage unavailable"), c);
   }
 });
 
