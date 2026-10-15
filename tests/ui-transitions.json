@@ -1999,7 +1999,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "unit",
+      "status": "browser",
       "auditEvidence": "U",
       "auditNote": "management-page-lifecycle.test.ts; management-navigation.test.ts",
       "edges": [
@@ -2116,6 +2116,23 @@
               "file": "tests/management-navigation.test.ts",
               "name": "disposes on sign-out even with blockers, aborts requests and rejects late secrets",
               "kind": "unit"
+            }
+          ]
+        },
+        {
+          "id": "UI-013-E11",
+          "from": "Invitation write pending",
+          "trigger": "Sign out and settle the old response",
+          "expected": "Forced page disposal restores busy controls; late invitation success and failure do not alter the disposed form.",
+          "inventoryRefs": [
+            "UI-013"
+          ],
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/management-dialog-reuse-browser.test.ts",
+              "name": "navigation disposal clears busy controls and ignores late invitation success or failure",
+              "kind": "browser"
             }
           ]
         }
@@ -2607,7 +2624,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "unit",
+      "status": "browser",
       "auditEvidence": "U",
       "auditNote": "management-ui-polish.test.ts",
       "edges": [
@@ -2647,6 +2664,23 @@
               "file": "tests/management-ui-polish.test.ts",
               "name": "resolves false on Escape, true on accept, and returns focus to the trigger",
               "kind": "unit"
+            }
+          ]
+        },
+        {
+          "id": "UI-019-E04",
+          "from": "Confirmation open",
+          "trigger": "Dismiss or accept, then reopen",
+          "expected": "The shared confirmation can Cancel, Escape, and accept repeatedly; its accept control never retains busy state.",
+          "inventoryRefs": [
+            "UI-019"
+          ],
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/management-dialog-reuse-browser.test.ts",
+              "name": "shared destructive confirmation can cancel, escape and confirm repeatedly without retaining busy state",
+              "kind": "browser"
             }
           ]
         }
@@ -2692,7 +2726,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "untested",
+      "status": "browser",
       "auditEvidence": "UNTESTED",
       "auditNote": "control-plane-ui.test.ts checks close-button styles; mutation tests cover selected paths only",
       "edges": [
@@ -2715,8 +2749,14 @@
           "inventoryRefs": [
             "G09"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/management-dialog-reuse-browser.test.ts",
+              "name": "$name resets after success and can reopen and submit exactly once again",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-020-E03",
@@ -2748,8 +2788,14 @@
           "inventoryRefs": [
             "G09"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/management-dialog-reuse-browser.test.ts",
+              "name": "$name blocks Cancel and Escape while pending, restores drafts after denial, and retries",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-020-E06",
@@ -2759,8 +2805,14 @@
           "inventoryRefs": [
             "G09"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/management-dialog-reuse-browser.test.ts",
+              "name": "$name blocks Cancel and Escape while pending, restores drafts after denial, and retries",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-020-E07",
@@ -2770,8 +2822,14 @@
           "inventoryRefs": [
             "G09"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/management-dialog-reuse-browser.test.ts",
+              "name": "$name resets after success and can reopen and submit exactly once again",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-020-E08",
@@ -4278,7 +4336,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "untested",
+      "status": "browser",
       "auditEvidence": "UNTESTED",
       "auditNote": "organization-pages.ts creationForm; no complete controller submission assertion found",
       "edges": [
@@ -4323,8 +4381,14 @@
           "inventoryRefs": [
             "O02"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/management-dialog-reuse-browser.test.ts",
+              "name": "$name resets before successful navigation and supports a later second submission",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-031-E05",
@@ -4334,8 +4398,14 @@
           "inventoryRefs": [
             "O02"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/management-dialog-reuse-browser.test.ts",
+              "name": "$name resets before successful navigation and supports a later second submission",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-031-E06",
@@ -4345,8 +4415,31 @@
           "inventoryRefs": [
             "O02"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/management-dialog-reuse-browser.test.ts",
+              "name": "$name resets before successful navigation and supports a later second submission",
+              "kind": "browser"
+            }
+          ]
+        },
+        {
+          "id": "UI-031-E07",
+          "from": "Form ready",
+          "trigger": "Submit, settle, and reuse",
+          "expected": "Organization creation resets busy state before navigating; returning supports another submission.",
+          "inventoryRefs": [
+            "UI-031"
+          ],
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/management-dialog-reuse-browser.test.ts",
+              "name": "$name resets before successful navigation and supports a later second submission",
+              "kind": "browser"
+            }
+          ]
         }
       ]
     },
@@ -5439,7 +5532,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "untested",
+      "status": "browser",
       "auditEvidence": "UNTESTED",
       "auditNote": "organization-pages.ts renderSettings; found failure/dirty-navigation tests, not successful-save assertions",
       "edges": [
@@ -5484,8 +5577,14 @@
           "inventoryRefs": [
             "O16"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/management-dialog-reuse-browser.test.ts",
+              "name": "settings restores the save control after success and denial and permits another save",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-043-E05",
@@ -5530,6 +5629,23 @@
           ],
           "status": "untested",
           "tests": []
+        },
+        {
+          "id": "UI-043-E09",
+          "from": "Form ready",
+          "trigger": "Submit, settle, and reuse",
+          "expected": "Success and denial both restore Save; canonical successful values update the form and organization chrome; another save succeeds.",
+          "inventoryRefs": [
+            "UI-043"
+          ],
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/management-dialog-reuse-browser.test.ts",
+              "name": "settings restores the save control after success and denial and permits another save",
+              "kind": "browser"
+            }
+          ]
         }
       ]
     },
@@ -6014,7 +6130,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "unit",
+      "status": "browser",
       "auditEvidence": "U",
       "auditNote": "management-form-regressions.test.ts",
       "edges": [
@@ -6026,8 +6142,14 @@
           "inventoryRefs": [
             "UI-048"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/management-dialog-reuse-browser.test.ts",
+              "name": "invitations retain only failed rows and do not resend successful rows on retry",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-048-E02",
@@ -6081,8 +6203,14 @@
           "inventoryRefs": [
             "O13"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/management-dialog-reuse-browser.test.ts",
+              "name": "invitations retain only failed rows and do not resend successful rows on retry",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-048-E07",
@@ -6092,8 +6220,14 @@
           "inventoryRefs": [
             "O13"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/management-dialog-reuse-browser.test.ts",
+              "name": "invitations retain only failed rows and do not resend successful rows on retry",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-048-E08",
@@ -6103,8 +6237,14 @@
           "inventoryRefs": [
             "O13"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/management-dialog-reuse-browser.test.ts",
+              "name": "invitations retain only failed rows and do not resend successful rows on retry",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-048-E09",
@@ -6114,12 +6254,17 @@
           "inventoryRefs": [
             "UI-048"
           ],
-          "status": "unit",
+          "status": "browser",
           "tests": [
             {
               "file": "tests/management-form-regressions.test.ts",
               "name": "keeps only failed rows after a partially failed batch invitation",
               "kind": "unit"
+            },
+            {
+              "file": "tests/management-dialog-reuse-browser.test.ts",
+              "name": "invitations retain only failed rows and do not resend successful rows on retry",
+              "kind": "browser"
             }
           ]
         }
@@ -6154,7 +6299,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "untested",
+      "status": "browser",
       "auditEvidence": "UNTESTED",
       "auditNote": "management-control-consistency.test.ts checks disabled-control source; no complete interaction matrix",
       "edges": [
@@ -6168,6 +6313,40 @@
           ],
           "status": "untested",
           "tests": []
+        },
+        {
+          "id": "UI-049-E02",
+          "from": "Form ready",
+          "trigger": "Submit, settle, and reuse",
+          "expected": "A successful invitation batch restores idle/enabled Send; reopening sends once and Add another person adds exactly one row after repeated list refreshes.",
+          "inventoryRefs": [
+            "UI-049"
+          ],
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/management-dialog-reuse-browser.test.ts",
+              "name": "$name resets after success and can reopen and submit exactly once again",
+              "kind": "browser"
+            }
+          ]
+        },
+        {
+          "id": "UI-049-E03",
+          "from": "Form ready",
+          "trigger": "Submit, settle, and reuse",
+          "expected": "Pending Cancel/Escape and enhanced navigation are blocked; denial restores enabled submission and retains fields; idle Cancel/Escape dismiss, and reopening permits a successful retry.",
+          "inventoryRefs": [
+            "UI-049"
+          ],
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/management-dialog-reuse-browser.test.ts",
+              "name": "$name blocks Cancel and Escape while pending, restores drafts after denial, and retries",
+              "kind": "browser"
+            }
+          ]
         }
       ]
     },
@@ -6356,7 +6535,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "untested",
+      "status": "browser",
       "auditEvidence": "UNTESTED",
       "auditNote": "organization-pages.ts invitationScript",
       "edges": [
@@ -6447,6 +6626,23 @@
           ],
           "status": "untested",
           "tests": []
+        },
+        {
+          "id": "UI-052-E09",
+          "from": "Form ready",
+          "trigger": "Submit, settle, and reuse",
+          "expected": "Invitation acceptance and decline restore both controls after denial and before successful document navigation; returning permits another response.",
+          "inventoryRefs": [
+            "UI-052"
+          ],
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/management-dialog-reuse-browser.test.ts",
+              "name": "invitation %s resets both response controls before navigation and remains retryable",
+              "kind": "browser"
+            }
+          ]
         }
       ]
     },
@@ -6478,7 +6674,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "untested",
+      "status": "browser",
       "auditEvidence": "UNTESTED",
       "auditNote": "organization-pages.ts respond",
       "edges": [
@@ -6492,6 +6688,23 @@
           ],
           "status": "untested",
           "tests": []
+        },
+        {
+          "id": "UI-053-E02",
+          "from": "Form ready",
+          "trigger": "Submit, settle, and reuse",
+          "expected": "Invitation acceptance and decline restore both controls after denial and before successful document navigation; returning permits another response.",
+          "inventoryRefs": [
+            "UI-053"
+          ],
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/management-dialog-reuse-browser.test.ts",
+              "name": "invitation %s resets both response controls before navigation and remains retryable",
+              "kind": "browser"
+            }
+          ]
         }
       ]
     },
@@ -6633,7 +6846,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "unit",
+      "status": "browser",
       "auditEvidence": "U",
       "auditNote": "management-form-regressions.test.ts",
       "edges": [
@@ -6700,12 +6913,34 @@
           "inventoryRefs": [
             "UI-055"
           ],
-          "status": "unit",
+          "status": "browser",
           "tests": [
             {
               "file": "tests/management-form-regressions.test.ts",
               "name": "creates two teams with one POST each and resets the reused dialog",
               "kind": "unit"
+            },
+            {
+              "file": "tests/management-dialog-reuse-browser.test.ts",
+              "name": "$name resets after success and can reopen and submit exactly once again",
+              "kind": "browser"
+            }
+          ]
+        },
+        {
+          "id": "UI-055-E07",
+          "from": "Form ready",
+          "trigger": "Submit, settle, and reuse",
+          "expected": "Pending Cancel/Escape and enhanced navigation are blocked; denial restores enabled submission and retains fields; idle Cancel/Escape dismiss, and reopening permits a successful retry.",
+          "inventoryRefs": [
+            "UI-055"
+          ],
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/management-dialog-reuse-browser.test.ts",
+              "name": "$name blocks Cancel and Escape while pending, restores drafts after denial, and retries",
+              "kind": "browser"
             }
           ]
         }
@@ -7208,7 +7443,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "unit",
+      "status": "browser",
       "auditEvidence": "U",
       "auditNote": "management-performance.test.ts",
       "edges": [
@@ -7237,6 +7472,23 @@
               "file": "tests/management-performance.test.ts",
               "name": "closes the create-project dialog before navigating and suppresses duplicate submissions",
               "kind": "unit"
+            }
+          ]
+        },
+        {
+          "id": "UI-063-E03",
+          "from": "Form ready",
+          "trigger": "Submit, settle, and reuse",
+          "expected": "Pending Cancel/Escape and enhanced navigation are blocked; denial restores enabled submission and retains fields; idle Cancel/Escape dismiss, and reopening permits a successful retry.",
+          "inventoryRefs": [
+            "UI-063"
+          ],
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/management-dialog-reuse-browser.test.ts",
+              "name": "$name blocks Cancel and Escape while pending, restores drafts after denial, and retries",
+              "kind": "browser"
             }
           ]
         }
@@ -7272,7 +7524,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "untested",
+      "status": "browser",
       "auditEvidence": "UNTESTED",
       "auditNote": "project-pages.ts form handler",
       "edges": [
@@ -7339,8 +7591,14 @@
           "inventoryRefs": [
             "P01"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/management-dialog-reuse-browser.test.ts",
+              "name": "$name blocks Cancel and Escape while pending, restores drafts after denial, and retries",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-064-E07",
@@ -7350,8 +7608,14 @@
           "inventoryRefs": [
             "P01"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/management-dialog-reuse-browser.test.ts",
+              "name": "$name blocks Cancel and Escape while pending, restores drafts after denial, and retries",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-064-E08",
@@ -7361,8 +7625,14 @@
           "inventoryRefs": [
             "P01"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/management-dialog-reuse-browser.test.ts",
+              "name": "$name resets after success and can reopen and submit exactly once again",
+              "kind": "browser"
+            }
+          ]
         }
       ]
     },
@@ -8039,7 +8309,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "untested",
+      "status": "browser",
       "auditEvidence": "UNTESTED",
       "auditNote": "organization-pages.ts projectStage",
       "edges": [
@@ -8073,8 +8343,14 @@
           "inventoryRefs": [
             "O04"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/management-dialog-reuse-browser.test.ts",
+              "name": "$name resets before successful navigation and supports a later second submission",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-071-E04",
@@ -8095,8 +8371,14 @@
           "inventoryRefs": [
             "O04"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/management-dialog-reuse-browser.test.ts",
+              "name": "$name resets before successful navigation and supports a later second submission",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-071-E06",
@@ -8108,6 +8390,23 @@
           ],
           "status": "untested",
           "tests": []
+        },
+        {
+          "id": "UI-071-E07",
+          "from": "Form ready",
+          "trigger": "Submit, settle, and reuse",
+          "expected": "First-project creation resets busy state before navigating to credential setup; returning supports another submission.",
+          "inventoryRefs": [
+            "UI-071"
+          ],
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/management-dialog-reuse-browser.test.ts",
+              "name": "$name resets before successful navigation and supports a later second submission",
+              "kind": "browser"
+            }
+          ]
         }
       ]
     },
@@ -8139,7 +8438,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "untested",
+      "status": "browser",
       "auditEvidence": "UNTESTED",
       "auditNote": "onboarding-cli-command.test.ts checks generated command, not credential lifecycle",
       "edges": [
@@ -8206,8 +8505,14 @@
           "inventoryRefs": [
             "O05"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/management-dialog-reuse-browser.test.ts",
+              "name": "onboarding credentials recover from denial and protect the one-time secret after each success",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-072-E07",
@@ -8219,6 +8524,23 @@
           ],
           "status": "untested",
           "tests": []
+        },
+        {
+          "id": "UI-072-E08",
+          "from": "Form ready",
+          "trigger": "Submit, settle, and reuse",
+          "expected": "Credential denial restores the draft and submit control; success releases busy state and reveals the key; a later visit can create another key.",
+          "inventoryRefs": [
+            "UI-072"
+          ],
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/management-dialog-reuse-browser.test.ts",
+              "name": "onboarding credentials recover from denial and protect the one-time secret after each success",
+              "kind": "browser"
+            }
+          ]
         }
       ]
     },
@@ -8250,7 +8572,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "untested",
+      "status": "browser",
       "auditEvidence": "UNTESTED",
       "auditNote": "management-page-lifecycle.test.ts executes generic scope cleanup only; onboarding-specific key guard/secret/poll teardown not exercised",
       "edges": [
@@ -8319,6 +8641,23 @@
           ],
           "status": "untested",
           "tests": []
+        },
+        {
+          "id": "UI-073-E07",
+          "from": "Form ready",
+          "trigger": "Submit, settle, and reuse",
+          "expected": "Unconfirmed onboarding key blocks unload; checking stored permits a later visit and creation.",
+          "inventoryRefs": [
+            "UI-073"
+          ],
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/management-dialog-reuse-browser.test.ts",
+              "name": "onboarding credentials recover from denial and protect the one-time secret after each success",
+              "kind": "browser"
+            }
+          ]
         }
       ]
     },
@@ -8675,8 +9014,14 @@
           "inventoryRefs": [
             "P10"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/management-dialog-reuse-browser.test.ts",
+              "name": "$name blocks Cancel and Escape while pending, restores drafts after denial, and retries",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-078-E05",
@@ -8686,8 +9031,14 @@
           "inventoryRefs": [
             "P10"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/management-dialog-reuse-browser.test.ts",
+              "name": "$name resets after success and can reopen and submit exactly once again",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-078-E06",
@@ -8713,6 +9064,23 @@
             {
               "file": "tests/sign-out-browser.test.ts",
               "name": "scrubs the open API-key reveal and focuses usable sign-in via %s",
+              "kind": "browser"
+            }
+          ]
+        },
+        {
+          "id": "UI-078-E08",
+          "from": "Form ready",
+          "trigger": "Submit, settle, and reuse",
+          "expected": "Pending Cancel/Escape and enhanced navigation are blocked; denial restores enabled submission and retains fields; idle Cancel/Escape dismiss, and reopening permits a successful retry.",
+          "inventoryRefs": [
+            "UI-078"
+          ],
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/management-dialog-reuse-browser.test.ts",
+              "name": "$name blocks Cancel and Escape while pending, restores drafts after denial, and retries",
               "kind": "browser"
             }
           ]
@@ -8792,7 +9160,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "unit",
+      "status": "browser",
       "auditEvidence": "U",
       "auditNote": "api-key-secret-lifecycle.test.ts",
       "edges": [
@@ -8837,8 +9205,14 @@
           "inventoryRefs": [
             "P11"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/management-dialog-reuse-browser.test.ts",
+              "name": "$name resets after success and can reopen and submit exactly once again",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-080-E05",
@@ -8881,8 +9255,14 @@
           "inventoryRefs": [
             "P11"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/management-dialog-reuse-browser.test.ts",
+              "name": "$name resets after success and can reopen and submit exactly once again",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-080-E09",
@@ -9357,7 +9737,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "untested",
+      "status": "browser",
       "auditEvidence": "UNTESTED",
       "auditNote": "publication-pages.ts; publication-boundaries.test.ts covers backend boundaries",
       "edges": [
@@ -9468,8 +9848,14 @@
           "inventoryRefs": [
             "P06"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/management-dialog-reuse-browser.test.ts",
+              "name": "$name resets after success and can reopen and submit exactly once again",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-087-E11",
@@ -9479,8 +9865,31 @@
           "inventoryRefs": [
             "P06"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/management-dialog-reuse-browser.test.ts",
+              "name": "$name blocks Cancel and Escape while pending, restores drafts after denial, and retries",
+              "kind": "browser"
+            }
+          ]
+        },
+        {
+          "id": "UI-087-E12",
+          "from": "Form ready",
+          "trigger": "Submit, settle, and reuse",
+          "expected": "Pending Cancel/Escape and enhanced navigation are blocked; denial restores enabled submission and retains fields; idle Cancel/Escape dismiss, and reopening permits a successful retry.",
+          "inventoryRefs": [
+            "UI-087"
+          ],
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/management-dialog-reuse-browser.test.ts",
+              "name": "$name blocks Cancel and Escape while pending, restores drafts after denial, and retries",
+              "kind": "browser"
+            }
+          ]
         }
       ]
     },
@@ -9819,7 +10228,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "untested",
+      "status": "browser",
       "auditEvidence": "UNTESTED",
       "auditNote": "src/routes/app.ts shareBtn handler; share-grants.test.ts and share-links.test.ts are backend/helper tests",
       "edges": [
@@ -9875,8 +10284,14 @@
           "inventoryRefs": [
             "V13"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/management-dialog-reuse-browser.test.ts",
+              "name": "private share creation can repeat after success and denial without retaining pending state",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-092-E06",
@@ -9886,8 +10301,14 @@
           "inventoryRefs": [
             "V13"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/management-dialog-reuse-browser.test.ts",
+              "name": "private share creation can repeat after success and denial without retaining pending state",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-092-E07",
@@ -9921,6 +10342,23 @@
           ],
           "status": "untested",
           "tests": []
+        },
+        {
+          "id": "UI-092-E10",
+          "from": "Form ready",
+          "trigger": "Submit, settle, and reuse",
+          "expected": "Private sharing can repeat after success and denial, creates a seven-day grant once per activation, and restores its idle label.",
+          "inventoryRefs": [
+            "UI-092"
+          ],
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/management-dialog-reuse-browser.test.ts",
+              "name": "private share creation can repeat after success and denial without retaining pending state",
+              "kind": "browser"
+            }
+          ]
         }
       ]
     },

@@ -95,10 +95,30 @@ interface PageScope {
   preventNavigation(check: () => boolean): () => void;
   canLeave(detail: unknown): boolean;
   toast(message: string): void;
+  busy(button: object | null, on: boolean): void;
+  dispose(): void;
 }
 
 describe("persistent management navigation", () => {
+  it("releases only its pending busy controls on disposal and ignores stale helpers", () => {
+    const runtime = scopeRuntime();
+    const scope = runtime.ui.createPageScope();
+    const pending = {}, completed = {};
+    scope.busy(null, true);
+    scope.busy(pending, true);
+    scope.busy(completed, true);
+    scope.busy(completed, false);
+    runtime.ui.busy.mockClear();
+    scope.dispose();
+    expect(runtime.ui.busy).toHaveBeenCalledExactlyOnceWith(pending, false);
+    scope.busy(pending, true);
+    scope.dispose();
+    expect(runtime.ui.busy).toHaveBeenCalledTimes(1);
+  });
   it("recognizes only the exact progressive-enhancement route set", () => {
+    expect(managementRouteIdentity("/organizations/org-a/projects")).toEqual({ organizationId: "org-a", projectId: undefined, section: "projects" });
+    expect(managementRouteIdentity("/organizations/org-a/projects/project-a")).toEqual({ organizationId: "org-a", projectId: "project-a", section: "project" });
+    expect(managementRouteIdentity("/organizations/org-a/people")).toEqual({ organizationId: "org-a", projectId: undefined, section: "people" });
     expect(managementRouteIdentity("/organizations/org-a")).toEqual({ organizationId: "org-a", projectId: undefined, section: "overview" });
     expect(managementRouteIdentity("/organizations/org-a/projects/project-a/publications")).toEqual({ organizationId: "org-a", projectId: "project-a", section: "publications" });
     expect(managementRouteIdentity("/organizations/org-a/projects/project-a/deployments")).toEqual({ organizationId: "org-a", projectId: "project-a", section: "deployments" });

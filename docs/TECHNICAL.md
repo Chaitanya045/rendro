@@ -125,6 +125,33 @@ The fast burst regression runs the production fixed-window reducer for **two use
 
 Release requires a **Convex deploy** for the auth options/plugin and component mutation/cleanup, plus the Worker/client asset release. No schema migration is needed.
 
+### Management form lifetime
+
+A pending management write keeps its form dialog open: Cancel, Close, backdrop,
+and Escape cannot dismiss it until the request settles. Enhanced navigation is
+also blocked. Success and failure release the submit control before the dialog
+is reused; page-scope disposal releases any remaining busy controls and aborts
+requests, and inactive controllers cannot apply late results. Organization and
+first-project creation, plus invitation acceptance/decline, release controls
+before their full-document success navigation as well.
+
+The People form and Add another person action each bind one handler
+for the lifetime of the persistent dialog. Reloading the invitation list must not accumulate
+listeners. Successful invitation rows are removed; partial failures retain only
+failed rows for retry. An entirely successful batch releases Send invitations
+before closing and refreshing the list.
+
+The dialog audit for #133 covers project, team, publication and API-key creation,
+the separate one-time-key reveal, and the shared destructive confirmation.
+Their existing success resets and secret-confirmation gates remain intact.
+Settings, organization creation, first-project/credential onboarding and
+invitation responses are inline forms; document sharing is a toolbar action,
+not a management dialog. Sharing already clears its pending guard in `finally`.
+`tests/management-dialog-reuse-browser.test.ts` exercises these real controllers
+in isolated Chromium with held success/denial responses, repeated submission,
+pending Cancel/Escape where a dialog exists, and scope teardown. This uses local
+fixtures only; it does not send invitations or create credentials on a deployment.
+
 ### Cookie-authenticated write admission
 
 Custom Convex HTTP writes declare their admission policy at registration. The shared `shared/request-admission.ts` helper requires an exact match to the origin of Better Auth's configured `SITE_URL`, rejects absent/opaque/foreign origins and `Sec-Fetch-Site: cross-site`, and requires `application/json` for JSON bodies (charset parameters are allowed). Origin checks never replace persisted session, membership, role, or scope authorization. Initial-password setup additionally reads the persisted session and checks its creation time against Better Auth's `sessionConfig.freshAge` (24 hours by default); stale sessions must sign in again.
