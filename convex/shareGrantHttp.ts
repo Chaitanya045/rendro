@@ -46,7 +46,7 @@ export const createShareGrant = httpAction(async (ctx, request) => {
   } catch (error: unknown) {
     return failure(error, 403, "createShareGrant");
   }
-});
+}, "cookie-json");
 
 export const listShareGrants = httpAction(async (ctx, request) => {
   const url = new URL(request.url);
@@ -85,7 +85,7 @@ export const revokeShareGrant = httpAction(async (ctx, request) => {
   } catch (error: unknown) {
     return failure(error, 403, "revokeShareGrant");
   }
-});
+}, "cookie-json");
 
 export const resolveShareGrant = httpAction(async (ctx, request) => {
   const token = new URL(request.url).searchParams.get("token");

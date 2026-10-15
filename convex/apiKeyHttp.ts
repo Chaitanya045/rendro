@@ -35,7 +35,7 @@ function limitedAction(handler: Handler, allowSession: boolean, budget: "credent
     // Charge before parsing input and independently of operation success. Scope
     // authorization still happens inside each handler, including revocation.
     return handler(ctx, request);
-  });
+  }, allowSession ? "mixed" : "bearer");
 }
 
 export const apiKeyHttpAction = (handler: Handler) => limitedAction(handler, false);

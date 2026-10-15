@@ -1,3 +1,4 @@
+import { writeAdmission } from "./middleware/write-admission";
 import type { Hono } from "hono";
 import type { User } from "better-auth/types";
 import { proxyAuthRequest, proxyAuthSignOut, proxyConvexRequest } from "@/auth-proxy";
@@ -35,6 +36,7 @@ export function mountPublicRoutes<E extends AppEnv>(app: Hono<E>): void {
 
 /** Auth proxy, Convex API proxy, and application routes. Mount after session middleware. */
 export function mountSessionRoutes<E extends AppEnv>(app: Hono<E>): void {
+  app.use("*", writeAdmission);
   // GET confirms; only a same-origin POST revokes the session.
   app.on(["GET", "POST"], "/api/auth/sign-out", (c) => proxyAuthSignOut(c.req.raw));
 

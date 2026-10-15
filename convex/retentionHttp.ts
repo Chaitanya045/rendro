@@ -31,4 +31,4 @@ export const markRetentionPurged = httpAction(async (ctx, request) => {
     objectCount,
   });
   return Response.json({ purged });
-});
+}, "bearer");

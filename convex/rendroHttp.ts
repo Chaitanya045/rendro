@@ -118,7 +118,7 @@ export const createProject = httpAction(async (ctx, request) => {
   } catch (error: unknown) {
     return jsonError(error);
   }
-});
+}, "cookie-json");
 
 export const getProject = httpAction(async (ctx, request) => {
   const url = new URL(request.url);

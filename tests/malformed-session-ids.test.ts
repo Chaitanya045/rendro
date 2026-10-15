@@ -46,7 +46,7 @@ async function fixture() {
 describe("real-session ID boundaries", () => {
   it("keeps valid sessions working and rejects malformed project IDs in the fallback and credential creation", async () => {
     const f = await fixture();
-    const headers = { cookie: f.cookie };
+    const headers = { cookie: f.cookie, origin: process.env.SITE_URL!, "content-type": "application/json" };
     const query = new URLSearchParams({ organizationId: f.organizationId, projectId: f.projectId });
     const valid = await f.backend.fetch(`/api/rendro/deployments/active?${query}`, { headers });
     expect(valid.status).toBe(200);

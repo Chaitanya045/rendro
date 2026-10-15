@@ -1,3 +1,4 @@
+import { writeAdmission } from "../src/middleware/write-admission";
 import type { User } from "better-auth/types";
 import { renderApiKeyPage } from "@/routes/api-key-pages";
 import { renderSharePage } from "@/routes/share-pages";
@@ -17,7 +18,7 @@ let revokedShares = 0;
 const rawKey = "rd_fixture_secret_must_disappear";
 const reader = { id: "reader", name: "Reader", email: "reader@example.test" } as User;
 beforeEach(() => { authenticated = true; failSignOut = false; revokedShares = 0; });
-afterAll(() => vi.unstubAllGlobals());
+afterAll(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
 beforeAll(async () => {
   // Production host, lifecycle and HTTP proxy; deterministic transport lets the
   // test deliver late private updates and mutations after the client closes.
@@ -52,6 +53,7 @@ beforeAll(async () => {
     return Promise.resolve(Response.json({ success: true }));
   }));
   const app = new Hono();
+  app.use("*", writeAdmission);
   app.get("/api/auth/get-session", c => c.json(authenticated ? { user: { id: "reader" } } : null));
   app.get("/api/auth/convex/token", c => c.json({ token: "fixture" }));
   app.on(["GET", "POST"], "/api/auth/sign-out", c => proxyAuthSignOut(c.req.raw));
@@ -82,6 +84,7 @@ beforeAll(async () => {
     ${renderCommentRecoveryLifecycle("reader")}<script src="/commentor-parent.js"></script></body></html>`));
   const listener = getRequestListener(app.fetch);
   await harness.start((req, res) => { void listener(req, res); }, assets);
+  vi.stubEnv("SITE_URL", harness.origin);
 });
 
 type Transport = { subscriptions: number; closes: number; writes: number; updates: number };

@@ -58,6 +58,13 @@ const setInitialPasswordHandler = httpAction(async (ctx, request) => {
   }
   try {
     const auth = createAuth(ctx);
+    const session = await auth.api.getSession({ headers: request.headers, query: { disableCookieCache: true } });
+    const { sessionConfig } = await auth.$context;
+    const createdAt = session ? new Date(session.session.createdAt).getTime() : NaN;
+    const age = Date.now() - createdAt;
+    if (!Number.isFinite(age) || age < 0 || age >= sessionConfig.freshAge * 1000) {
+      return Response.json({ error: "Sign in again before setting a password" }, { status: 403 });
+    }
     await auth.api.setPassword({
       body: { newPassword },
       headers: request.headers,
@@ -70,7 +77,7 @@ const setInitialPasswordHandler = httpAction(async (ctx, request) => {
       { status: 400 },
     );
   }
-});
+}, "cookie-json");
 
 http.route({
   path: "/api/auth/set-initial-password",
@@ -126,7 +133,7 @@ const authHandler = httpAction(async (ctx, request) => {
     });
   }
   return cacheJwksResponse(request, response);
-});
+}, "better-auth");
 http.route({ pathPrefix: "/api/auth/", method: "GET", handler: authHandler });
 http.route({ pathPrefix: "/api/auth/", method: "POST", handler: authHandler });
 

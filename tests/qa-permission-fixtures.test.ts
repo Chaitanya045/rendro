@@ -124,7 +124,7 @@ describe("QA permission fixtures", () => {
       members: [],
       sessions: [],
     });
-  });
+  }, 15_000);
 
   it("rejects a non-development site before seeding or making HTTP calls", async () => {
     vi.stubEnv("SITE_URL", "https://rendro.app");

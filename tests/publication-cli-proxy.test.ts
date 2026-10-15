@@ -38,3 +38,14 @@ it.each([401, 403])("does not turn upstream authorization rejection %i into succ
   const response = await app.request("/api/rendro/publications?organizationId=org&projectId=project");
   expect(response.status).toBe(status);
 });
+
+it.each(["application/json; charset=utf-8", "text/plain", null])("preserves browser admission headers and original content type %s", async contentType => {
+  const source = new Headers({ origin: "https://rendro.test", "sec-fetch-site": "same-site", cookie: "session=test" });
+  if (contentType) source.set("content-type", contentType);
+  // A byte body avoids Request automatically inserting text/plain.
+  await app.request("/api/rendro/publications/remove", { method: "POST", headers: source, body: new TextEncoder().encode("{}") });
+  const headers = new Headers(vi.mocked(fetch).mock.calls[0][1]?.headers);
+  expect(headers.get("origin")).toBe("https://rendro.test");
+  expect(headers.get("sec-fetch-site")).toBe("same-site");
+  expect(headers.get("content-type")).toBe(contentType);
+});

@@ -80,7 +80,7 @@ describe("shared response security policy", () => {
     vi.spyOn(apiKeys, "createOrgApiKey").mockResolvedValue("fixture-api-key");
     const put = vi.spyOn(minio, "putObject").mockResolvedValue(undefined);
     const response = await worker.request("https://rendro.test/api/orgs", {
-      method: "POST", headers: { Cookie: cookie, "Content-Type": "application/json" },
+      method: "POST", headers: { origin: process.env.SITE_URL!, Cookie: cookie, "Content-Type": "application/json" },
       body: JSON.stringify({ org: "example", displayName: "Example" }),
     });
     expect(response.status).toBe(200);

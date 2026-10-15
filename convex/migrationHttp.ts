@@ -68,4 +68,4 @@ export const ensureMigrationProject = httpAction(async (ctx, request) => {
     actorId: "migration-job",
   });
   return Response.json({ project, created: true }, { status: 201 });
-});
+}, "bearer");

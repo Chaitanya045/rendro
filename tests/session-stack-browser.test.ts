@@ -1,3 +1,4 @@
+import rateLimiterTest from "./convex-rate-limiter";
 import { spawn, type ChildProcess } from "node:child_process";
 import { createServer, get, request as httpRequest } from "node:http";
 import { once } from "node:events";
@@ -18,6 +19,7 @@ let server: ChildProcess | undefined;
 let organizationId: string, projectId: string;
 const password = "local-stack-fixture-password-only";
 const backend = convexTest(schema, import.meta.glob("../convex/**/*.ts"));
+rateLimiterTest.register(backend);
 backend.registerComponent("betterAuth", authSchema, import.meta.glob("../convex/betterAuth/**/*.ts"));
 const objects = new Map<string, string>();
 
@@ -131,6 +133,22 @@ it("signs in and browses management and docs without a 503 on the real local ser
     expect(response?.status()).toBe(200);
     await expect.poll(() => page.locator("body").textContent()).toContain("Stack Organization");
   }
+  // Exercise the actual management transport against Node -> Convex. Chromium
+  // supplies Origin and the shared transport supplies JSON for every mutation.
+  const writes = await page.evaluate(async ({ organizationId, projectId }) => {
+    const ui = (window as unknown as { RendroUI: { request(path: string, options: object): Promise<Record<string, unknown>> } }).RendroUI;
+    const post = (path: string, body: object) => ui.request(path, { method: "POST", body: JSON.stringify(body) });
+    const scope = { organizationId, projectId };
+    const project = await post("/api/rendro/projects", { organizationId, name: "Browser created", slug: "browser-created" });
+    const credential = await post("/api/rendro/credentials", { ...scope, name: "Browser key", scopes: ["docs:read"] });
+    await post("/api/rendro/credentials/revoke", { organizationId, keyId: (credential.credential as { keyId: string }).keyId });
+    const share = await post("/api/rendro/shares", { ...scope, documentPath: "index.html", expiresInSeconds: 600 });
+    await post("/api/rendro/shares/revoke", { organizationId, grantId: (share.grant as { _id: string })._id });
+    const publication = await post("/api/rendro/publications", { ...scope, slug: "browser-publication", pathPrefix: "", entryFile: "index.html", trackingMode: "track_active" });
+    await post("/api/rendro/publications/remove", { ...scope, publicationId: (publication.publication as { _id: string })._id });
+    return { createdProject: Boolean(project.project), createdKey: Boolean(credential.rawKey), createdShare: Boolean(share.token), createdPublication: Boolean(publication.publication) };
+  }, { organizationId, projectId });
+  expect(writes).toEqual({ createdProject: true, createdKey: true, createdShare: true, createdPublication: true });
   const docs = `${orgPath}/projects/${projectId}/docs`;
   expect((await page.goto(harness.origin + docs))?.status()).toBe(200);
   // The viewer iframe exercises the canonical route and a fresh persisted

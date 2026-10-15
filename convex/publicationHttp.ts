@@ -1,3 +1,4 @@
+import { requireCookieWrite } from "../shared/request-admission";
 import { sessionOrApiKeyHttpAction } from "./apiKeyHttp";
 import type { GenericActionCtx } from "convex/server";
 import type { DataModel } from "./_generated/dataModel";
@@ -22,6 +23,8 @@ async function publicationPrincipal(
     requiredScope: input.scope,
   });
   if (apiPrincipal) return { actorId: `api-key:${apiPrincipal.keyId}` };
+  // A missing, invalid, or insufficient key may fall back to session authority.
+  if (input.write) requireCookieWrite(request, process.env.SITE_URL);
   try {
     const { user } = await authorizeHttpOrganization(
       ctx,
