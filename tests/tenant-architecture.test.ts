@@ -189,7 +189,7 @@ describe("revocable private shares", () => {
     expect(document.headers.get("Content-Security-Policy")).toContain("sandbox allow-scripts");
     const asset = await shareRoutes.request("/s/token/files/guide/app.css");
     expect(asset.status).toBe(200);
-    expect(asset.headers.get("Content-Security-Policy")).toBe("default-src 'none'");
+    expect(asset.headers.get("Content-Security-Policy")).toBe("default-src 'none'; sandbox; frame-ancestors 'self'");
     expect((await shareRoutes.request("/s/token/files/guide/secret.html")).status).toBe(404);
     expect((await shareRoutes.request("/s/token/files/shared/app.css")).status).toBe(404);
     expect(read).toHaveBeenCalledTimes(2);
@@ -221,7 +221,7 @@ describe("revocable private shares", () => {
     expect(response.status).toBe(200);
     expect(response.headers.get("Cache-Control")).toBe("private, no-store");
     expect(response.headers.get("Referrer-Policy")).toBe("no-referrer");
-    expect(html).toContain('sandbox="allow-scripts allow-forms allow-popups allow-downloads allow-same-origin"');
+    expect(html).toContain('sandbox="allow-scripts allow-forms allow-popups allow-downloads"');
     expect(html).toContain('referrerpolicy="no-referrer"');
     expect(html).toContain("/s/token/files/guide/index.html");
   });

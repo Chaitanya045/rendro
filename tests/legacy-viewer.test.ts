@@ -37,7 +37,7 @@ describe("legacy viewer routes", () => {
     expect(html.indexOf("<base")).toBeLessThan(html.indexOf('<link rel="stylesheet"'));
     const asset = await request(`${prefix}assets/site.css`);
     expect(asset.status).toBe(200);
-    expect(asset.headers.get("Content-Type")).toBe("text/css");
+    expect(asset.headers.get("Content-Type")).toBe("text/css; charset=utf-8");
     expect(asset.headers.get("Access-Control-Allow-Origin")).toBe("null");
     expect(asset.headers.get("Access-Control-Allow-Credentials")).toBeNull();
     expect(asset.headers.get("Cache-Control")).toBe("private, no-store");

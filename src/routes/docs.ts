@@ -1,7 +1,7 @@
 import { sessionCache } from "@/session-cache";
 import { viewerBackendJson } from "@/viewer-backend";
 import { viewerErrorResponse } from "@/routes/viewer-unavailable";
-import { assetError } from "@/routes/asset-headers";
+import { assetError, assetHeaders, isHtmlAsset } from "@/routes/asset-headers";
 import { decodeStoragePath, isLegacyStorageKey, isLegacyStoragePrefix, legacyStoragePrefix } from "@/storage-boundary";
 import { Hono } from "hono";
 import type { Context } from "hono";
@@ -106,14 +106,10 @@ app.on("GET", ["/legacy-view/:org/files/*", "/legacy-view/:org/view/:viewerToken
   if (!object) return missing();
   const stream = await getObjectStream(key);
   if (!stream) return missing();
-  const contentType = object.contentType ?? "text/html";
-  const html = /^text\/html(?:;|$)/i.test(contentType);
+  const html = isHtmlAsset(path, object.contentType ?? "text/html");
   const headers = {
-    "Content-Type": contentType, "Cache-Control": "private, no-store", "Referrer-Policy": "no-referrer",
-    ...(ticket ? { "Access-Control-Allow-Origin": "null" } : {}),
-    // Sandbox other active document types too (e.g. a directly opened SVG).
-    "Content-Security-Policy": "sandbox allow-scripts allow-forms allow-popups allow-downloads; frame-ancestors 'self'",
-    "X-Content-Type-Options": "nosniff",
+    ...assetHeaders(path, Boolean(ticket), object.contentType ?? "text/html"),
+    "Cache-Control": "private, no-store", "Referrer-Policy": "no-referrer",
   };
   if (!html) return new Response(stream, { headers });
   const frameToken = token ?? await createLegacyViewerTicket(org, cookie);

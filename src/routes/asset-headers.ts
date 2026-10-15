@@ -20,19 +20,46 @@ const assetTypes: Record<string, string> = {
   ".png": "image/png",
   ".svg": "image/svg+xml",
   ".webp": "image/webp",
+  ".xml": "application/xml",
+  ".xhtml": "application/xhtml+xml",
 };
+
+/** Stored parameters are untrusted. Serve only a validated, canonical MIME essence. */
+export function normalizeMediaType(value: string): string {
+  const type = value.split(";", 1)[0].trim().toLowerCase();
+  return /^[a-z0-9!#$%&'*+.^_`|~-]+\/[a-z0-9!#$%&'*+.^_`|~-]+$/.test(type)
+    ? type : "application/octet-stream";
+}
 
 export function assetContentType(path: string, storedType?: string): string {
   const extension = path.slice(path.lastIndexOf(".")).toLowerCase();
   // Older manifests can store fonts as application/octet-stream. Preserve
-  // publisher-provided MIME types for all other files.
-  return fontTypes[extension] ?? storedType ?? assetTypes[extension] ?? "application/octet-stream";
+  // valid publisher MIME essences for other files, never arbitrary parameters.
+  const type = fontTypes[extension] ?? (storedType === undefined
+    ? assetTypes[extension] ?? "application/octet-stream"
+    : normalizeMediaType(storedType));
+  // HTML injection decodes as UTF-8; CSS shares that document encoding.
+  return /^(?:text\/html|text\/css)$/.test(type) ? `${type}; charset=utf-8` : type;
 }
 
-/** Call only after the route's publication, share, or session/ticket checks. */
-export function assetHeaders(path: string, allowOpaqueOrigin: boolean, storedType?: string): Record<string, string> {
+export function isHtmlAsset(path: string, storedType?: string): boolean {
+  return normalizeMediaType(assetContentType(path, storedType)) === "text/html";
+}
+
+/** A response sandbox also isolates direct navigation, regardless of MIME type. */
+function publisherContentPolicy(contentType: string, restrictResources: boolean): string {
+  return normalizeMediaType(contentType) === "text/html"
+    ? "sandbox allow-scripts allow-forms allow-popups allow-downloads; frame-ancestors 'self'"
+    : `${restrictResources ? "default-src 'none'; " : ""}sandbox; frame-ancestors 'self'`;
+}
+
+/** Call only after access checks. Retain resource restrictions where already used;
+ * adding default-src to public SVGs would also suppress their image styling. */
+export function assetHeaders(path: string, allowOpaqueOrigin: boolean, storedType?: string, restrictResources = false): Record<string, string> {
+  const contentType = assetContentType(path, storedType);
   return {
-    "Content-Type": assetContentType(path, storedType),
+    "Content-Type": contentType,
+    "Content-Security-Policy": publisherContentPolicy(contentType, restrictResources),
     "X-Content-Type-Options": "nosniff",
     // Fixed opaque origin, never reflected and never credentialed. Canonical
     // cookie-authenticated private URLs must not opt into this allowance.

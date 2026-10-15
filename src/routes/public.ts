@@ -1,3 +1,4 @@
+import { assetHeaders } from "@/routes/asset-headers";
 import { decodeStoragePath, legacyStoragePrefix } from "@/storage-boundary";
 import { viewerScript } from "@/viewer/markup";
 import { Hono } from "hono";
@@ -71,8 +72,7 @@ app.get("/public/:org/:slug/files/:path{.+}", async (c) => {
     const html = injectPublicNavigation(await readStream(stream), publication, documentPath, c.req.url);
     return c.html(html, 200, {
       "Cache-Control": "public, max-age=0, must-revalidate",
-      "Content-Security-Policy": "sandbox allow-scripts allow-forms allow-popups allow-downloads; frame-ancestors 'self'",
-      "X-Content-Type-Options": "nosniff",
+      ...assetHeaders(documentPath, false, "text/html"),
       "Referrer-Policy": "strict-origin-when-cross-origin",
     });
   } catch (error) {
