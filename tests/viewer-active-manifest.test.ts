@@ -9,8 +9,8 @@ async function deployedFixture() {
   const args = { organizationId: f.data.organizationId, projectId: f.data.projectId };
   const publish = async () => {
     const deployment = await f.backend.mutation(internal.deployments.startInternal, {
-      ...args, actorId: f.data.users[0].userId, manifestSha256: "hash", fileCount: 1, byteCount: 1,
-      provenance: { source: { kind: "local" }, execution: { kind: "local" }, cliVersion: "test", manifestSha256: "hash" },
+      ...args, actorId: f.data.users[0].userId, manifestSha256: "a".repeat(64), fileCount: 1, byteCount: 1,
+      provenance: { source: { kind: "local" }, execution: { kind: "local" }, cliVersion: "test", manifestSha256: "a".repeat(64) },
     });
     await commitWithProof(f.backend, {
       ...args, deploymentId: deployment.deploymentId, actorId: f.data.users[0].userId,

@@ -15,7 +15,7 @@ const provenance = {
   source: { kind: "git" as const, repository: "https://example.test/docs", commit: "abc", ref: "main" },
   execution: { kind: "ci" as const, provider: "test", runId: "1" },
   cliVersion: "test",
-  manifestSha256: "manifest",
+  manifestSha256: "a".repeat(64),
 };
 
 async function project(backend: ReturnType<typeof convexTest>, organizationId: string, slug: string) {

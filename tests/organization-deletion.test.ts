@@ -18,7 +18,7 @@ import { createViewerTicket } from "../src/viewer-ticket";
 import * as storage from "../src/minio";
 
 const modules = import.meta.glob("../convex/**/*.ts");
-const provenance = { source: { kind: "local" as const }, execution: { kind: "local" as const }, cliVersion: "test", manifestSha256: "manifest" };
+const provenance = { source: { kind: "local" as const }, execution: { kind: "local" as const }, cliVersion: "test", manifestSha256: "a".repeat(64) };
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 async function fixture(transactionLimits: { documentsWritten: number } | boolean = true) {
@@ -43,7 +43,7 @@ async function fixture(transactionLimits: { documentsWritten: number } | boolean
     const actorId = user.id;
     const project = (await t.mutation(internal.projects.createInternal, { organizationId, name: "Docs", slug: "docs", actorId }))!;
     const scope = { organizationId, projectId: project._id };
-    const start = { ...scope, manifestSha256: "manifest", fileCount: 1, byteCount: 1, provenance, actorId };
+    const start = { ...scope, manifestSha256: "a".repeat(64), fileCount: 1, byteCount: 1, provenance, actorId };
     const first = await t.mutation(internal.deployments.startInternal, start);
     await commitWithProof(t, { ...scope, deploymentId: first.deploymentId, actorId });
     const active = await t.mutation(internal.deployments.startInternal, start);

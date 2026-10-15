@@ -1,3 +1,4 @@
+import { isDeploymentPurging } from "./retentionPolicy";
 import { isOrganizationDeleted, requireActiveOrganization } from "./organizationLifecycle";
 import type { WorkerShare } from "../shared/resolver-dto";
 import { requireId } from "./ids";
@@ -31,7 +32,7 @@ export const createInternal = internalMutation({
     }
     const deployment = await ctx.db.get(project.activeDeploymentId);
     if (!deployment || deployment.projectId !== project._id || deployment.organizationId !== args.organizationId
-      || deployment.status !== "active" || deployment.purgeState === "purging" || deployment.purgedAt !== undefined) {
+      || deployment.status !== "active" || await isDeploymentPurging(ctx, deployment)) {
       throw new ConvexError("Project has no active deployment");
     }
     if (!validDocumentPath(args.documentPath)) throw new ConvexError("Invalid document path");
@@ -71,7 +72,7 @@ export const resolveInternal = internalQuery({
       || await isOrganizationDeleted(ctx, grant.organizationId)) return null;
     const deployment = await ctx.db.get(grant.deploymentId);
     const project = await ctx.db.get(grant.projectId);
-    if (!deployment || !project || deployment.purgeState === "purging" || deployment.purgedAt !== undefined || deployment.status === "failed" || deployment.status === "staging") return null;
+    if (!deployment || !project || await isDeploymentPurging(ctx, deployment) || deployment.status === "failed" || deployment.status === "staging") return null;
     return {
       grant: { documentPath: grant.documentPath, expiresAt: grant.expiresAt },
       deployment: { manifestKey: deployment.manifestKey },

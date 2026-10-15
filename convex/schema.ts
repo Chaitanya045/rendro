@@ -74,6 +74,7 @@ export default defineSchema({
     activatedAt: v.optional(v.number()),
     failureReason: v.optional(v.string()),
     previousDeploymentId: v.optional(v.id("deployments")),
+    // Compatibility with earlier cleanup versions; new writes use deploymentPurges.
     purgedAt: v.optional(v.number()),
     stagingExpiresAt: v.optional(v.number()),
     purgeState: v.optional(v.literal("purging")),
@@ -85,6 +86,13 @@ export default defineSchema({
     .index("by_project_created", ["projectId", "createdAt"])
     .index("by_organization_activated", ["organizationId", "activatedAt"])
     .index("by_organization_status", ["organizationId", "status"]),
+
+  deploymentPurges: defineTable({
+    deploymentId: v.id("deployments"),
+    purgeToken: v.string(),
+    claimUntil: v.number(),
+    purgedAt: v.optional(v.number()),
+  }).index("by_deployment", ["deploymentId"]),
 
   retentionProgress: defineTable({
     name: v.string(),

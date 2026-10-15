@@ -181,17 +181,17 @@ describe("deployment workflow", () => {
       source: { kind: "git" as const, repository: "https://example.test/docs", commit: "abc", ref: "main" },
       execution: { kind: "ci" as const, provider: "test", runId: "functional" },
       cliVersion: "test",
-      manifestSha256: "first",
+      manifestSha256: "a".repeat(64),
     };
     const first = await backend.mutation(internal.deployments.startInternal, {
-      organizationId: "org-functional", projectId: project._id, manifestSha256: "first", fileCount: 1, byteCount: 10, provenance, actorId: "qa",
+      organizationId: "org-functional", projectId: project._id, manifestSha256: "a".repeat(64), fileCount: 1, byteCount: 10, provenance, actorId: "qa",
     });
     await commitWithProof(backend, {
       organizationId: "org-functional", projectId: project._id, deploymentId: first.deploymentId, actorId: "qa",
     });
     const second = await backend.mutation(internal.deployments.startInternal, {
-      organizationId: "org-functional", projectId: project._id, manifestSha256: "second", fileCount: 2, byteCount: 20,
-      provenance: { ...provenance, manifestSha256: "second" }, actorId: "qa",
+      organizationId: "org-functional", projectId: project._id, manifestSha256: "b".repeat(64), fileCount: 2, byteCount: 20,
+      provenance: { ...provenance, manifestSha256: "b".repeat(64) }, actorId: "qa",
     });
     await commitWithProof(backend, {
       organizationId: "org-functional", projectId: project._id, deploymentId: second.deploymentId, actorId: "qa",
@@ -200,7 +200,7 @@ describe("deployment workflow", () => {
       organizationId: "org-functional", projectId: project._id,
     });
     expect(deployments.map((deployment) => [deployment.manifestSha256, deployment.status]))
-      .toEqual([["second", "active"], ["first", "superseded"]]);
+      .toEqual([["b".repeat(64), "active"], ["a".repeat(64), "superseded"]]);
     expect(deployments[0]?.previousDeploymentId).toBe(first.deploymentId);
   });
 });

@@ -20,14 +20,14 @@ const sharePath = "/api/rendro/shares/public?token=synthetic-share-token";
 const provenance = {
   source: { kind: "git" as const, repository: "https://private-user:synthetic-token@git.example/private/repo.git?token=synthetic-query#synthetic-fragment", commit: "commit-abc123", ref: "refs/heads/main", dirty: true, localPathLabel: "/private/home/user/docs" },
   execution: { kind: "ci" as const, provider: "github-actions", runId: "123", workflow: "Publish", job: "docs", actor: "private-actor" },
-  cliVersion: "2.0.0", manifestSha256: "manifest-sha",
+  cliVersion: "2.0.0", manifestSha256: "a".repeat(64),
 };
 async function fixture(inputProvenance = provenance) {
   const t = convexTest(schema, modules);
   rateLimiterTest.register(t);
   const project = (await t.mutation(internal.projects.createInternal, { organizationId: "private-org", name: "Docs", slug: "private-project", actorId: "private-creator" }))!;
   const scope = { organizationId: project.organizationId, projectId: project._id };
-  const deployment = await t.mutation(internal.deployments.startInternal, { ...scope, manifestSha256: "manifest-sha", fileCount: 1, byteCount: 1, provenance: inputProvenance, actorId: "private-actor" });
+  const deployment = await t.mutation(internal.deployments.startInternal, { ...scope, manifestSha256: "a".repeat(64), fileCount: 1, byteCount: 1, provenance: inputProvenance, actorId: "private-actor" });
   await commitWithProof(t, { ...scope, deploymentId: deployment.deploymentId, actorId: "private-actor" });
   const publication = (await publishWithProof(t, { ...scope, slug: "docs", entryFile: "index.html", pathPrefix: "private-prefix", trackingMode: "track_active", title: "Public docs", description: "private-description", actorId: "private-creator" }))!;
   const grant = (await t.mutation(internal.shareGrants.createInternal, { ...scope, tokenHash: await sha256("synthetic-share-token"), documentPath: "index.html", expiresAt: Date.now() + 600_000, actorId: "private-creator" }))!;
@@ -198,7 +198,7 @@ describe("minimal publication/share resolver responses", () => {
 
   it("rejects invalid deployment transitions while keeping authorized history useful", async () => {
     const f = await fixture();
-    const input = { ...f.scope, manifestSha256: "sha", fileCount: -1, byteCount: 0, provenance, actorId: "owner" };
+    const input = { ...f.scope, manifestSha256: "a".repeat(64), fileCount: -1, byteCount: 0, provenance, actorId: "owner" };
     await expect(f.t.mutation(internal.deployments.startInternal, input)).rejects.toThrow("non-negative");
     const commit = { ...f.scope, deploymentId: f.deployment.deploymentId, actorId: "owner" };
     await expect(commitWithProof(f.t, { ...commit, organizationId: "outsider" })).rejects.toThrow("Project not found");
@@ -214,11 +214,10 @@ describe("minimal publication/share resolver responses", () => {
 
   it("validates provenance shape and caps persisted strings at the mutation boundary", async () => {
     const f = await fixture();
-    const input = { ...f.scope, manifestSha256: "sha", fileCount: 0, byteCount: 0, provenance, actorId: "owner" };
+    const input = { ...f.scope, manifestSha256: "a".repeat(64), fileCount: 0, byteCount: 0, provenance, actorId: "owner" };
     await expect(f.t.mutation(internal.deployments.startInternal, { ...input, provenance: { ...provenance, source: { ...provenance.source, repository: 123 as unknown as string } } })).rejects.toThrow();
     const long = { ...provenance, source: { ...provenance.source, ref: "x".repeat(5000) } };
-    const result = await f.t.mutation(internal.deployments.startInternal, { ...input, provenance: long });
-    expect((await f.t.run(ctx => ctx.db.get(result.deploymentId)))?.provenance.source.ref).toBe("x".repeat(256));
+    await expect(f.t.mutation(internal.deployments.startInternal, { ...input, provenance: long })).rejects.toThrow("length limit");
     await f.t.run(ctx => ctx.db.patch(f.deployment.deploymentId, { provenance: { ...provenance, source: { ...provenance.source, commit: "https://user:synthetic-token@git.example/commit" } } }));
     expect((await f.t.query(internal.deployments.latestForOrganization, { organizationId: f.scope.organizationId }))?.commit).toBe("https://git.example/commit");
   });

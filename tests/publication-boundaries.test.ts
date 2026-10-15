@@ -25,8 +25,8 @@ async function createProject(
   });
   if (!project) throw new Error("Project creation failed");
   const deployment = await backend.mutation(internal.deployments.startInternal, {
-    organizationId, projectId: project._id, manifestSha256: "manifest", fileCount: 1, byteCount: 1, actorId: "owner",
-    provenance: { source: { kind: "local" }, execution: { kind: "local" }, cliVersion: "test", manifestSha256: "manifest" },
+    organizationId, projectId: project._id, manifestSha256: "a".repeat(64), fileCount: 1, byteCount: 1, actorId: "owner",
+    provenance: { source: { kind: "local" }, execution: { kind: "local" }, cliVersion: "test", manifestSha256: "a".repeat(64) },
   });
   await commitWithProof(backend, { organizationId, projectId: project._id, deploymentId: deployment.deploymentId, actorId: "owner" });
   return project;
@@ -75,14 +75,14 @@ describe("publication tenant and project boundaries", () => {
     const staged = await backend.mutation(internal.deployments.startInternal, {
       organizationId: "org-a",
       projectId: project._id,
-      manifestSha256: "pending-manifest",
+      manifestSha256: "a".repeat(64),
       fileCount: 1,
       byteCount: 10,
       provenance: {
         source: { kind: "git", repository: "https://example.test/docs", commit: "abc", ref: "main" },
         execution: { kind: "ci", provider: "test", runId: "1" },
         cliVersion: "test",
-        manifestSha256: "pending-manifest",
+        manifestSha256: "a".repeat(64),
       },
       actorId: "api-key:test",
     });

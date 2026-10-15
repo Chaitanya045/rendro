@@ -38,7 +38,7 @@ async function stage(
   return backend.mutation(internal.deployments.startInternal, {
     organizationId,
     projectId,
-    manifestSha256,
+    manifestSha256: "a".repeat(64),
     fileCount: 2,
     byteCount: 100,
     provenance: { ...provenance, manifestSha256 },

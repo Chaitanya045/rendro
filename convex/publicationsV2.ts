@@ -1,3 +1,4 @@
+import { isDeploymentPurging } from "./retentionPolicy";
 import { verifyStorageValidation } from "../shared/storage-attestation";
 import { isOrganizationDeleted, requireActiveOrganization } from "./organizationLifecycle";
 import type { WorkerPublication } from "../shared/resolver-dto";
@@ -48,8 +49,7 @@ export const createInternal = internalMutation({
       !deployment
       || deployment.organizationId !== args.organizationId
       || deployment.projectId !== project._id
-      || deployment.purgeState === "purging"
-      || deployment.purgedAt !== undefined
+      || await isDeploymentPurging(ctx, deployment)
       || deployment.status === "failed"
       || deployment.status === "staging"
     ) throw new ConvexError("Publication deployment not found");
@@ -135,7 +135,7 @@ export const resolvePublicInternal = internalQuery({
       : project.activeDeploymentId;
     if (!deploymentId) return null;
     const deployment = await ctx.db.get(deploymentId);
-    if (!deployment || deployment.purgeState === "purging" || deployment.purgedAt !== undefined || deployment.status === "failed" || deployment.status === "staging") return null;
+    if (!deployment || await isDeploymentPurging(ctx, deployment) || deployment.status === "failed" || deployment.status === "staging") return null;
     return {
       publication: {
         slug: publication.slug,

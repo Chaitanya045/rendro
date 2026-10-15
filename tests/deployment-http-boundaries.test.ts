@@ -1,5 +1,7 @@
+import { commitProof, commitWithProof } from "./helpers/storage-proof";
+import { STORAGE_ATTESTATION_HEADER } from "../shared/storage-attestation";
 import { describe, expect, it, vi } from "vitest";
-import { ConvexError } from "convex/values";
+import { ConvexError, getDocumentSize } from "convex/values";
 import { convexTest } from "convex-test";
 import rateLimiterTest from "./convex-rate-limiter";
 import schema from "../convex/schema";
@@ -10,16 +12,16 @@ vi.mock("../convex/authorization", () => ({ authorizeHttpOrganization: (_ctx: un
   return Promise.resolve({ user: { _id: "user" } });
 } }));
 const modules = import.meta.glob("../convex/**/*.ts");
-const provenance = { source: { kind: "local" as const }, execution: { kind: "local" as const }, cliVersion: "test", manifestSha256: "sha" };
+const provenance = { source: { kind: "local" as const }, execution: { kind: "local" as const }, cliVersion: "test", manifestSha256: "a".repeat(64) };
 async function fixture() {
   const t = convexTest(schema, modules);
   rateLimiterTest.register(t);
   const project = await t.mutation(internal.projects.createInternal, { organizationId: "org", name: "Docs", slug: "docs", actorId: "user" });
   await t.mutation(internal.apiKeyCredentials.createInternal, { organizationId: "org", keyId: "key", keyPrefix: "key", name: "test", secretHash: await sha256("key"), scopes: ["docs:read", "docs:write"], actorId: "user" });
-  const start = { organizationId: "org", projectId: project!._id, manifestSha256: "sha", fileCount: 1, byteCount: 1, provenance };
+  const start = { organizationId: "org", projectId: project!._id, manifestSha256: "a".repeat(64), fileCount: 1, byteCount: 1, provenance };
   const staged = await t.mutation(internal.deployments.startInternal, { ...start, actorId: "user" });
   const identity = { organizationId: "org", projectId: project!._id, deploymentId: staged.deploymentId };
-  const post = (path: string, body: unknown, key = "key") => t.fetch(`/api/rendro/deployments/${path}`, { method: "POST", headers: { authorization: `Bearer ${key}` }, body: JSON.stringify(body) });
+  const post = async (path: string, body: unknown, key = "key") => t.fetch(`/api/rendro/deployments/${path}`, { method: "POST", headers: { authorization: `Bearer ${key}`, ...(path === "commit" ? { [STORAGE_ATTESTATION_HEADER]: (await commitProof(t, identity))! } : {}) }, body: JSON.stringify(body) });
   const get = (path: string, fields: Record<string, string>, headers = { authorization: "Bearer key" } as Record<string, string>) => t.fetch(`/api/rendro/deployments${path}?${new URLSearchParams(fields)}`, { headers });
   return { t, projectId: project!._id, start, identity, post, get };
 }
@@ -101,7 +103,7 @@ describe("Convex deployment HTTP boundaries", () => {
     await f.t.run(ctx => ctx.db.patch(f.projectId, { activeDeploymentId: f.identity.deploymentId }));
     const next = await f.t.mutation(internal.deployments.startInternal, { ...f.start, actorId: "user" });
     if (missing) await f.t.run(ctx => ctx.db.delete(f.identity.deploymentId));
-    await f.t.mutation(internal.deployments.commitInternal, { ...f.identity, deploymentId: next.deploymentId, actorId: "user" });
+    await commitWithProof(f.t, { ...f.identity, deploymentId: next.deploymentId, actorId: "user" });
     expect((await f.t.run(ctx => ctx.db.get(next.deploymentId)))?.status).toBe("active");
   });
 
@@ -115,4 +117,84 @@ describe("Convex deployment HTTP boundaries", () => {
     await f.t.run(ctx => ctx.db.delete(f.projectId));
     expect(await f.t.query(internal.deployments.latestForOrganization, { organizationId: "org" })).toBeNull();
   });
+});
+
+it("rejects noncanonical manifest digests at direct authenticated Convex ingress", async () => {
+  const f = await fixture();
+  for (const manifestSha256 of ["", "a".repeat(63), "a".repeat(65), "A".repeat(64), "g".repeat(64), "a".repeat(64) + "\n", "x".repeat(1_048_000)]) {
+    const response = await f.post("start", { ...f.start, manifestSha256 });
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({ error: "manifestSha256 must be 64 lowercase hexadecimal characters" });
+  }
+  expect((await f.post("start", { ...f.start, manifestSha256: "0123456789abcdef".repeat(4) })).status).toBe(201);
+});
+
+it("rejects every oversized provenance string before creating a deployment", async () => {
+  const f = await fixture();
+  const fields = [
+    ["source", "repository", 2048], ["source", "commit", 128], ["source", "ref", 256], ["source", "localPathLabel", 512],
+    ["execution", "provider", 256], ["execution", "runId", 256], ["execution", "workflow", 256], ["execution", "job", 256], ["execution", "actor", 256],
+    ["", "cliVersion", 64], ["", "manifestSha256", 128],
+  ] as const;
+  for (const [group, name, limit] of fields) {
+    const provenance = group
+      ? { ...f.start.provenance, [group]: { ...f.start.provenance[group], [name]: "x".repeat(limit + 1) } }
+      : { ...f.start.provenance, [name]: "x".repeat(limit + 1) };
+    expect((await f.post("start", { ...f.start, provenance })).status).toBe(400);
+  }
+  const before = await f.t.run(ctx => ctx.db.query("deployments").collect());
+  expect(before).toHaveLength(1);
+  await expect(f.t.mutation(internal.deployments.startInternal, { ...f.start, actorId: "x".repeat(257) })).rejects.toThrow("length limit");
+});
+
+it.each([false, true])("returns only Worker staging fields for credential-bearing legacy rows (renew=%s)", async renew => {
+  const f = await fixture();
+  await f.t.run(ctx => ctx.db.patch(f.identity.deploymentId, {
+    stagingExpiresAt: Date.now() + (renew ? 1000 : 3_600_000),
+    provenance: { source: { kind: "git", repository: "https://user:synthetic-password@git.example/repo?token=synthetic-query", ref: "private-ref" }, execution: { kind: "ci", workflow: "private-workflow", actor: "synthetic-ci-token" }, cliVersion: "private-version", manifestSha256: "private-hash" },
+  }));
+  await f.t.mutation(internal.apiKeyCredentials.createInternal, { organizationId: "org", keyId: "write", keyPrefix: "write", name: "Writer", secretHash: await sha256("write"), scopes: ["docs:write"], actorId: "user" });
+  const response = await f.get("/staging", f.identity, { authorization: "Bearer write" });
+  expect(response.status).toBe(200);
+  const { deployment } = await response.json() as { deployment: { stagingExpiresAt: number } };
+  expect(Object.keys(deployment).sort()).toEqual(["manifestKey", "stagingExpiresAt", "treeIndexKey"]);
+  expect(JSON.stringify(deployment)).not.toMatch(/synthetic|private|provenance/);
+  expect(deployment.stagingExpiresAt).toBeGreaterThan(Date.now());
+});
+
+it("returns the actionable restart diagnostic when commit loses the lease", async () => {
+  const f = await fixture();
+  await f.t.run(ctx => ctx.db.patch(f.identity.deploymentId, { stagingExpiresAt: Date.now() - 1 }));
+  const response = await f.post("commit", f.identity);
+  expect(response.status).toBe(409);
+  expect(await response.json()).toMatchObject({ error: "Staging lease expired. Run rendro push again to start a new deployment." });
+});
+
+it("requires a Worker attestation even for a currently authorized staging deployment", async () => {
+  const f = await fixture();
+  const response = await f.t.fetch("/api/rendro/deployments/commit", { method: "POST", headers: { authorization: "Bearer key" }, body: JSON.stringify(f.identity) });
+  expect(response.status).toBe(409);
+  expect(await response.json()).toMatchObject({ error: "Worker storage validation is required" });
+});
+
+
+it("accepts boundary-length strings with bounded generated keys and document size", async () => {
+  const f = await fixture();
+  const organizationId = "o".repeat(256);
+  await f.t.run(ctx => ctx.db.patch(f.projectId, { organizationId }));
+  const provenance = {
+    source: { kind: "git" as const, repository: "https://git.example/" + "r".repeat(2028), commit: "c".repeat(128), ref: "😀".repeat(128), localPathLabel: "l".repeat(512) },
+    execution: { kind: "ci" as const, provider: "p".repeat(256), runId: "r".repeat(256), workflow: "w".repeat(256), job: "j".repeat(256), actor: "a".repeat(256) },
+    cliVersion: "v".repeat(64), manifestSha256: "h".repeat(128),
+  };
+  const start = { ...f.start, organizationId, provenance, actorId: "a".repeat(256) };
+  const result = await f.t.mutation(internal.deployments.startInternal, start);
+  const row = (await f.t.run(ctx => ctx.db.get(result.deploymentId)))!;
+  expect(getDocumentSize(row)).toBeLessThan(16 * 1024);
+  expect(row.manifestKey.length).toBeLessThan(1024);
+  expect(row.treeIndexKey!.length).toBeLessThan(1024);
+  expect(row.provenance.source.ref).toBe(provenance.source.ref);
+  const longOrg = organizationId + "o";
+  await f.t.run(ctx => ctx.db.patch(f.projectId, { organizationId: longOrg }));
+  await expect(f.t.mutation(internal.deployments.startInternal, { ...start, organizationId: longOrg })).rejects.toThrow("length limit");
 });

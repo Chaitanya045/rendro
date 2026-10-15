@@ -1,3 +1,4 @@
+import { publishWithProof } from "./helpers/storage-proof";
 import { describe, expect, it } from "vitest";
 import { convexTest } from "convex-test";
 import { internal } from "../convex/_generated/api";
@@ -9,7 +10,7 @@ async function fixture() {
   const t = convexTest({ schema, modules, transactionLimits: true });
   const projectId = await t.run(ctx => ctx.db.insert("projects", { organizationId: "org", slug: "docs", name: "Docs", createdBy: "user", createdAt: 1 }));
   const otherProjectId = await t.run(ctx => ctx.db.insert("projects", { organizationId: "other", slug: "other", name: "Other", createdBy: "user", createdAt: 1 }));
-  const deploymentId = await t.run(ctx => ctx.db.insert("deployments", { organizationId: "org", projectId, status: "active", manifestKey: "manifest", manifestSha256: "sha", fileCount: 1, byteCount: 1, createdAt: Date.now(), createdBy: "user", provenance: { source: { kind: "local" }, execution: { kind: "local" }, cliVersion: "test", manifestSha256: "sha" } }));
+  const deploymentId = await t.run(ctx => ctx.db.insert("deployments", { organizationId: "org", projectId, status: "active", manifestKey: "manifest", manifestSha256: "a".repeat(64), fileCount: 1, byteCount: 1, createdAt: Date.now(), createdBy: "user", provenance: { source: { kind: "local" }, execution: { kind: "local" }, cliVersion: "test", manifestSha256: "a".repeat(64) } }));
   await t.run(ctx => ctx.db.patch(projectId, { activeDeploymentId: deploymentId }));
   const publication = { organizationId: "org", projectId, slug: "docs", pathPrefix: "", entryFile: "index.html", trackingMode: "pinned" as const, pinnedDeploymentId: deploymentId, actorId: "user" };
   const share = { organizationId: "org", projectId, documentPath: "index.html", tokenHash: "token", expiresAt: Date.now() + 60_000, actorId: "user" };
@@ -22,31 +23,31 @@ describe("publication reference boundaries", () => {
     for (const [patch, error] of [
       [{ organizationId: "other" }, "Project not found"], [{ slug: "!" }, "Invalid publication slug"], [{ slug: "a".repeat(81) }, "Invalid publication slug"],
       [{ entryFile: "../index.html" }, "Invalid publication path"], [{ pinnedDeploymentId: undefined }, "requires a deployment"],
-      [{ projectId: f.otherProjectId, organizationId: "other" }, "Pinned deployment not found"],
-    ] as const) await expect(f.t.mutation(internal.publicationsV2.createInternal, { ...f.publication, ...patch })).rejects.toThrow(error);
-    const created = await f.t.mutation(internal.publicationsV2.createInternal, { ...f.publication, title: " Title ", description: " Description " });
+      [{ projectId: f.otherProjectId, organizationId: "other" }, "Publication deployment not found"],
+    ] as const) await expect(publishWithProof(f.t, { ...f.publication, ...patch })).rejects.toThrow(error);
+    const created = await publishWithProof(f.t, { ...f.publication, title: " Title ", description: " Description " });
     expect(created).toMatchObject({ title: "Title", description: "Description" });
-    await expect(f.t.mutation(internal.publicationsV2.createInternal, f.publication)).rejects.toThrow("already in use");
+    await expect(publishWithProof(f.t, f.publication)).rejects.toThrow("already in use");
     expect(await f.t.query(internal.publicationsV2.listInternal, { organizationId: "org" })).toHaveLength(1);
     await f.t.run(ctx => ctx.db.delete(f.projectId));
-    await expect(f.t.mutation(internal.publicationsV2.createInternal, { ...f.publication, slug: "other" })).rejects.toThrow("Project not found");
+    await expect(publishWithProof(f.t, { ...f.publication, slug: "other" })).rejects.toThrow("Project not found");
     await expect(f.t.query(internal.publicationsV2.listInternal, { organizationId: "org", projectId: f.projectId })).rejects.toThrow("Project not found");
     expect(await f.t.query(internal.publicationsV2.resolvePublicInternal, { slug: "docs" })).toBeNull();
   });
 
   it.each(["failed", "staging", "missing"] as const)("refuses %s deployment pins and resolves old references closed", async status => {
     const f = await fixture();
-    await f.t.mutation(internal.publicationsV2.createInternal, f.publication);
+    await publishWithProof(f.t, f.publication);
     if (status === "missing") await f.t.run(ctx => ctx.db.delete(f.deploymentId));
     else await f.t.run(ctx => ctx.db.patch(f.deploymentId, { status }));
-    await expect(f.t.mutation(internal.publicationsV2.createInternal, { ...f.publication, slug: "new" })).rejects.toThrow("Pinned deployment not found");
+    await expect(publishWithProof(f.t, { ...f.publication, slug: "new" })).rejects.toThrow("Publication deployment not found");
     expect(await f.t.query(internal.publicationsV2.resolvePublicInternal, { slug: "docs" })).toBeNull();
   });
 
   it("resolves both supported reference modes and rejects dangling legacy pins and invalid removal identities", async () => {
     const f = await fixture();
-    const pinned = await f.t.mutation(internal.publicationsV2.createInternal, { ...f.publication, title: " ", description: " " });
-    const tracked = await f.t.mutation(internal.publicationsV2.createInternal, { ...f.publication, slug: "track", trackingMode: "track_active", pinnedDeploymentId: undefined });
+    const pinned = await publishWithProof(f.t, { ...f.publication, title: " ", description: " " });
+    const tracked = await publishWithProof(f.t, { ...f.publication, slug: "track", trackingMode: "track_active", pinnedDeploymentId: undefined });
     expect(pinned?.title).toBe("Docs");
     await f.t.run(ctx => ctx.db.patch(pinned!._id, { title: undefined }));
     for (const slug of ["docs", "track"]) expect(await f.t.query(internal.publicationsV2.resolvePublicInternal, { slug })).toMatchObject({ deployment: { manifestKey: "manifest" } });
@@ -105,4 +106,11 @@ describe("share reference boundaries", () => {
     });
     expect(await f.t.query(internal.shareGrants.resolveInternal, { tokenHash: "token" })).toBeNull();
   });
+});
+
+it("preserves publication attestation checks and rejects a missing tracked deployment", async () => {
+  const f = await fixture();
+  await expect(f.t.mutation(internal.publicationsV2.createInternal, f.publication)).rejects.toThrow("Worker publication entry validation is required");
+  await f.t.run(ctx => ctx.db.patch(f.projectId, { activeDeploymentId: undefined }));
+  await expect(publishWithProof(f.t, { ...f.publication, trackingMode: "track_active" })).rejects.toThrow("Publication deployment not found");
 });
