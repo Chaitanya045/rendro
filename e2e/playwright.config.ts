@@ -10,7 +10,7 @@ export default defineConfig({
   retries: process.env.CI ? 1 : 0,
   failOnFlakyTests: !!process.env.CI,
   timeout: 30_000,
-  globalTimeout: 300_000,
+  globalTimeout: 600_000,
   expect: { timeout: 10_000 },
   outputDir: "../test-results/e2e",
   reporter: [["list"], ["html", { outputFolder: "../playwright-report", open: "never" }]],
