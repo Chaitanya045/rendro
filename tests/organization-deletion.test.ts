@@ -336,7 +336,10 @@ describe("organization capability boundary regressions", () => {
   it.each(["deployment", "active pointer", "project"])("rejects a publication with a missing %s independently", async missing => {
     const f = await fixture(), r = await f.seed("publication-missing");
     const resolve = () => f.t.query(internal.publicationsV2.resolvePublicInternal, { slug: r.slug });
-    expect(await resolve()).toMatchObject({ publication: { _id: r.publication._id }, deployment: { _id: r.active.deploymentId } });
+    expect(await resolve()).toEqual({
+      publication: { slug: r.slug, pathPrefix: r.publication.pathPrefix, entryFile: r.publication.entryFile, title: r.publication.title },
+      deployment: { manifestKey: r.active.manifestKey },
+    });
     if (missing === "deployment") await f.t.run(ctx => ctx.db.delete(r.active.deploymentId));
     if (missing === "active pointer") await f.t.run(ctx => ctx.db.patch(r.projectId, { activeDeploymentId: undefined }));
     if (missing === "project") await f.t.run(ctx => ctx.db.delete(r.projectId));
@@ -374,7 +377,11 @@ describe("organization capability boundary regressions", () => {
   it.each(["project", "deployment"])("rejects a share with a missing %s independently", async missing => {
     const f = await fixture(), r = await f.seed("share-missing");
     const resolve = () => f.t.query(internal.shareGrants.resolveInternal, { tokenHash: r.tokenHash });
-    expect(await resolve()).toMatchObject({ grant: { _id: r.share._id }, deployment: { _id: r.active.deploymentId } });
+    expect(await resolve()).toEqual({
+      grant: { documentPath: r.share.documentPath, expiresAt: r.share.expiresAt },
+      deployment: { manifestKey: r.active.manifestKey },
+      project: { name: (await f.t.run(ctx => ctx.db.get(r.projectId)))!.name },
+    });
     await f.t.run(ctx => ctx.db.delete(missing === "project" ? r.projectId : r.active.deploymentId));
     expect(await resolve()).toBeNull();
   });

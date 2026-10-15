@@ -9,6 +9,7 @@
  *   rendro publication remove --organization <id> --project <id> --id <publication-id>
  *   rendro init --source ./docs
  */
+import { sanitizeProvenance } from "../../shared/provenance";
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
@@ -81,9 +82,11 @@ function contentType(path: string): string {
   return types[extname(path).toLowerCase()] ?? "application/octet-stream";
 }
 
-function gitValue(cwd: string, args: string[]): string | undefined {
+function gitValue(cwd: string, args: string[], trim = true): string | undefined {
   try {
-    return execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim() || undefined;
+    const output = execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+    // Preserve configured remote bytes for validation; remove only Git's output terminator.
+    return (trim ? output.trim() : output.replace(/\n$/, "")) || undefined;
   } catch {
     return undefined;
   }
@@ -93,10 +96,10 @@ function deploymentProvenance(source: string, manifestSha256: string) {
   const commit = process.env.GITHUB_SHA || gitValue(source, ["rev-parse", "HEAD"]);
   const repository = process.env.GITHUB_REPOSITORY
     ? `https://github.com/${process.env.GITHUB_REPOSITORY}`
-    : gitValue(source, ["config", "--get", "remote.origin.url"]);
+    : gitValue(source, ["config", "--get", "remote.origin.url"], false);
   const dirtyOutput = gitValue(source, ["status", "--porcelain"]);
   const ci = Boolean(process.env.CI);
-  return {
+  return sanitizeProvenance({
     source: commit
       ? {
           kind: "git" as const,
@@ -118,7 +121,7 @@ function deploymentProvenance(source: string, manifestSha256: string) {
       : { kind: "local" as const, actor: process.env.USER },
     cliVersion: version,
     manifestSha256,
-  };
+  });
 }
 
 async function requestJson<T>(url: string, token: string, init?: RequestInit, idempotent?: boolean): Promise<T> {

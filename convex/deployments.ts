@@ -1,4 +1,5 @@
 import { isOrganizationDeleted, requireActiveOrganization } from "./organizationLifecycle";
+import { sanitizeProvenance } from "../shared/provenance";
 import { requireId } from "./ids";
 import { ConvexError, v } from "convex/values";
 import { internalMutation, internalQuery } from "./_generated/server";
@@ -36,7 +37,7 @@ export const startInternal = internalMutation({
       manifestSha256: args.manifestSha256,
       fileCount: args.fileCount,
       byteCount: args.byteCount,
-      provenance: args.provenance,
+      provenance: sanitizeProvenance(args.provenance),
       createdBy: args.actorId,
       createdAt,
       previousDeploymentId: project.activeDeploymentId,
@@ -83,7 +84,7 @@ export const getInternal = internalQuery({
       || deployment.organizationId !== args.organizationId
       || deployment.projectId !== args.projectId
     ) return null;
-    return deployment;
+    return { ...deployment, provenance: sanitizeProvenance(deployment.provenance) };
   },
 });
 
@@ -99,11 +100,12 @@ export const listInternal = internalQuery({
     if (!project || project.organizationId !== args.organizationId) {
       throw new ConvexError("Project not found");
     }
-    return ctx.db
+    const deployments = await ctx.db
       .query("deployments")
       .withIndex("by_project_created", (query) => query.eq("projectId", args.projectId))
       .order("desc")
       .take(100);
+    return deployments.map(deployment => ({ ...deployment, provenance: sanitizeProvenance(deployment.provenance) }));
   },
 });
 
@@ -117,7 +119,7 @@ export const latestForOrganization = internalQuery({
     if (!latest) return null;
     const project = await ctx.db.get(latest.projectId);
     if (!project || project.organizationId !== organizationId) return null;
-    return { projectId: latest.projectId, projectName: project.name, status: latest.status, activatedAt: latest.activatedAt, commit: latest.provenance.source.commit };
+    return { projectId: latest.projectId, projectName: project.name, status: latest.status, activatedAt: latest.activatedAt, commit: sanitizeProvenance(latest.provenance).source.commit };
   },
 });
 

@@ -1,3 +1,5 @@
+import { publicShare } from "../shared/resolver-dto";
+import { isWorkerResolverRequest } from "../shared/resolver-auth";
 import { internal } from "./_generated/api";
 import { httpAction, failure, clientFailure } from "./httpErrors";
 import { authorizeHttpOrganization } from "./authorization";
@@ -92,5 +94,6 @@ export const resolveShareGrant = httpAction(async (ctx, request) => {
   if (!token) return clientFailure("token is required");
   const result = await ctx.runQuery(internal.shareGrants.resolveInternal, { tokenHash: await sha256(token) });
   if (!result) return clientFailure("Share not found", 404);
-  return Response.json(result);
+  const worker = await isWorkerResolverRequest(request, process.env.CONVEX_INTERNAL_SECRET);
+  return Response.json(worker ? result : publicShare(result), { headers: { "Cache-Control": "private, no-store" } });
 });

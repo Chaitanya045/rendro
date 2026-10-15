@@ -386,6 +386,10 @@ Deployment statuses: `staging` → `active` → `superseded`, or `staging` → `
 
 Convex also serves `GET /api/rendro/deployments/active` and `GET /api/rendro/deployments` (latest 100) for sessions and `docs:read` keys, and `GET /api/rendro/deployments/staging` for the Worker.
 
+### Provenance privacy
+
+The CLI and Convex deployment mutation sanitize Git remotes before capture/storage: known HTTP(S), SSH and Git URLs lose userinfo, query and fragment; scp-style remotes lose their user prefix. Authorities are percent-decoded before userinfo removal; encoded authority delimiters, nested encodings, control characters, invalid IPv6/ports, local/file paths (including Windows absolute and drive-relative paths) and unsupported/malformed remotes are omitted. Sanitized repository URLs longer than 2,048 characters are omitted. All other provenance strings are bounded (commit/checksum 128, ref and CI labels 256, local path label 512, CLI version 64 characters), with embedded URL credentials removed. Authorized deployment reads apply the same sanitation to historical rows while retaining repository location, commit/ref, dirty state and CI context.
+
 ### Publications
 
 | Method | Path | Required access | Purpose |
@@ -397,7 +401,9 @@ Convex also serves `GET /api/rendro/deployments/active` and `GET /api/rendro/dep
 | GET | `/p/:slug/tree` | Anonymous | Paginated published document list |
 | GET | `/p/:slug/files/*` | Anonymous | Manifest-validated sandboxed object |
 
-Publication slugs are globally indexed. A publication maps one project path (`pathPrefix`, `entryFile`) to either the project's active deployment (`track_active`) or an explicit `pinned` deployment. Before creating one, the Worker resolves the target deployment, rejects `staging` or `failed` deployments, and requires the entry file to be an HTML file in that deployment's manifest. Uploading never makes content public. Public responses use `Cache-Control: public, max-age=0, must-revalidate`.
+Publication slugs are globally indexed. A publication maps one project path (`pathPrefix`, `entryFile`) to either the project's active deployment (`track_active`) or an explicit `pinned` deployment. Before creating one, the Worker resolves the target deployment, rejects `staging` or `failed` deployments, and requires the entry file to be an HTML file in that deployment's manifest. Uploading never makes content public. Public file/tree responses use `Cache-Control: public, max-age=0, must-revalidate`.
+
+The anonymous `/api/rendro/publications/public` resolver returns only `{ publication: { slug, entryFile, title } }`. The share resolver returns only `{ grant: { documentPath, expiresAt }, project: { name } }`. Neither exposes stored records, provenance, actor/tenant/project/deployment IDs, token hashes or storage keys, even when called directly at Convex. The Worker signs its resolver GET with a dedicated HMAC-SHA256 proof using `CONVEX_INTERNAL_SECRET`, bound to a purpose prefix, method, canonical pathname plus search and timestamp (60-second validity). Scheme/host rewriting by proxies does not invalidate the proof; path and query changes do. Only this proof adds `deployment.manifestKey` and, for publications, `publication.pathPrefix`. Generic API proxy calls cannot obtain or forward that proof. Both resolver variants are `private, no-store` to prevent public/internal cache mixing. Internal Convex queries also return explicit minimal DTOs. Release the Worker update first, then the Convex update, with matching secrets. If upgrading an already signed resolver from full-URL proofs, coordinate the Worker and Convex update because the signature payload changes. The updated Worker can consume the old resolver shape during rollout; older Workers cannot consume the reduced anonymous response after Convex updates.
 
 ### Revocable private shares
 
@@ -430,10 +436,10 @@ Convex HTTP routes (`convex/http.ts`). The Worker serves the rows marked *Worker
 | GET | `/api/rendro/deployments` | Member or `docs:read` |
 | GET, POST | `/api/rendro/publications` | See Publications (*Worker* front) |
 | POST | `/api/rendro/publications/remove` | See Publications (*Worker* front) |
-| GET | `/api/rendro/publications/public` | Anonymous; used by `/p/*` |
+| GET | `/api/rendro/publications/public` | Anonymous presentation DTO; signed Worker storage DTO for `/p/*` |
 | GET, POST | `/api/rendro/shares` | Member |
 | POST | `/api/rendro/shares/revoke` | Owner/admin |
-| GET | `/api/rendro/shares/public` | Anonymous; used by `/s/*` |
+| GET | `/api/rendro/shares/public` | Anonymous presentation DTO; signed Worker storage DTO for `/s/*` |
 | GET | `/api/rendro/retention/candidates` | `RETENTION_SECRET` bearer |
 | POST | `/api/rendro/retention/purged` | `RETENTION_SECRET` bearer |
 | POST | `/api/rendro/migration/project` | `MIGRATION_SECRET` bearer (*Worker* front) |
@@ -771,7 +777,7 @@ Both production (top-level) and `development` declare the same required secrets:
 | `NODE_ENV` | Wrangler var | Runtime mode; `production` selects JSON logs at `info` level |
 | `CONVEX_URL` | Var/secret (optional at startup) | Convex deployment URL for legacy calls and browser comments; defaults to empty, disabling those features. Set for the full app |
 | `CONVEX_SITE_URL` | Var/secret (optional) | Convex HTTP action origin for auth and project routes; derived from `CONVEX_URL` when unset. Startup and `/health` work without either URL; backend routes do not |
-| `CONVEX_INTERNAL_SECRET` | Secret (required by `wrangler.toml`, ≥32 chars) | Legacy Worker-only Convex functions; same value in Convex |
+| `CONVEX_INTERNAL_SECRET` | Secret (required by `wrangler.toml`, ≥32 chars) | Worker-only legacy functions, ingress proofs and storage resolver proofs; same value in Convex |
 | `AUTH_SECRET` | Secret (required, ≥16 chars) | Encrypts scoped private viewer tickets and signs legacy `/share/:token` HMAC links. Better Auth signing happens in Convex |
 | `MINIO_ENDPOINT`, `MINIO_ACCESS_KEY`, `MINIO_SECRET_KEY` | Secrets (required, nonempty) | R2 S3 access |
 | `MINIO_BUCKET`, `MINIO_REGION`, `MINIO_FORCE_PATH_STYLE` | Vars/secrets | R2 bucket configuration (defaults `docs`, `us-east-1`, `true`) |
@@ -786,7 +792,7 @@ Both production (top-level) and `development` declare the same required secrets:
 | `AUTH_SECRET` | Better Auth signing (required at runtime) |
 | `SITE_URL` | Canonical Worker origin; Better Auth base URL and trusted origin (required at runtime) |
 | `RESEND_API_KEY`, `AUTH_EMAIL_FROM` | Verification, reset, invitation, and account-link security email |
-| `CONVEX_INTERNAL_SECRET` | Authorizes Worker-only legacy functions (`convex/security.ts`); same value as the Worker |
+| `CONVEX_INTERNAL_SECRET` | Authorizes Worker-only legacy functions, ingress proofs and storage resolver proofs; same value as the Worker |
 | `RETENTION_SECRET` | Bearer secret accepted only by retention HTTP actions |
 | `MIGRATION_SECRET` | Bearer secret accepted only by the staged migration control action |
 
@@ -824,6 +830,10 @@ for status semantics, the audit baseline, and `scripts/ui-transition-report.ts`.
 - API credential: the organization's API keys page → Revoke. Validation checks revocation on every request.
 - Private share: revoke it from the project's Private shares page, or call `POST /api/rendro/shares/revoke` with its grant ID. The token hash stops resolving immediately.
 - Public publication: remove it from the project Publications page or with `rendro publication remove`. `/p/:slug` returns 404 afterward.
+
+### Historical provenance review
+
+Operators should privately review historical deployment provenance for embedded Git credentials, including URL userinfo, query strings and fragments. Rotate/revoke any discovered credentials and sanitize affected stored records and retained exports under the normal operator change process. Do not copy raw provenance into logs, issues or support messages. Read-time sanitation prevents responses from repeating known credential forms; it does not rewrite historical database rows or undo earlier exposure.
 
 ### Retention
 
