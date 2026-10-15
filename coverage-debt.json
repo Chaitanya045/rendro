@@ -307,12 +307,6 @@
       "functions": 0,
       "lines": 0
     },
-    "src/routes/management-navigation.ts": {
-      "statements": 0,
-      "branches": 1,
-      "functions": 0,
-      "lines": 0
-    },
     "src/routes/management-page-access.ts": {
       "statements": 2,
       "branches": 1,

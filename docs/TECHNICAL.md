@@ -135,6 +135,10 @@ requests, and inactive controllers cannot apply late results. Organization and
 first-project creation, plus invitation acceptance/decline, keep controls disabled
 and retain a logical submission guard after success until a fresh form is initialized.
 A delayed destination document cannot allow duplicate writes; denial restores retry.
+Success clears `aria-busy` immediately and appends a polite completion status and
+a real Continue link to the saved destination before attempting navigation.
+The completed guard and link stay in the document after Stop, visibility changes,
+and bfcache restoration, so recovery navigates without repeating the mutation.
 
 The People form and Add another person action each bind one handler
 for the lifetime of the persistent dialog. Reloading the invitation list must not accumulate

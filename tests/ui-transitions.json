@@ -4428,7 +4428,7 @@
           "id": "UI-031-E07",
           "from": "Form ready",
           "trigger": "Submit, settle, and reuse",
-          "expected": "Organization creation stays disabled after success while the destination loads and ignores duplicate submissions; a fresh form supports another submission.",
+          "expected": "Organization creation stays disabled after success while the destination loads and ignores duplicate submissions; a fresh form supports another submission. Success clears aria-busy and shows a polite status and focusable Continue link; stopped navigation and return from a 500 destination retain recovery without repeating the POST.",
           "inventoryRefs": [
             "UI-031"
           ],
@@ -4437,6 +4437,11 @@
             {
               "file": "tests/management-dialog-reuse-browser.test.ts",
               "name": "$name stays completed during delayed navigation and supports a fresh submission",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/completed-navigation-browser.test.ts",
+              "name": "$name retains a completed recovery link after $failure without another POST",
               "kind": "browser"
             }
           ]
@@ -6636,7 +6641,7 @@
           "id": "UI-052-E09",
           "from": "Form ready",
           "trigger": "Submit, settle, and reuse",
-          "expected": "Invitation acceptance and decline restore both controls after denial, keep both disabled after success while the destination loads, and ignore duplicate responses; a fresh page permits another response.",
+          "expected": "Invitation acceptance and decline restore both controls after denial, keep both disabled after success while the destination loads, and ignore duplicate responses; a fresh page permits another response. Success clears aria-busy and shows a polite status and focusable Continue link; stopped navigation and return from a 500 destination retain recovery without repeating the POST.",
           "inventoryRefs": [
             "UI-052"
           ],
@@ -6645,6 +6650,11 @@
             {
               "file": "tests/management-dialog-reuse-browser.test.ts",
               "name": "invitation %s locks both response controls during delayed navigation and remains retryable",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/completed-navigation-browser.test.ts",
+              "name": "$name retains a completed recovery link after $failure without another POST",
               "kind": "browser"
             }
           ]
@@ -8400,7 +8410,7 @@
           "id": "UI-071-E07",
           "from": "Form ready",
           "trigger": "Submit, settle, and reuse",
-          "expected": "First-project creation retains the exact draft after denial and stays disabled after success while credential setup loads; a fresh form supports another submission.",
+          "expected": "First-project creation retains the exact draft after denial and stays disabled after success while credential setup loads; a fresh form supports another submission. Success clears aria-busy and shows a polite status and focusable Continue link; stopped navigation and return from a 500 destination retain recovery without repeating the POST.",
           "inventoryRefs": [
             "UI-071"
           ],
@@ -8409,6 +8419,11 @@
             {
               "file": "tests/management-dialog-reuse-browser.test.ts",
               "name": "$name stays completed during delayed navigation and supports a fresh submission",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/completed-navigation-browser.test.ts",
+              "name": "$name retains a completed recovery link after $failure without another POST",
               "kind": "browser"
             }
           ]

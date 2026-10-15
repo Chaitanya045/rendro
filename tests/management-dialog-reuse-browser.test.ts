@@ -136,7 +136,9 @@ async function finishSecret(page: Page) {
   await page.locator('#secret-dialog[open]').waitFor();
   await page.keyboard.press('Escape');
   expect(await page.locator('#secret-dialog').getAttribute('open')).not.toBeNull();
+  expect(await page.locator('#secret-done').isDisabled()).toBe(true);
   await page.locator('#secret-confirmed').check();
+  expect(await page.locator('#secret-done').isEnabled()).toBe(true);
   await page.locator('#secret-done').click();
   await expect.poll(() => page.locator('#raw-key').textContent()).toBe('');
 }
@@ -359,7 +361,7 @@ it.each([
     await destination.wait();
     await browserStep('native click during delayed navigation', () => page.mouse.click(box.x + box.width / 2, box.y + box.height / 2));
     await browserStep('release destination', () => destination.release());
-    expect(await page.evaluate(() => JSON.parse(sessionStorage.getItem('completed-controls')!) as unknown)).toEqual([{ disabled: true, busy: 'true' }]);
+    expect(await page.evaluate(() => JSON.parse(sessionStorage.getItem('completed-controls')!) as unknown)).toEqual([{ disabled: true, busy: 'false' }]);
     expect(requests.bodies).toHaveLength(round * 2 + 2);
   }
   expect(requests.bodies).toHaveLength(4);
@@ -372,12 +374,18 @@ it('onboarding credentials recover from denial and protect the one-time secret a
   for (let round = 0; round < 2; round++) {
     if (round) await page.goto(harness.origin + path);
     const button = page.locator('#key-form button[type=submit]');
+    await page.locator('#key-form [name=name]').fill(`Credential draft ${round}`);
+    await page.locator('#key-form [name=expiry]').selectOption('30');
+    await page.locator('#key-form [name=scope][value="docs:write"]').uncheck();
+    const draft = await page.locator('#key-form').evaluate(form => Array.from(new FormData(form as HTMLFormElement).entries()));
     await button.click();
     await expect.poll(() => button.getAttribute('aria-busy')).toBe('true');
     await page.keyboard.press('Escape');
     expect(await button.isDisabled()).toBe(true);
     await requests.settle({ message: 'Permission denied' }, 403);
     await expect.poll(() => button.getAttribute('aria-busy')).toBe('false');
+    expect(await button.isEnabled()).toBe(true);
+    expect(await page.locator('#key-form').evaluate(form => Array.from(new FormData(form as HTMLFormElement).entries()))).toEqual(draft);
     await button.click();
     await requests.settle({ rawKey: `synthetic-onboarding-${round}` });
     await page.locator('#onboarding-key').waitFor();
@@ -442,7 +450,7 @@ it.each(['accept', 'reject'])('invitation %s locks both response controls during
     await browserStep('release destination', () => destination.release());
     const controls = await page.evaluate(() => JSON.parse(sessionStorage.getItem('completed-controls')!) as { disabled: boolean; busy: string | null }[]);
     expect(controls.every(button => button.disabled)).toBe(true);
-    expect(controls.filter(button => button.busy === 'true')).toHaveLength(1);
+    expect(controls.filter(button => button.busy === 'true')).toHaveLength(0);
     expect(otherResponse.bodies).toHaveLength(0);
     expect(requests.bodies).toHaveLength(round * 2 + 2);
   }
