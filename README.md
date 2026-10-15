@@ -56,7 +56,7 @@ deployment credentials available to untrusted pull-request code. Use
 | Command | Purpose |
 |---|---|
 | `rendro init --source <dir>` | Create `<dir>/index.html` plus empty `onboarding/`, `api/`, and `engineering/` folders |
-| `rendro push --source <dir> --organization <id> --project <id>` | Upload a new immutable deployment and activate it |
+| `rendro push --source <dir> --organization <id> --project <id>` | Upload filtered source files as a new immutable deployment and activate it |
 | `rendro publication create --organization <id> --project <id> --slug <slug>` | Publish a folder of the project at `/p/<slug>` |
 | `rendro publication list --organization <id> --project <id>` | List the project's publications |
 | `rendro publication remove --organization <id> --project <id> --id <publication-id>` | Remove a publication |
@@ -67,6 +67,7 @@ deployment credentials available to untrusted pull-request code. Use
 | `--source <dir>` | `init`, `push` | `./docs` |
 | `--endpoint <url>` | `push`, `publication` | `https://rendro.app` |
 | `--concurrency <n>` | `push` | `8` parallel uploads |
+| `--include-sensitive` | `push` | Off; opt into sensitive files, still honoring `.rendroignore` |
 | `--path <prefix>` | `publication create` | Deployment root |
 | `--entry <file>` | `publication create` | `index.html` (relative to `--path`) |
 | `--title <title>` | `publication create` | The slug |
@@ -87,9 +88,59 @@ Organization owners and admins create keys on the organization's API keys page. 
 
 ### How push works
 
-The CLI walks the source folder (skipping dot-folders and `node_modules`), computes a SHA-256 manifest, and compares it with the active deployment. Unchanged files are copied server-side from the active deployment; only changed files are uploaded. The new deployment becomes active only after every file in the manifest is present. If a copy, upload, or commit fails, the CLI marks the new deployment failed and the previous deployment stays active.
+The CLI filters the source folder as described below, computes a SHA-256 manifest, and compares it with the active deployment. Unchanged files are copied server-side from the active deployment; only changed files are uploaded. The new deployment becomes active only after every file in the manifest is present. If a copy, upload, or commit fails, the CLI marks the new deployment failed and the previous deployment stays active.
+
+Text assets keep their original bytes. The CLI records a media type without a
+charset unless a UTF-8 or UTF-16 BOM identifies the encoding. This lets CSS
+`@charset` and HTML `<meta charset>` declarations work on byte-preserving delivery
+paths. Without a BOM or in-file declaration, decoding follows browser defaults.
+Existing manifests remain valid; pushing again records the corrected
+metadata even when unchanged file bytes are reused.
 
 A publication created without `--pin` follows the project's active deployment. With `--pin`, it keeps serving that deployment after later pushes.
+
+### Source filtering
+
+By default, `push` skips these names at every depth (case-insensitive): `.env`,
+`.env.*`, `.envrc`, `.envrc.*`, `.npmrc`, `.pypirc`, `.netrc`, `.git-credentials`,
+`*.pem`, `*.key`, `id_*` (including SSH private/public key names).
+Each exclusion prints a `skipped` line with its relative path and reason;
+excluded directories are listed once without reading their contents.
+`--include-sensitive` permits these filenames, still honoring `.rendroignore`.
+Dot-directories are skipped by default, even with `--include-sensitive`. An explicit
+`.rendroignore` negation such as `!.environment/` can re-include an ordinary
+dot-directory. Metadata/credential directories `.git/`, `.ssh/`, `.aws/`, and
+`node_modules/` (case-insensitive) are always excluded; neither negation nor the
+flag can include them. Symbolic links and non-regular files are never
+followed/uploaded. Ordinary dotfiles such as `.nojekyll` and `.environment` remain
+eligible.
+
+Place `.rendroignore` in the **source root** (for example `docs/.rendroignore` for
+`--source ./docs`). It applies with or without `--include-sensitive` and is never
+uploaded. Nested ignore files are not loaded or uploaded. An unreadable root
+ignore file stops the push before any deployment request.
+
+The dependency-free matcher supports this gitignore-style subset:
+
+- Blank lines and lines beginning with `#` are ignored; surrounding whitespace is trimmed.
+- `*` matches within one path segment, `?` matches one non-slash character, and a whole segment `**` matches across directories (including zero directories before a following segment).
+- Patterns without `/` match names at any depth. A leading `/`, or an internal `/`, anchors a pattern to the source root.
+- A trailing `/` matches directories only. Excluded directories are pruned.
+- `!` negates an earlier ignore rule or the default dot-directory exclusion; the last matching rule wins. Re-include an excluded parent before re-including a child. Negation cannot override sensitive defaults without `--include-sensitive`.
+- Matching is case-sensitive. `\#` and `\!` escape a leading comment/negation marker. Character classes, brace expansion, other backslash escapes, and nested ignore files are unsupported; other metacharacters are literal.
+
+```gitignore
+# docs/.rendroignore
+*.map
+/drafts/
+assets/**/scratch-?.txt
+*.txt
+!LICENSE.txt
+!.environment/
+```
+
+These are filename safeguards, not content-based secret detection. Review the
+selected source before publishing it; the flag does not change publication access.
 
 ## Migrating from 1.x
 

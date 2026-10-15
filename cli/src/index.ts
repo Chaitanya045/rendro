@@ -12,13 +12,15 @@
 import { sanitizeProvenance } from "../../shared/provenance";
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
-import { extname, join, relative, resolve, sep } from "node:path";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { join, relative, resolve, sep } from "node:path";
 import { cleanDeploymentPath, cleanPublicationPath } from "../../shared/v2-paths";
 import { MAX_REUSED_FILES_PER_REQUEST } from "../../shared/deployment-limits";
 import { version } from "../../package.json";
 import { fetchWithRateLimit } from "./rate-limit";
 import { httpErrorMessage } from "./http-error";
+import { contentType } from "./content-type";
+import { sourceFiles } from "./source-files";
 
 interface PushOptions {
   source: string;
@@ -27,6 +29,7 @@ interface PushOptions {
   endpoint: string;
   token: string;
   concurrency?: number;
+  includeSensitive: boolean;
 }
 
 
@@ -42,44 +45,6 @@ type ManifestFile = Omit<FileEntry, "fullPath">;
 
 function sha256(content: string | Uint8Array): string {
   return createHash("sha256").update(content).digest("hex");
-}
-
-async function walk(dir: string): Promise<string[]> {
-  const files: string[] = [];
-  const entries = await readdir(dir, { withFileTypes: true });
-
-  for (const entry of entries) {
-    const full = join(dir, entry.name);
-    if (entry.isDirectory()) {
-      if (entry.name.startsWith(".") || entry.name === "node_modules") continue;
-      files.push(...await walk(full));
-    } else if (entry.isFile()) {
-      files.push(full);
-    }
-  }
-
-  return files;
-}
-
-function contentType(path: string): string {
-  const types: Record<string, string> = {
-    ".css": "text/css; charset=utf-8",
-    ".gif": "image/gif",
-    ".html": "text/html; charset=utf-8",
-    ".ico": "image/x-icon",
-    ".jpeg": "image/jpeg",
-    ".jpg": "image/jpeg",
-    ".js": "text/javascript; charset=utf-8",
-    ".json": "application/json; charset=utf-8",
-    ".map": "application/json; charset=utf-8",
-    ".png": "image/png",
-    ".svg": "image/svg+xml",
-    ".txt": "text/plain; charset=utf-8",
-    ".webp": "image/webp",
-    ".woff": "font/woff",
-    ".woff2": "font/woff2",
-  };
-  return types[extname(path).toLowerCase()] ?? "application/octet-stream";
 }
 
 function gitValue(cwd: string, args: string[], trim = true): string | undefined {
@@ -224,7 +189,9 @@ async function push(opts: PushOptions): Promise<void> {
   const absSource = resolve(source);
   console.log(`→ Preparing ${source} for project ${projectId}`);
 
-  const files = await walk(absSource);
+  const files = await sourceFiles(absSource, opts.includeSensitive, (path, reason) => {
+    console.log(`  skipped ${JSON.stringify(path)} (${reason})`);
+  });
   const entries: FileEntry[] = [];
   for (const fullPath of files) {
     const bytes = await readFile(fullPath);
@@ -236,7 +203,7 @@ async function push(opts: PushOptions): Promise<void> {
       path,
       sha256: sha256(bytes),
       size: bytes.byteLength,
-      contentType: contentType(path),
+      contentType: contentType(path, bytes),
     });
   }
   // Match the server manifest ordering without locale-dependent comparisons.
@@ -412,7 +379,7 @@ function printHelp(): void {
   console.log(`rendro — deploy HTML documentation
 
 Usage:
-  rendro push --source <dir> --organization <id> --project <id> [--endpoint <url>] [--concurrency <n>]
+  rendro push --source <dir> --organization <id> --project <id> [--endpoint <url>] [--concurrency <n>] [--include-sensitive]
   rendro publication create --organization <id> --project <id> --slug <slug> [--path <prefix>] [--entry <file>] [--title <title>] [--pin <deployment-id>]
   rendro publication list --organization <id> --project <id> [--endpoint <url>]
   rendro publication remove --organization <id> --project <id> --id <publication-id>
@@ -429,6 +396,7 @@ Options:
   --pin          Pin to one deployment instead of tracking active
   --endpoint     Rendro server URL (default: https://rendro.app)
   --concurrency  Parallel uploads (default: 8)
+  --include-sensitive  Include sensitive files (still honors .rendroignore)
 
 Auth: set RENDRO_API_KEY in your environment. Create a scoped key from
       your organization's API keys page.
@@ -526,7 +494,7 @@ async function main(): Promise<void> {
       process.exit(1);
     }
 
-    await push({ source, organizationId, projectId, endpoint, token, concurrency });
+    await push({ source, organizationId, projectId, endpoint, token, concurrency, includeSensitive: args.includes("--include-sensitive") });
     return;
   }
 

@@ -57,7 +57,14 @@ function publisherHtml(path: string): string {
       // Every replacement document tries the next hop, beyond the old 1s gate.
       if (location.search) {
         let hop = Number(new URLSearchParams(location.search).get('hop') || 0);
-        setInterval(() => parent.postMessage({type:'doc-navigate',path:'guide/other.html',search:'?hop='+ ++hop},location.origin), 1100);
+        let attempts = 0;
+        const timer = setInterval(() => {
+          parent.postMessage({type:'doc-navigate',path:'guide/other.html',search:'?hop='+ ++hop},location.origin);
+          if (++attempts === 5) {
+            clearInterval(timer);
+            parent.postMessage({type:'fixture-chain-finished'},location.origin);
+          }
+        }, 1100);
       }
     ` : ""}
     ${missingActivationAttack ? `
@@ -130,6 +137,10 @@ async function newPage(): Promise<Page> {
     (window as unknown as { activations: boolean[] }).activations = [];
     addEventListener("message", event => {
       if (event.data?.type === "doc-navigate") (window as unknown as { activations: boolean[] }).activations.push(navigator.userActivation?.isActive ?? false);
+      if (event.data?.type === "fixture-chain-finished"
+        && event.source === document.querySelector<HTMLIFrameElement>("#content-frame")?.contentWindow) {
+        document.documentElement.dataset.chainFinished = "true";
+      }
     });
     document.addEventListener("securitypolicyviolation", event => {
       (window as unknown as { recordViolation: (value: string) => void }).recordViolation(`${event.effectiveDirective}: ${event.blockedURI}`);
@@ -173,6 +184,31 @@ async function open(base: string, hash = ""): Promise<{ page: Page; frame: Frame
   expect(nonces.length).toBeGreaterThan(0);
   expect(nonces.every(value => value === nonce)).toBe(true);
   return { page, frame: await readyFrame(page) };
+}
+
+// Playwright evaluate grants transient activation. Reading history while the
+// fixture keeps requesting navigation must not rearm the gate under test.
+async function passiveNavigationState(page: Page, waitForChain = false): Promise<{ historyLength: number; notices: number; active: boolean }> {
+  const session = await page.context().newCDPSession(page);
+  try {
+    const { result, exceptionDetails } = await session.send("Runtime.evaluate", {
+      expression: `(async () => {
+        if (${waitForChain}) await new Promise(resolve => {
+          const poll = setInterval(() => {
+            if (document.documentElement.dataset.chainFinished === "true") {
+              clearInterval(poll); resolve();
+            }
+          }, 25);
+        });
+        return { historyLength: history.length, notices: document.querySelectorAll('#document-navigation-notice').length, active: navigator.userActivation.isActive };
+      })()`,
+      userGesture: false, returnByValue: true, awaitPromise: true,
+    });
+    if (exceptionDetails || result.type !== "object") throw new Error("Could not read navigation state without activation");
+    return result.value as { historyLength: number; notices: number; active: boolean };
+  } finally {
+    await session.detach();
+  }
 }
 
 async function atTarget(frame: Frame, id: string) {
@@ -302,21 +338,28 @@ describe("viewer fragment navigation in Chromium", () => {
     chainedNavigation = true;
     const page = await newPage();
     await page.goto(harness.origin + base);
-    await page.waitForTimeout(600);
-    const frame = page.frames().find(candidate => candidate.parentFrame() === page.mainFrame())!;
+    const frame = await readyFrame(page);
+    expect((await passiveNavigationState(page)).historyLength).toBe(2);
     let navigations = 0;
     page.on("framenavigated", candidate => { if (candidate === frame) navigations++; });
     const initialUrl = page.url();
-    const loads = requests.filter(path => path.includes("/files/")).length;
+    const targets = new Set<string>();
+    page.on("request", request => {
+      const url = new URL(request.url());
+      if (request.isNavigationRequest() && url.pathname.startsWith(`${base}/files/`)) targets.add(url.pathname + url.search);
+    });
     await frame.getByRole("link", { name: "Query one", exact: true }).click();
-    // No evaluations or further input: those can grant activation in Playwright.
-    // The replacement keeps attempting hops throughout and beyond the full window.
-    await page.waitForTimeout(5700);
+    // Five attempts span 5.5s, beyond native activation. Wait for the fixture's
+    // final message, after all attempts, without granting new activation. Stop
+    // the fixture before Back so a queued old-document request cannot race it.
+    const state = await browserStep("wait for delayed navigation attempts without activation", () => passiveNavigationState(page, true));
     expect(navigations).toBe(1);
-    expect(requests.filter(path => path.includes("/files/")).length).toBe(loads + 1);
+    // src followed by location.replace can dispatch duplicate requests before
+    // Chromium cancels one. Require one committed navigation and only its target.
+    expect([...targets]).toEqual([`${base}/files/${documents[0]}?v=1`]);
     expect(new URL(page.url()).searchParams.get("docQuery")).toBe("?v=1");
-    expect(await page.locator("#document-navigation-notice").count()).toBe(1);
-    expect(await page.evaluate(() => history.length)).toBe(3);
+    // Locator count also evaluates in Chromium; inspect all state passively.
+    expect(state).toEqual({ historyLength: 3, notices: 1, active: false });
     await page.goBack();
     await readyFrame(page);
     expect(new URL(page.url()).searchParams.has("docQuery")).toBe(false);

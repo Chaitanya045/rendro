@@ -1,5 +1,5 @@
 import { commitWithProof, publishWithProof } from "./helpers/storage-proof";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { convexTest } from "convex-test";
 import rateLimiterTest from "./convex-rate-limiter";
 import { internal } from "../convex/_generated/api";
@@ -38,6 +38,9 @@ async function fixture(inputProvenance = provenance) {
 async function signed(path: string, now = Date.now()) {
   return signResolverRequest(new Request(`https://some.convex.site${path}`), secret, now);
 }
+// Load the large auth/HTTP module graph as suite setup, outside the first test
+// budget. A timed-out test can otherwise keep running and mutate shared env/mocks.
+beforeAll(async () => { await import("../convex/http"); }, 30_000);
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
 
 describe("minimal publication/share resolver responses", () => {

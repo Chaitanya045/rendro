@@ -378,7 +378,7 @@ The CLI drives these Worker routes (`src/routes/deployments.ts`). Identity (`org
 
 Sequence used by `rendro push` (`cli/src/index.ts`):
 
-1. Walk the source folder, compute SHA-256 and size per file, build a sorted manifest, and hash its JSON.
+1. Filter the source folder before reading file contents, compute SHA-256 and size per included file, build a sorted manifest, and hash its JSON.
 2. `check` returns the active manifest. Files with matching `(path, sha256, size)` are unchanged; the rest are changed.
 3. `start` re-parses the manifest, rejects unsorted/duplicate/unsafe paths and checksum mismatches, then asks Convex to insert a `staging` deployment whose `previousDeploymentId` is the current active deployment. Every start creates a new deployment; staging deployments are never reused. If writing the manifest or tree index fails, the Worker marks the deployment failed.
 4. `copy` accepts at most 16 paths per request (`MAX_REUSED_FILES_PER_REQUEST` in `shared/deployment-limits.ts`, chosen to stay under the Workers subrequest limit). For each path it requires a manifest entry, then `HEAD`s the previous deployment's object and requires matching size and stored SHA-256 before copying.
@@ -391,6 +391,51 @@ Deployment statuses: `staging` → `active` → `superseded`, or `staging` → `
 A staging deployment starts with a one-hour lease (`stagingExpiresAt`). Each authorized staging read before upload/copy/commit renews it transactionally when ten minutes of the lease have elapsed, avoiding a write on every file. An expired lease cannot be renewed or committed; restart the push. Rows created before this field existed use `createdAt + one hour` without a backfill. Storage writes check their returned lease immediately before dispatch (including after slow body reads) and carry an abort signal bounded by the remaining lease and five minutes. Retention waits another 24 hours after lease expiry before claiming failed/abandoned staging storage, allowing in-flight writes to drain. Explicit failure preserves this drain deadline. Abandoned staging rows keep their original metadata; a separate `deploymentPurges` record makes them unavailable when claimed. Deploy the lease-aware Worker before enabling the new cleanup job; legacy upload workers do not enforce write deadlines.
 
 Convex also serves `GET /api/rendro/deployments/active` and `GET /api/rendro/deployments` (latest 100) for sessions and `docs:read` keys, and `GET /api/rendro/deployments/staging` for the Worker.
+
+### CLI source selection and encoding
+
+`cli/src/source-files.ts` filters before hashing or uploading, with zero runtime
+dependencies. The case-insensitive sensitive defaults at every depth are `.env`,
+`.env.*`, `.envrc`, `.envrc.*`, `.npmrc`, `.pypirc`, `.netrc`, `.git-credentials`,
+`*.pem`, `*.key`, and `id_*`. `--include-sensitive` overrides only these filename
+defaults. Dot-directories stay excluded by default, including under that flag; an
+explicit ignore negation such as `!.environment/` permits ordinary dot-directories.
+The case-insensitive directory names `.git`, `.ssh`, `.aws`, and `node_modules`
+are always excluded, even under negation or sensitive opt-in. Symlinks/non-regular
+files are never followed.
+Skipped files/directories produce JSON-quoted relative-path `skipped` lines with
+a reason; directory pruning avoids reading excluded contents.
+
+The source-root `.rendroignore` is read once; errors other than absence abort
+before network activity. It remains authoritative under `--include-sensitive`.
+Ignore files themselves are never uploaded and nested ignore files are not read.
+`cli/src/ignore.ts` implements trimmed lines, comments, `*`, `?`, whole-segment
+`**`, root-relative slash patterns, directory-only trailing slashes, ordered `!`
+negation, and escaped leading `#`/`!`. Other glob syntax is literal. Matching is
+case-sensitive. Directory pruning follows gitignore's parent rule: a negated
+child cannot resurrect an excluded parent. Negation can override default
+dot-directory exclusion but never the protected directory set. Sensitive filename
+defaults cannot be negated without the opt-in flag. See the [README subset and examples](../README.md#source-filtering).
+
+`cli/src/content-type.ts` records extension-derived MIME essences without an
+assumed charset. For recognized text types (including JSON/maps and SVG), only
+UTF-8, UTF-16LE, and UTF-16BE BOMs add a charset. UTF-32 BOMs are not misidentified
+as UTF-16. Bytes, hashes, and sizes are unchanged; no transcoding or heuristic
+encoding detection occurs. Existing manifests with `charset=utf-8` remain valid
+and are served as declared. A subsequent push records new metadata even when
+`(path, sha256, size)` matches and the object is copied: project/publication
+routes select the new manifest's type rather than copied object metadata. No
+server migration is required. Old incorrectly labeled immutable deployments
+remain unchanged; repush to correct metadata for a new deployment.
+
+Unit tests cover the matcher and BOM boundaries; real-filesystem and CLI
+subprocess tests cover filtering, opt-in, failures, source/bundle parity, exact
+bytes and metadata, and copying from old manifests. The Chromium charset suite
+feeds a real CLI subprocess's output to the real Worker delivery routes with
+fixture identity/storage, verifying `café €` from Windows-1252 CSS for public,
+private, and ticketed private files, including reused objects and existing UTF-8
+manifests. The modern share route's separate extension-only charset behavior is
+unchanged; it does not consult CLI manifest media types.
 
 ### Storage validation authority and rollout
 

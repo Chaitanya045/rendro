@@ -68,3 +68,19 @@ describe("CLI rate-limit handling", () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 });
+it("sanitizes malformed and backend error responses", async () => {
+  expect(await httpErrorMessage(new Response("private diagnostic", { status: 503 }))).toBe("503 Backend unavailable");
+  for (const data of [null, "private diagnostic", {}, { error: 42 }]) {
+    expect(await httpErrorMessage(Response.json(data, { status: 400 }))).toBe("400 Request failed");
+  }
+  expect(await httpErrorMessage(new Response("not JSON", { status: 400 }))).toBe("400 Request failed");
+});
+it("rejects overflowing numeric Retry-After values and handles empty retry bodies", async () => {
+  expect(retryAfterMs(limited("9".repeat(400)))).toBeUndefined();
+  const fetchMock = vi.fn().mockResolvedValueOnce(new Response(null, { status: 429 })).mockResolvedValueOnce(new Response(null));
+  vi.stubGlobal("fetch", fetchMock);
+  const pending = fetchWithRateLimit("https://rendro.test/read", { method: "HEAD" });
+  await vi.runAllTimersAsync();
+  expect((await pending).status).toBe(200);
+  expect(fetchMock).toHaveBeenCalledTimes(2);
+});
