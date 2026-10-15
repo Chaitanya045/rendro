@@ -8,6 +8,8 @@ import { CreateBucketCommand, DeleteObjectCommand, ListObjectsV2Command, S3Clien
 import { SignJWT, generateKeyPair, exportJWK } from "jose";
 import { localEnvironment, localHttp, ready, run } from "./backend";
 
+import type { ResourceJournal } from "./resource-journal";
+
 export const publicationSlug = "workerd-smoke";
 export const storageImage = "andrewgaul/s3proxy@sha256:87662b2a5afcdfa5f478a1c61650bae4c87bbd15f6ff2823236bcfd66ef7fe04";
 export async function listen(handler: RequestListener) {
@@ -133,14 +135,15 @@ export async function startIdentityFixtures(directory: string) {
   };
 }
 
-export async function startStorage(directory: string) {
+export async function startStorage(directory: string, resources: ResourceJournal) {
   const accessKeyId = randomBytes(24).toString("hex");
   const secretAccessKey = randomBytes(32).toString("hex");
   const envFile = join(directory, "storage.env");
   await writeFile(envFile, `S3PROXY_IDENTITY=${accessKeyId}\nS3PROXY_CREDENTIAL=${secretAccessKey}\nS3PROXY_AUTHORIZATION=aws-v4\nS3PROXY_JAVA_OPTS=-Xmx256m -XX:ActiveProcessorCount=2\nJCLOUDS_PROVIDER=filesystem\nJCLOUDS_FILESYSTEM_BASEDIR=/data\n`, { mode: 0o600 });
   const name = `rendro-e2e-${randomBytes(8).toString("hex")}`;
-  await run("docker", ["run", "--detach", "--rm", "--name", name, "--publish", "127.0.0.1::80", "--tmpfs", "/data",
-    "--env-file", envFile, storageImage], { env: localEnvironment(), timeout: 120_000 });
+  resources.createContainer(name, ["--rm", "--publish", "127.0.0.1::80", "--tmpfs", "/data",
+    "--env-file", envFile, storageImage]);
+  await run("docker", ["start", name], { env: localEnvironment(), timeout: 120_000 });
   const close = async () => { await run("docker", ["rm", "--force", name]); };
   try {
     const { stdout } = await run("docker", ["port", name, "80/tcp"]);

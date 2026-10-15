@@ -10,7 +10,7 @@ S3 client together. Neither layer replaces the other.
 ## Playwright Test E2E (#108, #109)
 
 ```sh
-# Prerequisites: Node 22+, pnpm, Docker, curl, unzip, OpenSSL.
+# Prerequisites: Node 22+, pnpm, Docker, curl, unzip, OpenSSL, ps.
 pnpm install --frozen-lockfile
 pnpm exec playwright install --with-deps chromium firefox webkit
 # Run one engine at a time on shared machines:
@@ -43,9 +43,25 @@ unexpected destinations. Recheck this behavior when upgrading Wrangler.
 
 All application listeners bind to loopback on allocated ports. The Convex backend
 is pinned to `precompiled-2026-10-06-a3538c6`, and the CLI/SDK is locked at 1.42.0.
-The installer verifies the platform ZIP's SHA-256 and caches the executable under
-`~/.cache/rendro-e2e/`. First use needs GitHub release access; cached runs do not
+The installer verifies the platform ZIP's pinned SHA-256 on downloads and every
+cache hit under `~/.cache/rendro-e2e/`. Unique staging paths and atomic rename
+prevent partial publication. Each run extracts verified bytes into its own
+private directory; shared cached executables are never executed. First use needs GitHub release access; cached runs do not
 need a deployed Convex account. A backend download/start failure fails the run.
+
+Cleanup is registered before acquiring resources, with an incremental journal
+under the system temp directory's `rendro-e2e-runs/`. Playwright global teardown,
+process exit and SIGINT/SIGTERM handlers remove tracked children, containers and
+the run directory even if setup never returns. The next invocation sweeps dead
+owners, checking PID start times to avoid killing reused PIDs or concurrent runs.
+Cleanup errors preserve the journal for recovery. SIGKILL cannot run an exit
+handler, so its recovery takes place on that next invocation.
+
+`tests/e2e-verified-cache.test.ts` covers corrupt/partial entries and concurrent
+publication without network access. `tests/e2e-setup-interruption.test.ts` runs a
+real Playwright child with a stalled setup, a real child process and a simulated
+Docker executable; it verifies timeout, signals and subsequent crash recovery
+without adding a Docker dependency to the unit suite.
 
 The harness generates an instance name, secret and admin key and starts its own
 temporary SQLite database and blob directory. It copies application sources and
@@ -113,7 +129,7 @@ covers this compatibility fix; no generated Convex module is modified.
 `tests/convex-public-rpc.test.ts` now always starts its own pinned backend: all 12
 RPC envelope/cursor tests execute in `pnpm verify` and in an explicit mandatory
 step of the E2E job. There is no opt-in skip or shared deployment credential.
-CI caches the backend binary and S3Proxy image layers as well as pnpm dependencies.
+CI caches the verified backend archive and S3Proxy image layers as well as pnpm dependencies.
 The workflow jobs have no conditional opt-out or allowed failure. Repository
 branch protection must require the existing `verify`, `coverage`, and `e2e` checks.
 

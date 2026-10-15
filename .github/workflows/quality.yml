@@ -32,7 +32,7 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: ~/.cache/rendro-e2e
-          key: ${{ runner.os }}-${{ runner.arch }}-convex-precompiled-2026-10-06-a3538c6-v1
+          key: ${{ runner.os }}-${{ runner.arch }}-convex-precompiled-2026-10-06-a3538c6-archive-v2
       - run: pnpm install --frozen-lockfile
       - run: pnpm exec playwright install --with-deps chromium
       # Vitest runs parallel unit tests first, then serial browser files.
@@ -58,7 +58,7 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: ~/.cache/rendro-e2e
-          key: ${{ runner.os }}-${{ runner.arch }}-convex-precompiled-2026-10-06-a3538c6-v1
+          key: ${{ runner.os }}-${{ runner.arch }}-convex-precompiled-2026-10-06-a3538c6-archive-v2
       - run: pnpm install --frozen-lockfile
       - run: pnpm exec playwright install --with-deps chromium firefox webkit
       - uses: actions/cache@v4
@@ -103,7 +103,7 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: ~/.cache/rendro-e2e
-          key: ${{ runner.os }}-${{ runner.arch }}-convex-precompiled-2026-10-06-a3538c6-v1
+          key: ${{ runner.os }}-${{ runner.arch }}-convex-precompiled-2026-10-06-a3538c6-archive-v2
       - run: pnpm install --frozen-lockfile
       - run: pnpm exec playwright install --with-deps chromium
       - run: pnpm coverage

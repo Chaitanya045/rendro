@@ -907,6 +907,14 @@ suite uses pinned local Convex with real Better Auth, HTTP actions and WebSocket
 disposable S3Proxy, an in-memory mail sink, and a deterministic OAuth provider fixture.
 A generated local instance/admin key, loopback target assertion, sanitized CLI
 environment and temporary source copy isolate every Convex push from shared deployments.
+Every cached Convex archive is SHA-256 checked against its pinned release digest
+on every use. Downloads publish by atomic rename from unique staging directories;
+each run extracts the verified bytes into its private directory and never executes
+a shared cached binary. Setup journals child PID/start-time identities, container
+names and its private directory before returning any teardown callback. A separate
+Playwright global teardown and synchronous exit/SIGINT/SIGTERM cleanup cover setup
+timeouts; the next run sweeps abandoned journals (including after SIGKILL) while
+preserving active runs. Failed cleanup retains its journal for another attempt.
 Owner/admin/member/outsider seeds span two organizations; all three engines cover
 a complete signup-to-CLI-push-to-reactive-comment journey. The 12 public-RPC backend
 tests run unconditionally in verify and an explicit E2E CI step. It complements the

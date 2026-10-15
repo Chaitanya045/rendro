@@ -1,19 +1,20 @@
 import { execFile } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { readFile, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { createTestHarness } from "wrangler";
 import { startIdentityFixtures, startStorage } from "./services";
 import { localEnvironment, startBackend } from "./backend";
 import { seedWorkspace } from "./seed";
+import { registerResources } from "./resource-journal";
 
 const run = promisify(execFile);
 const root = resolve(import.meta.dirname, "..");
 
 export default async function globalSetup() {
-  const directory = await mkdtemp(join(tmpdir(), "rendro-e2e-"));
+  const resources = registerResources();
+  const directory = resources.directory;
   const closers: Array<() => Promise<void>> = [];
   const originalFetch = globalThis.fetch;
   const blockedOrigins = new Set<string>();
@@ -29,7 +30,7 @@ export default async function globalSetup() {
       if (value === undefined) delete process.env[key];
       else process.env[key] = value;
     }
-    await rm(directory, { recursive: true, force: true });
+    resources.close();
     if (blockedOrigins.size) errors.push(new Error(`Blocked external Worker origins: ${[...blockedOrigins].join(", ")}`));
     if (errors.length) throw new AggregateError(errors, "E2E teardown failed");
   }
@@ -37,11 +38,11 @@ export default async function globalSetup() {
   try {
     const identity = await startIdentityFixtures(directory);
     closers.push(() => identity.close());
-    const convex = await startBackend(directory, identity);
+    const convex = await startBackend(directory, identity, resources);
     identity.allowedOrigins.add(convex.site);
     identity.allowedOrigins.add(convex.origin);
     closers.push(() => convex.close());
-    const storage = await startStorage(directory);
+    const storage = await startStorage(directory, resources);
     closers.push(() => storage.close());
     const vars = {
       NODE_ENV: "production",
@@ -88,6 +89,7 @@ export default async function globalSetup() {
       }
       return originalFetch(request, { redirect: "manual" });
     };
+    resources.assertActive();
     const server = createTestHarness({
       root,
       workers: [{ configPath, vars, secrets: vars }],

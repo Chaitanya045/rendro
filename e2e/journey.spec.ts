@@ -19,7 +19,7 @@ for (const role of roles) {
       const create = await fetch("/api/rendro/projects", { method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ organizationId, name: "Denied control", slug }) });
       return { access: access.status, other: other.status, keys: keys.status, create: create.status, body: await access.json() as { member?: { role: string } } };
-    }, { ...seed, slug: `role-control-${role}-${info.project.name}` });
+    }, { ...seed, slug: `role-control-${role}-${info.project.name}-${info.retry}` });
     expect(result.access).toBe(role === "outsider" ? 403 : 200);
     expect(result.other).toBe(role === "outsider" ? 200 : 403);
     expect(result.keys).toBe(role === "owner" || role === "admin" ? 200 : 403);
@@ -45,7 +45,7 @@ test("Google OAuth uses local code exchange and rejects a changed state", async 
 
 test("sign up → verify → organization → project → API key → CLI push → view → reactive comment", async ({ page, context, baseURL }, info) => {
   test.setTimeout(90_000);
-  const email = `journey-${info.project.name}@example.test`;
+  const email = `journey-${info.project.name}-${info.retry}@example.test`;
   await page.goto("/sign-up");
   await page.getByLabel("Full name", { exact: true }).fill("Journey Author");
   await page.getByLabel("Work email", { exact: true }).fill(email);
@@ -67,7 +67,7 @@ test("sign up → verify → organization → project → API key → CLI push �
   await page.getByLabel("Work email", { exact: true }).fill(email);
   await page.getByLabel("Password", { exact: true }).fill(password);
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
-  await page.getByLabel("Organization name", { exact: true }).fill(`Journey ${info.project.name}`);
+  await page.getByLabel("Organization name", { exact: true }).fill(`Journey ${info.project.name} ${info.retry}`);
   await page.getByRole("button", { name: "Create organization", exact: true }).click();
   await page.getByLabel("Project name", { exact: true }).fill("Journey documents");
   await page.getByRole("button", { name: "Create project", exact: true }).click();
@@ -78,7 +78,7 @@ test("sign up → verify → organization → project → API key → CLI push �
   const organizationId = new URL(page.url()).pathname.split("/")[2];
   const projectId = new URL(page.url()).searchParams.get("projectId");
   if (!projectId || !baseURL || !process.env.RENDRO_E2E_DIRECTORY) throw new Error("Missing journey state");
-  const source = join(process.env.RENDRO_E2E_DIRECTORY, `journey-${info.project.name}`);
+  const source = join(process.env.RENDRO_E2E_DIRECTORY, `journey-${info.project.name}-${info.retry}`);
   await mkdir(source);
   await writeFile(join(source, "index.html"), '<!doctype html><html><head><title>Journey document</title></head><body><h1>Documentation shipped locally</h1><p id="target">This paragraph accepts a real-time comment.</p></body></html>');
   await pushDocuments(source, baseURL, organizationId, projectId, token);
