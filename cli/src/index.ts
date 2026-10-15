@@ -9,6 +9,7 @@
  *   rendro publication remove --organization <id> --project <id> --id <publication-id>
  *   rendro init --source ./docs
  */
+import { sanitizeProvenance } from "../../shared/provenance";
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
@@ -96,7 +97,7 @@ function deploymentProvenance(source: string, manifestSha256: string) {
     : gitValue(source, ["config", "--get", "remote.origin.url"]);
   const dirtyOutput = gitValue(source, ["status", "--porcelain"]);
   const ci = Boolean(process.env.CI);
-  return {
+  return sanitizeProvenance({
     source: commit
       ? {
           kind: "git" as const,
@@ -118,7 +119,7 @@ function deploymentProvenance(source: string, manifestSha256: string) {
       : { kind: "local" as const, actor: process.env.USER },
     cliVersion: version,
     manifestSha256,
-  };
+  });
 }
 
 async function requestJson<T>(url: string, token: string, init?: RequestInit, idempotent?: boolean): Promise<T> {

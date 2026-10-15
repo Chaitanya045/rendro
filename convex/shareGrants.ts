@@ -1,4 +1,5 @@
 import { isOrganizationDeleted, requireActiveOrganization } from "./organizationLifecycle";
+import type { WorkerShare } from "../shared/resolver-dto";
 import { requireId } from "./ids";
 import { ConvexError, v } from "convex/values";
 import { internalMutation, internalQuery } from "./_generated/server";
@@ -66,7 +67,11 @@ export const resolveInternal = internalQuery({
     const deployment = await ctx.db.get(grant.deploymentId);
     const project = await ctx.db.get(grant.projectId);
     if (!deployment || !project || deployment.status === "failed" || deployment.status === "staging") return null;
-    return { grant, deployment, project };
+    return {
+      grant: { documentPath: grant.documentPath, expiresAt: grant.expiresAt },
+      deployment: { manifestKey: deployment.manifestKey },
+      project: { name: project.name },
+    } satisfies WorkerShare;
   },
 });
 

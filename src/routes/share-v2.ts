@@ -1,4 +1,6 @@
-import { viewerBackendJson } from "@/viewer-backend";
+import type { WorkerShare } from "../../shared/resolver-dto";
+import { signResolverRequest } from "../../shared/resolver-auth";
+import { ViewerBackendError, viewerBackendJson } from "@/viewer-backend";
 import { viewerErrorCache, viewerErrorResponse } from "@/routes/viewer-unavailable";
 import { decodeStoragePath } from "@/storage-boundary";
 import { validDocumentSearch } from "@/lazy-tree/messages";
@@ -9,7 +11,7 @@ import { viewerScript } from "@/viewer/markup";
 import { renderFaviconLinks } from "./favicon";
 import { renderThemeAssets } from "./theme";
 import { Hono } from "hono";
-import { CONVEX_SITE_URL } from "@/config";
+import { CONVEX_INTERNAL_SECRET, CONVEX_SITE_URL } from "@/config";
 import { getObjectStream } from "@/minio";
 import { renderNotFoundPage } from "@/routes/not-found";
 import { injectMobileViewportScrollbarStream, injectViewerHeadStream } from "@/routes/document-html";
@@ -18,17 +20,13 @@ const app = new Hono();
 app.use("/s/*", viewerErrorCache);
 app.onError(viewerErrorResponse);
 
-type ShareResolution = {
-  grant: { documentPath: string; expiresAt: number };
-  deployment: { manifestKey: string };
-  project: { name: string };
-};
-
-async function resolveShare(token: string): Promise<ShareResolution | null> {
-  return viewerBackendJson<ShareResolution>(
-    `${CONVEX_SITE_URL}/api/rendro/shares/public?token=${encodeURIComponent(token)}`,
-    { headers: { Accept: "application/json" } },
-  );
+async function resolveShare(token: string): Promise<WorkerShare | null> {
+  const url = `${CONVEX_SITE_URL}/api/rendro/shares/public?token=${encodeURIComponent(token)}`;
+  const headers = await signResolverRequest(new Request(url), CONVEX_INTERNAL_SECRET);
+  headers.set("Accept", "application/json");
+  const result = await viewerBackendJson<WorkerShare>(url, { headers });
+  if (result && !result.deployment?.manifestKey) throw new ViewerBackendError();
+  return result;
 }
 
 app.get("/s/:token/files/*", async (c) => {

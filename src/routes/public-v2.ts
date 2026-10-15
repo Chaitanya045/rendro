@@ -1,10 +1,12 @@
-import { viewerBackendJson } from "@/viewer-backend";
+import type { WorkerPublication } from "../../shared/resolver-dto";
+import { signResolverRequest } from "../../shared/resolver-auth";
+import { ViewerBackendError, viewerBackendJson } from "@/viewer-backend";
 import { viewerErrorCache, viewerErrorResponse } from "@/routes/viewer-unavailable";
 import { assetError, assetHeaders } from "@/routes/asset-headers";
 import { decodeStoragePath, isCanonicalStorageKey } from "@/storage-boundary";
 import { viewerScript } from "@/viewer/markup";
 import { Hono } from "hono";
-import { CONVEX_SITE_URL } from "@/config";
+import { CONVEX_INTERNAL_SECRET, CONVEX_SITE_URL } from "@/config";
 import { getObjectStream, getObjectText } from "@/minio";
 import { renderScopedDocumentShell } from "@/routes/app";
 import { renderNotFoundPage } from "@/routes/not-found";
@@ -15,38 +17,27 @@ const app = new Hono();
 app.use("/p/*", viewerErrorCache);
 app.onError(viewerErrorResponse);
 
-type PublicResolution = {
-  publication: {
-    slug: string;
-    pathPrefix: string;
-    entryFile: string;
-    title?: string;
-    description?: string;
-  };
-  project: { name: string; slug: string };
-  deployment: { manifestKey: string; manifestSha256: string };
-};
-
-
-async function resolvePublication(slug: string): Promise<PublicResolution | null> {
-  return viewerBackendJson<PublicResolution>(
-    `${CONVEX_SITE_URL}/api/rendro/publications/public?slug=${encodeURIComponent(slug)}`,
-    { headers: { Accept: "application/json" } },
-  );
+async function resolvePublication(slug: string): Promise<WorkerPublication | null> {
+  const url = `${CONVEX_SITE_URL}/api/rendro/publications/public?slug=${encodeURIComponent(slug)}`;
+  const headers = await signResolverRequest(new Request(url), CONVEX_INTERNAL_SECRET);
+  headers.set("Accept", "application/json");
+  const result = await viewerBackendJson<WorkerPublication>(url, { headers });
+  if (result && !result.deployment?.manifestKey) throw new ViewerBackendError();
+  return result;
 }
 
-async function manifestFor(result: PublicResolution): Promise<StoredManifest | null> {
+async function manifestFor(result: WorkerPublication): Promise<StoredManifest | null> {
   const text = await getObjectText(result.deployment.manifestKey);
   return parseStoredManifest(text);
 }
 
-function publicationPath(result: PublicResolution, path: string): string | null {
+function publicationPath(result: WorkerPublication, path: string): string | null {
   if (!isCanonicalStorageKey(path)) return null;
   const prefix = result.publication.pathPrefix;
   return prefix ? `${prefix}/${path}` : path;
 }
 
-function objectKey(result: PublicResolution, path: string): string {
+function objectKey(result: WorkerPublication, path: string): string {
   return `${result.deployment.manifestKey.slice(0, -"manifest.json".length)}files/${path}`;
 }
 
@@ -128,7 +119,7 @@ app.get("/p/:slug", async (c) => {
     return c.html(renderNotFoundPage({ path: c.req.path }), 404);
   }
   const slug = result.publication.slug;
-  const title = result.publication.title || result.project.name;
+  const title = result.publication.title;
   return c.html(renderScopedDocumentShell({
     user: null,
     namespace: slug,

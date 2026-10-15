@@ -1,4 +1,5 @@
 import { isOrganizationDeleted, requireActiveOrganization } from "./organizationLifecycle";
+import type { WorkerPublication } from "../shared/resolver-dto";
 import { requireId } from "./ids";
 import { ConvexError, v } from "convex/values";
 import { internalMutation, internalQuery } from "./_generated/server";
@@ -125,7 +126,15 @@ export const resolvePublicInternal = internalQuery({
     if (!deploymentId) return null;
     const deployment = await ctx.db.get(deploymentId);
     if (!deployment || deployment.status === "failed" || deployment.status === "staging") return null;
-    return { publication, project, deployment };
+    return {
+      publication: {
+        slug: publication.slug,
+        pathPrefix: publication.pathPrefix,
+        entryFile: publication.entryFile,
+        title: publication.title || project.name,
+      },
+      deployment: { manifestKey: deployment.manifestKey },
+    } satisfies WorkerPublication;
   },
 });
 

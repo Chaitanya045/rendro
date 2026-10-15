@@ -1,4 +1,6 @@
 import { requireCookieWrite } from "../shared/request-admission";
+import { publicPublication } from "../shared/resolver-dto";
+import { isWorkerResolverRequest } from "../shared/resolver-auth";
 import { sessionOrApiKeyHttpAction } from "./apiKeyHttp";
 import type { GenericActionCtx } from "convex/server";
 import type { DataModel } from "./_generated/dataModel";
@@ -140,5 +142,6 @@ export const resolvePublicPublication = httpAction(async (ctx: GenericActionCtx<
   if (!slug) return clientFailure("slug is required");
   const result = await ctx.runQuery(internal.publicationsV2.resolvePublicInternal, { slug });
   if (!result) return clientFailure("Publication not found", 404);
-  return Response.json(result);
+  const worker = await isWorkerResolverRequest(request, process.env.CONVEX_INTERNAL_SECRET);
+  return Response.json(worker ? result : publicPublication(result), { headers: { "Cache-Control": "private, no-store" } });
 });
