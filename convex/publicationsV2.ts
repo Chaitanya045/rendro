@@ -1,3 +1,4 @@
+import { verifyStorageValidation } from "../shared/storage-attestation";
 import { isOrganizationDeleted, requireActiveOrganization } from "./organizationLifecycle";
 import type { WorkerPublication } from "../shared/resolver-dto";
 import { requireId } from "./ids";
@@ -19,6 +20,7 @@ export const createInternal = internalMutation({
     title: v.optional(v.string()),
     description: v.optional(v.string()),
     actorId: v.string(),
+    attestation: v.optional(v.string()),
   },
   handler: async (ctx, input) => {
     await requireActiveOrganization(ctx, input.organizationId);
@@ -39,17 +41,23 @@ export const createInternal = internalMutation({
     const pathPrefix = cleanPublicationPath(args.pathPrefix, true);
     const entryFile = cleanPublicationPath(args.entryFile, false);
     if (pathPrefix === null || entryFile === null) throw new ConvexError("Invalid publication path");
-    if (args.trackingMode === "pinned") {
-      if (!args.pinnedDeploymentId) throw new ConvexError("Pinned publication requires a deployment");
-      const pinned = await ctx.db.get(args.pinnedDeploymentId);
-      if (
-        !pinned
-        || pinned.projectId !== project._id
-        || pinned.status === "failed"
-        || pinned.status === "staging"
-      ) {
-        throw new ConvexError("Pinned deployment not found");
-      }
+    const deploymentId = args.trackingMode === "pinned" ? args.pinnedDeploymentId : project.activeDeploymentId;
+    if (args.trackingMode === "pinned" && !deploymentId) throw new ConvexError("Pinned publication requires a deployment");
+    const deployment = deploymentId ? await ctx.db.get(deploymentId) : null;
+    if (
+      !deployment
+      || deployment.organizationId !== args.organizationId
+      || deployment.projectId !== project._id
+      || deployment.status === "failed"
+      || deployment.status === "staging"
+    ) throw new ConvexError("Publication deployment not found");
+    // Resolve track_active inside this transaction: a concurrent commit must not
+    // publish against a different manifest from the one the Worker inspected.
+    if (!await verifyStorageValidation({
+      purpose: "publication-entry", ...deployment, deploymentId: deployment._id,
+      pathPrefix, entryFile, trackingMode: args.trackingMode,
+    }, args.attestation, process.env.CONVEX_INTERNAL_SECRET)) {
+      throw new ConvexError("Worker publication entry validation is required");
     }
     const now = Date.now();
     const publicationId = await ctx.db.insert("publications", {

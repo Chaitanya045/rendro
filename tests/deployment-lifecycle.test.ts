@@ -1,3 +1,4 @@
+import { commitWithProof, publishWithProof } from "./helpers/storage-proof";
 import { describe, expect, it } from "vitest";
 import { convexTest } from "convex-test";
 import { internal } from "../convex/_generated/api";
@@ -72,7 +73,7 @@ describe("immutable deployment lifecycle", () => {
     const backend = convexTest(schema, modules);
     const owned = await project(backend);
     const first = await stage(backend, owned._id, "org-a", "first");
-    await backend.mutation(internal.deployments.commitInternal, {
+    await commitWithProof(backend, {
       organizationId: "org-a",
       projectId: owned._id,
       deploymentId: first.deploymentId,
@@ -103,13 +104,13 @@ describe("immutable deployment lifecycle", () => {
     const owned = await project(backend);
     const left = await stage(backend, owned._id, "org-a", "left");
     const right = await stage(backend, owned._id, "org-a", "right");
-    await backend.mutation(internal.deployments.commitInternal, {
+    await commitWithProof(backend, {
       organizationId: "org-a",
       projectId: owned._id,
       deploymentId: left.deploymentId,
       actorId: "api-key:key-a",
     });
-    await expect(backend.mutation(internal.deployments.commitInternal, {
+    await expect(commitWithProof(backend, {
       organizationId: "org-a",
       projectId: owned._id,
       deploymentId: right.deploymentId,
@@ -121,14 +122,14 @@ describe("immutable deployment lifecycle", () => {
     const backend = convexTest(schema, modules);
     const owned = await project(backend);
     const first = await stage(backend, owned._id, "org-a", "first");
-    await backend.mutation(internal.deployments.commitInternal, {
+    await commitWithProof(backend, {
       organizationId: "org-a", projectId: owned._id, deploymentId: first.deploymentId, actorId: "user-a",
     });
     const second = await stage(backend, owned._id, "org-a", "second");
-    await backend.mutation(internal.deployments.commitInternal, {
+    await commitWithProof(backend, {
       organizationId: "org-a", projectId: owned._id, deploymentId: second.deploymentId, actorId: "user-a",
     });
-    await backend.mutation(internal.publicationsV2.createInternal, {
+    await publishWithProof(backend, {
       organizationId: "org-a",
       projectId: owned._id,
       slug: "stable-docs",

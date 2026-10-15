@@ -1,3 +1,4 @@
+import { commitWithProof } from "./helpers/storage-proof";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { convexTest } from "convex-test";
 import { internal } from "../convex/_generated/api";
@@ -28,7 +29,7 @@ async function fixture() {
       execution: { kind: "local", actor: "migration" }, cliVersion: "migration-1", manifestSha256: input.manifestSha256,
     },
   });
-  await backend.mutation(internal.deployments.commitInternal, {
+  await commitWithProof(backend, {
     organizationId: "org", projectId: project._id, deploymentId: staged.deploymentId, actorId: "api-key:migration",
   });
   return { backend, project, staged };

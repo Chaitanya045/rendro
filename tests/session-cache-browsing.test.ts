@@ -1,3 +1,4 @@
+import { commitWithProof } from "./helpers/storage-proof";
 import { createHmac } from "node:crypto";
 import { convexTest } from "convex-test";
 import { betterAuth } from "better-auth/minimal";
@@ -66,7 +67,7 @@ async function fixture() {
     organizationId, projectId, actorId: readers[0].user.id, manifestSha256: "a".repeat(64), fileCount: 8, byteCount: 800,
     provenance: { source: { kind: "local" }, execution: { kind: "local" }, cliVersion: "test", manifestSha256: "a".repeat(64) },
   });
-  await backend.mutation(internal.deployments.commitInternal, { organizationId, projectId, deploymentId: deployment.deploymentId, actorId: readers[0].user.id });
+  await commitWithProof(backend, { organizationId, projectId, deploymentId: deployment.deploymentId, actorId: readers[0].user.id });
   const pages = ["index.html", "guide/next.html", "space name.html", "日本語.html", "100%.html", "hash#name.html", "no-head.html", "base.html"];
   vi.spyOn(minio, "getObjectText").mockResolvedValue(JSON.stringify({ version: 1, files: pages.map(path => ({ path, contentType: "text/html", sha256: "b".repeat(64), size: 100 })) }));
   vi.spyOn(minio, "getObjectStream").mockImplementation(() => Promise.resolve(new Response("<html><head></head><body><h1>Docs</h1></body></html>").body));

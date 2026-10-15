@@ -1,3 +1,4 @@
+import { commitWithProof, publishWithProof } from "./helpers/storage-proof";
 import { describe, expect, it } from "vitest";
 import { convexTest } from "convex-test";
 import { internal } from "../convex/_generated/api";
@@ -23,6 +24,11 @@ async function createProject(
     actorId: "owner",
   });
   if (!project) throw new Error("Project creation failed");
+  const deployment = await backend.mutation(internal.deployments.startInternal, {
+    organizationId, projectId: project._id, manifestSha256: "manifest", fileCount: 1, byteCount: 1, actorId: "owner",
+    provenance: { source: { kind: "local" }, execution: { kind: "local" }, cliVersion: "test", manifestSha256: "manifest" },
+  });
+  await commitWithProof(backend, { organizationId, projectId: project._id, deploymentId: deployment.deploymentId, actorId: "owner" });
   return project;
 }
 
@@ -32,7 +38,7 @@ async function createPublication(
   projectId: Awaited<ReturnType<typeof createProject>>["_id"],
   slug: string,
 ) {
-  return backend.mutation(internal.publicationsV2.createInternal, {
+  return publishWithProof(backend, {
     organizationId,
     projectId,
     slug,
@@ -47,7 +53,7 @@ describe("publication tenant and project boundaries", () => {
   it.each(["docs//nested", "docs/./nested", "docs/../private", "docs\\nested"])("rejects invalid v2 publication prefix %j in Convex too", async (pathPrefix) => {
     const backend = convexTest(schema, modules);
     const project = await createProject(backend, "org-a", "docs");
-    await expect(backend.mutation(internal.publicationsV2.createInternal, {
+    await expect(publishWithProof(backend, {
       organizationId: "org-a", projectId: project._id, slug: "docs",
       pathPrefix, entryFile: "index.html", trackingMode: "track_active", actorId: "owner",
     })).rejects.toThrow("Invalid publication path");
@@ -56,7 +62,7 @@ describe("publication tenant and project boundaries", () => {
   it.each(["Docs", "docs", "caf\u00e9", "cafe\u0301"])("trims outer delimiters while preserving case and Unicode in %j", async (folder) => {
     const backend = convexTest(schema, modules);
     const project = await createProject(backend, "org-a", "docs");
-    const publication = await backend.mutation(internal.publicationsV2.createInternal, {
+    const publication = await publishWithProof(backend, {
       organizationId: "org-a", projectId: project._id, slug: "docs",
       pathPrefix: ` /${folder}/ `, entryFile: " index.html ", trackingMode: "track_active", actorId: "owner",
     });
@@ -81,7 +87,7 @@ describe("publication tenant and project boundaries", () => {
       actorId: "api-key:test",
     });
 
-    await expect(backend.mutation(internal.publicationsV2.createInternal, {
+    await expect(publishWithProof(backend, {
       organizationId: "org-a",
       projectId: project._id,
       slug: "not-yet-public",
@@ -90,7 +96,7 @@ describe("publication tenant and project boundaries", () => {
       trackingMode: "pinned",
       pinnedDeploymentId: staged.deploymentId,
       actorId: "admin",
-    })).rejects.toThrow("Pinned deployment not found");
+    })).rejects.toThrow("Publication deployment not found");
   });
 
   it("rejects an organization paired with an outsider project's ID when listing", async () => {
@@ -118,6 +124,7 @@ describe("publication tenant and project boundaries", () => {
       actorId: "api-key:allowed-project-key",
     })).rejects.toThrow("Publication not found");
 
+    await backend.run(ctx => ctx.db.patch(siblingProject._id, { activeDeploymentId: undefined }));
     expect(await backend.query(internal.publicationsV2.resolvePublicInternal, {
       slug: publication.slug,
     })).toBeNull();

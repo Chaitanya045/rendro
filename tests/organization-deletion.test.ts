@@ -1,3 +1,4 @@
+import { commitWithProof, publishWithProof } from "./helpers/storage-proof";
 import { createHmac } from "node:crypto";
 import { betterAuth } from "better-auth/minimal";
 import { convexTest } from "convex-test";
@@ -44,9 +45,9 @@ async function fixture(transactionLimits: { documentsWritten: number } | boolean
     const scope = { organizationId, projectId: project._id };
     const start = { ...scope, manifestSha256: "manifest", fileCount: 1, byteCount: 1, provenance, actorId };
     const first = await t.mutation(internal.deployments.startInternal, start);
-    await t.mutation(internal.deployments.commitInternal, { ...scope, deploymentId: first.deploymentId, actorId });
+    await commitWithProof(t, { ...scope, deploymentId: first.deploymentId, actorId });
     const active = await t.mutation(internal.deployments.startInternal, start);
-    await t.mutation(internal.deployments.commitInternal, { ...scope, deploymentId: active.deploymentId, actorId });
+    await commitWithProof(t, { ...scope, deploymentId: active.deploymentId, actorId });
     const staging = await t.mutation(internal.deployments.startInternal, start);
     const failed = await t.mutation(internal.deployments.startInternal, start);
     await t.mutation(internal.deployments.failInternal, { ...scope, deploymentId: failed.deploymentId, reason: "Interrupted" });
@@ -60,10 +61,10 @@ async function fixture(transactionLimits: { documentsWritten: number } | boolean
       });
       keys.push({ id, keyId, secret, secretHash });
     }
-    const publication = (await t.mutation(internal.publicationsV2.createInternal, {
+    const publication = (await publishWithProof(t, {
       ...scope, slug, pathPrefix: "", entryFile: "index.html", trackingMode: "track_active", actorId,
     }))!;
-    await t.mutation(internal.publicationsV2.createInternal, {
+    await publishWithProof(t, {
       ...scope, slug: `${slug}-pinned`, pathPrefix: "", entryFile: "index.html", trackingMode: "pinned", pinnedDeploymentId: first.deploymentId, actorId,
     });
     const token = `share-${slug}`, tokenHash = await sha256(token);
@@ -180,10 +181,10 @@ describe("organization deletion lifecycle", () => {
     const scope = { organizationId: r.organizationId, projectId: r.projectId };
     await expect(f.t.mutation(internal.projects.createInternal, { organizationId: r.organizationId, name: "New", slug: "new", actorId: r.actorId })).rejects.toThrow("Organization membership required");
     await expect(f.t.mutation(internal.apiKeyCredentials.createInternal, { ...scope, keyId: "new", keyPrefix: "new", name: "New", secretHash: "new", scopes: [], actorId: r.actorId })).rejects.toThrow("Organization membership required");
-    await expect(f.t.mutation(internal.publicationsV2.createInternal, { ...scope, slug: "new", entryFile: "index.html", pathPrefix: "", trackingMode: "track_active", actorId: r.actorId })).rejects.toThrow("Organization membership required");
+    await expect(publishWithProof(f.t, { ...scope, slug: "new", entryFile: "index.html", pathPrefix: "", trackingMode: "track_active", actorId: r.actorId })).rejects.toThrow("Organization membership required");
     await expect(f.t.mutation(internal.shareGrants.createInternal, { ...scope, tokenHash: "new", documentPath: "index.html", expiresAt: Date.now() + 60_000, actorId: r.actorId })).rejects.toThrow("Organization membership required");
     await expect(f.t.mutation(internal.deployments.startInternal, r.start)).rejects.toThrow("Organization membership required");
-    await expect(f.t.mutation(internal.deployments.commitInternal, { ...scope, deploymentId: r.staging.deploymentId, actorId: r.actorId })).rejects.toThrow("Organization membership required");
+    await expect(commitWithProof(f.t, { ...scope, deploymentId: r.staging.deploymentId, actorId: r.actorId })).rejects.toThrow("Organization membership required");
     expect(await f.t.query(internal.projects.getInternal, scope)).toBeNull();
     expect(await f.t.query(internal.deployments.getInternal, { ...scope, deploymentId: r.active.deploymentId })).toBeNull();
     expect(await f.t.query(internal.deployments.latestForOrganization, { organizationId: r.organizationId })).toBeNull();
@@ -301,12 +302,12 @@ describe("organization capability boundary regressions", () => {
     expect(await f.t.query(internal.deployments.getInternal, { ...scope, organizationId: "foreign", deploymentId: r.active.deploymentId })).toBeNull();
     await expect(f.t.query(internal.deployments.listInternal, { ...scope, organizationId: "foreign" })).rejects.toThrow("Project not found");
     const commit = { ...scope, deploymentId: r.staging.deploymentId, actorId: r.actorId };
-    await expect(f.t.mutation(internal.deployments.commitInternal, { ...commit, organizationId: "foreign" })).rejects.toThrow("Project not found");
-    await expect(f.t.mutation(internal.deployments.commitInternal, { ...commit, deploymentId: r.active.deploymentId })).rejects.toThrow("Only a staging");
+    await expect(commitWithProof(f.t, { ...commit, organizationId: "foreign" })).rejects.toThrow("Project not found");
+    await expect(commitWithProof(f.t, { ...commit, deploymentId: r.active.deploymentId })).rejects.toThrow("Only a staging");
     await f.t.run(ctx => ctx.db.patch(r.active.deploymentId, { status: "superseded" }));
-    await f.t.mutation(internal.deployments.commitInternal, commit);
+    await commitWithProof(f.t, commit);
     await f.t.run(ctx => ctx.db.delete(r.staging.deploymentId));
-    await expect(f.t.mutation(internal.deployments.commitInternal, commit)).rejects.toThrow("Deployment not found");
+    await expect(commitWithProof(f.t, commit)).rejects.toThrow("Deployment not found");
     await f.t.run(ctx => ctx.db.delete(r.projectId));
     expect(await f.t.query(internal.projects.getInternal, scope)).toBeNull();
     expect(await f.t.query(internal.deployments.latestForOrganization, { organizationId: r.organizationId })).toBeNull();
@@ -315,11 +316,11 @@ describe("organization capability boundary regressions", () => {
   it("enforces publication validation and rejects dangling or unavailable capabilities", async () => {
     const f = await fixture(), r = await f.seed("publication-edges");
     const args = { organizationId: r.organizationId, projectId: r.projectId, slug: "new", pathPrefix: "", entryFile: "index.html", trackingMode: "track_active" as const, actorId: r.actorId };
-    await expect(f.t.mutation(internal.publicationsV2.createInternal, { ...args, organizationId: "foreign" })).rejects.toThrow("Project not found");
-    for (const slug of ["BAD/slug", "x".repeat(81)]) await expect(f.t.mutation(internal.publicationsV2.createInternal, { ...args, slug })).rejects.toThrow("Invalid publication slug");
-    await expect(f.t.mutation(internal.publicationsV2.createInternal, { ...args, slug: r.slug })).rejects.toThrow("already in use");
-    await expect(f.t.mutation(internal.publicationsV2.createInternal, { ...args, trackingMode: "pinned" })).rejects.toThrow("requires a deployment");
-    const titled = await f.t.mutation(internal.publicationsV2.createInternal, { ...args, title: " Release ", description: " Notes " });
+    await expect(publishWithProof(f.t, { ...args, organizationId: "foreign" })).rejects.toThrow("Project not found");
+    for (const slug of ["BAD/slug", "x".repeat(81)]) await expect(publishWithProof(f.t, { ...args, slug })).rejects.toThrow("Invalid publication slug");
+    await expect(publishWithProof(f.t, { ...args, slug: r.slug })).rejects.toThrow("already in use");
+    await expect(publishWithProof(f.t, { ...args, trackingMode: "pinned" })).rejects.toThrow("requires a deployment");
+    const titled = await publishWithProof(f.t, { ...args, title: " Release ", description: " Notes " });
     expect(titled).toMatchObject({ title: "Release", description: "Notes" });
     expect(await f.t.query(internal.publicationsV2.listInternal, { organizationId: r.organizationId })).toHaveLength(3);
     const resolve = () => f.t.query(internal.publicationsV2.resolvePublicInternal, { slug: r.slug });
@@ -327,7 +328,7 @@ describe("organization capability boundary regressions", () => {
     for (const status of ["failed", "staging"] as const) {
       await f.t.run(ctx => ctx.db.patch(r.active.deploymentId, { status }));
       expect(await resolve()).toBeNull();
-      await expect(f.t.mutation(internal.publicationsV2.createInternal, { ...args, slug: "pinned", trackingMode: "pinned", pinnedDeploymentId: r.active.deploymentId })).rejects.toThrow("Pinned deployment not found");
+      await expect(publishWithProof(f.t, { ...args, slug: "pinned", trackingMode: "pinned", pinnedDeploymentId: r.active.deploymentId })).rejects.toThrow("Publication deployment not found");
       await f.t.run(ctx => ctx.db.patch(r.active.deploymentId, { status: "active" }));
       expect(await resolve()).not.toBeNull();
     }

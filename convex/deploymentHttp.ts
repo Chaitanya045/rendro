@@ -1,3 +1,4 @@
+import { STORAGE_ATTESTATION_HEADER } from "../shared/storage-attestation";
 import { apiKeyCleanupHttpAction, apiKeyHttpAction, sessionOrApiKeyHttpAction } from "./apiKeyHttp";
 import type { DataModel } from "./_generated/dataModel";
 import type { GenericActionCtx } from "convex/server";
@@ -113,6 +114,7 @@ const principal = await validateApiCredential(ctx, request, {
 if (!principal) return clientFailure("Invalid or insufficient API key", 401);
 try {
   const result = await ctx.runMutation(internal.deployments.commitInternal, {
+    attestation: request.headers.get(STORAGE_ATTESTATION_HEADER) ?? undefined,
     organizationId,
     projectId,
     deploymentId,

@@ -1,7 +1,8 @@
 import { Hono } from "hono";
 import { authClientIpHeaders } from "@/auth-client-ip";
 import { backendFetch } from "@/backend-fetch";
-import { CONVEX_SITE_URL } from "@/config";
+import { signStorageValidation, STORAGE_ATTESTATION_HEADER } from "../../shared/storage-attestation";
+import { CONVEX_INTERNAL_SECRET, CONVEX_SITE_URL } from "@/config";
 import {
   copyObject,
   getObjectText,
@@ -59,11 +60,12 @@ function forwardedHeaders(request: Request): Headers {
 async function backendRequest(
   path: string,
   request: Request,
-  init: { method: string; body?: string },
+  init: { method: string; body?: string; attestation?: string },
 ): Promise<Response> {
   const target = `${CONVEX_SITE_URL}${path}`;
   const method = init.method;
   const headers = forwardedHeaders(request);
+  if (init.attestation) headers.set(STORAGE_ATTESTATION_HEADER, init.attestation);
   (await authClientIpHeaders(request, target, method)).forEach((value, name) => headers.set(name, value));
   return backendFetch(target, {
     method,
@@ -272,6 +274,12 @@ app.post("/api/rendro/deployments/:deploymentId/commit", async (c) => {
   return backendRequest("/api/rendro/deployments/commit", c.req.raw, {
     method: "POST",
     body: JSON.stringify(identity),
+    attestation: await signStorageValidation({
+      purpose: "deployment-commit", ...identity,
+      manifestKey: staging.deployment.manifestKey,
+      manifestSha256: await sha256(JSON.stringify(manifest)),
+      fileCount: manifest.files.length,
+    }, CONVEX_INTERNAL_SECRET),
   });
 });
 

@@ -1,3 +1,4 @@
+import { STORAGE_ATTESTATION_HEADER } from "../shared/storage-attestation";
 import { requireCookieWrite } from "../shared/request-admission";
 import { publicPublication } from "../shared/resolver-dto";
 import { isWorkerResolverRequest } from "../shared/resolver-auth";
@@ -17,6 +18,7 @@ async function publicationPrincipal(
     projectId?: string;
     scope: "publications:read" | "publications:write";
     write: boolean;
+    requireDocsRead?: boolean;
   },
 ): Promise<{ actorId: string } | null> {
   const apiPrincipal = await validateApiCredential(ctx, request, {
@@ -24,7 +26,9 @@ async function publicationPrincipal(
     projectId: input.projectId,
     requiredScope: input.scope,
   });
-  if (apiPrincipal) return { actorId: `api-key:${apiPrincipal.keyId}` };
+  if (apiPrincipal && (!input.requireDocsRead || await validateApiCredential(ctx, request, {
+    organizationId: input.organizationId, projectId: input.projectId, requiredScope: "docs:read",
+  }))) return { actorId: `api-key:${apiPrincipal.keyId}` };
   // A missing, invalid, or insufficient key may fall back to session authority.
   if (input.write) requireCookieWrite(request, process.env.SITE_URL);
   try {
@@ -71,10 +75,12 @@ export const createPublication = sessionOrApiKeyHttpAction(async (ctx: GenericAc
     projectId,
     scope: "publications:write",
     write: true,
+    requireDocsRead: true,
   });
   if (!principal) return clientFailure("Invalid or insufficient principal", 403);
   try {
     const publication = await ctx.runMutation(internal.publicationsV2.createInternal, {
+      attestation: request.headers.get(STORAGE_ATTESTATION_HEADER) ?? undefined,
       organizationId,
       projectId,
       slug,
