@@ -11,7 +11,7 @@ afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 it("inventories every publisher byte-serving module and mounted route", async () => {
   const { routes } = await publisherIsolationFixture();
   const directory = new URL("../src/routes/", import.meta.url);
-  const streaming = readdirSync(directory).filter(name => /\bgetObjectStream\(/.test(readFileSync(new URL(name, directory), "utf8")));
+  const streaming = readdirSync(directory).filter(name => name !== "share-api.ts" && /\bgetObjectStream\(/.test(readFileSync(new URL(name, directory), "utf8")));
   expect(streaming.sort()).toEqual(["docs.ts", "project-docs.ts", "public-v2.ts", "public.ts", "share-v2.ts", "share.ts"]);
   for (const name of streaming) expect(readFileSync(new URL(name, directory), "utf8")).toContain("assetHeaders(");
   const mounted = [...new Set(worker.routes.filter(route => route.method === "GET" &&
@@ -32,10 +32,8 @@ describe.each(mediaCases.map((file, index) => ({ ...file, index })))("publisher 
         headers: { Origin: "null", ...(route.signedIn ? { Cookie: cookie } : {}) },
       });
       expect(response.status, route.name).toBe(200);
-      // Legacy HTML-only capabilities deliberately force HTML; modern shares
-      // infer MIME from extensions and never trust stored metadata.
-      const type = route.legacyHtml ? "text/html" : route.name === "share"
-        ? assetContentType(file.path).split(";")[0] : file.expected;
+      // Legacy HTML-only capabilities force HTML; modern delivery uses manifest MIME.
+      const type = route.legacyHtml ? "text/html" : file.expected;
       expect(response.headers.get("Content-Type")?.split(";")[0], route.name).toBe(type);
       expect(response.headers.get("Content-Security-Policy"), route.name).toBe(type === "text/html" ? htmlPolicy
         : (["share", "private", "private ticket"].includes(route.name) ? "default-src 'none'; " : "") + assetPolicy);

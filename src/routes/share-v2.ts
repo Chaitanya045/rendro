@@ -1,4 +1,6 @@
 import { authClientIpHeaders } from "@/auth-client-ip";
+import { parseStoredManifest } from "@/stored-manifest";
+import { isShareDocument } from "@/share-assets";
 import type { WorkerShare } from "../../shared/resolver-dto";
 import { signResolverRequest } from "../../shared/resolver-auth";
 import { ViewerBackendError, viewerBackendJson } from "@/viewer-backend";
@@ -6,14 +8,14 @@ import { viewerErrorCache, viewerErrorResponse } from "@/routes/viewer-unavailab
 import { decodeStoragePath } from "@/storage-boundary";
 import { validDocumentSearch } from "@/lazy-tree/messages";
 import { escapeHtml } from "@/routes/html";
-import { assetContentType, assetError, assetHeaders } from "@/routes/asset-headers";
+import { normalizeMediaType, assetError, assetHeaders } from "@/routes/asset-headers";
 import { nonceAttribute } from "@/middleware/html-nonce";
 import { viewerScript } from "@/viewer/markup";
 import { renderFaviconLinks } from "./favicon";
 import { renderThemeAssets } from "./theme";
 import { Hono } from "hono";
 import { CONVEX_INTERNAL_SECRET, CONVEX_SITE_URL } from "@/config";
-import { getObjectStream } from "@/minio";
+import { getObjectStream, getObjectText } from "@/minio";
 import { renderNotFoundPage } from "@/routes/not-found";
 import { injectMobileViewportScrollbarStream, injectViewerHeadStream } from "@/routes/document-html";
 
@@ -37,21 +39,26 @@ app.get("/s/:token/files/*", async (c) => {
   if (!resolution || !path) return assetError(c, () => renderNotFoundPage({ path: "Document unavailable" }));
   const documentPath = resolution.grant.documentPath;
   const directory = documentPath.includes("/") ? documentPath.slice(0, documentPath.lastIndexOf("/") + 1) : "";
-  const type = assetContentType(path);
+  const manifest = parseStoredManifest(await getObjectText(resolution.deployment.manifestKey));
+  const entry = manifest?.files.find(file => file.path === path);
+  if (!entry) return assetError(c, () => renderNotFoundPage({ path: "Document unavailable" }));
+  const type = normalizeMediaType(entry.contentType);
   const isExactDocument = path === documentPath;
-  const isSameTreeAsset = !type.startsWith("text/html") && path.startsWith(directory);
-  if (!isExactDocument && !isSameTreeAsset) return assetError(c, () => renderNotFoundPage({ path: "Document unavailable" }));
+  const allowedAsset = !isShareDocument(type) && (resolution.grant.assetPaths === undefined
+    ? path.slice(0, path.lastIndexOf("/") + 1) === directory && (type === "text/css" || type.startsWith("image/") || type.startsWith("font/"))
+    : resolution.grant.assetPaths.includes(path));
+  if (!isExactDocument && !allowedAsset) return assetError(c, () => renderNotFoundPage({ path: "Document unavailable" }));
   const key = `${resolution.deployment.manifestKey.slice(0, -"manifest.json".length)}files/${path}`;
   const stream = await getObjectStream(key);
   if (!stream) return assetError(c, () => renderNotFoundPage({ path: "Document unavailable" }));
-  const body = type.startsWith("text/html")
+  const body = type === "text/html"
     ? injectViewerHeadStream(injectMobileViewportScrollbarStream(stream), () => viewerScript("navigation", {
       prefix: `/s/${encodeURIComponent(c.req.param("token"))}/files/`, documentPath, singleDocument: true,
     }, c.req.url)) : stream;
   return new Response(body, {
     headers: {
       "Cache-Control": "private, no-store",
-      ...assetHeaders(path, true, type, true),
+      ...assetHeaders(path, true, entry.contentType, true),
       "Referrer-Policy": "no-referrer",
       "X-Robots-Tag": "noindex, nofollow, noarchive",
     },

@@ -1,4 +1,4 @@
-import { commitWithProof, publishWithProof } from "./helpers/storage-proof";
+import { shareWithProof, commitWithProof, publishWithProof } from "./helpers/storage-proof";
 import { createHmac } from "node:crypto";
 import { betterAuth } from "better-auth/minimal";
 import { convexTest } from "convex-test";
@@ -68,10 +68,10 @@ async function fixture(transactionLimits: { documentsWritten: number } | boolean
       ...scope, slug: `${slug}-pinned`, pathPrefix: "", entryFile: "index.html", trackingMode: "pinned", pinnedDeploymentId: first.deploymentId, actorId,
     });
     const token = `share-${slug}`, tokenHash = await sha256(token);
-    const share = (await t.mutation(internal.shareGrants.createInternal, {
+    const share = (await shareWithProof(t, {
       ...scope, documentPath: "index.html", tokenHash, expiresAt: Date.now() + 60_000, actorId,
     }))!;
-    const revoked = (await t.mutation(internal.shareGrants.createInternal, {
+    const revoked = (await shareWithProof(t, {
       ...scope, documentPath: "index.html", tokenHash: `revoked-${slug}`, expiresAt: Date.now() + 60_000, actorId,
     }))!;
     await t.run(ctx => ctx.db.patch(revoked._id, { revokedAt: 1 }));
@@ -191,7 +191,7 @@ describe("organization deletion lifecycle", () => {
     await expect(f.t.mutation(internal.projects.createInternal, { organizationId: r.organizationId, name: "New", slug: "new", actorId: r.actorId })).rejects.toThrow("Organization membership required");
     await expect(f.t.mutation(internal.apiKeyCredentials.createInternal, { ...scope, keyId: "new", keyPrefix: "new", name: "New", secretHash: "new", scopes: [], actorId: r.actorId })).rejects.toThrow("Organization membership required");
     await expect(publishWithProof(f.t, { ...scope, slug: "new", entryFile: "index.html", pathPrefix: "", trackingMode: "track_active", actorId: r.actorId })).rejects.toThrow("Organization membership required");
-    await expect(f.t.mutation(internal.shareGrants.createInternal, { ...scope, tokenHash: "new", documentPath: "index.html", expiresAt: Date.now() + 60_000, actorId: r.actorId })).rejects.toThrow("Organization membership required");
+    await expect(shareWithProof(f.t, { ...scope, tokenHash: "new", documentPath: "index.html", expiresAt: Date.now() + 60_000, actorId: r.actorId })).rejects.toThrow("Organization membership required");
     await expect(f.t.mutation(internal.deployments.startInternal, r.start)).rejects.toThrow("Organization membership required");
     await expect(commitWithProof(f.t, { ...scope, deploymentId: r.staging.deploymentId, actorId: r.actorId })).rejects.toThrow("Organization membership required");
     await expect(f.t.mutation(internal.deployments.refreshStagingInternal, { ...scope, deploymentId: r.staging.deploymentId })).rejects.toThrow("Organization membership required");
@@ -372,7 +372,7 @@ describe("organization capability boundary regressions", () => {
     expect(await f.t.run(ctx => ctx.db.get(r.share._id))).toEqual(first);
     await f.t.run(ctx => ctx.db.delete(r.share._id));
     await expect(f.t.mutation(internal.shareGrants.revokeInternal, revoke)).rejects.toThrow("Share not found");
-    const valid = (await f.t.mutation(internal.shareGrants.createInternal, args))!;
+    const valid = (await shareWithProof(f.t, args))!;
     const resolve = () => f.t.query(internal.shareGrants.resolveInternal, { tokenHash: args.tokenHash });
     expect(await resolve()).not.toBeNull();
     for (const status of ["failed", "staging"] as const) {
@@ -389,7 +389,7 @@ describe("organization capability boundary regressions", () => {
     const f = await fixture(), r = await f.seed("share-missing");
     const resolve = () => f.t.query(internal.shareGrants.resolveInternal, { tokenHash: r.tokenHash });
     expect(await resolve()).toEqual({
-      grant: { documentPath: r.share.documentPath, expiresAt: r.share.expiresAt },
+      grant: { assetPaths: [], documentPath: r.share.documentPath, expiresAt: r.share.expiresAt },
       deployment: { manifestKey: r.active.manifestKey },
       project: { name: (await f.t.run(ctx => ctx.db.get(r.projectId)))!.name },
     });

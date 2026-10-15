@@ -1,5 +1,5 @@
 import { STORAGE_ATTESTATION_HEADER } from "../../shared/storage-attestation";
-import { commitWithProof, publishWithProof, publicationProof } from "./storage-proof";
+import { shareWithProof, shareProof, commitWithProof, publishWithProof, publicationProof } from "./storage-proof";
 import { createHmac } from "node:crypto";
 import { convexTest } from "convex-test";
 import schema from "../../convex/schema";
@@ -44,22 +44,23 @@ export async function cookieWriteFixture() {
   const publication = await publishWithProof(backend, {
     organizationId, projectId, slug: "existing", pathPrefix: "", entryFile: "index.html", trackingMode: "track_active", actorId: user._id,
   });
-  const grant = await backend.mutation(internal.shareGrants.createInternal, {
+  const grant = await shareWithProof(backend, {
     organizationId, projectId, documentPath: "index.html", tokenHash: "grant", expiresAt: now + 600_000, actorId: user._id,
   });
   const bodies: Record<string, object> = {
     "/api/rendro/projects": { organizationId, name: "New", slug: "new" },
     "/api/rendro/credentials": { organizationId, name: "New", scopes: ["docs:read"] },
     "/api/rendro/credentials/revoke": { organizationId, keyId: "key" },
-    "/api/rendro/shares": { organizationId, projectId, documentPath: "index.html", expiresInSeconds: 600 },
+    "/api/rendro/shares": { organizationId, projectId, documentPath: "index.html", assetPaths: [], expiresInSeconds: 600 },
     "/api/rendro/shares/revoke": { organizationId, grantId: grant!._id },
     "/api/rendro/publications": { organizationId, projectId, slug: "new", pathPrefix: "", entryFile: "index.html", trackingMode: "track_active" },
     "/api/rendro/publications/remove": { organizationId, projectId, publicationId: publication!._id },
     "/api/auth/set-initial-password": { newPassword: "local-test-initial-password" },
   };
   const proof = await publicationProof(backend, { organizationId, projectId, pathPrefix: "", entryFile: "index.html", trackingMode: "track_active" });
+  const shareAttestation = await shareProof(backend, { projectId, documentPath: "index.html", assetPaths: [] });
   const post = (path: string, overrides: Record<string, string> = {}) => backend.fetch(path, {
-    method: "POST", headers: admissionHeaders({ cookie, [STORAGE_ATTESTATION_HEADER]: proof!, ...overrides }), body: JSON.stringify(bodies[path]),
+    method: "POST", headers: admissionHeaders({ cookie, [STORAGE_ATTESTATION_HEADER]: (path === "/api/rendro/shares" ? shareAttestation : proof)!, ...overrides }), body: JSON.stringify(bodies[path]),
   });
   return { backend, post, bodies, session, user, cookie, organizationId, projectId };
 }

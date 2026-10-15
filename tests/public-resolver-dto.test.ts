@@ -1,4 +1,4 @@
-import { commitWithProof, publishWithProof } from "./helpers/storage-proof";
+import { shareWithProof, commitWithProof, publishWithProof } from "./helpers/storage-proof";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { convexTest } from "convex-test";
 import rateLimiterTest from "./convex-rate-limiter";
@@ -30,7 +30,7 @@ async function fixture(inputProvenance = provenance) {
   const deployment = await t.mutation(internal.deployments.startInternal, { ...scope, manifestSha256: "a".repeat(64), fileCount: 1, byteCount: 1, provenance: inputProvenance, actorId: "private-actor" });
   await commitWithProof(t, { ...scope, deploymentId: deployment.deploymentId, actorId: "private-actor" });
   const publication = (await publishWithProof(t, { ...scope, slug: "docs", entryFile: "index.html", pathPrefix: "private-prefix", trackingMode: "track_active", title: "Public docs", description: "private-description", actorId: "private-creator" }))!;
-  const grant = (await t.mutation(internal.shareGrants.createInternal, { ...scope, tokenHash: await sha256("synthetic-share-token"), documentPath: "index.html", expiresAt: Date.now() + 600_000, actorId: "private-creator" }))!;
+  const grant = (await shareWithProof(t, { ...scope, tokenHash: await sha256("synthetic-share-token"), documentPath: "index.html", expiresAt: Date.now() + 600_000, actorId: "private-creator" }))!;
   const publicPublication = { publication: { slug: "docs", entryFile: "index.html", title: "Public docs" } };
   const publicShare = { grant: { documentPath: "index.html", expiresAt: grant.expiresAt }, project: { name: "Docs" } };
   return { t, scope, deployment, publication, grant, publicPublication, publicShare };
@@ -57,7 +57,7 @@ describe("minimal publication/share resolver responses", () => {
       }
     }
     const workerPublication = { publication: { ...f.publicPublication.publication, pathPrefix: "private-prefix" }, deployment: { manifestKey: f.deployment.manifestKey } };
-    const workerShare = { ...f.publicShare, deployment: { manifestKey: f.deployment.manifestKey } };
+    const workerShare = { ...f.publicShare, grant: { ...f.publicShare.grant, assetPaths: [] }, deployment: { manifestKey: f.deployment.manifestKey } };
     expect(await f.t.query(internal.publicationsV2.resolvePublicInternal, { slug: "DOCS" })).toEqual(workerPublication);
     expect(await f.t.query(internal.shareGrants.resolveInternal, { tokenHash: f.grant.tokenHash })).toEqual(workerShare);
     expect(await (await f.t.fetch(pubPath, { headers: await signed(pubPath) })).json()).toEqual(workerPublication);
@@ -114,7 +114,7 @@ describe("minimal publication/share resolver responses", () => {
   it("renders shells, trees and files through the actual signed resolver contract", async () => {
     const f = await fixture();
     vi.stubGlobal("fetch", vi.fn((input: string, init?: RequestInit) => { const u = new URL(input); return f.t.fetch(u.pathname + u.search, init); }));
-    vi.spyOn(storage, "getObjectText").mockResolvedValue(JSON.stringify({ version: 1, files: [{ path: "private-prefix/index.html", sha256: "sha", size: 1, contentType: "text/html" }] }));
+    vi.spyOn(storage, "getObjectText").mockResolvedValue(JSON.stringify({ version: 1, files: [{ path: "index.html", contentType: "text/html" }, { path: "private-prefix/index.html", sha256: "sha", size: 1, contentType: "text/html" }] }));
     const stream = vi.spyOn(storage, "getObjectStream").mockImplementation(() => Promise.resolve(new Response("<html><body>Docs</body></html>").body));
     for (const path of ["/p/docs", "/p/docs/tree", "/p/docs/files/index.html"]) {
       const response = await publicRoutes.request(path);

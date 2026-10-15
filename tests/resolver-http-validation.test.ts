@@ -5,7 +5,7 @@ import { createPublication, removePublication, listPublications } from "../conve
 import { createShareGrant, revokeShareGrant, listShareGrants } from "../convex/shareGrantHttp";
 
 const publication = { organizationId: "org", projectId: "project", slug: "docs", pathPrefix: "", entryFile: "index.html", trackingMode: "track_active" };
-const share = { organizationId: "org", projectId: "project", documentPath: "index.html", expiresInSeconds: 60 };
+const share = { assetPaths: [], organizationId: "org", projectId: "project", documentPath: "index.html", expiresInSeconds: 60 };
 type Action = typeof createPublication;
 async function invoke(action: Action, body?: unknown, query = "", rawBody?: string, mutationResult: unknown = { slug: "docs" }) {
   const ctx = { runQuery: vi.fn().mockResolvedValue([]), runMutation: vi.fn().mockResolvedValue(mutationResult) };

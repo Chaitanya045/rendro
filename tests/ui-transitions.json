@@ -441,6 +441,10 @@
       "reason": "JSON API or upload/mutation response consumed by controllers/CLI; not a standalone HTML page."
     },
     {
+      "route": "POST /api/rendro/shares",
+      "reason": "JSON share creation API; not a standalone HTML page."
+    },
+    {
       "route": "POST /api/rendro/publications",
       "reason": "JSON API or upload/mutation response consumed by controllers/CLI; not a standalone HTML page."
     },

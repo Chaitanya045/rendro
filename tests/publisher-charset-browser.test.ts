@@ -21,7 +21,7 @@ beforeAll(async () => {
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 describe.each(["stored charset", "in-band charset"])("%s", mode => {
-  it.each(["public", "private", "private ticket", "legacy private", "legacy ticket"])(
+  it.each(["share", "public", "private", "private ticket", "legacy private", "legacy ticket"])(
     "renders a Windows-1252 non-ASCII CSS selector through %s", async name => {
       const { routes } = await publisherIsolationFixture();
       const cssType = mode === "stored charset" ? "text/css; charset=windows-1252" : "text/css";
@@ -52,7 +52,7 @@ describe.each(["stored charset", "in-band charset"])("%s", mode => {
     },
   );
 
-  it.each(["private", "private ticket", "legacy private", "legacy ticket"])(
+  it.each(["share", "private", "private ticket", "legacy private", "legacy ticket"])(
     "preserves Windows-1252 HTML rendering through %s", async name => {
       const { routes } = await publisherIsolationFixture();
       const htmlType = mode === "stored charset" ? "text/html; charset=windows-1252" : "text/html";

@@ -44,7 +44,7 @@ export function mockSecurityBackend() {
     if (url.pathname.endsWith("/get-session")) result = { user: testUser, session: { id: "session-a", expiresAt: Date.now() + 60_000 } };
     else if (url.pathname.endsWith("/deployments/active")) result = { project: { name: "Test project" }, deployment: { manifestKey } };
     else if (url.pathname.endsWith("/publications/public")) result = { publication: { slug: "product", pathPrefix: "", entryFile: "index.html" }, project: { name: "Product" }, deployment: { manifestKey } };
-    else if (url.pathname.endsWith("/shares/public")) result = { grant: { documentPath: "index.html", expiresAt: Date.now() + 60_000 }, project: { name: "Product" }, deployment: { manifestKey } };
+    else if (url.pathname.endsWith("/shares/public")) result = { grant: { documentPath: "index.html", assetPaths: ["assets/site.css"], expiresAt: Date.now() + 60_000 }, project: { name: "Product" }, deployment: { manifestKey } };
     else if (url.pathname.endsWith("/organization/list")) result = [{ id: "org-a", name: "Test organization", slug: "test" }];
     else if (url.pathname.endsWith("/organization/get-full-organization")) result = organization;
     else if (url.pathname.endsWith("/organization/get-invitation") && url.searchParams.get("id") === "test") result = {

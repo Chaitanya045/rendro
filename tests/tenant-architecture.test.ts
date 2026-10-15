@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import type { User } from "better-auth/types";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import publicRoutes from "@/routes/public-v2";
 import shareRoutes from "@/routes/share-v2";
 import publicationApiRoutes from "@/routes/publication-api";
@@ -179,7 +179,12 @@ describe("revocable private shares", () => {
     project: { name: "Private guide" },
   };
 
-  it("allows the exact HTML document and same-tree assets but not another HTML document", async () => {
+  beforeEach(() => {
+    vi.spyOn(minio, "getObjectText").mockResolvedValue(JSON.stringify({ files: [
+      { path: "guide/index.html", contentType: "text/html" }, { path: "guide/app.css", contentType: "text/css" },
+    ] }));
+  });
+  it("allows the exact HTML document and legacy same-directory assets but not another HTML document", async () => {
     vi.stubGlobal("fetch", vi.fn().mockImplementation(() => Promise.resolve(jsonResponse(resolution))));
     const read = vi.spyOn(minio, "getObjectStream").mockImplementation(() => Promise.resolve(stream()));
     const document = await shareRoutes.request("/s/token/files/guide/index.html");

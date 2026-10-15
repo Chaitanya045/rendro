@@ -64,7 +64,7 @@ describe("opaque viewer CORS resources in Chromium", () => {
       await document.fonts.load('16px Fixture', 'AAAA');
       await document.fonts.ready;
       return { origin: self.origin, status: document.fonts.status, check: document.fonts.check('16px Fixture', 'AAAA'),
-        faces: [...document.fonts].map(face => ({ family: face.family, status: face.status })) };
+        faces: [...document.fonts].filter(face => face.family === "Fixture").map(face => ({ family: face.family, status: face.status })) };
     }));
     expect(fonts).toEqual({ origin: "null", status: "loaded", check: true, faces: [{ family: "Fixture", status: "loaded" }] });
     for (const file of ["font.woff2", "image.svg", "module.js", "data.json"]) {

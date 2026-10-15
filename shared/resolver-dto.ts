@@ -12,7 +12,10 @@ export type WorkerPublication = PublicPublication & {
   publication: PublicPublication["publication"] & { pathPrefix: string };
   deployment: { manifestKey: string };
 };
-export type WorkerShare = PublicShare & { deployment: { manifestKey: string } };
+export type WorkerShare = PublicShare & {
+  grant: PublicShare["grant"] & { assetPaths?: string[] };
+  deployment: { manifestKey: string };
+};
 
 export function publicPublication(result: WorkerPublication): PublicPublication {
   return { publication: {

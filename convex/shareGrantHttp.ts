@@ -1,4 +1,6 @@
 import { anonymousHttpAction } from "./anonymousAdmission";
+import { STORAGE_ATTESTATION_HEADER } from "../shared/storage-attestation";
+import { validShareAssets } from "../shared/share-assets";
 import { publicShare } from "../shared/resolver-dto";
 import { isWorkerResolverRequest } from "../shared/resolver-auth";
 import { internal } from "./_generated/api";
@@ -36,11 +38,15 @@ export const createShareGrant = httpAction(async (ctx, request) => {
   ) return clientFailure("Invalid share fields");
   try {
     const { user } = await authorizeHttpOrganization(ctx, request.headers, organizationId);
+    const assetPaths = "assetPaths" in body ? body.assetPaths : undefined;
+    if (!validShareAssets(assetPaths)) return clientFailure("Worker share asset validation is required");
     const token = randomToken();
     const grant = await ctx.runMutation(internal.shareGrants.createInternal, {
       organizationId,
       projectId,
       documentPath,
+      assetPaths,
+      attestation: request.headers.get(STORAGE_ATTESTATION_HEADER) ?? undefined,
       tokenHash: await sha256(token),
       expiresAt: Date.now() + expiresInSeconds * 1000,
       actorId: user._id,
