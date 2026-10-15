@@ -1,4 +1,97 @@
-# Chromium tests
+# Browser tests
+
+There are two independent layers. The **Vitest browser project** below runs
+focused Chromium tests against Node HTTP fixtures, including real Worker route
+handlers where useful. **Playwright Test E2E** runs the actual `src/worker.ts` in
+workerd with Chromium, Firefox, and WebKit. It exercises Worker bundling,
+compatibility flags, HTTP, the ASSETS binding, browser CSP enforcement and the
+S3 client together. Neither layer replaces the other.
+
+## Playwright Test E2E (#108)
+
+```sh
+pnpm install --frozen-lockfile
+pnpm exec playwright install --with-deps chromium firefox webkit
+# Run one engine at a time on shared machines:
+VITEST_MAX_WORKERS=2 pnpm e2e --project=chromium
+VITEST_MAX_WORKERS=2 pnpm e2e --project=firefox
+VITEST_MAX_WORKERS=2 pnpm e2e --project=webkit
+# All three, still sequential (one Playwright worker):
+VITEST_MAX_WORKERS=2 pnpm e2e
+```
+
+`e2e/playwright.config.ts` owns the projects and global setup. Setup rebuilds
+browser assets every run so ignored bundles cannot silently be stale, then uses
+Wrangler **4.149.0**'s `createTestHarness().listen()` to start the real Worker.
+The harness uses the same local workerd development runtime as `wrangler dev`;
+it does not import the Worker into Node or replace its route handlers. A temporary
+copy of `wrangler.toml` relocates only the entry point and asset directory to
+absolute paths, preserving the production compatibility date, `nodejs_compat`,
+ASSETS binding and `run_worker_first`. `NODE_ENV` remains `production`.
+
+We evaluated both APIs exposed by the locked Wrangler version.
+[`createTestHarness`](https://developers.cloudflare.com/workers/wrangler/api/)
+already supplies a reachable ephemeral loopback URL, disables watching and
+persistent state, and owns runtime teardown. `unstable_startWorker` exposes
+more development-server internals; spawning `wrangler dev` would require
+additional subprocess, port and readiness management. The test-specific API
+therefore fits this slice. Its outbound transport delegates to
+`globalThis.fetch` in this locked version; setup guards that transport to permit
+only the fixture and Worker origins, rejects redirects, and fails teardown on
+unexpected destinations. Recheck this behavior when upgrading Wrangler.
+
+All servers bind to port 0 on loopback. Setup checks the real `/health` response
+over HTTP before starting tests. The returned teardown closes workerd and both
+fixture servers and removes the temporary configuration/state, including when
+setup or a test fails. An empty temporary `.dev.vars` and disabled dotenv loading
+prevent local credentials from being loaded. All authentication/storage secrets
+are generated afresh (at least 48 characters); no account or deployed endpoint
+is used. Do not set a production base URL for this suite.
+
+**Temporary backend boundary:** `e2e/services.ts` is a small Convex HTTP stub
+for anonymous sessions and one public publication. Its local S3-compatible
+fixture implements read-only GET/HEAD, Content-Length/ETag and XML not-found
+responses; the real AWS SDK signs requests and reads objects over HTTP. It
+checks the synthetic access-key identifier, not the full signature. It is not
+a MinIO/R2 conformance test. Unexpected Convex endpoints return 501 instead of
+plausible successes. A missing manifest entry and a missing stored object are
+both tested. #109 replaces these stubs with a real local Convex backend,
+storage service and mail fixtures; authentication, backend authorization,
+mutations and subscriptions are **not** established by these smoke tests.
+
+The shared Playwright fixture blocks service workers, WebSockets, and requests
+outside the Worker origin. Font CSS and the existing Tailwind CDN reference
+are fulfilled locally with deterministic minimal responses, never downloaded.
+Unexpected origins fail the test. Specs use browser navigation/fetch; Playwright
+`APIRequestContext` does not pass through browser routing and must not be used
+for arbitrary external requests.
+
+Smoke assertions cover landing nonce freshness and CSP violations, sign-in
+rendering, public HTML with an opaque origin and working local SVG, direct SVG
+isolation, and 404 MIME behavior. Asset failures intentionally have **no
+Content-Type and an empty body**; missing HTML documents retain styled HTML.
+These are transport/security smoke tests, not visual fidelity assertions.
+
+Local retries are zero. CI permits one diagnostic retry, prints each attempt,
+and uses `failOnFlakyTests` so a passing retry cannot hide a first failure.
+[`retain-on-failure`](https://playwright.dev/docs/trace-viewer) records the
+original failed attempt even without retries. The separate `e2e` job in
+`quality.yml` installs all three engines and uploads traces, failure screenshots
+and the HTML report for seven days. Open a trace with
+`pnpm exec playwright show-trace test-results/e2e/<test>/trace.zip`.
+`pnpm verify` continues to run the existing Vitest layers independently.
+`e2e/` is typechecked/linted test infrastructure, outside the production
+coverage denominator; no production code or build script is added by this harness.
+
+The next slices extend this foundation: #109 real local services; #110 shell,
+navigation, menus, dialogs and selects; #111 authentication and account recovery;
+#112 organizations, onboarding, people/invitations and teams; #113 projects,
+deployments, API keys, shares and publications; #114 document tree/viewer/link
+confirmation; #115 comments and recovery. The transition registry's `e2e`
+status still requires the complete local backend stack, so these stub-backed
+smokes do not promote all those journeys to complete E2E coverage.
+
+## Vitest Chromium project
 
 Run `pnpm exec playwright install chromium`, then `CI=true pnpm test:browser`.
 `pnpm test` and `pnpm verify` include both projects. On Linux, use

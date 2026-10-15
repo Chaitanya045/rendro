@@ -52,7 +52,8 @@
     "init:minio": "tsx --env-file=.env scripts/init-minio.ts",
     "migrate:legacy": "tsx --env-file-if-exists=.env scripts/migrate-legacy-tenancy.ts",
     "cleanup:retention": "tsx --env-file-if-exists=.env scripts/cleanup-retention.ts",
-    "deploy": "pnpm build:assets && wrangler deploy --config wrangler.toml"
+    "deploy": "pnpm build:assets && wrangler deploy --config wrangler.toml",
+    "e2e": "playwright test --config e2e/playwright.config.ts"
   },
   "devDependencies": {
     "@aws-sdk/client-s3": "^3.600.0",
@@ -63,6 +64,7 @@
     "@csstools/css-tokenizer": "^4.0.2",
     "@eslint/js": "^10.0.1",
     "@hono/node-server": "^2.1.1",
+    "@playwright/test": "1.64.0",
     "@tanstack/query-core": "^5.102.8",
     "@tanstack/query-persist-client-core": "5.102.8",
     "@types/node": "^20.14.0",

@@ -33,6 +33,8 @@ export default tseslint.config(
   {
     ignores: [
       ".wrangler/**",
+      "test-results/**",
+      "playwright-report/**",
       "bin/**",
       "convex/_generated/**",
       "convex/betterAuth/_generated/**",

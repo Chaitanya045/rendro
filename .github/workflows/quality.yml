@@ -34,3 +34,30 @@ jobs:
           ASSET_VERSION_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
       # No credentials or deployed test-user creation in untrusted PR jobs.
       - run: pnpm audit --audit-level=high
+
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      VITEST_MAX_WORKERS: "2"
+      WRANGLER_SEND_METRICS: "false"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec playwright install --with-deps chromium firefox webkit
+      # One worker runs the engines sequentially; no credentials or deployed services.
+      - run: pnpm e2e
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: workerd-e2e-failures
+          path: |
+            test-results/e2e/
+            playwright-report/
+          retention-days: 7
+          if-no-files-found: warn

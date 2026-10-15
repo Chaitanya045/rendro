@@ -817,11 +817,20 @@ Both production (top-level) and `development` declare the same required secrets:
 
 | Workflow | Trigger | Runs |
 |---|---|---|
-| `.github/workflows/quality.yml` | Pull requests, pushes to `main`/`development`, manual | `pnpm verify` and `pnpm audit --audit-level=high`, read-only permissions, no deployment credentials |
+| `.github/workflows/quality.yml` | Pull requests, pushes to `main`/`development`, manual | Independent `verify` (`pnpm verify`, dependency audit) and `e2e` (Playwright Test/workerd, three browser engines) jobs; read-only permissions, no deployment credentials |
 | `.github/workflows/release.yml` | `v*` tags | Builds `bin/rendro.mjs` and attaches it to a GitHub release |
 | `.github/workflows/retention.yml` | Daily cron, manual | `pnpm cleanup:retention` |
 
 No workflow deploys the Worker or Convex, or publishes to npm.
+
+`pnpm e2e` starts the real Worker through Wrangler's `createTestHarness`, with
+the production compatibility flags and static-asset configuration, isolated
+loopback ports, generated test secrets, and guarded outbound requests. The
+initial #108 smoke suite uses temporary Convex HTTP and read-only S3 fixtures;
+#109 supplies the real local backend/storage/mail layer. It complements the
+existing Vitest Chromium project, and runs one browser engine at a time.
+See [the two browser test layers](BROWSER_TESTS.md) for setup, limitations,
+failure traces and the #110–#115 journey expansion.
 
 The UI transition registry in `tests/ui-transitions.json` records behavior and
 assertion evidence for epic #99. Its validator runs in `pnpm verify` and checks
