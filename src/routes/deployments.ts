@@ -1,6 +1,8 @@
-import { deploymentWriteSignal } from "@/deployment-lease";
+import { deploymentWriteSignal, readDeploymentBody } from "@/deployment-lease";
 import { Hono } from "hono";
+import { HTTPException } from "hono/http-exception";
 import { authClientIpHeaders } from "@/auth-client-ip";
+import { logger } from "@/logger";
 import { backendFetch } from "@/backend-fetch";
 import { signStorageValidation, STORAGE_ATTESTATION_HEADER } from "../../shared/storage-attestation";
 import { CONVEX_INTERNAL_SECRET, CONVEX_SITE_URL } from "@/config";
@@ -11,12 +13,16 @@ import {
   listAllKeys,
   putObject,
 } from "@/minio";
-import { readExactBody } from "@/bounded-body";
 import { MAX_REUSED_FILES_PER_REQUEST } from "../../shared/deployment-limits";
 import { decodeStoragePath } from "../../shared/storage-path";
 import { cleanDeploymentPath } from "../../shared/v2-paths";
 
 const app = new Hono();
+app.onError((error, c) => {
+  if (error instanceof HTTPException) return error.getResponse();
+  logger.error({ errorType: error.name }, "Deployment request failed");
+  return c.json({ error: "Internal server error" }, 500);
+});
 
 type ManifestFile = {
   path: string;
@@ -206,16 +212,18 @@ app.put("/api/rendro/deployments/:deploymentId/files/*", async (c) => {
       return c.json({ error: "Uploaded file size does not match its manifest entry" }, 413);
     }
   }
-  const bytes = await readExactBody(c.req.raw.body, expected.size);
+  const bytes = await readDeploymentBody(c.req.raw.body, expected.size, () => stagingDeployment(c.req.raw, identity));
   if (!bytes || await sha256(bytes) !== expected.sha256) {
     return c.json({ error: "Uploaded file does not match its manifest entry" }, 400);
   }
+  const current = await stagingDeployment(c.req.raw, identity);
+  if (current instanceof Response) return current;
   await putObject(
     `${objectRoot(identity)}/files/${filePath}`,
     bytes,
     expected.contentType,
     { sha256: expected.sha256 },
-    deploymentWriteSignal(staging.deployment.stagingExpiresAt),
+    deploymentWriteSignal(current.deployment.stagingExpiresAt),
   );
   return c.json({ uploaded: filePath });
 });
@@ -244,19 +252,20 @@ app.post("/api/rendro/deployments/:deploymentId/copy", async (c) => {
   if (!manifest) return c.json({ error: "Deployment manifest not found" }, 404);
   const expectedByPath = new Map(manifest.files.map((file) => [file.path, file]));
   const previousRoot = objectRoot({ ...identity, deploymentId: staging.deployment.previousDeploymentId });
-  for (let start = 0; start < paths.length; start += 32) {
-    const batch = paths.slice(start, start + 32) as string[];
-    await Promise.all(batch.map(async (path) => {
-      const expected = expectedByPath.get(path);
-      if (!expected) throw new Error(`File ${path} is not present in the manifest`);
-      const source = `${previousRoot}/files/${path}`;
-      const sourceMetadata = await headObject(source);
-      if (!sourceMetadata || sourceMetadata.size !== expected.size || sourceMetadata.metadata?.sha256 !== expected.sha256) {
-        throw new Error(`File ${path} cannot be reused from the previous deployment`);
-      }
-      await copyObject(source, `${objectRoot(identity)}/files/${path}`, deploymentWriteSignal(staging.deployment.stagingExpiresAt));
-    }));
-  }
+  const copies = await Promise.all((paths as string[]).map(async (path) => {
+    const expected = expectedByPath.get(path);
+    if (!expected) throw new Error(`File ${path} is not present in the manifest`);
+    const source = `${previousRoot}/files/${path}`;
+    const sourceMetadata = await headObject(source);
+    if (!sourceMetadata || sourceMetadata.size !== expected.size || sourceMetadata.metadata?.sha256 !== expected.sha256) {
+      throw new Error(`File ${path} cannot be reused from the previous deployment`);
+    }
+    return { path, source };
+  }));
+  const current = await stagingDeployment(c.req.raw, identity);
+  if (current instanceof Response) return current;
+  const signal = deploymentWriteSignal(current.deployment.stagingExpiresAt);
+  await Promise.all(copies.map(({ path, source }) => copyObject(source, `${objectRoot(identity)}/files/${path}`, signal)));
   return c.json({ copied: paths.length });
 });
 

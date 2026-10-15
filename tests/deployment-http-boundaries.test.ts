@@ -55,6 +55,14 @@ describe("Convex deployment HTTP boundaries", () => {
     expect((await f.get("", f.identity, { cookie: "session=valid" })).status).toBe(200);
   });
 
+  it("returns an actionable conflict for an expired lease without reviving it", async () => {
+    const f = await fixture();
+    await f.t.run(ctx => ctx.db.patch(f.identity.deploymentId, { stagingExpiresAt: Date.now() - 1 }));
+    const response = await f.get("/staging", f.identity);
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({ error: "Staging lease expired. Run rendro push again to start a new deployment." });
+  });
+
   it("rejects incomplete read identities, absent projects, and unauthorized sessions", async () => {
     const f = await fixture();
     for (const path of ["/staging", "/active", ""]) {

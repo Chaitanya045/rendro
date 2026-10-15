@@ -1,7 +1,16 @@
+import { sanitizeProvenance } from "../shared/provenance";
 import { requireId } from "./ids";
 import { v } from "convex/values";
 import { internalMutation } from "./_generated/server";
 import { FAILED_RETENTION_MS, PURGE_CLAIM_MS, STAGING_DRAIN_MS, SUPERSEDED_RETENTION_MS, stagingExpiry } from "./retentionPolicy";
+
+// Never truncate a possible credential-bearing URL before sanitization. Discard
+// oversized legacy labels whole, bounding the sanitizer's work on old rows.
+function boundedFields<T extends object>(fields: T): T {
+  return Object.fromEntries(Object.entries(fields).map(([key, value]) => [key,
+    typeof value === "string" && value.length > 4096 ? "" : value,
+  ])) as T;
+}
 
 const phases = ["failed", "superseded", "staging"] as const;
 
@@ -19,7 +28,11 @@ export const candidatesInternal = internalMutation({
       ? ctx.db.query("deployments").withIndex("by_staging_expiry", q => q.eq("status", "staging").eq("purgedAt", undefined).lte("stagingExpiresAt", cutoff - STAGING_DRAIN_MS))
       : ctx.db.query("deployments").withIndex("by_retention", q => q.eq("status", status).eq("purgedAt", undefined)
         .lte("createdAt", cutoff - (status === "failed" ? FAILED_RETENTION_MS : SUPERSEDED_RETENTION_MS)));
-    const page = await query.paginate({ cursor: progress?.cursor ?? null, numItems: 50 });
+    // Pagination may cross the byte budget by one document (at most 1 MiB).
+    // Three candidates also bound the three reference reads per candidate to
+    // 9 MiB, leaving headroom below the 16 MiB transaction read limit. A large
+    // legacy row still advances; claim writes stay below 1.25 MiB + overhead.
+    const page = await query.paginate({ cursor: progress?.cursor ?? null, numItems: 3, maximumBytesRead: 256 * 1024 });
     const deployments = [];
     for (const deployment of page.page) {
       if ((deployment.purgeClaimUntil ?? 0) > now) continue;
@@ -32,6 +45,13 @@ export const candidatesInternal = internalMutation({
         .eq("revokedAt", undefined).gt("expiresAt", now)).first()) continue;
       await ctx.db.patch(deployment._id, {
         ...(status === "staging" ? { status: "failed" as const, failureReason: "Staging lease expired" } : {}),
+        // Apply the existing caps so claim metadata also fits a legacy row
+        // whose provenance previously filled the document-size allowance.
+        provenance: sanitizeProvenance({
+          ...boundedFields(deployment.provenance),
+          source: boundedFields(deployment.provenance.source),
+          execution: boundedFields(deployment.provenance.execution),
+        }),
         purgeState: "purging", purgeToken: token, purgeClaimUntil: now + PURGE_CLAIM_MS,
       });
       deployments.push({ _id: deployment._id, organizationId: deployment.organizationId, projectId: deployment.projectId, purgeToken: token });

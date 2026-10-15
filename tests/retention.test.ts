@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { getDocumentSize } from "convex/values";
 import { convexTest } from "convex-test";
 import { internal } from "../convex/_generated/api";
 import schema from "../convex/schema";
@@ -9,7 +10,7 @@ const modules = import.meta.glob("../convex/**/*.ts");
 const now = 100 * 86_400_000;
 const provenance = { source: { kind: "local" as const }, execution: { kind: "local" as const }, cliVersion: "test", manifestSha256: "sha" };
 function fixture() {
-  const backend = convexTest(schema, modules);
+  const backend = convexTest({ schema, modules, transactionLimits: true });
   const project = () => backend.run(ctx => ctx.db.insert("projects", { organizationId: "org", name: "Docs", slug: "docs", createdBy: "user", createdAt: 1 }));
   const seed = (projectId: Id<"projects">, fields: Partial<Doc<"deployments">> = {}) => backend.run(ctx => ctx.db.insert("deployments", {
     organizationId: "org", projectId, status: "superseded", createdAt: 1, createdBy: "user", manifestKey: "pending", manifestSha256: "sha", fileCount: 1, byteCount: 1, provenance, ...fields,
@@ -20,7 +21,7 @@ function fixture() {
   const page = (token = "claim") => backend.mutation(internal.retention.candidatesInternal, { token });
   const cycle = async (token = "claim") => {
     const claims = [];
-    for (let i = 0; i < 200; i++) {
+    for (let i = 0; i < 1_000; i++) {
       const result = await page(token);
       claims.push(...result.deployments);
       if (result.cycleComplete) return claims;
@@ -36,8 +37,8 @@ afterEach(() => vi.restoreAllMocks());
 describe("durable retention", () => {
   it("advances past over 2,000 pinned rows and excludes active/purged rows from the scan", async () => {
     const f = fixture(), projectId = await f.project();
-    await f.backend.run(async ctx => {
-      for (let i = 0; i < 2_001; i++) {
+    for (let batch = 0; batch < 2_001; batch += 100) await f.backend.run(async ctx => {
+      for (let i = batch; i < Math.min(batch + 100, 2_001); i++) {
         const row = { organizationId: "org", projectId, createdAt: i, createdBy: "user", manifestKey: "pending", manifestSha256: "sha", fileCount: 1, byteCount: 1, provenance };
         const id = await ctx.db.insert("deployments", { ...row, status: "superseded" });
         await ctx.db.insert("publications", { organizationId: "org", projectId, pinnedDeploymentId: id, trackingMode: "pinned", slug: `pin-${i}`, pathPrefix: "", entryFile: "index.html", createdAt: 1, updatedAt: 1, createdBy: "user" });
@@ -49,9 +50,9 @@ describe("durable retention", () => {
     });
     const eligible = await f.seed(projectId, { createdAt: 2_002 });
     expect((await f.page()).scanned).toBe(0); // failed: purged rows are excluded by the index
-    for (let i = 0; i < 40; i++) {
+    for (let i = 0; i < 666; i++) {
       const result = await f.page();
-      expect(result.scanned).toBe(50);
+      expect(result.scanned).toBe(3);
       expect(result.deployments).toEqual([]);
     }
     // Simulated process restart: no local cursor is supplied to the next run.
@@ -60,12 +61,42 @@ describe("durable retention", () => {
     expect(await f.backend.run(ctx => ctx.db.query("retentionProgress").collect())).toHaveLength(1);
   }, 120_000);
 
+  it("advances through fifty legacy 400 KiB rows and a near-limit row with transaction limits enabled", async () => {
+    const f = fixture(), projectId = await f.project();
+    const ids = [];
+    for (let i = 0; i < 51; i++) {
+      // Current start caps oversized provenance. Seed the pre-cap persisted
+      // shape directly, then exercise the real fail/claim/finalize mutations.
+      const id = await f.seed(projectId, {
+        status: "staging",
+        provenance: { ...provenance, execution: { kind: "ci", workflow: "x".repeat(i === 50 ? 1_000_000 : 400 * 1024) } },
+      });
+      await f.backend.mutation(internal.deployments.failInternal, { organizationId: "org", projectId, deploymentId: id, reason: "interrupted" });
+      if (i === 50) await f.backend.run(async ctx => {
+        const row = (await ctx.db.get(id))!;
+        // Leave no room for claim fields until the existing provenance caps
+        // are applied. Byte accounting includes Convex's system fields.
+        await ctx.db.patch(id, { provenance: { ...row.provenance, execution: { kind: "ci", workflow: "x".repeat(1_000_000 + 1024 * 1024 - getDocumentSize(row)) } } });
+        expect(getDocumentSize((await ctx.db.get(id))!)).toBe(1024 * 1024);
+      });
+      ids.push(id);
+    }
+    for (const id of ids) {
+      const result = await f.page();
+      expect(result.scanned).toBe(1);
+      expect(result.deployments.map(row => row._id)).toEqual([id]);
+      expect((await f.backend.run(ctx => ctx.db.get(id)))?.provenance.execution.workflow).toBe("");
+      expect(await f.backend.mutation(internal.retention.markPurgedInternal, { deploymentId: id, purgeToken: "claim", objectCount: 0 })).toBe(true);
+    }
+    expect(await f.cycle()).toEqual([]);
+  }, 120_000);
+
   it("drains multiple pages and recovers lost responses and partial deletion with a new token", async () => {
     const f = fixture(), projectId = await f.project();
     const ids = [];
     for (let i = 0; i < 101; i++) ids.push(await f.seed(projectId, { status: "failed" }));
-    expect((await f.page("lost-response")).deployments).toHaveLength(50);
-    expect((await f.cycle()).map(c => c._id)).toHaveLength(51);
+    expect((await f.page("lost-response")).deployments).toHaveLength(3);
+    expect((await f.cycle()).map(c => c._id)).toHaveLength(98);
     expect(await f.cycle()).toEqual([]); // unexpired workers own every claim
     vi.mocked(Date.now).mockReturnValue(now + PURGE_CLAIM_MS);
     const retry = await f.cycle("retry");
@@ -146,7 +177,7 @@ describe("staging leases", () => {
     expect((await f.cycle()).map(c => c._id)).toEqual([legacy]);
     expect(await f.backend.run(ctx => ctx.db.get(legacy))).toMatchObject({ status: "failed", failureReason: "Staging lease expired", purgeState: "purging" });
     vi.mocked(Date.now).mockReturnValue(now + 2 * STAGING_LEASE_MS - 1);
-    expect(await f.backend.mutation(internal.deployments.refreshStagingInternal, identity)).toBeNull();
+    await expect(f.backend.mutation(internal.deployments.refreshStagingInternal, identity)).rejects.toThrow("Staging lease expired");
     await expect(f.backend.mutation(internal.deployments.commitInternal, { ...identity, actorId: "user" })).rejects.toThrow("Staging lease expired");
     await f.cycle(); // update the fixed scan cutoff
     expect((await f.cycle()).map(c => c._id)).not.toContain(start.deploymentId);

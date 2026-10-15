@@ -6,7 +6,7 @@ import type { Doc } from "../convex/_generated/dataModel";
 const modules = import.meta.glob("../convex/**/*.ts");
 
 async function fixture() {
-  const t = convexTest(schema, modules);
+  const t = convexTest({ schema, modules, transactionLimits: true });
   const projectId = await t.run(ctx => ctx.db.insert("projects", { organizationId: "org", slug: "docs", name: "Docs", createdBy: "user", createdAt: 1 }));
   const otherProjectId = await t.run(ctx => ctx.db.insert("projects", { organizationId: "other", slug: "other", name: "Other", createdBy: "user", createdAt: 1 }));
   const deploymentId = await t.run(ctx => ctx.db.insert("deployments", { organizationId: "org", projectId, status: "active", manifestKey: "manifest", manifestSha256: "sha", fileCount: 1, byteCount: 1, createdAt: Date.now(), createdBy: "user", provenance: { source: { kind: "local" }, execution: { kind: "local" }, cliVersion: "test", manifestSha256: "sha" } }));
@@ -48,7 +48,8 @@ describe("publication reference boundaries", () => {
     const pinned = await f.t.mutation(internal.publicationsV2.createInternal, { ...f.publication, title: " ", description: " " });
     const tracked = await f.t.mutation(internal.publicationsV2.createInternal, { ...f.publication, slug: "track", trackingMode: "track_active", pinnedDeploymentId: undefined });
     expect(pinned?.title).toBe("Docs");
-    for (const slug of ["docs", "track"]) expect(await f.t.query(internal.publicationsV2.resolvePublicInternal, { slug })).toMatchObject({ deployment: { _id: f.deploymentId } });
+    await f.t.run(ctx => ctx.db.patch(pinned!._id, { title: undefined }));
+    for (const slug of ["docs", "track"]) expect(await f.t.query(internal.publicationsV2.resolvePublicInternal, { slug })).toMatchObject({ deployment: { manifestKey: "manifest" } });
     expect(await f.t.query(internal.publicationsV2.resolvePublicInternal, { slug: "missing" })).toBeNull();
     const remove = { organizationId: "org", projectId: f.projectId, publicationId: pinned!._id, actorId: "user" };
     await expect(f.t.mutation(internal.publicationsV2.removeInternal, { ...remove, organizationId: "other" })).rejects.toThrow("Publication not found");
@@ -82,7 +83,7 @@ describe("share reference boundaries", () => {
     for (const documentPath of ["", "a\\b", "/index.html", "./index.html", "../index.html"]) await expect(f.t.mutation(internal.shareGrants.createInternal, { ...f.share, documentPath })).rejects.toThrow("Invalid document path");
     await expect(f.t.mutation(internal.shareGrants.createInternal, { ...f.share, expiresAt: 1 })).rejects.toThrow("future");
     const grant = await f.t.mutation(internal.shareGrants.createInternal, f.share);
-    expect(await f.t.query(internal.shareGrants.resolveInternal, { tokenHash: "token" })).toMatchObject({ deployment: { _id: f.deploymentId } });
+    expect(await f.t.query(internal.shareGrants.resolveInternal, { tokenHash: "token" })).toMatchObject({ deployment: { manifestKey: "manifest" } });
     expect(await f.t.query(internal.shareGrants.resolveInternal, { tokenHash: "missing" })).toBeNull();
     const revoke = { organizationId: "org", grantId: grant!._id, actorId: "user" };
     await expect(f.t.mutation(internal.shareGrants.revokeInternal, { ...revoke, organizationId: "other" })).rejects.toThrow("Share not found");

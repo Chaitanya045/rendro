@@ -6,7 +6,7 @@ afterEach(() => vi.unstubAllEnvs());
 
 describe("retention operator HTTP", () => {
   it("authenticates both operations and returns non-cacheable claimed pages", async () => {
-    const t = convexTest(schema, modules);
+    const t = convexTest({ schema, modules, transactionLimits: true });
     vi.stubEnv("RETENTION_SECRET", "retention-test");
     for (const [path, method] of [["candidates", "GET"], ["purged", "POST"]]) {
       expect((await t.fetch(`/api/rendro/retention/${path}`, { method })).status).toBe(401);
@@ -21,13 +21,13 @@ describe("retention operator HTTP", () => {
 
   it.each(["{", "null", "1", "{}", '{"deploymentId":1}', '{"deploymentId":"x","objectCount":0}', '{"deploymentId":"x","purgeToken":"x"}', '{"deploymentId":"x","purgeToken":"x","objectCount":1.5}', '{"deploymentId":"x","purgeToken":"x","objectCount":-1}'])("rejects malformed finalization %s", async body => {
     vi.stubEnv("RETENTION_SECRET", "retention-test");
-    const result = await convexTest(schema, modules).fetch("/api/rendro/retention/purged", { method: "POST", headers: { Authorization: "Bearer retention-test" }, body });
+    const result = await convexTest({ schema, modules, transactionLimits: true }).fetch("/api/rendro/retention/purged", { method: "POST", headers: { Authorization: "Bearer retention-test" }, body });
     expect(result.status).toBe(400);
   });
 
   it("requires a matching claim for finalization", async () => {
     vi.stubEnv("RETENTION_SECRET", "retention-test");
-    const t = convexTest(schema, modules);
+    const t = convexTest({ schema, modules, transactionLimits: true });
     const deploymentId = await t.run(async ctx => {
       const projectId = await ctx.db.insert("projects", { organizationId: "org", name: "Docs", slug: "docs", createdAt: 1, createdBy: "user" });
       return ctx.db.insert("deployments", { organizationId: "org", projectId, status: "failed", createdAt: 1, createdBy: "user", manifestKey: "pending", manifestSha256: "sha", fileCount: 0, byteCount: 0, provenance: { source: { kind: "local" }, execution: { kind: "local" }, cliVersion: "test", manifestSha256: "sha" } });

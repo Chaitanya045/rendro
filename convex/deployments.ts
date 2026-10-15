@@ -224,7 +224,8 @@ export const refreshStagingInternal = internalMutation({
     const projectId = requireId(ctx, "projects", input.projectId);
     const deployment = await ctx.db.get(requireId(ctx, "deployments", input.deploymentId));
     if (!deployment || deployment.organizationId !== input.organizationId || deployment.projectId !== projectId
-      || deployment.status !== "staging" || stagingExpiry(deployment) <= Date.now()) return null;
+      || deployment.status !== "staging") return null;
+    if (stagingExpiry(deployment) <= Date.now()) throw new ConvexError({ code: "conflict", message: "Staging lease expired. Run rendro push again to start a new deployment." });
     if (stagingExpiry(deployment) > Date.now() + STAGING_LEASE_MS - 10 * 60 * 1000) {
       return { ...deployment, stagingExpiresAt: stagingExpiry(deployment) };
     }
