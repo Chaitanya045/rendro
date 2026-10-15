@@ -388,7 +388,7 @@ Convex also serves `GET /api/rendro/deployments/active` and `GET /api/rendro/dep
 
 ### Provenance privacy
 
-The CLI and Convex deployment mutation sanitize Git remotes before capture/storage: known HTTP(S), SSH and Git URLs lose userinfo, query and fragment; scp-style remotes lose their user prefix. Authorities are percent-decoded before userinfo removal; encoded authority delimiters, nested encodings, control characters, invalid IPv6/ports, local/file paths and unsupported/malformed remotes are omitted. Sanitized repository URLs longer than 2,048 characters are omitted. All other provenance strings are bounded (commit/checksum 128, ref and CI labels 256, local path label 512, CLI version 64 characters), with embedded URL credentials removed. Authorized deployment reads apply the same sanitation to historical rows while retaining repository location, commit/ref, dirty state and CI context.
+The CLI and Convex deployment mutation sanitize Git remotes before capture/storage: known HTTP(S), SSH and Git URLs lose userinfo, query and fragment; scp-style remotes lose their user prefix. Authorities are percent-decoded before userinfo removal; encoded authority delimiters, nested encodings, control characters, invalid IPv6/ports, local/file paths (including Windows absolute and drive-relative paths) and unsupported/malformed remotes are omitted. Sanitized repository URLs longer than 2,048 characters are omitted. All other provenance strings are bounded (commit/checksum 128, ref and CI labels 256, local path label 512, CLI version 64 characters), with embedded URL credentials removed. Authorized deployment reads apply the same sanitation to historical rows while retaining repository location, commit/ref, dirty state and CI context.
 
 ### Publications
 

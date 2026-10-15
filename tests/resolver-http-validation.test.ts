@@ -10,7 +10,9 @@ type Action = typeof createPublication;
 async function invoke(action: Action, body?: unknown, query = "", rawBody?: string, mutationResult: unknown = { slug: "docs" }) {
   const ctx = { runQuery: vi.fn().mockResolvedValue([]), runMutation: vi.fn().mockResolvedValue(mutationResult) };
   const handler = (action as unknown as { _handler: (ctx: unknown, request: Request) => Promise<Response> })._handler;
-  const response = await handler(ctx, new Request(`https://backend.test/test${query}`, body === undefined ? {} : { method: "POST", body: rawBody ?? JSON.stringify(body) }));
+  const response = await handler(ctx, new Request(`https://backend.test/test${query}`, body === undefined ? {} : {
+    method: "POST", headers: { origin: process.env.SITE_URL!, "content-type": "application/json" }, body: rawBody ?? JSON.stringify(body),
+  }));
   return { response, ctx };
 }
 afterEach(() => vi.resetAllMocks());

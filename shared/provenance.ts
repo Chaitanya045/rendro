@@ -26,6 +26,8 @@ export function sanitizeGitRemote(value: string | undefined): string | undefined
   // eslint-disable-next-line no-control-regex -- Reject control bytes in remote addresses.
   if (/[\u0000-\u001f\u007f]/.test(value)) return undefined;
   const remote = value.trim();
+  // Windows drive paths (absolute or drive-relative) are local, not scp hosts.
+  if (/^[a-z]:/i.test(remote)) return undefined;
   try {
     // eslint-disable-next-line no-control-regex -- Reject decoded control bytes too.
     if (/[\s\\\u0000-\u001f\u007f]/.test(decodeURIComponent(remote))) return undefined;

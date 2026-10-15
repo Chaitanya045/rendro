@@ -65,11 +65,13 @@ it("rejects missing identities on read routes", async () => {
   }
 });
 it("handles public capability presence and absence without session authority", async () => {
-  for (const [action, query] of [[shares.resolveShareGrant, "?token=token"], [publications.resolvePublicPublication, "?slug=docs"]] as const) {
+  const share = { grant: { documentPath: "index.html", expiresAt: 123 }, project: { name: "Docs" } };
+  const publication = { publication: { slug: "docs", entryFile: "index.html", title: "Docs" } };
+  for (const [action, query, result] of [[shares.resolveShareGrant, "?token=token", share], [publications.resolvePublicPublication, "?slug=docs", publication]] as const) {
     ctx.runQuery.mockResolvedValue(null);
     expect((await invoke(action, {}, query)).status).toBe(404);
-    ctx.runQuery.mockResolvedValue({ public: true });
-    expect(await (await invoke(action, {}, query)).json()).toEqual({ public: true });
+    ctx.runQuery.mockResolvedValue({ ...result, deployment: { manifestKey: "private/manifest.json" } });
+    expect(await (await invoke(action, {}, query)).json()).toEqual(result);
   }
   expect(auth.authorize).not.toHaveBeenCalled();
 });

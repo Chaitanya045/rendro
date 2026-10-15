@@ -81,8 +81,29 @@ describe("minimal publication/share resolver responses", () => {
     const f = await fixture();
     vi.stubGlobal("fetch", vi.fn((input: string, init?: RequestInit) => { const u = new URL(input); return f.t.fetch(u.pathname + u.search, init); }));
     for (const [path, expected] of [[pubPath, f.publicPublication], [sharePath, f.publicShare]] as const) {
-      const response = await proxyConvexRequest(new Request(`http://worker.test${path}`, { headers: await signed(path) }));
+      const headers = await signed(path);
+      headers.set("origin", "https://reader.example");
+      headers.set("sec-fetch-site", "cross-site");
+      const response = await proxyConvexRequest(new Request(`http://worker.test${path}`, { headers }));
       expect(await response.json()).toEqual(expected);
+      const forwarded = new Headers(vi.mocked(fetch).mock.calls.at(-1)![1]?.headers);
+      expect(forwarded.get("origin")).toBe("https://reader.example");
+      expect(forwarded.get("sec-fetch-site")).toBe("cross-site");
+      expect(forwarded.has("x-rendro-resolver-signature")).toBe(false);
+      expect(forwarded.has("x-rendro-resolver-time")).toBe(false);
+    }
+  });
+
+  it("keeps signed resolver GETs readable with forwarded cross-site headers", async () => {
+    const f = await fixture();
+    for (const path of [pubPath, sharePath]) {
+      const headers = await signed(path);
+      headers.set("origin", "https://reader.example");
+      headers.set("sec-fetch-site", "cross-site");
+      headers.set("cookie", "synthetic-cookie=value");
+      const response = await f.t.fetch(path, { headers });
+      expect(response.status).toBe(200);
+      expect((await response.json()).deployment).toEqual({ manifestKey: f.deployment.manifestKey });
     }
   });
 
