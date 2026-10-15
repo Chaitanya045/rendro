@@ -5,20 +5,25 @@ const secret = "resolver-test-secret-32-characters-long";
 const request = new Request("https://backend.example/api/rendro/publications/public?slug=docs");
 
 describe("Worker storage resolver proof", () => {
-  it("accepts only a fresh proof bound to the exact request", async () => {
+  it("accepts only a fresh proof bound to method, path and query", async () => {
     const now = Date.now();
     const headers = await signResolverRequest(request, secret, now);
     const signed = new Request(request, { headers });
     expect(await isWorkerResolverRequest(signed, secret)).toBe(true);
     expect(await isWorkerResolverRequest(signed, secret, now + 60_000)).toBe(true);
     for (const time of [now + 60_001, now - 60_001]) expect(await isWorkerResolverRequest(signed, secret, time)).toBe(false);
-    for (const url of [request.url + "x", request.url.replace("backend.example", "other.example"), request.url.replace("publications", "shares")]) {
+    for (const url of [request.url + "x", request.url.replace("publications", "shares")]) {
       expect(await isWorkerResolverRequest(new Request(url, { headers }), secret, now)).toBe(false);
     }
     expect(await isWorkerResolverRequest(new Request(request, { headers, method: "POST" }), secret, now)).toBe(false);
     expect(await isWorkerResolverRequest(signed, "x".repeat(32), now)).toBe(false);
     for (const missing of [undefined, "", "short"]) expect(await isWorkerResolverRequest(signed, missing, now)).toBe(false);
     await expect(signResolverRequest(request, "short")).rejects.toThrow("not configured");
+  });
+  it("accepts a Worker proof when Convex observes a rewritten origin", async () => {
+    const headers = await signResolverRequest(request, secret);
+    const observed = new Request(request.url.replace("https://backend.example", "http://convex-internal.example:8080"), { headers });
+    expect(await isWorkerResolverRequest(observed, secret)).toBe(true);
   });
   it("rejects missing, malformed, and other-purpose signatures", async () => {
     const valid = await signResolverRequest(request, secret);

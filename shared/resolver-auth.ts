@@ -3,7 +3,8 @@ const TIME = "x-rendro-resolver-time";
 const SIGNATURE = "x-rendro-resolver-signature";
 const encoder = new TextEncoder();
 function payload(request: Request, timestamp: string): Uint8Array<ArrayBuffer> {
-  return encoder.encode(JSON.stringify(["rendro-storage-resolver-v1", request.method, request.url, timestamp]));
+  const url = new URL(request.url);
+  return encoder.encode(JSON.stringify(["rendro-storage-resolver-v1", request.method, url.pathname + url.search, timestamp]));
 }
 function key(secret: string): Promise<CryptoKey> {
   return crypto.subtle.importKey("raw", encoder.encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign", "verify"]);

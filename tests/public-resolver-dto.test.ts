@@ -5,6 +5,7 @@ import { internal } from "../convex/_generated/api";
 import schema from "../convex/schema";
 import { sha256 } from "../convex/credentialHash";
 import { signResolverRequest } from "../shared/resolver-auth";
+import { gitRemoteCases } from "./git-remote-fixtures";
 import { sanitizeProvenance } from "../shared/provenance";
 import publicRoutes from "../src/routes/public-v2";
 import shareRoutes from "../src/routes/share-v2";
@@ -20,12 +21,12 @@ const provenance = {
   execution: { kind: "ci" as const, provider: "github-actions", runId: "123", workflow: "Publish", job: "docs", actor: "private-actor" },
   cliVersion: "2.0.0", manifestSha256: "manifest-sha",
 };
-async function fixture() {
+async function fixture(inputProvenance = provenance) {
   const t = convexTest(schema, modules);
   rateLimiterTest.register(t);
   const project = (await t.mutation(internal.projects.createInternal, { organizationId: "private-org", name: "Docs", slug: "private-project", actorId: "private-creator" }))!;
   const scope = { organizationId: project.organizationId, projectId: project._id };
-  const deployment = await t.mutation(internal.deployments.startInternal, { ...scope, manifestSha256: "manifest-sha", fileCount: 1, byteCount: 1, provenance, actorId: "private-actor" });
+  const deployment = await t.mutation(internal.deployments.startInternal, { ...scope, manifestSha256: "manifest-sha", fileCount: 1, byteCount: 1, provenance: inputProvenance, actorId: "private-actor" });
   await t.mutation(internal.deployments.commitInternal, { ...scope, deploymentId: deployment.deploymentId, actorId: "private-actor" });
   const publication = (await t.mutation(internal.publicationsV2.createInternal, { ...scope, slug: "docs", entryFile: "index.html", pathPrefix: "private-prefix", trackingMode: "track_active", title: "Public docs", description: "private-description", actorId: "private-creator" }))!;
   const grant = (await t.mutation(internal.shareGrants.createInternal, { ...scope, tokenHash: await sha256("synthetic-share-token"), documentPath: "index.html", expiresAt: Date.now() + 600_000, actorId: "private-creator" }))!;
@@ -60,6 +61,20 @@ describe("minimal publication/share resolver responses", () => {
     const headers = await signed(pubPath);
     vi.stubEnv("CONVEX_INTERNAL_SECRET", "");
     expect(await (await f.t.fetch(pubPath, { headers })).json()).toEqual(f.publicPublication);
+  });
+
+  it("accepts a rewritten resolver host but rejects changed paths and capability queries", async () => {
+    const f = await fixture();
+    for (const path of [pubPath, sharePath]) {
+      const headers = await signResolverRequest(new Request(`https://worker-backend.example${path}`), secret);
+      const response = await f.t.fetch(path, { headers });
+      expect(response.status).toBe(200);
+      expect((await response.json()).deployment).toEqual({ manifestKey: f.deployment.manifestKey });
+      for (const changed of [path.replace("/public?", "/other?"), path + "changed"]) {
+        const wrongHeaders = await signResolverRequest(new Request(`https://worker-backend.example${changed}`), secret);
+        expect((await (await f.t.fetch(path, { headers: wrongHeaders })).json()).deployment).toBeUndefined();
+      }
+    }
   });
 
   it("keeps anonymous proxy calls public, including caller-supplied proof headers", async () => {
@@ -186,11 +201,13 @@ describe("minimal publication/share resolver responses", () => {
     expect((await f.t.query(internal.deployments.latestForOrganization, { organizationId: f.scope.organizationId }))?.commit).toBe("https://git.example/commit");
   });
 
-  it("sanitizes before storage and on authorized historical provenance reads", async () => {
-    const f = await fixture();
-    const expected = sanitizeProvenance(provenance);
+  it.each(gitRemoteCases.concat([[provenance.source.repository, "https://git.example/private/repo.git"]]))("sanitizes remote %j before storage and on authorized historical reads", async (repository, expectedRepository) => {
+    const input = { ...provenance, source: { ...provenance.source, repository } };
+    const f = await fixture(input);
+    const expected = sanitizeProvenance(input);
+    expect(expected.source.repository).toBe(expectedRepository);
     expect((await f.t.run(ctx => ctx.db.get(f.deployment.deploymentId)))?.provenance).toEqual(expected);
-    await f.t.run(ctx => ctx.db.patch(f.deployment.deploymentId, { provenance }));
+    await f.t.run(ctx => ctx.db.patch(f.deployment.deploymentId, { provenance: input }));
     await f.t.mutation(internal.apiKeyCredentials.createInternal, { ...f.scope, keyId: "read-key", keyPrefix: "test", name: "Test", secretHash: await sha256("read-secret"), scopes: ["docs:read"], actorId: "owner" });
     const headers = { authorization: "Bearer read-secret" };
     const query = new URLSearchParams(f.scope);

@@ -82,9 +82,11 @@ function contentType(path: string): string {
   return types[extname(path).toLowerCase()] ?? "application/octet-stream";
 }
 
-function gitValue(cwd: string, args: string[]): string | undefined {
+function gitValue(cwd: string, args: string[], trim = true): string | undefined {
   try {
-    return execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim() || undefined;
+    const output = execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+    // Preserve configured remote bytes for validation; remove only Git's output terminator.
+    return (trim ? output.trim() : output.replace(/\n$/, "")) || undefined;
   } catch {
     return undefined;
   }
@@ -94,7 +96,7 @@ function deploymentProvenance(source: string, manifestSha256: string) {
   const commit = process.env.GITHUB_SHA || gitValue(source, ["rev-parse", "HEAD"]);
   const repository = process.env.GITHUB_REPOSITORY
     ? `https://github.com/${process.env.GITHUB_REPOSITORY}`
-    : gitValue(source, ["config", "--get", "remote.origin.url"]);
+    : gitValue(source, ["config", "--get", "remote.origin.url"], false);
   const dirtyOutput = gitValue(source, ["status", "--porcelain"]);
   const ci = Boolean(process.env.CI);
   return sanitizeProvenance({

@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { sanitizeGitRemote, sanitizeProvenance, type Provenance } from "../shared/provenance";
 
+import { gitRemoteCases } from "./git-remote-fixtures";
+
 describe("credential-free deployment provenance", () => {
   it.each([
+    ...gitRemoteCases,
     ["https://user:synthetic-token@git.example/repo.git?token=synthetic-query#synthetic-fragment", "https://git.example/repo.git"],
     ["https://synthetic-token@git.example/repo.git", "https://git.example/repo.git"],
     ["ssh://git:synthetic-token@git.example:2222/repo.git", "ssh://git.example:2222/repo.git"],

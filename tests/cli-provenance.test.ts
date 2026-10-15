@@ -7,9 +7,11 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { expect, it } from "vitest";
 import type { Provenance } from "../shared/provenance";
+import { gitRemoteCases } from "./git-remote-fixtures";
 const exec = promisify(execFile);
 
 it.each([
+  ...gitRemoteCases,
   ["https://git-user:synthetic-token@git.example/team/docs.git?token=synthetic-query#synthetic-fragment", "https://git.example/team/docs.git"],
   ["git@git.example:team/docs.git", "git.example:team/docs.git"],
 ])("captures credential-free provenance from a real git remote", async (remote, expected) => {
@@ -37,7 +39,8 @@ it.each([
     const env: NodeJS.ProcessEnv = { ...process.env, RENDRO_API_KEY: "synthetic-key" };
     for (const name of Object.keys(env)) if (name.startsWith("GITHUB_") || name === "CI") delete env[name];
     const result = await exec(resolve("node_modules/.bin/tsx"), ["cli/src/index.ts", "push", "--source", source, "--organization", "test-org", "--project", "test-project", "--endpoint", `http://127.0.0.1:${(server.address() as AddressInfo).port}`], { env });
-    expect(captured?.source).toMatchObject({ kind: "git", repository: expected, dirty: false });
+    expect(captured?.source).toMatchObject({ kind: "git", dirty: false });
+    expect(captured?.source.repository).toBe(expected);
     expect(captured?.source.commit).toMatch(/^[a-f0-9]{40}$/);
     expect(captured?.source.ref).toBeTruthy();
     expect(JSON.stringify(captured) + result.stdout + result.stderr).not.toMatch(/synthetic-token|synthetic-query|synthetic-fragment|git-user/);
