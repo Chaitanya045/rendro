@@ -777,6 +777,12 @@ Both production (top-level) and `development` declare the same required secrets:
 
 No workflow deploys the Worker or Convex, or publishes to npm.
 
+The UI transition registry in `tests/ui-transitions.json` records behavior and
+assertion evidence for epic #99. Its validator runs in `pnpm verify` and checks
+the actual Hono registrations against page families and explicit non-page
+exclusions. See [UI transition registry](BROWSER_TESTS.md#ui-transition-registry-99--102)
+for status semantics, the audit baseline, and `scripts/ui-transition-report.ts`.
+
 ---
 
 ## Operational Runbooks
