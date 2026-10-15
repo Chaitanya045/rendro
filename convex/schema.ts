@@ -33,6 +33,12 @@ export const provenanceValidator = v.object({
 });
 
 export default defineSchema({
+  organizationTombstones: defineTable({
+    organizationId: v.string(),
+    deletedAt: v.number(),
+    deletedBy: v.string(),
+  }).index("by_organization", ["organizationId"]),
+
   failedApiKeyBuckets: defineTable({ key: v.string(), expiresAt: v.number() })
     .index("by_key", ["key"])
     .index("by_expiry", ["expiresAt"]),

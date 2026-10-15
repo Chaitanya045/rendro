@@ -1,3 +1,4 @@
+import { isOrganizationDeleted, requireActiveOrganization } from "./organizationLifecycle";
 import type { GenericCtx } from "@convex-dev/better-auth";
 import { publicError } from "./publicErrors";
 import { ConvexError } from "convex/values";
@@ -46,6 +47,7 @@ export async function requireOrganizationMember(
   if (!identity || typeof identity.sessionId !== "string") publicError("unauthenticated");
   const user = await authComponent.safeGetAuthUser(ctx);
   if (!user) publicError("unauthenticated");
+  if (await isOrganizationDeleted(ctx, organizationId)) publicError("not_found");
   const auth = await createAuth(ctx).$context;
   const member = await auth.adapter.findOne<AuthorizedOrganization["member"]>({
     model: "member",
@@ -87,6 +89,7 @@ export async function httpOrganizationAccess(
     const auth = createAuth(ctx);
     const session = await auth.api.getSession({ headers });
     if (!session) throw new ConvexError("Authentication required");
+    await requireActiveOrganization(ctx, organizationId);
     const context = await auth.$context;
     const member = await context.adapter.findOne<AuthorizedOrganization["member"]>({
       model: "member", where: [{ field: "organizationId", value: organizationId }, { field: "userId", value: session.user.id }],

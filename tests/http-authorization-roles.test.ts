@@ -41,7 +41,7 @@ vi.mock("../convex/auth", () => ({
 
 import { authorizeHttpOrganization } from "../convex/authorization";
 
-const fakeContext = {} as Parameters<typeof authorizeHttpOrganization>[0];
+const fakeContext = { runQuery: () => Promise.resolve(false) } as unknown as Parameters<typeof authorizeHttpOrganization>[0];
 
 function asRole(role: "owner" | "admin" | "member") {
   authState.sessionUserId = `${role}-user`;

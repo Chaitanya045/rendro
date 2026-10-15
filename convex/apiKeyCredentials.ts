@@ -1,3 +1,4 @@
+import { isOrganizationDeleted, requireActiveOrganization } from "./organizationLifecycle";
 import { requireId } from "./ids";
 import { ConvexError, v } from "convex/values";
 import { internalMutation, internalQuery } from "./_generated/server";
@@ -15,6 +16,7 @@ export const createInternal = internalMutation({
     actorId: v.string(),
   },
   handler: async (ctx, input) => {
+    await requireActiveOrganization(ctx, input.organizationId);
     const args = {
       ...input,
       projectId: input.projectId === undefined ? undefined : requireId(ctx, "projects", input.projectId),
@@ -48,6 +50,7 @@ export const createInternal = internalMutation({
 export const listInternal = internalQuery({
   args: { organizationId: v.string() },
   handler: async (ctx, args) => {
+    await requireActiveOrganization(ctx, args.organizationId);
     const rows = await ctx.db
       .query("apiKeyCredentials")
       .withIndex("by_organization", (query) => query.eq("organizationId", args.organizationId))
@@ -64,6 +67,7 @@ export const revokeInternal = internalMutation({
     actorId: v.string(),
   },
   handler: async (ctx, args) => {
+    await requireActiveOrganization(ctx, args.organizationId);
     const credential = await ctx.db
       .query("apiKeyCredentials")
       .withIndex("by_key_id", (query) => query.eq("keyId", args.keyId))
@@ -94,6 +98,7 @@ export const validateInternal = internalMutation({
     requiredScope: v.string(),
   },
   handler: async (ctx, args) => {
+    if (await isOrganizationDeleted(ctx, args.organizationId)) return null;
     // HTTP callers supply untrusted strings. Reject malformed IDs as invalid
     // credentials rather than throwing before the authorization handler runs.
     const projectId = args.projectId === undefined
@@ -134,6 +139,7 @@ export const verifiedIdInternal = internalQuery({
       .withIndex("by_secret_hash", q => q.eq("secretHash", secretHash)).unique();
     if (!credential || credential.revokedAt !== undefined
       || (credential.expiresAt !== undefined && credential.expiresAt <= Date.now())) return null;
+    if (await isOrganizationDeleted(ctx, credential.organizationId)) return null;
     return credential._id;
   },
 });

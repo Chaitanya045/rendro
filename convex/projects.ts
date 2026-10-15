@@ -1,3 +1,4 @@
+import { isOrganizationDeleted, requireActiveOrganization } from "./organizationLifecycle";
 import { isPublicErrorData } from "../src/shared/public-errors";
 import { requireId } from "./ids";
 import { requireOrganizationMember } from "./authorization";
@@ -11,6 +12,7 @@ const slugPattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 export const listInternal = internalQuery({
   args: { organizationId: v.string() },
   handler: async (ctx, args) => {
+    await requireActiveOrganization(ctx, args.organizationId);
     return ctx.db
       .query("projects")
       .withIndex("by_organization", (query) => query.eq("organizationId", args.organizationId))
@@ -25,6 +27,7 @@ export const getInternal = internalQuery({
     projectId: v.string(),
   },
   handler: async (ctx, input) => {
+    if (await isOrganizationDeleted(ctx, input.organizationId)) return null;
     const args = {
       ...input,
       projectId: ctx.db.normalizeId("projects", input.projectId),
@@ -44,6 +47,7 @@ export const createInternal = internalMutation({
     actorId: v.string(),
   },
   handler: async (ctx, args) => {
+    await requireActiveOrganization(ctx, args.organizationId);
     const name = args.name.trim();
     const slug = args.slug.trim().toLowerCase();
     if (!name || name.length > 80) throw new ConvexError("Project name must be 1–80 characters");

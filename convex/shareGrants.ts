@@ -1,3 +1,4 @@
+import { isOrganizationDeleted, requireActiveOrganization } from "./organizationLifecycle";
 import { requireId } from "./ids";
 import { ConvexError, v } from "convex/values";
 import { internalMutation, internalQuery } from "./_generated/server";
@@ -18,6 +19,7 @@ export const createInternal = internalMutation({
     actorId: v.string(),
   },
   handler: async (ctx, input) => {
+    await requireActiveOrganization(ctx, input.organizationId);
     const args = {
       ...input,
       projectId: requireId(ctx, "projects", input.projectId),
@@ -59,7 +61,8 @@ export const resolveInternal = internalQuery({
       .query("shareGrants")
       .withIndex("by_token_hash", (query) => query.eq("tokenHash", args.tokenHash))
       .unique();
-    if (!grant || grant.revokedAt || grant.expiresAt <= Date.now()) return null;
+    if (!grant || grant.revokedAt || grant.expiresAt <= Date.now()
+      || await isOrganizationDeleted(ctx, grant.organizationId)) return null;
     const deployment = await ctx.db.get(grant.deploymentId);
     const project = await ctx.db.get(grant.projectId);
     if (!deployment || !project || deployment.status === "failed" || deployment.status === "staging") return null;
@@ -70,6 +73,7 @@ export const resolveInternal = internalQuery({
 export const listInternal = internalQuery({
   args: { organizationId: v.string(), projectId: v.string() },
   handler: async (ctx, input) => {
+    await requireActiveOrganization(ctx, input.organizationId);
     const args = {
       ...input,
       projectId: requireId(ctx, "projects", input.projectId),
@@ -92,6 +96,7 @@ export const revokeInternal = internalMutation({
     actorId: v.string(),
   },
   handler: async (ctx, input) => {
+    await requireActiveOrganization(ctx, input.organizationId);
     const args = {
       ...input,
       grantId: requireId(ctx, "shareGrants", input.grantId),
