@@ -29,8 +29,9 @@ app.get("/share/:token", async (c) => {
     const stream = await getObjectStream(key);
     if (!stream) return unavailable();
 
+    // The whole document is decoded as UTF-8 and re-encoded by c.html.
     const html = injectMobileViewportScrollbarStyle(await readHtmlStream(stream));
-    return c.html(html, 200, assetHeaders(key, false, "text/html"));
+    return c.html(html, 200, assetHeaders(key, false, "text/html; charset=utf-8"));
   } catch (err) {
     logger.error({ err, key }, "share stream failed");
     return c.text("Stream failed", 500);

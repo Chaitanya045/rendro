@@ -84,7 +84,7 @@ app.get("/p/:slug/files/*", async (c) => {
   const headers = {
     "Cache-Control": "public, max-age=0, must-revalidate",
     // readStream fully decodes HTML as UTF-8; its output is re-encoded below.
-    ...assetHeaders(fullPath, true, htmlAsset ? "text/html" : entry.contentType),
+    ...assetHeaders(fullPath, true, htmlAsset ? "text/html; charset=utf-8" : entry.contentType),
   };
   if (!htmlAsset) return new Response(stream, { headers });
   const html = injectNavigation(await readStream(stream), result.publication.slug, relativePath, c.req.url);

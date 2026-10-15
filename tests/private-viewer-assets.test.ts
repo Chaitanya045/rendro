@@ -303,7 +303,7 @@ describe("private sandbox asset routing", () => {
     const requests = [
       [cssUrl, "text/css; charset=utf-8", files[2].content],
       [new URL("image.png", cssUrl), "image/png", "png-fixture"],
-      [nestedUrl, "text/css; charset=utf-8", files[3].content],
+      [nestedUrl, "text/css", files[3].content],
       [new URL("../font.woff2", nestedUrl), "font/woff2", "font-fixture"],
     ] as const;
     for (const [assetUrl, contentType, body] of requests) {

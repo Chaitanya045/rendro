@@ -20,8 +20,6 @@ const assetTypes: Record<string, string> = {
   ".png": "image/png",
   ".svg": "image/svg+xml",
   ".webp": "image/webp",
-  ".xml": "application/xml",
-  ".xhtml": "application/xhtml+xml",
 };
 
 // WHATWG Encoding labels, https://encoding.spec.whatwg.org/encodings.json.
@@ -104,13 +102,13 @@ export function assetContentType(path: string, storedType?: string): string {
     ? assetTypes[extension] ?? "application/octet-stream"
     : normalizeMediaType(storedType));
   // Streamed text (including the byte-preserving HTML injector) retains its
-  // encoding. Routes that fully decode HTML pass text/html without parameters.
+  // encoding, including the absence of a charset for in-band declarations.
+  // Routes that fully decode HTML explicitly pass text/html; charset=utf-8.
   if (storedType !== undefined && /^(?:text\/|application\/(?:javascript|ecmascript|json|xml)$)|\+(?:json|xml)$/.test(type)) {
     const charset = storedCharset(storedType);
     if (charset !== undefined) return `${type}; charset=${charset}`;
   }
-  // Preserve the existing fallback when no usable charset was stored.
-  return /^(?:text\/html|text\/css)$/.test(type) ? `${type}; charset=utf-8` : type;
+  return type;
 }
 
 export function isHtmlAsset(path: string, storedType?: string): boolean {

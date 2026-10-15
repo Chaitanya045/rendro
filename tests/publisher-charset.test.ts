@@ -47,13 +47,14 @@ it.each([
   "not-charset=windows-1252", "charset=windows-1252; injected=<html>",
 ])("rejects malformed, ambiguous or unallowlisted parameters: %j", parameters => {
   expect(assetContentType("file", `text/plain; ${parameters}`)).toBe("text/plain");
-  expect(assetContentType("file.css", `text/css; ${parameters}`)).toBe("text/css; charset=utf-8");
+  expect(assetContentType("file.css", `text/css; ${parameters}`)).toBe("text/css");
+  expect(assetContentType("file.html", `text/html; ${parameters}`)).toBe("text/html");
 });
 
 it("retains existing defaults and does not attach charsets to binary or invalid types", () => {
   for (const [path, stored, expected] of [
-    ["file.css", undefined, "text/css; charset=utf-8"], ["file.css", "text/css", "text/css; charset=utf-8"],
-    ["file.html", undefined, "text/html; charset=utf-8"], ["file.html", "text/html", "text/html; charset=utf-8"],
+    ["file.css", undefined, "text/css; charset=utf-8"], ["file.css", "text/css", "text/css"],
+    ["file.html", undefined, "text/html; charset=utf-8"], ["file.html", "text/html", "text/html"],
     ["file.js", undefined, "application/javascript; charset=utf-8"], ["file.json", undefined, "application/json; charset=utf-8"],
     ["file", "text/plain", "text/plain"], ["file", "application/javascript", "application/javascript"],
     ["file", "application/json", "application/json"], ["file", "text/xml", "text/xml"],
@@ -64,12 +65,17 @@ it("retains existing defaults and does not attach charsets to binary or invalid 
 });
 
 describe("HTML encoding parity with main", () => {
-  it("retains original non-UTF-8 bytes/charset on private streams and UTF-8 decoding on buffered routes", async () => {
+  it.each([
+    ["text/html; charset=windows-1252", "text/html; charset=windows-1252"],
+    ["text/html", "text/html"],
+    ["TEXT/HTML; ignored=value", "text/html"],
+    ["text/html; charset=unknown", "text/html"],
+  ])("preserves private stream bytes and declares buffered UTF-8 for %s", async (stored, expected) => {
     const { routes, files } = await publisherIsolationFixture();
     vi.mocked(minio.getObjectText).mockResolvedValue(JSON.stringify({ files: files.map(file => ({
-      path: file.path, contentType: "text/html; charset=windows-1252",
+      path: file.path, contentType: stored,
     })) }));
-    vi.mocked(minio.headObject).mockResolvedValue({ contentType: "text/html; charset=windows-1252" });
+    vi.mocked(minio.headObject).mockResolvedValue({ contentType: stored });
     const bytes = new Uint8Array(Buffer.from('<!doctype html><html><head></head><body><p>caf\xe9</p></body></html>', "latin1"));
     vi.mocked(minio.getObjectStream).mockImplementation(() => Promise.resolve(new Response(bytes).body));
     for (const route of routes) {
@@ -78,7 +84,7 @@ describe("HTML encoding parity with main", () => {
       });
       expect(response.status, route.name).toBe(200);
       const privateStream = ["private", "private ticket", "legacy private", "legacy ticket"].includes(route.name);
-      expect(response.headers.get("Content-Type"), route.name).toBe(`text/html; charset=${privateStream ? "windows-1252" : "utf-8"}`);
+      expect(response.headers.get("Content-Type"), route.name).toBe(privateStream ? expected : "text/html; charset=utf-8");
       const body = new Uint8Array(await response.arrayBuffer());
       // Streaming injectors leave invalid UTF-8 untouched; extension-only shares
       // already lacked the stored charset on main. Buffered routes decode UTF-8.
@@ -87,3 +93,40 @@ describe("HTML encoding parity with main", () => {
     }
   });
 });
+
+// These are main's extension defaults, independent of stored MIME metadata.
+it.each([
+  ["css", "text/css; charset=utf-8"], ["html", "text/html; charset=utf-8"],
+  ["js", "application/javascript; charset=utf-8"], ["json", "application/json; charset=utf-8"],
+  ["gif", "image/gif"], ["jpeg", "image/jpeg"], ["jpg", "image/jpeg"],
+  ["png", "image/png"], ["svg", "image/svg+xml"], ["webp", "image/webp"],
+  ["woff2", "font/woff2"], ["woff", "font/woff"], ["ttf", "font/ttf"],
+  ["otf", "font/otf"], ["eot", "application/vnd.ms-fontobject"],
+  ["xml", "application/octet-stream"], ["xhtml", "application/octet-stream"],
+  ["unknown", "application/octet-stream"],
+])("retains main's extension fallback for .%s without stored metadata", (extension, expected) => {
+  expect(assetContentType(`file.${extension}`)).toBe(expected);
+});
+
+it.each(["text/css", "text/html"])("keeps an absent charset distinct from a fallback for %s", type => {
+  for (const stored of [type, `${type}; ignored=value`, `${type}; ignored="charset=utf-8"`]) {
+    expect(assetContentType("file", stored)).toBe(type);
+  }
+});
+
+it.each(["public", "legacy publication", "legacy share"])(
+  "labels re-encoded HTML as UTF-8 through %s regardless of stored or in-band charset", async name => {
+    const { routes } = await publisherIsolationFixture();
+    const route = routes.find(route => route.name === name)!;
+    const html = '<!doctype html><html><head><meta charset="windows-1252"></head><body><p>café</p></body></html>';
+    vi.mocked(minio.getObjectStream).mockImplementation(() => Promise.resolve(new Response(html).body));
+    for (const stored of ["text/html", "text/html; charset=windows-1252", "text/html; charset=utf-8", "text/html; charset=unknown"]) {
+      vi.mocked(minio.getObjectText).mockResolvedValue(JSON.stringify({ files: [{ path: "index.html", contentType: stored }] }));
+      vi.mocked(minio.headObject).mockResolvedValue({ contentType: stored });
+      const response = await worker.request(`https://rendro.test${route.url(0)}`);
+      expect(response.status).toBe(200);
+      expect(response.headers.get("Content-Type")).toBe("text/html; charset=utf-8");
+      expect(await response.text()).toContain("<p>café</p>");
+    }
+  },
+);

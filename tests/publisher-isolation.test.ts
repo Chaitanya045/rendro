@@ -68,7 +68,7 @@ it("normalizes MIME essences without mistaking active or invalid types for HTML"
     expect(normalizeMediaType(invalid)).toBe("application/octet-stream");
   }
   expect(normalizeMediaType(" TEXT/HTML ; charset=utf-7; extra=anything")).toBe("text/html");
-  expect(assetContentType("page.html", "Text/HTML; charset=utf-7")).toBe("text/html; charset=utf-8");
+  expect(assetContentType("page.html", "Text/HTML; charset=utf-7")).toBe("text/html");
   expect(assetContentType("unknown")).toBe("application/octet-stream");
   expect(isHtmlAsset("page.html")).toBe(true);
   expect(isHtmlAsset("page.html", "text/html-extra")).toBe(false);

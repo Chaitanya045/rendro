@@ -69,10 +69,11 @@ app.get("/public/:org/:slug/files/:path{.+}", async (c) => {
   try {
     const stream = await getObjectStream(key);
     if (!stream) return c.html(renderNotFoundPage({ path: c.req.path }), 404);
+    // The whole document is decoded as UTF-8 and re-encoded by c.html.
     const html = injectPublicNavigation(await readStream(stream), publication, documentPath, c.req.url);
     return c.html(html, 200, {
       "Cache-Control": "public, max-age=0, must-revalidate",
-      ...assetHeaders(documentPath, false, "text/html"),
+      ...assetHeaders(documentPath, false, "text/html; charset=utf-8"),
       "Referrer-Policy": "strict-origin-when-cross-origin",
     });
   } catch (error) {
