@@ -1,3 +1,4 @@
+import { renderSessionUnavailablePage } from "./session-unavailable";
 import { managementPageAccess } from "./management-page-access";
 import { nonceAttribute } from "@/middleware/html-nonce";
 import { Hono } from "hono";
@@ -292,6 +293,16 @@ app.get("/accept-invitation/:invitationId", managementPageAccess, (c) => {
   const returnTo = `/accept-invitation/${encodeURIComponent(invitationId)}`;
   if (!user) return c.redirect(signInHref(returnTo));
   return c.html(renderInvitationPage(user, invitationId));
+});
+
+// These routes only render pages. A committed error document must offer a GET
+// retry; the completed form in the previous document is no longer available.
+app.onError(async (error, c) => {
+  // Keep offline template/asset generation independent of runtime configuration.
+  const { logger } = await import("@/logger");
+  logger.error({ errorType: error.name }, "Organization page failed");
+  c.header("Cache-Control", "private, no-store");
+  return c.html(renderSessionUnavailablePage(500), 500);
 });
 
 export default app;

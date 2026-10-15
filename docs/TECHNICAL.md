@@ -139,6 +139,10 @@ Success clears `aria-busy` immediately and appends a polite completion status an
 a real Continue link to the saved destination before attempting navigation.
 The completed guard and link stay in the document after Stop, visibility changes,
 and bfcache restoration, so recovery navigates without repeating the mutation.
+Restoration is browser-dependent and is not required for recovery from a committed
+500 response: organization page render failures replace the completed document
+with a styled error page whose Try again link retries the destination (including
+its query string) with a GET, without replaying the successful mutation.
 
 The People form and Add another person action each bind one handler
 for the lifetime of the persistent dialog. Reloading the invitation list must not accumulate

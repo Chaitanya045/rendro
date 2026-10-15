@@ -5,10 +5,22 @@ import { existsSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import { chromium, type Browser, type BrowserContext } from 'playwright';
 import { afterAll, afterEach, beforeAll, expect, it, vi } from 'vitest';
+import type * as ControlPlane from '@/routes/control-plane';
 import { securityHeaders } from '@/middleware/security-headers';
 import organizationPages from '@/routes/organization-pages';
 import { managementAccessFixture } from './fixtures/management-access';
 import { browserStep, bundleBrowserAsset } from './helpers/browser';
+
+vi.mock('@/routes/control-plane', async importOriginal => {
+  const actual = await importOriginal<typeof ControlPlane>();
+  return {
+    ...actual,
+    renderControlPlanePage: (...args: Parameters<typeof actual.renderControlPlanePage>) => {
+      if (mutationCount && destinationStatus === 500) throw new Error('Private rendering failure');
+      return actual.renderControlPlanePage(...args);
+    },
+  };
+});
 
 const user = { id: 'user-a', name: 'Owner', email: 'owner@example.test' } as User;
 const organization = { id: 'org-a', name: 'Acme', slug: 'acme', members: [{ id: 'member-a', userId: user.id, role: 'owner', user }], teams: [] };
@@ -34,7 +46,13 @@ let held: Promise<void> | undefined;
 
 beforeAll(async () => {
   const access = managementAccessFixture(organization, user);
-  vi.stubGlobal('fetch', vi.fn((input: string | URL | Request) => Promise.resolve(access(input) ?? Response.json(invitation))));
+  vi.stubGlobal('fetch', vi.fn((input: string | URL | Request) => {
+    const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url);
+    if (url.pathname === '/api/rendro/projects/get') {
+      return Promise.resolve(Response.json({ project: { _id: 'project-a', organizationId: organization.id } }));
+    }
+    return Promise.resolve(access(input) ?? Response.json(invitation));
+  }));
   const assets = new Map([
     ['/management-query.js', await bundleBrowserAsset('src/management-query/browser.ts')],
     ['/select.js', await bundleBrowserAsset('src/ui/select-browser.ts')],
@@ -52,7 +70,9 @@ beforeAll(async () => {
     if (mutationCount && url.pathname + url.search === current.destination) {
       destinationCount++;
       await held;
-      return c.html('<h1>Destination response</h1>', destinationStatus as 200 | 500);
+      if (destinationStatus === 200) return c.html('<h1>Destination response</h1>');
+      // Let the actual destination route fail during rendering and use its
+      // production error handler, rather than fabricating an error document.
     }
     const asset = assets.get(url.pathname);
     if (asset) return c.body(asset, 200, { 'Content-Type': 'application/javascript' });
@@ -69,12 +89,9 @@ beforeAll(async () => {
   const address = server.address();
   if (!address || typeof address === 'string') throw new Error('Missing fixture port');
   origin = `http://127.0.0.1:${address.port}`;
-  // Playwright disables bfcache by default; request interception also prevents
-  // restoration. Use real loopback responses and explicitly enable it here.
   browser = await chromium.launch({
     executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH
       ?? (!process.env.CI && existsSync('/usr/bin/chromium') ? '/usr/bin/chromium' : undefined),
-    ignoreDefaultArgs: ['--disable-back-forward-cache'],
     args: ['--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE 127.0.0.1'],
   });
 });
@@ -92,11 +109,11 @@ afterAll(async () => {
   await new Promise<void>(resolve => server?.close(() => resolve()));
 });
 
-it.each(forms.flatMap(form => ['stop', '500'].map(failure => ({ ...form, failure }))))('$name retains a completed recovery link after $failure without another POST', async spec => {
+async function submitForm(spec: typeof forms[number], status: 200 | 500) {
   current = spec;
   mutationCount = 0;
   destinationCount = 0;
-  destinationStatus = spec.failure === '500' ? 500 : 200;
+  destinationStatus = status;
   held = new Promise<void>(resolve => { release = resolve; });
   context = await browser.newContext({ viewport: { width: 375, height: 812 } });
   context.setDefaultTimeout(10_000);
@@ -106,7 +123,6 @@ it.each(forms.flatMap(form => ['stop', '500'].map(failure => ({ ...form, failure
   if (spec.form) await page.locator(`#${spec.form}-form [name=name]`).fill('Created docs');
   await page.evaluate(() => {
     document.body.dataset.originalDocument = 'true';
-    window.addEventListener('pageshow', event => { document.body.dataset.restored = String(event.persisted); });
     window.addEventListener('beforeunload', () => {
       const link = Array.from(document.querySelectorAll('a')).find(link => link.textContent === 'Continue');
       document.body.dataset.recoveryBeforeNavigation = String(Boolean(link && link.getBoundingClientRect().height > 0));
@@ -117,24 +133,18 @@ it.each(forms.flatMap(form => ['stop', '500'].map(failure => ({ ...form, failure
   const button = page.locator(spec.form ? `#${spec.form}-form button[type=submit]` : `#${spec.action}`);
   await button.click({ noWaitAfter: true });
   await expect.poll(() => destinationCount).toBe(1);
-  // The affordance exists before either a stopped load or an error response.
+  return { page, button };
+}
+
+it.each(forms)('$name retains a completed recovery link after stopped navigation without another POST', async spec => {
+  const { page, button } = await submitForm(spec, 200);
+  // Locator/evaluate calls can wait for the pending navigation. Browser Stop
+  // operates on the current document directly, so use its DevTools equivalent.
+  const session = await context!.newCDPSession(page);
+  await browserStep('stop pending destination', () => session.send('Page.stopLoading'));
+  await session.detach();
+  release!();
   const link = page.getByRole('link', { name: 'Continue', exact: true });
-  if (spec.failure === 'stop') {
-    // Locator/evaluate calls can wait for the pending navigation. Browser Stop
-    // operates on the current document directly, so use its DevTools equivalent.
-    const session = await context.newCDPSession(page);
-    await browserStep('stop pending destination', () => session.send('Page.stopLoading'));
-    await session.detach();
-    release!();
-  } else {
-    const response = page.waitForResponse(response => response.url() === origin + spec.destination);
-    release!();
-    expect((await response).status()).toBe(500);
-    await page.getByRole('heading', { name: 'Destination response' }).waitFor();
-    await page.goBack({ waitUntil: 'commit' });
-    // Assert genuine bfcache restoration rather than silently accepting a new form.
-    expect(await page.locator('body').getAttribute('data-restored')).toBe('true');
-  }
   expect(await page.locator('body').getAttribute('data-original-document')).toBe('true');
   expect(await page.locator('body').getAttribute('data-recovery-before-navigation')).toBe('true');
   expect(await page.locator('body').getAttribute('data-completed-before-navigation')).toBe('true');
@@ -152,6 +162,43 @@ it.each(forms.flatMap(form => ['stop', '500'].map(failure => ({ ...form, failure
   await browserStep('Continue with the keyboard', () => link.press('Enter'));
   await page.getByRole('heading', { name: 'Destination response' }).waitFor();
   expect(page.url()).toBe(origin + spec.destination);
+  expect(destinationCount).toBe(2);
+  expect(mutationCount).toBe(1);
+});
+
+it.each(forms)('$name retries a committed 500 destination without another POST', async spec => {
+  const { page } = await submitForm(spec, 500);
+  // Subscribe before releasing the response: a 500 commits a new document,
+  // regardless of whether this browser would cache the completed form on Back.
+  const committed = page.waitForNavigation({ waitUntil: 'load' });
+  release!();
+  const response = await committed;
+  expect(response?.status()).toBe(500);
+  expect(response?.request().method()).toBe('GET');
+  expect(response?.headers()['content-type']).toContain('text/html');
+  expect(response?.headers()['cache-control']).toBe('private, no-store');
+  const nonce = response?.headers()['content-security-policy'].match(/'nonce-([^']+)'/)?.[1];
+  expect(nonce).toBeTruthy();
+  expect(await page.locator('script, style').evaluateAll(elements => elements.every(element => (element as HTMLElement).nonce === document.querySelector('script')?.nonce))).toBe(true);
+  expect(await page.locator('script').first().evaluate(script => (script as HTMLScriptElement).nonce)).toBe(nonce);
+  expect(page.url()).toBe(origin + spec.destination);
+  expect(await page.locator('body').getAttribute('data-original-document')).toBeNull();
+  expect(await page.getByRole('heading', { name: "We couldn't load this page" }).isVisible()).toBe(true);
+  expect(await page.locator('body').textContent()).not.toContain('Private rendering failure');
+  expect(mutationCount).toBe(1);
+  const retry = page.getByRole('link', { name: 'Try again', exact: true });
+  expect(await retry.isVisible()).toBe(true);
+  expect(await retry.evaluate(link => (link as HTMLAnchorElement).href)).toBe(origin + spec.destination);
+  await retry.focus();
+  expect(await retry.evaluate(link => document.activeElement === link)).toBe(true);
+  destinationStatus = 200;
+  const retried = page.waitForNavigation({ waitUntil: 'load' });
+  await browserStep('Retry with the keyboard', () => retry.press('Enter'));
+  const retryResponse = await retried;
+  expect(retryResponse?.status()).toBe(200);
+  expect(retryResponse?.request().method()).toBe('GET');
+  expect(page.url()).toBe(origin + spec.destination);
+  expect(await page.getByRole('heading', { name: 'Destination response' }).isVisible()).toBe(true);
   expect(destinationCount).toBe(2);
   expect(mutationCount).toBe(1);
 });
