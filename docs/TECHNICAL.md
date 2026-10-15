@@ -167,6 +167,18 @@ Enforcement layers:
 4. **Storage namespace:** committed files live below `tenants/{organizationId}/projects/{projectId}/deployments/{deploymentId}/`.
 5. **Public capability:** anonymous publication and share routes resolve an indexed Convex record. They never accept an arbitrary organization prefix.
 
+### Organization deletion
+
+Organizations deleted before this lifecycle change have no tombstone; the new checks do not retroactively revoke their surviving capabilities. The operator reported no such organizations in production at the pre-release check. To verify again, use a read-only, fully paginated inventory of distinct `organizationId` values in `projects`, `deployments`, `apiKeyCredentials`, `publications`, and `shareGrants`, compare them with the Better Auth component’s `organization._id` values and `organizationTombstones.organizationId`, and investigate every ID absent from both identity and tombstones. An empty tombstone table alone does not establish that there are no historical deletions. Reconcile any orphaned records before release; this change does not perform an automatic backfill.
+
+Better Auth's owner-only organization deletion endpoint awaits `beforeDeleteOrganization` before deleting identity records. The hook runs one Convex transaction that permanently inserts an `organizationTombstones` row, revokes every API credential and share grant, removes every publication, clears project active pointers, and retires active/staging deployments into superseded/failed states. The transaction records one audit event and is idempotent. Application revocation must commit before identity deletion can start; failures reject deletion. If subsequent identity cleanup fails, the tombstone remains and access stays denied. Retry the auth deletion while owner membership remains. If identity cleanup already removed that membership, an operator must finish identity cleanup; never remove the tombstone to restore access.
+
+The transaction accepts at most 1,000 combined credentials, publications, shares, projects, and deployments. Indexed reads check the complete bound before any write; larger organizations receive an error and retain their identity and access. Convex transaction size/time failures also abort deletion. Larger-scale metadata cleanup needs a separately designed bounded lifecycle; deletion never silently truncates revocation.
+
+API-key identity/validation, session membership, project/deployment reads, publication/share resolution, and application writes all check the tombstone. Mutation-local checks serialize capability creation and deployment commit against deletion, including requests authorized before deletion began. Private viewer tickets already call the active-deployment endpoint on every asset request and renewal, so existing tickets also stop working immediately. Already-delivered bytes cannot be recalled.
+
+R2 deletion remains asynchronous through the existing retention job: retired deployments become eligible under the failed/superseded age rules once capability references are removed/revoked. Metadata, comments, audit events and the permanent tombstone are retained. No R2 calls occur during auth deletion. The current management settings page exposes profile edits only, with no organization-delete control or deletion transition.
+
 ### API keys
 
 | Property | Value |
@@ -178,7 +190,7 @@ Enforcement layers:
 | Expiry | Optional; the UI offers 30 days, 90 days (default), 1 year, or never |
 | Management | Owners and admins create, list, and revoke keys |
 
-Validation checks organization, optional project binding, required scope, expiry, and revocation on every request, and records `lastUsedAt` only on success. `GET /api/rendro/credentials/validate` returns 200 with the principal for an accepted key, 401 for missing, malformed, expired, revoked, or insufficient keys, and 400 when organization or scope is missing. Unexpected backend failures remain sanitized server errors (502 through the Worker). The CLI uses `/api/rendro/deployments/check` for its preflight; that endpoint also permits member sessions and returns 403 when neither identity authorizes the request.
+Validation checks the organization tombstone, organization binding, optional project binding, required scope, expiry, and revocation on every request, and records `lastUsedAt` only on success. `GET /api/rendro/credentials/validate` returns 200 with the principal for an accepted key, 401 for missing, malformed, expired, revoked, or insufficient keys, and 400 when organization or scope is missing. Unexpected backend failures remain sanitized server errors (502 through the Worker). The CLI uses `/api/rendro/deployments/check` for its preflight; that endpoint also permits member sessions and returns 403 when neither identity authorizes the request.
 
 | Operation | Scope |
 |---|---|
@@ -199,6 +211,7 @@ The application schema (`convex/schema.ts`) owns:
 
 | Table | Purpose |
 |---|---|
+| `organizationTombstones` | Permanent deletion barrier shared by session and capability authorization |
 | `projects` | Organization-scoped documentation products and active deployment pointer |
 | `deployments` | Immutable manifest metadata, status, provenance, predecessor, retention state |
 | `publications` | Indexed global public slug, project/path mapping, tracked or pinned release mode |

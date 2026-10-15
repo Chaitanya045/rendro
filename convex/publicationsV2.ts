@@ -1,3 +1,4 @@
+import { isOrganizationDeleted, requireActiveOrganization } from "./organizationLifecycle";
 import { requireId } from "./ids";
 import { ConvexError, v } from "convex/values";
 import { internalMutation, internalQuery } from "./_generated/server";
@@ -19,6 +20,7 @@ export const createInternal = internalMutation({
     actorId: v.string(),
   },
   handler: async (ctx, input) => {
+    await requireActiveOrganization(ctx, input.organizationId);
     const args = {
       ...input,
       projectId: requireId(ctx, "projects", input.projectId),
@@ -82,6 +84,7 @@ export const listInternal = internalQuery({
     projectId: v.optional(v.string()),
   },
   handler: async (ctx, input) => {
+    await requireActiveOrganization(ctx, input.organizationId);
     const args = {
       ...input,
       projectId: input.projectId === undefined ? undefined : requireId(ctx, "projects", input.projectId),
@@ -113,7 +116,7 @@ export const resolvePublicInternal = internalQuery({
       .query("publications")
       .withIndex("by_slug", (query) => query.eq("slug", args.slug.toLowerCase()))
       .unique();
-    if (!publication) return null;
+    if (!publication || await isOrganizationDeleted(ctx, publication.organizationId)) return null;
     const project = await ctx.db.get(publication.projectId);
     if (!project) return null;
     const deploymentId = publication.trackingMode === "pinned"
@@ -134,6 +137,7 @@ export const removeInternal = internalMutation({
     actorId: v.string(),
   },
   handler: async (ctx, input) => {
+    await requireActiveOrganization(ctx, input.organizationId);
     const args = {
       ...input,
       projectId: requireId(ctx, "projects", input.projectId),

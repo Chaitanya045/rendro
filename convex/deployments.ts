@@ -1,3 +1,4 @@
+import { isOrganizationDeleted, requireActiveOrganization } from "./organizationLifecycle";
 import { requireId } from "./ids";
 import { ConvexError, v } from "convex/values";
 import { internalMutation, internalQuery } from "./_generated/server";
@@ -14,6 +15,7 @@ export const startInternal = internalMutation({
     actorId: v.string(),
   },
   handler: async (ctx, input) => {
+    await requireActiveOrganization(ctx, input.organizationId);
     const args = {
       ...input,
       projectId: requireId(ctx, "projects", input.projectId),
@@ -69,6 +71,7 @@ export const getInternal = internalQuery({
     deploymentId: v.string(),
   },
   handler: async (ctx, input) => {
+    if (await isOrganizationDeleted(ctx, input.organizationId)) return null;
     const args = {
       ...input,
       projectId: requireId(ctx, "projects", input.projectId),
@@ -87,6 +90,7 @@ export const getInternal = internalQuery({
 export const listInternal = internalQuery({
   args: { organizationId: v.string(), projectId: v.string() },
   handler: async (ctx, input) => {
+    await requireActiveOrganization(ctx, input.organizationId);
     const args = {
       ...input,
       projectId: requireId(ctx, "projects", input.projectId),
@@ -106,6 +110,7 @@ export const listInternal = internalQuery({
 export const latestForOrganization = internalQuery({
   args: { organizationId: v.string() },
   handler: async (ctx, { organizationId }) => {
+    if (await isOrganizationDeleted(ctx, organizationId)) return null;
     const latest = await ctx.db.query("deployments")
       .withIndex("by_organization_activated", (q) => q.eq("organizationId", organizationId).gt("activatedAt", 0))
       .order("desc").first();
@@ -124,6 +129,7 @@ export const commitInternal = internalMutation({
     actorId: v.string(),
   },
   handler: async (ctx, input) => {
+    await requireActiveOrganization(ctx, input.organizationId);
     const args = {
       ...input,
       projectId: requireId(ctx, "projects", input.projectId),
@@ -175,6 +181,7 @@ export const failInternal = internalMutation({
     reason: v.string(),
   },
   handler: async (ctx, input) => {
+    await requireActiveOrganization(ctx, input.organizationId);
     const args = {
       ...input,
       projectId: requireId(ctx, "projects", input.projectId),

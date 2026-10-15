@@ -31,6 +31,7 @@ import type * as httpErrors from "../httpErrors.js";
 import type * as ids from "../ids.js";
 import type * as legacyComments from "../legacyComments.js";
 import type * as migrationHttp from "../migrationHttp.js";
+import type * as organizationLifecycle from "../organizationLifecycle.js";
 import type * as projects from "../projects.js";
 import type * as publicErrors from "../publicErrors.js";
 import type * as publicFunctions from "../publicFunctions.js";
@@ -79,6 +80,7 @@ declare const fullApi: ApiFromModules<{
   ids: typeof ids;
   legacyComments: typeof legacyComments;
   migrationHttp: typeof migrationHttp;
+  organizationLifecycle: typeof organizationLifecycle;
   projects: typeof projects;
   publicErrors: typeof publicErrors;
   publicFunctions: typeof publicFunctions;

@@ -8,7 +8,7 @@ vi.mock("../convex/auth", () => ({
 }));
 import { authorizeHttpOrganization, httpOrganizationAccess } from "../convex/authorization";
 
-const ctx = {} as Parameters<typeof httpOrganizationAccess>[0];
+const ctx = { runQuery: async () => false } as unknown as Parameters<typeof httpOrganizationAccess>[0];
 const headers = new Headers();
 beforeEach(() => {
   vi.resetAllMocks();
@@ -46,6 +46,11 @@ describe("fresh minimal management authorization", () => {
     await expect(authorizeHttpOrganization(ctx, headers, "org-a", ["admin"])).resolves.toMatchObject({ user: { _id: "user-a" } });
     mocks.user.mockResolvedValue(null);
     await expect(authorizeHttpOrganization(ctx, headers, "org-a", ["admin"])).rejects.toThrow("Authenticated user not found");
+  });
+  it("rejects a surviving membership whose organization is gone", async () => {
+    mocks.find.mockImplementation(async ({ model }: { model: string }) => model === "member"
+      ? { id: "member-a", organizationId: "org-a", userId: "user-a", role: "member" } : null);
+    await expect(httpOrganizationAccess(ctx, headers, "org-a")).rejects.toThrow("Organization membership required");
   });
   it("fails closed if the authorization backend fails", async () => {
     mocks.find.mockRejectedValue(new Error("Backend unavailable"));

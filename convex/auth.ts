@@ -18,6 +18,7 @@ import {
   sendExistingAccountNotice,
   sendOrganizationInvitationEmail,
 } from "./authEmails";
+import { beforeDeleteOrganization } from "./organizationLifecycle";
 import authSchema from "./betterAuth/schema";
 
 export const authComponent = createClient<DataModel, typeof authSchema>(
@@ -130,6 +131,9 @@ export function createAuthOptions(ctx: GenericCtx<DataModel>) {
         return ctx.runMutation(components.betterAuth.sessionReadLimit.consume, { key });
       }),
       organization({
+        organizationHooks: {
+          beforeDeleteOrganization: ({ organization, user }) => beforeDeleteOrganization(ctx, organization.id, user.id),
+        },
         teams: { enabled: true },
         requireEmailVerificationOnInvitation: true,
         invitationExpiresIn: 60 * 60 * 24 * 7,
