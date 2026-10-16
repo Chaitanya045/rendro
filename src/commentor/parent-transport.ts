@@ -1,3 +1,5 @@
+import { ConvexError } from "convex/values";
+import { commentRetryAfter } from "./errors";
 import { normalizeMutationArgs } from "./mutation-args";
 import { CommentOperationState, mutationKey } from "./operation-state";
 import {
@@ -96,7 +98,7 @@ export class ParentCommentTransport {
     const operation = this.request(method, { ...prepared.args, clientOperationId: prepared.clientOperationId }).then(() => {
       this.recovery.complete(key, prepared.clientOperationId);
     }).catch((error: unknown) => {
-      if (error instanceof CommentMutationRejectedError) this.recovery.reject(key, prepared.clientOperationId);
+      if (error instanceof CommentMutationRejectedError || commentRetryAfter(error) !== null) this.recovery.reject(key, prepared.clientOperationId);
       throw error;
     }).finally(() => {
       if (this.mutations.get(key) === operation) this.mutations.delete(key);
@@ -260,8 +262,11 @@ export class ParentCommentTransport {
     window.clearTimeout(request.timeout);
     request.dismissSlow?.();
     if (event.data.ok) request.resolve();
-    else request.reject(event.data.rejected === true
+    else {
+      const quota = new ConvexError({ kind: "RateLimited", name: "comments", retryAfter: event.data.retryAfter ?? null });
+      request.reject(commentRetryAfter(quota) !== null ? quota : event.data.rejected === true
       ? new CommentMutationRejectedError(event.data.error || "Comment operation failed")
       : new Error(event.data.error || "Comment operation failed"));
+    }
   };
 }

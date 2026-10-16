@@ -45,12 +45,12 @@ export async function collectShareAssets(
   budget.charge(documentPath.length + 1);
   const document = files.get(documentPath);
   if (!document || document.mediaType !== "text/html") {
-    throw new ShareAssetError("Share requires an HTML document in the deployment manifest");
+    throw new ShareAssetError("Share requires an HTML document in the deployment manifest", "unavailable");
   }
   let bytes = 0;
   const source = async (file: StoredManifest["files"][number], environment?: string) => {
     const stream = await budget.wait(() => read(file.path));
-    if (!stream) throw new ShareAssetError("Share document or stylesheet is unavailable");
+    if (!stream) throw new ShareAssetError("Share document or stylesheet is unavailable", "unavailable");
     const reader = stream.getReader();
     const chunks: Uint8Array[] = [];
     let length = 0;
@@ -61,7 +61,7 @@ export async function collectShareAssets(
       bytes += chunk.value.byteLength;
       if (bytes > MAX_SOURCE_BYTES) {
         await reader.cancel();
-        throw new ShareAssetError("Share source exceeds the 8 MiB parsing limit");
+        throw new ShareAssetError("Share source exceeds the 8 MiB parsing limit", "source_size");
       }
       budget.charge(chunk.value.byteLength);
       chunks.push(chunk.value);
@@ -77,7 +77,7 @@ export async function collectShareAssets(
     try { return decodeShareSource(buffer, file.path, file.contentType, environment, budget); }
     catch (error) {
       if (error instanceof ShareAssetError) throw error;
-      throw new ShareAssetError("Share source uses an unsupported text encoding");
+      throw new ShareAssetError("Share source uses an unsupported text encoding", "encoding");
     }
   };
   const fileUrl = (path: string) => {
@@ -143,7 +143,7 @@ export async function collectShareAssets(
       budget.charge(file.path.length * 4 + 1);
       assetBytes += new TextEncoder().encode(JSON.stringify(file.path)).byteLength + (assets.size ? 1 : 0);
       if (assets.size >= MAX_SHARE_ASSET_PATHS || assetBytes > MAX_SHARE_ASSET_BYTES || !isCanonicalStorageKey(file.path)) {
-        throw new ShareAssetError("document references too many assets to share");
+        throw new ShareAssetError("document references too many assets to share", "assets");
       }
       assets.set(file.path, file);
     }

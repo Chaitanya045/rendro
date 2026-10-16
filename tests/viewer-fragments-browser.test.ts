@@ -666,11 +666,17 @@ describe("viewer fragment navigation in Chromium", () => {
     await page.goto(harness.origin + privateBase);
     await readyFrame(page);
     await waitForObservedActivationExpiry(page);
-    await withoutActivation(page, () => {
+    // Locator waits can grant automation activation before postMessage arrives.
+    // Observe the notice in this same passive evaluation before returning to Playwright.
+    await withoutActivation(page, () => new Promise<void>(resolve => {
+      const observer = new MutationObserver(() => {
+        if (document.querySelector("#document-navigation-notice")) { observer.disconnect(); resolve(); }
+      });
+      observer.observe(document.body, { childList: true, subtree: true });
       document.querySelector<HTMLIFrameElement>("#content-frame")!.contentWindow!.postMessage({
         type: "fixture-navigate", search: "?pending",
       }, "*");
-    }, "send unsolicited fixture navigation without activation");
+    }), "send and observe unsolicited fixture navigation without activation");
     await page.locator("#document-navigation-notice").waitFor();
     if (dismissed) await page.getByRole("button", { name: "Dismiss", exact: true }).click();
     await page.evaluate(() => {

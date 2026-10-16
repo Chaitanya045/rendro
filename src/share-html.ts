@@ -14,7 +14,7 @@ export function checkShareHtmlComplexity(input: string, budget = new WorkBudget(
   for (let i = 0; i < input.length; i++) {
     budget.charge();
     if (input.charCodeAt(i) === 60 && ++tags > MAX_HTML_TAG_MARKERS) {
-      throw new ShareAssetError("Share HTML exceeds the 50,000 tag marker limit");
+      throw new ShareAssetError("Share HTML exceeds the 50,000 tag marker limit", "tags");
     }
   }
 }
@@ -57,10 +57,10 @@ class ShareTokenizer extends Tokenizer {
   protected override _createAttr(first: string): void {
     this.budget.charge(128);
     if (++this.tagAttributes > MAX_HTML_ATTRIBUTES_PER_TAG) {
-      throw new ShareAssetError("Share HTML exceeds the 128 attributes per tag limit");
+      throw new ShareAssetError("Share HTML exceeds the 128 attributes per tag limit", "attributes");
     }
     if (++this.attributes > MAX_HTML_ATTRIBUTES) {
-      throw new ShareAssetError("Share HTML exceeds the 100,000 total attributes limit");
+      throw new ShareAssetError("Share HTML exceeds the 100,000 total attributes limit", "attributes");
     }
     super._createAttr(first);
   }

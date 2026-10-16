@@ -42,6 +42,7 @@ export type CommentorParentResponse = {
   ok: boolean;
   error?: string;
   rejected?: boolean;
+  retryAfter?: number;
 };
 
 export type CommentorParentUpdate = {

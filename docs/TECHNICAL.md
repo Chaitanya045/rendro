@@ -527,6 +527,42 @@ and a clear retry message; direct comment RPCs return the component's structured
 `RateLimited` application error. Management dialogs keep their existing draft and
 pending-state recovery, and never automatically replay a denied write.
 
+Every `ShareAssetError` 400 from `POST /api/rendro/shares` carries a stable machine
+`code` and a `reason`: `share_limit` (work cap, asset count/bytes, 8 MiB parse
+limit, tag/attribute limits, unsupported encoding), `share_busy` (the CPU
+deadline, which slow storage can trip and a retry may clear) and
+`share_unavailable` (missing document or stylesheet). The viewer chooses its
+wording from the code (and a known `reason`), never from server text, and
+offers Retry only for `share_busy`, HTTP 429 and unrecognized failures. Older
+Workers that returned only `document too complex to share` are still treated as
+a limit. A persistent, dismissible notice follows the toolbar in DOM order, with
+a separate always-present polite live region that is written once per notice and
+once when a delay ends; the visible countdown is aria-hidden. Escape dismisses
+it; a document change (`rendro:document-change`, fired when the shell's `RENDRO_CURRENT_DOC` changes, which the lazy tree assigns on every navigation) clears
+every notice except the account-wide quota countdown, and a failure arriving
+after the reader moved to another document is dropped.
+`Retry-After` is parsed by `shared/retry-after.ts` (digits-only seconds or an HTTP
+date, values above 2^31-1 ms capped rather than dropped); the inline page scripts
+embed its browser-safe twin, and `viewer-backend.ts` uses the typed version. The
+parsed delay gates both retry controls until its deadline; missing/malformed delays
+show quota guidance without inventing a countdown.
+Success retains the existing 1.8-second toolbar copy feedback.
+
+Comment error mapping recognizes only Convex `RateLimited` envelopes named
+`comments` or `comments:organization` (the per-user and per-organization buckets)
+with a finite positive millisecond delay (at most 2,147,483,647). The parent sends
+that validated delay alongside the sanitized message and definitive rejection;
+the iframe releases the rejected operation identity so the retained draft can be
+edited. Unknown outcomes still retain the original identity for safe retry.
+The widget shares a cooldown across thread/reply controls, including newly rendered
+controls, preserves editable drafts, and shows a persistent dismissible countdown
+whose reason is announced through a persistent live region once at the start and
+once at the end. Dismissing returns focus to the draft, and Enter during a
+dismissed cooldown re-shows the notice. Definitive rejection remains an explicit
+list of public error codes plus a validated quota.
+Expiry only re-enables controls; it never submits. Identity changes clear the
+notice/timer. The optional response field is backward compatible with protocol v2.
+
 Anonymous publication/share resolutions share **600 requests/minute with a 1,200
 burst per verified ingress IP**, before resolver queries or storage reads. Modern
 Convex resolver actions enforce this even when called directly. Legacy Worker
@@ -996,7 +1032,9 @@ the pending iframe `src` navigation can abort a request after it reaches the
 fixture server. Further unsolicited messages must cause neither additional
 commits nor requests once the approved document has loaded. The replacement-frame
 fixture reports completion after repeated requests and native activation expiry,
-then stops sending. History assertions and Back run after that signal so automation
+then stops sending. The sign-out confirmation regression also observes its
+unsolicited notice inside the same passive CDP evaluation that sends the request,
+before a Playwright locator wait can grant activation. History assertions and Back run after that signal so automation
 activation cannot authorize another fixture request and a still-running fixture
 cannot reopen a notice during restoration. History checks use passive reads and
 wait for the expected joint-session count; the sequential-click regression also

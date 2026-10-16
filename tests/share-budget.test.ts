@@ -28,6 +28,19 @@ describe("one cumulative discovery budget", () => {
     expect(() => timed.charge(1024)).toThrow(ShareAssetError);
   });
 
+  it("classifies the work cap as a limit but the deadline as a transient busy failure", () => {
+    let now = 0;
+    vi.spyOn(performance, "now").mockImplementation(() => now);
+    const capped = new WorkBudget();
+    capped.charge(MAX_SHARE_WORK);
+    expect(() => capped.charge()).toThrow(expect.objectContaining({ code: "share_limit", reason: "work" }));
+    const slow = new WorkBudget();
+    now = MAX_SHARE_CPU_MS + 1;
+    expect(() => slow.check()).toThrow(expect.objectContaining({ code: "share_busy", reason: "deadline" }));
+    expect(new ShareAssetError("x", "unavailable").code).toBe("share_unavailable");
+    expect(new ShareAssetError("x", "encoding").code).toBe("share_limit");
+  });
+
   it("excludes async storage waits, including rejection, but counts synchronous setup", async () => {
     let now = 0;
     vi.spyOn(performance, "now").mockImplementation(() => now);
@@ -70,13 +83,14 @@ describe("one cumulative discovery budget", () => {
 
 // V8 coverage instruments every hot character loop. Measure production code in
 // ONE uninstrumented child, with the real deadline enabled. Absolute CPU limits
-// and strict deterministic work ratios accompany a 25ms cold-JIT/GC timing floor.
+// and strict deterministic work ratios accompany a 25ms timing floor. Fixed
+// three-sample medians stabilize CPU ratios; every sample retains the 1s ceiling.
 it("meets the generated adversarial CPU/work matrix and accepts a real 1 MiB document", async () => {
   const { stdout } = await promisify(execFile)(process.execPath, ["--import", "tsx", "tests/helpers/share-performance.ts"]);
-  const report = JSON.parse(stdout) as { results: Array<{ name: string; points: Array<{ cpu: number; work: number }> }>; legitimate: { cpu: number; bytes: number } };
+  const report = JSON.parse(stdout) as { results: Array<{ name: string; points: Array<{ cpu: number; maxCpu: number; work: number }> }>; legitimate: { cpu: number; bytes: number } };
   for (const { name, points: [small, large] } of report.results) {
-    expect(small.cpu, name).toBeLessThan(1000);
-    expect(large.cpu, name).toBeLessThan(1000);
+    expect(small.maxCpu, name).toBeLessThan(1000);
+    expect(large.maxCpu, name).toBeLessThan(1000);
     expect(large.cpu, name).toBeLessThanOrEqual(Math.max(small.cpu, 25) * 5);
     expect(large.work, name).toBeLessThanOrEqual(small.work * 5);
   }

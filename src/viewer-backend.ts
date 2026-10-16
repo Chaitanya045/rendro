@@ -1,4 +1,5 @@
 import { evictRejectedSession } from "@/session-cache";
+import { retryAfterMs } from "../shared/retry-after";
 export class ViewerBackendError extends Error {
   readonly unavailable = true;
   constructor(readonly retryAfter = "1", readonly status: 429 | 503 = 503) {
@@ -22,9 +23,8 @@ export async function viewerBackendJson<T extends object>(url: string, init?: Re
             // expired/revoked public grants. 408 and 429 are retryable failures.
             if (response.status >= 400 && response.status < 500 && ![408, 429].includes(response.status)) return null;
             const value = response.headers.get("Retry-After");
-            const seconds = value && /^\d+$/.test(value) ? Number(value)
-              : value ? Math.ceil((Date.parse(value) - Date.now()) / 1_000) : 1;
-            throw new ViewerBackendError(String(Number.isSafeInteger(seconds) ? Math.max(1, seconds) : 1), preserveRateLimit && response.status === 429 ? 429 : 503);
+            const delay = retryAfterMs(value);
+            throw new ViewerBackendError(String(delay ? Math.ceil(delay / 1_000) : 1), preserveRateLimit && response.status === 429 ? 429 : 503);
           } finally {
             void response.body?.cancel().catch(() => {});
           }

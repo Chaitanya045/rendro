@@ -414,11 +414,33 @@ it('private share creation can repeat after success and denial without retaining
     await requests.settle(status === 200 ? { url: '/s/synthetic-share' } : { message: 'Permission denied' }, status);
     await expect.poll(() => button.getAttribute('aria-busy')).toBeNull();
     expect(await button.isEnabled()).toBe(true);
-    expect(await button.getAttribute('aria-label')).toBe(status === 200 ? 'Share link copied!' : 'Unable to copy');
+    expect(await button.getAttribute('aria-label')).toBe(status === 200 ? 'Share link copied!' : 'Share document');
+    const notice = page.locator('#share-error');
+    if (status === 200) expect(await notice.isVisible()).toBe(false);
+    else {
+      expect(await notice.isVisible()).toBe(true);
+      expect(await notice.innerText()).toContain('The share link could not be created. Please try again.');
+      expect(await notice.innerText()).not.toContain('Permission denied');
+    }
   }
   expect(requests.bodies).toHaveLength(3);
   expect(requests.bodies.every(body => body.expiresInSeconds === 604800)).toBe(true);
   await expect.poll(() => button.getAttribute('aria-label')).toBe('Share document');
+});
+
+it('a share failure notice is cleared when navigation changes the document', async () => {
+  const page = await open(`${projectBase}/docs`);
+  await page.evaluate(() => {
+    (window as unknown as { RENDRO_CURRENT_DOC: string }).RENDRO_CURRENT_DOC = 'org-a/project-a/index.html';
+  });
+  const requests = await writes(page, '/api/rendro/shares');
+  await page.locator('#share-btn').click();
+  await requests.settle({ message: 'Permission denied' }, 403);
+  await page.locator('#share-error').waitFor({ state: 'visible' });
+  // Real lazy-tree navigation (back/forward) assigns the current document.
+  await page.evaluate(() => window.dispatchEvent(new PopStateEvent('popstate', { state: { docPath: 'org-a/project-a/other.html' } })));
+  await expect.poll(() => page.evaluate(() => (window as unknown as { RENDRO_CURRENT_DOC: string }).RENDRO_CURRENT_DOC)).toBe('org-a/project-a/other.html');
+  expect(await page.locator('#share-error').isVisible()).toBe(false);
 });
 
 it.each(['accept', 'reject'])('invitation %s locks both response controls during delayed navigation and remains retryable', async action => {

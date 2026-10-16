@@ -1,7 +1,7 @@
 import { ConvexError } from "convex/values";
 import { isPublicErrorData } from "../shared/public-errors";
 import { showViewerUpdateNotice, updateViewerActiveDeployment } from "../viewer/client";
-import { commentErrorMessage, isDefinitiveCommentRejection } from "./errors";
+import { commentErrorMessage, commentRetryAfter, isDefinitiveCommentRejection } from "./errors";
 import { COMMENT_RECOVERY_PREFIX, syncCommentRecoveryUser } from "./recovery-session";
 import { normalizeMutationArgs, record, validAnchor } from "./mutation-args";
 import { CommentOperationState, mutationKey } from "./operation-state";
@@ -216,13 +216,14 @@ export class CommentorParentHost {
       && sameScope(scope, this.currentScope());
   }
 
-  private respond(source: MessageEventSource, requestId: string, ok: boolean, error?: string, rejected = !ok): void {
+  private respond(source: MessageEventSource, requestId: string, ok: boolean, error?: string, rejected = !ok, retryAfter?: number): void {
     if (!("postMessage" in source) || typeof source.postMessage !== "function") return;
     (source as WindowProxy).postMessage({
       type: COMMENTOR_PARENT_RESPONSE,
       requestId,
       ok,
       ...(error ? { error, rejected } : {}),
+      ...(retryAfter !== undefined ? { retryAfter } : {}),
     }, "*");
   }
 
@@ -422,7 +423,7 @@ export class CommentorParentHost {
         const rejected = isDefinitiveCommentRejection(error);
         if (rejected && operation.clientOperationId) this.recovery(scope).reject(key, operation.clientOperationId);
         const message = commentErrorMessage(error, "Comment operation failed");
-        this.respond(event.source!, event.data.requestId, false, message, rejected);
+        this.respond(event.source!, event.data.requestId, false, message, rejected, commentRetryAfter(error) ?? undefined);
       }
     }).finally(() => { this.mutationsInFlight--; });
   };
