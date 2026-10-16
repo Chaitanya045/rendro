@@ -48,6 +48,7 @@ import type * as retention from "../retention.js";
 import type * as retentionHttp from "../retentionHttp.js";
 import type * as retentionPolicy from "../retentionPolicy.js";
 import type * as security from "../security.js";
+import type * as sessionLifetime from "../sessionLifetime.js";
 import type * as sessionReadLimit from "../sessionReadLimit.js";
 import type * as shareGrantHttp from "../shareGrantHttp.js";
 import type * as shareGrants from "../shareGrants.js";
@@ -101,6 +102,7 @@ declare const fullApi: ApiFromModules<{
   retentionHttp: typeof retentionHttp;
   retentionPolicy: typeof retentionPolicy;
   security: typeof security;
+  sessionLifetime: typeof sessionLifetime;
   sessionReadLimit: typeof sessionReadLimit;
   shareGrantHttp: typeof shareGrantHttp;
   shareGrants: typeof shareGrants;

@@ -200,6 +200,9 @@ must be removed when the product is fixed. None are currently open.
 The #145 regression (AUTH-111-02) now passes in all three engines. It asserts the
 one-day backend lifetime after account, organization, project and document reads,
 reloads and the expiry boundary, alongside the session-only browser cookie.
+The same reads run with absent and altered client preference markers. Password
+rotation regressions check both stored lifetime choices and replacement-cookie
+persistence after removing the marker.
 A remembered-session control ages the disposable record past its update age and
 verifies protected entry refreshes it to seven days.
 

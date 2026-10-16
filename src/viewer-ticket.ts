@@ -19,8 +19,8 @@ export function sessionTokenCookie(cookie: string): string {
 export function viewerSessionCookie(cookie: string): string {
   const token = sessionTokenCookie(cookie);
   if (!token) return "";
-  // Better Auth verifies this signed marker and skips refreshing non-remembered
-  // sessions. Preserve it through protected reads and encrypted viewer tickets.
+  // Retain compatibility with existing tickets. Convex derives the lifetime
+  // preference from the persisted session, regardless of this client marker.
   // Never forward session_data, unrelated cookies, or bearer API credentials.
   const preference = cookie.split(";").map(part => part.trim())
     .filter(part => /^(?:__Secure-)?better-auth\.dont_remember=.+$/.test(part));

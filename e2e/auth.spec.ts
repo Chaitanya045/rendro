@@ -480,7 +480,19 @@ test("nonpersistent session retains its short backend lifetime [AUTH-111-02]", a
     }
     expect((await stored()).expiresAt).toBe(initial.expiresAt);
   }
-  expect((await context.cookies()).find(cookie => cookie.name.endsWith(".session_token"))?.expires).toBe(-1);
+  // The client preference is not authoritative, even when removed or forged.
+  for (const marker of [null, "true.invalid", "false"]) {
+    await context.clearCookies({ name: "better-auth.dont_remember" });
+    if (marker !== null) await context.addCookies([{ name: "better-auth.dont_remember", value: marker, url: page.url() }]);
+    // End on a fresh-identity page; the reloads below must not use cached identity.
+    for (const path of [org, `${org}/projects/${seed.projectId}/docs`, "/account/security"]) {
+      expect((await page.goto(path))?.status()).toBe(200);
+      if (path.endsWith("/docs")) await expect(page.frameLocator("#content-frame").getByRole("heading", { name: "Publication from local storage" })).toBeVisible();
+      expect((await session(page))?.sessionId).toBe(identity.sessionId);
+      expect((await stored()).expiresAt).toBe(initial.expiresAt);
+      expect((await context.cookies()).find(cookie => cookie.name.endsWith(".session_token"))?.expires).toBe(-1);
+    }
+  }
   // Age only this disposable record to just before its one-day boundary.
   const expiresAt = Date.now() + 60_000;
   await ageRecord("session", "_id", identity.sessionId, { createdAt: expiresAt - 86400_000, expiresAt });
@@ -515,3 +527,32 @@ test("remembered session refreshes to seven days on protected entry", async ({ p
   expect((await session(page))?.sessionId).toBe(identity.sessionId);
   expect((await context.cookies()).find(cookie => cookie.name.endsWith(".session_token"))?.expires).toBeGreaterThan(Date.now() / 1000);
 });
+
+for (const remember of [false, true]) {
+  test(`password rotation inherits session lifetime (remember=${remember})`, async ({ page, context }, info) => {
+    const email = `lifetime-${remember}-${info.project.name}-${info.retry}@example.test`;
+    await verifiedUser(page, email);
+    await login(page, email, password, remember);
+    await expect(page).toHaveURL(/\/account\/security$/);
+    const original = await session(page);
+    await context.clearCookies({ name: "better-auth.dont_remember" });
+    await page.locator("#currentPassword").fill(password);
+    await page.locator("#newPassword").fill(changedPassword);
+    await page.getByRole("button", { name: "Change password", exact: true }).click();
+    await expect(page.getByRole("status")).toHaveText("Password changed successfully.");
+    const replacement = await session(page);
+    if (!replacement) throw new Error("Missing replacement session");
+    expect(replacement.sessionId).not.toBe(original?.sessionId);
+    const stored = await authRecord<{ createdAt: number; expiresAt: number; rememberMe: boolean }>("findOne", {
+      model: "session", where: [{ field: "_id", value: replacement.sessionId }], select: ["createdAt", "expiresAt", "rememberMe"],
+    });
+    expect(stored.rememberMe).toBe(remember);
+    const duration = (remember ? 7 : 1) * 86400_000;
+    expect(stored.expiresAt - stored.createdAt).toBeGreaterThan(duration - 1000);
+    expect(stored.expiresAt - stored.createdAt).toBeLessThanOrEqual(duration);
+    const cookieExpiry = (await context.cookies()).find(cookie => cookie.name.endsWith(".session_token"))?.expires;
+    if (remember) expect(cookieExpiry).toBeGreaterThan(Date.now() / 1000);
+    else expect(cookieExpiry).toBe(-1);
+    expect(await authRecord("findOne", { model: "session", where: [{ field: "_id", value: original?.sessionId }], select: ["_id"] })).toBeNull();
+  });
+}
