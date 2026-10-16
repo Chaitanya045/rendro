@@ -160,14 +160,15 @@ export const recordUsageInternal = internalMutation({
 
 // Verify identity independently of requested tenant/scope, so changing those
 // fields cannot obtain fresh rate-limit buckets. Never return the stored hash.
+// Cached until the read set changes, so it never reads the clock: it returns the
+// stored `expiresAt` and the caller (`limitedAction`) treats an expired key as unverified.
 export const verifiedIdInternal = internalQuery({
   args: { secretHash: v.string() },
   handler: async (ctx, { secretHash }) => {
     const credential = await ctx.db.query("apiKeyCredentials")
       .withIndex("by_secret_hash", q => q.eq("secretHash", secretHash)).unique();
-    if (!credential || credential.revokedAt !== undefined
-      || (credential.expiresAt !== undefined && credential.expiresAt <= Date.now())) return null;
+    if (!credential || credential.revokedAt !== undefined) return null;
     if (await isOrganizationDeleted(ctx, credential.organizationId)) return null;
-    return credential._id;
+    return { id: credential._id, expiresAt: credential.expiresAt };
   },
 });

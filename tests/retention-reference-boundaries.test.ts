@@ -97,13 +97,13 @@ describe("share reference boundaries", () => {
     await expect(f.t.mutation(internal.shareGrants.revokeInternal, revoke)).rejects.toThrow("Share not found");
   });
 
-  it.each(["failed", "staging", "missing-deployment", "missing-project", "expired"])("denies existing shares when %s", async state => {
+  // Expiry is decided by the httpAction, not this query: see tests/query-clock-purity.test.ts.
+  it.each(["failed", "staging", "missing-deployment", "missing-project"])("denies existing shares when %s", async state => {
     const f = await fixture();
-    const grant = await shareWithProof(f.t, f.share);
+    await shareWithProof(f.t, f.share);
     await f.t.run(async ctx => {
       if (state === "missing-deployment") await ctx.db.delete(f.deploymentId);
       else if (state === "missing-project") await ctx.db.delete(f.projectId);
-      else if (state === "expired") await ctx.db.patch(grant!._id, { expiresAt: 1 });
       else await ctx.db.patch(f.deploymentId, { status: state as Doc<"deployments">["status"] });
     });
     expect(await f.t.query(internal.shareGrants.resolveInternal, { tokenHash: "token" })).toBeNull();

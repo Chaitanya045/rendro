@@ -130,6 +130,22 @@ describe("minimal publication/share resolver responses", () => {
     expect(stream).toHaveBeenCalledWith(f.deployment.manifestKey.replace("manifest.json", "files/index.html"));
   });
 
+  it("resolves a share on every request, so the Worker never outlives its expiry", async () => {
+    const f = await fixture();
+    const fetchMock = vi.fn((input: string, init?: RequestInit) => { const u = new URL(input); return f.t.fetch(u.pathname + u.search, init); });
+    vi.stubGlobal("fetch", fetchMock);
+    const clock = vi.spyOn(Date, "now");
+    const expiresAt = f.grant.expiresAt;
+    clock.mockReturnValue(expiresAt - 1);
+    expect((await shareRoutes.request("/s/synthetic-share-token")).status).toBe(200);
+    clock.mockReturnValue(expiresAt);
+    expect((await shareRoutes.request("/s/synthetic-share-token")).status).toBe(404);
+    expect((await shareRoutes.request("/s/synthetic-share-token/files/index.html")).status).toBe(404);
+    // One uncached backend lookup per request, with no cache directives that could pin a result.
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    for (const [, init] of fetchMock.mock.calls) expect(Object.keys(init ?? {}).sort()).toEqual(["headers", "redirect", "signal"]);
+  });
+
   it("fails closed before storage when the backend returns only presentation metadata", async () => {
     const f = await fixture();
     const read = vi.spyOn(storage, "getObjectText");

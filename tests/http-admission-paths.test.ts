@@ -68,7 +68,7 @@ it("rejects missing identities on read routes", async () => {
   }
 });
 it("handles public capability presence and absence without session authority", async () => {
-  const share = { grant: { documentPath: "index.html", expiresAt: 123 }, project: { name: "Docs" } };
+  const share = { grant: { documentPath: "index.html", expiresAt: Date.now() + 60_000 }, project: { name: "Docs" } };
   const publication = { publication: { slug: "docs", entryFile: "index.html", title: "Docs" } };
   for (const [action, query, result] of [[shares.resolveShareGrant, "?token=token", share], [publications.resolvePublicPublication, "?slug=docs", publication]] as const) {
     ctx.runQuery.mockResolvedValue(null);
@@ -76,6 +76,11 @@ it("handles public capability presence and absence without session authority", a
     ctx.runQuery.mockResolvedValue({ ...result, deployment: { manifestKey: "private/manifest.json" } });
     expect(await (await invoke(action, {}, query)).json()).toEqual(result);
   }
+  // The cached query reports the stored deadline; the action denies once it has passed.
+  ctx.runQuery.mockResolvedValue({ ...share, grant: { ...share.grant, expiresAt: 123 }, deployment: { manifestKey: "private/manifest.json" } });
+  const expired = await invoke(shares.resolveShareGrant, {}, "?token=token");
+  expect(expired.status).toBe(404);
+  expect(await expired.json()).toEqual({ error: "Share not found" });
   expect(auth.authorize).not.toHaveBeenCalled();
 });
 it("completes paginated member rows and handles deleted users without changing authority", async () => {
