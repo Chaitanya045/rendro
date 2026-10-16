@@ -26,12 +26,14 @@ const publisherHtml = `<!doctype html><html><head><meta charset="utf-8"><title>A
   document.body.dataset.fetched = data.value;
 });</script></body></html>`;
 
-export async function createAssetFixture() {
+export const publisherModule = 'document.body.dataset.module = "loaded";';
+
+export async function createAssetFixture(moduleSource = publisherModule) {
   const files = [
     { path: "guide/index.html", contentType: "text/html", body: publisherHtml },
     { path: "guide/assets/site.css", contentType: "text/css", body: '@font-face { font-family: Fixture; src: url(font.woff2) format("woff2"); } #font { font-family: Fixture; }' + fontTypes.flatMap(([extension]) => [extension, extension.toUpperCase()].map(ext => `@font-face { font-family: Unused-${ext}; src: url(font.${ext}); }`)).join("") },
     { path: "guide/assets/image.svg", contentType: "image/svg+xml", body: '<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><rect width="10" height="10" fill="green"/></svg>' },
-    { path: "guide/assets/module.js", contentType: "application/javascript", body: 'document.body.dataset.module = "loaded";' },
+    { path: "guide/assets/module.js", contentType: "application/javascript", body: moduleSource },
     { path: "guide/assets/data.json", contentType: "application/json", body: '{"value":"loaded"}' },
     ...fontTypes.flatMap(([extension]) => [extension, extension.toUpperCase()].map(ext => ({
       path: `guide/assets/font.${ext}`, contentType: "application/octet-stream",

@@ -4,7 +4,7 @@ import { renderApiKeyPage } from "@/routes/api-key-pages";
 import { renderSharePage } from "@/routes/share-pages";
 import { renderProjectPage } from "@/routes/project-pages";
 import { getRequestListener } from "@hono/node-server";
-import { build } from "esbuild";
+import { buildBrowserBundle as build } from "./helpers/browser";
 import { Hono } from "hono";
 import { afterAll, beforeAll, beforeEach, expect, it, vi } from "vitest";
 import { renderCommentRecoveryLifecycle } from "@/commentor/recovery-session";
@@ -93,14 +93,15 @@ it("refetches HTML for a cached v19 controller and clears state on sign-out", as
   await page.route("https://fonts.googleapis.com/**", route => route.fulfill({ contentType: "text/css", body: "" }));
   // Pin the pre-#75 version and its incompatible organization-context contract.
   // Using the current version here would hide the missing-bump regression.
-  await page.route("**/management-pages.js?*", route => route.fulfill({ contentType: "text/javascript", body: `
+  const staleBundle = await build({ stdin: { sourcefile: "tests/fixtures/stale-management.js", contents: `
     window.RendroManagementPages={version:"19",pages:{projects:{
       state:'{}',dialogs:'',title:'Stale projects',mount:function(){
         window.staleControllerMounted=true;
         window.RendroUI.organizationContext={display:function(){return {name:"Stale organization"};}};
       }
     }}};
-  ` }));
+  ` } });
+  await page.route("**/management-pages.js?*", route => route.fulfill({ contentType: "text/javascript; charset=utf-8", body: staleBundle.outputFiles[0].text }));
   const errors: string[] = [];
   page.on("pageerror", error => errors.push(error.message));
   await page.goto(`${harness.origin}/organizations/org/api-keys`);

@@ -29,7 +29,7 @@ beforeAll(async () => {
   });
   const viewer = await bundleBrowserAsset("src/viewer/entry.ts");
   const listener = getRequestListener(request => worker.fetch(request, {
-    ASSETS: { fetch: () => new Response(viewer, { headers: { "Content-Type": "text/javascript" } }) },
+    ASSETS: { fetch: () => new Response(viewer, { headers: { "Content-Type": "text/javascript; charset=utf-8" } }) },
   }));
   await harness.start((request, response) => { void listener(request, response).catch(error => response.destroy(error as Error)); });
 });

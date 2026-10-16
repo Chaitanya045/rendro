@@ -2,7 +2,7 @@ import rateLimiterTest from "./convex-rate-limiter";
 import { seedLegacyMember, registerAuth, seedIdentity } from "./helpers/auth-identity";
 import { getRequestListener } from "@hono/node-server";
 import { readFile } from "node:fs/promises";
-import { build } from "esbuild";
+import { buildBrowserBundle as build } from "./helpers/browser";
 import { getFunctionName, makeFunctionReference } from "convex/server";
 import { convexTest } from "convex-test";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
@@ -79,8 +79,8 @@ beforeAll(async () => {
     }
     return worker.fetch(request, { ASSETS: { fetch: async (req: Request) => {
       const path = new URL(req.url).pathname;
-      if (assets.has(path)) return new Response(assets.get(path), { headers: { "Content-Type": "text/javascript" } });
-      try { return new Response(await readFile(`public${path}`), { headers: { "Content-Type": path.endsWith(".js") ? "text/javascript" : "image/svg+xml" } }); }
+      if (assets.has(path)) return new Response(assets.get(path), { headers: { "Content-Type": "text/javascript; charset=utf-8" } });
+      try { return new Response(await readFile(`public${path}`), { headers: { "Content-Type": path.endsWith(".js") ? "text/javascript; charset=utf-8" : "image/svg+xml" } }); }
       catch { return new Response(null, { status: 404 }); }
     } } });
   });
@@ -91,7 +91,7 @@ afterAll(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 async function open(path: string) {
   const page = await harness.newPage();
   await page.context().addCookies([{ name: "better-auth.session_token", value: "test-session", url: harness.origin }, { name: "parent-marker", value: "private", url: harness.origin }]);
-  await page.route(url => ["cdn.tailwindcss.com", "fonts.googleapis.com"].includes(url.hostname), route => route.fulfill({ contentType: new URL(route.request().url()).hostname === "cdn.tailwindcss.com" ? "text/javascript" : "text/css", body: new URL(route.request().url()).hostname === "cdn.tailwindcss.com" ? "window.tailwind={}" : "" }));
+  await page.route(url => ["cdn.tailwindcss.com", "fonts.googleapis.com"].includes(url.hostname), route => route.fulfill({ contentType: new URL(route.request().url()).hostname === "cdn.tailwindcss.com" ? "text/javascript; charset=utf-8" : "text/css", body: new URL(route.request().url()).hostname === "cdn.tailwindcss.com" ? "window.tailwind={}" : "" }));
   await browserStep("open legacy URL and follow viewer redirect", () => page.goto(harness.origin + path));
   await browserStep("load legacy publisher iframe", () => page.frameLocator("#content-frame").locator("h1").waitFor());
   return page;
@@ -167,6 +167,10 @@ describe("legacy opaque viewer in Chromium", () => {
     await frame.locator("textarea").fill("Legacy bridge comment");
     await frame.getByTestId("commentor-composer-post").click();
     await expect.poll(async () => (await author.query(api.threads.list, scope)).map(thread => thread.body)).toContain("Legacy bridge comment");
+    // Persistence precedes the bridge acknowledgement and composer teardown.
+    // Reload only after the UI has consumed the acknowledgement and closed.
+    await browserStep("finish the comment acknowledgement and close animation", () =>
+      frame.getByTestId("commentor-composer").waitFor({ state: "detached" }));
     await page.reload();
     const reloaded = page.frameLocator("#content-frame");
     await reloaded.getByTestId("commentor-panel-btn").click();
@@ -209,6 +213,8 @@ describe("legacy opaque viewer in Chromium", () => {
     expect(await frame.evaluate(() => location.hash)).toBe("");
     await page.goBack();
     await browserStep("restore shell fragment on Back", () => page.waitForURL("**/docs/example/guide/index.html#bottom"));
+    await browserStep("finish restoring the legacy document handlers", () => frame.waitForFunction(() =>
+      location.pathname.endsWith("/files/guide/index.html") && document.readyState === "complete"));
     await page.frameLocator("#content-frame").locator("#old-link").click();
     await page.getByRole("button", { name: "Open linked document", exact: true }).click();
     await browserStep("resolve old absolute link through parent", () => page.waitForURL("**/docs/example/guide/next.html#destination"));

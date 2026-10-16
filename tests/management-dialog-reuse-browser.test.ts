@@ -11,7 +11,7 @@ import publicationPages from '@/routes/publication-pages';
 import { renderScopedDocumentShell } from '@/routes/app';
 import { managementPagesSource } from '../scripts/management-pages-source';
 import { managementAccessFixture } from './fixtures/management-access';
-import { browserStep, bundleBrowserAsset, createBrowserHarness } from './helpers/browser';
+import { browserStep, buildBrowserBundle, bundleBrowserAsset, createBrowserHarness } from './helpers/browser';
 
 const heldDocuments = new Map<string, { arrived: boolean; ready: Promise<void>; release(): void }>();
 afterEach(() => { for (const held of heldDocuments.values()) held.release(); heldDocuments.clear(); });
@@ -33,7 +33,7 @@ beforeAll(async () => {
   const assets = new Map<string, string>([
     ['/management-query.js', await bundleBrowserAsset('src/management-query/browser.ts')],
     ['/select.js', await bundleBrowserAsset('src/ui/select-browser.ts')],
-    ['/management-pages.js', managementPagesSource()],
+    ['/management-pages.js', (await buildBrowserBundle({ stdin: { contents: managementPagesSource(), sourcefile: 'tests/fixtures/generated-management-pages.js', resolveDir: process.cwd() } })).outputFiles[0].text],
     ['/lazy-tree.js', await bundleBrowserAsset('src/lazy-tree/lazy-tree.ts')],
   ]);
   const app = new Hono<{ Variables: { user?: User } }>();

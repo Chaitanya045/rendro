@@ -1,7 +1,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import { getRequestListener } from "@hono/node-server";
 import type { User } from "better-auth/types";
-import { build } from "esbuild";
+import { buildBrowserBundle as build } from "./helpers/browser";
 import { Hono } from "hono";
 import { readFile } from "node:fs/promises";
 import { afterAll, beforeAll, expect, it, vi } from "vitest";
@@ -36,11 +36,11 @@ beforeAll(async () => {
     }));
     assets.set(path, bundle.outputFiles[0].text);
   }
-  assets.set("/management-pages.js", managementPagesSource());
+  assets.set("/management-pages.js", (await build({ stdin: { contents: managementPagesSource(), sourcefile: "tests/fixtures/generated-management-pages.js", resolveDir: process.cwd() } })).outputFiles[0].text);
   const app = new Hono<{ Variables: { user?: User } }>();
   app.use("*", securityHeaders);
   app.use("*", async (c, next) => { c.set("user", user); await next(); });
-  for (const [path, body] of assets) app.get(path, c => c.body(body, 200, { "Content-Type": "text/javascript" }));
+  for (const [path, body] of assets) app.get(path, c => c.body(body, 200, { "Content-Type": "text/javascript; charset=utf-8" }));
   for (const [path, contentType] of Object.entries(faviconAssets)) {
     const body = await readFile(`public${path}`);
     app.get(path, c => c.body(body, 200, { "Content-Type": contentType }));

@@ -140,10 +140,10 @@
       "lines": 0
     },
     "src/commentor/commentor.ts": {
-      "statements": 678,
-      "branches": 505,
-      "functions": 112,
-      "lines": 580
+      "statements": 499,
+      "branches": 396,
+      "functions": 79,
+      "lines": 415
     },
     "src/commentor/delete-state.ts": {
       "statements": 8,
@@ -158,22 +158,22 @@
       "lines": 1
     },
     "src/commentor/operation-state.ts": {
-      "statements": 3,
-      "branches": 5,
+      "statements": 2,
+      "branches": 4,
       "functions": 0,
       "lines": 1
     },
     "src/commentor/parent-entry.ts": {
-      "statements": 13,
-      "branches": 7,
-      "functions": 4,
-      "lines": 10
+      "statements": 2,
+      "branches": 3,
+      "functions": 0,
+      "lines": 1
     },
     "src/commentor/parent-host.ts": {
-      "statements": 97,
-      "branches": 85,
-      "functions": 15,
-      "lines": 65
+      "statements": 68,
+      "branches": 69,
+      "functions": 7,
+      "lines": 41
     },
     "src/commentor/parent-protocol.ts": {
       "statements": 6,
@@ -182,10 +182,10 @@
       "lines": 0
     },
     "src/commentor/parent-transport.ts": {
-      "statements": 9,
-      "branches": 11,
-      "functions": 4,
-      "lines": 6
+      "statements": 5,
+      "branches": 8,
+      "functions": 3,
+      "lines": 5
     },
     "src/commentor/recovery-session.ts": {
       "statements": 0,
@@ -194,10 +194,10 @@
       "lines": 0
     },
     "src/lazy-tree/lazy-tree.ts": {
-      "statements": 549,
-      "branches": 361,
-      "functions": 71,
-      "lines": 460
+      "statements": 129,
+      "branches": 129,
+      "functions": 8,
+      "lines": 84
     },
     "src/lazy-tree/messages.ts": {
       "statements": 0,
@@ -205,21 +205,15 @@
       "functions": 0,
       "lines": 0
     },
-    "src/management-query/browser.ts": {
-      "statements": 1,
-      "branches": 0,
+    "src/management-query/cache.ts": {
+      "statements": 5,
+      "branches": 5,
       "functions": 0,
       "lines": 1
     },
-    "src/management-query/cache.ts": {
-      "statements": 8,
-      "branches": 7,
-      "functions": 1,
-      "lines": 3
-    },
     "src/management-query/organizations.ts": {
-      "statements": 6,
-      "branches": 12,
+      "statements": 5,
+      "branches": 10,
       "functions": 0,
       "lines": 0
     },
@@ -271,33 +265,21 @@
       "functions": 0,
       "lines": 0
     },
-    "src/ui/select-browser.ts": {
-      "statements": 1,
-      "branches": 0,
-      "functions": 0,
-      "lines": 1
-    },
     "src/ui/select.ts": {
-      "statements": 38,
-      "branches": 64,
-      "functions": 8,
+      "statements": 31,
+      "branches": 52,
+      "functions": 5,
       "lines": 2
     },
     "src/viewer/client.ts": {
-      "statements": 9,
-      "branches": 12,
-      "functions": 2,
+      "statements": 4,
+      "branches": 8,
+      "functions": 0,
       "lines": 0
     },
-    "src/viewer/entry.ts": {
-      "statements": 11,
-      "branches": 10,
-      "functions": 0,
-      "lines": 7
-    },
     "src/viewer/fragments.ts": {
-      "statements": 2,
-      "branches": 3,
+      "statements": 1,
+      "branches": 2,
       "functions": 0,
       "lines": 0
     },
@@ -308,14 +290,14 @@
       "lines": 1
     },
     "src/viewer/navigation.ts": {
-      "statements": 40,
-      "branches": 44,
-      "functions": 1,
-      "lines": 23
+      "statements": 10,
+      "branches": 11,
+      "functions": 0,
+      "lines": 0
     },
     "src/viewer/stylesheets.ts": {
-      "statements": 8,
-      "branches": 5,
+      "statements": 5,
+      "branches": 2,
       "functions": 0,
       "lines": 4
     }

@@ -1,4 +1,6 @@
-import { build } from "esbuild";
+import type { CoverageMapData } from "istanbul-lib-coverage";
+import { buildBrowserBundle, collectBrowserContext } from "./browser-coverage";
+export { buildBrowserBundle } from "./browser-coverage";
 import { existsSync } from "node:fs";
 import { createServer, get, type RequestListener, type Server } from "node:http";
 import { chromium, type Browser, type BrowserContext, type BrowserContextOptions, type Frame, type Page } from "playwright";
@@ -26,7 +28,7 @@ export async function browserStep<T>(label: string, action: () => Promise<T>, ti
 /** Build from source in memory; browser tests run before build:assets in CI. */
 export async function bundleBrowserAsset(entry: string): Promise<string> {
   return browserStep(`bundle ${entry}`, async () =>
-    (await build({ entryPoints: [entry], bundle: true, write: false, format: "iife", platform: "browser" })).outputFiles[0].text);
+    (await buildBrowserBundle({ entryPoints: [entry], bundle: true, write: false, format: "iife", platform: "browser" })).outputFiles[0].text);
 }
 
 /** Call after hydration or an interaction, before auditing rendered styles. */
@@ -46,7 +48,8 @@ export async function waitForSettled(page: Page | Frame) {
 }
 
 /** Call once at file scope. Owns one browser/server and a fresh context per page. */
-export function createBrowserHarness() {
+export function createBrowserHarness(harnessOptions: { coverage?: boolean; chromiumArgs?: string[]; onCoverage?: (report: CoverageMapData) => void } = {}) {
+  const collectors = new Map<BrowserContext, Awaited<ReturnType<typeof collectBrowserContext>>>();
   let browser: Browser | undefined;
   let server: Server | undefined;
   let origin = "";
@@ -54,9 +57,14 @@ export function createBrowserHarness() {
   const unexpectedOrigins = new Set<string>();
 
   async function closeContexts() {
-    const results = await Promise.allSettled([...contexts].map(context =>
-      browserStep("close browser context", () => context.close())));
+    const results = await Promise.allSettled([...contexts].map(context => {
+      const collector = collectors.get(context);
+      return collector
+        ? collector.close(action => browserStep("close browser context", action))
+        : browserStep("close browser context", () => context.close());
+    }));
     contexts.clear();
+    collectors.clear();
     const errors = results.filter(result => result.status === "rejected").map(result => result.reason as unknown);
     if (errors.length) throw new AggregateError(errors, "Browser context teardown failed");
   }
@@ -89,6 +97,13 @@ export function createBrowserHarness() {
 
   return {
     get origin() { return origin; },
+    coverageTargets(page: Page) { return collectors.get(page.context())!.targets(); },
+    async flushCoverage(page: Page) { await collectors.get(page.context())?.flush(page); },
+    coverageSnapshot(page: Page, include?: Set<string>) {
+      const collector = collectors.get(page.context());
+      if (!collector) throw new Error("Browser coverage is not enabled");
+      return collector.snapshot(include);
+    },
     async start(handler: RequestListener, assets: ReadonlyMap<string, string> = new Map()) {
       if (server) throw new Error("Browser harness already started");
       server = createServer((request, response) => {
@@ -98,7 +113,7 @@ export function createBrowserHarness() {
         } else {
           const asset = assets.get(new URL(request.url!, "http://localhost").pathname);
           if (asset !== undefined) {
-            response.writeHead(200, { "Content-Type": "text/javascript", "Cache-Control": "no-store" });
+            response.writeHead(200, { "Content-Type": "text/javascript; charset=utf-8", "Cache-Control": "no-store" });
             response.end(asset);
           } else handler(request, response);
         }
@@ -130,6 +145,7 @@ export function createBrowserHarness() {
       }), 5_000);
       browser = await browserStep("launch Chromium", () => chromium.launch({
         timeout: 45_000,
+        args: harnessOptions.chromiumArgs,
         // CI uses the pinned Playwright build; local hosts can opt into system Chromium.
         executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH
           ?? (!process.env.CI && existsSync("/usr/bin/chromium") ? "/usr/bin/chromium" : undefined),
@@ -153,7 +169,12 @@ export function createBrowserHarness() {
         unexpectedOrigins.add(new URL(socket.url()).origin);
         return socket.close();
       });
-      return browserStep("create browser page", () => context.newPage());
+      const collector = harnessOptions.coverage || process.env.RENDRO_BROWSER_COVERAGE_DIR
+        ? await collectBrowserContext(context, expect.getState().testPath!, origin, harnessOptions.onCoverage) : undefined;
+      if (collector) collectors.set(context, collector);
+      const page = await browserStep("create browser page", () => context.newPage());
+      await collector?.ready(page);
+      return page;
     },
   };
 }

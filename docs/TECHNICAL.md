@@ -1286,8 +1286,24 @@ merges Istanbul shards, checks the complete source manifest, and prevents
 per-file uncovered counters from exceeding `coverage-debt.json`. New files must
 be fully covered; stale ledger entries must be removed, and CI rejects ledger
 increases relative to the base revision. Coverage runs separately from verify
-to preserve its 15-minute budget. See [source coverage and debt](BROWSER_TESTS.md#source-coverage-and-debt-gate)
-for commands, reports, and the pending Chromium/subprocess collectors.
+to preserve its 15-minute budget. The Vitest Chromium harness builds mapped
+in-memory test bundles and collects page, popup, and opaque OOPIF V8 coverage,
+including pre-navigation and failure teardown samples. Collection barriers flush
+all attached targets before detach; tests explicitly flush before direct frame
+removal. Scheduling-sensitive loader, layout and comment states have deterministic
+Chromium fixtures, and a per-counter location diff checks repeated full reports
+before debt is shrunk. Comment highlight coverage explicitly verifies reuse of
+existing DOM segments. CI artifacts retain raw and merged counters on failure so
+the same diff can diagnose discrepancies with two-CPU constrained local runs.
+A reload delta for a transient script without a debugger source is attributed
+only to its URL's single agreeing retained source; ambiguity still fails.
+Tests flush explicitly before page code reloads a later main document, such as
+the viewer's Reload control.
+`pnpm coverage` requires
+per-suite browser receipts and feeds the mapped `coverage/browser/*.json` shards
+to the same strict merger as the Node report. Production assets are unchanged;
+inline controller strings remain tracked by #105/#106. See [source coverage and debt](BROWSER_TESTS.md#source-coverage-and-debt-gate)
+for commands, reports, transform normalization, and the pending subprocess collector.
 
 ---
 
