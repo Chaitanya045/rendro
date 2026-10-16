@@ -154,8 +154,11 @@ separate account tests resend delivery and neutral eligible/ineligible responses
 Reset mismatch asserts zero reset requests, with one request after correction.
 Sign-out checks that the retained protected containers are hidden and their shell
 is inert in both tabs before navigation; protected inputs cannot regain focus.
-The return-destination journey waits for method loading to finish before clicking
-Sign out, since the loaded password form moves that control.
+The shared sign-out helper waits for the security method list's `aria-busy=false`
+before clicking Sign out in every journey. Method loading expands the card and
+moves that control; WebKit can otherwise finish its actionability check just
+before the response arrives and click the old position. Waiting for this explicit
+ready state also covers the method-load failure UI, without sleeps or retries.
 
 The complete three-engine suite has a 20-minute bound (30 minutes for the CI
 job including installation); individual auth journeys have a 60-second bound.
@@ -178,14 +181,16 @@ content. Since browser routing can prevent native BFCache eligibility, an
 additional test explicitly dispatches a persisted `pageshow` event after backend
 revocation; it checks the restoration handler, not native cache admission.
 
+The #146 signup visibility regression now passes in all engines: the credential
+form, Google control and divider disappear, focus moves to the confirmation,
+and returning through sign-in restores the signup controls.
+`tests/auth-hidden-browser.test.ts` checks computed display, keyboard focus,
+retry and restored forms at desktop/mobile sizes, plus reset and security states.
+
 Expected failures name follow-up issues below. Their broken assertions receive
 no `e2e` registry credit; an unexpected pass fails the suite so the marker must
 be removed when the product is fixed.
 
-- **[#146](https://github.com/Chaitanya045/rendro/issues/146) (AUTH-111-01): signup alternatives remain visible after success.**
-  The Google button and divider get `hidden` attributes, but their `display:flex`
-  CSS overrides the browser's hidden styling. Both should disappear with the
-  credential form when the neutral verification confirmation is shown.
 - **[#145](https://github.com/Chaitanya045/rendro/issues/145) (AUTH-111-02): nonpersistent sessions gain the persistent lifetime.**
   Unchecking Keep me signed in correctly creates a session-only browser cookie,
   but the backend session is extended from the intended one-day lifetime to

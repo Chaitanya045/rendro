@@ -474,3 +474,28 @@ it('shared destructive confirmation can cancel, escape and confirm repeatedly wi
     expect(await page.locator('body').getAttribute('data-confirm-result')).toBe(String(action === 'accept'));
   }
 });
+
+it('management hidden controls stay out of layout through role and publication-mode changes', async () => {
+  const page = await open(`${projectBase}/publications`);
+  await page.locator('#publication-create').waitFor();
+  await page.locator('#publication-create').click();
+  const pin = page.locator('#pin-field');
+  expect(await pin.evaluate(node => getComputedStyle(node).display)).toBe('none');
+  await page.locator('[name=trackingMode]').selectOption('pinned');
+  await pin.waitFor();
+  await page.locator('[name=trackingMode]').selectOption('track_active');
+  expect(await pin.evaluate(node => getComputedStyle(node).display)).toBe('none');
+  await page.keyboard.press('Escape');
+
+  const member = { ...organization.members[0], role: 'member' };
+  await page.route('**/api/rendro/management/access?*', route => route.fulfill({ json: { ...organization, userId: user.id, member } }));
+  await page.reload();
+  await page.locator('#publication-access-note').waitFor();
+  expect(await page.locator('#publication-create').evaluate(node => getComputedStyle(node).display)).toBe('none');
+  expect(await page.getByRole('button', { name: 'Create publication', exact: true }).count()).toBe(0);
+  await page.route('**/api/rendro/management/access?*', route => route.fulfill({ json: { ...organization, userId: user.id, member: organization.members[0] } }));
+  await page.reload();
+  await page.locator('#publication-create').waitFor();
+  expect(await page.locator('#publication-create').isEnabled()).toBe(true);
+  expect(await page.locator('#publication-access-note').evaluate(node => getComputedStyle(node).display)).toBe('none');
+});

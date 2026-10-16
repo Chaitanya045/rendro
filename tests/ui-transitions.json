@@ -9739,7 +9739,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "unit",
+      "status": "browser",
       "auditEvidence": "U",
       "auditNote": "management-performance.test.ts",
       "edges": [
@@ -9768,6 +9768,23 @@
               "file": "tests/management-performance.test.ts",
               "name": "does not fetch deployment choices until pinned publication mode is selected",
               "kind": "unit"
+            }
+          ]
+        },
+        {
+          "id": "UI-086-E03",
+          "from": "Publication controls ready",
+          "trigger": "Toggle release mode and reload with member or owner access",
+          "expected": "Hidden pin fields and role-gated actions stay out of layout; allowed controls become visible again",
+          "inventoryRefs": [
+            "UI-086"
+          ],
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/management-dialog-reuse-browser.test.ts",
+              "name": "management hidden controls stay out of layout through role and publication-mode changes",
+              "kind": "browser"
             }
           ]
         }
@@ -15260,7 +15277,7 @@
       ],
       "status": "e2e",
       "auditEvidence": "U",
-      "auditNote": "auth-ui-regressions.test.ts",
+      "auditNote": "Signup success visibility, focus and return-to-form regression (#146); Chromium and three-engine E2E.",
       "edges": [
         {
           "id": "UI-131-E01",
@@ -15334,12 +15351,23 @@
           "id": "UI-131-E05",
           "from": "Sign-up form ready",
           "trigger": "Validate and submit new account details",
-          "expected": "success removes credential form/Google/divider and shows neutral verification message",
+          "expected": "success hides credential form/Google/divider, focuses the neutral confirmation; returning to signup restores enabled controls",
           "inventoryRefs": [
             "A06"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/auth.spec.ts",
+              "name": "signup success hides Google and the credential divider [AUTH-111-01]",
+              "kind": "e2e"
+            },
+            {
+              "file": "tests/auth-hidden-browser.test.ts",
+              "name": "signup hides alternatives, focuses success and restores a fresh form at %ipx",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-131-E06",
@@ -15967,6 +15995,23 @@
               "file": "tests/auth-ui-regressions.test.ts",
               "name": "restores reset controls after a failed request and permits retry",
               "kind": "unit"
+            }
+          ]
+        },
+        {
+          "id": "UI-136-E13",
+          "from": "Reset form ready",
+          "trigger": "Reject then accept reset request",
+          "expected": "Failure retains the form; success hides the form and focuses the confirmation before its sign-in link",
+          "inventoryRefs": [
+            "UI-136"
+          ],
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/auth-hidden-browser.test.ts",
+              "name": "reset success focuses its confirmation while failure retains the form",
+              "kind": "browser"
             }
           ]
         }

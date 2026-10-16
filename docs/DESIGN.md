@@ -110,6 +110,7 @@ The management experience is a separate shell from the document viewer. It opera
 
 ### Authentication and invitations
 
+- Auth and management chrome honor `hidden` ahead of layout styles. A completed sign-up hides email and Google controls and focuses the labelled confirmation; password-reset success does the same for its form. Returning through the sign-in/create-account links restores the ready form.
 - Authentication uses a focused two-column desktop composition: factual Rendro context beside a `380px`–`440px` form. Mobile collapses to the form.
 - Sign-in, sign-up, verification, recovery, reset, and account-security routes share the same fields, error region, pending state, password reveal behavior, and theme semantics. Their dark tokens match the shell (`#09090b` surface, `#18181b` secondary surface, `#27272a` border), and the form `h1` precedes the context `h2` in DOM order.
 - Account security load failures show a stacked title and one plain-language message with a retry action; never surface raw error text.

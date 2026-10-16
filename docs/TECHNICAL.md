@@ -55,11 +55,25 @@ Account linking trusts Google only when the local email is verified and the emai
 The local authentication regression suite (`e2e/auth.spec.ts`) exercises these
 flows against workerd and the disposable Convex backend, with captured mail and
 a local Google protocol fixture. Original signup verification and resend are
-separate journeys; reset mismatch asserts no request, and sign-out asserts hidden,
-inert protected containers in both tabs. Expiry tests age disposable backend records;
+separate journeys; reset mismatch asserts no request, and the shared sign-out
+helper waits for method loading to settle before clicking the moving footer control.
+Sign-out asserts hidden, inert protected containers in both tabs. Expiry tests age disposable backend records;
 rate-limit tests use the unchanged production limiter. See
 [Browser tests](BROWSER_TESTS.md#authentication-journeys-111) for isolation,
 assertions, and documented expected failures.
+
+Auth-page styles enforce `[hidden]{display:none!important}`, matching the
+management shell, so layout rules cannot expose inactive controls. Sign-up
+success hides the credential form, Google button and divider; both sign-up and
+password-reset success focus the labelled confirmation panel. Failed requests
+retain the form and allow retry; following the sign-in/create-account links
+returns to fresh, enabled controls with the original destination preserved.
+Auth templates and their runtime are inline in no-store HTML, outside the
+management bundle/version ledger. The hidden-state audit includes management
+role-gated actions, docs links, refresh/switcher panels, pinned-deployment fields,
+team rosters and onboarding credential replacement; these already inherit the
+management shell rule. Chromium coverage checks publication mode and role
+transitions as a regression control.
 
 ### Google OAuth flow
 

@@ -46,6 +46,9 @@ export async function session(page: Page) {
   });
 }
 export async function signout(page: Page) {
+  // Method loading expands the security card and moves Sign out. WebKit can
+  // finish its actionability check before that layout change and miss the click.
+  await expect(page.locator("#method-list")).toHaveAttribute("aria-busy", "false");
   await page.getByRole("button", { name: "Sign out", exact: true }).click();
   await expect(page.getByRole("heading", { name: "You're signed out" })).toBeVisible();
   expect(await session(page)).toBeNull();

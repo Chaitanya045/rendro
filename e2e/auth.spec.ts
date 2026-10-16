@@ -159,9 +159,6 @@ test("returnTo permits local paths and rejects off-site and protocol-relative de
     expect(new URL(page.url()).origin).toBe(baseURL);
     expect((await session(page))?.email).toBe("owner@example.test");
     await page.goto("/account/security");
-    // Method loading expands the card and moves Sign out. Wait for that
-    // layout transition before clicking, especially in WebKit.
-    await expect(page.locator("#method-list")).toHaveAttribute("aria-busy", "false");
     await signout(page);
   }
 });
@@ -198,6 +195,7 @@ test("password recovery is neutral and reset revokes a second browser session", 
   await page.getByLabel("Confirm password", { exact: true }).fill(changedPassword);
   await page.getByRole("button", { name: "Update password" }).click();
   await expect(page.getByRole("heading", { name: "Password updated" })).toBeVisible();
+  await expect(page.locator("#success-panel")).toBeFocused();
   expect(resetRequests).toBe(1);
   expect(await session(second)).toBeNull();
   expect(await authRecord("findOne", { model: "session", select: ["_id"], where: [{ field: "_id", value: previous?.sessionId }] })).toBeNull();
@@ -409,13 +407,23 @@ test("sign-out failure retries, clears both tabs and protects back-forward histo
   expect(await session(page)).toBeNull();
 });
 
-// Issue #146 (AUTH-111-01): auth CSS overrides the hidden attribute
-// on the Google button and divider after successful signup. Keep this failing
-// assertion until the controls actually disappear; do not credit the registry edge.
 test("signup success hides Google and the credential divider [AUTH-111-01]", async ({ page }, info) => {
   await signup(page, `hidden-${info.project.name}-${info.retry}@example.test`);
-  test.fail(true, "#146 (AUTH-111-01): display:flex overrides hidden on signup alternatives");
-  expect({ googleVisible: await page.locator("#google-auth").isVisible(), dividerVisible: await page.locator(".divider").isVisible() }).toEqual({ googleVisible: false, dividerVisible: false });
+  await expect(page.locator("#google-auth")).toBeHidden();
+  await expect(page.locator(".divider")).toBeHidden();
+  await expect(page.locator("#auth-form")).toBeHidden();
+  await expect(page.locator("#success-panel")).toBeFocused();
+  await page.locator("#email").evaluate(input => input.focus());
+  await expect(page.locator("#success-panel")).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(page.getByRole("link", { name: "Back to sign in" })).toBeFocused();
+  await page.keyboard.press("Enter");
+  await page.getByRole("link", { name: "Create an account" }).click();
+  await expect(page.locator("#google-auth")).toBeVisible();
+  await expect(page.locator("#google-auth")).toBeEnabled();
+  await expect(page.locator(".divider")).toBeVisible();
+  await expect(page.locator("#auth-form")).toBeVisible();
+  await expect(page.locator("#success-panel")).toBeHidden();
 });
 
 test("Google linking rejects a different provider email without replacing the session", async ({ page }, info) => {
