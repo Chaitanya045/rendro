@@ -533,6 +533,9 @@ acknowledgement and composer teardown before reloading; database persistence
 alone does not establish that the browser has finished handling a mutation.
 
 The coverage job keeps its existing 20-minute timeout. Browser files remain
-serial, and shared-host commands use `VITEST_MAX_WORKERS=2`. The #104 validation
-run used pinned Chromium and completed Vitest's full test/collection stage in
-571.66 seconds (169 files), leaving headroom for merging and CI setup.
+serial, and shared-host commands use `VITEST_MAX_WORKERS=2`. The #104 Round 2 validation
+used pinned Chromium for three consecutive full runs on unchanged code. All
+184 test files passed each time; complete collection and gating took 738.12,
+859.03, and 833.21 seconds. Both adjacent per-counter diffs were empty across
+all 194 source files. These timings retain headroom for CI setup within the
+existing budget.
