@@ -18,7 +18,7 @@ fetch('/api/auth/get-session', {credentials:'include'}).then(r => r.text()).then
 ]]></script></svg>`;
 
 beforeAll(async () => {
-  fixture = await publisherIsolationFixture();
+  fixture = await publisherIsolationFixture(["style.css", "image.svg", "font.woff2"]);
   const original = vi.mocked(minio.getObjectStream).getMockImplementation()!;
   vi.mocked(minio.getObjectStream).mockImplementation(key => {
     if (key.endsWith("/image.svg")) return Promise.resolve(new Response(svg).body);

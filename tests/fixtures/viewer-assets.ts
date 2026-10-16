@@ -7,6 +7,7 @@ import publicDocs from "@/routes/public-v2";
 import shareDocs from "@/routes/share-v2";
 import { securityHeaders } from "@/middleware/security-headers";
 import { createViewerTicket } from "@/viewer-ticket";
+import { collectShareAssets } from "@/share-assets";
 import * as minio from "@/minio";
 
 export const privateBase = "/organizations/org/projects/project/docs";
@@ -20,6 +21,7 @@ const publisherHtml = `<!doctype html><html><head><meta charset="utf-8"><title>A
 <link rel="stylesheet" href="assets/site.css"></head><body><p id="font">AAAA</p>
 <img id="image" crossorigin="anonymous" src="assets/image.svg">
 <script type="module" src="assets/module.js"></script>
+<link rel="preload" as="fetch" crossorigin="anonymous" href="assets/data.json">
 <script>fetch(new URL('assets/data.json', document.baseURI)).then(r => r.json()).then(data => {
   document.body.dataset.fetched = data.value;
 });</script></body></html>`;
@@ -27,7 +29,7 @@ const publisherHtml = `<!doctype html><html><head><meta charset="utf-8"><title>A
 export async function createAssetFixture() {
   const files = [
     { path: "guide/index.html", contentType: "text/html", body: publisherHtml },
-    { path: "guide/assets/site.css", contentType: "text/css", body: '@font-face { font-family: Fixture; src: url(font.woff2) format("woff2"); } #font { font-family: Fixture; }' },
+    { path: "guide/assets/site.css", contentType: "text/css", body: '@font-face { font-family: Fixture; src: url(font.woff2) format("woff2"); } #font { font-family: Fixture; }' + fontTypes.flatMap(([extension]) => [extension, extension.toUpperCase()].map(ext => `@font-face { font-family: Unused-${ext}; src: url(font.${ext}); }`)).join("") },
     { path: "guide/assets/image.svg", contentType: "image/svg+xml", body: '<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><rect width="10" height="10" fill="green"/></svg>' },
     { path: "guide/assets/module.js", contentType: "application/javascript", body: 'document.body.dataset.module = "loaded";' },
     { path: "guide/assets/data.json", contentType: "application/json", body: '{"value":"loaded"}' },
@@ -36,6 +38,7 @@ export async function createAssetFixture() {
       body: new Uint8Array(readFileSync(new URL("./viewer-font.woff2", import.meta.url))),
     }))),
   ];
+  const assetPaths = await collectShareAssets({ files }, "guide/index.html", path => Promise.resolve(new Response(files.find(file => file.path === path)!.body).body));
   const backend = vi.fn((input: string | URL | Request) => {
     const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url);
     const common = { project: { name: "Docs", slug: "docs" }, deployment: { manifestKey } };
@@ -43,7 +46,7 @@ export async function createAssetFixture() {
     if (url.pathname.endsWith("/publications/public")) return Promise.resolve(Response.json({ ...common,
       publication: { slug: "fixture", pathPrefix: "guide", entryFile: "index.html" } }));
     if (url.pathname.endsWith("/shares/public")) return Promise.resolve(Response.json({ ...common,
-      grant: { documentPath: "guide/index.html", expiresAt: Date.now() + 60_000 } }));
+      grant: { documentPath: "guide/index.html", assetPaths, expiresAt: Date.now() + 60_000 } }));
     return Promise.resolve(new Response(null, { status: 404 }));
   });
   vi.stubGlobal("fetch", backend);

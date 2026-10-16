@@ -31,3 +31,16 @@ export async function publicationProof(backend: Backend, args: Omit<Publication,
 export async function publishWithProof(backend: Backend, args: Publication) {
   return backend.mutation(internal.publicationsV2.createInternal, { ...args, attestation: await publicationProof(backend, args) });
 }
+
+type Share = FunctionArgs<typeof internal.shareGrants.createInternal>;
+export async function shareProof(backend: Backend, args: Pick<Share, "projectId" | "documentPath" | "assetPaths">) {
+  const project = await backend.run(ctx => ctx.db.get(ctx.db.normalizeId("projects", args.projectId)!));
+  const deployment = project?.activeDeploymentId ? await backend.run(ctx => ctx.db.get(project.activeDeploymentId!)) : null;
+  return deployment ? signStorageValidation({
+    purpose: "share-assets", ...deployment, deploymentId: deployment._id,
+    documentPath: args.documentPath, assetPaths: args.assetPaths ?? [],
+  }, process.env.CONVEX_INTERNAL_SECRET!) : undefined;
+}
+export async function shareWithProof(backend: Backend, args: Share) {
+  return backend.mutation(internal.shareGrants.createInternal, { ...args, assetPaths: args.assetPaths ?? [], attestation: await shareProof(backend, args) });
+}

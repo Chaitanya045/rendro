@@ -33,7 +33,7 @@ it("enumerates every registered Worker mutation, including dedicated and wildcar
   // Exact equality makes both new routes and stale policy entries visible.
   const policies = new Set(Object.keys(workerMutationPolicies));
   // These custom paths are handled by the registered Convex wildcard proxy.
-  for (const path of ["/api/auth/set-initial-password", "/api/rendro/projects", "/api/rendro/credentials", "/api/rendro/credentials/revoke", "/api/rendro/shares", "/api/rendro/shares/revoke"]) {
+  for (const path of ["/api/auth/set-initial-password", "/api/rendro/projects", "/api/rendro/credentials", "/api/rendro/credentials/revoke", "/api/rendro/shares/revoke"]) {
     policies.delete(`POST ${path}`);
   }
   expect([...registered].sort()).toEqual([...policies].sort());

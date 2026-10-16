@@ -129,6 +129,7 @@ export default defineSchema({
     projectId: v.id("projects"),
     deploymentId: v.id("deployments"),
     documentPath: v.string(),
+    assetPaths: v.optional(v.array(v.string())),
     tokenHash: v.string(),
     expiresAt: v.number(),
     revokedAt: v.optional(v.number()),

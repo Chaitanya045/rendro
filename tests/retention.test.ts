@@ -1,5 +1,5 @@
 import rateLimiterTest from "./convex-rate-limiter";
-import { publishWithProof } from "./helpers/storage-proof";
+import { publishWithProof, shareWithProof } from "./helpers/storage-proof";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDocumentSize } from "convex/values";
 import { convexTest } from "convex-test";
@@ -153,7 +153,7 @@ describe("durable retention", () => {
     const f = fixture(), projectId = await f.project();
     const live = await f.seed(projectId, { status: "active" });
     await f.backend.run(ctx => ctx.db.patch(projectId, { activeDeploymentId: live }));
-    await f.backend.mutation(internal.shareGrants.createInternal, { organizationId: "org", projectId, documentPath: "index.html", tokenHash: "live", expiresAt: now + 100, actorId: "user" });
+    await shareWithProof(f.backend, { organizationId: "org", projectId, documentPath: "index.html", tokenHash: "live", expiresAt: now + 100, actorId: "user" });
     const expired = await f.seed(projectId), revoked = await f.seed(projectId), pointer = await f.seed(projectId);
     await f.backend.run(async ctx => {
       await ctx.db.patch(live, { status: "superseded" });
@@ -220,9 +220,9 @@ describe("references cannot expose purged storage", () => {
     const f = fixture(), projectId = await f.project(), deploymentId = await f.seed(projectId, { status: "active" });
     await f.backend.run(ctx => ctx.db.patch(projectId, { activeDeploymentId: deploymentId }));
     await f.pin(projectId, deploymentId);
-    await f.backend.mutation(internal.shareGrants.createInternal, { organizationId: "org", projectId, documentPath: "index.html", tokenHash: "live", expiresAt: now + 100, actorId: "user" });
+    await shareWithProof(f.backend, { organizationId: "org", projectId, documentPath: "index.html", tokenHash: "live", expiresAt: now + 100, actorId: "user" });
     await f.backend.run(ctx => ctx.db.patch(deploymentId, fields));
-    await expect(f.backend.mutation(internal.shareGrants.createInternal, { organizationId: "org", projectId, documentPath: "index.html", tokenHash: "new", expiresAt: now + 100, actorId: "user" })).rejects.toThrow("Project has no active deployment");
+    await expect(shareWithProof(f.backend, { organizationId: "org", projectId, documentPath: "index.html", tokenHash: "new", expiresAt: now + 100, actorId: "user" })).rejects.toThrow("Project has no active deployment");
     expect(await f.backend.query(internal.shareGrants.resolveInternal, { tokenHash: "live" })).toBeNull();
     expect(await f.backend.query(internal.publicationsV2.resolvePublicInternal, { slug: "pin" })).toBeNull();
   });
@@ -269,10 +269,10 @@ it("denies all reference paths against separate-table claims", async () => {
   await f.backend.run(ctx => ctx.db.patch(projectId, { activeDeploymentId: deploymentId }));
   await f.pin(projectId, deploymentId);
   const share = { organizationId: "org", projectId, documentPath: "index.html", tokenHash: "sidecar", expiresAt: now + 1000, actorId: "user" };
-  await f.backend.mutation(internal.shareGrants.createInternal, share);
+  await shareWithProof(f.backend, share);
   await f.backend.run(ctx => ctx.db.insert("deploymentPurges", { deploymentId, purgeToken: "claim", claimUntil: now + PURGE_CLAIM_MS }));
   await expect(f.pin(projectId, deploymentId, "new")).rejects.toThrow("Publication deployment not found");
-  await expect(f.backend.mutation(internal.shareGrants.createInternal, share)).rejects.toThrow("no active deployment");
+  await expect(shareWithProof(f.backend, share)).rejects.toThrow("no active deployment");
   expect(await f.backend.query(internal.publicationsV2.resolvePublicInternal, { slug: "pin" })).toBeNull();
   expect(await f.backend.query(internal.shareGrants.resolveInternal, { tokenHash: "sidecar" })).toBeNull();
 });

@@ -83,11 +83,10 @@ describe("HTML encoding parity with main", () => {
         headers: route.signedIn ? { Cookie: cookie } : {},
       });
       expect(response.status, route.name).toBe(200);
-      const privateStream = ["private", "private ticket", "legacy private", "legacy ticket"].includes(route.name);
+      const privateStream = ["share", "private", "private ticket", "legacy private", "legacy ticket"].includes(route.name);
       expect(response.headers.get("Content-Type"), route.name).toBe(privateStream ? expected : "text/html; charset=utf-8");
       const body = new Uint8Array(await response.arrayBuffer());
-      // Streaming injectors leave invalid UTF-8 untouched; extension-only shares
-      // already lacked the stored charset on main. Buffered routes decode UTF-8.
+      // Streaming injectors preserve bytes and manifest charsets. Buffered routes decode UTF-8.
       if (privateStream || route.name === "share") expect(body, route.name).toEqual(bytes);
       else expect(new TextDecoder().decode(body), route.name).toContain("caf\ufffd");
     }

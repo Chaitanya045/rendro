@@ -59,6 +59,21 @@ mask-image: -webkit-image-set("c.png" 1x, url(d.png) 2x);
     }
   });
 
+  it("preserves Unicode URL characters and only treats ASCII-prefixed hashes as fragments", () => {
+    for (const whitespace of ["\u00a0", "\u2028", "\u3000", "\u0085", "\u200b", "\ufeff"]) {
+      const urls: string[] = [];
+      const input = `@import "${whitespace}#sheet"; p{background:url(${whitespace}#image)}`;
+      expect(rewriteCssUrls(input, value => { urls.push(value); return value; })).toBe(input);
+      expect(urls).toEqual([`${whitespace}#sheet`, `${whitespace}#image`]);
+    }
+    expect(rewriteCssUrls('p{filter:url("  #fragment")}', () => { throw new Error("Local fragment"); })).toBe('p{filter:url("  #fragment")}');
+  });
+
+  it("escapes replacement strings and preserves ordinary bracket/parenthesis blocks", () => {
+    const input = 'a[data-x="ordinary"] { --block: ("ordinary"); background:url(image) }';
+    expect(rewriteCssUrls(input, () => 'a"\\\n\u007f')).toBe('a[data-x="ordinary"] { --block: ("ordinary"); background:url("a\\22 \\5c \\a \\7f ") }');
+  });
+
   it("leaves comments, ordinary strings, malformed tokens and out-of-scope URLs alone", () => {
     const css = String.raw`/* url(image.png) */ .a { content: 'url(image.png)'; --text: "theme.css";
 background: url(https://external.test/a.png), url(data:image/png;base64,AAAA), url(/public/a.png);

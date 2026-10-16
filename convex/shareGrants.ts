@@ -1,5 +1,7 @@
 import { consumeWriteQuota } from "./writeQuotas";
 import { isDeploymentPurging } from "./retentionPolicy";
+import { verifyStorageValidation } from "../shared/storage-attestation";
+import { validShareAssets } from "../shared/share-assets";
 import { isOrganizationDeleted, requireActiveOrganization } from "./organizationLifecycle";
 import type { WorkerShare } from "../shared/resolver-dto";
 import { requireId } from "./ids";
@@ -20,6 +22,8 @@ export const createInternal = internalMutation({
     tokenHash: v.string(),
     expiresAt: v.number(),
     actorId: v.string(),
+    assetPaths: v.optional(v.array(v.string())),
+    attestation: v.optional(v.string()),
   },
   handler: async (ctx, input) => {
     await requireActiveOrganization(ctx, input.organizationId);
@@ -39,12 +43,17 @@ export const createInternal = internalMutation({
     }
     if (!validDocumentPath(args.documentPath)) throw new ConvexError("Invalid document path");
     if (args.expiresAt <= Date.now()) throw new ConvexError("Share expiry must be in the future");
+    if (!validShareAssets(args.assetPaths) || !await verifyStorageValidation({
+      purpose: "share-assets", ...deployment, deploymentId: deployment._id,
+      documentPath: args.documentPath, assetPaths: args.assetPaths,
+    }, args.attestation, process.env.CONVEX_INTERNAL_SECRET)) throw new ConvexError("Worker share asset validation is required");
     const now = Date.now();
     const grantId = await ctx.db.insert("shareGrants", {
       organizationId: args.organizationId,
       projectId: args.projectId,
       deploymentId: project.activeDeploymentId,
       documentPath: args.documentPath,
+      assetPaths: args.assetPaths,
       tokenHash: args.tokenHash,
       expiresAt: args.expiresAt,
       createdBy: args.actorId,
@@ -76,7 +85,7 @@ export const resolveInternal = internalQuery({
     const project = await ctx.db.get(grant.projectId);
     if (!deployment || !project || await isDeploymentPurging(ctx, deployment) || deployment.status === "failed" || deployment.status === "staging") return null;
     return {
-      grant: { documentPath: grant.documentPath, expiresAt: grant.expiresAt },
+      grant: { documentPath: grant.documentPath, expiresAt: grant.expiresAt, ...(grant.assetPaths === undefined ? {} : { assetPaths: grant.assetPaths }) },
       deployment: { manifestKey: deployment.manifestKey },
       project: { name: project.name },
     } satisfies WorkerShare;

@@ -67,6 +67,11 @@ const encodingLabels = new Map([
   ["x-user-defined", "x-user-defined"],
 ].flatMap(([encoding, labels]) => labels.split(" ").map(label => [label, encoding] as const)));
 
+/** WHATWG labels ignore only leading/trailing ASCII whitespace. */
+export function encodingLabel(value: string): string | undefined {
+  return encodingLabels.get(value.replace(/^[\t\n\f\r ]+|[\t\n\f\r ]+$/g, "").toLowerCase());
+}
+
 /** Copy only one allowlisted charset; never forward arbitrary stored parameters. */
 function storedCharset(value: string): string | undefined {
   const start = value.indexOf(";");

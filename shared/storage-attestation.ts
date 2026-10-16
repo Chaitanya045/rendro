@@ -13,6 +13,7 @@ type Deployment = {
 };
 export type StorageValidation = Deployment & (
   | { purpose: "deployment-commit" }
+  | { purpose: "share-assets"; documentPath: string; assetPaths: string[] }
   | { purpose: "publication-entry"; pathPrefix: string; entryFile: string; trackingMode: "pinned" | "track_active" }
 );
 
@@ -21,6 +22,7 @@ function payload(input: StorageValidation, timestamp: string): Uint8Array<ArrayB
     "rendro-storage-validation-v1", input.purpose,
     input.organizationId, input.projectId, input.deploymentId,
     input.manifestKey, input.manifestSha256, input.fileCount, timestamp,
+    ...(input.purpose === "share-assets" ? [input.documentPath, input.assetPaths] : []),
     ...(input.purpose === "publication-entry" ? [input.pathPrefix, input.entryFile, input.trackingMode] : []),
   ]));
 }

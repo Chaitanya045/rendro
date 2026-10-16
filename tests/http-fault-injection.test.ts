@@ -25,7 +25,7 @@ const routes = [
   { name: "credential create", action: createCredential, init: post({ organizationId: "org", name: "key", scopes: ["docs:read"] }), status: 403 },
   { name: "credential list", action: listCredentials, init: {}, status: 403 },
   { name: "credential revoke", action: revokeCredential, init: post({ organizationId: "org", keyId: "key" }), status: 403 },
-  { name: "share create", action: createShareGrant, init: post({ ...identity, documentPath: "index.html", expiresInSeconds: 60 }), status: 403 },
+  { name: "share create", action: createShareGrant, init: post({ ...identity, documentPath: "index.html", assetPaths: [], expiresInSeconds: 60 }), status: 403 },
   { name: "share list", action: listShareGrants, init: {}, status: 403 },
   { name: "share revoke", action: revokeShareGrant, init: post({ organizationId: "org", grantId: "grant" }), status: 403 },
   { name: "publication create", action: createPublication, init: post({ ...identity, slug: "docs", pathPrefix: "", entryFile: "index.html", trackingMode: "track_active" }), status: 400 },
@@ -83,7 +83,7 @@ describe("HTTP fault injection", () => {
   it.each([getActiveDeployment, listPublications, managementAccess, managementMembers, createCredential, createShareGrant])("does not turn authorization-service outages into permission failures (%#)", async action => {
     auth.authorize.mockRejectedValue(fault);
     const init = action === createCredential ? post({ organizationId: "org", name: "key", scopes: ["docs:read"] })
-      : action === createShareGrant ? post({ ...identity, documentPath: "index.html", expiresInSeconds: 60 }) : {};
+      : action === createShareGrant ? post({ ...identity, documentPath: "index.html", assetPaths: [], expiresInSeconds: 60 }) : {};
     const { response } = await invoke(action, init, fault, false);
     await expectPrivateFailure(response);
   });

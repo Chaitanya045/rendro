@@ -27,7 +27,7 @@ export const mediaCases = [
 ];
 
 /** Real Worker routes, with only identity/metadata and blob storage substituted. */
-export async function publisherIsolationFixture() {
+export async function publisherIsolationFixture(assetPaths?: string[]) {
   mockSecurityBackend();
   const files = mediaCases.map((entry, i) => ({ ...entry, legacyPath: `case-${i}.html` }));
   const find = (key: string) => files.find(file => key.endsWith(`/${file.path}`) || key === `example/${file.legacyPath}`);
@@ -42,7 +42,7 @@ export async function publisherIsolationFixture() {
     if (url.pathname.endsWith("/shares/public")) {
       const index = Number(url.searchParams.get("token"));
       const file = files[index];
-      return Promise.resolve(file ? Response.json({ grant: { documentPath: file.path, expiresAt: Date.now() + 60_000 },
+      return Promise.resolve(file ? Response.json({ grant: { documentPath: file.path, ...(assetPaths === undefined ? {} : { assetPaths }), expiresAt: Date.now() + 60_000 },
         deployment: { manifestKey }, project: { name: "Fixture" } }) : new Response(null, { status: 404 }));
     }
     return backend(input, init);
