@@ -371,14 +371,20 @@ intermediary checks that responses cannot be reused across users or after denial
 
 Request/error logs in Node and the Worker record Hono route templates, never raw
 paths, query strings, or URL suffixes (including unmatched wildcard requests).
-`src/log-redaction.ts` configures Pino credential-field redaction and recursive
-sanitation before serialization and at output, including child bindings. Header,
+`src/logger.ts` exposes a small logging facade that applies the shared recursive
+sanitizer in `src/log-redaction.ts` before delegating to Pino. Child bindings are
+sanitized when captured and merged into each sanitized record. This policy runs
+in both Node and the Worker, where bundling selects `pino/browser.js` and ignores
+Pino's top-level redaction/hooks/formatters options. Header,
 body, URL, query, stack and cause fields are redacted; exceptions retain only fixed
 categories. Log message text must be a static application-authored string. Storage
 and proxy catch blocks log fixed categories, without exception objects or storage
 keys. Better Auth diagnostics emit only a fixed category, without library messages
 or exception arguments. Registration-derived tests capture actual Pino output with synthetic
-capabilities, alternate encodings, malformed paths, and errors. Cloudflare raw
+capabilities, alternate encodings, malformed paths, and errors. A separate esbuild
+regression uses Wrangler's Worker conditions/browser resolution, verifies that
+`pino/browser.js` was bundled, and checks the same credential/error/child fixtures
+against Node output. Cloudflare raw
 invocation logs remain disabled because they include request URLs.
 
 `src/middleware/security-headers.ts` is the outermost Hono middleware in both the Worker and Node entry points, including static files, redirects, preflights, 404s and errors. Every response gets `X-Content-Type-Options: nosniff`, a default `Referrer-Policy: strict-origin-when-cross-origin`, and a restrictive `Permissions-Policy` disabling camera, microphone, geolocation, payment, USB, display capture, motion sensors, autoplay, encrypted media, fullscreen, picture-in-picture, MIDI, credential retrieval, wake locks and XR. Route-specific referrer policies (especially `no-referrer`) are preserved. HTTPS requests additionally get `Strict-Transport-Security: max-age=15552000`, without `preload`; local HTTP does not. The request URL is authoritative, not an untrusted forwarded-protocol header. Adding `includeSubDomains` is an owner decision pending confirmation that every subdomain is HTTPS-only.

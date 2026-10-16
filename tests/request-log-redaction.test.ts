@@ -1,3 +1,6 @@
+import { build } from "esbuild";
+import { runInNewContext } from "node:vm";
+import { exerciseLogRedaction, logSecret } from "./fixtures/log-redaction";
 import { Hono, Context } from "hono";
 import type { LoggerOptions } from "pino";
 import type * as Pino from "pino";
@@ -116,28 +119,7 @@ it("returns an opaque label when no route is matched", async () => {
 });
 
 it("redacts credential fields recursively, child bindings and exception objects in actual Pino output", () => {
-  const nested: Record<string, unknown> = { safe: 42, token: secret };
-  nested.loop = nested;
-  const fields = {
-    Authorization: `Bearer ${secret}`, authorization: secret, Cookie: secret, "set-cookie": secret,
-    password: secret, passwordHash: secret, newPassword: secret, rawKey: secret, api_key: secret,
-    access_token: secret, refreshToken: secret, sessionToken: secret, viewerTicket: secret,
-    invitationId: secret, verificationToken: secret, resetToken: secret, clientSecret: secret,
-    url: `/s/${secret}${query}`, callbackURL: `/verify-email?token=${secret}`, requestPath: `/share/${secret}`, path: `/share/${secret}`, body: secret,
-    err: faulty(), error: secret, errorType: secret, cause: faulty(), stack: secret,
-    nested: [null, false, { deeper: { fields: { token: secret, authorization: secret, secret } } }],
-    circular: nested, toJSON: () => ({ secret }),
-  };
-  logger.debug(fields, "structured fixture");
-  logger.error(faulty(), "exception fixture");
-  logger.error(faulty());
-  logger.error({ err: faulty() });
-  logger.info(null, "null fixture");
-  logger.error({ error: new RangeError(secret), other: new Error(secret) }, "error categories");
-  logger.error({ errorType: "TypeError" }, "safe type");
-  logger.error({ error: null, err: 0 }, "empty errors");
-  logger.error({ errorType: { toString: () => "TypeError", secret } }, "unsafe type");
-  logger.child(fields).info({ token: secret }, "child fixture");
+  exerciseLogRedaction(logger);
   noSecrets();
   expect(records()[0]).toMatchObject({ Authorization: "[redacted]", errorType: "Error", err: { category: "TypeError" }, circular: { safe: 42, token: "[redacted]", loop: "[redacted]" } });
   expect(records().find(record => record.msg === "error categories")).toMatchObject({ error: { category: "RangeError" }, other: { category: "Error" } });
@@ -151,4 +133,46 @@ it("configures redaction in both production and development logger modes", async
   production.logger.error({ token: secret, error: faulty() }, "production fixture");
   expect(capture.options.at(-1)?.transport).toBeUndefined();
   noSecrets();
+});
+
+function comparable(record: Record<string, unknown>) {
+  return Object.fromEntries(Object.entries(record).filter(([key]) => !["pid", "hostname", "time", "level"].includes(key)));
+}
+
+it.each(["production", "development"])("redacts identically in Node and the Worker-resolved %s bundle", async mode => {
+  vi.resetModules();
+  vi.stubEnv("NODE_ENV", mode);
+  vi.stubEnv("LOG_LEVEL", "trace");
+  const nodeLogger = (await import("../src/logger")).logger;
+  capture.lines.length = 0;
+  exerciseLogRedaction(nodeLogger);
+  const expected = records().map(comparable);
+  noSecrets();
+
+  // Match Wrangler's default esbuild browser platform and explicit conditions.
+  // Do not alias Pino: assert its real package browser field selected browser.js.
+  const bundle = await build({
+    entryPoints: ["src/logger.ts"], bundle: true, write: false, metafile: true,
+    platform: "browser", conditions: ["workerd", "worker", "browser"],
+    format: "iife", globalName: "workerLogger",
+  });
+  expect(Object.keys(bundle.metafile!.inputs).some(path => path.endsWith("pino/browser.js"))).toBe(true);
+  expect(Object.keys(bundle.metafile!.inputs).some(path => path.endsWith("pino/pino.js"))).toBe(false);
+  const output: Record<string, unknown>[] = [];
+  const rawOutput: unknown[][] = [];
+  const write = (record: Record<string, unknown>, msg?: string) => {
+    rawOutput.push([record, msg]);
+    output.push({ ...record, ...(msg === undefined ? {} : { msg }) });
+  };
+  const workerLogger = runInNewContext(`${bundle.outputFiles[0].text}; workerLogger.logger`, {
+    process: { env: { ...process.env } }, Error, TypeError, RangeError,
+    console: { log: write, error: write, warn: write, info: write, debug: write, trace: write },
+  }) as typeof logger;
+  exerciseLogRedaction(workerLogger);
+  // Inspect the actual console arguments before normalizing the message field.
+  expect(JSON.stringify(rawOutput)).not.toContain(logSecret);
+  expect(output.map(comparable)).toEqual(expected);
+  expect(output.find(record => record.msg === "grandchild fixture")).toMatchObject({ safe: "record", other: { category: "TypeError" }, err: { category: "Error" } });
+  expect(output.find(record => record.msg === "child message")).toMatchObject({ safe: "parent", mutable: { safe: "original" } });
+  expect(output.find(record => record.msg === "root fixture")).toMatchObject({ safe: "root" });
 });
