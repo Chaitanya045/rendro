@@ -121,6 +121,8 @@ it("delivers loading, stale subscription, drawer scroll and compatibility states
   await frame.locator("#target").evaluate(el => { el.style.transform = ""; });
   await card.dispatchEvent("pointerenter");
   expect(await frame.locator(".anchor-highlight-segment:not([hidden])").count()).toBeGreaterThan(0);
+  await card.dispatchEvent("pointerleave");
+  expect(await frame.locator(".anchor-highlight-segment:not([hidden])").count()).toBe(0);
   const drawer = frame.getByTestId("commentor-drawer-list");
   await drawer.evaluate(el => { el.scrollTop = 0; el.dispatchEvent(new Event("scroll")); });
   expect(await drawer.evaluate(el => el.scrollHeight > el.clientHeight + 24)).toBe(true);
