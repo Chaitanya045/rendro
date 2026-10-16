@@ -121,9 +121,9 @@ describe("share dependency discovery", () => {
   it("fails clearly at the path count, payload byte, and cumulative source byte limits", async () => {
     vi.spyOn(performance, "now").mockReturnValue(0);
     const files = Array.from({ length: 501 }, (_, i) => resource(`guide/${i}.png`));
-    await expect(fixture(files.map(file => `<img src="/${file.path}">`).join(""), files).collect()).rejects.toThrow("500 paths / 64 KiB");
+    await expect(fixture(files.map(file => `<img src="/${file.path}">`).join(""), files).collect()).rejects.toThrow("document references too many assets to share");
     const long = "x".repeat(64 * 1024);
-    await expect(fixture(`<img src="${long}">`, [resource("guide/" + long)]).collect()).rejects.toThrow("500 paths / 64 KiB");
+    await expect(fixture(`<img src="${long}">`, [resource("guide/" + long)]).collect()).rejects.toThrow("document references too many assets to share");
     const f = fixture('<link rel="stylesheet" href="style">', [resource("guide/style", "text/css", " ".repeat(8 * 1024 * 1024))]);
     await expect(f.collect()).rejects.toThrow("8 MiB");
     expect(validShareAssets(files.slice(0, 500).map(file => file.path))).toBe(true);

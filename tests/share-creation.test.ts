@@ -6,6 +6,10 @@ import { shareProof } from "./helpers/storage-proof";
 import { internal } from "../convex/_generated/api";
 import { signStorageValidation, STORAGE_ATTESTATION_HEADER } from "../shared/storage-attestation";
 
+import { MAX_HTTP_BODY_BYTES } from "../shared/deployment-limits";
+import { MAX_SHARE_ASSET_BYTES, MAX_SHARE_ASSET_PATHS, MAX_SHARE_METADATA_BYTES, SHARE_ASSET_JSON_OVERHEAD, validShareAssets } from "../shared/share-assets";
+
+const jsonBytes = (value: unknown) => new TextEncoder().encode(JSON.stringify(value)).byteLength;
 const path = "/api/rendro/shares";
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
@@ -27,6 +31,62 @@ describe("share creation authority", () => {
     await f.backend.run(ctx => ctx.db.patch(result.grant._id, { assetPaths: undefined }));
     expect((await f.backend.query(internal.shareGrants.resolveInternal, { tokenHash: result.grant.tokenHash }))?.grant)
       .toEqual({ documentPath: f.body.documentPath, expiresAt: result.grant.expiresAt });
+  });
+
+  it.each([0, 1])("enforces the asset byte boundary through Worker and Convex (+%i byte)", async extraByte => {
+    vi.spyOn(performance, "now").mockReturnValue(0);
+    const f = await fixture();
+    // Include multibyte and JSON-escaped characters in both budgets, and a
+    // maximum-length manifest document path.
+    const metadata = { ...f.body, documentPath: 'guide/é"index.html' };
+    metadata.documentPath += "界".repeat(1024 - metadata.documentPath.length);
+    expect(jsonBytes(metadata)).toBeLessThan(MAX_SHARE_METADATA_BYTES);
+    const assets = Array.from({ length: MAX_SHARE_ASSET_PATHS }, (_, i) => `guide/${i}-` + (i === 0 ? 'é"' : ""));
+    const padding = MAX_SHARE_ASSET_BYTES + extraByte - jsonBytes(assets);
+    for (let i = 0; i < assets.length; i++) assets[i] += "x".repeat(Math.floor(padding / assets.length) + (i < padding % assets.length ? 1 : 0));
+    expect(jsonBytes(assets)).toBe(MAX_SHARE_ASSET_BYTES + extraByte);
+    expect(validShareAssets(assets)).toBe(extraByte === 0);
+    expect(MAX_SHARE_ASSET_BYTES + MAX_SHARE_METADATA_BYTES + SHARE_ASSET_JSON_OVERHEAD).toBeLessThanOrEqual(MAX_HTTP_BODY_BYTES);
+    const maxMetadata = { ...metadata, documentPath: metadata.documentPath + "x".repeat(MAX_SHARE_METADATA_BYTES - jsonBytes(metadata)) };
+    expect(jsonBytes(maxMetadata)).toBe(MAX_SHARE_METADATA_BYTES);
+    expect(jsonBytes({ ...maxMetadata, assetPaths: assets })).toBe(MAX_HTTP_BODY_BYTES + extraByte);
+    const before = await f.backend.run(ctx => ctx.db.query("shareGrants").collect());
+    f.manifest.mockResolvedValue(JSON.stringify({ files: [
+      { path: metadata.documentPath, contentType: "text/html" },
+      ...assets.map(path => ({ path, contentType: "image/png" })),
+    ] }));
+    const html = '<img srcset="' + assets.map(path => '/' + path.split('/').map(encodeURIComponent).join('/')).join(', ') + '">';
+    f.read.mockImplementation(() => Promise.resolve(new Response(html).body));
+    // Unsupported fields and caller allowlists cannot enlarge the forwarded body.
+    const response = await f.request({ ...metadata, ignored: "x".repeat(1000), assetPaths: ["guide/private.json"] });
+    expect(response.status).toBe(extraByte ? 400 : 201);
+    const grants = await f.backend.run(ctx => ctx.db.query("shareGrants").collect());
+    if (extraByte) {
+      expect(await response.json()).toEqual({ error: "document references too many assets to share" });
+      expect(f.fetchMock).toHaveBeenCalledTimes(1); // Authorization only; no oversized POST.
+      expect(grants).toEqual(before);
+    } else {
+      const { grant } = await response.json() as { grant: Doc<"shareGrants"> };
+      expect(grant.assetPaths).toEqual(assets.sort());
+      expect(grants).toEqual([...before, grant]);
+      const forwarded = f.fetchMock.mock.calls.find(([url]) => new URL(url).pathname === path)![1]!.body as string;
+      expect(new TextEncoder().encode(forwarded).byteLength).toBe(jsonBytes(metadata) + SHARE_ASSET_JSON_OVERHEAD + MAX_SHARE_ASSET_BYTES);
+      expect(new TextEncoder().encode(forwarded).byteLength).toBeLessThanOrEqual(MAX_HTTP_BODY_BYTES);
+      expect(JSON.parse(forwarded)).toEqual({ ...metadata, assetPaths: assets });
+    }
+    f.fetchMock.mockClear();
+    f.manifest.mockClear();
+    // Metadata at its byte cap reaches authorization; one more byte is rejected
+    // before backend/storage access, independently of authentication.
+    f.fetchMock.mockResolvedValue(new Response(null, { status: 403 }));
+    expect((await f.request(maxMetadata)).status).toBe(403);
+    expect(f.fetchMock).toHaveBeenCalledTimes(1);
+    f.fetchMock.mockClear();
+    const oversizedMetadata = await f.request({ ...maxMetadata, documentPath: maxMetadata.documentPath + "x" });
+    expect(oversizedMetadata.status).toBe(400);
+    expect(await oversizedMetadata.json()).toEqual({ error: "Share metadata exceeds the size limit" });
+    expect(f.fetchMock).not.toHaveBeenCalled();
+    expect(f.manifest).not.toHaveBeenCalled();
   });
 
   it("rejects unauthenticated creation before storage and does not accept API keys as share authority", async () => {
@@ -84,6 +144,10 @@ describe("share creation authority", () => {
     const f = await fixture();
     expect((await f.app.request(path, { method: "POST", body: "{" })).status).toBe(400);
     for (const body of [null, false, {}, { organizationId: "org" }, { organizationId: "org", projectId: "p" }, { ...f.body, documentPath: "../bad" }]) expect((await f.request(body)).status).toBe(400);
+    for (const expiresInSeconds of [undefined, null, "600", 59, 60 * 60 * 24 * 30 + 1]) {
+      expect((await f.request({ ...f.body, expiresInSeconds })).status).toBe(400);
+    }
+    expect((await f.app.request(path, { method: "POST", body: JSON.stringify(f.body).replace('"expiresInSeconds":600', '"expiresInSeconds":1e309') })).status).toBe(400);
     for (const deployment of [undefined, { ...f.record, status: "failed" }, { ...f.record, status: "staging" }, { ...f.record, manifestKey: "foreign/manifest.json" }]) {
       f.fetchMock.mockImplementation(() => Promise.resolve(Response.json({ deployment })));
       expect((await f.request()).status).toBe(404);
@@ -115,7 +179,7 @@ describe("share creation authority", () => {
     vi.spyOn(performance, "now").mockReturnValue(0);
     const f = await fixture();
     const assets = Array.from({ length: 500 }, (_, i) => ({
-      path: i === 0 ? "guide/a" : `guide/${i}-${"x".repeat(114)}`, contentType: "image/png",
+      path: i === 0 ? "guide/a" : `guide/${i}-${"x".repeat(100)}`, contentType: "image/png",
     }));
     f.manifest.mockResolvedValue(JSON.stringify({ files: [{ path: f.body.documentPath, contentType: "text/html" }, ...assets] }));
     const html = '<img srcset="' + assets.map(file => file.path.slice(6) + ', ').join('') + 'a, '.repeat(10_000) + '">';
@@ -134,7 +198,7 @@ describe("share creation authority", () => {
     f.read.mockImplementation(() => Promise.resolve(new Response(files.slice(1).map(file => `<img src="/${file.path}">`).join("")).body));
     const response = await f.request();
     expect(response.status).toBe(400);
-    expect(await response.json()).toEqual({ error: "Share asset limit exceeded (500 paths / 64 KiB)" });
+    expect(await response.json()).toEqual({ error: "document references too many assets to share" });
     expect(f.fetchMock).toHaveBeenCalledTimes(1);
     f.read.mockResolvedValue(null);
     expect((await f.request()).status).toBe(400);

@@ -1,3 +1,4 @@
+import { MAX_SHARE_ASSET_BYTES, MAX_SHARE_ASSET_PATHS } from "../shared/share-assets";
 import { srcsetUrls } from "@/share-srcset";
 import { decodeShareSource } from "@/share-encoding";
 import { type DefaultTreeAdapterMap } from "parse5";
@@ -141,8 +142,8 @@ export async function collectShareAssets(
       if (assets.has(file.path)) return value;
       budget.charge(file.path.length * 4 + 1);
       assetBytes += new TextEncoder().encode(JSON.stringify(file.path)).byteLength + (assets.size ? 1 : 0);
-      if (assets.size >= 500 || assetBytes > 64 * 1024 || !isCanonicalStorageKey(file.path)) {
-        throw new ShareAssetError("Share asset limit exceeded (500 paths / 64 KiB)");
+      if (assets.size >= MAX_SHARE_ASSET_PATHS || assetBytes > MAX_SHARE_ASSET_BYTES || !isCanonicalStorageKey(file.path)) {
+        throw new ShareAssetError("document references too many assets to share");
       }
       assets.set(file.path, file);
     }
@@ -189,5 +190,5 @@ export async function collectShareAssets(
     css((await source(file, documentSource.encoding)).text, fileUrl(file.path));
   }
   budget.check();
-  return [...assets.keys()].sort(); // At most 500 entries / 64 KiB.
+  return [...assets.keys()].sort(); // Bounded path count and serialized bytes.
 }

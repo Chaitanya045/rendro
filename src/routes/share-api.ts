@@ -1,3 +1,4 @@
+import { MAX_SHARE_METADATA_BYTES } from "../../shared/share-assets";
 import { Hono } from "hono";
 import { authClientIpHeaders } from "@/auth-client-ip";
 import { backendFetch } from "@/backend-fetch";
@@ -17,8 +18,16 @@ app.post("/api/rendro/shares", async (c) => {
   const organizationId = "organizationId" in body ? body.organizationId : undefined;
   const projectId = "projectId" in body ? body.projectId : undefined;
   const documentPath = "documentPath" in body ? body.documentPath : undefined;
+  const expiresInSeconds = "expiresInSeconds" in body ? body.expiresInSeconds : undefined;
   if (typeof organizationId !== "string" || typeof projectId !== "string" || typeof documentPath !== "string"
+    || typeof expiresInSeconds !== "number" || !Number.isFinite(expiresInSeconds)
+    || expiresInSeconds < 60 || expiresInSeconds > 60 * 60 * 24 * 30
     || !isCanonicalStorageKey(documentPath)) return c.json({ error: "Invalid share fields" }, 400);
+  // Serialize only supported fields; caller extras must not consume the asset budget.
+  const metadata = { organizationId, projectId, documentPath, expiresInSeconds };
+  if (new TextEncoder().encode(JSON.stringify(metadata)).byteLength > MAX_SHARE_METADATA_BYTES) {
+    return c.json({ error: "Share metadata exceeds the size limit" }, 400);
+  }
   const headers = new Headers({ Accept: "application/json" });
   // Share creation is session-only; caller proofs and API credentials are not forwarded.
   for (const name of ["cookie", "content-type", "origin", "sec-fetch-site", "user-agent"]) {
@@ -54,7 +63,7 @@ app.post("/api/rendro/shares", async (c) => {
   const createTarget = `${CONVEX_SITE_URL}/api/rendro/shares`;
   (await authClientIpHeaders(c.req.raw, createTarget, "POST")).forEach((value, name) => headers.set(name, value));
   return backendFetch(createTarget, {
-    method: "POST", headers, body: JSON.stringify({ ...body, assetPaths }), redirect: "manual",
+    method: "POST", headers, body: JSON.stringify({ ...metadata, assetPaths }), redirect: "manual",
   }, "shareRequest");
 });
 
