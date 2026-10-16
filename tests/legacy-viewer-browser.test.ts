@@ -209,6 +209,8 @@ describe("legacy opaque viewer in Chromium", () => {
     expect(await frame.evaluate(() => location.hash)).toBe("");
     await page.goBack();
     await browserStep("restore shell fragment on Back", () => page.waitForURL("**/docs/example/guide/index.html#bottom"));
+    await browserStep("finish restoring the legacy document handlers", () => frame.waitForFunction(() =>
+      location.pathname.endsWith("/files/guide/index.html") && document.readyState === "complete"));
     await page.frameLocator("#content-frame").locator("#old-link").click();
     await page.getByRole("button", { name: "Open linked document", exact: true }).click();
     await browserStep("resolve old absolute link through parent", () => page.waitForURL("**/docs/example/guide/next.html#destination"));

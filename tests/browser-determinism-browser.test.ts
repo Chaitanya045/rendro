@@ -5,6 +5,7 @@ const harness = createBrowserHarness();
 beforeAll(async () => {
   const assets = new Map([
     ["/tree.js", await bundleBrowserAsset("src/lazy-tree/lazy-tree.ts")],
+    ["/navigation.js", await bundleBrowserAsset("tests/fixtures/deterministic-navigation.ts")],
     ["/select.js", await bundleBrowserAsset("src/ui/select-browser.ts")],
     ["/commentor.js", await bundleBrowserAsset("src/commentor/commentor.ts")],
     ["/host.js", await bundleBrowserAsset("tests/fixtures/deterministic-comment-host.ts")],
@@ -16,6 +17,10 @@ beforeAll(async () => {
       response.end(JSON.stringify({ children: [{ name: "page.html", path: "fixture/page.html", type: "file" }], isTruncated: false }));
     } else if (request.url === "/tree") {
       response.end('<!doctype html><div class="sidebar-tree" data-tree-org="fixture"><div id="tree-container"></div></div><iframe id="content-frame" name="content-frame"></iframe><script src="/tree.js"></script>');
+    } else if (request.url === "/navigation") {
+      response.end('<!doctype html><script>addEventListener("message",event=>{if(event.data.type==="doc-navigate")document.body.dataset.destination=event.data.path})</script><iframe src="/navigation-frame"></iframe>');
+    } else if (request.url === "/navigation-frame") {
+      response.end('<!doctype html><a href="/files/fixture/next.html">Legacy link</a><script src="/navigation.js"></script>');
     } else if (request.url === "/select") {
       response.end('<!doctype html><div id="container"><select class="select" aria-label="Choice"><option>A</option><option>B</option></select></div><script src="/select.js"></script>');
     } else if (request.url === "/comments") {
@@ -120,4 +125,13 @@ it("delivers loading, stale subscription, drawer scroll and compatibility states
   await frame.getByRole("button", { name: "Show reload notice" }).click();
   await page.clock.runFor(500);
   expect(await frame.getByRole("button", { name: "Show reload notice" }).isVisible()).toBe(true);
+});
+
+// A restored iframe can still be replacing its document when the shell URL has
+// changed. Own this compatibility outcome without relying on Back/load timing.
+it("classifies a legacy absolute link after the document navigation handler is ready", async () => {
+  const page = await harness.newPage();
+  await page.goto(`${harness.origin}/navigation`);
+  await page.frameLocator("iframe").getByRole("link", { name: "Legacy link" }).click();
+  await expect.poll(() => page.locator("body").getAttribute("data-destination")).toBe("next.html");
 });
