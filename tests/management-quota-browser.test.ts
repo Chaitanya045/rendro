@@ -1,13 +1,12 @@
 import type { User } from "better-auth/types";
 import { getRequestListener } from "@hono/node-server";
 import { Hono } from "hono";
-import { build } from "esbuild";
 import { beforeAll, afterAll, expect, it, vi } from "vitest";
 import { renderProjectPage } from "../src/routes/project-pages";
 import { managementPagesSource } from "../scripts/management-pages-source";
 import { cookieWriteFixture, admissionHeaders } from "./helpers/cookie-write-fixture";
 import { managementAccessFixture } from "./fixtures/management-access";
-import { createBrowserHarness } from "./helpers/browser";
+import { buildBrowserBundle as build, createBrowserHarness } from "./helpers/browser";
 import { writeQuotaLimiter, writeQuotaLimits } from "../convex/writeQuotas";
 
 const harness = createBrowserHarness();
@@ -19,9 +18,9 @@ beforeAll(async () => {
     const bundle = await build({ entryPoints: [entry], bundle: true, write: false, format: "iife", platform: "browser" });
     assets.set(path, bundle.outputFiles[0].text);
   }
-  assets.set("/management-pages.js", managementPagesSource());
+  assets.set("/management-pages.js", (await build({ stdin: { contents: managementPagesSource(), sourcefile: "tests/fixtures/generated-management-quota.js", resolveDir: process.cwd() } })).outputFiles[0].text);
   const app = new Hono();
-  for (const [path, body] of assets) app.get(path, c => c.body(body, 200, { "Content-Type": "text/javascript" }));
+  for (const [path, body] of assets) app.get(path, c => c.body(body, 200, { "Content-Type": "text/javascript; charset=utf-8" }));
   app.get("/api/rendro/projects", c => c.json({ projects: [] }));
   app.get("/api/rendro/management/access", c => {
     const user = { id: f.user._id, name: "Owner", email: "owner@example.test" } as User;
