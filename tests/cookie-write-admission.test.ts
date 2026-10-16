@@ -26,6 +26,9 @@ describe("cookie write admission", () => {
     expect(() => requireCookieWrite(new Request(request, { headers: headers({ "content-type": "" }) }), origin, false)).not.toThrow();
   });
 
+  // This matrix executes every mutation with ten denied origins/content types,
+  // then a real successful write (including password hashing). Coverage on a
+  // shared runner can exceed the default five-second unit-test budget.
   it("protects every custom session mutation directly at Convex and retains same-origin success", async () => {
     const f = await fixture();
     for (const path of Object.keys(f.bodies)) {
@@ -36,7 +39,7 @@ describe("cookie write admission", () => {
       const response = await f.post(path);
       expect(response.status, `${path}: ${await response.clone().text()}`).toBe(path.endsWith("/revoke") || path.endsWith("/remove") || path.endsWith("set-initial-password") ? 200 : 201);
     }
-  });
+  }, 15_000);
 
   it.each(["invalid-key", "read-only-key"])("checks session fallback for %s without treating Authorization as authority", async key => {
     const f = await fixture();

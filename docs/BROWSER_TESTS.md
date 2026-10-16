@@ -178,14 +178,16 @@ content. Since browser routing can prevent native BFCache eligibility, an
 additional test explicitly dispatches a persisted `pageshow` event after backend
 revocation; it checks the restoration handler, not native cache admission.
 
+The #146 signup visibility regression now passes in all engines: the credential
+form, Google control and divider disappear, focus moves to the confirmation,
+and returning through sign-in restores the signup controls.
+`tests/auth-hidden-browser.test.ts` checks computed display, keyboard focus,
+retry and restored forms at desktop/mobile sizes, plus reset and security states.
+
 Expected failures name follow-up issues below. Their broken assertions receive
 no `e2e` registry credit; an unexpected pass fails the suite so the marker must
 be removed when the product is fixed.
 
-- **[#146](https://github.com/Chaitanya045/rendro/issues/146) (AUTH-111-01): signup alternatives remain visible after success.**
-  The Google button and divider get `hidden` attributes, but their `display:flex`
-  CSS overrides the browser's hidden styling. Both should disappear with the
-  credential form when the neutral verification confirmation is shown.
 - **[#145](https://github.com/Chaitanya045/rendro/issues/145) (AUTH-111-02): nonpersistent sessions gain the persistent lifetime.**
   Unchecking Keep me signed in correctly creates a session-only browser cookie,
   but the backend session is extended from the intended one-day lifetime to

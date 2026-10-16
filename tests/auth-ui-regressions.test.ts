@@ -33,6 +33,7 @@ class ElementMock {
   password!: InputMock;
   confirmPassword!: InputMock;
   rememberMe!: { checked: boolean };
+  focus = () => { this.ownerDocument.activeElement = this; };
   constructor(public kind: string, public ownerDocument: any, public inputs: InputMock[] = []) {}
   addEventListener(type: string, listener: (event: any) => unknown) { this.listeners.set(type, [...(this.listeners.get(type) ?? []), listener]); }
   async dispatch(type: string, event: any = {}) { for (const listener of this.listeners.get(type) ?? []) await listener({ target: this, ...event }); }
@@ -222,6 +223,7 @@ describe("auth UI regressions", () => {
     await ui.form.dispatch("submit", { preventDefault() {} });
     expect(calls).toBe(2);
     expect(ui.successPanel.hidden).toBe(false);
+    expect(ui.document.activeElement).toBe(ui.successPanel);
   });
 
   it("preserves returnTo in sign-up verification callback and shows success", async () => {
@@ -237,6 +239,7 @@ describe("auth UI regressions", () => {
     await ui.form.dispatch("submit", { preventDefault() {} });
     expect(JSON.parse(body).callbackURL).toBe("http://local/verify-email?verified=1&returnTo=%2Faccept-invitation%2Finv-123");
     expect(ui.successPanel.hidden).toBe(false);
+    expect(ui.document.activeElement).toBe(ui.successPanel);
   });
 
   it("reports verification resend transport failure while keeping account privacy", async () => {
