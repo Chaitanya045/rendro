@@ -164,8 +164,9 @@ moves that control; WebKit can otherwise finish its actionability check just
 before the response arrives and click the old position. Waiting for this explicit
 ready state also covers the method-load failure UI, without sleeps or retries.
 
-The complete three-engine suite has a 45-minute bound (60 minutes for the CI
-job including installation); individual auth journeys have a 60-second bound.
+The complete three-engine suite has a 45-minute bound locally. In CI each engine
+is its own job (30 minutes including installation), so the bound applies per
+engine; individual auth journeys have a 60-second bound.
 Each test/context has a deterministic synthetic ingress address. The limiter
 case actually exhausts the configured five-attempt window; production limits
 remain enabled. Transport-failure tests hold individual browser requests and
