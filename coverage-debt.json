@@ -138,12 +138,6 @@
       "branches": 8,
       "functions": 3,
       "lines": 5
-    },
-    "src/commentor/recovery-session.ts": {
-      "statements": 0,
-      "branches": 1,
-      "functions": 0,
-      "lines": 0
     }
   }
 }

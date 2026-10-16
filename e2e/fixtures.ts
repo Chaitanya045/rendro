@@ -50,7 +50,7 @@ export const test = base.extend<Checks>({
   },
 });
 
-async function guardContext(context: BrowserContext, baseURL: string | undefined, testId: string) {
+export async function guardContext(context: BrowserContext, baseURL: string | undefined, testId: string) {
   // Distinct ingress per test/context keeps real auth windows independent.
   const ip = createHash("sha256").update(testId).digest();
   await context.setExtraHTTPHeaders({ "CF-Connecting-IP": `198.18.${ip[0]}.${ip[1]}` });

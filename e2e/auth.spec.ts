@@ -1,6 +1,6 @@
 import { test, expect } from "./fixtures";
 import { password } from "./seed";
-import { ageRecord, authRecord, holdRequest, login, mailFor, mailLink, oauthFixture, session, signout, signup, verifiedUser } from "./auth-helpers";
+import { ageRecord, authRecord, holdRequest, login, mailFor, mailLink, oauthFixture, requestPasswordReset, securityReady, session, signout, signup, verifiedUser } from "./auth-helpers";
 import { localHttp } from "./backend";
 
 test.describe.configure({ timeout: 60_000 });
@@ -225,9 +225,7 @@ test("missing, invalid and expired reset tokens recover without changing credent
   await expect(page.getByRole("button", { name: "Update password" })).toBeEnabled();
   const email = `expired-${info.project.name}-${info.retry}@example.test`;
   await verifiedUser(page, email);
-  await page.goto("/forgot-password");
-  await page.locator("#email").fill(email);
-  await page.getByRole("button", { name: "Send reset link" }).click();
+  await requestPasswordReset(page, email);
   const link = await mailLink(email, /reset/i);
   const token = new URL(link).pathname.split("/").at(-1) ?? "";
   await ageRecord("verification", "identifier", `reset-password:${token}`, { expiresAt: Date.now() - 1000 });
@@ -446,6 +444,9 @@ test("Google linking rejects a different provider email without replacing the se
 test("persisted pageshow checks the backend and hides a revoked account", async ({ page }) => {
   await login(page, "owner@example.test");
   await expect(page).toHaveURL(/\/account\/security$/);
+  // The URL commits before the document's inline scripts finish; a pageshow
+  // dispatched earlier would find no listener and be lost.
+  await securityReady(page);
   const identity = await session(page);
   await ageRecord("session", "_id", identity?.sessionId ?? "", { expiresAt: Date.now() - 1000 });
   // Routing can disable native BFCache eligibility. Exercise the persisted-event

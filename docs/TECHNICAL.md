@@ -668,7 +668,7 @@ restore the compatibility Worker.
 
 ### API-key HTTP rate limits
 
-Convex is authoritative: `convex/apiKeyHttp.ts` wraps credential validation, every deployment action (start, active, staging, commit, fail, list), and publication create/list/remove. Limiting runs before body parsing or business logic, so malformed requests also count. A read-only hash lookup verifies an active, unexpired key; a shared token bucket uses the credential's database ID, never a raw key or caller-selected tenant/scope. Scope, project, organization, expiry and revocation authorization still run for each operation. Failed operations consume capacity too; cookie-only session routes retain their session authorization path.
+Convex is authoritative: `convex/apiKeyHttp.ts` wraps credential validation, every deployment action (start, active, staging, commit, fail, list), and publication create/list/remove. Limiting runs before body parsing or business logic, so malformed requests also count. A read-only hash lookup (`verifiedIdInternal`) returns the credential ID and stored `expiresAt` for a non-revoked key in a live organization, and the wrapper treats a key at or past that deadline as unverified (failed-IP budget); a shared token bucket uses the credential's database ID, never a raw key or caller-selected tenant/scope. Scope, project, organization, expiry and revocation authorization still run for each operation. Failed operations consume capacity too; cookie-only session routes retain their session authorization path.
 
 The official `@convex-dev/rate-limiter` component provides persisted, transactional token buckets across Convex instances. There was no application-level limiter to reuse; Better Auth's database limiter covers only `/api/auth/*`. Version 0.3.2 is pinned because it supports the existing Convex 1.42 dependency, avoiding an unrelated backend upgrade. The component is registered in `convex/convex.config.ts`; **Convex deploy required** when releasing this change.
 
@@ -681,6 +681,12 @@ Request accounting from `cli/src/index.ts` and `src/routes/deployments.ts`: with
 Exhaustion returns `429`, `Retry-After` rounded up to whole seconds (minimum one), and `{ "error": "Rate limit exceeded", "code": "rate_limited" }`. Worker proxies preserve the status/body/header. This is an explicit error class in `httpErrors.ts`; unexpected limiter/backend faults remain sanitized 500s (502 through the Worker). Rate-limit responses do not log secrets, keys, request bodies or IPs.
 
 The CLI reports `429 Rate limited. Retry after Ns.` It retries only 429 responses for reads, same-byte file PUTs, copies of immutable manifest files to the same staging keys, and idempotent failure cleanup. Up to three retries use exponential delays (1, 2, 4 seconds), honor the greater `Retry-After` seconds/date value, and add 0–249ms jitter. A wait over 60 seconds stops with the rate-limit message. If failure cleanup remains rejected, the CLI exits non-zero and reports both the original deployment error and the cleanup failure, identifying the deployment that may remain staging. Start, commit and publication mutations are not automatically replayed; transport errors and 5xx responses are not retried. Start creates a new deployment and commit changes the active pointer, so their outcomes must not be guessed after an ambiguous response.
+
+### Time never decides access in a query
+
+Convex caches a query result until a document it read changes; elapsed time does not invalidate it. A query that compares `Date.now()` with a deadline can keep returning a stale "allowed" after the deadline passes (revocation is unaffected because it changes a document). Queries and `internalQuery` handlers therefore never read the clock (`Date.now()`, argument-less `new Date()`, `performance.now()`, `Temporal`), directly or through helpers. They return the stored deadline and the calling action/httpAction compares it with `Date.now()`, once, and denies: `resolveShareGrant` for share expiry, `limitedAction` (rate-limit identity) and `validateApiCredential` (authorization, #91) for API-key expiry. Mutations may read the clock freely.
+
+`tests/query-clock-purity.test.ts` enforces this. A TypeScript-AST analysis (`tests/helpers/convex-query-clock.ts`) starts from every query registration in `convex/**` (including factories that wrap `queryGeneric`), follows each referenced top-level declaration through relative imports, re-exports and namespace imports, and fails on any reachable clock read. The set of queries it finds must equal the set of exports Convex registers at runtime (`isQuery`), so a new registration shape cannot slip past it. Justified non-access uses are listed with a reason in the test's `allowedClockReads` map; an entry that no query reaches fails, so the list can only shrink. Code in `node_modules` (Better Auth, the Convex adapters) is outside the analysis; the Convex platform validates the auth token itself.
 
 ### Immutable deployment protocol
 
@@ -786,7 +792,7 @@ The anonymous `/api/rendro/publications/public` resolver returns only `{ publica
 
 ### Revocable private shares
 
-`POST /api/rendro/shares` (any organization member) creates a 256-bit random token. `expiresInSeconds` must be between 60 seconds and 30 days; the document toolbar requests 7 days. Convex stores the token's SHA-256 hash, expiry, creator, document path, pinned deployment, and an explicit `assetPaths` allowlist. `/s/:token` resolves the hash on every request, so expiry or revocation takes effect immediately. A new grant exposes its exact HTML document and only its allowlisted manifest assets, never the project tree or another HTML/XHTML document. Responses use `Cache-Control: private, no-store`. Owners and admins revoke grants with `POST /api/rendro/shares/revoke`.
+`POST /api/rendro/shares` (any organization member) creates a 256-bit random token. `expiresInSeconds` must be between 60 seconds and 30 days; the document toolbar requests 7 days. Convex stores the token's SHA-256 hash, expiry, creator, document path, pinned deployment, and an explicit `assetPaths` allowlist. `/s/:token` resolves the hash on every request (the Worker keeps no share cache, and the resolver response is `private, no-store`), so expiry or revocation takes effect immediately. Revocation changes the grant document. Expiry is time, which never invalidates a cached Convex query, so `shareGrants.resolveInternal` returns the stored `expiresAt` without reading the clock and the `resolveShareGrant` httpAction denies at `expiresAt` with the same 404 "Share not found" as a missing token (see [Time never decides access in a query](#time-never-decides-access-in-a-query)). A new grant exposes its exact HTML document and only its allowlisted manifest assets, never the project tree or another HTML/XHTML document. Responses use `Cache-Control: private, no-store`. Owners and admins revoke grants with `POST /api/rendro/shares/revoke`.
 
 The Worker authenticates a session-backed active-deployment read before reading storage. It requires a manifest `text/html` document and discovers literal resource references with parse5: images/srcset, stylesheet/icon/preload/modulepreload links, scripts, media/posters, object/embed, SVG image/use, and inline styles/style blocks. It honors the first HTML base URL, resolves paths relative to the document, removes query/fragment components, normalizes dot segments and decodes percent-encoded segments once. Only same-deployment manifest paths enter the list; `text/html` and `application/xhtml+xml` resources are excluded regardless of filename. The existing CSS tokenizer discovers URLs and imports from directly referenced stylesheets, resolving them relative to each stylesheet. Imported stylesheets are included but not crawled recursively. Navigation links and JavaScript-generated requests are not dependencies; a dynamic fetch must have an explicit preload reference to be shared. Absolute/protocol-relative URLs and bases are not inferred to belong to the deployment; publisher asset URLs should be document-relative to preserve the share route prefix.
 
@@ -1245,9 +1251,10 @@ Both production (top-level) and `development` declare the same required secrets:
 
 | Workflow | Trigger | Runs |
 |---|---|---|
-| `.github/workflows/quality.yml` | Pull requests, pushes to `main`/`development`, manual | Independent `verify` (`pnpm verify`, dependency audit), `coverage` (`pnpm coverage`, summary artifacts), and `e2e` (Playwright Test/workerd, three browser engines) jobs; read-only permissions, no deployment credentials |
+| `.github/workflows/quality.yml` | Pull requests, pushes to `main`/`development`, manual | Independent `verify` (`pnpm verify`, dependency audit), `coverage` (`pnpm coverage`, summary artifacts), and `e2e-engine` (one Playwright Test/workerd job per browser engine) with an aggregate required `e2e` job; read-only permissions, no deployment credentials |
 | `.github/workflows/release.yml` | `v*` tags | Builds `bin/rendro.mjs` and attaches it to a GitHub release |
 | `.github/workflows/retention.yml` | Daily cron, manual | `pnpm cleanup:retention` |
+| `.github/workflows/stability.yml` | Nightly cron, manual | `coverage-twice` (two consecutive `taskset -c 0,1 pnpm coverage` runs, then per-test outcome and coverage-counter diffs; the second run and diffs always execute) and `e2e-no-retries` (per engine, `E2E_RETRIES=0`); read-only permissions, no secrets; any failure fails the workflow |
 
 No workflow deploys the Worker or Convex to a shared environment, or publishes to npm.
 The E2E job pushes application code only to a harness-owned disposable loopback backend.
@@ -1272,7 +1279,10 @@ a complete signup-to-CLI-push-to-reactive-comment journey. The 12 public-RPC bac
 tests run unconditionally in verify and an explicit E2E CI step. It complements the
 existing Vitest Chromium project, and runs one browser engine at a time.
 See [the two browser test layers](BROWSER_TESTS.md) for setup, limitations,
-failure traces and the #110–#115 journey expansion.
+failure traces and the #110–#115 journey expansion. The complete three-engine run is bounded
+at 45 minutes (60 for the CI job); `e2e/shell-*.spec.ts` (#110) assert the shell, navigation,
+menu, dialog, select and theme transitions, and the registry credits an edge as `e2e` only
+for a named test that asserts its final state.
 
 The UI transition registry in `tests/ui-transitions.json` records behavior and
 assertion evidence for epic #99. Its validator runs in `pnpm verify` and checks

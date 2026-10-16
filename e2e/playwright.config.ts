@@ -8,11 +8,12 @@ export default defineConfig({
   fullyParallel: false,
   workers: 1,
   forbidOnly: !!process.env.CI,
-  retries: process.env.CI ? 1 : 0,
+  // E2E_RETRIES=0 (nightly stability job) surfaces first-attempt flakes that a retry would hide.
+  retries: process.env.E2E_RETRIES === undefined ? (process.env.CI ? 1 : 0) : Number.parseInt(process.env.E2E_RETRIES, 10),
   failOnFlakyTests: !!process.env.CI,
   timeout: 30_000,
   // All three engines remain sequential as the auth/recovery matrix grows.
-  globalTimeout: 1_200_000,
+  globalTimeout: 2_700_000,
   expect: { timeout: 10_000 },
   outputDir: "../test-results/e2e",
   reporter: [["list"], ["html", { outputFolder: "../playwright-report", open: "never" }]],

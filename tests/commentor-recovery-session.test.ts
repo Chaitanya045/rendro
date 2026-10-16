@@ -1,7 +1,7 @@
 import { Window } from "happy-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CommentOperationState } from "../src/commentor/operation-state";
-import { renderCommentRecoveryLifecycle, syncCommentRecoveryUser } from "../src/commentor/recovery-session";
+import { clearCommentRecovery, renderCommentRecoveryLifecycle, syncCommentRecoveryUser } from "../src/commentor/recovery-session";
 import { bootCommentorParentHost } from "../src/commentor/parent-host";
 import { COMMENTOR_PARENT_READY } from "../src/commentor/parent-protocol";
 
@@ -33,6 +33,19 @@ describe("comment recovery session ownership", () => {
       expect(new CommentOperationState(storage, "key", "B").value).toEqual({ operations: {}, drafts: {} });
       expect(storage.getItem("key")).toBeNull();
     }
+  });
+
+  it("tolerates storage shrinking while recovery entries are being cleared", () => {
+    const removeItem = vi.fn();
+    clearCommentRecovery({ length: 1, key: () => null, removeItem } as unknown as Storage);
+    expect(removeItem).not.toHaveBeenCalled();
+  });
+
+  it("publishes a completed sign-out immediately on the post-sign-out page", () => {
+    const win = windowFixture();
+    win.eval(renderCommentRecoveryLifecycle(null, "", true).replace(/^<script>|<\/script>$/g, ""));
+    expect(win.document.documentElement.dataset.rendroSignedOut).toBe("true");
+    expect(win.localStorage.getItem("rendro-sign-out")).toBeTruthy();
   });
 
   it("keeps drafts until successful sign-out and delivers local teardown only after success", async () => {
@@ -102,5 +115,61 @@ describe("comment recovery session ownership", () => {
     expect(storage.getItem("commentor-operations:B")).toBe("private");
     expect(source.postMessage).toHaveBeenLastCalledWith(expect.objectContaining({ userId: null, recoveryState: { operations: {}, drafts: {} } }), "*");
     dispose();
+  });
+
+  describe("session re-checks", () => {
+    const persisted = (win: Window) => Object.assign(new win.Event("pageshow"), { persisted: true });
+    function checks(userId: string | null = "A") {
+      const win = windowFixture();
+      const pending: Array<(response: Response | Error) => void> = [];
+      const fetch = vi.fn(() => new Promise<Response>((resolve, reject) => {
+        pending.push(result => result instanceof Error ? reject(result) : resolve(result));
+      }));
+      Object.assign(win, { fetch });
+      win.eval(renderCommentRecoveryLifecycle(userId).replace(/^<script>|<\/script>$/g, ""));
+      return { win, fetch, pending, signedOut: () => win.document.documentElement.dataset.rendroSignedOut === "true" };
+    }
+
+    it("runs another check for a trigger that arrives during an in-flight check", async () => {
+      const { win, fetch, pending, signedOut } = checks();
+      win.dispatchEvent(new win.Event("focus"));
+      win.dispatchEvent(persisted(win));
+      win.dispatchEvent(persisted(win));
+      expect(fetch).toHaveBeenCalledTimes(1);
+      // The first read predates the revocation; coalesced triggers get exactly one more.
+      pending[0](Response.json({ user: { id: "A" } }));
+      await flush();
+      expect(fetch).toHaveBeenCalledTimes(2);
+      expect(signedOut()).toBe(false);
+      pending[1](Response.json({}, { status: 401 }));
+      await flush();
+      expect(signedOut()).toBe(true);
+      expect(fetch).toHaveBeenCalledTimes(2);
+      win.dispatchEvent(new win.Event("focus"));
+      expect(fetch).toHaveBeenCalledTimes(2);
+    });
+
+    it("does not queue another check once the first resolves to a sign-out, and survives failed requests", async () => {
+      const { win, fetch, pending, signedOut } = checks();
+      win.dispatchEvent(new win.Event("focus"));
+      win.dispatchEvent(new win.Event("focus"));
+      pending[0](Response.json({ user: { id: "B" } }));
+      await flush();
+      expect(signedOut()).toBe(true);
+      expect(fetch).toHaveBeenCalledTimes(1);
+
+      const retry = checks();
+      retry.win.dispatchEvent(new retry.win.Event("focus"));
+      retry.pending[0](new Error("offline"));
+      await flush();
+      retry.win.dispatchEvent(new retry.win.Event("focus"));
+      expect(retry.fetch).toHaveBeenCalledTimes(2);
+      retry.pending[1](Response.json({ user: { id: "A" } }));
+      await flush();
+      expect(retry.signedOut()).toBe(false);
+      const anonymous = checks(null);
+      anonymous.win.dispatchEvent(new anonymous.win.Event("focus"));
+      expect(anonymous.fetch).not.toHaveBeenCalled();
+    });
   });
 });

@@ -148,7 +148,9 @@ it("requires an actual session cookie before issuing a private viewer ticket", a
   expect((await app.request(`${docsBase}/viewer-ticket?manifestKey=anything`)).status).toBe(401);
 });
 
-it.each(["invalid", new Date(Date.now() + 30_000).toUTCString()])("normalizes private viewer Retry-After: %s", async value => {
+// Titles must be run-independent: the stability workflow diffs outcomes by test name.
+it.each([["invalid", () => "invalid"], ["an HTTP date", () => new Date(Date.now() + 30_000).toUTCString()]])("normalizes private viewer Retry-After: %s", async (_label, header) => {
+  const value = header();
   const backend = vi.mocked(fetch).getMockImplementation()!;
   vi.mocked(fetch).mockImplementation((input, init) => (typeof input === "string" ? input : input instanceof URL ? input.href : input.url).includes("/deployments/active")
     ? Promise.resolve(new Response(null, { status: 503, headers: { "Retry-After": value } })) : backend(input, init));

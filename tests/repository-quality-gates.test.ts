@@ -55,6 +55,33 @@ describe("repository quality gates", () => {
     expect(readFileSync(join(root, ".github/workflows/quality.yml"), "utf8")).toContain("run: pnpm verify");
   });
 
+  it("schedules a credential-free stability workflow: constrained coverage twice with diffs, e2e without retries", () => {
+    const workflow = readFileSync(join(root, ".github/workflows/stability.yml"), "utf8");
+    expect(workflow).toMatch(/schedule:\s+- cron:/);
+    expect(workflow).toMatch(/permissions:\s+contents: read/);
+    expect(workflow).not.toMatch(/secrets\./);
+    expect(workflow.match(/taskset -c 0,1 pnpm coverage \|\| status=\$\?/g)).toHaveLength(2);
+    // The second pass and both comparisons run even when the first run failed.
+    expect(workflow.match(/if: \$\{\{ !cancelled\(\) \}\}/g)).toHaveLength(3);
+    expect(workflow).toContain("tests/helpers/diff-outcomes.ts");
+    expect(workflow).toContain("tests/helpers/diff-coverage.ts");
+    expect(workflow).toContain('E2E_RETRIES: "0"');
+    expect(workflow).toContain("run: pnpm e2e --project=${{ matrix.project }}");
+    // The overrides must reach their tools; a typo would silently restore the defaults.
+    expect(readFileSync(join(root, "e2e/playwright.config.ts"), "utf8")).toContain("process.env.E2E_RETRIES");
+    expect(readFileSync(join(root, "vitest.config.ts"), "utf8")).toContain("process.env.RENDRO_TEST_OUTCOMES");
+    expect(workflow).toContain("RENDRO_TEST_OUTCOMES:");
+  });
+
+  it("runs each e2e engine as its own job behind one aggregate required check named e2e", () => {
+    const quality = readFileSync(join(root, ".github/workflows/quality.yml"), "utf8");
+    expect(quality).toContain("project: [chromium, firefox, webkit]");
+    expect(quality).toContain("run: pnpm e2e --project=${{ matrix.project }}");
+    expect(quality).toMatch(/\n {2}e2e:\n {4}runs-on: ubuntu-latest\n {4}needs: e2e-engine\n {4}if: \$\{\{ always\(\) \}\}/);
+    expect(quality).toContain('test "$RESULT" = success');
+    expect(quality).toContain("name: workerd-e2e-failures-${{ matrix.project }}");
+  });
+
   it("rebuilds ignored browser assets in the canonical deployment command", () => {
     expect(scripts.deploy).toBe("pnpm build:assets && wrangler deploy --config wrangler.toml");
     expect(scripts["build:assets"]).toContain("tsx scripts/build-commentor-parent.ts");

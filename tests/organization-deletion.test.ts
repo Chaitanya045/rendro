@@ -91,7 +91,7 @@ async function access(f: Awaited<ReturnType<typeof fixture>>, r: Resources, allo
   for (const key of r.keys) {
     const headers = { authorization: `Bearer ${key.secret}` };
     expect((await f.t.fetch(`/api/rendro/credentials/validate?${query}&scope=docs:read`, { headers })).status).toBe(allowed ? 200 : 401);
-    expect(await f.t.query(internal.apiKeyCredentials.verifiedIdInternal, { secretHash: key.secretHash })).toEqual(allowed ? key.id : null);
+    expect(await f.t.query(internal.apiKeyCredentials.verifiedIdInternal, { secretHash: key.secretHash })).toEqual(allowed ? { id: key.id, expiresAt: undefined } : null);
     for (const path of ["deployments/active", "deployments", "publications"]) {
       expect((await f.t.fetch(`/api/rendro/${path}?${query}`, { headers })).status).toBe(allowed ? 200 : 403);
     }
@@ -381,8 +381,11 @@ describe("organization capability boundary regressions", () => {
       await f.t.run(ctx => ctx.db.patch(r.active.deploymentId, { status: "active" }));
       expect(await resolve()).not.toBeNull();
     }
-    await f.t.run(ctx => ctx.db.patch(valid._id, { expiresAt: Date.now() - 1 }));
-    expect(await resolve()).toBeNull();
+    // Expiry is the httpAction's decision (tests/query-clock-purity.test.ts); the cached
+    // query reports the stored deadline instead of reading the clock.
+    const past = Date.now() - 1;
+    await f.t.run(ctx => ctx.db.patch(valid._id, { expiresAt: past }));
+    expect(await resolve()).toMatchObject({ grant: { expiresAt: past } });
   });
 
   it.each(["project", "deployment"])("rejects a share with a missing %s independently", async missing => {

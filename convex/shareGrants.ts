@@ -72,6 +72,9 @@ export const createInternal = internalMutation({
   },
 });
 
+// Convex caches query results until their read set changes, not as time passes.
+// This query therefore never reads the clock: it returns the stored `expiresAt`
+// and the calling httpAction (`resolveShareGrant`) denies an expired grant.
 export const resolveInternal = internalQuery({
   args: { tokenHash: v.string() },
   handler: async (ctx, args) => {
@@ -79,7 +82,7 @@ export const resolveInternal = internalQuery({
       .query("shareGrants")
       .withIndex("by_token_hash", (query) => query.eq("tokenHash", args.tokenHash))
       .unique();
-    if (!grant || grant.revokedAt || grant.expiresAt <= Date.now()
+    if (!grant || grant.revokedAt
       || await isOrganizationDeleted(ctx, grant.organizationId)) return null;
     const deployment = await ctx.db.get(grant.deploymentId);
     const project = await ctx.db.get(grant.projectId);

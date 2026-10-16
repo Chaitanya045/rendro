@@ -114,10 +114,14 @@ functional checks, not visual fidelity assertions or coverage of every epic #99 
 
 Local retries are zero. CI permits one diagnostic retry, prints each attempt,
 and uses `failOnFlakyTests` so a passing retry cannot hide a first failure.
+`E2E_RETRIES` overrides the count; the nightly stability workflow sets it to `0`.
 [`retain-on-failure`](https://playwright.dev/docs/trace-viewer) records the
-original failed attempt even without retries. The separate `e2e` job in
-`quality.yml` installs all three engines and uploads traces, failure screenshots
-and the HTML report for seven days. Open a trace with
+original failed attempt even without retries. In `quality.yml` each engine runs as
+its own `e2e (chromium|firefox|webkit)` job (`pnpm e2e --project=<engine>`), so wall
+time follows the slowest engine rather than the sum. A final `e2e` job depends on
+all three and fails unless every one succeeded, keeping a single required check
+name. Each engine uploads its traces, failure screenshots and HTML report for
+seven days as `workerd-e2e-failures-<engine>`. Open a trace with
 `pnpm exec playwright show-trace test-results/e2e/<test>/trace.zip`.
 `pnpm verify` continues to run the existing Vitest layers independently.
 `e2e/` is typechecked/linted test infrastructure, outside the production
@@ -160,8 +164,9 @@ moves that control; WebKit can otherwise finish its actionability check just
 before the response arrives and click the old position. Waiting for this explicit
 ready state also covers the method-load failure UI, without sleeps or retries.
 
-The complete three-engine suite has a 20-minute bound (30 minutes for the CI
-job including installation); individual auth journeys have a 60-second bound.
+The complete three-engine suite has a 45-minute bound locally. In CI each engine
+is its own job (30 minutes including installation), so the bound applies per
+engine; individual auth journeys have a 60-second bound.
 Each test/context has a deterministic synthetic ingress address. The limiter
 case actually exhausts the configured five-attempt window; production limits
 remain enabled. Transport-failure tests hold individual browser requests and
@@ -203,6 +208,48 @@ the session token as `Authorization`, alone and with the cookie, directly to
 Convex and through the Worker. It asserts that bearer tokens never authenticate,
 that no persistent session cookie is set, and that the stored expiry is unchanged.
 
+## Shell, navigation, menus, dialogs and selects (#110)
+
+Six specs under `e2e/shell-*.spec.ts` cover the management shell and its shared
+controls on the real Worker, in all three engines at 1440px and 375px. They
+use `tests/ui-transitions.json` as the checklist: an edge is credited `e2e`
+only when a named test asserts its final state (URL and history entries, focus
+location, `aria-expanded`/`aria-modal`/`inert`, visible content and request
+counts); the ledger names those tests.
+
+| Spec | Covers |
+|---|---|
+| `shell-navigation.spec.ts` | Persistent chrome and the ten client-routed destinations (no document request), destination skeleton and in-place data swap, modified/targeted/download/cross-organization links, no-JavaScript navigation, Back/Forward, blocked Back, dialog/pending-write/cross-tab blockers and Refresh, late responses from disposed pages, dirty-settings discard, revoked membership and account change, and the authenticated-HTML fallback (unavailable bundle, invalid/mismatched/stalled HTML) |
+| `shell-menus.spec.ts` | Mobile drawer modal semantics, focus trap, scrim/Escape/close/route dismissal and resize reconciliation; account menu; organization switcher lazy load, cache reuse, keyboard/typeahead, dismissal, optimistic label hand-off, failure/empty/retry, late responses |
+| `shell-dialogs.spec.ts` | Form dialogs (containment, Close/Cancel/Escape/backdrop, mobile footer order and fit, pending exclusion, failure retention), shared destructive confirmation, toasts |
+| `shell-selects.spec.ts` | Enhanced select keyboard, typeahead, disabled options/groups, validation, reset, programmatic changes, positioning and dismissal |
+| `shell-theme.spec.ts` | Initial theme before first paint, cycle and persistence, OS/storage synchronization, rapid and failing transitions, reduced motion, unavailable storage |
+| `shell-controls.spec.ts` / `shell-entry.spec.ts` | Copy feedback, control sizes and states; direct-entry redirects, focused layouts and error pages |
+
+Tests that mutate or need an exact organization list use a verified disposable
+user. `e2e/shell-fixtures.ts` shares one such user per worker (eight organizations,
+each with a project) and one for the organization switcher, so signup and
+mail verification are paid once; tests that sign out or change membership still
+create their own. The seeded owner is used read-only. Hold helpers stall a single
+backend request at the browser boundary; no production behavior, header or
+clock is changed. The authenticated-HTML fallback test installs Playwright's fake
+clock to cross the 15-second navigation timeout without waiting.
+
+Expected failures (their broken assertions get no `e2e` credit; an unexpected
+pass fails the suite):
+
+- **Back does not restore the saved scroll offset between client-routed management pages.**
+  The departing offset is recorded in history state, but after Back the page content
+  mounts through the public bundle without re-applying it, so the page remains at the
+  top (reproduced in Chromium and Firefox).
+- **An enhanced select does not follow a user-activated native Reset button.**
+  The shared select refreshes its trigger from a microtask queued by the form's `reset`
+  event. For a Reset button the microtask runs before the browser restores the control,
+  so the trigger keeps the pre-reset label while the native value is restored
+  (Chromium, Firefox, WebKit). Programmatic `form.reset()`, which every current
+  controller uses, refreshes correctly and is covered. No current screen has a Reset button.
+
+
 ## Vitest Chromium project
 
 Run `pnpm exec playwright install chromium`, then `CI=true pnpm test:browser`.
@@ -223,10 +270,45 @@ The browser project has `sequence.groupOrder: 1` and `fileParallelism: false`:
 it starts after the unit project finishes, and launches one browser file at a
 time. See [Vitest's project ordering](https://vitest.dev/config/sequence#sequence-grouporder).
 Browser tests have 30s budgets and hooks 60s; cold Chromium startup on a small
-runner cannot reliably fit a unit test's 5s budget. Operations normally fail
+runner cannot reliably fit a unit test's budget (unit tests have 30s, see the
+stability rules below). Operations normally fail
 after 10s with a step label; Chromium launch has its own 45s deadline. These
 are failure bounds, not sleeps or retries. Assertions are not retried at the
 test level.
+
+### Test stability rules (#151)
+
+Intermittent failures under coverage or CPU contention were all timing
+assumptions, not product defects. The suites now follow these rules:
+
+- **Wait for an explicit ready signal, not a delay.** A URL assertion only proves
+  a navigation committed, not that the document's inline scripts have run;
+  e2e helpers wait for `load` plus the page's own ready state (`securityReady`).
+  Component tests that start a controller track its in-flight requests and await
+  them (`settleRequests` in `management-page-access.test.ts`) instead of sleeping
+  a fixed interval, and drain them before closing the DOM window.
+- **Do not depend on pointer delivery right after a navigation** when the click is
+  incidental to the test: Firefox can drop it under load. Submit with the keyboard
+  and wait for the visible confirmation (`requestPasswordReset`).
+- **Measure CPU, not wall time, and reduce noise structurally.** The share-budget
+  matrix reports process CPU time, takes the median of three identical samples for
+  the scaling comparison, and keeps the absolute ceiling on the slowest sample.
+- **Race-free lifecycle checks.** The comment recovery lifecycle re-checks the
+  session when focus/pageshow fire. A trigger arriving while a check is in flight is
+  never absorbed: one more check runs after it, because the in-flight request may
+  have read the server before a revocation.
+- **Budgets bound hangs, never behavior.** Unit tests have 30s test/hook budgets
+  (in-process Convex under V8 coverage is several times slower than the 5s default);
+  the real-server stack test uses 30s steps. No assertion depends on elapsed time.
+
+The scheduled `.github/workflows/stability.yml` (nightly, and on changes to the
+workflow itself) runs `pnpm coverage` twice under `taskset -c 0,1`. Each run
+writes Vitest's JSON report (`RENDRO_TEST_OUTCOMES=<file>`) and keeps its
+`merged/coverage-final.json`; `tests/helpers/diff-outcomes.ts` fails on any
+per-test outcome difference and `tests/helpers/diff-coverage.ts` on any counter
+difference. The second run and both comparisons always execute, so a failure in
+only one of the two runs is reported with the exact tests. It also runs the e2e
+suite once per engine with retries disabled (`E2E_RETRIES=0`).
 
 ## Shared fixture
 

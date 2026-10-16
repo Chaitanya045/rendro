@@ -36,6 +36,16 @@ export async function login(page: Page, email: string, value = password, remembe
   await page.getByLabel("Keep me signed in").setChecked(remember);
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
 }
+/** Submit the recovery form and wait for its neutral confirmation. Keyboard submission
+ * does not depend on pointer hit-testing, which Firefox can lose right after a navigation
+ * under load; the visible confirmation proves the request completed before mail is awaited.
+ */
+export async function requestPasswordReset(page: Page, email: string) {
+  await page.goto("/forgot-password");
+  await page.locator("#email").fill(email);
+  await page.locator("#email").press("Enter");
+  await expect(page.getByRole("status")).toContainText("If an account exists");
+}
 export async function session(page: Page) {
   // Deliberately project out credentials: assertions and traces need identity only.
   return page.evaluate(async () => {
@@ -45,10 +55,18 @@ export async function session(page: Page) {
       createdAt: result.session.createdAt, expiresAt: result.session.expiresAt } : null;
   });
 }
+/** The security page is interactive once its document has fully parsed (the
+ * lifecycle listeners are inline scripts at the end of the body) and the
+ * sign-in methods have loaded. A URL assertion only proves the navigation committed.
+ */
+export async function securityReady(page: Page) {
+  await page.waitForLoadState("load");
+  await expect(page.locator("#method-list")).toHaveAttribute("aria-busy", "false");
+}
 export async function signout(page: Page) {
   // Method loading expands the security card and moves Sign out. WebKit can
   // finish its actionability check before that layout change and miss the click.
-  await expect(page.locator("#method-list")).toHaveAttribute("aria-busy", "false");
+  await securityReady(page);
   await page.getByRole("button", { name: "Sign out", exact: true }).click();
   await expect(page.getByRole("heading", { name: "You're signed out" })).toBeVisible();
   expect(await session(page)).toBeNull();
