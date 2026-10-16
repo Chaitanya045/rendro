@@ -1,5 +1,5 @@
 import { getRequestListener } from "@hono/node-server";
-import { build } from "esbuild";
+import { buildBrowserBundle as build } from "./helpers/browser";
 import { Hono } from "hono";
 import type { User } from "better-auth/types";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -51,14 +51,14 @@ beforeAll(async () => {
     } }],
   }));
   assets.set("/commentor-parent.js", parent.outputFiles[0].text);
-  assets.set("/commentor.js", `addEventListener('message', event => {
+  assets.set("/commentor.js", (await build({ stdin: { sourcefile: "tests/fixtures/recovery-commentor.js", contents: `addEventListener('message', event => {
     if (event.source !== parent) return;
     if (event.data.type === 'commentor-parent-ready') {
       document.body.dataset.recovery = JSON.stringify(event.data.recoveryState);
       parent.postMessage({ type: 'commentor-parent-request', requestId: 'subscribe', method: 'subscribe', args: { documentPath: 'guide/page.html' } }, '*');
     }
     if (event.data.type === 'commentor-parent-response') document.body.dataset[event.data.requestId] = String(event.data.ok);
-  });`);
+  });` } })).outputFiles[0].text);
   vi.spyOn(minio, "getObjectText").mockResolvedValue(JSON.stringify({ version: 1, files: [
     { path: documentPath, contentType: "text/html" },
     { path: "guide/deferred.svg", contentType: "image/svg+xml" },
@@ -133,7 +133,7 @@ describe("private viewer republishing", () => {
     const page = await harness.newPage();
     await page.context().addCookies([{ name: "better-auth.session_token", value: "fixture.signature", url: harness.origin }]);
     await page.route(url => url.origin !== harness.origin, route => route.fulfill({
-      contentType: route.request().url().includes("cdn.tailwindcss.com") ? "text/javascript" : "text/css",
+      contentType: route.request().url().includes("cdn.tailwindcss.com") ? "text/javascript; charset=utf-8" : "text/css",
       body: route.request().url().includes("cdn.tailwindcss.com") ? "window.tailwind = {};" : "",
     }));
     await page.goto(`${harness.origin}${base}?doc=${documentPath}`);
@@ -174,7 +174,7 @@ describe("private viewer republishing", () => {
     const page = await harness.newPage();
     await page.context().addCookies([{ name: "better-auth.session_token", value: "fixture.signature", url: harness.origin }]);
     await page.route(url => url.origin !== harness.origin, route => route.fulfill({
-      contentType: route.request().url().includes("cdn.tailwindcss.com") ? "text/javascript" : "text/css",
+      contentType: route.request().url().includes("cdn.tailwindcss.com") ? "text/javascript; charset=utf-8" : "text/css",
       body: route.request().url().includes("cdn.tailwindcss.com") ? "window.tailwind = {};" : "",
     }));
     const violations: string[] = [];

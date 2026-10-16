@@ -1,8 +1,9 @@
+import { managementPagesSource } from "../scripts/management-pages-source";
 import AxeBuilder from "@axe-core/playwright";
 import * as minio from "@/minio";
 import { getRequestListener } from "@hono/node-server";
 import { readFile } from "node:fs/promises";
-import { build } from "esbuild";
+import { buildBrowserBundle as build } from "./helpers/browser";
 import type { Page } from "playwright";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import worker from "@/worker";
@@ -25,9 +26,12 @@ beforeAll(async () => {
     ["/private-viewer.js", "src/viewer/entry.ts"],
     ["/lazy-tree.js", "src/lazy-tree/lazy-tree.ts"],
     ["/commentor.js", "src/commentor/commentor.ts"],
+    ["/management-query.js", "src/management-query/browser.ts"],
+    ["/select.js", "src/ui/select-browser.ts"],
   ]) {
     assets.set(path, await bundleBrowserAsset(entry));
   }
+  assets.set("/management-pages.js", (await build({ stdin: { contents: managementPagesSource(), sourcefile: "tests/fixtures/generated-management-pages.js", resolveDir: process.cwd() } })).outputFiles[0].text);
   // Exercise the real parent protocol and widget with a deterministic comment
   // backend. Auth/Convex services are fixture boundaries, not live accounts.
   const parent = await browserStep("bundle comment parent fixture", () => build({ stdin: { contents: `
@@ -45,9 +49,9 @@ beforeAll(async () => {
   const requestListener = getRequestListener(request => worker.fetch(request, {
     ASSETS: { fetch: async (assetRequest: Request) => {
       const path = new URL(assetRequest.url).pathname;
-      if (assets.has(path)) return new Response(assets.get(path), { headers: { "Content-Type": "text/javascript" } });
+      if (assets.has(path)) return new Response(assets.get(path), { headers: { "Content-Type": "text/javascript; charset=utf-8" } });
       try {
-        return new Response(await readFile(`public${path}`), { headers: { "Content-Type": path.endsWith(".js") ? "text/javascript" : path.endsWith(".svg") ? "image/svg+xml" : "image/webp" } });
+        return new Response(await readFile(`public${path}`), { headers: { "Content-Type": path.endsWith(".js") ? "text/javascript; charset=utf-8" : path.endsWith(".svg") ? "image/svg+xml" : "image/webp" } });
       } catch { return new Response(null, { status: 404 }); }
     } },
   }));
@@ -62,7 +66,7 @@ beforeAll(async () => {
     for (const path of assets.keys()) {
       const response = await browserStep(`check fixture asset ${path}`, () => probe.request.get(harness.origin + path));
       expect(response.status(), `fixture asset ${path}`).toBe(200);
-      expect(response.headers()["content-type"], `fixture asset MIME ${path}`).toBe("text/javascript");
+      expect(response.headers()["content-type"], `fixture asset MIME ${path}`).toBe("text/javascript; charset=utf-8");
     }
   } finally { await probe.context().close(); }
 });
@@ -84,7 +88,7 @@ async function pageFor(signedIn = false): Promise<Page> {
   // Page routes fulfill intentional CDN/font fixtures before the offline guard.
   await page.route(url => url.hostname === "cdn.tailwindcss.com" || url.hostname === "fonts.googleapis.com", route => {
     const url = new URL(route.request().url());
-    if (url.hostname === "cdn.tailwindcss.com") return route.fulfill({ contentType: "text/javascript", body: "window.tailwind={}" });
+    if (url.hostname === "cdn.tailwindcss.com") return route.fulfill({ contentType: "text/javascript; charset=utf-8", body: "window.tailwind={}" });
     return route.fulfill({ contentType: "text/css", body: "" });
   });
   return page;

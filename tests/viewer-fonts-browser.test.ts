@@ -1,18 +1,19 @@
-import { build } from "esbuild";
+import { buildBrowserBundle as build } from "./helpers/browser";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { browserStep, createBrowserHarness } from "./helpers/browser";
-import { createAssetFixture, privateBase } from "./fixtures/viewer-assets";
+import { createAssetFixture, privateBase, publisherModule } from "./fixtures/viewer-assets";
 
 const harness = createBrowserHarness();
 const corsRequests: Array<{ file: string; origin?: string; cookie?: string }> = [];
 
 beforeAll(async () => {
-  const { app } = await createAssetFixture();
+  const module = await build({ stdin: { contents: publisherModule, sourcefile: "tests/fixtures/publisher-module.js" } });
+  const { app } = await createAssetFixture(module.outputFiles[0].text);
   for (const [url, entry] of [["/private-viewer.js", "src/viewer/entry.ts"], ["/lazy-tree.js", "src/lazy-tree/lazy-tree.ts"]]) {
     const bundle = await browserStep(`bundle ${entry}`, () => build({ entryPoints: [entry], bundle: true, write: false, format: "iife", platform: "browser" }));
-    app.get(url, c => c.body(bundle.outputFiles[0].text, 200, { "Content-Type": "text/javascript" }));
+    app.get(url, c => c.body(bundle.outputFiles[0].text, 200, { "Content-Type": "text/javascript; charset=utf-8" }));
   }
-  app.get("/commentor.js", c => c.body("", 200, { "Content-Type": "text/javascript" }));
+  app.get("/commentor.js", c => c.body("", 200, { "Content-Type": "text/javascript; charset=utf-8" }));
   await harness.start((request, response) => {
     void (async () => {
       const url = new URL(request.url!, harness.origin);
@@ -44,7 +45,7 @@ describe("opaque viewer CORS resources in Chromium", () => {
     page.on("pageerror", error => errors.push(error.message));
     // Shell-only third-party services are outside this offline asset regression.
     await page.route(url => url.origin !== harness.origin, route => route.request().url().includes("cdn.tailwindcss.com")
-      ? route.fulfill({ contentType: "text/javascript", body: "window.tailwind = {};" }) : route.abort());
+      ? route.fulfill({ contentType: "text/javascript; charset=utf-8", body: "window.tailwind = {};" }) : route.abort());
     if (base === privateBase) {
       await page.context().addCookies([{ name: "better-auth.session_token", value: "fixture.signature", url: harness.origin, sameSite: "Lax" }]);
     }

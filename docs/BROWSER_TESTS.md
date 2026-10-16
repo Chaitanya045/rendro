@@ -363,7 +363,7 @@ VITEST_MAX_WORKERS=2 pnpm coverage
 ```
 
 The quality workflow runs this in a separate `coverage` job (20-minute budget)
-and uploads both the Vitest and merged JSON summaries plus LCOV, including on
+and uploads the Vitest/merged summaries, merged counters, browser shards and LCOV, including on
 failure. `pnpm verify` keeps its existing 15-minute CI budget: the audit's full
 coverage run alone took about six minutes, so running the suite again inside
 verify would leave insufficient headroom. Vitest honors `VITEST_MAX_WORKERS`;
@@ -406,7 +406,7 @@ A fully covered or removed file's entry must be deleted. After improving tests,
 shrink the ledger using the same complete reports:
 
 ```sh
-pnpm exec tsx scripts/coverage-gate.ts --update-ledger coverage/coverage-final.json
+pnpm exec tsx tests/helpers/run-browser-coverage.ts --merge-only --update-ledger
 ```
 
 This command refuses new debt or increased counters and writes nothing if any
@@ -417,27 +417,100 @@ initial rollout is the only base revision without a ledger. Review ledger
 reductions alongside the tests that justify them. **The ledger must be empty
 to close epic #99.** Passing this temporary debt gate is not 100% coverage.
 
-### Additional coverage shards (#104 and #107)
+### Chromium source coverage (#104)
 
-The current Playwright suites execute Chromium outside Vitest's Node collector.
-Inline controller strings, browser bundles, and CLI/server subprocesses remain
-measurement gaps even when their functional tests pass. Do not exclude these
-authored sources or run operational scripts against real services to raise the
-score.
+`pnpm coverage` runs Vitest with `RENDRO_BROWSER_COVERAGE_DIR=coverage/browser`.
+The harness writes a uniquely named Istanbul JSON shard for every context,
+including an empty receipt for fixtures with no authored browser code. The
+runner requires receipts from **every** browser suite before passing all
+nonempty shards and the canonicalized Node report to the existing gate. A
+missing browser producer fails; Vitest cleans old output before each run.
+A failed test still closes its context and writes its report, but a failed
+suite prevents the final gate from reporting success.
+`pnpm test:coverage` remains the raw Node/Vitest diagnostic command. Use
+`pnpm coverage` and `coverage/merged/coverage-summary.json` for the combined
+result; Vitest's LCOV file contains only the Node producer's coverage.
 
-Chromium collection (#104) will collect before navigation, retain navigation and
-iframe coverage, and remap bundle execution through source maps. Subprocess
-collection (#107) will use isolated `NODE_V8_COVERAGE` outputs and remap CLI/server
-execution. Both producers must use the same revision, converter, original source
-locations, and compatible counter maps as the unit shard. Then add each required
-report explicitly to the gate command after all producers succeed, for example:
+A suite with a specialized context lifecycle (currently interrupted-navigation
+tests) installs `collectBrowserContext` before creating its first page and still
+awaits `context.close()` in teardown. It must produce the same required receipt.
+
+Build browser fixtures with `bundleBrowserAsset(entry)` or
+`buildBrowserBundle(options)` from `tests/helpers/browser.ts`. These build only
+in memory, using inline source maps with source content, no minification, and
+no tree shaking. Production bundles, asset versions, and the asset ledger are
+unchanged. Serve JavaScript as `text/javascript; charset=utf-8`: incorrect
+decoding changes V8 offsets and is rejected as an unrecognized bundle.
+Transport substitutes and publisher fixture modules also have maps, with
+virtual paths under `tests/fixtures`, so they cannot receive application credit.
+
+The collector starts Playwright JS coverage before navigation with
+`resetOnNavigation: false` and `reportAnonymousScripts: true`. It also uses
+public `BrowserContext.newCDPSession` sessions for page and OOPIF targets:
+page coverage alone loses samples across some renderer changes, and its debugger
+automatically resumes pauses before child collection can finish. The harness
+stops that API collector and transfers to CDP while navigation/script responses
+are still held, before authored bundle execution. CDP owns collection through
+teardown. A script
+request barrier attaches child targets before their script responses are
+released, including page/context route fulfillments and popup scripts.
+Same-process frames share their page's profiler. Chromium's precise-coverage
+delta events preserve intermediate samples; a `beforeunload` event breakpoint
+flushes the final interval before navigation destroys the old context.
+`pagehide` is too late because Chromium suppresses debugger pauses then.
+The harness intercepts explicit page/context close and flushes remaining
+sessions in teardown, including failed tests. These hooks run only during
+coverage collection, apart from the collector's dedicated regression fixture.
+An iframe removed directly from the DOM does not run `beforeunload`; abrupt
+target destruction can lose the final delta. The regression contract here
+covers navigation, popup self-close, explicit close, and harness teardown.
+
+Identical-bundle V8 deltas are first combined with Vitest's pinned
+`@bcoe/v8-coverage` range-tree merger, avoiding repeated AST conversion.
+Conversion uses the same pinned `ast-v8-to-istanbul` and Vitest AST parser as
+the gate. It validates embedded source content against this checkout, maps to
+repository-relative paths, then drops dependencies, generated APIs, and test
+fixtures. esbuild's synthetic class declaration wrappers are ignored; renamed
+bundle function symbols are restored by exact declaration/body locations in
+the gate's unbundled AST transform. Every remaining counter map must match
+exactly before addition, including duplicate branch locations. Unrecognized
+script URLs (including extensionless first-party requests), missing maps, stale
+source content, and incompatible maps fail the run.
+
+Vite's SSR import rewriting changes some Node source-map start columns. Before
+merging, the runner independently reproduces Vite's SSR map and the gate's plain
+esbuild map from each browser-covered source. The actual Node map must match
+the reproduced SSR map exactly. It translates counter identities using exact
+locations first, then unique source endpoints (including function declarations
+and every ordered branch arm). Ambiguous matches fail. Statements collapsed by
+SSR retain zero hits in the canonical map; normalization cannot manufacture
+coverage. `coverage/node-canonical.json` records the result, while the original
+Vitest report remains available. The gate itself still requires identical maps.
+
+`tests/browser-coverage-browser.test.ts` proves exact executed/unexecuted branch
+lines in a real opaque OOPIF, a final function call immediately before frame
+navigation, popup execution retained after navigation/self-close, and collection
+after a deliberately failing test. It asserts the child CDP target really is
+an `iframe`. `tests/browser-coverage.test.ts` checks required suite receipts and
+strict merging. The existing gate tests retain the absent-source/zero-seeding
+proof; browser execution cannot remove a file from the denominator.
+
+Management bundle fixture builds map to generated test source. Their returned
+controller strings, other inline management/auth/theme controllers, and
+publisher HTML scripts do **not** receive authored-module coverage here:
+extraction and genuine source maps belong to #105/#106. CLI/server subprocess
+collection remains #107. These boundaries must not be mistaken for full
+coverage of rendered controllers.
+
+After a successful complete collection, use the same required browser shards
+to review/shrink debt without rerunning Chromium:
 
 ```sh
-pnpm exec tsx scripts/coverage-gate.ts \
-  coverage/unit/coverage-final.json \
-  coverage/chromium/coverage-final.json \
-  coverage/subprocess/coverage-final.json
+pnpm exec tsx tests/helpers/run-browser-coverage.ts --merge-only --update-ledger
+pnpm exec tsx tests/helpers/run-browser-coverage.ts --merge-only
 ```
 
-These extra shards do not exist yet. Do not discover them through an optional
-wildcard: explicitly naming required reports makes a missing producer fail.
+The coverage job keeps its existing 20-minute timeout. Browser files remain
+serial, and shared-host commands use `VITEST_MAX_WORKERS=2`. The #104 validation
+run used pinned Chromium and completed Vitest's full test/collection stage in
+571.66 seconds (169 files), leaving headroom for merging and CI setup.

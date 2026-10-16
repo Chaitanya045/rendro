@@ -117,5 +117,8 @@ jobs:
           path: |
             coverage/coverage-summary.json
             coverage/merged/coverage-summary.json
+            coverage/merged/coverage-final.json
+            coverage/browser/*.json
+            coverage/node-canonical.json
             coverage/lcov.info
           if-no-files-found: error

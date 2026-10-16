@@ -46,7 +46,7 @@ beforeAll(async () => {
         response.writeHead(status, { "Content-Type": type, "Cache-Control": "no-store", "Access-Control-Allow-Origin": "null" });
         response.end(body);
       };
-      if (url.pathname === "/private-viewer.js") return send(200, "text/javascript", bundle);
+      if (url.pathname === "/private-viewer.js") return send(200, "text/javascript; charset=utf-8", bundle);
       if (url.pathname === "/") return send(200, "text/html", `<!doctype html>
         <iframe id="content-frame" sandbox="allow-scripts" src="${base}/files/guide/index.html"></iframe>
         ${viewerScript("parent", { base })}`);

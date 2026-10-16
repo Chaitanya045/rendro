@@ -1,3 +1,5 @@
+import { managementPagesSource } from "../scripts/management-pages-source";
+import { buildBrowserBundle } from "./helpers/browser";
 import { commitWithProof } from "./helpers/storage-proof";
 import rateLimiterTest from "./convex-rate-limiter";
 import { spawn, type ChildProcess } from "node:child_process";
@@ -31,9 +33,12 @@ beforeAll(async () => {
     ["/lazy-tree.js", "src/lazy-tree/lazy-tree.ts"],
     ["/commentor.js", "src/commentor/commentor.ts"],
     ["/commentor-parent.js", "src/commentor/parent-entry.ts"],
+    ["/management-query.js", "src/management-query/browser.ts"],
+    ["/select.js", "src/ui/select-browser.ts"],
   ]) {
     assets.set(path, await bundleBrowserAsset(entry));
   }
+  assets.set("/management-pages.js", (await buildBrowserBundle({ stdin: { contents: managementPagesSource(), sourcefile: "tests/fixtures/generated-management-pages.js", resolveDir: process.cwd() } })).outputFiles[0].text);
   const reservation = createServer();
   reservation.listen(0, "127.0.0.1");
   await once(reservation, "listening");
@@ -121,7 +126,7 @@ it("signs in and browses management and docs without a 503 on the real local ser
     if (response.status() >= 500) failures.push(`${response.status()} ${new URL(response.url()).pathname}`);
   });
   await page.route(url => url.hostname === "fonts.googleapis.com", route => route.fulfill({ contentType: "text/css", body: "" }));
-  await page.route(url => url.hostname === "cdn.tailwindcss.com", route => route.fulfill({ contentType: "text/javascript", body: "" }));
+  await page.route(url => url.hostname === "cdn.tailwindcss.com", route => route.fulfill({ contentType: "text/javascript; charset=utf-8", body: "" }));
   const orgPath = `/organizations/${organizationId}`;
   await page.goto(`${harness.origin}/sign-in?returnTo=${encodeURIComponent(orgPath)}`);
   await page.locator("#email").fill("stack@example.test");

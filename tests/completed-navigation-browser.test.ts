@@ -10,6 +10,7 @@ import { securityHeaders } from '@/middleware/security-headers';
 import organizationPages from '@/routes/organization-pages';
 import { managementAccessFixture } from './fixtures/management-access';
 import { browserStep, bundleBrowserAsset } from './helpers/browser';
+import { collectBrowserContext } from './helpers/browser-coverage';
 
 vi.mock('@/routes/control-plane', async importOriginal => {
   const actual = await importOriginal<typeof ControlPlane>();
@@ -75,7 +76,7 @@ beforeAll(async () => {
       // production error handler, rather than fabricating an error document.
     }
     const asset = assets.get(url.pathname);
-    if (asset) return c.body(asset, 200, { 'Content-Type': 'application/javascript' });
+    if (asset) return c.body(asset, 200, { 'Content-Type': 'application/javascript; charset=utf-8' });
     await next();
   });
   app.get('/api/auth/organization/list', c => c.json(current.name === 'first organization' ? [] : [organization]));
@@ -117,6 +118,7 @@ async function submitForm(spec: typeof forms[number], status: 200 | 500) {
   held = new Promise<void>(resolve => { release = resolve; });
   context = await browser.newContext({ viewport: { width: 375, height: 812 } });
   context.setDefaultTimeout(10_000);
+  if (process.env.RENDRO_BROWSER_COVERAGE_DIR) await collectBrowserContext(context, expect.getState().testPath!, origin);
   const page = await context.newPage();
   await browserStep('open form', () => page.goto(origin + spec.path));
   if (spec.name === 'another organization') await page.locator('#show-create').click();
