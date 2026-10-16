@@ -146,6 +146,7 @@ it("share failures belong to their document, but the account quota keeps countin
   expect(await page.locator("#share-live").textContent()).toBe("");
   status = 429;
   await page.locator("#share-btn").click();
+  await notice.waitFor({ state: "visible" });
   await expect.poll(() => notice.innerText()).toContain("Too many shares right now");
   await change();
   expect(await notice.isVisible()).toBe(true);
@@ -181,6 +182,7 @@ it.each(["3", "date", "invalid"])("share quota honors Retry-After %s and permits
     new MutationObserver(() => writes.push(live.textContent!.trim())).observe(live, { childList: true, characterData: true, subtree: true });
   });
   await page.locator("#share-btn").click();
+  await page.locator("#share-error").waitFor({ state: "visible" });
   await expect.poll(() => page.locator("#share-error").innerText()).toContain("Too many shares right now");
   const liveWrites = () => page.evaluate(() => (window as unknown as { liveWrites: string[] }).liveWrites.filter(Boolean));
   if (value !== "invalid") {
