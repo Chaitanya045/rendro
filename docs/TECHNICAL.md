@@ -368,6 +368,8 @@ existing policies. Resolver metadata remains private even for public publication
 The registration-derived cache matrices exercise direct Convex actions and Worker
 routes; proxy tests cover cookie rewriting and sanitized failures. A simulated
 intermediary checks that responses cannot be reused across users or after denial.
+The share-creation matrix uses the shared storage-proof fixture and real Convex
+insertion, checking persisted grants and private responses for invalid attestations.
 
 Request/error logs in Node and the Worker record Hono route templates, never raw
 paths, query strings, or URL suffixes (including unmatched wildcard requests).

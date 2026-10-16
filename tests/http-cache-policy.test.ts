@@ -1,8 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getFunctionName, type FunctionReference } from "convex/server";
+import { getFunctionName, type FunctionArgs, type FunctionReference } from "convex/server";
 import { ConvexError } from "convex/values";
+import { internal } from "../convex/_generated/api";
+import type { Doc } from "../convex/_generated/dataModel";
+import type * as AuthModule from "../convex/auth";
 import { apiCacheControl } from "../shared/http-cache";
+import { STORAGE_ATTESTATION_HEADER } from "../shared/storage-attestation";
 import { proxyConvexRequest } from "../src/auth-proxy";
+import { cookieWriteFixture } from "./helpers/cookie-write-fixture";
+import { shareProof } from "./helpers/storage-proof";
 
 const state = vi.hoisted(() => ({ mode: "success" as "success" | "denied" | "error" }));
 function fault() {
@@ -13,7 +19,7 @@ vi.mock("../convex/authorization", () => ({
   authorizeHttpOrganization: () => { fault(); return Promise.resolve({ user: { _id: "user" } }); },
   httpOrganizationAccess: () => { fault(); return Promise.resolve({ organization: { id: "org" }, member: { id: "member", userId: "user", role: "owner" }, userId: "user" }); },
 }));
-vi.mock("../convex/auth", () => ({ createAuth: () => ({
+vi.mock("../convex/auth", async importOriginal => ({ ...await importOriginal<typeof AuthModule>(), createAuth: () => ({
   api: { getSession: () => { fault(); return Promise.resolve({ session: { createdAt: Date.now() } }); }, setPassword: () => { fault(); return Promise.resolve(); } },
   $context: Promise.resolve({ sessionConfig: { freshAge: 3600 } }),
   handler: async (request: Request) => {
@@ -34,11 +40,16 @@ const input = {
   pathPrefix: "", entryFile: "index.html", trackingMode: "track_active", token: "synthetic-share",
   objectCount: 0, purgeToken: "synthetic-purge", newPassword: "synthetic-long-password",
 };
-function rpc(reference: FunctionReference<"query" | "mutation">, args: Record<string, unknown>) {
+let shareFixture: Awaited<ReturnType<typeof cookieWriteFixture>> | undefined;
+async function rpc(reference: FunctionReference<"query" | "mutation">, args: Record<string, unknown>) {
   fault();
   if (args.model) return { page: [], isDone: true };
   if (args.teamId) return { organizationId: "org" };
   const name = getFunctionName(reference);
+  // Exercise the real insertion/attestation contract, not a synthetic success.
+  if (name === "shareGrants:createInternal") return shareFixture!.backend.mutation(
+    internal.shareGrants.createInternal, args as FunctionArgs<typeof internal.shareGrants.createInternal>,
+  );
   if (/consume|:limit$/.test(name)) return { ok: true };
   if (name.endsWith(":verifiedIdInternal")) return null; // exercise the failed-IP limiter without bypassing it
   if (name.endsWith(":validateInternal")) return { keyId: "key" };
@@ -46,15 +57,23 @@ function rpc(reference: FunctionReference<"query" | "mutation">, args: Record<st
   if (name === "publicationsV2:resolvePublicInternal") return { publication: { slug: "test", title: "Test", entryFile: "index.html" } };
   return { _id: "project", slug: "test" };
 }
-const call = (...args: Parameters<typeof rpc>) => Promise.resolve().then(() => rpc(...args));
-const ctx = { runQuery: vi.fn(call), runMutation: vi.fn(call) };
+const ctx = { runQuery: vi.fn(rpc), runMutation: vi.fn(rpc) };
 const routes = http.getRoutes().map(([path, method, action]) => ({ path, method, action }));
-function makeRequest(path: string, method: string, malformed = false) {
+async function makeRequest(path: string, method: string, malformed = false) {
   const params = malformed ? "" : new URLSearchParams(Object.entries(input).filter(([, v]) => typeof v === "string") as [string, string][]).toString();
+  let body: object = input;
+  const headers = new Headers({ origin: process.env.SITE_URL!, "content-type": "application/json", authorization: state.mode === "denied" ? "Bearer invalid" : "Bearer synthetic-operator" });
+  if (path === "/api/rendro/shares" && method === "POST") {
+    shareFixture ??= await cookieWriteFixture();
+    body = shareFixture.bodies[path];
+    headers.set(STORAGE_ATTESTATION_HEADER, (await shareProof(shareFixture.backend, {
+      projectId: shareFixture.projectId, documentPath: "index.html", assetPaths: [],
+    }))!);
+  }
   return new Request(`http://localhost:3000${path.replace(/\*$/, "get-session")}?${params}`, {
     method,
-    headers: { origin: process.env.SITE_URL!, "content-type": "application/json", authorization: state.mode === "denied" ? "Bearer invalid" : "Bearer synthetic-operator" },
-    ...(method === "POST" ? { body: malformed ? "{" : JSON.stringify(input) } : {}),
+    headers,
+    ...(method === "POST" ? { body: malformed ? "{" : JSON.stringify(body) } : {}),
   });
 }
 function invoke(action: unknown, request: Request) {
@@ -62,6 +81,7 @@ function invoke(action: unknown, request: Request) {
 }
 beforeEach(() => {
   state.mode = "success";
+  shareFixture = undefined;
   vi.stubEnv("RETENTION_SECRET", "synthetic-operator");
   vi.stubEnv("MIGRATION_SECRET", "synthetic-operator");
   vi.spyOn(console, "error").mockImplementation(() => {});
@@ -72,9 +92,16 @@ describe("cache policy from the live Convex route registrations", () => {
   it.each(routes)("$method $path covers success, denial, faults and malformed input", async ({ path, method, action }) => {
     for (const mode of ["success", "denied", "error", "malformed"] as const) {
       state.mode = mode === "malformed" ? "success" : mode;
-      const response = await invoke(action, makeRequest(path, method, mode === "malformed"));
+      const response = await invoke(action, await makeRequest(path, method, mode === "malformed"));
       expect(response.headers.get("cache-control"), `${mode}: ${method} ${path}`).toBe("private, no-store");
-      if (mode === "success") expect(response.status, path).toBeLessThan(300);
+      if (mode === "success") {
+        expect(response.ok, `${method} ${path}: ${await response.clone().text()}`).toBe(true);
+        if (shareFixture) {
+          const { grant } = await response.json() as { grant: Doc<"shareGrants"> };
+          expect(grant).toMatchObject({ projectId: shareFixture.projectId, documentPath: "index.html", assetPaths: [] });
+          expect(await shareFixture.backend.run(ctx => ctx.db.get(grant._id))).toEqual(grant);
+        }
+      }
       if (mode === "denied") expect(response.status, path).toBeGreaterThanOrEqual(400);
       if (mode === "error") expect(response.status, path).toBe(500);
       if (mode === "malformed" && !path.includes("admission/public") && !path.includes("retention/candidates") && !(path === "/api/auth/*" && method === "GET")) {
@@ -86,8 +113,9 @@ describe("cache policy from the live Convex route registrations", () => {
   it.each(routes)("$method $path retains the policy and response through the proxy", async ({ path, method, action }) => {
     for (const mode of ["success", "denied", "error", "malformed"] as const) {
       state.mode = mode === "malformed" ? "success" : mode;
-      const request = makeRequest(path, method, mode === "malformed");
+      const request = await makeRequest(path, method, mode === "malformed");
       const upstream = await invoke(action, request.clone());
+      if (mode === "success") expect(upstream.ok, `${method} ${path}: ${await upstream.clone().text()}`).toBe(true);
       const payload = await upstream.clone().text();
       vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(upstream)));
       const response = await proxyConvexRequest(request);
@@ -96,6 +124,21 @@ describe("cache policy from the live Convex route registrations", () => {
       expect(await response.text()).toBe(mode === "error" ? JSON.stringify({ error: "Backend unavailable" }) : payload);
       expect(response.headers.get("set-cookie") ?? "").not.toContain("Domain=");
     }
+  });
+
+  it.each(["missing", "forged", "changed-assets"])("keeps rejected share attestations private (%s)", async invalid => {
+    const path = "/api/rendro/shares";
+    const request = await makeRequest(path, "POST");
+    const body = await request.json();
+    if (invalid === "missing") request.headers.delete(STORAGE_ATTESTATION_HEADER);
+    if (invalid === "forged") request.headers.set(STORAGE_ATTESTATION_HEADER, "forged");
+    if (invalid === "changed-assets") body.assetPaths = ["private.json"];
+    const before = await shareFixture!.backend.run(ctx => ctx.db.query("shareGrants").collect());
+    const action = routes.find(route => route.path === path && route.method === "POST")!.action;
+    const response = await invoke(action, new Request(request.url, { method: "POST", headers: request.headers, body: JSON.stringify(body) }));
+    expect(response.status).toBe(403);
+    expect(response.headers.get("cache-control")).toBe("private, no-store");
+    expect(await shareFixture!.backend.run(ctx => ctx.db.query("shareGrants").collect())).toEqual(before);
   });
 
   it("defaults future handlers and failures to private even when they attempt public caching", async () => {
