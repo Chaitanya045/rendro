@@ -1,5 +1,5 @@
 import rateLimiterTest from "./convex-rate-limiter";
-import { publishWithProof } from "./helpers/storage-proof";
+import { publishWithProof, shareWithProof } from "./helpers/storage-proof";
 import { describe, expect, it } from "vitest";
 import { convexTest } from "convex-test";
 import { internal } from "../convex/_generated/api";
@@ -69,23 +69,23 @@ describe("share reference boundaries", () => {
     const f = await fixture();
     for (const patch of [{ projectId: f.otherProjectId }, { organizationId: "other" }, { status: "superseded" as const }]) {
       await f.t.run(ctx => ctx.db.patch(f.deploymentId, patch));
-      await expect(f.t.mutation(internal.shareGrants.createInternal, f.share)).rejects.toThrow("no active deployment");
+      await expect(shareWithProof(f.t, f.share)).rejects.toThrow("no active deployment");
       await f.t.run(ctx => ctx.db.patch(f.deploymentId, { projectId: f.projectId, organizationId: "org", status: "active" }));
     }
-    await expect(f.t.mutation(internal.shareGrants.createInternal, { ...f.share, organizationId: "other" })).rejects.toThrow("no active deployment");
+    await expect(shareWithProof(f.t, { ...f.share, organizationId: "other" })).rejects.toThrow("no active deployment");
     await f.t.run(ctx => ctx.db.delete(f.deploymentId));
-    await expect(f.t.mutation(internal.shareGrants.createInternal, f.share)).rejects.toThrow("no active deployment");
+    await expect(shareWithProof(f.t, f.share)).rejects.toThrow("no active deployment");
     await f.t.run(ctx => ctx.db.patch(f.projectId, { activeDeploymentId: undefined }));
-    await expect(f.t.mutation(internal.shareGrants.createInternal, f.share)).rejects.toThrow("no active deployment");
+    await expect(shareWithProof(f.t, f.share)).rejects.toThrow("no active deployment");
     await f.t.run(ctx => ctx.db.delete(f.projectId));
-    await expect(f.t.mutation(internal.shareGrants.createInternal, f.share)).rejects.toThrow("no active deployment");
+    await expect(shareWithProof(f.t, f.share)).rejects.toThrow("no active deployment");
   });
 
   it("validates paths and expiry, and supports idempotent revocation with tenant checks", async () => {
     const f = await fixture();
-    for (const documentPath of ["", "a\\b", "/index.html", "./index.html", "../index.html"]) await expect(f.t.mutation(internal.shareGrants.createInternal, { ...f.share, documentPath })).rejects.toThrow("Invalid document path");
-    await expect(f.t.mutation(internal.shareGrants.createInternal, { ...f.share, expiresAt: 1 })).rejects.toThrow("future");
-    const grant = await f.t.mutation(internal.shareGrants.createInternal, f.share);
+    for (const documentPath of ["", "a\\b", "/index.html", "./index.html", "../index.html"]) await expect(shareWithProof(f.t, { ...f.share, documentPath })).rejects.toThrow("Invalid document path");
+    await expect(shareWithProof(f.t, { ...f.share, expiresAt: 1 })).rejects.toThrow("future");
+    const grant = await shareWithProof(f.t, f.share);
     expect(await f.t.query(internal.shareGrants.resolveInternal, { tokenHash: "token" })).toMatchObject({ deployment: { manifestKey: "manifest" } });
     expect(await f.t.query(internal.shareGrants.resolveInternal, { tokenHash: "missing" })).toBeNull();
     const revoke = { organizationId: "org", grantId: grant!._id, actorId: "user" };
@@ -99,7 +99,7 @@ describe("share reference boundaries", () => {
 
   it.each(["failed", "staging", "missing-deployment", "missing-project", "expired"])("denies existing shares when %s", async state => {
     const f = await fixture();
-    const grant = await f.t.mutation(internal.shareGrants.createInternal, f.share);
+    const grant = await shareWithProof(f.t, f.share);
     await f.t.run(async ctx => {
       if (state === "missing-deployment") await ctx.db.delete(f.deploymentId);
       else if (state === "missing-project") await ctx.db.delete(f.projectId);

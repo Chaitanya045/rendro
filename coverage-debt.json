@@ -325,12 +325,6 @@
       "functions": 2,
       "lines": 0
     },
-    "src/viewer/css-urls.ts": {
-      "statements": 2,
-      "branches": 3,
-      "functions": 0,
-      "lines": 0
-    },
     "src/viewer/entry.ts": {
       "statements": 11,
       "branches": 10,

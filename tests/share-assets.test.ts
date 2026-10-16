@@ -61,6 +61,37 @@ describe("share dependency discovery", () => {
     expect(await f.collect()).toEqual(["guide/already", "guide/café.png", "guide/import", "guide/second", "guide/style"]);
   });
 
+  it.each(["\u00a0", "\u2028", "\u3000", "\u0085", "\u200b", "\ufeff"])("does not split or trim Unicode URL characters %j", async whitespace => {
+    const exact = `private.json${whitespace}1x`;
+    const f = fixture(`<img srcset="${exact}"><img src="${whitespace}image${whitespace}">
+      <style>@import "${whitespace}sheet"; p{background:url(${whitespace}background)}</style>
+      <link rel="alternate${whitespace}preload" href="private.json">`, [
+      resource("guide/private.json", "application/json"), resource("guide/" + exact),
+      ...["image", `${whitespace}image${whitespace}`, "sheet", `${whitespace}sheet`, "background", `${whitespace}background`].map(p => resource("guide/" + p)),
+    ]);
+    expect(await f.collect()).toEqual([exact, `${whitespace}image${whitespace}`, `${whitespace}sheet`, `${whitespace}background`].map(p => "guide/" + p).sort());
+  });
+
+  it("traverses wide documents below the byte limit without an argument stack overflow", async () => {
+    expect(await fixture('<i></i>'.repeat(150000) + '<img src="image">', [resource("guide/image")]).collect()).toEqual(["guide/image"]);
+  });
+
+  it("sniffs declarations and BOMs across storage chunks", async () => {
+    const data = new TextEncoder().encode('\ufeff<meta charset=windows-1252><img src="café.png">');
+    const stream = new ReadableStream<Uint8Array<ArrayBuffer>>({ start(controller) {
+      for (const byte of data) controller.enqueue(new Uint8Array([byte]));
+      controller.close();
+    } });
+    const f = fixture("", [resource("guide/café.png")]);
+    f.read.mockResolvedValueOnce(stream);
+    expect(await f.collect()).toEqual(["guide/café.png"]);
+  });
+
+  it("fails clearly when the runtime cannot decode a declared encoding", async () => {
+    const f = fixture('<link rel="stylesheet" href="style">', [resource("guide/style", "text/css; charset=replacement", "x")]);
+    await expect(f.collect()).rejects.toThrow("unsupported text encoding");
+  });
+
   it("rejects missing/non-HTML documents and missing source objects", async () => {
     for (const files of [[], [resource("index.html", "application/xhtml+xml")], [resource("index.html", "image/png")]]) {
       await expect(collectShareAssets({ files }, "index.html", vi.fn())).rejects.toThrow("HTML document");

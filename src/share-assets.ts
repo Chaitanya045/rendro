@@ -1,7 +1,9 @@
+import { srcsetUrls } from "@/share-srcset";
+import { decodeShareSource } from "@/share-encoding";
 import { parse, type DefaultTreeAdapterMap } from "parse5";
 import { rewriteCssUrls } from "@/viewer/css-urls";
 import { decodeStoragePath } from "@/storage-boundary";
-import { normalizeMediaType, assetContentType } from "@/routes/asset-headers";
+import { normalizeMediaType } from "@/routes/asset-headers";
 import type { StoredManifest } from "@/stored-manifest";
 import { validShareAssets } from "../shared/share-assets";
 
@@ -12,7 +14,8 @@ const MAX_SOURCE_BYTES = 8 * 1024 * 1024;
 // publisher URL belongs to this deployment. Conservatively strip leading
 // whitespace/controls and normalize slashes before detecting absolute URLs.
 function absoluteReference(value: string): boolean {
-  return /^(?:[a-z][a-z0-9+.-]*:|\/\/)/i.test(value.replace(/[\t\n\r]/g, "").replace(/^[\s\p{Cc}]+/u, "").replaceAll("\\", "/"));
+  // eslint-disable-next-line no-control-regex -- URL parsing trims leading C0 controls and space.
+  return /^(?:[a-z][a-z0-9+.-]*:|\/\/)/i.test(value.replace(/[\t\n\r]/g, "").replace(/^[\x00-\x20]+/u, "").replaceAll("\\", "/"));
 }
 
 export function isShareDocument(type: string): boolean {
@@ -31,14 +34,12 @@ export async function collectShareAssets(
     throw new ShareAssetError("Share requires an HTML document in the deployment manifest");
   }
   let bytes = 0;
-  const source = async (file: StoredManifest["files"][number]): Promise<string> => {
+  const source = async (file: StoredManifest["files"][number], environment?: string) => {
     const stream = await read(file.path);
     if (!stream) throw new ShareAssetError("Share document or stylesheet is unavailable");
     const reader = stream.getReader();
-    const type = assetContentType(file.path, file.contentType);
-    const charset = /; charset=(.*)$/.exec(type)?.[1];
-    const decoder = new TextDecoder(charset);
-    let text = "";
+    const chunks: Uint8Array[] = [];
+    let length = 0;
     while (true) {
       const chunk = await reader.read();
       if (chunk.done) break;
@@ -47,17 +48,28 @@ export async function collectShareAssets(
         await reader.cancel();
         throw new ShareAssetError("Share source exceeds the 8 MiB parsing limit");
       }
-      text += decoder.decode(chunk.value, { stream: true });
+      chunks.push(chunk.value);
+      length += chunk.value.byteLength;
     }
-    return text + decoder.decode();
+    const buffer = new Uint8Array(length);
+    let offset = 0;
+    for (const chunk of chunks) {
+      buffer.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    try { return decodeShareSource(buffer, file.path, file.contentType, environment); }
+    catch { throw new ShareAssetError("Share source uses an unsupported text encoding"); }
   };
   const documentUrl = new URL(documentPath.split("/").map(encodeURIComponent).join("/"), origin + "/");
-  const root = parse(await source(document));
+  const documentSource = await source(document);
+  const root = parse(documentSource.text);
   const nodes: DefaultTreeAdapterMap["node"][] = [root];
   const elements: DefaultTreeAdapterMap["element"][] = [];
   for (let node = nodes.pop(); node; node = nodes.pop()) {
     if ("attrs" in node) elements.push(node);
-    if ("childNodes" in node) nodes.push(...[...node.childNodes].reverse());
+    if ("childNodes" in node) {
+      for (let i = node.childNodes.length - 1; i >= 0; i--) nodes.push(node.childNodes[i]);
+    }
   }
   const attr = (node: DefaultTreeAdapterMap["element"], name: string) => node.attrs.find(a => a.name === name)?.value;
   const baseNode = elements.find(node => node.tagName === "base" && attr(node, "href") !== undefined);
@@ -71,7 +83,8 @@ export async function collectShareAssets(
   }
   const assets = new Set<string>();
   const add = (value: string, relativeTo: URL): string => {
-    if (!value.trim() || value.trimStart().startsWith("#")) return value;
+    const trimmed = value.replace(/^[\t\n\f\r ]+|[\t\n\f\r ]+$/g, "");
+    if (!trimmed || trimmed.startsWith("#")) return value;
     let url: URL;
     try { url = new URL(value, relativeTo); } catch { return value; }
     if (absoluteReference(value)) return value;
@@ -91,21 +104,13 @@ export async function collectShareAssets(
     if (tag === "video") attributes.push("poster");
     if (tag === "object") attributes.push("data");
     if (["image", "use"].includes(tag)) attributes.push("href");
-    if (tag === "link" && /(?:^|\s)(?:stylesheet|icon|preload|modulepreload)(?:\s|$)/i.test(attr(node, "rel") ?? "")) attributes.push("href", "imagesrcset");
+    if (tag === "link" && /(?:^|[\t\n\f\r ])(?:stylesheet|icon|preload|modulepreload)(?:[\t\n\f\r ]|$)/i.test(attr(node, "rel") ?? "")) attributes.push("href", "imagesrcset");
     if (["img", "source"].includes(tag)) attributes.push("srcset");
     for (const name of attributes) {
       const value = attr(node, name);
       if (value === undefined) continue;
       if (name.endsWith("srcset")) {
-        // URL tokens end at whitespace (commas can occur inside data URLs).
-        // Descriptors end at a comma outside parentheses, per HTML's srcset parser.
-        let remaining = value;
-        while ((remaining = remaining.replace(/^[\s,]+/, ""))) {
-          const url = remaining.split(/\s/, 1)[0];
-          remaining = remaining.slice(url.length);
-          add(url.replace(/,+$/, ""), base);
-          if (!url.endsWith(",")) remaining = remaining.replace(/^(?:[^,(]|\([^)]*(?:\)|$))*/, "").slice(1);
-        }
+        for (const url of srcsetUrls(value)) add(url, base);
       } else add(value, base);
     }
     const style = attr(node, "style");
@@ -115,7 +120,7 @@ export async function collectShareAssets(
   // Snapshot before expansion: imported stylesheets are allowed but not crawled.
   const stylesheets = [...files.values()].filter(file => assets.has(file.path) && normalizeMediaType(file.contentType) === "text/css");
   for (const file of stylesheets) {
-    css(await source(file), new URL(file.path.split("/").map(encodeURIComponent).join("/"), origin + "/"));
+    css((await source(file, documentSource.encoding)).text, new URL(file.path.split("/").map(encodeURIComponent).join("/"), origin + "/"));
   }
   return [...assets].sort();
 }

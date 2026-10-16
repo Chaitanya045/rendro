@@ -619,8 +619,7 @@ bytes and metadata, and copying from old manifests. The Chromium charset suite
 feeds a real CLI subprocess's output to the real Worker delivery routes with
 fixture identity/storage, verifying `café €` from Windows-1252 CSS for public,
 private, and ticketed private files, including reused objects and existing UTF-8
-manifests. The modern share route's separate extension-only charset behavior is
-unchanged; it does not consult CLI manifest media types.
+manifests. Modern share routes also use manifest media types and preserve publisher bytes.
 
 ### Storage validation authority and rollout
 
@@ -656,6 +655,10 @@ The anonymous `/api/rendro/publications/public` resolver returns only `{ publica
 `POST /api/rendro/shares` (any organization member) creates a 256-bit random token. `expiresInSeconds` must be between 60 seconds and 30 days; the document toolbar requests 7 days. Convex stores the token's SHA-256 hash, expiry, creator, document path, pinned deployment, and an explicit `assetPaths` allowlist. `/s/:token` resolves the hash on every request, so expiry or revocation takes effect immediately. A new grant exposes its exact HTML document and only its allowlisted manifest assets, never the project tree or another HTML/XHTML document. Responses use `Cache-Control: private, no-store`. Owners and admins revoke grants with `POST /api/rendro/shares/revoke`.
 
 The Worker authenticates a session-backed active-deployment read before reading storage. It requires a manifest `text/html` document and discovers literal resource references with parse5: images/srcset, stylesheet/icon/preload/modulepreload links, scripts, media/posters, object/embed, SVG image/use, and inline styles/style blocks. It honors the first HTML base URL, resolves paths relative to the document, removes query/fragment components, normalizes dot segments and decodes percent-encoded segments once. Only same-deployment manifest paths enter the list; `text/html` and `application/xhtml+xml` resources are excluded regardless of filename. The existing CSS tokenizer discovers URLs and imports from directly referenced stylesheets, resolving them relative to each stylesheet. Imported stylesheets are included but not crawled recursively. Navigation links and JavaScript-generated requests are not dependencies; a dynamic fetch must have an explicit preload reference to be shared. Absolute/protocol-relative URLs and bases are not inferred to belong to the deployment; publisher asset URLs should be document-relative to preserve the share route prefix.
+
+Any same-deployment non-HTML file explicitly referenced by the shared document through these resource attributes becomes accessible to share recipients, including JSON, PDF, and dotfiles referenced through `link`/preload or other supported resource attributes. Treat those references as intentional disclosure; MIME types do not make referenced data private.
+
+Discovery uses the HTML srcset parsing algorithm (ASCII whitespace, comma and descriptor rules) and CSS tokenization without Unicode whitespace trimming. It decodes source bytes with BOM precedence, then the manifest charset, then an HTML meta declaration within the first 1024 bytes or CSS `@charset`, then the referencing document's encoding for CSS, and finally UTF-8. Unsupported runtime decoders fail creation explicitly. DOM traversal is iterative, including wide documents below the byte limit.
 
 Creation fails with an explicit error above **500 unique asset paths**, **64 KiB of serialized UTF-8 paths**, or **8 MiB of cumulative HTML/CSS source bytes**. Missing document/stylesheet objects also fail creation. The Worker replaces caller-supplied lists and signs a `share-assets` storage attestation binding the document, ordered asset list and exact deployment metadata. Convex authorizes the session independently and verifies the attestation against the current active deployment inside the insertion transaction; direct requests without proof and concurrent active-deployment changes fail closed. The public resolver omits the list; only the signed Worker DTO includes it.
 

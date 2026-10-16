@@ -19,7 +19,7 @@ export function rewriteCssUrls(css: string, replace: (url: string) => string): s
       // The tokenizer decodes CSS escapes, including escaped function names,
       // parentheses and hex escapes. Strings/comments containing url() aren't URLs.
       const value = token[4].value;
-      const replacement = value.trimStart().startsWith("#") ? value : replace(value);
+      const replacement = /^[\t\n\f\r ]*#/.test(value) ? value : replace(value);
       if (replacement !== value) {
         const quoted = '"' + Array.from(replacement, char => {
           const code = char.charCodeAt(0);
