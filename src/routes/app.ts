@@ -5,6 +5,7 @@ import { COMMENTOR_PARENT_VERSION, LAZY_TREE_VERSION } from "@/viewer/asset-vers
 import { renderCommentRecoveryLifecycle } from "../commentor/recovery-session";
 import { nonceAttribute } from "@/middleware/html-nonce";
 import { renderFaviconLinks } from "./favicon";
+import { renderFontHead } from "./fonts";
 import { Hono } from "hono";
 import { headObject } from "@/minio";
 import { logOrgAccess } from "@/orgs";
@@ -176,8 +177,7 @@ function renderOrgTreePage(user: User | null, org: string, selectedDoc = "", opt
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${displayNameEsc} — Rendro</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet">
+${renderFontHead({ icons: true, weights: [400, 600, 700] })}
 ${renderThemeAssets()}
 <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
 <script${nonceAttribute()}>
@@ -545,7 +545,7 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
 <main class="main">
 <div class="sidebar-resizer" id="sidebar-resizer" role="separator" aria-orientation="vertical" aria-controls="doc-sidebar" aria-label="Resize document tree" aria-valuemin="220" aria-valuemax="420" aria-valuenow="280" aria-valuetext="Document tree 280 pixels wide" tabindex="0"><span class="resizer-sparks resizer-sparks-top" aria-hidden="true"></span><span class="resizer-sparks resizer-sparks-bottom" aria-hidden="true"></span></div>
   <div class="main-placeholder" id="main-placeholder">
-    <div class="ph-icon"><span class="material-symbols-outlined" style="font-size:32px;color:#71717a">edit_document</span></div>
+    <div class="ph-icon"><span class="material-symbols-outlined" aria-hidden="true" style="font-size:32px;color:#71717a">edit_document</span></div>
     <h2>Select a document</h2>
     <p>Choose a document from the sidebar to view its contents, or create a new page to start writing.</p>
   </div>

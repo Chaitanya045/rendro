@@ -2,6 +2,7 @@ import type { Context } from "hono";
 import { nonceAttribute } from "@/middleware/html-nonce";
 import { assetError } from "./asset-headers";
 import { renderFaviconLinks } from "./favicon";
+import { renderFontHead } from "./fonts";
 import { renderThemeAssets } from "./theme";
 
 /** Shared global fallback for the Worker and local Node server. */
@@ -45,8 +46,7 @@ export function renderNotFoundPage(options: NotFoundPageOptions = {}): string {
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${status} · ${escapeHtml(heading)} — Rendro</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+${renderFontHead()}
 ${renderThemeAssets()}
 <script${nonceAttribute()}>
   addEventListener("message",function(event){if(event.source!==window.parent||window.parent===window)return;var data=event.data||{};if(data.type==="rendro-theme")window.RendroUI.applyTheme(data.theme,false,false);});

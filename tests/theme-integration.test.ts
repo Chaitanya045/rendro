@@ -62,7 +62,8 @@ describe("shared theme integration", () => {
     expect(html).toContain("--surface: #ffffff;");
     expect(html).toContain("--surface: #09090b;");
     expect(html).toContain("background: var(--surface-glass)");
-    expect(html).toContain("family=Material+Symbols+Outlined");
+    expect(html).toContain('font-family:"Material Symbols Outlined"');
+    expect(html).toContain('rel="preload" href="/fonts/material-symbols-outlined.');
   });
   it("uses one theme implementation on every public authentication form", async () => {
     for (const path of ["/sign-in", "/sign-up", "/forgot-password", "/reset-password", "/verify-email"]) {

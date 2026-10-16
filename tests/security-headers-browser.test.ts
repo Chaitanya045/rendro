@@ -85,12 +85,8 @@ async function pageFor(signedIn = false): Promise<Page> {
     });
   });
   page.on("console", message => { if (/content security policy|violates.*policy/i.test(message.text())) consoleCsp.push(message.text()); });
-  // Page routes fulfill intentional CDN/font fixtures before the offline guard.
-  await page.route(url => url.hostname === "cdn.tailwindcss.com" || url.hostname === "fonts.googleapis.com", route => {
-    const url = new URL(route.request().url());
-    if (url.hostname === "cdn.tailwindcss.com") return route.fulfill({ contentType: "text/javascript; charset=utf-8", body: "window.tailwind={}" });
-    return route.fulfill({ contentType: "text/css", body: "" });
-  });
+  // Page routes fulfill the intentional CDN fixture before the offline guard.
+  await page.route(url => url.hostname === "cdn.tailwindcss.com", route => route.fulfill({ contentType: "text/javascript; charset=utf-8", body: "window.tailwind={}" }));
   return page;
 }
 

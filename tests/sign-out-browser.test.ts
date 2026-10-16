@@ -10,6 +10,7 @@ import { afterAll, beforeAll, beforeEach, expect, it, vi } from "vitest";
 import { renderCommentRecoveryLifecycle } from "@/commentor/recovery-session";
 import { proxyAuthSignOut } from "@/auth-proxy";
 import { createBrowserHarness } from "./helpers/browser";
+import { serveFonts } from "./helpers/fonts";
 
 const harness = createBrowserHarness();
 let authenticated = true;
@@ -53,6 +54,7 @@ beforeAll(async () => {
     return Promise.resolve(Response.json({ success: true }));
   }));
   const app = new Hono();
+  app.get("/fonts/*", serveFonts);
   app.use("*", writeAdmission);
   app.get("/api/auth/get-session", c => c.json(authenticated ? { user: { id: "reader" } } : null));
   app.get("/api/auth/convex/token", c => c.json({ token: "fixture" }));
@@ -90,7 +92,6 @@ beforeAll(async () => {
 type Transport = { subscriptions: number; closes: number; writes: number; updates: number };
 it("refetches HTML for a cached v19 controller and clears state on sign-out", async () => {
   const page = await harness.newPage();
-  await page.route("https://fonts.googleapis.com/**", route => route.fulfill({ contentType: "text/css", body: "" }));
   // Pin the pre-#75 version and its incompatible organization-context contract.
   // Using the current version here would hide the missing-bump regression.
   const staleBundle = await build({ stdin: { sourcefile: "tests/fixtures/stale-management.js", contents: `
@@ -192,7 +193,6 @@ it.each(["broadcast", "storage", "focus", "own-form"])("scrubs the open API-key 
   if (mode === "storage") await context.addInitScript(() => { Object.defineProperty(window, "BroadcastChannel", { value: undefined }); });
   // Separate contexts simulate a missed cross-tab signal; focus must read the server.
   const tabB = mode === "focus" ? await harness.newPage() : await context.newPage();
-  await tabB.route("https://fonts.googleapis.com/**", route => route.fulfill({ contentType: "text/css", body: "" }));
   const errors: string[] = [];
   tabB.on("pageerror", error => errors.push(error.message));
   await tabA.goto(`${harness.origin}/viewer`);
@@ -236,7 +236,6 @@ it.each(["broadcast", "storage", "focus", "own-form"])("scrubs the open API-key 
 it("cancels an open private-share revocation confirmation in the other tab", async () => {
   const tabA = await harness.newPage();
   const tabB = await tabA.context().newPage();
-  await tabB.route("https://fonts.googleapis.com/**", route => route.fulfill({ contentType: "text/css", body: "" }));
   await tabA.goto(`${harness.origin}/viewer`);
   await tabB.goto(`${harness.origin}/organizations/org/projects/project/shares`);
   await tabB.getByRole("button", { name: "Revoke", exact: true }).click();
@@ -257,7 +256,6 @@ it("cancels an open private-share revocation confirmation in the other tab", asy
 it("closes the key-creation dialog and its top-layer select popover on cross-tab sign-out", async () => {
   const tabA = await harness.newPage();
   const tabB = await tabA.context().newPage();
-  await tabB.route("https://fonts.googleapis.com/**", route => route.fulfill({ contentType: "text/css", body: "" }));
   await tabA.goto(`${harness.origin}/viewer`);
   await tabB.goto(`${harness.origin}/organizations/org/api-keys`);
   await tabB.locator("#api-key-create").click();

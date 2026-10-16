@@ -73,6 +73,7 @@ import { securityHeaders } from "./middleware/security-headers";
   }, configurable: true });
 })();
 import { faviconAssets, faviconCacheControl } from "./routes/favicon";
+import { fontResponseHeaders } from "./routes/fonts";
 import { Hono } from "hono";
 import { requestLogPath } from "./request-log";
 import type { Context } from "hono";
@@ -126,6 +127,18 @@ for (const [path, contentType] of Object.entries(faviconAssets)) {
     return new Response(response.body, { status: response.status, headers });
   });
 }
+
+// Self-hosted fonts are public, content-hashed and immutable; no session lookup. Anything under
+// /fonts that is not a hashed font or a license text is a 404, never an ASSETS fallthrough.
+app.get("/fonts/*", async (c) => {
+  const fontHeaders = fontResponseHeaders(c.req.path);
+  if (!fontHeaders) return c.body(null, 404);
+  const response = await serveAsset(c);
+  if (!response.ok) return response;
+  const headers = new Headers(response.headers);
+  for (const [name, value] of Object.entries(fontHeaders)) headers.set(name, value);
+  return new Response(response.body, { status: response.status, headers });
+});
 
 // Public, versioned browser code must not trigger an authenticated session RPC.
 app.get("/management-query.js", serveAsset);

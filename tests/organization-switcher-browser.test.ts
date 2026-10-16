@@ -11,6 +11,7 @@ import organizationPages from "@/routes/organization-pages";
 import { managementPagesSource } from "../scripts/management-pages-source";
 import { managementAccessFixture } from "./fixtures/management-access";
 import { browserStep, createBrowserHarness, waitForSettled } from "./helpers/browser";
+import { serveFonts } from "./helpers/fonts";
 
 const harness = createBrowserHarness();
 const user = { id: "user-a", name: "Owner", email: "owner@example.test" } as User;
@@ -39,6 +40,7 @@ beforeAll(async () => {
   assets.set("/management-pages.js", (await build({ stdin: { contents: managementPagesSource(), sourcefile: "tests/fixtures/generated-management-pages.js", resolveDir: process.cwd() } })).outputFiles[0].text);
   const app = new Hono<{ Variables: { user?: User } }>();
   app.use("*", securityHeaders);
+  app.get("/fonts/*", serveFonts);
   app.use("*", async (c, next) => { c.set("user", user); await next(); });
   for (const [path, body] of assets) app.get(path, c => c.body(body, 200, { "Content-Type": "text/javascript; charset=utf-8" }));
   for (const [path, contentType] of Object.entries(faviconAssets)) {
@@ -73,7 +75,6 @@ it.each([375, 768, 1440])("exposes the org name in accessibility snapshots and p
   page.on("pageerror", error => pageErrors.push(error.message));
   page.on("response", response => { if (response.status() >= 400) pageErrors.push(`${response.status()} ${response.url()}`); });
   // Keep font fetching deterministic and offline, matching the CSP browser suite.
-  await page.route(url => url.hostname === "fonts.googleapis.com", route => route.fulfill({ contentType: "text/css", body: "" }));
   const response = await browserStep("load organization overview", () => page.goto(harness.origin + "/organizations/org-a"));
   expect(response?.status()).toBe(200);
   const nonce = response!.headers()["content-security-policy"].match(/'nonce-([^']+)'/)![1];

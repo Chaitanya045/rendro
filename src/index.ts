@@ -1,5 +1,6 @@
 import { securityHeaders } from "./middleware/security-headers";
 import { faviconAssets, faviconCacheControl } from "./routes/favicon";
+import { fontResponseHeaders } from "./routes/fonts";
 import { Hono } from "hono";
 import { requestLogPath } from "./request-log";
 import { serve, type HttpBindings } from "@hono/node-server";
@@ -28,6 +29,16 @@ for (const [path, contentType] of Object.entries(faviconAssets)) {
     }
   }, serveStatic({ path: `./public${path}` }));
 }
+
+// Same contract as the Worker: hashed fonts and license texts only, with immutable caching.
+app.use("/fonts/*", async (c, next) => {
+  const fontHeaders = fontResponseHeaders(c.req.path);
+  if (!fontHeaders) return c.body(null, 404);
+  await next();
+  if (c.res.ok) for (const [name, value] of Object.entries(fontHeaders)) c.header(name, value);
+}, serveStatic({ root: "./public" }));
+// serveStatic only falls through for a missing file: end the request instead of entering the app.
+app.get("/fonts/*", (c) => c.body(null, 404));
 
 // Serve static assets (commentor.js, etc.)
 app.use("/commentor.js", serveStatic({ path: "./public/commentor.js" }));

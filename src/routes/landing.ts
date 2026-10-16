@@ -1,5 +1,6 @@
 import { nonceAttribute } from "@/middleware/html-nonce";
 import { renderFaviconLinks } from "./favicon";
+import { renderFontHead } from "./fonts";
 import { renderThemeAssets, renderThemeButton } from "./theme";
 
 export function renderLandingPage(): string {
@@ -16,10 +17,7 @@ export function renderLandingPage(): string {
   <meta property="og:image" content="https://rendro.app/landing-product.webp">
   <meta name="twitter:card" content="summary_large_image">
   <link rel="canonical" href="https://rendro.app/">
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20,400,0,0" rel="stylesheet">
+  ${renderFontHead({ icons: true })}
   <title>Rendro — Documentation that ships with your code</title>
   ${renderThemeAssets()}
   <style${nonceAttribute()}>

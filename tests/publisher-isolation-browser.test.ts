@@ -89,7 +89,6 @@ describe("publisher resource rendering under the response sandbox", () => {
 
 it("keeps the share iframe opaque across document, asset, error and blank navigations", async () => {
   const page = await pageWithSession();
-  await page.route(url => url.hostname === "fonts.googleapis.com", route => route.fulfill({ contentType: "text/css", body: "" }));
   await page.goto(harness.origin + "/s/0");
   const iframe = page.locator("#content-frame");
   expect(await iframe.getAttribute("sandbox")).toBe("allow-scripts allow-forms allow-popups allow-downloads");

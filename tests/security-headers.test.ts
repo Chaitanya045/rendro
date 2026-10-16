@@ -40,8 +40,13 @@ describe("shared response security policy", () => {
     for (const directive of ["default-src 'self'", "frame-ancestors 'none'", "object-src 'none'", "base-uri 'self'", "script-src-attr 'none'", "form-action 'self' https://accounts.google.com", "http://127.0.0.1:3210", "ws://127.0.0.1:3210"]) expect(csp).toContain(directive);
     expect(csp).not.toContain("'unsafe-eval'");
     expect(csp.match(/script-src [^;]+/)![0]).not.toContain("'unsafe-inline'");
+    // Fonts are self-hosted: no font CDN in any directive, and fonts only from this origin.
+    expect(csp).not.toMatch(/fonts\.(?:googleapis|gstatic)\.com/);
+    expect(csp.match(/font-src [^;]+/)![0]).toBe("font-src 'self'");
+    expect(csp.match(/style-src [^;]+/)![0]).not.toMatch(/https?:/);
     const nonce = csp.match(/'nonce-([^']+)'/)![1];
     const html = await response.text();
+    expect(html).not.toMatch(/fonts\.(?:googleapis|gstatic)\.com/);
     expect(html).toContain(`nonce="${nonce}"`);
     if (!csp.includes("style-src 'self' 'unsafe-inline'")) {
       for (const tag of html.matchAll(/<style\b[^>]*>/g)) expect(tag[0]).toContain(`nonce="${nonce}"`);

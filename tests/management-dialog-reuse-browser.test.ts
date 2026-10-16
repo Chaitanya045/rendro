@@ -12,6 +12,7 @@ import { renderScopedDocumentShell } from '@/routes/app';
 import { managementPagesSource } from '../scripts/management-pages-source';
 import { managementAccessFixture } from './fixtures/management-access';
 import { browserStep, buildBrowserBundle, bundleBrowserAsset, createBrowserHarness } from './helpers/browser';
+import { serveFonts } from './helpers/fonts';
 
 const heldDocuments = new Map<string, { arrived: boolean; ready: Promise<void>; release(): void }>();
 afterEach(() => { for (const held of heldDocuments.values()) held.release(); heldDocuments.clear(); });
@@ -38,6 +39,7 @@ beforeAll(async () => {
   ]);
   const app = new Hono<{ Variables: { user?: User } }>();
   app.use('*', securityHeaders);
+  app.get('/fonts/*', serveFonts);
   app.use('*', async (c, next) => { c.set('user', user); await next(); });
   app.use('*', async (c, next) => {
     const url = new URL(c.req.url);
@@ -76,7 +78,7 @@ afterAll(() => { vi.unstubAllGlobals(); });
 
 async function open(path: string, emptyOrganizations = false) {
   const page = await harness.newPage();
-  await page.route(url => ['fonts.googleapis.com', 'fonts.gstatic.com', 'cdn.tailwindcss.com'].includes(url.hostname), route => route.fulfill({ body: '' }));
+  await page.route(url => url.hostname === 'cdn.tailwindcss.com', route => route.fulfill({ body: '' }));
   if (emptyOrganizations) await page.route('**/api/auth/organization/list', route => route.fulfill({ json: [] }));
   await browserStep(`open ${path}`, () => page.goto(harness.origin + path));
   return page;
