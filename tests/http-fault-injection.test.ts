@@ -44,7 +44,7 @@ async function invoke(action: HttpAction, init: RequestInit, error: Error, apiKe
   const runQuery = vi.fn((reference: FunctionReference<"query">) => {
     if (getFunctionName(reference) === "apiKeyCredentials:verifiedIdInternal") return Promise.resolve("credential-id");
     if (getFunctionName(reference) === "apiKeyCredentials:validateInternal") {
-      return Promise.resolve({ principal: { keyId: "key" }, credentialId: "credential-id", recordUsage: false });
+      return Promise.resolve({ principal: { keyId: "key" }, credentialId: "credential-id", lastUsedAt: Date.now() });
     }
     return Promise.reject(error);
   });

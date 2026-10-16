@@ -115,6 +115,41 @@ describe("read-only API-key authorization with debounced usage telemetry", () =>
     expect((await f.credential()).lastUsedAt).toBe(before.lastUsedAt);
   });
 
+  it("denies on the first request at expiresAt, never serving a cached allow", async () => {
+    const f = await fixture();
+    const expiresAt = start + 5_000;
+    await f.t.run(ctx => ctx.db.patch(f.credentialId, { expiresAt }));
+    f.clock.mockReturnValue(expiresAt - 1);
+    expect((await f.validate()).status).toBe(200);
+    expect(await f.authorize()).toMatchObject({ keyId: "usage-key" });
+    // Same arguments and untouched documents: only the clock moved.
+    f.clock.mockReturnValue(expiresAt);
+    const denied = await f.validate();
+    expect(denied.status).toBe(401);
+    expect(await denied.json()).toEqual({ error: "Invalid or insufficient API key" });
+    f.runMutation.mockClear();
+    expect(await f.authorize()).toBeNull();
+    expect(f.runMutation).not.toHaveBeenCalled();
+    f.clock.mockReturnValue(expiresAt + 86_400_000);
+    expect((await f.validate()).status).toBe(401);
+  });
+
+  it("keeps the authorization query independent of the clock", async () => {
+    const f = await fixture();
+    await f.t.run(ctx => ctx.db.patch(f.credentialId, { expiresAt: start - 1 }));
+    f.clock.mockClear();
+    f.clock.mockImplementation(() => { throw new Error("validateInternal read the clock"); });
+    const perf = vi.spyOn(performance, "now").mockImplementation(() => { throw new Error("validateInternal read the clock"); });
+    const args = { secretHash: await sha256(key), organizationId: "org-test", projectId: f.project._id, requiredScope: "docs:read" };
+    // An expired key is still reported with its stored expiry; the caller decides.
+    const result = await f.t.query(internal.apiKeyCredentials.validateInternal, args);
+    expect(result).toMatchObject({ credentialId: f.credentialId, expiresAt: start - 1, principal: { keyId: "usage-key" } });
+    expect(result?.lastUsedAt).toBeUndefined();
+    expect(await f.t.query(internal.apiKeyCredentials.validateInternal, { ...args, requiredScope: "docs:admin" })).toBeNull();
+    expect(f.clock).not.toHaveBeenCalled();
+    expect(perf).not.toHaveBeenCalled();
+  });
+
   it("keeps rate-limit denials authoritative and records no use for them", async () => {
     const f = await fixture();
     const { shards, capacity } = apiKeyRateLimits.credential;

@@ -5,6 +5,7 @@ import { httpAction, failure, clientFailure } from "./httpErrors";
 import { authorizeHttpOrganization } from "./authorization";
 import { apiKeyHttpAction } from "./apiKeyHttp";
 import { sha256 } from "./credentialHash";
+import { usageDue } from "./apiKeyCredentials";
 export { sha256 } from "./credentialHash";
 
 const allowedScopes = new Set([
@@ -136,7 +137,10 @@ export async function validateApiCredential(
     ...input,
   });
   if (!result) return null;
-  if (result.recordUsage) {
+  // The query is cached until its read set changes, so time is evaluated here.
+  const now = Date.now();
+  if (result.expiresAt !== undefined && result.expiresAt <= now) return null;
+  if (usageDue(result.lastUsedAt, now)) {
     // Usage telemetry is best-effort and must never deny an authorized request.
     try {
       await ctx.runMutation(internal.apiKeyCredentials.recordUsageInternal, {

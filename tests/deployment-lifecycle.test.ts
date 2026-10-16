@@ -4,6 +4,9 @@ import { describe, expect, it } from "vitest";
 import { convexTest } from "convex-test";
 import { internal } from "../convex/_generated/api";
 import schema from "../convex/schema";
+import type { GenericActionCtx } from "convex/server";
+import type { DataModel } from "../convex/_generated/dataModel";
+import { sha256, validateApiCredential } from "../convex/credentialHttp";
 
 declare global {
   interface ImportMeta {
@@ -211,16 +214,22 @@ describe("scoped API credentials", () => {
       keyId: "expired",
       keyPrefix: "rnd_live_expired",
       name: "Expired CI",
-      secretHash: "expired-hash",
+      secretHash: await sha256("expired-credential"),
       scopes: ["docs:read"],
       expiresAt: Date.now() - 1,
       actorId: "user-a",
     });
-    expect(await backend.query(internal.apiKeyCredentials.validateInternal, {
-      secretHash: "expired-hash",
+    // The query only reports the stored expiry; the HTTP wrapper decides with the real clock.
+    const stored = await backend.query(internal.apiKeyCredentials.validateInternal, {
+      secretHash: await sha256("expired-credential"),
       organizationId: "org-a",
       projectId: owned._id,
       requiredScope: "docs:read",
-    })).toBeNull();
+    });
+    expect(stored?.expiresAt).toBeLessThanOrEqual(Date.now());
+    const ctx = { runQuery: backend.query, runMutation: backend.mutation } as unknown as GenericActionCtx<DataModel>;
+    expect(await validateApiCredential(ctx, new Request("https://rendro.test", {
+      headers: { authorization: "Bearer expired-credential" },
+    }), { organizationId: "org-a", projectId: owned._id, requiredScope: "docs:read" })).toBeNull();
   });
 });

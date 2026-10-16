@@ -95,11 +95,14 @@ export const revokeInternal = internalMutation({
 // Last-use telemetry is debounced: at most one credential write per window.
 export const API_KEY_USAGE_DEBOUNCE_MS = 60_000;
 
-const usageDue = (lastUsedAt: number | undefined, now: number) =>
+export const usageDue = (lastUsedAt: number | undefined, now: number) =>
   lastUsedAt === undefined || now - lastUsedAt >= API_KEY_USAGE_DEBOUNCE_MS;
 
-// Authorization is a fresh read on every request and never writes, so parallel
-// requests with one key do not contend on its row. Never cache the result.
+// Authorization is a read-only query so parallel requests with one key do not
+// contend on its row. Convex caches query results until their read set changes,
+// so this must stay a pure function of its arguments and the documents it reads:
+// it never reads the clock. Time-based decisions (expiry, telemetry due) are made
+// by the caller (`validateApiCredential`) from the stored timestamps returned here.
 export const validateInternal = internalQuery({
   args: {
     secretHash: v.string(),
@@ -119,12 +122,10 @@ export const validateInternal = internalQuery({
       .query("apiKeyCredentials")
       .withIndex("by_secret_hash", (query) => query.eq("secretHash", args.secretHash))
       .unique();
-    const now = Date.now();
     if (
       !credential
       || credential.organizationId !== args.organizationId
       || credential.revokedAt !== undefined
-      || (credential.expiresAt !== undefined && credential.expiresAt <= now)
       || !credential.scopes.includes(args.requiredScope)
       || (credential.projectId !== undefined && credential.projectId !== projectId)
     ) {
@@ -138,7 +139,8 @@ export const validateInternal = internalQuery({
         scopes: credential.scopes,
       },
       credentialId: credential._id,
-      recordUsage: usageDue(credential.lastUsedAt, now),
+      expiresAt: credential.expiresAt,
+      lastUsedAt: credential.lastUsedAt,
     };
   },
 });
