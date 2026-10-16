@@ -93,6 +93,20 @@ describe("share creation authority", () => {
     expect((await f.request()).status).toBe(404);
   });
 
+  it.each([
+    '<img' + Array.from({ length: 40_000 }, (_, i) => ` a${i}`).join("") + '>',
+    '<br>'.repeat(50_001),
+  ])("rejects excessive HTML complexity without a partial grant (%#)", async html => {
+    const f = await fixture();
+    f.read.mockResolvedValue(new Response(html).body);
+    const before = await f.backend.run(ctx => ctx.db.query("shareGrants").collect());
+    const response = await f.request();
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: expect.stringMatching(/^Share HTML exceeds the /) });
+    expect(f.fetchMock).toHaveBeenCalledTimes(1);
+    expect(await f.backend.run(ctx => ctx.db.query("shareGrants").collect())).toEqual(before);
+  });
+
   it("fails clearly without persisting when discovery exceeds bounds or sources disappear", async () => {
     const f = await fixture();
     const files = [{ path: f.body.documentPath, contentType: "text/html" }, ...Array.from({ length: 501 }, (_, i) => ({ path: `guide/${i}.png`, contentType: "image/png" }))];

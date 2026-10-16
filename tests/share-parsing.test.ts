@@ -36,11 +36,24 @@ describe("share source encoding sniff", () => {
     '<div data-x="<meta charset=utf-8>"></div><meta charset=windows-1252>',
     '<!doctype html><?anything><meta charset=windows-1252>',
     '<meta content="charset=utf-8" charset=windows-1252>',
+    '<!--><meta charset=windows-1252>',
+    '</div data-x="<meta charset=utf-8>"><meta charset=windows-1252>',
+    '<?xml encoding="windows-1252">', '<?xml encoding = \'windows-1252\'>',
+    '<?xml encoding="utf-8"><meta charset=windows-1252>',
+    '<?xml encoding="windows-1252"><meta charset=',
   ])("recognizes HTML declarations: %s", prefix => {
     expect(decode(prefix + '<img src="caf\xe9.svg">').encoding).toBe("windows-1252");
     expect(decode(prefix + '<img src="caf\xe9.svg">').text).toContain("café.svg");
   });
   it.each([
+    '<meta charset=bogus content="charset=windows-1252" http-equiv=content-type><meta charset=utf-8>',
+    '<meta content="charset=windows-1252" charset=bogus http-equiv=content-type><meta charset=utf-8>',
+    '<meta content="charset=bogus" http-equiv=content-type><meta charset=utf-8>',
+    '<meta content="charset=windows-1252" http-equiv=wrong http-equiv=content-type><meta charset=utf-8>',
+    '<?xml', '<?xml?>', '<?xml?><a encoding="windows-1252">',
+    '<?xml encoding nope>', '<?xml encoding=windows-1252>', '<?xml encoding="windows-1252>',
+    '<?xml encoding=" windows-1252">', '<?xml encoding="bogus">',
+    '<?xml encoding="utf-16">', '<?xml encoding="utf-16be">',
     '<meta CHARSET charset=windows-1252>', '<meta charset=>',
     '<meta charset=windows-1252 a=" >', '<meta charset=', '<meta charset',
     '<meta charset=bogus content="charset=windows-1252">', '<meta content="charset=bogus">',
@@ -55,6 +68,12 @@ describe("share source encoding sniff", () => {
     '<?unterminated', '<div data-x="<meta charset=windows-1252>">',
   ])("falls back for absent/invalid/late declarations: %s", prefix => {
     expect(decode(prefix).encoding).toBe("utf-8");
+  });
+  it("recognizes BOM-less UTF-16 XML prefixes", () => {
+    const little = Buffer.from('<?xml encoding="utf-16"?><img src="café.svg">', "utf16le");
+    expect(decode(little).encoding).toBe("utf-16le");
+    expect(decode(little).text).toContain("café.svg");
+    expect(decode(Buffer.from(little).swap16()).encoding).toBe("utf-16be");
   });
   it("honors BOMs before transport and transport before HTML/CSS declarations", () => {
     for (const [bom, encoding] of [[Buffer.from([0xef, 0xbb, 0xbf]), "utf-8"], [Buffer.from([0xff, 0xfe]), "utf-16le"], [Buffer.from([0xfe, 0xff]), "utf-16be"]] as const) {

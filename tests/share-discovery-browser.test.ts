@@ -23,6 +23,7 @@ const bom16 = (value: string, big = false) => {
 };
 
 it.each([
+  { name: "invalid charset before content and later UTF-8", html: utf8('<meta charset=bogus content="charset=windows-1252" http-equiv=content-type><meta charset=utf-8>' + html), css: utf8(css) },
   { name: "HTML meta + CSS inheritance", html: latin('<meta charset=windows-1252>' + html), css: latin(css) },
   { name: "http-equiv + CSS inheritance", html: latin('<meta content="text/html; charset=iso-8859-1" http-equiv=Content-Type>' + html), css: latin(css) },
   { name: "manifest overrides declarations", html: latin('<meta charset=utf-8>' + html), css: latin('@charset "utf-8";' + css), htmlType: "text/html; charset=windows-1252", cssType: "text/css; charset=windows-1252" },
@@ -39,6 +40,7 @@ it.each([
     { path: "guide/style.css", contentType: testCase.cssType ?? "text/css", body: testCase.css },
     { path: "guide/café.svg", contentType: "image/svg+xml", body: utf8(svg) },
     { path: "guide/café.css.svg", contentType: "image/svg+xml", body: utf8(svg) },
+    { path: "guide/cafÃ©.svg", contentType: "application/json", body: utf8("unrelated") },
     { path: "guide/private.json", contentType: "application/json", body: utf8("private") },
   ];
   f.manifest.mockResolvedValue(JSON.stringify({ files }));
@@ -55,6 +57,7 @@ it.each([
   await expect.poll(() => page.locator("#asset").evaluate(el => (el as HTMLImageElement).naturalWidth)).toBe(10);
   expect(await page.locator("p").evaluate(el => getComputedStyle(el).color)).toBe("rgb(1, 2, 3)");
   expect((await page.request.get(`${harness.origin}/s/${token}/files/guide/private.json`)).status()).toBe(404);
+  expect((await page.request.get(`${harness.origin}/s/${token}/files/guide/caf%C3%83%C2%A9.svg`)).status()).toBe(404);
 });
 
 it.each(["\u00a0", "\u2028", "\u3000", "\u0085", "\u200b", "\ufeff"])("does not authorize a Unicode-separated srcset prefix (%j)", async whitespace => {

@@ -41,41 +41,48 @@ function nextAttribute(input: string, start: number): { position: number; name: 
 // The prescan operates on bytes, not decoded HTML/entities or a DOM tree.
 // https://html.spec.whatwg.org/multipage/parsing.html#prescan-a-byte-stream-to-determine-its-encoding
 function htmlEncoding(input: string): string | undefined {
+  if (input.startsWith("<\0?\0x\0")) return "utf-16le";
+  if (input.startsWith("\0<\0?\0x")) return "utf-16be";
   let position = 0;
   while (position < input.length) {
     if (input.startsWith("<!--", position)) {
-      const end = input.indexOf("-->", position + 4);
+      const end = input.indexOf("-->", position + 2);
       position = end === -1 ? input.length : end + 3;
       continue;
     }
-    const tag = /^<([a-z][^\t\n\f\r >]*)/i.exec(input.slice(position));
+    const tag = /^<\/?([a-z][^\t\n\f\r >]*)/i.exec(input.slice(position));
     if (tag) {
       const meta = /^<meta[\t\n\f\r /]/i.test(input.slice(position));
       position += meta ? 5 : tag[0].length;
       const seen = new Set<string>();
-      let charset: string | undefined;
-      let pragma = false;
-      let needsPragma = true;
+      // null means absent; undefined is the Encoding Standard's failure.
+      let charset: string | null | undefined = null;
+      let gotPragma = false;
+      let needPragma: boolean | null = null;
       while (position < input.length) {
         const attribute = nextAttribute(input, position);
         position = attribute.position;
         // Reaching the prescan byte limit aborts even a partially read attribute.
-        if (position === input.length) return undefined;
+        if (position === input.length) return xmlEncoding(input);
         const { name, value } = attribute;
         if (!name) break;
         if (seen.has(name)) continue;
         seen.add(name);
-        if (name === "http-equiv") pragma = value === "content-type";
-        if (name === "content" && charset === undefined) {
-          charset = contentEncoding(value);
-          if (charset !== undefined) needsPragma = true;
+        if (name === "http-equiv" && value === "content-type") gotPragma = true;
+        if (name === "content" && charset === null) {
+          const encoding = contentEncoding(value);
+          if (encoding !== undefined) {
+            charset = encoding;
+            needPragma = true;
+          }
         }
         if (name === "charset") {
           charset = encodingLabel(value);
-          needsPragma = false;
+          needPragma = false;
         }
       }
-      if (meta && charset !== undefined && (!needsPragma || pragma)) {
+      // An absent charset also means needPragma is still null.
+      if (meta && charset !== null && charset !== undefined && (!needPragma || gotPragma)) {
         if (charset === "utf-16le" || charset === "utf-16be") return "utf-8";
         return charset === "x-user-defined" ? "windows-1252" : charset;
       }
@@ -85,7 +92,23 @@ function htmlEncoding(input: string): string | undefined {
     }
     position++;
   }
-  return undefined;
+  return xmlEncoding(input);
+}
+
+/** HTML prescan fallback for a leading XML declaration (still text/html). */
+function xmlEncoding(input: string): string | undefined {
+  if (!input.startsWith("<?xml")) return undefined;
+  const end = input.indexOf(">");
+  if (end === -1) return undefined;
+  const start = input.indexOf("encoding");
+  if (start === -1 || start >= end) return undefined;
+  // eslint-disable-next-line no-control-regex -- XML prescan specifies bytes <= 0x20.
+  const value = /^[\x00-\x20]*=[\x00-\x20]*(["'])([^"']*)/.exec(input.slice(start + 8));
+  if (!value || input[start + 8 + value[0].length] !== value[1]) return undefined;
+  // eslint-disable-next-line no-control-regex -- XML prescan rejects space/control bytes in labels.
+  if (/[\x00-\x20]/.test(value[2])) return undefined;
+  const encoding = encodingLabel(value[2]);
+  return encoding === "utf-16le" || encoding === "utf-16be" ? "utf-8" : encoding;
 }
 
 /** BOM > transport > in-band > CSS environment > UTF-8. Source is already bounded. */

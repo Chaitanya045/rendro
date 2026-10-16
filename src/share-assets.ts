@@ -1,13 +1,14 @@
 import { srcsetUrls } from "@/share-srcset";
 import { decodeShareSource } from "@/share-encoding";
-import { parse, type DefaultTreeAdapterMap } from "parse5";
+import { type DefaultTreeAdapterMap } from "parse5";
+import { parseShareHtml, ShareAssetError } from "@/share-html";
 import { rewriteCssUrls } from "@/viewer/css-urls";
 import { decodeStoragePath } from "@/storage-boundary";
 import { normalizeMediaType } from "@/routes/asset-headers";
 import type { StoredManifest } from "@/stored-manifest";
 import { validShareAssets } from "../shared/share-assets";
 
-export class ShareAssetError extends Error {}
+export { ShareAssetError } from "@/share-html";
 const origin = "https://share.invalid";
 const MAX_SOURCE_BYTES = 8 * 1024 * 1024;
 // A synthetic URL origin is only a resolver base, never proof that an absolute
@@ -62,7 +63,7 @@ export async function collectShareAssets(
   };
   const documentUrl = new URL(documentPath.split("/").map(encodeURIComponent).join("/"), origin + "/");
   const documentSource = await source(document);
-  const root = parse(documentSource.text);
+  const root = parseShareHtml(documentSource.text);
   const nodes: DefaultTreeAdapterMap["node"][] = [root];
   const elements: DefaultTreeAdapterMap["element"][] = [];
   for (let node = nodes.pop(); node; node = nodes.pop()) {

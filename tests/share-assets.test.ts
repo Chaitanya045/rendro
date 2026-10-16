@@ -72,8 +72,8 @@ describe("share dependency discovery", () => {
     expect(await f.collect()).toEqual([exact, `${whitespace}image${whitespace}`, `${whitespace}sheet`, `${whitespace}background`].map(p => "guide/" + p).sort());
   });
 
-  it("traverses wide documents below the byte limit without an argument stack overflow", async () => {
-    expect(await fixture('<i></i>'.repeat(150000) + '<img src="image">', [resource("guide/image")]).collect()).toEqual(["guide/image"]);
+  it("traverses wide documents below the complexity limit without an argument stack overflow", async () => {
+    expect(await fixture('<i></i>'.repeat(24999) + '<img src="image">', [resource("guide/image")]).collect()).toEqual(["guide/image"]);
   });
 
   it("sniffs declarations and BOMs across storage chunks", async () => {
