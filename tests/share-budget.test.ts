@@ -28,6 +28,19 @@ describe("one cumulative discovery budget", () => {
     expect(() => timed.charge(1024)).toThrow(ShareAssetError);
   });
 
+  it("classifies the work cap as a limit but the deadline as a transient busy failure", () => {
+    let now = 0;
+    vi.spyOn(performance, "now").mockImplementation(() => now);
+    const capped = new WorkBudget();
+    capped.charge(MAX_SHARE_WORK);
+    expect(() => capped.charge()).toThrow(expect.objectContaining({ code: "share_limit", reason: "work" }));
+    const slow = new WorkBudget();
+    now = MAX_SHARE_CPU_MS + 1;
+    expect(() => slow.check()).toThrow(expect.objectContaining({ code: "share_busy", reason: "deadline" }));
+    expect(new ShareAssetError("x", "unavailable").code).toBe("share_unavailable");
+    expect(new ShareAssetError("x", "encoding").code).toBe("share_limit");
+  });
+
   it("excludes async storage waits, including rejection, but counts synchronous setup", async () => {
     let now = 0;
     vi.spyOn(performance, "now").mockImplementation(() => now);

@@ -52,7 +52,9 @@ app.post("/api/rendro/shares", async (c) => {
   try {
     assetPaths = await collectShareAssets(manifest, documentPath, path => getObjectStream(prefix + path));
   } catch (error) {
-    if (error instanceof ShareAssetError) return c.json({ error: error.message }, 400);
+    if (error instanceof ShareAssetError) {
+      return c.json({ error: error.message, code: error.code, reason: error.reason }, 400);
+    }
     throw error;
   }
   headers.set(STORAGE_ATTESTATION_HEADER, await signStorageValidation({

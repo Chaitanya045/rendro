@@ -10506,8 +10506,8 @@
         {
           "id": "UI-093-E02",
           "from": "Share pending",
-          "trigger": "Receive complexity or generic failure",
-          "expected": "Persistent accessible reason, bounded mobile layout, dismissal and explicit retry to unchanged success feedback",
+          "trigger": "Receive a stable share failure code (limit, busy, unavailable) or generic failure",
+          "expected": "Persistent accessible reason chosen from the code (server text never shown), retry only when it may succeed, bounded mobile layout, dismissal and explicit retry to unchanged success feedback",
           "inventoryRefs": [
             "UI-093"
           ],
@@ -10517,6 +10517,16 @@
               "file": "tests/share-comment-errors-browser.test.ts",
               "name": "share complexity and generic errors persist, dismiss and retry ($width, dark=$dark)",
               "kind": "browser"
+            },
+            {
+              "file": "tests/share-comment-errors-browser.test.ts",
+              "name": "share failure %j shows stable wording without server text (retry=%s)",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/share-comment-errors-browser.test.ts",
+              "name": "a 400 without a recognized failure is the generic retryable error",
+              "kind": "browser"
             }
           ]
         },
@@ -10524,7 +10534,7 @@
           "id": "UI-093-E03",
           "from": "Share pending",
           "trigger": "Receive HTTP 429 with seconds/date/malformed Retry-After",
-          "expected": "Quota guidance, deadline countdown, no duplicate writes, explicit retry after expiry",
+          "expected": "Quota guidance announced once at the start and once at the end (aria-hidden per-second countdown), deadline countdown, oversized delays capped, no duplicate writes, explicit retry after expiry",
           "inventoryRefs": [
             "UI-093"
           ],
@@ -10533,6 +10543,38 @@
             {
               "file": "tests/share-comment-errors-browser.test.ts",
               "name": "share quota honors Retry-After %s and permits an explicit retry",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/share-comment-errors-browser.test.ts",
+              "name": "an oversized Retry-After is capped to the timer limit rather than dropped",
+              "kind": "browser"
+            }
+          ]
+        },
+        {
+          "id": "UI-093-E04",
+          "from": "Share failure notice shown",
+          "trigger": "Press Escape, or the reader navigates to another document",
+          "expected": "Escape dismisses the notice and returns focus to the share action; a document change clears non-quota notices (and drops late failures) while the quota countdown continues",
+          "inventoryRefs": [
+            "UI-093"
+          ],
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/share-comment-errors-browser.test.ts",
+              "name": "Escape dismisses the share notice and returns focus to the toolbar action",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/share-comment-errors-browser.test.ts",
+              "name": "share failures belong to their document, but the account quota keeps counting",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/management-dialog-reuse-browser.test.ts",
+              "name": "a share failure notice is cleared when navigation changes the document",
               "kind": "browser"
             }
           ]
@@ -13389,7 +13431,7 @@
           "id": "UI-114-E12",
           "from": "Comment/reply submitting",
           "trigger": "Receive comments RateLimited rejection",
-          "expected": "Validated quota crosses the parent bridge; draft remains editable; all submit controls wait until expiry and permit an edited retry",
+          "expected": "Validated per-user or organization quota crosses the parent bridge; the reason is announced once at the start and once at the end; draft remains editable; all submit controls wait until expiry; dismissal returns focus to the draft and Enter re-shows the reason; an edited retry succeeds",
           "inventoryRefs": [
             "UI-114"
           ],
@@ -13415,6 +13457,23 @@
             {
               "file": "tests/share-comment-errors-browser.test.ts",
               "name": "comment %s generic failure keeps the draft and allows retry",
+              "kind": "browser"
+            }
+          ]
+        },
+        {
+          "id": "UI-114-E14",
+          "from": "Comment create pending",
+          "trigger": "Generic failure while a reply cooldown is active",
+          "expected": "Draft is preserved and the create button stays disabled until the shared cooldown ends",
+          "inventoryRefs": [
+            "UI-114"
+          ],
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/share-comment-errors-browser.test.ts",
+              "name": "a generic failure while a reply cooldown is active keeps the create button disabled",
               "kind": "browser"
             }
           ]

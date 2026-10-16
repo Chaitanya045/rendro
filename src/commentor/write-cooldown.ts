@@ -8,8 +8,19 @@ export class CommentWriteCooldown {
   private timer: number | undefined;
   private notice: HTMLElement | undefined;
   private message: HTMLElement | undefined;
+  private field: (() => HTMLElement | undefined) | undefined;
+  private announcements = 0;
+  // Present (and empty) before the first announcement so assistive technology registers it.
+  private readonly live: HTMLElement;
 
-  constructor(private readonly root: ShadowRoot) {}
+  constructor(private readonly root: ShadowRoot) {
+    this.live = document.createElement("div");
+    this.live.className = "quota-live";
+    this.live.setAttribute("role", "status");
+    this.live.setAttribute("aria-live", "polite");
+    this.live.setAttribute("aria-atomic", "true");
+    root.append(this.live);
+  }
 
   get active(): boolean { return Date.now() < this.until; }
 
@@ -27,29 +38,46 @@ export class CommentWriteCooldown {
     this.root.querySelectorAll<HTMLButtonElement>(submissions).forEach(button => this.updateButton(button));
   }
 
-  start(delay: number): void {
+  /** `field` finds the draft the reader was typing in; it regains focus when the notice is dismissed. */
+  start(delay: number, field?: () => HTMLElement | undefined): void {
     this.reset();
     this.until = Date.now() + delay;
+    this.field = field;
     const notice = document.createElement("div");
     notice.className = "toast error comment-quota";
+    // The visible countdown changes every second, so it stays out of the live region.
     const message = document.createElement("span");
-    message.setAttribute("role", "status");
-    message.setAttribute("aria-live", "polite");
-    message.setAttribute("aria-atomic", "true");
+    message.setAttribute("aria-hidden", "true");
     const dismiss = document.createElement("button");
     dismiss.type = "button";
     dismiss.textContent = "Dismiss";
-    dismiss.addEventListener("click", () => { notice.hidden = true; });
+    dismiss.addEventListener("click", () => {
+      notice.hidden = true;
+      this.field?.()?.focus();
+    });
     notice.append(message, dismiss);
     this.root.append(notice);
     this.notice = notice;
     this.message = message;
-    this.tick();
+    this.tick(true);
   }
 
-  private tick = (): void => {
+  /** Pressing Enter in a draft during a dismissed cooldown shows the reason again. */
+  reveal(): void {
+    if (this.notice) this.notice.hidden = false;
+  }
+
+  private announce(text: string): void {
+    this.live.textContent = text + (this.announcements++ % 2 ? "\u00a0" : "");
+  }
+
+  private tick = (initial = false): void => {
     if (!this.root.host.isConnected) { this.reset(); return; }
-    this.message!.textContent = commentQuotaMessage(Math.max(0, Math.ceil((this.until - Date.now()) / 1000)));
+    const seconds = Math.max(0, Math.ceil((this.until - Date.now()) / 1000));
+    const text = commentQuotaMessage(seconds);
+    this.message!.textContent = text;
+    // Announce when the delay starts and once when it ends, never per second.
+    if (initial === true || seconds === 0) this.announce(text);
     this.updateButtons();
     if (this.active) this.timer = window.setTimeout(this.tick, Math.min(1000, this.until - Date.now()));
   };
@@ -60,6 +88,8 @@ export class CommentWriteCooldown {
     this.notice?.remove();
     this.notice = undefined;
     this.message = undefined;
+    this.field = undefined;
+    this.live.textContent = "";
     this.updateButtons();
   }
 }

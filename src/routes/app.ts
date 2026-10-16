@@ -15,6 +15,7 @@ import { renderNotFoundPage } from "@/routes/not-found";
 import { renderLandingPage } from "@/routes/landing";
 import { renderThemeAssets, renderThemeButton } from "./theme";
 import { menuSurfaceStyles } from "../ui/menu-styles";
+import { RETRY_AFTER_SOURCE } from "../../shared/retry-after";
 
 const app = new Hono<{ Variables: { user?: User } }>();
 app.onError(legacyUnavailable);
@@ -230,6 +231,7 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
   .share-error{position:fixed;z-index:150;top:64px;right:16px;width:360px;max-width:calc(100vw - 32px);box-sizing:border-box;padding:16px;border:1px solid #e4e4e7;border-radius:8px;background:#fff;color:#09090b;box-shadow:0 4px 16px rgba(0,0,0,.12);font-size:14px;line-height:20px}
   .share-error[hidden],.share-error [hidden]{display:none}
   .share-error-actions{display:flex;gap:8px;margin-top:12px}
+  .share-live{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0 0 0 0);clip-path:inset(50%);white-space:nowrap;border:0}
   .share-error button:disabled{opacity:.5;cursor:not-allowed}
   .dark .share-error{background:#09090b;color:#fafafa;border-color:#27272a}
   #share-feedback-icon{transition:transform .18s cubic-bezier(.4,0,.2,1)}
@@ -501,10 +503,6 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
 </style>
 <body>
 
-<aside class="share-error" id="share-error" aria-label="Sharing feedback" hidden>
-  <div id="share-error-message" role="status" aria-live="polite" aria-atomic="true"></div>
-  <div class="share-error-actions"><button type="button" class="topbar-btn" id="share-retry">Retry</button><button type="button" class="topbar-btn" id="share-dismiss">Dismiss</button></div>
-</aside>
 <header class="topbar">
   <div class="topbar-left">
     <button class="topbar-btn-icon mobile-tree-toggle" id="mobile-tree-toggle" type="button" aria-label="Open document tree" aria-expanded="false"><span class="material-symbols-outlined" aria-hidden="true">menu</span></button>
@@ -525,6 +523,11 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
     </div>
   </div>
 </header>
+<div class="share-live" id="share-live" role="status" aria-live="polite" aria-atomic="true"></div>
+<aside class="share-error" id="share-error" aria-label="Sharing feedback" hidden>
+  <div id="share-error-message" aria-hidden="true"><span id="share-error-text"></span><span id="share-quota" hidden>Too many shares right now; try again in <span id="share-count"></span><span id="share-unit"> seconds</span>.</span></div>
+  <div class="share-error-actions"><button type="button" class="topbar-btn" id="share-retry">Retry</button><button type="button" class="topbar-btn" id="share-dismiss">Dismiss</button></div>
+</aside>
 <div class="shell-hotzone shell-hotzone-top" id="shell-hotzone-top" aria-hidden="true"></div>
 <div class="shell-hotzone shell-hotzone-left" id="shell-hotzone-left" aria-hidden="true"></div>
 <button class="mobile-tree-backdrop" id="mobile-tree-backdrop" type="button" aria-label="Close document tree"></button>
@@ -854,33 +857,55 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
   var shareBtn=document.getElementById("share-btn");
   var shareFeedbackLabel=document.getElementById("share-feedback-label");
   var shareFeedbackIcon=document.getElementById("share-feedback-icon");
-  var shareFeedbackTimer,shareRetryTimer,shareRetryUntil=0;
-  var shareError=document.getElementById("share-error"),shareErrorMessage=document.getElementById("share-error-message"),shareRetry=document.getElementById("share-retry"),shareDismiss=document.getElementById("share-dismiss");
-  function clearShareError(){clearTimeout(shareRetryTimer);shareRetryUntil=0;shareError.hidden=true;shareErrorMessage.textContent="";shareBtn.removeAttribute("aria-disabled");}
-  function updateShareQuota(){
+  var shareFeedbackTimer,shareRetryTimer,shareRetryUntil=0,shareAnnouncements=0;
+  var shareError=document.getElementById("share-error"),shareErrorText=document.getElementById("share-error-text"),shareQuota=document.getElementById("share-quota"),shareCount=document.getElementById("share-count"),shareUnit=document.getElementById("share-unit"),shareLive=document.getElementById("share-live"),shareRetry=document.getElementById("share-retry"),shareDismiss=document.getElementById("share-dismiss");
+  ${RETRY_AFTER_SOURCE}
+  // The live region exists, empty, from page load. It is written only when a notice appears and when a delay ends; the visible per-second countdown is aria-hidden.
+  function announceShare(text){shareLive.textContent=text+(shareAnnouncements++%2?"\u00a0":"");}
+  function clearShareError(){clearTimeout(shareRetryTimer);shareRetryUntil=0;shareError.hidden=true;shareErrorText.textContent="";shareQuota.hidden=true;shareLive.textContent="";shareBtn.removeAttribute("aria-disabled");}
+  function resetShareButton(){clearTimeout(shareFeedbackTimer);shareBtn.classList.remove("is-loading","is-feedback");shareBtn.removeAttribute("aria-busy");shareBtn.setAttribute("aria-label",${JSON.stringify(shareLabel)});}
+  function quotaText(seconds){return "Too many shares right now; try again in "+seconds+(seconds===1?" second.":" seconds.");}
+  function updateShareQuota(initial){
     var seconds=Math.max(0,Math.ceil((shareRetryUntil-Date.now())/1000));
-    shareErrorMessage.textContent=seconds?"Too many shares right now; try again in "+seconds+" seconds.":"You can try sharing again now.";
     shareRetry.disabled=seconds>0;
-    if(seconds){shareBtn.setAttribute("aria-disabled","true");shareRetryTimer=setTimeout(updateShareQuota,Math.min(1000,shareRetryUntil-Date.now()));}
-    else shareBtn.removeAttribute("aria-disabled");
+    if(seconds){
+      shareQuota.hidden=false;shareErrorText.textContent="";shareCount.textContent=String(seconds);shareUnit.textContent=seconds===1?" second":" seconds";
+      if(initial)announceShare(quotaText(seconds));
+      shareBtn.setAttribute("aria-disabled","true");shareRetryTimer=setTimeout(updateShareQuota,Math.min(1000,shareRetryUntil-Date.now()));
+    }else{
+      shareQuota.hidden=true;shareErrorText.textContent="You can share again now.";announceShare("You can share again now.");
+      shareBtn.removeAttribute("aria-disabled");
+    }
   }
-  function showShareError(message,retry,delay){
+  function showShareError(message,retry,delay,accountWide){
     if(signedOut)return;
-    clearShareError();
-    clearTimeout(shareFeedbackTimer);
-    shareBtn.classList.remove("is-loading","is-feedback");shareBtn.removeAttribute("aria-busy");shareBtn.setAttribute("aria-label",${JSON.stringify(shareLabel)});
-    shareError.hidden=false;shareErrorMessage.textContent=message;shareRetry.hidden=!retry;shareRetry.disabled=false;
-    if(delay>0){shareRetryUntil=Date.now()+delay;updateShareQuota();}
+    // A failure for a document the reader has already left must not label the new one. Quota applies to the whole account.
+    if(!accountWide&&shareDoc!==(window.RENDRO_CURRENT_DOC||"")){resetShareButton();return;}
+    clearShareError();resetShareButton();
+    shareError.hidden=false;shareRetry.hidden=!retry;shareRetry.disabled=false;
+    if(delay>0){shareRetryUntil=Date.now()+delay;updateShareQuota(true);}
+    else{shareErrorText.textContent=message;announceShare(message);}
   }
-  shareDismiss.addEventListener("click",function(){shareError.hidden=true;shareBtn.focus();});
+  function dismissShareError(){shareError.hidden=true;shareBtn.focus();}
+  shareDismiss.addEventListener("click",dismissShareError);
   shareRetry.addEventListener("click",function(){shareBtn.focus();shareBtn.click();});
-  function shareRetryDelay(response){
-    var value=response.headers.get("Retry-After");
-    if(!value||!value.trim())return 0;
-    var seconds=Number(value),delay=Number.isFinite(seconds)?seconds*1000:Date.parse(value)-Date.now();
-    return Number.isFinite(delay)&&delay>0&&delay<=2147483647?delay:0;
+  document.addEventListener("keydown",function(e){
+    if(e.key==="Escape"&&!shareError.hidden&&(shareError.contains(document.activeElement)||document.activeElement===shareBtn))dismissShareError();
+  });
+  // Quota is account-wide and keeps counting; every other notice describes one document.
+  addEventListener("rendro:document-change",function(){if(Date.now()>=shareRetryUntil)clearShareError();});
+  var shareLimitMessages={assets:"This document references too many assets to share. Reduce its assets before trying again."};
+  var shareLimitDefault="This document is too large or complex to share. Simplify it or reduce its size before trying again.";
+  // Only the stable code and a known sub-reason select wording; server text is never displayed.
+  function shareFailure(status,data){
+    if(status!==400||!data||typeof data!=="object")return null;
+    if(data.code==="share_busy")return {message:"Sharing is taking longer than expected right now. Please try again.",retry:true};
+    if(data.code==="share_unavailable")return {message:"This document cannot be shared because it, or a file it needs, is unavailable.",retry:false};
+    // Workers deployed before the stable code existed reported only this text.
+    if(data.code==="share_limit"||data.error==="document too complex to share")return {message:shareLimitMessages[data.reason]||shareLimitDefault,retry:false};
+    return null;
   }
-  var sharePending=false,shareController=new AbortController(),signedOut=false;
+  var sharePending=false,shareController=new AbortController(),signedOut=false,shareDoc="";
   addEventListener("commentor-sign-out",function(){signedOut=true;shareController.abort();clearShareError();clearTimeout(shareFeedbackTimer);setAvatarMenu(false);setMobileMore(false,false);});
   function setShareLoading(){if(!shareBtn)return;if(shareFeedbackTimer!==undefined)window.clearTimeout(shareFeedbackTimer);shareBtn.classList.remove("is-feedback");shareBtn.classList.add("is-loading");shareBtn.setAttribute("aria-busy","true");shareBtn.setAttribute("aria-label",${JSON.stringify(sharePendingLabel)});}
   function setShareFeedback(message){if(signedOut||!shareBtn||!shareFeedbackLabel)return;shareBtn.classList.remove("is-loading");shareBtn.removeAttribute("aria-busy");shareFeedbackLabel.textContent=message;if(shareFeedbackIcon)shareFeedbackIcon.textContent=message.endsWith("copied!")?"check":"error";shareBtn.classList.add("is-feedback");shareBtn.setAttribute("aria-label",message);if(shareFeedbackTimer!==undefined)window.clearTimeout(shareFeedbackTimer);shareFeedbackTimer=window.setTimeout(function(){shareBtn.classList.remove("is-feedback");shareBtn.setAttribute("aria-label",${JSON.stringify(shareLabel)});if(shareFeedbackIcon)shareFeedbackIcon.textContent="check";},1800);}
@@ -889,6 +914,7 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
     e.stopPropagation();if(signedOut||sharePending)return;
     if(Date.now()<shareRetryUntil){shareError.hidden=false;return;}
     var doc=window.RENDRO_CURRENT_DOC||"";
+    shareDoc=doc;
     if(!doc){showShareError("Select a document first.",false,0);return;}
     clearShareError();sharePending=true;setShareLoading();var copying=false;
     try{
@@ -900,10 +926,11 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
       }else if(shareConfig){
         var res=await fetch("/api/rendro/shares",{signal:shareController.signal,method:"POST",headers:{"Content-Type":"application/json",accept:"application/json"},body:JSON.stringify({organizationId:shareConfig.organizationId,projectId:shareConfig.projectId,documentPath:relativeDoc,expiresInSeconds:604800})});
         if(signedOut)return;
-        if(res.status===429){showShareError("Too many shares right now; please try again later.",true,shareRetryDelay(res));return;}
+        if(res.status===429){showShareError("Too many shares right now; please try again later.",true,parseRetryAfterMs(res.headers.get("Retry-After"),Date.now()),true);return;}
         var data=await res.json();
         if(signedOut)return;
-        if(res.status===400&&data&&data.error==="document too complex to share"){showShareError("This document references too many assets to share. Reduce its assets or size before trying again.",false,0);return;}
+        var failure=shareFailure(res.status,data);
+        if(failure){showShareError(failure.message,failure.retry,0);return;}
         if(!res.ok||!data||!data.url)throw new Error("share failed");
         copying=true;await copyText(new URL(data.url,window.location.origin).href);setShareFeedback("Share link copied!");
       }else{

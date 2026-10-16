@@ -633,7 +633,10 @@ async function navigateToDoc(relPath: string) {
 
 // Sync tree active state without reloading iframe (for doc-loaded messages)
 function syncActiveState(fullPath: string) {
+  const changed = RENDRO_WINDOW.RENDRO_CURRENT_DOC !== fullPath;
   RENDRO_WINDOW.RENDRO_CURRENT_DOC = fullPath;
+  // Per-document shell notices (for example share failures) must not outlive their document.
+  if (changed) window.dispatchEvent(new Event("rendro:document-change"));
   // Always expand ancestors first (no-op if already open)
   if (!ORG) return;
   const relPath = fullPath.startsWith(`${ORG}/`) ? fullPath.slice(ORG.length + 1) : fullPath;

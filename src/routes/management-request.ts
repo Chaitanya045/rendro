@@ -1,5 +1,8 @@
+import { RETRY_AFTER_SOURCE } from "../../shared/retry-after";
+
 /** Shared transport for management pages and the org switcher. Only safe GETs retry. */
 export const managementRequestScript = String.raw`
+  ${RETRY_AFTER_SOURCE}
   async function waitForReadRetry(milliseconds,signal){
     if(signal&&signal.aborted)throw new DOMException("Page navigation aborted","AbortError");
     await new Promise(function(resolve,reject){
@@ -18,8 +21,7 @@ export const managementRequestScript = String.raw`
       if(response.ok)return data;
       var retryable=orgRead&&(response.status===429||response.status===503);
       var header=response.headers&&response.headers.get("Retry-After")||response.headers&&response.headers.get("X-Retry-After");
-      var seconds=header&&/^\d+$/.test(header)?Number(header):header?Math.ceil((Date.parse(header)-Date.now())/1000):1;
-      seconds=Number.isSafeInteger(seconds)?Math.max(1,seconds):1;
+      var delay=parseRetryAfterMs(header,Date.now()),seconds=delay?Math.ceil(delay/1000):1;
       // Two short retries at most. Long server delays belong in the styled
       // page retry state, not a blocked navigation or an early retry.
       if(retryable&&attempt<2&&seconds<=2){await waitForReadRetry(seconds*1000,settings.signal);continue;}

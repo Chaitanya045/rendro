@@ -33,7 +33,15 @@ describe("comment quota envelopes", () => {
     expect(commentRetryAfter(error)).toBe(1001);
     expect(commentErrorMessage(error, "Fallback")).toBe("Too many comments right now; try again in 2 seconds.");
     expect(isDefinitiveCommentRejection(error)).toBe(true);
-    expect(commentQuotaMessage(0)).toBe("You can try posting your comment again now.");
+    expect(commentQuotaMessage(0)).toBe("You can post comments again now.");
+    expect(commentQuotaMessage(1)).toBe("Too many comments right now; try again in 1 second.");
+  });
+  it("recognizes the per-user and organization-wide comment buckets only", () => {
+    const quota = (name: string) => new ConvexError({ kind: "RateLimited", name, retryAfter: 1500 });
+    expect(commentRetryAfter(quota("comments"))).toBe(1500);
+    expect(commentRetryAfter(quota("comments:organization"))).toBe(1500);
+    expect(isDefinitiveCommentRejection(quota("comments:organization"))).toBe(true);
+    for (const name of ["shares", "comments:user", "organization", "comments:"]) expect(commentRetryAfter(quota(name))).toBeNull();
   });
   it.each([null, false, "trace", {}, { kind: "Other" }, { kind: "RateLimited", name: "shares" },
     ...[undefined, null, "1000", NaN, Infinity, -1, 0, 2_147_483_648].map(retryAfter => ({ kind: "RateLimited", name: "comments", retryAfter })),

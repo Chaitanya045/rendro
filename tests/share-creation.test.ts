@@ -62,7 +62,7 @@ describe("share creation authority", () => {
     expect(response.status).toBe(extraByte ? 400 : 201);
     const grants = await f.backend.run(ctx => ctx.db.query("shareGrants").collect());
     if (extraByte) {
-      expect(await response.json()).toEqual({ error: "document references too many assets to share" });
+      expect(await response.json()).toEqual({ error: "document references too many assets to share", code: "share_limit", reason: "assets" });
       expect(f.fetchMock).toHaveBeenCalledTimes(1); // Authorization only; no oversized POST.
       expect(grants).toEqual(before);
     } else {
@@ -169,7 +169,11 @@ describe("share creation authority", () => {
     const before = await f.backend.run(ctx => ctx.db.query("shareGrants").collect());
     const response = await f.request();
     expect(response.status).toBe(400);
-    expect(await response.json()).toEqual({ error: expect.stringMatching(/^(Share HTML exceeds the |document too complex to share$)/) });
+    expect(await response.json()).toEqual({
+      error: expect.stringMatching(/^(Share HTML exceeds the |document too complex to share$)/),
+      code: "share_limit",
+      reason: expect.stringMatching(/^(tags|attributes|work)$/),
+    });
     expect(f.fetchMock).toHaveBeenCalledTimes(1);
     expect(await f.backend.run(ctx => ctx.db.query("shareGrants").collect())).toEqual(before);
   });
@@ -198,10 +202,12 @@ describe("share creation authority", () => {
     f.read.mockImplementation(() => Promise.resolve(new Response(files.slice(1).map(file => `<img src="/${file.path}">`).join("")).body));
     const response = await f.request();
     expect(response.status).toBe(400);
-    expect(await response.json()).toEqual({ error: "document references too many assets to share" });
+    expect(await response.json()).toEqual({ error: "document references too many assets to share", code: "share_limit", reason: "assets" });
     expect(f.fetchMock).toHaveBeenCalledTimes(1);
     f.read.mockResolvedValue(null);
-    expect((await f.request()).status).toBe(400);
+    const missing = await f.request();
+    expect(missing.status).toBe(400);
+    expect(await missing.json()).toMatchObject({ code: "share_unavailable", reason: "unavailable" });
     f.read.mockRejectedValue(new Error("Storage unavailable"));
     expect((await f.request()).status).toBe(500);
   });

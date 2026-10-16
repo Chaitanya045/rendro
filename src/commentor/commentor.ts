@@ -1432,7 +1432,9 @@ class Commentor {
     ) as HTMLButtonElement;
     const submit = async () => {
       const body = textarea.value.trim();
-      if (!body || post.disabled || this.writeCooldown.active) return;
+      if (!body) return;
+      if (this.writeCooldown.active) { this.writeCooldown.reveal(); return; }
+      if (post.disabled) return;
       this.writeCooldown.reset();
       this.composerHasSubmitted = true;
       textarea.disabled = true;
@@ -1463,8 +1465,10 @@ class Commentor {
         post.classList.remove("is-pending");
         post.removeAttribute("aria-busy");
         post.textContent = "Post";
+        // A reply may have started a shared cooldown while this create was in flight.
+        this.writeCooldown.updateButton(post);
         const retryAfter = commentRetryAfter(err);
-        if (retryAfter !== null) this.writeCooldown.start(retryAfter);
+        if (retryAfter !== null) this.writeCooldown.start(retryAfter, () => textarea);
         else this.toast((err instanceof CommentMutationRejectedError || err instanceof CommentMutationOutcomeUnknownError || err instanceof CommentOperationConflictError) ? err.message : commentErrorMessage(err, "Could not post comment. Try again."), { kind: "error" });
         textarea.focus();
       }
@@ -1934,8 +1938,11 @@ class Commentor {
       const submitReply = async () => {
         const submittedDraft = input.value;
         const body = submittedDraft.trim();
-        if (!body || send.disabled || this.writeCooldown.active) return;
+        if (!body) return;
+        if (this.writeCooldown.active) { this.writeCooldown.reveal(); return; }
+        if (send.disabled) return;
         this.writeCooldown.reset();
+        const bubble = input.closest(".bubble");
         this.pendingReplies.set(t._id, submittedDraft);
         this.setReplyPendingState(t._id, true);
         try {
@@ -1952,7 +1959,7 @@ class Commentor {
         } catch (err) {
           console.error("[commentor] reply failed", err);
           const retryAfter = commentRetryAfter(err);
-          if (retryAfter !== null) this.writeCooldown.start(retryAfter);
+          if (retryAfter !== null) this.writeCooldown.start(retryAfter, () => this.replyInputs(t._id).find((candidate) => candidate.closest(".bubble") === bubble));
           else this.toast((err instanceof CommentMutationRejectedError || err instanceof CommentMutationOutcomeUnknownError || err instanceof CommentOperationConflictError) ? err.message : commentErrorMessage(err, "Could not post reply."), { kind: "error" });
         } finally {
           this.pendingReplies.delete(t._id);
@@ -2628,6 +2635,7 @@ function anchorLabel(a: Anchor): string {
 const STYLES = /* css */ `
 .toast.comment-quota{position:fixed;bottom:16px;left:16px;right:16px;z-index:2147483647;max-width:440px;margin:auto;box-sizing:border-box}
 .comment-quota[hidden]{display:none}
+.quota-live{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0 0 0 0);clip-path:inset(50%);white-space:nowrap;border:0}
 :host {
   --bg: #ffffff;
   --bg-elev: #ffffff;

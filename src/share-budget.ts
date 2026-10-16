@@ -1,4 +1,18 @@
-export class ShareAssetError extends Error {}
+export type ShareFailureReason =
+  | "work" | "assets" | "source_size" | "tags" | "attributes" | "encoding" | "deadline" | "unavailable";
+
+/** Stable codes the share UI keys on; only the deadline may succeed on a plain retry. */
+export type ShareErrorCode = "share_limit" | "share_busy" | "share_unavailable";
+
+export class ShareAssetError extends Error {
+  constructor(message: string, readonly reason: ShareFailureReason = "work") {
+    super(message);
+  }
+
+  get code(): ShareErrorCode {
+    return this.reason === "deadline" ? "share_busy" : this.reason === "unavailable" ? "share_unavailable" : "share_limit";
+  }
+}
 
 export const MAX_SHARE_WORK = 16_000_000;
 export const MAX_SHARE_CPU_MS = 750;
@@ -23,11 +37,11 @@ export class WorkBudget {
   }
 
   check(): void {
-    if (performance.now() > this.deadline) this.fail();
+    if (performance.now() > this.deadline) this.fail("deadline");
   }
 
-  fail(): never {
-    throw new ShareAssetError("document too complex to share");
+  fail(reason: ShareFailureReason = "work"): never {
+    throw new ShareAssetError("document too complex to share", reason);
   }
 
   async wait<T>(operation: () => Promise<T>): Promise<T> {

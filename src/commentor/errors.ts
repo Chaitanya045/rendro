@@ -6,14 +6,16 @@ import { isPublicErrorData } from "../shared/public-errors";
 export function commentRetryAfter(error: unknown): number | null {
   if (!(error instanceof ConvexError) || !error.data || typeof error.data !== "object") return null;
   const data = error.data as Record<string, unknown>;
-  return data.kind === "RateLimited" && data.name === "comments"
+  return data.kind === "RateLimited" && (data.name === "comments" || data.name === "comments:organization")
     && typeof data.retryAfter === "number" && Number.isFinite(data.retryAfter)
     && data.retryAfter > 0 && data.retryAfter <= 2_147_483_647 ? data.retryAfter : null;
 }
 
+export const COMMENT_QUOTA_END_MESSAGE = "You can post comments again now.";
+
 export function commentQuotaMessage(seconds: number): string {
-  return seconds > 0 ? `Too many comments right now; try again in ${seconds} seconds.`
-    : "You can try posting your comment again now.";
+  return seconds > 0 ? `Too many comments right now; try again in ${seconds} ${seconds === 1 ? "second" : "seconds"}.`
+    : COMMENT_QUOTA_END_MESSAGE;
 }
 
 export function commentErrorMessage(error: unknown, fallback: string): string {
@@ -30,10 +32,21 @@ export function commentErrorMessage(error: unknown, fallback: string): string {
   return error instanceof ConvexError && isPublicErrorData(error.data) ? messages[error.data.code] : fallback;
 }
 
-// Auth failure here rejects this action before it can write. A conflict also
-// definitively rejects changed operation arguments. Unrecognized codes (even
-// structured ConvexErrors) must keep the identity for a safe, unchanged retry.
+// A rate limit and the codes below definitively reject this action before it
+// can write. Unrecognized codes (even structured ConvexErrors) must keep the
+// identity for a safe, unchanged retry.
 export function isDefinitiveCommentRejection(error: unknown): boolean {
-  return commentRetryAfter(error) !== null
-    || (error instanceof ConvexError && isPublicErrorData(error.data));
+  if (commentRetryAfter(error) !== null) return true;
+  if (!(error instanceof ConvexError) || !isPublicErrorData(error.data)) return false;
+  switch (error.data.code) {
+    case "invalid_id":
+    case "not_found":
+    case "forbidden":
+    case "invalid_input":
+    case "unauthenticated":
+    case "conflict":
+      return true;
+    default:
+      return false;
+  }
 }
