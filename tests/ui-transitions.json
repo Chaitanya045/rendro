@@ -773,7 +773,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "unit",
+      "status": "e2e",
       "auditEvidence": "U",
       "auditNote": "management-performance.test.ts: mounts all ten routes; management-loading-parity.test.ts",
       "edges": [
@@ -785,8 +785,14 @@
           "inventoryRefs": [
             "UI-002"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shell-navigation.spec.ts",
+              "name": "management shell keeps its chrome while ten routes mount through the client router",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-002-E02",
@@ -796,8 +802,14 @@
           "inventoryRefs": [
             "M01"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shell-navigation.spec.ts",
+              "name": "management shell keeps its chrome while ten routes mount through the client router",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-002-E03",
@@ -807,8 +819,14 @@
           "inventoryRefs": [
             "M01"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shell-navigation.spec.ts",
+              "name": "management shell keeps its chrome while ten routes mount through the client router",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-002-E04",
@@ -818,8 +836,14 @@
           "inventoryRefs": [
             "M01"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shell-entry.spec.ts",
+              "name": "chooser, onboarding and invitation use focused layouts and omit the organization switcher where specified",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-002-E05",
@@ -829,8 +853,14 @@
           "inventoryRefs": [
             "M01"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shell-entry.spec.ts",
+              "name": "chooser, onboarding and invitation use focused layouts and omit the organization switcher where specified",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-002-E06",
@@ -840,8 +870,14 @@
           "inventoryRefs": [
             "M01"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shell-navigation.spec.ts",
+              "name": "management shell keeps its chrome while ten routes mount through the client router",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-002-E07",
@@ -851,8 +887,14 @@
           "inventoryRefs": [
             "M04"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shell-navigation.spec.ts",
+              "name": "management shell keeps its chrome while ten routes mount through the client router",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-002-E08",
@@ -862,8 +904,14 @@
           "inventoryRefs": [
             "M04"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shell-navigation.spec.ts",
+              "name": "management shell keeps its chrome while ten routes mount through the client router",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-002-E09",
@@ -873,8 +921,14 @@
           "inventoryRefs": [
             "M04"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shell-navigation.spec.ts",
+              "name": "an unavailable public page bundle falls back to authenticated HTML under the document nonce without persisting it",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-002-E10",
@@ -884,8 +938,14 @@
           "inventoryRefs": [
             "M04"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shell-navigation.spec.ts",
+              "name": "an unavailable public page bundle falls back to authenticated HTML under the document nonce without persisting it",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-002-E11",
@@ -895,8 +955,14 @@
           "inventoryRefs": [
             "M04"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shell-navigation.spec.ts",
+              "name": "invalid, mismatched or stalled authenticated HTML falls back to a full navigation",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-002-E12",
@@ -906,8 +972,14 @@
           "inventoryRefs": [
             "M04"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shell-navigation.spec.ts",
+              "name": "an unavailable public page bundle falls back to authenticated HTML under the document nonce without persisting it",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-002-E13",
@@ -917,12 +989,17 @@
           "inventoryRefs": [
             "UI-002"
           ],
-          "status": "unit",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/management-performance.test.ts",
               "name": "mounts all ten routes without an HTML fetch and preserves the shell",
               "kind": "unit"
+            },
+            {
+              "file": "e2e/shell-navigation.spec.ts",
+              "name": "management shell keeps its chrome while ten routes mount through the client router",
+              "kind": "e2e"
             }
           ]
         }
@@ -961,7 +1038,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "browser",
+      "status": "e2e",
       "auditEvidence": "B",
       "auditNote": "session-stack-browser.test.ts; management-page-access.test.ts",
       "edges": [
@@ -973,8 +1050,14 @@
           "inventoryRefs": [
             "UI-003"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shell-entry.spec.ts",
+              "name": "authenticated root, chooser, project and docs URLs load without a server error",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-003-E02",
@@ -984,12 +1067,17 @@
           "inventoryRefs": [
             "UI-003"
           ],
-          "status": "browser",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/session-stack-browser.test.ts",
               "name": "signs in and browses management and docs without a 503 on the real local server",
               "kind": "browser"
+            },
+            {
+              "file": "e2e/shell-entry.spec.ts",
+              "name": "authenticated root, chooser, project and docs URLs load without a server error",
+              "kind": "e2e"
             }
           ]
         }
@@ -1035,7 +1123,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "unit",
+      "status": "e2e",
       "auditEvidence": "U",
       "auditNote": "management-page-access.test.ts; control-plane-ui.test.ts",
       "edges": [
@@ -1047,8 +1135,14 @@
           "inventoryRefs": [
             "UI-004"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shell-entry.spec.ts",
+              "name": "anonymous management URLs redirect to sign-in and preserve the destination",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-004-E02",
@@ -1058,12 +1152,17 @@
           "inventoryRefs": [
             "UI-004"
           ],
-          "status": "unit",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/project-section-navigation.test.ts",
               "name": "requires sign-in on direct deployment visits and preserves the destination",
               "kind": "unit"
+            },
+            {
+              "file": "e2e/shell-entry.spec.ts",
+              "name": "anonymous management URLs redirect to sign-in and preserve the destination",
+              "kind": "e2e"
             }
           ]
         }
@@ -1109,7 +1208,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "browser",
+      "status": "e2e",
       "auditEvidence": "B",
       "auditNote": "security-headers-browser.test.ts: styled auth/error HTML",
       "edges": [
@@ -1121,8 +1220,24 @@
           "inventoryRefs": [
             "UI-005"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shell-entry.spec.ts",
+              "name": "standalone not-found page renders under the nonce policy and recovers by link and Go back at 1440",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/shell-entry.spec.ts",
+              "name": "standalone not-found page renders under the nonce policy and recovers by link and Go back at 375",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/shell-entry.spec.ts",
+              "name": "a missing document inside the viewer frame hides the wordmark and recovers in the top window",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-005-E02",
@@ -1132,12 +1247,17 @@
           "inventoryRefs": [
             "UI-005"
           ],
-          "status": "browser",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/security-headers-browser.test.ts",
               "name": "renders trusted document errors inside the opaque viewer",
               "kind": "browser"
+            },
+            {
+              "file": "e2e/shell-entry.spec.ts",
+              "name": "a missing document inside the viewer frame hides the wordmark and recovers in the top window",
+              "kind": "e2e"
             }
           ]
         }
@@ -1182,7 +1302,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "untested",
+      "status": "e2e",
       "auditEvidence": "UNTESTED",
       "auditNote": "error-pages.test.ts and global-not-found.test.ts check responses/markup; no recovery click assertion found",
       "edges": [
@@ -1194,8 +1314,24 @@
           "inventoryRefs": [
             "UI-006"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shell-entry.spec.ts",
+              "name": "standalone not-found page renders under the nonce policy and recovers by link and Go back at 1440",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/shell-entry.spec.ts",
+              "name": "standalone not-found page renders under the nonce policy and recovers by link and Go back at 375",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/shell-entry.spec.ts",
+              "name": "a missing document inside the viewer frame hides the wordmark and recovers in the top window",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-006-E02",
@@ -1205,8 +1341,14 @@
           "inventoryRefs": [
             "V18"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shell-entry.spec.ts",
+              "name": "a missing document inside the viewer frame hides the wordmark and recovers in the top window",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-006-E03",
@@ -1216,8 +1358,19 @@
           "inventoryRefs": [
             "V18"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shell-entry.spec.ts",
+              "name": "standalone not-found page renders under the nonce policy and recovers by link and Go back at 1440",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/shell-entry.spec.ts",
+              "name": "standalone not-found page renders under the nonce policy and recovers by link and Go back at 375",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-006-E04",
@@ -1238,8 +1391,14 @@
           "inventoryRefs": [
             "V18"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shell-entry.spec.ts",
+              "name": "asset errors stay plain and error pages are never cached",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-006-E06",
@@ -1249,8 +1408,24 @@
           "inventoryRefs": [
             "V18"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shell-entry.spec.ts",
+              "name": "standalone not-found page renders under the nonce policy and recovers by link and Go back at 1440",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/shell-entry.spec.ts",
+              "name": "standalone not-found page renders under the nonce policy and recovers by link and Go back at 375",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/shell-entry.spec.ts",
+              "name": "asset errors stay plain and error pages are never cached",
+              "kind": "e2e"
+            }
+          ]
         }
       ]
     },
@@ -1294,7 +1469,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "browser",
+      "status": "e2e",
       "auditEvidence": "B",
       "auditNote": "security-headers-browser.test.ts: management navigation; management-performance.test.ts",
       "edges": [
@@ -1306,8 +1481,19 @@
           "inventoryRefs": [
             "UI-007"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shell-navigation.spec.ts",
+              "name": "management shell keeps its chrome while ten routes mount through the client router",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/shell-navigation.spec.ts",
+              "name": "client navigation inserts a destination skeleton immediately and swaps authorized data in place",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-007-E02",
@@ -1317,8 +1503,14 @@
           "inventoryRefs": [
             "M02"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shell-navigation.spec.ts",
+              "name": "modified, targeted, download and cross-organization links keep native navigation",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-007-E03",
@@ -1328,8 +1520,14 @@
           "inventoryRefs": [
             "M02"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shell-navigation.spec.ts",
+              "name": "management shell keeps its chrome while ten routes mount through the client router",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-007-E04",
@@ -1339,8 +1537,14 @@
           "inventoryRefs": [
             "M02"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shell-navigation.spec.ts",
+              "name": "client navigation inserts a destination skeleton immediately and swaps authorized data in place",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-007-E05",
@@ -1350,8 +1554,19 @@
           "inventoryRefs": [
             "M02"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shell-navigation.spec.ts",
+              "name": "management shell keeps its chrome while ten routes mount through the client router",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/shell-navigation.spec.ts",
+              "name": "client navigation inserts a destination skeleton immediately and swaps authorized data in place",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-007-E06",
@@ -1361,8 +1576,14 @@
           "inventoryRefs": [
             "M02"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shell-navigation.spec.ts",
+              "name": "client navigation inserts a destination skeleton immediately and swaps authorized data in place",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-007-E07",
@@ -1372,12 +1593,17 @@
           "inventoryRefs": [
             "UI-007"
           ],
-          "status": "browser",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/security-headers-browser.test.ts",
               "name": "runs management navigation under the active document nonce",
               "kind": "browser"
+            },
+            {
+              "file": "e2e/shell-navigation.spec.ts",
+              "name": "management shell keeps its chrome while ten routes mount through the client router",
+              "kind": "e2e"
             }
           ]
         }
@@ -1423,7 +1649,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "unit",
+      "status": "e2e",
       "auditEvidence": "U",
       "auditNote": "management-navigation-regression.test.ts",
       "edges": [
@@ -1435,8 +1661,14 @@
           "inventoryRefs": [
             "UI-008"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shell-navigation.spec.ts",
+              "name": "rapid navigation ignores the older response and a repeated destination retries in place",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-008-E02",
@@ -1446,12 +1678,17 @@
           "inventoryRefs": [
             "UI-008"
           ],
-          "status": "unit",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/management-navigation-regression.test.ts",
               "name": "cancels rapid navigation and ignores an older response that arrives last",
               "kind": "unit"
+            },
+            {
+              "file": "e2e/shell-navigation.spec.ts",
+              "name": "rapid navigation ignores the older response and a repeated destination retries in place",
+              "kind": "e2e"
             }
           ]
         },
@@ -1463,12 +1700,17 @@
           "inventoryRefs": [
             "UI-008"
           ],
-          "status": "unit",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/management-navigation-regression.test.ts",
               "name": "retries the same destination while its previous request is still pending",
               "kind": "unit"
+            },
+            {
+              "file": "e2e/shell-navigation.spec.ts",
+              "name": "rapid navigation ignores the older response and a repeated destination retries in place",
+              "kind": "e2e"
             }
           ]
         }
@@ -1514,7 +1756,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "unit",
+      "status": "e2e",
       "auditEvidence": "U",
       "auditNote": "management-navigation-regression.test.ts",
       "edges": [
@@ -1548,8 +1790,19 @@
           "inventoryRefs": [
             "M05"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shell-navigation.spec.ts",
+              "name": "client navigation inserts a destination skeleton immediately and swaps authorized data in place",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/shell-navigation.spec.ts",
+              "name": "Back and Forward restore route and fragment; heading focus does not steal later focus",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-009-E04",
@@ -1559,8 +1812,14 @@
           "inventoryRefs": [
             "M05"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shell-navigation.spec.ts",
+              "name": "blocked Back reverses to the current route and later Back works",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-009-E05",
@@ -1570,8 +1829,14 @@
           "inventoryRefs": [
             "M05"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shell-navigation.spec.ts",
+              "name": "Back and Forward restore route and fragment; heading focus does not steal later focus",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-009-E06",
@@ -1592,12 +1857,17 @@
           "inventoryRefs": [
             "UI-009"
           ],
-          "status": "unit",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/management-navigation-regression.test.ts",
               "name": "reverses a blocked Back, then permits Back and Forward route restoration",
               "kind": "unit"
+            },
+            {
+              "file": "e2e/shell-navigation.spec.ts",
+              "name": "blocked Back reverses to the current route and later Back works",
+              "kind": "e2e"
             }
           ]
         },
@@ -1660,7 +1930,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "unit",
+      "status": "e2e",
       "auditEvidence": "U",
       "auditNote": "management-navigation.test.ts; management-performance.test.ts",
       "edges": [
@@ -1672,8 +1942,14 @@
           "inventoryRefs": [
             "UI-010"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shell-navigation.spec.ts",
+              "name": "an open dialog, a pending write and a stale-data notice block departure and refresh",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-010-E02",
@@ -1683,12 +1959,17 @@
           "inventoryRefs": [
             "UI-010"
           ],
-          "status": "unit",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/management-navigation.test.ts",
               "name": "blocks a route swap for pending mutations, open dialogs, and page-specific guards",
               "kind": "unit"
+            },
+            {
+              "file": "e2e/shell-navigation.spec.ts",
+              "name": "an open dialog, a pending write and a stale-data notice block departure and refresh",
+              "kind": "e2e"
             }
           ]
         },
@@ -1700,12 +1981,17 @@
           "inventoryRefs": [
             "UI-010"
           ],
-          "status": "unit",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/management-navigation.test.ts",
               "name": "manual refresh respects pending writes, open dialogs and unsaved-change guards",
               "kind": "unit"
+            },
+            {
+              "file": "e2e/shell-navigation.spec.ts",
+              "name": "an open dialog, a pending write and a stale-data notice block departure and refresh",
+              "kind": "e2e"
             }
           ]
         }
@@ -1751,7 +2037,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "unit",
+      "status": "e2e",
       "auditEvidence": "U",
       "auditNote": "management-navigation-regression.test.ts; management-performance.test.ts",
       "edges": [
@@ -1763,8 +2049,14 @@
           "inventoryRefs": [
             "UI-011"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shell-navigation.spec.ts",
+              "name": "dirty settings ask once before leaving for another organization and roll back when declined",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-011-E02",
@@ -1774,12 +2066,17 @@
           "inventoryRefs": [
             "UI-011"
           ],
-          "status": "unit",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/management-navigation-regression.test.ts",
               "name": "does not prompt twice for an accepted cross-organization departure",
               "kind": "unit"
+            },
+            {
+              "file": "e2e/shell-navigation.spec.ts",
+              "name": "dirty settings ask once before leaving for another organization and roll back when declined",
+              "kind": "e2e"
             }
           ]
         },
@@ -1791,12 +2088,17 @@
           "inventoryRefs": [
             "UI-011"
           ],
-          "status": "unit",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/management-navigation-regression.test.ts",
               "name": "does not start a cross-organization departure when discard is declined",
               "kind": "unit"
+            },
+            {
+              "file": "e2e/shell-navigation.spec.ts",
+              "name": "dirty settings ask once before leaving for another organization and roll back when declined",
+              "kind": "e2e"
             }
           ]
         }
@@ -1843,7 +2145,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "unit",
+      "status": "e2e",
       "auditEvidence": "U",
       "auditNote": "management-navigation.test.ts; management-query-cache.test.ts",
       "edges": [
@@ -1855,8 +2157,14 @@
           "inventoryRefs": [
             "UI-012"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shell-navigation.spec.ts",
+              "name": "revoked membership and a changed account are rejected instead of painting cached data",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-012-E02",
@@ -1943,12 +2251,17 @@
           "inventoryRefs": [
             "UI-012"
           ],
-          "status": "unit",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/management-navigation.test.ts",
               "name": "never returns a cached response after membership disappears",
               "kind": "unit"
+            },
+            {
+              "file": "e2e/shell-navigation.spec.ts",
+              "name": "revoked membership and a changed account are rejected instead of painting cached data",
+              "kind": "e2e"
             }
           ]
         },
@@ -1960,12 +2273,17 @@
           "inventoryRefs": [
             "UI-012"
           ],
-          "status": "unit",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/management-navigation.test.ts",
               "name": "never paints a cold or cached read for a different signed-in account",
               "kind": "unit"
+            },
+            {
+              "file": "e2e/shell-navigation.spec.ts",
+              "name": "revoked membership and a changed account are rejected instead of painting cached data",
+              "kind": "e2e"
             }
           ]
         }
@@ -2011,7 +2329,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "browser",
+      "status": "e2e",
       "auditEvidence": "U",
       "auditNote": "management-page-lifecycle.test.ts; management-navigation.test.ts",
       "edges": [
@@ -2023,8 +2341,14 @@
           "inventoryRefs": [
             "UI-013"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shell-navigation.spec.ts",
+              "name": "a late response from a disposed page cannot repaint the destination",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-013-E02",
@@ -2056,8 +2380,14 @@
           "inventoryRefs": [
             "M06"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shell-navigation.spec.ts",
+              "name": "a late response from a disposed page cannot repaint the destination",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-013-E05",
@@ -2100,8 +2430,14 @@
           "inventoryRefs": [
             "M06"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shell-navigation.spec.ts",
+              "name": "dirty settings ask once before leaving for another organization and roll back when declined",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-013-E09",
@@ -2190,7 +2526,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "untested",
+      "status": "e2e",
       "auditEvidence": "UNTESTED",
       "auditNote": "management-navigation.test.ts checks route classification; full user gesture matrix lacks browser assertions",
       "edges": [
@@ -2202,8 +2538,14 @@
           "inventoryRefs": [
             "UI-014"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shell-navigation.spec.ts",
+              "name": "modified, targeted, download and cross-organization links keep native navigation",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-014-E02",
@@ -2213,8 +2555,14 @@
           "inventoryRefs": [
             "M03"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shell-navigation.spec.ts",
+              "name": "modified, targeted, download and cross-organization links keep native navigation",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-014-E03",
@@ -2224,8 +2572,19 @@
           "inventoryRefs": [
             "M03"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shell-navigation.spec.ts",
+              "name": "modified, targeted, download and cross-organization links keep native navigation",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/shell-navigation.spec.ts",
+              "name": "visiting an explicit organization URL does not change the active organization",
+              "kind": "e2e"
+            }
+          ]
         }
       ]
     },
@@ -2269,7 +2628,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "untested",
+      "status": "e2e",
       "auditEvidence": "UNTESTED",
       "auditNote": "organization-switcher.test.ts checks fallback href; no JavaScript-disabled journey",
       "edges": [
@@ -2281,8 +2640,14 @@
           "inventoryRefs": [
             "UI-015"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shell-navigation.spec.ts",
+              "name": "HTML-only management navigation completes with plain links",
+              "kind": "e2e"
+            }
+          ]
         }
       ]
     },
@@ -2326,7 +2691,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "browser",
+      "status": "e2e",
       "auditEvidence": "B",
       "auditNote": "organization-switcher-browser.test.ts: 375/768/1440 viewport cases",
       "edges": [
@@ -2338,8 +2703,14 @@
           "inventoryRefs": [
             "UI-016"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shell-menus.spec.ts",
+              "name": "mobile drawer opens modally, traps focus and closes by control, scrim, Escape and route selection",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-016-E02",
@@ -2349,12 +2720,17 @@
           "inventoryRefs": [
             "UI-016"
           ],
-          "status": "browser",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/organization-switcher-browser.test.ts",
               "name": "exposes the org name in accessibility snapshots and passes axe at %spx",
               "kind": "browser"
+            },
+            {
+              "file": "e2e/shell-menus.spec.ts",
+              "name": "mobile drawer opens modally, traps focus and closes by control, scrim, Escape and route selection",
+              "kind": "e2e"
             }
           ]
         }
@@ -2400,7 +2776,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "untested",
+      "status": "e2e",
       "auditEvidence": "UNTESTED",
       "auditNote": "project-section-navigation.test.ts tests setNav/syncNavAccess helpers; actual backdrop/Escape/focus traversal events remain uncovered",
       "edges": [
@@ -2412,8 +2788,19 @@
           "inventoryRefs": [
             "UI-017"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shell-menus.spec.ts",
+              "name": "mobile drawer opens modally, traps focus and closes by control, scrim, Escape and route selection",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/shell-menus.spec.ts",
+              "name": "resizing to desktop reconciles drawer inertness and modal semantics",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-017-E02",
@@ -2423,8 +2810,14 @@
           "inventoryRefs": [
             "M10"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shell-menus.spec.ts",
+              "name": "mobile drawer opens modally, traps focus and closes by control, scrim, Escape and route selection",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-017-E03",
@@ -2434,8 +2827,14 @@
           "inventoryRefs": [
             "M10"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shell-menus.spec.ts",
+              "name": "mobile drawer opens modally, traps focus and closes by control, scrim, Escape and route selection",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-017-E04",
@@ -2445,8 +2844,14 @@
           "inventoryRefs": [
             "M10"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shell-menus.spec.ts",
+              "name": "mobile drawer opens modally, traps focus and closes by control, scrim, Escape and route selection",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-017-E05",
@@ -2456,8 +2861,14 @@
           "inventoryRefs": [
             "M10"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shell-menus.spec.ts",
+              "name": "resizing to desktop reconciles drawer inertness and modal semantics",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-017-E06",
@@ -2467,8 +2878,14 @@
           "inventoryRefs": [
             "M10"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shell-menus.spec.ts",
+              "name": "mobile drawer opens modally, traps focus and closes by control, scrim, Escape and route selection",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-017-E07",
@@ -2478,8 +2895,14 @@
           "inventoryRefs": [
             "M10"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shell-menus.spec.ts",
+              "name": "mobile drawer opens modally, traps focus and closes by control, scrim, Escape and route selection",
+              "kind": "e2e"
+            }
+          ]
         }
       ]
     },
@@ -2523,7 +2946,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "untested",
+      "status": "e2e",
       "auditEvidence": "UNTESTED",
       "auditNote": "management-control-consistency.test.ts asserts CSS; no menu interaction journey",
       "edges": [
@@ -2535,8 +2958,14 @@
           "inventoryRefs": [
             "UI-018"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shell-menus.spec.ts",
+              "name": "account menu toggles, dismisses and launches account security at both viewports",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-018-E02",
@@ -2546,8 +2975,14 @@
           "inventoryRefs": [
             "M12"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shell-menus.spec.ts",
+              "name": "account menu toggles, dismisses and launches account security at both viewports",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-018-E03",
@@ -2557,8 +2992,14 @@
           "inventoryRefs": [
             "M12"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shell-menus.spec.ts",
+              "name": "account menu toggles, dismisses and launches account security at both viewports",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-018-E04",
@@ -2568,8 +3009,14 @@
           "inventoryRefs": [
             "M12"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shell-menus.spec.ts",
+              "name": "opening the organization switcher closes the account menu and sign-out elsewhere closes overlays",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-018-E05",
@@ -2579,8 +3026,14 @@
           "inventoryRefs": [
             "M12"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shell-menus.spec.ts",
+              "name": "opening the organization switcher closes the account menu and sign-out elsewhere closes overlays",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-018-E06",
@@ -2590,8 +3043,14 @@
           "inventoryRefs": [
             "M12"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shell-menus.spec.ts",
+              "name": "account menu toggles, dismisses and launches account security at both viewports",
+              "kind": "e2e"
+            }
+          ]
         }
       ]
     },
@@ -2636,7 +3095,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "browser",
+      "status": "e2e",
       "auditEvidence": "U",
       "auditNote": "management-ui-polish.test.ts",
       "edges": [
@@ -2648,8 +3107,14 @@
           "inventoryRefs": [
             "UI-019"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shell-dialogs.spec.ts",
+              "name": "shared confirmation inserts text safely, defaults to Cancel and restores focus on Escape, Cancel and backdrop",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-019-E02",
@@ -2659,8 +3124,19 @@
           "inventoryRefs": [
             "G08"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shell-dialogs.spec.ts",
+              "name": "shared confirmation inserts text safely, defaults to Cancel and restores focus on Escape, Cancel and backdrop",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/shell-dialogs.spec.ts",
+              "name": "a second confirmation cancels the first and a missing modal API falls back to a native prompt",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-019-E03",
@@ -2670,12 +3146,17 @@
           "inventoryRefs": [
             "UI-019"
           ],
-          "status": "unit",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/management-ui-polish.test.ts",
               "name": "resolves false on Escape, true on accept, and returns focus to the trigger",
               "kind": "unit"
+            },
+            {
+              "file": "e2e/shell-dialogs.spec.ts",
+              "name": "shared confirmation inserts text safely, defaults to Cancel and restores focus on Escape, Cancel and backdrop",
+              "kind": "e2e"
             }
           ]
         },
@@ -2687,12 +3168,17 @@
           "inventoryRefs": [
             "UI-019"
           ],
-          "status": "browser",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/management-dialog-reuse-browser.test.ts",
               "name": "shared destructive confirmation can cancel, escape and confirm repeatedly without retaining busy state",
               "kind": "browser"
+            },
+            {
+              "file": "e2e/shell-dialogs.spec.ts",
+              "name": "shared confirmation accepts, reuses one dialog across pages and shows stacked toasts that expire",
+              "kind": "e2e"
             }
           ]
         }
@@ -2738,7 +3224,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "browser",
+      "status": "e2e",
       "auditEvidence": "UNTESTED",
       "auditNote": "control-plane-ui.test.ts checks close-button styles; mutation tests cover selected paths only",
       "edges": [
@@ -2750,8 +3236,14 @@
           "inventoryRefs": [
             "UI-020"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shell-dialogs.spec.ts",
+              "name": "form dialogs contain focus and close by Close, Cancel, Escape and backdrop at both viewports",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-020-E02",
@@ -2761,12 +3253,22 @@
           "inventoryRefs": [
             "G09"
           ],
-          "status": "browser",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/management-dialog-reuse-browser.test.ts",
               "name": "$name resets after success and can reopen and submit exactly once again",
               "kind": "browser"
+            },
+            {
+              "file": "e2e/shell-dialogs.spec.ts",
+              "name": "form dialogs contain focus and close by Close, Cancel, Escape and backdrop at both viewports",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/shell-dialogs.spec.ts",
+              "name": "a pending write blocks every dismissal and a failed write keeps the entered values for retry",
+              "kind": "e2e"
             }
           ]
         },
@@ -2778,8 +3280,14 @@
           "inventoryRefs": [
             "G09"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shell-dialogs.spec.ts",
+              "name": "form dialogs contain focus and close by Close, Cancel, Escape and backdrop at both viewports",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-020-E04",
@@ -2789,8 +3297,14 @@
           "inventoryRefs": [
             "G09"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shell-dialogs.spec.ts",
+              "name": "form dialogs contain focus and close by Close, Cancel, Escape and backdrop at both viewports",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-020-E05",
@@ -2800,12 +3314,17 @@
           "inventoryRefs": [
             "G09"
           ],
-          "status": "browser",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/management-dialog-reuse-browser.test.ts",
               "name": "$name blocks Cancel and Escape while pending, restores drafts after denial, and retries",
               "kind": "browser"
+            },
+            {
+              "file": "e2e/shell-dialogs.spec.ts",
+              "name": "a pending write blocks every dismissal and a failed write keeps the entered values for retry",
+              "kind": "e2e"
             }
           ]
         },
@@ -2817,12 +3336,17 @@
           "inventoryRefs": [
             "G09"
           ],
-          "status": "browser",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/management-dialog-reuse-browser.test.ts",
               "name": "$name blocks Cancel and Escape while pending, restores drafts after denial, and retries",
               "kind": "browser"
+            },
+            {
+              "file": "e2e/shell-dialogs.spec.ts",
+              "name": "a pending write blocks every dismissal and a failed write keeps the entered values for retry",
+              "kind": "e2e"
             }
           ]
         },
@@ -2834,12 +3358,17 @@
           "inventoryRefs": [
             "G09"
           ],
-          "status": "browser",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/management-dialog-reuse-browser.test.ts",
               "name": "$name resets after success and can reopen and submit exactly once again",
               "kind": "browser"
+            },
+            {
+              "file": "e2e/shell-dialogs.spec.ts",
+              "name": "a pending write blocks every dismissal and a failed write keeps the entered values for retry",
+              "kind": "e2e"
             }
           ]
         },
@@ -2851,8 +3380,14 @@
           "inventoryRefs": [
             "G09"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shell-dialogs.spec.ts",
+              "name": "form dialogs contain focus and close by Close, Cancel, Escape and backdrop at both viewports",
+              "kind": "e2e"
+            }
+          ]
         }
       ]
     },
@@ -2896,7 +3431,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "unit",
+      "status": "e2e",
       "auditEvidence": "U",
       "auditNote": "management-control-consistency.test.ts",
       "edges": [
@@ -2908,8 +3443,14 @@
           "inventoryRefs": [
             "UI-021"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shell-controls.spec.ts",
+              "name": "copy shows busy, Copied and then restores; repeats reset the timer and rejection recovers with guidance",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-021-E02",
@@ -2919,8 +3460,14 @@
           "inventoryRefs": [
             "G10"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shell-controls.spec.ts",
+              "name": "copy shows busy, Copied and then restores; repeats reset the timer and rejection recovers with guidance",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-021-E03",
@@ -2930,8 +3477,14 @@
           "inventoryRefs": [
             "G10"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shell-controls.spec.ts",
+              "name": "copy shows busy, Copied and then restores; repeats reset the timer and rejection recovers with guidance",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-021-E04",
@@ -2941,8 +3494,14 @@
           "inventoryRefs": [
             "G10"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shell-controls.spec.ts",
+              "name": "copy shows busy, Copied and then restores; repeats reset the timer and rejection recovers with guidance",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-021-E05",
@@ -2952,8 +3511,19 @@
           "inventoryRefs": [
             "G10"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shell-controls.spec.ts",
+              "name": "copy shows busy, Copied and then restores; repeats reset the timer and rejection recovers with guidance",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/shell-dialogs.spec.ts",
+              "name": "shared confirmation accepts, reuses one dialog across pages and shows stacked toasts that expire",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-021-E06",
@@ -2963,8 +3533,14 @@
           "inventoryRefs": [
             "G10"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shell-dialogs.spec.ts",
+              "name": "server error text is inserted as text, never as markup",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-021-E07",
@@ -2974,8 +3550,19 @@
           "inventoryRefs": [
             "G10"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shell-controls.spec.ts",
+              "name": "copy shows busy, Copied and then restores; repeats reset the timer and rejection recovers with guidance",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/shell-dialogs.spec.ts",
+              "name": "shared confirmation accepts, reuses one dialog across pages and shows stacked toasts that expire",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-021-E08",
@@ -2985,12 +3572,17 @@
           "inventoryRefs": [
             "UI-021"
           ],
-          "status": "unit",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/management-control-consistency.test.ts",
               "name": "keeps shared copy state coherent across success, repeats, and rejection",
               "kind": "unit"
+            },
+            {
+              "file": "e2e/shell-controls.spec.ts",
+              "name": "copy shows busy, Copied and then restores; repeats reset the timer and rejection recovers with guidance",
+              "kind": "e2e"
             }
           ]
         }
@@ -3036,7 +3628,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "unit",
+      "status": "e2e",
       "auditEvidence": "U",
       "auditNote": "shared-select.test.ts",
       "edges": [
@@ -3048,8 +3640,19 @@
           "inventoryRefs": [
             "UI-022"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shell-selects.spec.ts",
+              "name": "select keyboard, typeahead, Tab commit and Escape work inside a modal at 1440px",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/shell-selects.spec.ts",
+              "name": "select keyboard, typeahead, Tab commit and Escape work inside a modal at 375px",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-022-E02",
@@ -3059,8 +3662,19 @@
           "inventoryRefs": [
             "G06"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shell-selects.spec.ts",
+              "name": "select keyboard, typeahead, Tab commit and Escape work inside a modal at 1440px",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/shell-selects.spec.ts",
+              "name": "select keyboard, typeahead, Tab commit and Escape work inside a modal at 375px",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-022-E03",
@@ -3070,8 +3684,19 @@
           "inventoryRefs": [
             "G06"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shell-selects.spec.ts",
+              "name": "select keyboard, typeahead, Tab commit and Escape work inside a modal at 1440px",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/shell-selects.spec.ts",
+              "name": "select keyboard, typeahead, Tab commit and Escape work inside a modal at 375px",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-022-E04",
@@ -3081,8 +3706,19 @@
           "inventoryRefs": [
             "G06"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shell-selects.spec.ts",
+              "name": "select keyboard, typeahead, Tab commit and Escape work inside a modal at 1440px",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/shell-selects.spec.ts",
+              "name": "select keyboard, typeahead, Tab commit and Escape work inside a modal at 375px",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-022-E05",
@@ -3092,8 +3728,14 @@
           "inventoryRefs": [
             "G06"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shell-selects.spec.ts",
+              "name": "disabled options and groups are skipped, repeated letters cycle and native controls stay native",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-022-E06",
@@ -3103,8 +3745,19 @@
           "inventoryRefs": [
             "G06"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shell-selects.spec.ts",
+              "name": "select keyboard, typeahead, Tab commit and Escape work inside a modal at 1440px",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/shell-selects.spec.ts",
+              "name": "select keyboard, typeahead, Tab commit and Escape work inside a modal at 375px",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-022-E07",
@@ -3114,8 +3767,19 @@
           "inventoryRefs": [
             "G06"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shell-selects.spec.ts",
+              "name": "select keyboard, typeahead, Tab commit and Escape work inside a modal at 1440px",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/shell-selects.spec.ts",
+              "name": "select keyboard, typeahead, Tab commit and Escape work inside a modal at 375px",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-022-E08",
@@ -3125,8 +3789,19 @@
           "inventoryRefs": [
             "G06"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shell-selects.spec.ts",
+              "name": "select keyboard, typeahead, Tab commit and Escape work inside a modal at 1440px",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/shell-selects.spec.ts",
+              "name": "select keyboard, typeahead, Tab commit and Escape work inside a modal at 375px",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-022-E09",
@@ -3136,12 +3811,17 @@
           "inventoryRefs": [
             "UI-022"
           ],
-          "status": "unit",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/shared-select.test.ts",
               "name": "supports Home/End and skips disabled options",
               "kind": "unit"
+            },
+            {
+              "file": "e2e/shell-selects.spec.ts",
+              "name": "disabled options and groups are skipped, repeated letters cycle and native controls stay native",
+              "kind": "e2e"
             }
           ]
         },
@@ -3153,12 +3833,22 @@
           "inventoryRefs": [
             "UI-022"
           ],
-          "status": "unit",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/shared-select.test.ts",
               "name": "supports typeahead and commits on Tab without trapping focus",
               "kind": "unit"
+            },
+            {
+              "file": "e2e/shell-selects.spec.ts",
+              "name": "select keyboard, typeahead, Tab commit and Escape work inside a modal at 1440px",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/shell-selects.spec.ts",
+              "name": "select keyboard, typeahead, Tab commit and Escape work inside a modal at 375px",
+              "kind": "e2e"
             }
           ]
         },
@@ -3170,12 +3860,22 @@
           "inventoryRefs": [
             "UI-022"
           ],
-          "status": "unit",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/shared-select.test.ts",
               "name": "Escape cancels pending selection and doesn't escape into the enclosing dialog",
               "kind": "unit"
+            },
+            {
+              "file": "e2e/shell-selects.spec.ts",
+              "name": "select keyboard, typeahead, Tab commit and Escape work inside a modal at 1440px",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/shell-selects.spec.ts",
+              "name": "select keyboard, typeahead, Tab commit and Escape work inside a modal at 375px",
+              "kind": "e2e"
             }
           ]
         }
@@ -3221,7 +3921,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "unit",
+      "status": "e2e",
       "auditEvidence": "U",
       "auditNote": "shared-select.test.ts",
       "edges": [
@@ -3233,8 +3933,14 @@
           "inventoryRefs": [
             "UI-023"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shell-selects.spec.ts",
+              "name": "select reflects programmatic changes, async options, reset, validation and removal",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-023-E02",
@@ -3244,8 +3950,14 @@
           "inventoryRefs": [
             "G07"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shell-selects.spec.ts",
+              "name": "select reflects programmatic changes, async options, reset, validation and removal",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-023-E03",
@@ -3255,8 +3967,14 @@
           "inventoryRefs": [
             "G07"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shell-selects.spec.ts",
+              "name": "select reflects programmatic changes, async options, reset, validation and removal",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-023-E04",
@@ -3266,8 +3984,14 @@
           "inventoryRefs": [
             "G07"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shell-selects.spec.ts",
+              "name": "select reflects programmatic changes, async options, reset, validation and removal",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-023-E05",
@@ -3277,8 +4001,14 @@
           "inventoryRefs": [
             "G07"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shell-selects.spec.ts",
+              "name": "select reflects programmatic changes, async options, reset, validation and removal",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-023-E06",
@@ -3288,8 +4018,14 @@
           "inventoryRefs": [
             "G07"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shell-selects.spec.ts",
+              "name": "select reflects programmatic changes, async options, reset, validation and removal",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-023-E07",
@@ -3299,8 +4035,14 @@
           "inventoryRefs": [
             "G07"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shell-selects.spec.ts",
+              "name": "select reflects programmatic changes, async options, reset, validation and removal",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-023-E08",
@@ -3310,8 +4052,14 @@
           "inventoryRefs": [
             "G07"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shell-selects.spec.ts",
+              "name": "disabled options and groups are skipped, repeated letters cycle and native controls stay native",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-023-E09",
@@ -3321,12 +4069,17 @@
           "inventoryRefs": [
             "UI-023"
           ],
-          "status": "unit",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/shared-select.test.ts",
               "name": "supports async options and native form reset",
               "kind": "unit"
+            },
+            {
+              "file": "e2e/shell-selects.spec.ts",
+              "name": "select reflects programmatic changes, async options, reset, validation and removal",
+              "kind": "e2e"
             }
           ]
         },
@@ -3338,12 +4091,17 @@
           "inventoryRefs": [
             "UI-023"
           ],
-          "status": "unit",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/shared-select.test.ts",
               "name": "routes native required validation to the visible trigger",
               "kind": "unit"
+            },
+            {
+              "file": "e2e/shell-selects.spec.ts",
+              "name": "select reflects programmatic changes, async options, reset, validation and removal",
+              "kind": "e2e"
             }
           ]
         }
@@ -3389,7 +4147,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "untested",
+      "status": "e2e",
       "auditEvidence": "UNTESTED",
       "auditNote": "control-plane.ts toast runtime; static styles and mock calls do not prove lifecycle",
       "edges": [
@@ -3401,8 +4159,19 @@
           "inventoryRefs": [
             "UI-024"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shell-dialogs.spec.ts",
+              "name": "shared confirmation accepts, reuses one dialog across pages and shows stacked toasts that expire",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/shell-controls.spec.ts",
+              "name": "copy shows busy, Copied and then restores; repeats reset the timer and rejection recovers with guidance",
+              "kind": "e2e"
+            }
+          ]
         }
       ]
     },
@@ -3446,7 +4215,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "unit",
+      "status": "e2e",
       "auditEvidence": "U",
       "auditNote": "project-section-navigation.test.ts: mobile navigation access (VM helper test)",
       "edges": [
@@ -3458,8 +4227,19 @@
           "inventoryRefs": [
             "UI-149"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shell-menus.spec.ts",
+              "name": "mobile drawer opens modally, traps focus and closes by control, scrim, Escape and route selection",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/shell-menus.spec.ts",
+              "name": "resizing to desktop reconciles drawer inertness and modal semantics",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-149-E02",
@@ -3469,12 +4249,17 @@
           "inventoryRefs": [
             "UI-149"
           ],
-          "status": "unit",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/project-section-navigation.test.ts",
               "name": "contains background focus while open, restores the trigger on close, and releases desktop content",
               "kind": "unit"
+            },
+            {
+              "file": "e2e/shell-menus.spec.ts",
+              "name": "mobile drawer opens modally, traps focus and closes by control, scrim, Escape and route selection",
+              "kind": "e2e"
             }
           ]
         }
@@ -3542,7 +4327,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "unit",
+      "status": "e2e",
       "auditEvidence": "U",
       "auditNote": "theme-runtime.test.ts; landing-theme-navigation.test.ts",
       "edges": [
@@ -3554,8 +4339,19 @@
           "inventoryRefs": [
             "UI-025"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shell-theme.spec.ts",
+              "name": "theme initializes before paint and cycles system, dark, light, system at 1440",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/shell-theme.spec.ts",
+              "name": "theme initializes before paint and cycles system, dark, light, system at 375",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-025-E02",
@@ -3565,8 +4361,24 @@
           "inventoryRefs": [
             "G01"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shell-theme.spec.ts",
+              "name": "theme initializes before paint and cycles system, dark, light, system at 1440",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/shell-theme.spec.ts",
+              "name": "theme initializes before paint and cycles system, dark, light, system at 375",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/shell-theme.spec.ts",
+              "name": "unavailable preference storage keeps the control usable and the latest theme follows navigation",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-025-E03",
@@ -3576,8 +4388,19 @@
           "inventoryRefs": [
             "G01"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shell-theme.spec.ts",
+              "name": "theme initializes before paint and cycles system, dark, light, system at 1440",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/shell-theme.spec.ts",
+              "name": "theme initializes before paint and cycles system, dark, light, system at 375",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-025-E04",
@@ -3587,8 +4410,19 @@
           "inventoryRefs": [
             "G01"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shell-theme.spec.ts",
+              "name": "theme initializes before paint and cycles system, dark, light, system at 1440",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/shell-theme.spec.ts",
+              "name": "theme initializes before paint and cycles system, dark, light, system at 375",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-025-E05",
@@ -3598,12 +4432,22 @@
           "inventoryRefs": [
             "UI-025"
           ],
-          "status": "unit",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/theme-runtime.test.ts",
               "name": "applies the saved/system theme before mount and cycles system → dark → light",
               "kind": "unit"
+            },
+            {
+              "file": "e2e/shell-theme.spec.ts",
+              "name": "theme initializes before paint and cycles system, dark, light, system at 1440",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/shell-theme.spec.ts",
+              "name": "theme initializes before paint and cycles system, dark, light, system at 375",
+              "kind": "e2e"
             }
           ]
         }
@@ -3671,7 +4515,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "unit",
+      "status": "e2e",
       "auditEvidence": "U",
       "auditNote": "theme-runtime.test.ts",
       "edges": [
@@ -3683,8 +4527,14 @@
           "inventoryRefs": [
             "UI-026"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shell-theme.spec.ts",
+              "name": "OS preference changes and another tab's choice synchronize mounted and passive pages",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-026-E02",
@@ -3694,12 +4544,17 @@
           "inventoryRefs": [
             "UI-026"
           ],
-          "status": "unit",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/theme-runtime.test.ts",
               "name": "keeps passive screens synchronized before a control mounts",
               "kind": "unit"
+            },
+            {
+              "file": "e2e/shell-theme.spec.ts",
+              "name": "OS preference changes and another tab's choice synchronize mounted and passive pages",
+              "kind": "e2e"
             }
           ]
         }
@@ -3767,7 +4622,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "unit",
+      "status": "e2e",
       "auditEvidence": "U",
       "auditNote": "theme-runtime.test.ts",
       "edges": [
@@ -3779,8 +4634,14 @@
           "inventoryRefs": [
             "UI-027"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shell-theme.spec.ts",
+              "name": "rapid switches keep the latest intent and animation failures or reduced motion switch directly",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-027-E02",
@@ -3790,8 +4651,19 @@
           "inventoryRefs": [
             "G02"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shell-theme.spec.ts",
+              "name": "theme initializes before paint and cycles system, dark, light, system at 1440",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/shell-theme.spec.ts",
+              "name": "theme initializes before paint and cycles system, dark, light, system at 375",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-027-E03",
@@ -3801,8 +4673,19 @@
           "inventoryRefs": [
             "G02"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shell-theme.spec.ts",
+              "name": "theme initializes before paint and cycles system, dark, light, system at 1440",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/shell-theme.spec.ts",
+              "name": "theme initializes before paint and cycles system, dark, light, system at 375",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-027-E04",
@@ -3823,8 +4706,14 @@
           "inventoryRefs": [
             "G02"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shell-theme.spec.ts",
+              "name": "rapid switches keep the latest intent and animation failures or reduced motion switch directly",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-027-E06",
@@ -3834,8 +4723,14 @@
           "inventoryRefs": [
             "G02"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shell-theme.spec.ts",
+              "name": "rapid switches keep the latest intent and animation failures or reduced motion switch directly",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-027-E07",
@@ -3845,8 +4740,14 @@
           "inventoryRefs": [
             "G02"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shell-theme.spec.ts",
+              "name": "rapid switches keep the latest intent and animation failures or reduced motion switch directly",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-027-E08",
@@ -3856,8 +4757,14 @@
           "inventoryRefs": [
             "G02"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shell-theme.spec.ts",
+              "name": "rapid switches keep the latest intent and animation failures or reduced motion switch directly",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-027-E09",
@@ -3867,12 +4774,17 @@
           "inventoryRefs": [
             "UI-027"
           ],
-          "status": "unit",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/theme-runtime.test.ts",
               "name": "cycles intended modes before asynchronous snapshots and recovers from animation failure",
               "kind": "unit"
+            },
+            {
+              "file": "e2e/shell-theme.spec.ts",
+              "name": "rapid switches keep the latest intent and animation failures or reduced motion switch directly",
+              "kind": "e2e"
             }
           ]
         }
@@ -3940,7 +4852,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "unit",
+      "status": "e2e",
       "auditEvidence": "U",
       "auditNote": "theme-runtime.test.ts; landing-theme-navigation.test.ts",
       "edges": [
@@ -3952,8 +4864,14 @@
           "inventoryRefs": [
             "UI-028"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shell-theme.spec.ts",
+              "name": "unavailable preference storage keeps the control usable and the latest theme follows navigation",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-028-E02",
@@ -3963,12 +4881,17 @@
           "inventoryRefs": [
             "UI-028"
           ],
-          "status": "unit",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/theme-runtime.test.ts",
               "name": "keeps theme controls usable when preference storage is unavailable",
               "kind": "unit"
+            },
+            {
+              "file": "e2e/shell-theme.spec.ts",
+              "name": "unavailable preference storage keeps the control usable and the latest theme follows navigation",
+              "kind": "e2e"
             }
           ]
         }
@@ -4597,7 +5520,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "unit",
+      "status": "e2e",
       "auditEvidence": "U",
       "auditNote": "organization-switcher.test.ts; organization-browsing.test.ts",
       "edges": [
@@ -4609,8 +5532,19 @@
           "inventoryRefs": [
             "UI-034"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shell-menus.spec.ts",
+              "name": "switcher upgrades to a lazily loaded menu, marks the current organization and reopens from cache at 1440",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/shell-menus.spec.ts",
+              "name": "switcher upgrades to a lazily loaded menu, marks the current organization and reopens from cache at 375",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-034-E02",
@@ -4620,12 +5554,22 @@
           "inventoryRefs": [
             "UI-034"
           ],
-          "status": "unit",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/organization-switcher.test.ts",
               "name": "opens locally, loads on demand and marks the current organization",
               "kind": "unit"
+            },
+            {
+              "file": "e2e/shell-menus.spec.ts",
+              "name": "switcher upgrades to a lazily loaded menu, marks the current organization and reopens from cache at 1440",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/shell-menus.spec.ts",
+              "name": "switcher upgrades to a lazily loaded menu, marks the current organization and reopens from cache at 375",
+              "kind": "e2e"
             }
           ]
         },
@@ -4688,7 +5632,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "unit",
+      "status": "e2e",
       "auditEvidence": "U",
       "auditNote": "organization-switcher.test.ts",
       "edges": [
@@ -4700,8 +5644,14 @@
           "inventoryRefs": [
             "UI-035"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shell-menus.spec.ts",
+              "name": "switcher keyboard navigation, typeahead and dismissal paths",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-035-E02",
@@ -4711,8 +5661,24 @@
           "inventoryRefs": [
             "M13"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shell-navigation.spec.ts",
+              "name": "HTML-only management navigation completes with plain links",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/shell-menus.spec.ts",
+              "name": "switcher upgrades to a lazily loaded menu, marks the current organization and reopens from cache at 1440",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/shell-menus.spec.ts",
+              "name": "switcher upgrades to a lazily loaded menu, marks the current organization and reopens from cache at 375",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-035-E03",
@@ -4722,8 +5688,19 @@
           "inventoryRefs": [
             "M13"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shell-menus.spec.ts",
+              "name": "switcher upgrades to a lazily loaded menu, marks the current organization and reopens from cache at 1440",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/shell-menus.spec.ts",
+              "name": "switcher upgrades to a lazily loaded menu, marks the current organization and reopens from cache at 375",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-035-E04",
@@ -4733,8 +5710,19 @@
           "inventoryRefs": [
             "M13"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shell-menus.spec.ts",
+              "name": "switcher upgrades to a lazily loaded menu, marks the current organization and reopens from cache at 1440",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/shell-menus.spec.ts",
+              "name": "switcher upgrades to a lazily loaded menu, marks the current organization and reopens from cache at 375",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-035-E05",
@@ -4744,8 +5732,19 @@
           "inventoryRefs": [
             "M13"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shell-menus.spec.ts",
+              "name": "switcher optimistic label hands off across the full navigation and a failed load can be retried",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/shell-menus.spec.ts",
+              "name": "a late list response after close and reopen does not duplicate or replace the menu",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-035-E06",
@@ -4755,8 +5754,14 @@
           "inventoryRefs": [
             "M13"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shell-menus.spec.ts",
+              "name": "switcher keyboard navigation, typeahead and dismissal paths",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-035-E07",
@@ -4766,8 +5771,14 @@
           "inventoryRefs": [
             "M13"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shell-menus.spec.ts",
+              "name": "switcher keyboard navigation, typeahead and dismissal paths",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-035-E08",
@@ -4788,12 +5799,17 @@
           "inventoryRefs": [
             "UI-035"
           ],
-          "status": "unit",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/organization-switcher.test.ts",
               "name": "supports arrows, Home/End, typeahead, Space selection and Escape focus restoration",
               "kind": "unit"
+            },
+            {
+              "file": "e2e/shell-menus.spec.ts",
+              "name": "switcher keyboard navigation, typeahead and dismissal paths",
+              "kind": "e2e"
             }
           ]
         },
@@ -4805,12 +5821,17 @@
           "inventoryRefs": [
             "UI-035"
           ],
-          "status": "unit",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/organization-switcher.test.ts",
               "name": "dismisses on outside input, focus departure and route leave",
               "kind": "unit"
+            },
+            {
+              "file": "e2e/shell-menus.spec.ts",
+              "name": "switcher keyboard navigation, typeahead and dismissal paths",
+              "kind": "e2e"
             }
           ]
         }
@@ -4856,7 +5877,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "unit",
+      "status": "e2e",
       "auditEvidence": "U",
       "auditNote": "organization-switcher.test.ts",
       "edges": [
@@ -4868,8 +5889,19 @@
           "inventoryRefs": [
             "UI-036"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shell-menus.spec.ts",
+              "name": "switcher keyboard navigation, typeahead and dismissal paths",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/shell-menus.spec.ts",
+              "name": "switcher optimistic label hands off across the full navigation and a failed load can be retried",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-036-E02",
@@ -4879,8 +5911,14 @@
           "inventoryRefs": [
             "M14"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shell-menus.spec.ts",
+              "name": "switcher optimistic label hands off across the full navigation and a failed load can be retried",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-036-E03",
@@ -4890,8 +5928,19 @@
           "inventoryRefs": [
             "M14"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shell-menus.spec.ts",
+              "name": "switcher keyboard navigation, typeahead and dismissal paths",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/shell-menus.spec.ts",
+              "name": "switcher optimistic label hands off across the full navigation and a failed load can be retried",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-036-E04",
@@ -4901,8 +5950,14 @@
           "inventoryRefs": [
             "M14"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shell-menus.spec.ts",
+              "name": "switcher optimistic label hands off across the full navigation and a failed load can be retried",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-036-E05",
@@ -4912,8 +5967,14 @@
           "inventoryRefs": [
             "M14"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shell-menus.spec.ts",
+              "name": "switcher optimistic label hands off across the full navigation and a failed load can be retried",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-036-E06",
@@ -4923,8 +5984,14 @@
           "inventoryRefs": [
             "M14"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shell-navigation.spec.ts",
+              "name": "dirty settings ask once before leaving for another organization and roll back when declined",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-036-E07",
@@ -4945,12 +6012,17 @@
           "inventoryRefs": [
             "UI-036"
           ],
-          "status": "unit",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/organization-switcher.test.ts",
               "name": "rolls the optimistic label back when a route-leave guard blocks navigation",
               "kind": "unit"
+            },
+            {
+              "file": "e2e/shell-navigation.spec.ts",
+              "name": "dirty settings ask once before leaving for another organization and roll back when declined",
+              "kind": "e2e"
             }
           ]
         },
@@ -4962,12 +6034,17 @@
           "inventoryRefs": [
             "UI-036"
           ],
-          "status": "unit",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/organization-switcher.test.ts",
               "name": "ignores late responses after close or reopening",
               "kind": "unit"
+            },
+            {
+              "file": "e2e/shell-menus.spec.ts",
+              "name": "a late list response after close and reopen does not duplicate or replace the menu",
+              "kind": "e2e"
             }
           ]
         }
@@ -5013,7 +6090,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "unit",
+      "status": "e2e",
       "auditEvidence": "U",
       "auditNote": "organization-switcher.test.ts",
       "edges": [
@@ -5025,8 +6102,14 @@
           "inventoryRefs": [
             "UI-037"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shell-menus.spec.ts",
+              "name": "switcher optimistic label hands off across the full navigation and a failed load can be retried",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-037-E02",
@@ -5036,12 +6119,17 @@
           "inventoryRefs": [
             "UI-037"
           ],
-          "status": "unit",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/organization-switcher.test.ts",
               "name": "shows recoverable failures and delegates reopened reads to the shared requester",
               "kind": "unit"
+            },
+            {
+              "file": "e2e/shell-menus.spec.ts",
+              "name": "switcher optimistic label hands off across the full navigation and a failed load can be retried",
+              "kind": "e2e"
             }
           ]
         },
@@ -5053,12 +6141,27 @@
           "inventoryRefs": [
             "UI-037"
           ],
-          "status": "unit",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/organization-switcher.test.ts",
               "name": "handles empty membership and hostile names as text",
               "kind": "unit"
+            },
+            {
+              "file": "e2e/shell-menus.spec.ts",
+              "name": "switcher upgrades to a lazily loaded menu, marks the current organization and reopens from cache at 1440",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/shell-menus.spec.ts",
+              "name": "switcher upgrades to a lazily loaded menu, marks the current organization and reopens from cache at 375",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/shell-menus.spec.ts",
+              "name": "switcher optimistic label hands off across the full navigation and a failed load can be retried",
+              "kind": "e2e"
             }
           ]
         }
@@ -5104,7 +6207,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "browser",
+      "status": "e2e",
       "auditEvidence": "B",
       "auditNote": "organization-switcher-browser.test.ts",
       "edges": [
@@ -5116,8 +6219,19 @@
           "inventoryRefs": [
             "UI-038"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shell-menus.spec.ts",
+              "name": "switcher upgrades to a lazily loaded menu, marks the current organization and reopens from cache at 1440",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/shell-menus.spec.ts",
+              "name": "switcher upgrades to a lazily loaded menu, marks the current organization and reopens from cache at 375",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-038-E02",
@@ -5127,12 +6241,22 @@
           "inventoryRefs": [
             "UI-038"
           ],
-          "status": "browser",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/organization-switcher-browser.test.ts",
               "name": "exposes the org name in accessibility snapshots and passes axe at %spx",
               "kind": "browser"
+            },
+            {
+              "file": "e2e/shell-menus.spec.ts",
+              "name": "switcher upgrades to a lazily loaded menu, marks the current organization and reopens from cache at 1440",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/shell-menus.spec.ts",
+              "name": "switcher upgrades to a lazily loaded menu, marks the current organization and reopens from cache at 375",
+              "kind": "e2e"
             }
           ]
         }
@@ -17927,7 +19051,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "unit",
+      "status": "e2e",
       "auditEvidence": "NOT_IN_AUDIT",
       "auditNote": "Additional family from the modernization inventory/route ledger.",
       "edges": [
@@ -17970,8 +19094,14 @@
           "inventoryRefs": [
             "M08"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shell-navigation.spec.ts",
+              "name": "an open dialog, a pending write and a stale-data notice block departure and refresh",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-158-E05",
@@ -17981,8 +19111,14 @@
           "inventoryRefs": [
             "M08"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shell-navigation.spec.ts",
+              "name": "an open dialog, a pending write and a stale-data notice block departure and refresh",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-158-E06",
@@ -17992,8 +19128,14 @@
           "inventoryRefs": [
             "M08"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shell-navigation.spec.ts",
+              "name": "an open dialog, a pending write and a stale-data notice block departure and refresh",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-158-E07",
@@ -18014,8 +19156,19 @@
           "inventoryRefs": [
             "M15"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shell-menus.spec.ts",
+              "name": "switcher upgrades to a lazily loaded menu, marks the current organization and reopens from cache at 1440",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/shell-menus.spec.ts",
+              "name": "switcher upgrades to a lazily loaded menu, marks the current organization and reopens from cache at 375",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-158-E09",
@@ -18025,8 +19178,19 @@
           "inventoryRefs": [
             "M15"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shell-menus.spec.ts",
+              "name": "switcher upgrades to a lazily loaded menu, marks the current organization and reopens from cache at 1440",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/shell-menus.spec.ts",
+              "name": "switcher upgrades to a lazily loaded menu, marks the current organization and reopens from cache at 375",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-158-E10",
@@ -18047,8 +19211,19 @@
           "inventoryRefs": [
             "M15"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shell-menus.spec.ts",
+              "name": "switcher upgrades to a lazily loaded menu, marks the current organization and reopens from cache at 1440",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/shell-menus.spec.ts",
+              "name": "switcher upgrades to a lazily loaded menu, marks the current organization and reopens from cache at 375",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-158-E12",
@@ -18145,8 +19320,19 @@
           "trigger": "Hover, focus, press, validate, or submit",
           "expected": "Shared field and button interaction states",
           "inventoryRefs": [],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shell-controls.spec.ts",
+              "name": "controls expose hover, focus, pending, invalid states and target sizes at 1440",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/shell-controls.spec.ts",
+              "name": "controls expose hover, focus, pending, invalid states and target sizes at 375",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-159-E02",
@@ -18156,8 +19342,19 @@
           "inventoryRefs": [
             "G04"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shell-controls.spec.ts",
+              "name": "controls expose hover, focus, pending, invalid states and target sizes at 1440",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/shell-controls.spec.ts",
+              "name": "controls expose hover, focus, pending, invalid states and target sizes at 375",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-159-E03",
@@ -18189,8 +19386,19 @@
           "inventoryRefs": [
             "G04"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shell-controls.spec.ts",
+              "name": "controls expose hover, focus, pending, invalid states and target sizes at 1440",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/shell-controls.spec.ts",
+              "name": "controls expose hover, focus, pending, invalid states and target sizes at 375",
+              "kind": "e2e"
+            }
+          ]
         }
       ]
     },
@@ -18233,7 +19441,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "unit",
+      "status": "e2e",
       "auditEvidence": "NOT_IN_AUDIT",
       "auditNote": "Additional family from the modernization inventory/route ledger.",
       "edges": [
@@ -18243,8 +19451,19 @@
           "trigger": "Open, scroll, resize, click outside, or leave route",
           "expected": "Select popup positioning and dismissal",
           "inventoryRefs": [],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shell-selects.spec.ts",
+              "name": "select popup flips near the viewport edge, clamps to the right edge and repositions on resize",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/shell-selects.spec.ts",
+              "name": "select popup closes on outside pointer, scroll, blur, dialog close, route leave and sign-out",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-160-E02",
@@ -18254,8 +19473,14 @@
           "inventoryRefs": [
             "G05"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shell-selects.spec.ts",
+              "name": "select reflects programmatic changes, async options, reset, validation and removal",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-160-E03",
@@ -18265,8 +19490,19 @@
           "inventoryRefs": [
             "G05"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shell-selects.spec.ts",
+              "name": "select keyboard, typeahead, Tab commit and Escape work inside a modal at 1440px",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/shell-selects.spec.ts",
+              "name": "select keyboard, typeahead, Tab commit and Escape work inside a modal at 375px",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-160-E04",
@@ -18276,8 +19512,14 @@
           "inventoryRefs": [
             "G05"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shell-selects.spec.ts",
+              "name": "disabled options and groups are skipped, repeated letters cycle and native controls stay native",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-160-E05",
@@ -18287,8 +19529,14 @@
           "inventoryRefs": [
             "G05"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shell-selects.spec.ts",
+              "name": "disabled options and groups are skipped, repeated letters cycle and native controls stay native",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-160-E06",
@@ -18298,8 +19546,24 @@
           "inventoryRefs": [
             "G05"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shell-selects.spec.ts",
+              "name": "select popup flips near the viewport edge, clamps to the right edge and repositions on resize",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/shell-selects.spec.ts",
+              "name": "select keyboard, typeahead, Tab commit and Escape work inside a modal at 1440px",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/shell-selects.spec.ts",
+              "name": "select keyboard, typeahead, Tab commit and Escape work inside a modal at 375px",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-160-E07",
@@ -18309,8 +19573,14 @@
           "inventoryRefs": [
             "G05"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shell-selects.spec.ts",
+              "name": "select popup closes on outside pointer, scroll, blur, dialog close, route leave and sign-out",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-160-E08",
@@ -18320,8 +19590,14 @@
           "inventoryRefs": [
             "G05"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shell-selects.spec.ts",
+              "name": "select popup flips near the viewport edge, clamps to the right edge and repositions on resize",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-160-E09",
@@ -18329,12 +19605,17 @@
           "trigger": "Open, scroll, resize, click outside, or leave route",
           "expected": "Closes on outside pointer and route leave without changing the value",
           "inventoryRefs": [],
-          "status": "unit",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/shared-select.test.ts",
               "name": "closes on outside pointer and route leave without changing the value",
               "kind": "unit"
+            },
+            {
+              "file": "e2e/shell-selects.spec.ts",
+              "name": "select popup closes on outside pointer, scroll, blur, dialog close, route leave and sign-out",
+              "kind": "e2e"
             }
           ]
         }

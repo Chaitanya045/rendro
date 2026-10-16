@@ -27,6 +27,11 @@ export default tseslint.config(
     },
   },
   {
+    // Playwright specs interleave Node code with in-page DOM lookups, like the Vitest browser tests.
+    files: ["e2e/**/*.spec.ts"],
+    rules: { "@typescript-eslint/no-non-null-assertion": "off" },
+  },
+  {
     files: ["eslint.config.mjs"],
     extends: [tseslint.configs.disableTypeChecked],
   },
