@@ -121,9 +121,11 @@ describe("header organization switcher", () => {
     expect(html.indexOf("<script data-cp-org-label>")).toBeLessThan(html.indexOf('<script src="/select.js'));
     expect(html.indexOf("<script data-cp-org-label>")).toBeLessThan(html.indexOf('<script src="/management-query.js'));
   });
+  // Titles must be run-independent: the stability workflow diffs outcomes by test name.
   it.each([
-    { userId: "other" }, { organizationId: "other" }, { createdAt: 0 }, { createdAt: Date.now() + 120000 }, { name: "" }, { name: 42 }, { name: "a".repeat(257) },
-  ])("discards mismatched, stale or malformed navigation labels: %j", change => {
+    ["another user", { userId: "other" }], ["another organization", { organizationId: "other" }], ["expired", { createdAt: 0 }],
+    ["from the future", { createdAt: Date.now() + 120000 }], ["empty name", { name: "" }], ["numeric name", { name: 42 }], ["oversized name", { name: "a".repeat(257) }],
+  ])("discards mismatched, stale or malformed navigation labels: %s", (_label, change) => {
     const { win } = setup();
     win.sessionStorage.setItem("rendro-org-navigation-label", JSON.stringify({ userId: "u", organizationId: "org-b", name: "Beta", createdAt: Date.now(), ...change }));
     win.eval(renderOrganizationLabelBootstrap("u", "org-b"));

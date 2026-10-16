@@ -118,7 +118,23 @@ async function notFound(response: Response, requestedPath: string) {
 }
 
 const windows: Window[] = [];
-afterEach(async () => { vi.useRealTimers(); vi.unstubAllGlobals(); for (const win of windows.splice(0)) await win.happyDOM.close(); });
+// Controller requests still running when a test ends must finish before the
+// window closes; otherwise their continuations run against a destroyed DOM.
+const pendingRequests = new Set<Promise<unknown>>();
+async function settleRequests() {
+  // Each turn lets continuations (render, dependent requests) run before rechecking.
+  do {
+    await Promise.allSettled([...pendingRequests]);
+    await new Promise<void>(resolve => setTimeout(resolve, 0));
+  } while (pendingRequests.size);
+}
+afterEach(async () => {
+  vi.useRealTimers();
+  try { await settleRequests(); } finally {
+    vi.unstubAllGlobals();
+    for (const win of windows.splice(0)) await win.happyDOM.close();
+  }
+});
 
 describe.each(pages)("$name management page authorization", page => {
   it("resolves members once and makes all inaccessible IDs indistinguishable", async () => {
@@ -252,7 +268,12 @@ async function startBrowser(html: string, url: string, f: Awaited<ReturnType<typ
   windows.push(win);
   Object.assign(win, { AbortController, AbortSignal, structuredClone });
   win.document.write(html.replace(/<script\b([^>]*)>[\s\S]*?<\/script>/g, (tag, attrs: string) => attrs.includes('type="application/json"') ? tag : ""));
-  win.fetch = ((input: string, init?: RequestInit) => f.fetch(new URL(input, win.location.href), { ...init, headers: { ...Object.fromEntries(new Headers(init?.headers)), Cookie: f.cookie } })) as unknown as typeof win.fetch;
+  win.fetch = ((input: string, init?: RequestInit) => {
+    const request = f.fetch(new URL(input, win.location.href), { ...init, headers: { ...Object.fromEntries(new Headers(init?.headers)), Cookie: f.cookie } });
+    pendingRequests.add(request);
+    void request.finally(() => pendingRequests.delete(request)).catch(() => {});
+    return request;
+  }) as unknown as typeof win.fetch;
   for (const match of html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/g)) {
     if (match[1].includes('type="application/json"')) continue;
     // Model a streamed document pausing before its controller. Hydration must
@@ -262,7 +283,8 @@ async function startBrowser(html: string, url: string, f: Awaited<ReturnType<typ
     if (src === "/management-query.js" || src === "/select.js") win.eval(readFileSync(`public${src}`, "utf8"));
     else if (!src) win.eval(match[2]);
   }
-  for (let i = 0; i < 20; i++) await new Promise<void>(resolve => setTimeout(resolve, 5));
+  // Hydration is complete when the controller has no request in flight.
+  await settleRequests();
   return win;
 }
 

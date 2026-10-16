@@ -139,12 +139,6 @@
       "functions": 3,
       "lines": 5
     },
-    "src/commentor/recovery-session.ts": {
-      "statements": 0,
-      "branches": 1,
-      "functions": 0,
-      "lines": 0
-    },
     "src/lazy-tree/lazy-tree.ts": {
       "statements": 129,
       "branches": 129,
