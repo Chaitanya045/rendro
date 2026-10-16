@@ -20,17 +20,17 @@ this public file.
 | #79 | Isolation policy for every publisher-served file | critical | merged (#125) |
 | #80 | Origin checks on cookie-authenticated writes | high | merged (#127) |
 | #81 | Public resolver DTOs and provenance sanitization | high | merged (#123) |
-| #82 | Share scope limited to the shared document's assets | high | PR #141, round 4 |
+| #82 | Share scope limited to the shared document's assets | high | merged (#141) |
 | #83 | Organization deletion revokes keys, publications and shares | high | merged (#124) |
 | #84 | Retire legacy self-service and domain-derived auth; fail closed | high | merged (#136) |
 | #85 | Convex-authoritative commit and publication validation | medium | merged (#130) |
-| #86 | Admission budgets and body limits | medium | PR #142, round 2 |
+| #86 | Admission budgets and body limits | medium | merged (#142) |
 | #87 | Retention pagination, staging expiry, pin/purge race | medium | merged (#129) |
-| #88 | no-store on sensitive responses; log redaction | low | open |
+| #88 | no-store on sensitive responses; log redaction | low | merged (#150) |
 | #128 | Flaky viewer-fragments test | test | in progress |
 | #132 | CLI charset + sensitive-file skipping | bug | merged (#137) |
 | #133 | Invite dialog busy state + dialog audit | bug | merged (#135) |
-| #145 | Unchecked remember-me gets 7-day session | security bug | open (found by #111 E2E) |
+| #145 | Unchecked remember-me gets 7-day session | security bug | merged (#152), on dev |
 | #146 | Sign-up success leaves Google controls | bug | open (found by #111 E2E) |
 | #89 | Hardening: `__Host-` cookies, pinned Actions, strict CSP, CLI safeguards | hardening | open |
 
@@ -133,4 +133,5 @@ Use root-anchored patterns.
 - **2026-10-16:**
   - Widened coverage reached about 76% statements, 76% branches, 79% functions and 76% lines (from 66/65/71/68 at baseline), measured on PR #144's head.
   - Merged on `main`: #102 registry, #103 coverage gate, #108 workerd harness and #109 local Convex E2E.
-  - In progress: #104 Chromium coverage (determinism round) and #111 auth journeys.
+  - Also merged: #111 auth journeys (#144), #145 session lifetime (#152), #154 share/comment error UX (#155), #104 Chromium coverage (#143), #117 Convex coverage gaps (#156; all convex/ files at 100%), #91 read-only API-key auth (#158), #116 Worker coverage gaps (#163), #159 no clock in cached queries (#164), #110 shell/nav E2E (#160), #151 stability + per-engine E2E + nightly stability job (#166). With browser coverage merged, the CI coverage job measures 88.3% statements, 86.8% branches, 90.9% functions and 89.4% lines (head `9b902a9`).
+  - In progress: #118 batch A browser-bundle coverage, #165 self-hosted fonts. Filed: #157, #161, #162, #165.
