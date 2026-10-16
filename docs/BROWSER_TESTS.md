@@ -133,12 +133,65 @@ CI caches the verified backend archive and S3Proxy image layers as well as pnpm 
 The workflow jobs have no conditional opt-out or allowed failure. Repository
 branch protection must require the existing `verify`, `coverage`, and `e2e` checks.
 
-The next slices extend this foundation: #110 shell,
-navigation, menus, dialogs and selects; #111 authentication and account recovery;
-#112 organizations, onboarding, people/invitations and teams; #113 projects,
+The remaining slices extend this foundation: #110 shell,
+navigation, menus, dialogs and selects; #112 organizations, onboarding, people/invitations and teams; #113 projects,
 deployments, API keys, shares and publications; #114 document tree/viewer/link
 confirmation; #115 comments and recovery. The transition registry's `e2e` status still requires edge-specific assertions;
 this baseline does not promote all those journeys to complete E2E coverage.
+
+## Authentication journeys (#111)
+
+`e2e/auth.spec.ts` extends the real-stack suite with signup and verification mail,
+neutral duplicate/recovery responses, browser validation/focus/reveal, pending
+submission exclusion, the production sign-in limiter, remember-me session/cookie
+lifetimes, safe return destinations, password reset and change, initial-password
+freshness, method-load retry, Google linking/callback errors, and sign-out across
+contexts, tabs and history. Tests project session reads to non-secret identity
+and lifetime metadata, and check backend record removal after revocation.
+The original signup mail is captured before any later verification message and
+followed through explicit sign-in to its query-bearing return destination. A
+separate account tests resend delivery and neutral eligible/ineligible responses.
+Reset mismatch asserts zero reset requests, with one request after correction.
+Sign-out checks that the retained protected containers are hidden and their shell
+is inert in both tabs before navigation; protected inputs cannot regain focus.
+The return-destination journey waits for method loading to finish before clicking
+Sign out, since the loaded password form moves that control.
+
+The complete three-engine suite has a 20-minute bound (30 minutes for the CI
+job including installation); individual auth journeys have a 60-second bound.
+Each test/context has a deterministic synthetic ingress address. The limiter
+case actually exhausts the configured five-attempt window; production limits
+remain enabled. Transport-failure tests hold individual browser requests and
+return a deliberate 503. Method-load and Google-link cases then retry against
+the real backend. The OAuth fixture
+supports per-authorization identities, denial and mismatched state while keeping
+the real callback, single-use code, PKCE and token exchange.
+
+A mode-0600 file in the run's private directory gives the test helper access to
+that exact loopback backend's component adapter. It changes only disposable
+session creation/expiry and reset-token expiry timestamps. It is never copied
+into the worktree, exposed to browser JavaScript or supplied to a shared backend.
+No production auth option or Convex source changes are needed for these cases.
+
+Real back/forward traversal checks that signed-out pages do not expose account
+content. Since browser routing can prevent native BFCache eligibility, an
+additional test explicitly dispatches a persisted `pageshow` event after backend
+revocation; it checks the restoration handler, not native cache admission.
+
+Expected failures name follow-up issues below. Their broken assertions receive
+no `e2e` registry credit; an unexpected pass fails the suite so the marker must
+be removed when the product is fixed.
+
+- **[#146](https://github.com/Chaitanya045/rendro/issues/146) (AUTH-111-01): signup alternatives remain visible after success.**
+  The Google button and divider get `hidden` attributes, but their `display:flex`
+  CSS overrides the browser's hidden styling. Both should disappear with the
+  credential form when the neutral verification confirmation is shown.
+- **[#145](https://github.com/Chaitanya045/rendro/issues/145) (AUTH-111-02): nonpersistent sessions gain the persistent lifetime.**
+  Unchecking Keep me signed in correctly creates a session-only browser cookie,
+  but the backend session is extended from the intended one-day lifetime to
+  approximately seven days on protected-page entry. Worker session lookups strip
+  the nonpersistent-session preference cookie. Preserve the shorter backend
+  lifetime as well as the browser cookie behavior.
 
 ## Vitest Chromium project
 
@@ -148,6 +201,11 @@ wait for exact target alignment across consecutive frames before another history
 action, so a transient position during native restoration is not treated as readiness. On Linux, use
 `CI=true taskset -c 0,1 pnpm test:browser` to reproduce a two-CPU budget (choose
 CPUs from `taskset -pc $$` if your container has a different allowed set).
+
+Activation-sensitive viewer checks send the unsolicited frame message and wait
+for its confirmation notice inside one passive CDP evaluation (`userGesture: false`).
+This prevents an intervening Playwright locator evaluation from granting a new
+activation before the message reaches the shell.
 
 Vitest discovers `tests/**/*-browser.test.ts` in the `browser` project and
 excludes those files from `unit`. Unit files retain their normal parallelism.

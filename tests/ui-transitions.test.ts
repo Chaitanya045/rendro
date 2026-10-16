@@ -15,11 +15,11 @@ const text = z.string().trim().min(1);
 const status = z.enum(["untested", "unit", "browser", "e2e"]);
 const route = z.string().regex(/^(GET|POST|PUT|PATCH|DELETE|OPTIONS|HEAD|ALL) \/\S*$/);
 const pointer = z.strictObject({
-  file: z.string().regex(/^tests\/[\w/-]+\.test\.ts$/),
+  file: z.string().regex(/^(tests\/[\w/-]+\.test\.ts|e2e\/[\w/-]+\.spec\.ts)$/),
   // For it.each, use the literal declaration template, including %s/$name.
   name: text,
   kind: z.enum(["unit", "browser", "e2e"]),
-});
+}).refine(value => value.file.startsWith("e2e/") === (value.kind === "e2e"));
 const edgeSchema = z.strictObject({
   id: z.string().regex(/^UI-\d{3}-E\d{2,}$/),
   from: text, trigger: text, expected: text,
@@ -66,6 +66,10 @@ const missingRoutes = (routes: { method: string; path: string }[]) =>
 function declarations(source: string) {
   const file = ts.createSourceFile("test.ts", source, ts.ScriptTarget.Latest, true);
   const found: string[] = [];
+  function expectsFailure(node: ts.Node): boolean {
+    if (ts.isCallExpression(node) && /^(test|it)\.fail$/.test(node.expression.getText(file))) return true;
+    return ts.forEachChild(node, expectsFailure) ?? false;
+  }
   function visit(node: ts.Node, disabled = false) {
     if (ts.isCallExpression(node)) {
       let root: ts.Expression = node.expression;
@@ -73,9 +77,9 @@ function declarations(source: string) {
       const callee = ts.isIdentifier(root) && ["it", "test", "describe"].includes(root.text) ? node.expression.getText(file) : "";
       const test = /^(it|test)(?:\b|\.)/.test(callee);
       const suite = /^describe(?:\b|\.)/.test(callee);
-      if ((test || suite) && /\.(skip|todo|only|skipIf|runIf)\b/.test(callee)) disabled = true;
+      if ((test || suite) && /\.(skip|todo|only|skipIf|runIf|fail)\b/.test(callee)) disabled = true;
       const title = node.arguments[0];
-      if (test && !disabled && title && ts.isStringLiteralLike(title) && node.arguments.some(arg => ts.isArrowFunction(arg) || ts.isFunctionExpression(arg))) {
+      if (test && !disabled && !expectsFailure(node) && title && ts.isStringLiteralLike(title) && node.arguments.some(arg => ts.isArrowFunction(arg) || ts.isFunctionExpression(arg))) {
         found.push(title.text);
       }
     }
@@ -97,6 +101,9 @@ describe("UI transition registry", () => {
     expect(schema.safeParse(invalid).success).toBe(false);
     expect(status.safeParse("covered").success).toBe(false);
     expect(pointer.safeParse({ file: "../missing.ts", name: "test", kind: "browser" }).success).toBe(false);
+    expect(pointer.safeParse({ file: "e2e/auth.spec.ts", name: "auth", kind: "e2e" }).success).toBe(true);
+    expect(pointer.safeParse({ file: "e2e/auth.spec.ts", name: "auth", kind: "unit" }).success).toBe(false);
+    expect(pointer.safeParse({ file: "tests/auth.test.ts", name: "auth", kind: "e2e" }).success).toBe(false);
   });
 
   it("keeps IDs unique and retains every family and route from both inventories", () => {
@@ -153,6 +160,8 @@ describe("UI transition registry", () => {
       describe.skip("disabled", () => { it("nested skip", () => {}); });
       it.skip("skipped", () => {}); it.todo("todo");
       it.skipIf(true)("conditional", () => {});
+      test("expected failure", () => { test.fail(true, "known issue"); });
+      test.fail("declared failure", () => {});
       test("exact name", () => {});
       it.each([1, 2])("case %s", () => {});
       describe("enabled", () => { it("nested", function() {}); });`;
@@ -187,7 +196,7 @@ describe("UI transition registry", () => {
         expect(report).toContain(`${tier}: ${registry.families.filter(family => family.status === tier).length}`);
       }
       expect(report).toContain("Audit baseline: 152 families (64 untested, 62 unit, 26 browser, 0 e2e)");
-      expect(report).toContain("All edges at browser/e2e: 0");
+      expect(report).toContain(`All edges at browser/e2e: ${registry.families.filter(family => family.edges.every(edge => ["browser", "e2e"].includes(edge.status))).length}`);
     } finally {
       log.mockRestore();
     }

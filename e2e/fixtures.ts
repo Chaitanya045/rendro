@@ -1,9 +1,10 @@
-import { test as base, expect } from "@playwright/test";
+import { createHash } from "node:crypto";
+import { test as base, expect, type BrowserContext } from "@playwright/test";
 import { readFile } from "node:fs/promises";
 import { localHttp } from "./backend";
 import type { Seed } from "./seed";
 
-type Checks = { networkGuard: void; cspViolations: string[]; seed: Seed };
+type Checks = { secondContext: BrowserContext; networkGuard: void; cspViolations: string[]; seed: Seed };
 
 export const test = base.extend<Checks>({
   // Playwright requires destructuring even when an option has no dependencies.
@@ -20,38 +21,19 @@ export const test = base.extend<Checks>({
     await use(JSON.parse(await readFile(path, "utf8")) as Seed);
   },
   networkGuard: [async ({ context, baseURL }, use, info) => {
-    // Distinct local ingress addresses keep each engine's real auth limits independent.
-    await context.setExtraHTTPHeaders({ "CF-Connecting-IP": `192.0.2.${10 + ["chromium", "firefox", "webkit"].indexOf(info.project.name)}` });
-    const unexpectedOrigins = new Set<string>();
-    await context.route("**/*", async route => {
-      const url = new URL(route.request().url());
-      if (url.origin === baseURL || url.origin === process.env.RENDRO_E2E_CONVEX) return route.continue();
-      if (url.origin === "https://accounts.google.com" && url.pathname === "/o/oauth2/v2/auth") {
-        const result = await localHttp(`${process.env.RENDRO_E2E_MAIL}/authorize${url.search}`);
-        if (result.status !== 200) throw new Error("Local OAuth authorization failed");
-        const { location } = JSON.parse(result.body) as { location: string };
-        // WebKit cannot fulfill an intercepted request with a 3xx response.
-        // Model the provider's completion page, retaining a real browser callback navigation.
-        return route.fulfill({ contentType: "text/html", body: `<!doctype html><title>Local OAuth fixture</title><script>location.replace(${JSON.stringify(location).replaceAll("<", "\\u003c")})</script>` });
-      }
-      // Fulfilled locally: no request reaches the font/CDN hosts.
-      if (url.origin === "https://fonts.googleapis.com") return route.fulfill({ contentType: "text/css", body: "" });
-      if (url.origin === "https://cdn.tailwindcss.com") return route.fulfill({ contentType: "text/javascript", body: "window.tailwind={}" });
-      unexpectedOrigins.add(url.origin);
-      return route.abort("blockedbyclient");
-    });
-    await context.routeWebSocket(/.*/, socket => {
-      if (new URL(socket.url()).origin === process.env.RENDRO_E2E_CONVEX?.replace("http:", "ws:")) {
-        socket.connectToServer();
-        return;
-      }
-      unexpectedOrigins.add(new URL(socket.url()).origin);
-      return socket.close();
-    });
+    const unexpectedOrigins = await guardContext(context, baseURL, `${info.testId}-${info.retry}`);
     try { await use(); } finally {
       expect([...unexpectedOrigins], "Unexpected external browser requests (blocked)").toEqual([]);
     }
   }, { auto: true }],
+  secondContext: async ({ browser, baseURL }, use, info) => {
+    const context = await browser.newContext({ baseURL, serviceWorkers: "block" });
+    const unexpectedOrigins = await guardContext(context, baseURL, `${info.testId}-${info.retry}-second`);
+    try { await use(context); } finally {
+      await context.close();
+      expect([...unexpectedOrigins], "Unexpected external secondary-context requests").toEqual([]);
+    }
+  },
   cspViolations: async ({ context, page }, use) => {
     const violations: string[] = [];
     await context.exposeBinding("recordCspViolation", (_source, value: string) => { violations.push(value); });
@@ -67,5 +49,38 @@ export const test = base.extend<Checks>({
     await use(violations);
   },
 });
+
+async function guardContext(context: BrowserContext, baseURL: string | undefined, testId: string) {
+  // Distinct ingress per test/context keeps real auth windows independent.
+  const ip = createHash("sha256").update(testId).digest();
+  await context.setExtraHTTPHeaders({ "CF-Connecting-IP": `198.18.${ip[0]}.${ip[1]}` });
+  const unexpectedOrigins = new Set<string>();
+  await context.route("**/*", async route => {
+    const url = new URL(route.request().url());
+    if (url.origin === baseURL || url.origin === process.env.RENDRO_E2E_CONVEX) return route.continue();
+    if (url.origin === "https://accounts.google.com" && url.pathname === "/o/oauth2/v2/auth") {
+      const result = await localHttp(`${process.env.RENDRO_E2E_MAIL}/authorize${url.search}`);
+      if (result.status !== 200) throw new Error("Local OAuth authorization failed");
+      const { location } = JSON.parse(result.body) as { location: string };
+      // WebKit cannot fulfill an intercepted request with a 3xx response.
+      // Model the provider's completion page, retaining a real browser callback navigation.
+      return route.fulfill({ contentType: "text/html", body: `<!doctype html><title>Local OAuth fixture</title><script>location.replace(${JSON.stringify(location).replaceAll("<", "\\u003c")})</script>` });
+    }
+    // Fulfilled locally: no request reaches the font/CDN hosts.
+    if (url.origin === "https://fonts.googleapis.com") return route.fulfill({ contentType: "text/css", body: "" });
+    if (url.origin === "https://cdn.tailwindcss.com") return route.fulfill({ contentType: "text/javascript", body: "window.tailwind={}" });
+    unexpectedOrigins.add(url.origin);
+    return route.abort("blockedbyclient");
+  });
+  await context.routeWebSocket(/.*/, socket => {
+    if (new URL(socket.url()).origin === process.env.RENDRO_E2E_CONVEX?.replace("http:", "ws:")) {
+      socket.connectToServer();
+      return;
+    }
+    unexpectedOrigins.add(new URL(socket.url()).origin);
+    return socket.close();
+  });
+  return unexpectedOrigins;
+}
 
 export { expect };

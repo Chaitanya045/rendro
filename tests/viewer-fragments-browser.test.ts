@@ -515,13 +515,31 @@ describe("viewer fragment navigation in Chromium", () => {
     const frame = await readyFrame(page);
     const initialUrl = page.url();
     const notice = page.locator("#document-navigation-notice");
-    // Drain setup's automation activation before sending an unsolicited request.
-    await page.waitForFunction(() => navigator.userActivation?.isActive !== true);
-    await frame.waitForFunction(() => {
-      if (navigator.userActivation?.isActive) return false;
-      parent.postMessage({ type: "doc-navigate", path: "guide/other.html", search: "?shown", fragment: "#section" }, location.origin);
-      return true;
-    });
+    // Keep sending and observing in one passive evaluation: a subsequent
+    // Playwright locator wait can grant activation before the message arrives.
+    const session = await page.context().newCDPSession(page);
+    try {
+      await browserStep("show unsolicited navigation notice without activation", async () => {
+        const { result, exceptionDetails } = await session.send("Runtime.evaluate", {
+          expression: `(async () => {
+            const waitFor = predicate => new Promise(resolve => {
+              const timer = setInterval(() => {
+                if (predicate()) { clearInterval(timer); resolve(); }
+              }, 25);
+            });
+            await waitFor(() => navigator.userActivation?.isActive !== true);
+            document.querySelector('#content-frame').contentWindow.postMessage({ type: 'fixture-navigate', search: '?shown' }, '*');
+            await waitFor(() => document.querySelector('#document-navigation-notice'));
+            return navigator.userActivation?.isActive === true;
+          })()`,
+          userGesture: false, returnByValue: true, awaitPromise: true,
+        });
+        expect(exceptionDetails).toBeUndefined();
+        expect(result.value).toBe(false);
+      });
+    } finally {
+      await session.detach();
+    }
     await notice.waitFor();
     await notice.getByRole("button", { name: "Dismiss", exact: true }).click();
     await frame.waitForFunction(() => {

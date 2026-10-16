@@ -11,7 +11,8 @@ export default defineConfig({
   retries: process.env.CI ? 1 : 0,
   failOnFlakyTests: !!process.env.CI,
   timeout: 30_000,
-  globalTimeout: 600_000,
+  // All three engines remain sequential as the auth/recovery matrix grows.
+  globalTimeout: 1_200_000,
   expect: { timeout: 10_000 },
   outputDir: "../test-results/e2e",
   reporter: [["list"], ["html", { outputFolder: "../playwright-report", open: "never" }]],
