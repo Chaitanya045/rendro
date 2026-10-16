@@ -15,7 +15,10 @@ beforeAll(async () => {
   const app = new Hono();
   app.get(base, c => c.html(renderScopedDocumentShell({ user: null, namespace: "org-a/project-a", title: "Docs", basePath: base,
     selectedPath: "index.html", shareConfig: { organizationId: "org-a", projectId: "project-a" },
-  }).replace('src="about:blank"', `src="${base}/files/index.html"`).replace('style="display:none"', 'style="display:block"').replace(/<script[^>]*src="\/lazy-tree.js[^>]*><\/script>/, `<script>window.RENDRO_CURRENT_DOC="org-a/project-a/index.html"</script><script src="/fixture.js"></script>`)));
+  }).replace('src="about:blank"', `src="${base}/files/index.html"`).replace('style="display:none"', 'style="display:block"')
+    // The tree script hides the placeholder when a document is selected; left in flow it pushes the frame below the viewport,
+    // where Chromium stops running the frame's animation frames and actionability checks never see it as stable.
+    .replace('class="main-placeholder"', 'class="main-placeholder" style="display:none"').replace(/<script[^>]*src="\/lazy-tree.js[^>]*><\/script>/, `<script>window.RENDRO_CURRENT_DOC="org-a/project-a/index.html"</script><script src="/fixture.js"></script>`)));
   app.get(`${base}/files/index.html`, c => c.html(`<!doctype html><html><body><p id="target">Comment target</p>
     <script>window.COMMENTOR={transport:"parent",organizationId:"org-a",projectId:"project-a",documentPath:"index.html",canWrite:true}</script>
     <script src="/commentor.js"></script></body></html>`));
