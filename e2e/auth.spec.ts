@@ -1,6 +1,7 @@
 import { test, expect } from "./fixtures";
 import { password } from "./seed";
 import { ageRecord, authRecord, holdRequest, login, mailFor, mailLink, oauthFixture, session, signout, signup, verifiedUser } from "./auth-helpers";
+import { localHttp } from "./backend";
 
 test.describe.configure({ timeout: 60_000 });
 
@@ -456,18 +457,138 @@ test("persisted pageshow checks the backend and hides a revoked account", async 
   expect(await session(page)).toBeNull();
 });
 
-// Issue #145 (AUTH-111-02): protected-page session reads extend a
-// nonpersistent session to the persistent lifetime. The cookie-only assertions
-// above remain independent so this marker cannot hide a cookie regression.
-test("nonpersistent session retains its short backend lifetime [AUTH-111-02]", async ({ page }) => {
+// Exercise fresh and cached protected reads, ticket-backed document assets, and
+// the server expiry boundary with the production Better Auth settings.
+test("nonpersistent session retains its short backend lifetime [AUTH-111-02]", async ({ page, context, seed }) => {
   await login(page, "owner@example.test", password, false);
   await expect(page).toHaveURL(/\/account\/security$/);
   const identity = await session(page);
   expect(identity?.email).toBe("owner@example.test");
-  const record = await authRecord<{ createdAt: number; expiresAt: number }>("findOne", {
-    model: "session", where: [{ field: "_id", value: identity?.sessionId }], select: ["createdAt", "expiresAt"],
+  if (!identity) throw new Error("Missing session");
+  const stored = () => authRecord<{ createdAt: number; expiresAt: number }>("findOne", {
+    model: "session", where: [{ field: "_id", value: identity.sessionId }], select: ["createdAt", "expiresAt"],
   });
-  expect(record).not.toBeNull();
-  test.fail(true, "#145 (AUTH-111-02): nonpersistent backend session is extended on protected-page entry");
-  expect(record.expiresAt - record.createdAt).toBeLessThanOrEqual(86400_000 + 1000);
+  const initial = await stored();
+  // Better Auth samples expiresAt and createdAt separately on the real clock.
+  expect(initial.expiresAt - initial.createdAt).toBeGreaterThan(86400_000 - 1000);
+  expect(initial.expiresAt - initial.createdAt).toBeLessThanOrEqual(86400_000);
+  const org = `/organizations/${seed.organizationId}`;
+  for (const path of [org, `${org}/projects`, `${org}/projects/${seed.projectId}/docs`, "/account/security"]) {
+    expect((await page.goto(path))?.status()).toBe(200);
+    await page.reload();
+    if (path.endsWith("/docs")) {
+      await expect(page.frameLocator("#content-frame").getByRole("heading", { name: "Publication from local storage" })).toBeVisible();
+    }
+    expect((await stored()).expiresAt).toBe(initial.expiresAt);
+  }
+  // The client preference is not authoritative, even when removed or forged.
+  for (const marker of [null, "true.invalid", "false"]) {
+    await context.clearCookies({ name: "better-auth.dont_remember" });
+    if (marker !== null) await context.addCookies([{ name: "better-auth.dont_remember", value: marker, url: page.url() }]);
+    // End on a fresh-identity page; the reloads below must not use cached identity.
+    for (const path of [org, `${org}/projects/${seed.projectId}/docs`, "/account/security"]) {
+      expect((await page.goto(path))?.status()).toBe(200);
+      if (path.endsWith("/docs")) await expect(page.frameLocator("#content-frame").getByRole("heading", { name: "Publication from local storage" })).toBeVisible();
+      expect((await session(page))?.sessionId).toBe(identity.sessionId);
+      expect((await stored()).expiresAt).toBe(initial.expiresAt);
+      expect((await context.cookies()).find(cookie => cookie.name.endsWith(".session_token"))?.expires).toBe(-1);
+    }
+  }
+  // Age only this disposable record to just before its one-day boundary.
+  const expiresAt = Date.now() + 60_000;
+  await ageRecord("session", "_id", identity.sessionId, { createdAt: expiresAt - 86400_000, expiresAt });
+  await page.reload();
+  expect((await session(page))?.sessionId).toBe(identity.sessionId);
+  expect((await stored()).expiresAt).toBe(expiresAt);
+  await ageRecord("session", "_id", identity.sessionId, { expiresAt: Date.now() - 1000 });
+  await page.reload();
+  await expect(page).toHaveURL(/\/sign-in\?returnTo=/);
+  expect(await session(page)).toBeNull();
 });
+
+// Sessions are cookie-only on the real Convex runtime and through the Worker: a
+// bearer session token neither authenticates nor refreshes/persists the session.
+test("bearer session tokens never extend a nonpersistent session [AUTH-111-02]", async ({ page, context, seed }) => {
+  await login(page, "owner@example.test", password, false);
+  await expect(page).toHaveURL(/\/account\/security$/);
+  const identity = await session(page);
+  if (!identity) throw new Error("Missing session");
+  const stored = () => authRecord<{ expiresAt: number; rememberMe: boolean }>("findOne", {
+    model: "session", where: [{ field: "_id", value: identity.sessionId }], select: ["expiresAt", "rememberMe"],
+  });
+  const initial = await stored();
+  expect(initial.rememberMe).toBe(false);
+  const token = (await context.cookies()).find(cookie => cookie.name.endsWith(".session_token"));
+  if (!token) throw new Error("Missing session cookie");
+  const cookie = `${token.name}=${token.value}`;
+  const authorization = `Bearer ${decodeURIComponent(token.value)}`;
+  for (const origin of [process.env.RENDRO_E2E_CONVEX_SITE, process.env.RENDRO_E2E_ORIGIN]) {
+    for (const path of ["/api/auth/get-session", "/api/auth/convex/token", "/api/auth/organization/list", "/api/auth/list-sessions", `/api/rendro/management/access?organizationId=${seed.organizationId}`]) {
+      for (const headers of [{ authorization }, { authorization, cookie }] as Record<string, string>[]) {
+        const label = `${origin === process.env.RENDRO_E2E_ORIGIN ? "worker" : "convex"} ${path} ${Object.keys(headers).join("+")}`;
+        const response = await localHttp(`${origin}${path}`, undefined, headers);
+        const sessionCookies = [response.headers["set-cookie"] ?? []].flat().filter(value => /^[^=]*\.session_token=/.test(value));
+        for (const value of sessionCookies) expect(value.replace(/; Max-Age=0(?=;|$)/i, ""), label).not.toMatch(/; (?:Max-Age|Expires)=/i);
+        const authenticated = response.status === 200 && response.body !== "null";
+        // Convex Rendro APIs treat Authorization as an API-key request, never a session.
+        const cookieAuthority = "cookie" in headers && (path.startsWith("/api/auth/") || origin === process.env.RENDRO_E2E_ORIGIN);
+        expect(authenticated, `${label}: ${response.status}`).toBe(cookieAuthority);
+        const current = await stored();
+        expect(current.expiresAt, label).toBe(initial.expiresAt);
+        expect(current.rememberMe, label).toBe(false);
+      }
+    }
+  }
+});
+
+test("remembered session refreshes to seven days on protected entry", async ({ page, context }) => {
+  await login(page, "owner@example.test");
+  await expect(page).toHaveURL(/\/account\/security$/);
+  const identity = await session(page);
+  if (!identity) throw new Error("Missing session");
+  const stored = () => authRecord<{ createdAt: number; expiresAt: number }>("findOne", {
+    model: "session", where: [{ field: "_id", value: identity.sessionId }], select: ["createdAt", "expiresAt"],
+  });
+  const initial = await stored();
+  expect(initial.expiresAt - initial.createdAt).toBeGreaterThan(7 * 86400_000 - 1000);
+  expect(initial.expiresAt - initial.createdAt).toBeLessThanOrEqual(7 * 86400_000);
+  const before = Date.now();
+  await ageRecord("session", "_id", identity.sessionId, {
+    createdAt: before - 2 * 86400_000, expiresAt: before + 5 * 86400_000,
+  });
+  await page.reload();
+  const refreshed = await stored();
+  expect(refreshed.expiresAt).toBeGreaterThanOrEqual(before + 7 * 86400_000);
+  expect(refreshed.expiresAt).toBeLessThanOrEqual(Date.now() + 7 * 86400_000);
+  expect((await session(page))?.sessionId).toBe(identity.sessionId);
+  expect((await context.cookies()).find(cookie => cookie.name.endsWith(".session_token"))?.expires).toBeGreaterThan(Date.now() / 1000);
+});
+
+for (const remember of [false, true]) {
+  test(`password rotation inherits session lifetime (remember=${remember})`, async ({ page, context }, info) => {
+    const email = `lifetime-${remember}-${info.project.name}-${info.retry}@example.test`;
+    await verifiedUser(page, email);
+    await login(page, email, password, remember);
+    await expect(page).toHaveURL(/\/account\/security$/);
+    const original = await session(page);
+    await context.clearCookies({ name: "better-auth.dont_remember" });
+    await page.locator("#currentPassword").fill(password);
+    await page.locator("#newPassword").fill(changedPassword);
+    await page.getByRole("button", { name: "Change password", exact: true }).click();
+    await expect(page.getByRole("status")).toHaveText("Password changed successfully.");
+    const replacement = await session(page);
+    if (!replacement) throw new Error("Missing replacement session");
+    expect(replacement.sessionId).not.toBe(original?.sessionId);
+    const stored = await authRecord<{ createdAt: number; expiresAt: number; rememberMe: boolean }>("findOne", {
+      model: "session", where: [{ field: "_id", value: replacement.sessionId }], select: ["createdAt", "expiresAt", "rememberMe"],
+    });
+    expect(stored.rememberMe).toBe(remember);
+    const duration = (remember ? 7 : 1) * 86400_000;
+    expect(stored.expiresAt - stored.createdAt).toBeGreaterThan(duration - 1000);
+    expect(stored.expiresAt - stored.createdAt).toBeLessThanOrEqual(duration);
+    const cookieExpiry = (await context.cookies()).find(cookie => cookie.name.endsWith(".session_token"))?.expires;
+    if (remember) expect(cookieExpiry).toBeGreaterThan(Date.now() / 1000);
+    else expect(cookieExpiry).toBe(-1);
+    expect(await authRecord("findOne", { model: "session", where: [{ field: "_id", value: original?.sessionId }], select: ["_id"] })).toBeNull();
+  });
+}

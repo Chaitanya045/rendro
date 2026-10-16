@@ -4,6 +4,7 @@ import { publicError } from "./publicErrors";
 import { ConvexError } from "convex/values";
 import type { DataModel } from "./_generated/dataModel";
 import { authComponent, createAuth } from "./auth";
+import { sessionCookieHeaders } from "./sessionLifetime";
 
 export type OrganizationRole = "owner" | "admin" | "member";
 
@@ -87,7 +88,7 @@ export async function httpOrganizationAccess(
 ) {
   try {
     const auth = createAuth(ctx);
-    const session = await auth.api.getSession({ headers });
+    const session = await auth.api.getSession({ headers: sessionCookieHeaders(headers) });
     if (!session) throw new ConvexError("Authentication required");
     await requireActiveOrganization(ctx, organizationId);
     const context = await auth.$context;

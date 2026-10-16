@@ -75,6 +75,50 @@ team rosters and onboarding credential replacement; these already inherit the
 management shell rule. Chromium coverage checks publication mode and role
 transitions as a regression control.
 
+Unchecked **Keep me signed in** creates a one-day, non-refreshing session and
+session-only cookies. Checked sign-in retains seven-day sessions with normal
+refresh after the update age. A non-client-writable `session.rememberMe` field is
+written with each new session by a Better Auth database create hook. The lifetime
+plugin replaces the internal `dont_remember` preference with the persisted choice
+before Better Auth handles HTTP or server API calls. It rebuilds the request
+Cookie header from Better Auth's own parser (`better-call`, pinned to Better
+Auth's exact version), drops every client variant of the marker, including
+prefixed and mixed-case names, and places the server-derived marker first.
+Missing, invalid, forged, replayed, or malformed client markers cannot change
+refresh or cookie persistence, including organization middleware, Worker reads,
+and viewer-ticket authorization. Only endpoints that never resolve the caller's
+session (`/ok`, `/error`, `/sign-out`, and Convex JWKS/OpenID discovery) skip
+the plugin; a test enumerates every Better Auth endpoint to keep that list
+exact. The plugin runs after the read limiters and reuses their resolved
+session; it does not bypass rate limits. Password changes that revoke sessions
+carry the authenticated session's choice into the replacement session and cookie.
+
+The one-day limit is also enforced where sessions are stored. Better Auth's
+database adapter is wrapped so every session write, including writes inside
+transactions, keeps a non-remembered session's `expiresAt` within one day of its
+`createdAt`, whatever request, header, or server call produced the write. A
+session's `createdAt` and `rememberMe` cannot be updated, and bulk or counter
+writes to session lifetime fields are refused. Shortening an expiry is always
+allowed.
+
+Better Auth sessions are cookie-only. Convex removes `Authorization` before
+Better Auth handles `/api/auth/*` (the Worker already omits it there), so the
+`bearer` hook bundled with the Convex plugin never resolves a session.
+Server-side session reads (`httpOrganizationAccess` and the initial-password
+route) pass only the Cookie header. They pass no credentials when the request
+has an `Authorization` header: such a request asked for API-key authority and
+does not fall back to the browser session. The CLI uses API keys on
+`/api/rendro/*` only. The Convex plugin's 15-minute `convex_jwt` cookie keeps its
+Max-Age for non-remembered users. This is accepted: it is a short-lived access
+token minted from a live session, not a session. It expires within 15 minutes
+and cannot refresh or extend the session.
+
+Existing records without metadata use their stored duration to retain their
+current lifetime; already extended legacy records are not shortened because the
+original choice cannot be recovered. New records always carry explicit metadata.
+Worker cache keys and eviction still use only the token, and cache hits never
+extend backend expiry.
+
 ### Google OAuth flow
 
 ```
@@ -98,7 +142,7 @@ transitions as a regression control.
 
 The TTL is **at most 15 seconds**, capped by session expiry and measured from the start of the lookup; hits never extend it. Numeric/ISO expiry is normalized and checked before caching. **Cached identity may be ≤15 seconds old**, including revocations handled by another isolate or directly by Convex. Caching is restricted to scoped organization/project pages and invitations, whose downstream authorization checks read live session and membership state. All other routes use fresh identity: this includes landing, sign-in, sign-up (Get started), account pages, and legacy document/publication/storage routes. Redirects away from authentication pages never use a cached or coalesced identity. There is no stale-on-error fallback after that deadline. Sign-out evicts the cookie in the handling isolate before and after forwarding, including failed forwarding. Other Worker auth operations that can revoke sessions (single/all/other-session revocation, password changes/resets, account deletion) evict the caller before and after forwarding and clear the isolate cache on successful mutation, because they may target sessions other than the caller's. Rejected/anonymous calls do not flush other users' entries. Eviction also prevents earlier in-flight reads from repopulating the cache. Authoritative session and membership denials also evict the presented cookie before being translated into redirects or opaque 404s; direct Better Auth missing-session responses evict as well. This is not a distributed invalidation guarantee: other isolates expire naturally within the TTL, but authentication redirects still independently revalidate there. Document/ticket and management authorization still freshly reads persisted session/membership/project access in Convex, so those checks can deny a revoked session immediately even during the identity-cache interval.
 
-Requests under `/api/auth/` and `/api/rendro/` skip the lookup; Convex authorizes those calls itself. Retired `/api/sync/` requests also skip it and return 410. Ticketed viewer assets (`…/docs/view/:ticket/files/*`) also skip this redundant Worker lookup, even if cookies accompany the request: their ticket is decrypted and its session/membership/project access is freshly revalidated by Convex on every request. Only session-token cookies are forwarded for Worker session and viewer authorization reads; unused `session_data` cookies (including secure/chunked variants) cannot poison these reads.
+Requests under `/api/auth/` and `/api/rendro/` skip the lookup; Convex authorizes those calls itself. Retired `/api/sync/` requests also skip it and return 410. Ticketed viewer assets (`…/docs/view/:ticket/files/*`) also skip this redundant Worker lookup, even if cookies accompany the request: their ticket is decrypted and its session/membership/project access is freshly revalidated by Convex on every request. Session-token cookies and legacy `dont_remember` markers are forwarded for Worker session and viewer authorization reads; Convex replaces the marker with the server-side session choice; unused `session_data` cookies (including secure/chunked variants) cannot poison these reads.
 
 HTTP `/get-session` reads use atomic fixed 60-second windows in the Better Auth component's existing rate-limit table. The primary limit is 600 reads per window, keyed by `session-read:` plus SHA-256 of the decoded token, **only after verifying the exact configured session-token cookie's HMAC and finding its active persisted session**. Unknown, expired, unsigned, or non-session values (including renamed signed OAuth-state cookies) share a 120-read verified-IP fallback. Raw tokens and client-supplied identifiers are never stored as rate-limit keys; valid sessions retain their bucket across IP changes and alternate cookie encodings. A separate 6,000-read verified-IP backstop runs before session resolution, providing capacity for ten sessions at the full 600-read allowance (many more at cached browsing rates). Direct unverified callers share `no-trusted-ip`. Each bucket's start time stays fixed during the window; accepted and rejected traffic cannot delay replenishment, and `Retry-After` reports time until reset. Better Auth's inactivity-based limiter is disabled for this endpoint and the selected organization GETs described below; credential/reset/verification limits and exact-path verifier exemptions are unchanged.
 
@@ -883,7 +927,7 @@ The project iframe remains an **opaque-origin sandbox**, both in the shell attri
 
 The server uses a dedicated parser-based streaming injector to establish the ticket `<base>` before publisher resources, including documents with an implicit head, omitted head/body tags, or a doctype/comment prelude. The cosmetic head injector keeps its existing behavior. It points at `…/docs/view/<ticket>/files/<document-path>`. Relative stylesheets, images, scripts, CSS `@import`, nested CSS `url()`, and fonts therefore inherit the ticket prefix. The iframe's canonical `src` remains `…/docs/files/<document-path>` so the tree, deep links, and parent-mediated comments retain their existing document identity. Same-document fragment links stay in the current frame. Public publications and private-share routes use their existing access models.
 
-- **Ticket:** a randomized, authenticated-encrypted JWE (`dir` / `A256GCM`), valid for 15 minutes. A domain-separated SHA-256 key is derived from the Worker's existing `AUTH_SECRET`; rotating that secret invalidates outstanding viewer tickets. The encrypted payload binds the organization, project, active manifest, and only the signed session-token cookie. No readable session material, API key, or cached session-data cookie is exposed to publisher code.
+- **Ticket:** a randomized, authenticated-encrypted JWE (`dir` / `A256GCM`), valid for 15 minutes. A domain-separated SHA-256 key is derived from the Worker's existing `AUTH_SECRET`; rotating that secret invalidates outstanding viewer tickets. The encrypted payload binds the organization, project, active manifest, the signed session-token cookie, and any legacy `dont_remember` marker, which Convex replaces with the session's persisted lifetime choice. No readable session material, API key, or cached session-data cookie is exposed to publisher code.
 - **Every request:** decrypt and validate the ticket, then ask Convex for the active deployment using the recovered session-token cookie. Convex freshly checks the persisted session, organization membership, and project ownership. The active manifest must still match the ticket, and the requested path must appear in that manifest before R2 is read. There is no authorization cache. Session revocation, membership removal, or changing the active deployment denies subsequent requests; already-rendered bytes cannot be recalled.
 - **Responses:** private assets and renewal responses are `private, no-store` with `Referrer-Policy: no-referrer`. Ticket-authorized responses permit `Access-Control-Allow-Origin: null` for opaque-origin fonts/modules, without credentialed CORS. The ticket is a scoped read capability, not a session replacement or permission to call application/comment APIs.
 - **Renewal:** `private-viewer.js` asks the trusted parent for a replacement after five minutes, checking once a minute and on focus, visibility, pageshow, or resource errors. The parent accepts messages only from its current opaque content frame and calls cookie-authenticated `…/docs/viewer-ticket?manifestKey=…`. A ticket cannot renew itself. New URLs replace the base and current image/media/stylesheet URLs in place. CSS Syntax tokenization resolves scoped `url()` values (quoted, unquoted, and escaped), string candidates in `image-set()` / `-webkit-image-set()`, `src()` strings, and `@import` strings in inline styles and `<style>` blocks to explicit renewed URLs; Chromium otherwise retains the old base in parsed CSS. URL tokens are handled across properties, including font sources (preserving `format()`), cursor, masks, list/border images, and generated content. Fragment-only references such as `filter: url(#id)` and data/blob/absolute/protocol-relative publisher URLs remain unchanged; only absolute CSS URLs previously emitted by the renewal client are renewed again. For each scoped stylesheet link, an adjacent clone retains the same attributes/media and cascade position while loading the renewed `href`. The active sheet is removed only after the replacement loads; a failed replacement is discarded and retried on a later renewal with exponential backoff (one minute, capped at fifteen). Per-link serialization coalesces overlapping renewals to the latest ticket, keeping at most one pending clone per active sheet. Reloading the parent reloads its `@import` graph, including nested imports; the link load event waits for these sheets, and nested CSS/image/font URLs inherit the new ticket. This keeps deferred resources working without reloading the document or losing comment drafts. Resuming a suspended tab can briefly fail a resource before renewal retries it. Offline, revoked, and expired-session viewers fail closed; reload the shell after signing in again. Superseded deployments also fail closed: after fresh session, membership and project authorization, renewal for a different project-scoped manifest returns `409 { code: "deployment_superseded" }` without issuing a ticket. The trusted shell announces "A newer version of this document was published." with a non-blocking Reload button. Renewal heartbeats and resource-error-triggered renewals both detect this state. Reload is user-initiated and preserves the entire current shell URL (document path, publisher query and fragment), along with the existing user/document-scoped sessionStorage comment drafts and pending operation identities. Stale responses after frame navigation are ignored; there is no automatic reload loop. The comment bridge’s `commentor-viewer-reload` message is also only a request for this parent-owned notice: publisher code and the widget share an opaque frame, so neither the sender nor claimed user activation authorizes navigation. Repeated requests leave the visible notice and its polite announcement unchanged. Private and legacy private shells provide the Reload control; share and public shells ignore this message. Widget-version recovery first offers the notice, then waits for the reader’s parent-side Reload.

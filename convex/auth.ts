@@ -20,6 +20,7 @@ import {
 } from "./authEmails";
 import { beforeDeleteOrganization } from "./organizationLifecycle";
 import authSchema from "./betterAuth/schema";
+import { boundSessionLifetime, sessionLifetime } from "./sessionLifetime";
 
 export const authComponent = createClient<DataModel, typeof authSchema>(
   components.betterAuth,
@@ -51,7 +52,7 @@ export function createAuthOptions(ctx: GenericCtx<DataModel>) {
     baseURL: siteUrl,
     secret: optionEnv("AUTH_SECRET"),
     trustedOrigins: [siteUrl],
-    database: authComponent.adapter(ctx),
+    database: (options: BetterAuthOptions) => boundSessionLifetime(authComponent.adapter(ctx)(options)),
     advanced: {
       ipAddress: { ipAddressHeaders: [AUTH_CLIENT_IP_HEADER] },
       database: {
@@ -65,6 +66,7 @@ export function createAuthOptions(ctx: GenericCtx<DataModel>) {
       },
     },
     session: {
+      additionalFields: { rememberMe: { type: "boolean", required: false, input: false } },
       cookieCache: {
         // Authenticated requests must re-check persisted sessions so expiry and
         // revocation take effect immediately on every protected route.
@@ -133,6 +135,7 @@ export function createAuthOptions(ctx: GenericCtx<DataModel>) {
         if (!("runMutation" in ctx)) throw new Error("Organization HTTP reads require a mutation-capable context");
         return ctx.runMutation(components.betterAuth.sessionReadLimit.consume, { key });
       }),
+      sessionLifetime(),
       organization({
         organizationHooks: {
           beforeDeleteOrganization: ({ organization, user }) => beforeDeleteOrganization(ctx, organization.id, user.id),

@@ -24,6 +24,22 @@ beforeEach(() => { sessionCache.clear(); vi.useFakeTimers({ toFake: ["Date"] });
 afterEach(() => { sessionCache.clear(); vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers(); });
 
 describe("bounded isolate session cache", () => {
+  it("keys and evicts by token alone when a lifetime preference is present", async () => {
+    const header = `better-auth.dont_remember=signed-preference; ${cookie}`;
+    expect(await sessionCacheKey(header)).toBe(await sessionCacheKey(cookie));
+    expect(await sessionCacheKey("better-auth.dont_remember=signed-preference")).toBeNull();
+    expect(await sessionCacheKey(`${header}; __Secure-${cookie}`)).toBeNull();
+    const cache = new SessionCache<ReturnType<typeof success>>();
+    const resolve = vi.fn(() => Promise.resolve(success()));
+    await cache.lookup(header, resolve);
+    await cache.lookup(header, resolve);
+    await cache.lookup(cookie, resolve);
+    expect(resolve).toHaveBeenCalledOnce();
+    await cache.evict(header);
+    await cache.lookup(header, resolve);
+    expect(resolve).toHaveBeenCalledTimes(2);
+  });
+
   it("hashes only the cookie value and never stores or logs credentials", async () => {
     expect(await sessionCacheKey(`theme=dark; ${cookie}; better-auth.session_data=unused`))
       .toBe(createHash("sha256").update("raw-secret-signed-cookie").digest("hex"));
@@ -125,6 +141,22 @@ describe("bounded isolate session cache", () => {
     const next = vi.fn(() => Promise.resolve(success()));
     await cache.lookup(cookie, next);
     expect(next).toHaveBeenCalledOnce();
+  });
+
+  it("does not evict a replacement when an earlier evicted lookup rejects", async () => {
+    const cache = new SessionCache<ReturnType<typeof success>>();
+    let reject!: (error: Error) => void;
+    const resolve = vi.fn(() => new Promise<ReturnType<typeof success>>((_, fail) => { reject = fail; }));
+    const pending = cache.lookup(cookie, resolve);
+    await vi.waitFor(() => expect(resolve).toHaveBeenCalledOnce());
+    await cache.evict(cookie);
+    const replacement = vi.fn(() => Promise.resolve(success()));
+    await cache.lookup(cookie, replacement);
+    const rejected = expect(pending).rejects.toThrow("old lookup failed");
+    reject(new Error("old lookup failed"));
+    await rejected;
+    await cache.lookup(cookie, replacement);
+    expect(replacement).toHaveBeenCalledOnce();
   });
 });
 

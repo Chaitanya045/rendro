@@ -15368,8 +15368,19 @@
           "inventoryRefs": [
             "UI-130"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/auth.spec.ts",
+              "name": "nonpersistent session retains its short backend lifetime [AUTH-111-02]",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/auth.spec.ts",
+              "name": "remembered session refreshes to seven days on protected entry",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-130-E02",

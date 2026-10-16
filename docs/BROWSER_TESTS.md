@@ -187,16 +187,21 @@ and returning through sign-in restores the signup controls.
 `tests/auth-hidden-browser.test.ts` checks computed display, keyboard focus,
 retry and restored forms at desktop/mobile sizes, plus reset and security states.
 
-Expected failures name follow-up issues below. Their broken assertions receive
-no `e2e` registry credit; an unexpected pass fails the suite so the marker must
-be removed when the product is fixed.
+Expected failures, when present, name follow-up issues. Their broken assertions
+receive no `e2e` registry credit; an unexpected pass fails the suite so the marker
+must be removed when the product is fixed. None are currently open.
 
-- **[#145](https://github.com/Chaitanya045/rendro/issues/145) (AUTH-111-02): nonpersistent sessions gain the persistent lifetime.**
-  Unchecking Keep me signed in correctly creates a session-only browser cookie,
-  but the backend session is extended from the intended one-day lifetime to
-  approximately seven days on protected-page entry. Worker session lookups strip
-  the nonpersistent-session preference cookie. Preserve the shorter backend
-  lifetime as well as the browser cookie behavior.
+The #145 regression (AUTH-111-02) now passes in all three engines. It asserts the
+one-day backend lifetime after account, organization, project and document reads,
+reloads and the expiry boundary, alongside the session-only browser cookie.
+The same reads run with absent and altered client preference markers. Password
+rotation regressions check both stored lifetime choices and replacement-cookie
+persistence after removing the marker.
+A remembered-session control ages the disposable record past its update age and
+verifies protected entry refreshes it to seven days. A bearer-token check sends
+the session token as `Authorization`, alone and with the cookie, directly to
+Convex and through the Worker. It asserts that bearer tokens never authenticate,
+that no persistent session cookie is set, and that the stored expiry is unchanged.
 
 ## Vitest Chromium project
 
