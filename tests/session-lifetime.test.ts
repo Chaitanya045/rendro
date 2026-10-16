@@ -3,17 +3,19 @@ import { betterAuth } from "better-auth/minimal";
 import { hashPassword, makeSignature } from "better-auth/crypto";
 import { parseCookies } from "better-call";
 import { Hono } from "hono";
-import { readFileSync } from "node:fs";
-import type { User } from "better-auth/types";
-import { afterEach, expect, it, vi } from "vitest";
+import { realpathSync } from "node:fs";
+import { createRequire } from "node:module";
+import type { DBAdapter, User } from "better-auth/types";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import schema from "../convex/schema";
 import authSchema from "../convex/betterAuth/schema";
 import { components } from "../convex/_generated/api";
 import { createAuthOptions } from "../convex/auth";
-import { sessionLifetime, sessionlessAuthPaths, withLifetimeMarker } from "../convex/sessionLifetime";
+import { boundSessionLifetime, sessionCookieHeaders, sessionLifetime, sessionlessAuthPaths, withLifetimeMarker } from "../convex/sessionLifetime";
 import { proxyAuthRequest } from "@/auth-proxy";
 import { sessionCache, sessionMiddleware } from "@/middleware/session";
 import { createViewerTicket, readViewerTicket } from "@/viewer-ticket";
+import rateLimiterTest from "./convex-rate-limiter";
 
 const origin = "http://localhost:3000";
 const day = 86400_000;
@@ -27,6 +29,7 @@ async function fixture(rememberMe: boolean) {
   vi.useFakeTimers({ toFake: ["Date"] });
   const backend = convexTest(schema, import.meta.glob("../convex/**/*.ts"));
   backend.registerComponent("betterAuth", authSchema, import.meta.glob("../convex/betterAuth/**/*.ts"));
+  rateLimiterTest.register(backend);
   const auth = betterAuth(createAuthOptions({ runQuery: backend.query, runMutation: backend.mutation } as never));
   const context = await auth.$context;
   const user = await context.internalAdapter.createUser({ name: "Reader", email: "lifetime@example.test", emailVerified: true });
@@ -219,9 +222,10 @@ const marker = "better-auth.dont_remember";
 type Endpoint = { path?: string; options: { method: string | string[]; metadata?: { SERVER_ONLY?: boolean } } };
 
 it("reuses the exact cookie parser Better Auth reads markers with", () => {
-  const manifest = (path: string) => JSON.parse(readFileSync(path, "utf8")) as Record<string, Record<string, string>>;
-  expect(manifest("package.json").devDependencies["better-call"])
-    .toBe(manifest("node_modules/better-auth/package.json").dependencies["better-call"]);
+  // Compare the installed module both packages resolve, not declared ranges.
+  const resolved = (from: string) => realpathSync(createRequire(from).resolve("better-call"));
+  const betterAuth = realpathSync(createRequire(import.meta.url).resolve("better-auth"));
+  expect(resolved(import.meta.url)).toBe(resolved(betterAuth));
 });
 
 it.each([
@@ -341,3 +345,195 @@ it("hooks every Better Auth endpoint that can read a session", async () => {
     vi.restoreAllMocks();
   }
 }, 60_000);
+
+const bearer = (value: string) => ({ authorization: `Bearer ${value}` });
+async function credentialVariants(f: Awaited<ReturnType<typeof fixture>>) {
+  const cookie = f.tokenCookie.split(";", 1)[0];
+  const signed = decodeURIComponent(cookie.slice(cookie.indexOf("=") + 1));
+  const forgedMarker = `better-auth.dont_remember=${encodeURIComponent(`false.${await makeSignature("false", f.context.secret)}`)}`;
+  return { cookie, signed, variants: {
+    none: {}, cookie: { cookie }, "signed bearer": bearer(signed), "raw bearer": bearer(f.token),
+    "bearer + cookie": { ...bearer(signed), cookie }, "raw bearer + marked cookie": { ...bearer(f.token), cookie: `${cookie}; ${forgedMarker}` },
+  } as Record<string, Record<string, string>> };
+}
+const persistentSessionCookies = (response: Response) => response.headers.getSetCookie()
+  .filter(c => /^better-auth\.session_token=/.test(c) && /; (?:Max-Age|Expires)=/i.test(c.replace(/; Max-Age=0(?=;|$)/i, "")));
+
+it("bounds every Better Auth session refresh path at the storage layer, whatever the credentials", async () => {
+  const f = await fixture(false);
+  const initial = await f.stored();
+  const bound = Number(initial.createdAt) + day;
+  expect(Number(initial.expiresAt)).toBe(bound);
+  const { variants } = await credentialVariants(f);
+  // Spy on the bounded adapter: Better Auth must really attempt extensions here,
+  // so the stored result proves the clamp rather than an absent refresh.
+  const update = vi.spyOn(f.context.adapter, "update");
+  const paths: Record<string, (headers: Headers) => Promise<unknown>> = {
+    ...Object.fromEntries(["/get-session", "/convex/token", "/organization/list", "/list-sessions"].map(path =>
+      [`HTTP ${path}`, (headers: Headers) => f.auth.handler(new Request(`${origin}/api/auth${path}`, { headers }))])),
+    "server getSession": headers => f.auth.api.getSession({ headers }),
+    "server listSessions": headers => f.auth.api.listSessions({ headers }).catch(() => null),
+  };
+  let minute = 60;
+  for (const [label, call] of Object.entries(paths)) {
+    for (const [name, headers] of Object.entries(variants)) {
+      vi.setSystemTime(Number(initial.createdAt) + ++minute * 60_000);
+      await call(new Headers(headers));
+      const stored = await f.stored();
+      expect(Number(stored.expiresAt), `${label} with ${name}`).toBe(bound);
+      expect(stored.rememberMe).toBe(false);
+    }
+  }
+  // Direct storage writes, including Better Auth transactions, are bounded too.
+  const later = () => new Date(Date.now() + 7 * day);
+  await f.context.internalAdapter.updateSession(f.token, { expiresAt: later(), updatedAt: new Date() });
+  await f.context.adapter.update({ model: "session", where: [{ field: "token", value: f.token }], update: { expiresAt: later() } });
+  await f.context.adapter.transaction(trx => trx.update({ model: "session", where: [{ field: "token", value: f.token }], update: { expiresAt: later() } }));
+  expect(Number((await f.stored()).expiresAt)).toBe(bound);
+  const attempted = update.mock.calls.filter(([data]) => data.model === "session" && "expiresAt" in data.update);
+  expect(attempted.some(([data]) => new Date(data.update.expiresAt as Date).getTime() > bound)).toBe(true);
+  // Shortening is always allowed, e.g. administrative expiry.
+  await f.context.internalAdapter.updateSession(f.token, { expiresAt: new Date(Date.now() - 1000) });
+  expect(Number((await f.stored()).expiresAt)).toBe(Date.now() - 1000);
+}, 30_000);
+
+it("still refreshes remembered sessions through the bounded adapter", async () => {
+  const f = await fixture(true);
+  const initial = await f.stored();
+  vi.setSystemTime(Number(initial.createdAt) + 2 * day);
+  await f.context.internalAdapter.updateSession(f.token, { expiresAt: new Date(Date.now() + 7 * day) });
+  expect(Number((await f.stored()).expiresAt)).toBe(Date.now() + 7 * day);
+});
+
+it("never treats bearer tokens as sessions or persists a non-remembered cookie over HTTP", async () => {
+  const f = await fixture(false);
+  const initial = await f.stored();
+  const { cookie, variants } = await credentialVariants(f);
+  const now = Date.now();
+  const organization = await f.context.adapter.create<{ id: string }>({ model: "organization", data: { name: "Org", slug: "org", createdAt: new Date(now) } });
+  await f.context.adapter.create({ model: "member", data: { organizationId: organization.id, userId: f.user.id, role: "owner", createdAt: new Date(now) } });
+  const management = `/api/rendro/management/access?organizationId=${organization.id}`;
+  const authenticated = async (response: Response) => response.status === 200 && await response.clone().text() !== "null";
+  const routes: Record<string, (headers: Record<string, string>) => Promise<Response>> = {
+    ...Object.fromEntries(["/get-session", "/convex/token", "/organization/list", "/list-sessions"].flatMap(path => [
+      [`convex ${path}`, (headers: Record<string, string>) => f.backend.fetch(`/api/auth${path}`, { headers })],
+      [`worker ${path}`, (headers: Record<string, string>) => f.app.request(`${origin}/api/auth${path}`, { headers })],
+    ])),
+    "convex management access": headers => f.backend.fetch(management, { headers }),
+    "convex deployments": headers => f.backend.fetch(`/api/rendro/deployments?organizationId=${organization.id}&projectId=project`, { headers }),
+    "convex set-initial-password": headers => f.backend.fetch("/api/auth/set-initial-password", {
+      method: "POST", headers: { ...headers, origin, "content-type": "application/json" }, body: JSON.stringify({ newPassword: `${password} initial` }),
+    }),
+  };
+  let minute = 60;
+  for (const [label, send] of Object.entries(routes)) {
+    for (const [name, headers] of Object.entries(variants)) {
+      // Step past Better Auth's per-path limiter window for unverified clients.
+      vi.setSystemTime(Number(initial.createdAt) + (minute += 2) * 60_000);
+      const response = await send(headers);
+      expect(persistentSessionCookies(response), `${label} with ${name}`).toEqual([]);
+      expect(Number((await f.stored()).expiresAt), `${label} with ${name}`).toBe(Number(initial.expiresAt));
+      // Better Auth endpoints use only the cookie. Rendro APIs treat any
+      // Authorization header as an API-key request, never as a session.
+      const sessionAuthority = name === "cookie" || (name.includes("cookie") && label.includes("/"));
+      if (label.includes("set-initial-password")) expect(await response.json(), `${label} with ${name}`).toEqual({ error: sessionAuthority
+        ? "Unable to set password. Sign in again and retry." : "Sign in again before setting a password" });
+      else if (label.includes("deployments")) expect(await response.json(), `${label} with ${name}`).toEqual({ error: sessionAuthority ? "Project not found" : "Authentication required" });
+      else expect(await authenticated(response), `${label} with ${name}`).toBe(sessionAuthority);
+    }
+  }
+  expect(await authenticated(await f.backend.fetch(management, { headers: { cookie } }))).toBe(true);
+}, 30_000);
+
+it("builds cookie-only headers for server-side session reads", () => {
+  expect([...sessionCookieHeaders(new Headers({ cookie: "a=1", origin, "x-other": "1" }))]).toEqual([["cookie", "a=1"]]);
+  expect([...sessionCookieHeaders(new Headers({ cookie: "a=1", authorization: "Bearer key" }))]).toEqual([]);
+  expect([...sessionCookieHeaders(new Headers({ authorization: "Bearer key" }))]).toEqual([]);
+  expect([...sessionCookieHeaders(new Headers())]).toEqual([]);
+});
+
+describe("bounded session adapter", () => {
+  const createdAt = 1_000 * day;
+  const later = new Date(createdAt + 7 * day);
+  const rows: Record<string, object | null> = {
+    short: { rememberMe: false, createdAt, expiresAt: createdAt + day },
+    remembered: { rememberMe: true, createdAt, expiresAt: createdAt + 7 * day },
+    "legacy short": { rememberMe: null, createdAt, expiresAt: createdAt + day },
+    "legacy long": { rememberMe: null, createdAt, expiresAt: createdAt + 7 * day },
+    "invalid creation": { rememberMe: false, createdAt: "invalid", expiresAt: createdAt + day },
+    missing: null,
+  };
+  function fake(row: object | null, asIs = false) {
+    const inner = {
+      findOne: vi.fn(() => Promise.resolve(row)),
+      create: vi.fn((data: unknown) => Promise.resolve(data)),
+      update: vi.fn((data: unknown) => Promise.resolve(data)),
+      updateMany: vi.fn(() => Promise.resolve(1)),
+      incrementOne: vi.fn(() => Promise.resolve(null)),
+      transaction: vi.fn((callback: (trx: unknown) => Promise<unknown>) => callback(asIs ? inner : withoutTransaction)),
+    };
+    const { transaction: _transaction, ...withoutTransaction } = inner;
+    return { inner, adapter: boundSessionLifetime(inner as unknown as DBAdapter) };
+  }
+  const where = [{ field: "token", value: "t" }];
+
+  it.each([
+    ["short", createdAt + day], ["remembered", later.getTime()], ["legacy short", createdAt + day],
+    ["legacy long", later.getTime()], ["invalid creation", day], ["missing", later.getTime()],
+  ])("bounds updates of a %s session", async (name, expected) => {
+    const { inner, adapter } = fake(rows[name]);
+    await adapter.update({ model: "session", where, update: { expiresAt: later, updatedAt: later } });
+    const [[data]] = inner.update.mock.calls as unknown as [[{ update: { expiresAt: Date } }]];
+    expect(new Date(data.update.expiresAt).getTime()).toBe(expected);
+    expect(inner.findOne).toHaveBeenCalledWith({ model: "session", where });
+  });
+
+  it("leaves earlier expiries, other fields and other models untouched", async () => {
+    const { inner, adapter } = fake(rows.short);
+    const earlier = { model: "session", where, update: { expiresAt: createdAt + 60_000 } };
+    await adapter.update(earlier);
+    await adapter.update({ model: "session", where, update: { activeOrganizationId: "org" } });
+    await adapter.update({ model: "user", where, update: { expiresAt: later, createdAt: 1 } });
+    expect(inner.update.mock.calls.map(([data]) => data)).toEqual([earlier,
+      { model: "session", where, update: { activeOrganizationId: "org" } },
+      { model: "user", where, update: { expiresAt: later, createdAt: 1 } }]);
+    expect(inner.findOne).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses writes that could change the bound", async () => {
+    const { inner, adapter } = fake(rows.short);
+    for (const update of [{ rememberMe: true }, { createdAt: Date.now() }, { expiresAt: later, rememberMe: true }]) {
+      await expect(adapter.update({ model: "session", where, update })).rejects.toThrow("immutable");
+    }
+    await expect(adapter.updateMany({ model: "session", where, update: { expiresAt: later } })).rejects.toThrow("per session");
+    await expect(adapter.incrementOne({ model: "session", where, increment: { expiresAt: day } })).rejects.toThrow("per session");
+    await expect(adapter.incrementOne({ model: "session", where, increment: {}, set: { rememberMe: true } })).rejects.toThrow("per session");
+    expect(inner.update).not.toHaveBeenCalled();
+    expect(await adapter.updateMany({ model: "session", where, update: { activeTeamId: "t" } })).toBe(1);
+    expect(await adapter.incrementOne({ model: "rateLimit", where, increment: { count: 1 } })).toBeNull();
+    expect(inner.updateMany).toHaveBeenCalledTimes(1);
+    expect(inner.incrementOne).toHaveBeenCalledTimes(1);
+  });
+
+  it("bounds non-remembered creation only", async () => {
+    const { inner, adapter } = fake(null);
+    const session = { token: "t", createdAt: new Date(createdAt), expiresAt: later };
+    await adapter.create({ model: "session", data: { ...session, rememberMe: false } });
+    await adapter.create({ model: "session", data: { ...session, rememberMe: true } });
+    await adapter.create({ model: "session", data: session });
+    await adapter.create({ model: "verification", data: { ...session, rememberMe: false } });
+    expect(inner.create.mock.calls.map(([data]) => new Date((data as { data: { expiresAt: Date } }).data.expiresAt).getTime()))
+      .toEqual([createdAt + day, later.getTime(), later.getTime(), later.getTime()]);
+  });
+
+  it.each([false, true])("bounds writes made through transactions (as-is=%s)", async asIs => {
+    const { inner, adapter } = fake(rows.short, asIs);
+    await adapter.transaction(async trx => {
+      // As-is transactions reuse the adapter itself, so they get the same wrapper.
+      expect(trx === adapter).toBe(asIs);
+      await trx.update({ model: "session", where, update: { expiresAt: later } });
+    });
+    const [[data]] = inner.update.mock.calls as unknown as [[{ update: { expiresAt: Date } }]];
+    expect(new Date(data.update.expiresAt).getTime()).toBe(createdAt + day);
+  });
+});

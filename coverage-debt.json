@@ -45,7 +45,7 @@
     },
     "convex/sessionReadLimit.ts": {
       "statements": 1,
-      "branches": 1,
+      "branches": 0,
       "functions": 0,
       "lines": 1
     },

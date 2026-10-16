@@ -90,8 +90,28 @@ and viewer-ticket authorization. Only endpoints that never resolve the caller's
 session (`/ok`, `/error`, `/sign-out`, and Convex JWKS/OpenID discovery) skip
 the plugin; a test enumerates every Better Auth endpoint to keep that list
 exact. The plugin runs after the read limiters and reuses their resolved
-session; it does not bypass rate limits or mutate the shared adapter. Password changes that revoke sessions
+session; it does not bypass rate limits. Password changes that revoke sessions
 carry the authenticated session's choice into the replacement session and cookie.
+
+The one-day limit is also enforced where sessions are stored. Better Auth's
+database adapter is wrapped so every session write, including writes inside
+transactions, keeps a non-remembered session's `expiresAt` within one day of its
+`createdAt`, whatever request, header, or server call produced the write. A
+session's `createdAt` and `rememberMe` cannot be updated, and bulk or counter
+writes to session lifetime fields are refused. Shortening an expiry is always
+allowed.
+
+Better Auth sessions are cookie-only. Convex removes `Authorization` before
+Better Auth handles `/api/auth/*` (the Worker already omits it there), so the
+`bearer` hook bundled with the Convex plugin never resolves a session.
+Server-side session reads (`httpOrganizationAccess` and the initial-password
+route) pass only the Cookie header. They pass no credentials when the request
+has an `Authorization` header: such a request asked for API-key authority and
+does not fall back to the browser session. The CLI uses API keys on
+`/api/rendro/*` only. The Convex plugin's 15-minute `convex_jwt` cookie keeps its
+Max-Age for non-remembered users. This is accepted: it is a short-lived access
+token minted from a live session, not a session. It expires within 15 minutes
+and cannot refresh or extend the session.
 
 Existing records without metadata use their stored duration to retain their
 current lifetime; already extended legacy records are not shortened because the

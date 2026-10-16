@@ -20,7 +20,7 @@ import {
 } from "./authEmails";
 import { beforeDeleteOrganization } from "./organizationLifecycle";
 import authSchema from "./betterAuth/schema";
-import { sessionLifetime } from "./sessionLifetime";
+import { boundSessionLifetime, sessionLifetime } from "./sessionLifetime";
 
 export const authComponent = createClient<DataModel, typeof authSchema>(
   components.betterAuth,
@@ -52,7 +52,7 @@ export function createAuthOptions(ctx: GenericCtx<DataModel>) {
     baseURL: siteUrl,
     secret: optionEnv("AUTH_SECRET"),
     trustedOrigins: [siteUrl],
-    database: authComponent.adapter(ctx),
+    database: (options: BetterAuthOptions) => boundSessionLifetime(authComponent.adapter(ctx)(options)),
     advanced: {
       ipAddress: { ipAddressHeaders: [AUTH_CLIENT_IP_HEADER] },
       database: {
