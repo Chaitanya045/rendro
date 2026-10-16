@@ -55,7 +55,7 @@ export async function startIdentityFixtures(directory: string) {
   const mail: Mail[] = [];
   const allowedOrigins = new Set<string>();
   const blocked = new Set<string>();
-  const codes = new Map<string, { challenge: string; redirect: string }>();
+  const codes = new Map<string, { challenge: string; redirect: string; email: string }>();
   const signing = await generateKeyPair("RS256", { extractable: true });
   const jwk = { ...await exportJWK(signing.publicKey), alg: "RS256", kid: "fixture-google" };
   const handle: RequestListener = (req, res) => {
@@ -74,8 +74,8 @@ export async function startIdentityFixtures(directory: string) {
           || createHash("sha256").update(params.get("code_verifier") ?? "").digest("base64url") !== stored.challenge) {
           res.writeHead(400).end(JSON.stringify({ error: "invalid_grant" })); return;
         }
-        const idToken = await new SignJWT({ email: "oauth@example.test", email_verified: true, name: "OAuth Fixture" })
-          .setProtectedHeader({ alg: "RS256", kid: jwk.kid }).setSubject("e2e-google-user").setAudience("e2e-google")
+        const idToken = await new SignJWT({ email: stored.email, email_verified: true, name: "OAuth Fixture" })
+          .setProtectedHeader({ alg: "RS256", kid: jwk.kid }).setSubject(`e2e-google-${stored.email}`).setAudience("e2e-google")
           .setIssuer("https://accounts.google.com").setIssuedAt().setExpirationTime("1h").sign(signing.privateKey);
         res.setHeader("Content-Type", "application/json");
         res.end(JSON.stringify({ access_token: "local-access", token_type: "Bearer", expires_in: 3600, id_token: idToken }));
@@ -117,9 +117,11 @@ export async function startIdentityFixtures(directory: string) {
       if (!URL.canParse(redirect) || !allowedOrigins.has(new URL(redirect).origin) || url.searchParams.get("client_id") !== "e2e-google"
         || !url.searchParams.get("state") || !url.searchParams.get("code_challenge")) { res.writeHead(400).end("{}"); return; }
       const code = randomBytes(24).toString("hex");
-      codes.set(code, { redirect, challenge: url.searchParams.get("code_challenge") ?? "" });
+      codes.set(code, { redirect, challenge: url.searchParams.get("code_challenge") ?? "", email: url.searchParams.get("fixture_email") ?? "oauth@example.test" });
       const callback = new URL(redirect);
       callback.searchParams.set("code", code); callback.searchParams.set("state", url.searchParams.get("state") ?? "");
+      if (url.searchParams.get("fixture_mode") === "denial") { callback.searchParams.delete("code"); callback.searchParams.set("error", "access_denied"); codes.delete(code); }
+      if (url.searchParams.get("fixture_mode") === "state-mismatch") callback.searchParams.set("state", "tampered-state");
       res.end(JSON.stringify({ location: callback.href })); return;
     }
     res.writeHead(404).end("{}");

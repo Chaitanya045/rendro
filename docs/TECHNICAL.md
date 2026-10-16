@@ -52,6 +52,13 @@ Better Auth runs inside Convex HTTP actions (`convex/auth.ts`). The Worker proxi
 
 Account linking trusts Google only when the local email is verified and the emails match. Sign-up responses do not reveal whether an address is already registered. Better Auth rate limits are stored in the database; sign-in and sign-up endpoints have tighter per-route limits. Verification, reset, invitation, and existing-account notices are sent through Resend (`RESEND_API_KEY`, `AUTH_EMAIL_FROM`).
 
+The local authentication regression suite (`e2e/auth.spec.ts`) exercises these
+flows against workerd and the disposable Convex backend, with captured mail and
+a local Google protocol fixture. Expiry tests age disposable backend records;
+rate-limit tests use the unchanged production limiter. See
+[Browser tests](BROWSER_TESTS.md#authentication-journeys-111) for isolation,
+assertions, and documented expected failures.
+
 ### Google OAuth flow
 
 ```

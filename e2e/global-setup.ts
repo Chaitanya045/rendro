@@ -106,6 +106,7 @@ export default async function globalSetup() {
     await convex.push();
     const seed = await seedWorkspace({ site: convex.site, worker: url.origin, secret: vars.CONVEX_INTERNAL_SECRET, mail: identity.mail, directory, fetch: originalFetch });
     await storage.removeSmokeAsset(seed.organizationId, seed.projectId);
+    await writeFile(join(directory, "backend-admin.json"), JSON.stringify({ origin: convex.origin, adminKey: convex.adminKey }), { mode: 0o600 });
     const seedPath = join(directory, "seed.json");
     await writeFile(seedPath, JSON.stringify(seed), { mode: 0o600 });
     process.env.RENDRO_E2E_ORIGIN = url.origin;

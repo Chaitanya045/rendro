@@ -14802,7 +14802,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "browser",
+      "status": "e2e",
       "auditEvidence": "B",
       "auditNote": "session-stack-browser.test.ts",
       "edges": [
@@ -14814,8 +14814,19 @@
           "inventoryRefs": [
             "UI-127"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/auth.spec.ts",
+              "name": "returnTo permits local paths and rejects off-site and protocol-relative destinations",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/auth.spec.ts",
+              "name": "remember-me controls cookie persistence and survives reload",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-127-E02",
@@ -14864,7 +14875,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "unit",
+      "status": "e2e",
       "auditEvidence": "U",
       "auditNote": "auth-ui-regressions.test.ts",
       "edges": [
@@ -14876,8 +14887,14 @@
           "inventoryRefs": [
             "UI-128"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/auth.spec.ts",
+              "name": "auth validation, reveal, pending exclusion and transport recovery preserve inputs",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-128-E02",
@@ -14887,8 +14904,19 @@
           "inventoryRefs": [
             "A04"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/auth.spec.ts",
+              "name": "auth validation, reveal, pending exclusion and transport recovery preserve inputs",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/auth.spec.ts",
+              "name": "wrong password and the real sign-in limiter restore the form with an alert",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-128-E03",
@@ -14898,8 +14926,14 @@
           "inventoryRefs": [
             "A04"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/auth.spec.ts",
+              "name": "auth validation, reveal, pending exclusion and transport recovery preserve inputs",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-128-E04",
@@ -14909,8 +14943,14 @@
           "inventoryRefs": [
             "A04"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/auth.spec.ts",
+              "name": "remember-me controls cookie persistence and survives reload",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-128-E05",
@@ -14920,8 +14960,14 @@
           "inventoryRefs": [
             "A04"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/auth.spec.ts",
+              "name": "auth validation, reveal, pending exclusion and transport recovery preserve inputs",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-128-E06",
@@ -14931,8 +14977,14 @@
           "inventoryRefs": [
             "A04"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/auth.spec.ts",
+              "name": "auth validation, reveal, pending exclusion and transport recovery preserve inputs",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-128-E07",
@@ -14942,8 +14994,24 @@
           "inventoryRefs": [
             "A04"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/auth.spec.ts",
+              "name": "wrong password and the real sign-in limiter restore the form with an alert",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/auth.spec.ts",
+              "name": "signup verifies delivered mail, resends neutrally and retains the destination",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/auth.spec.ts",
+              "name": "auth validation, reveal, pending exclusion and transport recovery preserve inputs",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-128-E08",
@@ -14953,8 +15021,14 @@
           "inventoryRefs": [
             "A04"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/auth.spec.ts",
+              "name": "returnTo permits local paths and rejects off-site and protocol-relative destinations",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-128-E09",
@@ -14975,12 +15049,17 @@
           "inventoryRefs": [
             "UI-128"
           ],
-          "status": "unit",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/auth-ui-regressions.test.ts",
               "name": "blocks invalid auth submits and focuses the first invalid field",
               "kind": "unit"
+            },
+            {
+              "file": "e2e/auth.spec.ts",
+              "name": "auth validation, reveal, pending exclusion and transport recovery preserve inputs",
+              "kind": "e2e"
             }
           ]
         },
@@ -14992,12 +15071,17 @@
           "inventoryRefs": [
             "UI-128"
           ],
-          "status": "unit",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/auth-ui-regressions.test.ts",
               "name": "allows only one in-flight submit and restores the button after failure",
               "kind": "unit"
+            },
+            {
+              "file": "e2e/auth.spec.ts",
+              "name": "auth validation, reveal, pending exclusion and transport recovery preserve inputs",
+              "kind": "e2e"
             }
           ]
         }
@@ -15034,7 +15118,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "untested",
+      "status": "e2e",
       "auditEvidence": "UNTESTED",
       "auditNote": "auth-pages.ts data-reveal handler; no executed reveal toggle assertion found",
       "edges": [
@@ -15046,8 +15130,14 @@
           "inventoryRefs": [
             "UI-129"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/auth.spec.ts",
+              "name": "auth validation, reveal, pending exclusion and transport recovery preserve inputs",
+              "kind": "e2e"
+            }
+          ]
         }
       ]
     },
@@ -15079,7 +15169,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "untested",
+      "status": "e2e",
       "auditEvidence": "UNTESTED",
       "auditNote": "auth-pages.ts sign-in handler; session timing tests do not exercise checkbox journey",
       "edges": [
@@ -15093,6 +15183,21 @@
           ],
           "status": "untested",
           "tests": []
+        },
+        {
+          "id": "UI-130-E02",
+          "from": "Sign-in form ready",
+          "trigger": "Sign in with remember-me checked and unchecked, then reload",
+          "expected": "Checked creates a persistent cookie; unchecked creates a session-only cookie; each retains its session across reload",
+          "inventoryRefs": [],
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/auth.spec.ts",
+              "name": "remember-me controls cookie persistence and survives reload",
+              "kind": "e2e"
+            }
+          ]
         }
       ]
     },
@@ -15124,7 +15229,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "unit",
+      "status": "e2e",
       "auditEvidence": "U",
       "auditNote": "auth-ui-regressions.test.ts",
       "edges": [
@@ -15136,8 +15241,14 @@
           "inventoryRefs": [
             "UI-131"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/auth.spec.ts",
+              "name": "signup verifies delivered mail, resends neutrally and retains the destination",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-131-E02",
@@ -15147,8 +15258,14 @@
           "inventoryRefs": [
             "A06"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/auth.spec.ts",
+              "name": "auth validation, reveal, pending exclusion and transport recovery preserve inputs",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-131-E03",
@@ -15158,8 +15275,14 @@
           "inventoryRefs": [
             "A06"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/auth.spec.ts",
+              "name": "auth validation, reveal, pending exclusion and transport recovery preserve inputs",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-131-E04",
@@ -15169,8 +15292,14 @@
           "inventoryRefs": [
             "A06"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/auth.spec.ts",
+              "name": "signup verifies delivered mail, resends neutrally and retains the destination",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-131-E05",
@@ -15191,8 +15320,14 @@
           "inventoryRefs": [
             "A06"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/auth.spec.ts",
+              "name": "signup verifies delivered mail, resends neutrally and retains the destination",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-131-E07",
@@ -15202,8 +15337,14 @@
           "inventoryRefs": [
             "A06"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/auth.spec.ts",
+              "name": "auth validation, reveal, pending exclusion and transport recovery preserve inputs",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-131-E08",
@@ -15224,12 +15365,17 @@
           "inventoryRefs": [
             "UI-131"
           ],
-          "status": "unit",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/auth-ui-regressions.test.ts",
               "name": "preserves returnTo in sign-up verification callback and shows success",
               "kind": "unit"
+            },
+            {
+              "file": "e2e/auth.spec.ts",
+              "name": "signup verifies delivered mail, resends neutrally and retains the destination",
+              "kind": "e2e"
             }
           ]
         }
@@ -15263,7 +15409,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "untested",
+      "status": "e2e",
       "auditEvidence": "UNTESTED",
       "auditNote": "auth-pages.ts sign-up handler; shared validation coverage is incomplete for this flow",
       "edges": [
@@ -15277,6 +15423,21 @@
           ],
           "status": "untested",
           "tests": []
+        },
+        {
+          "id": "UI-132-E02",
+          "from": "Authentication or account security page",
+          "trigger": "Complete the local authentication journey",
+          "expected": "Signup and sign-in transport failure restores inputs and controls",
+          "inventoryRefs": [],
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/auth.spec.ts",
+              "name": "auth validation, reveal, pending exclusion and transport recovery preserve inputs",
+              "kind": "e2e"
+            }
+          ]
         }
       ]
     },
@@ -15308,7 +15469,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "unit",
+      "status": "e2e",
       "auditEvidence": "U",
       "auditNote": "auth-ui-regressions.test.ts (non-enumerating and transport-error paths)",
       "edges": [
@@ -15331,8 +15492,14 @@
           "inventoryRefs": [
             "A07"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/auth.spec.ts",
+              "name": "signup verifies delivered mail, resends neutrally and retains the destination",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-133-E03",
@@ -15342,8 +15509,14 @@
           "inventoryRefs": [
             "A07"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/auth.spec.ts",
+              "name": "signup verifies delivered mail, resends neutrally and retains the destination",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-133-E04",
@@ -15353,8 +15526,14 @@
           "inventoryRefs": [
             "A07"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/auth.spec.ts",
+              "name": "signup verifies delivered mail, resends neutrally and retains the destination",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-133-E05",
@@ -15375,8 +15554,14 @@
           "inventoryRefs": [
             "A07"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/auth.spec.ts",
+              "name": "signup verifies delivered mail, resends neutrally and retains the destination",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-133-E07",
@@ -15386,8 +15571,14 @@
           "inventoryRefs": [
             "A07"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/auth.spec.ts",
+              "name": "signup verifies delivered mail, resends neutrally and retains the destination",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-133-E08",
@@ -15436,7 +15627,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "untested",
+      "status": "e2e",
       "auditEvidence": "UNTESTED",
       "auditNote": "security-headers-browser.test.ts loads verified=1; no actual email-token lifecycle",
       "edges": [
@@ -15450,6 +15641,21 @@
           ],
           "status": "untested",
           "tests": []
+        },
+        {
+          "id": "UI-134-E02",
+          "from": "Authentication or account security page",
+          "trigger": "Complete the local authentication journey",
+          "expected": "Delivered verification link updates the backend user, preserves returnTo and requires explicit sign-in",
+          "inventoryRefs": [],
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/auth.spec.ts",
+              "name": "signup verifies delivered mail, resends neutrally and retains the destination",
+              "kind": "e2e"
+            }
+          ]
         }
       ]
     },
@@ -15481,7 +15687,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "unit",
+      "status": "e2e",
       "auditEvidence": "U",
       "auditNote": "auth-ui-regressions.test.ts",
       "edges": [
@@ -15510,6 +15716,21 @@
               "file": "tests/auth-ui-regressions.test.ts",
               "name": "keeps recovery non-enumerating but reports server failures for retry",
               "kind": "unit"
+            }
+          ]
+        },
+        {
+          "id": "UI-135-E03",
+          "from": "Authentication or account security page",
+          "trigger": "Complete the local authentication journey",
+          "expected": "Existing and absent addresses receive the same acknowledgement; only the existing account receives reset mail",
+          "inventoryRefs": [],
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/auth.spec.ts",
+              "name": "password recovery is neutral and reset revokes a second browser session",
+              "kind": "e2e"
             }
           ]
         }
@@ -15543,7 +15764,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "unit",
+      "status": "e2e",
       "auditEvidence": "U",
       "auditNote": "auth-ui-regressions.test.ts",
       "edges": [
@@ -15555,8 +15776,19 @@
           "inventoryRefs": [
             "UI-136"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/auth.spec.ts",
+              "name": "password recovery is neutral and reset revokes a second browser session",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/auth.spec.ts",
+              "name": "missing, invalid and expired reset tokens recover without changing credentials",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-136-E02",
@@ -15566,8 +15798,14 @@
           "inventoryRefs": [
             "A08"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/auth.spec.ts",
+              "name": "password recovery is neutral and reset revokes a second browser session",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-136-E03",
@@ -15577,8 +15815,14 @@
           "inventoryRefs": [
             "A08"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/auth.spec.ts",
+              "name": "missing, invalid and expired reset tokens recover without changing credentials",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-136-E04",
@@ -15588,8 +15832,14 @@
           "inventoryRefs": [
             "A08"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/auth.spec.ts",
+              "name": "password recovery is neutral and reset revokes a second browser session",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-136-E05",
@@ -15599,8 +15849,19 @@
           "inventoryRefs": [
             "A08"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/auth.spec.ts",
+              "name": "missing, invalid and expired reset tokens recover without changing credentials",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/auth.spec.ts",
+              "name": "password recovery is neutral and reset revokes a second browser session",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-136-E06",
@@ -15621,8 +15882,14 @@
           "inventoryRefs": [
             "A08"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/auth.spec.ts",
+              "name": "password recovery is neutral and reset revokes a second browser session",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-136-E08",
@@ -15643,12 +15910,17 @@
           "inventoryRefs": [
             "UI-136"
           ],
-          "status": "unit",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/auth-ui-regressions.test.ts",
               "name": "rejects mismatched reset passwords before making a request",
               "kind": "unit"
+            },
+            {
+              "file": "e2e/auth.spec.ts",
+              "name": "password recovery is neutral and reset revokes a second browser session",
+              "kind": "e2e"
             }
           ]
         },
@@ -15699,7 +15971,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "untested",
+      "status": "e2e",
       "auditEvidence": "UNTESTED",
       "auditNote": "No real email/reset-token browser journey found",
       "edges": [
@@ -15711,8 +15983,14 @@
           "inventoryRefs": [
             "UI-137"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/auth.spec.ts",
+              "name": "password recovery is neutral and reset revokes a second browser session",
+              "kind": "e2e"
+            }
+          ]
         }
       ]
     },
@@ -15746,7 +16024,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "untested",
+      "status": "e2e",
       "auditEvidence": "UNTESTED",
       "auditNote": "security-headers-browser.test.ts renders access_denied; no provider redirect/callback lifecycle",
       "edges": [
@@ -15758,8 +16036,19 @@
           "inventoryRefs": [
             "UI-138"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/auth.spec.ts",
+              "name": "OAuth callback creates a verified session and initial password requires freshness",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/auth.spec.ts",
+              "name": "OAuth denial and mismatched state create no session and offer sign-in recovery",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-138-E02",
@@ -15780,8 +16069,14 @@
           "inventoryRefs": [
             "A05"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/auth.spec.ts",
+              "name": "Google linking rejects a different provider email without replacing the session",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-138-E04",
@@ -15802,8 +16097,14 @@
           "inventoryRefs": [
             "A05"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/auth.spec.ts",
+              "name": "Google linking restores controls on failure and connects the matching account",
+              "kind": "e2e"
+            }
+          ]
         }
       ]
     },
@@ -15835,7 +16136,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "untested",
+      "status": "e2e",
       "auditEvidence": "UNTESTED",
       "auditNote": "auth-ui-regressions.test.ts checks method styles and initial-password wiring",
       "edges": [
@@ -15847,8 +16148,14 @@
           "inventoryRefs": [
             "UI-139"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/auth.spec.ts",
+              "name": "security methods expose loading, failure and a real retry",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-139-E02",
@@ -15858,8 +16165,14 @@
           "inventoryRefs": [
             "A09"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/auth.spec.ts",
+              "name": "security methods expose loading, failure and a real retry",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-139-E03",
@@ -15869,8 +16182,14 @@
           "inventoryRefs": [
             "A09"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/auth.spec.ts",
+              "name": "security methods expose loading, failure and a real retry",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-139-E04",
@@ -15880,8 +16199,24 @@
           "inventoryRefs": [
             "A09"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/auth.spec.ts",
+              "name": "security methods expose loading, failure and a real retry",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/auth.spec.ts",
+              "name": "OAuth callback creates a verified session and initial password requires freshness",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/auth.spec.ts",
+              "name": "Google linking restores controls on failure and connects the matching account",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-139-E05",
@@ -15924,7 +16259,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "untested",
+      "status": "e2e",
       "auditEvidence": "UNTESTED",
       "auditNote": "auth-pages.ts initial-password-form",
       "edges": [
@@ -15936,8 +16271,14 @@
           "inventoryRefs": [
             "UI-140"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/auth.spec.ts",
+              "name": "OAuth callback creates a verified session and initial password requires freshness",
+              "kind": "e2e"
+            }
+          ]
         }
       ]
     },
@@ -15969,7 +16310,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "untested",
+      "status": "e2e",
       "auditEvidence": "UNTESTED",
       "auditNote": "auth-pages.ts change-password-form",
       "edges": [
@@ -15981,8 +16322,14 @@
           "inventoryRefs": [
             "UI-141"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/auth.spec.ts",
+              "name": "change password rejects wrong current credentials and revokes other sessions",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-141-E02",
@@ -15992,8 +16339,14 @@
           "inventoryRefs": [
             "A10"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/auth.spec.ts",
+              "name": "OAuth callback creates a verified session and initial password requires freshness",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-141-E03",
@@ -16014,8 +16367,24 @@
           "inventoryRefs": [
             "A10"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/auth.spec.ts",
+              "name": "change password rejects wrong current credentials and revokes other sessions",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/auth.spec.ts",
+              "name": "OAuth callback creates a verified session and initial password requires freshness",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/auth.spec.ts",
+              "name": "Google linking restores controls on failure and connects the matching account",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-141-E05",
@@ -16025,8 +16394,14 @@
           "inventoryRefs": [
             "A10"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/auth.spec.ts",
+              "name": "Google linking restores controls on failure and connects the matching account",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-141-E06",
@@ -16069,7 +16444,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "untested",
+      "status": "e2e",
       "auditEvidence": "UNTESTED",
       "auditNote": "auth-pages.ts linkGoogle; no controller integration assertion found",
       "edges": [
@@ -16081,8 +16456,14 @@
           "inventoryRefs": [
             "UI-142"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/auth.spec.ts",
+              "name": "Google linking restores controls on failure and connects the matching account",
+              "kind": "e2e"
+            }
+          ]
         }
       ]
     },
@@ -16121,7 +16502,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "browser",
+      "status": "e2e",
       "auditEvidence": "B",
       "auditNote": "sign-out-browser.test.ts",
       "edges": [
@@ -16188,8 +16569,14 @@
           "inventoryRefs": [
             "G11"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/auth.spec.ts",
+              "name": "sign-out failure retries, clears both tabs and protects back-forward history",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-143-E07",
@@ -16221,8 +16608,14 @@
           "inventoryRefs": [
             "G11"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/auth.spec.ts",
+              "name": "sign-out failure retries, clears both tabs and protects back-forward history",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-143-E10",
@@ -16232,8 +16625,14 @@
           "inventoryRefs": [
             "G11"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/auth.spec.ts",
+              "name": "sign-out failure retries, clears both tabs and protects back-forward history",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-143-E11",
@@ -16243,8 +16642,14 @@
           "inventoryRefs": [
             "G11"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/auth.spec.ts",
+              "name": "sign-out failure retries, clears both tabs and protects back-forward history",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-143-E12",
@@ -16265,8 +16670,14 @@
           "inventoryRefs": [
             "G11"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/auth.spec.ts",
+              "name": "sign-out failure retries, clears both tabs and protects back-forward history",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-143-E14",
@@ -16282,6 +16693,21 @@
               "file": "tests/sign-out-browser.test.ts",
               "name": "tears down a background viewer within 2 seconds via %s and signs back in without a loop",
               "kind": "browser"
+            }
+          ]
+        },
+        {
+          "id": "UI-143-E15",
+          "from": "Authentication or account security page",
+          "trigger": "Complete the local authentication journey",
+          "expected": "Successful enhanced sign-out removes the backend session, hides both tabs, focuses the notice and preserves the background tab URL",
+          "inventoryRefs": [],
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/auth.spec.ts",
+              "name": "sign-out failure retries, clears both tabs and protects back-forward history",
+              "kind": "e2e"
             }
           ]
         }
@@ -16391,7 +16817,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "browser",
+      "status": "e2e",
       "auditEvidence": "B",
       "auditNote": "sign-out-browser.test.ts",
       "edges": [
@@ -16420,6 +16846,21 @@
               "file": "tests/sign-out-browser.test.ts",
               "name": "keeps the session and subscriptions on failure, then allows retry",
               "kind": "browser"
+            }
+          ]
+        },
+        {
+          "id": "UI-145-E03",
+          "from": "Signed-in account security page",
+          "trigger": "Fail/retry sign-out or restore a revoked session",
+          "expected": "Failed sign-out retains the backend session and other tab; retry removes the session and signs out both tabs",
+          "inventoryRefs": [],
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/auth.spec.ts",
+              "name": "sign-out failure retries, clears both tabs and protects back-forward history",
+              "kind": "e2e"
             }
           ]
         }
@@ -16460,7 +16901,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "unit",
+      "status": "e2e",
       "auditEvidence": "U",
       "auditNote": "commentor-recovery-session.test.ts",
       "edges": [
@@ -16483,8 +16924,19 @@
           "inventoryRefs": [
             "G12"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/auth.spec.ts",
+              "name": "persisted pageshow checks the backend and hides a revoked account",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/auth.spec.ts",
+              "name": "password recovery is neutral and reset revokes a second browser session",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-146-E03",
@@ -16544,6 +16996,36 @@
               "file": "tests/commentor-recovery-session.test.ts",
               "name": "checks the live server session before BFCache hydration and handles iframe load while the check is pending",
               "kind": "unit"
+            }
+          ]
+        },
+        {
+          "id": "UI-146-E08",
+          "from": "Authentication or account security page",
+          "trigger": "Complete the local authentication journey",
+          "expected": "Back/forward after sign-out does not display protected account-security content",
+          "inventoryRefs": [],
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/auth.spec.ts",
+              "name": "sign-out failure retries, clears both tabs and protects back-forward history",
+              "kind": "e2e"
+            }
+          ]
+        },
+        {
+          "id": "UI-146-E09",
+          "from": "Signed-in account security page",
+          "trigger": "Fail/retry sign-out or restore a revoked session",
+          "expected": "Persisted pageshow reads the live backend and hides account security after session revocation",
+          "inventoryRefs": [],
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/auth.spec.ts",
+              "name": "persisted pageshow checks the backend and hides a revoked account",
+              "kind": "e2e"
             }
           ]
         }
@@ -17427,7 +17909,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "untested",
+      "status": "e2e",
       "auditEvidence": "NOT_IN_AUDIT",
       "auditNote": "Additional family from the modernization inventory/route ledger.",
       "edges": [
@@ -17459,8 +17941,19 @@
           "inventoryRefs": [
             "G04"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/auth.spec.ts",
+              "name": "auth validation, reveal, pending exclusion and transport recovery preserve inputs",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/auth.spec.ts",
+              "name": "signup verifies delivered mail, resends neutrally and retains the destination",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-159-E04",
