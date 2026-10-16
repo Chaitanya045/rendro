@@ -49,12 +49,6 @@ prevent partial publication. Each run extracts verified bytes into its own
 private directory; shared cached executables are never executed. First use needs GitHub release access; cached runs do not
 need a deployed Convex account. A backend download/start failure fails the run.
 
-The disposable backend sets `DATABASE_UDF_USER_TIMEOUT_SECONDS=5`. The pinned
-[backend defaults to one second](https://github.com/get-convex/convex-backend/blob/a3538c6/crates/common/src/knobs.rs#L967)
-of elapsed time outside syscalls, which can expire
-even an indexed session lookup when a shared runner deschedules it. This test-only
-execution budget leaves application deadlines, auth lifetimes and rate limits intact.
-
 Cleanup is registered before acquiring resources, with an incremental journal
 under the system temp directory's `rendro-e2e-runs/`. Playwright global teardown,
 process exit and SIGINT/SIGTERM handlers remove tracked children, containers and

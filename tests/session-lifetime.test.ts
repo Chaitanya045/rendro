@@ -1,13 +1,16 @@
 import { convexTest } from "convex-test";
 import { betterAuth } from "better-auth/minimal";
 import { hashPassword, makeSignature } from "better-auth/crypto";
+import { parseCookies } from "better-call";
 import { Hono } from "hono";
+import { readFileSync } from "node:fs";
 import type { User } from "better-auth/types";
 import { afterEach, expect, it, vi } from "vitest";
 import schema from "../convex/schema";
 import authSchema from "../convex/betterAuth/schema";
 import { components } from "../convex/_generated/api";
 import { createAuthOptions } from "../convex/auth";
+import { sessionLifetime, sessionlessAuthPaths, withLifetimeMarker } from "../convex/sessionLifetime";
 import { proxyAuthRequest } from "@/auth-proxy";
 import { sessionCache, sessionMiddleware } from "@/middleware/session";
 import { createViewerTicket, readViewerTicket } from "@/viewer-ticket";
@@ -211,3 +214,130 @@ it("rejects client writes to the persisted lifetime choice", async () => {
   expect(response.status).toBe(400);
   expect(await f.stored()).toEqual(initial);
 });
+
+const marker = "better-auth.dont_remember";
+type Endpoint = { path?: string; options: { method: string | string[]; metadata?: { SERVER_ONLY?: boolean } } };
+
+it("reuses the exact cookie parser Better Auth reads markers with", () => {
+  const manifest = (path: string) => JSON.parse(readFileSync(path, "utf8")) as Record<string, Record<string, string>>;
+  expect(manifest("package.json").devDependencies["better-call"])
+    .toBe(manifest("node_modules/better-auth/package.json").dependencies["better-call"]);
+});
+
+it.each([
+  ["drops whitespace-before-equals variants", `${marker} =x; a=1; ${marker}\t=y`, "a=1"],
+  ["drops quoted, empty and leading-space variants", ` ${marker}="x"; a="q"; ${marker}=`, "a=q"],
+  ["skips pairs without '=' exactly as Better Auth does", `${marker}; junk; ${marker} =x; b=2`, "b=2"],
+  ["keeps the first duplicate of other cookies", "a=1; a=2;; b = 3 ;", "a=1; b=3"],
+  ["drops prefixed and mixed-case variants", `__Secure-${marker}=x; __HOST-${marker}=y; Better-Auth.Dont_Remember=z; c=3`, "c=3"],
+  ["escapes values that would otherwise be reparsed", "a=%25%3B%22; b=%zz; c=\" sp \"; d=%00", "a=%25%3B%22; b=%25zz; c=%20sp%20; d=%00"],
+  ["keeps empty names", "=x; a=1", "=x; a=1"],
+])("%s", (_name, header, expected) => {
+  expect(withLifetimeMarker(header, marker)).toBe(expected);
+  expect(withLifetimeMarker(header, `__Secure-${marker}`, "true.sig=")).toBe(`__Secure-${marker}=true.sig=${expected ? `; ${expected}` : ""}`);
+});
+
+it("rebuilds every header to Better Auth's own parse with the server marker first", () => {
+  // Deterministic fuzzing over the separators and encodings better-call treats specially.
+  const pieces = [marker, `__Secure-${marker}`, "a", "b", "", " ", "\t", "=", "==", ";", "\"", "%", "%3D", "%zz", "%00", "%0A", "\u0001", "\u00a0", "x", "true.v="];
+  let seed = 145;
+  const random = (n: number) => (seed = (seed * 1_103_515_245 + 12_345) % 2_147_483_648) % n;
+  for (let i = 0; i < 5_000; i++) {
+    const header = Array.from({ length: random(16) }, () => pieces[random(pieces.length)]).join("");
+    for (const name of [marker, `__Secure-${marker}`]) {
+      const others = [...parseCookies(header)].filter(([key]) => !/^(?:__secure-)?better-auth\.dont_remember$/i.test(key));
+      expect([...parseCookies(withLifetimeMarker(header, name))]).toEqual(others);
+      expect([...parseCookies(withLifetimeMarker(header, name, "true.s/g+=")).entries()]).toEqual([[name, "true.s/g+="], ...others]);
+    }
+  }
+});
+
+// Each variant precedes the session token: Better Auth reads the first pair it
+// parses under the marker name, so each would previously win over a later one.
+const variants = (value: string) => [
+  `${marker} =${encodeURIComponent(value)}`,
+  `${marker}\t=${encodeURIComponent(value)}`,
+  `${marker}="${value}"`,
+  `${marker}; ${marker} =${encodeURIComponent(value)}`,
+  `${marker} =${encodeURIComponent(value)}; ${marker}=${encodeURIComponent(value)}`,
+  `;;  ${marker}  =  ${encodeURIComponent(value)}  ;`,
+  `Better-Auth.Dont_Remember=${encodeURIComponent(value)}; __Secure-${marker}=${encodeURIComponent(value)}`,
+];
+
+it.each([false, true])("ignores client marker variants Better Auth would parse (remember=%s)", async remember => {
+  const f = await fixture(remember);
+  const initial = await f.stored();
+  const tokenOnly = f.tokenCookie.split(";", 1)[0];
+  // Non-remembered attacks try to hide the server marker; remembered ones try
+  // to inject a validly signed marker. Neither may change the persisted choice.
+  const values = remember ? [`true.${await makeSignature("true", f.context.secret)}`]
+    : ["x", "true.invalid", `false.${await makeSignature("false", f.context.secret)}`];
+  vi.setSystemTime(Number(initial.createdAt) + 60 * 60_000);
+  for (const value of values) {
+    for (const variant of variants(value)) {
+      for (const path of ["/get-session", "/convex/token", "/organization/list"]) {
+        for (const send of [
+          (cookie: string) => f.app.request(`${origin}/api/auth${path}`, { headers: { cookie } }),
+          (cookie: string) => f.auth.handler(new Request(`${origin}/api/auth${path}`, { headers: { cookie } })),
+        ]) {
+          // Remembered sessions are due for refresh (one-day update age) on every request.
+          if (remember) vi.setSystemTime(Number((await f.stored()).expiresAt) - 6 * day + 1000);
+          const response = await send(`${variant}; ${tokenOnly}`);
+          expect(response.status).toBe(200);
+          const stored = await f.stored();
+          expect(stored.rememberMe).toBe(remember);
+          expect(stored.expiresAt).toBe(remember ? Date.now() + 7 * day : initial.expiresAt);
+          for (const cookie of response.headers.getSetCookie().filter(c => c.startsWith("better-auth.session_token="))) {
+            if (remember) expect(cookie).toMatch(/; Max-Age=604800(?:;|$)/i);
+            else expect(cookie).not.toMatch(/; (?:Max-Age|Expires)=/i);
+          }
+        }
+      }
+      vi.advanceTimersByTime(60_000);
+    }
+  }
+}, 30_000);
+
+it("hooks every Better Auth endpoint that can read a session", async () => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  const hook = sessionLifetime().hooks!.before![0];
+  const endpoints = (auth: { api: object }) => Object.values(auth.api) as Endpoint[];
+  const backend = convexTest(schema, import.meta.glob("../convex/**/*.ts"));
+  backend.registerComponent("betterAuth", authSchema, import.meta.glob("../convex/betterAuth/**/*.ts"));
+  const auth = betterAuth(createAuthOptions({ runQuery: backend.query, runMutation: backend.mutation } as never));
+  const context = await auth.$context;
+  const all = endpoints(auth);
+  // Exemptions must name real endpoints; everything else, including server-only
+  // and future endpoints, is covered by default.
+  for (const path of sessionlessAuthPaths) expect(all.map(e => e.path)).toContain(path);
+  for (const { path } of all) expect(hook.matcher({ path } as never)).toBe(!sessionlessAuthPaths.has(path));
+
+  // Exercise every HTTP endpoint with a fresh non-remembered session and an
+  // attacking marker. Exempt endpoints must not resolve or refresh it at all.
+  const user = await context.internalAdapter.createUser({ name: "Sweep", email: "sweep@example.test", emailVerified: true });
+  for (const { path, options } of all.filter(e => e.path && !e.options.metadata?.SERVER_ONLY)) {
+    // The Convex adapter stores epoch milliseconds plus the lifetime field.
+    const session = await context.internalAdapter.createSession(user.id, true) as unknown as { token: string; createdAt: number; expiresAt: number; rememberMe: boolean };
+    expect(session.rememberMe).toBe(false);
+    const signed = encodeURIComponent(`${session.token}.${await makeSignature(session.token, context.secret)}`);
+    const find = vi.spyOn(context.internalAdapter, "findSession");
+    const update = vi.spyOn(context.internalAdapter, "updateSession");
+    vi.setSystemTime(session.createdAt + 60 * 60_000);
+    const method = [options.method].flat()[0] === "GET" ? "GET" : "POST";
+    const response = await auth.handler(new Request(`${origin}/api/auth${path!.replace(/:\w+/g, "x")}`, {
+      method, headers: { cookie: `${marker} =x; better-auth.session_token=${signed}`, origin, "content-type": "application/json" },
+      body: method === "POST" ? "{}" : undefined,
+    }));
+    const stored = await backend.query(components.betterAuth.adapter.findOne, { model: "session", where: [{ field: "token", value: session.token }] });
+    if (stored) expect(stored.expiresAt).toBe(session.expiresAt);
+    // Only deletions (Max-Age=0) may carry a lifetime; nothing may persist.
+    for (const cookie of response.headers.getSetCookie().filter(c => c.startsWith("better-auth.session_token="))) {
+      expect(cookie.replace(/; Max-Age=0(?=;|$)/i, ""), path).not.toMatch(/; (?:Max-Age|Expires)=/i);
+    }
+    if (sessionlessAuthPaths.has(path)) {
+      expect(find, path).not.toHaveBeenCalled();
+      expect(update, path).not.toHaveBeenCalled();
+    }
+    vi.restoreAllMocks();
+  }
+}, 60_000);

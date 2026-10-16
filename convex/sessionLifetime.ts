@@ -1,6 +1,7 @@
 import type { BetterAuthPlugin } from "better-auth";
 import { createAuthMiddleware } from "better-auth/api";
 import { makeSignature } from "better-auth/crypto";
+import { parseCookies } from "better-call";
 import { sessionExpiryMs } from "./sessionReadLimit";
 
 const day = 86_400_000;
@@ -10,6 +11,30 @@ type LifetimeSession = { rememberMe?: boolean | null; createdAt: unknown; expire
 // including records already extended before this fix; never trust a cookie.
 function remembered(session: LifetimeSession): boolean {
   return session.rememberMe ?? sessionExpiryMs(session.expiresAt) - sessionExpiryMs(session.createdAt) > day;
+}
+
+// Endpoints that never resolve the caller's session, refresh it, or write its
+// cookie. Every other endpoint, including future ones, gets the lifetime hook.
+export const sessionlessAuthPaths: ReadonlySet<string | undefined> = new Set([
+  "/ok", "/error", "/sign-out", "/convex/jwks", "/convex/.well-known/openid-configuration",
+]);
+
+const baseName = (name: string) => name.replace(/^__(?:secure|host)-/i, "").toLowerCase();
+// Escape everything better-call could trim, unquote, split on, or decode, so a
+// rebuilt pair parses back to exactly the value Better Auth would have read.
+const cookieValue = (value: string) => value.replace(/[\p{Cc}\s%;"]/gu, encodeURIComponent);
+
+/**
+ * Rebuild a Cookie header from Better Auth's own parse (better-call: trimmed
+ * names, first duplicate wins, quoted and pair-less segments). Every variant of
+ * `name` is dropped and the server-derived marker, if any, is placed first.
+ */
+export function withLifetimeMarker(header: string, name: string, marker?: string): string {
+  const pairs = marker === undefined ? [] : [`${name}=${cookieValue(marker)}`];
+  for (const [key, value] of parseCookies(header)) {
+    if (baseName(key) !== baseName(name)) pairs.push(`${key}=${cookieValue(value)}`);
+  }
+  return pairs.join("; ");
 }
 
 export function sessionLifetime(): BetterAuthPlugin {
@@ -27,7 +52,7 @@ export function sessionLifetime(): BetterAuthPlugin {
       },
     } } } } }),
     hooks: { before: [{
-      matcher: () => true,
+      matcher: ctx => !sessionlessAuthPaths.has(ctx.path),
       handler: createAuthMiddleware(async ctx => {
         const token = await ctx.getSignedCookie(ctx.context.authCookies.sessionToken.name, ctx.context.secret);
         if (!token) return;
@@ -41,16 +66,12 @@ export function sessionLifetime(): BetterAuthPlugin {
           findSession: async candidate => candidate === token ? resolved : adapter.findSession(candidate),
         };
         const name = ctx.context.authCookies.dontRememberToken.name;
+        const marker = remembered(resolved.session) ? undefined : `true.${await makeSignature("true", ctx.context.secret)}`;
         const headers = new Headers(ctx.headers);
+        // Better Auth's refresh and cookie writers consume this internal marker.
+        // It is derived solely from the persisted session, never client cookies.
         // A signed session token was read from this header, so it is present.
-        const cookies = (headers.get("cookie") as string).split(";")
-          .map(part => part.trim()).filter(part => part && part.split("=", 1)[0] !== name);
-        if (!remembered(resolved.session)) {
-          cookies.push(`${name}=${encodeURIComponent(`true.${await makeSignature("true", ctx.context.secret)}`)}`);
-        }
-        // Better Auth's refresh and cookie writers consume this internal header.
-        // It is derived solely from the persisted session, never client markers.
-        headers.set("cookie", cookies.join("; "));
+        headers.set("cookie", withLifetimeMarker(headers.get("cookie") as string, name, marker));
         return { context: { headers } };
       }),
     }] },

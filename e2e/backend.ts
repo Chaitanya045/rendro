@@ -92,11 +92,7 @@ export async function startBackend(directory: string, proxy?: { origin: string; 
   const site = `http://127.0.0.1:${sitePort}`;
   const secret = randomBytes(32).toString("hex");
   const instance = `e2e-${randomBytes(6).toString("hex")}`;
-  // The pinned backend's one-second user-time deadline counts elapsed time
-  // outside syscalls, including CPU descheduling on shared CI hosts. Keep a
-  // bounded test-only budget so even indexed auth reads survive contention.
-  const environment = { ...localEnvironment(), DISABLE_BEACON: "true", DATABASE_UDF_USER_TIMEOUT_SECONDS: "5",
-    ...(proxy ? { SSL_CERT_FILE: proxy.certificate } : {}) };
+  const environment = { ...localEnvironment(), DISABLE_BEACON: "true", ...(proxy ? { SSL_CERT_FILE: proxy.certificate } : {}) };
   resources?.assertActive();
   const generating = run(binary, ["keygen", "admin-key", "--instance-name", instance, "--instance-secret", secret], { env: environment });
   resources?.child(generating.child);

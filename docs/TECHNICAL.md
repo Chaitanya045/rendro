@@ -80,11 +80,17 @@ session-only cookies. Checked sign-in retains seven-day sessions with normal
 refresh after the update age. A non-client-writable `session.rememberMe` field is
 written with each new session by a Better Auth database create hook. The lifetime
 plugin replaces the internal `dont_remember` preference with the persisted choice
-before Better Auth handles HTTP or server API calls. Missing, invalid, forged, or
-replayed client markers cannot change refresh or cookie persistence, including
-organization middleware, Worker reads, and viewer-ticket authorization. The plugin
-runs after the read limiters and reuses their resolved session; it does not bypass
-rate limits or mutate the shared adapter. Password changes that revoke sessions
+before Better Auth handles HTTP or server API calls. It rebuilds the request
+Cookie header from Better Auth's own parser (`better-call`, pinned to Better
+Auth's exact version), drops every client variant of the marker, including
+prefixed and mixed-case names, and places the server-derived marker first.
+Missing, invalid, forged, replayed, or malformed client markers cannot change
+refresh or cookie persistence, including organization middleware, Worker reads,
+and viewer-ticket authorization. Only endpoints that never resolve the caller's
+session (`/ok`, `/error`, `/sign-out`, and Convex JWKS/OpenID discovery) skip
+the plugin; a test enumerates every Better Auth endpoint to keep that list
+exact. The plugin runs after the read limiters and reuses their resolved
+session; it does not bypass rate limits or mutate the shared adapter. Password changes that revoke sessions
 carry the authenticated session's choice into the replacement session and cookie.
 
 Existing records without metadata use their stored duration to retain their

@@ -73,6 +73,7 @@
     "@vitest/coverage-v8": "^4.1.11",
     "ast-v8-to-istanbul": "1.0.7",
     "better-auth": "^1.6.23",
+    "better-call": "1.3.7",
     "convex": "^1.42.0",
     "convex-test": "^0.0.54",
     "dom-accessibility-api": "^0.7.1",
