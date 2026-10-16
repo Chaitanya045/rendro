@@ -1285,7 +1285,12 @@ with root-anchored filters and generated-code exclusions. The coverage gate
 merges Istanbul shards, checks the complete source manifest, and prevents
 per-file uncovered counters from exceeding `coverage-debt.json`. New files must
 be fully covered; stale ledger entries must be removed, and CI rejects ledger
-increases relative to the base revision. Coverage runs separately from verify
+increases relative to the base revision. All authored Convex modules, including the
+Better Auth adapter and the DEV-only QA fixtures, are fully covered and absent
+from the ledger. The QA permission fixture is exercised end to end by routing its
+`dev.rendro.app` requests into the production Convex HTTP router under
+`convex-test`, with fault-injection suites for failed checks and partial cleanup.
+Coverage runs separately from verify
 to preserve its 15-minute budget. The Vitest Chromium harness builds mapped
 in-memory test bundles and collects page, popup, and opaque OOPIF V8 coverage,
 including pre-navigation and failure teardown samples. Collection barriers flush

@@ -1,54 +1,6 @@
 {
   "version": 1,
   "files": {
-    "convex/authEmails.ts": {
-      "statements": 19,
-      "branches": 18,
-      "functions": 6,
-      "lines": 18
-    },
-    "convex/betterAuth/adapter.ts": {
-      "statements": 1,
-      "branches": 2,
-      "functions": 0,
-      "lines": 1
-    },
-    "convex/betterAuth/teamLookup.ts": {
-      "statements": 0,
-      "branches": 1,
-      "functions": 0,
-      "lines": 0
-    },
-    "convex/convex.config.ts": {
-      "statements": 3,
-      "branches": 0,
-      "functions": 0,
-      "lines": 3
-    },
-    "convex/publicFunctions.ts": {
-      "statements": 2,
-      "branches": 2,
-      "functions": 0,
-      "lines": 1
-    },
-    "convex/qaPermissionFixtures.ts": {
-      "statements": 207,
-      "branches": 103,
-      "functions": 26,
-      "lines": 166
-    },
-    "convex/qaWorkspaceFixtures.ts": {
-      "statements": 74,
-      "branches": 24,
-      "functions": 6,
-      "lines": 48
-    },
-    "convex/sessionReadLimit.ts": {
-      "statements": 1,
-      "branches": 0,
-      "functions": 0,
-      "lines": 1
-    },
     "scripts/build-cli.mjs": {
       "statements": 3,
       "branches": 0,

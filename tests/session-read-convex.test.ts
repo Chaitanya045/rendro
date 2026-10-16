@@ -109,6 +109,14 @@ describe("production Convex session adapter", () => {
     for (const value of [undefined, null, {}, Symbol(), NaN, Infinity, 1e20, "bad", new Date(NaN)]) expect(sessionExpiryMs(value)).toBe(0);
   });
 
+  it("treats values that throw while being inspected as already expired", () => {
+    // A Date-prototyped object passes instanceof but getTime() throws; a revoked
+    // proxy throws from instanceof itself. Neither may escape into the auth hook.
+    const revoked = Proxy.revocable({}, {});
+    revoked.revoke();
+    for (const value of [Object.create(Date.prototype), revoked.proxy]) expect(sessionExpiryMs(value)).toBe(0);
+  });
+
   it("cleans expired custom windows in bounded indexed batches and preserves credential buckets", async () => {
     vi.useFakeTimers();
     // Run within the component, just like its own cron and continuations.
