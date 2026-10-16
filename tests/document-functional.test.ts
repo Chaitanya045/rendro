@@ -1,3 +1,4 @@
+import rateLimiterTest from "./convex-rate-limiter";
 import { commitWithProof } from "./helpers/storage-proof";
 import { describe, expect, it, vi } from "vitest";
 import { convexTest } from "convex-test";
@@ -18,6 +19,7 @@ const modules = import.meta.glob("../convex/**/*.ts");
 
 async function commentMember() {
   const backend = convexTest(schema, modules);
+  rateLimiterTest.register(backend);
   backend.registerComponent(
     "betterAuth",
     betterAuthSchema,
@@ -170,6 +172,7 @@ describe("document workflows", () => {
 describe("deployment workflow", () => {
   it("supersedes the previous active release while retaining immutable deployment records", async () => {
     const backend = convexTest(schema, modules);
+    rateLimiterTest.register(backend);
     const project = await backend.mutation(internal.projects.createInternal, {
       organizationId: "org-functional",
       name: "Docs",

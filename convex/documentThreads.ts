@@ -1,3 +1,4 @@
+import { consumeWriteQuota } from "./writeQuotas";
 import { publicPaginate } from "./publicPagination";
 import { publicError } from "./publicErrors";
 import { validateClientOperationId, validateCommentAuthor } from "./commentOperations";
@@ -183,6 +184,7 @@ export const create = mutation({
         .eq("clientOperationId", args.clientOperationId)).unique();
       if (existing) return existing._id;
     }
+    await consumeWriteQuota(ctx, "comments", authorized.user._id, args.organizationId);
     const now = Date.now();
     return ctx.db.insert("documentThreads", {
       clientOperationId: args.clientOperationId,

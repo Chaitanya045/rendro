@@ -1,3 +1,4 @@
+import rateLimiterTest from "./convex-rate-limiter";
 import type { User } from "better-auth/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { convexTest } from "convex-test";
@@ -21,6 +22,7 @@ afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.unstubAllEnvs(
 async function fixture() {
   vi.stubEnv("LEGACY_ORGANIZATION_MAP", "{}");
   const backend = convexTest(schema, modules);
+  rateLimiterTest.register(backend);
   registerAuth(backend);
   // A consumer email is allowed only because of this explicit membership.
   const identity = await seedIdentity(backend, { email: "mapped@gmail.com" });
@@ -125,6 +127,7 @@ describe("legacy Worker authorization and persistence", () => {
     vi.spyOn(minio, "deleteObject").mockResolvedValue();
     vi.stubGlobal("fetch", vi.fn(async (input, init) => {
       const url = String(input);
+      if (url.endsWith("/api/rendro/admission/public")) return Response.json({ admitted: true });
       if (url.includes("get-session")) return await Promise.resolve(Response.json({ user: { id: "user", email, name: "Name", emailVerified: true, createdAt: Date.now(), updatedAt: Date.now() }, session: { id: "session", expiresAt: Date.now() + 60_000 } }));
       if (url.includes("management/access")) return access === null ? new Response(null, { status: 403 }) : Response.json(access);
       const payload = JSON.parse(init?.body as string);
@@ -232,6 +235,8 @@ describe("legacy Worker authorization and persistence", () => {
     expect((await request(publicationPath, { method: "DELETE" })).status).toBe(503);
   });
   it("rejects malformed content/tree requests and preserves missing-document errors", async () => {
+    expect((await request("/public/tenants/guide")).status).toBe(404);
+    expect(minio.getObjectStream).not.toHaveBeenCalled();
     expect((await request("/api/legacy/content", { method: "DELETE" })).status).toBe(404);
     expect((await request("/api/legacy/content?key=example", { method: "DELETE" })).status).toBe(404);
     expect((await request("/api/tree/example?prefix=other/")).status).toBe(400);
@@ -277,6 +282,7 @@ describe("legacy Worker authorization and persistence", () => {
 
 it("bounds service deletion reads and persists deletion before reporting success", async () => {
   const backend = convexTest(schema, modules);
+  rateLimiterTest.register(backend);
   const args = { orgSlug: "example", fileKey: "example/one.html", internalSecret };
   expect(await backend.query(api.deletedFiles.isDeleted, { fileKey: args.fileKey, internalSecret })).toBe(false);
   await backend.mutation(api.deletedFiles.mark, args);

@@ -201,7 +201,7 @@ describe("authoritative API-key rate limits", () => {
     expect(allowedAfterRefill).toBeLessThanOrEqual(100 + 50 - allowed);
   });
 
-  it("allows the CLI pattern for a 10,000-file cold deploy plus a large incremental deploy without refill", async () => {
+  it("allows the CLI pattern for a 1,000-file cold deploy plus a large incremental deploy without refill", async () => {
     vi.spyOn(Date, "now").mockReturnValue(Date.now());
     const { t } = await fixture();
     const project = await t.mutation(internal.projects.createInternal, {
@@ -209,7 +209,7 @@ describe("authoritative API-key rate limits", () => {
     });
     const identity = { organizationId: "org", projectId: project!._id };
     const query = new URLSearchParams(identity);
-    for (const [changed, reused] of [[10_000, 0], [500, 9_500]]) {
+    for (const [changed, reused] of [[1_000, 0], [50, 950]]) {
       expect((await t.fetch(`/api/rendro/deployments/active?${query}`, { headers })).status).toBe(200);
       const start = await t.fetch("/api/rendro/deployments/start", {
         method: "POST", headers, body: JSON.stringify({ ...identity,

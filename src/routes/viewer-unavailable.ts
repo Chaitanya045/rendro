@@ -3,11 +3,12 @@ import type { Context, MiddlewareHandler } from "hono";
 import { assetError } from "@/routes/asset-headers";
 import { renderSessionUnavailablePage } from "@/routes/session-unavailable";
 
-export type ViewerUnavailable = { unavailable: true; retryAfter: string };
+export type ViewerUnavailable = { unavailable: true; retryAfter: string; status?: 429 | 503 };
 
 export function unavailableResponse(c: Context, failure: ViewerUnavailable, representation: "html" | "json" | "asset" = "html") {
   c.header("Cache-Control", "private, no-store");
   c.header("Retry-After", failure.retryAfter);
+  if (failure.status === 429) return c.json({ error: "Too many requests. Please retry later.", code: "rate_limited" }, 429);
   if (representation === "asset") return assetError(c, renderSessionUnavailablePage, 503);
   return representation === "json"
     ? c.json({ error: "Document temporarily unavailable", retryable: true }, 503)

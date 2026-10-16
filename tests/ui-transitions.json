@@ -595,6 +595,14 @@
     {
       "route": "ALL /api/publications*",
       "reason": "Rejects retired legacy credentials before publication handling."
+    },
+    {
+      "route": "ALL /public/*",
+      "reason": "Anonymous request admission middleware; the concrete public routes are inventoried separately."
+    },
+    {
+      "route": "ALL /share/*",
+      "reason": "Anonymous request admission middleware; the concrete share routes are inventoried separately."
     }
   ],
   "testSkips": [
@@ -7513,6 +7521,23 @@
             {
               "file": "tests/management-dialog-reuse-browser.test.ts",
               "name": "$name blocks Cancel and Escape while pending, restores drafts after denial, and retries",
+              "kind": "browser"
+            }
+          ]
+        },
+        {
+          "id": "UI-063-E04",
+          "from": "Create project dialog contains a draft",
+          "trigger": "Submit when the authenticated actor has exhausted the project write quota",
+          "expected": "Shows the server retry message, retains the draft, restores submit and cancel controls, and does not automatically retry the write",
+          "inventoryRefs": [
+            "UI-063"
+          ],
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/management-quota-browser.test.ts",
+              "name": "keeps the project dialog draft and restores controls with a clear quota retry message",
               "kind": "browser"
             }
           ]

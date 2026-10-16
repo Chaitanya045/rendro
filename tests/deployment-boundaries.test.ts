@@ -1,3 +1,4 @@
+import rateLimiterTest from "./convex-rate-limiter";
 import { commitWithProof } from "./helpers/storage-proof";
 import { describe, expect, it } from "vitest";
 import { convexTest } from "convex-test";
@@ -48,6 +49,7 @@ async function staging(
 describe("deployment tenant and project boundaries", () => {
   it("rejects a foreign organization paired with a project's ID when listing", async () => {
     const backend = convexTest(schema, modules);
+    rateLimiterTest.register(backend);
     const outsiderProject = await project(backend, "org-outsider", "outsider");
     await staging(backend, "org-outsider", outsiderProject._id);
 
@@ -59,6 +61,7 @@ describe("deployment tenant and project boundaries", () => {
 
   it("does not let one project-scoped credential fail a sibling deployment", async () => {
     const backend = convexTest(schema, modules);
+    rateLimiterTest.register(backend);
     const allowedProject = await project(backend, "org-a", "allowed");
     const siblingProject = await project(backend, "org-a", "sibling");
     const siblingDeployment = await staging(backend, "org-a", siblingProject._id);
@@ -80,6 +83,7 @@ describe("deployment tenant and project boundaries", () => {
 
   it("fails a staging deployment when all identity fields agree", async () => {
     const backend = convexTest(schema, modules);
+    rateLimiterTest.register(backend);
     const ownedProject = await project(backend, "org-a", "owned");
     const deployment = await staging(backend, "org-a", ownedProject._id);
 
@@ -93,6 +97,7 @@ describe("deployment tenant and project boundaries", () => {
 
   it("does not fail an already committed deployment", async () => {
     const backend = convexTest(schema, modules);
+    rateLimiterTest.register(backend);
     const ownedProject = await project(backend, "org-a", "committed");
     const deployment = await staging(backend, "org-a", ownedProject._id);
     await commitWithProof(backend, {

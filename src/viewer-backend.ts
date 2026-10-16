@@ -1,13 +1,13 @@
 import { evictRejectedSession } from "@/session-cache";
 export class ViewerBackendError extends Error {
   readonly unavailable = true;
-  constructor(readonly retryAfter = "1") {
+  constructor(readonly retryAfter = "1", readonly status: 429 | 503 = 503) {
     super("Viewer backend unavailable");
   }
 }
 
 /** Null means an HTTP denial; successful lookups must contain an object. */
-export async function viewerBackendJson<T extends object>(url: string, init?: RequestInit): Promise<T | null> {
+export async function viewerBackendJson<T extends object>(url: string, init?: RequestInit, preserveRateLimit = false): Promise<T | null> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 5_000);
   try {
@@ -23,7 +23,7 @@ export async function viewerBackendJson<T extends object>(url: string, init?: Re
           const value = response.headers.get("Retry-After");
           const seconds = value && /^\d+$/.test(value) ? Number(value)
             : value ? Math.ceil((Date.parse(value) - Date.now()) / 1_000) : 1;
-          throw new ViewerBackendError(String(Number.isSafeInteger(seconds) ? Math.max(1, seconds) : 1));
+          throw new ViewerBackendError(String(Number.isSafeInteger(seconds) ? Math.max(1, seconds) : 1), preserveRateLimit && response.status === 429 ? 429 : 503);
         }
         const data: unknown = await response.json();
         // All callers expect object envelopes and validate their required fields.

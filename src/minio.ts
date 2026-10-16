@@ -19,6 +19,7 @@ import {
 const s3 = new S3Client({
   endpoint: MINIO_ENDPOINT,
   region: MINIO_REGION,
+  maxAttempts: 3, // Included in the bounded commit subrequest budget.
   credentials: {
     accessKeyId: MINIO_ACCESS_KEY,
     secretAccessKey: MINIO_SECRET_KEY,
@@ -207,9 +208,10 @@ export async function putObject(
   );
 }
 
-export async function listAllKeys(prefix: string): Promise<string[]> {
+export async function listAllKeys(prefix: string, limits?: { maxKeys: number; maxPages: number }): Promise<string[]> {
   const keys: string[] = [];
   let token: string | undefined;
+  let pages = 0;
   do {
     const res = await s3.send(new ListObjectsV2Command({
       Bucket: MINIO_BUCKET, Prefix: prefix, ContinuationToken: token,
@@ -218,6 +220,10 @@ export async function listAllKeys(prefix: string): Promise<string[]> {
       if (o.Key) keys.push(o.Key);
     }
     token = res.NextContinuationToken;
+    pages++;
+    if (limits && (keys.length > limits.maxKeys || (token && pages >= limits.maxPages))) {
+      throw new Error("Storage listing exceeds deployment verification budget");
+    }
   } while (token);
   return keys;
 }

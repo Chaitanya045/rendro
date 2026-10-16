@@ -1,3 +1,4 @@
+import { consumeWriteQuota } from "./writeQuotas";
 import { requireId } from "./ids";
 import { mutation } from "./publicFunctions";
 import { v } from "convex/values";
@@ -15,6 +16,7 @@ export const add = mutation({
       if (previous) return previous._id;
     }
     if (thread.deletedAt !== undefined) publicError("not_found");
+    await consumeWriteQuota(ctx, "comments", identity.subject, identity.organizationId);
     return ctx.db.insert("replies", { threadId, body, authorId: identity.subject, clientOperationId: input.clientOperationId, authorEmail: identity.email, authorName: identity.name });
   },
 });

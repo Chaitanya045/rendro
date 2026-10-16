@@ -29,6 +29,7 @@ export function mockSecurityBackend() {
   vi.spyOn(minio, "getObjectStream").mockImplementation(key => Promise.resolve(new Response(key.endsWith(".css") ? "body{color:rgb(1,2,3)}" : publisherHtml).body));
   vi.stubGlobal("fetch", vi.fn((input: string | URL | Request, init?: RequestInit) => {
     const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url);
+    if (url.pathname === "/api/rendro/admission/public") return Promise.resolve(Response.json({ admitted: true }));
     if (url.pathname === "/api/query" && typeof init?.body === "string") {
       const payload = JSON.parse(init.body);
       if (payload.path === "legacyAccess:resolve") return Promise.resolve(Response.json({ status: "success", value: payload.args[0].orgSlug === "example" ? "org-a" : null }));

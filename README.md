@@ -221,6 +221,27 @@ cloud credentials, but requires downloading, provisioning, and configuring a
 backend (the documented setup uses `convex dev`), not just an offline codegen flag.
 Untrusted PR CI therefore uses the offline guard without deployment credentials.
 
+## Limits
+
+A deployment supports **1,000 files**, **8 MiB per file**, and **128 MiB total**.
+Paths are limited to 1,024 characters (UTF-16 code units), and MIME strings to 128.
+The deployment-start request, including its manifest, is limited to **2 MiB**;
+other JSON/form requests are limited to **64 KiB**. File sizes/counts must be
+non-negative safe integers. The CLI validates local limits before contacting the
+server and reports which limit was exceeded. Split larger sets into projects or
+reduce generated assets. Oversized request bodies return JSON with HTTP 413.
+
+Per-user creation budgets are 30 comments/replies per minute, 20 shares per minute,
+20 projects per hour, and 20 API keys per hour, with matching burst capacities.
+Each organization has ten times those capacities/refill rates. A rejected creation
+returns HTTP 429 with `Retry-After`; wait before trying again. Revocation remains
+available. Anonymous publication/share resolution allows 600 requests/minute
+(burst 1,200) per verified IP; direct unverified callers share 60/minute (burst 120).
+
+The file-count and bounded storage-listing limits keep commit verification below
+Workers' 50-subrequest ceiling: normally four requests, at most 29 with the
+configured listing/retry budgets. See [resource limits and rationale](docs/TECHNICAL.md#request-and-deployment-resource-limits).
+
 ## License
 
 MIT

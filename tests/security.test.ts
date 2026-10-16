@@ -1,3 +1,4 @@
+import rateLimiterTest from "./convex-rate-limiter";
 import { seedLegacyMember, seedIdentity } from "./helpers/auth-identity";
 import { describe, expect, it, vi } from "vitest";
 
@@ -21,6 +22,7 @@ const acmeIdentity = {
 
 function makeBackend() {
   const backend = convexTest(schema, modules);
+  rateLimiterTest.register(backend);
   backend.registerComponent(
     "betterAuth",
     betterAuthSchema,

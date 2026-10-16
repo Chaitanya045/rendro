@@ -2,7 +2,7 @@ import { version } from "../package.json";
 import { createHash } from "node:crypto";
 import { resolve, join } from "node:path";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-const io = vi.hoisted(() => ({ readdir: vi.fn(), readFile: vi.fn(), writeFile: vi.fn(), mkdir: vi.fn(), git: vi.fn() }));
+const io = vi.hoisted(() => ({ stat: vi.fn(), readdir: vi.fn(), readFile: vi.fn(), writeFile: vi.fn(), mkdir: vi.fn(), git: vi.fn() }));
 vi.mock("node:fs/promises", () => io);
 vi.mock("node:child_process", () => ({ execFileSync: io.git }));
 const originalArgv = process.argv;
@@ -16,6 +16,7 @@ let handle: (url: string, init?: RequestInit) => Promise<Response>;
 beforeEach(() => {
   vi.resetModules(); vi.resetAllMocks();
   for (const name of ["CI", "GITHUB_SHA", "GITHUB_REPOSITORY", "GITHUB_REF", "GITHUB_ACTIONS", "GITHUB_RUN_ID", "GITHUB_WORKFLOW", "GITHUB_JOB", "GITHUB_ACTOR", "RENDRO_API_KEY"]) vi.stubEnv(name, "");
+  io.stat.mockResolvedValue({ size: bytes.byteLength });
   io.readdir.mockResolvedValue([entry("index.html")]);
   io.readFile.mockImplementation((path: string) => path.endsWith("/.rendroignore")
     ? Promise.reject(Object.assign(new Error("missing"), { code: "ENOENT" })) : Promise.resolve(bytes)); io.writeFile.mockResolvedValue(undefined); io.mkdir.mockResolvedValue(undefined);
@@ -163,4 +164,24 @@ it.each([false, true])("dispatches sensitive-file opt-in and prints exclusions (
   expect(result.output.includes('skipped ".env.qa" (sensitive)')).toBe(!include);
   const manifest = requests.find(request => request.url.endsWith("/start"))!.body.manifest as { files: Array<{ path: string }> };
   expect(manifest.files.map(file => file.path)).toEqual(include ? [".env.qa", "index.html"] : ["index.html"]);
+});
+
+it.each(["count", "file", "total", "path", "changed-file", "changed-total", "manifest"])("fails fast on the %s deployment budget", async budget => {
+  const fileBytes = 8 * 1024 * 1024;
+  if (budget === "count") io.readdir.mockResolvedValue(Array.from({ length: 1001 }, (_, i) => entry(`${i}.html`)));
+  if (budget === "file") io.stat.mockResolvedValue({ size: fileBytes + 1 });
+  if (budget === "total" || budget === "changed-total") {
+    io.readdir.mockResolvedValue(Array.from({ length: 17 }, (_, i) => entry(`${i}.bin`)));
+    io.stat.mockResolvedValue({ size: budget === "total" ? fileBytes : 1 });
+  }
+  if (budget === "path") io.readdir.mockResolvedValue([entry("x".repeat(1025))]);
+  if (budget === "changed-file" || budget === "changed-total") {
+    const grown = Buffer.alloc(budget === "changed-file" ? fileBytes + 1 : fileBytes);
+    io.readFile.mockImplementation((path: string) => path.endsWith("/.rendroignore") ? Promise.reject(Object.assign(new Error("missing"), { code: "ENOENT" })) : Promise.resolve(grown));
+  }
+  if (budget === "manifest") io.readdir.mockResolvedValue(Array.from({ length: 1000 }, (_, i) => entry("界".repeat(1000) + String(i).padStart(4, "0") + ".html")));
+  const result = await run(["push", ...identity, "--token", "key"], "never");
+  expect(result.exits).toBe(1);
+  expect(result.errors).toMatch(/1,000-file|8 MiB|128 MiB|1024 characters|2 MiB/);
+  expect(requests).toHaveLength(0);
 });

@@ -1,3 +1,4 @@
+import { admitLegacyResolution } from "./anonymousAdmission";
 import { httpRouter } from "convex/server";
 import { APIError } from "better-auth/api";
 import { httpAction, failure } from "./httpErrors";
@@ -43,6 +44,7 @@ import { listRetentionCandidates, markRetentionPurged } from "./retentionHttp";
 import { ensureMigrationProject } from "./migrationHttp";
 
 const http = httpRouter();
+http.route({ path: "/api/rendro/admission/public", method: "GET", handler: admitLegacyResolution });
 const setInitialPasswordHandler = httpAction(async (ctx, request) => {
   let body: unknown;
   try {

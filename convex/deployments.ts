@@ -1,3 +1,4 @@
+import { validDeploymentCounts } from "../shared/deployment-limits";
 import { verifyStorageValidation } from "../shared/storage-attestation";
 import { isOrganizationDeleted, requireActiveOrganization } from "./organizationLifecycle";
 import { sanitizeProvenance } from "../shared/provenance";
@@ -27,8 +28,8 @@ export const startInternal = internalMutation({
     if (!project || project.organizationId !== args.organizationId) {
       throw new ConvexError("Project not found");
     }
-    if (args.fileCount < 0 || args.byteCount < 0) {
-      throw new ConvexError("Deployment counts must be non-negative");
+    if (!validDeploymentCounts(args.fileCount, args.byteCount)) {
+      throw new ConvexError("Deployment counts must be safe non-negative integers within 1,000 files and 128 MiB");
     }
     if (args.manifestSha256.length !== 64 || !/^[a-f0-9]{64}$/.test(args.manifestSha256)) throw new ConvexError("manifestSha256 must be 64 lowercase hexadecimal characters");
     // Match the provenance display/storage caps from #123, rejecting oversized

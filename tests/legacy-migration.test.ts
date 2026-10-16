@@ -232,10 +232,10 @@ describe("legacy migration with mocked source storage and backend HTTP", () => {
 
   it("rejects source changes between hashing and upload without activating corrupt bytes", async () => {
     failure = "source-change";
-    await expect(main(["--map", "targets.json", ...confirmedApply])).rejects.toThrow("does not match its manifest entry");
+    await expect(main(["--map", "targets.json", ...confirmedApply])).rejects.toThrow("does not match the manifest size");
     expect(starts).toBe(1); expect(commits).toBe(0);
     expect(active).toBe(false);
-    expect(failReason).toContain("does not match its manifest entry");
+    expect(failReason).toContain("does not match the manifest size");
     expect([...objects.keys()].some(key => key.includes("/files/"))).toBe(false);
     expect(publications).toHaveLength(0);
     expect(records()[0].deploymentId).toBe("deployment");

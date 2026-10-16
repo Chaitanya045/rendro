@@ -335,7 +335,7 @@ Request
 
 `src/index.ts` is the Node.js entry for local development (`pnpm dev`, `pnpm start`). It mounts the same route groups from `src/app-routes.ts` and serves browser assets with `serveStatic`.
 
-Public routes and static assets run before the session middleware so they never trigger a session lookup. Their safety comes from record and capability validation, not route position.
+Public routes and static assets run before the session middleware so they never trigger a session lookup. Their safety comes from record and capability validation, not route position. Anonymous publication/share resolution also consumes the verified-IP budget: modern resolvers enforce it in Convex, while legacy routes run admission middleware before resolution. Between steps 7 and 8, shared write admission checks the request policy and body admission bounds bytes before any JSON/form parser; authorized binary uploads use the independent exact-size reader.
 
 ### Response security headers
 
@@ -389,6 +389,103 @@ If `CONVEX_SITE_URL` is unset, `src/config.ts` derives it from `CONVEX_URL` (`.c
 
 ## Deployment and Publication API
 
+### Request and deployment resource limits
+
+`src/bounded-body.ts` counts streamed request bytes before JSON/form parsing. Both
+Worker proxies/routes and every registered Convex HTTP action enforce **64 KiB**,
+including Better Auth and operator actions. Worker deployment start allows
+**2 MiB** for the manifest envelope; its compact Convex metadata request retains
+the 64 KiB limit. Excessive or malformed Content-Length is rejected before a read;
+missing and understated lengths still encounter the actual byte cap. Overflow
+cancels the stream and returns HTTP **413 JSON**. Body admission does not replace
+same-origin/media-type checks, credential verification, or storage attestations.
+
+New deployments have these shared Worker/CLI limits:
+
+| Resource | Maximum |
+|---|---|
+| Files | 1,000 |
+| Individual file | 8 MiB (8,388,608 bytes) |
+| Sum of all file sizes | 128 MiB (134,217,728 bytes) |
+| Path string | 1,024 UTF-16 code units before normalization |
+| Content-Type string | 128 UTF-16 code units |
+| Worker start request, including manifest/provenance | 2 MiB |
+
+Sizes and aggregate counts must be non-negative safe integers. Convex independently
+checks the file/byte totals on deployment creation; the Worker validates every
+manifest entry before hashing/storage. Existing hashes, provenance caps, staging
+leases, exact object-set verification and predecessor checks remain authoritative.
+The CLI checks all source metadata before reading/hashing file contents or making
+network requests, then checks actual sizes/MIME and serialized manifest size before
+starting. Limit errors name the relevant maximum. Split larger documentation sets
+into projects or reduce generated assets before pushing.
+
+Commit normally makes **4 external requests** at the maximum: staging authorization,
+manifest GET, one S3 LIST (1,000 keys), and the attested Convex commit. Listings are
+additionally bounded to **8 pages and 1,000 keys**, failing closed without activation
+on overflow; short or repeated continuation pages cannot loop indefinitely. Sorting,
+path comparisons and manifest hashing therefore operate on bounded inputs. With
+three attempts for each of the nine possible S3 reads plus two Convex calls, the
+worst configured commit budget is **29 external requests**, leaving room below
+Workers' 50-request Free-plan subrequest ceiling. Cloudflare's Paid default is
+10,000; both plans have 128 MB memory. These are subrequest budgets, not a promise
+that SDK/crypto work fits the Free plan's 10 ms CPU allowance; production should
+use a paid Worker CPU budget. [Cloudflare limits](https://developers.cloudflare.com/workers/platform/limits/)
+
+An upload cannot exceed the independent 8 MiB server cap, even if its manifest
+claims more. Its exact-size reader preallocates one bounded buffer and copies each
+chunk directly into it; hashing uses that buffer without an explicit full-file
+copy. Checksums are verified before storage dispatch. Concurrent requests still
+have SDK/runtime overhead; the size cap is not an isolate-wide reservation system.
+
+### Actor write and anonymous read budgets
+
+Convex's existing `@convex-dev/rate-limiter` component owns the new transactional
+creation quotas. Each successful creation consumes both an authenticated-user
+bucket (across all organizations) and its verified organization's bucket. No
+client-supplied actor ID is accepted by public endpoints. Organization capacity and
+refill are ten times the per-user values below; unrelated actors/tenants have no
+global shared write bucket.
+
+| Resource | User capacity | User refill |
+|---|---|---|
+| Comment threads and replies, combined (project and legacy) | 30 | 30/minute |
+| Share grants | 20 | 20/minute |
+| Projects | 20 | 20/hour |
+| API keys | 20 | 20/hour |
+
+Limiter debits and inserts share the same Convex mutation transaction. Failed
+writes roll back the debits; an organization denial also rolls back the actor
+debit. Comment operation deduplication precedes charging, so a confirmed write
+retried with the same operation ID remains idempotent. Revocation/deletion remain
+available when creation is exhausted. HTTP denials return **429 + Retry-After**
+and a clear retry message; direct comment RPCs return the component's structured
+`RateLimited` application error. Management dialogs keep their existing draft and
+pending-state recovery, and never automatically replay a denied write.
+
+Anonymous publication/share resolutions share **600 requests/minute with a 1,200
+burst per verified ingress IP**, before resolver queries or storage reads. Modern
+Convex resolver actions enforce this even when called directly. Legacy Worker
+routes first call `/api/rendro/admission/public`, which grants no content access;
+legacy mapping, publication, deletion and signature checks still follow. The
+Worker forwards signed IP/method/path/query/time proofs, never arbitrary forwarding
+headers. Direct callers without a valid proof share **60/minute, burst 120**;
+changing slugs, tokens or forged IP headers cannot split this fallback allowance.
+Public Worker routes preserve 429 and Retry-After and use private/no-store on
+failures. Independent verified IPs retain their budgets. This IP policy includes
+all readers behind the same NAT; it is separate from authenticated write quotas
+and the existing API-key/session/organization-read limiters.
+
+Legacy tree deletion lookups already use batches of at most 100 keys per RPC;
+this implementation preserves that behavior.
+
+Rollout requires the Convex helper/action changes and Worker/CLI release; no data
+migration is needed. Regenerate Convex bindings from main after merge. Release
+Convex's legacy admission endpoint before the Worker that calls it. Rollback must
+keep the endpoint while those Workers are serving traffic. Existing committed
+content remains readable; oversized historical manifests cannot be used to resume
+staging writes under the new limits.
+
 ### API-key HTTP rate limits
 
 Convex is authoritative: `convex/apiKeyHttp.ts` wraps credential validation, every deployment action (start, active, staging, commit, fail, list), and publication create/list/remove. Limiting runs before body parsing or business logic, so malformed requests also count. A read-only hash lookup verifies an active, unexpired key; a shared token bucket uses the credential's database ID, never a raw key or caller-selected tenant/scope. Scope, project, organization, expiry and revocation authorization still run for each operation. Failed operations consume capacity too; cookie-only session routes retain their session authorization path.
@@ -399,7 +496,7 @@ The official `@convex-dev/rate-limiter` component provides persisted, transactio
 - **Failure cleanup (`/deployments/fail`):** a separate per-credential bucket refills 60 requests/minute with capacity 20, so exhausted upload budgets cannot block retention cleanup. Scope and tenant checks still apply.
 - **Invalid, expired, revoked, malformed or missing key on key-required routes:** refill 120 requests/minute (2/second), capacity 240 per verified IP. Invalid Authorization on session-capable routes also counts. IPs come only from #29's method/path/query-bound signed ingress metadata, verified using `CONVEX_INTERNAL_SECRET`. Deployment and publication Worker handlers sign their rewritten backend target/method, including staging reads for PUT uploads. Direct callers, absent secrets and invalid/stale signatures share one `unverified` bucket; raw forwarding headers cannot select a bucket. Valid credentials use their own budgets even when their IP's failed-attempt budget is exhausted. A verified key with insufficient scope/tenant access still consumes its credential budget. Each failed-key attempt atomically updates an expiry registry with its component debit. An hourly cron resets buckets inactive for at least an hour (well beyond the two-minute full refill), deleting registry and component rows together in batches of 100 with scheduled continuations. Concurrent reuse conflicts with cleanup in the same transaction, preserving active budgets.
 
-Request accounting from `cli/src/index.ts` and `src/routes/deployments.ts`: with C changed files and U reused files, a successful push makes **C + ceil(U / 16) + 3 Worker requests**, and **2C + 2 ceil(U / 16) + 4 Convex HTTP actions**. The fixed cost is active check, start, staging check at commit, and commit; each changed file and each 16-file copy batch adds an initial staging authorization plus a fresh authorization immediately before storage dispatch. An upload still receiving its body renews at most once every ten minutes, with a two-hour total transfer deadline; renewal failures cancel the body read. These additional renewal actions count against the same credential budget. Failure cleanup adds one action; publication creation adds two (deployment read + publication write). Default upload concurrency is eight. A 10,000-file cold push costs 20,004 tokens and therefore requires refill time beyond the 12,000-token burst budget; a 500-changed/9,500-reused push costs 2,192 tokens. The CLI honors bounded 429 retry delays. Sustained requests replenish at 100/second. These are application request limits, not file-size or storage-work quotas.
+Request accounting from `cli/src/index.ts` and `src/routes/deployments.ts`: with C changed files and U reused files, a successful push makes **C + ceil(U / 16) + 3 Worker requests**, and **2C + 2 ceil(U / 16) + 4 Convex HTTP actions**. The fixed cost is active check, start, staging check at commit, and commit; each changed file and each 16-file copy batch adds an initial staging authorization plus a fresh authorization immediately before storage dispatch. An upload still receiving its body renews at most once every ten minutes, with a two-hour total transfer deadline; renewal failures cancel the body read. These additional renewal actions count against the same credential budget. Failure cleanup adds one action; publication creation adds two (deployment read + publication write). Default upload concurrency is eight. At the 1,000-file deployment limit, a cold push costs 2,004 tokens within the 12,000-token burst budget; a 50-changed/950-reused push costs 224 tokens. The CLI honors bounded 429 retry delays. Sustained requests replenish at 100/second. These are application request limits, not file-size or storage-work quotas.
 
 Exhaustion returns `429`, `Retry-After` rounded up to whole seconds (minimum one), and `{ "error": "Rate limit exceeded", "code": "rate_limited" }`. Worker proxies preserve the status/body/header. This is an explicit error class in `httpErrors.ts`; unexpected limiter/backend faults remain sanitized 500s (502 through the Worker). Rate-limit responses do not log secrets, keys, request bodies or IPs.
 

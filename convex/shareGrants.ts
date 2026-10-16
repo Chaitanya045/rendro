@@ -1,3 +1,4 @@
+import { consumeWriteQuota } from "./writeQuotas";
 import { isDeploymentPurging } from "./retentionPolicy";
 import { isOrganizationDeleted, requireActiveOrganization } from "./organizationLifecycle";
 import type { WorkerShare } from "../shared/resolver-dto";
@@ -22,6 +23,7 @@ export const createInternal = internalMutation({
   },
   handler: async (ctx, input) => {
     await requireActiveOrganization(ctx, input.organizationId);
+    await consumeWriteQuota(ctx, "shares", input.actorId, input.organizationId);
     const args = {
       ...input,
       projectId: requireId(ctx, "projects", input.projectId),

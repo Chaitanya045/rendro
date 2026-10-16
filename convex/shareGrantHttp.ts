@@ -1,3 +1,4 @@
+import { anonymousHttpAction } from "./anonymousAdmission";
 import { publicShare } from "../shared/resolver-dto";
 import { isWorkerResolverRequest } from "../shared/resolver-auth";
 import { internal } from "./_generated/api";
@@ -89,7 +90,7 @@ export const revokeShareGrant = httpAction(async (ctx, request) => {
   }
 }, "cookie-json");
 
-export const resolveShareGrant = httpAction(async (ctx, request) => {
+export const resolveShareGrant = anonymousHttpAction(async (ctx, request) => {
   const token = new URL(request.url).searchParams.get("token");
   if (!token) return clientFailure("token is required");
   const result = await ctx.runQuery(internal.shareGrants.resolveInternal, { tokenHash: await sha256(token) });

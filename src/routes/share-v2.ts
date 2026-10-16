@@ -1,3 +1,4 @@
+import { authClientIpHeaders } from "@/auth-client-ip";
 import type { WorkerShare } from "../../shared/resolver-dto";
 import { signResolverRequest } from "../../shared/resolver-auth";
 import { ViewerBackendError, viewerBackendJson } from "@/viewer-backend";
@@ -20,17 +21,18 @@ const app = new Hono();
 app.use("/s/*", viewerErrorCache);
 app.onError(viewerErrorResponse);
 
-async function resolveShare(token: string): Promise<WorkerShare | null> {
+async function resolveShare(token: string, request: Request): Promise<WorkerShare | null> {
   const url = `${CONVEX_SITE_URL}/api/rendro/shares/public?token=${encodeURIComponent(token)}`;
   const headers = await signResolverRequest(new Request(url), CONVEX_INTERNAL_SECRET);
+  (await authClientIpHeaders(request, url, "GET")).forEach((value, name) => headers.set(name, value));
   headers.set("Accept", "application/json");
-  const result = await viewerBackendJson<WorkerShare>(url, { headers });
+  const result = await viewerBackendJson<WorkerShare>(url, { headers }, true);
   if (result && !result.deployment?.manifestKey) throw new ViewerBackendError();
   return result;
 }
 
 app.get("/s/:token/files/*", async (c) => {
-  const resolution = await resolveShare(c.req.param("token"));
+  const resolution = await resolveShare(c.req.param("token"), c.req.raw);
   const path = decodeStoragePath(c.req.path.slice(c.req.path.indexOf("/files/") + 7));
   if (!resolution || !path) return assetError(c, () => renderNotFoundPage({ path: "Document unavailable" }));
   const documentPath = resolution.grant.documentPath;
@@ -58,7 +60,7 @@ app.get("/s/:token/files/*", async (c) => {
 
 app.get("/s/:token", async (c) => {
   const token = c.req.param("token");
-  const resolution = await resolveShare(token);
+  const resolution = await resolveShare(token, c.req.raw);
   if (!resolution) return c.html(renderNotFoundPage({ path: c.req.path }), 404);
   // The grant alone chooses the file. A copied shell URL may name that exact
   // document, but cannot expand its scope; publisher query keys stay nested.

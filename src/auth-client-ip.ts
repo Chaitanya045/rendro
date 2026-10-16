@@ -11,3 +11,7 @@ export function registerAuthClientIp(request: Request, ip: string | undefined): 
 export function authClientIpHeaders(request: Request, target: string, method = request.method): Promise<Headers> {
   return signAuthClientIp(new Request(target, { method }), clientIps.get(request), CONVEX_INTERNAL_SECRET);
 }
+
+export function copyAuthClientIp(source: Request, target: Request): void {
+  registerAuthClientIp(target, clientIps.get(source));
+}

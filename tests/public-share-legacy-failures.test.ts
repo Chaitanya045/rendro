@@ -21,6 +21,11 @@ afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers(
 async function errorResponse(response: Response, status: number, asset: boolean, retryAfter = "1") {
   expect(response.status).toBe(status);
   expect(response.headers.get("Cache-Control")).toBe("private, no-store");
+  if (status === 429) {
+    expect(response.headers.get("Retry-After")).toBe(retryAfter);
+    expect(await response.json()).toEqual({ error: "Too many requests. Please retry later.", code: "rate_limited" });
+    return;
+  }
   expect(response.headers.get("X-Content-Type-Options")).toBe(asset ? null : "nosniff");
   expect(response.headers.get("Retry-After")).toBe(status === 503 ? retryAfter : null);
   expect(response.headers.has("Location")).toBe(false);
@@ -67,7 +72,7 @@ for (const viewer of viewers) describe(`${viewer.name} viewer backend failures`,
     it.each([408, 429, 500, 502, 503, 504])("returns retryable 503 for upstream %s", async status => {
       const base = await viewer.base();
       vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(new Response("private-backend-detail", { status, headers: { "Retry-After": "7" } }))));
-      await errorResponse(await request(base + suffix), 503, asset, "7");
+      await errorResponse(await request(base + suffix), status === 429 && viewer.name !== "legacy" ? 429 : 503, asset, "7");
       expect(minio.getObjectStream).not.toHaveBeenCalled();
     });
     it("returns retryable 503 on transport failure", async () => {
@@ -115,7 +120,7 @@ for (const viewer of viewers) describe(`${viewer.name} viewer backend failures`,
     vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(new Response(null, { status: 429, headers: {
       "Retry-After": value === "date" ? new Date(Date.now() + 60_000).toUTCString() : value,
     } }))));
-    await errorResponse(await request(base + "/files/index.html"), 503, false, value === "date" ? "60" : "1");
+    await errorResponse(await request(base + "/files/index.html"), viewer.name === "legacy" ? 503 : 429, false, value === "date" ? "60" : "1");
   });
   it("treats malformed JSON as retryable", async () => {
     const base = await viewer.base();

@@ -1,3 +1,4 @@
+import rateLimiterTest from "./convex-rate-limiter";
 import { describe, expect, it, vi } from "vitest";
 import { convexTest } from "convex-test";
 import { api, components, internal } from "../convex/_generated/api";
@@ -16,6 +17,7 @@ async function commentFixture(transactionLimits = false) {
   const backend = transactionLimits
     ? convexTest({ schema, modules, transactionLimits: true })
     : convexTest(schema, modules);
+  rateLimiterTest.register(backend);
   backend.registerComponent(
     "betterAuth",
     betterAuthSchema,

@@ -1,3 +1,4 @@
+import { readBoundedBody, BodyTooLargeError } from "./bounded-body";
 import { renderSignOutPage } from "@/routes/sign-out";
 import { sessionCache } from "@/session-cache";
 import { CONVEX_SITE_URL } from "@/config";
@@ -96,7 +97,8 @@ export async function proxyConvexRequest(request: Request): Promise<Response> {
     redirect: "manual",
   };
   if (request.method !== "GET" && request.method !== "HEAD") {
-    init.body = await request.text();
+    try { init.body = new TextDecoder().decode(await readBoundedBody(request)); }
+    catch (error) { if (error instanceof BodyTooLargeError) return error.response(); throw error; }
   }
   const upstream = await backendFetch(target, init, "proxyConvexRequest");
   const setCookies = strippedSetCookies(upstream.headers);

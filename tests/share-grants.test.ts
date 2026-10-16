@@ -1,3 +1,4 @@
+import rateLimiterTest from "./convex-rate-limiter";
 import { describe, expect, it } from "vitest";
 import { convexTest } from "convex-test";
 
@@ -15,6 +16,7 @@ const modules = import.meta.glob("../convex/**/*.ts");
 describe("private share grants", () => {
   it("lists a project's grants behind more than 200 newer sibling-project grants", async () => {
     const backend = convexTest(schema, modules);
+    rateLimiterTest.register(backend);
     const seeded = await backend.run(async (ctx) => {
       const organizationId = "org-share-boundary";
       const targetProjectId = await ctx.db.insert("projects", {

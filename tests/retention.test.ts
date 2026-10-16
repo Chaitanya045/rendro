@@ -1,3 +1,4 @@
+import rateLimiterTest from "./convex-rate-limiter";
 import { publishWithProof } from "./helpers/storage-proof";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDocumentSize } from "convex/values";
@@ -17,6 +18,7 @@ const now = 100 * 86_400_000;
 const provenance = { source: { kind: "local" as const }, execution: { kind: "local" as const }, cliVersion: "test", manifestSha256: "a".repeat(64) };
 function fixture() {
   const backend = convexTest({ schema, modules, transactionLimits: true });
+  rateLimiterTest.register(backend);
   const project = () => backend.run(ctx => ctx.db.insert("projects", { organizationId: "org", name: "Docs", slug: "docs", createdBy: "user", createdAt: 1 }));
   const seed = (projectId: Id<"projects">, fields: Partial<Doc<"deployments">> = {}) => backend.run(ctx => ctx.db.insert("deployments", {
     organizationId: "org", projectId, status: "superseded", createdAt: 1, createdBy: "user", manifestKey: "pending", manifestSha256: "a".repeat(64), fileCount: 1, byteCount: 1, provenance, ...fields,

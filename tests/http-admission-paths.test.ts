@@ -1,3 +1,4 @@
+import { anonymousLimiter } from "../convex/anonymousAdmission";
 import { beforeEach, afterEach, expect, it, vi } from "vitest";
 import { ConvexError } from "convex/values";
 const auth = vi.hoisted(() => ({ authorize: vi.fn(), users: vi.fn() }));
@@ -21,6 +22,7 @@ async function invoke(action: Action, body: unknown = {}, query = "", extraHeade
   }));
 }
 beforeEach(() => {
+  vi.spyOn(anonymousLimiter, "limit").mockResolvedValue({ ok: true });
   auth.authorize.mockResolvedValue({ user: { _id: "owner" } });
   auth.users.mockResolvedValue([]);
   ctx.runQuery.mockResolvedValue({ _id: "project" });

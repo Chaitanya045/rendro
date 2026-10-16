@@ -8,6 +8,7 @@
  * @module
  */
 
+import type * as anonymousAdmission from "../anonymousAdmission.js";
 import type * as apiKeyCredentials from "../apiKeyCredentials.js";
 import type * as apiKeyHttp from "../apiKeyHttp.js";
 import type * as apiKeyRateLimitBuckets from "../apiKeyRateLimitBuckets.js";
@@ -50,6 +51,7 @@ import type * as sessionReadLimit from "../sessionReadLimit.js";
 import type * as shareGrantHttp from "../shareGrantHttp.js";
 import type * as shareGrants from "../shareGrants.js";
 import type * as threads from "../threads.js";
+import type * as writeQuotas from "../writeQuotas.js";
 
 import type {
   ApiFromModules,
@@ -58,6 +60,7 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
+  anonymousAdmission: typeof anonymousAdmission;
   apiKeyCredentials: typeof apiKeyCredentials;
   apiKeyHttp: typeof apiKeyHttp;
   apiKeyRateLimitBuckets: typeof apiKeyRateLimitBuckets;
@@ -100,6 +103,7 @@ declare const fullApi: ApiFromModules<{
   shareGrantHttp: typeof shareGrantHttp;
   shareGrants: typeof shareGrants;
   threads: typeof threads;
+  writeQuotas: typeof writeQuotas;
 }>;
 
 /**

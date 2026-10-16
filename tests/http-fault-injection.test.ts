@@ -1,3 +1,4 @@
+import { anonymousLimiter } from "../convex/anonymousAdmission";
 import { apiKeyRateLimiter } from "../convex/apiKeyHttp";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getFunctionName, type FunctionReference } from "convex/server";
@@ -34,6 +35,7 @@ const routes = [
 ];
 
 beforeEach(() => {
+  vi.spyOn(anonymousLimiter, "limit").mockResolvedValue({ ok: true });
   vi.spyOn(apiKeyRateLimiter, "limit").mockResolvedValue({ ok: true });
   auth.authorize.mockResolvedValue({ user: { _id: "owner" } });
   vi.spyOn(console, "error").mockImplementation(() => {});

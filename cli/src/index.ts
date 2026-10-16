@@ -12,10 +12,10 @@
 import { sanitizeProvenance } from "../../shared/provenance";
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile, stat } from "node:fs/promises";
 import { join, relative, resolve, sep } from "node:path";
 import { cleanDeploymentPath, cleanPublicationPath } from "../../shared/v2-paths";
-import { MAX_REUSED_FILES_PER_REQUEST } from "../../shared/deployment-limits";
+import { MAX_REUSED_FILES_PER_REQUEST, MAX_DEPLOYMENT_FILES, validDeploymentCounts, deploymentFileLimitError, MAX_MANIFEST_BODY_BYTES } from "../../shared/deployment-limits";
 import { version } from "../../package.json";
 import { fetchWithRateLimit } from "./rate-limit";
 import { httpErrorMessage } from "./http-error";
@@ -192,6 +192,17 @@ async function push(opts: PushOptions): Promise<void> {
   const files = await sourceFiles(absSource, opts.includeSensitive, (path, reason) => {
     console.log(`  skipped ${JSON.stringify(path)} (${reason})`);
   });
+  if (files.length > MAX_DEPLOYMENT_FILES) throw new Error("Deployment exceeds the 1,000-file limit");
+  let totalBytes = 0;
+  // Check every file's metadata before reading/hashing any contents or making a request.
+  for (const fullPath of files) {
+    const path = relative(absSource, fullPath).split(sep).join("/");
+    const size = (await stat(fullPath)).size;
+    const error = deploymentFileLimitError(path, size, "");
+    if (error) throw new Error(error);
+    totalBytes += size;
+    if (!validDeploymentCounts(files.length, totalBytes)) throw new Error("Deployment exceeds the 128 MiB total limit");
+  }
   const entries: FileEntry[] = [];
   for (const fullPath of files) {
     const bytes = await readFile(fullPath);
@@ -218,6 +229,14 @@ async function push(opts: PushOptions): Promise<void> {
     })),
   };
   const manifestText = JSON.stringify(manifest);
+  totalBytes = 0;
+  for (const entry of entries) {
+    const error = deploymentFileLimitError(entry.path, entry.size, entry.contentType);
+    if (error) throw new Error(error);
+    totalBytes += entry.size;
+  }
+  if (!validDeploymentCounts(entries.length, totalBytes)) throw new Error("Deployment exceeds the 128 MiB total limit");
+  if (Buffer.byteLength(manifestText) > MAX_MANIFEST_BODY_BYTES - 16_384) throw new Error("Deployment manifest exceeds the 2 MiB request limit");
   const manifestSha256 = sha256(manifestText);
   const identityQuery = new URLSearchParams({ organizationId, projectId });
 

@@ -13,7 +13,7 @@ import {
   listAllKeys,
   putObject,
 } from "@/minio";
-import { MAX_REUSED_FILES_PER_REQUEST } from "../../shared/deployment-limits";
+import { MAX_REUSED_FILES_PER_REQUEST, MAX_DEPLOYMENT_FILES, MAX_COMMIT_LIST_PAGES, validDeploymentCounts, deploymentFileLimitError } from "../../shared/deployment-limits";
 import { decodeStoragePath } from "../../shared/storage-path";
 import { cleanDeploymentPath } from "../../shared/v2-paths";
 
@@ -48,7 +48,7 @@ function objectRoot(identity: DeploymentIdentity): string {
 
 async function sha256(bytes: Uint8Array | string): Promise<string> {
   const input = typeof bytes === "string" ? new TextEncoder().encode(bytes) : bytes;
-  const digestInput = input.buffer.slice(input.byteOffset, input.byteOffset + input.byteLength) as ArrayBuffer;
+  const digestInput = input as Uint8Array<ArrayBuffer>;
   const digest = await crypto.subtle.digest("SHA-256", digestInput);
   return Array.from(new Uint8Array(digest))
     .map((byte) => byte.toString(16).padStart(2, "0"))
@@ -84,18 +84,22 @@ async function backendRequest(
 
 function parseManifest(value: unknown): DeploymentManifest | null {
   if (!value || typeof value !== "object" || !("version" in value) || value.version !== 1) return null;
-  if (!("files" in value) || !Array.isArray(value.files)) return null;
+  if (!("files" in value) || !Array.isArray(value.files) || value.files.length > MAX_DEPLOYMENT_FILES) return null;
   const files: ManifestFile[] = [];
   const paths = new Set<string>();
+  let byteCount = 0;
   for (const entry of value.files as unknown[]) {
     if (!entry || typeof entry !== "object") return null;
-    const path = "path" in entry && typeof entry.path === "string" ? cleanDeploymentPath(entry.path) : null;
+    const rawPath = "path" in entry && typeof entry.path === "string" ? entry.path : "";
+    const path = cleanDeploymentPath(rawPath);
     const fileSha = "sha256" in entry && typeof entry.sha256 === "string" ? entry.sha256 : "";
     const size = "size" in entry && typeof entry.size === "number" ? entry.size : -1;
     const contentType = "contentType" in entry && typeof entry.contentType === "string"
       ? entry.contentType
       : "application/octet-stream";
-    if (!path || paths.has(path) || !/^[a-f0-9]{64}$/.test(fileSha) || size < 0) return null;
+    if (!path || paths.has(path) || !/^[a-f0-9]{64}$/.test(fileSha) || deploymentFileLimitError(rawPath, size, contentType)) return null;
+    byteCount += size;
+    if (!validDeploymentCounts(value.files.length, byteCount)) return null;
     paths.add(path);
     files.push({ path, sha256: fileSha, size, contentType });
   }
@@ -213,7 +217,8 @@ app.put("/api/rendro/deployments/:deploymentId/files/*", async (c) => {
     }
   }
   const bytes = await readDeploymentBody(c.req.raw.body, expected.size, () => stagingDeployment(c.req.raw, identity));
-  if (!bytes || await sha256(bytes) !== expected.sha256) {
+  if (!bytes) return c.json({ error: "Uploaded file exceeds its size limit or does not match the manifest size" }, 413);
+  if (await sha256(bytes) !== expected.sha256) {
     return c.json({ error: "Uploaded file does not match its manifest entry" }, 400);
   }
   const current = await stagingDeployment(c.req.raw, identity);
@@ -280,7 +285,7 @@ app.post("/api/rendro/deployments/:deploymentId/commit", async (c) => {
   const manifest = await loadManifest(staging.deployment.manifestKey);
   if (!manifest) return c.json({ error: "Deployment manifest not found" }, 404);
   const prefix = `${objectRoot(identity)}/files/`;
-  const actual = (await listAllKeys(prefix)).map((key) => key.slice(prefix.length)).sort();
+  const actual = (await listAllKeys(prefix, { maxKeys: MAX_DEPLOYMENT_FILES, maxPages: MAX_COMMIT_LIST_PAGES })).map((key) => key.slice(prefix.length)).sort();
   const expected = manifest.files.map((file) => file.path);
   if (actual.length !== expected.length || actual.some((path, index) => path !== expected[index])) {
     return c.json({ error: "Deployment is incomplete; uploaded files do not match the manifest" }, 409);

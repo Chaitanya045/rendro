@@ -1,3 +1,4 @@
+import { consumeWriteQuota } from "./writeQuotas";
 import { internalMutation, type MutationCtx } from "./_generated/server";
 import { query, mutation } from "./publicFunctions";
 import { internal } from "./_generated/api";
@@ -41,6 +42,7 @@ export const create = mutation({
       const previous = await ctx.db.query("threads").withIndex("by_operation", q => q.eq("orgSlug", args.orgSlug).eq("filePath", args.filePath).eq("authorId", identity.subject).eq("clientOperationId", args.clientOperationId)).unique();
       if (previous) return previous._id;
     }
+    await consumeWriteQuota(ctx, "comments", identity.subject, identity.organizationId);
     return ctx.db.insert("threads", {
       orgSlug: args.orgSlug, filePath: args.filePath, body, anchor: args.anchor,
       authorId: identity.subject, clientOperationId: args.clientOperationId,

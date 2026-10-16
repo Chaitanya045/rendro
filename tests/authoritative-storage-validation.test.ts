@@ -85,7 +85,7 @@ describe("Convex storage validation authority", () => {
     const f = await fixture(), deployment = await f.start();
     const path = `/api/rendro/deployments/${deployment.deploymentId}/files/docs/index.html?${new URLSearchParams(f.scope)}`;
     expect((await worker.request(path, { method: "PUT", headers: { authorization: "Bearer all", "content-length": "999" }, body: contents })).status).toBe(413);
-    for (const body of ["short", "x".repeat(contents.length)]) expect((await worker.request(path, { method: "PUT", headers: { authorization: "Bearer all" }, body })).status).toBe(400);
+    for (const body of ["short", "x".repeat(contents.length)]) expect((await worker.request(path, { method: "PUT", headers: { authorization: "Bearer all" }, body })).status).toBe(body.length === contents.length ? 400 : 413);
     for (let attempt = 0; attempt < 2; attempt++) expect((await worker.request("/api/rendro/deployments/fail", json({ ...f.scope, deploymentId: deployment.deploymentId, reason: "Upload interrupted" }))).status).toBe(200);
     expect((await worker.request("/api/rendro/publications", { ...json({}), body: "{" })).status).toBe(400);
   });
