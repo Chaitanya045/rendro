@@ -26,9 +26,9 @@ async function fixture(projectScoped = false) {
     scopes: ["docs:read"], actorId: "owner",
   });
   const validate = (projectId?: string, organizationId = "org-test", requiredScope = "docs:read") =>
-    backend.mutation(internal.apiKeyCredentials.validateInternal, {
+    backend.query(internal.apiKeyCredentials.validateInternal, {
       organizationId, projectId, secretHash, requiredScope,
-    });
+    }).then(result => result && result.principal);
   return { backend, project, key, credentialId, validate };
 }
 
@@ -47,7 +47,8 @@ describe("untrusted credential project IDs", () => {
     const { backend, project, credentialId, validate } = await fixture();
     expect(await validate()).toMatchObject({ keyId: "test-key", organizationId: "org-test" });
     expect(await validate(project._id)).toMatchObject({ keyId: "test-key" });
-    expect(await backend.run(async (ctx) => (await ctx.db.get(credentialId))?.lastUsedAt)).toEqual(expect.any(Number));
+    // Validation is read-only; usage is recorded separately by the HTTP caller.
+    expect((await backend.run((ctx) => ctx.db.get(credentialId)))?.lastUsedAt).toBeUndefined();
   });
 
   it("preserves project, organization, scope, and revocation boundaries", async () => {

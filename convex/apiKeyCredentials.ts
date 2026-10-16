@@ -92,7 +92,18 @@ export const revokeInternal = internalMutation({
   },
 });
 
-export const validateInternal = internalMutation({
+// Last-use telemetry is debounced: at most one credential write per window.
+export const API_KEY_USAGE_DEBOUNCE_MS = 60_000;
+
+export const usageDue = (lastUsedAt: number | undefined, now: number) =>
+  lastUsedAt === undefined || now - lastUsedAt >= API_KEY_USAGE_DEBOUNCE_MS;
+
+// Authorization is a read-only query so parallel requests with one key do not
+// contend on its row. Convex caches query results until their read set changes,
+// so this must stay a pure function of its arguments and the documents it reads:
+// it never reads the clock. Time-based decisions (expiry, telemetry due) are made
+// by the caller (`validateApiCredential`) from the stored timestamps returned here.
+export const validateInternal = internalQuery({
   args: {
     secretHash: v.string(),
     organizationId: v.string(),
@@ -111,24 +122,39 @@ export const validateInternal = internalMutation({
       .query("apiKeyCredentials")
       .withIndex("by_secret_hash", (query) => query.eq("secretHash", args.secretHash))
       .unique();
-    const now = Date.now();
     if (
       !credential
       || credential.organizationId !== args.organizationId
       || credential.revokedAt !== undefined
-      || (credential.expiresAt !== undefined && credential.expiresAt <= now)
       || !credential.scopes.includes(args.requiredScope)
       || (credential.projectId !== undefined && credential.projectId !== projectId)
     ) {
       return null;
     }
-    await ctx.db.patch(credential._id, { lastUsedAt: now });
     return {
-      keyId: credential.keyId,
-      organizationId: credential.organizationId,
-      projectId: credential.projectId,
-      scopes: credential.scopes,
+      principal: {
+        keyId: credential.keyId,
+        organizationId: credential.organizationId,
+        projectId: credential.projectId,
+        scopes: credential.scopes,
+      },
+      credentialId: credential._id,
+      expiresAt: credential.expiresAt,
+      lastUsedAt: credential.lastUsedAt,
     };
+  },
+});
+
+// Re-checks the window inside the transaction, so requests that raced past a
+// stale read write once and the rest commit without touching the credential.
+export const recordUsageInternal = internalMutation({
+  args: { credentialId: v.id("apiKeyCredentials") },
+  handler: async (ctx, { credentialId }) => {
+    const credential = await ctx.db.get(credentialId);
+    const now = Date.now();
+    if (!credential || !usageDue(credential.lastUsedAt, now)) return false;
+    await ctx.db.patch(credential._id, { lastUsedAt: now });
+    return true;
   },
 });
 

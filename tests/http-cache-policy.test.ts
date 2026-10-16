@@ -52,7 +52,7 @@ async function rpc(reference: FunctionReference<"query" | "mutation">, args: Rec
   );
   if (/consume|:limit$/.test(name)) return { ok: true };
   if (name.endsWith(":verifiedIdInternal")) return null; // exercise the failed-IP limiter without bypassing it
-  if (name.endsWith(":validateInternal")) return { keyId: "key" };
+  if (name.endsWith(":validateInternal")) return { principal: { keyId: "key" }, credentialId: "key", lastUsedAt: Date.now() };
   if (name === "shareGrants:resolveInternal") return { grant: { documentPath: "index.html", expiresAt: Date.now() + 1000 }, project: { name: "Test" } };
   if (name === "publicationsV2:resolvePublicInternal") return { publication: { slug: "test", title: "Test", entryFile: "index.html" } };
   return { _id: "project", slug: "test" };

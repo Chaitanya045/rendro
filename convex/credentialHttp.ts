@@ -5,6 +5,7 @@ import { httpAction, failure, clientFailure } from "./httpErrors";
 import { authorizeHttpOrganization } from "./authorization";
 import { apiKeyHttpAction } from "./apiKeyHttp";
 import { sha256 } from "./credentialHash";
+import { usageDue } from "./apiKeyCredentials";
 export { sha256 } from "./credentialHash";
 
 const allowedScopes = new Set([
@@ -131,10 +132,25 @@ export async function validateApiCredential(
   const authorization = request.headers.get("authorization") ?? "";
   const match = /^Bearer\s+(.+)$/i.exec(authorization);
   if (!match) return null;
-  return ctx.runMutation(internal.apiKeyCredentials.validateInternal, {
+  const result = await ctx.runQuery(internal.apiKeyCredentials.validateInternal, {
     secretHash: await sha256(match[1]),
     ...input,
   });
+  if (!result) return null;
+  // The query is cached until its read set changes, so time is evaluated here.
+  const now = Date.now();
+  if (result.expiresAt !== undefined && result.expiresAt <= now) return null;
+  if (usageDue(result.lastUsedAt, now)) {
+    // Usage telemetry is best-effort and must never deny an authorized request.
+    try {
+      await ctx.runMutation(internal.apiKeyCredentials.recordUsageInternal, {
+        credentialId: result.credentialId,
+      });
+    } catch {
+      console.warn("API key usage telemetry failed", { operation: "recordUsage" });
+    }
+  }
+  return result.principal;
 }
 
 export const validateCredential = apiKeyHttpAction(async (ctx: GenericActionCtx<DataModel>, request: Request) => { const url = new URL(request.url);

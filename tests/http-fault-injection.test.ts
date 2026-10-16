@@ -43,11 +43,13 @@ afterEach(() => { vi.restoreAllMocks(); vi.resetAllMocks(); });
 async function invoke(action: HttpAction, init: RequestInit, error: Error, apiKey = true) {
   const runQuery = vi.fn((reference: FunctionReference<"query">) => {
     if (getFunctionName(reference) === "apiKeyCredentials:verifiedIdInternal") return Promise.resolve("credential-id");
+    if (getFunctionName(reference) === "apiKeyCredentials:validateInternal") {
+      return Promise.resolve({ principal: { keyId: "key" }, credentialId: "credential-id", lastUsedAt: Date.now() });
+    }
     return Promise.reject(error);
   });
   const runMutation = vi.fn((reference: FunctionReference<"mutation">) => {
     if (getFunctionName(reference) === "anonymousAdmission:consume") return Promise.resolve({ ok: true });
-    if (getFunctionName(reference) === "apiKeyCredentials:validateInternal") return Promise.resolve({ keyId: "key" });
     return Promise.reject(error);
   });
   const ctx = { runQuery, runMutation };
