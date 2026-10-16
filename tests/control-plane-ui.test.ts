@@ -35,6 +35,23 @@ function authenticatedPages(): Hono<{ Variables: { user?: User } }> {
 }
 
 describe("control-plane UI", () => {
+  it("redirects anonymous organization and invitation entries with their exact return path", async () => {
+    const app = new Hono().route("/", organizationPageRoutes);
+    for (const route of ["/organizations", "/organizations/org-a", "/organizations/org-a/people", "/organizations/org-a/teams", "/organizations/org-a/settings", "/organizations/org-a/onboarding", "/accept-invitation/invitation-a"]) {
+      const response = await app.request(route);
+      expect(response.status).toBe(302);
+      expect(response.headers.get("Location")).toBe(`/sign-in?returnTo=${encodeURIComponent(route)}`);
+    }
+  });
+
+  it("renders deployment onboarding after project creation with completed earlier steps", async () => {
+    const response = await authenticatedPages().request("/organizations/org-a/onboarding?projectId=project-a");
+    expect(response.status).toBe(200);
+    const html = await response.text();
+    expect(html).toContain("Loading deployment setup");
+    expect(html).toContain('"projectId":"project-a"');
+    expect(html).toContain('step active" aria-current="step"><span class="step-dot" aria-hidden="true">3</span>');
+  });
   it("names workspace and complementary panels on overview and deployment templates", async () => {
     const app = authenticatedPages();
     for (const suffix of ["", "/projects/project-a", "/projects/project-a/deployments"]) {

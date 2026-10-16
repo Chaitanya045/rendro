@@ -3,7 +3,7 @@ import { renderFaviconLinks } from "./favicon";
 import { renderThemeAssets } from "./theme";
 
 /** No request data is embedded; the relative link retries this URL with a GET. */
-export function renderSessionUnavailablePage(): string {
+export function renderSessionUnavailablePage(status: 500 | 503 = 503): string {
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -30,9 +30,9 @@ ${renderThemeAssets()}
 <body>
 <main aria-labelledby="session-error-title">
   <div class="brand">Rendro<span>.</span></div>
-  <p class="eyebrow">503 · Temporarily unavailable</p>
-  <h1 id="session-error-title">We couldn't check your session</h1>
-  <p>Please wait a moment and try again. You don't need to sign in again because of this error.</p>
+  <p class="eyebrow">${status} · Temporarily unavailable</p>
+  <h1 id="session-error-title">${status === 500 ? "We couldn't load this page" : "We couldn't check your session"}</h1>
+  <p>${status === 500 ? "Please wait a moment and try loading this page again." : "Please wait a moment and try again. You don't need to sign in again because of this error."}</p>
   <a class="retry" href="">Try again</a>
 </main>
 </body>

@@ -1,6 +1,6 @@
 import { MANAGEMENT_PROJECT_PLACEHOLDER, managementLoadingPages } from "./management-loading-pages";
 
-export const MANAGEMENT_SHELL_VERSION = "20";
+export const MANAGEMENT_SHELL_VERSION = "23";
 
 export interface ManagementRouteIdentity {
   organizationId: string;
@@ -63,7 +63,7 @@ function managementNavigationRuntime(loadingPagesJson: string): string {
   }
   function createPageScope(){
     if(currentScope&&currentScope.active)currentScope.dispose();
-    var controller=new AbortController(),cleanups=[],blockers=[],pendingMutations=0,inflightGets=new Map(),readBatch=null;
+    var controller=new AbortController(),cleanups=[],blockers=[],pendingMutations=0,inflightGets=new Map(),readBatch=null,busyButtons=new Set();
     var scope={active:true,signal:controller.signal};
     function isActive(){return !signedOut&&scope.active&&currentScope===scope;}
     function onCleanup(callback){if(typeof callback!=="function")return function(){};if(!isActive()){callback();return function(){};}cleanups.push(callback);return function(){var index=cleanups.indexOf(callback);if(index>=0)cleanups.splice(index,1);};}
@@ -75,7 +75,7 @@ function managementNavigationRuntime(loadingPagesJson: string): string {
       for(var index=0;index<blockers.length;index+=1){if(blockers[index](detail)===false)return false;}
       return true;
     }
-    function dispose(){if(!scope.active)return;scope.active=false;controller.abort();inflightGets.clear();readBatch=null;while(cleanups.length){try{cleanups.pop()();}catch(_error){}}}
+    function dispose(){if(!scope.active)return;scope.active=false;controller.abort();inflightGets.clear();readBatch=null;busyButtons.forEach(function(button){ui.busy(button,false);});busyButtons.clear();while(cleanups.length){try{cleanups.pop()();}catch(_error){}}}
     // A controller load may contain sequential reads. Share its identity check
     // only until that explicit load finishes; mutations immediately discard it.
     function beginReadBatch(){var batch={access:null};readBatch=batch;return function(){if(readBatch===batch)readBatch=null;};}
@@ -99,8 +99,9 @@ function managementNavigationRuntime(loadingPagesJson: string): string {
       if(getKey)inflightGets.set(getKey,pending);
       try{return await pending;}catch(error){if(error&&(error.status===401||error.status===403))clearQueryCache();throw error;}finally{if(mutation){pendingMutations=Math.max(0,pendingMutations-1);invalidateMutation(path,settings);}if(getKey&&inflightGets.get(getKey)===pending)inflightGets.delete(getKey);}
     }
+    function busy(button,on){if(!isActive()||!button)return;if(on)busyButtons.add(button);else busyButtons.delete(button);ui.busy(button,on);}
     function activeCall(name){return function(){if(!isActive())return name==="copyText"||name==="confirm"?Promise.resolve(false):undefined;return ui[name].apply(ui,arguments);};}
-    Object.assign(scope,{beginReadBatch:beginReadBatch,request:request,isActive:isActive,guard:function(callback){return function(){if(isActive())return callback.apply(this,arguments);};},onCleanup:onCleanup,cleanup:onCleanup,preventNavigation:preventNavigation,canLeave:canLeave,dispose:dispose,busy:activeCall("busy"),copyText:activeCall("copyText"),toast:activeCall("toast"),openDialog:activeCall("openDialog"),applyTheme:activeCall("applyTheme"),confirm:activeCall("confirm"),setDocsLink:activeCall("setDocsLink")});
+    Object.assign(scope,{beginReadBatch:beginReadBatch,request:request,isActive:isActive,guard:function(callback){return function(){if(isActive())return callback.apply(this,arguments);};},onCleanup:onCleanup,cleanup:onCleanup,preventNavigation:preventNavigation,canLeave:canLeave,dispose:dispose,busy:busy,copyText:activeCall("copyText"),toast:activeCall("toast"),openDialog:activeCall("openDialog"),applyTheme:activeCall("applyTheme"),confirm:activeCall("confirm"),setDocsLink:activeCall("setDocsLink")});
     currentScope=scope;if(signedOut)scope.dispose();return scope;
   }
   function disposePage(){if(currentScope)currentScope.dispose();currentScope=null;}
