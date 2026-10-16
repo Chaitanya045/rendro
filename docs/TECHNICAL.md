@@ -927,6 +927,27 @@ may need confirmation. A false-to-true transition missed between polling ticks
 also needs confirmation; this conservative trade-off preserves ordinary first
 mouse/keyboard links without treating iframe gesture claims as authority.
 
+The Chromium fragment regressions wait for the shell to read native inactive
+activation before a subsequent click, rather than assuming a 5.3-second delay
+includes an observer tick. Their test-only getter delegates to Chromium's native
+getter and acknowledges the read after the gate's synchronous reset. CDP installs
+this observation without granting the automation activation that Playwright
+evaluations can introduce. Destination checks match the publisher's path and
+initialized query so the outgoing document cannot satisfy readiness. Tests wait for the
+iframe's load acknowledgement, without waiting for the sidebar's cosmetic
+520ms feedback window; native share navigation needs no activation-expiry wait.
+Confirmation and replacement-frame tests count committed documents separately
+from requests: replacing
+the pending iframe `src` navigation can abort a request after it reaches the
+fixture server. Further unsolicited messages must cause neither additional
+commits nor requests once the approved document has loaded. The replacement-frame
+fixture reports completion after repeated requests and native activation expiry,
+then stops sending. History assertions and Back run after that signal so automation
+activation cannot authorize another fixture request and a still-running fixture
+cannot reopen a notice during restoration. History checks use passive reads and
+wait for the expected joint-session count; the sequential-click regression also
+checks both Back destinations so a missing entry cannot be hidden by readiness.
+
 **Why not consume activation directly?** The [HTML activation model](https://html.spec.whatwg.org/multipage/interaction.html#tracking-user-activation)
 consumes activation across the frame tree, but `UserActivation` only exposes
 read-only state. Its direct consume command is WebDriver-only, unavailable to
