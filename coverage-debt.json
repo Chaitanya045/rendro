@@ -253,12 +253,6 @@
       "functions": 0,
       "lines": 2
     },
-    "src/session-cache.ts": {
-      "statements": 0,
-      "branches": 3,
-      "functions": 0,
-      "lines": 0
-    },
     "src/share-links.ts": {
       "statements": 5,
       "branches": 4,
@@ -288,12 +282,6 @@
       "branches": 64,
       "functions": 8,
       "lines": 2
-    },
-    "src/viewer-ticket.ts": {
-      "statements": 1,
-      "branches": 1,
-      "functions": 0,
-      "lines": 0
     },
     "src/viewer/client.ts": {
       "statements": 9,

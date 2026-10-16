@@ -456,18 +456,62 @@ test("persisted pageshow checks the backend and hides a revoked account", async 
   expect(await session(page)).toBeNull();
 });
 
-// Issue #145 (AUTH-111-02): protected-page session reads extend a
-// nonpersistent session to the persistent lifetime. The cookie-only assertions
-// above remain independent so this marker cannot hide a cookie regression.
-test("nonpersistent session retains its short backend lifetime [AUTH-111-02]", async ({ page }) => {
+// Exercise fresh and cached protected reads, ticket-backed document assets, and
+// the server expiry boundary with the production Better Auth settings.
+test("nonpersistent session retains its short backend lifetime [AUTH-111-02]", async ({ page, context, seed }) => {
   await login(page, "owner@example.test", password, false);
   await expect(page).toHaveURL(/\/account\/security$/);
   const identity = await session(page);
   expect(identity?.email).toBe("owner@example.test");
-  const record = await authRecord<{ createdAt: number; expiresAt: number }>("findOne", {
-    model: "session", where: [{ field: "_id", value: identity?.sessionId }], select: ["createdAt", "expiresAt"],
+  if (!identity) throw new Error("Missing session");
+  const stored = () => authRecord<{ createdAt: number; expiresAt: number }>("findOne", {
+    model: "session", where: [{ field: "_id", value: identity.sessionId }], select: ["createdAt", "expiresAt"],
   });
-  expect(record).not.toBeNull();
-  test.fail(true, "#145 (AUTH-111-02): nonpersistent backend session is extended on protected-page entry");
-  expect(record.expiresAt - record.createdAt).toBeLessThanOrEqual(86400_000 + 1000);
+  const initial = await stored();
+  // Better Auth samples expiresAt and createdAt separately on the real clock.
+  expect(initial.expiresAt - initial.createdAt).toBeGreaterThan(86400_000 - 1000);
+  expect(initial.expiresAt - initial.createdAt).toBeLessThanOrEqual(86400_000);
+  const org = `/organizations/${seed.organizationId}`;
+  for (const path of [org, `${org}/projects`, `${org}/projects/${seed.projectId}/docs`, "/account/security"]) {
+    expect((await page.goto(path))?.status()).toBe(200);
+    await page.reload();
+    if (path.endsWith("/docs")) {
+      await expect(page.frameLocator("#content-frame").getByRole("heading", { name: "Publication from local storage" })).toBeVisible();
+    }
+    expect((await stored()).expiresAt).toBe(initial.expiresAt);
+  }
+  expect((await context.cookies()).find(cookie => cookie.name.endsWith(".session_token"))?.expires).toBe(-1);
+  // Age only this disposable record to just before its one-day boundary.
+  const expiresAt = Date.now() + 60_000;
+  await ageRecord("session", "_id", identity.sessionId, { createdAt: expiresAt - 86400_000, expiresAt });
+  await page.reload();
+  expect((await session(page))?.sessionId).toBe(identity.sessionId);
+  expect((await stored()).expiresAt).toBe(expiresAt);
+  await ageRecord("session", "_id", identity.sessionId, { expiresAt: Date.now() - 1000 });
+  await page.reload();
+  await expect(page).toHaveURL(/\/sign-in\?returnTo=/);
+  expect(await session(page)).toBeNull();
+});
+
+test("remembered session refreshes to seven days on protected entry", async ({ page, context }) => {
+  await login(page, "owner@example.test");
+  await expect(page).toHaveURL(/\/account\/security$/);
+  const identity = await session(page);
+  if (!identity) throw new Error("Missing session");
+  const stored = () => authRecord<{ createdAt: number; expiresAt: number }>("findOne", {
+    model: "session", where: [{ field: "_id", value: identity.sessionId }], select: ["createdAt", "expiresAt"],
+  });
+  const initial = await stored();
+  expect(initial.expiresAt - initial.createdAt).toBeGreaterThan(7 * 86400_000 - 1000);
+  expect(initial.expiresAt - initial.createdAt).toBeLessThanOrEqual(7 * 86400_000);
+  const before = Date.now();
+  await ageRecord("session", "_id", identity.sessionId, {
+    createdAt: before - 2 * 86400_000, expiresAt: before + 5 * 86400_000,
+  });
+  await page.reload();
+  const refreshed = await stored();
+  expect(refreshed.expiresAt).toBeGreaterThanOrEqual(before + 7 * 86400_000);
+  expect(refreshed.expiresAt).toBeLessThanOrEqual(Date.now() + 7 * 86400_000);
+  expect((await session(page))?.sessionId).toBe(identity.sessionId);
+  expect((await context.cookies()).find(cookie => cookie.name.endsWith(".session_token"))?.expires).toBeGreaterThan(Date.now() / 1000);
 });

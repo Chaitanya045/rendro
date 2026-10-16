@@ -180,7 +180,9 @@ describe("organization deletion lifecycle", () => {
     }
     expect(read).not.toHaveBeenCalled();
     expect(stream).not.toHaveBeenCalled();
-  });
+  // This integration matrix seeds two tenants and performs dozens of real auth
+  // and authorization calls. Allow for coverage and shared-runner contention.
+  }, 30_000);
 
   it("denies surviving capabilities and preauthorized writes using only a tombstone", async () => {
     const f = await fixture(), r = await f.seed("partial");

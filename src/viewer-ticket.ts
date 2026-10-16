@@ -11,10 +11,20 @@ export interface ViewerScope {
 }
 interface ViewerTicket extends ViewerScope { cookie: string }
 
-export function viewerSessionCookie(cookie: string): string {
-  // Never forward/cache session_data, other cookies, or bearer API credentials.
+export function sessionTokenCookie(cookie: string): string {
   return cookie.split(";").map(part => part.trim())
     .filter(part => /^(?:__Secure-)?better-auth\.session_token=.+$/.test(part)).join("; ");
+}
+
+export function viewerSessionCookie(cookie: string): string {
+  const token = sessionTokenCookie(cookie);
+  if (!token) return "";
+  // Better Auth verifies this signed marker and skips refreshing non-remembered
+  // sessions. Preserve it through protected reads and encrypted viewer tickets.
+  // Never forward session_data, unrelated cookies, or bearer API credentials.
+  const preference = cookie.split(";").map(part => part.trim())
+    .filter(part => /^(?:__Secure-)?better-auth\.dont_remember=.+$/.test(part));
+  return [token, ...preference].join("; ");
 }
 
 async function ticketKey(domain = audience): Promise<Uint8Array> {
