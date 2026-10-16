@@ -140,7 +140,7 @@ describe("repository quality gates", () => {
   });
 
   const commit = (directory: string) => execFileSync("git", ["-c", "user.name=Fixture", "-c", "user.email=fixture@example.test", "commit", "--quiet", "-m", "Baseline"], { cwd: directory });
-  const record = (directory: string) => spawnSync(process.execPath, ["--import", "tsx", join(root, "scripts/verify-asset-versions.ts"), "--record"], { cwd: directory, encoding: "utf8", env: subprocessEnv() });
+  const record = (directory: string) => spawnSync(process.execPath, ["--import", "tsx", join(root, "scripts/verify-asset-versions.ts"), "--record"], { cwd: directory, encoding: "utf8", env: subprocessEnv({ ...process.env, ASSET_VERSION_BASE: "" }) });
 
   it("rejects an asset version missing from the ledger, and --record adds it without touching other hashes", () => {
     const directory = assetFixture();
