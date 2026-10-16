@@ -115,6 +115,21 @@ it("delivers loading, stale subscription, drawer scroll and compatibility states
   await page.clock.runFor(32);
   await card.hover();
   await expect.poll(() => frame.locator(".anchor-highlight-segment:not([hidden])").count()).toBeGreaterThan(0);
+  // Reposition while the segment exists; incidental layout callbacks are not
+  // guaranteed to run between hover and removal on a two-CPU CI runner.
+  const reusedHighlight = await card.evaluate(el => {
+    const root = el.getRootNode() as ShadowRoot;
+    const segments = Array.from(root.querySelectorAll<HTMLElement>(".anchor-highlight-segment"));
+    const previousLeft = parseFloat(segments[0].style.left);
+    document.getElementById("target")!.style.transform = "translateX(12px)";
+    el.dispatchEvent(new PointerEvent("pointerenter"));
+    const updated = Array.from(root.querySelectorAll<HTMLElement>(".anchor-highlight-segment"));
+    return {
+      reused: updated.length === segments.length && updated.every((segment, index) => segment === segments[index]),
+      offset: parseFloat(updated[0].style.left) - previousLeft,
+    };
+  });
+  expect(reusedHighlight).toEqual({ reused: true, offset: 12 });
   await frame.locator("#target").evaluate(el => { el.style.transform = "translateY(-1000px)"; });
   await card.dispatchEvent("pointerenter");
   expect(await frame.locator(".anchor-highlight-segment:not([hidden])").count()).toBe(0);

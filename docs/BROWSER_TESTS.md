@@ -363,8 +363,10 @@ VITEST_MAX_WORKERS=2 pnpm coverage
 ```
 
 The quality workflow runs this in a separate `coverage` job (20-minute budget)
-and uploads the Vitest/merged summaries, merged counters, browser shards and LCOV, including on
-failure. `pnpm verify` keeps its existing 15-minute CI budget: the audit's full
+and uploads the Vitest/merged summaries and counters, browser shards and LCOV,
+including on failure. The raw `coverage/coverage-final.json` remains available
+even when a test or merge failure prevents the merged report from being written.
+`pnpm verify` keeps its existing 15-minute CI budget: the audit's full
 coverage run alone took about six minutes, so running the suite again inside
 verify would leave insufficient headroom. Vitest honors `VITEST_MAX_WORKERS`;
 use two workers on the shared development host.
@@ -531,6 +533,21 @@ of scheduling-sensitive paths. Reduced motion keeps its assertions independent
 of CSS animation timing. The legacy comment fixture waits for the bridge
 acknowledgement and composer teardown before reloading; database persistence
 alone does not establish that the browser has finished handling a mutation.
+
+For CI scheduling regressions on Linux, constrain the entire command (including
+Chromium children) to two available CPUs:
+
+```sh
+CI=true VITEST_MAX_WORKERS=2 taskset -c 0,1 pnpm coverage
+```
+
+Save and compare three consecutive reports with the same counter diff command.
+Use CPUs from `taskset -pc $$` if the host does not allow CPUs 0 and 1. Download
+the failing workflow's `coverage-summary` artifact with `gh run download <run-id>
+-n coverage-summary`; compare its `merged/coverage-final.json` with the matching
+local source revision. The comment highlight fixture explicitly updates a visible
+anchor twice and asserts DOM segment reuse before exercising off-screen removal;
+reuse must not depend on an incidental resize or animation frame.
 
 The coverage job keeps its existing 20-minute timeout. Browser files remain
 serial, and shared-host commands use `VITEST_MAX_WORKERS=2`. The #104 Round 2 validation

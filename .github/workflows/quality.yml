@@ -115,6 +115,7 @@ jobs:
         with:
           name: coverage-summary
           path: |
+            coverage/coverage-final.json
             coverage/coverage-summary.json
             coverage/merged/coverage-summary.json
             coverage/merged/coverage-final.json

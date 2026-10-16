@@ -1292,7 +1292,10 @@ including pre-navigation and failure teardown samples. Collection barriers flush
 all attached targets before detach; tests explicitly flush before direct frame
 removal. Scheduling-sensitive loader, layout and comment states have deterministic
 Chromium fixtures, and a per-counter location diff checks repeated full reports
-before debt is shrunk. `pnpm coverage` requires
+before debt is shrunk. Comment highlight coverage explicitly verifies reuse of
+existing DOM segments. CI artifacts retain raw and merged counters on failure so
+the same diff can diagnose discrepancies with two-CPU constrained local runs.
+`pnpm coverage` requires
 per-suite browser receipts and feeds the mapped `coverage/browser/*.json` shards
 to the same strict merger as the Node report. Production assets are unchanged;
 inline controller strings remain tracked by #105/#106. See [source coverage and debt](BROWSER_TESTS.md#source-coverage-and-debt-gate)
