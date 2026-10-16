@@ -1,3 +1,4 @@
+import rateLimiterTest from "../convex-rate-limiter";
 import { convexTest } from "convex-test";
 import { api, components } from "../../convex/_generated/api";
 import schema from "../../convex/schema";
@@ -6,6 +7,7 @@ const modules = import.meta.glob("../../convex/**/*.ts");
 
 export async function fixture() {
   const backend = convexTest(schema, modules);
+  rateLimiterTest.register(backend);
   backend.registerComponent("betterAuth", betterAuthSchema, import.meta.glob("../../convex/betterAuth/**/*.ts"));
   const now = Date.now();
   const data = await backend.run(async (ctx) => {

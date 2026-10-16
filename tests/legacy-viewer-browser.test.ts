@@ -1,3 +1,4 @@
+import rateLimiterTest from "./convex-rate-limiter";
 import { seedLegacyMember, registerAuth, seedIdentity } from "./helpers/auth-identity";
 import { getRequestListener } from "@hono/node-server";
 import { readFile } from "node:fs/promises";
@@ -15,6 +16,7 @@ import { browserStep, createBrowserHarness } from "./helpers/browser";
 const harness = createBrowserHarness();
 const modules = import.meta.glob("../convex/**/*.ts");
 const backend = convexTest(schema, modules);
+rateLimiterTest.register(backend);
 registerAuth(backend);
 let author: ReturnType<typeof backend.withIdentity>;
 const scope = { orgSlug: "example", filePath: "example/guide/index.html" };

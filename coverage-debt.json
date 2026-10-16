@@ -25,18 +25,6 @@
       "functions": 0,
       "lines": 3
     },
-    "convex/documentReplies.ts": {
-      "statements": 1,
-      "branches": 5,
-      "functions": 0,
-      "lines": 1
-    },
-    "convex/documentThreads.ts": {
-      "statements": 3,
-      "branches": 7,
-      "functions": 0,
-      "lines": 1
-    },
     "convex/publicFunctions.ts": {
       "statements": 2,
       "branches": 2,

@@ -1,3 +1,4 @@
+import { consumeWriteQuota } from "./writeQuotas";
 import { isOrganizationDeleted, requireActiveOrganization } from "./organizationLifecycle";
 import { isPublicErrorData } from "../src/shared/public-errors";
 import { requireId } from "./ids";
@@ -48,6 +49,7 @@ export const createInternal = internalMutation({
   },
   handler: async (ctx, args) => {
     await requireActiveOrganization(ctx, args.organizationId);
+    await consumeWriteQuota(ctx, "projects", args.actorId, args.organizationId);
     const name = args.name.trim();
     const slug = args.slug.trim().toLowerCase();
     if (!name || name.length > 80) throw new ConvexError("Project name must be 1–80 characters");

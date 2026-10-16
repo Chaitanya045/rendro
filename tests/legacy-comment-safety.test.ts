@@ -1,3 +1,4 @@
+import rateLimiterTest from "./convex-rate-limiter";
 import { seedLegacyMember, registerAuth, seedIdentity } from "./helpers/auth-identity";
 import { describe, expect, it } from "vitest";
 import { convexTest } from "convex-test";
@@ -9,6 +10,7 @@ const anchor = { kind: "element" as const, path: ["main", "h1"] };
 async function fixture() {
   process.env.LEGACY_ORGANIZATION_MAP = "{}";
   const backend = convexTest(schema, modules);
+  rateLimiterTest.register(backend);
   registerAuth(backend);
   const identity = await seedIdentity(backend, { email: "author@example.com", name: "Author" });
   await seedLegacyMember(backend, identity.subject, "example");

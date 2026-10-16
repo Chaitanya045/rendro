@@ -1,3 +1,4 @@
+import rateLimiterTest from "./convex-rate-limiter";
 import { commitWithProof, publishWithProof } from "./helpers/storage-proof";
 import { describe, expect, it } from "vitest";
 import { convexTest } from "convex-test";
@@ -49,6 +50,7 @@ async function stage(
 describe("immutable deployment lifecycle", () => {
   it("returns one compact recent deployment across all projects, scoped to its organization", async () => {
     const backend = convexTest(schema, modules);
+    rateLimiterTest.register(backend);
     const owned = await project(backend), other = await project(backend, "org-b");
     expect(await backend.query(internal.deployments.latestForOrganization, { organizationId: "org-a" })).toBeNull();
     const own = await stage(backend, owned._id), foreign = await stage(backend, other._id, "org-b");
@@ -65,12 +67,14 @@ describe("immutable deployment lifecycle", () => {
   });
   it("rejects a project ID paired with another organization ID", async () => {
     const backend = convexTest(schema, modules);
+    rateLimiterTest.register(backend);
     const owned = await project(backend);
     await expect(stage(backend, owned._id, "org-b")).rejects.toThrow("Project not found");
   });
 
   it("keeps the active deployment unchanged when a later upload fails", async () => {
     const backend = convexTest(schema, modules);
+    rateLimiterTest.register(backend);
     const owned = await project(backend);
     const first = await stage(backend, owned._id, "org-a", "first");
     await commitWithProof(backend, {
@@ -101,6 +105,7 @@ describe("immutable deployment lifecycle", () => {
 
   it("rejects a stale concurrent commit instead of overwriting the newer pointer", async () => {
     const backend = convexTest(schema, modules);
+    rateLimiterTest.register(backend);
     const owned = await project(backend);
     const left = await stage(backend, owned._id, "org-a", "left");
     const right = await stage(backend, owned._id, "org-a", "right");
@@ -120,6 +125,7 @@ describe("immutable deployment lifecycle", () => {
 
   it("preserves a superseded deployment while a publication pins it", async () => {
     const backend = convexTest(schema, modules);
+    rateLimiterTest.register(backend);
     const owned = await project(backend);
     const first = await stage(backend, owned._id, "org-a", "first");
     await commitWithProof(backend, {
@@ -150,6 +156,7 @@ describe("immutable deployment lifecycle", () => {
 describe("scoped API credentials", () => {
   it("enforces organization, project, scope, expiry, and revocation", async () => {
     const backend = convexTest(schema, modules);
+    rateLimiterTest.register(backend);
     const owned = await project(backend);
     await backend.mutation(internal.apiKeyCredentials.createInternal, {
       organizationId: "org-a",
@@ -196,6 +203,7 @@ describe("scoped API credentials", () => {
 
   it("rejects expired credentials", async () => {
     const backend = convexTest(schema, modules);
+    rateLimiterTest.register(backend);
     const owned = await project(backend);
     await backend.mutation(internal.apiKeyCredentials.createInternal, {
       organizationId: "org-a",

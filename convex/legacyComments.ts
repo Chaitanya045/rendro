@@ -19,7 +19,7 @@ export async function authorizeLegacyComment(ctx: QueryCtx | MutationCtx, orgSlu
   const identity = await requireIdentity(ctx);
   const authorized = await requireLegacyMember(ctx, orgSlug);
   const role = authorized.member.role;
-  const result = { ...identity, admin: role.split(",").some(value => ["owner", "admin"].includes(value.trim())) };
+  const result = { ...identity, organizationId: authorized.member.organizationId, admin: role.split(",").some(value => ["owner", "admin"].includes(value.trim())) };
   validateCommentAuthor(input.expectedAuthorId, identity.subject);
   validateClientOperationId(input.clientOperationId);
   return result;

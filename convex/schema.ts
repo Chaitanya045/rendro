@@ -39,6 +39,10 @@ export default defineSchema({
     deletedBy: v.string(),
   }).index("by_organization", ["organizationId"]),
 
+  admissionBuckets: defineTable({ name: v.string(), key: v.string(), expiresAt: v.number() })
+    .index("by_bucket", ["name", "key"])
+    .index("by_expiry", ["expiresAt"]),
+
   failedApiKeyBuckets: defineTable({ key: v.string(), expiresAt: v.number() })
     .index("by_key", ["key"])
     .index("by_expiry", ["expiresAt"]),

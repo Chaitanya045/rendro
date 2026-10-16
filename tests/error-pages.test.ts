@@ -32,6 +32,8 @@ vi.mock("@/minio", () => ({ getObjectStream: fixtures.stream, listObjects: fixtu
 import worker from "@/worker";
 
 beforeEach(() => {
+  vi.stubGlobal("fetch", vi.fn((input) => Promise.resolve(String(input).endsWith("/api/rendro/admission/public")
+    ? Response.json({ admitted: true }) : new Response(null, { status: 404 }))));
   fixtures.user = undefined;
   fixtures.member = false;
   fixtures.deleted.mockReset().mockResolvedValue(false);

@@ -1,3 +1,4 @@
+import { authClientIpHeaders } from "@/auth-client-ip";
 import type { WorkerPublication } from "../../shared/resolver-dto";
 import { signResolverRequest } from "../../shared/resolver-auth";
 import { ViewerBackendError, viewerBackendJson } from "@/viewer-backend";
@@ -17,11 +18,12 @@ const app = new Hono();
 app.use("/p/*", viewerErrorCache);
 app.onError(viewerErrorResponse);
 
-async function resolvePublication(slug: string): Promise<WorkerPublication | null> {
+async function resolvePublication(slug: string, request: Request): Promise<WorkerPublication | null> {
   const url = `${CONVEX_SITE_URL}/api/rendro/publications/public?slug=${encodeURIComponent(slug)}`;
   const headers = await signResolverRequest(new Request(url), CONVEX_INTERNAL_SECRET);
+  (await authClientIpHeaders(request, url, "GET")).forEach((value, name) => headers.set(name, value));
   headers.set("Accept", "application/json");
-  const result = await viewerBackendJson<WorkerPublication>(url, { headers });
+  const result = await viewerBackendJson<WorkerPublication>(url, { headers }, true);
   if (result && !result.deployment?.manifestKey) throw new ViewerBackendError();
   return result;
 }
@@ -61,7 +63,7 @@ function injectNavigation(html: string, slug: string, path: string, url: string)
 }
 
 app.get("/p/:slug/files/*", async (c) => {
-  const result = await resolvePublication(c.req.param("slug"));
+  const result = await resolvePublication(c.req.param("slug"), c.req.raw);
   if (!result) return assetError(c, () => renderNotFoundPage({ path: "Document unavailable" }));
   const relativePath = decodeStoragePath(c.req.path.slice(c.req.path.indexOf("/files/") + 7));
   const fullPath = relativePath ? publicationPath(result, relativePath) : null;
@@ -88,7 +90,7 @@ app.get("/p/:slug/files/*", async (c) => {
 });
 
 app.get("/p/:slug/tree", async (c) => {
-  const result = await resolvePublication(c.req.param("slug"));
+  const result = await resolvePublication(c.req.param("slug"), c.req.raw);
   if (!result) return c.json({ error: "Not found" }, 404);
   const manifest = await manifestFor(result);
   if (!manifest) return c.json({ error: "Manifest unavailable" }, 404);
@@ -105,7 +107,7 @@ app.get("/p/:slug/tree", async (c) => {
 });
 
 app.get("/p/:slug", async (c) => {
-  const result = await resolvePublication(c.req.param("slug"));
+  const result = await resolvePublication(c.req.param("slug"), c.req.raw);
   if (!result) return c.html(renderNotFoundPage({ path: c.req.path }), 404);
   const manifest = await manifestFor(result);
   if (!manifest) return c.html(renderNotFoundPage({ path: c.req.path }), 404);

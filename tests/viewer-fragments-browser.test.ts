@@ -211,6 +211,27 @@ async function passiveNavigationState(page: Page, waitForChain = false): Promise
   }
 }
 
+// This fixture message must remain unsolicited. Playwright evaluation can grant
+// activation, including between the expiry check and delivery of postMessage.
+async function stagePendingNavigation(page: Page): Promise<void> {
+  const session = await page.context().newCDPSession(page);
+  try {
+    const { exceptionDetails } = await browserStep("send pending navigation without activation", () => session.send("Runtime.evaluate", {
+      expression: `(async () => {
+        while (navigator.userActivation?.isActive) await new Promise(resolve => setTimeout(resolve, 25));
+        document.querySelector('#content-frame').contentWindow.postMessage({
+          type: 'fixture-navigate', search: '?pending'
+        }, '*');
+        while (!document.querySelector('#document-navigation-notice')) await new Promise(resolve => setTimeout(resolve, 25));
+      })()`,
+      userGesture: false, awaitPromise: true, returnByValue: true,
+    }));
+    if (exceptionDetails) throw new Error("Could not stage unsolicited navigation");
+  } finally {
+    await session.detach();
+  }
+}
+
 async function atTarget(frame: Frame, id: string) {
   // Native history restoration can adjust scroll after the first target paint.
   // Do not issue the next traversal/reload from that transient position.
@@ -584,13 +605,8 @@ describe("viewer fragment navigation in Chromium", () => {
   it.each([false, true])("keeps sign-in and dialog teardown usable with a pending confirmation (dismissed: %s)", async dismissed => {
     const page = await newPage();
     await page.goto(harness.origin + privateBase);
-    const frame = await readyFrame(page);
-    await page.waitForFunction(() => navigator.userActivation?.isActive !== true);
-    await frame.waitForFunction(() => {
-      if (navigator.userActivation?.isActive) return false;
-      parent.postMessage({ type: "doc-navigate", path: "guide/other.html", search: "?pending" }, location.origin);
-      return true;
-    });
+    await readyFrame(page);
+    await stagePendingNavigation(page);
     await page.locator("#document-navigation-notice").waitFor();
     if (dismissed) await page.getByRole("button", { name: "Dismiss", exact: true }).click();
     await page.evaluate(() => {

@@ -1,3 +1,4 @@
+import rateLimiterTest from "./convex-rate-limiter";
 import { commitWithProof, publishWithProof } from "./helpers/storage-proof";
 import { describe, expect, it } from "vitest";
 import { convexTest } from "convex-test";
@@ -52,6 +53,7 @@ async function createPublication(
 describe("publication tenant and project boundaries", () => {
   it.each(["docs//nested", "docs/./nested", "docs/../private", "docs\\nested"])("rejects invalid v2 publication prefix %j in Convex too", async (pathPrefix) => {
     const backend = convexTest(schema, modules);
+    rateLimiterTest.register(backend);
     const project = await createProject(backend, "org-a", "docs");
     await expect(publishWithProof(backend, {
       organizationId: "org-a", projectId: project._id, slug: "docs",
@@ -61,6 +63,7 @@ describe("publication tenant and project boundaries", () => {
 
   it.each(["Docs", "docs", "caf\u00e9", "cafe\u0301"])("trims outer delimiters while preserving case and Unicode in %j", async (folder) => {
     const backend = convexTest(schema, modules);
+    rateLimiterTest.register(backend);
     const project = await createProject(backend, "org-a", "docs");
     const publication = await publishWithProof(backend, {
       organizationId: "org-a", projectId: project._id, slug: "docs",
@@ -71,6 +74,7 @@ describe("publication tenant and project boundaries", () => {
 
   it("does not publish a pinned deployment before it has committed", async () => {
     const backend = convexTest(schema, modules);
+    rateLimiterTest.register(backend);
     const project = await createProject(backend, "org-a", "pending");
     const staged = await backend.mutation(internal.deployments.startInternal, {
       organizationId: "org-a",
@@ -101,6 +105,7 @@ describe("publication tenant and project boundaries", () => {
 
   it("rejects an organization paired with an outsider project's ID when listing", async () => {
     const backend = convexTest(schema, modules);
+    rateLimiterTest.register(backend);
     const outsiderProject = await createProject(backend, "org-outsider", "outsider-docs");
     await createPublication(backend, "org-outsider", outsiderProject._id, "outsider-publication");
 
@@ -112,6 +117,7 @@ describe("publication tenant and project boundaries", () => {
 
   it("does not let a project-scoped removal target a sibling project's publication", async () => {
     const backend = convexTest(schema, modules);
+    rateLimiterTest.register(backend);
     const allowedProject = await createProject(backend, "org-a", "allowed");
     const siblingProject = await createProject(backend, "org-a", "sibling");
     const publication = await createPublication(backend, "org-a", siblingProject._id, "sibling-publication");
@@ -137,6 +143,7 @@ describe("publication tenant and project boundaries", () => {
 
   it("removes a publication only when organization, project, and publication agree", async () => {
     const backend = convexTest(schema, modules);
+    rateLimiterTest.register(backend);
     const project = await createProject(backend, "org-a", "docs");
     const publication = await createPublication(backend, "org-a", project._id, "public-docs");
     if (!publication) throw new Error("Publication creation failed");

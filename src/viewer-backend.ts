@@ -1,13 +1,13 @@
 import { evictRejectedSession } from "@/session-cache";
 export class ViewerBackendError extends Error {
   readonly unavailable = true;
-  constructor(readonly retryAfter = "1") {
+  constructor(readonly retryAfter = "1", readonly status: 429 | 503 = 503) {
     super("Viewer backend unavailable");
   }
 }
 
 /** Null means an HTTP denial; successful lookups must contain an object. */
-export async function viewerBackendJson<T extends object>(url: string, init?: RequestInit): Promise<T | null> {
+export async function viewerBackendJson<T extends object>(url: string, init?: RequestInit, preserveRateLimit = false, missingRoute?: (response: Response) => Promise<T | null>): Promise<T | null> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 5_000);
   try {
@@ -16,14 +16,18 @@ export async function viewerBackendJson<T extends object>(url: string, init?: Re
         const response = await fetch(url, { ...init, signal: controller.signal, redirect: "manual" });
         await evictRejectedSession(new Headers(init?.headers).get("cookie") ?? "", response.status);
         if (!response.ok) {
-          void response.body?.cancel().catch(() => {});
-          // Keep all existing controlled denials indistinguishable, including
-          // expired/revoked public grants. 408 and 429 are retryable failures.
-          if (response.status >= 400 && response.status < 500 && ![408, 429].includes(response.status)) return null;
-          const value = response.headers.get("Retry-After");
-          const seconds = value && /^\d+$/.test(value) ? Number(value)
-            : value ? Math.ceil((Date.parse(value) - Date.now()) / 1_000) : 1;
-          throw new ViewerBackendError(String(Number.isSafeInteger(seconds) ? Math.max(1, seconds) : 1));
+          try {
+            if (response.status === 404 && missingRoute) return await missingRoute(response);
+            // Keep all existing controlled denials indistinguishable, including
+            // expired/revoked public grants. 408 and 429 are retryable failures.
+            if (response.status >= 400 && response.status < 500 && ![408, 429].includes(response.status)) return null;
+            const value = response.headers.get("Retry-After");
+            const seconds = value && /^\d+$/.test(value) ? Number(value)
+              : value ? Math.ceil((Date.parse(value) - Date.now()) / 1_000) : 1;
+            throw new ViewerBackendError(String(Number.isSafeInteger(seconds) ? Math.max(1, seconds) : 1), preserveRateLimit && response.status === 429 ? 429 : 503);
+          } finally {
+            void response.body?.cancel().catch(() => {});
+          }
         }
         const data: unknown = await response.json();
         // All callers expect object envelopes and validate their required fields.

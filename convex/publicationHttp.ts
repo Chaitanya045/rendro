@@ -1,3 +1,4 @@
+import { anonymousHttpAction } from "./anonymousAdmission";
 import { STORAGE_ATTESTATION_HEADER } from "../shared/storage-attestation";
 import { requireCookieWrite } from "../shared/request-admission";
 import { publicPublication } from "../shared/resolver-dto";
@@ -6,7 +7,7 @@ import { sessionOrApiKeyHttpAction } from "./apiKeyHttp";
 import type { GenericActionCtx } from "convex/server";
 import type { DataModel } from "./_generated/dataModel";
 import { internal } from "./_generated/api";
-import { httpAction, failure, clientFailure, isApplicationError } from "./httpErrors";
+import { failure, clientFailure, isApplicationError } from "./httpErrors";
 import { authorizeHttpOrganization } from "./authorization";
 import { validateApiCredential } from "./credentialHttp";
 
@@ -143,7 +144,7 @@ export const removePublication = sessionOrApiKeyHttpAction(async (ctx: GenericAc
   return Response.json({ removed: true });
 });
 
-export const resolvePublicPublication = httpAction(async (ctx: GenericActionCtx<DataModel>, request: Request) => {
+export const resolvePublicPublication = anonymousHttpAction(async (ctx: GenericActionCtx<DataModel>, request: Request) => {
   const slug = new URL(request.url).searchParams.get("slug");
   if (!slug) return clientFailure("slug is required");
   const result = await ctx.runQuery(internal.publicationsV2.resolvePublicInternal, { slug });

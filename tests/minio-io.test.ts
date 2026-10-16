@@ -81,3 +81,22 @@ describe("storage requests and responses", () => {
     await expect(getObjectStream("a")).rejects.toBeUndefined();
   });
 });
+
+it("bounds commit listings by keys and page count, including short/repeated pages", async () => {
+  const limits = { maxKeys: 1000, maxPages: 8 };
+  for (const count of [999, 1000]) {
+    send.mockResolvedValueOnce({ Contents: Array.from({ length: count }, (_, i) => ({ Key: `root/${i}` })) });
+    expect((await listAllKeys("root/", limits)).length).toBe(count);
+  }
+  send.mockResolvedValueOnce({ Contents: Array.from({ length: 1001 }, (_, i) => ({ Key: `root/${i}` })) });
+  await expect(listAllKeys("root/", limits)).rejects.toThrow("verification budget");
+  send.mockClear();
+  send.mockResolvedValue({ Contents: [], NextContinuationToken: "repeated" });
+  await expect(listAllKeys("root/", limits)).rejects.toThrow("verification budget");
+  expect(send).toHaveBeenCalledTimes(8);
+  send.mockReset();
+  for (let i = 0; i < 7; i++) send.mockResolvedValueOnce({ NextContinuationToken: String(i) });
+  send.mockResolvedValueOnce({ Contents: [{ Key: "root/a" }] });
+  expect(await listAllKeys("root/", limits)).toEqual(["root/a"]);
+  expect(send).toHaveBeenCalledTimes(8);
+});

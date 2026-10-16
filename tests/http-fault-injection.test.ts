@@ -46,6 +46,7 @@ async function invoke(action: HttpAction, init: RequestInit, error: Error, apiKe
     return Promise.reject(error);
   });
   const runMutation = vi.fn((reference: FunctionReference<"mutation">) => {
+    if (getFunctionName(reference) === "anonymousAdmission:consume") return Promise.resolve({ ok: true });
     if (getFunctionName(reference) === "apiKeyCredentials:validateInternal") return Promise.resolve({ keyId: "key" });
     return Promise.reject(error);
   });

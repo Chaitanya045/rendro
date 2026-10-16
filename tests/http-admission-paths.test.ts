@@ -1,3 +1,4 @@
+import { getFunctionName, type FunctionReference } from "convex/server";
 import { beforeEach, afterEach, expect, it, vi } from "vitest";
 import { ConvexError } from "convex/values";
 const auth = vi.hoisted(() => ({ authorize: vi.fn(), users: vi.fn() }));
@@ -24,7 +25,9 @@ beforeEach(() => {
   auth.authorize.mockResolvedValue({ user: { _id: "owner" } });
   auth.users.mockResolvedValue([]);
   ctx.runQuery.mockResolvedValue({ _id: "project" });
-  ctx.runMutation.mockResolvedValue({ _id: "created", slug: "docs" });
+  ctx.runMutation.mockImplementation((reference: FunctionReference<"mutation">) => Promise.resolve(
+    getFunctionName(reference) === "anonymousAdmission:consume" ? { ok: true } : { _id: "created", slug: "docs" },
+  ));
 });
 afterEach(() => { vi.resetAllMocks(); vi.unstubAllEnvs(); });
 

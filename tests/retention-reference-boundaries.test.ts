@@ -1,3 +1,4 @@
+import rateLimiterTest from "./convex-rate-limiter";
 import { publishWithProof } from "./helpers/storage-proof";
 import { describe, expect, it } from "vitest";
 import { convexTest } from "convex-test";
@@ -8,6 +9,7 @@ const modules = import.meta.glob("../convex/**/*.ts");
 
 async function fixture() {
   const t = convexTest({ schema, modules, transactionLimits: true });
+  rateLimiterTest.register(t);
   const projectId = await t.run(ctx => ctx.db.insert("projects", { organizationId: "org", slug: "docs", name: "Docs", createdBy: "user", createdAt: 1 }));
   const otherProjectId = await t.run(ctx => ctx.db.insert("projects", { organizationId: "other", slug: "other", name: "Other", createdBy: "user", createdAt: 1 }));
   const deploymentId = await t.run(ctx => ctx.db.insert("deployments", { organizationId: "org", projectId, status: "active", manifestKey: "manifest", manifestSha256: "a".repeat(64), fileCount: 1, byteCount: 1, createdAt: Date.now(), createdBy: "user", provenance: { source: { kind: "local" }, execution: { kind: "local" }, cliVersion: "test", manifestSha256: "a".repeat(64) } }));

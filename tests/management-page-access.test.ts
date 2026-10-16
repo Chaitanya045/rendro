@@ -1,3 +1,4 @@
+import rateLimiterTest from "./convex-rate-limiter";
 import { readFileSync } from "node:fs";
 import { Window } from "happy-dom";
 import { sessionCache, sessionMiddleware } from "@/middleware/session";
@@ -25,6 +26,7 @@ function requestUrl(input: string | URL | Request): string {
 async function fixture(realSession = false) {
   sessionCache.clear();
   const backend = convexTest(schema, import.meta.glob("../convex/**/*.ts"));
+  rateLimiterTest.register(backend);
   backend.registerComponent("betterAuth", authSchema, import.meta.glob("../convex/betterAuth/**/*.ts"));
   const now = Date.now(), token = "management-page-session";
   const records = await backend.run(async ctx => {

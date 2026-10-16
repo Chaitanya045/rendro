@@ -1,3 +1,4 @@
+import rateLimiterTest from "./convex-rate-limiter";
 import { commitWithProof } from "./helpers/storage-proof";
 import { createHmac } from "node:crypto";
 import { convexTest } from "convex-test";
@@ -44,6 +45,7 @@ afterEach(async () => {
 async function fixture() {
   sessionCache.clear();
   const backend = convexTest(schema, import.meta.glob("../convex/**/*.ts"));
+  rateLimiterTest.register(backend);
   backend.registerComponent("betterAuth", authSchema, import.meta.glob("../convex/betterAuth/**/*.ts"));
   const auth = betterAuth(createAuthOptions({ runQuery: backend.query, runMutation: backend.mutation } as never));
   const context = await auth.$context;

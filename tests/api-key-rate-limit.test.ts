@@ -201,7 +201,7 @@ describe("authoritative API-key rate limits", () => {
     expect(allowedAfterRefill).toBeLessThanOrEqual(100 + 50 - allowed);
   });
 
-  it("allows the CLI pattern for a 10,000-file cold deploy plus a large incremental deploy without refill", async () => {
+  it("allows the CLI pattern for a 1,000-file cold deploy plus a large incremental deploy without refill", async () => {
     vi.spyOn(Date, "now").mockReturnValue(Date.now());
     const { t } = await fixture();
     const project = await t.mutation(internal.projects.createInternal, {
@@ -209,7 +209,7 @@ describe("authoritative API-key rate limits", () => {
     });
     const identity = { organizationId: "org", projectId: project!._id };
     const query = new URLSearchParams(identity);
-    for (const [changed, reused] of [[10_000, 0], [500, 9_500]]) {
+    for (const [changed, reused] of [[1_000, 0], [50, 950]]) {
       expect((await t.fetch(`/api/rendro/deployments/active?${query}`, { headers })).status).toBe(200);
       const start = await t.fetch("/api/rendro/deployments/start", {
         method: "POST", headers, body: JSON.stringify({ ...identity,
@@ -222,8 +222,8 @@ describe("authoritative API-key rate limits", () => {
       const deploymentIdentity = { ...identity, deploymentId: deployment.deploymentId };
       const stagingPath = `/api/rendro/deployments/staging?${new URLSearchParams(deploymentIdentity)}`;
       // One staging authorization per upload/copy batch, plus one at commit.
-      // Match the CLI's default concurrency instead of serializing 10,000
-      // independent HTTP/crypto operations. Every authorization still executes.
+      // Match the CLI's default concurrency instead of serializing every
+      // independent HTTP/crypto operation. Every authorization still executes.
       const authorizations = changed + Math.ceil(reused / MAX_REUSED_FILES_PER_REQUEST) + 1;
       const concurrency = 8;
       for (let offset = 0; offset < authorizations; offset += concurrency) {

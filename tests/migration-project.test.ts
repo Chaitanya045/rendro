@@ -1,3 +1,4 @@
+import rateLimiterTest from "./convex-rate-limiter";
 import { commitWithProof } from "./helpers/storage-proof";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { convexTest } from "convex-test";
@@ -18,6 +19,7 @@ function request(backend: ReturnType<typeof convexTest>, body: object, secret = 
 
 async function fixture() {
   const backend = convexTest(schema, modules);
+  rateLimiterTest.register(backend);
   const first = await request(backend, input);
   expect(first.status).toBe(201);
   const project = await backend.query(internal.projects.listInternal, { organizationId: "org" }).then(rows => rows[0]);

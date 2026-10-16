@@ -1,3 +1,5 @@
+import { anonymousAdmission } from "./middleware/anonymous-admission";
+import { bodyAdmission } from "./middleware/body-admission";
 import { writeAdmission } from "./middleware/write-admission";
 import type { Hono } from "hono";
 import type { User } from "better-auth/types";
@@ -28,6 +30,8 @@ type AppEnv = { Variables: { user?: User } };
 
 /** Public signed share and publication routes. Mount before session middleware. */
 export function mountPublicRoutes<E extends AppEnv>(app: Hono<E>): void {
+  app.use("/public/*", anonymousAdmission);
+  app.use("/share/*", anonymousAdmission);
   app.route("/", publicV2Routes);
   app.route("/", shareV2Routes);
   app.route("/", shareRoutes);
@@ -37,6 +41,7 @@ export function mountPublicRoutes<E extends AppEnv>(app: Hono<E>): void {
 /** Auth proxy, Convex API proxy, and application routes. Mount after session middleware. */
 export function mountSessionRoutes<E extends AppEnv>(app: Hono<E>): void {
   app.use("*", writeAdmission);
+  app.use("*", bodyAdmission);
   // GET confirms; only a same-origin POST revokes the session.
   app.on(["GET", "POST"], "/api/auth/sign-out", (c) => proxyAuthSignOut(c.req.raw));
 

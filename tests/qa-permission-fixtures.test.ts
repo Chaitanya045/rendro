@@ -1,3 +1,4 @@
+import rateLimiterTest from "./convex-rate-limiter";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { convexTest } from "convex-test";
 import { makeFunctionReference } from "convex/server";
@@ -40,6 +41,7 @@ const runFixtureWithUnvalidatedArgs = makeFunctionReference<
 
 function fixtureBackend() {
   const backend = convexTest(schema, modules);
+  rateLimiterTest.register(backend);
   backend.registerComponent("betterAuth", betterAuthSchema, betterAuthModules);
   return backend;
 }

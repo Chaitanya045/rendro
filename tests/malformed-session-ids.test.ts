@@ -1,3 +1,4 @@
+import rateLimiterTest from "./convex-rate-limiter";
 import { createHmac } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { convexTest } from "convex-test";
@@ -9,6 +10,7 @@ import authSchema from "../convex/betterAuth/schema";
 // matrix's mocked session authorization. All records live in convex-test.
 async function fixture() {
   const backend = convexTest(schema, import.meta.glob("../convex/**/*.ts"));
+  rateLimiterTest.register(backend);
   backend.registerComponent("betterAuth", authSchema, import.meta.glob("../convex/betterAuth/**/*.ts"));
   const now = Date.now();
   const token = "test-session-token";

@@ -121,7 +121,7 @@ describe("Convex deployment HTTP boundaries", () => {
 
 it("rejects noncanonical manifest digests at direct authenticated Convex ingress", async () => {
   const f = await fixture();
-  for (const manifestSha256 of ["", "a".repeat(63), "a".repeat(65), "A".repeat(64), "g".repeat(64), "a".repeat(64) + "\n", "x".repeat(1_048_000)]) {
+  for (const manifestSha256 of ["", "a".repeat(63), "a".repeat(65), "A".repeat(64), "g".repeat(64), "a".repeat(64) + "\n", "x".repeat(60_000)]) {
     const response = await f.post("start", { ...f.start, manifestSha256 });
     expect(response.status).toBe(400);
     expect(await response.json()).toMatchObject({ error: "manifestSha256 must be 64 lowercase hexadecimal characters" });

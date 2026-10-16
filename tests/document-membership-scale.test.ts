@@ -1,3 +1,4 @@
+import rateLimiterTest from "./convex-rate-limiter";
 import { describe, expect, it } from "vitest";
 import { convexTest } from "convex-test";
 import { api, components } from "../convex/_generated/api";
@@ -16,6 +17,7 @@ const betterAuthModules = import.meta.glob("../convex/betterAuth/**/*.ts");
 describe("document membership authorization at roster scale", () => {
   it("authorizes a member beyond the full-organization roster's first 100", async () => {
     const backend = convexTest(schema, modules);
+    rateLimiterTest.register(backend);
     backend.registerComponent("betterAuth", betterAuthSchema, betterAuthModules);
     const now = Date.now();
     const seeded = await backend.run(async (ctx) => {

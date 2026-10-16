@@ -1,3 +1,4 @@
+import { consumeWriteQuota } from "./writeQuotas";
 import { isOrganizationDeleted, requireActiveOrganization } from "./organizationLifecycle";
 import { requireId } from "./ids";
 import { ConvexError, v } from "convex/values";
@@ -17,6 +18,7 @@ export const createInternal = internalMutation({
   },
   handler: async (ctx, input) => {
     await requireActiveOrganization(ctx, input.organizationId);
+    await consumeWriteQuota(ctx, "credentials", input.actorId, input.organizationId);
     const args = {
       ...input,
       projectId: input.projectId === undefined ? undefined : requireId(ctx, "projects", input.projectId),

@@ -1,9 +1,13 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import worker from "@/worker";
 import { renderFaviconLinks } from "@/routes/favicon";
 
 vi.mock("@hono/node-server", () => ({ serve: vi.fn() }));
 import { app as local } from "@/index";
+
+beforeEach(() => vi.stubGlobal("fetch", vi.fn((input) => Promise.resolve(String(input).endsWith("/api/rendro/admission/public")
+  ? Response.json({ admitted: true }) : new Response(null, { status: 404 })))));
+afterEach(() => vi.unstubAllGlobals());
 
 const runtimes = [
   { name: "Worker without ASSETS", request: (path: string, init?: RequestInit) => worker.request(path, init) },
