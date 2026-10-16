@@ -5,10 +5,11 @@ import { ageRecord, authRecord, holdRequest, login, mailFor, mailLink, oauthFixt
 test.describe.configure({ timeout: 60_000 });
 
 const changedPassword = "Changed local password 111!";
-test("signup verifies delivered mail, resends neutrally and retains the destination", async ({ page }, info) => {
+test("signup verifies the original mail and retains the destination", async ({ page }, info) => {
   const email = `signup-${info.project.name}-${info.retry}@example.test`;
   const pending = await holdRequest(page, "/api/auth/sign-up/email");
-  const signing = signup(page, email);
+  const destination = "/account/security?from=original-signup";
+  const signing = signup(page, email, destination);
   try {
     await expect.poll(pending.count).toBe(1);
     await page.locator("#auth-form").dispatchEvent("submit");
@@ -17,6 +18,8 @@ test("signup verifies delivered mail, resends neutrally and retains the destinat
     expect(pending.count()).toBe(1);
   } finally { pending.release(); await signing; await pending.close(); }
   await expect.poll(async () => (await mailFor(email)).length).toBe(1);
+  // Capture before sign-in or resend can deliver another verification message.
+  const originalLink = await mailLink(email, /Verify/);
   const neutral = await page.locator("#success-panel p").innerText();
   await expect(page.locator("#auth-form")).toBeHidden();
   expect(await session(page)).toBeNull();
@@ -24,6 +27,30 @@ test("signup verifies delivered mail, resends neutrally and retains the destinat
   await expect(page.getByRole("alert")).toContainText(/verif/i);
   await expect(page.getByRole("button", { name: "Sign in", exact: true })).toBeEnabled();
   expect(await session(page)).toBeNull();
+
+  await page.goto(originalLink);
+  await expect(page.getByRole("heading", { name: "Email verified", exact: true })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Continue to sign in" })).toHaveAttribute("href", `/sign-in?returnTo=${encodeURIComponent(destination)}`);
+  expect(await session(page)).toBeNull();
+  await page.getByRole("link", { name: "Continue to sign in" }).click();
+  await page.getByLabel("Work email", { exact: true }).fill(email);
+  await page.getByLabel("Password", { exact: true }).fill(password);
+  await page.getByRole("button", { name: "Sign in", exact: true }).click();
+  await expect(page).toHaveURL(`${process.env.RENDRO_E2E_ORIGIN}${destination}`);
+  expect(await session(page)).toMatchObject({ email, verified: true });
+  const user = await authRecord<{ emailVerified: boolean }>("findOne", { model: "user", where: [{ field: "email", value: email }], select: ["emailVerified"] });
+  expect(user.emailVerified).toBe(true);
+  await signout(page);
+  // Duplicate signup has the same UI; the existing user gets an account notice.
+  await signup(page, email);
+  await expect(page.locator("#success-panel p")).toHaveText(neutral);
+  await expect.poll(async () => (await mailFor(email)).some(mail => mail.subject === "A Rendro sign-up was requested")).toBe(true);
+});
+
+test("verification resend is neutral and retains its destination", async ({ page }, info) => {
+  const email = `resend-${info.project.name}-${info.retry}@example.test`;
+  await signup(page, email);
+  await expect.poll(async () => (await mailFor(email)).length).toBe(1);
   const before = (await mailFor(email)).length;
   await page.goto("/verify-email?returnTo=%2Faccount%2Fsecurity");
   await page.getByRole("button", { name: "Resend verification email" }).click();
@@ -42,15 +69,6 @@ test("signup verifies delivered mail, resends neutrally and retains the destinat
   await expect(page.getByRole("heading", { name: "Email verified", exact: true })).toBeVisible();
   await expect(page.getByRole("link", { name: "Continue to sign in" })).toHaveAttribute("href", "/sign-in?returnTo=%2Faccount%2Fsecurity");
   expect(await session(page)).toBeNull();
-  // Duplicate signup has the same UI; the existing user gets an account notice.
-  await signup(page, email);
-  await expect(page.locator("#success-panel p")).toHaveText(neutral);
-  await expect.poll(async () => (await mailFor(email)).some(mail => mail.subject === "A Rendro sign-up was requested")).toBe(true);
-  await login(page, email);
-  await expect(page).toHaveURL(/\/account\/security$/);
-  expect(await session(page)).toMatchObject({ email, verified: true });
-  const user = await authRecord<{ emailVerified: boolean }>("findOne", { model: "user", where: [{ field: "email", value: email }], select: ["emailVerified"] });
-  expect(user.emailVerified).toBe(true);
 });
 
 test("auth validation, reveal, pending exclusion and transport recovery preserve inputs", async ({ page }) => {
@@ -165,13 +183,19 @@ test("password recovery is neutral and reset revokes a second browser session", 
   const link = await mailLink(email, /reset/i);
   await page.goto(link);
   await expect(page).toHaveURL(/\/reset-password\?.*token=/);
+  let resetRequests = 0;
+  page.on("request", request => {
+    if (new URL(request.url()).pathname === "/api/auth/reset-password") resetRequests++;
+  });
   await page.getByLabel("New password", { exact: true }).fill(changedPassword);
   await page.getByLabel("Confirm password", { exact: true }).fill(password);
   await page.getByRole("button", { name: "Update password" }).click();
   await expect(page.getByRole("alert")).toHaveText("Passwords do not match.");
+  expect(resetRequests).toBe(0);
   await page.getByLabel("Confirm password", { exact: true }).fill(changedPassword);
   await page.getByRole("button", { name: "Update password" }).click();
   await expect(page.getByRole("heading", { name: "Password updated" })).toBeVisible();
+  expect(resetRequests).toBe(1);
   expect(await session(second)).toBeNull();
   expect(await authRecord("findOne", { model: "session", select: ["_id"], where: [{ field: "_id", value: previous?.sessionId }] })).toBeNull();
   await second.evaluate(() => window.dispatchEvent(new Event("focus")));
@@ -341,6 +365,11 @@ test("sign-out failure retries, clears both tabs and protects back-forward histo
   const observer = await context.newPage();
   await observer.goto("/account/security");
   const observerURL = observer.url();
+  for (const tab of [page, observer]) {
+    await expect(tab.locator(".shell")).toBeVisible();
+    await expect(tab.locator(".shell")).not.toHaveAttribute("inert");
+    await expect(tab.locator("#change-password-section")).toBeVisible();
+  }
   const pending = await holdRequest(page, "/api/auth/sign-out");
   try {
     await page.getByRole("button", { name: "Sign out", exact: true }).click();
@@ -354,6 +383,18 @@ test("sign-out failure retries, clears both tabs and protects back-forward histo
   await expect(observer.locator("#rendro-signed-out")).toBeFocused();
   await expect(observer.locator("#rendro-signed-out")).toHaveAttribute("aria-live", "polite");
   await expect(observer.getByRole("heading", { name: "Sign-in methods" })).toBeHidden();
+  for (const tab of [page, observer]) {
+    // Assert the retained containers themselves, before either tab navigates.
+    await expect(tab.locator(".shell")).toBeAttached();
+    await expect(tab.locator(".shell")).toBeHidden();
+    await expect(tab.locator(".shell")).toHaveAttribute("inert", "");
+    await expect(tab.locator(".card[data-page=security]")).toBeHidden();
+    await expect(tab.locator("#change-password-section")).toBeHidden();
+    await tab.locator("#currentPassword").evaluate(input => input.focus());
+    await expect(tab.locator("#currentPassword")).not.toBeFocused();
+    await expect(tab.locator("#rendro-signed-out")).toBeFocused();
+  }
+  expect(page.url()).toBe(observerURL);
   expect(observer.url()).toBe(observerURL);
   expect(await authRecord("findOne", { model: "session", select: ["_id"], where: [{ field: "_id", value: identity?.sessionId }] })).toBeNull();
   await page.getByRole("link", { name: "Sign in", exact: true }).click();
@@ -365,12 +406,12 @@ test("sign-out failure retries, clears both tabs and protects back-forward histo
   expect(await session(page)).toBeNull();
 });
 
-// New issue AUTH-111-01 (to be filed): auth CSS overrides the hidden attribute
+// Issue #146 (AUTH-111-01): auth CSS overrides the hidden attribute
 // on the Google button and divider after successful signup. Keep this failing
 // assertion until the controls actually disappear; do not credit the registry edge.
 test("signup success hides Google and the credential divider [AUTH-111-01]", async ({ page }, info) => {
   await signup(page, `hidden-${info.project.name}-${info.retry}@example.test`);
-  test.fail(true, "AUTH-111-01: display:flex overrides hidden on signup alternatives");
+  test.fail(true, "#146 (AUTH-111-01): display:flex overrides hidden on signup alternatives");
   expect({ googleVisible: await page.locator("#google-auth").isVisible(), dividerVisible: await page.locator(".divider").isVisible() }).toEqual({ googleVisible: false, dividerVisible: false });
 });
 
@@ -404,7 +445,7 @@ test("persisted pageshow checks the backend and hides a revoked account", async 
   expect(await session(page)).toBeNull();
 });
 
-// New issue AUTH-111-02 (to be filed): protected-page session reads extend a
+// Issue #145 (AUTH-111-02): protected-page session reads extend a
 // nonpersistent session to the persistent lifetime. The cookie-only assertions
 // above remain independent so this marker cannot hide a cookie regression.
 test("nonpersistent session retains its short backend lifetime [AUTH-111-02]", async ({ page }) => {
@@ -416,6 +457,6 @@ test("nonpersistent session retains its short backend lifetime [AUTH-111-02]", a
     model: "session", where: [{ field: "_id", value: identity?.sessionId }], select: ["createdAt", "expiresAt"],
   });
   expect(record).not.toBeNull();
-  test.fail(true, "AUTH-111-02: nonpersistent backend session is extended on protected-page entry");
+  test.fail(true, "#145 (AUTH-111-02): nonpersistent backend session is extended on protected-page entry");
   expect(record.expiresAt - record.createdAt).toBeLessThanOrEqual(86400_000 + 1000);
 });

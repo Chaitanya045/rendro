@@ -15003,7 +15003,7 @@
             },
             {
               "file": "e2e/auth.spec.ts",
-              "name": "signup verifies delivered mail, resends neutrally and retains the destination",
+              "name": "signup verifies the original mail and retains the destination",
               "kind": "e2e"
             },
             {
@@ -15245,7 +15245,7 @@
           "tests": [
             {
               "file": "e2e/auth.spec.ts",
-              "name": "signup verifies delivered mail, resends neutrally and retains the destination",
+              "name": "signup verifies the original mail and retains the destination",
               "kind": "e2e"
             }
           ]
@@ -15296,7 +15296,7 @@
           "tests": [
             {
               "file": "e2e/auth.spec.ts",
-              "name": "signup verifies delivered mail, resends neutrally and retains the destination",
+              "name": "signup verifies the original mail and retains the destination",
               "kind": "e2e"
             }
           ]
@@ -15324,7 +15324,7 @@
           "tests": [
             {
               "file": "e2e/auth.spec.ts",
-              "name": "signup verifies delivered mail, resends neutrally and retains the destination",
+              "name": "signup verifies the original mail and retains the destination",
               "kind": "e2e"
             }
           ]
@@ -15374,7 +15374,7 @@
             },
             {
               "file": "e2e/auth.spec.ts",
-              "name": "signup verifies delivered mail, resends neutrally and retains the destination",
+              "name": "signup verifies the original mail and retains the destination",
               "kind": "e2e"
             }
           ]
@@ -15496,7 +15496,7 @@
           "tests": [
             {
               "file": "e2e/auth.spec.ts",
-              "name": "signup verifies delivered mail, resends neutrally and retains the destination",
+              "name": "signup verifies the original mail and retains the destination",
               "kind": "e2e"
             }
           ]
@@ -15513,7 +15513,7 @@
           "tests": [
             {
               "file": "e2e/auth.spec.ts",
-              "name": "signup verifies delivered mail, resends neutrally and retains the destination",
+              "name": "verification resend is neutral and retains its destination",
               "kind": "e2e"
             }
           ]
@@ -15530,7 +15530,7 @@
           "tests": [
             {
               "file": "e2e/auth.spec.ts",
-              "name": "signup verifies delivered mail, resends neutrally and retains the destination",
+              "name": "verification resend is neutral and retains its destination",
               "kind": "e2e"
             }
           ]
@@ -15558,7 +15558,7 @@
           "tests": [
             {
               "file": "e2e/auth.spec.ts",
-              "name": "signup verifies delivered mail, resends neutrally and retains the destination",
+              "name": "verification resend is neutral and retains its destination",
               "kind": "e2e"
             }
           ]
@@ -15575,7 +15575,7 @@
           "tests": [
             {
               "file": "e2e/auth.spec.ts",
-              "name": "signup verifies delivered mail, resends neutrally and retains the destination",
+              "name": "verification resend is neutral and retains its destination",
               "kind": "e2e"
             }
           ]
@@ -15652,7 +15652,7 @@
           "tests": [
             {
               "file": "e2e/auth.spec.ts",
-              "name": "signup verifies delivered mail, resends neutrally and retains the destination",
+              "name": "signup verifies the original mail and retains the destination",
               "kind": "e2e"
             }
           ]
@@ -17950,7 +17950,7 @@
             },
             {
               "file": "e2e/auth.spec.ts",
-              "name": "signup verifies delivered mail, resends neutrally and retains the destination",
+              "name": "signup verifies the original mail and retains the destination",
               "kind": "e2e"
             }
           ]

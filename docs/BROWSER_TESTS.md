@@ -148,6 +148,12 @@ lifetimes, safe return destinations, password reset and change, initial-password
 freshness, method-load retry, Google linking/callback errors, and sign-out across
 contexts, tabs and history. Tests project session reads to non-secret identity
 and lifetime metadata, and check backend record removal after revocation.
+The original signup mail is captured before any later verification message and
+followed through explicit sign-in to its query-bearing return destination. A
+separate account tests resend delivery and neutral eligible/ineligible responses.
+Reset mismatch asserts zero reset requests, with one request after correction.
+Sign-out checks that the retained protected containers are hidden and their shell
+is inert in both tabs before navigation; protected inputs cannot regain focus.
 
 The complete three-engine suite has a 20-minute bound (30 minutes for the CI
 job including installation); individual auth journeys have a 60-second bound.
@@ -174,11 +180,11 @@ Expected failures name follow-up issues below. Their broken assertions receive
 no `e2e` registry credit; an unexpected pass fails the suite so the marker must
 be removed when the product is fixed.
 
-- **AUTH-111-01 (issue to file): signup alternatives remain visible after success.**
+- **[#146](https://github.com/Chaitanya045/rendro/issues/146) (AUTH-111-01): signup alternatives remain visible after success.**
   The Google button and divider get `hidden` attributes, but their `display:flex`
   CSS overrides the browser's hidden styling. Both should disappear with the
   credential form when the neutral verification confirmation is shown.
-- **AUTH-111-02 (issue to file): nonpersistent sessions gain the persistent lifetime.**
+- **[#145](https://github.com/Chaitanya045/rendro/issues/145) (AUTH-111-02): nonpersistent sessions gain the persistent lifetime.**
   Unchecking Keep me signed in correctly creates a session-only browser cookie,
   but the backend session is extended from the intended one-day lifetime to
   approximately seven days on protected-page entry. Worker session lookups strip
@@ -193,6 +199,11 @@ wait for exact target alignment across consecutive frames before another history
 action, so a transient position during native restoration is not treated as readiness. On Linux, use
 `CI=true taskset -c 0,1 pnpm test:browser` to reproduce a two-CPU budget (choose
 CPUs from `taskset -pc $$` if your container has a different allowed set).
+
+Activation-sensitive viewer checks send the unsolicited frame message and wait
+for its confirmation notice inside one passive CDP evaluation (`userGesture: false`).
+This prevents an intervening Playwright locator evaluation from granting a new
+activation before the message reaches the shell.
 
 Vitest discovers `tests/**/*-browser.test.ts` in the `browser` project and
 excludes those files from `unit`. Unit files retain their normal parallelism.
