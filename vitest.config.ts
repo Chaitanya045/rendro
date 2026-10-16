@@ -7,6 +7,9 @@ export default defineConfig({
     globals: true,
     environment: "node",
     setupFiles: ["tests/setup.ts"],
+    // The nightly stability workflow records per-test outcomes of consecutive runs
+    // and diffs them (tests/helpers/diff-outcomes.ts); unset, only the default reporter runs.
+    reporters: process.env.RENDRO_TEST_OUTCOMES ? ["default", ["json", { outputFile: process.env.RENDRO_TEST_OUTCOMES }]] : ["default"],
     projects: [
       {
         extends: true,
@@ -15,6 +18,11 @@ export default defineConfig({
           include: ["tests/**/*.test.ts"],
           exclude: ["tests/**/*-browser.test.ts"],
           sequence: { groupOrder: 0 },
+          // In-process Convex emulation under V8 coverage on a shared 2-vCPU runner
+          // runs several times slower than the 5s default assumes (seen: 5.1-7s).
+          // Budgets here only catch hangs; assertions never depend on elapsed time.
+          testTimeout: 30_000,
+          hookTimeout: 30_000,
         },
       },
       {

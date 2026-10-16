@@ -1,0 +1,131 @@
+name: Test stability
+
+# Surfaces intermittent failures early. The coverage suite runs twice on two CPUs
+# (the constrained configuration that exposed #151) and any difference in
+# per-test outcomes or in per-counter coverage hits between the runs fails the
+# workflow. The end-to-end suite runs once per engine with retries disabled.
+on:
+  schedule:
+    - cron: "41 2 * * *"
+  workflow_dispatch:
+  # Only changes to this workflow itself, so edits to it are exercised before merge.
+  pull_request:
+    paths:
+      - .github/workflows/stability.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: stability-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  VITEST_MAX_WORKERS: "2"
+
+jobs:
+  coverage-twice:
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    env:
+      CI: "true"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/rendro-e2e
+          key: ${{ runner.os }}-${{ runner.arch }}-convex-precompiled-2026-10-06-a3538c6-archive-v2
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec playwright install --with-deps chromium
+      # Vitest cleans coverage/ on every run, so each run's reports are copied
+      # out. RENDRO_TEST_OUTCOMES makes Vitest also write its per-test JSON report.
+      - name: Coverage run 1
+        env:
+          RENDRO_TEST_OUTCOMES: ${{ runner.temp }}/stability/run1/outcomes.json
+        run: |
+          mkdir -p "$RUNNER_TEMP/stability/run1"
+          status=0
+          taskset -c 0,1 pnpm coverage || status=$?
+          cp coverage/merged/coverage-final.json "$RUNNER_TEMP/stability/run1/" || true
+          exit $status
+      # Always run the second pass: a failure in only one of two identical runs is a flake.
+      - name: Coverage run 2
+        if: ${{ !cancelled() }}
+        env:
+          RENDRO_TEST_OUTCOMES: ${{ runner.temp }}/stability/run2/outcomes.json
+        run: |
+          mkdir -p "$RUNNER_TEMP/stability/run2"
+          status=0
+          taskset -c 0,1 pnpm coverage || status=$?
+          cp coverage/merged/coverage-final.json "$RUNNER_TEMP/stability/run2/" || true
+          exit $status
+      # Empty output is success; every difference is one JSON line and fails the step.
+      - name: Compare per-test outcomes
+        if: ${{ !cancelled() }}
+        run: pnpm exec tsx tests/helpers/diff-outcomes.ts "$RUNNER_TEMP/stability/run1/outcomes.json" "$RUNNER_TEMP/stability/run2/outcomes.json"
+      - name: Compare coverage counters
+        if: ${{ !cancelled() }}
+        run: pnpm exec tsx tests/helpers/diff-coverage.ts "$RUNNER_TEMP/stability/run1/coverage-final.json" "$RUNNER_TEMP/stability/run2/coverage-final.json"
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: stability-coverage-reports
+          path: ${{ runner.temp }}/stability/
+          retention-days: 7
+          if-no-files-found: warn
+
+  e2e-no-retries:
+    name: e2e-no-retries (${{ matrix.project }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        project: [chromium, firefox, webkit]
+    env:
+      WRANGLER_SEND_METRICS: "false"
+      # Playwright reads this in e2e/playwright.config.ts; the first failure is final.
+      E2E_RETRIES: "0"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/rendro-e2e
+          key: ${{ runner.os }}-${{ runner.arch }}-convex-precompiled-2026-10-06-a3538c6-archive-v2
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec playwright install --with-deps ${{ matrix.project }}
+      - uses: actions/cache@v4
+        id: s3proxy-cache
+        with:
+          path: /tmp/rendro-s3proxy.tar
+          key: s3proxy-87662b2a5afcdfa5f478a1c61650bae4c87bbd15f6ff2823236bcfd66ef7fe04
+      - name: Load pinned local storage image
+        if: steps.s3proxy-cache.outputs.cache-hit == 'true'
+        run: docker load --input /tmp/rendro-s3proxy.tar
+      - name: Resolve pinned local storage image
+        run: docker pull andrewgaul/s3proxy@sha256:87662b2a5afcdfa5f478a1c61650bae4c87bbd15f6ff2823236bcfd66ef7fe04
+      - name: Cache pinned local storage image
+        if: steps.s3proxy-cache.outputs.cache-hit != 'true'
+        run: docker save andrewgaul/s3proxy@sha256:87662b2a5afcdfa5f478a1c61650bae4c87bbd15f6ff2823236bcfd66ef7fe04 --output /tmp/rendro-s3proxy.tar
+      - run: pnpm e2e --project=${{ matrix.project }}
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: stability-e2e-failures-${{ matrix.project }}
+          path: |
+            test-results/e2e/
+            playwright-report/
+          retention-days: 7
+          if-no-files-found: warn

@@ -42,9 +42,17 @@ jobs:
       # No credentials or deployed test-user creation in untrusted PR jobs.
       - run: pnpm audit --audit-level=high
 
-  e2e:
+  # One job per Playwright project keeps wall time near the slowest engine instead
+  # of the sum of all three. The aggregate `e2e` job below preserves the single
+  # required check name.
+  e2e-engine:
+    name: e2e (${{ matrix.project }})
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        project: [chromium, firefox, webkit]
     env:
       VITEST_MAX_WORKERS: "2"
       WRANGLER_SEND_METRICS: "false"
@@ -60,7 +68,7 @@ jobs:
           path: ~/.cache/rendro-e2e
           key: ${{ runner.os }}-${{ runner.arch }}-convex-precompiled-2026-10-06-a3538c6-archive-v2
       - run: pnpm install --frozen-lockfile
-      - run: pnpm exec playwright install --with-deps chromium firefox webkit
+      - run: pnpm exec playwright install --with-deps ${{ matrix.project }}
       - uses: actions/cache@v4
         id: s3proxy-cache
         with:
@@ -74,19 +82,33 @@ jobs:
       - name: Cache pinned local storage image
         if: steps.s3proxy-cache.outputs.cache-hit != 'true'
         run: docker save andrewgaul/s3proxy@sha256:87662b2a5afcdfa5f478a1c61650bae4c87bbd15f6ff2823236bcfd66ef7fe04 --output /tmp/rendro-s3proxy.tar
-      # Non-optional RPC gate: a missing backend fails, never skips.
-      - run: pnpm exec vitest run tests/convex-public-rpc.test.ts
-      # One worker runs the engines sequentially; no credentials or deployed services.
-      - run: pnpm e2e
+      # Non-optional RPC gate (engine-independent): a missing backend fails, never skips.
+      - name: Convex public RPC gate
+        if: matrix.project == 'chromium'
+        run: pnpm exec vitest run tests/convex-public-rpc.test.ts
+      # One worker runs this engine's project; no credentials or deployed services.
+      - run: pnpm e2e --project=${{ matrix.project }}
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
-          name: workerd-e2e-failures
+          name: workerd-e2e-failures-${{ matrix.project }}
           path: |
             test-results/e2e/
             playwright-report/
           retention-days: 7
           if-no-files-found: warn
+
+  # Required check `e2e`: fails unless every engine job succeeded. `always()` is
+  # needed so a failed or cancelled matrix leg is reported instead of skipping this job.
+  e2e:
+    runs-on: ubuntu-latest
+    needs: e2e-engine
+    if: ${{ always() }}
+    steps:
+      - name: Require every engine
+        env:
+          RESULT: ${{ needs.e2e-engine.result }}
+        run: test "$RESULT" = success
 
   coverage:
     runs-on: ubuntu-latest

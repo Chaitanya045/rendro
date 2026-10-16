@@ -1251,9 +1251,10 @@ Both production (top-level) and `development` declare the same required secrets:
 
 | Workflow | Trigger | Runs |
 |---|---|---|
-| `.github/workflows/quality.yml` | Pull requests, pushes to `main`/`development`, manual | Independent `verify` (`pnpm verify`, dependency audit), `coverage` (`pnpm coverage`, summary artifacts), and `e2e` (Playwright Test/workerd, three browser engines) jobs; read-only permissions, no deployment credentials |
+| `.github/workflows/quality.yml` | Pull requests, pushes to `main`/`development`, manual | Independent `verify` (`pnpm verify`, dependency audit), `coverage` (`pnpm coverage`, summary artifacts), and `e2e-engine` (one Playwright Test/workerd job per browser engine) with an aggregate required `e2e` job; read-only permissions, no deployment credentials |
 | `.github/workflows/release.yml` | `v*` tags | Builds `bin/rendro.mjs` and attaches it to a GitHub release |
 | `.github/workflows/retention.yml` | Daily cron, manual | `pnpm cleanup:retention` |
+| `.github/workflows/stability.yml` | Nightly cron, manual | `coverage-twice` (two consecutive `taskset -c 0,1 pnpm coverage` runs, then per-test outcome and coverage-counter diffs; the second run and diffs always execute) and `e2e-no-retries` (per engine, `E2E_RETRIES=0`); read-only permissions, no secrets; any failure fails the workflow |
 
 No workflow deploys the Worker or Convex to a shared environment, or publishes to npm.
 The E2E job pushes application code only to a harness-owned disposable loopback backend.
