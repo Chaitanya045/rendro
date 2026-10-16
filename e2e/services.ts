@@ -1,94 +1,163 @@
-import { createHash } from "node:crypto";
-import { createServer, type RequestListener } from "node:http";
+import { createHash, randomBytes } from "node:crypto";
+import { createServer, request, type IncomingMessage, type RequestListener } from "node:http";
+import { createServer as createTlsServer } from "node:https";
+import { readFile, writeFile } from "node:fs/promises";
+import type { Duplex } from "node:stream";
+import { join } from "node:path";
+import { CreateBucketCommand, DeleteObjectCommand, ListObjectsV2Command, S3Client } from "@aws-sdk/client-s3";
+import { SignJWT, generateKeyPair, exportJWK } from "jose";
+import { localEnvironment, localHttp, ready, run } from "./backend";
+
+import type { ResourceJournal } from "./resource-journal";
 
 export const publicationSlug = "workerd-smoke";
-const prefix = "tenants/e2e-org/projects/e2e-project/deployments/e2e-release/";
-const html = '<!doctype html><html><head><title>Worker publication</title></head><body><h1>Publication from local storage</h1><img src="diagram.svg" alt="Local diagram"><script>document.body.dataset.publisherReady="yes"</script></body></html>';
-const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="80" height="40"><title>Local diagram</title><rect width="80" height="40" fill="green"/></svg>';
-const digest = (body: string) => createHash("sha256").update(body).digest("hex");
-const manifest = JSON.stringify({
-  version: 1,
-  files: [
-    { path: "index.html", contentType: "text/html", size: Buffer.byteLength(html), sha256: digest(html) },
-    { path: "diagram.svg", contentType: "image/svg+xml", size: Buffer.byteLength(svg), sha256: digest(svg) },
-    // Manifest entry with no object exercises the real AWS SDK's S3 404 path.
-    { path: "deleted.svg", contentType: "image/svg+xml", size: 0, sha256: digest("") },
-  ],
-});
-const objects = new Map([
-  [`/docs/${prefix}manifest.json`, { body: manifest, type: "application/json" }],
-  [`/docs/${prefix}files/index.html`, { body: html, type: "text/html" }],
-  [`/docs/${prefix}files/diagram.svg`, { body: svg, type: "image/svg+xml" }],
-]);
-
+export const storageImage = "andrewgaul/s3proxy@sha256:87662b2a5afcdfa5f478a1c61650bae4c87bbd15f6ff2823236bcfd66ef7fe04";
 export async function listen(handler: RequestListener) {
   const server = createServer(handler);
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
-    server.listen(0, "127.0.0.1", () => {
-      server.off("error", reject);
-      resolve();
-    });
+    server.listen(0, "127.0.0.1", () => { server.off("error", reject); resolve(); });
   });
   const address = server.address();
   if (!address || typeof address === "string") throw new Error("Fixture has no TCP address");
   return {
+    server,
     origin: `http://127.0.0.1:${address.port}`,
     async close() {
-      const closed = new Promise<void>((resolve, reject) => {
-        server.close(error => error ? reject(error) : resolve());
-      });
+      const closed = new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
       server.closeAllConnections();
       await closed;
     },
   };
 }
+async function body(request: IncomingMessage) {
+  const chunks: Buffer[] = [];
+  for await (const chunk of request) chunks.push(Buffer.from(chunk as Uint8Array));
+  return Buffer.concat(chunks).toString();
+}
+export type Mail = { to: string; subject: string; text: string };
 
-/** Temporary read-only HTTP fixtures. #109 replaces these with real backends. */
-export function startConvexStub() {
-  return listen((request, response) => {
-    const url = new URL(request.url ?? "/", "http://fixture.invalid");
-    response.setHeader("Content-Type", "application/json");
-    if (request.method === "GET" && url.pathname === "/api/rendro/publications/public") {
-      if (url.searchParams.get("slug") !== publicationSlug) {
-        response.writeHead(404).end(JSON.stringify({ error: "Not found" }));
-        return;
+/** No external forwarding: HTTPS mail/Google requests terminate in this fixture.
+ * The only forwarded HTTP origins are the harness's own Worker and Convex.
+ */
+export async function startIdentityFixtures(directory: string) {
+  const key = join(directory, "fixture.key");
+  const certificate = join(directory, "fixture.crt");
+  const caKey = join(directory, "ca.key");
+  const caCert = join(directory, "ca.crt");
+  const csr = join(directory, "fixture.csr");
+  const extensions = join(directory, "fixture.ext");
+  await run("openssl", ["req", "-x509", "-newkey", "rsa:2048", "-nodes", "-keyout", caKey, "-out", caCert,
+    "-days", "1", "-subj", "/CN=Rendro disposable E2E CA", "-addext", "basicConstraints=critical,CA:TRUE"]);
+  await run("openssl", ["req", "-newkey", "rsa:2048", "-nodes", "-keyout", key, "-out", csr, "-subj", "/CN=api.resend.com"]);
+  await writeFile(extensions, "basicConstraints=critical,CA:FALSE\nkeyUsage=digitalSignature,keyEncipherment\nextendedKeyUsage=serverAuth\nsubjectAltName=DNS:api.resend.com,DNS:oauth2.googleapis.com,DNS:www.googleapis.com\n");
+  await run("openssl", ["x509", "-req", "-in", csr, "-CA", caCert, "-CAkey", caKey, "-CAcreateserial", "-out", certificate, "-days", "1", "-extfile", extensions]);
+  const mail: Mail[] = [];
+  const allowedOrigins = new Set<string>();
+  const blocked = new Set<string>();
+  const codes = new Map<string, { challenge: string; redirect: string }>();
+  const signing = await generateKeyPair("RS256", { extractable: true });
+  const jwk = { ...await exportJWK(signing.publicKey), alg: "RS256", kid: "fixture-google" };
+  const handle: RequestListener = (req, res) => {
+    void (async () => {
+      const url = new URL(req.url ?? "/", `https://${req.headers.host}`);
+      if (url.origin === "https://api.resend.com" && url.pathname === "/emails" && req.method === "POST") {
+        mail.push(JSON.parse(await body(req)) as Mail);
+        res.setHeader("Content-Type", "application/json");
+        res.end(JSON.stringify({ id: `mail-${mail.length}` }));
+      } else if (url.origin === "https://oauth2.googleapis.com" && url.pathname === "/token" && req.method === "POST") {
+        const params = new URLSearchParams(await body(req));
+        const code = params.get("code") ?? "";
+        const stored = codes.get(code);
+        codes.delete(code);
+        if (!stored || stored.redirect !== params.get("redirect_uri") || params.get("client_id") !== "e2e-google"
+          || createHash("sha256").update(params.get("code_verifier") ?? "").digest("base64url") !== stored.challenge) {
+          res.writeHead(400).end(JSON.stringify({ error: "invalid_grant" })); return;
+        }
+        const idToken = await new SignJWT({ email: "oauth@example.test", email_verified: true, name: "OAuth Fixture" })
+          .setProtectedHeader({ alg: "RS256", kid: jwk.kid }).setSubject("e2e-google-user").setAudience("e2e-google")
+          .setIssuer("https://accounts.google.com").setIssuedAt().setExpirationTime("1h").sign(signing.privateKey);
+        res.setHeader("Content-Type", "application/json");
+        res.end(JSON.stringify({ access_token: "local-access", token_type: "Bearer", expires_in: 3600, id_token: idToken }));
+      } else if (url.origin === "https://www.googleapis.com" && url.pathname === "/oauth2/v3/certs") {
+        res.setHeader("Content-Type", "application/json"); res.end(JSON.stringify({ keys: [jwk] }));
+      } else {
+        blocked.add(url.origin); res.writeHead(403).end("Blocked fixture destination");
       }
-      response.end(JSON.stringify({
-        publication: { slug: publicationSlug, pathPrefix: "", entryFile: "index.html", title: "Worker publication" },
-        project: { name: "Worker publication", slug: "e2e-project" },
-        deployment: { manifestKey: `${prefix}manifest.json`, manifestSha256: digest(manifest) },
-      }));
-      return;
+    })().catch(() => { res.writeHead(500).end("Identity fixture failed"); });
+  };
+  const tls = createTlsServer({ key: await readFile(key), cert: await readFile(certificate) }, handle);
+  const sockets = new Set<Duplex>();
+  const proxy = await listen((req, res) => {
+    const url = new URL(req.url ?? "/", "http://fixture.invalid");
+    if (!allowedOrigins.has(url.origin)) {
+      blocked.add(url.origin); res.writeHead(403).end("External access blocked"); return;
     }
-    if (request.method === "GET" && url.pathname === "/api/auth/get-session") {
-      response.end("null");
-      return;
-    }
-    // Do not invent successful responses for backend contracts we have not seeded.
-    response.writeHead(501).end(JSON.stringify({ error: "Unimplemented E2E Convex endpoint" }));
+    const upstream = request(url, { method: req.method, headers: req.headers }, response => {
+      res.writeHead(response.statusCode ?? 502, response.headers); response.pipe(res);
+    });
+    upstream.on("error", () => { res.writeHead(502).end(); });
+    req.pipe(upstream);
   });
+  proxy.server.on("connect", (req, socket, head) => {
+    if (!["api.resend.com:443", "oauth2.googleapis.com:443", "www.googleapis.com:443"].includes(req.url ?? "")) {
+      blocked.add(req.url ?? "unknown"); socket.end("HTTP/1.1 403 Forbidden\r\n\r\n"); return;
+    }
+    sockets.add(socket); socket.on("close", () => sockets.delete(socket));
+    socket.write("HTTP/1.1 200 Connection Established\r\n\r\n");
+    if (head.length) socket.unshift(head);
+    tls.emit("connection", socket);
+  });
+  const control = await listen((req, res) => {
+    const url = new URL(req.url ?? "/", "http://fixture.invalid");
+    res.setHeader("Content-Type", "application/json");
+    if (url.pathname === "/mail") { res.end(JSON.stringify(mail.filter(item => item.to === url.searchParams.get("to")))); return; }
+    if (url.pathname === "/authorize") {
+      const redirect = url.searchParams.get("redirect_uri") ?? "";
+      if (!URL.canParse(redirect) || !allowedOrigins.has(new URL(redirect).origin) || url.searchParams.get("client_id") !== "e2e-google"
+        || !url.searchParams.get("state") || !url.searchParams.get("code_challenge")) { res.writeHead(400).end("{}"); return; }
+      const code = randomBytes(24).toString("hex");
+      codes.set(code, { redirect, challenge: url.searchParams.get("code_challenge") ?? "" });
+      const callback = new URL(redirect);
+      callback.searchParams.set("code", code); callback.searchParams.set("state", url.searchParams.get("state") ?? "");
+      res.end(JSON.stringify({ location: callback.href })); return;
+    }
+    res.writeHead(404).end("{}");
+  });
+  return {
+    origin: proxy.origin, certificate: caCert, control: control.origin, allowedOrigins, mail,
+    async close() {
+      for (const socket of sockets) socket.destroy();
+      tls.close();
+      await control.close(); await proxy.close();
+      if (blocked.size) throw new Error(`Blocked Convex outbound destinations: ${[...blocked].join(", ")}`);
+    },
+  };
 }
 
-/** S3 GET/HEAD wire protocol, including XML errors; the real Worker SDK does the reads. */
-export function startStorageStub(accessKey: string) {
-  return listen((request, response) => {
-    if (!["GET", "HEAD"].includes(request.method ?? "")
-      || !request.headers.authorization?.startsWith(`AWS4-HMAC-SHA256 Credential=${accessKey}/`)) {
-      response.writeHead(403, { "Content-Type": "application/xml" }).end("<Error><Code>AccessDenied</Code></Error>");
-      return;
-    }
-    const path = new URL(request.url ?? "/", "http://fixture.invalid").pathname;
-    const object = objects.get(path);
-    if (!object) {
-      response.writeHead(404, { "Content-Type": "application/xml" }).end("<Error><Code>NoSuchKey</Code><Message>Not found</Message></Error>");
-      return;
-    }
-    response.writeHead(200, {
-      "Content-Type": object.type,
-      "Content-Length": Buffer.byteLength(object.body),
-      ETag: `"${digest(object.body)}"`,
-    });
-    response.end(request.method === "HEAD" ? undefined : object.body);
-  });
+export async function startStorage(directory: string, resources: ResourceJournal) {
+  const accessKeyId = randomBytes(24).toString("hex");
+  const secretAccessKey = randomBytes(32).toString("hex");
+  const envFile = join(directory, "storage.env");
+  await writeFile(envFile, `S3PROXY_IDENTITY=${accessKeyId}\nS3PROXY_CREDENTIAL=${secretAccessKey}\nS3PROXY_AUTHORIZATION=aws-v4\nS3PROXY_JAVA_OPTS=-Xmx256m -XX:ActiveProcessorCount=2\nJCLOUDS_PROVIDER=filesystem\nJCLOUDS_FILESYSTEM_BASEDIR=/data\n`, { mode: 0o600 });
+  const name = `rendro-e2e-${randomBytes(8).toString("hex")}`;
+  resources.createContainer(name, ["--rm", "--publish", "127.0.0.1::80", "--tmpfs", "/data",
+    "--env-file", envFile, storageImage]);
+  await run("docker", ["start", name], { env: localEnvironment(), timeout: 120_000 });
+  const close = async () => { await run("docker", ["rm", "--force", name]); };
+  try {
+    const { stdout } = await run("docker", ["port", name, "80/tcp"]);
+    const origin = `http://${stdout.trim()}`;
+    await ready(async () => (await localHttp(`${origin}/healthz`)).status === 200, "S3Proxy");
+    const client = new S3Client({ endpoint: origin, region: "us-east-1", forcePathStyle: true, credentials: { accessKeyId, secretAccessKey } });
+    await client.send(new CreateBucketCommand({ Bucket: "docs" }));
+    return { origin, accessKeyId, secretAccessKey, close: async () => { client.destroy(); await close(); },
+      async removeSmokeAsset(organizationId: string, projectId: string) {
+        const objects = await client.send(new ListObjectsV2Command({ Bucket: "docs", Prefix: `tenants/${organizationId}/projects/${projectId}/` }));
+        const key = objects.Contents?.find(object => object.Key?.endsWith("/files/deleted.svg"))?.Key;
+        if (!key) throw new Error("Seed missing-object control was not uploaded");
+        await client.send(new DeleteObjectCommand({ Bucket: "docs", Key: key }));
+      },
+    };
+  } catch (error) { await close(); throw error; }
 }

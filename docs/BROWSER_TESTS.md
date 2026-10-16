@@ -7,9 +7,10 @@ workerd with Chromium, Firefox, and WebKit. It exercises Worker bundling,
 compatibility flags, HTTP, the ASSETS binding, browser CSP enforcement and the
 S3 client together. Neither layer replaces the other.
 
-## Playwright Test E2E (#108)
+## Playwright Test E2E (#108, #109)
 
 ```sh
+# Prerequisites: Node 22+, pnpm, Docker, curl, unzip, OpenSSL, ps.
 pnpm install --frozen-lockfile
 pnpm exec playwright install --with-deps chromium firefox webkit
 # Run one engine at a time on shared machines:
@@ -37,40 +38,79 @@ more development-server internals; spawning `wrangler dev` would require
 additional subprocess, port and readiness management. The test-specific API
 therefore fits this slice. Its outbound transport delegates to
 `globalThis.fetch` in this locked version; setup guards that transport to permit
-only the fixture and Worker origins, rejects redirects, and fails teardown on
+only the fixture and Worker origins, forwards redirects without following them, and fails teardown on
 unexpected destinations. Recheck this behavior when upgrading Wrangler.
 
-All servers bind to port 0 on loopback. Setup checks the real `/health` response
-over HTTP before starting tests. The returned teardown closes workerd and both
-fixture servers and removes the temporary configuration/state, including when
-setup or a test fails. An empty temporary `.dev.vars` and disabled dotenv loading
-prevent local credentials from being loaded. All authentication/storage secrets
-are generated afresh (at least 48 characters); no account or deployed endpoint
-is used. Do not set a production base URL for this suite.
+All application listeners bind to loopback on allocated ports. The Convex backend
+is pinned to `precompiled-2026-10-06-a3538c6`, and the CLI/SDK is locked at 1.42.0.
+The installer verifies the platform ZIP's pinned SHA-256 on downloads and every
+cache hit under `~/.cache/rendro-e2e/`. Unique staging paths and atomic rename
+prevent partial publication. Each run extracts verified bytes into its own
+private directory; shared cached executables are never executed. First use needs GitHub release access; cached runs do not
+need a deployed Convex account. A backend download/start failure fails the run.
 
-**Temporary backend boundary:** `e2e/services.ts` is a small Convex HTTP stub
-for anonymous sessions and one public publication. Its local S3-compatible
-fixture implements read-only GET/HEAD, Content-Length/ETag and XML not-found
-responses; the real AWS SDK signs requests and reads objects over HTTP. It
-checks the synthetic access-key identifier, not the full signature. It is not
-a MinIO/R2 conformance test. Unexpected Convex endpoints return 501 instead of
-plausible successes. A missing manifest entry and a missing stored object are
-both tested. #109 replaces these stubs with a real local Convex backend,
-storage service and mail fixtures; authentication, backend authorization,
-mutations and subscriptions are **not** established by these smoke tests.
+Cleanup is registered before acquiring resources, with an incremental journal
+under the system temp directory's `rendro-e2e-runs/`. Playwright global teardown,
+process exit and SIGINT/SIGTERM handlers remove tracked children, containers and
+the run directory even if setup never returns. The next invocation sweeps dead
+owners, checking PID start times to avoid killing reused PIDs or concurrent runs.
+Cleanup errors preserve the journal for recovery. SIGKILL cannot run an exit
+handler, so its recovery takes place on that next invocation.
 
-The shared Playwright fixture blocks service workers, WebSockets, and requests
-outside the Worker origin. Font CSS and the existing Tailwind CDN reference
-are fulfilled locally with deterministic minimal responses, never downloaded.
-Unexpected origins fail the test. Specs use browser navigation/fetch; Playwright
-`APIRequestContext` does not pass through browser routing and must not be used
-for arbitrary external requests.
+`tests/e2e-verified-cache.test.ts` covers corrupt/partial entries and concurrent
+publication without network access. `tests/e2e-setup-interruption.test.ts` runs a
+real Playwright child with a stalled setup, a real child process and a simulated
+Docker executable; it verifies timeout, signals and subsequent crash recovery
+without adding a Docker dependency to the unit suite.
 
-Smoke assertions cover landing nonce freshness and CSP violations, sign-in
-rendering, public HTML with an opaque origin and working local SVG, direct SVG
-isolation, and 404 MIME behavior. Asset failures intentionally have **no
-Content-Type and an empty body**; missing HTML documents retain styled HTML.
-These are transport/security smoke tests, not visual fidelity assertions.
+The harness generates an instance name, secret and admin key and starts its own
+temporary SQLite database and blob directory. It copies application sources and
+the existing generated modules into a temporary directory, without dotenv files,
+then runs `convex dev --once --url http://127.0.0.1:<port> --admin-key <generated>`.
+A loopback assertion runs before the push. Inherited `CONVEX_*` deployment
+selectors/keys and external proxy settings are removed. The push directory must
+have no `.env.local`; CLI writes and generated files stay in that disposable copy.
+The real schema, HTTP actions, Better Auth/rate-limiter components, authorization,
+and WebSocket subscriptions execute unchanged. Never supply a shared deployment
+or copy `.env.local` into this workflow.
+
+S3Proxy **4.1.1** runs from the digest-pinned image in `e2e/services.ts`, with a loopback-only host
+port, fresh credentials, a tmpfs data directory, and a fresh bucket. The actual
+AWS SDK and CLI exercise signed reads, uploads, listings and commits. No persistent
+volume or named shared container is used. The public smoke publication is created
+through the real API after a real CLI push. Its missing-object control deliberately
+deletes one already-uploaded object; its manifest remains intact.
+
+Convex's outbound proxy terminates mail and OAuth requests locally, with a fresh
+CA and server certificate trusted only by the child backend process. The Resend
+wire endpoint captures verification/invitation messages in memory. The deterministic
+Google fixture preserves state, binds authorization codes to the redirect and PKCE
+challenge, consumes codes once, and returns a locally signed identity token. Browser
+navigation to Google's authorization URL is fulfilled locally. No email or OAuth
+request reaches an external provider. Only the exact local Worker/Convex origins
+can pass through the backend proxy; other destinations fail teardown. This tests
+the application/provider protocol boundary, not Google's UI or deliverability.
+
+Seed helpers use real signup, verification, sign-in, organization and invitation
+APIs to provision owner/admin/member plus an outsider in a second organization.
+Their generated sessions live only in a mode-0600 temporary fixture file. Each
+browser context gets its own cookies; test artifacts contain disposable fixture
+identities only. Distinct synthetic ingress IPs keep engine auth rate-limit windows
+independent while leaving the application's limits enabled.
+
+The Worker outbound guard allows only the exact local services. Redirect responses
+are returned to the browser without following them. The browser guard permits
+Worker and local Convex HTTP/WebSocket traffic and fulfills font/CDN resources
+locally. Any other destination fails. Teardown closes workerd, Convex, the proxy,
+mail sink and S3Proxy and removes temporary data, including on setup/test failure.
+An empty temporary `.dev.vars` and disabled dotenv loading isolate Worker secrets.
+
+The three engines run the original nonce/CSP, opaque publication/SVG and 404 MIME
+smokes, role/tenant allowed-and-denied checks, local OAuth success/state rejection,
+and one full UI signup → mail verification → organization → project → one-time API
+key → built CLI push → private viewer → comment journey. The comment must arrive
+in a second open viewer via a real subscription and remain after reload. These are
+functional checks, not visual fidelity assertions or coverage of every epic #99 edge.
 
 Local retries are zero. CI permits one diagnostic retry, prints each attempt,
 and uses `failOnFlakyTests` so a passing retry cannot hide a first failure.
@@ -81,20 +121,31 @@ and the HTML report for seven days. Open a trace with
 `pnpm exec playwright show-trace test-results/e2e/<test>/trace.zip`.
 `pnpm verify` continues to run the existing Vitest layers independently.
 `e2e/` is typechecked/linted test infrastructure, outside the production
-coverage denominator; no production code or build script is added by this harness.
+coverage denominator. The loopback/environment guards have a separate 100% coverage
+regression. The Worker XML polyfill exposes an array of named attributes, so the SDK reads
+empty S3 listing elements as strings instead of objects. A focused regression
+covers this compatibility fix; no generated Convex module is modified.
 
-The next slices extend this foundation: #109 real local services; #110 shell,
+`tests/convex-public-rpc.test.ts` now always starts its own pinned backend: all 12
+RPC envelope/cursor tests execute in `pnpm verify` and in an explicit mandatory
+step of the E2E job. There is no opt-in skip or shared deployment credential.
+CI caches the verified backend archive and S3Proxy image layers as well as pnpm dependencies.
+The workflow jobs have no conditional opt-out or allowed failure. Repository
+branch protection must require the existing `verify`, `coverage`, and `e2e` checks.
+
+The next slices extend this foundation: #110 shell,
 navigation, menus, dialogs and selects; #111 authentication and account recovery;
 #112 organizations, onboarding, people/invitations and teams; #113 projects,
 deployments, API keys, shares and publications; #114 document tree/viewer/link
-confirmation; #115 comments and recovery. The transition registry's `e2e`
-status still requires the complete local backend stack, so these stub-backed
-smokes do not promote all those journeys to complete E2E coverage.
+confirmation; #115 comments and recovery. The transition registry's `e2e` status still requires edge-specific assertions;
+this baseline does not promote all those journeys to complete E2E coverage.
 
 ## Vitest Chromium project
 
 Run `pnpm exec playwright install chromium`, then `CI=true pnpm test:browser`.
-`pnpm test` and `pnpm verify` include both projects. On Linux, use
+`pnpm test` and `pnpm verify` include both projects. Fragment-navigation checks
+wait for exact target alignment across consecutive frames before another history
+action, so a transient position during native restoration is not treated as readiness. On Linux, use
 `CI=true taskset -c 0,1 pnpm test:browser` to reproduce a two-CPU budget (choose
 CPUs from `taskset -pc $$` if your container has a different allowed set).
 
@@ -221,8 +272,8 @@ Initial reconciled family counts: **70 untested, 64 unit, 26 browser, 0 e2e**
 unit families. The JSON also preserves the historical configured coverage
 S/B/F/L **65.50/64.76/69.47/67.42%** (101 files), widened coverage
 **66.25/65.44/70.93/68.45%** (171 files), and **2,188 passed / 12 skipped tests**.
-These are historical measurements, not a fresh coverage run. The 12 opt-in
-`convex-public-rpc` tests require `CONVEX_TEST_BACKEND` and receive no registry credit.
+These are historical measurements, not a fresh coverage run. Those 12 formerly opt-in `convex-public-rpc` tests now run unconditionally against
+a disposable local backend; their RPC assertions receive no UI registry credit.
 
 The validator walks the real Worker and Node Hono registrations (without starting a server), including shared route
 modules, HTML POST results, document frames, and fallback pages. Every registration

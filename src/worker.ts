@@ -28,11 +28,11 @@ import { securityHeaders } from "./middleware/security-headers";
 
   class X {
     nodeType = E; nodeName = ""; tagName = "";
-    children: X[] = []; attributes: Record<string, string> = {};
+    children: X[] = []; attributes: Array<{ name: string; value: string }> = [];
     textContent = "";
     constructor(tag: string, attrs: Record<string, string> = {}, isText = false) {
       this.nodeType = isText ? T : E; this.nodeName = isText ? "#text" : tag;
-      this.tagName = tag; this.attributes = attrs;
+      this.tagName = tag; this.attributes = Object.entries(attrs).map(([name, value]) => ({ name, value }));
     }
     get childNodes() { return this.children; }
     get nodeValue() { return this.textContent; }
@@ -56,7 +56,7 @@ import { securityHeaders } from "./middleware/security-headers";
       else {
         const am: Record<string, string> = {}; const ar = /(\w+)\s*=\s*"([^"]*)"/g; let a: RegExpExecArray | null;
         while ((a = ar.exec(ats)) !== null) am[a[1]] = a[2];
-        const n = new X(tg, am); if (stack.length) stack[stack.length - 1].children.push(n);
+        const n = new X(tg, am); stack[stack.length - 1].children.push(n);
         if (!m[0].endsWith("/>")) stack.push(n);
       }
       li = re.lastIndex;

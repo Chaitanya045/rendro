@@ -73,6 +73,8 @@ beforeEach(() => {
 });
 afterEach(() => vi.unstubAllGlobals());
 
+// Two pushes, thirteen publications and a rejected push each start a real CLI.
+// Budget the complete subprocess journey separately from each bounded command.
 it.each(["source", "bundle"])("%s CLI preserves exact keys through upload, reuse, commit, publication and reads", async kind => {
   await mkdir("tmp", { recursive: true });
   const scratch = await mkdtemp(resolve("tmp/path-roundtrip-"));
@@ -93,9 +95,11 @@ it.each(["source", "bundle"])("%s CLI preserves exact keys through upload, reuse
     if (!address || typeof address === "string") throw new Error("Missing server address");
     const entry = kind === "source" ? "cli/src/index.ts" : join(scratch, "rendro.mjs");
     if (kind === "bundle") await build({ entryPoints: ["cli/src/index.ts"], bundle: true, platform: "node", target: "node22", format: "esm", outfile: entry });
-    const run = (args: string[]) => promisify(execFile)(kind === "source" ? resolve("node_modules/.bin/tsx") : process.execPath, [
-      entry, ...args, "--organization", "org", "--project", "project", "--endpoint", `http://127.0.0.1:${address.port}`,
-    ], { env: { ...process.env, RENDRO_API_KEY: "disposable-test-key" } });
+    // Load TypeScript directly in the child instead of starting the tsx CLI's
+    // additional Node wrapper for every publication-path case.
+    const run = (args: string[]) => promisify(execFile)(process.execPath, [
+      ...(kind === "source" ? ["--import", "tsx"] : []), entry, ...args, "--organization", "org", "--project", "project", "--endpoint", `http://127.0.0.1:${address.port}`,
+    ], { env: { ...process.env, RENDRO_API_KEY: "disposable-test-key" }, timeout: 10_000, killSignal: "SIGKILL" });
     for (const id of ["1", "2"]) {
       const { stdout } = await run(["push", "--source", source]);
       expect(stdout).toContain(id === "1" ? `${paths.length} uploaded, 0 reused` : `0 uploaded, ${paths.length} reused`);
@@ -127,7 +131,7 @@ it.each(["source", "bundle"])("%s CLI preserves exact keys through upload, reuse
     await new Promise<void>((done, fail) => server.close(error => error ? fail(error) : done()));
     await rm(scratch, { recursive: true, force: true });
   }
-}, 20_000);
+}, 60_000);
 
 it.each(["/file.html", "../file.html", "folder//file.html", "folder/./file.html", "folder\\file.html", "bad\0.html", "bad\x1f.html", "bad\x7f.html"])("rejects noncanonical manifest/copy paths: %j", async path => {
   expect(cleanDeploymentPath(path)).toBeNull();

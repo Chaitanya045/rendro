@@ -372,12 +372,6 @@
       "branches": 5,
       "functions": 0,
       "lines": 4
-    },
-    "src/worker.ts": {
-      "statements": 53,
-      "branches": 34,
-      "functions": 8,
-      "lines": 29
     }
   }
 }

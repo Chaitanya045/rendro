@@ -222,8 +222,14 @@ describe("authoritative API-key rate limits", () => {
       const deploymentIdentity = { ...identity, deploymentId: deployment.deploymentId };
       const stagingPath = `/api/rendro/deployments/staging?${new URLSearchParams(deploymentIdentity)}`;
       // One staging authorization per upload/copy batch, plus one at commit.
-      for (let i = 0; i < changed + Math.ceil(reused / MAX_REUSED_FILES_PER_REQUEST) + 1; i++) {
-        expect((await t.fetch(stagingPath, { headers })).status).toBe(200);
+      // Match the CLI's default concurrency instead of serializing 10,000
+      // independent HTTP/crypto operations. Every authorization still executes.
+      const authorizations = changed + Math.ceil(reused / MAX_REUSED_FILES_PER_REQUEST) + 1;
+      const concurrency = 8;
+      for (let offset = 0; offset < authorizations; offset += concurrency) {
+        const count = Math.min(concurrency, authorizations - offset);
+        const responses = await Promise.all(Array.from({ length: count }, () => t.fetch(stagingPath, { headers })));
+        expect(responses.map(response => response.status)).toEqual(Array(count).fill(200));
       }
       expect((await t.fetch("/api/rendro/deployments/commit", {
         method: "POST", headers: { ...headers, [STORAGE_ATTESTATION_HEADER]: (await commitProof(t, deploymentIdentity))! }, body: JSON.stringify(deploymentIdentity),

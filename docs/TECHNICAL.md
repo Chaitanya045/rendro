@@ -31,6 +31,9 @@ Cloudflare Workers (Hono)
 | **Browser UI** | Server HTML + vanilla JavaScript | Organization/project management, document navigation, comments |
 
 The Worker has no R2 binding. Local development uses MinIO with the same S3 client.
+E2E uses disposable S3Proxy filesystem storage. The Worker DOM shim exposes
+iterable named XML attributes with a length, matching the AWS SDK browser parser;
+empty S3 listing fields (including continuation tokens) deserialize as empty strings.
 
 ---
 
@@ -933,13 +936,27 @@ Both production (top-level) and `development` declare the same required secrets:
 | `.github/workflows/release.yml` | `v*` tags | Builds `bin/rendro.mjs` and attaches it to a GitHub release |
 | `.github/workflows/retention.yml` | Daily cron, manual | `pnpm cleanup:retention` |
 
-No workflow deploys the Worker or Convex, or publishes to npm.
+No workflow deploys the Worker or Convex to a shared environment, or publishes to npm.
+The E2E job pushes application code only to a harness-owned disposable loopback backend.
 
 `pnpm e2e` starts the real Worker through Wrangler's `createTestHarness`, with
 the production compatibility flags and static-asset configuration, isolated
 loopback ports, generated test secrets, and guarded outbound requests. The
-initial #108 smoke suite uses temporary Convex HTTP and read-only S3 fixtures;
-#109 supplies the real local backend/storage/mail layer. It complements the
+suite uses pinned local Convex with real Better Auth, HTTP actions and WebSockets,
+disposable S3Proxy, an in-memory mail sink, and a deterministic OAuth provider fixture.
+A generated local instance/admin key, loopback target assertion, sanitized CLI
+environment and temporary source copy isolate every Convex push from shared deployments.
+Every cached Convex archive is SHA-256 checked against its pinned release digest
+on every use. Downloads publish by atomic rename from unique staging directories;
+each run extracts the verified bytes into its private directory and never executes
+a shared cached binary. Setup journals child PID/start-time identities, container
+names and its private directory before returning any teardown callback. A separate
+Playwright global teardown and synchronous exit/SIGINT/SIGTERM cleanup cover setup
+timeouts; the next run sweeps abandoned journals (including after SIGKILL) while
+preserving active runs. Failed cleanup retains its journal for another attempt.
+Owner/admin/member/outsider seeds span two organizations; all three engines cover
+a complete signup-to-CLI-push-to-reactive-comment journey. The 12 public-RPC backend
+tests run unconditionally in verify and an explicit E2E CI step. It complements the
 existing Vitest Chromium project, and runs one browser engine at a time.
 See [the two browser test layers](BROWSER_TESTS.md) for setup, limitations,
 failure traces and the #110–#115 journey expansion.

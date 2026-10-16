@@ -212,7 +212,16 @@ async function passiveNavigationState(page: Page, waitForChain = false): Promise
 }
 
 async function atTarget(frame: Frame, id: string) {
-  await browserStep(`scroll to fragment ${id}`, () => frame.waitForFunction(id => Math.round(document.getElementById(id)?.getBoundingClientRect().top ?? -1) === 0, id));
+  // Native history restoration can adjust scroll after the first target paint.
+  // Do not issue the next traversal/reload from that transient position.
+  await browserStep(`scroll to fragment ${id}`, () => frame.waitForFunction(async id => {
+    const aligned = () => Math.round(document.getElementById(id)?.getBoundingClientRect().top ?? -1) === 0;
+    if (!aligned()) return false;
+    await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
+    if (!aligned()) return false;
+    await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
+    return aligned();
+  }, id));
 }
 
 // Uses the actual route injectors, shell, and bundled bridge/tree in Chromium's

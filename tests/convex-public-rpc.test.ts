@@ -1,48 +1,17 @@
-import { spawn, execFileSync, type ChildProcess } from "node:child_process";
-import { randomBytes } from "node:crypto";
-import { mkdir, mkdtemp, open, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { resolve } from "node:path";
-import { createServer } from "node:net";
-import { request } from "node:http";
-import { once } from "node:events";
+import { localHttp, startBackend } from "../e2e/backend";
 import { build } from "esbuild";
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { publicErrorMessages } from "../src/shared/public-errors";
 
-// Verified with backend release precompiled-2026-10-06-a3538c6 and SDK 1.42.0.
-// Opt in with CONVEX_TEST_BACKEND=/absolute/path/to/convex-local-backend.
-// Starts its own loopback-only backend and temporary DB inside this worktree;
-// never reads deployment credentials or connects to an existing deployment.
-const binary = process.env.CONVEX_TEST_BACKEND;
-describe.skipIf(!binary)("isolated Convex RPC envelopes", () => {
-  let server: ChildProcess | undefined;
+// Always executes against its own pinned disposable backend; no opt-in or credentials.
+describe("isolated Convex RPC envelopes", () => {
+  let backend: Awaited<ReturnType<typeof startBackend>> | undefined;
   let directory: string;
   let url: string;
   let legacy: { threadId: string; foreignThreadId: string; missingThreadId: string; foreignReplyId: string; missingReplyId: string };
-  let log: Awaited<ReturnType<typeof open>> | undefined;
-
-  async function freePort() {
-    const listener = createServer();
-    listener.listen(0, "127.0.0.1");
-    await once(listener, "listening");
-    const port = (listener.address() as { port: number }).port;
-    await new Promise<void>((resolve, reject) => listener.close(error => error ? reject(error) : resolve()));
-    return port;
-  }
-  function localRequest(path: string, body?: unknown): Promise<{ status: number; body: string }> {
-    return new Promise((resolve, reject) => {
-      const req = request(`${url}${path}`, {
-        method: body === undefined ? "GET" : "POST", headers: { "Content-Type": "application/json" },
-      }, response => {
-        const chunks: Buffer[] = [];
-        response.on("data", (chunk: Buffer) => chunks.push(chunk));
-        response.on("end", () => resolve({ status: response.statusCode ?? 0, body: Buffer.concat(chunks).toString() }));
-        response.on("error", reject);
-      });
-      req.on("error", reject);
-      req.end(body === undefined ? undefined : JSON.stringify(body));
-    });
-  }
+  const localRequest = (path: string, body?: unknown) => localHttp(`${url}${path}`, body);
   async function post(path: string, body: unknown): Promise<Record<string, unknown>> {
     return JSON.parse((await localRequest(`/api/${path}`, body)).body) as Record<string, unknown>;
   }
@@ -57,21 +26,9 @@ describe.skipIf(!binary)("isolated Convex RPC envelopes", () => {
   beforeAll(async () => {
     await mkdir("tmp", { recursive: true });
     directory = await mkdtemp(resolve("tmp/public-rpc-"));
-    const secret = randomBytes(32).toString("hex");
-    const instance = "public-rpc-test";
-    const adminKey = execFileSync(binary!, ["keygen", "admin-key", "--instance-name", instance, "--instance-secret", secret], { encoding: "utf8" }).trim();
-    const port = await freePort();
-    const sitePort = await freePort();
-    url = `http://127.0.0.1:${port}`;
-    log = await open(`${directory}/runtime.log`, "w");
-    server = spawn(binary!, [
-      "--interface", "127.0.0.1", "--port", String(port), "--site-proxy-port", String(sitePort),
-      "--instance-name", instance, "--instance-secret", secret,
-      "--local-storage", `${directory}/storage`, `${directory}/db.sqlite3`,
-    ], { stdio: ["ignore", log.fd, log.fd], env: { ...process.env, DO_NOT_SEND_BEACON: "true" } });
-    await vi.waitFor(async () => {
-      expect((await localRequest("/version")).status).toBe(200);
-    }, { timeout: 20_000, interval: 100 });
+    backend = await startBackend(directory);
+    url = backend.origin;
+    const adminKey = backend.adminKey;
     const bundle = await build({
       entryPoints: ["tests/helpers/public-rpc-fixture.ts"], bundle: true, format: "esm", platform: "browser",
       write: false, outfile: "probe.js", sourcemap: "external",
@@ -87,15 +44,10 @@ describe.skipIf(!binary)("isolated Convex RPC envelopes", () => {
     const seeded = await rpc("mutation", "seed", {});
     expect(seeded).toMatchObject({ status: "success" });
     legacy = seeded.value as typeof legacy;
-  }, 30_000);
+  }, 180_000);
 
   afterAll(async () => {
-    if (server && server.exitCode === null) {
-      const stopped = once(server, "exit");
-      server.kill();
-      await stopped;
-    }
-    await log?.close();
+    await backend?.close();
     if (directory) await rm(directory, { recursive: true, force: true });
   });
 
@@ -113,7 +65,8 @@ describe.skipIf(!binary)("isolated Convex RPC envelopes", () => {
   it.each(["threads:list", "threads:create", "threads:resolve", "threads:archive", "threads:remove", "replies:add", "replies:remove"])("%s actual legacy envelopes hide missing versus inaccessible records and server frames", async method => {
     const envelopes = [];
     for (const missing of [true, false]) {
-      // List/create have no record lookup: compare two denied organization scopes.
+      // List/create compare denied scopes. Unmapped legacy scopes use the same
+      // opaque not_found contract as inaccessible records.
       const orgSlug = missing ? "missing-org" : "other";
       const result = method === "threads:list"
         ? await rpc("query", "legacyList", { orgSlug })
@@ -122,7 +75,7 @@ describe.skipIf(!binary)("isolated Convex RPC envelopes", () => {
           threadId: method === "replies:remove" ? legacy.threadId : missing ? legacy.missingThreadId : legacy.foreignThreadId,
           replyId: missing ? legacy.missingReplyId : legacy.foreignReplyId,
         });
-      safeFailure(result, ["threads:list", "threads:create"].includes(method) ? "forbidden" : "not_found");
+      safeFailure(result, "not_found");
       envelopes.push(normalized(result));
     }
     expect(envelopes[0]).toBe(envelopes[1]);
