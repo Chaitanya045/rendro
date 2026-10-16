@@ -111,7 +111,23 @@ beforeAll(async () => {
 beforeEach(() => { publisherBase = ""; version = 1; shellLoads = 0; renewals = 0; assetStatuses.length = 0; deferredResponses.length = 0; });
 afterAll(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
+// Ticket ciphertext is random and can contain diagnostic-looking text. Inspect
+// browser diagnostics, excluding resource URLs, when checking for ORB failures.
+function isOpaqueResponseBlocking(message: string): boolean {
+  const diagnostic = message.replace(/https?:\/\/[^\s'"<>]+/g, "[url]");
+  return /\b(?:ORB|CORB|OpaqueResponseBlocking|ERR_BLOCKED_BY_ORB|ERR_BLOCKED_BY_CORB)\b/i.test(diagnostic);
+}
+
 describe("private viewer republishing", () => {
+  it("distinguishes opaque-response failures from diagnostic-looking ticket URLs", () => {
+    const url = "http://127.0.0.1:3000/view/random-ORB-CORB-OpaqueResponseBlocking-ticket/files/font.woff2";
+    expect(isOpaqueResponseBlocking(`Access to font at '${url}' from origin 'null' has been blocked by CORS policy`)).toBe(false);
+    expect(isOpaqueResponseBlocking(`${url}: net::ERR_FAILED`)).toBe(false);
+    for (const diagnostic of ["net::ERR_BLOCKED_BY_ORB", "OpaqueResponseBlocking", "blocked by ORB", "CORB blocked a cross-origin response"]) {
+      expect(isOpaqueResponseBlocking(`${url}: ${diagnostic}`)).toBe(true);
+    }
+  });
+
   it.each(["https://publisher.invalid/assets/", "/outside-project/"])("announces a publication with publisher base %s", async href => {
     publisherBase = `<base href="${href}">`;
     const page = await harness.newPage();
@@ -254,8 +270,8 @@ describe("private viewer republishing", () => {
       }
       await browserStep("settle failed subresources", () => frame.evaluate(async () => { await document.fonts.ready; }));
     }
-    expect(consoleMessages.filter(message => /ORB|OpaqueResponseBlocking/i.test(message))).toEqual([]);
-    expect(failedRequests.filter(message => /ORB|OpaqueResponseBlocking/i.test(message))).toEqual([]);
+    expect(consoleMessages.filter(isOpaqueResponseBlocking)).toEqual([]);
+    expect(failedRequests.filter(isOpaqueResponseBlocking)).toEqual([]);
     expect(page.url()).toBe(locationBefore);
     const deniedAsset = await page.request.get(oldAsset);
     expect(deniedAsset.status()).toBe(404);

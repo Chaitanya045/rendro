@@ -222,8 +222,8 @@ describe("authoritative API-key rate limits", () => {
       const deploymentIdentity = { ...identity, deploymentId: deployment.deploymentId };
       const stagingPath = `/api/rendro/deployments/staging?${new URLSearchParams(deploymentIdentity)}`;
       // One staging authorization per upload/copy batch, plus one at commit.
-      // Match the CLI's default concurrency instead of serializing 10,000
-      // independent HTTP/crypto operations. Every authorization still executes.
+      // Match the CLI's default concurrency instead of serializing every
+      // independent HTTP/crypto operation. Every authorization still executes.
       const authorizations = changed + Math.ceil(reused / MAX_REUSED_FILES_PER_REQUEST) + 1;
       const concurrency = 8;
       for (let offset = 0; offset < authorizations; offset += concurrency) {
