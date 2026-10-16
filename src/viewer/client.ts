@@ -39,10 +39,10 @@ export function installViewerParent(config: ParentConfig, host: Window = window)
     host.location.reload();
   });
   host.addEventListener("load", event => {
-    if (event.target !== host.document.getElementById("content-frame")) return;
-    generation++;
     const frame = host.document.getElementById("content-frame");
-    if (frame) delete frame.dataset.loadedDeployment;
+    if (!frame || event.target !== frame) return;
+    generation++;
+    delete frame.dataset.loadedDeployment;
     if (notice) notice.hidden = true;
   }, true);
   host.addEventListener("message", (event: MessageEvent<RenewalMessage>) => {

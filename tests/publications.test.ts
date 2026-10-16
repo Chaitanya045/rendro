@@ -51,6 +51,7 @@ vi.mock("@/legacy-access", async importOriginal => ({
 import publicRoutes from "@/routes/public";
 import publicationRoutes from "@/routes/publications";
 import docsRoutes from "@/routes/docs";
+import { PRIVATE_VIEWER_VERSION } from "@/viewer/asset-versions";
 import {
   getPublication,
   listPublishedDocumentPaths,
@@ -223,7 +224,7 @@ describe("anonymous public routes", () => {
     const documentHtml = await document.text();
     expect(documentHtml).toContain("<h1>Public guide</h1>");
     expect(documentHtml).toContain('data-viewer="navigation"');
-    expect(documentHtml).toContain("/private-viewer.js?v=14");
+    expect(documentHtml).toContain(`/private-viewer.js?v=${PRIVATE_VIEWER_VERSION}`);
     expect(documentHtml).not.toContain("window.COMMENTOR");
     expect(documentHtml).not.toContain("commentor.js");
     expect(document.headers.get("content-security-policy")).toContain("sandbox");
