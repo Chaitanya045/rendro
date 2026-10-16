@@ -46,6 +46,8 @@ async function fixture() {
 }
 
 describe("real-session ID boundaries", () => {
+  // The file's first backend fixture loads Convex modules cold. Coverage on a
+  // shared runner can exceed the default five-second unit-test budget.
   it("keeps valid sessions working and rejects malformed project IDs in the fallback and credential creation", async () => {
     const f = await fixture();
     const headers = { cookie: f.cookie, origin: process.env.SITE_URL!, "content-type": "application/json" };
@@ -62,7 +64,7 @@ describe("real-session ID boundaries", () => {
       expect(credential.status).toBe(404);
       expect(await credential.json()).toEqual({ error: "Project not found" });
     }
-  });
+  }, 15_000);
 
   it("normalizes team IDs in the component and keeps the valid-team path working", async () => {
     const f = await fixture();
