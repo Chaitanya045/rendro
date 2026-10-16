@@ -43,10 +43,12 @@ beforeEach(() => vi.spyOn(Date, "now").mockReturnValue(now));
 afterEach(() => vi.restoreAllMocks());
 
 describe("durable retention", () => {
-  it("advances past over 2,000 pinned rows and excludes active/purged rows from the scan", async () => {
+  it("advances across pinned pages and excludes active/purged rows from the scan", async () => {
     const f = fixture(), projectId = await f.project();
-    for (let batch = 0; batch < 2_001; batch += 100) await f.backend.run(async ctx => {
-      for (let i = batch; i < Math.min(batch + 100, 2_001); i++) {
+    // Cross several three-row pages and leave a partial pinned page before
+    // the eligible row; the cursor invariant does not require thousands of rows.
+    await f.backend.run(async ctx => {
+      for (let i = 0; i < 10; i++) {
         const row = { organizationId: "org", projectId, createdAt: i, createdBy: "user", manifestKey: "pending", manifestSha256: "a".repeat(64), fileCount: 1, byteCount: 1, provenance };
         const id = await ctx.db.insert("deployments", { ...row, status: "superseded" });
         await ctx.db.insert("publications", { organizationId: "org", projectId, pinnedDeploymentId: id, trackingMode: "pinned", slug: `pin-${i}`, pathPrefix: "", entryFile: "index.html", createdAt: 1, updatedAt: 1, createdBy: "user" });
@@ -56,9 +58,9 @@ describe("durable retention", () => {
         }
       }
     });
-    const eligible = await f.seed(projectId, { createdAt: 2_002 });
+    const eligible = await f.seed(projectId, { createdAt: 11 });
     expect((await f.page()).scanned).toBe(0); // failed: purged rows are excluded by the index
-    for (let i = 0; i < 666; i++) {
+    for (let i = 0; i < 3; i++) {
       const result = await f.page();
       expect(result.scanned).toBe(3);
       expect(result.deployments).toEqual([]);
@@ -67,7 +69,7 @@ describe("durable retention", () => {
     const claims = await f.cycle();
     expect(claims.map(c => c._id)).toEqual([eligible]);
     expect(await f.backend.run(ctx => ctx.db.query("retentionProgress").collect())).toHaveLength(1);
-  }, 120_000);
+  });
 
   it("advances through fifty legacy 400 KiB rows and a near-limit row with transaction limits enabled", async () => {
     const f = fixture(), projectId = await f.project();

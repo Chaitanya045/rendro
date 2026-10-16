@@ -1,5 +1,6 @@
 import { RateLimiter, MINUTE, HOUR } from "@convex-dev/rate-limiter";
 import { components } from "./_generated/api";
+import { touchAdmissionBucket } from "./admissionBuckets";
 import type { MutationCtx } from "./_generated/server";
 
 export const writeQuotaLimits = {
@@ -14,6 +15,8 @@ export const writeQuotaLimiter = new RateLimiter(components.rateLimiter, writeQu
  * Actor buckets span organizations. Tenant buckets provide 10 actors' capacity.
  * No global bucket lets one tenant consume another tenant's allowance. */
 export async function consumeWriteQuota(ctx: MutationCtx, resource: keyof typeof writeQuotaLimits, userId: string, organizationId: string): Promise<void> {
+  await touchAdmissionBucket(ctx, resource, `user:${userId}`);
+  await touchAdmissionBucket(ctx, `${resource}:organization`, organizationId);
   await writeQuotaLimiter.limit(ctx, resource, { key: `user:${userId}`, throws: true });
   const limit = writeQuotaLimits[resource];
   await writeQuotaLimiter.limit(ctx, `${resource}:organization`, {

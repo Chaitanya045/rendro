@@ -474,17 +474,53 @@ changing slugs, tokens or forged IP headers cannot split this fallback allowance
 Public Worker routes preserve 429 and Retry-After and use private/no-store on
 failures. Independent verified IPs retain their budgets. This IP policy includes
 all readers behind the same NAT; it is separate from authenticated write quotas
-and the existing API-key/session/organization-read limiters.
+and the existing API-key/session/organization-read limiters. Both anonymous
+budgets use ten component shards, splitting the total capacity/refill rather than
+multiplying it. Two-choice selection can reject near exhaustion before all tokens
+are spent; independent shards reduce contention for shared NATs and direct callers.
+
+Anonymous buckets (including nonexistent URL attempts) and actor/organization
+write buckets have an indexed `admissionBuckets` expiry registry. Expiry rounds up
+to the end of the next hour, allowing at least one hour of inactivity: all these
+token buckets refill fully within that interval, and none use reservations. The
+registry refresh and limiter debit share one mutation transaction, including
+anonymous denials; failed writes roll both back. Within an hour, admissions only
+read the registry, avoiding a shared write hotspot across anonymous shards. Cleanup
+and reuse conflict on the registry read/write, so cleanup cannot erase an active
+allowance. An hourly cron deletes nine expired registry entries and their at-most
+ten component shards per entry (at most 99 row deletions), scheduling an immediate
+continuation when the batch fills. The continuation adds one scheduled row, keeping
+each transaction at or below 100 writes. No table scan or per-request job is needed.
 
 Legacy tree deletion lookups already use batches of at most 100 keys per RPC;
 this implementation preserves that behavior.
 
-Rollout requires the Convex helper/action changes and Worker/CLI release; no data
-migration is needed. Regenerate Convex bindings from main after merge. Release
-Convex's legacy admission endpoint before the Worker that calls it. Rollback must
-keep the endpoint while those Workers are serving traffic. Existing committed
-content remains readable; oversized historical manifests cannot be used to resume
-staging writes under the new limits.
+Release in the standard **Worker → Convex** order, then distribute the CLI. The
+new Worker always sends the signed verified-IP proof; the old Convex ignores it.
+During this interval only the new legacy admission endpoint has a compatibility
+exception: HTTP 404 with `Content-Type: text/plain; charset=utf-8` and exactly
+`No matching routes found` proceeds to the existing
+capability authorization checks. One percent of these responses log a fixed
+warning without URLs, tokens or IPs. Ordinary application 404s, malformed success,
+transport errors and other failures remain closed (503); quota denials remain 429.
+Admission is defense-in-depth rate limiting and this exception grants no authority.
+Deploy Convex next to activate the endpoint, sharded limits, expiry registry and
+cleanup cron. No data migration is needed; regenerate Convex bindings from main
+after merge. Verify both modern and legacy reads after each release.
+
+Rollback boundaries: before Convex is deployed, the Worker can be rolled back
+independently. After Convex is deployed, roll back Convex's admission changes first,
+then the Worker: an old Worker with new Convex would put modern readers into the
+shared unverified bucket and map quota responses to 503. Keeping the new Worker
+while reverting Convex is supported by the exact missing-route exception. Preserve
+the registry/component state on rollback; do not reset active quotas. Existing
+committed content remains readable; oversized historical manifests cannot be used
+to resume staging writes under the new limits.
+
+**Follow-up / TODO (#86):** remove the legacy missing-route compatibility branch
+and sampled warning after both sides are deployed and the rollback window closes.
+After removal, a Convex rollback must retain the admission endpoint, or first
+restore the compatibility Worker.
 
 ### API-key HTTP rate limits
 

@@ -103,17 +103,19 @@ it("budgets anonymous resolution by verified IP before queries, shares budgets a
   const publication = "/api/rendro/publications/public?slug=existing";
   const share = "/api/rendro/shares/public?token=missing";
   const signed = async (path: string, ip: string) => f.backend.fetch(path, { headers: await signAuthClientIp(new Request(`https://test.convex.site${path}`), ip, process.env.CONVEX_INTERNAL_SECRET!) });
-  await f.backend.run(ctx => anonymousLimiter.limit(ctx, "resolution", { key: "192.0.2.1", count: anonymousLimits.resolution.capacity - 1 }));
+  await exhaustAnonymous(f.backend, "resolution", "192.0.2.1", 0.5);
+  vi.spyOn(Math, "random").mockReturnValue(0);
   expect((await signed(publication, "192.0.2.1")).status).toBe(200);
   const denied = await signed(share, "192.0.2.1");
   expect(denied.status).toBe(429);
   expect(denied.headers.get("retry-after")).toBe("1");
   expect((await signed(publication, "192.0.2.2")).status).toBe(200);
-  await f.backend.run(ctx => anonymousLimiter.limit(ctx, "unverifiedResolution", { key: "unverified", count: anonymousLimits.unverifiedResolution.capacity - 1 }));
+  await exhaustAnonymous(f.backend, "unverifiedResolution", "unverified");
+  vi.spyOn(Math, "random").mockReturnValue(0);
   for (const path of [publication, share]) {
     expect((await f.backend.fetch(path, { headers: { "x-rendro-verified-client-ip": "192.0.2.2", "x-forwarded-for": "192.0.2.3" } })).status).toBe(429);
   }
-  vi.mocked(Date.now).mockReturnValue(Date.now() + 1000);
+  vi.mocked(Date.now).mockReturnValue(Date.now() + 5000);
   expect((await signed(publication, "192.0.2.1")).status).toBe(200);
 });
 
@@ -126,3 +128,15 @@ it("sanitizes limiter errors and rejects unauthenticated management writes witho
   expect(limited.headers.get("retry-after")).toBe("1");
   expect(await limited.text()).not.toContain("private-name");
 });
+
+async function exhaustAnonymous(backend: Awaited<ReturnType<typeof cookieWriteFixture>>["backend"], name: keyof typeof anonymousLimits, key: string, remaining = 0) {
+  const { shards, capacity } = anonymousLimits[name];
+  await backend.run(ctx => anonymousLimiter.reset(ctx, name, { key }));
+  const random = vi.spyOn(Math, "random");
+  try {
+    for (let shard = 0; shard < shards; shard++) {
+      random.mockReturnValue((shard + 0.1) / shards);
+      expect((await backend.run(ctx => anonymousLimiter.limit(ctx, name, { key, count: capacity / shards - remaining }))).ok).toBe(true);
+    }
+  } finally { random.mockRestore(); }
+}

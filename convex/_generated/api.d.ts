@@ -8,6 +8,7 @@
  * @module
  */
 
+import type * as admissionBuckets from "../admissionBuckets.js";
 import type * as anonymousAdmission from "../anonymousAdmission.js";
 import type * as apiKeyCredentials from "../apiKeyCredentials.js";
 import type * as apiKeyHttp from "../apiKeyHttp.js";
@@ -60,6 +61,7 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
+  admissionBuckets: typeof admissionBuckets;
   anonymousAdmission: typeof anonymousAdmission;
   apiKeyCredentials: typeof apiKeyCredentials;
   apiKeyHttp: typeof apiKeyHttp;

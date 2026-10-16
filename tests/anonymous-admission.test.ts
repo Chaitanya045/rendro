@@ -58,3 +58,36 @@ it("forwards verified ingress proofs from modern publication and share resolvers
   }
   expect(fetch).toHaveBeenCalledTimes(2);
 });
+
+const missingRoute = "No matching routes found";
+it("supports Worker-first deployment only for Convex's exact missing-route response, with sampled warnings", async () => {
+  const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+  const random = vi.spyOn(Math, "random").mockReturnValue(0);
+  vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(new Response(missingRoute, { status: 404, headers: { "content-type": "text/plain; charset=utf-8" } }))));
+  expect((await app.request("/public/old/docs")).status).toBe(200);
+  expect(warn).toHaveBeenCalledOnce();
+  random.mockReturnValue(0.5);
+  expect((await app.request("/share/old")).status).toBe(200);
+  expect(warn).toHaveBeenCalledOnce();
+  expect(work).toHaveBeenCalledTimes(2);
+});
+it.each([
+  [404, "text/plain; charset=utf-8", "Not found"],
+  [404, "text/plain; charset=utf-8", missingRoute + " extra"],
+  [404, "application/json", missingRoute],
+  [503, "text/plain; charset=utf-8", missingRoute],
+])("rejects lookalike missing-route responses (%s, %s, %s)", async (status, contentType, body) => {
+  vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(new Response(body, { status, headers: { "content-type": contentType } }))));
+  expect((await app.request("/public/old/docs")).status).toBe(503);
+  expect(work).not.toHaveBeenCalled();
+});
+
+it("cancels a rejected compatibility response without reading its body", async () => {
+  const cancel = vi.fn();
+  vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(new Response(new ReadableStream({ cancel }), {
+    status: 404, headers: { "content-type": "text/html" },
+  }))));
+  expect((await app.request("/public/old/docs")).status).toBe(503);
+  expect(cancel).toHaveBeenCalledOnce();
+  expect(work).not.toHaveBeenCalled();
+});

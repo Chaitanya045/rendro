@@ -1,4 +1,3 @@
-import { anonymousLimiter } from "../convex/anonymousAdmission";
 import { apiKeyRateLimiter } from "../convex/apiKeyHttp";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getFunctionName, type FunctionReference } from "convex/server";
@@ -35,7 +34,6 @@ const routes = [
 ];
 
 beforeEach(() => {
-  vi.spyOn(anonymousLimiter, "limit").mockResolvedValue({ ok: true });
   vi.spyOn(apiKeyRateLimiter, "limit").mockResolvedValue({ ok: true });
   auth.authorize.mockResolvedValue({ user: { _id: "owner" } });
   vi.spyOn(console, "error").mockImplementation(() => {});
@@ -48,6 +46,7 @@ async function invoke(action: HttpAction, init: RequestInit, error: Error, apiKe
     return Promise.reject(error);
   });
   const runMutation = vi.fn((reference: FunctionReference<"mutation">) => {
+    if (getFunctionName(reference) === "anonymousAdmission:consume") return Promise.resolve({ ok: true });
     if (getFunctionName(reference) === "apiKeyCredentials:validateInternal") return Promise.resolve({ keyId: "key" });
     return Promise.reject(error);
   });
