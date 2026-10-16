@@ -136,6 +136,7 @@ export async function collectBrowserContext(context: BrowserContext, suite: stri
   let closing = false;
   const flushing = new Set<Promise<void>>();
   const flushes = new Map<CDPSession, Promise<void>>();
+  const wrappedFrames = new WeakSet<Frame>();
 
   async function takeFrame(session: CDPSession) {
     const { result } = await session.send("Profiler.takePreciseCoverage");
@@ -204,6 +205,13 @@ export async function collectBrowserContext(context: BrowserContext, suite: stri
     return session;
   }
 
+  function wrapFrameNavigation(frame: Frame) {
+    if (wrappedFrames.has(frame)) return;
+    wrappedFrames.add(frame);
+    const goto = frame.goto.bind(frame);
+    frame.goto = async (url, options) => { await flush(frame.page()); return goto(url, options); };
+  }
+
   function startPage(page: Page) {
     if (pages.has(page)) return pages.get(page)!;
     const ready = page.coverage.startJSCoverage({ resetOnNavigation: false, reportAnonymousScripts: true }).then(async () => {
@@ -218,6 +226,17 @@ export async function collectBrowserContext(context: BrowserContext, suite: stri
     });
     pages.set(page, ready);
     void ready.catch(error => errors.push(error));
+    // Parent reload/history can destroy a child realm without giving its
+    // lifecycle breakpoint a reliable final pause. Collect before initiating
+    // the operation, while every attached target is still alive.
+    page.frames().forEach(wrapFrameNavigation);
+    page.on("frameattached", wrapFrameNavigation);
+    const reload = page.reload.bind(page);
+    page.reload = async options => { await flush(page); return reload(options); };
+    const goBack = page.goBack.bind(page);
+    page.goBack = async options => { await flush(page); return goBack(options); };
+    const goForward = page.goForward.bind(page);
+    page.goForward = async options => { await flush(page); return goForward(options); };
     page.on("framenavigated", frame => {
       const previous = frames.get(frame);
       void previous?.then(session => {

@@ -167,6 +167,10 @@ describe("legacy opaque viewer in Chromium", () => {
     await frame.locator("textarea").fill("Legacy bridge comment");
     await frame.getByTestId("commentor-composer-post").click();
     await expect.poll(async () => (await author.query(api.threads.list, scope)).map(thread => thread.body)).toContain("Legacy bridge comment");
+    // Persistence precedes the bridge acknowledgement and composer teardown.
+    // Reload only after the UI has consumed the acknowledgement and closed.
+    await browserStep("finish the comment acknowledgement and close animation", () =>
+      frame.getByTestId("commentor-composer").waitFor({ state: "detached" }));
     await page.reload();
     const reloaded = page.frameLocator("#content-frame");
     await reloaded.getByTestId("commentor-panel-btn").click();

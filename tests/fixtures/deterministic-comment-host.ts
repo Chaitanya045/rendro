@@ -1,4 +1,5 @@
 import { CommentorParentHost, type DocumentCommentBackend } from "../../src/commentor/parent-host";
+import { updateViewerActiveDeployment } from "../../src/viewer/client";
 
 const updates: Array<Parameters<DocumentCommentBackend["subscribe"]>[1]> = [];
 const backend: DocumentCommentBackend = {
@@ -17,4 +18,6 @@ function publishThreads() {
     body: `Comment ${index}`, anchor: { kind: "element", path: ["#target"] }, resolved: false, replies: [],
   })), { canLoadMore: true, loading: false });
 }
-Object.assign(window, { fixtureHost: host, fixtureUpdates: updates, publishThreads });
+Object.assign(window, { fixtureHost: host, fixtureUpdates: updates, publishThreads,
+  clearDeployment: () => updateViewerActiveDeployment(null),
+});

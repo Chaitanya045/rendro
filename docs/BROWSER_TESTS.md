@@ -462,6 +462,10 @@ The harness intercepts explicit page/context close and awaits a collection
 barrier for every attached target before detaching any session, including failed
 tests. Concurrent lifecycle and explicit flushes serialize per target. These hooks run only during
 coverage collection, apart from the collector's dedicated regression fixture.
+Navigation APIs (`goto`, `reload`, Back and Forward) also await this barrier
+before starting navigation: a parent reload can discard child-realm counters
+without a reliable child lifecycle pause. The opaque-parent-reload regression
+asserts that both the outgoing calls and the new document's call are retained.
 An iframe removed directly from the DOM does not run `beforeunload`. Tests must
 `await harness.flushCoverage(page)` before removing a frame or triggering other
 destructive fixture actions. This barrier is a no-op outside coverage runs.
@@ -524,7 +528,9 @@ discard counters to make a flaky result pass. `browser-determinism-browser.test.
 uses a paused Playwright clock, held responses, explicit layout/transition/scroll
 events, and controlled comment subscription delivery to exercise both outcomes
 of scheduling-sensitive paths. Reduced motion keeps its assertions independent
-of CSS animation timing.
+of CSS animation timing. The legacy comment fixture waits for the bridge
+acknowledgement and composer teardown before reloading; database persistence
+alone does not establish that the browser has finished handling a mutation.
 
 The coverage job keeps its existing 20-minute timeout. Browser files remain
 serial, and shared-host commands use `VITEST_MAX_WORKERS=2`. The #104 validation

@@ -65,6 +65,11 @@ it.each([0, 600])("settles the document loader after %i ms and handles explicit 
     });
     await page.clock.runFor(32);
     expect(await page.locator("#active-indicator").evaluate(el => (el as HTMLElement).style.opacity)).toBe("1");
+    await page.evaluate(() => window.dispatchEvent(new MessageEvent("message", {
+      source: document.querySelector<HTMLIFrameElement>("#content-frame")!.contentWindow,
+      origin: "https://untrusted.invalid", data: { type: "doc-loaded", path: "other.html" },
+    })));
+    expect(await page.locator(".tree-item.active").getAttribute("data-path")).toBe("fixture/page.html");
   } finally { release(); }
 });
 
@@ -98,12 +103,24 @@ it("delivers loading, stale subscription, drawer scroll and compatibility states
   await expect.poll(() => frame.getByTestId("commentor-load-older-threads").getAttribute("aria-busy")).toBe("true");
   await page.evaluate("fixtureUpdates[0]([], { canLoadMore: true, loading: false })");
   await expect.poll(() => frame.getByTestId("commentor-load-older-threads").getAttribute("aria-busy")).toBe("false");
+  await page.clock.runFor(32);
+  await frame.getByTestId("commentor-comment-btn").hover();
+  await page.clock.runFor(160);
+  expect(await frame.getByTestId("commentor-tip").getAttribute("aria-hidden")).toBe("false");
+  await frame.locator("#target").hover();
+  expect(await frame.getByTestId("commentor-tip").getAttribute("aria-hidden")).toBe("true");
   await page.evaluate("publishThreads()");
   const card = frame.locator('.drawer-thread[data-thread-id="thread-0"]');
   await card.waitFor();
   await page.clock.runFor(32);
   await card.hover();
   await expect.poll(() => frame.locator(".anchor-highlight-segment:not([hidden])").count()).toBeGreaterThan(0);
+  await frame.locator("#target").evaluate(el => { el.style.transform = "translateY(-1000px)"; });
+  await card.dispatchEvent("pointerenter");
+  expect(await frame.locator(".anchor-highlight-segment:not([hidden])").count()).toBe(0);
+  await frame.locator("#target").evaluate(el => { el.style.transform = ""; });
+  await card.dispatchEvent("pointerenter");
+  expect(await frame.locator(".anchor-highlight-segment:not([hidden])").count()).toBeGreaterThan(0);
   const drawer = frame.getByTestId("commentor-drawer-list");
   await drawer.evaluate(el => { el.scrollTop = 0; el.dispatchEvent(new Event("scroll")); });
   expect(await drawer.evaluate(el => el.scrollHeight > el.clientHeight + 24)).toBe(true);
@@ -125,6 +142,10 @@ it("delivers loading, stale subscription, drawer scroll and compatibility states
   await frame.getByRole("button", { name: "Show reload notice" }).click();
   await page.clock.runFor(500);
   expect(await frame.getByRole("button", { name: "Show reload notice" }).isVisible()).toBe(true);
+  await harness.flushCoverage(page);
+  await page.locator("iframe").evaluate(frame => frame.remove());
+  await page.evaluate("clearDeployment()");
+  expect(await page.locator("#content-frame").count()).toBe(0);
 });
 
 // A restored iframe can still be replacing its document when the shell URL has

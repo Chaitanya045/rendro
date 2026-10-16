@@ -97,6 +97,18 @@ it("flushes an opaque child before direct DOM removal", async () => {
   expect(file.s[executed[0]]).toBe(2);
 });
 
+it("flushes every child before reloading its parent", async () => {
+  const page = await harness.newPage();
+  await page.goto(harness.origin);
+  const frame = page.frames().find(frame => frame !== page.mainFrame())!;
+  await frame.evaluate("coverageProbe(true)");
+  await page.reload();
+  const report = await harness.coverageSnapshot(page, included);
+  const file = report[probe];
+  const executed = Object.entries(file.statementMap).find(([, loc]) => loc.start.line === 3)!;
+  expect(file.s[executed[0]]).toBe(3);
+});
+
 it("rejects unmapped first-party scripts", async () => {
   await expect(convertBrowserCoverage([{ scriptId: "1", url: `${harness.origin}/missing.js`, source: "window.unmapped = true", functions: [] }]))
     .rejects.toThrow("Unmapped browser script");
