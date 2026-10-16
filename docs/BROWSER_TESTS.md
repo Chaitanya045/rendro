@@ -269,6 +269,9 @@ excludes those files from `unit`. Unit files retain their normal parallelism.
 The browser project has `sequence.groupOrder: 1` and `fileParallelism: false`:
 it starts after the unit project finishes, and launches one browser file at a
 time. See [Vitest's project ordering](https://vitest.dev/config/sequence#sequence-grouporder).
+A third `timing` project (`groupOrder: 2`, serial) holds `tests/share-budget.test.ts`, whose
+CPU-time ratio assertions drifted when parallel unit workers (esbuild builds, tsx
+children) shared the cores; it now runs alone after the browser project.
 Browser tests have 30s budgets and hooks 60s; cold Chromium startup on a small
 runner cannot reliably fit a unit test's budget (unit tests have 30s, see the
 stability rules below). Operations normally fail
