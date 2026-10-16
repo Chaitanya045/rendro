@@ -135,13 +135,30 @@ export async function collectBrowserContext(context: BrowserContext, suite: stri
   const finished = new Set<Page>();
   let closing = false;
   const flushing = new Set<Promise<void>>();
+  const flushes = new Map<CDPSession, Promise<void>>();
 
-  async function flushFrame(session: CDPSession) {
+  async function takeFrame(session: CDPSession) {
     const { result } = await session.send("Profiler.takePreciseCoverage");
     for (const entry of result) {
       const source = await sources.get(session)?.get(entry.scriptId);
       collected.push({ ...entry, source });
     }
+  }
+
+  function flushFrame(session: CDPSession) {
+    // Lifecycle pauses and explicit test barriers can overlap. Drain deltas in
+    // order, and await their source reads before permitting target destruction.
+    const pending = (flushes.get(session) ?? Promise.resolve()).then(() => takeFrame(session));
+    flushes.set(session, pending);
+    return pending;
+  }
+
+  async function flush(page?: Page) {
+    await Promise.all([...pages].filter(([target]) => !page || target === page).map(([, ready]) => ready));
+    await Promise.all([...frames].filter(([frame]) => !page || frame.page() === page).map(async ([frame, ready]) => {
+      const session = await ready;
+      if (session && !frame.isDetached() && !finished.has(frame.page())) await flushFrame(session);
+    }));
   }
 
   async function startFrame(frame: Frame) {
@@ -172,7 +189,7 @@ export async function collectBrowserContext(context: BrowserContext, suite: stri
     // beforeunload is the last pausable lifecycle event. Chromium suppresses
     // debugger pauses during pagehide/unload; polling loses the final interval.
     session.on("Debugger.paused", () => {
-      const pending = flushFrame(session).catch(error => { errors.push(error); }).finally(async () => {
+      const pending = flush(frame.page()).catch(error => { errors.push(error); }).finally(async () => {
         await session.send("Debugger.resume").catch(error => { errors.push(error); });
         flushing.delete(pending);
       });
@@ -219,13 +236,13 @@ export async function collectBrowserContext(context: BrowserContext, suite: stri
 
   async function finishPage(page: Page) {
     if (finished.has(page)) return;
+    await flush(page);
     finished.add(page);
     await pages.get(page);
     for (const [frame, pending] of frames) {
       if (frame.page() !== page) continue;
       const session = await pending;
       if (session && !frame.isDetached()) {
-        await flushFrame(session);
         await session.send("Profiler.stopPreciseCoverage");
         await session.send("Debugger.disable");
         await session.detach();
@@ -264,6 +281,9 @@ export async function collectBrowserContext(context: BrowserContext, suite: stri
     if (closing) return;
     closing = true;
     try {
+      // Flush every attached target before stopping/detaching even the first
+      // profiler: parent teardown must not race its OOPIF's final collection.
+      await flush();
       for (const page of context.pages()) await finishPage(page);
     } finally { await close(options); }
     if (errors.length) throw new AggregateError(errors, "Browser coverage collection failed");
@@ -275,6 +295,7 @@ export async function collectBrowserContext(context: BrowserContext, suite: stri
     }
   };
   return {
+    flush,
     async targets() {
       const types: string[] = [];
       for (const pending of frames.values()) {

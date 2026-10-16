@@ -94,6 +94,7 @@ export function createBrowserHarness(harnessOptions: { coverage?: boolean; chrom
   return {
     get origin() { return origin; },
     coverageTargets(page: Page) { return collectors.get(page.context())!.targets(); },
+    async flushCoverage(page: Page) { await collectors.get(page.context())?.flush(page); },
     coverageSnapshot(page: Page, include?: Set<string>) {
       const collector = collectors.get(page.context());
       if (!collector) throw new Error("Browser coverage is not enabled");

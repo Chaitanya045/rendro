@@ -6,6 +6,27 @@ import { afterEach, expect, it } from "vitest";
 import { mergeBrowserFile } from "./helpers/browser-coverage";
 import { browserCoverageShards } from "./helpers/run-browser-coverage";
 import { normalizeNodeFile } from "./helpers/normalize-node-coverage";
+import { diffCoverage } from "./helpers/diff-coverage";
+
+it("diffs hit status by location, retaining duplicates and individual branch arms", () => {
+  const file = libCoverage.createFileCoverage("src/file.ts").data;
+  const loc = { start: { line: 3, column: 2 }, end: { line: 3, column: 12 } };
+  file.statementMap = { "0": loc, "1": loc }; file.s = { "0": 1, "1": 0 };
+  file.fnMap = { "0": { name: "run", decl: loc, loc, line: 3 } }; file.f = { "0": 1 };
+  file.branchMap = { "0": { type: "if", line: 3, loc, locations: [loc, loc] } }; file.b = { "0": [1, 0] };
+  const before = { [file.path]: file }, after = structuredClone(before);
+  after[file.path].s["0"] = 99;
+  expect(diffCoverage(before, after)).toEqual([]);
+  after[file.path].s["1"] = 1;
+  after[file.path].b["0"] = [0, 1];
+  after[file.path].f["0"] = 0;
+  expect(diffCoverage(before, after)).toHaveLength(4);
+  expect(diffCoverage(before, {})).toHaveLength(5);
+  expect(diffCoverage({}, before)).toHaveLength(5);
+  const renumbered = structuredClone(before);
+  renumbered[file.path].fnMap = { "8": file.fnMap["0"] }; renumbered[file.path].f = { "8": 1 };
+  expect(diffCoverage(before, renumbered)).toEqual([]);
+});
 
 const dirs: string[] = [];
 afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }); });

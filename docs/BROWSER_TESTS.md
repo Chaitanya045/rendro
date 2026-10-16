@@ -458,12 +458,16 @@ Same-process frames share their page's profiler. Chromium's precise-coverage
 delta events preserve intermediate samples; a `beforeunload` event breakpoint
 flushes the final interval before navigation destroys the old context.
 `pagehide` is too late because Chromium suppresses debugger pauses then.
-The harness intercepts explicit page/context close and flushes remaining
-sessions in teardown, including failed tests. These hooks run only during
+The harness intercepts explicit page/context close and awaits a collection
+barrier for every attached target before detaching any session, including failed
+tests. Concurrent lifecycle and explicit flushes serialize per target. These hooks run only during
 coverage collection, apart from the collector's dedicated regression fixture.
-An iframe removed directly from the DOM does not run `beforeunload`; abrupt
-target destruction can lose the final delta. The regression contract here
-covers navigation, popup self-close, explicit close, and harness teardown.
+An iframe removed directly from the DOM does not run `beforeunload`. Tests must
+`await harness.flushCoverage(page)` before removing a frame or triggering other
+destructive fixture actions. This barrier is a no-op outside coverage runs.
+The regression contract covers direct frame removal after this barrier,
+navigation, popup self-close, explicit close, and harness teardown. Renderer
+crashes cannot guarantee a final sample.
 
 Identical-bundle V8 deltas are first combined with Vitest's pinned
 `@bcoe/v8-coverage` range-tree merger, avoiding repeated AST conversion.
@@ -509,6 +513,18 @@ to review/shrink debt without rerunning Chromium:
 pnpm exec tsx tests/helpers/run-browser-coverage.ts --merge-only --update-ledger
 pnpm exec tsx tests/helpers/run-browser-coverage.ts --merge-only
 ```
+
+Before shrinking debt, save three consecutive full `VITEST_MAX_WORKERS=2 pnpm coverage`
+results outside `coverage/` (Vitest cleans that directory). Compare each adjacent
+pair with `pnpm exec tsx tests/helpers/diff-coverage.ts first/merged/coverage-final.json
+second/merged/coverage-final.json`. An identical hit/no-hit result prints nothing
+and exits zero; differences print exact source maps and branch arms and exit one.
+This compares individual counters, not just totals. Do not add tolerance or
+discard counters to make a flaky result pass. `browser-determinism-browser.test.ts`
+uses a paused Playwright clock, held responses, explicit layout/transition/scroll
+events, and controlled comment subscription delivery to exercise both outcomes
+of scheduling-sensitive paths. Reduced motion keeps its assertions independent
+of CSS animation timing.
 
 The coverage job keeps its existing 20-minute timeout. Browser files remain
 serial, and shared-host commands use `VITEST_MAX_WORKERS=2`. The #104 validation

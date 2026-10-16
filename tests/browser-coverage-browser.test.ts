@@ -41,15 +41,17 @@ it("maps opaque child branches to exact source lines across navigation", async (
   expect(await harness.coverageTargets(page)).toContain("iframe");
   await frame.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
   await frame.evaluate("coverageProbe(true)");
+  await harness.flushCoverage(page);
+  await frame.evaluate("coverageProbe(true)");
   await frame.goto(`${harness.origin}/__browser_health`);
   const result = await harness.coverageSnapshot(page, included);
   expect(Object.keys(result).sort()).toEqual([...included].sort());
   const file = result[probe];
   expect(file).toBeDefined();
   const countsAt = (line: number) => Object.entries(file.statementMap).filter(([, loc]) => loc.start.line === line).map(([id]) => file.s[id]);
-  expect(countsAt(3)).toEqual([2]);
+  expect(countsAt(3)).toEqual([3]);
   expect(countsAt(5)).toEqual([0]);
-  expect(Object.values(file.b)).toContainEqual([2, 0]);
+  expect(Object.values(file.b)).toContainEqual([3, 0]);
   const unused = Object.entries(file.fnMap).find(([, fn]) => fn.name === "neverCalled")!;
   expect(file.f[unused[0]]).toBe(0);
   expect(Object.values(result["src/commentor/commentor.ts"].s).some(count => count > 0)).toBe(true);
@@ -64,6 +66,8 @@ it.each(["navigate", "self-close"])("collects popup execution before %s", async 
   await expect.poll(() => popup.evaluate("globalThis.coverageProof")).toBe("executed browser branch");
   await popup.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
   await popup.evaluate("coverageProbe(true)");
+  await harness.flushCoverage(popup);
+  await popup.evaluate("coverageProbe(true)");
   if (action === "navigate") {
     await popup.goto(`${harness.origin}/__browser_health`);
     await popup.close();
@@ -75,8 +79,22 @@ it.each(["navigate", "self-close"])("collects popup execution before %s", async 
   const result = await harness.coverageSnapshot(page, included);
   const popupFile = result[probe];
   const executed = Object.entries(popupFile.statementMap).find(([, loc]) => loc.start.line === 3)!;
-  expect(popupFile.s[executed[0]]).toBe(2);
+  expect(popupFile.s[executed[0]]).toBe(3);
   expect(result["src/commentor/commentor.ts"]).toBeUndefined();
+});
+
+it("flushes an opaque child before direct DOM removal", async () => {
+  const page = await harness.newPage();
+  await page.goto(harness.origin);
+  const frame = page.frames().find(frame => frame !== page.mainFrame())!;
+  await expect.poll(() => frame.evaluate("globalThis.coverageProof")).toBe("executed browser branch");
+  await frame.evaluate("coverageProbe(true)");
+  await harness.flushCoverage(page);
+  await page.locator("iframe").evaluate(frame => frame.remove());
+  const report = await harness.coverageSnapshot(page, included);
+  const file = report[probe];
+  const executed = Object.entries(file.statementMap).find(([, loc]) => loc.start.line === 3)!;
+  expect(file.s[executed[0]]).toBe(2);
 });
 
 it("rejects unmapped first-party scripts", async () => {
