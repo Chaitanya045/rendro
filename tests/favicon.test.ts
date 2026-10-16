@@ -28,6 +28,6 @@ describe("public favicon assets", () => {
     const response = await worker.request("/favicon.svg", {}, { ASSETS: { fetch: () => new Response("missing", { status: 404 }) } });
     expect(response.status).toBe(404);
     expect(response.headers.get("content-type")).not.toBe("image/svg+xml");
-    expect(response.headers.get("cache-control")).toBeNull();
+    expect(response.headers.get("cache-control")).toBe("private, no-store");
   });
 });

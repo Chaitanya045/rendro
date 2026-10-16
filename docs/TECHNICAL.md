@@ -349,6 +349,46 @@ Public routes and static assets run before the session middleware so they never 
 
 ### Response security headers
 
+Every registered Convex HTTP action passes through `convex/httpErrors.ts`, which
+sets `Cache-Control: private, no-store` after both successful handling and failure
+mapping. This includes authenticated metadata, one-time API keys/share secrets,
+resolver DTOs, admission failures, and malformed input. `shared/http-cache.ts`
+owns the sole API exception: an exact GET `/api/auth/convex/jwks` returning 200
+without `Set-Cookie` receives `public, max-age=300, must-revalidate`. New actions
+inherit the private default. The generic Worker proxy preserves/enforces this
+policy, including sanitized upstream failures; the outer Hono middleware applies
+it to every `/api` response, including dedicated handlers, local denials and errors.
+Other Worker responses without an explicit cache policy also default to private/no-store.
+
+Modern and legacy shares, private viewers, reset/verification pages and invitation
+pages receive `private, no-store` and `Referrer-Policy: no-referrer`, including
+errors and unmatched paths within those route families. Successful public
+publication documents/tree/sitemaps and explicitly cached static assets keep their
+existing policies. Resolver metadata remains private even for public publications.
+The registration-derived cache matrices exercise direct Convex actions and Worker
+routes; proxy tests cover cookie rewriting and sanitized failures. A simulated
+intermediary checks that responses cannot be reused across users or after denial.
+The share-creation matrix uses the shared storage-proof fixture and real Convex
+insertion, checking persisted grants and private responses for invalid attestations.
+
+Request/error logs in Node and the Worker record Hono route templates, never raw
+paths, query strings, or URL suffixes (including unmatched wildcard requests).
+`src/logger.ts` exposes a small logging facade that applies the shared recursive
+sanitizer in `src/log-redaction.ts` before delegating to Pino. Child bindings are
+sanitized when captured and merged into each sanitized record. This policy runs
+in both Node and the Worker, where bundling selects `pino/browser.js` and ignores
+Pino's top-level redaction/hooks/formatters options. Header,
+body, URL, query, stack and cause fields are redacted; exceptions retain only fixed
+categories. Log message text must be a static application-authored string. Storage
+and proxy catch blocks log fixed categories, without exception objects or storage
+keys. Better Auth diagnostics emit only a fixed category, without library messages
+or exception arguments. Registration-derived tests capture actual Pino output with synthetic
+capabilities, alternate encodings, malformed paths, and errors. A separate esbuild
+regression uses Wrangler's Worker conditions/browser resolution, verifies that
+`pino/browser.js` was bundled, and checks the same credential/error/child fixtures
+against Node output. Cloudflare raw
+invocation logs remain disabled because they include request URLs.
+
 `src/middleware/security-headers.ts` is the outermost Hono middleware in both the Worker and Node entry points, including static files, redirects, preflights, 404s and errors. Every response gets `X-Content-Type-Options: nosniff`, a default `Referrer-Policy: strict-origin-when-cross-origin`, and a restrictive `Permissions-Policy` disabling camera, microphone, geolocation, payment, USB, display capture, motion sensors, autoplay, encrypted media, fullscreen, picture-in-picture, MIDI, credential retrieval, wake locks and XR. Route-specific referrer policies (especially `no-referrer`) are preserved. HTTPS requests additionally get `Strict-Transport-Security: max-age=15552000`, without `preload`; local HTTP does not. The request URL is authoritative, not an untrusted forwarded-protocol header. Adding `includeSubDomains` is an owner decision pending confirmation that every subdomain is HTTPS-only.
 
 | Route class | Framing | Content Security Policy / exceptions |

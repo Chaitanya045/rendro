@@ -79,8 +79,8 @@ app.get("/public/:org/:slug/files/:path{.+}", async (c) => {
       ...assetHeaders(documentPath, false, "text/html; charset=utf-8"),
       "Referrer-Policy": "strict-origin-when-cross-origin",
     });
-  } catch (error) {
-    logger.error({ error, key }, "public document stream failed");
+  } catch {
+    logger.error({ category: "StorageError" }, "public document stream failed");
     return legacyUnavailable(new Error("Storage unavailable"), c);
   }
 });

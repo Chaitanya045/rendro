@@ -90,7 +90,7 @@ describe("shared response security policy", () => {
     const policies = responses.map(response => response.headers.get("Content-Security-Policy"));
     expect(new Set(policies).size).toBe(10);
     for (const response of responses) {
-      expect(response.headers.get("Cache-Control")).toBe("no-store");
+      expect(response.headers.get("Cache-Control")).toBe("private, no-store");
       const nonce = response.headers.get("Content-Security-Policy")!.match(/'nonce-([^']+)'/)![1];
       expect(await response.text()).toBe(`<script nonce="${nonce}">trusted()</script><script>untrusted()</script>`);
     }

@@ -1,6 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createViewerTicket, readViewerTicket, viewerSessionCookie, VIEWER_TICKET_SECONDS } from "@/viewer-ticket";
-import { redactViewerPath } from "@/viewer-log";
 
 const scope = { organizationId: "org-a", projectId: "project-a", manifestKey: "tenants/org-a/projects/project-a/deployments/deploy-a/manifest.json" };
 const cookie = "__Secure-better-auth.session_token=private-session-material";
@@ -40,11 +39,4 @@ describe("encrypted private viewer capabilities", () => {
     expect(await readViewerTicket(token, scope)).toBeNull();
   });
 
-  it("redacts tickets from both successful and malformed request paths", () => {
-    expect(redactViewerPath("/organizations/a/projects/b/docs/view/ciphertext/files/site.css"))
-      .toBe("/organizations/a/projects/b/docs/view/[redacted]/files/site.css");
-    expect(redactViewerPath("/docs/view/malformed" )).toBe("/docs/view/[redacted]");
-    expect(redactViewerPath("/legacy-view/example/view/ciphertext/files/site.css")).toBe("/legacy-view/example/view/[redacted]/files/site.css");
-    expect(redactViewerPath("/docs/files/index.html")).toBe("/docs/files/index.html");
-  });
 });

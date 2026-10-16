@@ -45,6 +45,9 @@ export function createAuthOptions(ctx: GenericCtx<DataModel>) {
   const siteUrl = process.env.SITE_URL ?? "http://localhost:3000";
   return {
     appName: "rendro",
+    // Better Auth diagnostics can include callback URLs and raw exceptions.
+    // Keep a fixed signal; request failures have structured HTTP status logs.
+    logger: { log: () => console.error("Auth diagnostic", { category: "AuthDiagnostic" }) },
     baseURL: siteUrl,
     secret: optionEnv("AUTH_SECRET"),
     trustedOrigins: [siteUrl],

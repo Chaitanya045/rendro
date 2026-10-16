@@ -12,7 +12,7 @@ test("landing uses a fresh CSP nonce and renders without CSP violations", async 
   expect(nonce).toMatch(/^[A-Za-z0-9+/]{24}$/);
   expect(policy).toContain("frame-ancestors 'none'");
   expect(policy.split(";").find(directive => directive.trim().startsWith("script-src "))).not.toContain("'unsafe-inline'");
-  expect(response?.headers()["cache-control"]).toBe("no-store");
+  expect(response?.headers()["cache-control"]).toBe("private, no-store");
   const scriptNonces = await page.locator("script:not([src])").evaluateAll(scripts => scripts.map(script => (script as HTMLScriptElement).nonce));
   expect(scriptNonces.length).toBeGreaterThan(0);
   expect(scriptNonces.every(value => value === nonce)).toBe(true);
