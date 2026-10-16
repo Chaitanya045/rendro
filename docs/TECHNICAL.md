@@ -343,13 +343,45 @@ The application schema (`convex/schema.ts`) owns:
         └── deployments/{deploymentId}/
             ├── manifest.json
             ├── tree-index.json
+            ├── index/v1/
+            │   ├── root.json
+            │   ├── files/{n}.json
+            │   └── tree/{n}.json
             └── files/
                 ├── index.html
                 ├── assets/app.css
                 └── reference/api.html
 ```
 
-`manifest.json` holds `{ version: 1, files: [{ path, sha256, size, contentType }] }`, sorted by path. `tree-index.json` holds `{ version: 1, files: [{ path, size }] }`. Both are written by the Worker when the deployment starts. The viewers currently derive their tree from `manifest.json`. Each uploaded or copied object stores its SHA-256 as object metadata.
+`manifest.json` holds `{ version: 1, files: [{ path, sha256, size, contentType }] }`, sorted by path. `tree-index.json` holds `{ version: 1, files: [{ path, size }] }` and is not read by the viewers. Both are written by the Worker when the deployment starts, together with the path/directory index under `index/v1/` (see [Deployment index and metadata cache](#deployment-index-and-metadata-cache)). Each uploaded or copied object stores its SHA-256 as object metadata.
+
+### Deployment index and metadata cache
+
+Requests never download a whole manifest to answer a single-path or single-directory question (#90). Deployment start writes an immutable index next to the manifest (`src/deployment-index.ts`):
+
+| Object | Contents |
+|---|---|
+| `index/v1/files/{n}.json` | `{ version: 1, files: [[path, sha256, size, contentType], …] }` |
+| `index/v1/tree/{n}.json` | `{ version: 1, tree: [[directory, page, [[name, folder], …], more], …] }` |
+| `index/v1/root.json` | `{ version: 1, manifestSha256, fileCount, salt, shards, firstDocument }`; written last |
+
+- **Shards.** The shard count is the smallest power of two with at most 256 files per shard on average (`INDEX_SHARD_TARGET_FILES`), so it grows with the file count: 1 shard up to 256 files, 4 at the 1,000-file deployment limit, and 512 for a synthetic 100,000-file manifest. A path belongs to file shard `SHA-256(salt ‖ "f" ‖ path) mod shards`. A directory page belongs to tree shard `SHA-256(salt ‖ "t" ‖ directory ‖ page) mod shards`. The salt is 16 random bytes per deployment and is never served, so publisher-chosen paths cannot concentrate entries in one shard. Empty shards are written too. A deployment with one shard has no shard objects: the root carries its file and tree rows inline, so a small deployment's lookups read one object, as before. Start writes at most `1 + 2 × shards` index objects; at the file limit that is 9 puts, beside the manifest and tree index.
+- **Directory pages.** Only HTML documents (manifest MIME essence `text/html`) and folders that contain one appear. A directory is `""` for the root or a canonical path ending in `/`. Children are folders first, then names by `localeCompare` with a code-point tie-break. Pages hold 200 children (`TREE_PAGE_SIZE`). `firstDocument` is the first HTML path in manifest order, the default selection when there is no `index.html`.
+- **Write order and integrity.** Start writes the manifest, the tree index and every shard in parallel, then the root. A present root therefore implies a complete index. Index objects live under the deployment's immutable namespace. Only the Worker writes them, upload keys are confined to `files/`, and retention deletes them with the rest of the deployment prefix. Readers validate every row as strictly as the manifest: canonical paths of at most 1,024 characters, hexadecimal hashes, safe sizes, bounded MIME types, single-segment child names, canonical directories, unique keys. Lookups compare exact canonical paths and never build storage keys from index contents.
+- **Fallback.** A missing or invalid root (every deployment started before this change, or a manifest key that is not a deployment key) means the deployment is served from its `manifest.json`, parsed once per isolate. A missing or damaged shard falls back to the manifest for that lookup. Staging uploads use the strict new-deployment manifest parser; viewers use the lenient stored-manifest parser, which accepts deployments that predate current limits. No backfill is needed.
+- **Per-isolate cache.** `deploymentMetadataCache` (`src/immutable-cache.ts`) is a least-recently-used map of parsed immutable objects. Keys are the deployment's manifest key plus the object name; shard keys also include the root's manifest SHA-256. It is bounded at about 4 MiB of source JSON. An entry above 2 MiB is used once but not retained. Concurrent misses share one storage read. Failed reads, missing manifests and damaged shards are not retained; the absence of an index root is retained because an index is never added after start returns. The cache holds only immutable bytes. Session, membership, publication, share-grant and staging-lease decisions are still made freshly by Convex on every request, before any cached metadata is consulted. Deployment IDs are never reused, so an entry cannot become stale.
+
+Costs for synthetic manifests (`tests/deployment-index.test.ts`), counted as storage reads and bytes on a cold isolate:
+
+| Files | Asset lookup | Tree root page | Deep link (3 directory pages) | Previously, asset / full tree |
+|---|---|---|---|---|
+| 10 | 1 read, 1.7 KB | 1 read, 1.7 KB | 1 read, 1.7 KB | 1 read, 1.6 KB / 1 request, 1.6 KB |
+| 1,000 | 2 reads, 31 KB | 2 reads, 4.9 KB | 4 reads, 14 KB | 1 read, 156 KB / 5 requests, 778 KB |
+| 100,000 | 2 reads, 24 KB | 2 reads, 4.9 KB | 4 reads, 16 KB | 1 read, 15.6 MB / 450 requests, 7.0 GB |
+
+A 1,000-file cold push with every upload on a cold isolate reads 30 MB of index metadata, compared with 156 MB of manifests before. Within one warm isolate the whole push reads the root and four shards once (119 KB).
+
+**Rollout.** This is a Worker-only change; Convex, the CLI and the request/response shapes of existing routes are unchanged. The new Worker reads an index when present and otherwise the manifest. Old Workers ignore `index/v1/`. Deployments started by an old Worker during rollout have no index and are served from their manifests. Rolling back leaves harmless extra objects that retention deletes. Directory pages are an additive `dir` query on the existing tree routes; requests without it keep the `{ documents, cursor }` shape for tree clients that predate directory pages, served from the cached manifest.
 
 Deployment keys are immutable. A push writes objects under a new staging deployment, then commit changes the Convex project pointer. A failed or interrupted push cannot overwrite the active version. Superseded deployments remain available to pinned publications and unexpired shares until retention permits deletion.
 
@@ -695,7 +727,7 @@ The CLI drives these Worker routes (`src/routes/deployments.ts`). Identity (`org
 | Method | Path | Scope | Purpose |
 |---|---|---|---|
 | GET | `/api/rendro/deployments/check` | `docs:read` | Return the active deployment and its manifest |
-| POST | `/api/rendro/deployments/start` | `docs:write` | Validate the manifest and checksum, create a new staging deployment, write `manifest.json` and `tree-index.json` |
+| POST | `/api/rendro/deployments/start` | `docs:write` | Validate the manifest and checksum, create a new staging deployment, write `manifest.json`, `tree-index.json` and the path/directory index |
 | POST | `/api/rendro/deployments/:id/copy` | `docs:write` | Copy unchanged files from the previous active deployment |
 | PUT | `/api/rendro/deployments/:id/files/*` | `docs:write` | Upload one changed file |
 | POST | `/api/rendro/deployments/:id/commit` | `docs:write` | Verify the object listing and activate the deployment |
@@ -706,8 +738,8 @@ Sequence used by `rendro push` (`cli/src/index.ts`):
 1. Filter the source folder before reading file contents, compute SHA-256 and size per included file, build a sorted manifest, and hash its JSON.
 2. `check` returns the active manifest. Files with matching `(path, sha256, size)` are unchanged; the rest are changed.
 3. `start` re-parses the manifest, rejects unsorted/duplicate/unsafe paths and checksum mismatches, then asks Convex to insert a `staging` deployment whose `previousDeploymentId` is the current active deployment. Every start creates a new deployment; staging deployments are never reused. If writing the manifest or tree index fails, the Worker marks the deployment failed.
-4. `copy` accepts at most 16 paths per request (`MAX_REUSED_FILES_PER_REQUEST` in `shared/deployment-limits.ts`, chosen to stay under the Workers subrequest limit). For each path it requires a manifest entry, then `HEAD`s the previous deployment's object and requires matching size and stored SHA-256 before copying.
-5. `PUT files/*` accepts only paths in the manifest. The body must match the manifest size (oversized bodies are cancelled) and SHA-256. The CLI uploads changed files in batches of `--concurrency` (default 8).
+4. `copy` accepts at most 16 paths per request (`MAX_REUSED_FILES_PER_REQUEST` in `shared/deployment-limits.ts`, chosen to stay under the Workers subrequest limit). For each path it requires a manifest entry (looked up in the index: at most the root and four shards at the file limit, instead of the whole manifest), then `HEAD`s the previous deployment's object and requires matching size and stored SHA-256 before copying.
+5. `PUT files/*` accepts only paths in the manifest, found by reading the index root and one shard (cached per isolate). The body must match the manifest size (oversized bodies are cancelled) and SHA-256. The CLI uploads changed files in batches of `--concurrency` (default 8).
 6. `commit` lists the deployment's `files/` prefix and requires it to equal the manifest's paths exactly (409 otherwise). The Worker then sends a short-lived storage attestation (see below). Convex verifies it against the stored deployment inside the commit mutation and requires the deployment to still be `staging` and the project's active deployment to still equal `previousDeploymentId` ("Active deployment changed; rebase and retry"). It marks the previous deployment `superseded`, the new one `active`, and moves the project pointer in one mutation.
 7. If copy, upload, or commit throws, the CLI calls `fail` with the error message and exits non-zero.
 
@@ -783,7 +815,7 @@ The CLI and Convex deployment mutation sanitize Git remotes before capture/stora
 | POST | `/api/rendro/publications` | Owner/admin, or `publications:write` + `docs:read` | Create a publication |
 | POST | `/api/rendro/publications/remove` | Owner/admin, or `publications:write` | Remove a publication |
 | GET | `/p/:slug` | Anonymous | Public read-only shell |
-| GET | `/p/:slug/tree` | Anonymous | Paginated published document list |
+| GET | `/p/:slug/tree` | Anonymous | Directory pages relative to the publication prefix (`?dir=&cursor=`) |
 | GET | `/p/:slug/files/*` | Anonymous | Manifest-validated sandboxed object |
 
 Publication slugs are globally indexed. A publication maps one project path (`pathPrefix`, `entryFile`) to either the project's active deployment (`track_active`) or an explicit `pinned` deployment. Convex independently requires both `docs:read` and `publications:write` for publication creation using API keys; owner/admin sessions retain their existing same-origin admission and role checks. Before creating one, the Worker resolves the target deployment, rejects `staging` or `failed` deployments, and requires the entry file to be an HTML file in that deployment's manifest under the normalized prefix. Convex requires the corresponding storage attestation on direct and proxied creation alike. Uploading never makes content public. Public file/tree responses use `Cache-Control: public, max-age=0, must-revalidate`.
@@ -864,9 +896,9 @@ Management screens gate retained data on `GET /api/rendro/management/access?orga
 
 Legacy `/docs/:org` and nested document URLs require live membership in an explicitly mapped Better Auth organization. Signed-out requests redirect to sign-in with a return path. Missing or inaccessible organizations return the shared styled 404, regardless of the email domain; they never start v1 organization creation. New organizations use the v2 management flow at `/organizations` (the 404 links to `/organizations?choose=1` so existing members can also choose **New organization**).
 
-The project and publication viewers share `renderScopedDocumentShell()` in `src/routes/app.ts`. The project shell resolves the active deployment through Convex with the session cookie, reads `manifest.json`, and selects `?doc=` or `index.html` (falling back to the first HTML file). Unknown paths return the shared 404 page.
+The project and publication viewers share `renderScopedDocumentShell()` in `src/routes/app.ts`. The project shell resolves the active deployment through Convex with the session cookie, looks up `?doc=` or `index.html` in the deployment index (falling back to the first HTML file), and validates that the selection is an HTML manifest entry. Unknown paths return the shared 404 page.
 
-`…/docs/tree` returns HTML document paths from the active manifest in pages of 200 (`{ documents, cursor }`). `…/docs/files/*` serves only manifest entries with `Cache-Control: private, no-store`, `X-Content-Type-Options: nosniff`, and either `sandbox allow-scripts allow-forms allow-popups allow-downloads; frame-ancestors 'self'` (HTML) or `default-src 'none'` (other types) as the Content-Security-Policy. HTML responses get a small injected script for navigation messages, the shell shortcut, and the comment configuration; stored publisher bytes are never modified.
+`…/docs/tree?dir=<directory>&cursor=<page>` returns one directory page from the index: `{ children: [{ name, type: "file" | "folder" }], cursor }`, with at most 200 children. `dir` is `""` for the root or a canonical relative path ending in `/`; `cursor` is the next page number or `null`. A malformed directory or cursor returns 400 before storage is read, and an unknown directory returns an empty page. `/p/:slug/tree` serves the same pages, relative to the publication's path prefix, so it can never name a path outside the prefix. Without `dir`, both routes keep the previous `{ documents, cursor }` list of all HTML paths in pages of 200 for clients that predate directory pages. `…/docs/files/*` serves only manifest entries with `Cache-Control: private, no-store`, `X-Content-Type-Options: nosniff`, and either `sandbox allow-scripts allow-forms allow-popups allow-downloads; frame-ancestors 'self'` (HTML) or `default-src 'none'` (other types) as the Content-Security-Policy. HTML responses get a small injected script for navigation messages, the shell shortcut, and the comment configuration; stored publisher bytes are never modified.
 
 ### Document fragments
 

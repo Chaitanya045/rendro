@@ -8,11 +8,12 @@ import { decodeStoragePath, isCanonicalStorageKey } from "@/storage-boundary";
 import { viewerScript } from "@/viewer/markup";
 import { Hono } from "hono";
 import { CONVEX_INTERNAL_SECRET, CONVEX_SITE_URL } from "@/config";
-import { getObjectStream, getObjectText } from "@/minio";
+import { getObjectStream } from "@/minio";
 import { renderScopedDocumentShell } from "@/routes/app";
 import { renderNotFoundPage } from "@/routes/not-found";
 import { injectMobileViewportScrollbarStyle } from "@/routes/document-html";
-import { parseStoredManifest, type StoredManifest } from "@/stored-manifest";
+import { deploymentDocuments, openDeploymentIndex, validTreeDirectory } from "@/deployment-index";
+import { treePageCursor } from "@/routes/tree-pages";
 
 const app = new Hono();
 app.use("/p/*", viewerErrorCache);
@@ -26,11 +27,6 @@ async function resolvePublication(slug: string, request: Request): Promise<Worke
   const result = await viewerBackendJson<WorkerPublication>(url, { headers }, true);
   if (result && !result.deployment?.manifestKey) throw new ViewerBackendError();
   return result;
-}
-
-async function manifestFor(result: WorkerPublication): Promise<StoredManifest | null> {
-  const text = await getObjectText(result.deployment.manifestKey);
-  return parseStoredManifest(text);
 }
 
 function publicationPath(result: WorkerPublication, path: string): string | null {
@@ -68,8 +64,7 @@ app.get("/p/:slug/files/*", async (c) => {
   const relativePath = decodeStoragePath(c.req.path.slice(c.req.path.indexOf("/files/") + 7));
   const fullPath = relativePath ? publicationPath(result, relativePath) : null;
   if (!relativePath || !fullPath) return assetError(c, () => renderNotFoundPage({ path: "Document unavailable" }));
-  const manifest = await manifestFor(result);
-  const entry = manifest?.files.find((file) => file.path === fullPath);
+  const entry = await (await openDeploymentIndex(result.deployment.manifestKey))?.file(fullPath);
   if (!entry) return assetError(c, () => renderNotFoundPage({ path: "Document unavailable" }));
   const stream = await getObjectStream(objectKey(result, fullPath));
   if (!stream) return assetError(c, () => renderNotFoundPage({ path: "Document unavailable" }));
@@ -92,33 +87,39 @@ app.get("/p/:slug/files/*", async (c) => {
 app.get("/p/:slug/tree", async (c) => {
   const result = await resolvePublication(c.req.param("slug"), c.req.raw);
   if (!result) return c.json({ error: "Not found" }, 404);
-  const manifest = await manifestFor(result);
-  if (!manifest) return c.json({ error: "Manifest unavailable" }, 404);
   const prefix = result.publication.pathPrefix ? `${result.publication.pathPrefix}/` : "";
-  const documents = manifest.files
-    .filter((file) => isHtmlAsset(file.path, file.contentType) && file.path.startsWith(prefix))
-    .map((file) => file.path.slice(prefix.length));
-  const offset = Math.max(0, Number.parseInt(c.req.query("cursor") ?? "0", 10) || 0);
-  const page = documents.slice(offset, offset + 200);
-  const cursor = offset + page.length < documents.length ? String(offset + page.length) : null;
-  return c.json({ documents: page, cursor, total: documents.length }, 200, {
-    "Cache-Control": "public, max-age=0, must-revalidate",
-  });
+  const cache = { "Cache-Control": "public, max-age=0, must-revalidate" };
+  const directory = c.req.query("dir");
+  if (directory === undefined) {
+    // Clients that predate directory pages list every document (rollout only).
+    const all = await deploymentDocuments(result.deployment.manifestKey);
+    if (!all) return c.json({ error: "Manifest unavailable" }, 404);
+    const documents = all.filter((path) => path.startsWith(prefix)).map((path) => path.slice(prefix.length));
+    const offset = Math.max(0, Number.parseInt(c.req.query("cursor") ?? "0", 10) || 0);
+    const page = documents.slice(offset, offset + 200);
+    const cursor = offset + page.length < documents.length ? String(offset + page.length) : null;
+    return c.json({ documents: page, cursor, total: documents.length }, 200, cache);
+  }
+  const pageNumber = treePageCursor(c.req.query("cursor"));
+  // Directories are relative to the publication root, so a page never names
+  // anything outside its path prefix.
+  if (!validTreeDirectory(directory) || pageNumber === null) return c.json({ error: "Invalid tree page" }, 400);
+  const index = await openDeploymentIndex(result.deployment.manifestKey);
+  if (!index) return c.json({ error: "Manifest unavailable" }, 404);
+  const page = await index.treePage(prefix + directory, pageNumber);
+  return c.json({ children: page?.children ?? [], cursor: page?.more ? String(pageNumber + 1) : null }, 200, cache);
 });
 
 app.get("/p/:slug", async (c) => {
   const result = await resolvePublication(c.req.param("slug"), c.req.raw);
   if (!result) return c.html(renderNotFoundPage({ path: c.req.path }), 404);
-  const manifest = await manifestFor(result);
-  if (!manifest) return c.html(renderNotFoundPage({ path: c.req.path }), 404);
+  const index = await openDeploymentIndex(result.deployment.manifestKey);
+  if (!index) return c.html(renderNotFoundPage({ path: c.req.path }), 404);
   const requested = c.req.query("doc");
   const selected = requested ?? result.publication.entryFile;
   const fullPath = selected ? publicationPath(result, selected) : null;
-  if (
-    !selected
-    || !fullPath
-    || !manifest.files.some((file) => file.path === fullPath && isHtmlAsset(file.path, file.contentType))
-  ) {
+  const entry = fullPath ? await index.file(fullPath) : null;
+  if (!fullPath || !entry || !isHtmlAsset(fullPath, entry.contentType)) {
     return c.html(renderNotFoundPage({ path: c.req.path }), 404);
   }
   const slug = result.publication.slug;

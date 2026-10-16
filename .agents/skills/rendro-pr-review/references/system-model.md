@@ -53,9 +53,10 @@ Public capabilities have narrower invariants:
 ```text
 start: validate manifest + checksum, create a new staging deployment
        (previousDeploymentId = active), Worker writes manifest.json + tree-index.json
+       + the sharded path/directory index (index/v1/, root written last)
   -> copy unchanged files from the previous active deployment (<=16 per request,
      size + stored sha256 checked via HEAD) / upload changed files (validated
-     against the manifest entry's size and sha256)
+     against the manifest entry's size and sha256, looked up in one index shard)
   -> commit: files/ key listing must equal manifest paths; Convex requires
      status staging and active pointer unchanged since start
   -> activate new deployment, previous becomes superseded (one mutation)

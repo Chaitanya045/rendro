@@ -2,6 +2,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import publicRoutes from "../src/routes/public-v2";
 import shareRoutes from "../src/routes/share-v2";
 import * as storage from "../src/minio";
+import { deploymentMetadataCache } from "../src/immutable-cache";
 const publication = { publication: { slug: "docs", entryFile: "index.html", title: "Docs", pathPrefix: "" }, deployment: { manifestKey: "root/manifest.json" } };
 const share = { grant: { documentPath: "index.html", expiresAt: Date.now() + 60_000 }, project: { name: "Docs" }, deployment: publication.deployment };
 const manifest = JSON.stringify({ version: 1, files: [{ path: "index.html", sha256: "sha", size: 1, contentType: "text/html" }] });
@@ -26,6 +27,8 @@ it("paginates root publications and renders HTML fragments", async () => {
   vi.mocked(storage.getObjectText).mockResolvedValue(JSON.stringify({ version: 1, files: Array.from({ length: 201 }, (_, i) => ({ path: `${i}.html`, sha256: "sha", size: 1, contentType: "text/html" })) }));
   expect(await (await publicRoutes.request("/p/docs/tree")).json()).toMatchObject({ cursor: "200", total: 201 });
   expect(await (await publicRoutes.request("/p/docs/tree?cursor=200")).json()).toEqual({ documents: ["200.html"], cursor: null, total: 201 });
+  // Deployment manifests are immutable; model a new deployment's isolate.
+  deploymentMetadataCache.clear();
   vi.mocked(storage.getObjectText).mockResolvedValue(manifest);
   vi.mocked(storage.getObjectStream).mockResolvedValue(new ReadableStream<Uint8Array>({ start(controller) {
     controller.enqueue(undefined as unknown as Uint8Array);

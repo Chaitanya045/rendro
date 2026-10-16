@@ -1,4 +1,4 @@
-import { vi } from "vitest";
+import { beforeEach, vi } from "vitest";
 
 // Test env vars must be set before any imports that read config
 process.env.AUTH_SECRET = "test-auth-secret-32-chars-long!!";
@@ -16,3 +16,10 @@ process.env.SITE_URL = "http://localhost:3000";
 
 // No permissive legacy credential/deletion emulator: tests must configure their backend.
 globalThis.fetch = vi.fn(() => Promise.resolve(new Response("Not found", { status: 404 }))) as typeof fetch;
+
+// Parsed deployment metadata is cached per isolate. Tests reuse manifest keys
+// with different fixtures, so every test starts with an empty cache. Import it
+// lazily so a test's module reset reaches its current instance.
+beforeEach(async () => {
+  (await import("../src/immutable-cache")).deploymentMetadataCache.clear();
+});

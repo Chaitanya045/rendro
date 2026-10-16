@@ -1,5 +1,5 @@
 import { authClientIpHeaders } from "@/auth-client-ip";
-import { parseStoredManifest } from "@/stored-manifest";
+import { openDeploymentIndex } from "@/deployment-index";
 import { isShareDocument } from "@/share-assets";
 import type { WorkerShare } from "../../shared/resolver-dto";
 import { signResolverRequest } from "../../shared/resolver-auth";
@@ -15,7 +15,7 @@ import { renderFaviconLinks } from "./favicon";
 import { renderThemeAssets } from "./theme";
 import { Hono } from "hono";
 import { CONVEX_INTERNAL_SECRET, CONVEX_SITE_URL } from "@/config";
-import { getObjectStream, getObjectText } from "@/minio";
+import { getObjectStream } from "@/minio";
 import { renderNotFoundPage } from "@/routes/not-found";
 import { injectMobileViewportScrollbarStream, injectViewerHeadStream } from "@/routes/document-html";
 
@@ -39,8 +39,8 @@ app.get("/s/:token/files/*", async (c) => {
   if (!resolution || !path) return assetError(c, () => renderNotFoundPage({ path: "Document unavailable" }));
   const documentPath = resolution.grant.documentPath;
   const directory = documentPath.includes("/") ? documentPath.slice(0, documentPath.lastIndexOf("/") + 1) : "";
-  const manifest = parseStoredManifest(await getObjectText(resolution.deployment.manifestKey));
-  const entry = manifest?.files.find(file => file.path === path);
+  // The grant was resolved freshly above; only immutable metadata is cached.
+  const entry = await (await openDeploymentIndex(resolution.deployment.manifestKey))?.file(path);
   if (!entry) return assetError(c, () => renderNotFoundPage({ path: "Document unavailable" }));
   const type = normalizeMediaType(entry.contentType);
   const isExactDocument = path === documentPath;
