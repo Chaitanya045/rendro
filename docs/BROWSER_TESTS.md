@@ -549,6 +549,13 @@ local source revision. The comment highlight fixture explicitly updates a visibl
 anchor twice and asserts DOM segment reuse before exercising off-screen removal;
 reuse must not depend on an incidental resize or animation frame.
 
+Coverage context teardown keeps the 10-second browser-action deadline around
+protocol flushing, profiler detachment and physical context close. Source-map
+conversion and report writing happen afterward, within the existing 60-second
+hook budget. A fake-clock regression advances time during reporting to verify
+that CPU-heavy conversion is not charged to an already completed browser action;
+mapping failures still fail teardown.
+
 The coverage job keeps its existing 20-minute timeout. Browser files remain
 serial, and shared-host commands use `VITEST_MAX_WORKERS=2`. The #104 Round 2 validation
 used pinned Chromium for three consecutive full runs on unchanged code. All

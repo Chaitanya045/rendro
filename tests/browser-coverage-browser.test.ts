@@ -1,13 +1,21 @@
 import type { CoverageMapData } from "istanbul-lib-coverage";
-import { afterAll, beforeAll, expect, it, onTestFinished } from "vitest";
-import { bundleBrowserAsset, createBrowserHarness } from "./helpers/browser";
+import { afterAll, beforeAll, expect, it, onTestFinished, vi } from "vitest";
+import { browserStepTimeout, bundleBrowserAsset, createBrowserHarness } from "./helpers/browser";
 import { convertBrowserCoverage } from "./helpers/browser-coverage";
 
 let failureReport: CoverageMapData | undefined;
 let captureFailure = false;
 let failureFixtureStarted = false;
 let deliberateFailureReached = false;
-const harness = createBrowserHarness({ coverage: true, chromiumArgs: ["--site-per-process", "--enable-features=IsolateSandboxedIframes"], onCoverage: report => { if (captureFailure) failureReport = report; } });
+let advanceReportingClock = false;
+let slowReportReached = false;
+const harness = createBrowserHarness({ coverage: true, chromiumArgs: ["--site-per-process", "--enable-features=IsolateSandboxedIframes"], onCoverage: report => {
+  if (captureFailure) failureReport = report;
+  if (advanceReportingClock) {
+    slowReportReached = true;
+    vi.advanceTimersByTime(browserStepTimeout + 1);
+  }
+} });
 const probe = "tests/fixtures/browser-coverage-probe.ts";
 const included = new Set([probe, "src/commentor/commentor.ts"]);
 beforeAll(async () => {
@@ -121,6 +129,20 @@ it("fails teardown for an unmapped extensionless first-party script", async () =
   await page.goto(`${harness.origin}/opener`);
   await page.addScriptTag({ url: `${harness.origin}/unmapped` });
   await expect(page.context().close()).rejects.toThrow("Unmapped browser script");
+});
+
+it("allows coverage reporting to outlive the browser action deadline", async () => {
+  const page = await harness.newPage();
+  await page.goto(`${harness.origin}/opener`);
+  // The report callback runs after protocol cleanup and physical context close.
+  // Advance Node time there to simulate slow reporting without a real delay.
+  onTestFinished(() => {
+    vi.useRealTimers();
+    advanceReportingClock = false;
+    expect(slowReportReached).toBe(true);
+  });
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  advanceReportingClock = true;
 });
 
 // it.fails also swallows hook failures: assert OUTSIDE that test's lifecycle.

@@ -26,6 +26,7 @@ export async function buildBrowserBundle(options: BuildOptions) {
 }
 
 type Script = Profiler.ScriptCoverage & { source?: string };
+type CloseBrowser = (action: () => Promise<void>) => Promise<void>;
 
 export async function convertBrowserCoverage(entries: Script[], root = process.cwd(), include?: Set<string>, scriptUrls = new Set<string>()) {
   if (!include && !manifest.has(root)) manifest.set(root, sourceManifest(root));
@@ -296,24 +297,30 @@ export async function collectBrowserContext(context: BrowserContext, suite: stri
   await context.route("**/*", route => route.fallback());
 
   const close = context.close.bind(context);
-  context.close = async options => {
+  async function closeContext(options?: Parameters<BrowserContext["close"]>[0], closeBrowser: CloseBrowser = action => action()) {
     if (closing) return;
     closing = true;
-    try {
-      // Flush every attached target before stopping/detaching even the first
-      // profiler: parent teardown must not race its OOPIF's final collection.
-      await flush();
-      for (const page of context.pages()) await finishPage(page);
-    } finally { await close(options); }
+    await closeBrowser(async () => {
+      try {
+        // Flush every attached target before stopping/detaching even the first
+        // profiler: parent teardown must not race its OOPIF's final collection.
+        await flush();
+        for (const page of context.pages()) await finishPage(page);
+      } finally { await close(options); }
+    });
     if (errors.length) throw new AggregateError(errors, "Browser coverage collection failed");
+    // Source-map conversion is CPU work after the browser has closed. The
+    // harness hook bounds reporting separately from its short browser deadline.
     const report = await convertBrowserCoverage(collected, process.cwd(), undefined, scriptUrls);
     onReport?.(report);
     if (process.env.RENDRO_BROWSER_COVERAGE_DIR) {
       mkdirSync(process.env.RENDRO_BROWSER_COVERAGE_DIR, { recursive: true });
       writeFileSync(resolve(process.env.RENDRO_BROWSER_COVERAGE_DIR, `${basename(suite)}-${randomUUID()}.json`), JSON.stringify(report));
     }
-  };
+  }
+  context.close = options => closeContext(options);
   return {
+    close: (closeBrowser: CloseBrowser) => closeContext(undefined, closeBrowser),
     flush,
     async targets() {
       const types: string[] = [];

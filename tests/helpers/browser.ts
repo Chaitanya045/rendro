@@ -57,8 +57,12 @@ export function createBrowserHarness(harnessOptions: { coverage?: boolean; chrom
   const unexpectedOrigins = new Set<string>();
 
   async function closeContexts() {
-    const results = await Promise.allSettled([...contexts].map(context =>
-      browserStep("close browser context", () => context.close())));
+    const results = await Promise.allSettled([...contexts].map(context => {
+      const collector = collectors.get(context);
+      return collector
+        ? collector.close(action => browserStep("close browser context", action))
+        : browserStep("close browser context", () => context.close());
+    }));
     contexts.clear();
     collectors.clear();
     const errors = results.filter(result => result.status === "rejected").map(result => result.reason as unknown);
