@@ -21,7 +21,7 @@ describe("pins and anchors", () => {
     await lab.ready([{ _id: "t1", body: "First", anchor: heading }, { _id: "t2", body: "Second", anchor: intro, resolved: true }, { _id: "t3", body: "Third", anchor: intro }]);
     await expect.poll(() => lab.pins().count()).toBe(2);
     expect(await lab.pins().nth(1).getAttribute("aria-label")).toBe("Thread 2 by Ada");
-    const title = await lab.doc(() => document.querySelector("h1")!.getBoundingClientRect().toJSON());
+    const title = await lab.doc(() => { const rect = document.querySelector("h1")!.getBoundingClientRect(); return { left: rect.left, top: rect.top }; });
     const position = await lab.pins().first().evaluate(pin => ({ left: parseFloat((pin as HTMLElement).style.left), top: parseFloat((pin as HTMLElement).style.top) }));
     expect(position).toEqual({ left: title.left - 10, top: title.top - 26 });
     const bubble = await openBubble(lab);
@@ -231,7 +231,7 @@ describe("authoring", () => {
     expect(await lab.tid("commentor-composer").locator(".anchor-label").innerText()).toBe("On: “Quarterly report”");
     await lab.tid("commentor-composer-post").click();
     await expect.poll(() => lab.pins().count()).toBe(1);
-    const stored = await lab.page.evaluate(() => Object.entries(sessionStorage).filter(([key]) => key.startsWith("commentor-operations:")).map(([, value]) => JSON.parse(value)));
+    const stored = await lab.page.evaluate(() => (Object.entries(sessionStorage) as Array<[string, string]>).filter(([key]) => key.startsWith("commentor-operations:")).map(([, value]) => JSON.parse(value) as { operations: object; drafts: object }));
     expect(stored[0].drafts).toEqual({});
     expect(stored[0].operations).toEqual({});
   });
@@ -436,7 +436,7 @@ describe("write guards", () => {
     await lab.openDrawer();
     const card = (id: string) => lab.ui.locator(`.drawer-thread[data-thread-id="${id}"]`);
     const input = card("t1").locator('[data-testid="commentor-reply-input"]');
-    const drafts = () => lab.page.evaluate(() => Object.values(sessionStorage).flatMap(value => value.includes('"drafts"') ? [Object.keys(JSON.parse(value).drafts)] : []));
+    const drafts = () => lab.page.evaluate(() => (Object.values(sessionStorage) as string[]).flatMap(value => value.includes('"drafts"') ? [Object.keys((JSON.parse(value) as { drafts: object }).drafts)] : []));
     await input.fill("temporary");
     await expect.poll(drafts).toEqual([["t1"]]);
     await input.fill("");

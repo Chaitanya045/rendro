@@ -98,7 +98,7 @@ describe("parent compatibility and recovery", () => {
     expect(creates[1].args.clientOperationId).toBe(creates[0].args.clientOperationId);
     // The abandoned acknowledgement from the first connection cannot retire anything.
     await lab.host(l => l.settle(0));
-    const state = await lab.page.evaluate(() => Object.values(sessionStorage).filter(value => value.includes('"operations"')).map(value => JSON.parse(value)));
+    const state = await lab.page.evaluate(() => (Object.values(sessionStorage) as string[]).filter(value => value.includes('"operations"')).map(value => JSON.parse(value) as { operations: object; drafts: object }));
     expect(state.every(entry => Object.keys(entry.operations).length === 0 && Object.keys(entry.drafts).length === 0)).toBe(true);
   });
 
@@ -229,7 +229,7 @@ describe("parent hardening", () => {
     await expect.poll(() => lab.doc(() => location.pathname)).toMatch(/other\.html$/);
     await lab.host(l => l.settle(0));
     // The operation stays recorded for a safe retry instead of being retired by a stale acknowledgement.
-    const operations = await lab.page.evaluate(() => Object.values(sessionStorage).flatMap(value => value.includes('"operations"') ? [Object.keys(JSON.parse(value).operations).length] : []));
+    const operations = await lab.page.evaluate(() => (Object.values(sessionStorage) as string[]).flatMap(value => value.includes('"operations"') ? [Object.keys((JSON.parse(value) as { operations: object }).operations).length] : []));
     expect(operations.some(count => count === 1)).toBe(true);
     await expect.poll(() => lab.host(l => l.subscriptions)).toBeGreaterThanOrEqual(2);
     await lab.ui.locator('[data-testid="commentor-dock"]').waitFor({ state: "attached" });

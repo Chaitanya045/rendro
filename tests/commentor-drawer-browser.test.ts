@@ -9,7 +9,7 @@ const heading = { kind: "element", path: ["main", "h1"] };
 const intro = { kind: "text-range", quote: "lazy dog", path: ["main", "p:nth-of-type(1)"], startOffset: 0, endOffset: 8 };
 const footer = { kind: "element", path: ["main", "#footer"] };
 const dock = (lab: Lab) => lab.tid("commentor-dock");
-const dockBox = (lab: Lab) => dock(lab).evaluate(el => ({ left: parseFloat((el as HTMLElement).style.left), top: parseFloat((el as HTMLElement).style.top), className: el.className }));
+const dockBox = (lab: Lab) => dock(lab).evaluate(el => ({ left: parseFloat((el as HTMLElement).style.left), top: parseFloat((el as HTMLElement).style.top), className: (el as HTMLElement).className }));
 const scrollY = (lab: Lab) => lab.doc(() => Math.round(window.scrollY));
 
 describe("comments drawer", () => {
@@ -76,7 +76,7 @@ describe("comments drawer", () => {
     await cards.nth(1).locator(".body").click();
     await expect.poll(() => lab.tid("commentor-thread-bubble").getAttribute("data-thread-id")).toBe("far");
     expect(await scrollY(lab)).toBeGreaterThan(500);
-    const footerBox = await lab.doc(() => document.getElementById("footer")!.getBoundingClientRect().toJSON());
+    const footerBox = await lab.doc(() => { const rect = document.getElementById("footer")!.getBoundingClientRect(); return { top: rect.top, bottom: rect.bottom }; });
     expect(footerBox.top).toBeGreaterThanOrEqual(0);
     expect(footerBox.bottom).toBeLessThanOrEqual(800);
     await lab.tid("commentor-thread-bubble").locator(".thread-close").click();
@@ -507,7 +507,7 @@ describe("tooltips, selection and appearance", () => {
     const lab = await commentLab.open();
     await lab.ready();
     const host = lab.page.frameLocator("#content-frame").locator("#commentor-host");
-    const classes = () => host.evaluate(el => el.className);
+    const classes = () => host.evaluate(el => (el as HTMLElement).className);
     const send = (data: unknown) => lab.host((_lab, data) => (document.getElementById("content-frame") as HTMLIFrameElement).contentWindow!.postMessage(data, "*"), data);
     await send({ type: "rendro-theme", theme: "dark" });
     await expect.poll(classes).toBe("dark");

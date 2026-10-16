@@ -8,7 +8,7 @@ vi.mock("convex/browser", () => ({
   ConvexClient: class {
     setAuth = vi.fn();
     onUpdate = vi.fn();
-    mutation = vi.fn(async () => null);
+    mutation = vi.fn(() => Promise.resolve(null));
     constructor(readonly url: string) { convex.clients.push(this); }
   },
 }));

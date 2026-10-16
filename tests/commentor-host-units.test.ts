@@ -7,7 +7,7 @@ import {
   type DocumentCommentBackend, type DocumentCommentScope,
 } from "../src/commentor/parent-host";
 import {
-  COMMENTOR_PARENT_ERROR, COMMENTOR_PARENT_READY, COMMENTOR_PARENT_REQUEST, COMMENTOR_PARENT_RESPONSE, COMMENTOR_PARENT_UPDATE, COMMENTOR_PARENT_REPLIES_UPDATE,
+  COMMENTOR_PARENT_ERROR, COMMENTOR_PARENT_READY, COMMENTOR_PARENT_REQUEST, COMMENTOR_PARENT_RESPONSE, COMMENTOR_PARENT_REPLIES_UPDATE,
 } from "../src/commentor/parent-protocol";
 
 const clients = vi.hoisted(() => [] as Array<{
@@ -69,6 +69,7 @@ describe("comment host protocol handling", () => {
     let publishReplies!: Parameters<DocumentCommentBackend["subscribeReplies"]>[2];
     let failReplies!: (error: Error) => void;
     const pendingMutations: Array<{ resolve: () => void; reject: (error: Error) => void }> = [];
+    const mutate = vi.fn<DocumentCommentBackend["mutate"]>(() => new Promise<void>((resolve, reject) => { pendingMutations.push({ resolve, reject }); }));
     const backend: DocumentCommentBackend = {
       subscribe: (_scope, onUpdate, onError) => {
         publish = onUpdate; fail = onError;
@@ -82,7 +83,7 @@ describe("comment host protocol handling", () => {
         replySubscriptions.push(subscription);
         return subscription;
       },
-      mutate: vi.fn(() => new Promise<void>((resolve, reject) => { pendingMutations.push({ resolve, reject }); })),
+      mutate,
     };
     const host = new CommentorParentHost(frame as never, "https://rendro.test", { ...project, convexUrl: "https://convex.test" }, backend,
       options.userId === undefined ? "user-a" : options.userId);
@@ -92,7 +93,7 @@ describe("comment host protocol handling", () => {
       receive({ type: COMMENTOR_PARENT_REQUEST, requestId, method, args }, source);
     const responses = () => posted.filter(message => message.type === COMMENTOR_PARENT_RESPONSE);
     const subscribe = () => { load(); request("sub", "subscribe", { documentPath: "guide.html" }); };
-    return { host, frame, child, posted, backend, load: () => load(), receive, request, responses, subscribe, subscriptions, replySubscriptions, pendingMutations,
+    return { host, frame, child, posted, backend, mutate, load: () => load(), receive, request, responses, subscribe, subscriptions, replySubscriptions, pendingMutations,
       publish: (...args: Parameters<typeof publish>) => publish(...args), fail: (error: Error) => fail(error),
       publishReplies: (...args: Parameters<typeof publishReplies>) => publishReplies(...args), failReplies: (error: Error) => failReplies(error) };
   }
@@ -153,7 +154,7 @@ describe("comment host protocol handling", () => {
     state.frame.contentWindow = other;
     state.request("swapped", "thread.resolve", { threadId: "t", resolved: true }, other);
     expect(other.postMessage).toHaveBeenCalledWith(expect.objectContaining({ requestId: "swapped", ok: false, error: "Comment scope is unavailable" }), "*");
-    expect(state.backend.mutate).not.toHaveBeenCalled();
+    expect(state.mutate).not.toHaveBeenCalled();
   });
 
   it("keeps a thread's reply stream only while the thread is listed, and drops stale streams and errors", () => {
@@ -186,11 +187,11 @@ describe("comment host protocol handling", () => {
     state.subscribe();
     state.publish([thread("gone")], { canLoadMore: false, loading: false });
     state.request("first", "thread.remove", { threadId: "gone", clientOperationId: "op-1" });
-    expect(state.backend.mutate).toHaveBeenCalledTimes(1);
+    expect(state.mutate).toHaveBeenCalledTimes(1);
     // The deletion appeared to finish: the thread has left the page but the operation is still recorded.
     state.publish([], { canLoadMore: false, loading: false });
     state.request("retry", "thread.remove", { threadId: "gone", clientOperationId: "op-1" });
-    expect(state.backend.mutate).toHaveBeenCalledTimes(2);
+    expect(state.mutate).toHaveBeenCalledTimes(2);
     state.request("other-id", "thread.remove", { threadId: "gone", clientOperationId: "op-2" });
     state.request("other-method", "thread.resolve", { threadId: "gone", resolved: true, clientOperationId: "op-1" });
     state.request("unknown", "thread.remove", { threadId: "never-seen", clientOperationId: "op-1" });
@@ -235,7 +236,7 @@ describe("Convex backends", () => {
     const client = {
       onPaginatedUpdate_experimental(query: unknown, args: unknown, options: unknown, callback: typeof report) { calls.push({ query, args, options }); report = callback; return unsubscribe; },
       onUpdate: vi.fn(() => unsubscribe),
-      mutation: vi.fn(async () => null),
+      mutation: vi.fn(() => Promise.resolve(null)),
     };
     return { client: client as unknown as Client, calls, report: (result: Parameters<typeof report>[0]) => report(result), unsubscribe, raw: client };
   }
@@ -324,9 +325,9 @@ describe("booting the parent host", () => {
     if (config) Object.assign(window, { [key]: config });
   }
   function session(user: unknown = { id: "user-a" }, token: unknown = { token: "jwt" }, status = 200, tokenStatus = 200) {
-    const fetcher = vi.fn(async (url: string) => String(url).includes("get-session")
+    const fetcher = vi.fn((url: string) => Promise.resolve(String(url).includes("get-session")
       ? new Response(JSON.stringify(user ? { user } : null), { status })
-      : new Response(JSON.stringify(token), { status: tokenStatus }));
+      : new Response(JSON.stringify(token), { status: tokenStatus })));
     vi.stubGlobal("fetch", fetcher);
     return fetcher;
   }
@@ -360,12 +361,12 @@ describe("booting the parent host", () => {
     // A refused or empty token ends deployment tracking and gives the client nothing.
     const frame = document.getElementById("content-frame")!;
     frame.dataset.activeDeployment = "dep-1";
-    fetcher.mockImplementation(async (url: string) => String(url).includes("get-session") ? new Response(JSON.stringify({ user: { id: "user-a" } })) : new Response("{}", { status: 403 }));
+    fetcher.mockImplementation((url: string) => Promise.resolve(String(url).includes("get-session") ? new Response(JSON.stringify({ user: { id: "user-a" } })) : new Response("{}", { status: 403 })));
     expect(await authenticate()).toBeNull();
     expect(frame.dataset.activeDeployment).toBeUndefined();
-    fetcher.mockImplementation(async (url: string) => String(url).includes("get-session") ? new Response(JSON.stringify({ user: { id: "user-a" } })) : new Response(JSON.stringify({ token: "" })));
+    fetcher.mockImplementation((url: string) => Promise.resolve(String(url).includes("get-session") ? new Response(JSON.stringify({ user: { id: "user-a" } })) : new Response(JSON.stringify({ token: "" }))));
     expect(await authenticate()).toBeNull();
-    fetcher.mockImplementation(async (url: string) => String(url).includes("get-session") ? new Response(JSON.stringify({ user: { id: "user-a" } })) : new Response("{}", { status: 500 }));
+    fetcher.mockImplementation((url: string) => Promise.resolve(String(url).includes("get-session") ? new Response(JSON.stringify({ user: { id: "user-a" } })) : new Response("{}", { status: 500 })));
     expect(await authenticate()).toBeNull();
     dispose();
     expect(await authenticate()).toBeNull();
@@ -382,8 +383,8 @@ describe("booting the parent host", () => {
     const dispose = bootCommentorParentHost()!;
     await vi.waitFor(() => expect(clients[0].setAuth).toHaveBeenCalled());
     const authenticate = clients[0].setAuth.mock.calls[0][0] as () => Promise<string | null>;
-    fetcher.mockImplementation(async (url: string) => String(url).includes("get-session")
-      ? new Response(JSON.stringify({ user: { id: "user-a" } }))
+    fetcher.mockImplementation((url: string) => String(url).includes("get-session")
+      ? Promise.resolve(new Response(JSON.stringify({ user: { id: "user-a" } })))
       : new Promise<Response>(resolve => { answer = resolve; }));
     const pending = authenticate();
     await vi.waitFor(() => expect(answer).toBeTypeOf("function"));

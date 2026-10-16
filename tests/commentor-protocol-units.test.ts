@@ -15,7 +15,7 @@ afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
 
 describe("protocol message guards", () => {
   const junk = [null, undefined, "text", 7, true];
-  it.each([
+  const rows: Array<[string, (value: unknown) => boolean, unknown, unknown[]]> = [
     ["request", isCommentorParentRequest, { type: COMMENTOR_PARENT_REQUEST, requestId: "r", method: "subscribe", args: {} },
       [{ type: "other" }, { type: COMMENTOR_PARENT_REQUEST, requestId: "", method: "subscribe" }, { type: COMMENTOR_PARENT_REQUEST, requestId: "x".repeat(161), method: "subscribe" },
         { type: COMMENTOR_PARENT_REQUEST, requestId: 4, method: "subscribe" }, { type: COMMENTOR_PARENT_REQUEST, requestId: "r", method: "drop.table" }, { type: COMMENTOR_PARENT_REQUEST, requestId: "r", method: 4 }]],
@@ -33,7 +33,8 @@ describe("protocol message guards", () => {
       [{ type: "other", protocolVersion: COMMENTOR_PROTOCOL_VERSION, parentGeneration: "g" }, { type: COMMENTOR_PARENT_READY, protocolVersion: COMMENTOR_PROTOCOL_VERSION - 1, parentGeneration: "g" },
         { type: COMMENTOR_PARENT_READY, protocolVersion: COMMENTOR_PROTOCOL_VERSION, parentGeneration: 3 }, { type: COMMENTOR_PARENT_READY, protocolVersion: COMMENTOR_PROTOCOL_VERSION, parentGeneration: "" }]],
     ["ready signal", isCommentorParentReadySignal, { type: COMMENTOR_PARENT_READY }, [{ type: "other" }, {}]],
-  ] as const)("%s accepts its shape and rejects every other", (_name, guard, valid, invalid) => {
+  ];
+  it.each(rows)("%s accepts its shape and rejects every other", (_name, guard, valid, invalid) => {
     expect(guard(valid)).toBe(true);
     for (const value of [...junk, ...invalid]) expect(guard(value), JSON.stringify(value)).toBe(false);
   });
@@ -46,14 +47,15 @@ describe("mutation argument validation", () => {
     expect(record({ a: 1 })).toEqual({ a: 1 });
     for (const value of [null, undefined, [], "x", 3]) expect(record(value)).toBeNull();
   });
-  it.each([
+  const anchors: Array<[unknown, boolean]> = [
     [anchor, true], [text, true], [{ ...text, startOffset: 1_000_000, endOffset: 0 }, true],
     [null, false], [{ kind: "element" }, false], [{ kind: "element", path: [] }, false], [{ kind: "element", path: Array(65).fill("p") }, false],
     [{ kind: "element", path: ["   "] }, false], [{ kind: "element", path: [3] }, false], [{ kind: "element", path: ["x".repeat(257)] }, false], [{ kind: "area", path: ["main"] }, false],
     [{ ...text, quote: 4 }, false], [{ ...text, quote: "  " }, false], [{ ...text, quote: "q".repeat(4097) }, false],
     [{ ...text, startOffset: 1.5 }, false], [{ ...text, startOffset: -1 }, false], [{ ...text, startOffset: 1_000_001 }, false],
     [{ ...text, endOffset: 0.5 }, false], [{ ...text, endOffset: -1 }, false], [{ ...text, endOffset: 1_000_001 }, false],
-  ])("validAnchor(%j) is %s", (value, expected) => expect(validAnchor(value)).toBe(expected));
+  ];
+  it.each(anchors)("validAnchor(%j) is %s", (value, expected) => expect(validAnchor(value)).toBe(expected));
   it.each([
     ["thread.create", { body: "  hello  ", anchor }, { body: "hello", anchor }],
     ["thread.create", { body: "hi", anchor, clientOperationId: "op" }, { clientOperationId: "op", body: "hi", anchor }],
@@ -176,14 +178,14 @@ describe("parent transport edge cases", () => {
     vi.useFakeTimers();
     vi.stubGlobal("window", { setTimeout, clearTimeout });
     const listeners = new Set<(event: MessageEvent) => void>();
-    const parent = { postMessage: vi.fn() };
+    const parent = { postMessage: vi.fn<(message: { method?: string; requestId: string; args?: unknown }) => void>() };
     const transport = new ParentCommentTransport(parent, {
       addEventListener: (_type: string, listener: EventListenerOrEventListenerObject) => listeners.add(listener as never),
       removeEventListener: (_type: string, listener: EventListenerOrEventListenerObject) => listeners.delete(listener as never),
     }, "guide.html");
     const errors: Error[] = [];
     if (subscribed) transport.subscribe(vi.fn(), vi.fn(), error => errors.push(error));
-    const send = (data: unknown) => { for (const listener of [...listeners]) listener({ source: parent, data } as MessageEvent); };
+    const send = (data: unknown) => { for (const listener of [...listeners]) listener({ source: parent, data } as unknown as MessageEvent); };
     const ready = (extra: Record<string, unknown> = {}) => send({ type: COMMENTOR_PARENT_READY, protocolVersion: COMMENTOR_PROTOCOL_VERSION, parentGeneration: "g1", ...extra });
     const sent = (method: string) => parent.postMessage.mock.calls.map(([message]) => message).filter(message => message.method === method);
     return { transport, parent, errors, send, ready, sent };
@@ -206,7 +208,7 @@ describe("parent transport edge cases", () => {
   it("reports an unsaved draft, tolerates a failed completion and keeps a pending write without a slow-write handler", async () => {
     const { transport, ready, send, sent, errors } = connect();
     ready({ recoveryState: { operations: { [mutationKey("thread.create")]: { method: "thread.create", args: { body: "x", anchor: {} }, clientOperationId: "op1" } }, drafts: {} } });
-    const fail = (method: string, error?: string) => send({ type: COMMENTOR_PARENT_RESPONSE, requestId: sent(method).at(-1).requestId, ok: false, ...(error ? { error } : {}) });
+    const fail = (method: string, error?: string) => send({ type: COMMENTOR_PARENT_RESPONSE, requestId: sent(method).at(-1)!.requestId, ok: false, ...(error ? { error } : {}) });
     transport.saveDraft("create", { body: "draft" });
     fail("draft.save");
     await vi.advanceTimersByTimeAsync(0);
