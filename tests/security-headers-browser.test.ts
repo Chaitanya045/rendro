@@ -201,7 +201,7 @@ describe("Chromium security header smoke", () => {
       expect(await frame.locator("body").evaluate(() => { try { void parent.document; return false; } catch { return true; } })).toBe(true);
       await settled(page);
       expect(await page.locator('script[src="/commentor-parent.js?v=15"]').count()).toBe(1);
-      expect(await frame.locator('script[src="/commentor.js?v=44"]').count()).toBe(1);
+      expect(await frame.locator('script[src="/commentor.js?v=45"]').count()).toBe(1);
       const originalNonce = await page.locator('script[src="/commentor-parent.js?v=15"]').evaluate(script => (script as HTMLScriptElement).nonce);
       expect(originalNonce).not.toBe("");
 

@@ -193,8 +193,9 @@ export class ParentCommentTransport {
           // acknowledgement arrives. A deadline cannot establish failure.
           // Keep the operation pending and accept the eventual server result;
           // never resubmit toggles, creates or replies on a timer.
-          const pending = this.pending.get(requestId);
-          if (pending) pending.dismissSlow = this.slowHandler?.() || undefined;
+          // A response or retirePending clears this timer together with the entry,
+          // so the request is still pending whenever it fires.
+          this.pending.get(requestId)!.dismissSlow = this.slowHandler?.() || undefined;
           return;
         }
         this.pending.delete(requestId);

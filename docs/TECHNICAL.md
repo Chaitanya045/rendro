@@ -1181,6 +1181,8 @@ publisher iframe <- scoped results  <- trusted parent shell <- reactive pages
 
 The iframe receives only document-scoped comment data and operation results, never a JWT or session credential. The parent derives organization, project, and document from its trusted configuration and frame URL, allowlists comment operations, and confines thread mutations to that document. Server-side membership and thread ownership checks in `convex/documentThreads.ts` and `convex/documentReplies.ts` remain authoritative. Author fields come from the authenticated identity.
 
+Convex delivers the reactive snapshot that contains a new comment or reply before the mutation's acknowledgement, so the widget treats either order as normal. Closing the composer returns focus to the control that opened it even when the snapshot closes the composer first, and a sent reply keeps keyboard focus in its (possibly re-rendered) reply box. A rendered action whose write is still outstanding stays disabled across re-renders.
+
 ### Comment permissions
 
 Project comment queries and mutations require current organization membership and the exact organization/project/document scope. Authors can delete their own threads and replies; organization owners and admins can delete anyone's comments. Other members cannot. Archive/unarchive uses the same author-or-admin rule because it hides a thread. The server returns a per-comment `canDelete` flag in thread pages, reply previews, and reply pages; the widget hides Delete (and thread Archive/Unarchive) unless permitted. These flags are presentation hints: mutations recheck the current identity and role.
