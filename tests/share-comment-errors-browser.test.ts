@@ -137,7 +137,6 @@ it("share failures belong to their document, but the account quota keeps countin
     ? { status, headers: { "Retry-After": "30" }, body: "not JSON" } : { status, json: { error: "private trace" } }));
   const change = () => page.evaluate(() => {
     (window as unknown as { RENDRO_CURRENT_DOC: string }).RENDRO_CURRENT_DOC = "org-a/project-a/other.html";
-    window.dispatchEvent(new Event("rendro:document-change"));
   });
   const notice = page.locator("#share-error");
   await page.locator("#share-btn").click();

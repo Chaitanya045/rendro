@@ -437,7 +437,7 @@ it('a share failure notice is cleared when navigation changes the document', asy
   await page.locator('#share-btn').click();
   await requests.settle({ message: 'Permission denied' }, 403);
   await page.locator('#share-error').waitFor({ state: 'visible' });
-  // Real lazy-tree navigation (back/forward) announces the document change.
+  // Real lazy-tree navigation (back/forward) assigns the current document.
   await page.evaluate(() => window.dispatchEvent(new PopStateEvent('popstate', { state: { docPath: 'org-a/project-a/other.html' } })));
   await expect.poll(() => page.evaluate(() => (window as unknown as { RENDRO_CURRENT_DOC: string }).RENDRO_CURRENT_DOC)).toBe('org-a/project-a/other.html');
   expect(await page.locator('#share-error').isVisible()).toBe(false);

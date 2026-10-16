@@ -1,5 +1,5 @@
 import { ConvexError } from "convex/values";
-import { isPublicErrorData } from "../shared/public-errors";
+import { isPublicErrorData, type PublicErrorCode } from "../shared/public-errors";
 
 // Only the limiter's documented comments envelope is safe to expose. Never
 // display backend messages or infer quotas from diagnostic strings.
@@ -32,21 +32,20 @@ export function commentErrorMessage(error: unknown, fallback: string): string {
   return error instanceof ConvexError && isPublicErrorData(error.data) ? messages[error.data.code] : fallback;
 }
 
-// A rate limit and the codes below definitively reject this action before it
-// can write. Unrecognized codes (even structured ConvexErrors) must keep the
-// identity for a safe, unchanged retry.
+// A rate limit and every code marked below definitively reject this action
+// before it can write. Unrecognized codes (even structured ConvexErrors) must
+// keep the identity for a safe, unchanged retry. The record type forces a
+// decision whenever a public code is added.
+const definitiveCodes: Record<PublicErrorCode, boolean> = {
+  invalid_id: true,
+  not_found: true,
+  forbidden: true,
+  invalid_input: true,
+  unauthenticated: true,
+  conflict: true,
+};
+
 export function isDefinitiveCommentRejection(error: unknown): boolean {
   if (commentRetryAfter(error) !== null) return true;
-  if (!(error instanceof ConvexError) || !isPublicErrorData(error.data)) return false;
-  switch (error.data.code) {
-    case "invalid_id":
-    case "not_found":
-    case "forbidden":
-    case "invalid_input":
-    case "unauthenticated":
-    case "conflict":
-      return true;
-    default:
-      return false;
-  }
+  return error instanceof ConvexError && isPublicErrorData(error.data) && definitiveCodes[error.data.code];
 }

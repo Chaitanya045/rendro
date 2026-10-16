@@ -45,6 +45,14 @@ it("renders a quota through the transport and preserves create/reply drafts unti
     };
     // Non-quota failures keep the existing toasts and never start a cooldown.
     await attempt("Draft");
+    // Enter on an empty draft, or while this submission is still pending, sends nothing.
+    const pending = mutations().length;
+    const enter = () => field().dispatchEvent(new KeyboardEvent("keydown", { key: "Enter" }));
+    enter();
+    field().value = "";
+    enter();
+    await flush();
+    expect(mutations()).toHaveLength(pending);
     send({ type: COMMENTOR_PARENT_RESPONSE, requestId: mutations().at(-1)!.requestId, ok: false, error: "private trace" });
     await flush();
     expect(toast()).toContain(action === "create" ? "Could not post comment" : "Could not post reply");
@@ -70,7 +78,14 @@ it("renders a quota through the transport and preserves create/reply drafts unti
     expect(button(submitName).disabled).toBe(true);
     expect(root.querySelector('.comment-quota')!.textContent).toContain("3 seconds");
     const denied = mutations().length;
+    // Dismissal returns focus to the draft; Enter during the delay shows the reason again without sending.
+    const focus = vi.spyOn(field(), "focus");
+    root.querySelector<HTMLButtonElement>(".comment-quota button")!.click();
+    expect(root.querySelector<HTMLElement>(".comment-quota")!.hidden).toBe(true);
+    expect(focus).toHaveBeenCalledTimes(1);
     field().dispatchEvent(new KeyboardEvent("keydown", { key: "Enter" }));
+    expect(root.querySelector<HTMLElement>(".comment-quota")!.hidden).toBe(false);
+    expect(mutations()).toHaveLength(denied);
     await vi.advanceTimersByTimeAsync(2100);
     expect(mutations()).toHaveLength(denied);
     expect(button(submitName).disabled).toBe(false);

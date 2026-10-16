@@ -538,7 +538,7 @@ Workers that returned only `document too complex to share` are still treated as
 a limit. A persistent, dismissible notice follows the toolbar in DOM order, with
 a separate always-present polite live region that is written once per notice and
 once when a delay ends; the visible countdown is aria-hidden. Escape dismisses
-it; a document change (`rendro:document-change`, dispatched by the lazy tree) clears
+it; a document change (`rendro:document-change`, fired when the shell's `RENDRO_CURRENT_DOC` changes, which the lazy tree assigns on every navigation) clears
 every notice except the account-wide quota countdown, and a failure arriving
 after the reader moved to another document is dropped.
 `Retry-After` is parsed by `shared/retry-after.ts` (digits-only seconds or an HTTP

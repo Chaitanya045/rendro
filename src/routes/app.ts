@@ -892,6 +892,9 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
   document.addEventListener("keydown",function(e){
     if(e.key==="Escape"&&!shareError.hidden&&(shareError.contains(document.activeElement)||document.activeElement===shareBtn))dismissShareError();
   });
+  // The lazy tree assigns the current document on every navigation; assignment announces the change.
+  var currentDocument=window.RENDRO_CURRENT_DOC;
+  Object.defineProperty(window,"RENDRO_CURRENT_DOC",{configurable:true,enumerable:true,get:function(){return currentDocument;},set:function(value){var changed=value!==currentDocument;currentDocument=value;if(changed)window.dispatchEvent(new Event("rendro:document-change"));}});
   // Quota is account-wide and keeps counting; every other notice describes one document.
   addEventListener("rendro:document-change",function(){if(Date.now()>=shareRetryUntil)clearShareError();});
   var shareLimitMessages={assets:"This document references too many assets to share. Reduce its assets before trying again."};
