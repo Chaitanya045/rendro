@@ -1272,7 +1272,10 @@ a complete signup-to-CLI-push-to-reactive-comment journey. The 12 public-RPC bac
 tests run unconditionally in verify and an explicit E2E CI step. It complements the
 existing Vitest Chromium project, and runs one browser engine at a time.
 See [the two browser test layers](BROWSER_TESTS.md) for setup, limitations,
-failure traces and the #110–#115 journey expansion.
+failure traces and the #110–#115 journey expansion. The complete three-engine run is bounded
+at 45 minutes (60 for the CI job); `e2e/shell-*.spec.ts` (#110) assert the shell, navigation,
+menu, dialog, select and theme transitions, and the registry credits an edge as `e2e` only
+for a named test that asserts its final state.
 
 The UI transition registry in `tests/ui-transitions.json` records behavior and
 assertion evidence for epic #99. Its validator runs in `pnpm verify` and checks

@@ -160,7 +160,7 @@ moves that control; WebKit can otherwise finish its actionability check just
 before the response arrives and click the old position. Waiting for this explicit
 ready state also covers the method-load failure UI, without sleeps or retries.
 
-The complete three-engine suite has a 20-minute bound (30 minutes for the CI
+The complete three-engine suite has a 45-minute bound (60 minutes for the CI
 job including installation); individual auth journeys have a 60-second bound.
 Each test/context has a deterministic synthetic ingress address. The limiter
 case actually exhausts the configured five-attempt window; production limits
@@ -202,6 +202,48 @@ verifies protected entry refreshes it to seven days. A bearer-token check sends
 the session token as `Authorization`, alone and with the cookie, directly to
 Convex and through the Worker. It asserts that bearer tokens never authenticate,
 that no persistent session cookie is set, and that the stored expiry is unchanged.
+
+## Shell, navigation, menus, dialogs and selects (#110)
+
+Six specs under `e2e/shell-*.spec.ts` cover the management shell and its shared
+controls on the real Worker, in all three engines at 1440px and 375px. They
+use `tests/ui-transitions.json` as the checklist: an edge is credited `e2e`
+only when a named test asserts its final state (URL and history entries, focus
+location, `aria-expanded`/`aria-modal`/`inert`, visible content and request
+counts); the ledger names those tests.
+
+| Spec | Covers |
+|---|---|
+| `shell-navigation.spec.ts` | Persistent chrome and the ten client-routed destinations (no document request), destination skeleton and in-place data swap, modified/targeted/download/cross-organization links, no-JavaScript navigation, Back/Forward, blocked Back, dialog/pending-write/cross-tab blockers and Refresh, late responses from disposed pages, dirty-settings discard, revoked membership and account change, and the authenticated-HTML fallback (unavailable bundle, invalid/mismatched/stalled HTML) |
+| `shell-menus.spec.ts` | Mobile drawer modal semantics, focus trap, scrim/Escape/close/route dismissal and resize reconciliation; account menu; organization switcher lazy load, cache reuse, keyboard/typeahead, dismissal, optimistic label hand-off, failure/empty/retry, late responses |
+| `shell-dialogs.spec.ts` | Form dialogs (containment, Close/Cancel/Escape/backdrop, mobile footer order and fit, pending exclusion, failure retention), shared destructive confirmation, toasts |
+| `shell-selects.spec.ts` | Enhanced select keyboard, typeahead, disabled options/groups, validation, reset, programmatic changes, positioning and dismissal |
+| `shell-theme.spec.ts` | Initial theme before first paint, cycle and persistence, OS/storage synchronization, rapid and failing transitions, reduced motion, unavailable storage |
+| `shell-controls.spec.ts` / `shell-entry.spec.ts` | Copy feedback, control sizes and states; direct-entry redirects, focused layouts and error pages |
+
+Tests that mutate or need an exact organization list use a verified disposable
+user. `e2e/shell-fixtures.ts` shares one such user per worker (eight organizations,
+each with a project) and one for the organization switcher, so signup and
+mail verification are paid once; tests that sign out or change membership still
+create their own. The seeded owner is used read-only. Hold helpers stall a single
+backend request at the browser boundary; no production behavior, header or
+clock is changed. The authenticated-HTML fallback test installs Playwright's fake
+clock to cross the 15-second navigation timeout without waiting.
+
+Expected failures (their broken assertions get no `e2e` credit; an unexpected
+pass fails the suite):
+
+- **Back does not restore the saved scroll offset between client-routed management pages.**
+  The departing offset is recorded in history state, but after Back the page content
+  mounts through the public bundle without re-applying it, so the page remains at the
+  top (reproduced in Chromium and Firefox).
+- **An enhanced select does not follow a user-activated native Reset button.**
+  The shared select refreshes its trigger from a microtask queued by the form's `reset`
+  event. For a Reset button the microtask runs before the browser restores the control,
+  so the trigger keeps the pre-reset label while the native value is restored
+  (Chromium, Firefox, WebKit). Programmatic `form.reset()`, which every current
+  controller uses, refreshes correctly and is covered. No current screen has a Reset button.
+
 
 ## Vitest Chromium project
 

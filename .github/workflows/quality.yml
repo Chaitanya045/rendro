@@ -44,7 +44,7 @@ jobs:
 
   e2e:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
     env:
       VITEST_MAX_WORKERS: "2"
       WRANGLER_SEND_METRICS: "false"
