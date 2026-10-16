@@ -15110,7 +15110,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "unit",
+      "status": "browser",
       "auditEvidence": "U",
       "auditNote": "commentor-recovery-ui.test.ts",
       "edges": [
@@ -15155,8 +15155,14 @@
           "inventoryRefs": [
             "C01"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/commentor-protocol-browser.test.ts",
+              "name": "tells the reader to reload when the parent speaks another protocol, and recovers when it matches",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-112-E05",
@@ -15166,8 +15172,14 @@
           "inventoryRefs": [
             "C01"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/commentor-widget-browser.test.ts",
+              "name": "offers Delete and Archive only where the server allows them, and nothing to read-only viewers",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-112-E06",
@@ -15199,8 +15211,14 @@
           "inventoryRefs": [
             "C13"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/commentor-protocol-browser.test.ts",
+              "name": "tells the reader to reload when the parent speaks another protocol, and recovers when it matches",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-112-E09",
@@ -15210,8 +15228,14 @@
           "inventoryRefs": [
             "C13"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/commentor-protocol-browser.test.ts",
+              "name": "tells the reader to reload when the parent speaks another protocol, and recovers when it matches",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-112-E10",
@@ -15243,8 +15267,14 @@
           "inventoryRefs": [
             "C13"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/commentor-protocol-browser.test.ts",
+              "name": "drops results that arrive after the document navigated away, and serves the next document's scope",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-112-E13",
@@ -15402,8 +15432,19 @@
           "inventoryRefs": [
             "C05"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/commentor-widget-browser.test.ts",
+              "name": "posts a comment on selected text, focuses the toolbar again and shows the new pin",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/commentor-widget-browser.test.ts",
+              "name": "restores an unsent draft after the document reloads and clears it once posted",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-114-E03",
@@ -15413,8 +15454,14 @@
           "inventoryRefs": [
             "C05"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/commentor-widget-browser.test.ts",
+              "name": "comments on a clicked element, and clicking empty space or pressing Escape cancels",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-114-E04",
@@ -15424,8 +15471,19 @@
           "inventoryRefs": [
             "C05"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/commentor-widget-browser.test.ts",
+              "name": "posts a comment on selected text, focuses the toolbar again and shows the new pin",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/commentor-widget-browser.test.ts",
+              "name": "comments on a clicked element, and clicking empty space or pressing Escape cancels",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-114-E05",
@@ -15435,8 +15493,14 @@
           "inventoryRefs": [
             "C05"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/commentor-widget-browser.test.ts",
+              "name": "posts a comment on selected text, focuses the toolbar again and shows the new pin",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-114-E06",
@@ -15457,8 +15521,14 @@
           "inventoryRefs": [
             "C05"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/commentor-widget-browser.test.ts",
+              "name": "shows a pending post, keeps the draft on every failure and recovers",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-114-E08",
@@ -15468,8 +15538,14 @@
           "inventoryRefs": [
             "C05"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/commentor-widget-browser.test.ts",
+              "name": "shows a pending post, keeps the draft on every failure and recovers",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-114-E09",
@@ -15479,8 +15555,14 @@
           "inventoryRefs": [
             "C05"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/commentor-widget-browser.test.ts",
+              "name": "posts a comment on selected text, focuses the toolbar again and shows the new pin",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-114-E10",
@@ -15596,7 +15678,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "unit",
+      "status": "browser",
       "auditEvidence": "U",
       "auditNote": "commentor-recovery-ui.test.ts; commentor-parent-transport.test.ts",
       "edges": [
@@ -15619,8 +15701,14 @@
           "inventoryRefs": [
             "C07"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/commentor-drawer-browser.test.ts",
+              "name": "pages older threads and replies on demand and says when more cannot be loaded",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-115-E03",
@@ -15641,8 +15729,14 @@
           "inventoryRefs": [
             "C07"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/commentor-widget-browser.test.ts",
+              "name": "replies with Enter, keeps Shift+Enter as a newline, and removes only deletable replies",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-115-E05",
@@ -15652,8 +15746,14 @@
           "inventoryRefs": [
             "C07"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/commentor-widget-browser.test.ts",
+              "name": "keeps the reply draft on a rejected reply and explains it",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-115-E06",
@@ -15663,8 +15763,14 @@
           "inventoryRefs": [
             "C07"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/commentor-edges-browser.test.ts",
+              "name": "clears a sent reply when its acknowledgement beats the snapshot, and ignores a repeated delete",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-115-E07",
@@ -15674,8 +15780,14 @@
           "inventoryRefs": [
             "C07"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/commentor-widget-browser.test.ts",
+              "name": "clears the stored draft when the reply is emptied, and keeps text typed while a reply is sending",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-115-E08",
@@ -15685,8 +15797,19 @@
           "inventoryRefs": [
             "C07"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/commentor-widget-browser.test.ts",
+              "name": "offers Delete and Archive only where the server allows them, and nothing to read-only viewers",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/commentor-widget-browser.test.ts",
+              "name": "replies with Enter, keeps Shift+Enter as a newline, and removes only deletable replies",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-115-E09",
@@ -15696,8 +15819,14 @@
           "inventoryRefs": [
             "C07"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/commentor-widget-browser.test.ts",
+              "name": "ignores a repeated activation of a busy action and keeps a removal's control disabled across live updates",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-115-E10",
@@ -15752,7 +15881,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "unit",
+      "status": "browser",
       "auditEvidence": "U",
       "auditNote": "document-ui-regressions.test.ts (delete-state unit assertions, not rendered Undo click)",
       "edges": [
@@ -15775,8 +15904,14 @@
           "inventoryRefs": [
             "C10"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/commentor-widget-browser.test.ts",
+              "name": "deletes after an undo window and rolls back with an explanation when the delete fails",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-116-E03",
@@ -15786,8 +15921,14 @@
           "inventoryRefs": [
             "C10"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/commentor-widget-browser.test.ts",
+              "name": "deletes after an undo window and rolls back with an explanation when the delete fails",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-116-E04",
@@ -15797,8 +15938,14 @@
           "inventoryRefs": [
             "C10"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/commentor-widget-browser.test.ts",
+              "name": "deletes after an undo window and rolls back with an explanation when the delete fails",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-116-E05",
@@ -15808,8 +15955,19 @@
           "inventoryRefs": [
             "C10"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/commentor-widget-browser.test.ts",
+              "name": "deletes after an undo window and rolls back with an explanation when the delete fails",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/commentor-widget-browser.test.ts",
+              "name": "restores a thread whose delete failed for an unknown reason",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-116-E06",
@@ -15819,8 +15977,14 @@
           "inventoryRefs": [
             "C10"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/commentor-edges-browser.test.ts",
+              "name": "keeps a thread hidden while its deletion is pending, even if another update arrives",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-116-E07",
@@ -15885,7 +16049,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "unit",
+      "status": "browser",
       "auditEvidence": "U",
       "auditNote": "commentor-permissions-rendering.test.ts; commentor-recovery-ui.test.ts",
       "edges": [
@@ -15908,8 +16072,14 @@
           "inventoryRefs": [
             "C09"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/commentor-widget-browser.test.ts",
+              "name": "offers Delete and Archive only where the server allows them, and nothing to read-only viewers",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-117-E03",
@@ -15919,8 +16089,19 @@
           "inventoryRefs": [
             "C09"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/commentor-widget-browser.test.ts",
+              "name": "offers Delete and Archive only where the server allows them, and nothing to read-only viewers",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/commentor-widget-browser.test.ts",
+              "name": "resolves and reopens, archives and unarchives, with accessible pending state and failures",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-117-E04",
@@ -16075,7 +16256,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "unit",
+      "status": "browser",
       "auditEvidence": "U",
       "auditNote": "commentor-recovery-ui.test.ts; commentor-parent-recovery.test.ts",
       "edges": [
@@ -16098,8 +16279,14 @@
           "inventoryRefs": [
             "C12"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/commentor-protocol-browser.test.ts",
+              "name": "keeps an unconfirmed post across a reload, reuses its identity on resubmit and settles when the server shows it",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-119-E03",
@@ -16109,8 +16296,19 @@
           "inventoryRefs": [
             "C12"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/commentor-protocol-browser.test.ts",
+              "name": "reports an unknown outcome, without replaying, when the parent is replaced during a post or reply",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/commentor-widget-browser.test.ts",
+              "name": "keeps the reply draft on a rejected reply and explains it",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-119-E04",
@@ -16131,8 +16329,14 @@
           "inventoryRefs": [
             "C12"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/commentor-protocol-browser.test.ts",
+              "name": "keeps an unconfirmed post across a reload, reuses its identity on resubmit and settles when the server shows it",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-119-E06",
@@ -16142,8 +16346,14 @@
           "inventoryRefs": [
             "C12"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/commentor-widget-browser.test.ts",
+              "name": "clears the stored draft when the reply is emptied, and keeps text typed while a reply is sending",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-119-E07",
@@ -16265,8 +16475,14 @@
           "inventoryRefs": [
             "C14"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/commentor-protocol-browser.test.ts",
+              "name": "stops serving and releases its subscriptions when torn down",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-120-E06",
@@ -16276,8 +16492,14 @@
           "inventoryRefs": [
             "C14"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/commentor-protocol-browser.test.ts",
+              "name": "starts over for a different signed-in reader",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-120-E07",
@@ -16331,7 +16553,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "untested",
+      "status": "browser",
       "auditEvidence": "UNTESTED",
       "auditNote": "commentor.ts selection and keyboard handlers; current browser test opens composer, not full anchor/keyboard matrix Reconciled with commentor.ts composer/reply keydown: plain Enter submits; Ctrl/Meta+Enter does not. The audit title was inaccurate.",
       "edges": [
@@ -16354,8 +16576,19 @@
           "inventoryRefs": [
             "C04"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/commentor-widget-browser.test.ts",
+              "name": "posts a comment on selected text, focuses the toolbar again and shows the new pin",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/commentor-drawer-browser.test.ts",
+              "name": "opens the composer from a selection with the Comment control, and only for real selections",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-121-E03",
@@ -16365,8 +16598,14 @@
           "inventoryRefs": [
             "C04"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/commentor-drawer-browser.test.ts",
+              "name": "opens the composer from a selection with the Comment control, and only for real selections",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-121-E04",
@@ -16376,8 +16615,14 @@
           "inventoryRefs": [
             "C04"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/commentor-widget-browser.test.ts",
+              "name": "comments on a clicked element, and clicking empty space or pressing Escape cancels",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-121-E05",
@@ -16387,8 +16632,14 @@
           "inventoryRefs": [
             "C04"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/commentor-widget-browser.test.ts",
+              "name": "anchors by quote across element boundaries and whitespace, and hides pins whose anchor is gone or off screen",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-121-E06",
@@ -16398,8 +16649,14 @@
           "inventoryRefs": [
             "C04"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/commentor-widget-browser.test.ts",
+              "name": "labels a long selection with a trimmed quote",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-121-E07",
@@ -16409,8 +16666,14 @@
           "inventoryRefs": [
             "C04"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/commentor-widget-browser.test.ts",
+              "name": "highlights each wrapped line of a hovered thread's anchor and clears it on leave",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-121-E08",
@@ -16420,8 +16683,14 @@
           "inventoryRefs": [
             "C04"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/commentor-edges-browser.test.ts",
+              "name": "labels, orders and highlights anchors of every shape without inventing rectangles",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-121-E09",
@@ -16431,8 +16700,14 @@
           "inventoryRefs": [
             "C04"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/commentor-widget-browser.test.ts",
+              "name": "anchors by quote across element boundaries and whitespace, and hides pins whose anchor is gone or off screen",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-121-E10",
@@ -16480,7 +16755,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "untested",
+      "status": "browser",
       "auditEvidence": "UNTESTED",
       "auditNote": "commentor.ts toggleDrawer/setThreadFilter",
       "edges": [
@@ -16503,8 +16778,14 @@
           "inventoryRefs": [
             "C02"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/commentor-widget-browser.test.ts",
+              "name": "comments on a clicked element, and clicking empty space or pressing Escape cancels",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-122-E03",
@@ -16514,8 +16795,14 @@
           "inventoryRefs": [
             "C02"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/commentor-drawer-browser.test.ts",
+              "name": "lists threads by view with live counts, keyboard-navigable tabs and helpful empty states",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-122-E04",
@@ -16525,8 +16812,14 @@
           "inventoryRefs": [
             "C02"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/commentor-drawer-browser.test.ts",
+              "name": "lists threads by view with live counts, keyboard-navigable tabs and helpful empty states",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-122-E05",
@@ -16536,8 +16829,19 @@
           "inventoryRefs": [
             "C02"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/commentor-widget-browser.test.ts",
+              "name": "places numbered pins at their anchors and opens, toggles and closes the thread bubble",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/commentor-widget-browser.test.ts",
+              "name": "comments on a clicked element, and clicking empty space or pressing Escape cancels",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-122-E06",
@@ -16547,8 +16851,14 @@
           "inventoryRefs": [
             "C02"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/commentor-drawer-browser.test.ts",
+              "name": "lists threads by view with live counts, keyboard-navigable tabs and helpful empty states",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-122-E07",
@@ -16558,8 +16868,14 @@
           "inventoryRefs": [
             "C02"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/commentor-drawer-browser.test.ts",
+              "name": "describes controls on hover and focus, flips below when there is no room and hides on scroll",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-122-E08",
@@ -16569,8 +16885,14 @@
           "inventoryRefs": [
             "C02"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/commentor-drawer-browser.test.ts",
+              "name": "lists threads by view with live counts, keyboard-navigable tabs and helpful empty states",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-122-E09",
@@ -16580,8 +16902,14 @@
           "inventoryRefs": [
             "C08"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/commentor-drawer-browser.test.ts",
+              "name": "lists threads by view with live counts, keyboard-navigable tabs and helpful empty states",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-122-E10",
@@ -16591,8 +16919,14 @@
           "inventoryRefs": [
             "C08"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/commentor-drawer-browser.test.ts",
+              "name": "lists threads by view with live counts, keyboard-navigable tabs and helpful empty states",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-122-E11",
@@ -16602,8 +16936,14 @@
           "inventoryRefs": [
             "C08"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/commentor-drawer-browser.test.ts",
+              "name": "lists threads by view with live counts, keyboard-navigable tabs and helpful empty states",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-122-E12",
@@ -16613,8 +16953,14 @@
           "inventoryRefs": [
             "C08"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/commentor-widget-browser.test.ts",
+              "name": "resolves and reopens, archives and unarchives, with accessible pending state and failures",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-122-E13",
@@ -16624,8 +16970,14 @@
           "inventoryRefs": [
             "C08"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/commentor-widget-browser.test.ts",
+              "name": "resolves and reopens, archives and unarchives, with accessible pending state and failures",
+              "kind": "browser"
+            }
+          ]
         }
       ]
     },
@@ -16662,7 +17014,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "untested",
+      "status": "browser",
       "auditEvidence": "UNTESTED",
       "auditNote": "document-comment-pagination.test.ts tests backend pages; no rendered pagination assertions found",
       "edges": [
@@ -16685,8 +17037,14 @@
           "inventoryRefs": [
             "C11"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/commentor-edges-browser.test.ts",
+              "name": "keeps reply focus and caret in the drawer across updates, drops it when the thread leaves and closes the open bubble",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-123-E03",
@@ -16707,8 +17065,19 @@
           "inventoryRefs": [
             "C11"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/commentor-drawer-browser.test.ts",
+              "name": "announces comments that arrive while the reader is away from the end of the list",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/commentor-drawer-browser.test.ts",
+              "name": "does not announce arrivals when the list is short, and scrolls to the newest on request ($motion motion)",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-123-E05",
@@ -16718,8 +17087,19 @@
           "inventoryRefs": [
             "C11"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/commentor-drawer-browser.test.ts",
+              "name": "announces comments that arrive while the reader is away from the end of the list",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/commentor-drawer-browser.test.ts",
+              "name": "does not announce arrivals when the list is short, and scrolls to the newest on request ($motion motion)",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-123-E06",
@@ -16729,8 +17109,14 @@
           "inventoryRefs": [
             "C11"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/commentor-edges-browser.test.ts",
+              "name": "shows a first page that arrives still loading, and reply pages as they stream in",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-123-E07",
@@ -16740,8 +17126,19 @@
           "inventoryRefs": [
             "C11"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/commentor-drawer-browser.test.ts",
+              "name": "pages older threads and replies on demand and says when more cannot be loaded",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/commentor-drawer-browser.test.ts",
+              "name": "keeps the current list while the next page loads and shows the loading state",
+              "kind": "browser"
+            }
+          ]
         }
       ]
     },
@@ -16778,7 +17175,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "untested",
+      "status": "browser",
       "auditEvidence": "UNTESTED",
       "auditNote": "commentor.ts focusThread/anchor handlers",
       "edges": [
@@ -16801,8 +17198,19 @@
           "inventoryRefs": [
             "C06"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/commentor-widget-browser.test.ts",
+              "name": "places numbered pins at their anchors and opens, toggles and closes the thread bubble",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/commentor-drawer-browser.test.ts",
+              "name": "scrolls to a thread's anchor and opens it from its card ($motion motion)",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-124-E03",
@@ -16812,8 +17220,19 @@
           "inventoryRefs": [
             "C06"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/commentor-drawer-browser.test.ts",
+              "name": "highlights a card's anchor while hovered or focused and keeps it for an open thread",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/commentor-widget-browser.test.ts",
+              "name": "highlights each wrapped line of a hovered thread's anchor and clears it on leave",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-124-E04",
@@ -16834,8 +17253,14 @@
           "inventoryRefs": [
             "C06"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/commentor-drawer-browser.test.ts",
+              "name": "opens a thread even when the page cannot be scrolled or measured the usual way",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-124-E06",
@@ -16845,8 +17270,14 @@
           "inventoryRefs": [
             "C06"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/commentor-widget-browser.test.ts",
+              "name": "places numbered pins at their anchors and opens, toggles and closes the thread bubble",
+              "kind": "browser"
+            }
+          ]
         }
       ]
     },
@@ -16883,7 +17314,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "untested",
+      "status": "browser",
       "auditEvidence": "UNTESTED",
       "auditNote": "commentor.ts drag lifecycle; no interaction test found",
       "edges": [
@@ -16906,8 +17337,14 @@
           "inventoryRefs": [
             "C03"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/commentor-drawer-browser.test.ts",
+              "name": "drags to the nearest edge, snaps there and keeps the drawer usable on every edge",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-125-E03",
@@ -16917,8 +17354,19 @@
           "inventoryRefs": [
             "C03"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/commentor-drawer-browser.test.ts",
+              "name": "moves with the keyboard along its edge and remembers where it was left",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/commentor-drawer-browser.test.ts",
+              "name": "ignores invalid saved placement and falls back to the bottom edge",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-125-E04",
@@ -16928,8 +17376,14 @@
           "inventoryRefs": [
             "C03"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/commentor-drawer-browser.test.ts",
+              "name": "moves with the keyboard along its edge and remembers where it was left",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-125-E05",
@@ -16939,8 +17393,14 @@
           "inventoryRefs": [
             "C03"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/commentor-drawer-browser.test.ts",
+              "name": "drags to the nearest edge, snaps there and keeps the drawer usable on every edge",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-125-E06",
@@ -16950,8 +17410,14 @@
           "inventoryRefs": [
             "C03"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/commentor-drawer-browser.test.ts",
+              "name": "sizes itself as a bottom sheet on a narrow screen",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-125-E07",
@@ -17022,8 +17488,14 @@
           "inventoryRefs": [
             "UI-126"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/commentor-drawer-browser.test.ts",
+              "name": "describes controls on hover and focus, flips below when there is no room and hides on scroll",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-126-E02",

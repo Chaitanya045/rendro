@@ -159,6 +159,12 @@ describe("authoring", () => {
     await expect.poll(() => composer.count()).toBe(0);
     // Without a selection invoker, focus returns to the dock's Comments control.
     await expect.poll(() => lab.focused()).toBe("commentor-panel-btn");
+    // Escape closes an open composer as well.
+    await button.click();
+    await lab.doc(() => document.getElementById("second")!.click());
+    await lab.tid("commentor-composer-textarea").waitFor();
+    await lab.page.keyboard.press("Escape");
+    await expect.poll(() => composer.count()).toBe(0);
   });
 
   it("shows a pending post, keeps the draft on every failure and recovers", async () => {
