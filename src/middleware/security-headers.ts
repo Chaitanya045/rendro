@@ -1,3 +1,4 @@
+import { apiCacheControl } from "../../shared/http-cache";
 import { nonceContext } from "./html-nonce";
 import type { MiddlewareHandler } from "hono";
 import { CONVEX_SITE_URL, CONVEX_URL } from "@/config";
@@ -58,6 +59,16 @@ function documentRoute(path: string): boolean {
 export const securityHeaders: MiddlewareHandler = async (c, next) => {
   const nonce = Buffer.from(crypto.getRandomValues(new Uint8Array(18))).toString("base64");
   await nonceContext.run(nonce, next);
+  // Apply after downstream handlers (including Hono's error handler), so local
+  // denials, proxy failures and malformed/unmatched capability paths inherit it.
+  const capability = /^\/(?:s|share|accept-invitation|reset-password|verify-email)(?:\/|$)/.test(c.req.path)
+    || /^\/(?:docs|legacy-view)(?:\/|$)|^\/organizations\/[^/]+\/projects\/[^/]+\/docs(?:\/|$)/.test(c.req.path);
+  if (/^\/api(?:\/|$)/.test(c.req.path)) {
+    c.header("Cache-Control", apiCacheControl(c.req.raw, c.res));
+  } else if (capability || !c.res.headers.has("Cache-Control")) {
+    c.header("Cache-Control", "private, no-store");
+  }
+  if (capability) c.header("Referrer-Policy", "no-referrer");
   // Only the shared asset-error helper may opt an empty, untyped failure out.
   // HTML (including styled document errors) always retains nosniff and CSP.
   const emptyAssetError = c.get("emptyAssetError") === true && c.res.status >= 400
@@ -82,7 +93,7 @@ export const securityHeaders: MiddlewareHandler = async (c, next) => {
   } else {
     // Nonces must never be reused from a stored response. Preserve private
     // no-store policies; replace public/revalidation policies on all app shells.
-    const cacheControl = c.res.headers.get("Cache-Control") ?? "";
+    const cacheControl = String(c.res.headers.get("Cache-Control"));
     c.header("Cache-Control", /(?:^|,)\s*private\s*(?:,|$)/i.test(cacheControl)
       ? "private, no-store" : "no-store");
     c.header("Content-Security-Policy", appPolicy(nonce, c.res.status >= 400 ? "" : c.req.path, document));

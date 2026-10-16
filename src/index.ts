@@ -1,7 +1,7 @@
 import { securityHeaders } from "./middleware/security-headers";
 import { faviconAssets, faviconCacheControl } from "./routes/favicon";
 import { Hono } from "hono";
-import { redactViewerPath } from "./viewer-log";
+import { requestLogPath } from "./request-log";
 import { serve, type HttpBindings } from "@hono/node-server";
 import { registerAuthClientIp } from "@/auth-client-ip";
 import { serveStatic } from "@hono/node-server/serve-static";
@@ -46,7 +46,7 @@ app.use("*", async (c, next) => {
   const start = Date.now();
   await next();
   logger.debug(
-    { method: c.req.method, path: redactViewerPath(c.req.path), status: c.res.status, ms: Date.now() - start },
+    { method: c.req.method, route: requestLogPath(c), status: c.res.status, ms: Date.now() - start },
     "request"
   );
 });
@@ -72,8 +72,8 @@ mountSessionRoutes(app);
 app.notFound(notFoundResponse);
 
 // Error handler
-app.onError((err, c) => {
-  logger.error({ errorType: err.name, path: redactViewerPath(c.req.path) }, "Unhandled error");
+app.onError((_err, c) => {
+  logger.error({ category: "UnhandledError", route: requestLogPath(c) }, "Unhandled error");
   return c.text("Internal server error", 500);
 });
 

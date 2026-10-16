@@ -1,3 +1,4 @@
+import { apiCacheControl } from "../shared/http-cache";
 import { boundedRequest, BodyTooLargeError } from "../src/bounded-body";
 import { isRateLimitError } from "@convex-dev/rate-limiter";
 import { requireCookieWrite, RequestAdmissionError, httpActionPolicies, type HttpPolicy } from "../shared/request-admission";
@@ -59,12 +60,16 @@ export function failure(error: unknown, applicationStatus = 400, operation = "ht
 
 export const httpAction = (handler: Parameters<typeof registerHttpAction>[0], policy: HttpPolicy = "read") => {
   const action = registerHttpAction(async (ctx, request) => {
+    let response: Response;
     try {
       if (policy === "cookie-json") requireCookieWrite(request, process.env.SITE_URL);
-      return await handler(ctx, await boundedRequest(request));
+      response = await handler(ctx, await boundedRequest(request));
     } catch (error) {
-      return failure(error, 500);
+      response = failure(error, 500);
     }
+    const headers = new Headers(response.headers);
+    headers.set("Cache-Control", apiCacheControl(request, response));
+    return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
   });
 
   httpActionPolicies.set(action, policy);

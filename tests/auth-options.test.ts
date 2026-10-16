@@ -46,3 +46,18 @@ it("refuses HTTP limiter consumption in a read-only auth context", () => {
   expect(consumers).toHaveLength(2);
   for (const consume of consumers) expect(() => consume("test")).toThrow("mutation-capable context");
 });
+
+it("does not emit Better Auth callback URLs or exception diagnostics", async () => {
+  const log = vi.spyOn(console, "error").mockImplementation(() => {});
+  try {
+    const context = await createAuth({} as never).$context;
+    for (const path of ["reset-password", "verify-email", "accept-invitation", "callback/google"]) {
+      const url = `https://test/${path}/synthetic-private-token?token=synthetic-private-token`;
+      context.logger.error(url, Object.assign(new Error(url), { cause: { token: url }, authorization: url }));
+      context.logger.warn(url, { password: url, token: url });
+    }
+    expect(log).toHaveBeenCalled();
+    for (const call of log.mock.calls) expect(call).toEqual(["Auth diagnostic", { category: "AuthDiagnostic" }]);
+    expect(JSON.stringify(log.mock.calls)).not.toContain("synthetic-private-token");
+  } finally { log.mockRestore(); }
+});

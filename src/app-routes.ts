@@ -50,9 +50,9 @@ export function mountSessionRoutes<E extends AppEnv>(app: Hono<E>): void {
   app.on(["POST", "GET", "OPTIONS"], "/api/auth/*", async (c) => {
     try {
       return await proxyAuthRequest(c.req.raw);
-    } catch (error: unknown) {
+    } catch {
       logger.error(
-        { error: error instanceof Error ? error.message : String(error) },
+        { category: "TransportError" },
         "Auth proxy error",
       );
       return c.json({ error: "Auth unavailable" }, 502);
@@ -66,9 +66,9 @@ export function mountSessionRoutes<E extends AppEnv>(app: Hono<E>): void {
   app.on(["POST", "GET", "PATCH", "DELETE"], "/api/rendro/*", async (c) => {
     try {
       return await proxyConvexRequest(c.req.raw);
-    } catch (error: unknown) {
+    } catch {
       logger.error(
-        { error: error instanceof Error ? error.message : String(error) },
+        { category: "TransportError" },
         "Convex API proxy error",
       );
       return c.json({ error: "Backend unavailable" }, 502);

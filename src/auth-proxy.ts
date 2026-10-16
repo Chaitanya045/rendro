@@ -1,3 +1,4 @@
+import { apiCacheControl } from "../shared/http-cache";
 import { readBoundedBody, BodyTooLargeError } from "./bounded-body";
 import { renderSignOutPage } from "@/routes/sign-out";
 import { sessionCache } from "@/session-cache";
@@ -98,17 +99,23 @@ export async function proxyConvexRequest(request: Request): Promise<Response> {
   };
   if (request.method !== "GET" && request.method !== "HEAD") {
     try { init.body = new TextDecoder().decode(await readBoundedBody(request)); }
-    catch (error) { if (error instanceof BodyTooLargeError) return error.response(); throw error; }
+    catch (error) {
+      if (!(error instanceof BodyTooLargeError)) throw error;
+      const response = error.response();
+      response.headers.set("Cache-Control", "private, no-store");
+      return response;
+    }
   }
   const upstream = await backendFetch(target, init, "proxyConvexRequest");
   const setCookies = strippedSetCookies(upstream.headers);
-  if (setCookies.length === 0) return upstream;
 
   const headers = new Headers(upstream.headers);
+  headers.set("Cache-Control", apiCacheControl(request, upstream));
   headers.delete("set-cookie");
   for (const cookie of setCookies) headers.append("set-cookie", cookie);
   return new Response(upstream.body, {
     status: upstream.status,
+    statusText: upstream.statusText,
     headers,
   });
 }

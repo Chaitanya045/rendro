@@ -35,8 +35,8 @@ app.get("/share/:token", async (c) => {
     // The whole document is decoded as UTF-8 and re-encoded by c.html.
     const html = injectMobileViewportScrollbarStyle(await readHtmlStream(stream));
     return c.html(html, 200, assetHeaders(key, false, "text/html; charset=utf-8"));
-  } catch (err) {
-    logger.error({ err, key }, "share stream failed");
+  } catch {
+    logger.error({ category: "StorageError" }, "share stream failed");
     return legacyUnavailable(new Error("Storage unavailable"), c);
   }
 });

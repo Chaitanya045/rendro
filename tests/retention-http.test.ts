@@ -13,7 +13,7 @@ describe("retention operator HTTP", () => {
     }
     const result = await t.fetch("/api/rendro/retention/candidates", { headers: { Authorization: "Bearer retention-test" } });
     expect(result.status).toBe(200);
-    expect(result.headers.get("cache-control")).toBe("no-store");
+    expect(result.headers.get("cache-control")).toBe("private, no-store");
     expect(await result.json()).toEqual({ deployments: [], cycleComplete: false, scanned: 0 });
     vi.stubEnv("RETENTION_SECRET", undefined);
     expect((await t.fetch("/api/rendro/retention/candidates", { headers: { Authorization: "Bearer undefined" } })).status).toBe(401);
