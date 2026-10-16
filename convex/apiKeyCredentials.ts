@@ -92,7 +92,15 @@ export const revokeInternal = internalMutation({
   },
 });
 
-export const validateInternal = internalMutation({
+// Last-use telemetry is debounced: at most one credential write per window.
+export const API_KEY_USAGE_DEBOUNCE_MS = 60_000;
+
+const usageDue = (lastUsedAt: number | undefined, now: number) =>
+  lastUsedAt === undefined || now - lastUsedAt >= API_KEY_USAGE_DEBOUNCE_MS;
+
+// Authorization is a fresh read on every request and never writes, so parallel
+// requests with one key do not contend on its row. Never cache the result.
+export const validateInternal = internalQuery({
   args: {
     secretHash: v.string(),
     organizationId: v.string(),
@@ -122,13 +130,29 @@ export const validateInternal = internalMutation({
     ) {
       return null;
     }
-    await ctx.db.patch(credential._id, { lastUsedAt: now });
     return {
-      keyId: credential.keyId,
-      organizationId: credential.organizationId,
-      projectId: credential.projectId,
-      scopes: credential.scopes,
+      principal: {
+        keyId: credential.keyId,
+        organizationId: credential.organizationId,
+        projectId: credential.projectId,
+        scopes: credential.scopes,
+      },
+      credentialId: credential._id,
+      recordUsage: usageDue(credential.lastUsedAt, now),
     };
+  },
+});
+
+// Re-checks the window inside the transaction, so requests that raced past a
+// stale read write once and the rest commit without touching the credential.
+export const recordUsageInternal = internalMutation({
+  args: { credentialId: v.id("apiKeyCredentials") },
+  handler: async (ctx, { credentialId }) => {
+    const credential = await ctx.db.get(credentialId);
+    const now = Date.now();
+    if (!credential || !usageDue(credential.lastUsedAt, now)) return false;
+    await ctx.db.patch(credential._id, { lastUsedAt: now });
+    return true;
   },
 });
 

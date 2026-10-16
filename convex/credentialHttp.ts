@@ -131,10 +131,22 @@ export async function validateApiCredential(
   const authorization = request.headers.get("authorization") ?? "";
   const match = /^Bearer\s+(.+)$/i.exec(authorization);
   if (!match) return null;
-  return ctx.runMutation(internal.apiKeyCredentials.validateInternal, {
+  const result = await ctx.runQuery(internal.apiKeyCredentials.validateInternal, {
     secretHash: await sha256(match[1]),
     ...input,
   });
+  if (!result) return null;
+  if (result.recordUsage) {
+    // Usage telemetry is best-effort and must never deny an authorized request.
+    try {
+      await ctx.runMutation(internal.apiKeyCredentials.recordUsageInternal, {
+        credentialId: result.credentialId,
+      });
+    } catch {
+      console.warn("API key usage telemetry failed", { operation: "recordUsage" });
+    }
+  }
+  return result.principal;
 }
 
 export const validateCredential = apiKeyHttpAction(async (ctx: GenericActionCtx<DataModel>, request: Request) => { const url = new URL(request.url);

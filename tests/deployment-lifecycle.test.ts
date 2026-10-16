@@ -169,20 +169,20 @@ describe("scoped API credentials", () => {
       expiresAt: Date.now() + 60_000,
       actorId: "user-a",
     });
-    const valid = await backend.mutation(internal.apiKeyCredentials.validateInternal, {
+    const valid = await backend.query(internal.apiKeyCredentials.validateInternal, {
       secretHash: "secret-hash",
       organizationId: "org-a",
       projectId: owned._id,
       requiredScope: "docs:write",
     });
-    expect(valid?.keyId).toBe("key-a");
-    expect(await backend.mutation(internal.apiKeyCredentials.validateInternal, {
+    expect(valid?.principal.keyId).toBe("key-a");
+    expect(await backend.query(internal.apiKeyCredentials.validateInternal, {
       secretHash: "secret-hash",
       organizationId: "org-b",
       projectId: owned._id,
       requiredScope: "docs:write",
     })).toBeNull();
-    expect(await backend.mutation(internal.apiKeyCredentials.validateInternal, {
+    expect(await backend.query(internal.apiKeyCredentials.validateInternal, {
       secretHash: "secret-hash",
       organizationId: "org-a",
       projectId: owned._id,
@@ -193,7 +193,7 @@ describe("scoped API credentials", () => {
       keyId: "key-a",
       actorId: "user-a",
     });
-    expect(await backend.mutation(internal.apiKeyCredentials.validateInternal, {
+    expect(await backend.query(internal.apiKeyCredentials.validateInternal, {
       secretHash: "secret-hash",
       organizationId: "org-a",
       projectId: owned._id,
@@ -216,7 +216,7 @@ describe("scoped API credentials", () => {
       expiresAt: Date.now() - 1,
       actorId: "user-a",
     });
-    expect(await backend.mutation(internal.apiKeyCredentials.validateInternal, {
+    expect(await backend.query(internal.apiKeyCredentials.validateInternal, {
       secretHash: "expired-hash",
       organizationId: "org-a",
       projectId: owned._id,
