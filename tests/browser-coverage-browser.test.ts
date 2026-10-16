@@ -124,6 +124,26 @@ it("rejects unmapped first-party scripts", async () => {
     .rejects.toThrow("Missing browser script source");
 });
 
+it("recovers a sourceless sample only from one agreeing source for its URL", async () => {
+  const code = await bundleBrowserAsset(probe);
+  const url = `${harness.origin}/probe.js`;
+  const start = code.indexOf("function coverageProbe");
+  const sample = (scriptId: string, count: number, source?: string) => ({ scriptId, url, source, functions: [
+    { functionName: "", isBlockCoverage: true, ranges: [{ startOffset: 0, endOffset: code.length, count: 1 }] },
+    { functionName: "coverageProbe", isBlockCoverage: true, ranges: [{ startOffset: start, endOffset: code.indexOf("\n  }", start) + 4, count }] },
+  ] });
+  const executed = (report: CoverageMapData) => {
+    const file = report[probe];
+    return file.s[Object.entries(file.statementMap).find(([, loc]) => loc.start.line === 3)![0]];
+  };
+  // Reload deltas can name a script id that the debugger never announced.
+  expect(executed(await convertBrowserCoverage([sample("1", 1, code), sample("2", 2)], process.cwd(), new Set([probe])))).toBe(3);
+  await expect(convertBrowserCoverage([sample("3", 1), sample("1", 1, code), sample("2", 1, `${code}\n`)], process.cwd(), new Set([probe])))
+    .rejects.toThrow("Missing browser script source");
+  await expect(convertBrowserCoverage([sample("2", 1), sample("1", 1, "x")], process.cwd(), new Set([probe])))
+    .rejects.toThrow("Incompatible browser script source");
+});
+
 it("fails teardown for an unmapped extensionless first-party script", async () => {
   const page = await harness.newPage();
   await page.goto(`${harness.origin}/opener`);

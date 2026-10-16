@@ -33,8 +33,19 @@ export async function convertBrowserCoverage(entries: Script[], root = process.c
   const included = include ?? new Set(await manifest.get(root));
   const result: CoverageMapData = {};
   const grouped = new Map<string, { code: string; entries: Script[] }>();
+  const urlSources = new Map<string, Set<string>>();
+  for (const { url, source } of entries) {
+    if (source !== undefined) urlSources.set(url, (urlSources.get(url) ?? new Set()).add(source));
+  }
   for (const entry of entries) {
-    const code = entry.source;
+    // A reload can report a transient script in a delta without a debugger
+    // scriptParsed event; its id is already gone. Recover only a URL whose
+    // retained samples agree on one source, and whose ranges fit inside it.
+    const recovered = entry.source === undefined && urlSources.get(entry.url)?.size === 1 ? [...urlSources.get(entry.url)!][0] : undefined;
+    if (recovered !== undefined && entry.functions.some(fn => fn.ranges.some(range => range.endOffset > recovered.length))) {
+      throw new Error(`Incompatible browser script source: ${entry.url}`);
+    }
+    const code = entry.source ?? recovered;
     const requiresMap = scriptUrls.has(entry.url) || (/\.(?:[cm]?js|ts)(?:[?#]|$)/.test(entry.url) && !entry.url.startsWith("__playwright"));
     if (code === undefined && requiresMap) throw new Error(`Missing browser script source: ${entry.url}`);
     if (!code) continue;

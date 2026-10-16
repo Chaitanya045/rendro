@@ -474,6 +474,11 @@ destructive fixture actions. This barrier is a no-op outside coverage runs.
 The regression contract covers direct frame removal after this barrier,
 navigation, popup self-close, explicit close, and harness teardown. Renderer
 crashes cannot guarantee a final sample.
+Source text is read on each `Debugger.scriptParsed` event. A parent reload can
+deliver a precise-coverage delta for a transient script that never had that
+event; its id is already gone. Such a sample keeps its counts only when every
+retained sample for the same URL in that context has one identical source, and
+its ranges fit that source. Otherwise conversion fails as before.
 
 Identical-bundle V8 deltas are first combined with Vitest's pinned
 `@bcoe/v8-coverage` range-tree merger, avoiding repeated AST conversion.
