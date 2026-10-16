@@ -100,7 +100,10 @@ export const resolveShareGrant = anonymousHttpAction(async (ctx, request) => {
   const token = new URL(request.url).searchParams.get("token");
   if (!token) return clientFailure("token is required");
   const result = await ctx.runQuery(internal.shareGrants.resolveInternal, { tokenHash: await sha256(token) });
-  if (!result) return clientFailure("Share not found", 404);
+  // Queries are cached until their read set changes, so expiry is decided here,
+  // once, from the stored deadline. An expired grant is indistinguishable from a missing one.
+  const now = Date.now();
+  if (!result || result.grant.expiresAt <= now) return clientFailure("Share not found", 404);
   const worker = await isWorkerResolverRequest(request, process.env.CONVEX_INTERNAL_SECRET);
   return Response.json(worker ? result : publicShare(result), { headers: { "Cache-Control": "private, no-store" } });
 });

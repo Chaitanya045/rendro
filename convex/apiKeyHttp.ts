@@ -15,9 +15,11 @@ function limitedAction(handler: Handler, allowSession: boolean, budget: "credent
     // any Authorization header opts into API-key limiting, even with a cookie.
     if (allowSession && authorization === null) return handler(ctx, request);
     const match = /^Bearer\s+(.+)$/i.exec(authorization ?? "");
-    const credentialId = match ? await ctx.runQuery(internal.apiKeyCredentials.verifiedIdInternal, {
+    const lookup = match ? await ctx.runQuery(internal.apiKeyCredentials.verifiedIdInternal, {
       secretHash: await sha256(match[1]),
     }) : null;
+    // The query is cached until its read set changes, so expiry is decided here.
+    const credentialId = lookup && (lookup.expiresAt === undefined || lookup.expiresAt > Date.now()) ? lookup.id : null;
     let status;
     if (credentialId) {
       status = await apiKeyRateLimiter.limit(ctx, budget, { key: credentialId });
