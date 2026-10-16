@@ -40,6 +40,21 @@ describe("parent-owned message limits", () => {
     expect(gate.request("second", "first")).toBe("push");
   });
 
+  it("requires confirmation when another click hides expiry between observer ticks", () => {
+    const { gate, activation, advance } = fixture();
+    activation.isActive = true;
+    expect(gate.request("first", "start")).toBe("push");
+    activation.isActive = false;
+    advance(5300);
+    // A delayed observer never saw false before the next browser gesture.
+    activation.isActive = true;
+    expect(gate.request("second", "first")).toBe("confirm");
+    activation.isActive = false;
+    gate.observe();
+    activation.isActive = true;
+    expect(gate.request("second", "first")).toBe("push");
+  });
+
   it("coalesces confirmations and prevents their activation authorizing another frame", () => {
     const { gate, activation } = fixture();
     activation.isActive = true;

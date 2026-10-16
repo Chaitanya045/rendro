@@ -60,9 +60,9 @@ function publisherHtml(path: string): string {
         let attempts = 0;
         const timer = setInterval(() => {
           parent.postMessage({type:'doc-navigate',path:'guide/other.html',search:'?hop='+ ++hop},location.origin);
-          if (++attempts === 5) {
+          if (++attempts >= 5 && navigator.userActivation?.isActive !== true) {
             clearInterval(timer);
-            parent.postMessage({type:'fixture-chain-finished'},location.origin);
+            parent.postMessage({type:'fixture-chain-complete'},location.origin);
           }
         }, 1100);
       }
@@ -134,12 +134,14 @@ async function newPage(): Promise<Page> {
   const page = await harness.newPage();
   await page.exposeFunction("recordViolation", (value: string) => { violations.push(value); });
   await page.addInitScript(() => {
-    (window as unknown as { activations: boolean[] }).activations = [];
+    const state = window as unknown as { activations: boolean[]; chainComplete: boolean };
+    state.activations = [];
+    state.chainComplete = false;
     addEventListener("message", event => {
-      if (event.data?.type === "doc-navigate") (window as unknown as { activations: boolean[] }).activations.push(navigator.userActivation?.isActive ?? false);
-      if (event.data?.type === "fixture-chain-finished"
+      if (event.data?.type === "doc-navigate") state.activations.push(navigator.userActivation?.isActive ?? false);
+      if (event.data?.type === "fixture-chain-complete"
         && event.source === document.querySelector<HTMLIFrameElement>("#content-frame")?.contentWindow) {
-        document.documentElement.dataset.chainFinished = "true";
+        state.chainComplete = true;
       }
     });
     document.addEventListener("securitypolicyviolation", event => {
@@ -153,7 +155,7 @@ async function newPage(): Promise<Page> {
   return page;
 }
 
-async function readyFrame(page: Page): Promise<Frame> {
+async function readyFrame(page: Page, { path = documents[0], search = "" }: { path?: string; search?: string } = {}): Promise<Frame> {
   // The shell can finish parsing before its tree starts the document request.
   // Wait for the canonical iframe and publisher initialization, not a load event
   // that may already have fired or unrelated shell resources.
@@ -163,13 +165,64 @@ async function readyFrame(page: Page): Promise<Frame> {
   }));
   const frame = await (await page.locator("#content-frame").elementHandle())!.contentFrame();
   if (!frame) throw new Error("Missing document frame");
-  await browserStep("wait for publisher initialization", () => frame.waitForFunction(() => document.readyState === "complete"
-    && document.body?.dataset.initializedQuery !== undefined && Boolean(document.getElementById("details"))));
+  await browserStep("wait for publisher initialization", () => frame.waitForFunction(expected => document.readyState === "complete"
+    && document.body?.dataset.path === expected.path
+    && document.body.dataset.initializedQuery === expected.search
+    && Boolean(document.getElementById("details")), { path, search }));
   // A restored scroll position can be visible before the parent's load handler
-  // finishes. Let that handler and the shell's loading state settle before clicks.
-  await browserStep("wait for viewer loading state to settle", () => page.waitForFunction(() => document.querySelector("#content-frame")?.getAttribute("aria-busy") !== "true"
-    && !document.documentElement.classList.contains("doc-loading")));
+  // finishes. aria-busy is cleared by that handler; doc-loading only keeps the
+  // sidebar animation visible for 520ms and does not block document interaction.
+  await browserStep("wait for viewer load acknowledgement", () => page.waitForFunction(() => document.querySelector("#content-frame")?.getAttribute("aria-busy") !== "true"));
   return frame;
+}
+
+// Unlike Playwright's evaluated scripts, these fixture operations must not grant
+// activation. Keep CDP local to this Chromium test and release each session.
+async function withoutActivation<T>(page: Page, action: () => T | Promise<T>, label: string): Promise<T> {
+  const session = await page.context().newCDPSession(page);
+  try {
+    return await browserStep(label, async () => {
+      const result = await session.send("Runtime.evaluate", {
+        expression: `(${action.toString()})()`, userGesture: false, awaitPromise: true, returnByValue: true,
+      });
+      if (result.exceptionDetails) throw new Error(result.exceptionDetails.text);
+      return result.result.value as T;
+    });
+  } finally {
+    await session.detach();
+  }
+}
+
+function readHistoryLength(page: Page): Promise<number> {
+  return withoutActivation(page, () => history.length, "read history without activation");
+}
+
+// Document readiness is not a history assertion. Wait for the expected joint
+// session history state without granting activation during the observation.
+async function expectHistoryLength(page: Page, expected: number): Promise<void> {
+  await expect.poll(() => readHistoryLength(page)).toBe(expected);
+}
+
+// Observe the native getter without a gesture, and resolve only after the shell
+// has read false. Polling isActive ourselves could beat the gate's observer.
+async function waitForObservedActivationExpiry(page: Page): Promise<void> {
+  await withoutActivation(page, () => new Promise<void>(resolve => {
+    const activation = navigator.userActivation;
+    if (!activation) { resolve(); return; }
+    const read = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(activation), "isActive")!.get!.bind(activation);
+    Object.defineProperty(activation, "isActive", {
+      configurable: true,
+      get() {
+        const active = read() as boolean;
+        if (!active) {
+          Reflect.deleteProperty(activation, "isActive");
+          // The gate finishes resetting its reservation in this same task.
+          queueMicrotask(resolve);
+        }
+        return active;
+      },
+    });
+  }), "wait for shell to observe native activation expiry");
 }
 
 async function open(base: string, hash = ""): Promise<{ page: Page; frame: Frame }> {
@@ -184,52 +237,6 @@ async function open(base: string, hash = ""): Promise<{ page: Page; frame: Frame
   expect(nonces.length).toBeGreaterThan(0);
   expect(nonces.every(value => value === nonce)).toBe(true);
   return { page, frame: await readyFrame(page) };
-}
-
-// Playwright evaluate grants transient activation. Reading history while the
-// fixture keeps requesting navigation must not rearm the gate under test.
-async function passiveNavigationState(page: Page, waitForChain = false): Promise<{ historyLength: number; notices: number; active: boolean }> {
-  const session = await page.context().newCDPSession(page);
-  try {
-    const { result, exceptionDetails } = await session.send("Runtime.evaluate", {
-      expression: `(async () => {
-        if (${waitForChain}) await new Promise(resolve => {
-          const poll = setInterval(() => {
-            if (document.documentElement.dataset.chainFinished === "true") {
-              clearInterval(poll); resolve();
-            }
-          }, 25);
-        });
-        return { historyLength: history.length, notices: document.querySelectorAll('#document-navigation-notice').length, active: navigator.userActivation.isActive };
-      })()`,
-      userGesture: false, returnByValue: true, awaitPromise: true,
-    });
-    if (exceptionDetails || result.type !== "object") throw new Error("Could not read navigation state without activation");
-    return result.value as { historyLength: number; notices: number; active: boolean };
-  } finally {
-    await session.detach();
-  }
-}
-
-// This fixture message must remain unsolicited. Playwright evaluation can grant
-// activation, including between the expiry check and delivery of postMessage.
-async function stagePendingNavigation(page: Page): Promise<void> {
-  const session = await page.context().newCDPSession(page);
-  try {
-    const { exceptionDetails } = await browserStep("send pending navigation without activation", () => session.send("Runtime.evaluate", {
-      expression: `(async () => {
-        while (navigator.userActivation?.isActive) await new Promise(resolve => setTimeout(resolve, 25));
-        document.querySelector('#content-frame').contentWindow.postMessage({
-          type: 'fixture-navigate', search: '?pending'
-        }, '*');
-        while (!document.querySelector('#document-navigation-notice')) await new Promise(resolve => setTimeout(resolve, 25));
-      })()`,
-      userGesture: false, awaitPromise: true, returnByValue: true,
-    }));
-    if (exceptionDetails) throw new Error("Could not stage unsolicited navigation");
-  } finally {
-    await session.detach();
-  }
 }
 
 async function atTarget(frame: Frame, id: string) {
@@ -339,7 +346,7 @@ describe("viewer fragment navigation in Chromium", () => {
     expect(new URL(page.url()).pathname).toBe(new URL(url).pathname);
     expect(new URL(page.url()).searchParams.has("docQuery")).toBe(false);
     expect(requests.filter(path => path.includes("/files/")).length).toBe(loads);
-    expect(await page.evaluate(() => history.length)).toBe(2);
+    expect(await readHistoryLength(page)).toBe(2);
     await page.close();
   });
 
@@ -352,10 +359,10 @@ describe("viewer fragment navigation in Chromium", () => {
     let navigations = 0;
     page.on("framenavigated", navigated => { if (navigated === frame) navigations++; });
     await frame.getByRole("link", { name: "Query one", exact: true }).click();
-    await readyFrame(page);
+    await readyFrame(page, { search: "?v=1" });
     expect(new URL(page.url()).searchParams.get("docQuery")).toBe("?v=1");
     expect(navigations).toBe(1);
-    expect(await page.evaluate(() => history.length)).toBe(3);
+    await expectHistoryLength(page, 3);
     expect(await page.evaluate(() => (window as unknown as { activations: boolean[] }).activations.includes(true))).toBe(true);
     navigationAttack = false;
     await page.goBack();
@@ -369,26 +376,52 @@ describe("viewer fragment navigation in Chromium", () => {
     const page = await newPage();
     await page.goto(harness.origin + base);
     const frame = await readyFrame(page);
-    expect((await passiveNavigationState(page)).historyLength).toBe(2);
+    expect(await readHistoryLength(page)).toBe(2);
     let navigations = 0;
     page.on("framenavigated", candidate => { if (candidate === frame) navigations++; });
-    const initialUrl = page.url();
+    const destinations: string[] = [];
+    const requestsAfterCommit: string[] = [];
+    page.on("request", request => {
+      if (!request.isNavigationRequest() || request.frame() !== frame) return;
+      destinations.push(request.url());
+      if (navigations) requestsAfterCommit.push(request.url());
+    });
     const targets = new Set<string>();
     page.on("request", request => {
       const url = new URL(request.url());
       if (request.isNavigationRequest() && url.pathname.startsWith(`${base}/files/`)) targets.add(url.pathname + url.search);
     });
+    const initialUrl = page.url();
+    const loads = requests.filter(path => path.includes("/files/")).length;
     await frame.getByRole("link", { name: "Query one", exact: true }).click();
-    // Five attempts span 5.5s, beyond native activation. Wait for the fixture's
-    // final message, after all attempts, without granting new activation. Stop
-    // the fixture before Back so a queued old-document request cannot race it.
-    const state = await browserStep("wait for delayed navigation attempts without activation", () => passiveNavigationState(page, true));
+    // A passive completion signal follows at least five attempts and native
+    // expiry. Drain the fixture stream before Back so it cannot reopen a notice
+    // during history restoration. Do not grant any further automation activation.
+    await withoutActivation(page, () => new Promise<void>(resolve => {
+      if ((window as unknown as { chainComplete: boolean }).chainComplete) { resolve(); return; }
+      const complete = (event: MessageEvent) => {
+        if (event.data?.type !== "fixture-chain-complete"
+          || event.source !== document.querySelector<HTMLIFrameElement>("#content-frame")?.contentWindow) return;
+        window.removeEventListener("message", complete);
+        resolve();
+      };
+      window.addEventListener("message", complete);
+    }), "wait for replacement-frame requests beyond activation expiry");
     expect(navigations).toBe(1);
-    // src followed by location.replace can dispatch duplicate requests before
-    // Chromium cancels one. Require one committed navigation and only its target.
+    // The pending src request can reach the server before location.replace
+    // cancels it. Both attempts must target the approved URL, with no later fetch.
+    expect(new Set(destinations)).toEqual(new Set([`${harness.origin}${base}/files/${documents[0]}?v=1`]));
+    expect(requestsAfterCommit).toEqual([]);
     expect([...targets]).toEqual([`${base}/files/${documents[0]}?v=1`]);
+    expect(new Set(requests.filter(path => path.includes("/files/")).slice(loads)))
+      .toEqual(new Set([`${base}/files/${documents[0]}`]));
     expect(new URL(page.url()).searchParams.get("docQuery")).toBe("?v=1");
-    // Locator count also evaluates in Chromium; inspect all state passively.
+    // Inspect all state passively: even a locator count can grant activation.
+    const state = await withoutActivation(page, () => ({
+      historyLength: history.length,
+      notices: document.querySelectorAll("#document-navigation-notice").length,
+      active: navigator.userActivation.isActive,
+    }), "read replacement-frame navigation state without activation");
     expect(state).toEqual({ historyLength: 3, notices: 1, active: false });
     await page.goBack();
     await readyFrame(page);
@@ -401,28 +434,38 @@ describe("viewer fragment navigation in Chromium", () => {
 
   it.each([privateBase, "/p/fixture"])("uses deduplicated text-only parent confirmation without userActivation in %s", async base => {
     missingActivationAttack = true;
+    const search = "?value=<img src=x onerror=alert(1)>";
     const page = await newPage();
     await page.addInitScript(() => { Object.defineProperty(navigator, "userActivation", { value: undefined }); });
+    let committedLoads = 0;
+    page.on("framenavigated", frame => {
+      if (frame.parentFrame() && new URL(frame.url()).pathname.includes("/files/")) committedLoads++;
+    });
     await page.goto(harness.origin + base);
-    await page.waitForTimeout(1600);
+    await page.waitForFunction(() => (window as unknown as { activations: boolean[] }).activations.length >= 8);
     expect(new URL(page.url()).searchParams.has("docQuery")).toBe(false);
     const notice = page.locator("#document-navigation-notice");
     expect(await notice.count()).toBe(1);
-    expect(await notice.locator("p").textContent()).toBe("Open linked document guide/other.html?value=<img src=x onerror=alert(1)>#section?");
+    expect(await notice.locator("p").textContent()).toBe(`Open linked document guide/other.html${search}#section?`);
     expect(await notice.locator("img").count()).toBe(0);
     expect(await page.locator("html").getAttribute("class")).not.toContain("shell-hidden");
     expect(requests.filter(path => path.includes("/files/")).length).toBe(1);
     // Parent native button supports keyboard activation even without the API.
     await notice.getByRole("button", { name: "Open linked document", exact: true }).press("Enter");
-    await readyFrame(page);
+    await readyFrame(page, { path: documents[1], search: new URL(search, "https://fixture.test").search });
     expect(new URL(page.url()).searchParams.get("doc")).toBe(documents[1]);
-    expect(new URL(page.url()).searchParams.get("docQuery")).toBe("?value=<img src=x onerror=alert(1)>");
+    expect(new URL(page.url()).searchParams.get("docQuery")).toBe(search);
     expect(new URL(page.url()).hash).toBe("#section");
-    await page.waitForTimeout(400);
+    // src + location.replace can issue an aborted request before the one
+    // committed navigation. Count commits, and forbid any later fetches.
+    const loadsAfterOpen = requests.filter(path => path.includes("/files/")).length;
+    await notice.waitFor();
     await notice.getByRole("button", { name: "Dismiss", exact: true }).click();
-    await page.waitForTimeout(600);
+    const attempts = await page.evaluate(() => (window as unknown as { activations: boolean[] }).activations.length);
+    await page.waitForFunction(before => (window as unknown as { activations: boolean[] }).activations.length >= before + 3, attempts);
     expect(await notice.count()).toBe(0);
-    expect(requests.filter(path => path.includes("/files/")).length).toBe(2);
+    expect(committedLoads).toBe(2);
+    expect(requests.filter(path => path.includes("/files/")).length).toBe(loadsAfterOpen);
     await page.goBack();
     await readyFrame(page);
     expect(new URL(page.url()).searchParams.has("docQuery")).toBe(false);
@@ -453,7 +496,7 @@ describe("viewer fragment navigation in Chromium", () => {
       expect(await notice.locator("p").textContent()).toBe(`Open linked document ${destination}?`);
       expect((await new AxeBuilder({ page }).include("#document-navigation-notice").options({ preload: false }).analyze()).violations).toEqual([]);
       await notice.getByRole("button", { name: "Open linked document", exact: true }).press("Enter");
-      frame = await readyFrame(page);
+      frame = await readyFrame(page, { path: link === "Other page" ? documents[1] : documents[0], search: link === "Other page" ? "" : "?v=2" });
       expect(new URL(page.url()).searchParams.get("doc")).toBe(link === "Other page" ? documents[1] : documents[0]);
       expect(new URL(page.url()).searchParams.get("docQuery")).toBe(link === "Other page" ? null : "?v=2");
       expect(new URL(page.url()).hash).toBe("#section");
@@ -503,7 +546,7 @@ describe("viewer fragment navigation in Chromium", () => {
       if (round < 2) await notice.getByRole("button", { name: "Dismiss", exact: true }).click();
     }
     await notice.getByRole("button", { name: "Open linked document", exact: true }).click();
-    await readyFrame(page);
+    await readyFrame(page, { search: "?v=2" });
     expect(new URL(page.url()).searchParams.get("docQuery")).toBe("?v=2");
     await page.close();
   });
@@ -554,8 +597,7 @@ describe("viewer fragment navigation in Chromium", () => {
     await review.evaluate(button => button.addEventListener("click", () => {
       document.querySelector<HTMLIFrameElement>("#content-frame")!.contentWindow!.postMessage({ type: "fixture-navigate", search: "?attack-review" }, "*");
     }, { once: true }));
-    await page.waitForFunction(() => navigator.userActivation?.isActive !== true);
-    await page.waitForTimeout(150); // Allow the gate's inactivity observer to run.
+    await waitForObservedActivationExpiry(page);
     await review.click();
     await page.waitForFunction(() => (window as unknown as { activations: boolean[] }).activations.length === 3);
     expect(page.url()).toBe(initialUrl);
@@ -572,7 +614,7 @@ describe("viewer fragment navigation in Chromium", () => {
     expect(page.url()).toBe(initialUrl);
     expect(await notice.locator("p").textContent()).toBe("Open linked document guide/other.html?reviewed#section?");
     await page.mouse.up();
-    const replacement = await readyFrame(page);
+    const replacement = await readyFrame(page, { path: documents[1], search: "?reviewed" });
     expect(new URL(page.url()).searchParams.get("docQuery")).toBe("?reviewed");
     expect(new URL(page.url()).hash).toBe("#section");
     await replacement.waitForFunction(() => {
@@ -581,7 +623,7 @@ describe("viewer fragment navigation in Chromium", () => {
     });
     await notice.waitFor();
     expect(new URL(page.url()).searchParams.get("docQuery")).toBe("?reviewed");
-    expect(await page.evaluate(() => history.length)).toBe(3);
+    await expectHistoryLength(page, 3);
     await page.close();
   });
 
@@ -607,8 +649,7 @@ describe("viewer fragment navigation in Chromium", () => {
       await target.evaluate(element => element.addEventListener("pointerdown", () => {
         document.querySelector<HTMLIFrameElement>("#content-frame")!.contentWindow!.postMessage({ type: "fixture-navigate", search: "?parent-attack" }, "*");
       }, { once: true }));
-      await page.waitForFunction(() => navigator.userActivation?.isActive !== true);
-      await page.waitForTimeout(150);
+      await waitForObservedActivationExpiry(page);
       await target.hover();
       await page.mouse.down();
       await page.waitForFunction(() => (window as unknown as { activations: boolean[] }).activations.length === 1);
@@ -616,7 +657,7 @@ describe("viewer fragment navigation in Chromium", () => {
       expect(await page.locator("#document-navigation-notice").count()).toBe(1);
       await page.mouse.up();
       expect(await page.evaluate(() => (window as unknown as { activations: boolean[] }).activations)).toEqual([!missing]);
-      expect(await page.evaluate(() => history.length)).toBe(2);
+      expect(await readHistoryLength(page)).toBe(2);
       await page.close();
     });
 
@@ -624,7 +665,12 @@ describe("viewer fragment navigation in Chromium", () => {
     const page = await newPage();
     await page.goto(harness.origin + privateBase);
     await readyFrame(page);
-    await stagePendingNavigation(page);
+    await waitForObservedActivationExpiry(page);
+    await withoutActivation(page, () => {
+      document.querySelector<HTMLIFrameElement>("#content-frame")!.contentWindow!.postMessage({
+        type: "fixture-navigate", search: "?pending",
+      }, "*");
+    }, "send unsolicited fixture navigation without activation");
     await page.locator("#document-navigation-notice").waitFor();
     if (dismissed) await page.getByRole("button", { name: "Dismiss", exact: true }).click();
     await page.evaluate(() => {
@@ -648,23 +694,23 @@ describe("viewer fragment navigation in Chromium", () => {
   it("coalesces a rapid legitimate confirmed link so one Back returns before the burst", async () => {
     const { page, frame } = await open(privateBase);
     await frame.getByRole("link", { name: "Query one", exact: true }).click();
-    await readyFrame(page);
+    await readyFrame(page, { search: "?v=1" });
     await frame.getByRole("link", { name: "Query two", exact: true }).click();
     await page.getByRole("button", { name: "Open linked document", exact: true }).click();
-    await readyFrame(page);
+    await readyFrame(page, { search: "?v=2" });
     expect(new URL(page.url()).searchParams.get("docQuery")).toBe("?v=2");
-    expect(await page.evaluate(() => history.length)).toBe(3);
+    await expectHistoryLength(page, 3);
     await page.goBack();
     await readyFrame(page);
     expect(new URL(page.url()).searchParams.has("docQuery")).toBe(false);
     await page.goForward();
-    await readyFrame(page);
+    await readyFrame(page, { search: "?v=2" });
     expect(new URL(page.url()).searchParams.get("docQuery")).toBe("?v=2");
     await page.goBack();
     await readyFrame(page);
     await frame.getByRole("link", { name: "Query two", exact: true }).click();
     await page.getByRole("button", { name: "Open linked document", exact: true }).click();
-    await readyFrame(page);
+    await readyFrame(page, { search: "?v=2" });
     await page.goBack();
     await readyFrame(page);
     expect(new URL(page.url()).searchParams.has("docQuery")).toBe(false);
@@ -674,27 +720,33 @@ describe("viewer fragment navigation in Chromium", () => {
   it("allows two legitimate sequential clicks after observing activation expiry", async () => {
     const { page, frame } = await open(privateBase);
     await frame.getByRole("link", { name: "Query one", exact: true }).click();
-    await readyFrame(page);
-    await page.waitForTimeout(5300);
+    await readyFrame(page, { search: "?v=1" });
+    await expectHistoryLength(page, 3);
+    await waitForObservedActivationExpiry(page);
     await frame.getByRole("link", { name: "Query two", exact: true }).click();
-    await readyFrame(page);
+    await readyFrame(page, { search: "?v=2" });
     expect(new URL(page.url()).searchParams.get("docQuery")).toBe("?v=2");
     expect(await page.locator("#document-navigation-notice").count()).toBe(0);
-    expect(await page.evaluate(() => history.length)).toBe(4);
+    await expectHistoryLength(page, 4);
+    await page.goBack();
+    await readyFrame(page, { search: "?v=1" });
+    expect(new URL(page.url()).searchParams.get("docQuery")).toBe("?v=1");
+    await page.goBack();
+    await readyFrame(page);
+    expect(new URL(page.url()).searchParams.has("docQuery")).toBe(false);
     await page.close();
   });
 
   it.each([privateBase, "/p/fixture"])("propagates keyboard Enter activation from an opaque-frame link in %s", async base => {
     const page = await newPage();
     await page.goto(harness.origin + base);
-    await page.waitForTimeout(600);
-    const frame = page.frames().find(candidate => candidate.parentFrame() === page.mainFrame())!;
+    const frame = await readyFrame(page);
     await frame.getByRole("link", { name: "Other page", exact: true }).press("Enter");
-    await readyFrame(page);
+    await readyFrame(page, { path: documents[1] });
     expect(new URL(page.url()).searchParams.get("doc")).toBe(documents[1]);
     expect(new URL(page.url()).hash).toBe("#section");
     expect(await page.evaluate(() => (window as unknown as { activations: boolean[] }).activations)).toEqual([true]);
-    expect(await page.evaluate(() => history.length)).toBe(3);
+    await expectHistoryLength(page, 3);
     await page.close();
   });
 
@@ -711,7 +763,7 @@ describe("viewer fragment navigation in Chromium", () => {
     });
     await expect.poll(() => new URL(page.url()).hash).toBe("#flood-999");
     expect(await page.evaluate(() => (window as unknown as { replaces: number }).replaces)).toBeLessThanOrEqual(3);
-    expect(await page.evaluate(() => history.length)).toBe(historyLength);
+    expect(await readHistoryLength(page)).toBe(historyLength);
     await page.close();
   });
 
@@ -722,7 +774,7 @@ describe("viewer fragment navigation in Chromium", () => {
     try {
       await frame.locator("textarea").fill("Unsent comment draft");
       const loads = requests.filter(path => path === `${base}/files/${documents[0]}`).length;
-      const historyLength = await page.evaluate(() => history.length);
+      const historyLength = await readHistoryLength(page);
       for (const label of ["Bare fragment", "Explicit same page"]) {
         await frame.getByRole("link", { name: label, exact: true }).click();
         await atTarget(frame, "details");
@@ -730,7 +782,7 @@ describe("viewer fragment navigation in Chromium", () => {
       }
       expect(await frame.locator("textarea").inputValue()).toBe("Unsent comment draft");
       expect(requests.filter(path => path === `${base}/files/${documents[0]}`).length).toBe(loads);
-      expect(await page.evaluate(() => history.length)).toBe(historyLength);
+      expect(await readHistoryLength(page)).toBe(historyLength);
       expect(frame.url()).toBe(`${harness.origin}${base}/files/${documents[0]}${base === "/s/fixture" ? "#details" : ""}`);
       await frame.getByRole("link", { name: "Unicode", exact: true }).click();
       await atTarget(frame, "日本語");
@@ -767,7 +819,7 @@ describe("viewer fragment navigation in Chromium", () => {
       expect(new URL(page.url()).searchParams.get("doc")).toBe(documents[1]);
       expect(new URL(page.url()).hash).toBe("#section");
       await browserStep("reload document", () => page.reload({ waitUntil: "domcontentloaded" }));
-      let current = await readyFrame(page);
+      let current = await readyFrame(page, { path: documents[1] });
       await atTarget(current, "section");
       await page.evaluate(() => history.back());
       await browserStep("restore canonical document frame", () => expect.poll(() => page.frames().find(frame => frame !== page.mainFrame())?.url()).toBe(`${harness.origin}${base}/files/${documents[0]}`));
@@ -808,14 +860,14 @@ describe("viewer fragment navigation in Chromium", () => {
       await atTarget(frame, "details");
       expect(await frame.locator("textarea").inputValue()).toBe("Keep same query draft");
       expect(requests.filter(path => path === `${base}/files/${documents[0]}`).length).toBe(loads);
-      await page.waitForTimeout(5300); // Let the parent observe the end of Chromium activation.
+      if (base !== "/s/fixture") await waitForObservedActivationExpiry(page);
       await frame.getByRole("link", { name: "Query two", exact: true }).click();
       await initialized("?v=2");
       await atTarget(frame, "section");
       expect(await frame.locator("textarea").inputValue()).toBe("Comment draft");
       if (base !== "/s/fixture") {
         await browserStep("reload document", () => page.reload({ waitUntil: "domcontentloaded" }));
-        const restored = await readyFrame(page);
+        const restored = await readyFrame(page, { search: "?v=2" });
         expect(await restored.locator("body").getAttribute("data-initialized-query")).toBe("?v=2");
         await atTarget(restored, "section");
         await browserStep("restore previous history entry", () => page.goBack({ waitUntil: "domcontentloaded" }));
@@ -824,7 +876,7 @@ describe("viewer fragment navigation in Chromium", () => {
         await browserStep("restore next history entry", () => page.goForward({ waitUntil: "domcontentloaded" }));
         await browserStep("wait for publisher initialization", () => restored.waitForFunction(() => document.body?.dataset.initializedQuery === "?v=2"));
         await atTarget(restored, "section");
-        await page.waitForTimeout(5300); // Back/Forward also consumes the parent navigation authorization.
+        await waitForObservedActivationExpiry(page); // Back/Forward also consumes authorization.
         await restored.getByRole("link", { name: "Publisher doc query", exact: true }).click();
         await browserStep("wait for publisher initialization", () => restored.waitForFunction(() => document.body?.dataset.initializedQuery === "?doc=publisher&v=3"));
         expect(new URL(page.url()).searchParams.get("doc")).toBe(documents[0]);
@@ -851,7 +903,7 @@ describe("viewer fragment navigation in Chromium", () => {
     try {
       await frame.getByRole("link", { name: "Query one", exact: true }).click();
       await assertDestination("?v=1", "details");
-      await page.waitForTimeout(5300); // Let the parent observe the end of Chromium activation.
+      if (base !== "/s/fixture") await waitForObservedActivationExpiry(page);
       await frame.getByRole("link", { name: "Query two", exact: true }).click();
       await assertDestination("?v=2", "section");
       await page.evaluate(() => history.back());
@@ -861,7 +913,7 @@ describe("viewer fragment navigation in Chromium", () => {
       await page.evaluate(() => history.back());
       await assertDestination("?v=1", "details");
       await browserStep("reload document", () => page.reload({ waitUntil: "domcontentloaded" }));
-      const restored = await readyFrame(page);
+      const restored = await readyFrame(page, { search: "?v=1" });
       expect(await restored.locator("body").getAttribute("data-initialized-query")).toBe("?v=1");
       expect(new URL(page.url()).searchParams.get("docQuery")).toBe("?v=1");
       await browserStep("synchronize shell fragment", () => expect.poll(() => new URL(page.url()).hash).toBe("#details"));
@@ -878,13 +930,13 @@ describe("viewer fragment navigation in Chromium", () => {
     expect(new URL(copiedUrl).searchParams.get("doc")).toBe(documents[0]);
     expect(new URL(copiedUrl).searchParams.get("docQuery")).toBe("?v=2");
     await browserStep("reload query destination", () => page.reload({ waitUntil: "domcontentloaded" }));
-    const restored = await readyFrame(page);
+    const restored = await readyFrame(page, { search: "?v=2" });
     expect(new URL(restored.url()).pathname).toBe(`${base}/files/${documents[0]}`);
     expect(await restored.locator("body").getAttribute("data-initialized-query")).toBe("?v=2");
     await atTarget(restored, "section");
     const copied = await newPage(); // The shared harness creates a fresh context.
     await browserStep("open copied URL", () => copied.goto(copiedUrl, { waitUntil: "domcontentloaded" }));
-    const copiedFrame = await readyFrame(copied);
+    const copiedFrame = await readyFrame(copied, { search: "?v=2" });
     expect(new URL(copiedFrame.url()).pathname).toBe(`${base}/files/${documents[0]}`);
     expect(await copiedFrame.locator("body").getAttribute("data-initialized-query")).toBe("?v=2");
     await atTarget(copiedFrame, "section");
@@ -909,7 +961,7 @@ describe("viewer fragment navigation in Chromium", () => {
       await browserStep("restore scoped query URL", () => destination === page
         ? destination.reload({ waitUntil: "domcontentloaded" })
         : destination.goto(copiedUrl, { waitUntil: "domcontentloaded" }));
-      const restored = await readyFrame(destination);
+      const restored = await readyFrame(destination, { search: expected });
       expect(await restored.locator("body").getAttribute("data-initialized-query")).toBe(expected);
       expect(new URL(restored.url()).pathname).toBe("/s/fixture/files/" + documents[0]);
       expect(new URL(destination.url()).pathname).toBe("/s/fixture");
@@ -926,7 +978,7 @@ describe("viewer fragment navigation in Chromium", () => {
     await atTarget(frame, "details");
     await browserStep("synchronize initial share URL", () => expect.poll(() => new URL(page.url()).searchParams.get("doc")).toBe(documents[0]));
     const url = page.url();
-    const historyLength = await page.evaluate(() => history.length);
+    const historyLength = await readHistoryLength(page);
     const loads = requests.filter(path => path.includes("/files/")).length;
     await frame.getByRole("link", { name: "Query two", exact: true }).evaluate(link => {
       link.setAttribute("href", "page.html?" + "x".repeat(4096) + "#section");
@@ -946,7 +998,7 @@ describe("viewer fragment navigation in Chromium", () => {
       ]) window.dispatchEvent(new MessageEvent("message", event));
     });
     expect(page.url()).toBe(url);
-    expect(await page.evaluate(() => history.length)).toBe(historyLength);
+    expect(await readHistoryLength(page)).toBe(historyLength);
     expect(requests.filter(path => path.includes("/files/"))).toHaveLength(loads);
     await atTarget(frame, "details");
   });
@@ -982,7 +1034,6 @@ describe("viewer fragment navigation in Chromium", () => {
         await frame.getByRole("link", { name: "Unicode", exact: true }).click();
       }
       await assertOriginal();
-      await page.waitForTimeout(5300); // Let the parent observe the end of Chromium activation.
       await frame.getByRole("link", { name: "Query two", exact: true }).click();
       await browserStep("wait for publisher initialization", () => frame.waitForFunction(() => document.readyState === "complete" && document.body?.dataset.initializedQuery === "?v=2"));
       await browserStep("synchronize shell fragment", () => expect.poll(() => new URL(page.url()).hash).toBe("#section"));
