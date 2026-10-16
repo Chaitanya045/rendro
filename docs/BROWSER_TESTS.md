@@ -154,6 +154,8 @@ separate account tests resend delivery and neutral eligible/ineligible responses
 Reset mismatch asserts zero reset requests, with one request after correction.
 Sign-out checks that the retained protected containers are hidden and their shell
 is inert in both tabs before navigation; protected inputs cannot regain focus.
+The return-destination journey waits for method loading to finish before clicking
+Sign out, since the loaded password form moves that control.
 
 The complete three-engine suite has a 20-minute bound (30 minutes for the CI
 job including installation); individual auth journeys have a 60-second bound.

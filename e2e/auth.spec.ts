@@ -159,6 +159,9 @@ test("returnTo permits local paths and rejects off-site and protocol-relative de
     expect(new URL(page.url()).origin).toBe(baseURL);
     expect((await session(page))?.email).toBe("owner@example.test");
     await page.goto("/account/security");
+    // Method loading expands the card and moves Sign out. Wait for that
+    // layout transition before clicking, especially in WebKit.
+    await expect(page.locator("#method-list")).toHaveAttribute("aria-busy", "false");
     await signout(page);
   }
 });
