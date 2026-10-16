@@ -1,4 +1,16 @@
-import { parse } from "parse5";
+import { parse, type DefaultTreeAdapterMap } from "parse5";
+
+type ParsedElement = DefaultTreeAdapterMap["element"];
+
+// parse5 follows the HTML tree-construction rules: every input, even empty or
+// truncated, produces <html> and <head>. Only <body> is optional (framesets).
+function parseDocument(html: string) {
+  const document = parse(html, { sourceCodeLocationInfo: true });
+  const root = document.childNodes.find((node) => node.nodeName === "html") as ParsedElement;
+  const head = root.childNodes.find((node) => node.nodeName === "head") as ParsedElement;
+  const body = root.childNodes.find((node) => node.nodeName === "body") as ParsedElement | undefined;
+  return { document, head, body, root };
+}
 
 const MOBILE_VIEWPORT_SCROLLBAR_STYLE = `<style data-rendro-mobile-viewport>
 @media (max-width: 760px) {
@@ -15,17 +27,12 @@ function markupInsertionOffset(html: string, complete: boolean): number | undefi
   // Parse only a bounded prefix, and splice the original markup rather than
   // serializing publisher HTML. Raw text, comments and quoted attributes can
   // contain closing-tag lookalikes. A truncated/implicit head is not an anchor.
-  const document = parse(html.slice(0, 64 * 1024), { sourceCodeLocationInfo: true });
-  const root = document.childNodes.find((node) => node.nodeName === "html");
-  if (!root || !("childNodes" in root)) return undefined;
-  const head = root.childNodes.find((node) => node.nodeName === "head");
-  const body = root.childNodes.find((node) => node.nodeName === "body");
-  const headStart = head?.sourceCodeLocation && "startTag" in head.sourceCodeLocation
-    ? head.sourceCodeLocation.startTag?.endOffset : undefined;
+  const { head, body } = parseDocument(html.slice(0, 64 * 1024));
+  const headStart = head.sourceCodeLocation?.startTag?.endOffset;
   // Fragments have implicit head/body elements. Their first parsed child's
   // beginning is also safe, unlike a guessed position inside an unfinished tag.
-  const headContent = head && "childNodes" in head ? head.childNodes[0]?.sourceCodeLocation?.startOffset : undefined;
-  const bodyContent = body && "childNodes" in body ? body.childNodes[0]?.sourceCodeLocation?.startOffset : undefined;
+  const headContent = head.childNodes[0]?.sourceCodeLocation?.startOffset;
+  const bodyContent = body?.childNodes[0]?.sourceCodeLocation?.startOffset;
   // EOF can turn an incomplete '<' into fragment text. Only use implicit
   // fragment anchors when this is genuinely the complete, untruncated input.
   const fragmentOffset = complete && html.length <= 64 * 1024 ? headContent ?? bodyContent : undefined;
@@ -48,7 +55,7 @@ export async function readHtmlStream(stream: ReadableStream<Uint8Array>): Promis
   while (true) {
     const result = await reader.read();
     if (result.done) break;
-    if (result.value) html += decoder.decode(result.value, { stream: true });
+    html += decoder.decode(result.value, { stream: true });
   }
   return html + decoder.decode();
 }
@@ -95,16 +102,12 @@ export function injectViewerHeadStream(
   maxPrefixBytes = 64 * 1024,
 ): ReadableStream<Uint8Array> {
   return injectHtmlPrefixStream(stream, (html, complete) => {
-    const document = parse(html, { sourceCodeLocationInfo: true });
-    const root = document.childNodes.find(node => node.nodeName === "html");
-    if (!root || !("childNodes" in root)) return undefined;
-    const head = root.childNodes.find(node => node.nodeName === "head");
-    const body = root.childNodes.find(node => node.nodeName === "body");
-    const children = head && "childNodes" in head ? head.childNodes : [];
-    const headLocation = head?.sourceCodeLocation;
-    const headClosed = headLocation && "endTag" in headLocation && headLocation.endTag;
-    const bodyContent = body && "childNodes" in body ? body.childNodes[0]?.sourceCodeLocation?.startOffset : undefined;
-    const bodyElement = body && "childNodes" in body && body.childNodes.some(node =>
+    const { document, root, head, body } = parseDocument(html);
+    const children = head.childNodes;
+    const headLocation = head.sourceCodeLocation;
+    const headClosed = headLocation?.endTag;
+    const bodyContent = body?.childNodes[0]?.sourceCodeLocation?.startOffset;
+    const bodyElement = body?.childNodes.some(node =>
       node.sourceCodeLocation && "startTag" in node.sourceCodeLocation && node.sourceCodeLocation.startTag);
     // EOF in a partial '<title' can produce implicit body text. Only a complete
     // element or explicit head close proves the head has ended before EOF.
@@ -113,9 +116,8 @@ export function injectViewerHeadStream(
       && "attrs" in node && node.attrs.some(attr => attr.name === "href"));
     const href = publisherBase && "attrs" in publisherBase
       ? publisherBase.attrs.find(attr => attr.name === "href")?.value : undefined;
-    const headStart = headLocation && "startTag" in headLocation ? headLocation.startTag?.endOffset : undefined;
-    const rootLocation = root.sourceCodeLocation;
-    const rootStart = rootLocation && "startTag" in rootLocation ? rootLocation.startTag?.endOffset : undefined;
+    const headStart = headLocation?.startTag?.endOffset;
+    const rootStart = root.sourceCodeLocation?.startTag?.endOffset;
     const doctype = document.childNodes.find(node => node.nodeName === "#documentType");
     const offset = headStart ?? children[0]?.sourceCodeLocation?.startOffset
       ?? body?.sourceCodeLocation?.startOffset ?? bodyContent
@@ -165,7 +167,8 @@ function injectHtmlPrefixStream(
     // Without a one-to-one UTF-8 mapping, a parser character offset cannot be
     // translated safely back into the publisher's original byte stream.
     if (decoded === null) {
-      if (bytes.byteLength > 0) controller.enqueue(bytes);
+      // Empty input always decodes, so a failure implies bytes were buffered.
+      controller.enqueue(bytes);
       decided = true;
       return true;
     }

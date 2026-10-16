@@ -164,6 +164,9 @@ describe("share creation authority", () => {
     '<template>'.repeat(10_000),
     '<img src=image><style>' + 'a{background:url(image)}'.repeat(15_000) + '</style>',
   ])("rejects excessive HTML complexity without a partial grant (%#)", async html => {
+    // These are deterministic size/work counters. A real clock lets a slow or
+    // instrumented machine hit the separate CPU deadline first ("share_busy").
+    vi.spyOn(performance, "now").mockReturnValue(0);
     const f = await fixture();
     f.read.mockResolvedValue(new Response(html).body);
     const before = await f.backend.run(ctx => ctx.db.query("shareGrants").collect());

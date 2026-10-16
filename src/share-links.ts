@@ -13,17 +13,14 @@ export type ShareTokenResult =
   | { ok: true; key: string; expiresAt: number }
   | { ok: false; status: 403 | 410; reason: "invalid" | "expired" };
 
-function base64UrlEncode(value: string | Buffer): string {
-  const buffer = typeof value === "string" ? Buffer.from(value, "utf8") : value;
-  return buffer.toString("base64url");
+function base64UrlEncode(value: string): string {
+  return Buffer.from(value, "utf8").toString("base64url");
 }
 
-function base64UrlDecode(value: string): string | null {
-  try {
-    return Buffer.from(value, "base64url").toString("utf8");
-  } catch {
-    return null;
-  }
+// Node's base64url decoding skips invalid characters and never throws; garbage
+// yields an empty or unparseable string that the caller rejects.
+function base64UrlDecode(value: string): string {
+  return Buffer.from(value, "base64url").toString("utf8");
 }
 
 function sign(payload: string): string {

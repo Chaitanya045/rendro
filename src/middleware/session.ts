@@ -138,13 +138,17 @@ async function lookupWithRetry(request: Request, cookie: string, cached: boolean
     const result = cached && attempt === 1
       ? await sessionCache.lookup(cookie, () => lookupSession(request, cookie))
       : await lookupSession(request, cookie);
-    if (result.kind !== "failure") return result;
-    logger.warn({ category: result.category, status: result.status ?? null, attempt }, "Session lookup failed");
-    const delay = Math.max(RETRY_BACKOFF_MS, result.retryAfterMs ?? 0);
-    // Only repeat the session GET, never the incoming request or its writes.
-    // A long Retry-After belongs in the 503, not a premature second request.
-    if (attempt === 2 || result.category === "unexpected_status" || delay > MAX_RETRY_BACKOFF_MS) return result;
-    await new Promise((resolve) => setTimeout(resolve, delay));
+    if (result.kind === "failure") {
+      logger.warn({ category: result.category, status: result.status ?? null, attempt }, "Session lookup failed");
+      const delay = Math.max(RETRY_BACKOFF_MS, result.retryAfterMs ?? 0);
+      // Only repeat the session GET, never the incoming request or its writes.
+      // A long Retry-After belongs in the 503, not a premature second request.
+      if (attempt < 2 && result.category !== "unexpected_status" && delay <= MAX_RETRY_BACKOFF_MS) {
+        await new Promise((resolve) => setTimeout(resolve, delay));
+        continue;
+      }
+    }
+    return result;
   }
 }
 
@@ -196,7 +200,7 @@ export async function sessionMiddleware(
         : c.json({ error: "Session temporarily unavailable", retryable: true }, 503);
       return;
     }
-    if (result.kind === "authenticated") {
+    if (result.kind !== "anonymous") {
       c.set("user", {
         ...result.user,
         createdAt: new Date(result.user.createdAt),
