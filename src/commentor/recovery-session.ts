@@ -86,14 +86,23 @@ export function renderCommentRecoveryLifecycle(userId: string | null, nonceAttri
       if (event.key === key && event.newValue) clear();
     });
     let checking = false;
+    let queued = false;
     const recheck = async () => {
-      if (!userId || signedOut || checking) return;
+      if (!userId || signedOut) return;
+      // A trigger arriving mid-check may postdate that request's server read (for
+      // example a revocation), so it must not be absorbed: run one more check after it.
+      if (checking) { queued = true; return; }
       checking = true;
       try {
-        const response = await fetch("/api/auth/get-session?disableCookieCache=true", { credentials: "same-origin", cache: "no-store" });
-        if (response.status === 401 || response.status === 403) clear();
-        else if (response.ok && (await response.json())?.user?.id !== userId) clear();
-      } catch {} finally { checking = false; }
+        do {
+          queued = false;
+          try {
+            const response = await fetch("/api/auth/get-session?disableCookieCache=true", { credentials: "same-origin", cache: "no-store" });
+            if (response.status === 401 || response.status === 403) clear();
+            else if (response.ok && (await response.json())?.user?.id !== userId) clear();
+          } catch {}
+        } while (queued && !signedOut);
+      } finally { checking = false; }
     };
     window.addEventListener("focus", recheck);
     window.addEventListener("pageshow", event => {

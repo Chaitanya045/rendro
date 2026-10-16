@@ -35,7 +35,10 @@ export async function seedWorkspace(input: { site: string; worker: string; secre
     const link = message?.text.match(/http:\/\/[^\s]+/)?.[0];
     if (!link) throw new Error(`Verification mail missing for ${role}`);
     const url = new URL(link);
-    await input.fetch(`${input.site}${url.pathname}${url.search}`, { redirect: "manual" });
+    const verified = await input.fetch(`${input.site}${url.pathname}${url.search}`, { redirect: "manual" });
+    // A failed verification would otherwise surface as a misleading sign-in error.
+    const outcome = `${verified.status} ${(await verified.text()).slice(0, 200)}`;
+    if (verified.status >= 400) throw new Error(`Seed verification for ${role} failed (${outcome})`);
     await call(role, "/api/auth/sign-in/email", { email, password });
   }
   const organization = await call<{ id: string }>("owner", "/api/auth/organization/create", { name: "E2E primary", slug: "e2e-primary" });

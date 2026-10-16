@@ -116,8 +116,14 @@ afterAll(async () => {
   }
 });
 
-it("signs in and browses management and docs without a 503 on the real local server", async () => {
+// Every request crosses the real server process and the coverage-instrumented
+// convex-test backend in this worker. On a 2-vCPU runner that serial chain is
+// several times slower than the 10s harness step; these budgets only bound hangs.
+const stackStep = 30_000;
+it("signs in and browses management and docs without a 503 on the real local server", { timeout: 120_000 }, async () => {
   const page = await harness.newPage();
+  page.setDefaultTimeout(stackStep);
+  page.setDefaultNavigationTimeout(stackStep);
   // convex-test provides HTTP actions, not the realtime WebSocket protocol.
   // Keep comment subscriptions offline; auth/session HTTP remains real.
   await page.routeWebSocket(/.*/, socket => socket.close());
@@ -133,11 +139,11 @@ it("signs in and browses management and docs without a 503 on the real local ser
   await page.locator("#password").fill(password);
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await page.waitForURL(`${harness.origin}${orgPath}`);
-  await expect.poll(() => page.locator("body").textContent()).toContain("Stack Organization");
+  await expect.poll(() => page.locator("body").textContent(), { timeout: stackStep }).toContain("Stack Organization");
   for (const path of [orgPath + "/projects", orgPath + "/people", orgPath + `/projects/${projectId}`]) {
     const response = await page.goto(harness.origin + path);
     expect(response?.status()).toBe(200);
-    await expect.poll(() => page.locator("body").textContent()).toContain("Stack Organization");
+    await expect.poll(() => page.locator("body").textContent(), { timeout: stackStep }).toContain("Stack Organization");
   }
   // Exercise the actual management transport against Node -> Convex. Chromium
   // supplies Origin and the shared transport supplies JSON for every mutation.
@@ -159,7 +165,7 @@ it("signs in and browses management and docs without a 503 on the real local ser
   expect((await page.goto(harness.origin + docs))?.status()).toBe(200);
   // The viewer iframe exercises the canonical route and a fresh persisted
   // authorization read after the top-level session lookup.
-  await expect.poll(async () => Promise.all(page.frames().map(frame => frame.locator("body").textContent())).then(texts => texts.join(" "))).toContain("Local stack document loaded");
+  await expect.poll(async () => Promise.all(page.frames().map(frame => frame.locator("body").textContent())).then(texts => texts.join(" ")), { timeout: stackStep }).toContain("Local stack document loaded");
   expect(failures).toEqual([]);
   const sessions = await backend.query(components.betterAuth.adapter.findMany, { model: "session", paginationOpts: { cursor: null, numItems: 10 } });
   expect(sessions.page).toHaveLength(1);
