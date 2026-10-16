@@ -4,6 +4,7 @@ import type { AddressInfo } from "node:net";
 import { resolve } from "node:path";
 import { promisify } from "node:util";
 import { describe, expect, it } from "vitest";
+import { subprocessEnv } from "./helpers/subprocess-coverage";
 
 const execFileAsync = promisify(execFile);
 
@@ -27,7 +28,7 @@ describe("publication CLI", () => {
       const run = () => execFileAsync(resolve("node_modules/.bin/tsx"), [
         "cli/src/index.ts", "publication", "list", "--organization", "org",
         "--project", "not-an-id", "--endpoint", endpoint,
-      ], { env: { ...process.env, RENDRO_API_KEY: "test-key" } });
+      ], { env: subprocessEnv({ ...process.env, RENDRO_API_KEY: "test-key" }) });
       await expect(run()).rejects.toMatchObject({ code: 1, stderr: "400 Invalid ID\n" });
       status = 500;
       body = "ArgumentValidationError: private backend details\n at handler (convex/projects.ts:1:2)";
@@ -73,7 +74,7 @@ describe("publication CLI", () => {
       const run = (args: string[]) => execFileAsync(
         resolve("node_modules/.bin/tsx"),
         ["cli/src/index.ts", ...args, "--endpoint", endpoint],
-        { env: { ...process.env, RENDRO_API_KEY: "rendro_test" } },
+        { env: subprocessEnv({ ...process.env, RENDRO_API_KEY: "rendro_test" }) },
       );
 
       const created = await run([

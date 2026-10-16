@@ -8,6 +8,7 @@ import { join, resolve } from "node:path";
 import { expect, it } from "vitest";
 import type { Provenance } from "../shared/provenance";
 import { gitRemoteCases } from "./git-remote-fixtures";
+import { subprocessEnv } from "./helpers/subprocess-coverage";
 const exec = promisify(execFile);
 
 it.each([
@@ -36,7 +37,7 @@ it.each([
     await exec("git", ["-C", source, "add", "index.html"]);
     await exec("git", ["-C", source, "-c", "user.email=test@example.invalid", "-c", "user.name=Test", "commit", "-m", "fixture"]);
     await exec("git", ["-C", source, "remote", "add", "origin", remote]);
-    const env: NodeJS.ProcessEnv = { ...process.env, RENDRO_API_KEY: "synthetic-key" };
+    const env: NodeJS.ProcessEnv = subprocessEnv({ ...process.env, RENDRO_API_KEY: "synthetic-key" });
     for (const name of Object.keys(env)) if (name.startsWith("GITHUB_") || name === "CI") delete env[name];
     const result = await exec(resolve("node_modules/.bin/tsx"), ["cli/src/index.ts", "push", "--source", source, "--organization", "test-org", "--project", "test-project", "--endpoint", `http://127.0.0.1:${(server.address() as AddressInfo).port}`], { env });
     expect(captured?.source).toMatchObject({ kind: "git", dirty: false });

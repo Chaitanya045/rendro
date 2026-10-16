@@ -5,7 +5,7 @@ import type { AddressInfo } from "node:net";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { build } from "esbuild";
+import { buildCliBundle, subprocessEnv } from "./subprocess-coverage";
 
 export interface CliManifestFile { path: string; sha256: string; size: number; contentType: string }
 export interface CliManifest { version: number; files: CliManifestFile[] }
@@ -52,10 +52,10 @@ export async function captureCliPush(source: string, options: {
     await new Promise<void>(done => server.listen(0, "127.0.0.1", done));
     const endpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
     const entry = options.bundle ? join(scratch, "rendro.mjs") : "cli/src/index.ts";
-    if (options.bundle) await build({ entryPoints: ["cli/src/index.ts"], bundle: true, platform: "node", target: "node22", format: "esm", outfile: entry });
+    if (options.bundle) await buildCliBundle(entry);
     const result = await promisify(execFile)(options.bundle ? process.execPath : resolve("node_modules/.bin/tsx"), [entry,
       "push", "--source", source, "--organization", "org", "--project", "project", "--endpoint", endpoint, ...options.flags ?? [],
-    ], { env: { ...process.env, RENDRO_API_KEY: "synthetic-key" }, timeout: 15_000 });
+    ], { env: subprocessEnv({ ...process.env, RENDRO_API_KEY: "synthetic-key" }), timeout: 15_000 });
     if (!manifest) throw new Error("CLI did not start a deployment");
     return { ...result, manifest, manifestSha256, copied, uploads, commits, requests };
   } catch (error) {

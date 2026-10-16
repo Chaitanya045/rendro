@@ -72,37 +72,66 @@ export async function convertBrowserCoverage(entries: Script[], root = process.c
     })))!;
     const match = /\/\/# sourceMappingURL=data:application\/json;base64,([^\s]+)/.exec(code);
     if (!match) throw new Error(`Missing source map: ${entry.url}`);
-    const map = JSON.parse(Buffer.from(match[1], "base64").toString("utf8")) as {
-      sources: string[]; sourcesContent: string[]; version: number; mappings: string; names: string[];
-    };
-    // Build output is in the repository root, independently of the served URL.
-    for (let index = 0; index < map.sources.length; index++) {
-      const name = map.sources[index];
-      if (!included.has(name)) continue;
-      if (readFileSync(resolve(root, name), "utf8") !== map.sourcesContent[index]) throw new Error(`Stale browser source: ${name}`);
-    }
-    const converted = await convert({ code, sourceMap: map, ast: parseAstAsync(code),
-      ignoreNode: (node, type) => type === "statement" && node.type === "VariableDeclarator" && node.init?.type === "ClassExpression",
-      coverage: { ...entry, url: pathToFileURL(resolve(root, "browser-bundle.js")).href } });
-    for (const [path, file] of Object.entries(converted)) {
-      const name = canonicalPath(root, path);
-      // Filter dependencies, fixture transports and generated APIs AFTER remapping.
-      if (included.has(name)) {
-        // esbuild disambiguates colliding bundle symbols (replace -> replace2).
-        // Names are display metadata; recover them from the same unbundled AST
-        // transform as the gate, matching exact declaration and body locations.
-        if (!functionMaps.has(path)) functionMaps.set(path, canonicalFunctionNames(path));
-        const names = await functionMaps.get(path)!;
-        for (const fn of Object.values(file.fnMap)) {
-          const original = names.get(JSON.stringify([fn.decl, fn.loc]));
-          if (original === undefined) throw new Error(`Unmapped browser function: ${name}:${fn.line}`);
-          fn.name = original;
-        }
-        mergeBrowserFile(result, { ...file, path: name });
-      }
-    }
+    const map = JSON.parse(Buffer.from(match[1], "base64").toString("utf8")) as MappedSource;
+    await convertMappedScript({ code, map, coverage: { ...entry, url: pathToFileURL(resolve(root, "browser-bundle.js")).href }, root, included, result });
   }
   return result;
+}
+
+/** esbuild's keepNames prelude (`var __name = ...`), which tsx emits and which has no authored counterpart. */
+const isNameHelper = (node: { id: { type: string; name?: string } }) => node.id.type === "Identifier" && (node.id.name === "__defProp" || node.id.name === "__name");
+/** `export default expr` printed by esbuild as `var <file>_default = expr; export { <file>_default as default }`. */
+const isDefaultExportBinding = (node: { id: { type: string; name?: string } }) => node.id.type === "Identifier" && node.id.name!.endsWith("_default");
+const isNameHelperDeclaration = (node: { declarations: Array<{ id: { type: string; name?: string } }> }) => node.declarations.every(isNameHelper);
+
+export interface MappedSource { sources: string[]; sourcesContent: string[]; version: number; mappings: string; names: string[] }
+
+/**
+ * Remap one script whose generated code maps back to authored sources (a browser
+ * bundle, a test-built Node bundle or a tsx-transformed module) to Istanbul files
+ * under repository-relative names. Dependencies, fixtures and generated APIs are
+ * filtered AFTER remapping.
+ */
+export async function convertMapped({ code, map, coverage, root, included, ignoredRanges = [] }: {
+  code: string; map: MappedSource; coverage: Profiler.ScriptCoverage; root: string; included: Set<string>;
+  /** Generated-code offsets (loader-inserted text) whose nodes have no authored counterpart. */
+  ignoredRanges?: Array<[number, number]>;
+}): Promise<Array<{ path: string; name: string; file: FileCoverageData }>> {
+  // Build output is in the repository root, independently of the served URL.
+  for (let index = 0; index < map.sources.length; index++) {
+    let name: string;
+    try { name = canonicalPath(root, map.sources[index]); } catch { continue; }
+    if (!included.has(name)) continue;
+    if (readFileSync(resolve(root, name), "utf8") !== map.sourcesContent[index]) throw new Error(`Stale source: ${name}`);
+  }
+  const converted = await convert({ code, sourceMap: map, ast: parseAstAsync(code),
+    ignoreNode: (node, type) => ignoredRanges.some(([start, end]) => (node as unknown as { start: number }).start >= start && (node as unknown as { end: number }).end <= end)
+      || (type === "statement" && node.type === "VariableDeclarator" && (node.init?.type === "ClassExpression" || isNameHelper(node) || isDefaultExportBinding(node)))
+      || (type === "statement" && node.type === "VariableDeclaration" && isNameHelperDeclaration(node))
+      || (type === "statement" && node.type === "ExpressionStatement" && node.expression.type === "CallExpression" && node.expression.callee.type === "Identifier" && node.expression.callee.name === "__name")
+      || (node.type === "ArrowFunctionExpression" && node.body.type === "CallExpression" && node.body.callee.type === "Identifier" && node.body.callee.name === "__defProp"),
+    coverage });
+  return Object.entries(converted as unknown as CoverageMapData).flatMap(([path, file]) => {
+    const name = canonicalPath(root, path);
+    return included.has(name) ? [{ path, name, file }] : [];
+  });
+}
+
+/** Browser flavour: recover function names, then merge into the report. */
+export async function convertMappedScript(options: Parameters<typeof convertMapped>[0] & { result: CoverageMapData }) {
+  for (const { path, name, file } of await convertMapped(options)) {
+    // esbuild disambiguates colliding bundle symbols (replace -> replace2).
+    // Names are display metadata; recover them from the same unbundled AST
+    // transform as the gate, matching exact declaration and body locations.
+    if (!functionMaps.has(path)) functionMaps.set(path, canonicalFunctionNames(path));
+    const names = await functionMaps.get(path)!;
+    for (const fn of Object.values(file.fnMap)) {
+      const original = names.get(JSON.stringify([fn.decl, fn.loc]));
+      if (original === undefined) throw new Error(`Unmapped function: ${name}:${fn.line}`);
+      fn.name = original;
+    }
+    mergeBrowserFile(options.result, { ...file, path: name });
+  }
 }
 
 async function canonicalFunctionNames(path: string) {

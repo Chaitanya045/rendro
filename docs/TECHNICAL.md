@@ -1335,7 +1335,11 @@ the viewer's Reload control.
 per-suite browser receipts and feeds the mapped `coverage/browser/*.json` shards
 to the same strict merger as the Node report. Production assets are unchanged;
 inline controller strings remain tracked by #105/#106. See [source coverage and debt](BROWSER_TESTS.md#source-coverage-and-debt-gate)
-for commands, reports, transform normalization, and the pending subprocess collector.
+for commands, reports, transform normalization, and the subprocess collector
+(`NODE_V8_COVERAGE` receipts per spawned CLI, server or script process, converted
+and merged like the browser shards; a suite that spawns through the collector and
+produces no coverage fails the run). The CLI, shared and script modules are fully
+covered and absent from the ledger.
 
 ---
 

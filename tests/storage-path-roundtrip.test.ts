@@ -3,7 +3,6 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join, dirname, resolve } from "node:path";
 import { promisify } from "node:util";
 import { serve } from "@hono/node-server";
-import { build } from "esbuild";
 import { Hono } from "hono";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { cleanDeploymentPath, cleanPublicationPath } from "../shared/v2-paths";
@@ -17,6 +16,7 @@ vi.mock("../src/minio", () => storage);
 import deployments from "../src/routes/deployments";
 import publications from "../src/routes/publication-api";
 import publicReader from "../src/routes/public-v2";
+import { buildCliBundle, subprocessEnv } from "./helpers/subprocess-coverage";
 
 const root = (id: string) => `tenants/org/projects/project/deployments/${id}`;
 const objects = new Map<string, { text: string; metadata?: Record<string, string> }>();
@@ -94,12 +94,12 @@ it.each(["source", "bundle"])("%s CLI preserves exact keys through upload, reuse
     const address = server.address();
     if (!address || typeof address === "string") throw new Error("Missing server address");
     const entry = kind === "source" ? "cli/src/index.ts" : join(scratch, "rendro.mjs");
-    if (kind === "bundle") await build({ entryPoints: ["cli/src/index.ts"], bundle: true, platform: "node", target: "node22", format: "esm", outfile: entry });
+    if (kind === "bundle") await buildCliBundle(entry);
     // Load TypeScript directly in the child instead of starting the tsx CLI's
     // additional Node wrapper for every publication-path case.
     const run = (args: string[]) => promisify(execFile)(process.execPath, [
       ...(kind === "source" ? ["--import", "tsx"] : []), entry, ...args, "--organization", "org", "--project", "project", "--endpoint", `http://127.0.0.1:${address.port}`,
-    ], { env: { ...process.env, RENDRO_API_KEY: "disposable-test-key" }, timeout: 10_000, killSignal: "SIGKILL" });
+    ], { env: subprocessEnv({ ...process.env, RENDRO_API_KEY: "disposable-test-key" }), timeout: 10_000, killSignal: "SIGKILL" });
     for (const id of ["1", "2"]) {
       const { stdout } = await run(["push", "--source", source]);
       expect(stdout).toContain(id === "1" ? `${paths.length} uploaded, 0 reused` : `0 uploaded, ${paths.length} reused`);

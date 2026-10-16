@@ -49,6 +49,8 @@ export default tseslint.config(
       "public/**",
       "src/commentor/**",
       "scripts/**",
+      // Plain-JS preload for subprocesses, outside the TypeScript project.
+      "tests/helpers/exit-on-sigterm.mjs",
     ],
   }
 );
