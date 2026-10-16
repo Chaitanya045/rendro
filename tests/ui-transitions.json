@@ -381,6 +381,14 @@
       "reason": "Static browser code or favicon, not an HTML page."
     },
     {
+      "route": "GET /fonts/*",
+      "reason": "Static self-hosted font or license text, not an HTML page."
+    },
+    {
+      "route": "ALL /fonts/*",
+      "reason": "Static self-hosted font or license text, not an HTML page."
+    },
+    {
       "route": "GET /management-query.js",
       "reason": "Static browser code or favicon, not an HTML page."
     },

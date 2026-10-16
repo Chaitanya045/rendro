@@ -66,8 +66,8 @@ export async function guardContext(context: BrowserContext, baseURL: string | un
       // Model the provider's completion page, retaining a real browser callback navigation.
       return route.fulfill({ contentType: "text/html", body: `<!doctype html><title>Local OAuth fixture</title><script>location.replace(${JSON.stringify(location).replaceAll("<", "\\u003c")})</script>` });
     }
-    // Fulfilled locally: no request reaches the font/CDN hosts.
-    if (url.origin === "https://fonts.googleapis.com") return route.fulfill({ contentType: "text/css", body: "" });
+    // Fonts are self-hosted: a request to any font CDN is unexpected and fails the test.
+    // The viewer shell's Tailwind CDN script is fulfilled locally.
     if (url.origin === "https://cdn.tailwindcss.com") return route.fulfill({ contentType: "text/javascript", body: "window.tailwind={}" });
     unexpectedOrigins.add(url.origin);
     return route.abort("blockedbyclient");

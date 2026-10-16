@@ -4,6 +4,7 @@ import { beforeAll, expect, it } from "vitest";
 import type { Page } from "playwright";
 import { renderScopedDocumentShell } from "../src/routes/app";
 import { bundleBrowserAsset, createBrowserHarness } from "./helpers/browser";
+import { serveFonts } from "./helpers/fonts";
 
 const harness = createBrowserHarness();
 const base = "/organizations/org-a/projects/project-a/docs";
@@ -13,6 +14,7 @@ beforeAll(async () => {
     ["/fixture.js", await bundleBrowserAsset("tests/fixtures/comment-quota-browser.ts")],
   ]);
   const app = new Hono();
+  app.get("/fonts/*", serveFonts);
   app.get(base, c => c.html(renderScopedDocumentShell({ user: null, namespace: "org-a/project-a", title: "Docs", basePath: base,
     selectedPath: "index.html", shareConfig: { organizationId: "org-a", projectId: "project-a" },
   }).replace('src="about:blank"', `src="${base}/files/index.html"`).replace('style="display:none"', 'style="display:block"')
@@ -27,7 +29,7 @@ beforeAll(async () => {
 });
 async function open(width = 1024, dark = false) {
   const page = await harness.newPage({ viewport: { width, height: 800 }, colorScheme: dark ? "dark" : "light", reducedMotion: "reduce" });
-  await page.route(url => ["fonts.googleapis.com", "fonts.gstatic.com", "cdn.tailwindcss.com"].includes(url.hostname), route => route.fulfill({ body: "" }));
+  await page.route(url => url.hostname === "cdn.tailwindcss.com", route => route.fulfill({ body: "" }));
   await page.addInitScript(() => { Object.defineProperty(navigator, "clipboard", { value: { writeText: async () => {} } }); });
   await page.goto(harness.origin + base);
   return page;

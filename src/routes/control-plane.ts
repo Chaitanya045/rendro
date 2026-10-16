@@ -4,6 +4,7 @@ import { renderManagementInitialData, managementInitialDataRuntime } from "./man
 import { renderCommentRecoveryLifecycle } from "../commentor/recovery-session";
 import { nonceAttribute } from "@/middleware/html-nonce";
 import { renderFaviconLinks } from "./favicon";
+import { renderFontHead } from "./fonts";
 import type { User } from "better-auth/types";
 import { renderThemeAssets, renderThemeButton } from "./theme";
 import { escapeHtml } from "./html";
@@ -324,7 +325,7 @@ dialog.cp-dialog[open]::backdrop{opacity:1}
 .dialog-head h2{margin:0;color:var(--cp-strong);font-size:19px;line-height:26px}
 .dialog-head p{margin:4px 0 0;color:var(--cp-muted)}
 .dialog-close{width:36px;height:36px;flex:none;border:0;border-radius:6px;background:transparent;color:var(--cp-muted);font-size:0;cursor:pointer;transition:background var(--cp-instant) var(--cp-ease),color var(--cp-instant) var(--cp-ease),transform var(--cp-instant) var(--cp-ease),opacity var(--cp-instant) var(--cp-ease)}
-.dialog-close::before{content:"close";font:400 20px/1 "Material Symbols Outlined"}
+.dialog-close::before{content:"close";display:inline-block;width:20px;overflow:hidden;white-space:nowrap;font:400 20px/1 "Material Symbols Outlined"}
 .dialog-close:hover:not(:disabled){background:var(--cp-container);color:var(--cp-strong)}
 .dialog-close:active:not(:disabled){transform:scale(.98)}
 .dialog-close:disabled{cursor:not-allowed;opacity:.5;transform:none}
@@ -540,7 +541,7 @@ export function renderControlPlanePage(options: ControlPlanePageOptions): string
 <link rel="preload" href="/select.js?v=${SELECT_VERSION}" as="script">
 ${hasSidebar ? `<script defer src="/management-pages.js?v=${MANAGEMENT_SHELL_VERSION}"></script>` : ""}
 <link rel="preload" href="/management-query.js?v=${MANAGEMENT_QUERY_VERSION}" as="script">
-<title>${escapeHtml(options.title)} — Rendro</title><link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..24,400,0,0&display=swap" rel="stylesheet">${renderThemeAssets()}<style${nonceAttribute()}>${controlPlaneStyles}${managementUiStyles}${selectStyles}${organizationSwitcherStyles}</style></head>
+<title>${escapeHtml(options.title)} — Rendro</title>${renderFontHead({ icons: true })}${renderThemeAssets()}<style${nonceAttribute()}>${controlPlaneStyles}${managementUiStyles}${selectStyles}${organizationSwitcherStyles}</style></head>
 <body class="${hasSidebar ? "has-sidebar" : "focused-layout"}">
 <header class="cp-topbar"><div class="cp-topbar-inner">
   ${hasSidebar ? '<button class="cp-icon-button cp-mobile-menu" id="cp-menu" type="button" aria-label="Open navigation" aria-expanded="false" aria-controls="cp-navigation"><span class="material-symbols-outlined" aria-hidden="true">menu</span></button>' : ""}

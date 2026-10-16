@@ -30,8 +30,8 @@ Rendro has two visual layers with different ownership:
 - Tree behavior ships as `public/lazy-tree.js`, built from `src/lazy-tree/lazy-tree.ts`.
 - Comment widget ships as `public/commentor.js` (built from `src/commentor/commentor.ts`); the viewer-side comment bridge ships as `public/commentor-parent.js` (built from `src/commentor/parent-entry.ts`). Both are gitignored build outputs.
 - Management controllers and shared browser components ship as the committed bundles `public/management-pages.js`, `public/management-query.js`, and `public/select.js`. `pnpm build:assets` regenerates every bundle; `pnpm verify:assets` fails if a committed bundle is stale.
-- Icons: Material Symbols Outlined variable font.
-- Font: Inter for app chrome. Publisher documents may use anything inside the iframe.
+- Icons: Material Symbols Outlined, self-hosted as a static subset containing only the icons the source uses (see "Fonts" below).
+- Font: Inter for app chrome, self-hosted. Publisher documents may use anything inside the iframe.
 
 ### Token palette
 
@@ -65,6 +65,8 @@ Rules:
 ### Typography
 
 - App chrome font: Inter, fallback `system-ui, sans-serif`.
+- Fonts are self-hosted under `/fonts/` (no third-party font request, no font CDN in the CSP). Inter is one variable file per subset (Latin, Latin Extended) declared as four faces, weights 400/500/600/700, each clamped to one weight, exactly the weights the page previously requested from Google Fonts. The legacy document shell declares 400/600/700 only, as before. Other CSS weights (650, 750, 800) snap to the nearest declared face as they always did. Cyrillic, Greek and Vietnamese text falls back to `system-ui`. Inter uses `font-display: swap`; the icon font uses `font-display: block` so ligature names are never painted as words while it loads.
+- Icons are ligatures: the element text (or a `::before` `content`) is the icon name. Every icon box must stay layout-safe without the font: `.material-symbols-outlined` (emitted with the font faces, ahead of page CSS) carries Google's former class defaults (family, 24px, `line-height:1`, `inline-block`) plus `flex:none; width:1em; overflow:hidden; white-space:nowrap`, and the `.dialog-close::before` icon has a fixed 20px box with the same clamps. Component rules size their own icons and win by order or specificity. Icon text is decorative, so it is `aria-hidden="true"` itself or inside an `aria-hidden` ancestor. Add a new icon by using its name in source and running `pnpm build:fonts`.
 - Base body: `14px / 20px`, weight `400`.
 - Sidebar org title: `20px / 28px`, weight `600`.
 - Wordmark: "Rendro" in the primary text color followed by an Ember-colored dot, `24px / 32px`, weight `700` (`20px / 28px` at `760px` and below). Landing, authentication, 404, and the management shell all use this same mark. The document viewer instead shows the organization/project title in the primary color as its `h1`.
@@ -490,7 +492,7 @@ Specific bans:
 
 - Modern Chromium, Firefox, and Safari, last two versions.
 - Cloudflare Workers runtime for server-rendered shell.
-- Material Symbols variable font support required for icon rendering.
+- WOFF2 font support (all supported browsers) for icon rendering. Without the icon font a page must still lay out correctly (see "Fonts").
 - Core document links should remain usable without app JS.
 - Browser APIs used by enhancements must degrade cleanly.
 

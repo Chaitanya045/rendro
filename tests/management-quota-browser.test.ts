@@ -8,6 +8,7 @@ import { cookieWriteFixture, admissionHeaders } from "./helpers/cookie-write-fix
 import { managementAccessFixture } from "./fixtures/management-access";
 import { buildBrowserBundle as build, createBrowserHarness } from "./helpers/browser";
 import { writeQuotaLimiter, writeQuotaLimits } from "../convex/writeQuotas";
+import { serveFonts } from "./helpers/fonts";
 
 const harness = createBrowserHarness();
 let f: Awaited<ReturnType<typeof cookieWriteFixture>>;
@@ -20,6 +21,7 @@ beforeAll(async () => {
   }
   assets.set("/management-pages.js", (await build({ stdin: { contents: managementPagesSource(), sourcefile: "tests/fixtures/generated-management-quota.js", resolveDir: process.cwd() } })).outputFiles[0].text);
   const app = new Hono();
+  app.get("/fonts/*", serveFonts);
   for (const [path, body] of assets) app.get(path, c => c.body(body, 200, { "Content-Type": "text/javascript; charset=utf-8" }));
   app.get("/api/rendro/projects", c => c.json({ projects: [] }));
   app.get("/api/rendro/management/access", c => {
@@ -46,7 +48,6 @@ afterAll(() => vi.unstubAllEnvs());
 
 it("keeps the project dialog draft and restores controls with a clear quota retry message", async () => {
   const page = await harness.newPage();
-  await page.route(url => url.hostname === "fonts.googleapis.com", route => route.fulfill({ contentType: "text/css", body: "" }));
   await page.goto(`${harness.origin}/organizations/${f.organizationId}/projects`);
   await page.getByText("No projects yet", { exact: true }).waitFor();
   await page.getByRole("button", { name: "Create project", exact: true }).first().click();

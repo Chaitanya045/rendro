@@ -6,12 +6,14 @@ import { beforeAll, expect, it } from 'vitest';
 import authPages from '@/routes/auth-pages';
 import { securityHeaders } from '@/middleware/security-headers';
 import { createBrowserHarness } from './helpers/browser';
+import { serveFonts } from './helpers/fonts';
 
 const harness = createBrowserHarness();
 const password = 'Synthetic password 146!';
 beforeAll(async () => {
   const app = new Hono<{ Variables: { user?: User } }>();
   app.use('*', securityHeaders);
+  app.get('/fonts/*', serveFonts);
   app.use('/account/*', async (c, next) => {
     c.set('user', { id: 'user-a', email: 'person@example.test' } as User);
     await next();
@@ -23,7 +25,6 @@ beforeAll(async () => {
 
 async function open(path: string, width = 1440) {
   const page = await harness.newPage({ viewport: { width, height: 900 }, reducedMotion: 'reduce' });
-  await page.route(url => ['fonts.googleapis.com', 'fonts.gstatic.com'].includes(url.hostname), route => route.fulfill({ body: '' }));
   await page.goto(harness.origin + path);
   return page;
 }

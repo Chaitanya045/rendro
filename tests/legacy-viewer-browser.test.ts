@@ -91,7 +91,7 @@ afterAll(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 async function open(path: string) {
   const page = await harness.newPage();
   await page.context().addCookies([{ name: "better-auth.session_token", value: "test-session", url: harness.origin }, { name: "parent-marker", value: "private", url: harness.origin }]);
-  await page.route(url => ["cdn.tailwindcss.com", "fonts.googleapis.com"].includes(url.hostname), route => route.fulfill({ contentType: new URL(route.request().url()).hostname === "cdn.tailwindcss.com" ? "text/javascript; charset=utf-8" : "text/css", body: new URL(route.request().url()).hostname === "cdn.tailwindcss.com" ? "window.tailwind={}" : "" }));
+  await page.route(url => url.hostname === "cdn.tailwindcss.com", route => route.fulfill({ contentType: "text/javascript; charset=utf-8", body: "window.tailwind={}" }));
   await browserStep("open legacy URL and follow viewer redirect", () => page.goto(harness.origin + path));
   await browserStep("load legacy publisher iframe", () => page.frameLocator("#content-frame").locator("h1").waitFor());
   return page;

@@ -34,9 +34,9 @@ function appPolicy(nonce: string, path: string, embeddedError = false): string {
     "script-src-attr 'none'",
     // Tailwind creates style elements; management navigation inserts page CSS,
     // and the shell uses inline style attributes for sizing/loading feedback.
-    `style-src 'self' ${dynamicStyles ? "'unsafe-inline'" : `'nonce-${nonce}'`} https://fonts.googleapis.com`,
+    `style-src 'self' ${dynamicStyles ? "'unsafe-inline'" : `'nonce-${nonce}'`}`,
     "style-src-attr 'unsafe-inline'",
-    "font-src 'self' https://fonts.gstatic.com",
+    "font-src 'self'",
     "img-src 'self' data: https://lh3.googleusercontent.com",
     `connect-src ${connectionSources()}`,
     "frame-src 'self'",

@@ -1,6 +1,7 @@
 import { renderCommentRecoveryLifecycle } from "../commentor/recovery-session";
 import { nonceAttribute } from "@/middleware/html-nonce";
 import { renderFaviconLinks } from "./favicon";
+import { renderFontHead } from "./fonts";
 import { Hono } from "hono";
 import type { User } from "better-auth/types";
 import { renderThemeAssets, renderThemeButton } from "./theme";
@@ -155,7 +156,7 @@ function renderAuthPage(
   return `<!DOCTYPE html>
 <html lang="en"><head>${renderFaviconLinks()}<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${page === "security" ? "Account security" : "Authentication"} — Rendro</title>
-<link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..24,400,0,0&display=swap" rel="stylesheet">
+${renderFontHead({ icons: true })}
 ${renderThemeAssets()}
 <style${nonceAttribute()}>
 :root{color-scheme:light;--page:#fafafa;--surface:#fff;--surface-2:#f4f4f5;--text:#18181b;--muted:#71717a;--border:#e4e4e7;--accent:#c2410c;--accent-hover:#9a3412;--on-accent:#fff;--focus:rgba(194,65,12,.2);--danger:#b42318;--success:#15803d;--shadow:0 24px 60px rgba(24,24,27,.09)}

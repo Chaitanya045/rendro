@@ -1,6 +1,6 @@
 import { MANAGEMENT_PROJECT_PLACEHOLDER, managementLoadingPages } from "./management-loading-pages";
 
-export const MANAGEMENT_SHELL_VERSION = "24";
+export const MANAGEMENT_SHELL_VERSION = "25";
 
 export interface ManagementRouteIdentity {
   organizationId: string;

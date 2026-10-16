@@ -36,7 +36,9 @@ describe("auth, landing, 404 and viewer polish", () => {
 
   it("keeps the 404 page context-neutral, on Inter, and on shell tokens", () => {
     const html = renderNotFoundPage({ path: "/missing" });
-    expect(html).toContain("family=Inter");
+    expect(html).toContain("font-family:Inter;");
+    expect(html).toContain('rel="preload" href="/fonts/inter-latin.');
+    expect(html).not.toContain("font-display:block");
     expect(html).toContain('<div class="eyebrow">Error 404</div>');
     expect(html).toContain('<h1 id="not-found-title">Page not found</h1>');
     expect(html).toContain('target="_top">Go to Rendro</a>');
