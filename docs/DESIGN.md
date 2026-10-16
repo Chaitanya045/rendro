@@ -223,7 +223,7 @@ Purpose: global actions, not navigation depth.
 - The title uses the primary color and stays consistent between private and public docs.
 - Right-side actions: hide/show app shell, share, theme toggle, avatar. The share button is **Share document** in the project viewer (creates a revocable 7-day private share), **Copy public URL** in the public viewer, and **Copy signed URL** in the legacy viewer.
 - On mobile the toolbar keeps the tree toggle, title, and share visible and moves the project back link, reading mode, theme, and account into a **More** menu (`aria-label="More document actions"`, `44px` rows, closes on `Escape` or outside click and returns focus). The theme row in that menu is a plain row: no border or background, row text color.
-- Avatar menu opens near its trigger and closes on outside click. Copy feedback stays inline in the copy button.
+- Avatar menu opens near its trigger and closes on outside click. Successful copy feedback stays inline in the copy button. Share failures use a persistent, dismissible notice with a polite live region. Complexity errors explain the asset/size limit; quota errors count down to an explicit Retry action. Dismissing a quota notice does not bypass its delay.
 - Hide/show app shell persists in `localStorage`; `Ctrl+Shift+H` (`Cmd+Shift+H` on macOS) toggles it from either the app shell or the focused document iframe, top/left hot zones temporarily reveal the header/sidebar while hidden, and `Escape` restores the full shell.
 - Theme toggle cycles `system → dark → light → system`. Supported browsers reveal the new shell/commentor theme with a radial ripple from the theme button while the icon scrolls through `contrast`, `dark_mode`, and `light_mode`. Reduced-motion and unsupported browsers switch directly. Publisher iframe content is not restyled.
 
@@ -391,7 +391,7 @@ The commentor is an enhancement over publisher HTML.
 - Quote controls retain the complete anchor text in the DOM but visually clamp the preview to two lines with an ellipsis.
 - Anchor navigation scrolls only the publisher document's scrolling element. It does nothing when the anchor is already visible or the document cannot scroll, and must never move an ancestor iframe or app-shell container.
 - The composer exposes **Post** and **Cancel**. `Enter` posts, `Shift+Enter` inserts a newline, and `Escape` closes the current mode or bubble.
-- Mutation controls expose one local pending indicator, preserve drafts on error, and report failures through an accessible status. Delete uses a five-second **Undo** toast before the destructive mutation.
+- Mutation controls expose one local pending indicator, preserve drafts on error, and report failures through an accessible status. Comment quota failures keep drafts editable, disable thread/reply submission for the supplied delay, and show a persistent, dismissible polite countdown. Expiry re-enables submission without automatically replaying writes. Delete uses a five-second **Undo** toast before the destructive mutation.
 - Collapsed drawer content is `inert` and `aria-hidden`. Icon tooltips supplement accessible names through `aria-describedby`; status and error feedback use appropriate live-region semantics.
 
 State expectations:

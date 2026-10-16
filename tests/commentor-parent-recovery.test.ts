@@ -409,6 +409,7 @@ describe("round-three recovery regressions", () => {
 
   describe.each([false, true])("legacy=%s error recovery", legacy => {
     it.each((["thread.create", "reply.add"] as const).flatMap(method => [
+      { method, data: { kind: "RateLimited", name: "comments", retryAfter: 2100 }, message: "RateLimited" },
       ...[
         ["invalid_id", "This comment is unavailable"],
         ["not_found", "This comment is unavailable"],

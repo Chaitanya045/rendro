@@ -70,13 +70,14 @@ describe("one cumulative discovery budget", () => {
 
 // V8 coverage instruments every hot character loop. Measure production code in
 // ONE uninstrumented child, with the real deadline enabled. Absolute CPU limits
-// and strict deterministic work ratios accompany a 25ms cold-JIT/GC timing floor.
+// and strict deterministic work ratios accompany a 25ms timing floor. Fixed
+// three-sample medians stabilize CPU ratios; every sample retains the 1s ceiling.
 it("meets the generated adversarial CPU/work matrix and accepts a real 1 MiB document", async () => {
   const { stdout } = await promisify(execFile)(process.execPath, ["--import", "tsx", "tests/helpers/share-performance.ts"]);
-  const report = JSON.parse(stdout) as { results: Array<{ name: string; points: Array<{ cpu: number; work: number }> }>; legitimate: { cpu: number; bytes: number } };
+  const report = JSON.parse(stdout) as { results: Array<{ name: string; points: Array<{ cpu: number; maxCpu: number; work: number }> }>; legitimate: { cpu: number; bytes: number } };
   for (const { name, points: [small, large] } of report.results) {
-    expect(small.cpu, name).toBeLessThan(1000);
-    expect(large.cpu, name).toBeLessThan(1000);
+    expect(small.maxCpu, name).toBeLessThan(1000);
+    expect(large.maxCpu, name).toBeLessThan(1000);
     expect(large.cpu, name).toBeLessThanOrEqual(Math.max(small.cpu, 25) * 5);
     expect(large.work, name).toBeLessThanOrEqual(small.work * 5);
   }

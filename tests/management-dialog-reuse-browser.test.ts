@@ -414,7 +414,7 @@ it('private share creation can repeat after success and denial without retaining
     await requests.settle(status === 200 ? { url: '/s/synthetic-share' } : { message: 'Permission denied' }, status);
     await expect.poll(() => button.getAttribute('aria-busy')).toBeNull();
     expect(await button.isEnabled()).toBe(true);
-    expect(await button.getAttribute('aria-label')).toBe(status === 200 ? 'Share link copied!' : 'Unable to copy');
+    expect(await button.getAttribute('aria-label')).toBe(status === 200 ? 'Share link copied!' : 'Share document');
   }
   expect(requests.bodies).toHaveLength(3);
   expect(requests.bodies.every(body => body.expiresInSeconds === 604800)).toBe(true);

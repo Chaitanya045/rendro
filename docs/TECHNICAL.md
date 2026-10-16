@@ -527,6 +527,23 @@ and a clear retry message; direct comment RPCs return the component's structured
 `RateLimited` application error. Management dialogs keep their existing draft and
 pending-state recovery, and never automatically replay a denied write.
 
+Viewer share failures distinguish the exact complexity rejection, HTTP 429, and
+other creation/copy failures without displaying backend diagnostics. A persistent,
+dismissible live-region notice offers explicit Retry for transient failures.
+`Retry-After` seconds or HTTP dates gate both retry controls until their deadline;
+missing/malformed delays show quota guidance without inventing a countdown.
+Success retains the existing 1.8-second toolbar copy feedback.
+
+Comment error mapping recognizes only Convex `RateLimited` / `comments` envelopes
+with a finite positive millisecond delay (at most 2,147,483,647). The parent sends
+that validated delay alongside the sanitized message and definitive rejection;
+the iframe releases the rejected operation identity so the retained draft can be
+edited. Unknown outcomes still retain the original identity for safe retry.
+The widget shares a cooldown across thread/reply controls, including newly rendered
+controls, preserves editable drafts, and shows a persistent dismissible countdown.
+Expiry only re-enables controls; it never submits. Identity changes clear the
+notice/timer. The optional response field is backward compatible with protocol v2.
+
 Anonymous publication/share resolutions share **600 requests/minute with a 1,200
 burst per verified ingress IP**, before resolver queries or storage reads. Modern
 Convex resolver actions enforce this even when called directly. Legacy Worker
@@ -996,7 +1013,9 @@ the pending iframe `src` navigation can abort a request after it reaches the
 fixture server. Further unsolicited messages must cause neither additional
 commits nor requests once the approved document has loaded. The replacement-frame
 fixture reports completion after repeated requests and native activation expiry,
-then stops sending. History assertions and Back run after that signal so automation
+then stops sending. The sign-out confirmation regression also observes its
+unsolicited notice inside the same passive CDP evaluation that sends the request,
+before a Playwright locator wait can grant activation. History assertions and Back run after that signal so automation
 activation cannot authorize another fixture request and a still-running fixture
 cannot reopen a notice during restoration. History checks use passive reads and
 wait for the expected joint-session count; the sequential-click regression also

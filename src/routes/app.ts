@@ -227,6 +227,11 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
   .topbar-btn-share.is-loading .share-icon-track{transform:translateY(-18px)}
   .topbar-btn-share.is-loading .share-loader{animation:shareLoaderSpin .8s linear infinite}
   .topbar-btn-share.is-feedback .share-icon-track{transform:translateY(-36px)}
+  .share-error{position:fixed;z-index:150;top:64px;right:16px;width:360px;max-width:calc(100vw - 32px);box-sizing:border-box;padding:16px;border:1px solid #e4e4e7;border-radius:8px;background:#fff;color:#09090b;box-shadow:0 4px 16px rgba(0,0,0,.12);font-size:14px;line-height:20px}
+  .share-error[hidden],.share-error [hidden]{display:none}
+  .share-error-actions{display:flex;gap:8px;margin-top:12px}
+  .share-error button:disabled{opacity:.5;cursor:not-allowed}
+  .dark .share-error{background:#09090b;color:#fafafa;border-color:#27272a}
   #share-feedback-icon{transition:transform .18s cubic-bezier(.4,0,.2,1)}
   .topbar-btn-share.is-feedback #share-feedback-icon{transform:scale(1.08)}
   .shortcut-tooltip-wrap{position:relative;display:inline-flex}
@@ -496,6 +501,10 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
 </style>
 <body>
 
+<aside class="share-error" id="share-error" aria-label="Sharing feedback" hidden>
+  <div id="share-error-message" role="status" aria-live="polite" aria-atomic="true"></div>
+  <div class="share-error-actions"><button type="button" class="topbar-btn" id="share-retry">Retry</button><button type="button" class="topbar-btn" id="share-dismiss">Dismiss</button></div>
+</aside>
 <header class="topbar">
   <div class="topbar-left">
     <button class="topbar-btn-icon mobile-tree-toggle" id="mobile-tree-toggle" type="button" aria-label="Open document tree" aria-expanded="false"><span class="material-symbols-outlined" aria-hidden="true">menu</span></button>
@@ -845,13 +854,66 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
   var shareBtn=document.getElementById("share-btn");
   var shareFeedbackLabel=document.getElementById("share-feedback-label");
   var shareFeedbackIcon=document.getElementById("share-feedback-icon");
-  var shareFeedbackTimer;
+  var shareFeedbackTimer,shareRetryTimer,shareRetryUntil=0;
+  var shareError=document.getElementById("share-error"),shareErrorMessage=document.getElementById("share-error-message"),shareRetry=document.getElementById("share-retry"),shareDismiss=document.getElementById("share-dismiss");
+  function clearShareError(){clearTimeout(shareRetryTimer);shareRetryUntil=0;shareError.hidden=true;shareErrorMessage.textContent="";shareBtn.removeAttribute("aria-disabled");}
+  function updateShareQuota(){
+    var seconds=Math.max(0,Math.ceil((shareRetryUntil-Date.now())/1000));
+    shareErrorMessage.textContent=seconds?"Too many shares right now; try again in "+seconds+" seconds.":"You can try sharing again now.";
+    shareRetry.disabled=seconds>0;
+    if(seconds){shareBtn.setAttribute("aria-disabled","true");shareRetryTimer=setTimeout(updateShareQuota,Math.min(1000,shareRetryUntil-Date.now()));}
+    else shareBtn.removeAttribute("aria-disabled");
+  }
+  function showShareError(message,retry,delay){
+    if(signedOut)return;
+    clearShareError();
+    clearTimeout(shareFeedbackTimer);
+    shareBtn.classList.remove("is-loading","is-feedback");shareBtn.removeAttribute("aria-busy");shareBtn.setAttribute("aria-label",${JSON.stringify(shareLabel)});
+    shareError.hidden=false;shareErrorMessage.textContent=message;shareRetry.hidden=!retry;shareRetry.disabled=false;
+    if(delay>0){shareRetryUntil=Date.now()+delay;updateShareQuota();}
+  }
+  shareDismiss.addEventListener("click",function(){shareError.hidden=true;shareBtn.focus();});
+  shareRetry.addEventListener("click",function(){shareBtn.focus();shareBtn.click();});
+  function shareRetryDelay(response){
+    var value=response.headers.get("Retry-After");
+    if(!value||!value.trim())return 0;
+    var seconds=Number(value),delay=Number.isFinite(seconds)?seconds*1000:Date.parse(value)-Date.now();
+    return Number.isFinite(delay)&&delay>0&&delay<=2147483647?delay:0;
+  }
   var sharePending=false,shareController=new AbortController(),signedOut=false;
-  addEventListener("commentor-sign-out",function(){signedOut=true;shareController.abort();clearTimeout(shareFeedbackTimer);setAvatarMenu(false);setMobileMore(false,false);});
+  addEventListener("commentor-sign-out",function(){signedOut=true;shareController.abort();clearShareError();clearTimeout(shareFeedbackTimer);setAvatarMenu(false);setMobileMore(false,false);});
   function setShareLoading(){if(!shareBtn)return;if(shareFeedbackTimer!==undefined)window.clearTimeout(shareFeedbackTimer);shareBtn.classList.remove("is-feedback");shareBtn.classList.add("is-loading");shareBtn.setAttribute("aria-busy","true");shareBtn.setAttribute("aria-label",${JSON.stringify(sharePendingLabel)});}
   function setShareFeedback(message){if(signedOut||!shareBtn||!shareFeedbackLabel)return;shareBtn.classList.remove("is-loading");shareBtn.removeAttribute("aria-busy");shareFeedbackLabel.textContent=message;if(shareFeedbackIcon)shareFeedbackIcon.textContent=message.endsWith("copied!")?"check":"error";shareBtn.classList.add("is-feedback");shareBtn.setAttribute("aria-label",message);if(shareFeedbackTimer!==undefined)window.clearTimeout(shareFeedbackTimer);shareFeedbackTimer=window.setTimeout(function(){shareBtn.classList.remove("is-feedback");shareBtn.setAttribute("aria-label",${JSON.stringify(shareLabel)});if(shareFeedbackIcon)shareFeedbackIcon.textContent="check";},1800);}
   async function copyText(text){if(signedOut)return;try{if(navigator.clipboard&&window.isSecureContext){await navigator.clipboard.writeText(text);return;}}catch(_){}if(signedOut)return;var ta=document.createElement("textarea");ta.value=text;ta.setAttribute("readonly","");ta.style.position="fixed";ta.style.top="-999px";ta.style.left="-999px";document.body.appendChild(ta);ta.select();ta.setSelectionRange(0,text.length);try{if(!document.execCommand("copy"))throw new Error("copy failed");}finally{ta.remove();}}
-  if(shareBtn)shareBtn.addEventListener("click",async function(e){e.stopPropagation();if(signedOut||sharePending)return;var doc=window.RENDRO_CURRENT_DOC||"";if(!doc){setShareFeedback("Select a document first");return;}sharePending=true;setShareLoading();try{var relativeDoc=doc.indexOf(window.RENDRO_ORG+"/")===0?doc.slice(window.RENDRO_ORG.length+1):doc;var publicBase=window.RENDRO_PUBLICATION_BASE||"";var shareConfig=window.RENDRO_SHARE_CONFIG;if(publicBase){var publicUrl=new URL(publicBase,window.location.origin);publicUrl.searchParams.set("doc",relativeDoc);await copyText(publicUrl.href);setShareFeedback("Public URL copied!");}else if(shareConfig){var res=await fetch("/api/rendro/shares",{signal:shareController.signal,method:"POST",headers:{"Content-Type":"application/json",accept:"application/json"},body:JSON.stringify({organizationId:shareConfig.organizationId,projectId:shareConfig.projectId,documentPath:relativeDoc,expiresInSeconds:604800})});var data=await res.json();if(signedOut)return;if(!res.ok||!data.url)throw new Error("share failed");await copyText(new URL(data.url,window.location.origin).href);setShareFeedback("Share link copied!");}else{var legacyRes=await fetch("/api/share/create?key="+encodeURIComponent(doc),{signal:shareController.signal,headers:{accept:"application/json"}});if(!legacyRes.ok)throw new Error("share failed");var legacyData=await legacyRes.json();if(signedOut)return;await copyText(legacyData.url);setShareFeedback("Signed URL copied!");}}catch(_){setShareFeedback("Unable to copy");}finally{sharePending=false;}});
+  if(shareBtn)shareBtn.addEventListener("click",async function(e){
+    e.stopPropagation();if(signedOut||sharePending)return;
+    if(Date.now()<shareRetryUntil){shareError.hidden=false;return;}
+    var doc=window.RENDRO_CURRENT_DOC||"";
+    if(!doc){showShareError("Select a document first.",false,0);return;}
+    clearShareError();sharePending=true;setShareLoading();var copying=false;
+    try{
+      var relativeDoc=doc.indexOf(window.RENDRO_ORG+"/")===0?doc.slice(window.RENDRO_ORG.length+1):doc;
+      var publicBase=window.RENDRO_PUBLICATION_BASE||"",shareConfig=window.RENDRO_SHARE_CONFIG;
+      if(publicBase){
+        var publicUrl=new URL(publicBase,window.location.origin);publicUrl.searchParams.set("doc",relativeDoc);
+        copying=true;await copyText(publicUrl.href);setShareFeedback("Public URL copied!");
+      }else if(shareConfig){
+        var res=await fetch("/api/rendro/shares",{signal:shareController.signal,method:"POST",headers:{"Content-Type":"application/json",accept:"application/json"},body:JSON.stringify({organizationId:shareConfig.organizationId,projectId:shareConfig.projectId,documentPath:relativeDoc,expiresInSeconds:604800})});
+        if(signedOut)return;
+        if(res.status===429){showShareError("Too many shares right now; please try again later.",true,shareRetryDelay(res));return;}
+        var data=await res.json();
+        if(signedOut)return;
+        if(res.status===400&&data&&data.error==="document too complex to share"){showShareError("This document references too many assets to share. Reduce its assets or size before trying again.",false,0);return;}
+        if(!res.ok||!data||!data.url)throw new Error("share failed");
+        copying=true;await copyText(new URL(data.url,window.location.origin).href);setShareFeedback("Share link copied!");
+      }else{
+        var legacyRes=await fetch("/api/share/create?key="+encodeURIComponent(doc),{signal:shareController.signal,headers:{accept:"application/json"}});
+        if(!legacyRes.ok)throw new Error("share failed");var legacyData=await legacyRes.json();if(signedOut)return;
+        copying=true;await copyText(legacyData.url);setShareFeedback("Signed URL copied!");
+      }
+    }catch(_){showShareError(copying?"The link could not be copied. Please try again.":"The share link could not be created. Please try again.",true,0);}
+    finally{sharePending=false;}
+  });
   document.addEventListener("click",function(){setAvatarMenu(false);setMobileMore(false,false);});
 })();
 </script>

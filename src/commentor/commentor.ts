@@ -1,4 +1,5 @@
-import { commentErrorMessage } from "./errors";
+import { CommentWriteCooldown } from "./write-cooldown";
+import { commentErrorMessage, commentRetryAfter } from "./errors";
 import { CommentOperationConflictError } from "./operation-state";
 // commentor.ts — a drop-in commenting widget for any HTML file.
 //
@@ -489,6 +490,7 @@ class Commentor {
   private client: ConvexClient | null;
   private parentTransport: ParentCommentTransport | null;
   private root: ShadowRoot;
+  private writeCooldown: CommentWriteCooldown;
   private dock: HTMLElement;
   private content!: HTMLElement;
   private drawerList!: HTMLElement;
@@ -553,6 +555,7 @@ class Commentor {
     host.id = "commentor-host";
     document.body.append(host);
     this.root = host.attachShadow({ mode: "open" });
+    this.writeCooldown = new CommentWriteCooldown(this.root);
     this.root.append(h("style", undefined, STYLES));
 
     this.markersLayer = h("div", { class: "markers" });
@@ -882,6 +885,7 @@ class Commentor {
           }
         },
         () => {
+          this.writeCooldown.reset();
           this.replyDrafts.clear();
           this.closeBubbles(false);
           this.hideSelectionAction(true);
@@ -1428,7 +1432,8 @@ class Commentor {
     ) as HTMLButtonElement;
     const submit = async () => {
       const body = textarea.value.trim();
-      if (!body || post.disabled) return;
+      if (!body || post.disabled || this.writeCooldown.active) return;
+      this.writeCooldown.reset();
       this.composerHasSubmitted = true;
       textarea.disabled = true;
       post.disabled = true;
@@ -1458,7 +1463,9 @@ class Commentor {
         post.classList.remove("is-pending");
         post.removeAttribute("aria-busy");
         post.textContent = "Post";
-        this.toast((err instanceof CommentMutationRejectedError || err instanceof CommentMutationOutcomeUnknownError || err instanceof CommentOperationConflictError) ? err.message : commentErrorMessage(err, "Could not post comment. Try again."), { kind: "error" });
+        const retryAfter = commentRetryAfter(err);
+        if (retryAfter !== null) this.writeCooldown.start(retryAfter);
+        else this.toast((err instanceof CommentMutationRejectedError || err instanceof CommentMutationOutcomeUnknownError || err instanceof CommentOperationConflictError) ? err.message : commentErrorMessage(err, "Could not post comment. Try again."), { kind: "error" });
         textarea.focus();
       }
     };
@@ -1492,6 +1499,7 @@ class Commentor {
         h("div", { class: "actions" }, cancel, post),
       ),
     );
+    this.writeCooldown.updateButton(post);
     this.bubbleLayer.append(bubble);
     placeFloating(bubble, rect);
     queueMicrotask(() => textarea.focus());
@@ -1922,10 +1930,12 @@ class Commentor {
         send.setAttribute("aria-busy", "true");
         send.textContent = "Sending…";
       }
+      this.writeCooldown.updateButton(send);
       const submitReply = async () => {
         const submittedDraft = input.value;
         const body = submittedDraft.trim();
-        if (!body || send.disabled) return;
+        if (!body || send.disabled || this.writeCooldown.active) return;
+        this.writeCooldown.reset();
         this.pendingReplies.set(t._id, submittedDraft);
         this.setReplyPendingState(t._id, true);
         try {
@@ -1941,7 +1951,9 @@ class Commentor {
           }
         } catch (err) {
           console.error("[commentor] reply failed", err);
-          this.toast((err instanceof CommentMutationRejectedError || err instanceof CommentMutationOutcomeUnknownError || err instanceof CommentOperationConflictError) ? err.message : commentErrorMessage(err, "Could not post reply."), { kind: "error" });
+          const retryAfter = commentRetryAfter(err);
+          if (retryAfter !== null) this.writeCooldown.start(retryAfter);
+          else this.toast((err instanceof CommentMutationRejectedError || err instanceof CommentMutationOutcomeUnknownError || err instanceof CommentOperationConflictError) ? err.message : commentErrorMessage(err, "Could not post reply."), { kind: "error" });
         } finally {
           this.pendingReplies.delete(t._id);
           this.setReplyPendingState(t._id, false);
@@ -1998,6 +2010,7 @@ class Commentor {
       button.classList.toggle("is-pending", pending);
       button.toggleAttribute("aria-busy", pending);
       button.textContent = pending ? "Sending…" : "Reply";
+      this.writeCooldown.updateButton(button);
     }
   }
 
@@ -2613,6 +2626,8 @@ function anchorLabel(a: Anchor): string {
 // ───────────────────────────── styles ───────────────────────────────
 
 const STYLES = /* css */ `
+.toast.comment-quota{position:fixed;bottom:16px;left:16px;right:16px;z-index:2147483647;max-width:440px;margin:auto;box-sizing:border-box}
+.comment-quota[hidden]{display:none}
 :host {
   --bg: #ffffff;
   --bg-elev: #ffffff;

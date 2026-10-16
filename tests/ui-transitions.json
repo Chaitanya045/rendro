@@ -10477,7 +10477,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "untested",
+      "status": "browser",
       "auditEvidence": "UNTESTED",
       "auditNote": "Document share controller; no browser share-creation flow found",
       "edges": [
@@ -10489,8 +10489,53 @@
           "inventoryRefs": [
             "UI-093"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/management-dialog-reuse-browser.test.ts",
+              "name": "private share creation can repeat after success and denial without retaining pending state",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/share-comment-errors-browser.test.ts",
+              "name": "clipboard failure stays readable and retries successfully",
+              "kind": "browser"
+            }
+          ]
+        },
+        {
+          "id": "UI-093-E02",
+          "from": "Share pending",
+          "trigger": "Receive complexity or generic failure",
+          "expected": "Persistent accessible reason, bounded mobile layout, dismissal and explicit retry to unchanged success feedback",
+          "inventoryRefs": [
+            "UI-093"
+          ],
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/share-comment-errors-browser.test.ts",
+              "name": "share complexity and generic errors persist, dismiss and retry ($width, dark=$dark)",
+              "kind": "browser"
+            }
+          ]
+        },
+        {
+          "id": "UI-093-E03",
+          "from": "Share pending",
+          "trigger": "Receive HTTP 429 with seconds/date/malformed Retry-After",
+          "expected": "Quota guidance, deadline countdown, no duplicate writes, explicit retry after expiry",
+          "inventoryRefs": [
+            "UI-093"
+          ],
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/share-comment-errors-browser.test.ts",
+              "name": "share quota honors Retry-After %s and permits an explicit retry",
+              "kind": "browser"
+            }
+          ]
         }
       ]
     },
@@ -13186,7 +13231,10 @@
       ],
       "sources": [
         "src/commentor/commentor.ts",
-        "src/commentor/parent-host.ts"
+        "src/commentor/parent-host.ts",
+        "src/commentor/errors.ts",
+        "src/commentor/parent-transport.ts",
+        "src/commentor/write-cooldown.ts"
       ],
       "roles": [
         "anonymous",
@@ -13206,7 +13254,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "unit",
+      "status": "browser",
       "auditEvidence": "U",
       "auditNote": "commentor-recovery-ui.test.ts",
       "edges": [
@@ -13334,6 +13382,40 @@
               "file": "tests/commentor-recovery-ui.test.ts",
               "name": "allows a corrected %s after oversized validation and a definitive permission rejection",
               "kind": "unit"
+            }
+          ]
+        },
+        {
+          "id": "UI-114-E12",
+          "from": "Comment/reply submitting",
+          "trigger": "Receive comments RateLimited rejection",
+          "expected": "Validated quota crosses the parent bridge; draft remains editable; all submit controls wait until expiry and permit an edited retry",
+          "inventoryRefs": [
+            "UI-114"
+          ],
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/share-comment-errors-browser.test.ts",
+              "name": "comment %s quota crosses the real bridge, retains the draft, counts down and retries",
+              "kind": "browser"
+            }
+          ]
+        },
+        {
+          "id": "UI-114-E13",
+          "from": "Comment/reply submitting",
+          "trigger": "Receive generic failure",
+          "expected": "Generic failure preserves draft and operation identity, then explicit retry succeeds",
+          "inventoryRefs": [
+            "UI-114"
+          ],
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/share-comment-errors-browser.test.ts",
+              "name": "comment %s generic failure keeps the draft and allows retry",
+              "kind": "browser"
             }
           ]
         }

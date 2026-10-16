@@ -140,22 +140,16 @@
       "lines": 0
     },
     "src/commentor/commentor.ts": {
-      "statements": 977,
-      "branches": 658,
-      "functions": 157,
-      "lines": 856
+      "statements": 678,
+      "branches": 505,
+      "functions": 112,
+      "lines": 580
     },
     "src/commentor/delete-state.ts": {
       "statements": 8,
       "branches": 6,
       "functions": 1,
       "lines": 4
-    },
-    "src/commentor/errors.ts": {
-      "statements": 1,
-      "branches": 1,
-      "functions": 0,
-      "lines": 1
     },
     "src/commentor/mutation-args.ts": {
       "statements": 3,

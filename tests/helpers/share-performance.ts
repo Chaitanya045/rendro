@@ -33,13 +33,20 @@ for (const [name, n, generate] of matrix) {
   const points = [];
   for (const size of [n, n * 4]) {
     const html = generate(size);
-    const budget = new WorkBudget();
-    const start = process.cpuUsage();
-    let outcome = "success";
-    try { await discover(html, budget); }
-    catch (error) { assert(error instanceof ShareAssetError); outcome = "controlled rejection"; }
-    const elapsed = process.cpuUsage(start);
-    points.push({ cpu: (elapsed.user + elapsed.system) / 1000, work: budget.used, outcome });
+    // Fixed samples, not retries: median CPU reduces one-off JIT/GC noise in
+    // the scaling comparison, while maxCpu retains the absolute ceiling.
+    const samples = [];
+    for (let sample = 0; sample < 3; sample++) {
+      const budget = new WorkBudget();
+      const start = process.cpuUsage();
+      let outcome = "success";
+      try { await discover(html, budget); }
+      catch (error) { assert(error instanceof ShareAssetError); outcome = "controlled rejection"; }
+      const elapsed = process.cpuUsage(start);
+      samples.push({ cpu: (elapsed.user + elapsed.system) / 1000, work: budget.used, outcome });
+    }
+    samples.sort((a, b) => a.cpu - b.cpu);
+    points.push({ ...samples[1], maxCpu: samples[2].cpu });
   }
   results.push({ name, points });
 }
