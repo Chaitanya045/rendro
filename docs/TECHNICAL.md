@@ -1297,7 +1297,10 @@ per-file uncovered counters from exceeding `coverage-debt.json`. New files must
 be fully covered; stale ledger entries must be removed, and CI rejects ledger
 increases relative to the base revision. All authored Convex modules, including the
 Better Auth adapter and the DEV-only QA fixtures, are fully covered and absent
-from the ledger. The QA permission fixture is exercised end to end by routing its
+from the ledger, as are `src/viewer`, `src/lazy-tree`, `src/ui` and
+`src/management-query` (#118 batch A); only `src/commentor` remains. The lazy
+tree and the shared select are covered by Chromium suites against the real
+bundles (`tests/lazy-tree-browser.test.ts`, `tests/shared-select-browser.test.ts`). The QA permission fixture is exercised end to end by routing its
 `dev.rendro.app` requests into the production Convex HTTP router under
 `convex-test`, with fault-injection suites for failed checks and partial cleanup.
 Coverage runs separately from verify

@@ -38,8 +38,12 @@ export function installSelects(doc: Document) {
       const named = select.getAttribute("aria-label");
       if (named) return named;
       const labelled = select.getAttribute("aria-labelledby");
-      if (labelled) return labelled.split(/\s+/).map((part) => doc.getElementById(part)?.textContent || "").join(" ").trim();
-      return Array.from(select.labels || []).map((node) => Array.from(node.childNodes).filter((child) => child !== select && child !== trigger && child !== validation && !(child.nodeType === 1 && (child as Element).tagName === "SMALL")).map((child) => child.textContent).join(" ")).join(" ").trim() || select.name || "Choose an option";
+      if (labelled) {
+        // Dangling references are ignored, as in the accessible-name algorithm.
+        const referenced = labelled.split(/\s+/).map((part) => doc.getElementById(part)?.textContent || "").join(" ").trim();
+        if (referenced) return referenced;
+      }
+      return Array.from(select.labels).map((node) => Array.from(node.childNodes).filter((child) => child !== select && child !== trigger && child !== validation && !(child.nodeType === 1 && (child as Element).tagName === "SMALL")).map((child) => child.textContent).join(" ")).join(" ").trim() || select.name || "Choose an option";
     }
     function highlight(index: number) {
       active = index;
@@ -53,7 +57,6 @@ export function installSelects(doc: Document) {
       } else trigger.removeAttribute("aria-activedescendant");
     }
     function position() {
-      if (!open) return;
       const rect = trigger.getBoundingClientRect(), viewport = win.visualViewport;
       const leftEdge = (viewport?.offsetLeft || 0) + 8, topEdge = (viewport?.offsetTop || 0) + 8;
       const rightEdge = leftEdge + (viewport?.width || win.innerWidth) - 16;
