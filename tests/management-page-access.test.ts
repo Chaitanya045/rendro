@@ -341,3 +341,47 @@ it("keeps a revoked backend session signed out without embedding initial data", 
   expect(response.headers.get("Location")).toBe(`/sign-in?returnTo=${encodeURIComponent(url)}`);
   expect(await response.text()).not.toContain("data-cp-initial-data");
 });
+
+const invitationId = "invitation-under-test";
+const future = () => new Date(Date.now() + 60_000).toISOString();
+const staleInvitation = [
+  ["a null body", () => null],
+  ["another invitation id", () => ({ id: "someone-elses", email: "owner@example.test", status: "pending", expiresAt: future() })],
+  ["another recipient", () => ({ id: invitationId, email: "other@example.test", status: "pending", expiresAt: future() })],
+  ["a missing recipient", () => ({ id: invitationId, status: "pending", expiresAt: future() })],
+  ["a non-string recipient", () => ({ id: invitationId, email: 7, status: "pending", expiresAt: future() })],
+  ["a settled status", () => ({ id: invitationId, email: "owner@example.test", status: "accepted", expiresAt: future() })],
+  ["a missing expiry", () => ({ id: invitationId, email: "owner@example.test", status: "pending" })],
+  ["an expired invitation", () => ({ id: invitationId, email: "owner@example.test", status: "pending", expiresAt: new Date(Date.now() - 1000).toISOString() })],
+  ["an unparseable expiry", () => ({ id: invitationId, email: "owner@example.test", status: "pending", expiresAt: "never" })],
+] as const;
+
+it.each(staleInvitation)("re-verifies the backend invitation and denies %s with the generic 404", async (_name, body) => {
+  const f = await fixture(), url = `/accept-invitation/${invitationId}`;
+  await sessionCache.lookup(f.cookie, () => Promise.resolve({ kind: "authenticated" as const, expiresAt: Date.now() + 60_000, user: { ...f.user, createdAt: 1, updatedAt: 1, image: null } }));
+  f.fetch.mockImplementation(() => Promise.resolve(Response.json(body())));
+  const invited = await notFound(await f.app.request(url, { headers: { Cookie: f.cookie } }), url);
+  // A denial must not leave a cached session able to serve later cached pages.
+  const resolve = vi.fn(() => Promise.resolve({ kind: "anonymous" as const }));
+  await sessionCache.lookup(f.cookie, resolve);
+  expect(resolve).toHaveBeenCalledOnce();
+  // The page is indistinguishable from an unknown invitation, not a 503 or a leak.
+  const unknown = await notFound(await f.app.request("/accept-invitation/unknown", { headers: { Cookie: f.cookie } }), "/accept-invitation/unknown");
+  expect(invited).toBe(unknown);
+  expect(f.fetch).toHaveBeenCalledTimes(2);
+});
+
+it("forwards no credentials when an authenticated context has no cookie header, and the backend decides", async () => {
+  const f = await fixture(), url = path(pages[0], f.organizationId);
+  const app = new Hono<{ Variables: { user?: User } }>();
+  app.use("*", async (c, next) => { c.set("user", f.user); await next(); });
+  app.route("/", organizationPages);
+  f.fetch.mockResolvedValue(new Response(null, { status: 401 }));
+  const response = await app.request(url);
+  expect(response.status).toBe(302);
+  expect(response.headers.get("Location")).toBe(`/sign-in?returnTo=${encodeURIComponent(url)}`);
+  expect(response.headers.get("Cache-Control")).toBe("private, no-store");
+  const headers = new Headers(f.fetch.mock.calls[0][1]?.headers);
+  expect(headers.has("Cookie")).toBe(false);
+  expect(headers.get("Accept")).toBe("application/json");
+});

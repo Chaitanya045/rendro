@@ -3,7 +3,7 @@ import { createHmac } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { EncryptJWT } from "jose";
 import worker from "@/worker";
-import { decodeStoragePath, isCanonicalStorageKey, modernStorageKey } from "@/storage-boundary";
+import { decodeStoragePath, isCanonicalStorageKey, isLegacyStorageKey, isLegacyStoragePrefix, legacyStoragePrefix, modernStorageKey, modernStoragePrefix } from "@/storage-boundary";
 import { AUTH_SECRET } from "@/config";
 import * as minio from "@/minio";
 import * as deletion from "@/soft-delete";
@@ -212,5 +212,44 @@ describe("disjoint storage authorization", () => {
     expect(response.status).toBe(410);
     expect(minio.putObject).not.toHaveBeenCalled();
     noStorageReads();
+  });
+});
+
+describe("storage boundary derivation", () => {
+  const manifest = (id: string) => `tenants/org-a/projects/project-a/deployments/${id}/manifest.json`;
+  const scoped = (patch: Partial<{ organizationId: string; projectId: string; manifestKey: string }> = {}) =>
+    ({ organizationId: "org-a", projectId: "project-a", manifestKey: manifest("dep-1"), ...patch });
+
+  it("derives the files prefix only from a manifest inside the same organization and project", () => {
+    expect(modernStoragePrefix(scoped())).toBe("tenants/org-a/projects/project-a/deployments/dep-1/files/");
+    for (const patch of [
+      { manifestKey: "tenants/org-a/projects/project-a/deployments/dep-1/other.json" },
+      { manifestKey: "tenants/org-a/projects/project-a/deployments/dep-1/nested/manifest.json" },
+      { manifestKey: "tenants/org-a/projects/project-a/deployments/manifest.json" },
+      { manifestKey: "tenants/org-b/projects/project-a/deployments/dep-1/manifest.json" },
+      { manifestKey: "tenants/org-a/projects/project-b/deployments/dep-1/manifest.json" },
+      { manifestKey: "tenants/org-a/projects/project-a/deployments/../manifest.json" },
+      { manifestKey: "" },
+      { organizationId: "org/a" }, { projectId: "project/a" }, { organizationId: "" }, { projectId: ".." },
+    ]) expect(modernStoragePrefix(scoped(patch)), JSON.stringify(patch)).toBeNull();
+  });
+
+  it("maps canonical paths under the prefix and refuses ambiguous ones", () => {
+    const prefix = "tenants/org-a/projects/project-a/deployments/dep-1/files/";
+    for (const path of ["index.html", "guide/a b.html", "100%25.html", "a/b/c.css"]) expect(modernStorageKey(scoped(), path)).toBe(prefix + path);
+    for (const path of ["", "../manifest.json", "a/../../x", "a//b", "/a", "a/", "a\\b", "a\0b"]) expect(modernStorageKey(scoped(), path), path).toBeNull();
+    expect(modernStorageKey(scoped({ manifestKey: "tenants/org-b/projects/project-a/deployments/d/manifest.json" }), "index.html")).toBeNull();
+  });
+
+  it("keeps legacy namespaces disjoint from the reserved modern root", () => {
+    expect(legacyStoragePrefix("acme-docs")).toBe("acme-docs/");
+    for (const org of ["tenants", "", "Acme", "acme_docs", "-acme", "acme-", "acme--docs", "a/b"]) expect(legacyStoragePrefix(org), org).toBeNull();
+    expect(isLegacyStorageKey("acme", "acme/index.html")).toBe(true);
+    for (const key of ["other/index.html", "acme", "acme/../other/x", "acmeish/x"]) expect(isLegacyStorageKey("acme", key), key).toBe(false);
+    expect(isLegacyStorageKey("tenants", "tenants/org-a/projects/p/deployments/d/manifest.json")).toBe(false);
+    expect(isLegacyStoragePrefix("acme", "acme/")).toBe(true);
+    expect(isLegacyStoragePrefix("acme", "acme/guide/")).toBe(true);
+    for (const prefix of ["acme/guide", "other/", "acme//", "acme/../", "", "/"]) expect(isLegacyStoragePrefix("acme", prefix), prefix).toBe(false);
+    expect(isLegacyStoragePrefix("tenants", "tenants/")).toBe(false);
   });
 });

@@ -30,6 +30,7 @@ export function modernStoragePrefix(scope: { organizationId: string; projectId: 
 export function modernStorageKey(scope: { organizationId: string; projectId: string; manifestKey: string }, path: string): string | null {
   const prefix = modernStoragePrefix(scope);
   if (!prefix || !isCanonicalStorageKey(path)) return null;
-  const key = prefix + path;
-  return isCanonicalStorageKey(key) && key.startsWith(prefix) ? key : null;
+  // The prefix is built from validated segments and ends in "/", and the path is
+  // canonical, so the concatenation is canonical and inside the prefix.
+  return prefix + path;
 }

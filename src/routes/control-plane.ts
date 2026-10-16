@@ -518,7 +518,7 @@ ${managementRequestScript}
 
 export function renderControlPlanePage(options: ControlPlanePageOptions): string {
   const organizationId = options.organizationId;
-  const hasSidebar = Boolean(organizationId) && !options.focused;
+  const hasSidebar = !!organizationId && !options.focused;
   const userLabel = options.user.name || options.user.email;
   const initial = userLabel.trim().charAt(0).toUpperCase() || "R";
   const state = jsonState(options.state ?? {});
@@ -553,7 +553,7 @@ ${hasSidebar ? `<script defer src="/management-pages.js?v=${MANAGEMENT_SHELL_VER
 </div>
 ${organizationId ? '<div class="cp-org-menu" id="cp-org-menu" role="menu" aria-label="Switch organization" popover="manual" hidden><p class="cp-org-menu-heading" role="presentation">Switch organization</p><p class="cp-org-menu-status" role="status"></p><div data-org-options role="presentation"></div><div class="cp-org-menu-footer" role="presentation"><a href="/organizations?choose=1" role="menuitem">Manage organizations</a></div></div>' : ""}
 </header>
-${hasSidebar ? `<div class="cp-sidebar" id="cp-navigation" role="complementary" aria-label="Workspace navigation"><div class="cp-drawer-head"><span>Navigation</span><button class="cp-icon-button" id="cp-nav-close" type="button" aria-label="Close navigation"><span class="material-symbols-outlined" aria-hidden="true">close</span></button></div>${drawerContext}${controlNavigation(organizationId ?? "", options.active)}</div><button class="cp-backdrop" id="cp-backdrop" type="button" aria-label="Close navigation" tabindex="-1"></button>` : ""}
+${hasSidebar ? `<div class="cp-sidebar" id="cp-navigation" role="complementary" aria-label="Workspace navigation"><div class="cp-drawer-head"><span>Navigation</span><button class="cp-icon-button" id="cp-nav-close" type="button" aria-label="Close navigation"><span class="material-symbols-outlined" aria-hidden="true">close</span></button></div>${drawerContext}${controlNavigation(organizationId, options.active)}</div><button class="cp-backdrop" id="cp-backdrop" type="button" aria-label="Close navigation" tabindex="-1"></button>` : ""}
 <main class="cp-main${hasSidebar ? "" : " focused"}" data-cp-route-envelope="true" data-cp-shell-version="${MANAGEMENT_SHELL_VERSION}" data-cp-organization-id="${escapeHtml(organizationId ?? "")}" data-cp-project-id="${escapeHtml(options.projectId ?? "")}" data-cp-user-id="${escapeHtml(options.user.id)}"><div class="cp-content${pageClass}">
   <header class="cp-page-head"><div class="cp-page-copy"><p class="eyebrow">${escapeHtml(options.eyebrow)}</p><h1 class="cp-page-heading">${escapeHtml(options.heading)}</h1><p class="cp-page-description">${escapeHtml(options.description)}</p></div>${options.actions ? `<div class="cp-page-actions">${options.actions}</div>` : ""}</header>
   ${options.content}

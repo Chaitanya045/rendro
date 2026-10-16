@@ -20,7 +20,7 @@ function app() {
   const app = new Hono<{ Variables: { user?: User } }>();
   app.use("*", sessionMiddleware);
   app.all("*", (c) => {
-    downstream();
+    downstream(c.get("user"));
     return c.get("user") ? c.json({ id: c.get("user")!.id }) : c.redirect("/sign-in");
   });
   return { app, downstream };
@@ -180,6 +180,51 @@ describe("session lookup failures", () => {
     expect(downstream).not.toHaveBeenCalled();
     expect(logger.warn).toHaveBeenCalledWith({ category: "timeout", status: null, attempt: 2 }, "Session lookup failed");
     expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("ignores an unparseable Retry-After and uses the default backoff", async () => {
+    const fetchMock = vi.fn()
+      .mockImplementationOnce(() => new Response(null, { status: 429, headers: { "retry-after": "soon" } }))
+      .mockImplementation(() => Response.json({ user, session: { expiresAt: Date.now() + 60_000 } }));
+    vi.stubGlobal("fetch", fetchMock);
+    const start = Date.now();
+    expect((await request()).response.status).toBe(200);
+    expect(Date.now() - start).toBe(150);
+    const persistent = vi.fn(() => new Response(null, { status: 429, headers: { "retry-after": "soon" } }));
+    vi.stubGlobal("fetch", persistent);
+    sessionCache.clear();
+    const { response } = await request();
+    expect(response.status).toBe(503);
+    expect(response.headers.get("retry-after")).toBe("1");
+  });
+
+  it("does not surface a body that refuses to be cancelled after an upstream failure", async () => {
+    const rejections: unknown[] = [];
+    const onRejection = (reason: unknown) => rejections.push(reason);
+    process.on("unhandledRejection", onRejection);
+    try {
+      const fetchMock = vi.fn(() => new Response(new ReadableStream({ cancel() { throw new Error("secret-cancel"); } }), { status: 502 }));
+      vi.stubGlobal("fetch", fetchMock);
+      const { response } = await request();
+      await realDelay(5);
+      expect(response.status).toBe(503);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(logger.warn).toHaveBeenCalledWith({ category: "upstream", status: 502, attempt: 2 }, "Session lookup failed");
+      expect(rejections).toEqual([]);
+    } finally {
+      process.off("unhandledRejection", onRejection);
+    }
+  });
+
+  it("keeps only public user fields, including a string avatar, never session secrets", async () => {
+    const profile = { ...user, image: "https://images.example.test/a.png", password: "secret-hash", role: "admin" };
+    vi.stubGlobal("fetch", vi.fn(() => Response.json({ user: profile, session: { expiresAt: Date.now() + 60_000, token: "secret-token" } })));
+    const { response, downstream } = await request();
+    expect(response.status).toBe(200);
+    expect(downstream).toHaveBeenCalledWith({
+      id: user.id, email: user.email, name: user.name, emailVerified: true, image: "https://images.example.test/a.png",
+      createdAt: new Date(user.createdAt), updatedAt: new Date(user.updatedAt),
+    });
   });
 
   it("waits for a short Retry-After before recovering", async () => {
