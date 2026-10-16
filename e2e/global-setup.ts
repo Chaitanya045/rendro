@@ -18,7 +18,7 @@ export default async function globalSetup() {
   const closers: Array<() => Promise<void>> = [];
   const originalFetch = globalThis.fetch;
   const blockedOrigins = new Set<string>();
-  const environmentKeys = ["CLOUDFLARE_LOAD_DEV_VARS_FROM_DOT_ENV", "WRANGLER_SEND_METRICS", "RENDRO_E2E_ORIGIN", "RENDRO_E2E_CONVEX", "RENDRO_E2E_MAIL", "RENDRO_E2E_SEED", "RENDRO_E2E_DIRECTORY"];
+  const environmentKeys = ["CLOUDFLARE_LOAD_DEV_VARS_FROM_DOT_ENV", "WRANGLER_SEND_METRICS", "RENDRO_E2E_ORIGIN", "RENDRO_E2E_CONVEX", "RENDRO_E2E_CONVEX_SITE", "RENDRO_E2E_MAIL", "RENDRO_E2E_SEED", "RENDRO_E2E_DIRECTORY"];
   const previousEnvironment = new Map(environmentKeys.map(key => [key, process.env[key]]));
   async function cleanup() {
     const errors: unknown[] = [];
@@ -111,6 +111,7 @@ export default async function globalSetup() {
     await writeFile(seedPath, JSON.stringify(seed), { mode: 0o600 });
     process.env.RENDRO_E2E_ORIGIN = url.origin;
     process.env.RENDRO_E2E_CONVEX = convex.origin;
+    process.env.RENDRO_E2E_CONVEX_SITE = convex.site;
     process.env.RENDRO_E2E_MAIL = identity.control;
     process.env.RENDRO_E2E_SEED = seedPath;
     process.env.RENDRO_E2E_DIRECTORY = directory;

@@ -1,6 +1,7 @@
 import { test, expect } from "./fixtures";
 import { password } from "./seed";
 import { ageRecord, authRecord, holdRequest, login, mailFor, mailLink, oauthFixture, session, signout, signup, verifiedUser } from "./auth-helpers";
+import { localHttp } from "./backend";
 
 test.describe.configure({ timeout: 60_000 });
 
@@ -503,6 +504,41 @@ test("nonpersistent session retains its short backend lifetime [AUTH-111-02]", a
   await page.reload();
   await expect(page).toHaveURL(/\/sign-in\?returnTo=/);
   expect(await session(page)).toBeNull();
+});
+
+// Sessions are cookie-only on the real Convex runtime and through the Worker: a
+// bearer session token neither authenticates nor refreshes/persists the session.
+test("bearer session tokens never extend a nonpersistent session [AUTH-111-02]", async ({ page, context, seed }) => {
+  await login(page, "owner@example.test", password, false);
+  await expect(page).toHaveURL(/\/account\/security$/);
+  const identity = await session(page);
+  if (!identity) throw new Error("Missing session");
+  const stored = () => authRecord<{ expiresAt: number; rememberMe: boolean }>("findOne", {
+    model: "session", where: [{ field: "_id", value: identity.sessionId }], select: ["expiresAt", "rememberMe"],
+  });
+  const initial = await stored();
+  expect(initial.rememberMe).toBe(false);
+  const token = (await context.cookies()).find(cookie => cookie.name.endsWith(".session_token"));
+  if (!token) throw new Error("Missing session cookie");
+  const cookie = `${token.name}=${token.value}`;
+  const authorization = `Bearer ${decodeURIComponent(token.value)}`;
+  for (const origin of [process.env.RENDRO_E2E_CONVEX_SITE, process.env.RENDRO_E2E_ORIGIN]) {
+    for (const path of ["/api/auth/get-session", "/api/auth/convex/token", "/api/auth/organization/list", "/api/auth/list-sessions", `/api/rendro/management/access?organizationId=${seed.organizationId}`]) {
+      for (const headers of [{ authorization }, { authorization, cookie }] as Record<string, string>[]) {
+        const label = `${origin === process.env.RENDRO_E2E_ORIGIN ? "worker" : "convex"} ${path} ${Object.keys(headers).join("+")}`;
+        const response = await localHttp(`${origin}${path}`, undefined, headers);
+        const sessionCookies = [response.headers["set-cookie"] ?? []].flat().filter(value => /^[^=]*\.session_token=/.test(value));
+        for (const value of sessionCookies) expect(value.replace(/; Max-Age=0(?=;|$)/i, ""), label).not.toMatch(/; (?:Max-Age|Expires)=/i);
+        const authenticated = response.status === 200 && response.body !== "null";
+        // Convex Rendro APIs treat Authorization as an API-key request, never a session.
+        const cookieAuthority = "cookie" in headers && (path.startsWith("/api/auth/") || origin === process.env.RENDRO_E2E_ORIGIN);
+        expect(authenticated, `${label}: ${response.status}`).toBe(cookieAuthority);
+        const current = await stored();
+        expect(current.expiresAt, label).toBe(initial.expiresAt);
+        expect(current.rememberMe, label).toBe(false);
+      }
+    }
+  }
 });
 
 test("remembered session refreshes to seven days on protected entry", async ({ page, context }) => {

@@ -4,7 +4,7 @@ import { once } from "node:events";
 import { chmod, open, writeFile } from "node:fs/promises";
 import { cpSync, mkdirSync, readdirSync, symlinkSync } from "node:fs";
 import { createServer } from "node:net";
-import { request } from "node:http";
+import { request, type IncomingHttpHeaders } from "node:http";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
@@ -61,11 +61,11 @@ export async function freePort() {
 // Node HTTP bypasses Vitest's global fetch mock and Wrangler's outbound transport.
 export function localHttp(url: string, body?: unknown, headers: Record<string, string> = {}) {
   assertLoopback(new URL(url).origin);
-  return new Promise<{ status: number; body: string }>((resolve, reject) => {
+  return new Promise<{ status: number; body: string; headers: IncomingHttpHeaders }>((resolve, reject) => {
     const req = request(url, { method: body === undefined ? "GET" : "POST", headers: { "Content-Type": "application/json", ...headers }, timeout: 15_000 }, response => {
       const chunks: Buffer[] = [];
       response.on("data", (chunk: Buffer) => chunks.push(chunk));
-      response.on("end", () => resolve({ status: response.statusCode ?? 0, body: Buffer.concat(chunks).toString() }));
+      response.on("end", () => resolve({ status: response.statusCode ?? 0, body: Buffer.concat(chunks).toString(), headers: response.headers }));
       response.on("error", reject);
     });
     req.on("timeout", () => req.destroy(new Error("Local HTTP timeout")));

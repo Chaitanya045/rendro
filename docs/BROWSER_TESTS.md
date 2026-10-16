@@ -198,7 +198,10 @@ The same reads run with absent and altered client preference markers. Password
 rotation regressions check both stored lifetime choices and replacement-cookie
 persistence after removing the marker.
 A remembered-session control ages the disposable record past its update age and
-verifies protected entry refreshes it to seven days.
+verifies protected entry refreshes it to seven days. A bearer-token check sends
+the session token as `Authorization`, alone and with the cookie, directly to
+Convex and through the Worker. It asserts that bearer tokens never authenticate,
+that no persistent session cookie is set, and that the stored expiry is unchanged.
 
 ## Vitest Chromium project
 
