@@ -459,6 +459,14 @@ released, including page/context route fulfillments and popup scripts.
 Same-process frames share their page's profiler. Chromium's precise-coverage
 delta events preserve intermediate samples; a `beforeunload` event breakpoint
 flushes the final interval before navigation destroys the old context.
+The breakpoint needs a listener that the collector installs in each target's
+first document; OOPIF children get their own target per document. A main
+document reached after the first navigation has no such listener (injecting one
+everywhere changes viewer navigation behaviour), so before page code navigates
+the main document itself, for example the viewer's Reload control calling
+`location.reload()`, tests must `await harness.flushCoverage(page)`. Otherwise
+whether the outgoing interval is retained depends on Chromium's paint-triggered
+coverage deltas. A regression covers a page-initiated opaque child reload.
 `pagehide` is too late because Chromium suppresses debugger pauses then.
 The harness intercepts explicit page/context close and awaits a collection
 barrier for every attached target before detaching any session, including failed

@@ -281,6 +281,9 @@ describe("private viewer republishing", () => {
     const nonce = await page.locator('script[data-viewer="parent"]').evaluate(element => (element as HTMLScriptElement).nonce);
     expect(nonce).not.toBe("");
     expect(await page.locator("#viewer-update-notice").evaluate(element => (element.previousElementSibling as HTMLStyleElement).nonce)).toBe(nonce);
+    // The shell reloads itself via location.reload(); collect the outgoing
+    // document (including the pending write) before it is destroyed.
+    await harness.flushCoverage(page);
     await browserStep("explicitly reload the same document URL", async () => {
       await Promise.all([page.waitForEvent("load"), page.getByRole("button", { name: "Reload", exact: true }).click()]);
     });

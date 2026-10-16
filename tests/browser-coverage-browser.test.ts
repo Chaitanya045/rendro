@@ -117,6 +117,22 @@ it("flushes every child before reloading its parent", async () => {
   expect(file.s[executed[0]]).toBe(3);
 });
 
+it("collects opaque child execution before page code reloads the child", async () => {
+  const page = await harness.newPage();
+  await page.goto(harness.origin);
+  const frame = page.frames().find(frame => frame !== page.mainFrame())!;
+  await expect.poll(() => frame.evaluate("globalThis.coverageProof")).toBe("executed browser branch");
+  await frame.evaluate("coverageProbe(true)");
+  // Page code navigates itself; no harness navigation API is involved.
+  const reloaded = page.waitForEvent("framenavigated", navigated => navigated === frame);
+  await frame.evaluate(() => { setTimeout(() => location.reload(), 0); });
+  await reloaded;
+  await expect.poll(() => frame.evaluate("globalThis.coverageProof")).toBe("executed browser branch");
+  const file = (await harness.coverageSnapshot(page, included))[probe];
+  const executed = Object.entries(file.statementMap).find(([, loc]) => loc.start.line === 3)!;
+  expect(file.s[executed[0]]).toBe(3);
+});
+
 it("rejects unmapped first-party scripts", async () => {
   await expect(convertBrowserCoverage([{ scriptId: "1", url: `${harness.origin}/missing.js`, source: "window.unmapped = true", functions: [] }]))
     .rejects.toThrow("Unmapped browser script");

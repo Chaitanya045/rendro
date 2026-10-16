@@ -1297,6 +1297,8 @@ existing DOM segments. CI artifacts retain raw and merged counters on failure so
 the same diff can diagnose discrepancies with two-CPU constrained local runs.
 A reload delta for a transient script without a debugger source is attributed
 only to its URL's single agreeing retained source; ambiguity still fails.
+Tests flush explicitly before page code reloads a later main document, such as
+the viewer's Reload control.
 `pnpm coverage` requires
 per-suite browser receipts and feeds the mapped `coverage/browser/*.json` shards
 to the same strict merger as the Node report. Production assets are unchanged;
