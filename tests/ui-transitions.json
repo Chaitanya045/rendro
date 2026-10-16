@@ -3036,7 +3036,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "unit",
+      "status": "browser",
       "auditEvidence": "U",
       "auditNote": "shared-select.test.ts",
       "edges": [
@@ -3048,8 +3048,19 @@
           "inventoryRefs": [
             "UI-022"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/shared-select-browser.test.ts",
+              "name": "navigates with arrows, Home/End and page keys, skipping disabled options, then commits with Enter",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/shared-select-browser.test.ts",
+              "name": "supports Alt+Arrow disclosure, Escape, Tab commit and ignores Ctrl/Meta shortcuts",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-022-E02",
@@ -3059,8 +3070,19 @@
           "inventoryRefs": [
             "G06"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/shared-select-browser.test.ts",
+              "name": "opens with %s on the selected option and keeps the native value until commit",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/shared-select-browser.test.ts",
+              "name": "navigates with arrows, Home/End and page keys, skipping disabled options, then commits with Enter",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-022-E03",
@@ -3070,8 +3092,14 @@
           "inventoryRefs": [
             "G06"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/shared-select-browser.test.ts",
+              "name": "navigates with arrows, Home/End and page keys, skipping disabled options, then commits with Enter",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-022-E04",
@@ -3081,8 +3109,14 @@
           "inventoryRefs": [
             "G06"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/shared-select-browser.test.ts",
+              "name": "supports Alt+Arrow disclosure, Escape, Tab commit and ignores Ctrl/Meta shortcuts",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-022-E05",
@@ -3092,8 +3126,14 @@
           "inventoryRefs": [
             "G06"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/shared-select-browser.test.ts",
+              "name": "matches typeahead by prefix, cycles repeated letters and resets after the buffer expires",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-022-E06",
@@ -3103,8 +3143,19 @@
           "inventoryRefs": [
             "G06"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/shared-select-browser.test.ts",
+              "name": "supports Alt+Arrow disclosure, Escape, Tab commit and ignores Ctrl/Meta shortcuts",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/shared-select-browser.test.ts",
+              "name": "keeps Escape inside a modal select popup and leaves the dialog open",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-022-E07",
@@ -3114,8 +3165,14 @@
           "inventoryRefs": [
             "G06"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/shared-select-browser.test.ts",
+              "name": "supports Alt+Arrow disclosure, Escape, Tab commit and ignores Ctrl/Meta shortcuts",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-022-E08",
@@ -3125,8 +3182,14 @@
           "inventoryRefs": [
             "G06"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/shared-select-browser.test.ts",
+              "name": "navigates with arrows, Home/End and page keys, skipping disabled options, then commits with Enter",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-022-E09",
@@ -3221,7 +3284,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "unit",
+      "status": "browser",
       "auditEvidence": "U",
       "auditNote": "shared-select.test.ts",
       "edges": [
@@ -3255,8 +3318,14 @@
           "inventoryRefs": [
             "G07"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/shared-select-browser.test.ts",
+              "name": "re-synchronizes an open list when options change underneath it",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-023-E04",
@@ -3266,8 +3335,14 @@
           "inventoryRefs": [
             "G07"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/shared-select-browser.test.ts",
+              "name": "reports a required native select inline, then clears it on selection or reset",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-023-E05",
@@ -3277,8 +3352,14 @@
           "inventoryRefs": [
             "G07"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/shared-select-browser.test.ts",
+              "name": "reports a required native select inline, then clears it on selection or reset",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-023-E06",
@@ -11170,8 +11251,19 @@
           "inventoryRefs": [
             "UI-099"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/lazy-tree-browser.test.ts",
+              "name": "restores documents on Back/Forward and keeps the last document for an entry without one",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/lazy-tree-browser.test.ts",
+              "name": "follows a link the reader clicks inside the document and keeps its query and fragment",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-099-E02",
@@ -11181,8 +11273,19 @@
           "inventoryRefs": [
             "V03"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/lazy-tree-browser.test.ts",
+              "name": "selects a document, announces loading, then settles after the minimum display time",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/lazy-tree-browser.test.ts",
+              "name": "opens a deep link with its query and fragment, revealing and marking the document",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-099-E03",
@@ -11192,8 +11295,14 @@
           "inventoryRefs": [
             "V03"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/lazy-tree-browser.test.ts",
+              "name": "opens and closes folders from the keyboard and ignores other keys",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-099-E04",
@@ -11203,8 +11312,14 @@
           "inventoryRefs": [
             "V03"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/lazy-tree-browser.test.ts",
+              "name": "keeps modified-click links native and takes over plain clicks",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-099-E05",
@@ -11214,8 +11329,14 @@
           "inventoryRefs": [
             "V03"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/lazy-tree-browser.test.ts",
+              "name": "re-aligns the indicator after a %s",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-099-E06",
@@ -11280,7 +11401,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "untested",
+      "status": "browser",
       "auditEvidence": "UNTESTED",
       "auditNote": "lazy-tree/lazy-tree.ts; static motion/modified-click tests are not full tree interaction coverage",
       "edges": [
@@ -11292,8 +11413,24 @@
           "inventoryRefs": [
             "UI-100"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/lazy-tree-browser.test.ts",
+              "name": "renders folders first, expands them lazily and keeps their state on collapse and re-expand",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/lazy-tree-browser.test.ts",
+              "name": "opens and closes folders from the keyboard and ignores other keys",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/lazy-tree-browser.test.ts",
+              "name": "shows a retryable folder error and loads the folder after retry",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-100-E02",
@@ -11314,8 +11451,14 @@
           "inventoryRefs": [
             "V02"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/lazy-tree-browser.test.ts",
+              "name": "ignores clicks on the root error text and reloads the list from its Retry button",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-100-E04",
@@ -11325,8 +11468,14 @@
           "inventoryRefs": [
             "V02"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/lazy-tree-browser.test.ts",
+              "name": "explains an empty tree at %s",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-100-E05",
@@ -11347,8 +11496,14 @@
           "inventoryRefs": [
             "V02"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/lazy-tree-browser.test.ts",
+              "name": "shows a retryable folder error and loads the folder after retry",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-100-E07",
@@ -11358,8 +11513,14 @@
           "inventoryRefs": [
             "V02"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/lazy-tree-browser.test.ts",
+              "name": "pages a folder, drops duplicate rows and retries a failed page",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-100-E08",
@@ -11369,8 +11530,14 @@
           "inventoryRefs": [
             "V02"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/lazy-tree-browser.test.ts",
+              "name": "builds one sorted, de-duplicated tree from every page of the document list and opens the linked document",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-100-E09",
@@ -11556,7 +11723,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "untested",
+      "status": "browser",
       "auditEvidence": "UNTESTED",
       "auditNote": "document-ui-regressions.test.ts asserts semantics; security-headers-browser displays errors but does not click retry",
       "edges": [
@@ -11568,8 +11735,19 @@
           "inventoryRefs": [
             "UI-102"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/lazy-tree-browser.test.ts",
+              "name": "reports a failed document load after a %s and recovers when it is selected again",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/lazy-tree-browser.test.ts",
+              "name": "selects a document, announces loading, then settles after the minimum display time",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-102-E02",
@@ -11601,8 +11779,14 @@
           "inventoryRefs": [
             "V04"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/lazy-tree-browser.test.ts",
+              "name": "selects a document, announces loading, then settles after the minimum display time",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-102-E05",
@@ -11612,8 +11796,14 @@
           "inventoryRefs": [
             "V04"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/lazy-tree-browser.test.ts",
+              "name": "reports a failed document load after a %s and recovers when it is selected again",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-102-E06",

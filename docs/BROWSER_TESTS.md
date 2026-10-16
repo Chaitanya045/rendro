@@ -533,6 +533,14 @@ pnpm exec tsx tests/helpers/run-browser-coverage.ts --merge-only --update-ledger
 pnpm exec tsx tests/helpers/run-browser-coverage.ts --merge-only
 ```
 
+`tests/lazy-tree-browser.test.ts` and `tests/shared-select-browser.test.ts` (#118) run
+the real bundles against small fixture servers: legacy and scoped tree shells, a
+frame that relays posted messages, and `page.route` holds or failures for tree and
+document requests. Activation-sensitive navigation reserves the parent input with a
+real click in the shell before a programmatic frame message, so the confirmation
+prompt appears deterministically; the paused page clock drives the 520 ms and 15 s
+loader timers and the select's typeahead buffer.
+
 Before shrinking debt, save three consecutive full `VITEST_MAX_WORKERS=2 pnpm coverage`
 results outside `coverage/` (Vitest cleans that directory). Compare each adjacent
 pair with `pnpm exec tsx tests/helpers/diff-coverage.ts first/merged/coverage-final.json

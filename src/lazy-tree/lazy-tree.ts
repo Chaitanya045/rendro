@@ -96,10 +96,8 @@ function updateIndicator(el: HTMLElement, animate = true) {
 
 function refreshIndicator(animate = false) {
   if (!activeEl) return;
-  requestAnimationFrame(() => {
-    if (!activeEl) return;
-    updateIndicator(activeEl, animate);
-  });
+  // The selection is never cleared once set, so it is still present next frame.
+  requestAnimationFrame(() => updateIndicator(activeEl as HTMLElement, animate));
 }
 
 // ── fold icon toggle ──
@@ -444,28 +442,27 @@ function showDocLoader(frame: HTMLIFrameElement | null) {
   if (frame) {frame.style.display = "block";frame.setAttribute("aria-busy", String(accessibility.busy));}
 }
 
-function showDocLoadError(frame: HTMLIFrameElement | null) {
+function showDocLoadError(frame: HTMLIFrameElement) {
   if (docLoadClearTimer !== undefined) window.clearTimeout(docLoadClearTimer);
   document.documentElement.classList.remove("doc-loading");
   document.documentElement.classList.add("doc-loading-error");
   const accessibility = documentLoadAccessibility("error");
-  if (frame) frame.removeAttribute("aria-busy");
+  frame.removeAttribute("aria-busy");
   announceDocumentState(accessibility.message, accessibility.assertive);
 }
 
-function hideDocLoader(frame: HTMLIFrameElement | null, loadId: number) {
+// Every loadDoc replaces the frame handlers and clears the pending timers, so
+// a callback that still runs always belongs to the latest load.
+function hideDocLoader(frame: HTMLIFrameElement) {
   const remaining = Math.max(0, DOC_LOAD_MIN_VISIBLE_MS - (performance.now() - docLoadStartedAt));
-  const clear = () => {
-    if (loadId === activeDocLoadId) clearDocLoadingState();
-  };
   if (remaining > 0) {
-    docLoadClearTimer = window.setTimeout(clear, remaining);
+    docLoadClearTimer = window.setTimeout(clearDocLoadingState, remaining);
   } else {
-    clear();
+    clearDocLoadingState();
   }
-  if (frame) frame.style.display = "block";
+  frame.style.display = "block";
   const accessibility = documentLoadAccessibility("loaded");
-  if (frame) frame.removeAttribute("aria-busy");
+  frame.removeAttribute("aria-busy");
   announceDocumentState(accessibility.message, accessibility.assertive);
 }
 
@@ -560,25 +557,21 @@ function loadDoc(fullPath: string, pushState: false | "push" | "replace", fragme
   expectedLoadedPath = fullPath;
   syncActiveState(fullPath);
 
-  const loadId = ++activeDocLoadId;
+  activeDocLoadId++;
   if (docLoadTimeout !== undefined) window.clearTimeout(docLoadTimeout);
   showDocLoader(frame);
 
   if (frame) {
     frame.onload = () => {
-      if (loadId !== activeDocLoadId) return;
-      if (docLoadTimeout !== undefined) window.clearTimeout(docLoadTimeout);
-      hideDocLoader(frame, loadId);
+      window.clearTimeout(docLoadTimeout);
+      hideDocLoader(frame);
       sendDocumentFragment(frame, relativeDocumentPath(fullPath), location.hash);
     };
     frame.onerror = () => {
-      if (loadId !== activeDocLoadId) return;
-      if (docLoadTimeout !== undefined) window.clearTimeout(docLoadTimeout);
+      window.clearTimeout(docLoadTimeout);
       showDocLoadError(frame);
     };
-    docLoadTimeout = window.setTimeout(() => {
-      if (loadId === activeDocLoadId) showDocLoadError(frame);
-    }, 15000);
+    docLoadTimeout = window.setTimeout(() => showDocLoadError(frame), 15000);
     const frameUrl = documentFrameUrl(fullPath) + search;
     frame.src = frameUrl;
     // Keep src authoritative for comments/tickets, but replace the pending
@@ -604,11 +597,10 @@ function loadDoc(fullPath: string, pushState: false | "push" | "replace", fragme
   }
 }
 
-async function navigateToDoc(relPath: string) {
-  if (!ORG) return;
-  const fullPath = `${ORG}/${relPath}`;
+async function navigateToDoc(org: string, relPath: string) {
+  const fullPath = `${org}/${relPath}`;
   const parts = relPath.split("/");
-  let currentPath = ORG;
+  let currentPath = org;
 
   for (let i = 0; i < parts.length - 1; i++) {
     currentPath += "/" + parts[i];
@@ -637,7 +629,7 @@ function syncActiveState(fullPath: string) {
   // Always expand ancestors first (no-op if already open)
   if (!ORG) return;
   const relPath = fullPath.startsWith(`${ORG}/`) ? fullPath.slice(ORG.length + 1) : fullPath;
-  void navigateToDoc(relPath);
+  void navigateToDoc(ORG, relPath);
 }
 
 function reconcileLoadedDocument(fullPath: string): void {

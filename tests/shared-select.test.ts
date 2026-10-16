@@ -20,6 +20,9 @@ function setup(html = '<form><label>Release mode<select class="select" name="mod
 afterEach(async () => { cleanups.splice(0).forEach((cleanup) => cleanup()); await Promise.all(windows.splice(0).map((win) => win.happyDOM.close())); });
 
 describe("shared shadcn-style select", () => {
+  it("requires a document with a window", () => {
+    expect(() => installSelects({ defaultView: null } as unknown as Document)).toThrow("Select enhancement requires a browser document.");
+  });
   it("preserves native form controls and exposes a named combobox", () => {
     const { select, trigger, popup } = setup();
     expect(select.getAttribute("aria-hidden")).toBe("true");
