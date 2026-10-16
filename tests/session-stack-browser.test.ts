@@ -13,6 +13,7 @@ import schema from "../convex/schema";
 import authSchema from "../convex/betterAuth/schema";
 import { components, internal } from "../convex/_generated/api";
 import { browserStep, bundleBrowserAsset, createBrowserHarness } from "./helpers/browser";
+import { subprocessArgs, subprocessEnv } from "./helpers/subprocess-coverage";
 
 // Run the actual local server entry point, including the auth proxy,
 // session middleware and all routes. Only remote services are local substitutes:
@@ -93,11 +94,11 @@ beforeAll(async () => {
   const document = "<!doctype html><html><head><title>Stack guide</title></head><body><h1>Local stack document loaded</h1></body></html>";
   objects.set(`/mock-storage/docs/${deployment.manifestKey}`, JSON.stringify({ version: 1, files: [{ path: "index.html", contentType: "text/html", sha256: "b".repeat(64), size: document.length }] }));
   objects.set(`/mock-storage/docs/${deployment.objectRoot}/files/index.html`, document);
-  server = spawn(process.execPath, ["--import", "tsx", "src/index.ts"], {
-    cwd: process.cwd(), stdio: "ignore", env: {
+  server = spawn(process.execPath, [...subprocessArgs(), "--import", "tsx", "src/index.ts"], {
+    cwd: process.cwd(), stdio: "ignore", env: subprocessEnv({
       ...process.env, PORT: String(port), LOG_LEVEL: "silent", CONVEX_SITE_URL: `${harness.origin}/mock-convex`,
       MINIO_ENDPOINT: `${harness.origin}/mock-storage`, MINIO_BUCKET: "docs",
-    },
+    }),
   });
   await vi.waitFor(async () => {
     expect(await new Promise<number>(resolve => {

@@ -2,7 +2,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import convert from "ast-v8-to-istanbul";
-import { transform } from "esbuild";
+import { transform, type TransformResult } from "esbuild";
 import type { CoverageMapData, FileCoverageData } from "istanbul-lib-coverage";
 import { moduleRunnerTransform, type Rollup } from "vite";
 import { parseAstAsync } from "vitest/node";
@@ -17,7 +17,34 @@ export function normalizeNodeFile(actual: FileCoverageData, ssr: FileCoverageDat
   for (const map of maps) {
     if (fingerprint(sorted(actual[map])) !== fingerprint(sorted(ssr[map]))) throw new Error(`Unexpected Node coverage transform: ${actual.path} ${map}`);
   }
+  return alignCoverage(actual, canonical);
+}
+
+type Counter = "s" | "f" | "b";
+/** Identity of one map entry that survives a re-print: the default also keys functions by declaration. */
+export type Identity = (file: FileCoverageData, counter: Counter, key: string) => unknown;
+export const sourceIdentity: Identity = (file, counter, key) => {
+  if (counter === "s") return [file.statementMap[key].start.line, file.statementMap[key].end];
+  if (counter === "f") return [file.fnMap[key].decl, file.fnMap[key].loc.end];
+  const branch = file.branchMap[key];
+  return [branch.type, branch.loc.start.line, branch.loc.end, branch.locations.map(loc => loc.end)];
+};
+/** Rewritten nested conditionals can move a branch's own start; its arms keep their ends. */
+export const armIdentity: Identity = (file, counter, key) =>
+  counter === "b" ? [file.branchMap[key].type, file.branchMap[key].locations.map(loc => loc.end)] : sourceIdentity(file, counter, key);
+/** Re-printed code (tsx: minified whitespace, keepNames wrappers) moves declaration spans and the end of wrapped declarators. */
+export const reprintedIdentities: Identity[] = [
+  (file, counter, key) => counter === "f" ? file.fnMap[key].loc : sourceIdentity(file, counter, key),
+  (file, counter, key) => counter === "s" ? file.statementMap[key].start : counter === "f" ? file.fnMap[key].loc.start : file.branchMap[key].loc.start,
+  // A multi-line initializer can start on the previous line once re-printed.
+  (file, counter, key) => counter === "s" ? file.statementMap[key].end : counter === "f" ? file.fnMap[key].loc.end : file.branchMap[key].loc.end,
+  armIdentity,
+];
+
+/** Re-key `actual` hit counts onto the canonical maps; ambiguous or missing identities are errors. */
+export function alignCoverage(actual: FileCoverageData, canonical: FileCoverageData, identities: Identity[] = [sourceIdentity, armIdentity]) {
   const result = structuredClone(canonical);
+  let unpaired: string[] = [];
   for (const counter of ["s", "f", "b"] as const) {
     const map = counter === "s" ? "statementMap" : counter === "f" ? "fnMap" : "branchMap";
     const available = new Set(Object.keys(canonical[map]));
@@ -34,23 +61,37 @@ export function normalizeNodeFile(actual: FileCoverageData, ssr: FileCoverageDat
       // Imports rewritten by Vite shift start columns, but retain source ends,
       // declaration spans, branch kind and the ordered endpoints of every arm.
       // Both complete maps were reproduced from this source revision above.
-      const identity = (file: FileCoverageData, key: string) => {
-        if (counter === "s") return [file.statementMap[key].start.line, file.statementMap[key].end];
-        if (counter === "f") return [file.fnMap[key].decl, file.fnMap[key].loc.end];
-        const branch = file.branchMap[key];
-        return [branch.type, branch.loc.start.line, branch.loc.end, branch.locations.map(loc => loc.end)];
-      };
-      const candidates = [...available].filter(key => fingerprint(identity(actual, id)) === fingerprint(identity(canonical, key)));
-      if (candidates.length !== 1) throw new Error(`Ambiguous coverage transform: ${actual.path} ${counter}:${id}`);
-      pairs.set(id, candidates[0]); available.delete(candidates[0]);
+      // The first identity that selects exactly one canonical entry wins.
+      const candidate = identities.map(identity => [...available].filter(key => fingerprint(identity(actual, counter, id)) === fingerprint(identity(canonical, counter, key))))
+        .find(candidates => candidates.length === 1)?.[0];
+      if (candidate === undefined) throw new Error(`Ambiguous coverage transform: ${actual.path} ${counter}:${id}`);
+      pairs.set(id, candidate); available.delete(candidate);
     }
     if (counter !== "s" && available.size) throw new Error(`Missing coverage identities: ${actual.path} ${counter}`);
+    if (counter === "s") unpaired = [...available];
     for (const [from, to] of pairs) {
       if (counter === "b") result.b[to] = actual.b[from].map(count => Math.max(0, count));
       else result[counter][to] = actual[counter][from];
     }
   }
+  // SSR collapses a declaration and its expression-bodied arrow into one statement.
+  // The absent body statement runs once per call: the hits of the function it fills.
+  for (const id of unpaired) {
+    const fn = Object.keys(canonical.fnMap).find(key => fingerprint(canonical.fnMap[key].loc) === fingerprint(canonical.statementMap[id]));
+    if (fn !== undefined) result.s[id] = result.f[fn];
+  }
   return result;
+}
+
+const executed = (file: FileCoverageData) => [...Object.values(file.s), ...Object.values(file.f), ...Object.values(file.b).flat()].some(hits => hits > 0);
+
+/** The gate's own transform of one authored file, as its zero-hit reference map. */
+export async function canonicalCoverage(absolute: string): Promise<{ canonical: FileCoverageData; output: TransformResult; sourceMap: Rollup.SourceMap; coverage: { url: string; functions: never[] } }> {
+  const output = await transform(readFileSync(absolute, "utf8"), { loader: /\.[cm]?ts$/.test(absolute) ? "ts" : "js", sourcefile: absolute, sourcemap: "external", target: "esnext" });
+  const sourceMap = JSON.parse(output.map) as Rollup.SourceMap;
+  const coverage = { url: pathToFileURL(absolute).href, functions: [] };
+  const canonical = (await convert({ code: output.code, sourceMap, ast: parseAstAsync(output.code), coverage }) as unknown as CoverageMapData)[absolute];
+  return { canonical, output, sourceMap, coverage };
 }
 
 export async function normalizeNodeCoverage(root: string, nodeShard: string, browserShards: string[]) {
@@ -60,10 +101,7 @@ export async function normalizeNodeCoverage(root: string, nodeShard: string, bro
     const name = canonicalPath(root, path);
     if (!browserFiles.has(name)) continue;
     const absolute = resolve(root, name);
-    const output = await transform(readFileSync(absolute, "utf8"), { loader: "ts", sourcefile: absolute, sourcemap: "external", target: "esnext" });
-    const sourceMap = JSON.parse(output.map) as Rollup.SourceMap;
-    const coverage = { url: pathToFileURL(absolute).href, functions: [] };
-    const canonical = (await convert({ code: output.code, sourceMap, ast: parseAstAsync(output.code), coverage }))[absolute];
+    const { canonical, output, sourceMap, coverage } = await canonicalCoverage(absolute);
     const transformed = await moduleRunnerTransform(output.code, sourceMap, absolute, output.code);
     if (!transformed?.map || !("version" in transformed.map)) throw new Error(`Missing SSR transform: ${name}`);
     const ssr = (await convert({ code: transformed.code, sourceMap: transformed.map, ast: parseAstAsync(transformed.code), coverage,
@@ -72,7 +110,9 @@ export async function normalizeNodeCoverage(root: string, nodeShard: string, bro
         (node.type === "ExpressionStatement" && node.expression.type === "AssignmentExpression" && node.expression.left.type === "MemberExpression" && node.expression.left.object.type === "Identifier" && node.expression.left.object.name === "__vite_ssr_exports__")
       ),
     }))[absolute];
-    report[path] = normalizeNodeFile(actual, ssr, canonical);
+    // Vitest lists a file it never executed with its own zero-hit map. Nothing there
+    // to carry over: another shard (a subprocess) supplies every hit of the file.
+    report[path] = executed(actual) ? normalizeNodeFile(actual, ssr, canonical) : canonical;
   }
   const output = resolve(root, "coverage/node-canonical.json");
   writeFileSync(output, JSON.stringify(report));

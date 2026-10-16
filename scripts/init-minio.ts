@@ -8,27 +8,33 @@ import {
   HeadBucketCommand,
   PutObjectCommand,
 } from "@aws-sdk/client-s3";
+import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
-const s3 = new S3Client({
-  endpoint: process.env.MINIO_ENDPOINT ?? "http://localhost:9000",
-  region: process.env.MINIO_REGION ?? "us-east-1",
-  credentials: {
-    accessKeyId: process.env.MINIO_ACCESS_KEY ?? "minioadmin",
-    secretAccessKey: process.env.MINIO_SECRET_KEY ?? "minioadmin",
-  },
-  forcePathStyle: true,
-});
+/** Connection settings. Defaults are the loopback MinIO of docker-compose.yml. */
+export function minioSettings(env: NodeJS.ProcessEnv = process.env) {
+  return {
+    bucket: env.MINIO_BUCKET ?? "docs",
+    client: {
+      endpoint: env.MINIO_ENDPOINT ?? "http://localhost:9000",
+      region: env.MINIO_REGION ?? "us-east-1",
+      credentials: {
+        accessKeyId: env.MINIO_ACCESS_KEY ?? "minioadmin",
+        secretAccessKey: env.MINIO_SECRET_KEY ?? "minioadmin",
+      },
+      forcePathStyle: true,
+    },
+  };
+}
 
-const BUCKET = process.env.MINIO_BUCKET ?? "docs";
-
-async function main() {
+export async function seedMinio(s3: Pick<S3Client, "send">, bucket: string) {
   // Ensure bucket exists
   try {
-    await s3.send(new HeadBucketCommand({ Bucket: BUCKET }));
-    console.log(`Bucket "${BUCKET}" already exists.`);
+    await s3.send(new HeadBucketCommand({ Bucket: bucket }));
+    console.log(`Bucket "${bucket}" already exists.`);
   } catch {
-    await s3.send(new CreateBucketCommand({ Bucket: BUCKET }));
-    console.log(`Created bucket "${BUCKET}".`);
+    await s3.send(new CreateBucketCommand({ Bucket: bucket }));
+    console.log(`Created bucket "${bucket}".`);
   }
 
   const sampleDocs: Record<string, string> = {
@@ -112,7 +118,7 @@ Authorization: Bearer &lt;token&gt;</code></pre>
   for (const [key, body] of Object.entries(sampleDocs)) {
     await s3.send(
       new PutObjectCommand({
-        Bucket: BUCKET,
+        Bucket: bucket,
         Key: key,
         Body: body,
         ContentType: "text/html",
@@ -124,7 +130,10 @@ Authorization: Bearer &lt;token&gt;</code></pre>
   console.log(`\nDone! Seeded ${Object.keys(sampleDocs).length} documents.`);
 }
 
-main().catch((err) => {
-  console.error(err);
-  process.exit(1);
-});
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  const { bucket, client } = minioSettings();
+  seedMinio(new S3Client(client), bucket).catch((err) => {
+    console.error(err);
+    process.exit(1);
+  });
+}

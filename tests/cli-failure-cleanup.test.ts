@@ -5,7 +5,7 @@ import type { AddressInfo } from "node:net";
 import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { expect, it } from "vitest";
-import { build } from "esbuild";
+import { buildCliBundle, subprocessEnv } from "./helpers/subprocess-coverage";
 
 it.each([
   ["source", false], ["source", true], ["bundle", false], ["bundle", true],
@@ -53,10 +53,10 @@ it.each([
     const executable = kind === "source" ? resolve("node_modules/.bin/tsx") : process.execPath;
     const entry = kind === "source" ? "cli/src/index.ts" : join(scratch, "rendro.mjs");
     if (kind === "bundle") {
-      await build({ entryPoints: ["cli/src/index.ts"], bundle: true, platform: "node", target: "node22", format: "esm", outfile: entry });
+      await buildCliBundle(entry);
     }
     const result = await promisify(execFile)(executable, [entry, "push", "--source", source, "--organization", "org", "--project", "project", "--endpoint", endpoint], {
-      env: { ...process.env, RENDRO_API_KEY: "disposable-test-key" }, timeout: 15_000,
+      env: subprocessEnv({ ...process.env, RENDRO_API_KEY: "disposable-test-key" }), timeout: 15_000,
     }).then(output => ({ ...output, code: 0 }), (error: { code: number; stdout: string; stderr: string }) => error);
     expect(result.code).toBe(1);
     expect(result.stderr).toContain("Upload failed for index.html: 429 Rate limited");

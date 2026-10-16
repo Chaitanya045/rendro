@@ -1,11 +1,12 @@
 import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { copyFileSync, mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import type { AssetVersionLedger } from "../scripts/asset-version-ledger";
+import { subprocessEnv } from "./helpers/subprocess-coverage";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const scripts = JSON.parse(readFileSync(join(root, "package.json"), "utf8")).scripts as Record<string, string>;
@@ -17,8 +18,10 @@ function assetFixture(): string {
   fixtures.push(directory);
   mkdirSync(join(directory, "public"));
   mkdirSync(join(directory, "scripts"));
+  // Symlinks resolve to the repository files, so the script under test is the real
+  // one (and is attributed to scripts/ in subprocess coverage) while it only writes here.
   for (const name of ["verify-asset-versions.ts", "asset-version-ledger.ts"]) {
-    copyFileSync(join(root, "scripts", name), join(directory, "scripts", name));
+    symlinkSync(join(root, "scripts", name), join(directory, "scripts", name));
   }
   for (const name of ["src", "node_modules"]) symlinkSync(join(root, name), join(directory, name));
   const ledger = JSON.parse(readFileSync(join(root, "scripts/asset-versions.json"), "utf8")) as AssetVersionLedger;
@@ -36,7 +39,7 @@ function assetFixture(): string {
 }
 
 function checkAssets(directory: string, base = "") {
-  return spawnSync("sh", ["-c", scripts["verify:assets"]], { cwd: directory, encoding: "utf8", env: { ...process.env, ASSET_VERSION_BASE: base } });
+  return spawnSync("sh", ["-c", scripts["verify:assets"]], { cwd: directory, encoding: "utf8", env: subprocessEnv({ ...process.env, ASSET_VERSION_BASE: base }) });
 }
 
 afterEach(() => { for (const directory of fixtures.splice(0)) rmSync(directory, { recursive: true, force: true }); });
@@ -134,5 +137,51 @@ describe("repository quality gates", () => {
     const result = checkAssets(directory, "HEAD");
     expect(result.status).toBe(1);
     expect(result.stderr).toContain("recorded hashes are immutable");
+  });
+
+  const commit = (directory: string) => execFileSync("git", ["-c", "user.name=Fixture", "-c", "user.email=fixture@example.test", "commit", "--quiet", "-m", "Baseline"], { cwd: directory });
+  const record = (directory: string) => spawnSync(process.execPath, ["--import", "tsx", join(root, "scripts/verify-asset-versions.ts"), "--record"], { cwd: directory, encoding: "utf8", env: subprocessEnv({ ...process.env, ASSET_VERSION_BASE: "" }) });
+
+  it("rejects an asset version missing from the ledger, and --record adds it without touching other hashes", () => {
+    const directory = assetFixture();
+    const manifest = join(directory, "scripts/asset-versions.json");
+    const ledger = JSON.parse(readFileSync(manifest, "utf8")) as AssetVersionLedger;
+    const [version, hash] = Object.entries(ledger["public/select.js"]).at(-1)!;
+    delete ledger["public/select.js"][version];
+    writeFileSync(manifest, JSON.stringify(ledger));
+    const rejected = checkAssets(directory);
+    expect(rejected.status).toBe(1);
+    expect(rejected.stderr).toContain(`public/select.js v${version} is unrecorded. Rebuild and run pnpm record:assets.`);
+
+    const recorded = record(directory);
+    expect(recorded.status, recorded.stderr).toBe(0);
+    expect(recorded.stdout).toBe("Asset version hashes verified.\n");
+    const next = JSON.parse(readFileSync(manifest, "utf8")) as AssetVersionLedger;
+    expect(next["public/select.js"][version]).toBe(hash);
+    expect(next).toEqual({ ...ledger, "public/select.js": { ...ledger["public/select.js"], [version]: hash } });
+    expect(readFileSync(manifest, "utf8").endsWith("\n")).toBe(true);
+    expect(checkAssets(directory).status).toBe(0);
+  });
+
+  it("refuses to record a changed bundle over an immutable version", () => {
+    const directory = assetFixture();
+    const before = readFileSync(join(directory, "scripts/asset-versions.json"), "utf8");
+    writeFileSync(join(directory, "public/select.js"), "const changed = true;\n");
+    const result = record(directory);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("changed without a version bump");
+    expect(readFileSync(join(directory, "scripts/asset-versions.json"), "utf8")).toBe(before);
+  });
+
+  it("compares with the base ledger only when the base has one", () => {
+    const directory = assetFixture();
+    commit(directory);
+    // Baseline without a ledger: nothing to protect yet.
+    expect(checkAssets(directory, "HEAD").status).toBe(0);
+    execFileSync("git", ["add", "scripts/asset-versions.json"], { cwd: directory });
+    commit(directory);
+    // Baseline with an identical ledger, and an all-zero (new branch) base.
+    expect(checkAssets(directory, "HEAD").status).toBe(0);
+    expect(checkAssets(directory, "0".repeat(40)).status).toBe(0);
   });
 });

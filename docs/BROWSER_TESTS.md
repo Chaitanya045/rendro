@@ -269,6 +269,9 @@ excludes those files from `unit`. Unit files retain their normal parallelism.
 The browser project has `sequence.groupOrder: 1` and `fileParallelism: false`:
 it starts after the unit project finishes, and launches one browser file at a
 time. See [Vitest's project ordering](https://vitest.dev/config/sequence#sequence-grouporder).
+A third `timing` project (`groupOrder: 2`, serial) holds `tests/share-budget.test.ts`, whose
+CPU-time ratio assertions drifted when parallel unit workers (esbuild builds, tsx
+children) shared the cores; it now runs alone after the browser project.
 Browser tests have 30s budgets and hooks 60s; cold Chromium startup on a small
 runner cannot reliably fit a unit test's budget (unit tests have 30s, see the
 stability rules below). Operations normally fail
@@ -603,9 +606,62 @@ proof; browser execution cannot remove a file from the denominator.
 Management bundle fixture builds map to generated test source. Their returned
 controller strings, other inline management/auth/theme controllers, and
 publisher HTML scripts do **not** receive authored-module coverage here:
-extraction and genuine source maps belong to #105/#106. CLI/server subprocess
-collection remains #107. These boundaries must not be mistaken for full
-coverage of rendered controllers.
+extraction and genuine source maps belong to #105/#106. These boundaries must
+not be mistaken for full coverage of rendered controllers.
+
+### Subprocess coverage (CLI, server, scripts)
+
+Tests that spawn Node run the repository's own code outside Vitest's collector:
+the CLI (tsx source and an esbuild bundle), the Node server and the `scripts/`
+entry points. `pnpm coverage` sets `RENDRO_SUBPROCESS_COVERAGE_DIR`
+(`coverage/subprocess`); a test that spawns passes `subprocessEnv(env)` from
+`tests/helpers/subprocess-coverage.ts` to the child (and `subprocessArgs()` before
+the entry for a server that SIGTERM stops, so it exits normally and writes its
+dump). Each call creates its own receipt directory `raw/<suite>-<uuid>` as that
+child's `NODE_V8_COVERAGE`, strictly under the coverage output and never in the
+repository tree. Without the variable the helpers do nothing, so plain
+`pnpm test` runs are unchanged. Test-built CLI bundles use `buildCliBundle`, the
+`scripts/build-cli.mjs` options plus inline source maps and no tree-shaking, and
+register the bundle text, because the scratch file is deleted before conversion.
+A scratch bundle built any other way (a production-style bundle) must run
+without the collector.
+
+`tests/helpers/merge-subprocess-coverage.ts` converts the dumps after the run
+(`convertSubprocessCoverage`) and reuses the browser pipeline: manifest and
+canonical-path filtering, the source-map conversion and stale-source check of
+`convertMapped`, then `alignCoverage` to the gate's canonical maps and
+`mergeBrowserFile` to add counts. Three script kinds are handled:
+
+- **tsx-run TypeScript.** V8 reports offsets of tsx's output, which dumps do not
+  keep, so the merger re-runs esbuild with tsx's coverage options (minified
+  whitespace, `keepNames`, the child's Node target) and accepts the result only
+  if every line length equals Node's recorded `lineLengths`. tsx's `.then(...)`
+  interop after each dynamic `import()` is inserted as an equal-length placeholder
+  and its nodes are ignored. The recorded source map is the one used.
+- **Registered bundles** map through their inline source map back to `cli/` and
+  `shared/`.
+- **Plain `.js`/`.mjs`** (the QA runners) run unmodified.
+
+The converted maps are re-keyed onto the gate's canonical maps because tsx and
+bundles re-print code (esbuild's `__name` helpers, `_default` export bindings,
+spans moved by wrapping). A hit that cannot be paired with exactly one canonical
+entry is an error, never a guess. The vitest report is aligned the same way for
+files that a subprocess also covers; a file Vitest listed without executing is
+replaced by its zero map.
+
+The run fails closed: the suites that call the helpers (found by scanning for
+`subprocessEnv(`/`captureCliPush(`) must each leave a receipt; a receipt with no
+dump (a child killed before exit), one that touched no repository source, a
+script that maps to authored files but was never registered, an unreproducible
+tsx transform, a stale recorded source or an ambiguous pairing all stop the
+merge. Raw dumps are deleted once converted, leaving
+`coverage/subprocess/<suite>-<uuid>.json` shards, which `--merge-only` reuses.
+
+Subprocesses write only to temp directories and local loopback fixtures: build
+scripts run with a copied `src/` in a scratch working directory, the QA runners
+see a stand-in `pnpm` as the only executable on `PATH`, and `init-minio` talks to
+a loopback fake. The deliberately uninstrumented child in `share-budget.test.ts`
+measures CPU time and stays outside the collector.
 
 After a successful complete collection, use the same required browser shards
 to review/shrink debt without rerunning Chromium:

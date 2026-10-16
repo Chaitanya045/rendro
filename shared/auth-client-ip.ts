@@ -54,7 +54,8 @@ export async function verifiedAuthRequest(
     && timestamp && /^\d+$/.test(timestamp) && Math.abs(now - Number(timestamp)) <= 60_000
     && signature && /^[a-f0-9]{64}$/.test(signature)
   ) {
-    const bytes = Uint8Array.from(signature.match(/../g) ?? [], (byte) => Number.parseInt(byte, 16));
+    // The pattern above guarantees exactly 32 hex byte pairs.
+    const bytes = Uint8Array.from({ length: 32 }, (_, index) => Number.parseInt(signature.slice(index * 2, index * 2 + 2), 16));
     if (await crypto.subtle.verify("HMAC", await key(secret), bytes, payload(request, ip, timestamp))) {
       headers.set(AUTH_CLIENT_IP_HEADER, ip);
     }

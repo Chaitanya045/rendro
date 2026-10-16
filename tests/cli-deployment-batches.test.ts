@@ -7,8 +7,8 @@ import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { expect, it } from "vitest";
-import { build } from "esbuild";
 import { MAX_REUSED_FILES_PER_REQUEST } from "../shared/deployment-limits";
+import { buildCliBundle, subprocessEnv } from "./helpers/subprocess-coverage";
 
 it.each(["source", "bundle"])("%s pushes unchanged documents in bounded copy requests before committing", async (kind) => {
   const scratch = await mkdtemp(join(tmpdir(), "rendro-cli-batches-"));
@@ -54,9 +54,9 @@ it.each(["source", "bundle"])("%s pushes unchanged documents in bounded copy req
     const executable = kind === "source" ? resolve("node_modules/.bin/tsx") : process.execPath;
     const entry = kind === "source" ? "cli/src/index.ts" : join(scratch, "rendro.mjs");
     if (kind === "bundle") {
-      await build({ entryPoints: ["cli/src/index.ts"], bundle: true, platform: "node", target: "node22", format: "esm", outfile: entry });
+      await buildCliBundle(entry);
     }
-    const { stdout, stderr } = await promisify(execFile)(executable, [entry, "push", "--source", source, "--organization", "org", "--project", "project", "--endpoint", endpoint], { env: { ...process.env, RENDRO_API_KEY: "disposable-test-key" } });
+    const { stdout, stderr } = await promisify(execFile)(executable, [entry, "push", "--source", source, "--organization", "org", "--project", "project", "--endpoint", endpoint], { env: subprocessEnv({ ...process.env, RENDRO_API_KEY: "disposable-test-key" }) });
     expect(batches.map(batch => batch.length)).toEqual([16, 16, 8]);
     expect(batches.flat()).toEqual(files.map(file => file.path));
     expect(commits).toBe(1);
