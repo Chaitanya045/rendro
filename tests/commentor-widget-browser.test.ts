@@ -365,8 +365,11 @@ describe("replies", () => {
     await lab.page.keyboard.type("line two");
     expect(await input.inputValue()).toBe("Line one\nline two");
     // Drafts survive a live update that re-renders the bubble, with focus and caret kept.
+    await input.evaluate(el => el.setAttribute("data-before-update", ""));
     await lab.host(l => l.publish());
-    await expect.poll(() => lab.ui.locator('[data-testid="commentor-reply-input"]:focus').inputValue()).toBe("Line one\nline two");
+    const replacement = bubble.locator('[data-testid="commentor-reply-input"]:not([data-before-update])');
+    await expect.poll(() => replacement.evaluate(el => el === (el.getRootNode() as ShadowRoot).activeElement)).toBe(true);
+    expect(await replacement.inputValue()).toBe("Line one\nline two");
     await lab.host(l => { l.holds = ["reply.add"]; });
     await lab.page.keyboard.press("Enter");
     const send = bubble.locator('[data-testid="commentor-reply-send"]');
