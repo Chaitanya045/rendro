@@ -1,6 +1,8 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { collectShareAssets, isShareDocument } from "../src/share-assets";
 import { validShareAssets } from "../shared/share-assets";
+
+afterEach(() => vi.restoreAllMocks());
 
 type File = { path: string; contentType: string; body?: string | Uint8Array<ArrayBuffer> };
 function fixture(html: string, files: File[] = [], documentPath = "guide/index.html") {
@@ -42,7 +44,7 @@ describe("share dependency discovery", () => {
       <img src="https://share.invalid/root.png"><img src="//share.invalid/root.png"><img src="https://outside.test/root.png"><img src="//outside.test/root.png"><img src="data:image/png,xx">
       <img src="https://user:pass@share.invalid/root.png"><img src="http://[invalid"><img src=" "><img src="#icon">
       <script src="secret.js"></script><object data="other.htm"></object><embed src="other.xhtml">
-      <img srcset="same.png 1x ( private.json"><img src="missing"><img src="index.html"><img src="same.png"><img srcset="same.png, /root.png 2x, same.png calc(1,2)">`, [
+      <img srcset="same.png 1x ( private.json"><img src="missing"><img src="index.html"><img src="same.png"><img src=" same.png "><img srcset="same.png, /root.png 2x, same.png calc(1,2)">`, [
       resource("assets/a b.png"), resource("assets/percent%20.png"), resource("guide/same.png"), resource("root.png"),
       resource("guide/AAAA"), resource("guide/private.json", "application/json"), resource("guide/secret.js", " Text/Html ; charset=utf-8"), resource("guide/other.htm", "text/html"), resource("guide/other.xhtml", "application/xhtml+xml"),
     ]);
@@ -72,7 +74,21 @@ describe("share dependency discovery", () => {
     expect(await f.collect()).toEqual([exact, `${whitespace}image${whitespace}`, `${whitespace}sheet`, `${whitespace}background`].map(p => "guide/" + p).sort());
   });
 
+  it("classifies manifest MIME types once even for many aliases of one path", async () => {
+    let reads = 0;
+    const type = "image/png; note=" + "x".repeat(10_000);
+    const file = { path: "guide/image", get contentType() { reads++; return type; } };
+    const html = '<img srcset="' + Array.from({ length: 500 }, (_, i) => `image?v=${i}, `).join("") + '">';
+    expect(await fixture(html, [file]).collect()).toEqual(["guide/image"]);
+    // Budget reservation, retained transport type, and normalized classification.
+    expect(reads).toBe(3);
+    expect(isShareDocument("text/html; charset=utf-8")).toBe(true);
+    expect(isShareDocument("image/png")).toBe(false);
+  });
+
   it("traverses wide documents below the complexity limit without an argument stack overflow", async () => {
+    // Structural boundary; real deadline/CPU behavior is tested in share-budget.
+    vi.spyOn(performance, "now").mockReturnValue(0);
     expect(await fixture('<i></i>'.repeat(24999) + '<img src="image">', [resource("guide/image")]).collect()).toEqual(["guide/image"]);
   });
 
@@ -103,6 +119,7 @@ describe("share dependency discovery", () => {
   });
 
   it("fails clearly at the path count, payload byte, and cumulative source byte limits", async () => {
+    vi.spyOn(performance, "now").mockReturnValue(0);
     const files = Array.from({ length: 501 }, (_, i) => resource(`guide/${i}.png`));
     await expect(fixture(files.map(file => `<img src="/${file.path}">`).join(""), files).collect()).rejects.toThrow("500 paths / 64 KiB");
     const long = "x".repeat(64 * 1024);

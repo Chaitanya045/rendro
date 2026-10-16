@@ -96,15 +96,35 @@ describe("share creation authority", () => {
   it.each([
     '<img' + Array.from({ length: 40_000 }, (_, i) => ` a${i}`).join("") + '>',
     '<br>'.repeat(50_001),
+    '<div>'.repeat(20_000),
+    '<template>'.repeat(10_000),
+    '<img src=image><style>' + 'a{background:url(image)}'.repeat(15_000) + '</style>',
   ])("rejects excessive HTML complexity without a partial grant (%#)", async html => {
     const f = await fixture();
     f.read.mockResolvedValue(new Response(html).body);
     const before = await f.backend.run(ctx => ctx.db.query("shareGrants").collect());
     const response = await f.request();
     expect(response.status).toBe(400);
-    expect(await response.json()).toEqual({ error: expect.stringMatching(/^Share HTML exceeds the /) });
+    expect(await response.json()).toEqual({ error: expect.stringMatching(/^(Share HTML exceeds the |document too complex to share$)/) });
     expect(f.fetchMock).toHaveBeenCalledTimes(1);
     expect(await f.backend.run(ctx => ctx.db.query("shareGrants").collect())).toEqual(before);
+  });
+
+  it("persists a near-cap unique list once despite many duplicate references", async () => {
+    // Persistence/allowlist assertion; the separate CPU matrix uses the real clock.
+    vi.spyOn(performance, "now").mockReturnValue(0);
+    const f = await fixture();
+    const assets = Array.from({ length: 500 }, (_, i) => ({
+      path: i === 0 ? "guide/a" : `guide/${i}-${"x".repeat(114)}`, contentType: "image/png",
+    }));
+    f.manifest.mockResolvedValue(JSON.stringify({ files: [{ path: f.body.documentPath, contentType: "text/html" }, ...assets] }));
+    const html = '<img srcset="' + assets.map(file => file.path.slice(6) + ', ').join('') + 'a, '.repeat(10_000) + '">';
+    f.read.mockResolvedValue(new Response(html).body);
+    const response = await f.request();
+    expect(response.status).toBe(201);
+    const { grant } = await response.json() as { grant: Doc<"shareGrants"> };
+    expect(grant.assetPaths).toEqual(assets.map(file => file.path).sort());
+    expect(await f.backend.run(ctx => ctx.db.get(grant._id))).toMatchObject({ assetPaths: grant.assetPaths });
   });
 
   it("fails clearly without persisting when discovery exceeds bounds or sources disappear", async () => {

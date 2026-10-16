@@ -1,3 +1,5 @@
+import { WorkBudget } from "@/share-budget";
+
 // https://html.spec.whatwg.org/multipage/images.html#parse-a-srcset-attribute
 const space = /[\t\n\f\r ]/;
 // A strict end assertion: `$` also matches before a final Unicode line separator.
@@ -5,26 +7,33 @@ const integer = /^[0-9]+(?![\s\S])/;
 const floating = /^-?(?:[0-9]+(?:\.[0-9]+)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?(?![\s\S])/;
 
 /** Return URLs of valid candidates; selection by viewport/density happens later. */
-export function srcsetUrls(input: string): string[] {
+export function srcsetUrls(input: string, budget = new WorkBudget()): string[] {
+  budget.charge(input.length);
   const urls: string[] = [];
   let position = 0;
   while (position < input.length) {
-    while (position < input.length && /[\t\n\f\r ,]/.test(input[position])) position++;
+    budget.charge();
+    while (position < input.length && /[\t\n\f\r ,]/.test(input[position])) { budget.charge(); position++; }
     if (position === input.length) break;
     const start = position;
-    while (position < input.length && !space.test(input[position])) position++;
+    while (position < input.length && !space.test(input[position])) { budget.charge(); position++; }
     let url = input.slice(start, position);
     const descriptors: string[] = [];
-    if (url.endsWith(",")) url = url.replace(/,+$/, "");
+    if (url.endsWith(",")) {
+      let end = url.length;
+      while (end > 0 && url[end - 1] === ",") { budget.charge(); end--; }
+      url = url.slice(0, end);
+    }
     else {
-      while (position < input.length && space.test(input[position])) position++;
+      while (position < input.length && space.test(input[position])) { budget.charge(); position++; }
       let descriptor = "";
       let state: "descriptor" | "parens" | "after" = "descriptor";
       while (true) {
+        budget.charge();
         const c = input[position];
         if (c === undefined || (state !== "parens" && c === ",")) {
           if (descriptor) descriptors.push(descriptor);
-          if (c === ",") position++;
+          if (c === ",") { budget.charge(); position++; }
           break;
         }
         if (state === "parens") {
@@ -38,6 +47,7 @@ export function srcsetUrls(input: string): string[] {
           descriptor += c;
           state = c === "(" ? "parens" : "descriptor";
         }
+        budget.charge();
         position++;
       }
     }
@@ -46,6 +56,7 @@ export function srcsetUrls(input: string): string[] {
     let height = false;
     let error = false;
     for (const descriptor of descriptors) {
+      budget.charge(descriptor.length + 1);
       const value = descriptor.slice(0, -1);
       const suffix = descriptor.at(-1);
       if (suffix === "w" && integer.test(value)) {

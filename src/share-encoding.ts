@@ -1,3 +1,4 @@
+import { WorkBudget } from "@/share-budget";
 import { assetContentType, encodingLabel } from "@/routes/asset-headers";
 
 /** Extract the first charset assignment; malformed quotes cannot reveal a later one. */
@@ -14,37 +15,41 @@ function contentEncoding(value: string): string | undefined {
 }
 
 /** HTML's byte-prescan attribute tokenizer (no entity decoding). */
-function nextAttribute(input: string, start: number): { position: number; name: string; value: string } {
+function nextAttribute(input: string, start: number, budget: WorkBudget): { position: number; name: string; value: string } {
   let position = start;
-  while (position < input.length && /[\t\n\f\r /]/.test(input[position])) position++;
+  while (position < input.length && /[\t\n\f\r /]/.test(input[position])) { budget.charge(); position++; }
   let name = "";
   while (position < input.length && !/[\t\n\f\r />]/.test(input[position])) {
+    budget.charge();
     if (input[position] === "=" && name) break;
     name += input[position++];
   }
-  while (position < input.length && /[\t\n\f\r ]/.test(input[position])) position++;
+  while (position < input.length && /[\t\n\f\r ]/.test(input[position])) { budget.charge(); position++; }
   if (!name || input[position] !== "=") return { position, name: name.toLowerCase(), value: "" };
+  budget.charge();
   position++;
-  while (position < input.length && /[\t\n\f\r ]/.test(input[position])) position++;
+  while (position < input.length && /[\t\n\f\r ]/.test(input[position])) { budget.charge(); position++; }
   const quote = input[position];
   let value = "";
   if (quote === '"' || quote === "'") {
+    budget.charge();
     position++;
-    while (position < input.length && input[position] !== quote) value += input[position++];
-    if (position < input.length) position++;
+    while (position < input.length && input[position] !== quote) { budget.charge(); value += input[position++]; }
+    if (position < input.length) { budget.charge(); position++; }
   } else {
-    while (position < input.length && !/[\t\n\f\r >]/.test(input[position])) value += input[position++];
+    while (position < input.length && !/[\t\n\f\r >]/.test(input[position])) { budget.charge(); value += input[position++]; }
   }
   return { position, name: name.toLowerCase(), value: value.toLowerCase() };
 }
 
 // The prescan operates on bytes, not decoded HTML/entities or a DOM tree.
 // https://html.spec.whatwg.org/multipage/parsing.html#prescan-a-byte-stream-to-determine-its-encoding
-function htmlEncoding(input: string): string | undefined {
+function htmlEncoding(input: string, budget: WorkBudget): string | undefined {
   if (input.startsWith("<\0?\0x\0")) return "utf-16le";
   if (input.startsWith("\0<\0?\0x")) return "utf-16be";
   let position = 0;
   while (position < input.length) {
+    budget.charge();
     if (input.startsWith("<!--", position)) {
       const end = input.indexOf("-->", position + 2);
       position = end === -1 ? input.length : end + 3;
@@ -60,7 +65,8 @@ function htmlEncoding(input: string): string | undefined {
       let gotPragma = false;
       let needPragma: boolean | null = null;
       while (position < input.length) {
-        const attribute = nextAttribute(input, position);
+        budget.charge();
+        const attribute = nextAttribute(input, position, budget);
         position = attribute.position;
         // Reaching the prescan byte limit aborts even a partially read attribute.
         if (position === input.length) return xmlEncoding(input);
@@ -90,6 +96,7 @@ function htmlEncoding(input: string): string | undefined {
       const end = input.indexOf(">", position + 2);
       position = end === -1 ? input.length : end;
     }
+    budget.charge();
     position++;
   }
   return xmlEncoding(input);
@@ -112,7 +119,8 @@ function xmlEncoding(input: string): string | undefined {
 }
 
 /** BOM > transport > in-band > CSS environment > UTF-8. Source is already bounded. */
-export function decodeShareSource(bytes: Uint8Array, path: string, contentType: string, environment?: string): { text: string; encoding: string } {
+export function decodeShareSource(bytes: Uint8Array, path: string, contentType: string, environment?: string, budget = new WorkBudget()): { text: string; encoding: string } {
+  budget.charge(bytes.length + contentType.length + path.length);
   let encoding: string | undefined;
   if (bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf) encoding = "utf-8";
   else if (bytes[0] === 0xff && bytes[1] === 0xfe) encoding = "utf-16le";
@@ -120,8 +128,8 @@ export function decodeShareSource(bytes: Uint8Array, path: string, contentType: 
   encoding ??= /; charset=(.*)$/.exec(assetContentType(path, contentType))?.[1];
   if (encoding === undefined) {
     // Latin-1 byte-to-code-point mapping preserves ASCII and does not interpret BOMs.
-    const prefix = Array.from(bytes.subarray(0, 1024), byte => String.fromCharCode(byte)).join("");
-    if (environment === undefined) encoding = htmlEncoding(prefix);
+    const prefix = Array.from(bytes.subarray(0, 1024), byte => { budget.charge(); return String.fromCharCode(byte); }).join("");
+    if (environment === undefined) encoding = htmlEncoding(prefix, budget);
     else {
       // CSS Syntax's byte pattern is deliberately stricter than an at-rule.
       // eslint-disable-next-line no-control-regex -- CSS specifies this exact ASCII byte range.
@@ -135,5 +143,7 @@ export function decodeShareSource(bytes: Uint8Array, path: string, contentType: 
   // WHATWG labels unsupported by this runtime must fail creation, never silently
   // discover paths in a different encoding from the browser's delivery decoder.
   const decoder = new TextDecoder(encoding);
-  return { text: decoder.decode(bytes), encoding };
+  const text = decoder.decode(bytes);
+  budget.check();
+  return { text, encoding };
 }
