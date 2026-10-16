@@ -154,8 +154,11 @@ separate account tests resend delivery and neutral eligible/ineligible responses
 Reset mismatch asserts zero reset requests, with one request after correction.
 Sign-out checks that the retained protected containers are hidden and their shell
 is inert in both tabs before navigation; protected inputs cannot regain focus.
-The return-destination journey waits for method loading to finish before clicking
-Sign out, since the loaded password form moves that control.
+The shared sign-out helper waits for the security method list's `aria-busy=false`
+before clicking Sign out in every journey. Method loading expands the card and
+moves that control; WebKit can otherwise finish its actionability check just
+before the response arrives and click the old position. Waiting for this explicit
+ready state also covers the method-load failure UI, without sleeps or retries.
 
 The complete three-engine suite has a 20-minute bound (30 minutes for the CI
 job including installation); individual auth journeys have a 60-second bound.
