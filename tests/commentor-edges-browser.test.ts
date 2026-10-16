@@ -28,7 +28,9 @@ describe("anchor shapes", () => {
     // Oldest first, each with a compact age.
     expect(await lab.ui.locator(".drawer-thread").evaluateAll(cards => cards.map(item => item.getAttribute("data-thread-id")))).toEqual(["ghost", "hidden", "svg", "partial", "nopath", "box"]);
     const ages = await lab.ui.locator(".drawer-thread .when").allInnerTexts();
-    expect(ages).toEqual(["2d", "3h", "2m", "1m", "1m", "5s"]);
+    // Seconds drift with a loaded host; the coarser units have wide margins.
+    expect(ages.slice(0, 5)).toEqual(["2d", "3h", "2m", "1m", "1m"]);
+    expect(ages[5]).toMatch(/^([5-9]|[1-3]\d)s$/);
     expect(await card("box").locator(".locate-link").innerText()).toBe("Locate element");
     expect(await card("hidden").locator(".locate-link").count()).toBe(1);
     expect(await card("svg").locator(".quote-text").innerText()).toBe("Chart label");
