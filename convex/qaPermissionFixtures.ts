@@ -166,8 +166,9 @@ export const run = internalAction({
         record(`get-session:${roles[index]}:identity`, 1, sessionBody?.user?.id === users[index].id ? 1 : 0);
         if (sessionBody?.user?.id !== users[index].id) throw new Error("Fixture session identity mismatch");
         const legacySession = await auth.api.getSession({ headers: login.headers, asResponse: true });
-        cachedHeaders.set(roles[index], captureCookies(login.headers, legacySession));
-        record(`get-session:${roles[index]}:legacy-cache-prepared`, 1, /session_data/.test(cachedHeaders.get(roles[index])?.get("cookie") ?? "") ? 1 : 0);
+        const cached = captureCookies(login.headers, legacySession);
+        cachedHeaders.set(roles[index], cached);
+        record(`get-session:${roles[index]}:legacy-cache-prepared`, 1, /session_data/.test(String(cached.get("cookie"))) ? 1 : 0);
       }
       phase = "http-permission-matrix";
 
@@ -340,12 +341,12 @@ export const run = internalAction({
 
       await authContext.internalAdapter.updateSession(sessionTokens[1], { expiresAt: new Date(Date.now() - 1_000) });
       record("session:expired-uncached-denied", 403, (await call("admin", projectPath)).status);
-      headers.set("admin", cachedHeaders.get("admin") ?? new Headers());
+      headers.set("admin", cachedHeaders.get("admin") as Headers);
       record("session:expired-cached-denied", 403, (await call("admin", projectPath)).status);
       record("management:access:expired-session", 401, (await call("admin", accessPath)).status);
       await authContext.internalAdapter.deleteSession(sessionTokens[0]);
       record("session:revoked-uncached-denied", 403, (await call("owner", projectPath)).status);
-      headers.set("owner", cachedHeaders.get("owner") ?? new Headers());
+      headers.set("owner", cachedHeaders.get("owner") as Headers);
       record("session:revoked-cached-denied", 403, (await call("owner", projectPath)).status);
       record("management:access:revoked-session", 401, (await call("owner", accessPath)).status);
       record("session:revoked-cached-native-organization-denied", 401, (await call("owner", `/api/auth/organization/get-full-organization?organizationId=${encodeURIComponent(primaryOrgId)}`)).status);
