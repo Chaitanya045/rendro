@@ -121,7 +121,15 @@ async function controlStates(page: Page, pooled: Pool, viewport: { width: number
   await name.fill("A".repeat(80));
   const box = (await dialog.boundingBox())!;
   expect(box.x + box.width).toBeLessThanOrEqual(viewport.width);
+  // The fixtures stub the icon-font stylesheet, so ligature names such as the close glyph render as fallback text whose
+  // width depends on the host's system fonts. Measure containment of the real content, not of that placeholder text.
+  await page.addStyleTag({ content: ".dialog-close::before{content:none}" });
   expect(await dialog.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
+  const escaping = await dialog.evaluate(element => {
+    const edge = element.getBoundingClientRect().right;
+    return [...element.querySelectorAll("*")].filter(child => child.getBoundingClientRect().right > edge + 0.5).map(child => child.tagName + "." + child.className);
+  });
+  expect(escaping).toEqual([]);
   // The error region is announced politely to assistive technology.
   await expect(dialog.locator("#team-error")).toHaveAttribute("role", "alert");
 }
