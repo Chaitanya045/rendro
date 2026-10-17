@@ -6486,7 +6486,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "browser",
+      "status": "e2e",
       "auditEvidence": "U",
       "auditNote": "management-performance.test.ts; organization-role-ux.test.ts",
       "edges": [
@@ -6509,8 +6509,14 @@
           "inventoryRefs": [
             "O08"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/deployments.spec.ts",
+              "name": "the organization overview shows project release state and the recent deployment, which retries on its own",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-039-E03",
@@ -6531,8 +6537,14 @@
           "inventoryRefs": [
             "O08"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/deployments.spec.ts",
+              "name": "the organization overview shows project release state and the recent deployment, which retries on its own",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-039-E05",
@@ -6570,8 +6582,14 @@
           "inventoryRefs": [
             "O08"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/deployments.spec.ts",
+              "name": "the organization overview shows project release state and the recent deployment, which retries on its own",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-039-E08",
@@ -6621,7 +6639,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "untested",
+      "status": "e2e",
       "auditEvidence": "UNTESTED",
       "auditNote": "organization-pages.ts loadRecentDeployment; history retry tests are for project history",
       "edges": [
@@ -6633,8 +6651,14 @@
           "inventoryRefs": [
             "UI-040"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/deployments.spec.ts",
+              "name": "the organization overview shows project release state and the recent deployment, which retries on its own",
+              "kind": "e2e"
+            }
+          ]
         }
       ]
     },
@@ -9338,7 +9362,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "unit",
+      "status": "e2e",
       "auditEvidence": "U",
       "auditNote": "project-role-ux.test.ts; management-performance.test.ts",
       "edges": [
@@ -9350,8 +9374,19 @@
           "inventoryRefs": [
             "UI-062"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/projects.spec.ts",
+              "name": "an owner creates projects with validation, a slug conflict and a retained draft, then lands on the new project",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/projects.spec.ts",
+              "name": "owner, admin, member and outsider get the controls and API access of their role",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-062-E02",
@@ -9402,7 +9437,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "browser",
+      "status": "e2e",
       "auditEvidence": "U",
       "auditNote": "management-performance.test.ts",
       "edges": [
@@ -9414,8 +9449,14 @@
           "inventoryRefs": [
             "UI-063"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/projects.spec.ts",
+              "name": "an owner creates projects with validation, a slug conflict and a retained draft, then lands on the new project",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-063-E02",
@@ -9500,7 +9541,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "browser",
+      "status": "e2e",
       "auditEvidence": "UNTESTED",
       "auditNote": "project-pages.ts form handler",
       "edges": [
@@ -9512,8 +9553,14 @@
           "inventoryRefs": [
             "UI-064"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/projects.spec.ts",
+              "name": "an owner creates projects with validation, a slug conflict and a retained draft, then lands on the new project",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-064-E02",
@@ -9534,8 +9581,19 @@
           "inventoryRefs": [
             "P01"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/projects.spec.ts",
+              "name": "an owner creates projects with validation, a slug conflict and a retained draft, then lands on the new project",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/deployments.spec.ts",
+              "name": "history moves from empty through staging, a failed attempt, a CLI push and a superseded release",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-064-E04",
@@ -9545,8 +9603,14 @@
           "inventoryRefs": [
             "P01"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/projects.spec.ts",
+              "name": "owner, admin, member and outsider get the controls and API access of their role",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-064-E05",
@@ -9556,8 +9620,14 @@
           "inventoryRefs": [
             "P01"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/projects.spec.ts",
+              "name": "an owner creates projects with validation, a slug conflict and a retained draft, then lands on the new project",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-064-E06",
@@ -9567,12 +9637,17 @@
           "inventoryRefs": [
             "P01"
           ],
-          "status": "browser",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/management-dialog-reuse-browser.test.ts",
               "name": "$name blocks Cancel and Escape while pending, restores drafts after denial, and retries",
               "kind": "browser"
+            },
+            {
+              "file": "e2e/projects.spec.ts",
+              "name": "an owner creates projects with validation, a slug conflict and a retained draft, then lands on the new project",
+              "kind": "e2e"
             }
           ]
         },
@@ -9584,12 +9659,17 @@
           "inventoryRefs": [
             "P01"
           ],
-          "status": "browser",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/management-dialog-reuse-browser.test.ts",
               "name": "$name blocks Cancel and Escape while pending, restores drafts after denial, and retries",
               "kind": "browser"
+            },
+            {
+              "file": "e2e/projects.spec.ts",
+              "name": "an owner creates projects with validation, a slug conflict and a retained draft, then lands on the new project",
+              "kind": "e2e"
             }
           ]
         },
@@ -9601,12 +9681,17 @@
           "inventoryRefs": [
             "P01"
           ],
-          "status": "browser",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/management-dialog-reuse-browser.test.ts",
               "name": "$name resets after success and can reopen and submit exactly once again",
               "kind": "browser"
+            },
+            {
+              "file": "e2e/projects.spec.ts",
+              "name": "an owner creates projects with validation, a slug conflict and a retained draft, then lands on the new project",
+              "kind": "e2e"
             }
           ]
         }
@@ -9642,7 +9727,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "unit",
+      "status": "e2e",
       "auditEvidence": "U",
       "auditNote": "project-section-navigation.test.ts; management-performance.test.ts",
       "edges": [
@@ -9665,8 +9750,19 @@
           "inventoryRefs": [
             "M11"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/projects.spec.ts",
+              "name": "an owner creates projects with validation, a slug conflict and a retained draft, then lands on the new project",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/deployments.spec.ts",
+              "name": "history moves from empty through staging, a failed attempt, a CLI push and a superseded release",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-065-E03",
@@ -9761,7 +9857,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "unit",
+      "status": "e2e",
       "auditEvidence": "U",
       "auditNote": "management-performance.test.ts",
       "edges": [
@@ -9795,8 +9891,14 @@
           "inventoryRefs": [
             "P04"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/deployments.spec.ts",
+              "name": "history moves from empty through staging, a failed attempt, a CLI push and a superseded release",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-066-E04",
@@ -9806,8 +9908,14 @@
           "inventoryRefs": [
             "P04"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/deployments.spec.ts",
+              "name": "history moves from empty through staging, a failed attempt, a CLI push and a superseded release",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-066-E05",
@@ -9960,7 +10068,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "unit",
+      "status": "e2e",
       "auditEvidence": "U",
       "auditNote": "management-ui-polish.test.ts; management-control-consistency.test.ts (separate state/utility tests)",
       "edges": [
@@ -9983,8 +10091,14 @@
           "inventoryRefs": [
             "P02"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/projects.spec.ts",
+              "name": "an owner creates projects with validation, a slug conflict and a retained draft, then lands on the new project",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-068-E03",
@@ -10005,8 +10119,14 @@
           "inventoryRefs": [
             "P02"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/projects.spec.ts",
+              "name": "an owner creates projects with validation, a slug conflict and a retained draft, then lands on the new project",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-068-E05",
@@ -10016,8 +10136,14 @@
           "inventoryRefs": [
             "P02"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/deployments.spec.ts",
+              "name": "history moves from empty through staging, a failed attempt, a CLI push and a superseded release",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-068-E06",
@@ -10027,8 +10153,14 @@
           "inventoryRefs": [
             "P02"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/projects.spec.ts",
+              "name": "owner, admin, member and outsider get the controls and API access of their role",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-068-E07",
@@ -10038,8 +10170,14 @@
           "inventoryRefs": [
             "P02"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/deployments.spec.ts",
+              "name": "history moves from empty through staging, a failed attempt, a CLI push and a superseded release",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-068-E08",
@@ -10049,8 +10187,14 @@
           "inventoryRefs": [
             "P03"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/deployments.spec.ts",
+              "name": "history moves from empty through staging, a failed attempt, a CLI push and a superseded release",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-068-E09",
@@ -10071,8 +10215,14 @@
           "inventoryRefs": [
             "P03"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/deployments.spec.ts",
+              "name": "history moves from empty through staging, a failed attempt, a CLI push and a superseded release",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-068-E11",
@@ -10123,7 +10273,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "untested",
+      "status": "e2e",
       "auditEvidence": "UNTESTED",
       "auditNote": "project-pages.ts load; lifecycle tests cover stale failure, not successful retry click",
       "edges": [
@@ -10135,8 +10285,14 @@
           "inventoryRefs": [
             "UI-069"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/projects.spec.ts",
+              "name": "a failed project read recovers with Try again, and another organization's project is a 404",
+              "kind": "e2e"
+            }
+          ]
         }
       ]
     },
@@ -11033,7 +11189,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "unit",
+      "status": "e2e",
       "auditEvidence": "U",
       "auditNote": "api-key-role-ux.test.ts (retry handler wiring only)",
       "edges": [
@@ -11045,8 +11201,19 @@
           "inventoryRefs": [
             "UI-077"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/api-keys.spec.ts",
+              "name": "owner, admin, member and outsider: who can see, create and revoke keys",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/api-keys.spec.ts",
+              "name": "a key list that fails to load recovers with Try again",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-077-E02",
@@ -11112,7 +11279,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "browser",
+      "status": "e2e",
       "auditEvidence": "B",
       "auditNote": "sign-out-browser.test.ts creates and reveals a key before cross-tab teardown",
       "edges": [
@@ -11124,8 +11291,14 @@
           "inventoryRefs": [
             "UI-078"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/api-keys.spec.ts",
+              "name": "an owner creates a scoped key with a one-time secret, uses it, and revoking it stops the very next request",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-078-E02",
@@ -11146,8 +11319,14 @@
           "inventoryRefs": [
             "P10"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/api-keys.spec.ts",
+              "name": "an owner creates a scoped key with a one-time secret, uses it, and revoking it stops the very next request",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-078-E04",
@@ -11191,8 +11370,14 @@
           "inventoryRefs": [
             "P10"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/api-keys.spec.ts",
+              "name": "an owner creates a scoped key with a one-time secret, uses it, and revoking it stops the very next request",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-078-E07",
@@ -11258,7 +11443,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "untested",
+      "status": "e2e",
       "auditEvidence": "UNTESTED",
       "auditNote": "api-key-pages.ts form handler",
       "edges": [
@@ -11270,8 +11455,14 @@
           "inventoryRefs": [
             "UI-079"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/api-keys.spec.ts",
+              "name": "an owner creates a scoped key with a one-time secret, uses it, and revoking it stops the very next request",
+              "kind": "e2e"
+            }
+          ]
         }
       ]
     },
@@ -11303,7 +11494,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "browser",
+      "status": "e2e",
       "auditEvidence": "U",
       "auditNote": "api-key-secret-lifecycle.test.ts",
       "edges": [
@@ -11315,8 +11506,14 @@
           "inventoryRefs": [
             "UI-080"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/api-keys.spec.ts",
+              "name": "an owner creates a scoped key with a one-time secret, uses it, and revoking it stops the very next request",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-080-E02",
@@ -11326,8 +11523,14 @@
           "inventoryRefs": [
             "P11"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/api-keys.spec.ts",
+              "name": "an owner creates a scoped key with a one-time secret, uses it, and revoking it stops the very next request",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-080-E03",
@@ -11337,8 +11540,14 @@
           "inventoryRefs": [
             "P11"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/api-keys.spec.ts",
+              "name": "an owner creates a scoped key with a one-time secret, uses it, and revoking it stops the very next request",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-080-E04",
@@ -11348,12 +11557,17 @@
           "inventoryRefs": [
             "P11"
           ],
-          "status": "browser",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/management-dialog-reuse-browser.test.ts",
               "name": "$name resets after success and can reopen and submit exactly once again",
               "kind": "browser"
+            },
+            {
+              "file": "e2e/api-keys.spec.ts",
+              "name": "an owner creates a scoped key with a one-time secret, uses it, and revoking it stops the very next request",
+              "kind": "e2e"
             }
           ]
         },
@@ -11471,7 +11685,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "untested",
+      "status": "e2e",
       "auditEvidence": "UNTESTED",
       "auditNote": "shared copy utility tested; secret-specific copy values/fallback not exercised end to end",
       "edges": [
@@ -11483,8 +11697,14 @@
           "inventoryRefs": [
             "UI-081"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/api-keys.spec.ts",
+              "name": "an owner creates a scoped key with a one-time secret, uses it, and revoking it stops the very next request",
+              "kind": "e2e"
+            }
+          ]
         }
       ]
     },
@@ -11578,7 +11798,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "untested",
+      "status": "e2e",
       "auditEvidence": "UNTESTED",
       "auditNote": "api-key-pages.ts renderKeys; backend credential revocation tests are not UI assertions",
       "edges": [
@@ -11590,8 +11810,14 @@
           "inventoryRefs": [
             "UI-083"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/api-keys.spec.ts",
+              "name": "an owner creates a scoped key with a one-time secret, uses it, and revoking it stops the very next request",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-083-E02",
@@ -11601,8 +11827,14 @@
           "inventoryRefs": [
             "P12"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/api-keys.spec.ts",
+              "name": "an owner creates a scoped key with a one-time secret, uses it, and revoking it stops the very next request",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-083-E03",
@@ -11612,8 +11844,14 @@
           "inventoryRefs": [
             "P12"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/api-keys.spec.ts",
+              "name": "an owner creates a scoped key with a one-time secret, uses it, and revoking it stops the very next request",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-083-E04",
@@ -11623,8 +11861,14 @@
           "inventoryRefs": [
             "P12"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/api-keys.spec.ts",
+              "name": "an owner creates a scoped key with a one-time secret, uses it, and revoking it stops the very next request",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-083-E05",
@@ -11667,7 +11911,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "untested",
+      "status": "e2e",
       "auditEvidence": "UNTESTED",
       "auditNote": "api-key-pages.ts load/renderKeys; role failure contract is only partial evidence",
       "edges": [
@@ -11679,8 +11923,24 @@
           "inventoryRefs": [
             "UI-084"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/api-keys.spec.ts",
+              "name": "an owner creates a scoped key with a one-time secret, uses it, and revoking it stops the very next request",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/api-keys.spec.ts",
+              "name": "expiry: a short-lived key works until it expires, then the next request is refused; bad creation fields are rejected",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/api-keys.spec.ts",
+              "name": "a key list that fails to load recovers with Try again",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-084-E02",
@@ -11701,8 +11961,14 @@
           "inventoryRefs": [
             "P09"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/api-keys.spec.ts",
+              "name": "owner, admin, member and outsider: who can see, create and revoke keys",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-084-E04",
@@ -11712,8 +11978,19 @@
           "inventoryRefs": [
             "P09"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/api-keys.spec.ts",
+              "name": "owner, admin, member and outsider: who can see, create and revoke keys",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/api-keys.spec.ts",
+              "name": "a key list that fails to load recovers with Try again",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-084-E05",
@@ -11723,8 +12000,19 @@
           "inventoryRefs": [
             "P09"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/api-keys.spec.ts",
+              "name": "an owner creates a scoped key with a one-time secret, uses it, and revoking it stops the very next request",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/api-keys.spec.ts",
+              "name": "expiry: a short-lived key works until it expires, then the next request is refused; bad creation fields are rejected",
+              "kind": "e2e"
+            }
+          ]
         }
       ]
     },
@@ -11756,7 +12044,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "unit",
+      "status": "e2e",
       "auditEvidence": "U",
       "auditNote": "project-role-ux.test.ts",
       "edges": [
@@ -11768,8 +12056,14 @@
           "inventoryRefs": [
             "UI-085"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/publications.spec.ts",
+              "name": "owner, admin, member and outsider: who publishes, sees and removes",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-085-E02",
@@ -11818,7 +12112,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "browser",
+      "status": "e2e",
       "auditEvidence": "U",
       "auditNote": "management-performance.test.ts",
       "edges": [
@@ -11830,8 +12124,14 @@
           "inventoryRefs": [
             "UI-086"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/publications.spec.ts",
+              "name": "publish with validation, a tracked and a pinned publication, view them anonymously, then unpublish",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-086-E02",
@@ -11897,7 +12197,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "browser",
+      "status": "e2e",
       "auditEvidence": "UNTESTED",
       "auditNote": "publication-pages.ts; publication-boundaries.test.ts covers backend boundaries",
       "edges": [
@@ -11909,8 +12209,14 @@
           "inventoryRefs": [
             "UI-087"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/publications.spec.ts",
+              "name": "publish with validation, a tracked and a pinned publication, view them anonymously, then unpublish",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-087-E02",
@@ -11920,8 +12226,14 @@
           "inventoryRefs": [
             "P06"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/publications.spec.ts",
+              "name": "publish with validation, a tracked and a pinned publication, view them anonymously, then unpublish",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-087-E03",
@@ -11931,8 +12243,14 @@
           "inventoryRefs": [
             "P06"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/publications.spec.ts",
+              "name": "publish with validation, a tracked and a pinned publication, view them anonymously, then unpublish",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-087-E04",
@@ -11942,8 +12260,14 @@
           "inventoryRefs": [
             "P06"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/publications.spec.ts",
+              "name": "publish with validation, a tracked and a pinned publication, view them anonymously, then unpublish",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-087-E05",
@@ -11953,8 +12277,14 @@
           "inventoryRefs": [
             "P06"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/publications.spec.ts",
+              "name": "publish with validation, a tracked and a pinned publication, view them anonymously, then unpublish",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-087-E06",
@@ -11964,8 +12294,14 @@
           "inventoryRefs": [
             "P06"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/publications.spec.ts",
+              "name": "publish with validation, a tracked and a pinned publication, view them anonymously, then unpublish",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-087-E07",
@@ -11975,8 +12311,14 @@
           "inventoryRefs": [
             "P06"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/publications.spec.ts",
+              "name": "publish with validation, a tracked and a pinned publication, view them anonymously, then unpublish",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-087-E08",
@@ -11986,8 +12328,14 @@
           "inventoryRefs": [
             "P06"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/publications.spec.ts",
+              "name": "publish with validation, a tracked and a pinned publication, view them anonymously, then unpublish",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-087-E09",
@@ -11997,8 +12345,19 @@
           "inventoryRefs": [
             "P06"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/publications.spec.ts",
+              "name": "publish with validation, a tracked and a pinned publication, view them anonymously, then unpublish",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/publications.spec.ts",
+              "name": "a failed list read recovers with Try again, and publications from the API appear in the page",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-087-E10",
@@ -12008,12 +12367,17 @@
           "inventoryRefs": [
             "P06"
           ],
-          "status": "browser",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/management-dialog-reuse-browser.test.ts",
               "name": "$name resets after success and can reopen and submit exactly once again",
               "kind": "browser"
+            },
+            {
+              "file": "e2e/publications.spec.ts",
+              "name": "publish with validation, a tracked and a pinned publication, view them anonymously, then unpublish",
+              "kind": "e2e"
             }
           ]
         },
@@ -12025,12 +12389,17 @@
           "inventoryRefs": [
             "P06"
           ],
-          "status": "browser",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/management-dialog-reuse-browser.test.ts",
               "name": "$name blocks Cancel and Escape while pending, restores drafts after denial, and retries",
               "kind": "browser"
+            },
+            {
+              "file": "e2e/publications.spec.ts",
+              "name": "publish with validation, a tracked and a pinned publication, view them anonymously, then unpublish",
+              "kind": "e2e"
             }
           ]
         },
@@ -12081,7 +12450,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "untested",
+      "status": "e2e",
       "auditEvidence": "UNTESTED",
       "auditNote": "publication-pages.ts form and deployment choice handlers",
       "edges": [
@@ -12093,8 +12462,14 @@
           "inventoryRefs": [
             "UI-088"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/publications.spec.ts",
+              "name": "publish with validation, a tracked and a pinned publication, view them anonymously, then unpublish",
+              "kind": "e2e"
+            }
+          ]
         }
       ]
     },
@@ -12126,7 +12501,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "untested",
+      "status": "e2e",
       "auditEvidence": "UNTESTED",
       "auditNote": "project-role-ux.test.ts checks links/copy access, not complete interaction",
       "edges": [
@@ -12138,8 +12513,14 @@
           "inventoryRefs": [
             "UI-089"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/publications.spec.ts",
+              "name": "publish with validation, a tracked and a pinned publication, view them anonymously, then unpublish",
+              "kind": "e2e"
+            }
+          ]
         }
       ]
     },
@@ -12171,7 +12552,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "untested",
+      "status": "e2e",
       "auditEvidence": "UNTESTED",
       "auditNote": "publication-pages.ts; publications.test.ts covers server behavior",
       "edges": [
@@ -12183,8 +12564,14 @@
           "inventoryRefs": [
             "UI-090"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/publications.spec.ts",
+              "name": "publish with validation, a tracked and a pinned publication, view them anonymously, then unpublish",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-090-E02",
@@ -12194,8 +12581,14 @@
           "inventoryRefs": [
             "P07"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/publications.spec.ts",
+              "name": "publish with validation, a tracked and a pinned publication, view them anonymously, then unpublish",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-090-E03",
@@ -12205,8 +12598,14 @@
           "inventoryRefs": [
             "P07"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/publications.spec.ts",
+              "name": "publish with validation, a tracked and a pinned publication, view them anonymously, then unpublish",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-090-E04",
@@ -12216,8 +12615,14 @@
           "inventoryRefs": [
             "P07"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/publications.spec.ts",
+              "name": "publish with validation, a tracked and a pinned publication, view them anonymously, then unpublish",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-090-E05",
@@ -12227,8 +12632,14 @@
           "inventoryRefs": [
             "P07"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/publications.spec.ts",
+              "name": "publish with validation, a tracked and a pinned publication, view them anonymously, then unpublish",
+              "kind": "e2e"
+            }
+          ]
         }
       ]
     },
@@ -12260,7 +12671,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "untested",
+      "status": "e2e",
       "auditEvidence": "UNTESTED",
       "auditNote": "publication-pages.ts load/render; lifecycle tests only ensure stale responses do not paint",
       "edges": [
@@ -12283,8 +12694,14 @@
           "inventoryRefs": [
             "P05"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/publications.spec.ts",
+              "name": "publish with validation, a tracked and a pinned publication, view them anonymously, then unpublish",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-091-E03",
@@ -12294,8 +12711,14 @@
           "inventoryRefs": [
             "P05"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/publications.spec.ts",
+              "name": "publish with validation, a tracked and a pinned publication, view them anonymously, then unpublish",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-091-E04",
@@ -12305,8 +12728,14 @@
           "inventoryRefs": [
             "P05"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/publications.spec.ts",
+              "name": "publish with validation, a tracked and a pinned publication, view them anonymously, then unpublish",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-091-E05",
@@ -12327,8 +12756,14 @@
           "inventoryRefs": [
             "P05"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/publications.spec.ts",
+              "name": "owner, admin, member and outsider: who publishes, sees and removes",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-091-E07",
@@ -12349,8 +12784,14 @@
           "inventoryRefs": [
             "P05"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/publications.spec.ts",
+              "name": "publish with validation, a tracked and a pinned publication, view them anonymously, then unpublish",
+              "kind": "e2e"
+            }
+          ]
         }
       ]
     },
@@ -12388,7 +12829,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "browser",
+      "status": "e2e",
       "auditEvidence": "UNTESTED",
       "auditNote": "src/routes/app.ts shareBtn handler; share-grants.test.ts and share-links.test.ts are backend/helper tests",
       "edges": [
@@ -12500,8 +12941,14 @@
           "inventoryRefs": [
             "V13"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shares.spec.ts",
+              "name": "a share made from a document opens for an anonymous recipient, stays within the document and its assets, and revoking it ends access",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-092-E10",
@@ -12694,7 +13141,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "unit",
+      "status": "e2e",
       "auditEvidence": "U",
       "auditNote": "project-role-ux.test.ts",
       "edges": [
@@ -12706,8 +13153,14 @@
           "inventoryRefs": [
             "UI-094"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shares.spec.ts",
+              "name": "owner, admin, member and outsider: who creates, sees and revokes shares",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-094-E02",
@@ -12830,7 +13283,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "untested",
+      "status": "e2e",
       "auditEvidence": "UNTESTED",
       "auditNote": "share-pages.ts; public-share-legacy-failures.test.ts checks delivery independently",
       "edges": [
@@ -12842,8 +13295,14 @@
           "inventoryRefs": [
             "UI-096"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shares.spec.ts",
+              "name": "a share made from a document opens for an anonymous recipient, stays within the document and its assets, and revoking it ends access",
+              "kind": "e2e"
+            }
+          ]
         }
       ]
     },
@@ -12881,7 +13340,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "untested",
+      "status": "e2e",
       "auditEvidence": "UNTESTED",
       "auditNote": "share-pages.ts render/load",
       "edges": [
@@ -12893,8 +13352,19 @@
           "inventoryRefs": [
             "UI-097"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shares.spec.ts",
+              "name": "a share made from a document opens for an anonymous recipient, stays within the document and its assets, and revoking it ends access",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/shares.spec.ts",
+              "name": "expiry: short-lived links stop at their time, the list tells the states apart, and invalid shares are refused",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-097-E02",
@@ -12904,8 +13374,14 @@
           "inventoryRefs": [
             "P08"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shares.spec.ts",
+              "name": "a share made from a document opens for an anonymous recipient, stays within the document and its assets, and revoking it ends access",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-097-E03",
@@ -12915,8 +13391,14 @@
           "inventoryRefs": [
             "P08"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shares.spec.ts",
+              "name": "expiry: short-lived links stop at their time, the list tells the states apart, and invalid shares are refused",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-097-E04",
@@ -12926,8 +13408,14 @@
           "inventoryRefs": [
             "P08"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shares.spec.ts",
+              "name": "owner, admin, member and outsider: who creates, sees and revokes shares",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-097-E05",
@@ -12937,8 +13425,14 @@
           "inventoryRefs": [
             "P08"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shares.spec.ts",
+              "name": "a share made from a document opens for an anonymous recipient, stays within the document and its assets, and revoking it ends access",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-097-E06",
@@ -12948,8 +13442,14 @@
           "inventoryRefs": [
             "P08"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shares.spec.ts",
+              "name": "a share made from a document opens for an anonymous recipient, stays within the document and its assets, and revoking it ends access",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-097-E07",
@@ -12959,8 +13459,19 @@
           "inventoryRefs": [
             "P08"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shares.spec.ts",
+              "name": "a share made from a document opens for an anonymous recipient, stays within the document and its assets, and revoking it ends access",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/shares.spec.ts",
+              "name": "expiry: short-lived links stop at their time, the list tells the states apart, and invalid shares are refused",
+              "kind": "e2e"
+            }
+          ]
         }
       ]
     },
@@ -13010,7 +13521,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "browser",
+      "status": "e2e",
       "auditEvidence": "B",
       "auditNote": "security-headers-browser.test.ts; viewer-fonts-browser.test.ts; viewer-fragments-browser.test.ts",
       "edges": [
@@ -13055,8 +13566,14 @@
           "inventoryRefs": [
             "V01"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/publications.spec.ts",
+              "name": "publish with validation, a tracked and a pinned publication, view them anonymously, then unpublish",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-098-E05",
@@ -13088,8 +13605,19 @@
           "inventoryRefs": [
             "V01"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shares.spec.ts",
+              "name": "a share made from a document opens for an anonymous recipient, stays within the document and its assets, and revoking it ends access",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/publications.spec.ts",
+              "name": "publish with validation, a tracked and a pinned publication, view them anonymously, then unpublish",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-098-E08",
@@ -13121,8 +13649,14 @@
           "inventoryRefs": [
             "V17"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/publications.spec.ts",
+              "name": "publish with validation, a tracked and a pinned publication, view them anonymously, then unpublish",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-098-E11",
@@ -13132,8 +13666,14 @@
           "inventoryRefs": [
             "V17"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/publications.spec.ts",
+              "name": "publish with validation, a tracked and a pinned publication, view them anonymously, then unpublish",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-098-E12",
