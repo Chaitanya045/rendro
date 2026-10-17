@@ -385,6 +385,10 @@
       "reason": "Static image, not an HTML page."
     },
     {
+      "route": "GET /styles/*",
+      "reason": "Static self-hosted, content-hashed stylesheet, not an HTML page."
+    },
+    {
       "route": "GET /fonts/*",
       "reason": "Static self-hosted font or license text, not an HTML page."
     },
