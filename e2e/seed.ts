@@ -8,10 +8,10 @@ export const roles = ["owner", "admin", "member", "outsider"] as const;
 export type Role = typeof roles[number];
 export type Seed = { organizationId: string; otherOrganizationId: string; projectId: string; cookies: Record<Role, string> };
 export const password = "Local fixture password 109!";
-export async function pushDocuments(source: string, endpoint: string, organizationId: string, projectId: string, token: string, concurrency = 1) {
+export async function pushDocuments(source: string, endpoint: string, organizationId: string, projectId: string, token: string, concurrency = 1, timeout = 60_000) {
   assertLoopback(endpoint);
   await run(process.execPath, [join(root, "bin/rendro.mjs"), "push", "--source", source, "--organization", organizationId,
-    "--project", projectId, "--endpoint", endpoint, "--concurrency", String(concurrency)], { cwd: source, env: { ...localEnvironment(), RENDRO_API_KEY: token }, timeout: 60_000 });
+    "--project", projectId, "--endpoint", endpoint, "--concurrency", String(concurrency)], { cwd: source, env: { ...localEnvironment(), RENDRO_API_KEY: token }, timeout });
 }
 export async function seedWorkspace(input: { site: string; worker: string; secret: string; mail: Mail[]; directory: string; fetch: typeof fetch }): Promise<Seed> {
   const cookies = {} as Record<Role, string>;
