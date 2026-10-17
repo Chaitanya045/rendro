@@ -235,15 +235,13 @@ backend request at the browser boundary; no production behavior, header or
 clock is changed. The authenticated-HTML fallback test installs Playwright's fake
 clock to cross the 15-second navigation timeout without waiting.
 
-Expected failures (their broken assertions get no `e2e` credit; an unexpected
-pass fails the suite):
-
-- **An enhanced select does not follow a user-activated native Reset button.**
-  The shared select refreshes its trigger from a microtask queued by the form's `reset`
-  event. For a Reset button the microtask runs before the browser restores the control,
-  so the trigger keeps the pre-reset label while the native value is restored
-  (Chromium, Firefox, WebKit). Programmatic `form.reset()`, which every current
-  controller uses, refreshes correctly and is covered. No current screen has a Reset button.
+No expected failures are currently open. The #162 regression passes in all three
+engines: the shared select follows a user-activated native Reset button. The browser
+restores the control only after the `reset` event and its microtasks have run (a
+microtask suffices for programmatic `form.reset()`), so the select also re-syncs from a
+task queued by the event. `tests/shared-select-browser.test.ts` covers it in Chromium and
+`e2e/shell-selects.spec.ts` asserts the label, selected option and `aria-selected`
+state in every engine (registry edge UI-023-E11).
 
 
 ## Organizations, onboarding, people and teams (#112)

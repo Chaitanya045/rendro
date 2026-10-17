@@ -160,7 +160,9 @@ export function installSelects(doc: Document) {
     const focus = () => trigger.focus({ preventScroll: true });
     const invalid = (event: Event) => { event.preventDefault(); validation.hidden = false; validation.textContent = select.validationMessage || "Choose an option."; trigger.setAttribute("aria-invalid", "true"); trigger.setAttribute("aria-describedby", [select.getAttribute("aria-describedby"), validation.id].filter(Boolean).join(" ")); focus(); };
     select.addEventListener("focus", focus); select.addEventListener("invalid", invalid); select.addEventListener("change", sync);
-    const form = select.form, reset = () => { validation.hidden = true; queueMicrotask(sync); }; form?.addEventListener("reset", reset);
+    // The browser restores the control after the reset event: a microtask covers form.reset() called from script, but a
+    // user-activated Reset button runs its microtasks before the restore, so a task is needed to see the restored value.
+    const form = select.form, reset = () => { validation.hidden = true; queueMicrotask(sync); win.setTimeout(sync, 0); }; form?.addEventListener("reset", reset);
     // Existing controllers set these native properties directly after async
     // confirmation/rejection. Mirror them without patching global prototypes.
     const patched: string[] = [];

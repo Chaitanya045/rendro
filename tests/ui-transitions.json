@@ -4193,6 +4193,28 @@
               "kind": "e2e"
             }
           ]
+        },
+        {
+          "id": "UI-023-E11",
+          "from": "Mounted select in a form",
+          "trigger": "User activates the form's native Reset button",
+          "expected": "trigger label, selected option and aria-selected follow the native reset value",
+          "inventoryRefs": [
+            "G07"
+          ],
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shell-selects.spec.ts",
+              "name": "enhanced select follows a user-activated native Reset button",
+              "kind": "e2e"
+            },
+            {
+              "file": "tests/shared-select-browser.test.ts",
+              "name": "follows a user-activated native Reset button: label, selection and ARIA state return to the native default",
+              "kind": "browser"
+            }
+          ]
         }
       ]
     },
