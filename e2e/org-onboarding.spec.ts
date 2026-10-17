@@ -23,6 +23,16 @@ test.describe("onboarding", () => {
     expect(occupied.status).toBe(201);
     await fakeClipboard(page);
     await page.clock.install();
+    // Count each time the onboarding poller arms its timer (after handling a poll response or skipping a hidden tick).
+    await page.addInitScript(() => {
+      const armed = window as unknown as { pollTimersArmed: number };
+      armed.pollTimersArmed = 0;
+      const schedule = window.setTimeout.bind(window);
+      window.setTimeout = ((handler: () => void, timeout?: number, ...args: unknown[]) => {
+        if (handler.name === "pollDeployment") armed.pollTimersArmed++;
+        return schedule(handler, timeout, ...args);
+      }) as typeof window.setTimeout;
+    });
     const deploymentReads: string[] = [];
     page.on("request", request => { if (request.url().includes("/api/rendro/deployments?")) deploymentReads.push(request.url()); });
 
@@ -190,7 +200,14 @@ test.describe("onboarding", () => {
     expect(await unloadBlocked()).toBe(true);
     await page.getByLabel("I have stored this key securely").check();
 
-    // Polling: advance the frozen page clock five seconds at a time.
+    // Polling: advance the frozen page clock five seconds at a time. The poller re-arms only after it has handled the
+    // previous response, which can land after a network barrier, so each step first waits for its timer to exist.
+    let polls = 0;
+    const pollTick = async () => {
+      polls++;
+      await expect.poll(() => page.evaluate(() => (window as unknown as { pollTimersArmed: number }).pollTimersArmed)).toBeGreaterThanOrEqual(polls);
+      await page.clock.runFor(5000);
+    };
     await expect.poll(() => deploymentReads.length).toBeGreaterThanOrEqual(1);
     await barrier(page);
     const waiting = page.locator(".progress-state");
@@ -199,26 +216,26 @@ test.describe("onboarding", () => {
     let reads = deploymentReads.length;
     // A hidden tab pauses fetching but keeps the schedule.
     await page.evaluate(() => Object.defineProperty(document, "hidden", { configurable: true, get: () => true }));
-    await page.clock.runFor(5000);
+    await pollTick();
     await barrier(page);
     expect(deploymentReads.length).toBe(reads);
     await page.evaluate(() => Object.defineProperty(document, "hidden", { configurable: true, get: () => false }));
-    await page.clock.runFor(5000);
+    await pollTick();
     await expect.poll(() => deploymentReads.length).toBe(reads + 1);
     reads++;
     await barrier(page);
     await expect(waiting).toContainText("Waiting for your first deployment");
     // Outage: the status says so and polling continues; recovery restores the waiting state.
     await page.route("**/api/rendro/deployments?*", route => route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: "Deployments unavailable" }) }));
-    await page.clock.runFor(5000);
+    await pollTick();
     await expect(waiting).toContainText("Connection interrupted");
     await expect(waiting).toHaveClass(/poll-error/);
     await expect(waiting.locator(".cell-secondary")).toContainText("Rendro will retry automatically");
-    await page.clock.runFor(5000);
+    await pollTick();
     await expect.poll(() => deploymentReads.length).toBe(reads + 2);
     reads += 2;
     await page.unroute("**/api/rendro/deployments?*");
-    await page.clock.runFor(5000);
+    await pollTick();
     await expect(waiting).toContainText("Waiting for your first deployment");
     await expect(waiting).not.toHaveClass(/poll-error/);
     await expect.poll(() => deploymentReads.length).toBe(reads + 1);
@@ -229,7 +246,7 @@ test.describe("onboarding", () => {
     const source = await mkdtemp(join(process.env.RENDRO_E2E_DIRECTORY!, "onboard-"));
     await writeFile(join(source, "index.html"), '<!doctype html><html><head><title>Onboarding document</title></head><body><h1>Shipped through onboarding</h1></body></html>');
     await pushDocuments(source, baseURL!, organization.id, projectId, token);
-    await page.clock.runFor(5000);
+    await pollTick();
     const success = page.locator("#deployment-success");
     await expect(success.getByText("First deployment received", { exact: true })).toBeVisible();
     await expect(success).toHaveAttribute("role", "status");
