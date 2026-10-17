@@ -535,12 +535,17 @@ async function holdDocument(tab: Page, file: string) {
     async close() { await this.release(); await tab.unroute(glob, handler); },
   };
 }
-/** Pauses the page clock where it is, after everything armed so far has run, so only the test advances time. */
+const loadStatus = (tab: Page) => tab.locator("#document-load-status");
+/**
+ * Pauses the page clock once the first document has finished loading (the status is empty only after the frame's load event),
+ * so its progress timer is armed and the jump runs it, and from then on only the test advances time.
+ */
 async function pauseClock(tab: Page) {
+  await expect(loadStatus(tab)).toHaveText("");
   const now = await tab.evaluate(() => Date.now());
   await tab.clock.pauseAt(now + 1000);
+  await expect.poll(async () => classes(tab)).not.toContain("doc-loading");
 }
-const loadStatus = (tab: Page) => tab.locator("#document-load-status");
 
 test.describe("document loading", () => {
   test.use({ viewport: desktop });
@@ -549,7 +554,6 @@ test.describe("document loading", () => {
     await tab.clock.install();
     await open(tab, site.docs);
     await pauseClock(tab);
-    expect(await classes(tab)).not.toContain("doc-loading");
     await folderRow(tab, "guide").click();
     await expect(folderRow(tab, "guide")).toHaveAttribute("aria-expanded", "true");
     const hold = await holdDocument(tab, "guide/intro.html");
