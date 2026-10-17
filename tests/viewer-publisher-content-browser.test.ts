@@ -70,7 +70,7 @@ async function open(base: string): Promise<{ page: Page; frame: Frame }> {
     if (url.hostname === "cdn.tailwindcss.com") return route.fulfill({ contentType: "text/javascript; charset=utf-8", body: "window.tailwind = {};" });
     if (url.origin !== cdn) return route.abort();
     cdnRequests.push(url.pathname);
-    if (url.pathname.endsWith(".js")) return route.fulfill({ contentType: "text/javascript", body: "document.documentElement.dataset.external = 'ran';" });
+    if (url.pathname === "/lib") return route.fulfill({ contentType: "text/javascript", body: "document.documentElement.dataset.external = 'ran';" });
     if (url.pathname.endsWith(".css")) return route.fulfill({ contentType: "text/css", body: "#external { color: rgb(7, 8, 9) }" });
     return route.fulfill({ contentType: "image/svg+xml", body: svg });
   });
@@ -92,7 +92,7 @@ describe("publisher content in the opaque frame of every viewer surface", () => 
     await serve(`<!doctype html><html><head><meta charset="utf-8"><title>Publisher content</title>
       <link rel="stylesheet" href="assets/site2.css"><link rel="stylesheet" href="${cdn}/lib.css">
       <style>#inline { color: rgb(10, 11, 12) }</style>
-      <script src="${cdn}/lib.js"></script><script>document.documentElement.dataset.inline = "ran"</script>
+      <script src="${cdn}/lib"></script><script>document.documentElement.dataset.inline = "ran"</script>
       <script type="module" src="assets/module.js"></script></head>
       <body><p id="styled">a</p><p id="imported">b</p><p id="external">c</p><p id="inline">d</p>
       <audio id="audio" preload="auto" src="assets/tone.wav"></audio></body></html>`);
@@ -113,7 +113,7 @@ describe("publisher content in the opaque frame of every viewer surface", () => 
       })));
       expect(media).toEqual({ error: false, duration: 0.1 });
       expect(await frame.evaluate(() => self.origin)).toBe("null");
-      expect(cdnRequests.sort()).toEqual(["/lib.css", "/lib.js"]);
+      expect(cdnRequests.sort()).toEqual(["/lib", "/lib.css"]);
       // None of the frame's subresources relied on the reader's cookie.
       for (const file of ["site2.css", "imported.css", "module.js", "tone.wav"]) {
         const requests = seen.filter(request => request.path.endsWith(`/${file}`));

@@ -26,6 +26,9 @@ export async function buildBrowserBundle(options: BuildOptions) {
 }
 
 type Script = Profiler.ScriptCoverage & { source?: string };
+
+/** Scripts a viewer serves from a deployment's `…/files/…` are the publisher's own, never one of the app's bundles. */
+const publisherFile = (url: string) => URL.canParse(url) && new URL(url).pathname.includes("/files/");
 type CloseBrowser = (action: () => Promise<void>) => Promise<void>;
 
 export async function convertBrowserCoverage(entries: Script[], root = process.cwd(), include?: Set<string>, scriptUrls = new Set<string>()) {
@@ -46,7 +49,8 @@ export async function convertBrowserCoverage(entries: Script[], root = process.c
       throw new Error(`Incompatible browser script source: ${entry.url}`);
     }
     const code = entry.source ?? recovered;
-    const requiresMap = scriptUrls.has(entry.url) || (/\.(?:[cm]?js|ts)(?:[?#]|$)/.test(entry.url) && !entry.url.startsWith("__playwright"));
+    const requiresMap = !publisherFile(entry.url)
+      && (scriptUrls.has(entry.url) || (/\.(?:[cm]?js|ts)(?:[?#]|$)/.test(entry.url) && !entry.url.startsWith("__playwright")));
     if (code === undefined && requiresMap) throw new Error(`Missing browser script source: ${entry.url}`);
     if (!code) continue;
     const registered = bundles.has(digest(code));
@@ -313,7 +317,7 @@ export async function collectBrowserContext(context: BrowserContext, suite: stri
 
   async function ensureScript(request: BrowserRequest) {
     if (request.resourceType() !== "script") return;
-    if (new URL(request.url()).origin === origin) scriptUrls.add(request.url());
+    if (new URL(request.url()).origin === origin && !publisherFile(request.url())) scriptUrls.add(request.url());
     const frame = request.frame();
     await startPage(frame.page());
     if (!frames.has(frame)) frames.set(frame, startFrame(frame));
