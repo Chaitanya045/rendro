@@ -31,6 +31,8 @@ export function installSelects(doc: Document) {
     select.after(trigger);
     const validation = doc.createElement("span"); validation.id = `${id}-error`; validation.className = "rd-select-validation"; validation.hidden = true; validation.setAttribute("role", "alert"); trigger.after(validation);
     let active = -1, open = false, typeBuffer = "", lastType = 0;
+    // Trigger offset the popup was last placed against; scrolling matters only once it moves away from there.
+    let anchorLeft = 0, anchorTop = 0;
     let items: HTMLElement[] = [];
     const isDisabled = (option: HTMLOptionElement) => option.disabled || Boolean(option.closest("optgroup")?.disabled);
     const optionLabel = (option: HTMLOptionElement) => option.label || option.textContent?.trim() || "";
@@ -58,6 +60,7 @@ export function installSelects(doc: Document) {
     }
     function position() {
       const rect = trigger.getBoundingClientRect(), viewport = win.visualViewport;
+      anchorLeft = rect.left; anchorTop = rect.top;
       const leftEdge = (viewport?.offsetLeft || 0) + 8, topEdge = (viewport?.offsetTop || 0) + 8;
       const rightEdge = leftEdge + (viewport?.width || win.innerWidth) - 16;
       const bottomEdge = topEdge + (viewport?.height || win.innerHeight) - 16;
@@ -172,7 +175,10 @@ export function installSelects(doc: Document) {
     }
     const observer = new win.MutationObserver(sync);
     observer.observe(select, { subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ["disabled", "selected", "label", "hidden", "required", "aria-label", "aria-labelledby", "aria-describedby", "aria-invalid"] });
-    const api = { close, position, sync, trigger, popup, destroy() {
+    // Browsers deliver a scroll event a frame after the scroll itself, so one caused before the popup opened (or
+    // by an ancestor that left the trigger where it was) arrives while it is open and must not dismiss it.
+    const scrolled = () => { const rect = trigger.getBoundingClientRect(); if (Math.hypot(rect.left - anchorLeft, rect.top - anchorTop) > 0.5) close(); };
+    const api = { close, position, scrolled, sync, trigger, popup, destroy() {
       close(); observer.disconnect(); select.removeEventListener("focus", focus); select.removeEventListener("invalid", invalid); select.removeEventListener("change", sync); form?.removeEventListener("reset", reset);
       patched.forEach((name) => { Reflect.deleteProperty(select, name); }); trigger.remove(); popup.remove(); validation.remove(); select.classList.remove("rd-select-native"); delete select.dataset.rdSelect;
       if (nativeTabIndex === null) select.removeAttribute("tabindex"); else select.setAttribute("tabindex", nativeTabIndex);
@@ -185,7 +191,7 @@ export function installSelects(doc: Document) {
     doc.querySelectorAll<HTMLSelectElement>("select.select:not([data-rd-select]):not([multiple])").forEach((select) => { if (Number(select.getAttribute("size") || 0) <= 1) instances.set(select, enhance(select)); });
   }
   const outside = (event: PointerEvent) => { if (opened && !opened.trigger.contains(event.target as Node) && !opened.popup.contains(event.target as Node)) opened.close(); };
-  const scroll = (event: Event) => { if (opened && !opened.popup.contains(event.target as Node)) opened.close(); };
+  const scroll = (event: Event) => { if (opened && !opened.popup.contains(event.target as Node)) opened.scrolled(); };
   const resize = () => opened?.position();
   const transition = (event: Event) => { if (opened && (event.target as Node)?.contains(opened.trigger)) opened.position(); };
   const close = () => opened?.close();
