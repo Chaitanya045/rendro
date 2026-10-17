@@ -2,6 +2,7 @@ import { coalesceMessage } from "./message-limits";
 import { externalLinkHref, validDocumentSearch, validRelativeDocumentPath } from "../lazy-tree/messages";
 import { shouldUseNativeLinkNavigation } from "../lazy-tree/navigation";
 import { replaceViewerFragment, scrollToFragment, sendDocumentFragment, validFragment } from "./fragments";
+import { createNavigationNotice } from "./navigation-notice";
 
 interface FragmentMessage { type?: unknown; path?: unknown; search?: unknown; fragment?: unknown }
 
@@ -86,8 +87,8 @@ export function installDocumentNavigation(config: DocumentNavigationConfig, host
     const link = classifyDocumentLink(href, doc.baseURI, host.location.href, config);
     if (!link) {
       // The frame cannot load another site, so a plain click would do nothing the reader can see. The parent asks first
-      // and opens it in a new tab. Shares and standalone documents keep their native navigation.
-      const external = !config.singleDocument && host.parent !== host ? externalLinkHref(href, doc.baseURI, origin) : null;
+      // and opens it in a new tab, in shares too. Standalone documents keep their native navigation.
+      const external = host.parent !== host ? externalLinkHref(href, doc.baseURI, origin) : null;
       if (external) {
         event.preventDefault();
         host.parent.postMessage({ type: "doc-external", path: config.documentPath, href: external }, origin);
@@ -151,6 +152,21 @@ export function installShareFragments(config: DocumentNavigationConfig, host: Wi
       replaceViewerFragment(data.fragment, host);
     }
   }, host);
+  const externalLink = createNavigationNotice({
+    describe: ({ href }) => ({ question: `Open external link ${href}?`, open: "Open external link", review: "Review external link" }),
+    open: ({ href }) => {
+      // The document stays where it is; the other site gets a new tab with no handle back to this one.
+      externalLink.clear();
+      host.open(href, "_blank", "noopener,noreferrer");
+    },
+  }, host.document);
+  host.addEventListener("message", (event: MessageEvent<FragmentMessage & { href?: unknown }>) => {
+    if (event.source !== frame.contentWindow || event.origin !== "null" || event.data?.type !== "doc-external"
+      || event.data.path !== config.documentPath) return;
+    // Never navigates or opens anything by itself: the reader confirms the exact address shown.
+    const href = externalLinkHref(event.data.href, host.location.href, host.location.origin);
+    if (href) externalLink.offer({ fullPath: "", search: "", fragment: "", href });
+  });
   host.addEventListener("message", (event: MessageEvent<FragmentMessage>) => {
     if (event.source !== frame.contentWindow || event.origin !== "null" || event.data?.path !== config.documentPath
       || !validFragment(event.data.fragment)) return;

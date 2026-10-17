@@ -3,7 +3,7 @@
  * grid-row animations, active indicator, and border-line indentation.
  */
 import { coalesceMessage, createDocumentNavigationGate } from "../viewer/message-limits";
-import { createNavigationConfirmation, type DocumentNavigationTarget } from "../viewer/navigation-confirmation";
+import { createNavigationNotice } from "../viewer/navigation-notice";
 import { replaceViewerFragment, sendDocumentFragment, validFragment } from "../viewer/fragments";
 import {
   externalLinkHref,
@@ -491,83 +491,31 @@ for (const type of ["pointerdown", "pointerup", "mousedown", "keydown", "touchen
     if (event.isTrusted) navigationGate.reserveParentInput();
   }, { capture: true, passive: true });
 }
-const navigationConfirmation = createNavigationConfirmation();
-let navigationNotice: HTMLElement | undefined;
-
-function clearNavigationNotice() {
-  navigationNotice?.remove();
-  navigationNotice = undefined;
-  navigationConfirmation.reset();
-}
-
-function offerDocumentNavigation(fullPath: string, search: string, fragment: string) {
-  const target = navigationConfirmation.request({ fullPath, search, fragment });
-  if (target) showNavigationConfirmation(target);
-}
-
-function offerExternalLink(href: string) {
-  const target = navigationConfirmation.request({ fullPath: "", search: "", fragment: "", href });
-  if (target) showNavigationConfirmation(target);
-}
-
-function showNavigationConfirmation({ fullPath, search, fragment, href }: DocumentNavigationTarget) {
-  const notice = document.createElement("div");
-  notice.id = "document-navigation-notice";
-  notice.className = "document-navigation-notice";
-  const label = document.createElement("p");
-  label.id = "document-navigation-destination";
-  label.setAttribute("role", "status");
-  label.style.cssText = "margin:0 0 8px;overflow-wrap:anywhere;max-height:6em;overflow:auto";
-  label.textContent = href ? `Open external link ${href}?`
-    : `Open linked document ${relativeDocumentPath(fullPath)}${search}${fragment}?`;
-  const open = document.createElement("button");
-  open.type = "button";
-  open.className = "load-more-btn";
-  open.setAttribute("aria-describedby", label.id);
-  open.textContent = href ? "Open external link" : "Open linked document";
-  open.addEventListener("click", () => {
+const navigationNotice = createNavigationNotice({
+  describe: ({ fullPath, search, fragment, href }) => href
+    ? { question: `Open external link ${href}?`, open: "Open external link", review: "Review external link" }
+    : { question: `Open linked document ${relativeDocumentPath(fullPath)}${search}${fragment}?`, open: "Open linked document", review: "Review linked document" },
+  open: ({ fullPath, search, fragment, href }) => {
     if (!href) {
       loadDoc(fullPath, navigationGate.confirm(), fragment, search);
       return;
     }
     // The document stays where it is; the other site gets a new tab with no handle back to this one.
-    clearNavigationNotice();
+    navigationNotice.clear();
     window.open(href, "_blank", "noopener,noreferrer");
-  });
-  const dismiss = document.createElement("button");
-  dismiss.type = "button";
-  dismiss.className = "load-more-btn";
-  dismiss.textContent = "Dismiss";
-  dismiss.style.marginLeft = "12px";
-  dismiss.addEventListener("click", () => {
-    if (!navigationConfirmation.dismiss()) return;
-    const collapsed = document.createElement("div");
-    collapsed.id = "document-navigation-review";
-    collapsed.className = "document-navigation-notice";
-    const review = document.createElement("button");
-    review.type = "button";
-    review.className = "load-more-btn";
-    review.textContent = href ? "Review external link" : "Review linked document";
-    review.addEventListener("click", () => {
-      const target = navigationConfirmation.reopen();
-      if (!target) return;
-      collapsed.remove();
-      showNavigationConfirmation(target);
-      // Focus moves only in response to the reader's explicit parent action.
-      navigationNotice?.querySelector("button")?.focus();
-    });
-    collapsed.append(review);
-    notice.replaceWith(collapsed);
-    navigationNotice = collapsed;
-    review.focus();
-  });
-  notice.append(label, open, dismiss);
-  navigationNotice = notice;
-  document.body.append(notice);
+  },
+});
+
+function offerDocumentNavigation(fullPath: string, search: string, fragment: string) {
+  navigationNotice.offer({ fullPath, search, fragment });
+}
+
+function offerExternalLink(href: string) {
+  navigationNotice.offer({ fullPath: "", search: "", fragment: "", href });
 }
 
 function loadDoc(fullPath: string, pushState: false | "push" | "replace", fragment = "", search = "") {
-  clearNavigationNotice();
+  navigationNotice.clear();
   const frame = document.getElementById("content-frame") as HTMLIFrameElement | null;
   const placeholder = document.getElementById("main-placeholder");
   if (placeholder) placeholder.style.display = "none";

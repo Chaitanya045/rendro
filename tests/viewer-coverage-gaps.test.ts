@@ -269,11 +269,12 @@ describe("document navigation edge cases", () => {
   });
 
   it.each([
-    ["a link", '<a id="l" href="https://external.test/page.html?q=1#top">x</a>', "https://external.test/page.html?q=1#top"],
-    ["a protocol-relative link", '<a id="l" href="//external.test/a b">x</a>', "https://external.test/a%20b"],
-    ["a link that targets the frame", '<a id="l" target="_self" href="http://external.test:8080/">x</a>', "http://external.test:8080/"],
-  ])("hands %s to another site to the shell instead of loading it in the frame", (_name, html, href) => {
-    const f = fixture(html);
+    ["a link", '<a id="l" href="https://external.test/page.html?q=1#top">x</a>', "https://external.test/page.html?q=1#top", {}],
+    ["a protocol-relative link", '<a id="l" href="//external.test/a b">x</a>', "https://external.test/a%20b", {}],
+    ["a link that targets the frame", '<a id="l" target="_self" href="http://external.test:8080/">x</a>', "http://external.test:8080/", {}],
+    ["a link in a share", '<a id="l" href="https://external.test/page.html">x</a>', "https://external.test/page.html", { singleDocument: true }],
+  ])("hands %s to another site to the shell instead of loading it in the frame", (_name, html, href, options) => {
+    const f = fixture(html, options);
     expect(click(f.win, "#l").defaultPrevented).toBe(true);
     expect(f.parent.postMessage).toHaveBeenCalledWith({ type: "doc-external", path: config.documentPath, href }, origin);
     expect(f.parent.postMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "doc-navigate" }), origin);
@@ -285,7 +286,6 @@ describe("document navigation edge cases", () => {
     ["a link on the viewer origin outside the document scope", `<a id="l" href="${origin}/organizations">x</a>`, {}],
     ["a link too long to confirm", `<a id="l" href="https://external.test/${"x".repeat(2100)}">x</a>`, {}],
     ["a link in a standalone document", '<a id="l" href="https://external.test/page.html">x</a>', { standalone: true }],
-    ["a link in a share", '<a id="l" href="https://external.test/page.html">x</a>', { singleDocument: true }],
   ])("leaves %s to the browser", (_name, html, options) => {
     const f = fixture(html, options);
     expect(click(f.win, "#l").defaultPrevented).toBe(false);
