@@ -73,7 +73,7 @@ test("verification resend is neutral and retains its destination", async ({ page
 });
 
 test("an invalid or expired verification link never reports success and offers a fresh link", async ({ page }, info) => {
-  const email = `badlink-${info.project.name}-${info.retry}@example.test`;
+  const email = `badlink-${info.project.name}-${info.retry}-${info.repeatEachIndex}@example.test`;
   await signup(page, email);
   const link = new URL(await mailLink(email, /Verify/));
   const token = link.searchParams.get("token") ?? "";
