@@ -27,7 +27,8 @@ export function hasIllFormedText(value: unknown): boolean {
     if (typeof current === "string") {
       if (!current.isWellFormed()) return true;
     } else if (Array.isArray(current)) {
-      pending.push(...current);
+      // A loop, not a spread: a large array would exceed the argument limit.
+      for (const item of current as unknown[]) pending.push(item);
     } else if (current !== null && typeof current === "object") {
       for (const [key, nested] of Object.entries(current)) {
         if (!key.isWellFormed()) return true;

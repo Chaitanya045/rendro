@@ -53,6 +53,7 @@ describe("well-formed text helpers", () => {
     expect(hasIllFormedText(["ok", { deep: ["ok", { [lone]: 1 }] }])).toBe(true);
     expect(hasIllFormedText({ list: ["ok", [lone]] })).toBe(true);
     expect(hasIllFormedText({ ok: [1, true, null, undefined, { more: "text" }] })).toBe(false);
+    expect(hasIllFormedText(Array.from({ length: 1_000_000 }, () => 0))).toBe(false);
     let nested: unknown = lone;
     for (let level = 0; level < 200_000; level++) nested = [nested];
     expect(hasIllFormedText(nested)).toBe(true);
@@ -137,7 +138,7 @@ describe("API key expiry", () => {
     expect(API_KEY_MAX_LIFETIME_MS).toBe(366 * day);
     for (const value of [now + 1, now + 30 * day, now + 365 * day, now + API_KEY_MAX_LIFETIME_MS]) expect(validExpiresAt(value, now), String(value)).toBe(true);
     for (const value of [now, now - 1, 0, -1, now + API_KEY_MAX_LIFETIME_MS + 1, 1e300, 1e21, 8.64e15 + 1, Number.MAX_SAFE_INTEGER + 2, now + 1.5, NaN, Infinity, -Infinity, "1900000000000", null, undefined, {}, true]) {
-      expect(validExpiresAt(value, now), String(value)).toBe(false);
+      expect(validExpiresAt(value, now), typeof value).toBe(false);
     }
   });
 
