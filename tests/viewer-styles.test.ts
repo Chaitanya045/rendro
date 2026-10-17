@@ -73,6 +73,22 @@ describe("viewer stylesheet build", () => {
     expect(runStyleBuild(root, ["--check"], log)).toBe(0);
     expect(log).toHaveBeenLastCalledWith("Styles verified (1 files).");
   });
+
+  it("runs against the working directory with the real console", async () => {
+    const info = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    const argv = process.argv;
+    const code = process.exitCode;
+    process.argv = [argv[0], "scripts/build-styles.ts", "--check"];
+    try {
+      await import("../scripts/build-styles");
+      expect(info).toHaveBeenCalledWith("Styles verified (1 files).");
+      expect(process.exitCode).toBe(0);
+    } finally {
+      process.argv = argv;
+      process.exitCode = code;
+      info.mockRestore();
+    }
+  });
 });
 
 describe("self-hosted stylesheet responses", () => {
