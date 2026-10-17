@@ -287,6 +287,48 @@ creation form's Cancel (there is none), roster completion beyond 100 members, th
 credential step's third and fourth scope (the step offers only the two recommended ones), a
 real `beforeunload` prompt, and an empty team list (unreachable: the server never deletes the last team).
 
+## Projects, deployments, API keys, shares and publications (#113)
+
+Five specs run the project journeys on the real Worker, local Convex, S3Proxy and the built CLI in all three
+engines. They reuse the `actor` fixture of `e2e/org-fixtures.ts` (one independent browser context per person, own
+cookies and ingress address, provisioned through real signup, mail verification and organization APIs), so each test
+owns its users, organization and slugs; none uses the seeded users. Final state is
+asserted four ways: the DOM (text, ARIA, focus, announced toasts), the URL, the authoritative API, and the **actual
+URL or credential** the feature is about (an anonymous recipient's `/s/<token>` and `/p/<slug>` requests, a Bearer key
+used by the CLI or `curl`-style calls). Helpers in `e2e/project-helpers.ts` push a document tree with the real CLI,
+start/upload/commit/fail a deployment by hand (to hold one in `staging` or `failed`), and call the Worker with only a
+Bearer key.
+
+| Spec | Covers |
+|---|---|
+| `projects.spec.ts` | Empty list, create dialog (slug follows name, manual override, native validation, pending exclusion, conflict with retained draft, correction, same-shell navigation), overview facts and tabs, release badge; server-side normalization, boundaries and refusals; per-organization slug scope; read failure with Try again; another organization's project is a 404; owner/admin/member/outsider/anonymous controls and API |
+| `deployments.spec.ts` | Empty history and the pinned, placeholder-only CLI command; a staging deployment (commit, dirty flag, size, date), an incomplete commit refused, a failed attempt with its reason, a real CLI push to Active/Deployed, a superseded release, a manually completed release; a stale failure call cannot deactivate the live release; history read failure with isolated retry; organization overview (counts, checklist, recent deployment empty/active/retry); member, outsider and anonymous access |
+| `api-keys.spec.ts` | Create dialog (defaults, validation, rejection that keeps every choice, retry), one-time secret (modal, Done gated by the stored checkbox, Escape refused, exact copy values and clipboard rejection, scrubbed on close, absent from the list/DOM/storage), list facts, use by the CLI and recorded last use, revoke (Escape, pending, failure, success) with the **very next** API and CLI request refused; scope and project binding matrix; expiry (short-lived key refused after its time, "Expiring"/"Expired"/"Never", expired key still revocable); refused creation fields; owner/admin/member/outsider/anonymous |
+| `shares.spec.ts` | Share from the document toolbar (exact copied URL, seven-day grant), anonymous recipient (headers, document, stylesheet, image), scope (sibling and unreferenced files, other folders, `?doc=`, altered token), pinned to its release across a later deployment, list facts without the link, revoke (Escape, pending, failure, success) ending every request; a one-minute link expiring while others live, "Expiring"/"Expired"/"Revoked", invalid shares refused; member creates but cannot revoke, admin revokes, outsider and anonymous denied |
+| `publications.spec.ts` | Create dialog (validation, no deployment, lazily loaded pin choices with retry, only active/superseded releases offered, entry-file and slug conflicts that keep the form, reset after success), tracked vs pinned publication viewed anonymously (follows the new release vs keeps the old one, folder scope, tree, traversal), copy/open link, unpublish (Escape, pending, failure, success) with the URL gone on the next request and the slug reusable; API normalization and pinned-deployment rules; list failure with Try again; member read-only, admin removes, outsider and anonymous denied, slugs shared across organizations |
+
+The one-minute share expiry is real time (the API minimum is 60 seconds and the Worker/backend read the system clock);
+the test does its other work while waiting and polls the link, so it adds about 45 seconds per engine. The short key
+expiry uses eight seconds. Everything else is clock-independent.
+
+Not supported by the product (so not tested): renaming, editing settings of or deleting a project; re-activating an
+older deployment (a new push is the only way to change the active release, and an older release is reachable through a
+pinned publication or an existing private share); a retention display (the history shows the latest 100 releases and
+says so). Not asserted (not credited): the sign-out and other-tab races of the key reveal and share revoke, copy
+feedback timing (the copied values are asserted), legacy signed URLs, public-URL copy from the document toolbar,
+`?docQuery`/fragment restoration in a shared document, the mobile layout of these pages, and quota (429) responses.
+
+Expected failures (their broken assertions get no `e2e` credit; an unexpected pass fails the suite):
+
+- **A lone surrogate in a project name is a 502.** The Worker forwards the body, the backend cannot store the text, and the caller gets "Backend unavailable" (and a transport error is logged) instead of a 400.
+- **A key expiry beyond the representable date range is accepted.** Only "in the future" is checked; `1e300` is stored and its row reads "Invalid Date".
+- **A repeated permission is stored twice.** `["docs:read", "docs:read"]` is not de-duplicated and is listed twice.
+- **The API does not enforce the publication title length.** The form allows 100 characters; the API stores 5,000.
+
+Harness note: an oversized request body (the Worker answers 413 without reading it) makes the *next* request on that
+connection fail with miniflare's "Network connection lost" 500. This is the local development transport, not the
+application, but it means no test here sends an oversized body.
+
 ## Vitest Chromium project
 
 Run `pnpm exec playwright install chromium`, then `CI=true pnpm test:browser`.
