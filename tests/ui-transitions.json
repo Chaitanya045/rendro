@@ -5237,7 +5237,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "untested",
+      "status": "e2e",
       "auditEvidence": "UNTESTED",
       "auditNote": "organization-pages.ts organizationChooserScript; page lifecycle tests suppress late paints only",
       "edges": [
@@ -5249,8 +5249,19 @@
           "inventoryRefs": [
             "UI-030"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/org-lifecycle.spec.ts",
+              "name": "a user without an organization creates the first one: slug derivation, validation, pending, conflict and retry",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/org-lifecycle.spec.ts",
+              "name": "one organization redirects without a history entry; the forced chooser lists cards and a second creation lands on its overview",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-030-E02",
@@ -5260,8 +5271,14 @@
           "inventoryRefs": [
             "O01"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/org-lifecycle.spec.ts",
+              "name": "a user without an organization creates the first one: slug derivation, validation, pending, conflict and retry",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-030-E03",
@@ -5271,8 +5288,19 @@
           "inventoryRefs": [
             "O01"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/org-lifecycle.spec.ts",
+              "name": "a user without an organization creates the first one: slug derivation, validation, pending, conflict and retry",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/org-lifecycle.spec.ts",
+              "name": "one organization redirects without a history entry; the forced chooser lists cards and a second creation lands on its overview",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-030-E04",
@@ -5282,8 +5310,14 @@
           "inventoryRefs": [
             "O01"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/org-lifecycle.spec.ts",
+              "name": "one organization redirects without a history entry; the forced chooser lists cards and a second creation lands on its overview",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-030-E05",
@@ -5293,8 +5327,14 @@
           "inventoryRefs": [
             "O01"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/org-lifecycle.spec.ts",
+              "name": "one organization redirects without a history entry; the forced chooser lists cards and a second creation lands on its overview",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-030-E06",
@@ -5304,8 +5344,14 @@
           "inventoryRefs": [
             "O01"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/org-lifecycle.spec.ts",
+              "name": "one organization redirects without a history entry; the forced chooser lists cards and a second creation lands on its overview",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-030-E07",
@@ -5315,8 +5361,14 @@
           "inventoryRefs": [
             "O01"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/org-lifecycle.spec.ts",
+              "name": "a failed organization list shows a recoverable error and Try again lists the organizations",
+              "kind": "e2e"
+            }
+          ]
         }
       ]
     },
@@ -5349,7 +5401,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "browser",
+      "status": "e2e",
       "auditEvidence": "UNTESTED",
       "auditNote": "organization-pages.ts creationForm; no complete controller submission assertion found",
       "edges": [
@@ -5361,8 +5413,14 @@
           "inventoryRefs": [
             "UI-031"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/org-lifecycle.spec.ts",
+              "name": "a user without an organization creates the first one: slug derivation, validation, pending, conflict and retry",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-031-E02",
@@ -5372,8 +5430,14 @@
           "inventoryRefs": [
             "O02"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/org-lifecycle.spec.ts",
+              "name": "a user without an organization creates the first one: slug derivation, validation, pending, conflict and retry",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-031-E03",
@@ -5383,8 +5447,14 @@
           "inventoryRefs": [
             "O02"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/org-lifecycle.spec.ts",
+              "name": "a user without an organization creates the first one: slug derivation, validation, pending, conflict and retry",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-031-E04",
@@ -5394,12 +5464,17 @@
           "inventoryRefs": [
             "O02"
           ],
-          "status": "browser",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/management-dialog-reuse-browser.test.ts",
               "name": "$name stays completed during delayed navigation and supports a fresh submission",
               "kind": "browser"
+            },
+            {
+              "file": "e2e/org-lifecycle.spec.ts",
+              "name": "a user without an organization creates the first one: slug derivation, validation, pending, conflict and retry",
+              "kind": "e2e"
             }
           ]
         },
@@ -5411,12 +5486,17 @@
           "inventoryRefs": [
             "O02"
           ],
-          "status": "browser",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/management-dialog-reuse-browser.test.ts",
               "name": "$name stays completed during delayed navigation and supports a fresh submission",
               "kind": "browser"
+            },
+            {
+              "file": "e2e/org-lifecycle.spec.ts",
+              "name": "a user without an organization creates the first one: slug derivation, validation, pending, conflict and retry",
+              "kind": "e2e"
             }
           ]
         },
@@ -5428,12 +5508,22 @@
           "inventoryRefs": [
             "O02"
           ],
-          "status": "browser",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/management-dialog-reuse-browser.test.ts",
               "name": "$name stays completed during delayed navigation and supports a fresh submission",
               "kind": "browser"
+            },
+            {
+              "file": "e2e/org-lifecycle.spec.ts",
+              "name": "a user without an organization creates the first one: slug derivation, validation, pending, conflict and retry",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/org-lifecycle.spec.ts",
+              "name": "one organization redirects without a history entry; the forced chooser lists cards and a second creation lands on its overview",
+              "kind": "e2e"
             }
           ]
         },
@@ -5541,7 +5631,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "untested",
+      "status": "e2e",
       "auditEvidence": "UNTESTED",
       "auditNote": "organization-pages.ts load; organization-browsing tests target scoped management routes",
       "edges": [
@@ -5553,8 +5643,14 @@
           "inventoryRefs": [
             "UI-033"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/org-lifecycle.spec.ts",
+              "name": "a failed organization list shows a recoverable error and Try again lists the organizations",
+              "kind": "e2e"
+            }
+          ]
         }
       ]
     },
@@ -6693,7 +6789,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "unit",
+      "status": "e2e",
       "auditEvidence": "U",
       "auditNote": "management-form-regressions.test.ts",
       "edges": [
@@ -6705,8 +6801,14 @@
           "inventoryRefs": [
             "UI-042"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/org-lifecycle.spec.ts",
+              "name": "settings guard unsaved edits, save canonical values to the chrome and server, and report a slug conflict without losing edits",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-042-E02",
@@ -6756,7 +6858,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "browser",
+      "status": "e2e",
       "auditEvidence": "UNTESTED",
       "auditNote": "organization-pages.ts renderSettings; found failure/dirty-navigation tests, not successful-save assertions",
       "edges": [
@@ -6768,8 +6870,14 @@
           "inventoryRefs": [
             "UI-043"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/org-lifecycle.spec.ts",
+              "name": "settings guard unsaved edits, save canonical values to the chrome and server, and report a slug conflict without losing edits",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-043-E02",
@@ -6779,8 +6887,19 @@
           "inventoryRefs": [
             "O16"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/org-lifecycle.spec.ts",
+              "name": "settings guard unsaved edits, save canonical values to the chrome and server, and report a slug conflict without losing edits",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/org-permissions.spec.ts",
+              "name": "member: People, Teams and Settings expose exactly the controls of that role",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-043-E03",
@@ -6790,8 +6909,14 @@
           "inventoryRefs": [
             "O16"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/org-lifecycle.spec.ts",
+              "name": "settings guard unsaved edits, save canonical values to the chrome and server, and report a slug conflict without losing edits",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-043-E04",
@@ -6801,12 +6926,17 @@
           "inventoryRefs": [
             "O16"
           ],
-          "status": "browser",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/management-dialog-reuse-browser.test.ts",
               "name": "settings restores the save control after success and denial and permits another save",
               "kind": "browser"
+            },
+            {
+              "file": "e2e/org-lifecycle.spec.ts",
+              "name": "settings guard unsaved edits, save canonical values to the chrome and server, and report a slug conflict without losing edits",
+              "kind": "e2e"
             }
           ]
         },
@@ -6818,8 +6948,14 @@
           "inventoryRefs": [
             "O16"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/org-lifecycle.spec.ts",
+              "name": "settings guard unsaved edits, save canonical values to the chrome and server, and report a slug conflict without losing edits",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-043-E06",
@@ -6829,8 +6965,14 @@
           "inventoryRefs": [
             "O16"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/org-lifecycle.spec.ts",
+              "name": "settings guard unsaved edits, save canonical values to the chrome and server, and report a slug conflict without losing edits",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-043-E07",
@@ -6840,8 +6982,14 @@
           "inventoryRefs": [
             "O16"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/org-lifecycle.spec.ts",
+              "name": "settings guard unsaved edits, save canonical values to the chrome and server, and report a slug conflict without losing edits",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-043-E08",
@@ -6903,7 +7051,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "unit",
+      "status": "e2e",
       "auditEvidence": "U",
       "auditNote": "organization-role-ux.test.ts",
       "edges": [
@@ -6915,8 +7063,19 @@
           "inventoryRefs": [
             "UI-044"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/org-permissions.spec.ts",
+              "name": "member: People, Teams and Settings expose exactly the controls of that role",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/org-people.spec.ts",
+              "name": "roles: an admin is limited, the owner assigns and is bound by the last-owner rule, failures revert and self-demotion drops privileges",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-044-E02",
@@ -6926,12 +7085,17 @@
           "inventoryRefs": [
             "UI-044"
           ],
-          "status": "unit",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/organization-role-ux.test.ts",
               "name": "refreshes owner constraints and management actions after confirmed role changes",
               "kind": "unit"
+            },
+            {
+              "file": "e2e/org-people.spec.ts",
+              "name": "roles: an admin is limited, the owner assigns and is bound by the last-owner rule, failures revert and self-demotion drops privileges",
+              "kind": "e2e"
             }
           ]
         }
@@ -6966,7 +7130,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "unit",
+      "status": "e2e",
       "auditEvidence": "U",
       "auditNote": "management-performance.test.ts; management-request-waterfall.test.ts",
       "edges": [
@@ -6989,8 +7153,14 @@
           "inventoryRefs": [
             "O09"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/org-people.spec.ts",
+              "name": "an owner invites a batch: row limits, validation, partial failure and retry, mail, pending list and revocation",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-045-E03",
@@ -7011,8 +7181,29 @@
           "inventoryRefs": [
             "O09"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/org-people.spec.ts",
+              "name": "roles: an admin is limited, the owner assigns and is bound by the last-owner rule, failures revert and self-demotion drops privileges",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/org-permissions.spec.ts",
+              "name": "owner: People, Teams and Settings expose exactly the controls of that role",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/org-permissions.spec.ts",
+              "name": "admin: People, Teams and Settings expose exactly the controls of that role",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/org-permissions.spec.ts",
+              "name": "member: People, Teams and Settings expose exactly the controls of that role",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-045-E05",
@@ -7022,8 +7213,19 @@
           "inventoryRefs": [
             "O09"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/org-people.spec.ts",
+              "name": "roles: an admin is limited, the owner assigns and is bound by the last-owner rule, failures revert and self-demotion drops privileges",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/org-permissions.spec.ts",
+              "name": "admin: People, Teams and Settings expose exactly the controls of that role",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-045-E06",
@@ -7033,8 +7235,14 @@
           "inventoryRefs": [
             "O09"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/org-people.spec.ts",
+              "name": "roles: an admin is limited, the owner assigns and is bound by the last-owner rule, failures revert and self-demotion drops privileges",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-045-E07",
@@ -7044,8 +7252,19 @@
           "inventoryRefs": [
             "O09"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/org-people.spec.ts",
+              "name": "roles: an admin is limited, the owner assigns and is bound by the last-owner rule, failures revert and self-demotion drops privileges",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/org-permissions.spec.ts",
+              "name": "owner: People, Teams and Settings expose exactly the controls of that role",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-045-E08",
@@ -7055,8 +7274,14 @@
           "inventoryRefs": [
             "O09"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/org-people.spec.ts",
+              "name": "roles: an admin is limited, the owner assigns and is bound by the last-owner rule, failures revert and self-demotion drops privileges",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-045-E09",
@@ -7123,7 +7348,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "unit",
+      "status": "e2e",
       "auditEvidence": "U",
       "auditNote": "organization-role-ux.test.ts; management-form-regressions.test.ts",
       "edges": [
@@ -7135,8 +7360,14 @@
           "inventoryRefs": [
             "UI-046"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/org-people.spec.ts",
+              "name": "roles: an admin is limited, the owner assigns and is bound by the last-owner rule, failures revert and self-demotion drops privileges",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-046-E02",
@@ -7146,8 +7377,14 @@
           "inventoryRefs": [
             "O10"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/org-people.spec.ts",
+              "name": "roles: an admin is limited, the owner assigns and is bound by the last-owner rule, failures revert and self-demotion drops privileges",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-046-E03",
@@ -7157,8 +7394,14 @@
           "inventoryRefs": [
             "O10"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/org-people.spec.ts",
+              "name": "roles: an admin is limited, the owner assigns and is bound by the last-owner rule, failures revert and self-demotion drops privileges",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-046-E04",
@@ -7168,8 +7411,14 @@
           "inventoryRefs": [
             "O10"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/org-people.spec.ts",
+              "name": "roles: an admin is limited, the owner assigns and is bound by the last-owner rule, failures revert and self-demotion drops privileges",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-046-E05",
@@ -7179,8 +7428,14 @@
           "inventoryRefs": [
             "O10"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/org-people.spec.ts",
+              "name": "removing a member: confirmation, failure and retry, the removed person's lost access and a revoked admin's rejected action",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-046-E06",
@@ -7247,7 +7502,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "unit",
+      "status": "e2e",
       "auditEvidence": "U",
       "auditNote": "management-performance.test.ts: removes organization members only after confirmation and successful response",
       "edges": [
@@ -7259,8 +7514,14 @@
           "inventoryRefs": [
             "UI-047"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/org-people.spec.ts",
+              "name": "removing a member: confirmation, failure and retry, the removed person's lost access and a revoked admin's rejected action",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-047-E02",
@@ -7270,8 +7531,14 @@
           "inventoryRefs": [
             "O11"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/org-people.spec.ts",
+              "name": "removing a member: confirmation, failure and retry, the removed person's lost access and a revoked admin's rejected action",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-047-E03",
@@ -7281,8 +7548,14 @@
           "inventoryRefs": [
             "O11"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/org-people.spec.ts",
+              "name": "removing a member: confirmation, failure and retry, the removed person's lost access and a revoked admin's rejected action",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-047-E04",
@@ -7292,8 +7565,14 @@
           "inventoryRefs": [
             "O11"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/org-people.spec.ts",
+              "name": "removing a member: confirmation, failure and retry, the removed person's lost access and a revoked admin's rejected action",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-047-E05",
@@ -7303,8 +7582,14 @@
           "inventoryRefs": [
             "O11"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/org-people.spec.ts",
+              "name": "removing a member: confirmation, failure and retry, the removed person's lost access and a revoked admin's rejected action",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-047-E06",
@@ -7354,7 +7639,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "browser",
+      "status": "e2e",
       "auditEvidence": "U",
       "auditNote": "management-form-regressions.test.ts",
       "edges": [
@@ -7366,12 +7651,17 @@
           "inventoryRefs": [
             "UI-048"
           ],
-          "status": "browser",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/management-dialog-reuse-browser.test.ts",
               "name": "invitations retain only failed rows and do not resend successful rows on retry",
               "kind": "browser"
+            },
+            {
+              "file": "e2e/org-people.spec.ts",
+              "name": "an owner invites a batch: row limits, validation, partial failure and retry, mail, pending list and revocation",
+              "kind": "e2e"
             }
           ]
         },
@@ -7383,8 +7673,14 @@
           "inventoryRefs": [
             "O13"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/org-people.spec.ts",
+              "name": "an owner invites a batch: row limits, validation, partial failure and retry, mail, pending list and revocation",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-048-E03",
@@ -7394,8 +7690,14 @@
           "inventoryRefs": [
             "O13"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/org-people.spec.ts",
+              "name": "an owner invites a batch: row limits, validation, partial failure and retry, mail, pending list and revocation",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-048-E04",
@@ -7405,8 +7707,14 @@
           "inventoryRefs": [
             "O13"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/org-people.spec.ts",
+              "name": "an owner invites a batch: row limits, validation, partial failure and retry, mail, pending list and revocation",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-048-E05",
@@ -7416,8 +7724,14 @@
           "inventoryRefs": [
             "O13"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/org-people.spec.ts",
+              "name": "an owner invites a batch: row limits, validation, partial failure and retry, mail, pending list and revocation",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-048-E06",
@@ -7427,12 +7741,17 @@
           "inventoryRefs": [
             "O13"
           ],
-          "status": "browser",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/management-dialog-reuse-browser.test.ts",
               "name": "invitations retain only failed rows and do not resend successful rows on retry",
               "kind": "browser"
+            },
+            {
+              "file": "e2e/org-people.spec.ts",
+              "name": "an owner invites a batch: row limits, validation, partial failure and retry, mail, pending list and revocation",
+              "kind": "e2e"
             }
           ]
         },
@@ -7444,12 +7763,17 @@
           "inventoryRefs": [
             "O13"
           ],
-          "status": "browser",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/management-dialog-reuse-browser.test.ts",
               "name": "invitations retain only failed rows and do not resend successful rows on retry",
               "kind": "browser"
+            },
+            {
+              "file": "e2e/org-people.spec.ts",
+              "name": "an owner invites a batch: row limits, validation, partial failure and retry, mail, pending list and revocation",
+              "kind": "e2e"
             }
           ]
         },
@@ -7461,7 +7785,7 @@
           "inventoryRefs": [
             "O13"
           ],
-          "status": "browser",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/management-dialog-reuse-browser.test.ts",
@@ -7472,6 +7796,11 @@
               "file": "tests/management-dialog-reuse-browser.test.ts",
               "name": "invitations reset before refresh and preserve a reopened draft when the held list arrives",
               "kind": "browser"
+            },
+            {
+              "file": "e2e/org-people.spec.ts",
+              "name": "an owner invites a batch: row limits, validation, partial failure and retry, mail, pending list and revocation",
+              "kind": "e2e"
             }
           ]
         },
@@ -7483,7 +7812,7 @@
           "inventoryRefs": [
             "UI-048"
           ],
-          "status": "browser",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/management-form-regressions.test.ts",
@@ -7494,6 +7823,11 @@
               "file": "tests/management-dialog-reuse-browser.test.ts",
               "name": "invitations retain only failed rows and do not resend successful rows on retry",
               "kind": "browser"
+            },
+            {
+              "file": "e2e/org-people.spec.ts",
+              "name": "an owner invites a batch: row limits, validation, partial failure and retry, mail, pending list and revocation",
+              "kind": "e2e"
             }
           ]
         }
@@ -7528,7 +7862,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "browser",
+      "status": "e2e",
       "auditEvidence": "UNTESTED",
       "auditNote": "management-control-consistency.test.ts checks disabled-control source; no complete interaction matrix",
       "edges": [
@@ -7540,8 +7874,14 @@
           "inventoryRefs": [
             "UI-049"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/org-people.spec.ts",
+              "name": "an owner invites a batch: row limits, validation, partial failure and retry, mail, pending list and revocation",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-049-E02",
@@ -7608,7 +7948,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "untested",
+      "status": "e2e",
       "auditEvidence": "UNTESTED",
       "auditNote": "organization-pages.ts renderPeople; API/markup assertions do not execute cancel lifecycle",
       "edges": [
@@ -7620,8 +7960,14 @@
           "inventoryRefs": [
             "UI-050"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/org-people.spec.ts",
+              "name": "an owner invites a batch: row limits, validation, partial failure and retry, mail, pending list and revocation",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-050-E02",
@@ -7631,8 +7977,19 @@
           "inventoryRefs": [
             "O12"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/org-permissions.spec.ts",
+              "name": "member: People, Teams and Settings expose exactly the controls of that role",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/org-permissions.spec.ts",
+              "name": "owner: People, Teams and Settings expose exactly the controls of that role",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-050-E03",
@@ -7642,8 +7999,14 @@
           "inventoryRefs": [
             "O12"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/org-people.spec.ts",
+              "name": "an owner invites a batch: row limits, validation, partial failure and retry, mail, pending list and revocation",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-050-E04",
@@ -7653,8 +8016,14 @@
           "inventoryRefs": [
             "O12"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/org-people.spec.ts",
+              "name": "an owner invites a batch: row limits, validation, partial failure and retry, mail, pending list and revocation",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-050-E05",
@@ -7664,8 +8033,14 @@
           "inventoryRefs": [
             "O12"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/org-people.spec.ts",
+              "name": "an owner invites a batch: row limits, validation, partial failure and retry, mail, pending list and revocation",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-050-E06",
@@ -7675,8 +8050,14 @@
           "inventoryRefs": [
             "O12"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/org-people.spec.ts",
+              "name": "an owner invites a batch: row limits, validation, partial failure and retry, mail, pending list and revocation",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-050-E07",
@@ -7686,8 +8067,14 @@
           "inventoryRefs": [
             "O12"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/org-invitations.spec.ts",
+              "name": "a wrong recipient, a revoked, an expired and an already used invitation are all unavailable and change nothing",
+              "kind": "e2e"
+            }
+          ]
         }
       ]
     },
@@ -7764,7 +8151,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "browser",
+      "status": "e2e",
       "auditEvidence": "UNTESTED",
       "auditNote": "organization-pages.ts invitationScript",
       "edges": [
@@ -7776,8 +8163,19 @@
           "inventoryRefs": [
             "UI-052"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/org-invitations.spec.ts",
+              "name": "a new invitee follows the mailed link through sign-up and verification, reviews the invitation and accepts it",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/org-invitations.spec.ts",
+              "name": "declining returns to the chooser and the declined invitation can no longer be used",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-052-E02",
@@ -7787,8 +8185,14 @@
           "inventoryRefs": [
             "O17"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/org-invitations.spec.ts",
+              "name": "a new invitee follows the mailed link through sign-up and verification, reviews the invitation and accepts it",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-052-E03",
@@ -7798,8 +8202,19 @@
           "inventoryRefs": [
             "O17"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/org-invitations.spec.ts",
+              "name": "a new invitee follows the mailed link through sign-up and verification, reviews the invitation and accepts it",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/org-invitations.spec.ts",
+              "name": "declining returns to the chooser and the declined invitation can no longer be used",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-052-E04",
@@ -7809,8 +8224,19 @@
           "inventoryRefs": [
             "O17"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/org-invitations.spec.ts",
+              "name": "a new invitee follows the mailed link through sign-up and verification, reviews the invitation and accepts it",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/org-invitations.spec.ts",
+              "name": "declining returns to the chooser and the declined invitation can no longer be used",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-052-E05",
@@ -7820,8 +8246,19 @@
           "inventoryRefs": [
             "O17"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/org-invitations.spec.ts",
+              "name": "a new invitee follows the mailed link through sign-up and verification, reviews the invitation and accepts it",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/org-invitations.spec.ts",
+              "name": "declining returns to the chooser and the declined invitation can no longer be used",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-052-E06",
@@ -7831,8 +8268,19 @@
           "inventoryRefs": [
             "O17"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/org-invitations.spec.ts",
+              "name": "a wrong recipient, a revoked, an expired and an already used invitation are all unavailable and change nothing",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/org-invitations.spec.ts",
+              "name": "declining returns to the chooser and the declined invitation can no longer be used",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-052-E07",
@@ -7842,8 +8290,14 @@
           "inventoryRefs": [
             "O17"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/org-invitations.spec.ts",
+              "name": "a new invitee follows the mailed link through sign-up and verification, reviews the invitation and accepts it",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-052-E08",
@@ -7853,8 +8307,14 @@
           "inventoryRefs": [
             "O17"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/org-invitations.spec.ts",
+              "name": "a new invitee follows the mailed link through sign-up and verification, reviews the invitation and accepts it",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-052-E09",
@@ -7913,7 +8373,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "browser",
+      "status": "e2e",
       "auditEvidence": "UNTESTED",
       "auditNote": "organization-pages.ts respond",
       "edges": [
@@ -7925,8 +8385,19 @@
           "inventoryRefs": [
             "UI-053"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/org-invitations.spec.ts",
+              "name": "a new invitee follows the mailed link through sign-up and verification, reviews the invitation and accepts it",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/org-invitations.spec.ts",
+              "name": "declining returns to the chooser and the declined invitation can no longer be used",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-053-E02",
@@ -7977,7 +8448,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "unit",
+      "status": "e2e",
       "auditEvidence": "U",
       "auditNote": "control-plane-ui.test.ts; auth-ui-regressions.test.ts",
       "edges": [
@@ -7989,8 +8460,14 @@
           "inventoryRefs": [
             "UI-054"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/org-invitations.spec.ts",
+              "name": "a new invitee follows the mailed link through sign-up and verification, reviews the invitation and accepts it",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-054-E02",
@@ -8040,7 +8517,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "untested",
+      "status": "e2e",
       "auditEvidence": "UNTESTED",
       "auditNote": "organization-pages.ts remove-member catch; management-performance test covers cancel/success only",
       "edges": [
@@ -8052,8 +8529,14 @@
           "inventoryRefs": [
             "UI-150"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/org-people.spec.ts",
+              "name": "removing a member: confirmation, failure and retry, the removed person's lost access and a revoked admin's rejected action",
+              "kind": "e2e"
+            }
+          ]
         }
       ]
     },
@@ -8085,7 +8568,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "browser",
+      "status": "e2e",
       "auditEvidence": "U",
       "auditNote": "management-form-regressions.test.ts",
       "edges": [
@@ -8097,8 +8580,14 @@
           "inventoryRefs": [
             "UI-055"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/org-teams.spec.ts",
+              "name": "a team is created, staffed, inspected and removed; membership never changes organization access",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-055-E02",
@@ -8119,8 +8608,14 @@
           "inventoryRefs": [
             "O14"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/org-teams.spec.ts",
+              "name": "a team is created, staffed, inspected and removed; membership never changes organization access",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-055-E04",
@@ -8141,8 +8636,14 @@
           "inventoryRefs": [
             "O14"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/org-teams.spec.ts",
+              "name": "a team is created, staffed, inspected and removed; membership never changes organization access",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-055-E06",
@@ -8213,7 +8714,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "untested",
+      "status": "e2e",
       "auditEvidence": "UNTESTED",
       "auditNote": "organization-pages.ts renderTeams; repeated successful creation is tested",
       "edges": [
@@ -8225,8 +8726,14 @@
           "inventoryRefs": [
             "UI-056"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/org-teams.spec.ts",
+              "name": "a team is created, staffed, inspected and removed; membership never changes organization access",
+              "kind": "e2e"
+            }
+          ]
         }
       ]
     },
@@ -8258,7 +8765,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "unit",
+      "status": "e2e",
       "auditEvidence": "U",
       "auditNote": "management-form-regressions.test.ts",
       "edges": [
@@ -8270,8 +8777,14 @@
           "inventoryRefs": [
             "UI-057"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/org-teams.spec.ts",
+              "name": "a team is created, staffed, inspected and removed; membership never changes organization access",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-057-E02",
@@ -8320,7 +8833,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "untested",
+      "status": "e2e",
       "auditEvidence": "UNTESTED",
       "auditNote": "organization-pages.ts renderTeams; mutation scoping is tested, successful UI refresh not identified",
       "edges": [
@@ -8332,8 +8845,14 @@
           "inventoryRefs": [
             "UI-058"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/org-teams.spec.ts",
+              "name": "a team is created, staffed, inspected and removed; membership never changes organization access",
+              "kind": "e2e"
+            }
+          ]
         }
       ]
     },
@@ -8365,7 +8884,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "unit",
+      "status": "e2e",
       "auditEvidence": "U",
       "auditNote": "management-performance.test.ts",
       "edges": [
@@ -8377,8 +8896,14 @@
           "inventoryRefs": [
             "UI-059"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/org-teams.spec.ts",
+              "name": "a team is created, staffed, inspected and removed; membership never changes organization access",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-059-E02",
@@ -8427,7 +8952,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "untested",
+      "status": "e2e",
       "auditEvidence": "UNTESTED",
       "auditNote": "management-team-members.test.ts tests API pagination, not rendered pagination lifecycle",
       "edges": [
@@ -8439,8 +8964,19 @@
           "inventoryRefs": [
             "UI-060"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/org-teams.spec.ts",
+              "name": "a team is created, staffed, inspected and removed; membership never changes organization access",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/org-teams.spec.ts",
+              "name": "a roster larger than one page loads more, retries failures and ignores an outdated response",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-060-E02",
@@ -8450,8 +8986,14 @@
           "inventoryRefs": [
             "O15"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/org-teams.spec.ts",
+              "name": "a team is created, staffed, inspected and removed; membership never changes organization access",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-060-E03",
@@ -8461,8 +9003,14 @@
           "inventoryRefs": [
             "O15"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/org-teams.spec.ts",
+              "name": "a team is created, staffed, inspected and removed; membership never changes organization access",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-060-E04",
@@ -8472,8 +9020,19 @@
           "inventoryRefs": [
             "O15"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/org-teams.spec.ts",
+              "name": "a team is created, staffed, inspected and removed; membership never changes organization access",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/org-teams.spec.ts",
+              "name": "a roster larger than one page loads more, retries failures and ignores an outdated response",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-060-E05",
@@ -8483,8 +9042,14 @@
           "inventoryRefs": [
             "O15"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/org-teams.spec.ts",
+              "name": "a team is created, staffed, inspected and removed; membership never changes organization access",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-060-E06",
@@ -8494,8 +9059,14 @@
           "inventoryRefs": [
             "O15"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/org-teams.spec.ts",
+              "name": "a team is created, staffed, inspected and removed; membership never changes organization access",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-060-E07",
@@ -8505,8 +9076,19 @@
           "inventoryRefs": [
             "O15"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/org-teams.spec.ts",
+              "name": "a team is created, staffed, inspected and removed; membership never changes organization access",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/org-teams.spec.ts",
+              "name": "a roster larger than one page loads more, retries failures and ignores an outdated response",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-060-E08",
@@ -8516,8 +9098,14 @@
           "inventoryRefs": [
             "O15"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/org-teams.spec.ts",
+              "name": "a roster larger than one page loads more, retries failures and ignores an outdated response",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-060-E09",
@@ -8527,8 +9115,14 @@
           "inventoryRefs": [
             "O15"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/org-teams.spec.ts",
+              "name": "a team is created, staffed, inspected and removed; membership never changes organization access",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-060-E10",
@@ -8538,8 +9132,14 @@
           "inventoryRefs": [
             "O15"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/org-teams.spec.ts",
+              "name": "a roster larger than one page loads more, retries failures and ignores an outdated response",
+              "kind": "e2e"
+            }
+          ]
         }
       ]
     },
@@ -9448,7 +10048,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "unit",
+      "status": "e2e",
       "auditEvidence": "U",
       "auditNote": "organization-role-ux.test.ts",
       "edges": [
@@ -9460,8 +10060,14 @@
           "inventoryRefs": [
             "UI-070"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/org-onboarding.spec.ts",
+              "name": "an ordinary member sees setup restricted to admins, and the APIs refuse them",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-070-E02",
@@ -9471,8 +10077,19 @@
           "inventoryRefs": [
             "O03"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/org-onboarding.spec.ts",
+              "name": "an owner goes from project to key to a real CLI deployment with polling, outage recovery and one-time secret handling",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/org-onboarding.spec.ts",
+              "name": "an ordinary member sees setup restricted to admins, and the APIs refuse them",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-070-E03",
@@ -9482,8 +10099,14 @@
           "inventoryRefs": [
             "O03"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/org-onboarding.spec.ts",
+              "name": "an owner goes from project to key to a real CLI deployment with polling, outage recovery and one-time secret handling",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-070-E04",
@@ -9493,8 +10116,19 @@
           "inventoryRefs": [
             "O03"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/org-onboarding.spec.ts",
+              "name": "an owner goes from project to key to a real CLI deployment with polling, outage recovery and one-time secret handling",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/org-onboarding.spec.ts",
+              "name": "an ordinary member sees setup restricted to admins, and the APIs refuse them",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-070-E05",
@@ -9515,8 +10149,14 @@
           "inventoryRefs": [
             "O03"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/org-onboarding.spec.ts",
+              "name": "setup initialization failure recovers with Try again; a foreign project cannot be used and Finish later leaves setup",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-070-E07",
@@ -9565,7 +10205,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "browser",
+      "status": "e2e",
       "auditEvidence": "UNTESTED",
       "auditNote": "organization-pages.ts projectStage",
       "edges": [
@@ -9577,8 +10217,14 @@
           "inventoryRefs": [
             "UI-071"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/org-onboarding.spec.ts",
+              "name": "an owner goes from project to key to a real CLI deployment with polling, outage recovery and one-time secret handling",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-071-E02",
@@ -9588,8 +10234,14 @@
           "inventoryRefs": [
             "O04"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/org-onboarding.spec.ts",
+              "name": "an owner goes from project to key to a real CLI deployment with polling, outage recovery and one-time secret handling",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-071-E03",
@@ -9599,12 +10251,17 @@
           "inventoryRefs": [
             "O04"
           ],
-          "status": "browser",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/management-dialog-reuse-browser.test.ts",
               "name": "$name stays completed during delayed navigation and supports a fresh submission",
               "kind": "browser"
+            },
+            {
+              "file": "e2e/org-onboarding.spec.ts",
+              "name": "an owner goes from project to key to a real CLI deployment with polling, outage recovery and one-time secret handling",
+              "kind": "e2e"
             }
           ]
         },
@@ -9616,8 +10273,14 @@
           "inventoryRefs": [
             "O04"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/org-onboarding.spec.ts",
+              "name": "setup initialization failure recovers with Try again; a foreign project cannot be used and Finish later leaves setup",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-071-E05",
@@ -9627,12 +10290,17 @@
           "inventoryRefs": [
             "O04"
           ],
-          "status": "browser",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/management-dialog-reuse-browser.test.ts",
               "name": "$name stays completed during delayed navigation and supports a fresh submission",
               "kind": "browser"
+            },
+            {
+              "file": "e2e/org-onboarding.spec.ts",
+              "name": "an owner goes from project to key to a real CLI deployment with polling, outage recovery and one-time secret handling",
+              "kind": "e2e"
             }
           ]
         },
@@ -9644,8 +10312,14 @@
           "inventoryRefs": [
             "O04"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/org-onboarding.spec.ts",
+              "name": "setup initialization failure recovers with Try again; a foreign project cannot be used and Finish later leaves setup",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-071-E07",
@@ -9704,7 +10378,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "browser",
+      "status": "e2e",
       "auditEvidence": "UNTESTED",
       "auditNote": "onboarding-cli-command.test.ts checks generated command, not credential lifecycle",
       "edges": [
@@ -9716,8 +10390,14 @@
           "inventoryRefs": [
             "UI-072"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/org-onboarding.spec.ts",
+              "name": "an owner goes from project to key to a real CLI deployment with polling, outage recovery and one-time secret handling",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-072-E02",
@@ -9727,8 +10407,14 @@
           "inventoryRefs": [
             "O05"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/org-onboarding.spec.ts",
+              "name": "an owner goes from project to key to a real CLI deployment with polling, outage recovery and one-time secret handling",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-072-E03",
@@ -9749,8 +10435,14 @@
           "inventoryRefs": [
             "O05"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/org-onboarding.spec.ts",
+              "name": "an owner goes from project to key to a real CLI deployment with polling, outage recovery and one-time secret handling",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-072-E05",
@@ -9760,8 +10452,14 @@
           "inventoryRefs": [
             "O05"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/org-onboarding.spec.ts",
+              "name": "an owner goes from project to key to a real CLI deployment with polling, outage recovery and one-time secret handling",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-072-E06",
@@ -9771,12 +10469,17 @@
           "inventoryRefs": [
             "O05"
           ],
-          "status": "browser",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/management-dialog-reuse-browser.test.ts",
               "name": "onboarding credentials recover from denial and protect the one-time secret after each success",
               "kind": "browser"
+            },
+            {
+              "file": "e2e/org-onboarding.spec.ts",
+              "name": "an owner goes from project to key to a real CLI deployment with polling, outage recovery and one-time secret handling",
+              "kind": "e2e"
             }
           ]
         },
@@ -9788,8 +10491,14 @@
           "inventoryRefs": [
             "O05"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/org-onboarding.spec.ts",
+              "name": "an owner goes from project to key to a real CLI deployment with polling, outage recovery and one-time secret handling",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-072-E08",
@@ -9838,7 +10547,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "browser",
+      "status": "e2e",
       "auditEvidence": "UNTESTED",
       "auditNote": "management-page-lifecycle.test.ts executes generic scope cleanup only; onboarding-specific key guard/secret/poll teardown not exercised",
       "edges": [
@@ -9861,8 +10570,14 @@
           "inventoryRefs": [
             "O06"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/org-onboarding.spec.ts",
+              "name": "an owner goes from project to key to a real CLI deployment with polling, outage recovery and one-time secret handling",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-073-E03",
@@ -9872,8 +10587,14 @@
           "inventoryRefs": [
             "O06"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/org-onboarding.spec.ts",
+              "name": "an owner goes from project to key to a real CLI deployment with polling, outage recovery and one-time secret handling",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-073-E04",
@@ -9955,7 +10676,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "untested",
+      "status": "e2e",
       "auditEvidence": "UNTESTED",
       "auditNote": "organization-pages.ts pollDeployment",
       "edges": [
@@ -9967,8 +10688,14 @@
           "inventoryRefs": [
             "UI-074"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/org-onboarding.spec.ts",
+              "name": "an owner goes from project to key to a real CLI deployment with polling, outage recovery and one-time secret handling",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-074-E02",
@@ -9978,8 +10705,14 @@
           "inventoryRefs": [
             "O07"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/org-onboarding.spec.ts",
+              "name": "an owner goes from project to key to a real CLI deployment with polling, outage recovery and one-time secret handling",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-074-E03",
@@ -9989,8 +10722,14 @@
           "inventoryRefs": [
             "O07"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/org-onboarding.spec.ts",
+              "name": "an owner goes from project to key to a real CLI deployment with polling, outage recovery and one-time secret handling",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-074-E04",
@@ -10011,8 +10750,14 @@
           "inventoryRefs": [
             "O07"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/org-onboarding.spec.ts",
+              "name": "an owner goes from project to key to a real CLI deployment with polling, outage recovery and one-time secret handling",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-074-E06",
@@ -10066,7 +10811,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "untested",
+      "status": "e2e",
       "auditEvidence": "UNTESTED",
       "auditNote": "organization-pages.ts schedulePoll/pollDeployment",
       "edges": [
@@ -10078,8 +10823,14 @@
           "inventoryRefs": [
             "UI-075"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/org-onboarding.spec.ts",
+              "name": "an owner goes from project to key to a real CLI deployment with polling, outage recovery and one-time secret handling",
+              "kind": "e2e"
+            }
+          ]
         }
       ]
     },
@@ -10111,7 +10862,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "untested",
+      "status": "e2e",
       "auditEvidence": "UNTESTED",
       "auditNote": "organization-pages.ts init/projectStage",
       "edges": [
@@ -10123,8 +10874,14 @@
           "inventoryRefs": [
             "UI-076"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/org-onboarding.spec.ts",
+              "name": "setup initialization failure recovers with Try again; a foreign project cannot be used and Finish later leaves setup",
+              "kind": "e2e"
+            }
+          ]
         }
       ]
     },

@@ -250,6 +250,54 @@ pass fails the suite):
   controller uses, refreshes correctly and is covered. No current screen has a Reset button.
 
 
+## Organizations, onboarding, people and teams (#112)
+
+Six specs under `e2e/org-*.spec.ts` run the organization journeys on the real Worker
+and local Convex in all three engines. Journeys that involve several people use
+`e2e/org-fixtures.ts`: each *actor* is its own browser context (own cookies and
+ingress address), provisioned through the real signup, mail verification and
+organization APIs by the shell helpers, and closed with the external-request guard
+asserted. Setup that is not the journey under test (an invitation accepted so
+someone is already a member) goes through the real authorization APIs; the journey
+itself is driven through the UI. Final state is asserted three ways: the DOM (text,
+ARIA, focus, announced toasts), the URL, and a re-fetch from the server or a second
+person's view.
+
+| Spec | Covers |
+|---|---|
+| `org-lifecycle.spec.ts` | Chooser with zero, one and many organizations (replace-redirect, forced chooser, cards, hostile names as text), create with slug derivation/override, length, native validation, pending exclusion, conflict and retry, the completed-state recovery link, list failure and Try again; settings guard, canonical save, slug conflict; owner-only deletion (API-only: there is no delete control) and the lost access of every member |
+| `org-onboarding.spec.ts` | Organization → project → credential → first deployment with a real CLI push, five-second polling on a frozen page clock (hidden-tab pause, outage and recovery), one-time key reveal/copy/confirmation, setup initialization failure, foreign project, Finish later, member restriction |
+| `org-people.spec.ts` | Invite batch (1–10 rows, native validation, sequential partial failure, retry without resending, captured mail), pending list failure and retry, revocation; roles (owner/admin/member controls, last-owner rule, failure revert, self-demotion, leave); member removal (confirmation, pending, failure, retry, lost access, team membership, revoked admin's rejected action) |
+| `org-invitations.spec.ts` | Mailed link signed out through sign-up, verification and sign-in; review, accept (failure, pending, completed-state recovery) and decline; wrong recipient, revoked, expired and already-used invitations |
+| `org-teams.spec.ts` | Create (validation, pending, failure, reuse), assign, roster open/hide/refresh, remove from team, delete, read-only members; a 52-member roster with Load more, failure and retry, and an outdated page response |
+| `org-permissions.spec.ts` | Controls of owner, admin and member on People, Teams and Settings; outsider denial; every management write refused for members, outsiders and (for ownership and deletion) admins |
+
+Completed writes navigate immediately, so "stays visible" states are observed by
+cancelling the destination navigation (`stopNavigation`, an aborted request that keeps the
+current document) and then following the recovery link with real navigation. The 52
+organization members of the roster test are written directly to the disposable auth
+store through the admin key (`authRecord("create", …)`): signing up that many users
+would dominate the run, and the roster is read through the same management APIs.
+Invitation expiry is aged the same way. Polling uses Playwright's fake clock paused
+after load; timers advance only when the test says so. A real `beforeunload`
+prompt is not exercised: the guard is checked by dispatching the event and reading
+`defaultPrevented`.
+
+Expected failures (no `e2e` credit; an unexpected pass fails the suite):
+
+- **The API accepts organization slugs that violate the documented pattern.** `create` and `update` accept `Not A Valid Slug`; only the `pattern` attribute of the form enforces lowercase hyphenated slugs.
+- **Any member can read the pending invitations.** `list-invitations` only requires membership, so an ordinary member sees every invited address, role and status; the UI avoids requesting it for members, and a unit test names the request "forbidden".
+- **An expired invitation is listed as Pending** until someone revokes it: the list filters on `status` only.
+- **A blank team name is accepted.** Whitespace passes `required`, is trimmed to empty by the dialog, and neither it nor the API rejects it; the team card renders with an empty heading.
+- **The last team cannot be deleted, but the UI offers it.** The page renders Remove team and an empty state, while the server always refuses the last team, so the empty state is unreachable.
+- **A roster refresh after an assignment can be answered by an older read.** Plain GETs are coalesced per page scope and a mutation does not discard them, so a refresh issued while the first roster read is still in flight reuses that older, pre-assignment response.
+
+Not asserted (not credited): the invitation page's own read-failure state (the page consumes the
+server-rendered lookup instead of issuing a read that a browser test could fail), the organization
+creation form's Cancel (there is none), roster completion beyond 100 members, the onboarding
+credential step's third and fourth scope (the step offers only the two recommended ones), a
+real `beforeunload` prompt, and an empty team list (unreachable, see above).
+
 ## Vitest Chromium project
 
 Run `pnpm exec playwright install chromium`, then `CI=true pnpm test:browser`.

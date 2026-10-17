@@ -75,7 +75,7 @@ export async function signout(page: Page) {
 /** Administrative access is only to the private backend allocated by global setup.
  * No production function, auth option or clock is changed. Never print this file.
  */
-export async function authRecord<T>(operation: "findOne" | "updateOne", args: object): Promise<T> {
+export async function authRecord<T>(operation: "findOne" | "updateOne" | "create", args: object): Promise<T> {
   const directory = process.env.RENDRO_E2E_DIRECTORY;
   if (!directory) throw new Error("Missing disposable backend directory");
   const { origin, adminKey } = JSON.parse(await readFile(join(directory, "backend-admin.json"), "utf8")) as { origin: string; adminKey: string };

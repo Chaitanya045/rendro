@@ -1,25 +1,7 @@
 import type { Page } from "@playwright/test";
 import { test, expect } from "./shell-fixtures";
 import type { Pool } from "./shell-fixtures";
-import { desktop, mobile, shellReady, signInSeeded } from "./shell-helpers";
-
-/** Replace the async clipboard so success, delay and rejection are deterministic in every engine. */
-async function fakeClipboard(page: Page) {
-  await page.addInitScript(() => {
-    const state = { mode: "ok" as "ok" | "reject", delay: 250, writes: [] as string[] };
-    (window as unknown as { clipboardState: typeof state }).clipboardState = state;
-    Object.defineProperty(navigator, "clipboard", {
-      configurable: true,
-      value: {
-        writeText: (value: string) => new Promise<void>((resolve, reject) => setTimeout(() => {
-          if (state.mode === "reject") reject(new DOMException("denied", "NotAllowedError"));
-          else { state.writes.push(value); resolve(); }
-        }, state.delay)),
-      },
-    });
-  });
-}
-const clipboard = (page: Page) => page.evaluate(() => (window as unknown as { clipboardState: { writes: string[] } }).clipboardState.writes);
+import { clipboard, desktop, fakeClipboard, mobile, shellReady, signInSeeded } from "./shell-helpers";
 
 test.describe("copy feedback", () => {
   test.use({ viewport: desktop });
