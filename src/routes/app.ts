@@ -299,8 +299,11 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
   html.shell-hidden.shell-sidebar-revealed .sidebar,html.shell-hidden.shell-sidebar-revealed .sidebar-resizer{transform:translateX(0);opacity:1;pointer-events:auto}
   html.shell-hidden .main{margin-left:0;margin-top:0;height:100vh}
 
-  .tree-folder-content{overflow:hidden;transition:max-height .4s cubic-bezier(.34,1.56,.64,1),opacity .3s ease;max-height:0;opacity:0}
-  .tree-folder.open>.tree-folder-content{max-height:2000px;opacity:1;overflow:visible}
+  /* The collapse wrapper animates a 0fr→1fr row, so an open folder is exactly as tall as its rows, however many pages are loaded. */
+  .tree-folder-collapse{display:grid;grid-template-rows:0fr;transition:grid-template-rows .4s cubic-bezier(.34,1.56,.64,1),opacity .3s ease;opacity:0}
+  .tree-folder.open>.tree-folder-collapse{grid-template-rows:1fr;opacity:1}
+  .tree-folder-content{min-height:0;overflow:hidden}
+  .tree-folder.open>.tree-folder-collapse>.tree-folder-content{overflow:visible}
   /* ── sticky folder headers (VS Code-style stacking) ── */
   .tree-folder.open>.tree-item{position:sticky;background:var(--sidebar-bg,#fff)}
   .tree-folder[data-depth="0"].open>.tree-item{top:0;z-index:10}
@@ -370,7 +373,7 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
   @media (prefers-reduced-motion: reduce){.tree-skeleton-icon,.tree-skeleton-label{animation:none;background:#f4f4f5}}
   @media (prefers-reduced-motion: reduce){.topbar,.sidebar,.main,.sidebar-resizer,.share-label-track,.shortcut-tooltip,.sidebar-resizer::before{transition:none}.sidebar-resizer::before{transform:scaleY(1)}.resizer-sparks{display:none}}
   @media (prefers-reduced-motion: reduce){.share-icon-track{transition:none}.share-loader{animation:none!important}}
-  @media (prefers-reduced-motion: reduce){.tree-folder-content,.active-indicator{transition:none!important}}
+  @media (prefers-reduced-motion: reduce){.tree-folder-collapse,.active-indicator{transition:none!important}}
   .avatar-wrap{position:relative}
   @keyframes viewerMenuIn{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}
   .avatar-menu{position:absolute;top:44px;right:0;background:#fff;border:1px solid #e4e4e7;border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,.12);padding:4px;width:230px;max-width:calc(100vw - 20px);z-index:100}
@@ -945,6 +948,11 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
     finally{sharePending=false;}
   });
   document.addEventListener("click",function(){setAvatarMenu(false);setMobileMore(false,false);});
+  // The document is another frame: a click inside it never reaches this page's click handler, but it moves focus into the
+  // frame and blurs this window. Keyboard use of the menus keeps focus in this page, so nothing closes then.
+  window.addEventListener("blur",function(){if(document.activeElement===document.getElementById("content-frame")){setAvatarMenu(false);setMobileMore(false,false);}});
+  // Engines that do not report that blur are told by the document itself: it posts a bare message on a press inside it.
+  window.addEventListener("message",function(e){var frame=document.getElementById("content-frame");if(frame&&e.source===frame.contentWindow&&e.data&&e.data.type==="doc-pointer"){setAvatarMenu(false);setMobileMore(false,false);}});
 })();
 </script>
 <script${nonceAttribute()}>window.RENDRO_INITIAL_DOC=${inlineJson(selectedDoc)};window.RENDRO_ORG=${inlineJson(org)};window.RENDRO_DOCUMENT_BASE=${inlineJson(documentBase)};window.RENDRO_PUBLICATION_BASE=${inlineJson(isPublicDocument ? documentBase : "")};window.RENDRO_SHARE_CONFIG=${inlineJson(options.shareConfig ?? null)};window.RENDRO_LEGACY_COMMENT_CONFIG=${inlineJson(options.legacyCommentConfig ?? null)};</script>

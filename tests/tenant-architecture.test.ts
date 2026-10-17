@@ -322,4 +322,20 @@ describe("private project documents", () => {
       "/sign-in?returnTo=%2Forganizations%2Forg-a%2Fprojects%2Fproject-a%2Fdocs",
     );
   });
+
+  it("carries the requested document and publisher query through sign-in, and nothing else", async () => {
+    const docs = "/organizations/org-a/projects/project-a/docs";
+    const location = async (query: string) => (await projectDocsRoutes.request(`${docs}${query}`)).headers.get("Location");
+    const returnTo = (path: string) => `/sign-in?returnTo=${encodeURIComponent(path)}`;
+    expect(await location("?doc=guide%2Fintro.html")).toBe(returnTo(`${docs}?doc=guide%2Fintro.html`));
+    expect(await location("?doc=guide%2Fintro.html&docQuery=%3Fv%3D1%26w%3D2")).toBe(returnTo(`${docs}?doc=guide%2Fintro.html&docQuery=%3Fv%3D1%26w%3D2`));
+    // Other parameters, a publisher query without a document, and malformed values never travel.
+    expect(await location("?doc=a.html&utm=x&dev_user=someone")).toBe(returnTo(`${docs}?doc=a.html`));
+    expect(await location("?docQuery=%3Fv%3D1")).toBe(returnTo(docs));
+    expect(await location("?doc=a.html&docQuery=v%3D1")).toBe(returnTo(`${docs}?doc=a.html`));
+    expect(await location(`?doc=a.html&docQuery=${encodeURIComponent(`?${"x".repeat(4096)}`)}`)).toBe(returnTo(`${docs}?doc=a.html`));
+    for (const hostile of ["%2F%2Foutside.invalid", "..%2Fsecret.html", "a%5Cb.html", "a%00.html", "https%3A%2F%2Foutside.invalid%2F", "%2Fabsolute.html", "a%2F%2Fb.html", ""]) {
+      expect(await location(`?doc=${hostile}`)).toBe(returnTo(docs));
+    }
+  });
 });

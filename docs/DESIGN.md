@@ -195,7 +195,7 @@ Current source locations:
 Rules:
 
 - Prefer `transform` and `opacity` for movement.
-- Folder expansion may animate `max-height` because the tree is the only expanding layout surface; keep it bounded and predictable.
+- Folder expansion animates a grid row (`0fr → 1fr`) because the tree is the only expanding layout surface; an open folder is always exactly as tall as its rows. A closed folder is also `inert`.
 - Sidebar resize may animate `width`/`margin-left` over `300ms`; live dragging disables transitions so the pane tracks the pointer directly.
 - Do not animate iframe opacity during document navigation. Full-opacity iframe prevents app-surface flashes between differently themed docs.
 - Infinite animation is allowed only for active loading state. No ambient loops in chrome.
@@ -224,8 +224,8 @@ Purpose: global actions, not navigation depth.
 - Header starts with the project title (project viewer), publication title (public viewer), or organization slug (legacy viewer) as the page `h1`; there is no sidebar collapse toggle.
 - The title uses the primary color and stays consistent between private and public docs.
 - Right-side actions: hide/show app shell, share, theme toggle, avatar. The share button is **Share document** in the project viewer (creates a revocable 7-day private share), **Copy public URL** in the public viewer, and **Copy signed URL** in the legacy viewer.
-- On mobile the toolbar keeps the tree toggle, title, and share visible and moves the project back link, reading mode, theme, and account into a **More** menu (`aria-label="More document actions"`, `44px` rows, closes on `Escape` or outside click and returns focus). The theme row in that menu is a plain row: no border or background, row text color.
-- Avatar menu opens near its trigger and closes on outside click. Successful copy feedback stays inline in the copy button. Share failures use a persistent, dismissible notice placed after the toolbar in DOM order; Escape dismisses it and returns focus to the share action. A separate, always-present polite live region announces the reason once, and a delay once when it starts and once when it ends. The per-second countdown is aria-hidden, never live. Size/complexity errors explain the limit without Retry; a busy (deadline) failure offers Retry; quota errors count down to an explicit Retry action. Dismissing a quota notice does not bypass its delay, and navigating to another document clears every notice except the quota countdown.
+- On mobile the toolbar keeps the tree toggle, title, and share visible and moves the project back link, reading mode, theme, and account into a **More** menu (`aria-label="More document actions"`, `44px` rows, closes on `Escape`, an outside click or a click inside the document, and returns focus). The theme row in that menu is a plain row: no border or background, row text color.
+- Avatar menu opens near its trigger and closes on outside click and when the reader presses inside the document (a click there never reaches the shell: it is detected by the window's `blur` with the frame focused, and by the document's own `doc-pointer` message in engines that do not report that blur). Successful copy feedback stays inline in the copy button. Share failures use a persistent, dismissible notice placed after the toolbar in DOM order; Escape dismisses it and returns focus to the share action. A separate, always-present polite live region announces the reason once, and a delay once when it starts and once when it ends. The per-second countdown is aria-hidden, never live. Size/complexity errors explain the limit without Retry; a busy (deadline) failure offers Retry; quota errors count down to an explicit Retry action. Dismissing a quota notice does not bypass its delay, and navigating to another document clears every notice except the quota countdown.
 - Hide/show app shell persists in `localStorage`; `Ctrl+Shift+H` (`Cmd+Shift+H` on macOS) toggles it from either the app shell or the focused document iframe, top/left hot zones temporarily reveal the header/sidebar while hidden, and `Escape` restores the full shell.
 - Theme toggle cycles `system → dark → light → system`. Supported browsers reveal the new shell/commentor theme with a radial ripple from the theme button while the icon scrolls through `contrast`, `dark_mode`, and `light_mode`. Reduced-motion and unsupported browsers switch directly. Publisher iframe content is not restyled.
 
@@ -352,7 +352,7 @@ Rendro's micro-interactions are small and functional. They make state legible.
 
 | Surface | Interaction |
 |---|---|
-| Tree folder | Caret rotates over `300ms`; children expand/collapse with opacity + bounded max-height |
+| Tree folder | Caret rotates over `300ms`; children expand/collapse with opacity + a `0fr → 1fr` grid row; closed rows are `inert` |
 | Tree active item | 4px active indicator translates to selected item over `300ms` |
 | Tree hover | Background/text color transition over `200ms` |
 | Topbar search | Border shifts to primary on focus within `150ms` |

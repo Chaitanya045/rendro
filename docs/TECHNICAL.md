@@ -930,7 +930,7 @@ Management screens gate retained data on `GET /api/rendro/management/access?orga
 
 Legacy `/docs/:org` and nested document URLs require live membership in an explicitly mapped Better Auth organization. Signed-out requests redirect to sign-in with a return path. Missing or inaccessible organizations return the shared styled 404, regardless of the email domain; they never start v1 organization creation. New organizations use the v2 management flow at `/organizations` (the 404 links to `/organizations?choose=1` so existing members can also choose **New organization**).
 
-The project and publication viewers share `renderScopedDocumentShell()` in `src/routes/app.ts`. The project shell resolves the active deployment through Convex with the session cookie, looks up `?doc=` or `index.html` in the deployment index (falling back to the first HTML file), and validates that the selection is an HTML manifest entry. Unknown paths return the shared 404 page.
+The project and publication viewers share `renderScopedDocumentShell()` in `src/routes/app.ts`. The project shell resolves the active deployment through Convex with the session cookie, looks up `?doc=` or `index.html` in the deployment index (falling back to the first HTML file), and validates that the selection is an HTML manifest entry. Unknown paths return the shared 404 page. A signed-out request redirects to `/sign-in?returnTo=<…/docs>` and keeps the reader's selection: `doc` when it is a canonical document path and `docQuery` when it is a valid publisher query (`?` first, no fragment, at most 4,096 characters); every other parameter is dropped. The sign-in page then accepts only a rooted single-slash path without backslashes or control characters as `returnTo`, so an absolute URL, `//host`, a backslash variant or an encoded form of either falls back to `/`. A `#fragment` never reaches the server and is not carried.
 
 `…/docs/tree?dir=<directory>&cursor=<page>` returns one directory page from the index: `{ children: [{ name, type: "file" | "folder" }], cursor }`, with at most 200 children. `dir` is `""` for the root or a canonical relative path ending in `/`; `cursor` is the next page number or `null`. A malformed directory or cursor returns 400 before storage is read, and an unknown directory returns an empty page. `/p/:slug/tree` serves the same pages, relative to the publication's path prefix, so it can never name a path outside the prefix. Without `dir`, both routes keep the previous `{ documents, cursor }` list of all HTML paths in pages of 200 for clients that predate directory pages. `…/docs/files/*` serves only manifest entries with `Cache-Control: private, no-store`, `X-Content-Type-Options: nosniff`, and either `sandbox allow-scripts allow-forms allow-popups allow-downloads; frame-ancestors 'self'` (HTML) or `default-src 'none'` (other types) as the Content-Security-Policy. HTML responses get a small injected script for navigation messages, the shell shortcut, and the comment configuration; stored publisher bytes are never modified.
 
@@ -1069,7 +1069,9 @@ Client (lazy-tree.js, ~25KB IIFE built from src/lazy-tree/)
   │   └─ history.pushState (?doc=<path> for scoped viewers, /docs/:org/:path for legacy)
   ├─ postMessage listener (current content iframe only)
   │   ├─ doc-navigate → parent authorization / confirmation → loadDoc(path, push/replace)
+  │   ├─ doc-external → parent confirmation → window.open(href, "_blank", "noopener,noreferrer")
   │   ├─ doc-loaded → acknowledge expected path (no navigation or tree fetch)
+  │   ├─ doc-pointer → (inline shell script) close the account and More menus; carries no data
   │   └─ shell-toggle → Ctrl/Cmd+Shift+H inside the iframe toggles the shell
   └─ popstate / initial URL → loadDoc(path)
 ```
@@ -1124,6 +1126,16 @@ destination. Focus moves only for explicit parent Review/Dismiss actions. The na
 works with mouse and keyboard even when the activation API is absent. Shell
 `toggle` messages also fail closed when the API is absent. Share viewers retain
 their native, document-scoped navigation path.
+
+A link to another site (an absolute `http(s)` address on a different origin, in a scoped or legacy viewer
+frame) never loads in the sandboxed frame, which the shell's frame policy would refuse. The frame cancels the click
+and sends `doc-external` with the resolved address; shares, standalone documents, `mailto:` and script URLs keep
+native behavior. The parent re-validates the address (a string of at most 2,048 characters, `http(s)`, not its own
+origin) and offers it through the same bounded confirmation as a document: one visible prompt that is never
+retargeted, one silently replaced pending address while dismissed, and a parent-owned "Review external link"
+button. The label is assigned with `textContent`. Only the reader's "Open external link" press opens it, with
+`window.open(href, "_blank", "noopener,noreferrer")`, so the other site gets a new tab with no handle back to the
+viewer and the document, its history and its selection stay where they were. The sandbox is unchanged.
 
 A first authorized navigation pushes history; explicit parent confirmations or
 tree selections while activation remains consumed replace that entry. Fragment
@@ -1196,12 +1208,14 @@ The iframe stays at full opacity throughout. There is no fixed header line, main
   z-index: calc(10 - var(--depth)); /* 10, 9, 8... */
   background: var(--sidebar-bg);
 }
-.tree-folder.open > .tree-folder-content {
+.tree-folder.open > .tree-folder-collapse > .tree-folder-content {
   overflow: visible; /* unblock sticky positioning */
 }
 ```
 
 Zero JavaScript. Multiple open folders stack with increasing top offset.
+
+A folder's rows sit in `.tree-folder-content` inside `.tree-folder-collapse`. The wrapper is a grid whose single row animates `0fr → 1fr` (with opacity), so an open folder is exactly as tall as its loaded rows, however many Load-more pages it holds, and nothing is drawn over the rows after it. A closed folder's wrapper carries `inert` (set when the folder is rendered, removed when it opens, set again when it closes), so its rows are skipped by Tab and left out of the accessibility tree; `aria-expanded` on the folder row still announces the state. Reduced motion removes the transition.
 
 ---
 

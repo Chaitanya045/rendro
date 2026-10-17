@@ -15,6 +15,7 @@ import { renderNotFoundPage } from "@/routes/not-found";
 import { injectViewerHeadStream } from "@/routes/document-html";
 import { deploymentDocuments, openDeploymentIndex, validTreeDirectory } from "@/deployment-index";
 import { treePageCursor } from "@/routes/tree-pages";
+import { validDocumentSearch } from "@/lazy-tree/messages";
 
 const app = new Hono<{ Variables: { user?: User } }>();
 
@@ -223,7 +224,18 @@ app.get("/organizations/:organizationId/projects/:projectId/docs", async (c) => 
   const organizationId = c.req.param("organizationId");
   const projectId = c.req.param("projectId");
   const base = basePath(organizationId, projectId);
-  if (!user) return c.redirect(`/sign-in?returnTo=${encodeURIComponent(base)}`);
+  if (!user) {
+    // Sign-in returns to the document that was asked for. Only well-formed selectors travel; the sign-in page still
+    // accepts nothing but a same-origin relative path.
+    const wanted = c.req.query("doc");
+    const query = new URLSearchParams();
+    if (wanted && isCanonicalStorageKey(wanted)) {
+      query.set("doc", wanted);
+      const publisherQuery = c.req.query("docQuery");
+      if (publisherQuery && validDocumentSearch(publisherQuery)) query.set("docQuery", publisherQuery);
+    }
+    return c.redirect(`/sign-in?returnTo=${encodeURIComponent(query.size ? `${base}?${query}` : base)}`);
+  }
   const active = await activeDeployment(organizationId, projectId, c.req.header("Cookie"));
   if (active && "unavailable" in active) return unavailableResponse(c, active);
   if (!active) return c.html(renderNotFoundPage({ path: c.req.path }), 404);
