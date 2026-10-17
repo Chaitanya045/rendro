@@ -21,9 +21,13 @@ const record = () => {
 
 async function themeCycle(page: Page, context: BrowserContext, baseURL: string | undefined, seed: Seed, viewport: { width: number; height: number }) {
   await page.setViewportSize(viewport);
-  await page.emulateMedia({ colorScheme: "dark" });
   await page.addInitScript(record);
   await signInSeeded(context, baseURL, seed, "owner");
+  // Firefox's automation drops emulated media when a navigation enters a new browsing context group, which every
+  // trusted page starts with COOP same-origin (#89); navigations within the group keep it. Enter the group first, so
+  // the measured load below starts with the preference already applied.
+  await page.goto(`/organizations/${seed.organizationId}`);
+  await page.emulateMedia({ colorScheme: "dark" });
   // System preference with nothing stored: dark before the body exists.
   await page.goto(`/organizations/${seed.organizationId}`);
   await shellReady(page);

@@ -105,6 +105,11 @@ are self-hosted, so no CDN is stubbed. Any other destination fails. Teardown clo
 mail sink and S3Proxy and removes temporary data, including on setup/test failure.
 An empty temporary `.dev.vars` and disabled dotenv loading isolate Worker secrets.
 
+Trusted pages send `Cross-Origin-Opener-Policy: same-origin` (#89). In Firefox, Playwright drops emulated media
+(`emulateMedia`, and the context's `colorScheme`) when a navigation enters a new browsing context group, as the
+first navigation from `about:blank` to a trusted page does. A spec that needs a non-default preference on its first
+load navigates to the origin first, then emulates, then makes the load it measures (see `shell-theme.spec.ts`).
+
 The three engines run the original nonce/CSP, opaque publication/SVG and 404 MIME
 smokes, role/tenant allowed-and-denied checks, local OAuth success/state rejection,
 and one full UI signup → mail verification → organization → project → one-time API
