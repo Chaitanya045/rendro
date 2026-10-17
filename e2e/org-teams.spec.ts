@@ -369,7 +369,9 @@ test.describe("teams", () => {
     expect(refused.body.message).toMatch(/not allowed to delete this team/i);
     expect(await teamsOf(page, organization.id)).toEqual(["Active Org", "Docs"]);
 
-    // Making the other team active moves the restriction with it.
+    // A session can only activate a team it belongs to; once it does, the restriction moves with it.
+    const me = (await api<{ user: { id: string } }>(page, "/api/auth/get-session?disableCookieCache=true")).body.user.id;
+    expect((await api(page, "/api/auth/organization/add-team-member", { teamId: created.body.id, userId: me, organizationId: organization.id })).status).toBe(200);
     const switched = await api(page, "/api/auth/organization/set-active-team", { teamId: created.body.id });
     expect(switched.status).toBe(200);
     expect(await session()).toBe(created.body.id);
