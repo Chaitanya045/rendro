@@ -12647,7 +12647,7 @@
           "id": "UI-100-E08",
           "from": "Tree skeleton or folder",
           "trigger": "Load, expand/collapse, paginate, or retry tree",
-          "expected": "scoped multi-page fetch and correct nested construction",
+          "expected": "scoped directory pages: one root page first, folders and later pages fetched by cursor on request, deep links read only their ancestors",
           "inventoryRefs": [
             "V02"
           ],
@@ -12655,7 +12655,22 @@
           "tests": [
             {
               "file": "tests/lazy-tree-browser.test.ts",
-              "name": "builds one sorted, de-duplicated tree from every page of the document list and opens the linked document",
+              "name": "paints the root from one page, reveals a deep link from its folders only and opens the linked document",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/lazy-tree-browser.test.ts",
+              "name": "pages a large folder on request, from the mouse and the keyboard, without duplicate rows",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/lazy-tree-browser.test.ts",
+              "name": "loads only the deep-linked folder's later pages to reveal a document beyond the first page",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/lazy-tree-browser.test.ts",
+              "name": "pages the root, and reveals deep links into later root pages",
               "kind": "browser"
             }
           ]

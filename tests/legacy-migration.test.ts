@@ -16,6 +16,7 @@ import migrationRoutes from "../src/routes/migration";
 import publicationRoutes from "../src/routes/publication-api";
 import legacyPublicRoutes from "../src/routes/public";
 import publicRoutes from "../src/routes/public-v2";
+import { deploymentMetadataCache } from "../src/immutable-cache";
 
 const confirmedApply = ["--apply", "--confirm-endpoint", "https://worker.test"];
 const target = { legacyOrgSlug: "old-org", organizationId: "org", apiKey: "scoped-key", legacySessionCookie: "better-auth.session_token=legacy-session" };
@@ -131,6 +132,9 @@ beforeEach(async () => {
       if (failure === "source-change") sourceChanged = true;
       expect(body.fileCount).toBeGreaterThan(0);
       expect(body.manifest).toBeUndefined(); // Worker strips manifest after validating its checksum.
+      // This fixture reuses one deployment namespace for every start; real
+      // deployment IDs are never reused, so their cached metadata never goes stale.
+      deploymentMetadataCache.clear();
       return Response.json({ deployment: { deploymentId: "deployment", objectRoot: root, stagingExpiresAt: Date.now() + 3_600_000, manifestKey: `${root}/manifest.json`, treeIndexKey: `${root}/tree-index.json`, ...(failure === "destination-change" ? { previousDeploymentId: "ordinary-deployment" } : {}) } });
     }
     if (path.endsWith("/deployments/staging")) {

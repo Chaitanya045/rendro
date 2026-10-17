@@ -7,12 +7,13 @@ import { viewerScript, viewerUpdateNotice } from "@/viewer/markup";
 import { escapeHtml } from "@/routes/html";
 import type { User } from "better-auth/types";
 import { CONVEX_SITE_URL, CONVEX_URL } from "@/config";
-import { getObjectStream, getObjectText } from "@/minio";
+import { getObjectStream } from "@/minio";
 import { renderScopedDocumentShell } from "@/routes/app";
 import { unavailableResponse, type ViewerUnavailable } from "@/routes/viewer-unavailable";
 import { renderNotFoundPage } from "@/routes/not-found";
 import { injectViewerHeadStream } from "@/routes/document-html";
-import { parseStoredManifest, type StoredManifest } from "@/stored-manifest";
+import { deploymentDocuments, openDeploymentIndex, validTreeDirectory } from "@/deployment-index";
+import { treePageCursor } from "@/routes/tree-pages";
 
 const app = new Hono<{ Variables: { user?: User } }>();
 
@@ -66,11 +67,6 @@ async function activeDeployment(
 
 }
 
-async function activeManifest(result: ActiveDeployment): Promise<StoredManifest | null> {
-  const text = await getObjectText(result.deployment.manifestKey);
-  return parseStoredManifest(text);
-}
-
 function basePath(organizationId: string, projectId: string): string {
   return `/organizations/${encodeURIComponent(organizationId)}/projects/${encodeURIComponent(projectId)}/docs`;
 }
@@ -117,12 +113,21 @@ app.get("/organizations/:organizationId/projects/:projectId/docs/tree", async (c
   const active = await activeDeployment(organizationId, projectId, c.req.header("Cookie"));
   if (active && "unavailable" in active) return unavailableResponse(c, active, "json");
   if (!active) return c.json({ error: "Not found" }, 404);
-  const manifest = await activeManifest(active);
-  if (!manifest) return c.json({ error: "Manifest unavailable" }, 404);
-  const documents = manifest.files.filter((file) => isHtmlAsset(file.path, file.contentType)).map((file) => file.path);
-  const offset = Math.max(0, Number.parseInt(c.req.query("cursor") ?? "0", 10) || 0);
-  const page = documents.slice(offset, offset + 200);
-  return c.json({ documents: page, cursor: offset + page.length < documents.length ? String(offset + page.length) : null });
+  const directory = c.req.query("dir");
+  if (directory === undefined) {
+    // Clients that predate directory pages list every document (rollout only).
+    const documents = await deploymentDocuments(active.deployment.manifestKey);
+    if (!documents) return c.json({ error: "Manifest unavailable" }, 404);
+    const offset = Math.max(0, Number.parseInt(c.req.query("cursor") ?? "0", 10) || 0);
+    const page = documents.slice(offset, offset + 200);
+    return c.json({ documents: page, cursor: offset + page.length < documents.length ? String(offset + page.length) : null });
+  }
+  const pageNumber = treePageCursor(c.req.query("cursor"));
+  if (!validTreeDirectory(directory) || pageNumber === null) return c.json({ error: "Invalid tree page" }, 400);
+  const index = await openDeploymentIndex(active.deployment.manifestKey);
+  if (!index) return c.json({ error: "Manifest unavailable" }, 404);
+  const page = await index.treePage(directory, pageNumber);
+  return c.json({ children: page?.children ?? [], cursor: page?.more ? String(pageNumber + 1) : null });
 });
 
 // Only the trusted same-origin parent can read this cookie-authenticated response.
@@ -173,8 +178,7 @@ app.on("GET", [
   const active = await activeDeployment(organizationId, projectId, cookie);
   if (active && "unavailable" in active) return unavailableResponse(c, active, "asset");
   if (!active || (ticket && ticket.manifestKey !== active.deployment.manifestKey)) return missing();
-  const manifest = await activeManifest(active);
-  const entry = manifest?.files.find((file) => file.path === path);
+  const entry = await (await openDeploymentIndex(active.deployment.manifestKey))?.file(path);
   if (!entry) return missing();
   const key = modernStorageKey({ organizationId, projectId, manifestKey: active.deployment.manifestKey }, path);
   if (!key) return missing();
@@ -222,17 +226,18 @@ app.get("/organizations/:organizationId/projects/:projectId/docs", async (c) => 
   const active = await activeDeployment(organizationId, projectId, c.req.header("Cookie"));
   if (active && "unavailable" in active) return unavailableResponse(c, active);
   if (!active) return c.html(renderNotFoundPage({ path: c.req.path }), 404);
-  const manifest = await activeManifest(active);
-  if (!manifest) return c.html(renderNotFoundPage({ path: c.req.path }), 404);
-  const documents = manifest.files
-    .filter((file) => isHtmlAsset(file.path, file.contentType))
-    .map((file) => file.path);
+  const index = await openDeploymentIndex(active.deployment.manifestKey);
+  if (!index) return c.html(renderNotFoundPage({ path: c.req.path }), 404);
+  const isDocument = async (path: string) => {
+    const entry = await index.file(path);
+    return !!entry && isHtmlAsset(path, entry.contentType);
+  };
   // Hono has already decoded the query parameter; validate the literal key.
   const requested = c.req.query("doc");
   const selectedPath = requested
     ? (isCanonicalStorageKey(requested) ? requested : null)
-    : documents.includes("index.html") ? "index.html" : documents[0];
-  if (!selectedPath || !documents.includes(selectedPath)) {
+    : await isDocument("index.html") ? "index.html" : index.firstDocument;
+  if (!selectedPath || !await isDocument(selectedPath)) {
     return c.html(renderNotFoundPage({ path: c.req.path }), 404);
   }
   const projectBase = base.replace(/\/docs$/, "");

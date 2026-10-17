@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import shareRoutes from "../src/routes/share-v2";
 import * as storage from "../src/minio";
+import { deploymentMetadataCache } from "../src/immutable-cache";
 
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 function fixture(directory: string, assetPaths?: string[]) {
@@ -42,6 +43,8 @@ describe.each(["", "guide/"])("share delivery under %j", directory => {
   it("keeps an empty allowlist document-only and fails closed on unavailable manifests", async () => {
     const f = fixture(directory, []);
     expect((await f.request("style")).status).toBe(404);
+    // A different isolate (empty metadata cache) cannot read the manifest.
+    deploymentMetadataCache.clear();
     vi.mocked(storage.getObjectText).mockResolvedValue(null);
     expect((await f.request("index.html")).status).toBe(404);
     expect(f.read).not.toHaveBeenCalled();

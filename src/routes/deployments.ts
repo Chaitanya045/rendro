@@ -13,9 +13,11 @@ import {
   listAllKeys,
   putObject,
 } from "@/minio";
-import { MAX_REUSED_FILES_PER_REQUEST, MAX_DEPLOYMENT_FILES, MAX_COMMIT_LIST_PAGES, validDeploymentCounts, deploymentFileLimitError } from "../../shared/deployment-limits";
+import { MAX_REUSED_FILES_PER_REQUEST, MAX_DEPLOYMENT_FILES, MAX_COMMIT_LIST_PAGES } from "../../shared/deployment-limits";
 import { decodeStoragePath } from "../../shared/storage-path";
 import { cleanDeploymentPath } from "../../shared/v2-paths";
+import { parseDeploymentManifest, parseDeploymentManifestText, type DeploymentManifest } from "@/stored-manifest";
+import { deploymentIndexObjects, openDeploymentIndex } from "@/deployment-index";
 
 const app = new Hono();
 app.onError((error, c) => {
@@ -23,18 +25,6 @@ app.onError((error, c) => {
   logger.error({ errorType: error.name }, "Deployment request failed");
   return c.json({ error: "Internal server error" }, 500);
 });
-
-type ManifestFile = {
-  path: string;
-  sha256: string;
-  size: number;
-  contentType: string;
-};
-
-type DeploymentManifest = {
-  version: 1;
-  files: ManifestFile[];
-};
 
 type DeploymentIdentity = {
   organizationId: string;
@@ -82,31 +72,6 @@ async function backendRequest(
   }, "deploymentRequest");
 }
 
-function parseManifest(value: unknown): DeploymentManifest | null {
-  if (!value || typeof value !== "object" || !("version" in value) || value.version !== 1) return null;
-  if (!("files" in value) || !Array.isArray(value.files) || value.files.length > MAX_DEPLOYMENT_FILES) return null;
-  const files: ManifestFile[] = [];
-  const paths = new Set<string>();
-  let byteCount = 0;
-  for (const entry of value.files as unknown[]) {
-    if (!entry || typeof entry !== "object") return null;
-    const rawPath = "path" in entry && typeof entry.path === "string" ? entry.path : "";
-    const path = cleanDeploymentPath(rawPath);
-    const fileSha = "sha256" in entry && typeof entry.sha256 === "string" ? entry.sha256 : "";
-    const size = "size" in entry && typeof entry.size === "number" ? entry.size : -1;
-    const contentType = "contentType" in entry && typeof entry.contentType === "string"
-      ? entry.contentType
-      : "application/octet-stream";
-    if (!path || paths.has(path) || !/^[a-f0-9]{64}$/.test(fileSha) || deploymentFileLimitError(rawPath, size, contentType)) return null;
-    byteCount += size;
-    if (!validDeploymentCounts(value.files.length, byteCount)) return null;
-    paths.add(path);
-    files.push({ path, sha256: fileSha, size, contentType });
-  }
-  if (files.some((file, index) => index > 0 && files[index - 1].path >= file.path)) return null;
-  return { version: 1, files };
-}
-
 async function stagingDeployment(
   request: Request,
   identity: DeploymentIdentity,
@@ -118,9 +83,7 @@ async function stagingDeployment(
 }
 
 async function loadManifest(key: string): Promise<DeploymentManifest | null> {
-  const text = await getObjectText(key);
-  if (!text) return null;
-  try { return parseManifest(JSON.parse(text)); } catch { return null; }
+  return parseDeploymentManifestText(await getObjectText(key));
 }
 
 app.get("/api/rendro/deployments/check", async (c) => {
@@ -137,7 +100,7 @@ app.post("/api/rendro/deployments/start", async (c) => {
   let body: unknown;
   try { body = await c.req.json(); } catch { return c.json({ error: "Invalid JSON body" }, 400); }
   if (!body || typeof body !== "object") return c.json({ error: "Invalid deployment body" }, 400);
-  const manifest = "manifest" in body ? parseManifest(body.manifest) : null;
+  const manifest = "manifest" in body ? parseDeploymentManifest(body.manifest) : null;
   const organizationId = "organizationId" in body ? body.organizationId : null;
   const projectId = "projectId" in body ? body.projectId : null;
   const manifestSha256 = "manifestSha256" in body ? body.manifestSha256 : null;
@@ -171,6 +134,8 @@ app.post("/api/rendro/deployments/start", async (c) => {
     };
   };
   try {
+    // Readers fall back to the manifest for any key without an index.
+    const index = await deploymentIndexObjects(result.deployment.manifestKey, manifest, computedSha);
     await Promise.all([
       putObject(result.deployment.manifestKey, manifestText, "application/json", { sha256: computedSha }, deploymentWriteSignal(result.deployment.stagingExpiresAt)),
       putObject(
@@ -180,7 +145,10 @@ app.post("/api/rendro/deployments/start", async (c) => {
         undefined,
         deploymentWriteSignal(result.deployment.stagingExpiresAt),
       ),
+      ...(index?.shards ?? []).map(({ key, body }) => putObject(key, body, "application/json", undefined, deploymentWriteSignal(result.deployment.stagingExpiresAt))),
     ]);
+    // The root is written last, so its presence implies every shard is stored.
+    if (index) await putObject(index.root.key, index.root.body, "application/json", undefined, deploymentWriteSignal(result.deployment.stagingExpiresAt));
   } catch (error: unknown) {
     await backendRequest("/api/rendro/deployments/fail", c.req.raw, {
       method: "POST",
@@ -206,8 +174,9 @@ app.put("/api/rendro/deployments/:deploymentId/files/*", async (c) => {
   const identity = { organizationId, projectId, deploymentId };
   const staging = await stagingDeployment(c.req.raw, identity);
   if (staging instanceof Response) return staging;
-  const manifest = await loadManifest(staging.deployment.manifestKey);
-  const expected = manifest?.files.find((file) => file.path === filePath);
+  // Reads one index shard (or the cached manifest of an unindexed deployment).
+  const index = await openDeploymentIndex(staging.deployment.manifestKey, "staging");
+  const expected = await index?.file(filePath);
   if (!expected) return c.json({ error: "File is not present in the deployment manifest" }, 400);
   const declaredLength = c.req.header("Content-Length");
   if (declaredLength !== undefined) {
@@ -253,12 +222,11 @@ app.post("/api/rendro/deployments/:deploymentId/copy", async (c) => {
   if (paths.length > MAX_REUSED_FILES_PER_REQUEST) {
     return c.json({ error: `Copy at most ${MAX_REUSED_FILES_PER_REQUEST} files per request; update the Rendro CLI` }, 400);
   }
-  const manifest = await loadManifest(staging.deployment.manifestKey);
-  if (!manifest) return c.json({ error: "Deployment manifest not found" }, 404);
-  const expectedByPath = new Map(manifest.files.map((file) => [file.path, file]));
+  const index = await openDeploymentIndex(staging.deployment.manifestKey, "staging");
+  if (!index) return c.json({ error: "Deployment manifest not found" }, 404);
   const previousRoot = objectRoot({ ...identity, deploymentId: staging.deployment.previousDeploymentId });
   const copies = await Promise.all((paths as string[]).map(async (path) => {
-    const expected = expectedByPath.get(path);
+    const expected = await index.file(path);
     if (!expected) throw new Error(`File ${path} is not present in the manifest`);
     const source = `${previousRoot}/files/${path}`;
     const sourceMetadata = await headObject(source);
