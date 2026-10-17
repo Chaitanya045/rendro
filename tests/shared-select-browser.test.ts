@@ -249,6 +249,37 @@ describe("shared select in Chromium", () => {
     expect((await state(tab, "long")).expanded).toBe("false");
   });
 
+  it("keeps the list open for scroll events that leave the trigger where the popup was placed", async () => {
+    const tab = await open();
+    // A scroll applied just before the open (as Playwright's scroll-into-view does) still emits its event a frame later.
+    await tab.evaluate(() => {
+      const arrived = new Promise<void>(resolve => window.addEventListener("scroll", () => resolve(), { once: true }));
+      window.scrollTo(0, 60);
+      document.querySelector<HTMLElement>("#long + .rd-select-trigger")!.click();
+      (window as unknown as { lateScroll: Promise<void> }).lateScroll = arrived;
+    });
+    expect((await state(tab, "long")).expanded).toBe("true");
+    await tab.evaluate(() => (window as unknown as { lateScroll: Promise<void> }).lateScroll);
+    expect(await state(tab, "long")).toMatchObject({ expanded: "true", hidden: false });
+    // A real page scroll that does not move a fixed trigger leaves it open and in place.
+    await trigger(tab, "bottom").click();
+    expect((await state(tab, "bottom")).expanded).toBe("true");
+    await tab.evaluate(() => {
+      const arrived = new Promise<void>(resolve => window.addEventListener("scroll", () => resolve(), { once: true }));
+      window.scrollTo(0, 400);
+      return arrived;
+    });
+    expect(await state(tab, "bottom")).toMatchObject({ expanded: "true", side: "top" });
+    // Moving the trigger sideways, or off its anchor at all, still dismisses on the next scroll event.
+    await tab.evaluate(() => { document.querySelector<HTMLElement>("#bottom-wrap")!.style.left = "40px"; document.dispatchEvent(new Event("scroll")); });
+    expect((await state(tab, "bottom")).expanded).toBe("false");
+    await tab.evaluate(() => window.scrollTo(0, 0));
+    await trigger(tab, "long").click();
+    expect((await state(tab, "long")).expanded).toBe("true");
+    await tab.evaluate(() => { document.querySelector<HTMLElement>("#long + .rd-select-trigger")!.style.marginTop = "7px"; document.dispatchEvent(new Event("scroll")); });
+    expect((await state(tab, "long")).expanded).toBe("false");
+  });
+
   it("keeps the list inside the viewport: upward near the bottom, repositioned on resize", async () => {
     const tab = await open();
     await trigger(tab, "bottom").click();
