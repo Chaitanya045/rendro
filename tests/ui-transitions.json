@@ -1776,8 +1776,19 @@
           "inventoryRefs": [
             "UI-009"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "tests/management-dialog-reuse-browser.test.ts",
+              "name": "Back restores the saved scroll offset only after the restored page has rendered, unless the user scrolls first",
+              "kind": "browser"
+            },
+            {
+              "file": "e2e/shell-navigation.spec.ts",
+              "name": "Back restores the saved scroll offset of a client-routed page",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-009-E02",
@@ -8684,7 +8695,7 @@
           "id": "UI-055-E04",
           "from": "Teams page ready",
           "trigger": "Create/delete team or reopen form",
-          "expected": "remove named team confirmation, delayed row removal; the last team keeps a disabled Remove team with a hint (no empty state)",
+          "expected": "remove named team confirmation, delayed row removal; the last team and the session's active team keep a disabled Remove team with a hint (no empty state)",
           "inventoryRefs": [
             "O14"
           ],
@@ -8703,6 +8714,21 @@
             {
               "file": "e2e/org-teams.spec.ts",
               "name": "the only remaining team cannot be removed; the control explains why and follows the team count",
+              "kind": "e2e"
+            },
+            {
+              "file": "tests/management-dialog-reuse-browser.test.ts",
+              "name": "the active team of the session cannot be removed, other teams can, and the hint follows the rule",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/management-dialog-reuse-browser.test.ts",
+              "name": "a failed session read leaves Remove team enabled and shows the server refusal",
+              "kind": "browser"
+            },
+            {
+              "file": "e2e/org-teams.spec.ts",
+              "name": "the team a session has active cannot be removed; the control explains why, follows the active team and the server still refuses",
               "kind": "e2e"
             }
           ]

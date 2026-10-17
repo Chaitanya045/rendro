@@ -324,20 +324,71 @@ test.describe("teams", () => {
     expect(refused.body.message).toBe("Unable to remove last team");
     expect(await teamsOf(page, organization.id)).toEqual(["Last Org"]);
 
-    // A second team unlocks both; removing one locks the survivor again without a reload.
+    // A second team unlocks that team only: the owner's session keeps the first one active. Removing it locks the survivor on the count again.
     const created = await api(page, "/api/auth/organization/create-team", { organizationId: organization.id, name: "Second" });
     expect(created.status).toBe(200);
     await page.reload();
     const second = card(page, "Second");
     await expect(second.getByRole("button", { name: "Remove team", exact: true })).toBeEnabled();
-    await expect(remove).toBeEnabled();
-    await expect(page.locator(".team-hint")).toHaveCount(0);
+    await expect(remove).toBeDisabled();
+    await expect(remove).toHaveAccessibleDescription(/active team/);
+    await expect(page.locator(".team-hint")).toHaveCount(1);
     await second.getByRole("button", { name: "Remove team", exact: true }).click();
     await confirmDialog(page).locator("[data-confirm-accept]").click();
     await expect(toasts(page).filter({ hasText: "Team removed." })).toHaveCount(1);
     await expect(second).toHaveCount(0);
     await expect(remove).toBeDisabled();
+    await expect(remove).toHaveAccessibleDescription(/at least one team/);
     await expect(only.locator(".team-hint")).toBeVisible();
     expect(await teamsOf(page, organization.id)).toEqual(["Last Org"]);
+  });
+
+  test("the team a session has active cannot be removed; the control explains why, follows the active team and the server still refuses", async ({ actor }) => {
+    test.setTimeout(120_000);
+    const owner = await actor("active-owner", { organizations: ["Active Org"] });
+    const [organization] = owner.organizations;
+    const { page } = owner;
+    const created = await api<{ id: string }>(page, "/api/auth/organization/create-team", { organizationId: organization.id, name: "Docs" });
+    expect(created.status).toBe(200);
+    const [first] = (await fullOrganization(page, organization.id)).body.teams.filter(team => team.name === "Active Org");
+    const removeOf = (name: string) => card(page, name).getByRole("button", { name: "Remove team", exact: true });
+    const session = async () => (await api<{ session: { activeTeamId: string | null } }>(page, "/api/auth/get-session?disableCookieCache=true")).body.session.activeTeamId;
+
+    // The creator's session has the organization's first team active: it is not offered for removal, the other team is.
+    expect(await session()).toBe(first.id);
+    await openSection(page, organization.id, "teams");
+    await expect(removeOf("Active Org")).toBeDisabled();
+    await expect(removeOf("Active Org")).toHaveAccessibleDescription("This is your active team, so it can’t be removed.");
+    await expect(card(page, "Active Org").locator(".team-hint")).toBeVisible();
+    await expect(removeOf("Docs")).toBeEnabled();
+    await expect(card(page, "Docs").locator(".team-hint")).toHaveCount(0);
+
+    // The rule is the server's: without the UI the same session is refused and nothing is deleted.
+    const refused = await api<{ message?: string }>(page, "/api/auth/organization/remove-team", { teamId: first.id, organizationId: organization.id });
+    expect(refused.status).toBe(403);
+    expect(refused.body.message).toMatch(/not allowed to delete this team/i);
+    expect(await teamsOf(page, organization.id)).toEqual(["Active Org", "Docs"]);
+
+    // Making the other team active moves the restriction with it.
+    const switched = await api(page, "/api/auth/organization/set-active-team", { teamId: created.body.id });
+    expect(switched.status).toBe(200);
+    expect(await session()).toBe(created.body.id);
+    await page.reload();
+    await expect(card(page, "Docs")).toBeVisible();
+    await expect(removeOf("Docs")).toBeDisabled();
+    await expect(removeOf("Docs")).toHaveAccessibleDescription(/active team/);
+    await expect(removeOf("Active Org")).toBeEnabled();
+    await expect(card(page, "Active Org").locator(".team-hint")).toHaveCount(0);
+    const stillRefused = await api<{ message?: string }>(page, "/api/auth/organization/remove-team", { teamId: created.body.id, organizationId: organization.id });
+    expect(stillRefused.status).toBe(403);
+
+    // The now-inactive team is removed through the page; the survivor is both active and the last team.
+    await removeOf("Active Org").click();
+    await confirmDialog(page).locator("[data-confirm-accept]").click();
+    await expect(toasts(page).filter({ hasText: "Team removed." })).toHaveCount(1);
+    await expect(card(page, "Active Org")).toHaveCount(0);
+    await expect(removeOf("Docs")).toBeDisabled();
+    await expect(removeOf("Docs")).toHaveAccessibleDescription(/at least one team/);
+    expect(await teamsOf(page, organization.id)).toEqual(["Docs"]);
   });
 });

@@ -1,6 +1,6 @@
 import { MANAGEMENT_PROJECT_PLACEHOLDER, managementLoadingPages } from "./management-loading-pages";
 
-export const MANAGEMENT_SHELL_VERSION = "26";
+export const MANAGEMENT_SHELL_VERSION = "27";
 
 export interface ManagementRouteIdentity {
   organizationId: string;
@@ -29,7 +29,7 @@ function managementNavigationRuntime(loadingPagesJson: string): string {
   var documentNonce=document.currentScript&&document.currentScript.nonce;
   var SHELL_VERSION=${JSON.stringify(MANAGEMENT_SHELL_VERSION)},PROJECT_PLACEHOLDER=${JSON.stringify(MANAGEMENT_PROJECT_PLACEHOLDER)},loadingPages=${loadingPagesJson},ui=window.RendroUI;
   if(!ui||!window.fetch||!window.DOMParser||!window.AbortController)return;
-  var main=document.querySelector(".cp-main[data-cp-route-envelope]"),currentScope=null,navigationController=null,pendingObserver=null,pendingExpectedMarkup=new WeakMap(),navigationVersion=0,currentUrl=location.href,historyIndex=Number(history.state&&history.state.__rendroManagementIndex)||0,suppressPop=false;
+  var main=document.querySelector(".cp-main[data-cp-route-envelope]"),currentScope=null,navigationController=null,pendingObserver=null,pendingExpectedMarkup=new WeakMap(),navigationVersion=0,scrollRestore=null,currentUrl=location.href,historyIndex=Number(history.state&&history.state.__rendroManagementIndex)||0,suppressPop=false;
   if(!main)return;
   var shellOrganization=main.getAttribute("data-cp-organization-id")||"",shellUser=main.getAttribute("data-cp-user-id")||"";
   if(main.getAttribute("data-cp-shell-version")!==SHELL_VERSION)return;
@@ -125,7 +125,7 @@ function managementNavigationRuntime(loadingPagesJson: string): string {
   addEventListener("commentor-sign-out",function(){
     if(signedOut)return;signedOut=true;navigationVersion++;
     if(navigationController)navigationController.abort();
-    if(pendingObserver)pendingObserver.disconnect();pendingObserver=null;
+    if(pendingObserver)pendingObserver.disconnect();pendingObserver=null;scrollRestore=null;
     disposePage();clearQueryCache();
     if(ui.organizationContext)ui.organizationContext.dispose();
     if(cacheChannel){cacheChannel.close();cacheChannel=null;}
@@ -138,9 +138,13 @@ function managementNavigationRuntime(loadingPagesJson: string): string {
   function materialize(value,route){return String(value||"").split(PROJECT_PLACEHOLDER).join(encodeURIComponent(route.projectId||""));}
   function hasLoadingContent(content){return Boolean(content&&content.querySelector(".loading-view,.skeleton-table-row"));}
   function normalizedServerMarkup(content){var clone=content.cloneNode(true);clone.querySelectorAll(":scope > dialog").forEach(function(node){node.remove();});return clone.innerHTML.replace(/>\s+</g,"><").trim();}
+  // Back/Forward restores the offset saved with the history entry only once the destination has finished rendering: while its
+  // skeleton or loading states are showing, the document is too short for the offset and the browser would clamp it. Any user
+  // scroll input in the meantime wins, and a newer navigation drops the pending offset.
+  function settleScroll(){var target=scrollRestore;scrollRestore=null;if(target!==null&&typeof window.scrollTo==="function")window.scrollTo(0,target);}
   function watchPendingContent(content){
     if(pendingObserver)pendingObserver.disconnect();
-    function ready(){if(!content.isConnected||hasLoadingContent(content))return false;content.classList.replace("cp-navigation-pending","cp-navigation-ready");content.removeAttribute("aria-busy");content.removeAttribute("aria-label");if(pendingObserver)pendingObserver.disconnect();pendingObserver=null;return true;}
+    function ready(){if(!content.isConnected||hasLoadingContent(content))return false;content.classList.replace("cp-navigation-pending","cp-navigation-ready");content.removeAttribute("aria-busy");content.removeAttribute("aria-label");if(pendingObserver)pendingObserver.disconnect();pendingObserver=null;settleScroll();return true;}
     if(ready())return;pendingObserver=new MutationObserver(ready);pendingObserver.observe(content,{childList:true,subtree:true});
   }
   function showDestinationSkeleton(route,mode,savedScroll){
@@ -201,8 +205,8 @@ function managementNavigationRuntime(loadingPagesJson: string): string {
     if(!route||!loadingPages[route.section]){if(!(options&&options.checked)&&!canLeave(leaveDetail))return false;hardNavigate(url);return true;}
     if(url.pathname===location.pathname&&url.search===location.search&&url.hash!==location.hash){if(mode!=="pop")location.assign(url.href);else syncChrome(url);return true;}
     if(!(options&&options.checked)&&!canLeave(leaveDetail))return false;
-    if(navigationController)navigationController.abort();navigationController=new AbortController();var version=++navigationVersion,departingScroll=window.scrollY||0;
-    disposePage();if(typeof ui.setNav==="function")ui.setNav(false,false);syncDocsLinks(route);var pendingContent=showDestinationSkeleton(route,mode,options&&options.scrollY);setHistory(url,mode,departingScroll);syncChrome(url);var skeletonScroll=window.scrollY||0;
+    if(navigationController)navigationController.abort();navigationController=new AbortController();var version=++navigationVersion,departingScroll=window.scrollY||0;scrollRestore=mode==="pop"&&Number.isFinite(options&&options.scrollY)&&options.scrollY>0?options.scrollY:null;
+    disposePage();if(typeof ui.setNav==="function")ui.setNav(false,false);syncDocsLinks(route);var pendingContent=showDestinationSkeleton(route,mode,options&&options.scrollY);setHistory(url,mode,departingScroll);syncChrome(url);
     var timedOut=false,timeoutId=setTimeout(function(){if(version!==navigationVersion)return;timedOut=true;navigationController.abort();hardNavigate(url,true);},15000);
     try{
       var bundle=window.RendroManagementPages,page=bundle&&bundle.version===SHELL_VERSION&&bundle.pages[route.section];
@@ -215,6 +219,7 @@ function managementNavigationRuntime(loadingPagesJson: string): string {
         pendingContent.insertAdjacentHTML("beforeend",substitute(page.dialogs));
         window.__RENDRO_PAGE_STATE__=state;document.title=page.title;
         syncChrome(url);hideRefresh();page.mount();if(typeof ui.enhancePage==="function")ui.enhancePage();
+        if(!pendingObserver)settleScroll();
         return true;
       }
       var response=await fetch(url.href,{method:"GET",headers:{Accept:"text/html"},credentials:"same-origin",cache:"no-store",signal:navigationController.signal});
@@ -227,17 +232,24 @@ function managementNavigationRuntime(loadingPagesJson: string): string {
       if(!validated){hardNavigate(responseUrl,true);return false;}
       var incoming=document.importNode(validated.content,true),current=main.querySelector(":scope > .cp-content"),pendingHeading=pendingContent&&pendingContent.querySelector("h1"),restoreFocus=mode!=="pop"&&document.activeElement===pendingHeading,preservePending=current===pendingContent&&hasLoadingContent(pendingContent);
       if(preservePending&&pendingExpectedMarkup.get(pendingContent)!==normalizedServerMarkup(incoming)){hardNavigate(responseUrl,true);return false;}
-      if(preservePending){Array.from(incoming.querySelectorAll(":scope > dialog")).forEach(function(dialog){pendingContent.append(dialog);});incoming=pendingContent;}else{if(hasLoadingContent(incoming)){incoming.classList.add("cp-navigation-pending");incoming.setAttribute("aria-busy","true");watchPendingContent(incoming);}if(current)current.replaceWith(incoming);else main.append(incoming);}
+      if(preservePending){Array.from(incoming.querySelectorAll(":scope > dialog")).forEach(function(dialog){pendingContent.append(dialog);});incoming=pendingContent;}else{if(pendingObserver){pendingObserver.disconnect();pendingObserver=null;}if(hasLoadingContent(incoming)){incoming.classList.add("cp-navigation-pending");incoming.setAttribute("aria-busy","true");watchPendingContent(incoming);}if(current)current.replaceWith(incoming);else main.append(incoming);}
       window.__RENDRO_PAGE_STATE__=validated.state;document.title=validated.title;
       if(responseUrl.href!==location.href){var finalState=Object.assign({},history.state||{}, {__rendroManagementIndex:historyIndex});history.replaceState(finalState,"",responseUrl.href);}
       syncChrome(responseUrl);hideRefresh();runPageScript(validated.script);if(typeof ui.enhancePage==="function")ui.enhancePage();if(restoreFocus){var heading=incoming.querySelector("h1");if(heading){heading.tabIndex=-1;heading.focus({preventScroll:true});}}
-      if(mode==="pop"&&Number.isFinite(options&&options.scrollY)&&window.scrollY===skeletonScroll&&typeof window.scrollTo==="function")window.scrollTo(0,options.scrollY);
+      if(!pendingObserver)settleScroll();
       return true;
     }catch(error){if(error&&error.name==="AbortError")return false;if(version===navigationVersion&&!timedOut)hardNavigate(url,true);return false;}finally{clearTimeout(timeoutId);}
   }
   ui.navigate=function(href){return navigate(href,{mode:"push"});};
   ui.refresh=function(){if(!canLeave({kind:"refresh",url:location.href}))return Promise.resolve(false);if(queryCache)queryCache.invalidate();return navigate(location.href,{mode:"replace",checked:true});};
   var refreshButton=document.querySelector("#cp-refresh-button");if(refreshButton)refreshButton.addEventListener("click",function(){ui.refresh();});
+  // The router restores offsets itself, after the destination has rendered; the browser's own restoration would apply them to a
+  // still-short document and then fight the user's scrolling. Keep the current offset with the entry so a reload or a hard Back
+  // to this document is restored the same way.
+  if("scrollRestoration" in history)history.scrollRestoration="manual";
+  addEventListener("pagehide",function(){history.replaceState(Object.assign({},history.state||{},{__rendroManagementIndex:historyIndex,__rendroScrollY:window.scrollY||0}),"",location.href);});
+  var entryType=typeof performance!=="undefined"&&performance.getEntriesByType?(performance.getEntriesByType("navigation")[0]||{}).type:"",entryScroll=Number(history.state&&history.state.__rendroScrollY);
+  if((entryType==="reload"||entryType==="back_forward")&&entryScroll>0){var initialContent=main.querySelector(":scope > .cp-content");if(initialContent){scrollRestore=entryScroll;watchPendingContent(initialContent);}}
   history.replaceState(Object.assign({},history.state||{}, {__rendroManagementIndex:historyIndex}),"",location.href);
   document.addEventListener("click",function(event){
     if(event.defaultPrevented||event.button!==0||event.metaKey||event.ctrlKey||event.shiftKey||event.altKey)return;
@@ -258,6 +270,7 @@ function managementNavigationRuntime(loadingPagesJson: string): string {
   });
   addEventListener("hashchange",function(){currentUrl=location.href;});
   addEventListener("pageshow",resetUnloadApproval);
+  ["wheel","touchstart","keydown","pointerdown"].forEach(function(type){addEventListener(type,function(){scrollRestore=null;},{capture:true,passive:true});});
   // If the user resumes work after stopping navigation, a later close/reload
   // must protect the draft again. The initiating pointer/key event has already
   // passed the capture phase before hardNavigate grants the approval.

@@ -58,7 +58,7 @@ async function fixture(route: string) {
   ready();
   return { win, calls, serverCalls, fetch, ready };
 }
-const expected = [[4, 4, 2], [1, 1, 0], [1, 1, 0], [2, 3, 2], [2, 2, 0], [2, 2, 0], [1, 2, 1], [2, 1, 0]];
+const expected = [[4, 4, 2], [1, 1, 0], [1, 1, 0], [2, 3, 2], [2, 2, 0], [2, 2, 0], [2, 3, 2], [2, 1, 0]];  // /teams: one extra session read for the active team
 it.each(routes)("bounds initial and client navigation requests for %s", async route => {
   const f = await fixture(route);
   const initial = [...f.calls];
@@ -103,6 +103,6 @@ it.each(routes)("bounds first client navigation with a cold data cache for %s", 
   const f = await fixture("/people"); f.calls.length = 0;
   await f.win.eval(`window.RendroUI.navigate(${JSON.stringify("/organizations/org-a" + route)})`);
   await flush(); f.ready();
-  expect(f.calls).toHaveLength([5, 2, 2, 3, 3, 3, 2, 3][routes.indexOf(route)]);
+  expect(f.calls).toHaveLength([5, 2, 2, 3, 3, 3, 3, 3][routes.indexOf(route)]);
   expect(f.calls.filter(path => path === "/api/rendro/management/access")).toHaveLength(1);
 });

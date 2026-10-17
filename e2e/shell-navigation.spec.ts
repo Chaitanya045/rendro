@@ -322,9 +322,7 @@ test.describe("management history, blockers and cancellation", () => {
     await expect(page.locator(".cp-nav-link[aria-current=page]")).toHaveText(/Teams/);
   });
 
-  // Product bug (reported with this slice): a Back transition between bundled management
-  // routes records the departing offset but never restores it once the page content settles.
-  test.fail("Back restores the saved scroll offset of a client-routed page (known bug)", async ({ page, context, baseURL, seed }) => {
+  test("Back restores the saved scroll offset of a client-routed page", async ({ page, context, baseURL, seed }) => {
     await signInSeeded(context, baseURL, seed, "owner");
     const base = `/organizations/${seed.organizationId}`;
     await page.goto(`${base}/people`);
