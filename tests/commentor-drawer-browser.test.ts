@@ -477,8 +477,8 @@ describe("tooltips, selection and appearance", () => {
     await lab.page.mouse.move(400, 20, { steps: 3 });
     await lab.page.mouse.up();
     await expect.poll(async () => (await dockBox(lab)).className).toBe("dock dock-top");
-    // A scroll suppresses tips for 120ms of real time and a hover inside that window is ignored for good, so outwait it.
-    await lab.page.waitForTimeout(200);
+    // A scroll suppresses tips for 120ms and a hover inside that window is ignored for good. A later-due page timer runs after it.
+    await lab.doc(() => new Promise<void>(resolve => setTimeout(resolve, 121)));
     await button.hover();
     await expect.poll(() => tip.getAttribute("data-state")).toBe("open");
     expect(await tip.evaluate(el => el.getBoundingClientRect().top)).toBeGreaterThan((await button.boundingBox())!.y);
