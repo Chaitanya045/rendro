@@ -292,6 +292,16 @@ describe("document navigation edge cases", () => {
     expect(f.parent.postMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "doc-external" }), origin);
   });
 
+  it("tells the shell about a press inside the document, and a standalone document has no shell to tell", () => {
+    const f = fixture('<p id="p">text</p>');
+    f.parent.postMessage.mockClear();
+    f.win.document.getElementById("p")!.dispatchEvent(new f.win.MouseEvent("pointerdown", { bubbles: true }));
+    expect(f.parent.postMessage).toHaveBeenCalledWith({ type: "doc-pointer", path: config.documentPath }, origin);
+    const standalone = fixture('<p id="p">text</p>', { standalone: true });
+    standalone.win.document.getElementById("p")!.dispatchEvent(new standalone.win.MouseEvent("pointerdown", { bubbles: true }));
+    expect(standalone.parent.postMessage).not.toHaveBeenCalled();
+  });
+
   it.each(["_self", "content-frame"])("routes a %s target through the shell", target => {
     const f = fixture(`<a id="l" target="${target}" href="other.html#top">x</a>`);
     expect(click(f.win, "#l").defaultPrevented).toBe(true);

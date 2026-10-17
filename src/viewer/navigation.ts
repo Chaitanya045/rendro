@@ -68,6 +68,12 @@ export function installDocumentNavigation(config: DocumentNavigationConfig, host
     host.addEventListener("popstate", loaded);
   } else if (doc.readyState === "loading") doc.addEventListener("DOMContentLoaded", loaded, { once: true });
   else loaded();
+  // A press in this frame never reaches the shell's own handlers, and not every engine reports the shell losing focus.
+  // Tell the shell, so its open menus close; the message carries nothing and changes nothing else.
+  if (host.parent !== host) {
+    doc.addEventListener("pointerdown", () => host.parent.postMessage({ type: "doc-pointer", path: config.documentPath }, origin),
+      { capture: true, passive: true });
+  }
   doc.addEventListener("click", event => {
     if (event.defaultPrevented || shouldUseNativeLinkNavigation(event)) return;
     // Comment UI lives in a shadow root; leave its own anchoring/handlers alone.

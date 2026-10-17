@@ -951,6 +951,8 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
   // The document is another frame: a click inside it never reaches this page's click handler, but it moves focus into the
   // frame and blurs this window. Keyboard use of the menus keeps focus in this page, so nothing closes then.
   window.addEventListener("blur",function(){if(document.activeElement===document.getElementById("content-frame")){setAvatarMenu(false);setMobileMore(false,false);}});
+  // Engines that do not report that blur are told by the document itself: it posts a bare message on a press inside it.
+  window.addEventListener("message",function(e){var frame=document.getElementById("content-frame");if(frame&&e.source===frame.contentWindow&&e.data&&e.data.type==="doc-pointer"){setAvatarMenu(false);setMobileMore(false,false);}});
 })();
 </script>
 <script${nonceAttribute()}>window.RENDRO_INITIAL_DOC=${inlineJson(selectedDoc)};window.RENDRO_ORG=${inlineJson(org)};window.RENDRO_DOCUMENT_BASE=${inlineJson(documentBase)};window.RENDRO_PUBLICATION_BASE=${inlineJson(isPublicDocument ? documentBase : "")};window.RENDRO_SHARE_CONFIG=${inlineJson(options.shareConfig ?? null)};window.RENDRO_LEGACY_COMMENT_CONFIG=${inlineJson(options.legacyCommentConfig ?? null)};</script>

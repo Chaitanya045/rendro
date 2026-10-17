@@ -1070,6 +1070,7 @@ Client (lazy-tree.js, ~25KB IIFE built from src/lazy-tree/)
   │   ├─ doc-navigate → parent authorization / confirmation → loadDoc(path, push/replace)
   │   ├─ doc-external → parent confirmation → window.open(href, "_blank", "noopener,noreferrer")
   │   ├─ doc-loaded → acknowledge expected path (no navigation or tree fetch)
+  │   ├─ doc-pointer → (inline shell script) close the account and More menus; carries no data
   │   └─ shell-toggle → Ctrl/Cmd+Shift+H inside the iframe toggles the shell
   └─ popstate / initial URL → loadDoc(path)
 ```

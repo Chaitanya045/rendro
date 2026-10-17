@@ -147,6 +147,22 @@ describe("menus and the document", () => {
     await menu.waitFor({ state: "hidden" });
   });
 
+  it("closes the menus when the document reports a press inside it, and ignores the same message from anywhere else", async () => {
+    // Engines that do not report the shell losing focus rely on the document's own report.
+    const page = await open();
+    const menu = page.locator("#avatar-menu");
+    await page.locator("#avatar-btn").click();
+    await menu.waitFor({ state: "visible" });
+    await page.evaluate(() => window.postMessage({ type: "doc-pointer" }, "*"));
+    await page.evaluate(() => new Promise(resolve => setTimeout(resolve, 100)));
+    expect(await menu.isVisible()).toBe(true);
+    await page.frameLocator("#content-frame").locator("body").evaluate(() => parent.postMessage({ type: "doc-other" }, "*"));
+    await page.evaluate(() => new Promise(resolve => setTimeout(resolve, 100)));
+    expect(await menu.isVisible()).toBe(true);
+    await page.frameLocator("#content-frame").locator("body").evaluate(() => parent.postMessage({ type: "doc-pointer" }, "*"));
+    await menu.waitFor({ state: "hidden" });
+  });
+
   it("closes the phone More menu, and the account menu inside it, when the reader clicks in the document", async () => {
     const page = await open(390);
     const more = page.locator("#mobile-more-btn");

@@ -375,9 +375,12 @@ test.describe("deployment index browsing", () => {
     await expect(heading(tab, tree.amended)).toBeVisible();
     await folderRow(tab, "wide").click();
     await expect(rows(tab, "wide/")).toHaveCount(200);
-    const last = await rows(tab, "wide/").last().boundingBox();
-    const next = await fileRow(tab, "index.html").boundingBox();
-    if (!last || !next) throw new Error("Missing rows");
-    expect(next.y).toBeGreaterThanOrEqual(last.y + last.height - 1);
+    // The folder opens over a short transition; once it settles the next row starts below the last one.
+    await expect.poll(async () => {
+      const last = await rows(tab, "wide/").last().boundingBox();
+      const next = await fileRow(tab, "index.html").boundingBox();
+      if (!last || !next) return -Infinity;
+      return next.y - (last.y + last.height - 1);
+    }).toBeGreaterThanOrEqual(0);
   });
 });
