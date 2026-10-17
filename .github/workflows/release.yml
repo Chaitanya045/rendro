@@ -1,22 +1,82 @@
 name: Release
 
+# A `v*` tag runs the full quality gate (the same workflow as pull requests),
+# builds the CLI without any write access, then publishes it with SHA-256
+# checksums and a build provenance attestation. Edits to this file also run the
+# gate and the build on the pull request; only a tag push can publish.
 on:
   push:
     tags: ["v*"]
+  pull_request:
+    paths:
+      - .github/workflows/release.yml
+
+permissions: {}
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
-  release:
-    runs-on: ubuntu-latest
+  gate:
     permissions:
-      contents: write
+      contents: read
+    uses: ./.github/workflows/quality.yml
+
+  build:
+    needs: gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
-        with: { node-version: "22", cache: "pnpm" }
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "22"
+          cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: node scripts/build-cli.mjs
-      - uses: softprops/action-gh-release@v2
+      # `sha256sum -c SHA256SUMS` verifies a downloaded artifact.
+      - name: Checksum the artifacts
+        working-directory: bin
+        run: sha256sum rendro.mjs | tee SHA256SUMS
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          files: bin/rendro.mjs
+          name: cli-release
+          path: |
+            bin/rendro.mjs
+            bin/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    # Pull requests that edit this file stop after the gate and the build.
+    if: ${{ github.event_name == 'push' }}
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write # create the GitHub release
+      id-token: write # sign the provenance attestation
+      attestations: write # store the provenance attestation
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: cli-release
+          path: dist
+      - name: Verify the artifacts match the recorded checksums
+        working-directory: dist
+        run: sha256sum --check SHA256SUMS
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: dist/rendro.mjs
+      - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
+        with:
+          files: |
+            dist/rendro.mjs
+            dist/SHA256SUMS
           generate_release_notes: true

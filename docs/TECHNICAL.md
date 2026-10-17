@@ -761,13 +761,25 @@ A staging deployment starts with a one-hour lease (`stagingExpiresAt`). Each aut
 
 Convex also serves `GET /api/rendro/deployments/active` and `GET /api/rendro/deployments` (latest 100) for sessions and `docs:read` keys, and `GET /api/rendro/deployments/staging` for the Worker.
 
+### CLI endpoint safety and dry run
+
+`cli/src/endpoint.ts` validates `--endpoint` for `push` and every `publication` action before any file is read or
+request is sent. The bearer API key must not cross a plaintext link, so only `https:` URLs and `http:` URLs whose
+host is exactly `localhost`, `127.0.0.1` or `[::1]` pass; other schemes, other `http:` hosts and unparseable
+values fail with exit code 1. Errors name the scheme and host but never echo the raw value (it can embed credentials).
+`push --dry-run` runs the same source selection, path and size validation and prints `path  size B` per file
+plus a total, then returns before provenance collection or any request; it requires neither identity nor key.
+
 ### CLI source selection and encoding
 
 `cli/src/source-files.ts` filters before hashing or uploading, with zero runtime
 dependencies. The case-insensitive sensitive defaults at every depth are `.env`,
 `.env.*`, `.envrc`, `.envrc.*`, `.npmrc`, `.pypirc`, `.netrc`, `.git-credentials`,
-`*.pem`, `*.key`, and `id_*`. `--include-sensitive` overrides only these filename
-defaults. Dot-directories stay excluded by default, including under that flag; an
+`.htpasswd`, `.pgpass`, `.dockercfg`, `*.pem`, `*.key`, `*.p12`, `*.pfx`, `*.jks`,
+`*.keystore`, `*.ppk`, `*.tfstate`, `*.tfvars`, `id_*`, `credentials[.json|yml|yaml|toml|ini|csv|xml]`
+and `secret(s).json|yml|yaml|toml|ini`. `--include-sensitive` overrides only these filename
+defaults; `sourceFiles` reports each included sensitive file through a callback and `push`
+prints a stderr warning listing them. Dot-directories stay excluded by default, including under that flag; an
 explicit ignore negation such as `!.environment/` permits ordinary dot-directories.
 The case-insensitive directory names `.git`, `.ssh`, `.aws`, and `node_modules`
 are always excluded, even under negation or sensitive opt-in. Symlinks/non-regular
@@ -886,6 +898,8 @@ Convex HTTP routes (`convex/http.ts`). The Worker serves the rows marked *Worker
 | GET | `/api/rendro/retention/candidates` | `RETENTION_SECRET` bearer |
 | POST | `/api/rendro/retention/purged` | `RETENTION_SECRET` bearer |
 | POST | `/api/rendro/migration/project` | `MIGRATION_SECRET` bearer (*Worker* front) |
+
+Static secrets and stored random tokens are compared with `constantTimeEqual` / `bearerMatches` from `shared/constant-time.ts` (no early exit on the first differing byte, length folded into the result, runs in Convex, Workers and Node): the `RETENTION_SECRET` and `MIGRATION_SECRET` bearers, `requireInternalSecret` (`CONVEX_INTERNAL_SECRET`), the deployment purge claim token, and the share-link HMAC check. HMAC proofs verified with WebCrypto `verify` (resolver, ingress-IP and storage attestations) are already constant-time. Do not compare secrets with `===`.
 
 Organization, member, team, and invitation operations use Better Auth's organization plugin endpoints under `/api/auth/organization/*`.
 
@@ -1321,9 +1335,16 @@ Both production (top-level) and `development` declare the same required secrets:
 | Workflow | Trigger | Runs |
 |---|---|---|
 | `.github/workflows/quality.yml` | Pull requests, pushes to `main`/`development`, manual | Independent `verify` (`pnpm verify`, dependency audit), `coverage` (`pnpm coverage`, summary artifacts), and `e2e-engine` (one Playwright Test/workerd job per browser engine) with an aggregate required `e2e` job; read-only permissions, no deployment credentials |
-| `.github/workflows/release.yml` | `v*` tags | Builds `bin/rendro.mjs` and attaches it to a GitHub release |
+| `.github/workflows/release.yml` | `v*` tags (and edits to the file itself, which stop before publishing) | `gate` calls `quality.yml` (`verify`, `coverage`, `e2e`) as a reusable workflow; `build` (read-only) builds `bin/rendro.mjs` and `SHA256SUMS`; `publish` (the only job with `contents`, `id-token` and `attestations` write) re-checks the sums, attaches a build provenance attestation (`actions/attest-build-provenance`) and creates the GitHub release with both files. Verify a download with `sha256sum -c SHA256SUMS` and `gh attestation verify rendro.mjs --repo Chaitanya045/rendro` |
 | `.github/workflows/retention.yml` | Daily cron, manual | `pnpm cleanup:retention` |
 | `.github/workflows/stability.yml` | Nightly cron, manual | `coverage-twice` (two consecutive `taskset -c 0,1 pnpm coverage` runs, then per-test outcome and coverage-counter diffs; the second run and diffs always execute) and `e2e-no-retries` (per engine, `E2E_RETRIES=0`); read-only permissions, no secrets; any failure fails the workflow |
+
+Supply-chain policy (enforced by `tests/workflow-supply-chain.test.ts`): every external `uses:` is pinned to a full
+40-character commit SHA followed by a `# vX.Y.Z` comment; every checkout sets `persist-credentials: false` (a
+`true` value needs a justification comment); each workflow declares workflow-level permissions without writes and
+each job declares its own block, with write access allowed only for the release `publish` job. Dependabot
+(`.github/dependabot.yml`) proposes weekly SHA and comment bumps. To pin by hand, resolve the tag with
+`gh api repos/<owner>/<repo>/git/ref/tags/<tag>` and dereference annotated tags to their commit.
 
 No workflow deploys the Worker or Convex to a shared environment, or publishes to npm.
 The E2E job pushes application code only to a harness-owned disposable loopback backend.

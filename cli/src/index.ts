@@ -21,6 +21,7 @@ import { fetchWithRateLimit } from "./rate-limit";
 import { httpErrorMessage } from "./http-error";
 import { contentType } from "./content-type";
 import { sourceFiles } from "./source-files";
+import { validateEndpoint } from "./endpoint";
 
 interface PushOptions {
   source: string;
@@ -30,6 +31,7 @@ interface PushOptions {
   token: string;
   concurrency?: number;
   includeSensitive: boolean;
+  dryRun: boolean;
 }
 
 
@@ -187,11 +189,16 @@ async function push(opts: PushOptions): Promise<void> {
   } = opts;
   const cleanEndpoint = endpoint.replace(/\/$/, "");
   const absSource = resolve(source);
-  console.log(`→ Preparing ${source} for project ${projectId}`);
+  console.log(opts.dryRun ? `→ Dry run for ${source}` : `→ Preparing ${source} for project ${projectId}`);
 
+  const sensitive: string[] = [];
   const files = await sourceFiles(absSource, opts.includeSensitive, (path, reason) => {
     console.log(`  skipped ${JSON.stringify(path)} (${reason})`);
-  });
+  }, path => sensitive.push(path));
+  if (sensitive.length) {
+    console.error(`warning: --include-sensitive is uploading ${sensitive.length} sensitive file(s) that are skipped by default:`);
+    for (const path of sensitive) console.error(`  ! ${JSON.stringify(path)}`);
+  }
   if (files.length > MAX_DEPLOYMENT_FILES) throw new Error("Deployment exceeds the 1,000-file limit");
   let totalBytes = 0;
   // Check every file's metadata before reading/hashing any contents or making a request.
@@ -237,6 +244,12 @@ async function push(opts: PushOptions): Promise<void> {
   }
   if (!validDeploymentCounts(entries.length, totalBytes)) throw new Error("Deployment exceeds the 128 MiB total limit");
   if (Buffer.byteLength(manifestText) > MAX_MANIFEST_BODY_BYTES - 16_384) throw new Error("Deployment manifest exceeds the 2 MiB request limit");
+  if (opts.dryRun) {
+    console.log(`Dry run: ${entries.length} file(s) would be uploaded (nothing was sent):`);
+    for (const entry of entries) console.log(`  ${entry.path}  ${entry.size} B`);
+    console.log(`Total: ${entries.length} file(s), ${totalBytes} B`);
+    return;
+  }
   const manifestSha256 = sha256(manifestText);
   const identityQuery = new URLSearchParams({ organizationId, projectId });
 
@@ -398,7 +411,7 @@ function printHelp(): void {
   console.log(`rendro — deploy HTML documentation
 
 Usage:
-  rendro push --source <dir> --organization <id> --project <id> [--endpoint <url>] [--concurrency <n>] [--include-sensitive]
+  rendro push --source <dir> --organization <id> --project <id> [--endpoint <url>] [--concurrency <n>] [--include-sensitive] [--dry-run]
   rendro publication create --organization <id> --project <id> --slug <slug> [--path <prefix>] [--entry <file>] [--title <title>] [--pin <deployment-id>]
   rendro publication list --organization <id> --project <id> [--endpoint <url>]
   rendro publication remove --organization <id> --project <id> --id <publication-id>
@@ -415,7 +428,11 @@ Options:
   --pin          Pin to one deployment instead of tracking active
   --endpoint     Rendro server URL (default: https://rendro.app)
   --concurrency  Parallel uploads (default: 8)
-  --include-sensitive  Include sensitive files (still honors .rendroignore)
+  --include-sensitive  Include sensitive files such as .env and keys (warns; still honors .rendroignore)
+  --dry-run      List the files push would upload with sizes, without any network access
+
+Endpoints must use https:// (http:// only for localhost, 127.0.0.1 or [::1]).
+Put gitignore-style rules in <source>/.rendroignore to keep files out of a push.
 
 Auth: set RENDRO_API_KEY in your environment. Create a scoped key from
       your organization's API keys page.
@@ -450,7 +467,7 @@ async function main(): Promise<void> {
     const action = args[1];
     const organizationId = getFlag("--organization", "");
     const projectId = getFlag("--project", "");
-    const endpoint = getFlag("--endpoint", "https://rendro.app");
+    const endpoint = validateEndpoint(getFlag("--endpoint", "https://rendro.app"));
     const token = getFlag("--token", process.env.RENDRO_API_KEY || "");
     if (!organizationId || !projectId) {
       console.error("Error: --organization and --project are required");
@@ -500,20 +517,22 @@ async function main(): Promise<void> {
     const source = getFlag("--source", "./docs");
     const organizationId = getFlag("--organization", "");
     const projectId = getFlag("--project", "");
-    const endpoint = getFlag("--endpoint", "https://rendro.app");
+    const endpoint = validateEndpoint(getFlag("--endpoint", "https://rendro.app"));
     const token = getFlag("--token", process.env.RENDRO_API_KEY || "");
     const concurrency = parseInt(getFlag("--concurrency", "8"), 10);
+    const dryRun = args.includes("--dry-run");
 
-    if (!organizationId || !projectId) {
+    // A dry run only reads the source folder, so it needs no identity or credentials.
+    if (!dryRun && (!organizationId || !projectId)) {
       console.error("Error: --organization and --project are required for push");
       process.exit(1);
     }
-    if (!token) {
+    if (!dryRun && !token) {
       console.error("Error: RENDRO_API_KEY environment variable is required. Get your key from the Rendro org page.");
       process.exit(1);
     }
 
-    await push({ source, organizationId, projectId, endpoint, token, concurrency, includeSensitive: args.includes("--include-sensitive") });
+    await push({ source, organizationId, projectId, endpoint, token, concurrency, includeSensitive: args.includes("--include-sensitive"), dryRun });
     return;
   }
 

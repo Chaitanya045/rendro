@@ -1,5 +1,6 @@
 import { authComponent } from "./auth";
 import { publicError } from "./publicErrors";
+import { constantTimeEqual } from "../shared/constant-time";
 import type { QueryCtx, MutationCtx } from "./_generated/server";
 
 type AuthCtx = QueryCtx | MutationCtx;
@@ -24,12 +25,5 @@ export async function requireIdentity(ctx: AuthCtx): Promise<AuthenticatedIdenti
 
 export function requireInternalSecret(provided: string): void {
   const expected = process.env.CONVEX_INTERNAL_SECRET;
-  if (!expected || provided.length !== expected.length) {
-    publicError("forbidden");
-  }
-  let difference = 0;
-  for (let index = 0; index < expected.length; index += 1) {
-    difference |= provided.charCodeAt(index) ^ expected.charCodeAt(index);
-  }
-  if (difference !== 0) publicError("forbidden");
+  if (!expected || !constantTimeEqual(provided, expected)) publicError("forbidden");
 }

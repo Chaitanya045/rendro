@@ -67,13 +67,16 @@ deployment credentials available to untrusted pull-request code. Use
 | `--source <dir>` | `init`, `push` | `./docs` |
 | `--endpoint <url>` | `push`, `publication` | `https://rendro.app` |
 | `--concurrency <n>` | `push` | `8` parallel uploads |
-| `--include-sensitive` | `push` | Off; opt into sensitive files, still honoring `.rendroignore` |
+| `--include-sensitive` | `push` | Off; opt into sensitive files (warns and lists each one), still honoring `.rendroignore` |
+| `--dry-run` | `push` | Off; list the files `push` would upload with sizes and a total, without credentials or any network access |
 | `--path <prefix>` | `publication create` | Deployment root |
 | `--entry <file>` | `publication create` | `index.html` (relative to `--path`) |
 | `--title <title>` | `publication create` | The slug |
 | `--pin <deployment-id>` | `publication create` | Track the active deployment |
 
 `push` and `publication` read the API key from `RENDRO_API_KEY`.
+
+`--endpoint` must be `https://`. Plain `http://` is refused with an error because the API key travels in a header; the only exceptions are `http://localhost`, `http://127.0.0.1` and `http://[::1]` for local development. Other schemes and unparseable URLs are refused too.
 
 ### API key scopes
 
@@ -103,10 +106,15 @@ A publication created without `--pin` follows the project's active deployment. W
 
 By default, `push` skips these names at every depth (case-insensitive): `.env`,
 `.env.*`, `.envrc`, `.envrc.*`, `.npmrc`, `.pypirc`, `.netrc`, `.git-credentials`,
-`*.pem`, `*.key`, `id_*` (including SSH private/public key names).
+`.htpasswd`, `.pgpass`, `.dockercfg`, `*.pem`, `*.key`, `*.p12`, `*.pfx`, `*.jks`,
+`*.keystore`, `*.ppk`, `*.tfstate`, `*.tfvars`, `id_*` (including SSH private/public
+key names), `credentials` and `credentials.{json,yml,yaml,toml,ini,csv,xml}`, and
+`secret(s).{json,yml,yaml,toml,ini}`. Pages such as `credentials.html` stay eligible.
 Each exclusion prints a `skipped` line with its relative path and reason;
 excluded directories are listed once without reading their contents.
-`--include-sensitive` permits these filenames, still honoring `.rendroignore`.
+`--include-sensitive` permits these filenames, still honoring `.rendroignore`, and prints a
+`warning:` on stderr naming every sensitive file it is about to upload. Review the list with
+`--dry-run --include-sensitive` first.
 Dot-directories are skipped by default, even with `--include-sensitive`. An explicit
 `.rendroignore` negation such as `!.environment/` can re-include an ordinary
 dot-directory. Metadata/credential directories `.git/`, `.ssh/`, `.aws/`, and
@@ -114,6 +122,10 @@ dot-directory. Metadata/credential directories `.git/`, `.ssh/`, `.aws/`, and
 flag can include them. Symbolic links and non-regular files are never
 followed/uploaded. Ordinary dotfiles such as `.nojekyll` and `.environment` remain
 eligible.
+
+`push --dry-run` runs the same selection and limit checks, then prints each file that would
+be uploaded with its size and a total, and exits without any request. It needs no
+`--organization`, `--project` or API key.
 
 Place `.rendroignore` in the **source root** (for example `docs/.rendroignore` for
 `--source ./docs`). It applies with or without `--include-sensitive` and is never

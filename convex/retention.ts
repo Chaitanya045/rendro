@@ -1,5 +1,6 @@
 import { requireId } from "./ids";
 import { v } from "convex/values";
+import { constantTimeEqual } from "../shared/constant-time";
 import { internalMutation } from "./_generated/server";
 import { FAILED_RETENTION_MS, PURGE_CLAIM_MS, STAGING_DRAIN_MS, SUPERSEDED_RETENTION_MS, stagingExpiry } from "./retentionPolicy";
 
@@ -59,7 +60,7 @@ export const markPurgedInternal = internalMutation({
     const deployment = await ctx.db.get(requireId(ctx, "deployments", args.deploymentId));
     if (!deployment) return false;
     const claim = await ctx.db.query("deploymentPurges").withIndex("by_deployment", q => q.eq("deploymentId", deployment._id)).unique();
-    if (!claim || claim.purgeToken !== args.purgeToken) return false;
+    if (!claim || !constantTimeEqual(claim.purgeToken, args.purgeToken)) return false;
     if (claim.purgedAt !== undefined) return true;
     const now = Date.now();
     await ctx.db.patch(claim._id, { purgedAt: now });

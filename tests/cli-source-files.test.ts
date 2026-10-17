@@ -78,3 +78,32 @@ it.each([false, true])("never re-includes metadata or credential directories, in
   await file(".rendroignore", "!**/\n");
   expect(await sourceFiles(root, include, () => {})).toEqual([join(root, ".environment/index.html")]);
 });
+
+const credentialFiles = [".htpasswd", ".pgpass", ".dockercfg", "bundle.p12", "bundle.pfx", "store.jks", "app.keystore", "putty.ppk",
+  "terraform.tfstate", "prod.tfvars", "credentials", "credentials.json", "Credentials.YAML", "credentials.toml", "credentials.ini", "credentials.csv", "credentials.xml",
+  "secret.json", "secrets.yml", "secrets.yaml", "secrets.toml", "secrets.ini", "id_rsa.pub", "id_rsa.bak"];
+const lookalikes = ["credentials.html", "credentials.md", "secrets.html", "secretary.json", "keys.html", "pem.html", "keystore", "env.html", "environment", "identity.html", "tfvars"];
+
+it.each([false, true])("skips credential stores by default and reports opted-in ones, includeSensitive=%s", async include => {
+  await Promise.all([...credentialFiles, ...lookalikes, ...credentialFiles.map(path => `nested/${path}`)].map(path => file(path)));
+  const skipped: string[] = [], included: string[] = [];
+  const files = (await sourceFiles(root, include, (path, reason) => skipped.push(`${path}:${reason}`), path => included.push(path))).map(path => relative(root, path));
+  if (include) {
+    expect(files.sort()).toEqual([...credentialFiles, ...lookalikes, ...credentialFiles.map(path => `nested/${path}`)].sort());
+    expect(included.sort()).toEqual([...credentialFiles, ...credentialFiles.map(path => `nested/${path}`)].sort());
+    expect(skipped).toEqual([]);
+  } else {
+    expect(files.sort()).toEqual(lookalikes.sort());
+    expect(included).toEqual([]);
+    for (const path of credentialFiles) expect(skipped).toContain(`${path}:sensitive`);
+  }
+});
+
+it("reports only sensitive files that actually reach the upload set", async () => {
+  await file(".rendroignore", ".env.ignored\n");
+  await Promise.all([".env", ".env.ignored", "index.html", ".git/id_rsa", "nested/private.key"].map(path => file(path)));
+  const included: string[] = [];
+  const files = await sourceFiles(root, true, () => {}, path => included.push(path));
+  expect(included.sort()).toEqual([".env", "nested/private.key"]);
+  expect(files.map(path => relative(root, path)).sort()).toEqual([".env", "index.html", "nested/private.key"]);
+});

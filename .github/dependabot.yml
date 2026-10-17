@@ -1,0 +1,10 @@
+version: 2
+updates:
+  # Actions are pinned to commit SHAs; Dependabot proposes SHA + version-comment bumps.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      github-actions:
+        patterns: ["*"]
