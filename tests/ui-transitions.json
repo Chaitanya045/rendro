@@ -5072,7 +5072,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "untested",
+      "status": "e2e",
       "auditEvidence": "UNTESTED",
       "auditNote": "theme-integration.test.ts checks injected runtime/markup; document-ui-regressions.test.ts tests ready-message helper, not final iframe appearance",
       "edges": [
@@ -5084,8 +5084,14 @@
           "inventoryRefs": [
             "UI-029"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/viewer-chrome.spec.ts",
+              "name": "the theme control cycles system, dark and light, persists, and tells the document without restyling it",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-029-E02",
@@ -5095,8 +5101,14 @@
           "inventoryRefs": [
             "G03"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/viewer-chrome.spec.ts",
+              "name": "the theme control cycles system, dark and light, persists, and tells the document without restyling it",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-029-E03",
@@ -5139,8 +5151,14 @@
           "inventoryRefs": [
             "G03"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/viewer-chrome.spec.ts",
+              "name": "the theme control cycles system, dark and light, persists, and tells the document without restyling it",
+              "kind": "e2e"
+            }
+          ]
         }
       ]
     },
@@ -13596,8 +13614,14 @@
           "inventoryRefs": [
             "V01"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/viewer-surfaces.spec.ts",
+              "name": "a private project viewer has the account and comments; a publication and a share have neither, and neither looks up a session",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-098-E03",
@@ -13624,6 +13648,16 @@
               "file": "e2e/publications.spec.ts",
               "name": "publish with validation, a tracked and a pinned publication, view them anonymously, then unpublish",
               "kind": "e2e"
+            },
+            {
+              "file": "e2e/viewer-surfaces.spec.ts",
+              "name": "a publication opens by deep link and fragment, selects, browses by keyboard, and Back and Forward step through its documents",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/viewer-surfaces.spec.ts",
+              "name": "a publication of one folder shows only that folder and cannot be used to read outside it",
+              "kind": "e2e"
             }
           ]
         },
@@ -13635,8 +13669,19 @@
           "inventoryRefs": [
             "V01"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/deployment-tree.spec.ts",
+              "name": "the root listing fails with Retry and an empty listing explains itself",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/deployment-tree.spec.ts",
+              "name": "a project with no deployment has no document viewer",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-098-E06",
@@ -13646,8 +13691,19 @@
           "inventoryRefs": [
             "V01"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/deployment-tree.spec.ts",
+              "name": "Back and Forward step through the selected documents; an entry that names no document keeps the last one showing",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/viewer-links.spec.ts",
+              "name": "cross-document links keep their query and fragment, restore on reload, and Back returns to the document before",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-098-E07",
@@ -13668,6 +13724,21 @@
               "file": "e2e/publications.spec.ts",
               "name": "publish with validation, a tracked and a pinned publication, view them anonymously, then unpublish",
               "kind": "e2e"
+            },
+            {
+              "file": "e2e/viewer-surfaces.spec.ts",
+              "name": "a document in a publication that is not there, or is not a page, is not found",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/viewer-surfaces.spec.ts",
+              "name": "an outsider and a signed-out visitor never get the private viewer",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/viewer-surfaces.spec.ts",
+              "name": "a publication of one folder shows only that folder and cannot be used to read outside it",
+              "kind": "e2e"
             }
           ]
         },
@@ -13679,8 +13750,14 @@
           "inventoryRefs": [
             "V17"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/viewer-surfaces.spec.ts",
+              "name": "a private project viewer has the account and comments; a publication and a share have neither, and neither looks up a session",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-098-E09",
@@ -13690,8 +13767,14 @@
           "inventoryRefs": [
             "V17"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/viewer-surfaces.spec.ts",
+              "name": "a publication of one folder shows only that folder and cannot be used to read outside it",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-098-E10",
@@ -13746,8 +13829,24 @@
           "inventoryRefs": [
             "V17"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/viewer-surfaces.spec.ts",
+              "name": "a shared document scrolls to its fragments and keeps the bar; a link to any other file shows it is unavailable inside the frame",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/viewer-surfaces.spec.ts",
+              "name": "a revoked share is not found, in the shell, in the document and in a viewer that was already open",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/viewer-surfaces.spec.ts",
+              "name": "an expired share is not found, and the viewer that was open when it lapsed cannot reload it",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-098-E14",
@@ -13829,7 +13928,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "browser",
+      "status": "e2e",
       "auditEvidence": "B",
       "auditNote": "viewer-fragments-browser.test.ts",
       "edges": [
@@ -13841,7 +13940,7 @@
           "inventoryRefs": [
             "UI-099"
           ],
-          "status": "browser",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/lazy-tree-browser.test.ts",
@@ -13852,6 +13951,21 @@
               "file": "tests/lazy-tree-browser.test.ts",
               "name": "follows a link the reader clicks inside the document and keeps its query and fragment",
               "kind": "browser"
+            },
+            {
+              "file": "e2e/deployment-tree.spec.ts",
+              "name": "Back and Forward step through the selected documents; an entry that names no document keeps the last one showing",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/viewer-links.spec.ts",
+              "name": "cross-document links keep their query and fragment, restore on reload, and Back returns to the document before",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/viewer-links.spec.ts",
+              "name": "a link back to a section of another document opens it there, and picking a row in the tree drops the old fragment",
+              "kind": "e2e"
             }
           ]
         },
@@ -13863,7 +13977,7 @@
           "inventoryRefs": [
             "V03"
           ],
-          "status": "browser",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/lazy-tree-browser.test.ts",
@@ -13874,6 +13988,26 @@
               "file": "tests/lazy-tree-browser.test.ts",
               "name": "opens a deep link with its query and fragment, revealing and marking the document",
               "kind": "browser"
+            },
+            {
+              "file": "e2e/deployment-tree.spec.ts",
+              "name": "a CLI-pushed multi-folder deployment browses by directory page, deep link and keyboard",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/deployment-tree.spec.ts",
+              "name": "Back and Forward step through the selected documents; an entry that names no document keeps the last one showing",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/viewer-links.spec.ts",
+              "name": "a link back to a section of another document opens it there, and picking a row in the tree drops the old fragment",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/viewer-chrome.spec.ts",
+              "name": "a slow document shows progress and says so; once it arrives the content is shown at once and the progress ends after its minimum",
+              "kind": "e2e"
             }
           ]
         },
@@ -13885,12 +14019,22 @@
           "inventoryRefs": [
             "V03"
           ],
-          "status": "browser",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/lazy-tree-browser.test.ts",
               "name": "opens and closes folders from the keyboard and ignores other keys",
               "kind": "browser"
+            },
+            {
+              "file": "e2e/deployment-tree.spec.ts",
+              "name": "folders and documents are reached by Tab; Enter and Space operate them and the arrow, Home, End and typed keys do nothing",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/deployment-tree.spec.ts",
+              "name": "a CLI-pushed multi-folder deployment browses by directory page, deep link and keyboard",
+              "kind": "e2e"
             }
           ]
         },
@@ -13936,12 +14080,27 @@
           "inventoryRefs": [
             "UI-099"
           ],
-          "status": "browser",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/viewer-fragments-browser.test.ts",
               "name": "preserves cross-page fragments, back/forward and tree navigation in %s",
               "kind": "browser"
+            },
+            {
+              "file": "e2e/viewer-links.spec.ts",
+              "name": "cross-document links keep their query and fragment, restore on reload, and Back returns to the document before",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/viewer-links.spec.ts",
+              "name": "a link back to a section of another document opens it there, and picking a row in the tree drops the old fragment",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/deployment-tree.spec.ts",
+              "name": "Back and Forward step through the selected documents; an entry that names no document keeps the last one showing",
+              "kind": "e2e"
             }
           ]
         }
@@ -13991,7 +14150,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "browser",
+      "status": "e2e",
       "auditEvidence": "UNTESTED",
       "auditNote": "lazy-tree/lazy-tree.ts; static motion/modified-click tests are not full tree interaction coverage",
       "edges": [
@@ -14003,7 +14162,7 @@
           "inventoryRefs": [
             "UI-100"
           ],
-          "status": "browser",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/lazy-tree-browser.test.ts",
@@ -14019,6 +14178,21 @@
               "file": "tests/lazy-tree-browser.test.ts",
               "name": "shows a retryable folder error and loads the folder after retry",
               "kind": "browser"
+            },
+            {
+              "file": "e2e/deployment-tree.spec.ts",
+              "name": "a CLI-pushed multi-folder deployment browses by directory page, deep link and keyboard",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/deployment-tree.spec.ts",
+              "name": "a failed folder page and a failed Load more each leave the tree usable and recover on Retry",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/deployment-tree.spec.ts",
+              "name": "folders and documents are reached by Tab; Enter and Space operate them and the arrow, Home, End and typed keys do nothing",
+              "kind": "e2e"
             }
           ]
         },
@@ -14041,12 +14215,17 @@
           "inventoryRefs": [
             "V02"
           ],
-          "status": "browser",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/lazy-tree-browser.test.ts",
               "name": "ignores clicks on the root error text and reloads the list from its Retry button",
               "kind": "browser"
+            },
+            {
+              "file": "e2e/deployment-tree.spec.ts",
+              "name": "the root listing fails with Retry and an empty listing explains itself",
+              "kind": "e2e"
             }
           ]
         },
@@ -14058,12 +14237,17 @@
           "inventoryRefs": [
             "V02"
           ],
-          "status": "browser",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/lazy-tree-browser.test.ts",
               "name": "explains an empty tree at %s",
               "kind": "browser"
+            },
+            {
+              "file": "e2e/deployment-tree.spec.ts",
+              "name": "the root listing fails with Retry and an empty listing explains itself",
+              "kind": "e2e"
             }
           ]
         },
@@ -14086,12 +14270,17 @@
           "inventoryRefs": [
             "V02"
           ],
-          "status": "browser",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/lazy-tree-browser.test.ts",
               "name": "shows a retryable folder error and loads the folder after retry",
               "kind": "browser"
+            },
+            {
+              "file": "e2e/deployment-tree.spec.ts",
+              "name": "a failed folder page and a failed Load more each leave the tree usable and recover on Retry",
+              "kind": "e2e"
             }
           ]
         },
@@ -14103,12 +14292,17 @@
           "inventoryRefs": [
             "V02"
           ],
-          "status": "browser",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/lazy-tree-browser.test.ts",
               "name": "pages a folder, drops duplicate rows and retries a failed page",
               "kind": "browser"
+            },
+            {
+              "file": "e2e/deployment-tree.spec.ts",
+              "name": "a failed folder page and a failed Load more each leave the tree usable and recover on Retry",
+              "kind": "e2e"
             }
           ]
         },
@@ -14120,7 +14314,7 @@
           "inventoryRefs": [
             "V02"
           ],
-          "status": "browser",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/lazy-tree-browser.test.ts",
@@ -14141,6 +14335,11 @@
               "file": "tests/lazy-tree-browser.test.ts",
               "name": "pages the root, and reveals deep links into later root pages",
               "kind": "browser"
+            },
+            {
+              "file": "e2e/deployment-tree.spec.ts",
+              "name": "a CLI-pushed multi-folder deployment browses by directory page, deep link and keyboard",
+              "kind": "e2e"
             }
           ]
         },
@@ -14201,7 +14400,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "untested",
+      "status": "e2e",
       "auditEvidence": "UNTESTED",
       "auditNote": "document-ui-regressions.test.ts checks markup; mobile-toolbar-layout.test.ts checks breakpoint logic",
       "edges": [
@@ -14213,8 +14412,24 @@
           "inventoryRefs": [
             "UI-101"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/viewer-chrome.spec.ts",
+              "name": "the tree is a drawer: it opens and closes by button, backdrop and Escape, and choosing a document closes it",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/viewer-chrome.spec.ts",
+              "name": "More holds the secondary actions: it opens and closes, moves focus, runs each action once, and gives them back on desktop",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/viewer-chrome.spec.ts",
+              "name": "reading mode hides the shell, is remembered, and the hot zones, Escape and the shortcut bring it back",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-101-E02",
@@ -14224,8 +14439,14 @@
           "inventoryRefs": [
             "V12"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/viewer-chrome.spec.ts",
+              "name": "the tree is a drawer: it opens and closes by button, backdrop and Escape, and choosing a document closes it",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-101-E03",
@@ -14235,8 +14456,14 @@
           "inventoryRefs": [
             "V12"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/viewer-chrome.spec.ts",
+              "name": "More holds the secondary actions: it opens and closes, moves focus, runs each action once, and gives them back on desktop",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-101-E04",
@@ -14246,8 +14473,19 @@
           "inventoryRefs": [
             "V12"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/viewer-chrome.spec.ts",
+              "name": "More holds the secondary actions: it opens and closes, moves focus, runs each action once, and gives them back on desktop",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/viewer-chrome.spec.ts",
+              "name": "the tree is a drawer: it opens and closes by button, backdrop and Escape, and choosing a document closes it",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-101-E05",
@@ -14257,8 +14495,14 @@
           "inventoryRefs": [
             "V12"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/viewer-chrome.spec.ts",
+              "name": "More holds the secondary actions: it opens and closes, moves focus, runs each action once, and gives them back on desktop",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-101-E06",
@@ -14279,8 +14523,14 @@
           "inventoryRefs": [
             "V12"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/viewer-chrome.spec.ts",
+              "name": "the bar, the drawer and the menu stay inside 320, 375 and 430px screens",
+              "kind": "e2e"
+            }
+          ]
         }
       ]
     },
@@ -14328,7 +14578,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "browser",
+      "status": "e2e",
       "auditEvidence": "UNTESTED",
       "auditNote": "document-ui-regressions.test.ts asserts semantics; security-headers-browser displays errors but does not click retry",
       "edges": [
@@ -14340,7 +14590,7 @@
           "inventoryRefs": [
             "UI-102"
           ],
-          "status": "browser",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/lazy-tree-browser.test.ts",
@@ -14351,6 +14601,16 @@
               "file": "tests/lazy-tree-browser.test.ts",
               "name": "selects a document, announces loading, then settles after the minimum display time",
               "kind": "browser"
+            },
+            {
+              "file": "e2e/viewer-chrome.spec.ts",
+              "name": "a slow document shows progress and says so; once it arrives the content is shown at once and the progress ends after its minimum",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/viewer-chrome.spec.ts",
+              "name": "a document that never arrives fails after fifteen seconds with an assertive announcement, and selecting it again recovers",
+              "kind": "e2e"
             }
           ]
         },
@@ -14373,8 +14633,14 @@
           "inventoryRefs": [
             "V04"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/viewer-chrome.spec.ts",
+              "name": "a slow document shows progress and says so; once it arrives the content is shown at once and the progress ends after its minimum",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-102-E04",
@@ -14384,12 +14650,17 @@
           "inventoryRefs": [
             "V04"
           ],
-          "status": "browser",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/lazy-tree-browser.test.ts",
               "name": "selects a document, announces loading, then settles after the minimum display time",
               "kind": "browser"
+            },
+            {
+              "file": "e2e/viewer-chrome.spec.ts",
+              "name": "a slow document shows progress and says so; once it arrives the content is shown at once and the progress ends after its minimum",
+              "kind": "e2e"
             }
           ]
         },
@@ -14401,12 +14672,17 @@
           "inventoryRefs": [
             "V04"
           ],
-          "status": "browser",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/lazy-tree-browser.test.ts",
               "name": "reports a failed document load after a %s and recovers when it is selected again",
               "kind": "browser"
+            },
+            {
+              "file": "e2e/viewer-chrome.spec.ts",
+              "name": "a document that never arrives fails after fifteen seconds with an assertive announcement, and selecting it again recovers",
+              "kind": "e2e"
             }
           ]
         },
@@ -14418,8 +14694,14 @@
           "inventoryRefs": [
             "V04"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/viewer-chrome.spec.ts",
+              "name": "a load that was replaced cannot fail or finish the one that replaced it",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-102-E07",
@@ -14429,8 +14711,14 @@
           "inventoryRefs": [
             "V04"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/viewer-chrome.spec.ts",
+              "name": "with reduced motion the loading row is static",
+              "kind": "e2e"
+            }
+          ]
         }
       ]
     },
@@ -14478,7 +14766,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "browser",
+      "status": "e2e",
       "auditEvidence": "B",
       "auditNote": "viewer-fragments-browser.test.ts; legacy-viewer-browser.test.ts",
       "edges": [
@@ -14490,8 +14778,24 @@
           "inventoryRefs": [
             "UI-103"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/viewer-links.spec.ts",
+              "name": "a fragment link scrolls its own document and is reported to the shell without navigating or reloading",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/viewer-links.spec.ts",
+              "name": "a deep link with a fragment scrolls once the document has loaded, and so does a reload",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/viewer-links.spec.ts",
+              "name": "cross-document links keep their query and fragment, restore on reload, and Back returns to the document before",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-103-E02",
@@ -14501,8 +14805,14 @@
           "inventoryRefs": [
             "V05"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/viewer-links.spec.ts",
+              "name": "cross-document links keep their query and fragment, restore on reload, and Back returns to the document before",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-103-E03",
@@ -14523,8 +14833,24 @@
           "inventoryRefs": [
             "V05"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/viewer-links.spec.ts",
+              "name": "a deep link with a fragment scrolls once the document has loaded, and so does a reload",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/viewer-links.spec.ts",
+              "name": "cross-document links keep their query and fragment, restore on reload, and Back returns to the document before",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/viewer-surfaces.spec.ts",
+              "name": "a document in a publication that is not there, or is not a page, is not found",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-103-E05",
@@ -14534,8 +14860,19 @@
           "inventoryRefs": [
             "V05"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/viewer-links.spec.ts",
+              "name": "a fragment link scrolls its own document and is reported to the shell without navigating or reloading",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/viewer-links.spec.ts",
+              "name": "cross-document links keep their query and fragment, restore on reload, and Back returns to the document before",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-103-E06",
@@ -14545,8 +14882,14 @@
           "inventoryRefs": [
             "V05"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/viewer-links.spec.ts",
+              "name": "cross-document links keep their query and fragment, restore on reload, and Back returns to the document before",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-103-E07",
@@ -14556,8 +14899,14 @@
           "inventoryRefs": [
             "V05"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/viewer-links.spec.ts",
+              "name": "a link back to a section of another document opens it there, and picking a row in the tree drops the old fragment",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-103-E08",
@@ -14567,8 +14916,14 @@
           "inventoryRefs": [
             "V05"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/viewer-links.spec.ts",
+              "name": "cross-document links keep their query and fragment, restore on reload, and Back returns to the document before",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-103-E09",
@@ -14589,8 +14944,14 @@
           "inventoryRefs": [
             "V06"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/viewer-links.spec.ts",
+              "name": "a fragment link scrolls its own document and is reported to the shell without navigating or reloading",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-103-E11",
@@ -14600,8 +14961,14 @@
           "inventoryRefs": [
             "V06"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/viewer-links.spec.ts",
+              "name": "a fragment link scrolls its own document and is reported to the shell without navigating or reloading",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-103-E12",
@@ -14611,8 +14978,14 @@
           "inventoryRefs": [
             "V06"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/viewer-links.spec.ts",
+              "name": "a fragment link scrolls its own document and is reported to the shell without navigating or reloading",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-103-E13",
@@ -14622,8 +14995,14 @@
           "inventoryRefs": [
             "V06"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/viewer-links.spec.ts",
+              "name": "a fragment link scrolls its own document and is reported to the shell without navigating or reloading",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-103-E14",
@@ -14633,8 +15012,24 @@
           "inventoryRefs": [
             "V06"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/viewer-links.spec.ts",
+              "name": "cross-document links keep their query and fragment, restore on reload, and Back returns to the document before",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/viewer-links.spec.ts",
+              "name": "a link back to a section of another document opens it there, and picking a row in the tree drops the old fragment",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/viewer-links.spec.ts",
+              "name": "a deep link with a fragment scrolls once the document has loaded, and so does a reload",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-103-E15",
@@ -14655,12 +15050,22 @@
           "inventoryRefs": [
             "UI-103"
           ],
-          "status": "browser",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/viewer-fragments-browser.test.ts",
               "name": "reopens query document state after reload and a copied URL in %s",
               "kind": "browser"
+            },
+            {
+              "file": "e2e/viewer-links.spec.ts",
+              "name": "cross-document links keep their query and fragment, restore on reload, and Back returns to the document before",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/viewer-links.spec.ts",
+              "name": "a deep link with a fragment scrolls once the document has loaded, and so does a reload",
+              "kind": "e2e"
             }
           ]
         },
@@ -14672,12 +15077,22 @@
           "inventoryRefs": [
             "UI-103"
           ],
-          "status": "browser",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/viewer-fragments-browser.test.ts",
               "name": "scrolls without a reload and restores Unicode deep links in %s",
               "kind": "browser"
+            },
+            {
+              "file": "e2e/viewer-links.spec.ts",
+              "name": "a fragment link scrolls its own document and is reported to the shell without navigating or reloading",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/viewer-links.spec.ts",
+              "name": "a deep link with a fragment scrolls once the document has loaded, and so does a reload",
+              "kind": "e2e"
             }
           ]
         }
@@ -15208,7 +15623,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "browser",
+      "status": "e2e",
       "auditEvidence": "B",
       "auditNote": "viewer-fragments-browser.test.ts; legacy-viewer-browser.test.ts",
       "edges": [
@@ -15231,8 +15646,14 @@
           "inventoryRefs": [
             "V07"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/viewer-links.spec.ts",
+              "name": "forged, malformed and stale requests do not navigate, prompt or leave the shell",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-107-E03",
@@ -15242,8 +15663,14 @@
           "inventoryRefs": [
             "V07"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/viewer-links.spec.ts",
+              "name": "forged, malformed and stale requests do not navigate, prompt or leave the shell",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-107-E04",
@@ -15275,8 +15702,14 @@
           "inventoryRefs": [
             "V07"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/viewer-links.spec.ts",
+              "name": "forged, malformed and stale requests do not navigate, prompt or leave the shell",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-107-E07",
@@ -15329,7 +15762,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "untested",
+      "status": "e2e",
       "auditEvidence": "UNTESTED",
       "auditNote": "app.ts setAvatarMenu; CSS contract tests do not execute interaction",
       "edges": [
@@ -15341,8 +15774,14 @@
           "inventoryRefs": [
             "UI-148"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/viewer-chrome.spec.ts",
+              "name": "the avatar menu opens and closes by click, outside click and Escape, and leads to the account",
+              "kind": "e2e"
+            }
+          ]
         }
       ]
     },
@@ -15380,7 +15819,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "browser",
+      "status": "e2e",
       "auditEvidence": "B",
       "auditNote": "viewer-fragments-browser.test.ts; viewer-navigation-confirmation.test.ts",
       "edges": [
@@ -15392,8 +15831,19 @@
           "inventoryRefs": [
             "UI-108"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/viewer-links.spec.ts",
+              "name": "a link followed with no reader action is offered by the shell: cancel, review and confirm",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/viewer-links.spec.ts",
+              "name": "further unsolicited links never retarget a visible prompt, and while dismissed only the latest is kept for Review",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-108-E02",
@@ -15403,12 +15853,22 @@
           "inventoryRefs": [
             "UI-108"
           ],
-          "status": "browser",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/viewer-fragments-browser.test.ts",
               "name": "uses deduplicated text-only parent confirmation without userActivation in %s",
               "kind": "browser"
+            },
+            {
+              "file": "e2e/viewer-links.spec.ts",
+              "name": "a link followed with no reader action is offered by the shell: cancel, review and confirm",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/viewer-links.spec.ts",
+              "name": "further unsolicited links never retarget a visible prompt, and while dismissed only the latest is kept for Review",
+              "kind": "e2e"
             }
           ]
         }
@@ -15448,7 +15908,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "browser",
+      "status": "e2e",
       "auditEvidence": "B",
       "auditNote": "viewer-fragments-browser.test.ts",
       "edges": [
@@ -15460,8 +15920,19 @@
           "inventoryRefs": [
             "UI-109"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/viewer-links.spec.ts",
+              "name": "a link followed with no reader action is offered by the shell: cancel, review and confirm",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/viewer-links.spec.ts",
+              "name": "further unsolicited links never retarget a visible prompt, and while dismissed only the latest is kept for Review",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-109-E02",
@@ -15471,8 +15942,14 @@
           "inventoryRefs": [
             "V09"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/viewer-links.spec.ts",
+              "name": "a link followed with no reader action is offered by the shell: cancel, review and confirm",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-109-E03",
@@ -15482,8 +15959,14 @@
           "inventoryRefs": [
             "V09"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/viewer-links.spec.ts",
+              "name": "further unsolicited links never retarget a visible prompt, and while dismissed only the latest is kept for Review",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-109-E04",
@@ -15493,8 +15976,19 @@
           "inventoryRefs": [
             "V09"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/viewer-links.spec.ts",
+              "name": "a link followed with no reader action is offered by the shell: cancel, review and confirm",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/viewer-links.spec.ts",
+              "name": "further unsolicited links never retarget a visible prompt, and while dismissed only the latest is kept for Review",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-109-E05",
@@ -15504,8 +15998,14 @@
           "inventoryRefs": [
             "V09"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/viewer-links.spec.ts",
+              "name": "further unsolicited links never retarget a visible prompt, and while dismissed only the latest is kept for Review",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-109-E06",
@@ -15515,8 +16015,19 @@
           "inventoryRefs": [
             "V09"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/viewer-links.spec.ts",
+              "name": "a link followed with no reader action is offered by the shell: cancel, review and confirm",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/viewer-links.spec.ts",
+              "name": "further unsolicited links never retarget a visible prompt, and while dismissed only the latest is kept for Review",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-109-E07",
@@ -15526,8 +16037,14 @@
           "inventoryRefs": [
             "V09"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/viewer-links.spec.ts",
+              "name": "a link followed with no reader action is offered by the shell: cancel, review and confirm",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-109-E08",
@@ -15548,12 +16065,17 @@
           "inventoryRefs": [
             "UI-109"
           ],
-          "status": "browser",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/viewer-fragments-browser.test.ts",
               "name": "recovers later document and query links through parent Review after dismissal in %s",
               "kind": "browser"
+            },
+            {
+              "file": "e2e/viewer-links.spec.ts",
+              "name": "further unsolicited links never retarget a visible prompt, and while dismissed only the latest is kept for Review",
+              "kind": "e2e"
             }
           ]
         }
@@ -15593,7 +16115,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "browser",
+      "status": "e2e",
       "auditEvidence": "B",
       "auditNote": "viewer-fragments-browser.test.ts",
       "edges": [
@@ -15605,8 +16127,19 @@
           "inventoryRefs": [
             "UI-110"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/viewer-links.spec.ts",
+              "name": "a link the reader activates opens at once, by pointer or by keyboard, without asking",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/deployment-tree.spec.ts",
+              "name": "Back and Forward step through the selected documents; an entry that names no document keeps the last one showing",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-110-E02",
@@ -15616,8 +16149,19 @@
           "inventoryRefs": [
             "V08"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/viewer-links.spec.ts",
+              "name": "a link the reader activates opens at once, by pointer or by keyboard, without asking",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/viewer-links.spec.ts",
+              "name": "a link followed with no reader action is offered by the shell: cancel, review and confirm",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-110-E03",
@@ -15649,8 +16193,14 @@
           "inventoryRefs": [
             "V08"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/viewer-links.spec.ts",
+              "name": "further unsolicited links never retarget a visible prompt, and while dismissed only the latest is kept for Review",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-110-E06",
@@ -15660,8 +16210,14 @@
           "inventoryRefs": [
             "V08"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/viewer-links.spec.ts",
+              "name": "a link followed with no reader action is offered by the shell: cancel, review and confirm",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-110-E07",
@@ -15682,8 +16238,14 @@
           "inventoryRefs": [
             "V08"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/deployment-tree.spec.ts",
+              "name": "Back and Forward step through the selected documents; an entry that names no document keeps the last one showing",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-110-E09",
@@ -15710,12 +16272,17 @@
           "inventoryRefs": [
             "UI-110"
           ],
-          "status": "browser",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/viewer-fragments-browser.test.ts",
               "name": "propagates keyboard Enter activation from an opaque-frame link in %s",
               "kind": "browser"
+            },
+            {
+              "file": "e2e/viewer-links.spec.ts",
+              "name": "a link the reader activates opens at once, by pointer or by keyboard, without asking",
+              "kind": "e2e"
             }
           ]
         }
@@ -20898,7 +21465,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "untested",
+      "status": "e2e",
       "auditEvidence": "NOT_IN_AUDIT",
       "auditNote": "Additional family from the modernization inventory/route ledger.",
       "edges": [
@@ -20908,8 +21475,14 @@
           "trigger": "Toggle reading mode, use shortcut/hot zone, or Escape",
           "expected": "Viewer reading mode and hot-zone recovery",
           "inventoryRefs": [],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/viewer-chrome.spec.ts",
+              "name": "reading mode hides the shell, is remembered, and the hot zones, Escape and the shortcut bring it back",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-155-E02",
@@ -20919,8 +21492,14 @@
           "inventoryRefs": [
             "V10"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/viewer-chrome.spec.ts",
+              "name": "reading mode hides the shell, is remembered, and the hot zones, Escape and the shortcut bring it back",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-155-E03",
@@ -20930,8 +21509,14 @@
           "inventoryRefs": [
             "V10"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/viewer-chrome.spec.ts",
+              "name": "reading mode hides the shell, is remembered, and the hot zones, Escape and the shortcut bring it back",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-155-E04",
@@ -20941,8 +21526,19 @@
           "inventoryRefs": [
             "V10"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/viewer-chrome.spec.ts",
+              "name": "reading mode hides the shell, is remembered, and the hot zones, Escape and the shortcut bring it back",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/viewer-chrome.spec.ts",
+              "name": "the sidebar resizes by keyboard and by dragging within its limits, remembers the width, and never collapses the tree",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-155-E05",
@@ -20952,8 +21548,14 @@
           "inventoryRefs": [
             "V10"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/viewer-chrome.spec.ts",
+              "name": "reading mode hides the shell, is remembered, and the hot zones, Escape and the shortcut bring it back",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-155-E06",
@@ -21010,7 +21612,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "untested",
+      "status": "e2e",
       "auditEvidence": "NOT_IN_AUDIT",
       "auditNote": "Additional family from the modernization inventory/route ledger.",
       "edges": [
@@ -21020,8 +21622,14 @@
           "trigger": "Drag/cancel, keyboard resize, reload saved width, or resize viewport",
           "expected": "Viewer sidebar pointer and keyboard resize",
           "inventoryRefs": [],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/viewer-chrome.spec.ts",
+              "name": "the sidebar resizes by keyboard and by dragging within its limits, remembers the width, and never collapses the tree",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-156-E02",
@@ -21031,8 +21639,14 @@
           "inventoryRefs": [
             "V11"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/viewer-chrome.spec.ts",
+              "name": "the sidebar resizes by keyboard and by dragging within its limits, remembers the width, and never collapses the tree",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-156-E03",
@@ -21042,8 +21656,14 @@
           "inventoryRefs": [
             "V11"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/viewer-chrome.spec.ts",
+              "name": "the sidebar resizes by keyboard and by dragging within its limits, remembers the width, and never collapses the tree",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-156-E04",
@@ -21053,8 +21673,14 @@
           "inventoryRefs": [
             "V11"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/viewer-chrome.spec.ts",
+              "name": "the sidebar resizes by keyboard and by dragging within its limits, remembers the width, and never collapses the tree",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-156-E05",
@@ -21064,8 +21690,14 @@
           "inventoryRefs": [
             "V11"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/viewer-chrome.spec.ts",
+              "name": "the sidebar resizes by keyboard and by dragging within its limits, remembers the width, and never collapses the tree",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-156-E06",
@@ -21075,8 +21707,14 @@
           "inventoryRefs": [
             "V11"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/viewer-chrome.spec.ts",
+              "name": "the sidebar resizes by keyboard and by dragging within its limits, remembers the width, and never collapses the tree",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-156-E07",
@@ -21086,8 +21724,14 @@
           "inventoryRefs": [
             "V11"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/viewer-chrome.spec.ts",
+              "name": "the sidebar resizes by keyboard and by dragging within its limits, remembers the width, and never collapses the tree",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-156-E08",
@@ -21097,8 +21741,14 @@
           "inventoryRefs": [
             "V11"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/viewer-chrome.spec.ts",
+              "name": "the sidebar resizes by keyboard and by dragging within its limits, remembers the width, and never collapses the tree",
+              "kind": "e2e"
+            }
+          ]
         }
       ]
     },

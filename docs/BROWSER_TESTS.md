@@ -324,6 +324,54 @@ Harness note: an oversized request body (the Worker answers 413 without reading 
 connection fail with miniflare's "Network connection lost" 500. This is the local development transport, not the
 application, but it means no test here sends an oversized body.
 
+## Document viewer: tree, chrome and link confirmation (#114)
+
+Four specs run the document viewers on the real Worker and local Convex in all three engines. One
+deployment per worker is pushed through the real CLI (`e2e/viewer-fixtures.ts`: a private project with
+an owner and an outsider, a whole-deployment and a one-folder publication, pages written to exercise
+links, fragments and hostile publisher scripts; `e2e/deployment-tree.spec.ts` pushes its own 260-file
+deployment so folders page). Final state is asserted in the DOM, ARIA, focus, the URL, history length,
+`localStorage`, and the iframe's own location (`documentFrame()`); the document is opaque, so only
+Playwright can read where it is.
+
+| Spec | Covers |
+|---|---|
+| `deployment-tree.spec.ts` | Directory-page browsing (root page, folder pages and Load more by cursor, deep links beyond the first page), folder and Load more failure and Retry, failed deep-link reveal, root failure and empty listing, no deployment, Tab/Enter/Space operation (arrow, Home/End and typed keys do nothing), selection indicator, Back/Forward between documents |
+| `viewer-links.spec.ts` | Fragments within and across documents (Unicode ids, named anchors, bare and unmatched hashes, replace vs push, reload), `docQuery`, and the parent-owned link confirmation: a reader's click or Enter opens at once; a link followed with no reader action is offered (confirm, dismiss, review, repeat), a visible prompt is never retargeted, forged and malformed requests do nothing, new-tab and external links |
+| `viewer-chrome.spec.ts` | Theme (cycle, persistence, what the document is told and that its own colors are untouched), avatar menu, reading mode (control, shortcut, hot zones, Escape, persistence), sidebar resize (keyboard, drag, cancel, limits, viewport clamp, persistence), the phone tree drawer and More menu (focus, dismissal, one handler per action, desktop/landscape restore), 320/375/430px containment, document loading, never-arriving and replaced loads with their announcements, reduced motion, share failure notices |
+| `viewer-surfaces.spec.ts` | Private vs publication vs share chrome; outsider and signed-out access; a publication's deep links, Back/Forward and scope; a share's fragments and out-of-grant links; revoked and expired shares are 404 in the shell, the document and a viewer that was open; the anonymous viewers make no session lookup. Creating, listing and revoking shares and publications is #113's and is not repeated |
+
+Timing-sensitive steps never sleep. The loading specs install Playwright's fake clock and pause it
+where the page is idle, hold the document request at the browser boundary, and then advance time by
+exact amounts (14,999 ms, then 1 ms, across the 15-second deadline; 519 ms, then 1 ms, across the 520 ms
+minimum row feedback). The link-confirmation specs use `trackActivation()`: it waits until the shell's
+user activation has lapsed (a navigation typed into the address bar and any Playwright evaluation grant
+activation) and then posts to the content frame from inside the shell, so the request carries no reader
+authorization; acknowledgements are requests the shell itself makes after handling each message. The
+share expiry journey uses the shortest lifetime the product allows (one minute), created when the worker
+starts and polled for rather than waited out. Every test uses data provisioned for its worker.
+
+**#169 part 2** (a Back/Forward entry that names no document) is an open product decision. The
+Back/Forward test asserts the current behavior and says so: reaching such an entry changes only the URL;
+the last document and its selection stay showing.
+
+Expected failures (their broken assertions get no `e2e` credit; an unexpected pass fails the suite):
+
+- **A closed folder's rows are still reached by Tab.** Closed folders hide their rows with
+  `max-height`/`opacity` only, so they stay focusable and in the accessibility tree. Fix: `inert` (or
+  `visibility: hidden`) on a closed folder's content.
+- **An open folder with a full page of rows overlaps the rows after it.** Open content is capped at
+  `max-height: 2000px` with visible overflow, so rows past about 60 draw over what follows. Fix: size to
+  content (or use `grid-template-rows` for the animation).
+- **A link to another site tells the reader nothing.** The shell refuses to frame it; Chromium replaces the
+  document with a browser error page, Firefox and WebKit do nothing visible. Fix: route such links
+  through the parent confirmation and open them in a new context.
+- **The account menu (and More on a phone) stays open when the reader clicks in the document.** The
+  document is another frame, so its clicks never reach the shell's outside-click handler. Fix: also close
+  on the window's `blur` (focus moving into the frame).
+- **Signing in does not return to the document the reader asked for.** The signed-out redirect keeps only
+  the path, so `?doc=` is lost. Fix: carry the `doc` and `docQuery` parameters in `returnTo`.
+
 ## Vitest Chromium project
 
 Run `pnpm exec playwright install chromium`, then `CI=true pnpm test:browser`.
