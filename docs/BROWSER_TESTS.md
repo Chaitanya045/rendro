@@ -283,10 +283,7 @@ after load; timers advance only when the test says so. A real `beforeunload`
 prompt is not exercised: the guard is checked by dispatching the event and reading
 `defaultPrevented`.
 
-Expected failures (no `e2e` credit; an unexpected pass fails the suite):
-
-- **The API accepts organization slugs that violate the documented pattern.** `create` and `update` accept `Not A Valid Slug`; only the `pattern` attribute of the form enforces lowercase hyphenated slugs.
-- **Any member can read the pending invitations.** `list-invitations` only requires membership, so an ordinary member sees every invited address, role and status; the UI avoids requesting it for members, and a unit test names the request "forbidden".
+No organization expected failures remain: every journey above passes in all three engines.
 
 Not asserted (not credited): the invitation page's own read-failure state (the page consumes the
 server-rendered lookup instead of issuing a read that a browser test could fail), the organization
