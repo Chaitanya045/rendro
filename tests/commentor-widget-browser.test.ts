@@ -280,7 +280,7 @@ describe("thread actions and permissions", () => {
     const bubble = await openBubble(lab);
     const resolve = bubble.locator('[data-testid="commentor-resolve-btn"]');
     // A slow host: the request reaches it long after the widget showed its pending state.
-    await lab.host(l => { const original = l.mutate; l.mutate = (method, args) => new Promise(done => setTimeout(done, 300)).then(() => original.call(l, method, args)); l.holds = ["thread.resolve"]; });
+    await lab.host(l => { const original = l.mutate.bind(l); l.mutate = (method, args) => new Promise(done => setTimeout(done, 300)).then(() => original(method, args)); l.holds = ["thread.resolve"]; });
     await resolve.click();
     await expect.poll(() => resolve.getAttribute("aria-busy")).toBe("true");
     expect(await lab.host(l => l.held.length)).toBe(0);
