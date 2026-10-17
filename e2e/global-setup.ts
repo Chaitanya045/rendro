@@ -32,7 +32,7 @@ export default async function globalSetup() {
     }
     resources.close();
     if (blockedOrigins.size) errors.push(new Error(`Blocked external Worker origins: ${[...blockedOrigins].join(", ")}`));
-    if (errors.length) throw new AggregateError(errors, "E2E teardown failed");
+    if (errors.length) throw new AggregateError(errors, `E2E teardown failed: ${errors.map(error => error instanceof Error ? error.message : String(error)).join("; ")}`);
   }
 
   try {
