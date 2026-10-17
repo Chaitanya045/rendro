@@ -287,6 +287,13 @@ describe("organization name", () => {
     expect((await f.call(transport, "member", "/api/auth/organization/update", { organizationId: f.organizationId, data: { name: "x".repeat(81) } })).status).toBe(403);
   });
 
+  it("refuses a name that is not text when the hooks are called directly", async () => {
+    const hooks = organizationFieldHooks(() => Promise.resolve({ name: "Stored" }));
+    expect(() => hooks.beforeCreateOrganization({ organization: { name: 7, slug: "ok" } })).toThrowError(expect.objectContaining({ statusCode: 400 }));
+    await expect(hooks.beforeUpdateOrganization({ organization: { name: 7 }, member: { organizationId: "org" } })).rejects.toMatchObject({ statusCode: 400 });
+    await expect(hooks.beforeUpdateOrganization({ organization: { name: "Stored" }, member: { organizationId: "org" } })).resolves.toEqual({ data: { name: "Stored" } });
+  });
+
   it("keeps organizations with a legacy name working and validates only a new name", async () => {
     const f = await fixture();
     const longName = "L".repeat(120);
