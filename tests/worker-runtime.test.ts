@@ -69,10 +69,14 @@ describe("Worker runtime bindings and asset fallbacks", () => {
   it("serves assets, gives opaque missing responses, and handles binding failures", async () => {
     expect((await worker.request("/management-query.js")).status).toBe(404);
     expect((await worker.request("/missing.svg")).status).toBe(404);
-    const found = await worker.request("/fixture.txt", {}, { ASSETS: { fetch: () => new Response("fixture") } });
+    const found = await worker.request("/select.js", {}, { ASSETS: { fetch: () => new Response("fixture") } });
     expect(await found.text()).toBe("fixture");
-    expect((await worker.request("/missing.svg", {}, { ASSETS: { fetch: () => new Response(null, { status: 404 }) } })).status).toBe(404);
-    const failed = await worker.request("/fixture.txt", {}, { ASSETS: { fetch: () => { throw new Error("Private diagnostic"); } } });
+    expect((await worker.request("/select.js", {}, { ASSETS: { fetch: () => new Response(null, { status: 404 }) } })).status).toBe(404);
+    // Only allowlisted paths ever reach the binding, even when it would serve them.
+    const unlisted = { fetch: vi.fn(() => new Response("fixture")) };
+    expect((await worker.request("/fixture.txt", {}, { ASSETS: unlisted })).status).toBe(404);
+    expect(unlisted.fetch).not.toHaveBeenCalled();
+    const failed = await worker.request("/select.js", {}, { ASSETS: { fetch: () => { throw new Error("Private diagnostic"); } } });
     expect(failed.status).toBe(500);
     expect(await failed.text()).not.toContain("Private diagnostic");
     expect((await worker.request("/missing", { method: "PATCH" })).status).toBe(404);

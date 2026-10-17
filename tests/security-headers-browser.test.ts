@@ -9,6 +9,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import worker from "@/worker";
 import { COMMENTOR_PARENT_READY, COMMENTOR_PROTOCOL_VERSION } from "@/commentor/parent-protocol";
 import { createShareToken } from "@/share-links";
+import { COMMENTOR_VERSION } from "@/viewer/asset-versions";
 import { docsBase, mockSecurityBackend, publisherHtml, testUser } from "./fixtures/security-headers";
 import { browserStep, bundleBrowserAsset, createBrowserHarness, waitForSettled } from "./helpers/browser";
 
@@ -201,7 +202,7 @@ describe("Chromium security header smoke", () => {
       expect(await frame.locator("body").evaluate(() => { try { void parent.document; return false; } catch { return true; } })).toBe(true);
       await settled(page);
       expect(await page.locator('script[src="/commentor-parent.js?v=16"]').count()).toBe(1);
-      expect(await frame.locator('script[src="/commentor.js?v=45"]').count()).toBe(1);
+      expect(await frame.locator(`script[src="/commentor.js?v=${COMMENTOR_VERSION}"]`).count()).toBe(1);
       const originalNonce = await page.locator('script[src="/commentor-parent.js?v=16"]').evaluate(script => (script as HTMLScriptElement).nonce);
       expect(originalNonce).not.toBe("");
 

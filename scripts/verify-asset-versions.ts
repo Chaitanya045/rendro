@@ -1,9 +1,7 @@
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
-import { MANAGEMENT_SHELL_VERSION } from "../src/routes/management-navigation";
-import { MANAGEMENT_QUERY_VERSION, SELECT_VERSION } from "../src/routes/management-asset-versions";
-import { COMMENTOR_PARENT_VERSION, LAZY_TREE_VERSION, PRIVATE_VIEWER_VERSION } from "../src/viewer/asset-versions";
+import { versionedBundles } from "../src/routes/versioned-bundles";
 import { recordAssetVersion, verifyAssetHistory, type AssetVersionLedger } from "./asset-version-ledger";
 
 const manifest = "scripts/asset-versions.json";
@@ -19,14 +17,10 @@ if (base && !/^0+$/.test(base)) {
     verifyAssetHistory(ledger, previous);
   }
 }
-for (const [path, version] of Object.entries({
-  "public/management-pages.js": MANAGEMENT_SHELL_VERSION,
-  "public/management-query.js": MANAGEMENT_QUERY_VERSION,
-  "public/select.js": SELECT_VERSION,
-  "public/lazy-tree.js": LAZY_TREE_VERSION,
-  "public/private-viewer.js": PRIVATE_VIEWER_VERSION,
-  "public/commentor-parent.js": COMMENTOR_PARENT_VERSION,
-})) {
+// The Worker serves a bundle as immutable only for the version listed here, so the ledger and the
+// routes share one registry.
+for (const [route, version] of Object.entries(versionedBundles)) {
+  const path = `public${route}`;
   if (!record && !ledger[path]?.[version]) {
     throw new Error(`${path} v${version} is unrecorded. Rebuild and run pnpm record:assets.`);
   }
