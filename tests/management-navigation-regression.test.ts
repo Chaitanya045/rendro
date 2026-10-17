@@ -42,7 +42,7 @@ function deferred<T>() {
 class ContentMock {
   parent: MainMock | null = null;
   readonly heading = { focus: vi.fn(), tabIndex: 0 };
-  readonly classList = { add: vi.fn(), remove: vi.fn() };
+  readonly classList = { add: vi.fn(), remove: vi.fn(), replace: vi.fn() };
   readonly dialogs: object[] = [];
   innerHTML = "";
 
@@ -110,7 +110,7 @@ class MainMock {
   }
 }
 
-function navigationRuntime(initialPath = "/organizations/org-a/people") {
+function navigationRuntime(initialPath = "/organizations/org-a/people", entry: { type?: string; state?: Record<string, unknown> } = {}) {
   const origin = "https://rendro.test";
   const initialUrl = `${origin}${initialPath}`;
   const listeners = new Map<string, (event: { state?: Record<string, unknown> | null }) => void>();
@@ -138,7 +138,8 @@ function navigationRuntime(initialPath = "/organizations/org-a/people") {
   function setLocation(href: string): void { locationUrl = new URL(href, locationUrl); }
 
   const history = {
-    state: null as Record<string, unknown> | null,
+    scrollRestoration: "auto",
+    state: (entry.state ?? null) as Record<string, unknown> | null,
     go: vi.fn(),
     pushState: vi.fn((state: Record<string, unknown>, _title: string, href: string) => {
       history.state = state;
@@ -203,9 +204,11 @@ function navigationRuntime(initialPath = "/organizations/org-a/people") {
   class CustomEventMock {
     constructor(readonly type: string, readonly init: unknown) {}
   }
+  const mutationCallbacks = new Set<() => void>();
   class MutationObserverMock {
-    disconnect(): void {}
-    observe(): void {}
+    constructor(private readonly callback: () => void) {}
+    disconnect(): void { mutationCallbacks.delete(this.callback); }
+    observe(): void { mutationCallbacks.add(this.callback); }
   }
   const scrollTo = vi.fn((_x: number, y: number) => { scrollY = y; });
   const windowObject = {
@@ -232,6 +235,7 @@ function navigationRuntime(initialPath = "/organizations/org-a/people") {
     fetch: fetchMock,
     history,
     location,
+    performance: entry.type ? { getEntriesByType: () => [{ type: entry.type }] } : undefined,
     setTimeout,
     window: windowObject,
   });
@@ -261,6 +265,10 @@ function navigationRuntime(initialPath = "/organizations/org-a/people") {
     location,
     main,
     replaceLocation,
+    finishRendering() {
+      main.current.innerHTML = "";
+      [...mutationCallbacks].forEach((callback) => callback());
+    },
     resolveFetch,
     setLocation,
     themeMount,
@@ -470,6 +478,72 @@ describe("management navigation regressions", () => {
     expect(runtime.window.scrollTo).toHaveBeenCalledWith(0, 0);
     runtime.resolveFetch(0, { label: "teams" }, teams);
     await navigation;
+  });
+
+  async function backToSavedScroll(runtime: ReturnType<typeof navigationRuntime>, savedScroll: number) {
+    const teams = `${new URL(runtime.initialUrl).origin}/organizations/org-a/teams`;
+    const toTeams = runtime.ui.navigate(teams);
+    runtime.resolveFetch(0, { label: "teams" }, teams);
+    await toTeams;
+    runtime.setLocation(runtime.initialUrl);
+    runtime.listeners.get("popstate")!({ state: { __rendroManagementIndex: 0, __rendroScrollY: savedScroll } });
+    runtime.window.scrollTo.mockClear();
+    return runtime;
+  }
+
+  it("restores the saved offset once the restored page has rendered", async () => {
+    const runtime = await backToSavedScroll(navigationRuntime(), 300);
+    runtime.resolveFetch(1, { label: "people-back" }, runtime.initialUrl);
+    await flushNavigation();
+    expect(runtime.window.scrollTo).not.toHaveBeenCalled();
+    runtime.finishRendering();
+    expect(runtime.window.scrollTo).toHaveBeenCalledOnce();
+    expect(runtime.window.scrollTo).toHaveBeenLastCalledWith(0, 300);
+    expect(runtime.window.scrollY).toBe(300);
+  });
+
+  it("takes over scroll restoration and keeps the current offset with the history entry when the page is hidden", () => {
+    const runtime = navigationRuntime();
+    expect(runtime.history.scrollRestoration).toBe("manual");
+    runtime.listeners.get("pagehide")!({});
+    expect(runtime.history.replaceState).toHaveBeenLastCalledWith(
+      expect.objectContaining({ __rendroManagementIndex: 0, __rendroScrollY: 164 }),
+      "",
+      runtime.initialUrl,
+    );
+  });
+
+  it.each(["reload", "back_forward"])("restores the entry's offset after a %s", (type) => {
+    const runtime = navigationRuntime("/organizations/org-a/people", { type, state: { __rendroManagementIndex: 2, __rendroScrollY: 90 } });
+    expect(runtime.window.scrollTo).toHaveBeenCalledOnce();
+    expect(runtime.window.scrollTo).toHaveBeenCalledWith(0, 90);
+  });
+
+  it.each([["navigate", { __rendroScrollY: 90 }], ["reload", { __rendroScrollY: 0 }]])("does not restore after a %s without a saved offset", (type, state) => {
+    const runtime = navigationRuntime("/organizations/org-a/people", { type, state });
+    runtime.finishRendering();
+    expect(runtime.window.scrollTo).not.toHaveBeenCalled();
+  });
+
+  it("keeps the scroll position the user chose while the restored page was loading", async () => {
+    const runtime = await backToSavedScroll(navigationRuntime(), 300);
+    runtime.listeners.get("wheel")!({});
+    runtime.resolveFetch(1, { label: "people-back" }, runtime.initialUrl);
+    await flushNavigation();
+    runtime.finishRendering();
+    expect(runtime.window.scrollTo).not.toHaveBeenCalled();
+  });
+
+  it("drops a pending restore when a newer navigation starts", async () => {
+    const runtime = await backToSavedScroll(navigationRuntime(), 300);
+    const settings = `${new URL(runtime.initialUrl).origin}/organizations/org-a/settings`;
+    const next = runtime.ui.navigate(settings);
+    runtime.window.scrollTo.mockClear();
+    runtime.resolveFetch(1, { label: "ignored" }, runtime.initialUrl);
+    runtime.resolveFetch(2, { label: "settings" }, settings);
+    await next;
+    runtime.finishRendering();
+    expect(runtime.window.scrollTo).not.toHaveBeenCalledWith(0, 300);
   });
 
   it("aborts pending navigation on sign-out and never mounts its late response", async () => {

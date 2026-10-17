@@ -238,10 +238,6 @@ clock to cross the 15-second navigation timeout without waiting.
 Expected failures (their broken assertions get no `e2e` credit; an unexpected
 pass fails the suite):
 
-- **Back does not restore the saved scroll offset between client-routed management pages.**
-  The departing offset is recorded in history state, but after Back the page content
-  mounts through the public bundle without re-applying it, so the page remains at the
-  top (reproduced in Chromium and Firefox).
 - **An enhanced select does not follow a user-activated native Reset button.**
   The shared select refreshes its trigger from a microtask queued by the form's `reset`
   event. For a Reset button the microtask runs before the browser restores the control,
@@ -269,7 +265,7 @@ person's view.
 | `org-onboarding.spec.ts` | Organization → project → credential → first deployment with a real CLI push, five-second polling on a frozen page clock (hidden-tab pause, outage and recovery), one-time key reveal/copy/confirmation, setup initialization failure, foreign project, Finish later, member restriction |
 | `org-people.spec.ts` | Invite batch (1–10 rows, native validation, sequential partial failure, retry without resending, captured mail), pending list failure and retry, revocation; roles (owner/admin/member controls, last-owner rule, failure revert, self-demotion, leave); member removal (confirmation, pending, failure, retry, lost access, team membership, revoked admin's rejected action) |
 | `org-invitations.spec.ts` | Mailed link signed out through sign-up, verification and sign-in; review, accept (failure, pending, completed-state recovery) and decline; wrong recipient, revoked, expired and already-used invitations |
-| `org-teams.spec.ts` | Create (validation, pending, failure, reuse), assign, roster open/hide/refresh, remove from team, delete, read-only members; a 52-member roster with Load more, failure and retry, and an outdated page response |
+| `org-teams.spec.ts` | Create (validation, pending, failure, reuse), assign, roster open/hide/refresh, remove from team, delete (the last team and the session's active team are not offered, and the server still refuses them), read-only members; a 52-member roster with Load more, failure and retry, and an outdated page response |
 | `org-permissions.spec.ts` | Controls of owner, admin and member on People, Teams and Settings; outsider denial; every management write refused for members, outsiders and (for ownership and deletion) admins |
 
 Completed writes navigate immediately, so "stays visible" states are observed by

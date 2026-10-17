@@ -17,6 +17,9 @@ import { serveFonts } from './helpers/fonts';
 const heldDocuments = new Map<string, { arrived: boolean; ready: Promise<void>; release(): void }>();
 afterEach(() => { for (const held of heldDocuments.values()) held.release(); heldDocuments.clear(); });
 const harness = createBrowserHarness();
+let sessionActiveTeamId: string | null = null;
+let sessionStatus = 200;
+afterEach(() => { sessionActiveTeamId = null; sessionStatus = 200; });
 const user = { id: 'user-a', name: 'Owner', email: 'owner@example.test' } as User;
 const organization = { id: 'org-a', name: 'Acme', slug: 'acme', members: [{ id: 'member-a', userId: user.id, role: 'owner', user }], teams: [{ id: 'team-default', name: 'Acme' }] };
 const project = { _id: 'project-a', organizationId: 'org-a', name: 'Docs', slug: 'docs', activeDeploymentId: 'deployment-a' };
@@ -52,6 +55,7 @@ beforeAll(async () => {
     await next();
   });
   app.get('/api/rendro/management/access', c => access(c.req.raw)!);
+  app.get('/api/auth/get-session', c => sessionStatus === 200 ? c.json({ user, session: { id: 'session-a', activeTeamId: sessionActiveTeamId } }) : c.json({ message: 'unavailable' }, sessionStatus as 500));
   app.get('/api/auth/organization/get-full-organization', c => c.json(organization));
   app.get('/api/auth/organization/list', c => c.json([organization]));
   app.get('/api/auth/organization/get-invitation', c => c.json(invitation));
@@ -594,6 +598,111 @@ it('the last team cannot be removed and the rule follows removals of other teams
   expect(await remove('Platform').isDisabled()).toBe(true);
   expect(await accessibleDescription(page, '.team-card .remove-team')).toBe('Every organization keeps at least one team, so this team can’t be removed.');
   expect(await page.locator('.team-hint').isVisible()).toBe(true);
+});
+
+it('the active team of the session cannot be removed, other teams can, and the hint follows the rule', async () => {
+  sessionActiveTeamId = 'team-two';
+  const teams = [{ id: 'team-one', name: 'Docs' }, { id: 'team-two', name: 'Platform' }, { id: 'team-three', name: 'Support' }];
+  const page = await harness.newPage();
+  await page.route(url => url.hostname === 'cdn.tailwindcss.com', route => route.fulfill({ body: '' }));
+  await page.route('**/api/auth/organization/get-full-organization?*', route => route.fulfill({ json: { ...organization, teams } }));
+  const sessionReads: string[] = [];
+  page.on('request', request => { if (request.url().includes('/api/auth/get-session')) sessionReads.push(request.url()); });
+  await page.goto(harness.origin + `${base}/teams`);
+  const card = (title: string) => page.locator('.team-card', { has: page.getByRole('heading', { name: title, level: 2 }) });
+  const remove = (title: string) => card(title).getByRole('button', { name: 'Remove team', exact: true });
+  await card('Docs').waitFor();
+  expect(sessionReads).toHaveLength(1);
+  expect(sessionReads[0]).toContain('disableCookieCache=true');
+  expect(await remove('Platform').isDisabled()).toBe(true);
+  expect(await card('Platform').locator('.team-hint').textContent()).toBe('This is your active team, so it can’t be removed.');
+  expect(await card('Platform').locator('.team-hint').isVisible()).toBe(true);
+  const describedBy = await remove('Platform').getAttribute('aria-describedby');
+  expect(await page.locator(`[id="${describedBy}"]`).textContent()).toContain('active team');
+  expect(await remove('Docs').isEnabled()).toBe(true);
+  expect(await remove('Support').isEnabled()).toBe(true);
+  expect(await page.locator('.team-hint').count()).toBe(1);
+  expect(await remove('Platform').evaluate((button: HTMLButtonElement) => { button.click(); return document.querySelector('[data-confirm-accept]') === null; })).toBe(true);
+
+  // Removing the others leaves the active team as the last team, with the last-team explanation.
+  const requests = await writes(page, '/api/auth/organization/remove-team');
+  for (const [index, title] of ['Docs', 'Support'].entries()) {
+    await remove(title).click();
+    await page.locator('[data-confirm-accept]').click();
+    await expect.poll(() => requests.bodies.length).toBe(index + 1);
+    await requests.settle({});
+    await card(title).waitFor({ state: 'detached' });
+  }
+  expect(requests.bodies.map(body => (body as { teamId: string }).teamId)).toEqual(['team-one', 'team-three']);
+  expect(await accessibleDescription(page, '.team-card .remove-team')).toBe('Every organization keeps at least one team, so this team can’t be removed.');
+});
+
+it('a failed session read leaves Remove team enabled and shows the server refusal', async () => {
+  sessionActiveTeamId = 'team-two';
+  sessionStatus = 503;
+  const teams = [{ id: 'team-one', name: 'Docs' }, { id: 'team-two', name: 'Platform' }];
+  const page = await harness.newPage();
+  await page.route(url => url.hostname === 'cdn.tailwindcss.com', route => route.fulfill({ body: '' }));
+  await page.route('**/api/auth/organization/get-full-organization?*', route => route.fulfill({ json: { ...organization, teams } }));
+  await page.goto(harness.origin + `${base}/teams`);
+  const remove = page.locator('.team-card', { has: page.getByRole('heading', { name: 'Platform', level: 2 }) }).getByRole('button', { name: 'Remove team', exact: true });
+  await remove.waitFor();
+  expect(await remove.isEnabled()).toBe(true);
+  expect(await page.locator('.team-hint').count()).toBe(0);
+  const requests = await writes(page, '/api/auth/organization/remove-team');
+  await remove.click();
+  await page.locator('[data-confirm-accept]').click();
+  await expect.poll(() => requests.bodies.length).toBe(1);
+  await requests.settle({ message: 'You are not allowed to delete this team' }, 403);
+  await page.getByText('You are not allowed to delete this team').waitFor();
+  expect(await remove.isEnabled()).toBe(true);
+});
+
+it('Back restores the saved scroll offset only after the restored page has rendered, unless the user scrolls first', async () => {
+  const page = await harness.newPage();
+  await page.route(url => url.hostname === 'cdn.tailwindcss.com', route => route.fulfill({ body: '' }));
+  await page.setViewportSize({ width: 1440, height: 300 });
+  const navLink = (name: string) => page.locator('.cp-nav').getByRole('link', { name, exact: true });
+  const scrollY = () => page.evaluate(() => Math.round(window.scrollY));
+  await page.goto(harness.origin + `${base}/people`);
+  await page.getByText('No pending invitations.', { exact: true }).waitFor();
+  const offset = await page.evaluate(() => Math.min(120, document.documentElement.scrollHeight - window.innerHeight));
+  expect(offset).toBeGreaterThan(40);
+
+  for (const interrupt of [false, true]) {
+    await page.evaluate(top => window.scrollTo(0, top), offset);
+    expect(await scrollY()).toBe(offset);
+    await navLink('Teams').click();
+    await page.locator('.team-card').waitFor();
+    expect(await scrollY()).toBe(0);
+
+    // The restored page is still loading: the offset is not applied to the short skeleton and then lost.
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    await page.route('**/api/auth/organization/list-invitations?*', async route => { await gate; await route.fulfill({ json: [] }); });
+    await page.goBack();
+    await page.locator('.cp-content[aria-busy=true]').waitFor();
+    if (interrupt) {
+      await page.evaluate(() => window.scrollTo(0, 0));
+      const wheeled = page.evaluate(() => new Promise<void>(resolve => addEventListener('wheel', () => resolve(), { once: true, capture: true })));
+      await page.mouse.wheel(0, 5);
+      await wheeled;
+    }
+    release();
+    await page.getByText('No pending invitations.', { exact: true }).waitFor();
+    await page.locator('.cp-content[aria-busy=true]').waitFor({ state: 'detached' });
+    if (interrupt) await page.waitForTimeout(200);
+    await expect.poll(scrollY).toBeGreaterThanOrEqual(interrupt ? 0 : offset);
+    if (!interrupt) expect(await scrollY()).toBe(offset);
+    else expect(await scrollY()).toBeLessThan(offset);
+    await page.unroute('**/api/auth/organization/list-invitations?*');
+  }
+
+  // The router owns restoration, so a reload is restored from the offset kept with the history entry.
+  await page.evaluate(top => window.scrollTo(0, top), offset);
+  await page.reload();
+  await page.getByText('No pending invitations.', { exact: true }).waitFor();
+  await expect.poll(scrollY).toBe(offset);
 });
 
 it('a lone team shows a disabled Remove team with an explanation instead of an empty state', async () => {
