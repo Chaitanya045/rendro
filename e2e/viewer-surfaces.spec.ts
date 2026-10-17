@@ -373,6 +373,8 @@ test.describe("share viewer", () => {
     expect(nextFile.status()).toBe(404);
     await content(tab).locator("#to-section-two").click();
     await scrolledTo(tab, "section-two"); // Same-document scrolling needs no request, so it still works.
+    // The shell learns the fragment from a message the document sends; wait for it before leaving the page.
+    await expect.poll(() => hash(tab)).toBe("#section-two");
     const response = await tab.reload();
     expect(response?.status()).toBe(404);
     await notFound(tab);
