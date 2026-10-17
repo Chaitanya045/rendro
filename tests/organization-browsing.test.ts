@@ -81,22 +81,26 @@ it("shares the switcher list across menu opens and client navigation", async () 
   await request();
   expect(f.calls.filter(path => path === "/api/auth/organization/list")).toHaveLength(1);
 });
-it.each([429, 503])("renders a styled retry state for org lookup %s and keeps navigation working", async status => {
-  const f = await fixture("");
-  const normal = f.fetch.getMockImplementation()!;
-  f.fetch.mockImplementation(async url => url.includes("get-full-organization")
-    ? Response.json({ message: "raw upstream detail" }, { status, headers: { "Retry-After": "60" } }) : normal(url));
-  await f.win.eval('window.RendroUI.navigate("/organizations/org-a/people")'); await flush();
-  const content = f.win.document.querySelector(".cp-content")!;
-  expect(content.textContent).toContain("Organization information is temporarily unavailable");
-  expect(content.textContent).not.toContain("raw upstream detail");
-  const retry = content.querySelector(".empty button")!;
-  expect(retry.textContent).toBe("Try again");
-  f.fetch.mockImplementation(normal);
-  (retry as unknown as { click(): void }).click(); await flush(); f.ready();
-  await f.win.eval('window.RendroUI.navigate("/organizations/org-a/projects")'); await flush(); f.ready();
-  expect(f.win.location.pathname).toBe("/organizations/org-a/projects");
-});
+// The page that reads the organization through the shared helper fails on its own lookup: Settings reads the access record.
+const failing = [["", "get-full-organization"], ["/people", "get-full-organization"], ["/teams", "get-full-organization"], ["/settings", "management/access"]] as const;
+it.each(failing.flatMap(([route, lookup]) => [429, 503].map(status => [route, lookup, status] as const)))(
+  "renders a styled retry state for the %s page when its organization lookup (%s) returns %s, and keeps navigation working", async (route, lookup, status) => {
+    const f = await fixture("");
+    const normal = f.fetch.getMockImplementation()!;
+    f.fetch.mockImplementation(async url => url.includes(lookup)
+      ? Response.json({ message: "raw upstream detail" }, { status, headers: { "Retry-After": "60" } }) : normal(url));
+    await f.win.eval(`window.RendroUI.navigate(${JSON.stringify("/organizations/org-a" + route)})`); await flush();
+    const content = f.win.document.querySelector(".cp-content")!;
+    // Organization reads are rewritten to one sanitized message; Settings reads the API's own access record and shows its failure state.
+    expect(content.textContent).toContain(lookup === "management/access" ? "Unable to load this organization" : "Organization information is temporarily unavailable");
+    if (lookup !== "management/access") expect(content.textContent).not.toContain("raw upstream detail");
+    const retry = content.querySelector(".empty button")!;
+    expect(retry.textContent).toBe("Try again");
+    f.fetch.mockImplementation(normal);
+    (retry as unknown as { click(): void }).click(); await flush(); f.ready();
+    await f.win.eval('window.RendroUI.navigate("/organizations/org-a/projects")'); await flush(); f.ready();
+    expect(f.win.location.pathname).toBe("/organizations/org-a/projects");
+  });
 
 it.each(routes)("bounds first client navigation with a cold data cache for %s", async route => {
   // People loads no cacheable project/deployment data, so the target starts cold.

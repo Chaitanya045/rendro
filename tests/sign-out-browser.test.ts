@@ -253,6 +253,39 @@ it("cancels an open private-share revocation confirmation in the other tab", asy
   await tabB.waitForURL("**/sign-in");
 });
 
+it("never reveals a key whose creation response arrives after the account signed out elsewhere", async () => {
+  const tabA = await harness.newPage();
+  const tabB = await tabA.context().newPage();
+  await tabA.goto(`${harness.origin}/viewer`);
+  await tabB.goto(`${harness.origin}/organizations/org/api-keys`);
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  let held = false, delivered!: () => void;
+  const answered = new Promise<void>(resolve => { delivered = resolve; });
+  await tabB.route(url => url.pathname === "/api/rendro/credentials", async route => {
+    if (route.request().method() !== "POST") return route.continue();
+    held = true;
+    await gate;
+    await route.continue();
+    delivered();
+  });
+  await tabB.locator("#api-key-create").click();
+  await tabB.locator('#key-form [name="name"]').fill("Late key");
+  await tabB.locator('#key-form button[type="submit"]').click();
+  await expect.poll(() => held).toBe(true);
+
+  await tabA.bringToFront();
+  await tabA.getByRole("button", { name: "Sign out", exact: true }).click();
+  await tabB.locator("#rendro-signed-out").waitFor();
+  release(); await answered;
+  // Let the page process the response that is now delivered to the disposed form.
+  await tabB.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(resolve, 0)))));
+  expect(await tabB.locator("dialog[open]").count()).toBe(0);
+  expect(await tabB.locator("#raw-key").textContent()).toBe("");
+  expect(await tabB.locator("body").textContent()).not.toContain(rawKey);
+  expect(await tabB.locator("#copy-key").evaluate((button: HTMLButtonElement) => button.onclick)).toBeNull();
+});
+
 it("closes the key-creation dialog and its top-layer select popover on cross-tab sign-out", async () => {
   const tabA = await harness.newPage();
   const tabB = await tabA.context().newPage();

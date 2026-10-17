@@ -2,7 +2,7 @@ import { getRequestListener } from "@hono/node-server";
 import { Hono } from "hono";
 import { beforeAll, expect, it } from "vitest";
 import type { Page } from "playwright";
-import { renderScopedDocumentShell } from "../src/routes/app";
+import { renderPublicOrgDocs, renderScopedDocumentShell } from "../src/routes/app";
 import { bundleBrowserAsset, createBrowserHarness } from "./helpers/browser";
 import { serveFonts } from "./helpers/fonts";
 
@@ -15,23 +15,27 @@ beforeAll(async () => {
   ]);
   const app = new Hono();
   app.get("/fonts/*", serveFonts);
-  app.get(base, c => c.html(renderScopedDocumentShell({ user: null, namespace: "org-a/project-a", title: "Docs", basePath: base,
-    selectedPath: "index.html", shareConfig: { organizationId: "org-a", projectId: "project-a" },
-  }).replace('src="about:blank"', `src="${base}/files/index.html"`).replace('style="display:none"', 'style="display:block"')
+  // Serve a rendered shell around the fixture frame, selecting `currentDoc` without the lazy tree.
+  const framed = (html: string, currentDoc: string) => html.replace('src="about:blank"', `src="${base}/files/index.html"`).replace('style="display:none"', 'style="display:block"')
     // The tree script hides the placeholder when a document is selected; left in flow it pushes the frame below the viewport,
     // where Chromium stops running the frame's animation frames and actionability checks never see it as stable.
-    .replace('class="main-placeholder"', 'class="main-placeholder" style="display:none"').replace(/<script[^>]*src="\/lazy-tree.js[^>]*><\/script>/, `<script>window.RENDRO_CURRENT_DOC="org-a/project-a/index.html"</script><script src="/fixture.js"></script>`)));
+    .replace('class="main-placeholder"', 'class="main-placeholder" style="display:none"').replace(/<script[^>]*src="\/lazy-tree.js[^>]*><\/script>/, `<script>window.RENDRO_CURRENT_DOC="${currentDoc}"</script><script src="/fixture.js"></script>`);
+  const scoped = { user: null, namespace: "org-a/project-a", title: "Docs", basePath: base, selectedPath: "index.html" };
+  app.get(base, c => c.html(framed(renderScopedDocumentShell({ ...scoped, shareConfig: { organizationId: "org-a", projectId: "project-a" } }), "org-a/project-a/index.html")));
+  // A published (public) document and a legacy signed-URL document use the other two copy branches.
+  app.get("/public-view", c => c.html(framed(renderPublicOrgDocs({ orgSlug: "acme", slug: "docs", title: "Docs", entryFile: "index.html" }, "index.html"), "acme/index.html")));
+  app.get("/legacy-view", c => c.html(framed(renderScopedDocumentShell(scoped), "org-a/project-a/index.html")));
   app.get(`${base}/files/index.html`, c => c.html(`<!doctype html><html><body><p id="target">Comment target</p>
     <script>window.COMMENTOR={transport:"parent",organizationId:"org-a",projectId:"project-a",documentPath:"index.html",canWrite:true}</script>
     <script src="/commentor.js"></script></body></html>`));
   const listener = getRequestListener(request => app.fetch(request));
   await harness.start((req, res) => { void listener(req, res).catch(error => res.destroy(error as Error)); }, assets);
 });
-async function open(width = 1024, dark = false) {
+async function open(width = 1024, dark = false, path = base) {
   const page = await harness.newPage({ viewport: { width, height: 800 }, colorScheme: dark ? "dark" : "light", reducedMotion: "reduce" });
   await page.route(url => url.hostname === "cdn.tailwindcss.com", route => route.fulfill({ body: "" }));
   await page.addInitScript(() => { Object.defineProperty(navigator, "clipboard", { value: { writeText: async () => {} } }); });
-  await page.goto(harness.origin + base);
+  await page.goto(harness.origin + path);
   return page;
 }
 async function failure(page: Page, kind: string) {
@@ -236,6 +240,122 @@ it("clipboard failure stays readable and retries successfully", async () => {
   await page.evaluate(() => { navigator.clipboard.writeText = async () => {}; });
   await page.locator("#share-retry").click();
   await expect.poll(() => page.locator("#share-btn").getAttribute("aria-label")).toBe("Share link copied!");
+});
+
+/** Records what would reach the clipboard; the shell only counts it as copied once this resolves. */
+async function recordClipboard(page: Page) {
+  await page.evaluate(() => {
+    const copied: string[] = [];
+    (window as unknown as { copied: string[] }).copied = copied;
+    navigator.clipboard.writeText = (value: string) => { copied.push(value); return Promise.resolve(); };
+  });
+  return () => page.evaluate(() => (window as unknown as { copied: string[] }).copied);
+}
+
+it("copying a published document builds its public URL for the current document without creating a share", async () => {
+  const page = await open(1024, false, "/public-view");
+  const copied = await recordClipboard(page);
+  let shareRequests = 0;
+  await page.route("**/api/rendro/shares", route => { shareRequests++; return route.abort(); });
+  const button = page.locator("#share-btn");
+  expect(await button.getAttribute("aria-label")).toBe("Copy public URL");
+  await button.click();
+  await expect.poll(() => button.getAttribute("aria-label")).toBe("Public URL copied!");
+  expect(await copied()).toEqual([`${harness.origin}/public/acme/docs?doc=index.html`]);
+  expect(shareRequests).toBe(0);
+  expect(await page.locator("#share-error").isVisible()).toBe(false);
+});
+
+it("copying a legacy document asks for a signed URL for that document and copies exactly what it returns", async () => {
+  const page = await open(1024, false, "/legacy-view");
+  const copied = await recordClipboard(page);
+  const keys: string[] = [];
+  await page.route("**/api/share/create?*", route => { keys.push(new URL(route.request().url()).searchParams.get("key")!); return route.fulfill({ json: { url: "https://signed.example.test/s/abc?sig=1" } }); });
+  const button = page.locator("#share-btn");
+  expect(await button.getAttribute("aria-label")).toBe("Copy signed URL");
+  await button.click();
+  await expect.poll(() => button.getAttribute("aria-label")).toBe("Signed URL copied!");
+  expect(keys).toEqual(["org-a/project-a/index.html"]);
+  expect(await copied()).toEqual(["https://signed.example.test/s/abc?sig=1"]);
+});
+
+it("Share with no document selected explains what to do and sends nothing", async () => {
+  const page = await open();
+  let requests = 0;
+  await page.route("**/api/rendro/shares", route => { requests++; return route.abort(); });
+  await page.evaluate(() => { (window as unknown as { RENDRO_CURRENT_DOC: string }).RENDRO_CURRENT_DOC = ""; });
+  const button = page.locator("#share-btn");
+  await button.click();
+  await expect.poll(() => page.locator("#share-error-text").innerText()).toBe("Select a document first.");
+  expect(await page.locator("#share-live").textContent()).toContain("Select a document first.");
+  expect(await page.locator("#share-retry").isVisible()).toBe(false);
+  expect(await button.getAttribute("aria-busy")).toBeNull();
+  expect(await button.getAttribute("aria-label")).toBe("Share document");
+  expect(requests).toBe(0);
+});
+
+it("copying uses the async clipboard when it works and falls back to selecting a temporary field when it does not", async () => {
+  const page = await open();
+  await page.route("**/api/rendro/shares", route => route.fulfill({ json: { url: "/s/fixture" } }));
+  const copied = await recordClipboard(page);
+  await page.locator("#share-btn").click();
+  await expect.poll(() => page.locator("#share-btn").getAttribute("aria-label")).toBe("Share link copied!");
+  expect(await copied()).toEqual([`${harness.origin}/s/fixture`]);
+
+  await page.evaluate(() => {
+    const fallback: string[] = [];
+    (window as unknown as { fallback: string[] }).fallback = fallback;
+    navigator.clipboard.writeText = () => Promise.reject(new Error("denied"));
+    document.execCommand = (command: string) => {
+      const field = document.activeElement as HTMLTextAreaElement;
+      fallback.push(`${command}:${field.tagName}:${field.value}`);
+      return true;
+    };
+  });
+  await expect.poll(() => page.locator("#share-btn").getAttribute("aria-label")).toBe("Share document");
+  await page.locator("#share-btn").click();
+  await expect.poll(() => page.locator("#share-btn").getAttribute("aria-label")).toBe("Share link copied!");
+  expect(await page.evaluate(() => (window as unknown as { fallback: string[] }).fallback)).toEqual([`copy:TEXTAREA:${harness.origin}/s/fixture`]);
+  expect(await page.locator("textarea").count()).toBe(0);
+  expect(await page.locator("#share-error").isVisible()).toBe(false);
+});
+
+it("a share request that cannot reach the server is a retryable failure, not a copied link", async () => {
+  const page = await open();
+  const copied = await recordClipboard(page);
+  await page.route("**/api/rendro/shares", route => route.abort("connectionreset"));
+  await page.locator("#share-btn").click();
+  await expect.poll(() => page.locator("#share-error-text").innerText()).toBe("The share link could not be created. Please try again.");
+  expect(await page.locator("#share-retry").isVisible()).toBe(true);
+  expect(await page.locator("#share-btn").getAttribute("aria-label")).toBe("Share document");
+  expect(await page.locator("#share-btn").getAttribute("aria-busy")).toBeNull();
+  expect(await copied()).toEqual([]);
+});
+
+it.each(["before the response", "after the response"])("signing out %s leaves no feedback, notice or copied link", async moment => {
+  const page = await open();
+  const copied = await recordClipboard(page);
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  let seen = false;
+  await page.route("**/api/rendro/shares", async route => { seen = true; await gate; await route.fulfill({ json: { url: "/s/fixture" } }).catch(() => {}); });
+  if (moment === "after the response") {
+    // The clipboard promise is what is still pending when the account signs out.
+    await page.evaluate(() => {
+      const clipboard = navigator.clipboard;
+      const original = clipboard.writeText.bind(clipboard);
+      clipboard.writeText = async (value: string) => { window.dispatchEvent(new Event("commentor-sign-out")); await original(value); };
+    });
+  }
+  await page.locator("#share-btn").click();
+  await expect.poll(() => seen).toBe(true);
+  if (moment === "before the response") await page.evaluate(() => window.dispatchEvent(new Event("commentor-sign-out")));
+  release();
+  await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(resolve, 0)))));
+  expect(await page.locator("#share-error").isVisible()).toBe(false);
+  expect(await page.locator("#share-btn").getAttribute("aria-label")).not.toBe("Share link copied!");
+  expect(await page.locator("#share-btn").evaluate(button => button.classList.contains("is-feedback"))).toBe(false);
+  if (moment === "before the response") expect(await copied()).toEqual([]);
 });
 
 it.each(["create", "reply"])("comment %s quota crosses the real bridge, retains the draft, counts down and retries", async action => {

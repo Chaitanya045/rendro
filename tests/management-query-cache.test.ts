@@ -218,4 +218,46 @@ describe("management query cache policy", () => {
     cache.invalidateMutation("/api/rendro/projects", { method: "POST", body: "{}" });
     permission.resolve(); await expect(pending).rejects.toMatchObject({ name: "AbortError" });
   });
+
+  it("pins the 30 second freshness window and the 5 minute inactive lifetime", async () => {
+    vi.useFakeTimers();
+    expect(MANAGEMENT_STALE_TIME).toBe(30_000);
+    expect(MANAGEMENT_GC_TIME).toBe(300_000);
+    const { cache, raw, authorize } = setup();
+    await cache.request(path, {}, authorize);
+    await vi.advanceTimersByTimeAsync(29_999);
+    await cache.request(path, {}, authorize);
+    expect(raw).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1);
+    await cache.request(path, {}, authorize);
+    expect(raw).toHaveBeenCalledTimes(2);
+    // Inactive data survives (and so needs fresh authorization) until the full five minutes have passed.
+    const kept = setup(); await kept.cache.request(path, {}, kept.authorize);
+    await vi.advanceTimersByTimeAsync(299_999);
+    await kept.cache.request(path, {}, kept.authorize);
+    expect(kept.authorize).toHaveBeenCalledTimes(1);
+    const collected = setup(); await collected.cache.request(path, {}, collected.authorize);
+    await vi.advanceTimersByTimeAsync(300_000);
+    await collected.cache.request(path, {}, collected.authorize);
+    expect(collected.authorize).not.toHaveBeenCalled();
+  });
+
+  it("never retains a one-time credential: the write and any seeded copy bypass the cache and leave nothing in diagnostics", async () => {
+    const logs = (["log", "info", "warn", "error", "debug"] as const).map(method => vi.spyOn(console, method).mockImplementation(() => {}));
+    try {
+      const { cache, raw, authorize } = setup();
+      const credentials = "/api/rendro/credentials?organizationId=org-a";
+      raw.mockResolvedValue({ rawKey: "rnd_live_secret" });
+      expect(cache.canCache("/api/rendro/credentials")).toBe(false);
+      expect(cache.canCache(credentials)).toBe(false);
+      await cache.request("/api/rendro/credentials", { method: "POST", body: JSON.stringify({ organizationId: "org-a" }) }, authorize);
+      cache.invalidateMutation("/api/rendro/credentials", { method: "POST", body: JSON.stringify({ organizationId: "org-a" }) });
+      cache.seed(credentials, { rawKey: "rnd_live_secret" });
+      await cache.request(credentials, {}, authorize);
+      await cache.request(credentials, {}, authorize);
+      expect(raw).toHaveBeenCalledTimes(3);
+      expect(authorize).not.toHaveBeenCalled();
+      for (const log of logs) expect(JSON.stringify(log.mock.calls)).not.toContain("rnd_live_secret");
+    } finally { logs.forEach(log => log.mockRestore()); }
+  });
 });

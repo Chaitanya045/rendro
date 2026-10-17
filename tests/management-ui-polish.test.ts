@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { Hono } from "hono";
 import type { User } from "better-auth/types";
 import { Window, type HTMLButtonElement } from "happy-dom";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import apiKeyPageRoutes from "@/routes/api-key-pages";
 import organizationPageRoutes from "@/routes/organization-pages";
 import projectPageRoutes from "@/routes/project-pages";
@@ -109,6 +109,35 @@ describe("documentation entry points", () => {
       expect(link.hasAttribute("hidden")).toBe(false);
       expect(link.getAttribute("href")).toBe("/organizations/org-a/projects/project-a/docs");
     }
+  });
+
+  it("shows the project and active-deployment IDs in full, truncates them visually, and copies each one or reports a refusal", async () => {
+    const win = await projectPage("deployment-" + "0123456789abcdef".repeat(4));
+    const full = "deployment-" + "0123456789abcdef".repeat(4);
+    const writes: string[] = [];
+    let refuse = false;
+    Object.defineProperty(win.navigator, "clipboard", { configurable: true, value: { writeText: (value: string) => refuse ? Promise.reject(new Error("denied")) : (writes.push(value), Promise.resolve()) } });
+    const toast = vi.fn();
+    (win as unknown as { RendroUI: { toast: typeof toast } }).RendroUI.toast = toast;
+    const idCopy = (id: string) => win.document.querySelector<HTMLButtonElement>(`${id} .cp-id-copy`)!;
+    const idText = (id: string) => win.document.querySelector(`${id} .cp-id`)!;
+    expect(idText("#project-id").textContent).toBe("project-a");
+    expect(idText("#active-deployment").textContent).toBe(full);
+    expect(idText("#active-deployment").getAttribute("title")).toBe(full);
+    expect(idCopy("#project-id").getAttribute("aria-label")).toBe("Copy project ID");
+    expect(idCopy("#active-deployment").getAttribute("aria-label")).toBe("Copy deployment ID");
+    // The text node is complete; the layout rule, not the data, is what shortens it.
+    expect(readFileSync("src/ui/management-ui.ts", "utf8")).toMatch(/\.cp-id\{[^}]*overflow:hidden;text-overflow:ellipsis;white-space:nowrap/);
+
+    idCopy("#project-id").click(); await flush();
+    idCopy("#active-deployment").click(); await flush();
+    expect(writes).toEqual(["project-a", full]);
+    expect(idCopy("#project-id").getAttribute("aria-label")).toBe("project ID copied");
+    expect(idCopy("#active-deployment").getAttribute("aria-label")).toBe("deployment ID copied");
+
+    refuse = true;
+    idCopy("#active-deployment").click(); await flush();
+    expect(toast).toHaveBeenCalledExactlyOnceWith("Unable to copy. Select the value and copy it manually.", "error");
   });
 
   it("does not render an organization switcher or docs link without an organization", async () => {

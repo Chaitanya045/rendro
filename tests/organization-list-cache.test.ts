@@ -134,6 +134,28 @@ describe("organization display list cache", () => {
     expect(returningRaw).toHaveBeenCalledOnce();
     vi.useRealTimers();
   });
+  it.each([401, 403])("a %s from any organization read removes the persisted list so a reload cannot restore it", async status => {
+    vi.useFakeTimers();
+    const win = new Window({ url: identity.origin }); windows.push(win);
+    vi.stubGlobal("window", win); vi.stubGlobal("document", win.document);
+    vi.stubGlobal("sessionStorage", win.sessionStorage);
+    vi.stubGlobal("BroadcastChannel", class { onmessage = null; postMessage() {} close() {} });
+    const raw = vi.fn().mockResolvedValue(orgs);
+    const request = installOrganizationListCache(identity, raw);
+    await request(path); await vi.runAllTimersAsync();
+    expect(win.sessionStorage.length).toBe(1);
+
+    raw.mockRejectedValueOnce(Object.assign(new Error("Denied"), { status }));
+    await expect(request("/api/rendro/management/access")).rejects.toThrow("Denied");
+    await vi.runAllTimersAsync();
+    expect(win.sessionStorage.length).toBe(0);
+
+    // A fresh page load finds nothing to restore and asks the server again.
+    const reloaded = vi.fn().mockResolvedValue([]);
+    expect(await installOrganizationListCache(identity, reloaded)(path)).toEqual([]);
+    expect(reloaded).toHaveBeenCalledOnce();
+    vi.useRealTimers();
+  });
   it("restores the sanitized list across a full-page navigation and removes it after an organization change", async () => {
     const win = new Window({ url: identity.origin }); windows.push(win);
     vi.stubGlobal("window", win); vi.stubGlobal("document", win.document); vi.stubGlobal("Element", win.Element);
@@ -151,5 +173,66 @@ describe("organization display list cache", () => {
     destinationRaw.mockResolvedValue([{ id: "org-b", name: "Beta", slug: "beta" }]);
     expect(await destination(path)).toEqual([{ id: "org-b", name: "Beta", slug: "beta" }]);
     expect(destinationRaw).toHaveBeenCalledTimes(2);
+  });
+  describe("restricted browsers", () => {
+    function browser(setup: (win: Window) => void) {
+      const win = new Window({ url: identity.origin }); windows.push(win);
+      vi.stubGlobal("window", win); vi.stubGlobal("document", win.document);
+      setup(win);
+      const raw = vi.fn().mockResolvedValue(orgs);
+      return { win, raw, request: installOrganizationListCache(identity, raw) };
+    }
+    const blocked = () => ({
+      get length(): number { throw new DOMException("Blocked", "SecurityError"); },
+      key: () => { throw new DOMException("Blocked", "SecurityError"); },
+      getItem: () => { throw new DOMException("Blocked", "SecurityError"); },
+      setItem: () => { throw new DOMException("Blocked", "SecurityError"); },
+      removeItem: () => { throw new DOMException("Blocked", "SecurityError"); },
+    });
+    it("keeps in-memory caching, invalidation and sign-out when session storage is blocked", async () => {
+      const { win, raw, request } = browser(() => {
+        vi.stubGlobal("sessionStorage", blocked());
+        vi.stubGlobal("BroadcastChannel", class { onmessage = null; postMessage() {} close() {} });
+      });
+      expect(await request(path)).toEqual(orgs); expect(await request(path)).toEqual(orgs);
+      expect(raw).toHaveBeenCalledOnce();
+      await request("/api/auth/organization/update", { method: "POST", body: "{}" });
+      await request(path); expect(raw).toHaveBeenCalledTimes(3);
+      win.dispatchEvent(new win.Event("commentor-sign-out"));
+      await expect(request(path)).rejects.toMatchObject({ name: "AbortError" });
+      expect(raw).toHaveBeenCalledTimes(3);
+    });
+    it("works without BroadcastChannel: mutations still invalidate locally and sign-out still disposes", async () => {
+      const { win, raw, request } = browser(window => {
+        vi.stubGlobal("sessionStorage", window.sessionStorage);
+        vi.stubGlobal("BroadcastChannel", undefined);
+      });
+      await request(path);
+      await expect(request("/api/auth/organization/create", { method: "POST", body: "{}" })).resolves.toBeDefined();
+      await request(path); expect(raw).toHaveBeenCalledTimes(3);
+      win.dispatchEvent(new win.Event("commentor-sign-out"));
+      await expect(request(path)).rejects.toMatchObject({ name: "AbortError" });
+    });
+    it("survives a BroadcastChannel that cannot be constructed or posted to", async () => {
+      const refused = browser(window => {
+        vi.stubGlobal("sessionStorage", window.sessionStorage);
+        vi.stubGlobal("BroadcastChannel", class { constructor() { throw new DOMException("Denied", "SecurityError"); } });
+      });
+      await refused.request(path);
+      await refused.request("/api/auth/organization/delete", { method: "POST", body: "{}" });
+      await refused.request(path); expect(refused.raw).toHaveBeenCalledTimes(3);
+      refused.win.dispatchEvent(new refused.win.Event("commentor-sign-out"));
+      await expect(refused.request(path)).rejects.toMatchObject({ name: "AbortError" });
+
+      const mute = browser(window => {
+        vi.stubGlobal("sessionStorage", window.sessionStorage);
+        vi.stubGlobal("BroadcastChannel", class { onmessage = null; close() {} postMessage() { throw new DOMException("Closed", "InvalidStateError"); } });
+      });
+      await mute.request(path);
+      await expect(mute.request("/api/auth/organization/leave", { method: "POST", body: "{}" })).resolves.toBeDefined();
+      await mute.request(path); expect(mute.raw).toHaveBeenCalledTimes(3);
+      mute.win.dispatchEvent(new mute.win.Event("commentor-sign-out"));
+      await expect(mute.request(path)).rejects.toMatchObject({ name: "AbortError" });
+    });
   });
 });

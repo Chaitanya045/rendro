@@ -267,4 +267,59 @@ describe("header organization switcher", () => {
     expect(organizationSwitcherStyles).toContain("prefers-reduced-motion:reduce");
     expect(organizationSwitcherStyles).toContain("var(--cp-container)");
   });
+
+  it("does not present an aborted organization read as a failure, but does present a real one", async () => {
+    const aborted = setup(() => Promise.reject(new DOMException("Organization list request aborted", "AbortError")));
+    aborted.trigger.click(); await flush();
+    expect(aborted.menu.textContent).not.toContain("Unable to load organizations");
+    expect(aborted.menu.querySelector("button")).toBeNull();
+    expect(aborted.menu.hidden).toBe(false);
+
+    const failed = setup(() => Promise.reject(new Error("Offline")));
+    failed.trigger.click(); await flush();
+    expect(failed.menu.textContent).toContain("Unable to load organizations.");
+    expect(failed.menu.querySelector("button")?.textContent).toBe("Try again");
+  });
+
+  describe("menu placement", () => {
+    function place(win: Window, trigger: HTMLElement, rect: { left: number; bottom: number }) {
+      trigger.getBoundingClientRect = () => ({ ...rect, top: rect.bottom - 40, right: rect.left + 120, width: 120, height: 40, x: rect.left, y: rect.bottom - 40, toJSON() {} }) as never;
+      win.dispatchEvent(new win.Event("resize"));
+    }
+    it("keeps the menu below its trigger, inside the layout viewport, and follows resizes", async () => {
+      const { win, trigger, menu } = setup();
+      Object.assign(win, { innerWidth: 1440, innerHeight: 900 });
+      trigger.getBoundingClientRect = () => ({ left: 1300, bottom: 50 }) as never;
+      trigger.click(); await flush();
+      expect([menu.style.width, menu.style.left, menu.style.top, menu.style.maxHeight]).toEqual(["320px", "1112px", "54px", "838px"]);
+      place(win, trigger, { left: -20, bottom: 880 });
+      expect([menu.style.left, menu.style.top, menu.style.maxHeight]).toEqual(["8px", "884px", "8px"]);
+      Object.assign(win, { innerWidth: 300, innerHeight: 500 });
+      place(win, trigger, { left: 250, bottom: 30 });
+      expect([menu.style.width, menu.style.left, menu.style.top, menu.style.maxHeight]).toEqual(["284px", "8px", "34px", "458px"]);
+    });
+    it("positions against the visual viewport when one is present", async () => {
+      const { win, trigger, menu } = setup();
+      Object.defineProperty(win, "visualViewport", { configurable: true, value: { offsetLeft: 10, offsetTop: 20, width: 360, height: 600 } });
+      trigger.getBoundingClientRect = () => ({ left: 300, bottom: 4 }) as never;
+      trigger.click(); await flush();
+      expect([menu.style.width, menu.style.left, menu.style.top, menu.style.maxHeight]).toEqual(["320px", "42px", "28px", "584px"]);
+    });
+    it("opens in the top layer when the Popover API exists and falls back to a fixed menu when it does not", async () => {
+      const first = setup();
+      expect("showPopover" in first.menu).toBe(false);
+      first.trigger.click(); await flush();
+      expect(first.menu.hidden).toBe(false); expect(first.trigger.getAttribute("aria-expanded")).toBe("true");
+      first.key(first.menu, "Escape");
+      expect(first.menu.hidden).toBe(true);
+
+      const { trigger, menu, key } = setup();
+      const showPopover = vi.fn(), hidePopover = vi.fn();
+      Object.assign(menu, { showPopover, hidePopover, matches: (selector: string) => selector === ":popover-open" });
+      trigger.click(); await flush();
+      expect(showPopover).toHaveBeenCalledOnce(); expect(menu.hidden).toBe(false);
+      key(menu, "Escape");
+      expect(hidePopover).toHaveBeenCalledOnce(); expect(menu.hidden).toBe(true);
+    });
+  });
 });

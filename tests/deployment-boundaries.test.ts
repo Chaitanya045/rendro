@@ -59,6 +59,24 @@ describe("deployment tenant and project boundaries", () => {
     })).rejects.toThrow("Project not found");
   });
 
+  it("lists at most the latest 100 deployments of a project, newest first", async () => {
+    const backend = convexTest(schema, modules);
+    rateLimiterTest.register(backend);
+    const created = await project(backend, "org-history", "history");
+    await backend.run(async ctx => {
+      for (let index = 0; index < 101; index++) {
+        await ctx.db.insert("deployments", {
+          organizationId: "org-history", projectId: created._id, status: "superseded", manifestKey: `manifest-${index}`,
+          manifestSha256: provenance.manifestSha256, fileCount: 1, byteCount: 1, provenance, createdBy: "owner", createdAt: 1_000 + index,
+        });
+      }
+    });
+    const listed = await backend.query(internal.deployments.listInternal, { organizationId: "org-history", projectId: created._id });
+    expect(listed).toHaveLength(100);
+    expect(listed.map(deployment => deployment.createdAt)).toEqual(Array.from({ length: 100 }, (_, index) => 1_100 - index));
+    expect(listed.some(deployment => deployment.createdAt === 1_000)).toBe(false);
+  });
+
   it("does not let one project-scoped credential fail a sibling deployment", async () => {
     const backend = convexTest(schema, modules);
     rateLimiterTest.register(backend);
