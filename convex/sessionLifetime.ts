@@ -129,7 +129,7 @@ const legacySessionToken = `${LEGACY_AUTH_COOKIE_PREFIX}session_token`;
  * Migrates pre-#89 `__Secure-better-auth.*` cookies to the current names.
  * Reads: every HTTP request is rewritten before routing, so all hooks and
  * endpoints see only current names. Writes: a successful GET that resolves a
- * live session from a promoted legacy token re-issues it under the current
+ * stored session from a promoted legacy token re-issues it under the current
  * name, with the lifetime the persisted session allows (#145: non-remembered
  * sessions stay browser-session cookies). Promoted legacy cookies are expired
  * only by such a read, or once the response sets or clears the current session
@@ -143,7 +143,7 @@ export function legacyCookieMigration(): BetterAuthPlugin {
       const cookie = request.headers.get("cookie");
       const prefix = context.authCookies.sessionToken.name.slice(0, -".session_token".length);
       const migration = cookie === null ? undefined : promoteLegacyCookies(cookie, prefix);
-      const migrates = migration !== undefined && migration.header !== cookie;
+      const migrates = migration !== undefined && migration.promoted.length + migration.shadowed.length > 0;
       if (!migrates && !request.headers.has(legacyCookieHeader)) return Promise.resolve(undefined);
       const headers = new Headers(request.headers);
       headers.delete(legacyCookieHeader);
@@ -167,15 +167,16 @@ export function legacyCookieMigration(): BetterAuthPlugin {
         else if (legacy.promoted.includes(legacySessionToken) && ctx.request?.method === "GET"
           && !isAPIError(ctx.context.returned) && !sessionlessAuthPaths.has(ctx.path)) {
           const token = await ctx.getSignedCookie(cookies.sessionToken.name, ctx.context.secret);
+          // No clock read: an expired session was already deleted, with its cookie, by the endpoint.
           const resolved = token ? await ctx.context.internalAdapter.findSession(token) : null;
-          if (token && resolved && sessionExpiryMs(resolved.session.expiresAt) > Date.now()) {
+          if (token && resolved) {
             const rememberMe = remembered(resolved.session);
             await ctx.setSignedCookie(cookies.sessionToken.name, token, ctx.context.secret, {
               ...cookies.sessionToken.attributes, maxAge: rememberMe ? ctx.context.sessionConfig.expiresIn : undefined,
             });
             if (!rememberMe) await ctx.setSignedCookie(cookies.dontRememberToken.name, "true", ctx.context.secret, cookies.dontRememberToken.attributes);
           }
-          // A legacy token without a live session can never authenticate again.
+          // A legacy token without a session can never authenticate again.
           expire = [...expire, ...legacy.promoted];
         }
         // Legacy cookies were set host-only by the Worker, which strips Domain.

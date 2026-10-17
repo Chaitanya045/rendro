@@ -1,6 +1,6 @@
-import type { BrowserContext } from "@playwright/test";
+import type { BrowserContext, Page } from "@playwright/test";
 import { test, expect } from "./fixtures";
-import { login, session } from "./auth-helpers";
+import { authRecord, login, session } from "./auth-helpers";
 import { password } from "./seed";
 
 /**
@@ -12,22 +12,26 @@ const legacy = (name: string) => `__Secure-${name}`;
 const authCookies = async (context: BrowserContext) =>
   (await context.cookies()).filter(cookie => /^(?:__Secure-)?better-auth\./.test(cookie.name));
 
+async function asLegacyBrowser(page: Page, context: BrowserContext, project: string) {
+  const current = await authCookies(context);
+  // WebKit keeps but never sends Secure cookies on a loopback HTTP origin (production is HTTPS); probe first.
+  await context.addCookies([{ name: "__Secure-probe", value: "1", domain: new URL(page.url()).hostname, path: "/", secure: true }]);
+  test.skip(!(await page.evaluate(() => document.cookie)).includes("__Secure-probe=1"),
+    `${project} does not use Secure cookies on a loopback HTTP origin`);
+  await context.clearCookies();
+  await context.addCookies(current.map(cookie => ({ ...cookie, name: legacy(cookie.name), secure: true })));
+  return current;
+}
+
 for (const remember of [false, true]) {
   test(`a legacy session stays signed in and moves to the current cookie name (remember=${remember}) [AUTH-89-01]`, async ({ page, context, seed }, info) => {
     await login(page, "owner@example.test", password, remember);
     await expect(page).toHaveURL(/\/account\/security$/);
     const identity = await session(page);
     if (!identity) throw new Error("Missing session");
-    const current = await authCookies(context);
+    const current = await asLegacyBrowser(page, context, info.project.name);
     const token = current.find(cookie => cookie.name === "better-auth.session_token");
     if (!token) throw new Error("Missing session cookie");
-
-    // WebKit keeps but never sends Secure cookies on a loopback HTTP origin (production is HTTPS); probe first.
-    await context.addCookies([{ name: "__Secure-probe", value: "1", domain: new URL(page.url()).hostname, path: "/", secure: true }]);
-    test.skip(!(await page.evaluate(() => document.cookie)).includes("__Secure-probe=1"),
-      `${info.project.name} does not use Secure cookies on a loopback HTTP origin`);
-    await context.clearCookies();
-    await context.addCookies(current.map(cookie => ({ ...cookie, name: legacy(cookie.name), secure: true })));
 
     // Reads: the Worker renders a protected page from the legacy cookie alone (no redirect to sign-in).
     expect((await page.goto(`/organizations/${seed.organizationId}`))?.status()).toBe(200);
@@ -56,3 +60,18 @@ for (const remember of [false, true]) {
     await second.close();
   });
 }
+
+test("a legacy session signs out through the Worker and leaves no auth cookie [AUTH-89-02]", async ({ page, context }, info) => {
+  await login(page, "owner@example.test", password, true);
+  await expect(page).toHaveURL(/\/account\/security$/);
+  const identity = await session(page);
+  if (!identity) throw new Error("Missing session");
+  await asLegacyBrowser(page, context, info.project.name);
+  // A POST with a body: Convex rewrites the legacy cookie names before routing and revokes the session.
+  const result = await page.evaluate(async () => await (await fetch("/api/auth/sign-out", { method: "POST", headers: { Accept: "application/json" } })).json() as unknown);
+  expect(result).toEqual({ success: true });
+  expect(await authRecord("findOne", { model: "session", where: [{ field: "_id", value: identity.sessionId }], select: ["_id"] })).toBeNull();
+  expect(await authCookies(context)).toEqual([]);
+  await page.goto("/account/security");
+  await expect(page).toHaveURL(/\/sign-in\?returnTo=/);
+});
