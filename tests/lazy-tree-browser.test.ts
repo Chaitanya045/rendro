@@ -867,8 +867,14 @@ describe("lazy tree with scoped documents", () => {
     }
     expect(await tab.locator("#active-indicator").count()).toBe(1);
     if (returnTo) {
+      // The tree must leave the link's navigation alone. Stay on the page so
+      // its browser coverage is kept: observe the click after the tree saw it.
+      await tab.evaluate(() => document.addEventListener("click", event => {
+        (window as unknown as { linkFollowed: boolean }).linkFollowed = !event.defaultPrevented;
+        event.preventDefault();
+      }));
       await link.click();
-      await tab.waitForURL(`${harness.origin}${returnTo}`);
+      expect(await tab.evaluate(() => (window as unknown as { linkFollowed?: boolean }).linkFollowed)).toBe(true);
     }
   });
 
