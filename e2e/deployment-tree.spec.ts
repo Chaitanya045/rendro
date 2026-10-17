@@ -24,9 +24,9 @@ function treeRequests(tab: Page) {
   return seen;
 }
 const active = (tab: Page) => tab.locator("#tree-container .tree-item.active");
-const rows = (tab: Page, folder: string) => tab.locator(`.tree-folder[data-path$="/${folder}"] > .tree-folder-content > .tree-item`);
+const rows = (tab: Page, folder: string) => tab.locator(`.tree-folder[data-path$="/${folder}"] > .tree-folder-collapse > .tree-folder-content > .tree-item`);
 /** Every direct child of a folder: its documents and its subfolders' rows. */
-const children = (tab: Page, folder: string) => tab.locator(`.tree-folder[data-path$="/${folder}"] > .tree-folder-content > :is(.tree-item, .tree-folder)`);
+const children = (tab: Page, folder: string) => tab.locator(`.tree-folder[data-path$="/${folder}"] > .tree-folder-collapse > .tree-folder-content > :is(.tree-item, .tree-folder)`);
 const folderRow = (tab: Page, folder: string) => tab.locator(`.tree-folder[data-path$="/${folder}/"] > .tree-item`);
 const fileRow = (tab: Page, path: string) => tab.locator(`.tree-item[data-path$="/${path}"]`);
 const rootLabels = (tab: Page) => tab.locator("#tree-container > .tree-folder > .tree-item .tree-label, #tree-container > .tree-item .tree-label");
@@ -345,23 +345,32 @@ test.describe("deployment index browsing", () => {
     expect(frameFile(tab)).toBe("guide/intro.html");
   });
 
-  test.fail("a closed folder's rows are skipped by Tab (known bug)", async ({ owner: tab, tree }) => {
-    // A closed folder hides its rows with max-height/opacity only, so they stay focusable and in the accessibility tree.
+  test("a closed folder's rows are skipped by Tab and hidden from assistive technology", async ({ owner: tab, tree }) => {
+    // A closed folder's rows are inert: not focusable, and out of the accessibility tree, until the folder opens again.
     await tab.goto(`${tree.docs}?doc=index.html`);
     await expect(heading(tab, tree.amended)).toBeVisible();
     const guide = folderRow(tab, "guide");
     await guide.focus();
     await tab.keyboard.press("Enter");
     await expect(guide).toHaveAttribute("aria-expanded", "true");
+    const collapse = tab.locator('.tree-folder[data-path$="/guide/"] > .tree-folder-collapse');
+    await expect(collapse).not.toHaveAttribute("inert");
     await tab.keyboard.press(" ");
     await expect(guide).toHaveAttribute("aria-expanded", "false");
+    await expect(collapse).toHaveAttribute("inert", "");
     await tab.keyboard.press("Tab");
     await expect(folderRow(tab, "wide")).toBeFocused();
+    // Opening it again makes the rows reachable.
+    await tab.keyboard.press("Shift+Tab");
+    await expect(guide).toBeFocused();
+    await tab.keyboard.press("Enter");
+    await expect(collapse).not.toHaveAttribute("inert");
+    await tab.keyboard.press("Tab");
+    await expect(tab.locator('.tree-folder[data-path$="/guide/"] > .tree-folder-collapse :focus')).toHaveCount(1);
   });
 
-  test.fail("an open folder with a full page of rows pushes the rows after it down instead of overlapping them (known bug)", async ({ owner: tab, tree }) => {
-    // The open folder's content is capped at max-height: 2000px with visible overflow: rows past the cap (about 60) are
-    // drawn over the siblings that follow the folder.
+  test("an open folder with a full page of rows pushes the rows after it down instead of overlapping them", async ({ owner: tab, tree }) => {
+    // The open folder is as tall as its rows, however many pages are loaded, so the rows that follow it start below it.
     await tab.goto(`${tree.docs}?doc=index.html`);
     await expect(heading(tab, tree.amended)).toBeVisible();
     await folderRow(tab, "wide").click();

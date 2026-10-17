@@ -35,6 +35,26 @@ describe('auth route rendering boundaries', () => {
     expect(response.headers.get('Location')).toBe('/');
   });
 
+  // The query value is decoded once by the router, so an encoded variant arrives here as its decoded form; anything
+  // that is not a rooted, single-slash, control-free path falls back to the home page.
+  it.each([
+    '//outside.invalid/path', '///outside.invalid', '/\\/outside.invalid', '\\\\outside.invalid', 'http://outside.invalid', 'HTTPS://outside.invalid',
+    'javascript:alert(1)', 'data:text/html,x', 'outside.invalid/path', ' //outside.invalid', '/\t/outside.invalid', '/\n/outside.invalid', '/\r/outside.invalid',
+    '%2F%2Foutside.invalid', '%252F%252Foutside.invalid', 'https:%2F%2Foutside.invalid', '', '?x=/',
+  ])('falls back to the home page for returnTo %j, raw and encoded', async destination => {
+    for (const query of [`returnTo=${encodeURIComponent(destination)}`, `returnTo=${encodeURIComponent(destination).replace(/%2F/g, '/')}`]) {
+      for (const path of ['/sign-in', '/sign-up']) {
+        const response = await signedIn().request(`${path}?${query}`);
+        expect(response.headers.get('Location'), `${path}?${query}`).toBe('/');
+      }
+    }
+  });
+
+  it.each(['/organizations/o/projects/p/docs?doc=guide%2Fintro.html', '/organizations/o/projects/p/docs?doc=a.html&docQuery=%3Fv%3D1', '/%2F%2Foutside.invalid'])('keeps the rooted path %j, query included', async destination => {
+    const response = await signedIn().request(`/sign-in?returnTo=${encodeURIComponent(destination)}`);
+    expect(response.headers.get('Location')).toBe(destination);
+  });
+
   it('renders verification completion and safely handles missing profile email', async () => {
     const verified = await (await authPages.request('/verify-email?verified=1')).text();
     expect(verified).toContain('Email verified');

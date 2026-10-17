@@ -138,17 +138,22 @@ test.describe("what each viewer offers", () => {
     // Signed out: the page is the sign-in form, and the tree and files are refused.
     await anon.goto(`${site.docs}?doc=index.html`);
     await expect(anon).toHaveURL(/\/sign-in\?returnTo=/);
-    expect(new URL(anon.url()).searchParams.get("returnTo")).toBe(site.docs);
+    expect(new URL(anon.url()).searchParams.get("returnTo")).toBe(`${site.docs}?doc=index.html`);
     await expect(anon.locator("#tree-container, #content-frame")).toHaveCount(0);
     expect((await anon.request.get(`${site.docs}/tree?dir=`, { maxRedirects: 0 })).status()).toBe(401);
     expect((await anon.request.get(`${site.docs}/files/index.html`, { maxRedirects: 0 })).status()).toBe(404);
   });
 
-  test.fail("signing in returns to the document the reader asked for (known bug)", async ({ anon, site }) => {
-    // The sign-in redirect keeps only the path, so a deep link to one document comes back as the project's default one.
+  test("signing in returns to the document the reader asked for, and only to a same-origin path", async ({ anon, site }) => {
+    // The sign-in redirect carries the document selector and the publisher's query, so a deep link is not lost.
     await anon.goto(`${site.docs}?doc=guide%2Fintro.html`);
     await expect(anon).toHaveURL(/\/sign-in\?returnTo=/);
     expect(new URL(anon.url()).searchParams.get("returnTo")).toBe(`${site.docs}?doc=guide%2Fintro.html`);
+    await anon.goto(`${site.docs}?doc=guide%2Fintro.html&docQuery=%3Fv%3D1&utm=x`);
+    expect(new URL(anon.url()).searchParams.get("returnTo")).toBe(`${site.docs}?doc=guide%2Fintro.html&docQuery=%3Fv%3D1`);
+    // A selector that is not a document path is dropped; the project's default document is shown after signing in.
+    await anon.goto(`${site.docs}?doc=%2F%2Foutside.invalid`);
+    expect(new URL(anon.url()).searchParams.get("returnTo")).toBe(site.docs);
   });
 });
 
