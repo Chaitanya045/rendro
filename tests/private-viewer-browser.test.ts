@@ -140,6 +140,42 @@ describe("opaque-origin Chromium private viewer", () => {
     } finally { await page.close(); }
   });
 
+  it("keeps the same document, its scroll position, focus and an unsent draft through every renewal", async () => {
+    publisherHtml = `<!doctype html><html><head><link rel="stylesheet" href="assets/site.css"></head><body>
+      <img id="picture" src="assets/picture.svg"><div style="height:3000px"></div>
+      <textarea id="draft" aria-label="Draft"></textarea><div style="height:1500px"></div></body></html>`;
+    const page = await openViewer();
+    try {
+      const frame = page.frames().find(frame => frame !== page.mainFrame())!;
+      await browserStep("settle the document", () => frame.waitForFunction(() =>
+        (document.getElementById("picture") as HTMLImageElement).naturalWidth === 10));
+      await frame.evaluate(() => {
+        const draft = document.getElementById("draft") as HTMLTextAreaElement;
+        draft.scrollIntoView({ block: "center" });
+        draft.focus();
+        draft.value = "A comment I have not sent yet";
+        draft.setSelectionRange(2, 9);
+        Object.assign(window, { identity: { origin: performance.timeOrigin, node: draft, scrollY: window.scrollY } });
+      });
+      const documentLoads = () => requests.filter(request => request.path === `${base}/files/guide/index.html`).length;
+      expect(documentLoads()).toBe(1);
+      for (let round = 1; round <= 3; round++) {
+        await renew(page, frame, round);
+        await browserStep(`apply ticket ${round} to the picture`, () => frame.waitForFunction(expected =>
+          (document.getElementById("picture") as HTMLImageElement).src.includes(expected), `/view/renewed-${round}/`));
+        expect(await frame.evaluate(() => {
+          const kept = (window as unknown as { identity: { origin: number; node: Element; scrollY: number } }).identity;
+          const draft = document.getElementById("draft") as HTMLTextAreaElement;
+          return {
+            sameDocument: performance.timeOrigin === kept.origin, sameNode: draft === kept.node, scrollY: window.scrollY === kept.scrollY && kept.scrollY > 0,
+            value: draft.value, selection: [draft.selectionStart, draft.selectionEnd], focused: document.activeElement === draft,
+          };
+        }), `after renewal ${round}`).toEqual({ sameDocument: true, sameNode: true, scrollY: true, value: "A comment I have not sent yet", selection: [2, 9], focused: true });
+        expect(documentLoads()).toBe(1);
+      }
+    } finally { await page.close(); }
+  });
+
   it.each([
     ["inline image-set", '<div id="target" style=\'background-image:image-set("assets/candidate.svg" 1x, "assets/double.svg" 2x)\'></div>', "candidate.svg"],
     ["block image-set", '<style>#target { background-image:image-set("assets/candidate.svg" 1x, "assets/double.svg" 2x) }</style><div id="target"></div>', "candidate.svg"],

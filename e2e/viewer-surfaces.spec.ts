@@ -58,6 +58,8 @@ const rootLabels = (tab: Page) => tab.locator("#tree-container > .tree-folder > 
 const folderRow = (tab: Page, folder: string) => tab.locator(`.tree-folder[data-path$="/${folder}/"] > .tree-item`);
 const fileLink = (tab: Page, path: string) => tab.locator(`.tree-item[data-path$="/${path}"] a.tree-link`);
 const notice = (tab: Page) => tab.locator("#document-navigation-notice");
+const destination = (tab: Page) => tab.locator("#document-navigation-destination");
+const review = (tab: Page) => tab.locator("#document-navigation-review");
 const historyLength = (tab: Page) => tab.evaluate(() => history.length);
 const hash = (tab: Page) => tab.evaluate(() => location.hash);
 /** Distance of an element's top edge from the top of the document's viewport. */
@@ -101,7 +103,7 @@ test.describe("what each viewer offers", () => {
     await expect(anon.locator("#share-btn")).toHaveAttribute("aria-label", "Copy public URL");
     await expect(anon.locator(".rendro-theme-control")).toHaveCount(1);
     await expect(anon.locator("#shell-toggle")).toHaveCount(1);
-    await expect(rootLabels(anon)).toHaveText(["guide", "other", "flood", "forged", "index", "late", "probe"]);
+    await expect(rootLabels(anon)).toHaveText(["guide", "other", "comment", "flood", "forged", "index", "late", "probe"]);
     await expect(anon.locator("#commentor-host, [data-comment-toolbar]")).toHaveCount(0);
     await expect(content(anon).locator("#commentor-host")).toHaveCount(0);
     expect(publicRequests.filter(path => path.startsWith("/api/auth/"))).toEqual([]);
@@ -362,6 +364,53 @@ test.describe("share viewer", () => {
     expect((await anon.goto(`/s/${share.token}?doc=guide%2Fdeep%2Ftopic.html`))?.status()).toBe(404);
     await notFound(anon);
     expect((await anon.goto(`/s/${share.token}?doc=guide%2Fintro.html&docQuery=nope`))?.status()).toBe(400);
+  });
+
+  test("a link to another site in a shared document asks first: Dismiss stays on the page, Open goes to a new tab that cannot reach the viewer", async ({ anon, makeShare }) => {
+    test.slow();
+    const share = await makeShare("index.html");
+    const requests: string[] = [];
+    await anon.context().route("https://docs.example.test/**", route => { requests.push(route.request().url()); return route.fulfill({ contentType: "text/html", body: "<h1>outside</h1>" }); });
+    await anon.goto(`/s/${share.token}`);
+    await expect(heading(anon, "Viewer home")).toBeVisible();
+    const url = anon.url();
+    const entries = await historyLength(anon);
+
+    // The frame never loads another site; the click is handed to the shell, which asks and changes nothing meanwhile.
+    await content(anon).locator("#external").click();
+    await expect(destination(anon)).toHaveText("Open external link https://docs.example.test/outside?");
+    await expect(notice(anon).getByRole("button", { name: "Open external link" })).toHaveAccessibleDescription("Open external link https://docs.example.test/outside?");
+    await content(anon).locator("#external").click();
+    await expect(notice(anon)).toHaveCount(1);
+    expect(requests).toEqual([]);
+    expect(anon.url()).toBe(url);
+    await expect(heading(anon, "Viewer home")).toBeVisible();
+    expect(await historyLength(anon)).toBe(entries);
+
+    // Dismiss stays on the page with only a Review button; Review brings the prompt back with the same address.
+    await notice(anon).getByRole("button", { name: "Dismiss" }).click();
+    await expect(notice(anon)).toHaveCount(0);
+    await expect(heading(anon, "Viewer home")).toBeVisible();
+    expect(requests).toEqual([]);
+    await review(anon).getByRole("button", { name: "Review external link" }).click();
+    await expect(destination(anon)).toHaveText("Open external link https://docs.example.test/outside?");
+
+    // Open is the only thing that leaves, and it is a new tab with no handle back.
+    const popup = anon.context().waitForEvent("page");
+    await notice(anon).getByRole("button", { name: "Open external link" }).click();
+    const opened = await popup;
+    await opened.waitForLoadState("domcontentloaded");
+    expect(opened.url()).toBe("https://docs.example.test/outside");
+    expect(await opened.evaluate(() => window.opener === null)).toBe(true);
+    await opened.close();
+    await expect(notice(anon)).toHaveCount(0);
+    await expect(review(anon)).toHaveCount(0);
+    expect(anon.url()).toBe(url);
+    await expect(heading(anon, "Viewer home")).toBeVisible();
+    expect(await historyLength(anon)).toBe(entries);
+    expect(requests).toEqual(["https://docs.example.test/outside"]);
+    // The share still grants only its one document.
+    await expect(anon.locator("#content-frame")).toHaveAttribute("sandbox", "allow-scripts allow-forms allow-popups allow-downloads");
   });
 
   test("a revoked share is not found, in the shell, in the document and in a viewer that was already open", async ({ anon, makeShare, revokeShare }) => {

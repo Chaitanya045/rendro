@@ -122,6 +122,24 @@ describe("shared theme runtime", () => {
     expect(runtime.api.getMode()).toBe("light");
   });
 
+  it.each([false, true])("applies another tab's storage choice immediately, without starting or replaying an animation (mounted: %s)", mounted => {
+    const runtime = themeRuntime({ saved: "light", transitions: true });
+    const controller = mounted ? runtime.api.mount(runtime.button) : null;
+    for (const choice of ["dark", "system", "light"]) {
+      for (const listener of runtime.windowListeners.get("storage") ?? []) listener({ key: "commentor-theme", newValue: choice });
+      expect(runtime.root.dataset.theme).toBe(choice);
+      expect(controller?.getMode() ?? runtime.api.getMode()).toBe(choice);
+    }
+    // A write to some other key is not a theme change.
+    for (const listener of runtime.windowListeners.get("storage") ?? []) listener({ key: "unrelated", newValue: "dark" });
+    expect(runtime.root.dataset.theme).toBe("light");
+    // Nothing animated: no view transition, no ripple, and the other tab's value was not written back.
+    expect(runtime.transitions).toHaveLength(0);
+    expect(runtime.document.startViewTransition as unknown as ReturnType<typeof vi.fn>).not.toHaveBeenCalled();
+    expect(runtime.animate).not.toHaveBeenCalled();
+    expect(runtime.storage.get("commentor-theme")).toBe("light");
+  });
+
   it("keeps passive screens synchronized before a control mounts", () => {
     const runtime = themeRuntime();
     for (const listener of runtime.windowListeners.get("storage") ?? []) listener({ key: "commentor-theme", newValue: "dark" });

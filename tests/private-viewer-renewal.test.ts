@@ -216,6 +216,70 @@ describe("private viewer renewal", () => {
     expect(parent.postMessage).toHaveBeenCalledTimes(2);
   });
 
+  it.each([
+    ["the tab regaining focus", (f: ReturnType<typeof frameFixture>) => f.bus.emit("focus")],
+    ["a page restore", (f: ReturnType<typeof frameFixture>) => f.bus.emit("pageshow")],
+    ["the tab becoming visible", (f: ReturnType<typeof frameFixture>) => f.win.document.dispatchEvent(new f.win.Event("visibilitychange"))],
+  ])("renews on %s only once the ticket is five minutes old, and at most once per request window", (_name, resume) => {
+    vi.useFakeTimers();
+    const f = frameFixture();
+    const start = Date.now();
+    // Only the clock moves, as in a suspended tab: no periodic check has run since.
+    vi.setSystemTime(start + 5 * 60_000 - 1);
+    resume(f);
+    expect(f.parent.postMessage).not.toHaveBeenCalled();
+    vi.setSystemTime(start + 5 * 60_000);
+    resume(f);
+    expect(f.parent.postMessage).toHaveBeenCalledExactlyOnceWith({ type: "viewer-renew", manifestKey: "release/manifest.json", requestId: expect.any(String) }, origin);
+    resume(f);
+    vi.setSystemTime(start + 5 * 60_000 + 29_999);
+    resume(f);
+    expect(f.parent.postMessage).toHaveBeenCalledOnce();
+    // A renewal restarts the five minutes.
+    f.renew(`${base}/view/renewed/files/`);
+    const renewedAt = start + 5 * 60_000 + 29_999;
+    vi.setSystemTime(renewedAt + 5 * 60_000 - 1);
+    resume(f);
+    expect(f.parent.postMessage).toHaveBeenCalledOnce();
+    vi.setSystemTime(renewedAt + 5 * 60_000);
+    resume(f);
+    expect(f.parent.postMessage).toHaveBeenCalledTimes(2);
+  });
+
+  it("checks every minute and renews once the ticket is five minutes old", () => {
+    vi.useFakeTimers();
+    const f = frameFixture();
+    vi.advanceTimersByTime(5 * 60_000 - 1);
+    expect(f.parent.postMessage).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1);
+    expect(f.parent.postMessage).toHaveBeenCalledOnce();
+    expect(f.parent.postMessage.mock.lastCall![0]).toMatchObject({ type: "viewer-renew", manifestKey: "release/manifest.json" });
+  });
+
+  it("caps the stylesheet retry backoff at fifteen minutes however often replacement fails", () => {
+    vi.useFakeTimers();
+    const { win, renew, settleSheet } = frameFixture();
+    const attempt = (ticket: string, seconds: number) => {
+      vi.advanceTimersByTime(seconds * 1000);
+      win.document.dispatchEvent(new win.Event("error"));
+      renew(`${base}/view/${ticket}/files/`);
+    };
+    attempt("first", 0);
+    // Each failure doubles the wait (one, two, four, eight minutes), then it stays at the fifteen-minute ceiling.
+    for (const [failure, delay] of [60, 120, 240, 480, 900, 900].entries()) {
+      const links = win.document.querySelectorAll("link");
+      expect(links, `replacement ${failure} is loading`).toHaveLength(2);
+      settleSheet(links[1], "error");
+      expect(win.document.querySelectorAll("link")).toHaveLength(1);
+      // Half way through the wait a renewal is recorded but nothing is retried; shortly after it, the retry starts.
+      attempt(`early-${failure}`, delay / 2);
+      expect(win.document.querySelectorAll("link"), `no retry within ${delay}s`).toHaveLength(1);
+      attempt(`late-${failure}`, delay / 2 + 1);
+    }
+    expect(win.document.querySelectorAll("link")).toHaveLength(2);
+    expect(win.document.querySelectorAll("link")[1].href).toContain("/view/late-5/");
+  });
+
   it("allows only the current opaque frame to request cookie-authenticated renewal", async () => {
     let now = 0;
     vi.spyOn(Date, "now").mockImplementation(() => now);

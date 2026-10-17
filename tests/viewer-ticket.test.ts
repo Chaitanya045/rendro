@@ -56,4 +56,21 @@ describe("encrypted private viewer capabilities", () => {
     expect(await readViewerTicket(token, scope)).toBeNull();
   });
 
+  it("gives legacy tickets the same fifteen-minute lifetime and keeps the two kinds from authorizing each other", async () => {
+    vi.useFakeTimers();
+    const start = new Date("2026-10-10T00:00:00Z");
+    vi.setSystemTime(start);
+    const modern = await createViewerTicket({ ...scope, cookie });
+    const legacy = await createLegacyViewerTicket("example", cookie);
+    // A capability of one kind is not even decryptable as the other: separate audiences and derived keys.
+    expect(await readLegacyViewerTicket(modern, "example")).toBeNull();
+    expect(await readViewerTicket(legacy, scope)).toBeNull();
+    expect(await readLegacyViewerTicket(legacy, "example")).toEqual({ cookie, storagePrefix: "example/" });
+    vi.setSystemTime(start.getTime() + VIEWER_TICKET_SECONDS * 1000 - 1000);
+    expect(await readLegacyViewerTicket(legacy, "example")).not.toBeNull();
+    expect(await readViewerTicket(modern, scope)).not.toBeNull();
+    vi.setSystemTime(start.getTime() + VIEWER_TICKET_SECONDS * 1000);
+    expect(await readLegacyViewerTicket(legacy, "example")).toBeNull();
+    expect(await readViewerTicket(modern, scope)).toBeNull();
+  });
 });

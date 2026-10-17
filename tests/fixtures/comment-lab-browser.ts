@@ -1,4 +1,5 @@
 import { ConvexError } from "convex/values";
+import { installViewerParent } from "../../src/viewer/client";
 import { CommentorParentHost, type CommentPaginationSubscription, type DocumentCommentBackend } from "../../src/commentor/parent-host";
 
 // A scriptable in-memory comment backend behind the real parent host, so Chromium
@@ -37,6 +38,8 @@ const lab = {
   holds: [] as string[],
   held: [] as Held[],
   subscriptions: 0,
+  // The scope each thread subscription was opened with, in order.
+  scopes: [] as unknown[],
   replySubscriptions: () => replyUpdates.size,
   unsubscribed: 0,
   host: null as CommentorParentHost | null,
@@ -89,8 +92,9 @@ const lab = {
 };
 
 const backend: DocumentCommentBackend = {
-  subscribe(_scope, update, onError) {
+  subscribe(scope, update, onError) {
     lab.subscriptions++;
+    lab.scopes.push(scope);
     threadUpdate = update;
     threadError = onError;
     // The first page arrives like a Convex snapshot, after the request is acknowledged.
@@ -132,5 +136,7 @@ const frame = document.querySelector<HTMLIFrameElement>("#content-frame")!;
 lab.host = new CommentorParentHost(frame, location.origin,
   { organizationId: "org-a", projectId: "project-a" as never, convexUrl: "http://unused.test" }, backend, query.get("user") === "" ? null : query.get("user") ?? "user-a");
 lab.host.start(true);
+// The real shell's reload notice and Reload button, for the tests that press them.
+if (query.has("viewer")) installViewerParent({ base: location.pathname });
 Object.assign(window, { lab });
 export type CommentLab = typeof lab;
