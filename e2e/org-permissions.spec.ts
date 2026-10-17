@@ -1,6 +1,6 @@
 import type { BrowserContext, Page } from "@playwright/test";
 import type { Seed } from "./seed";
-import { test, expect, fullOrganization, openSection, optionsOf } from "./org-fixtures";
+import { test, expect, fullOrganization, invitations, join, openSection, optionsOf, toasts, type FullOrganization } from "./org-fixtures";
 import { api, signInSeeded } from "./shell-helpers";
 
 type Role = "owner" | "admin" | "member";
@@ -157,10 +157,41 @@ test.describe("organization management APIs enforce roles independently of the U
     expect((await api(ownerPage, "/api/auth/organization/cancel-invitation", { invitationId: invitation.body.id })).status).toBe(200);
   });
 
-  // Known bug: list-invitations only requires membership, so any member can read every invited address, role and status.
-  test.fail("an ordinary member cannot read the organization's pending invitations (known bug)", async ({ seeded, seed }) => {
-    const page = await seeded("member");
-    const response = await api(page, `/api/auth/organization/list-invitations?organizationId=${seed.organizationId}`);
-    expect([401, 403]).toContain(response.status);
+  test("an ordinary member cannot read the organization's pending invitations", async ({ actor }) => {
+    const owner = await actor("invites-owner", { organizations: ["Invite Privacy"] });
+    const admin = await actor("invites-admin");
+    const member = await actor("invites-member");
+    const [organization] = owner.organizations;
+    await join(owner, organization.id, admin, "admin");
+    await join(owner, organization.id, member, "member");
+    const pending = `pending-${Date.now().toString(36)}@example.test`;
+    expect((await api(owner.page, "/api/auth/organization/invite-member", { organizationId: organization.id, email: pending, role: "member" })).status).toBe(200);
+    type WithInvitations = FullOrganization & { invitations: Array<{ email: string }> };
+
+    for (const who of [owner, admin]) {
+      const listed = await invitations(who.page, organization.id);
+      expect(listed.status, who.label).toBe(200);
+      expect(listed.body.map(entry => entry.email), who.label).toContain(pending);
+      const full = await fullOrganization(who.page, organization.id) as { status: number; body: WithInvitations };
+      expect(full.body.invitations.map(entry => entry.email), who.label).toContain(pending);
+    }
+
+    // Members are refused the list and get the organization without it; the roster they need is unchanged.
+    const denied = await invitations(member.page, organization.id);
+    expect(denied).toMatchObject({ status: 403, body: { code: "YOU_ARE_NOT_ALLOWED_TO_LIST_INVITATIONS" } });
+    expect(JSON.stringify(denied.body)).not.toContain(pending);
+    const memberView = await fullOrganization(member.page, organization.id) as { status: number; body: WithInvitations };
+    expect(memberView.status).toBe(200);
+    expect(memberView.body.invitations).toEqual([]);
+    expect(memberView.body.members.map(entry => entry.user.email).sort()).toEqual([admin.email, member.email, owner.email].sort());
+
+    // Their People page shows the roster without an invitation section or an error.
+    await openSection(member.page, organization.id, "people");
+    await expect(member.page.locator("#member-list tr")).toHaveCount(3);
+    await expect(member.page.locator(".pending-panel")).toHaveCount(0);
+    await expect(member.page.getByText(pending)).toHaveCount(0);
+    await expect(toasts(member.page)).toHaveCount(0);
+    await openSection(admin.page, organization.id, "people");
+    await expect(admin.page.locator("#invitation-list")).toContainText(pending);
   });
 });

@@ -221,8 +221,10 @@ test.describe("people and invitations", () => {
     await expect(member.page.locator(".pending-panel")).toBeVisible();
 
     // A second owner lifts the last-owner constraint; the original owner can then demote themselves and loses every privilege.
+    // Toasts last 4.2s and the reload above can outlast the first one, so count only the new confirmation.
+    await expect(toasts(owner.page).filter({ hasText: "Member role updated." })).toHaveCount(0);
     await choose(owner.page, roleSelect(admin.email), "Owner");
-    await expect(toasts(owner.page).filter({ hasText: "Member role updated." })).toHaveCount(2);
+    await expect(toasts(owner.page).filter({ hasText: "Member role updated." })).toHaveCount(1);
     expect(await roles(owner.page, organization.id)).toEqual({ [owner.email]: "owner", [admin.email]: "owner", [member.email]: "admin" });
     expect(await optionsOf(owner.page, roleSelect(owner.email))).toEqual([{ text: "Member", disabled: false }, { text: "Admin", disabled: false }, { text: "Owner", disabled: false }]);
     await choose(owner.page, roleSelect(owner.email), "Member");
