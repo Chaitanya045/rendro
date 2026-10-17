@@ -26,9 +26,11 @@ function renderedPage(): string {
   });
 }
 
-function scopeRuntime(withCache = false) {
+function scopeRuntime(withCache = false, create: typeof createManagementQueryCache = createManagementQueryCache) {
   const runtime = renderManagementNavigationRuntime();
   const listeners = new Map<string, (...args: unknown[]) => unknown>();
+  const registered = new Map<string, Array<(...args: unknown[]) => unknown>>();
+  const listen = (name: string, callback: (...args: unknown[]) => unknown) => { listeners.set(name, callback); registered.set(name, [...registered.get(name) ?? [], callback]); };
   let openDialog = false;
   const main = {
     getAttribute: (name: string) => ({
@@ -61,14 +63,14 @@ function scopeRuntime(withCache = false) {
   const document = {
     querySelector: (selector: string) => selector === ".cp-main[data-cp-route-envelope]" ? main : selector === ".cp-main dialog[open]" && openDialog ? {} : null,
     querySelectorAll: () => [],
-    addEventListener: (name: string, callback: (...args: unknown[]) => unknown) => listeners.set(name, callback),
+    addEventListener: listen,
     dispatchEvent: () => true,
   };
   class TestCustomEvent {
     constructor(public type: string, public init: unknown) {}
   }
   const context = vm.createContext({
-    window: { RendroUI: ui, RendroQueryCore: withCache ? { create: createManagementQueryCache } : undefined, fetch: vi.fn(), DOMParser: class {}, AbortController },
+    window: { RendroUI: ui, RendroQueryCore: withCache ? { create } : undefined, fetch: vi.fn(), DOMParser: class {}, AbortController },
     document,
     location,
     history,
@@ -78,13 +80,13 @@ function scopeRuntime(withCache = false) {
     DOMException,
     CustomEvent: TestCustomEvent,
     Element: class {},
-    addEventListener: (name: string, callback: (...args: unknown[]) => unknown) => listeners.set(name, callback),
+    addEventListener: listen,
     setTimeout,
     clearTimeout,
     console,
   });
   vm.runInContext(runtime, context);
-  return { ui: ui as typeof ui & { createPageScope: () => PageScope; refresh: () => Promise<boolean>; navigate: (href: string) => Promise<boolean> }, request, toast, location, listeners, setOpenDialog: (value: boolean) => { openDialog = value; } };
+  return { ui: ui as typeof ui & { createPageScope: () => PageScope; refresh: () => Promise<boolean>; navigate: (href: string) => Promise<boolean> }, request, toast, location, listeners, fire: (name: string) => { (registered.get(name) ?? []).forEach(callback => callback()); }, setOpenDialog: (value: boolean) => { openDialog = value; } };
 }
 
 interface PageScope {
@@ -366,5 +368,94 @@ describe("persistent management navigation", () => {
       : { projects: [{ name: "Private project" }] }));
     await expect(runtime.ui.createPageScope().request("/api/rendro/projects?organizationId=org-a")).rejects.toMatchObject({ status: 403 });
     runtime.listeners.get("pagehide")?.();
+  });
+
+  it("clears every retained management read on page exit and on sign-out", async () => {
+    const created: ReturnType<typeof createManagementQueryCache>[] = [];
+    const runtime = scopeRuntime(true, (identity, raw) => { const cache = createManagementQueryCache(identity, raw); created.push(cache); return cache; });
+    const path = "/api/rendro/projects?organizationId=org-a";
+    runtime.request.mockImplementation((url: string) => Promise.resolve(url.includes("management/access") ? { id: "org-a", userId: "user-a", member: { userId: "user-a" } } : { projects: [] }));
+    const reads = () => runtime.request.mock.calls.filter(([url]) => url === path).length;
+    await runtime.ui.createPageScope().request(path);
+    await runtime.ui.createPageScope().request(path);
+    expect(reads()).toBe(1);
+
+    // pagehide (page exit or navigating to another document) drops the retained data.
+    runtime.fire("pagehide");
+    await runtime.ui.createPageScope().request(path);
+    expect(reads()).toBe(2);
+
+    // Sign-out clears it too, even for a cache that a still-open consumer holds.
+    const clear = vi.spyOn(created[0], "clear");
+    runtime.fire("commentor-sign-out");
+    expect(clear).toHaveBeenCalled();
+    await created[0].request(path, {}, () => Promise.resolve());
+    expect(reads()).toBe(3);
+  });
+
+  it.each([
+    ["another account", { id: "org-a", userId: "user-b", member: { userId: "user-b" } }],
+    ["another organization", { id: "org-b", userId: "user-a", member: { userId: "user-a" } }],
+    ["a missing membership", { id: "org-a", userId: "user-a" }],
+    ["a different member record", { id: "org-a", userId: "user-a", member: { userId: "user-b" } }],
+    ["an empty response", null],
+  ])("a role or identity mismatch (%s) clears retained reads, rejects and reloads the page", async (_name, access) => {
+    const runtime = scopeRuntime(true);
+    const path = "/api/rendro/projects?organizationId=org-a";
+    const good = { id: "org-a", userId: "user-a", member: { userId: "user-a" } };
+    let current: unknown = good;
+    runtime.request.mockImplementation((url: string) => Promise.resolve(url.includes("management/access") ? current : { projects: [] }));
+    await runtime.ui.createPageScope().request(path);
+    const reads = () => runtime.request.mock.calls.filter(([url]) => url === path).length;
+    expect(reads()).toBe(1);
+
+    current = access;
+    const scope = runtime.ui.createPageScope();
+    await expect(scope.request(path)).rejects.toMatchObject({ status: 403, message: "Your account or organization access changed. Reload to continue." });
+    expect(runtime.location.replace).toHaveBeenCalledExactlyOnceWith(runtime.location.href);
+
+    // Everything retained is gone: once access is valid again the next read goes to the network.
+    current = good;
+    await runtime.ui.createPageScope().request(path);
+    expect(reads()).toBe(2);
+    runtime.fire("pagehide");
+  });
+
+  it("counts every concurrent write and only allows departure when the last one settles", async () => {
+    const runtime = scopeRuntime();
+    const writes: Array<(value: unknown) => void> = [];
+    runtime.request.mockImplementation(() => new Promise(resolve => { writes.push(resolve); }));
+    const scope = runtime.ui.createPageScope();
+    const first = scope.request("/api/one", { method: "POST" });
+    const second = scope.request("/api/two", { method: "POST" });
+    expect(scope.canLeave({ kind: "navigation" })).toBe(false);
+    writes[0]({ ok: 1 }); await first;
+    expect(scope.canLeave({ kind: "navigation" })).toBe(false);
+    writes[1]({ ok: 2 }); await second;
+    expect(scope.canLeave({ kind: "navigation" })).toBe(true);
+  });
+
+  it("blocks leaving for another organization, refresh and unload while a write is pending or a dialog is open", async () => {
+    const runtime = scopeRuntime();
+    const other = "https://rendro.test/organizations/org-b/people";
+    let finish!: (value: unknown) => void;
+    runtime.request.mockImplementation(() => new Promise(resolve => { finish = resolve; }));
+    const scope = runtime.ui.createPageScope();
+    const pending = scope.request("/api/update", { method: "POST" });
+    await expect(runtime.ui.navigate(other)).resolves.toBe(false);
+    await expect(runtime.ui.refresh()).resolves.toBe(false);
+    expect(scope.canLeave({ kind: "unload" })).toBe(false);
+    expect(runtime.location.assign).not.toHaveBeenCalled();
+    finish({ ok: true }); await pending;
+
+    runtime.setOpenDialog(true);
+    await expect(runtime.ui.navigate(other)).resolves.toBe(false);
+    await expect(runtime.ui.refresh()).resolves.toBe(false);
+    expect(scope.canLeave({ kind: "unload" })).toBe(false);
+    expect(runtime.location.assign).not.toHaveBeenCalled();
+    runtime.setOpenDialog(false);
+    expect(scope.canLeave({ kind: "unload" })).toBe(true);
+    await expect(runtime.ui.navigate(other)).resolves.toBe(true);
+    expect(runtime.location.assign).toHaveBeenCalledExactlyOnceWith(other);
   });
 });

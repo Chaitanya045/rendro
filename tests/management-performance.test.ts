@@ -359,4 +359,79 @@ describe("management critical-path optimization", () => {
     gate.resolve([]); await flush();
     expect(win.document.querySelector("#invitation-list")?.textContent).toContain("No pending invitations");
   });
+  it("guards unload only while Settings has unsaved edits, and a save or a revert clears the guard", async () => {
+    const { win, navigate } = await setup(async path => path === "/api/auth/organization/update" ? { name: "Renamed", slug: "renamed" } : response(path));
+    await navigate("/settings"); await flush();
+    const unload = () => { const event = new win.Event("beforeunload", { cancelable: true }); win.dispatchEvent(event); return event.defaultPrevented; };
+    const name = win.document.querySelector<HTMLInputElement>('#settings-form [name="name"]')!;
+    const original = name.value;
+    expect(unload()).toBe(false);
+    name.value = "Unsaved name"; name.dispatchEvent(new win.Event("input", { bubbles: true }));
+    expect(unload()).toBe(true);
+    name.value = original; name.dispatchEvent(new win.Event("input", { bubbles: true }));
+    expect(unload()).toBe(false);
+    name.value = "Renamed"; name.dispatchEvent(new win.Event("input", { bubbles: true }));
+    expect(unload()).toBe(true);
+    win.document.querySelector("#settings-form")!.dispatchEvent(new win.Event("submit", { bubbles: true, cancelable: true })); await flush();
+    expect(name.value).toBe("Renamed");
+    expect(unload()).toBe(false);
+  });
+  it("shows only the first five projects on the overview and links to the full list", async () => {
+    const projects = Array.from({ length: 7 }, (_, index) => ({ ...project, _id: `project-${index}`, name: `Project ${index}`, slug: `project-${index}` }));
+    const { win, navigate } = await setup(async path => path.includes("projects?") ? { projects } : response(path));
+    await navigate(""); await flush();
+    const rows = [...win.document.querySelectorAll<HTMLElement>("#overview-projects .overview-row")];
+    expect(rows.map(row => row.querySelector("strong")?.textContent)).toEqual(["Project 0", "Project 1", "Project 2", "Project 3", "Project 4"]);
+    expect(rows.map(row => row.getAttribute("href"))).toEqual(projects.slice(0, 5).map(item => `/organizations/org-a/projects/${item._id}`));
+    const all = [...win.document.querySelectorAll("a")].find(link => link.textContent === "All projects")!;
+    expect(all.getAttribute("href")).toBe("/organizations/org-a/projects");
+    expect(win.document.querySelector("#overview-projects")?.textContent).not.toContain("Project 5");
+  });
+  it.each([
+    ["owner", "No projects yet. Create the first project to connect your documentation."],
+    ["admin", "No projects yet. Create the first project to connect your documentation."],
+    ["member", "No projects yet. An owner or admin can create the first project."],
+  ])("overview with no projects gives a %s this guidance: %s", async (role, advice) => {
+    const member = { ...access.member, role };
+    const { win, navigate } = await setup(async path => path.includes("get-full-organization") ? { ...access, member, members: [member], teams: [] }
+      : path.includes("management/access") ? { ...access, member } : path.includes("projects?") ? { projects: [] } : response(path));
+    await navigate(""); await flush();
+    expect(win.document.querySelector("#overview-projects .mini-empty")?.textContent).toBe(advice);
+    expect(win.document.querySelectorAll("#overview-projects .overview-row")).toHaveLength(0);
+  });
+  it("lists projects behind a loading skeleton that gives way to the owner's empty guidance", async () => {
+    const gate = deferred<unknown>();
+    const { win, navigate } = await setup(async path => path.includes("management/access") ? gate.promise : path.includes("projects?") ? { projects: [] } : response(path));
+    await navigate("/projects"); await flush();
+    expect(win.document.querySelector(".loading-view,.skeleton-table-row")).not.toBeNull();
+    expect(win.document.querySelector("#project-list")).toBeNull();
+    gate.resolve(access); await flush();
+    expect(win.document.querySelector(".loading-view,.skeleton-table-row")).toBeNull();
+    const empty = win.document.querySelector(".empty")!;
+    expect(empty.querySelector("h2")?.textContent).toBe("No projects yet");
+    expect(empty.querySelector("p")?.textContent).toBe("Create the first documentation product for this organization.");
+    expect(empty.querySelector("button")?.textContent).toBe("Create project");
+  });
+  it("tells a member an owner or admin must create the first project, without a create action", async () => {
+    const member = { ...access.member, role: "member" };
+    const { win, navigate } = await setup(async path => path.includes("get-full-organization") ? { ...access, member, members: [member], teams: [] }
+      : path.includes("management/access") ? { ...access, member } : path.includes("projects?") ? { projects: [] } : response(path));
+    await navigate("/projects"); await flush();
+    expect(win.document.querySelector(".empty p")?.textContent).toBe("An owner or admin can create the first documentation product.");
+    expect(win.document.querySelector(".empty button")).toBeNull();
+  });
+  it("shows a project list failure with its message and recovers through Try again", async () => {
+    let failing = true;
+    const { win, navigate } = await setup(async path => {
+      if (path.includes("projects?") && failing) throw new Error("Projects unavailable");
+      return response(path);
+    });
+    await navigate("/projects"); await flush();
+    expect(win.document.querySelector(".empty h2")?.textContent).toBe("Unable to load projects");
+    expect(win.document.querySelector(".empty p")?.textContent).toBe("Projects unavailable");
+    failing = false;
+    win.document.querySelector<HTMLButtonElement>(".empty button")!.click(); await flush();
+    expect(win.document.querySelector(".empty")).toBeNull();
+    expect(win.document.querySelector("#project-list")?.textContent).toContain(project.name);
+  });
 });

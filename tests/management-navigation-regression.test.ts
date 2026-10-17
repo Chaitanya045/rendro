@@ -270,6 +270,7 @@ function navigationRuntime(initialPath = "/organizations/org-a/people", entry: {
       [...mutationCallbacks].forEach((callback) => callback());
     },
     resolveFetch,
+    observers: () => mutationCallbacks.size,
     setLocation,
     themeMount,
     ui: ui as typeof ui & RuntimeUi,
@@ -445,6 +446,67 @@ describe("management navigation regressions", () => {
     await flushNavigation();
     expect(runtime.main.current).toBe(pendingForward);
     expect(runtime.appendedScripts.at(-1)?.textContent).toBe("page:teams-forward");
+  });
+
+  it("pushes a new entry for a new route or query, replaces for the current route, and leaves same-page fragments to the browser", async () => {
+    const runtime = navigationRuntime();
+    const origin = new URL(runtime.initialUrl).origin;
+    const teams = `${origin}/organizations/org-a/teams`;
+
+    // A new route records the departing scroll on the old entry, then pushes a fresh one.
+    const toTeams = runtime.ui.navigate(teams);
+    runtime.resolveFetch(0, { label: "teams" }, teams);
+    await toTeams;
+    expect(runtime.history.replaceState.mock.calls[0]).toEqual([{ __rendroManagementIndex: 0, __rendroScrollY: 164 }, "", runtime.initialUrl]);
+    expect(runtime.history.pushState).toHaveBeenCalledExactlyOnceWith({ __rendroManagementIndex: 1, __rendroScrollY: 0 }, "", teams);
+
+    // Repeating the current route replaces its entry; the history length does not grow.
+    runtime.history.pushState.mockClear(); runtime.history.replaceState.mockClear();
+    const again = runtime.ui.navigate(teams);
+    runtime.resolveFetch(1, { label: "teams-again" }, teams);
+    await again;
+    expect(runtime.history.pushState).not.toHaveBeenCalled();
+    expect(runtime.history.replaceState).toHaveBeenCalledWith({ __rendroManagementIndex: 1, __rendroScrollY: 0 }, "", teams);
+
+    // A different query on the same path is a different entry.
+    const filtered = `${teams}?view=all`;
+    const toQuery = runtime.ui.navigate(filtered);
+    runtime.resolveFetch(2, { label: "teams-query" }, filtered);
+    await toQuery;
+    expect(runtime.history.pushState).toHaveBeenCalledExactlyOnceWith({ __rendroManagementIndex: 2, __rendroScrollY: 0 }, "", filtered);
+
+    // A same-page fragment is the browser's own navigation: no fetch, no router history write.
+    runtime.history.pushState.mockClear();
+    const fetches = runtime.fetchMock.mock.calls.length;
+    await expect(runtime.ui.navigate(`${filtered}#section`)).resolves.toBe(true);
+    expect(runtime.assignLocation).toHaveBeenCalledExactlyOnceWith(`${filtered}#section`);
+    expect(runtime.fetchMock.mock.calls).toHaveLength(fetches);
+    expect(runtime.history.pushState).not.toHaveBeenCalled();
+  });
+
+  it("keeps at most one loading observer, and releases it when the page settles, is superseded or signs out", async () => {
+    const runtime = navigationRuntime();
+    const origin = new URL(runtime.initialUrl).origin;
+    const teams = `${origin}/organizations/org-a/teams`, settings = `${origin}/organizations/org-a/settings`;
+    expect(runtime.observers()).toBe(0);
+
+    // The skeleton is watched until real content replaces it.
+    const toTeams = runtime.ui.navigate(teams);
+    expect(runtime.observers()).toBe(1);
+    // A newer navigation supersedes it: the old observer is disconnected before the new one starts.
+    const toSettings = runtime.ui.navigate(settings);
+    expect(runtime.observers()).toBe(1);
+    runtime.resolveFetch(0, { label: "stale" }, teams);
+    runtime.resolveFetch(1, { label: "settings" }, settings);
+    await Promise.all([toTeams, toSettings]);
+    runtime.finishRendering();
+    expect(runtime.observers()).toBe(0);
+
+    // Signing out while a destination is still loading releases it too.
+    void runtime.ui.navigate(teams);
+    expect(runtime.observers()).toBe(1);
+    runtime.listeners.get("commentor-sign-out")!({});
+    expect(runtime.observers()).toBe(0);
   });
 
   it("preserves a requested fragment and reuses the existing shell/theme mount", async () => {

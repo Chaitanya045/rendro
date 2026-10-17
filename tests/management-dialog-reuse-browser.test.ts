@@ -65,6 +65,7 @@ beforeAll(async () => {
   app.get('/api/rendro/deployments', c => c.json({ deployments: [] }));
   app.get('/api/rendro/credentials', c => c.json({ credentials: [] }));
   app.get('/api/rendro/publications', c => c.json({ publications: [] }));
+  app.get('/api/rendro/shares', c => c.json({ shares: [] }));
   app.get('/api/rendro/management/recent-deployment', c => c.json({ deployment: null }));
   app.get(`${projectBase}/docs/tree`, c => c.json({ entries: [] }));
   app.get(`${projectBase}/docs`, c => c.html(renderScopedDocumentShell({
@@ -750,4 +751,294 @@ it('lists an expired invitation as Expired, keeps it revocable and does not coun
   invitations.splice(0, invitations.length, live);
   await overview.goto(harness.origin + base);
   await expect.poll(async () => checklist(overview).getAttribute('class')).toContain('complete');
+});
+
+it('API key project scope defaults to the first project, can be All projects, and is All projects when there are none', async () => {
+  const create = async (page: Page, name: string, choose?: string) => {
+    const requests = await writes(page, '/api/rendro/credentials');
+    await page.locator('#api-key-create').click();
+    const scope = page.locator('#key-form [name=projectId]');
+    const initial = await scope.inputValue();
+    await page.locator('#key-form [name=name]').fill(name);
+    if (choose !== undefined) await scope.selectOption(choose);
+    await page.locator('#key-form button[type=submit]').click();
+    await requests.settle({ rawKey: `synthetic-${name}` });
+    await finishSecret(page);
+    return { initial, body: requests.bodies[0] };
+  };
+  const page = await open(`${base}/api-keys`);
+  expect(await page.locator('#key-form [name=projectId] option').allTextContents()).toEqual(['All projects', 'Docs']);
+  const first = await create(page, 'default');
+  expect(first.initial).toBe('project-a');
+  expect(first.body.projectId).toBe('project-a');
+  // The reopened form is back at the default, and All projects sends no project binding.
+  const second = await create(page, 'everything', '');
+  expect(second.initial).toBe('project-a');
+  expect('projectId' in second.body).toBe(false);
+
+  const empty = await harness.newPage();
+  await empty.route(url => url.pathname === '/api/rendro/projects', route => route.fulfill({ json: { projects: [] } }));
+  await empty.goto(harness.origin + `${base}/api-keys`);
+  await empty.locator('#key-list').waitFor();
+  expect(await empty.locator('#key-form [name=projectId] option').allTextContents()).toEqual(['All projects']);
+  const none = await create(empty, 'unbound');
+  expect(none.initial).toBe('');
+  expect('projectId' in none.body).toBe(false);
+});
+
+it('an unconfirmed one-time key cannot be dismissed by Escape, backdrop, route navigation or unload until it is confirmed', async () => {
+  const page = await open(`${base}/api-keys`);
+  const requests = await writes(page, '/api/rendro/credentials');
+  await page.locator('#api-key-create').click();
+  await page.locator('#key-form [name=name]').fill('CI');
+  await page.locator('#key-form button[type=submit]').click();
+  await requests.settle({ rawKey: 'synthetic-held-key' });
+  await page.locator('#secret-dialog[open]').waitFor();
+  const stillRevealed = async () => {
+    expect(await page.locator('#secret-dialog').getAttribute('open')).not.toBeNull();
+    expect(await page.locator('#raw-key').textContent()).toBe('synthetic-held-key');
+  };
+  await page.keyboard.press('Escape');
+  await stillRevealed();
+  await page.mouse.click(2, 2);
+  await stillRevealed();
+  expect(await page.evaluate((path: string) => (window as unknown as { RendroUI: { navigate(href: string): Promise<boolean> } }).RendroUI.navigate(path), `${base}/people`)).toBe(false);
+  expect(new URL(page.url()).pathname).toBe(`${base}/api-keys`);
+  expect(await page.evaluate(() => !window.dispatchEvent(new Event('beforeunload', { cancelable: true })))).toBe(true);
+  await stillRevealed();
+  await page.locator('#secret-confirmed').check();
+  await page.locator('#secret-done').click();
+  await expect.poll(() => page.locator('#raw-key').textContent()).toBe('');
+  expect(await page.evaluate(() => !window.dispatchEvent(new Event('beforeunload', { cancelable: true })))).toBe(false);
+});
+
+const phone = { width: 375, height: 812 };
+const sectionState = (page: Page) => page.evaluate(() => {
+  const select = document.querySelector<HTMLSelectElement>('.project-section-picker select')!;
+  return {
+    path: location.pathname,
+    picker: new URL(select.value).pathname,
+    tab: document.querySelector('.project-tabs [aria-current=page]')?.textContent,
+    active: document.querySelectorAll('.project-tabs .active').length,
+  };
+});
+const sections = [['Overview', projectBase], ['Deployments', `${projectBase}/deployments`], ['Publications', `${projectBase}/publications`], ['Private shares', `${projectBase}/shares`]] as const;
+
+it('project tabs and the section picker agree after every tab click, Back/Forward and deep link', async () => {
+  const page = await open(projectBase);
+  await page.locator('.project-tabs a[aria-current=page]').waitFor();
+  const expected = (index: number) => ({ path: sections[index][1], picker: sections[index][1], tab: sections[index][0], active: 1 });
+  expect(await sectionState(page)).toEqual(expected(0));
+  // Desktop tabs drive the (hidden) picker.
+  for (const index of [1, 2, 3, 0]) {
+    await page.locator('.project-tabs').getByRole('link', { name: sections[index][0], exact: true }).click();
+    await page.waitForURL(harness.origin + sections[index][1]);
+    await page.locator('.cp-content[aria-busy=true]').waitFor({ state: 'detached' });
+    expect(await sectionState(page)).toEqual(expected(index));
+  }
+  for (const index of [2, 1, 3]) {
+    await page.locator('.project-tabs').getByRole('link', { name: sections[index][0], exact: true }).click();
+    await page.waitForURL(harness.origin + sections[index][1]);
+    await page.locator('.cp-content[aria-busy=true]').waitFor({ state: 'detached' });
+    expect(await sectionState(page)).toEqual(expected(index));
+  }
+  // History restores both controls together.
+  for (const index of [1, 2]) {
+    await page.goBack();
+    await page.waitForURL(harness.origin + sections[index][1]);
+    await page.locator('.cp-content[aria-busy=true]').waitFor({ state: 'detached' });
+    expect(await sectionState(page)).toEqual(expected(index));
+  }
+  await page.goForward();
+  await page.waitForURL(harness.origin + sections[1][1]);
+  await page.locator('.cp-content[aria-busy=true]').waitFor({ state: 'detached' });
+  expect(await sectionState(page)).toEqual(expected(1));
+  // A deep link starts aligned.
+  await page.goto(harness.origin + sections[2][1]);
+  await page.locator('.project-section-picker select').waitFor({ state: 'attached' });
+  expect(await sectionState(page)).toEqual(expected(2));
+});
+
+it('on a phone the section picker is a labelled shared select that replaces the tabs and navigates like them', async () => {
+  const page = await harness.newPage({ viewport: phone });
+  await page.route(url => url.hostname === 'cdn.tailwindcss.com', route => route.fulfill({ body: '' }));
+  await page.goto(harness.origin + `${projectBase}/publications`);
+  const trigger = page.getByRole('combobox', { name: 'Project section' });
+  await trigger.waitFor();
+  expect(await page.locator('.project-tabs').isVisible()).toBe(false);
+  expect(await page.locator('.project-section-picker select').evaluate(select => select.classList.contains('rd-select-native') || (select as HTMLSelectElement).hidden || getComputedStyle(select).position === 'absolute')).toBe(true);
+  expect(await trigger.textContent()).toContain('Publications');
+  await trigger.click();
+  const options = page.getByRole('option');
+  expect(await options.allTextContents()).toEqual(['Overview', 'Deployments', 'Publications', 'Private shares']);
+  expect(await page.getByRole('option', { selected: true }).textContent()).toBe('Publications');
+  await page.getByRole('option', { name: 'Deployments' }).click();
+  await page.waitForURL(harness.origin + `${projectBase}/deployments`);
+  await page.locator('.cp-content[aria-busy=true]').waitFor({ state: 'detached' });
+  expect(await trigger.textContent()).toContain('Deployments');
+  expect(await sectionState(page)).toEqual({ path: `${projectBase}/deployments`, picker: `${projectBase}/deployments`, tab: 'Deployments', active: 1 });
+  // Back restores the picker's label as well as the page.
+  await page.goBack();
+  await page.waitForURL(harness.origin + `${projectBase}/publications`);
+  await page.locator('.cp-content[aria-busy=true]').waitFor({ state: 'detached' });
+  expect(await trigger.textContent()).toContain('Publications');
+  expect(await sectionState(page)).toEqual({ path: `${projectBase}/publications`, picker: `${projectBase}/publications`, tab: 'Publications', active: 1 });
+  await page.goForward();
+  await page.waitForURL(harness.origin + `${projectBase}/deployments`);
+  await page.locator('.cp-content[aria-busy=true]').waitFor({ state: 'detached' });
+  expect(await trigger.textContent()).toContain('Deployments');
+});
+
+it('a picker choice is refused by the same departure guards as a tab click', async () => {
+  const page = await open(`${projectBase}/publications`);
+  await page.locator('#publication-create').click();
+  await page.locator('#publication-dialog[open]').waitFor();
+  const blocked = await page.evaluate(() => {
+    const select = document.querySelector<HTMLSelectElement>('.project-section-picker select')!;
+    select.value = Array.from(select.options).find(option => option.textContent === 'Deployments')!.value;
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+    return new Promise<string>(resolve => setTimeout(() => resolve(location.pathname), 100));
+  });
+  expect(blocked).toBe(`${projectBase}/publications`);
+  expect(await page.locator('#publication-dialog').getAttribute('open')).not.toBeNull();
+  // The refused choice does not leave the picker showing a section that is not on screen.
+  expect(await sectionState(page)).toEqual({ path: `${projectBase}/publications`, picker: `${projectBase}/publications`, tab: 'Publications', active: 1 });
+});
+
+const onboarding = `${base}/onboarding?projectId=project-a`;
+
+it('onboarding shows the handed-off organization label until the authoritative name arrives', async () => {
+  const page = await harness.newPage();
+  await page.addInitScript(() => sessionStorage.setItem('rendro-org-navigation-label', JSON.stringify({ userId: 'user-a', organizationId: 'org-a', name: 'Handed-off name', createdAt: Date.now() })));
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  await page.route(url => url.pathname === '/api/rendro/management/access', async route => { await gate; await route.continue(); });
+  await page.goto(harness.origin + onboarding, { waitUntil: 'domcontentloaded' });
+  const label = page.locator('.cp-topbar [data-org-name]').first();
+  await expect.poll(() => label.textContent()).toBe('Handed-off name');
+  expect(await page.locator('#key-form').count()).toBe(0);
+  release();
+  await expect.poll(() => label.textContent()).toBe('Acme');
+  await page.locator('#key-form').waitFor();
+});
+
+/** Onboarding with a fake clock: the key is generated, the first poll is empty, and later polls are held. */
+async function onboardingWithKey(deployments: unknown[] = []) {
+  const page = await harness.newPage();
+  await page.clock.install();
+  const polls: Array<{ release(body: unknown): Promise<void> }> = [];
+  let requestCount = 0;
+  await page.route(url => url.pathname === '/api/rendro/deployments', async route => {
+    requestCount++;
+    if (requestCount === 1) return route.fulfill({ json: { deployments: [] } });
+    await new Promise<void>(resolve => polls.push({ release: async body => { await route.fulfill({ json: body }); resolve(); } }));
+  });
+  const credential = await writes(page, '/api/rendro/credentials');
+  await page.goto(harness.origin + onboarding);
+  await page.locator('#key-form button[type=submit]').click();
+  await credential.settle({ rawKey: 'synthetic-onboarding-secret' });
+  await page.locator('#onboarding-key').waitFor();
+  await expect.poll(() => requestCount).toBe(1);
+  const unloadBlocked = () => page.evaluate(() => !window.dispatchEvent(new Event('beforeunload', { cancelable: true })));
+  return { page, polls, requests: () => requestCount, unloadBlocked, deployments };
+}
+
+it('leaving onboarding is refused while the one-time key is unconfirmed, and disposal scrubs the key, stops polling and releases the guard', async () => {
+  const { page, polls, requests, unloadBlocked } = await onboardingWithKey();
+  expect(await page.locator('#onboarding-key').textContent()).toBe('synthetic-onboarding-secret');
+  expect(await page.locator('#onboarding-command').textContent()).toContain('synthetic-onboarding-secret');
+  expect(await unloadBlocked()).toBe(true);
+
+  // The next poll is armed on the 5 second timer and is now in flight.
+  await page.clock.runFor(5000);
+  await expect.poll(() => polls.length).toBe(1);
+  expect(requests()).toBe(2);
+
+  await page.evaluate(() => window.dispatchEvent(new Event('commentor-sign-out')));
+  expect(await page.locator('#onboarding-key, #onboarding-command').count()).toBe(0);
+  expect(await page.locator('body').innerText()).not.toContain('synthetic-onboarding-secret');
+  expect(await page.locator('#deployment-connect').evaluate(node => node.children.length)).toBe(0);
+  expect(await unloadBlocked()).toBe(false);
+
+  // A response that arrives after disposal changes nothing and arms no new timer.
+  await polls[0].release({ deployments: [{ _id: 'deployment-a', status: 'active', fileCount: 3, provenance: { source: { commit: 'abcdef1234' } } }] });
+  await page.clock.runFor(30_000);
+  expect(await page.locator('#deployment-success').count()).toBe(0);
+  expect(await page.getByRole('link', { name: 'Open documentation' }).count()).toBe(0);
+  expect(await page.locator('body').innerText()).not.toContain('First deployment received');
+  expect(requests()).toBe(2);
+});
+
+it('a failing poll after disposal cannot report an interruption either', async () => {
+  const { page, polls, requests } = await onboardingWithKey();
+  await page.clock.runFor(5000);
+  await expect.poll(() => polls.length).toBe(1);
+  await page.evaluate(() => window.dispatchEvent(new Event('commentor-sign-out')));
+  await polls[0].release({ message: 'Unavailable' });
+  await page.clock.runFor(30_000);
+  expect(await page.locator('.progress-state, .poll-error').count()).toBe(0);
+  expect(await page.locator('body').innerText()).not.toContain('Connection interrupted');
+  expect(requests()).toBe(2);
+});
+
+it('a received first deployment replaces the waiting state with the document count and Open documentation', async () => {
+  const { page, polls, requests, unloadBlocked } = await onboardingWithKey();
+  await page.clock.runFor(5000);
+  await expect.poll(() => polls.length).toBe(1);
+  await polls[0].release({ deployments: [{ _id: 'deployment-a', status: 'active', fileCount: 3 }] });
+  const success = page.locator('#deployment-success');
+  await expect.poll(() => success.innerText()).toContain('First deployment received');
+  expect(await success.locator('.cell-secondary').textContent()).toBe('3 documents');
+  expect(await success.getByRole('link', { name: 'Open documentation' }).getAttribute('href')).toBe(`${projectBase}/docs`);
+  expect(await page.locator('.progress-state').count()).toBe(0);
+  // Polling stops once the deployment is seen.
+  await page.clock.runFor(30_000);
+  expect(requests()).toBe(2);
+  expect(await unloadBlocked()).toBe(true);
+});
+
+it.fails('the received deployment shows its commit (known bug: the poll reads provenance.commit, but the API nests it under provenance.source)', async () => {
+  const { page, polls } = await onboardingWithKey();
+  await page.clock.runFor(5000);
+  await expect.poll(() => polls.length).toBe(1);
+  await polls[0].release({ deployments: [{ _id: 'deployment-a', status: 'active', fileCount: 3, provenance: { source: { commit: 'abcdef1234' } } }] });
+  await page.locator('#deployment-success .cell-secondary').waitFor();
+  expect(await page.locator('#deployment-success .cell-secondary').textContent()).toBe('3 documents · commit abcdef1234');
+});
+
+it('publication Copy URL shows its pending state, then Copied, then restores; a refusal restores at once with guidance', async () => {
+  const page = await harness.newPage();
+  await page.clock.install();
+  await page.addInitScript(() => {
+    const state = { writes: [] as string[], settle: null as null | ((ok: boolean) => void) };
+    (window as unknown as { copyState: typeof state }).copyState = state;
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: {
+      writeText: (value: string) => new Promise<void>((resolve, reject) => { state.settle = ok => { if (ok) { state.writes.push(value); resolve(); } else reject(new DOMException('denied', 'NotAllowedError')); }; }),
+    } });
+  });
+  await page.route(url => url.pathname === '/api/rendro/publications', route => route.request().method() === 'GET'
+    ? route.fulfill({ json: { publications: [{ _id: 'publication-a', slug: 'docs', title: 'Documentation', trackingMode: 'tracked' }] } }) : route.continue());
+  await page.goto(harness.origin + `${projectBase}/publications`);
+  const button = page.locator('#publication-list .row-actions button').first();
+  await expect.poll(() => button.textContent()).toBe('Copy URL');
+  // From here the page clock only moves when the test advances it, so the 1.5 second window is exact.
+  await page.clock.pauseAt(new Date(Date.now() + 1000));
+  const settle = (ok: boolean) => page.evaluate(ok => (window as unknown as { copyState: { settle(ok: boolean): void } }).copyState.settle(ok), ok);
+  await button.click();
+  await expect.poll(() => button.getAttribute('aria-busy')).toBe('true');
+  await settle(true);
+  await expect.poll(() => button.textContent()).toBe('Copied');
+  expect(await button.getAttribute('aria-busy')).toBe('false');
+  expect(await page.evaluate(() => (window as unknown as { copyState: { writes: string[] } }).copyState.writes)).toEqual([`${harness.origin}/p/docs`]);
+  await page.clock.runFor(1499);
+  expect(await button.textContent()).toBe('Copied');
+  await page.clock.runFor(1);
+  expect(await button.textContent()).toBe('Copy URL');
+
+  await button.click();
+  await expect.poll(() => button.getAttribute('aria-busy')).toBe('true');
+  await settle(false);
+  await expect.poll(() => page.locator('#cp-toasts .toast.error').textContent()).toBe('Unable to copy. Select the URL and copy it manually.');
+  expect(await button.textContent()).toBe('Copy URL');
+  expect(await button.getAttribute('aria-busy')).toBe('false');
 });

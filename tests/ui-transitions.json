@@ -1758,8 +1758,24 @@
           "inventoryRefs": [
             "M05"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "unit",
+          "tests": [
+            {
+              "file": "tests/management-navigation-regression.test.ts",
+              "name": "pushes a new entry for a new route or query, replaces for the current route, and leaves same-page fragments to the browser",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/management-navigation-regression.test.ts",
+              "name": "restores the saved offset once the restored page has rendered",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/management-navigation-regression.test.ts",
+              "name": "preserves a requested fragment and reuses the existing shell/theme mount",
+              "kind": "unit"
+            }
+          ]
         },
         {
           "id": "UI-009-E03",
@@ -1825,8 +1841,19 @@
           "inventoryRefs": [
             "M05"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "unit",
+          "tests": [
+            {
+              "file": "tests/management-navigation-regression.test.ts",
+              "name": "does not prompt twice for an accepted cross-organization departure",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/management-navigation-regression.test.ts",
+              "name": "revokes unused unload approval when the user resumes editing after stopping navigation",
+              "kind": "unit"
+            }
+          ]
         },
         {
           "id": "UI-009-E07",
@@ -2153,8 +2180,29 @@
           "inventoryRefs": [
             "M07"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "unit",
+          "tests": [
+            {
+              "file": "tests/management-query-cache.test.ts",
+              "name": "does not cache %s",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/management-query-cache.test.ts",
+              "name": "publication writes invalidate only that project's publications",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/management-query-cache.test.ts",
+              "name": "project creation invalidates the list but preserves existing project details",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/management-performance.test.ts",
+              "name": "never mixes deployment history between projects",
+              "kind": "unit"
+            }
+          ]
         },
         {
           "id": "UI-012-E03",
@@ -2164,8 +2212,14 @@
           "inventoryRefs": [
             "M07"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "unit",
+          "tests": [
+            {
+              "file": "tests/management-query-cache.test.ts",
+              "name": "pins the 30 second freshness window and the 5 minute inactive lifetime",
+              "kind": "unit"
+            }
+          ]
         },
         {
           "id": "UI-012-E04",
@@ -2175,8 +2229,24 @@
           "inventoryRefs": [
             "M07"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "unit",
+          "tests": [
+            {
+              "file": "tests/management-query-cache.test.ts",
+              "name": "keys by identity, organization, endpoint and project, independent of parameter order",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/management-query-cache.test.ts",
+              "name": "does not cache %s",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/management-navigation.test.ts",
+              "name": "never paints a cold or cached read for a different signed-in account",
+              "kind": "unit"
+            }
+          ]
         },
         {
           "id": "UI-012-E05",
@@ -2186,8 +2256,14 @@
           "inventoryRefs": [
             "M07"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "unit",
+          "tests": [
+            {
+              "file": "tests/management-page-access.test.ts",
+              "name": "reuses the SSR lookup during $name controller startup, then refreshes live",
+              "kind": "unit"
+            }
+          ]
         },
         {
           "id": "UI-012-E06",
@@ -2197,8 +2273,24 @@
           "inventoryRefs": [
             "M07"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "unit",
+          "tests": [
+            {
+              "file": "tests/management-performance.test.ts",
+              "name": "starts access and data together but paints neither until access resolves",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/management-performance.test.ts",
+              "name": "does not release retained data after access is revoked",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/management-navigation.test.ts",
+              "name": "never returns a cached response after membership disappears",
+              "kind": "unit"
+            }
+          ]
         },
         {
           "id": "UI-012-E07",
@@ -2208,8 +2300,14 @@
           "inventoryRefs": [
             "M07"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "unit",
+          "tests": [
+            {
+              "file": "tests/management-navigation.test.ts",
+              "name": "a role or identity mismatch (%s) clears retained reads, rejects and reloads the page",
+              "kind": "unit"
+            }
+          ]
         },
         {
           "id": "UI-012-E08",
@@ -2219,8 +2317,24 @@
           "inventoryRefs": [
             "M07"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "tests/management-query-cache.test.ts",
+              "name": "does not cache %s",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/management-query-coverage-gaps.test.ts",
+              "name": "passes uncacheable requests straight to the transport without authorization",
+              "kind": "unit"
+            },
+            {
+              "file": "e2e/api-keys.spec.ts",
+              "name": "an owner creates a scoped key with a one-time secret, uses it, and revoking it stops the very next request",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-012-E09",
@@ -2337,8 +2451,19 @@
           "inventoryRefs": [
             "M06"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "unit",
+          "tests": [
+            {
+              "file": "tests/management-navigation.test.ts",
+              "name": "invalidates old scopes, guards stale helpers, and deduplicates only in-flight scoped GETs",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/management-query-cache.test.ts",
+              "name": "cancels disposed page reads and never retains a late transport response",
+              "kind": "unit"
+            }
+          ]
         },
         {
           "id": "UI-013-E03",
@@ -2348,8 +2473,19 @@
           "inventoryRefs": [
             "M06"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/management-navigation-regression.test.ts",
+              "name": "keeps at most one loading observer, and releases it when the page settles, is superseded or signs out",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/management-dialog-reuse-browser.test.ts",
+              "name": "leaving onboarding is refused while the one-time key is unconfirmed, and disposal scrubs the key, stops polling and releases the guard",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-013-E04",
@@ -2376,8 +2512,19 @@
           "inventoryRefs": [
             "M06"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "unit",
+          "tests": [
+            {
+              "file": "tests/management-navigation-regression.test.ts",
+              "name": "deduplicates an in-flight scoped GET but fetches it again after settlement",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/management-navigation.test.ts",
+              "name": "invalidates old scopes, guards stale helpers, and deduplicates only in-flight scoped GETs",
+              "kind": "unit"
+            }
+          ]
         },
         {
           "id": "UI-013-E06",
@@ -2387,8 +2534,14 @@
           "inventoryRefs": [
             "M06"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "unit",
+          "tests": [
+            {
+              "file": "tests/management-navigation.test.ts",
+              "name": "counts every concurrent write and only allows departure when the last one settles",
+              "kind": "unit"
+            }
+          ]
         },
         {
           "id": "UI-013-E07",
@@ -2398,8 +2551,19 @@
           "inventoryRefs": [
             "M06"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "unit",
+          "tests": [
+            {
+              "file": "tests/management-navigation.test.ts",
+              "name": "blocks leaving for another organization, refresh and unload while a write is pending or a dialog is open",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/management-navigation.test.ts",
+              "name": "blocks a route swap for pending mutations, open dialogs, and page-specific guards",
+              "kind": "unit"
+            }
+          ]
         },
         {
           "id": "UI-013-E08",
@@ -2426,8 +2590,24 @@
           "inventoryRefs": [
             "M06"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "tests/management-dialog-reuse-browser.test.ts",
+              "name": "onboarding credentials recover from denial and protect the one-time secret after each success",
+              "kind": "browser"
+            },
+            {
+              "file": "e2e/api-keys.spec.ts",
+              "name": "an owner creates a scoped key with a one-time secret, uses it, and revoking it stops the very next request",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/org-onboarding.spec.ts",
+              "name": "an owner goes from project to key to a real CLI deployment with polling, outage recovery and one-time secret handling",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-013-E10",
@@ -5579,7 +5759,7 @@
     },
     {
       "id": "UI-032",
-      "title": "Create organization failure→editable retry/cancel back to chooser",
+      "title": "Create organization failure→editable retry",
       "area": "Organization chooser/switcher",
       "routes": [
         "GET /organizations"
@@ -5606,7 +5786,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "untested",
+      "status": "e2e",
       "auditEvidence": "UNTESTED",
       "auditNote": "organization-pages.ts creationForm",
       "edges": [
@@ -5614,12 +5794,18 @@
           "id": "UI-032-E01",
           "from": "Organization creation request pending",
           "trigger": "Reject it, correct inputs, retry, or cancel",
-          "expected": "Create organization failure→editable retry/cancel back to chooser",
+          "expected": "Create organization failure→editable retry; the form has no Cancel control, so there is no cancel path back to the chooser",
           "inventoryRefs": [
             "UI-032"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/org-lifecycle.spec.ts",
+              "name": "a user without an organization creates the first one: slug derivation, validation, pending, conflict and retry",
+              "kind": "e2e"
+            }
+          ]
         }
       ]
     },
@@ -5983,8 +6169,24 @@
           "inventoryRefs": [
             "M13"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "unit",
+          "tests": [
+            {
+              "file": "tests/organization-switcher.test.ts",
+              "name": "keeps the menu below its trigger, inside the layout viewport, and follows resizes",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/organization-switcher.test.ts",
+              "name": "positions against the visual viewport when one is present",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/organization-switcher.test.ts",
+              "name": "opens in the top layer when the Popover API exists and falls back to a fixed menu when it does not",
+              "kind": "unit"
+            }
+          ]
         },
         {
           "id": "UI-035-E09",
@@ -6196,8 +6398,14 @@
           "inventoryRefs": [
             "M14"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "unit",
+          "tests": [
+            {
+              "file": "tests/organization-switcher.test.ts",
+              "name": "restores the original identity and control after a back/forward cache resume",
+              "kind": "unit"
+            }
+          ]
         },
         {
           "id": "UI-036-E08",
@@ -6498,8 +6706,24 @@
           "inventoryRefs": [
             "UI-039"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "tests/management-performance.test.ts",
+              "name": "shows only the first five projects on the overview and links to the full list",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/management-performance.test.ts",
+              "name": "overview with no projects gives a %s this guidance: %s",
+              "kind": "unit"
+            },
+            {
+              "file": "e2e/deployments.spec.ts",
+              "name": "the organization overview shows project release state and the recent deployment, which retries on its own",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-039-E02",
@@ -6526,8 +6750,14 @@
           "inventoryRefs": [
             "O08"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "unit",
+          "tests": [
+            {
+              "file": "tests/management-performance.test.ts",
+              "name": "shows only the first five projects on the overview and links to the full list",
+              "kind": "unit"
+            }
+          ]
         },
         {
           "id": "UI-039-E04",
@@ -6554,8 +6784,14 @@
           "inventoryRefs": [
             "O08"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "unit",
+          "tests": [
+            {
+              "file": "tests/management-performance.test.ts",
+              "name": "overview with no projects gives a %s this guidance: %s",
+              "kind": "unit"
+            }
+          ]
         },
         {
           "id": "UI-039-E06",
@@ -6706,8 +6942,14 @@
           "inventoryRefs": [
             "UI-041"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "unit",
+          "tests": [
+            {
+              "file": "tests/organization-browsing.test.ts",
+              "name": "renders a styled retry state for the %s page when its organization lookup (%s) returns %s, and keeps navigation working",
+              "kind": "unit"
+            }
+          ]
         },
         {
           "id": "UI-041-E02",
@@ -6717,8 +6959,14 @@
           "inventoryRefs": [
             "M09"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "unit",
+          "tests": [
+            {
+              "file": "tests/organization-switcher.test.ts",
+              "name": "does not present an aborted organization read as a failure, but does present a real one",
+              "kind": "unit"
+            }
+          ]
         },
         {
           "id": "UI-041-E03",
@@ -6728,8 +6976,24 @@
           "inventoryRefs": [
             "M09"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "unit",
+          "tests": [
+            {
+              "file": "tests/management-org-retry.test.ts",
+              "name": "honors Retry-After for %s, then recovers without surfacing the raw error",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/management-org-retry.test.ts",
+              "name": "stops after two automatic retries and returns a safe retryable message",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/management-org-retry.test.ts",
+              "name": "does not retry before a long %s Retry-After",
+              "kind": "unit"
+            }
+          ]
         },
         {
           "id": "UI-041-E04",
@@ -6739,8 +7003,19 @@
           "inventoryRefs": [
             "M09"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "unit",
+          "tests": [
+            {
+              "file": "tests/organization-browsing.test.ts",
+              "name": "renders a styled retry state for the %s page when its organization lookup (%s) returns %s, and keeps navigation working",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/management-org-retry.test.ts",
+              "name": "does not retry before a long %s Retry-After",
+              "kind": "unit"
+            }
+          ]
         },
         {
           "id": "UI-041-E05",
@@ -6750,8 +7025,14 @@
           "inventoryRefs": [
             "M09"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "unit",
+          "tests": [
+            {
+              "file": "tests/management-org-retry.test.ts",
+              "name": "cancels the backoff on navigation",
+              "kind": "unit"
+            }
+          ]
         },
         {
           "id": "UI-041-E06",
@@ -6761,8 +7042,14 @@
           "inventoryRefs": [
             "M09"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "unit",
+          "tests": [
+            {
+              "file": "tests/management-org-retry.test.ts",
+              "name": "never retries invitation or credential writes",
+              "kind": "unit"
+            }
+          ]
         },
         {
           "id": "UI-041-E07",
@@ -6772,8 +7059,24 @@
           "inventoryRefs": [
             "M09"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "unit",
+          "tests": [
+            {
+              "file": "tests/management-org-retry.test.ts",
+              "name": "stops after two automatic retries and returns a safe retryable message",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/organization-browsing.test.ts",
+              "name": "renders a styled retry state for the %s page when its organization lookup (%s) returns %s, and keeps navigation working",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/management-page-access.test.ts",
+              "name": "normalizes %s Retry-After without exposing upstream content",
+              "kind": "unit"
+            }
+          ]
         },
         {
           "id": "UI-041-E08",
@@ -7055,8 +7358,14 @@
           "inventoryRefs": [
             "O16"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "unit",
+          "tests": [
+            {
+              "file": "tests/management-performance.test.ts",
+              "name": "guards unload only while Settings has unsaved edits, and a save or a revert clears the guard",
+              "kind": "unit"
+            }
+          ]
         },
         {
           "id": "UI-043-E09",
@@ -7198,8 +7507,24 @@
           "inventoryRefs": [
             "UI-045"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "unit",
+          "tests": [
+            {
+              "file": "tests/management-performance.test.ts",
+              "name": "renders People members before the invitation request finishes",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/management-request-waterfall.test.ts",
+              "name": "loads members beyond the full-organization join's first 100 without duplicates",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/management-request-waterfall.test.ts",
+              "name": "fails visibly if roster pagination stops making progress",
+              "kind": "unit"
+            }
+          ]
         },
         {
           "id": "UI-045-E02",
@@ -7226,8 +7551,19 @@
           "inventoryRefs": [
             "O09"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "unit",
+          "tests": [
+            {
+              "file": "tests/management-request-waterfall.test.ts",
+              "name": "loads members beyond the full-organization join's first 100 without duplicates",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/management-request-waterfall.test.ts",
+              "name": "fails visibly if roster pagination stops making progress",
+              "kind": "unit"
+            }
+          ]
         },
         {
           "id": "UI-045-E04",
@@ -8194,7 +8530,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "untested",
+      "status": "e2e",
       "auditEvidence": "UNTESTED",
       "auditNote": "control-plane-ui.test.ts preserves invitation context; no invitation controller journey",
       "edges": [
@@ -8206,8 +8542,29 @@
           "inventoryRefs": [
             "UI-051"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "tests/management-page-access.test.ts",
+              "name": "re-verifies the backend invitation and denies %s with the generic 404",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/management-page-access.test.ts",
+              "name": "resolves invitations only for recipients and gives the same 404 for every unavailable ID",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/management-page-access.test.ts",
+              "name": "preserves retryable recovery for upstream %s after a real successful session lookup",
+              "kind": "unit"
+            },
+            {
+              "file": "e2e/org-invitations.spec.ts",
+              "name": "a wrong recipient, a revoked, an expired and an already used invitation are all unavailable and change nothing",
+              "kind": "e2e"
+            }
+          ]
         }
       ]
     },
@@ -8681,12 +9038,28 @@
           "id": "UI-055-E02",
           "from": "Teams page ready",
           "trigger": "Create/delete team or reopen form",
-          "expected": "empty/populated, privileged create versus member read-only",
+          "expected": "populated Teams grid: privileged create versus member read-only (Better Auth always provisions a default team, so the grid is never empty)",
           "inventoryRefs": [
             "O14"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/org-permissions.spec.ts",
+              "name": "owner: People, Teams and Settings expose exactly the controls of that role",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/org-permissions.spec.ts",
+              "name": "admin: People, Teams and Settings expose exactly the controls of that role",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/org-permissions.spec.ts",
+              "name": "member: People, Teams and Settings expose exactly the controls of that role",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-055-E03",
@@ -9289,7 +9662,7 @@
     },
     {
       "id": "UI-061",
-      "title": "Delete team cancel/confirm/success/error; last deletion→empty state",
+      "title": "Delete team cancel/confirm/success/error; last team keeps a disabled Remove",
       "area": "Teams",
       "routes": [
         "GET /organizations/:organizationId/teams"
@@ -9315,7 +9688,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "untested",
+      "status": "e2e",
       "auditEvidence": "UNTESTED",
       "auditNote": "organization-pages.ts remove-team and watchCollectionEmpties",
       "edges": [
@@ -9323,12 +9696,33 @@
           "id": "UI-061-E01",
           "from": "Team row present",
           "trigger": "Cancel/confirm deletion and resolve/reject; delete the final row",
-          "expected": "Delete team cancel/confirm/success/error; last deletion→empty state",
+          "expected": "Delete team cancel/confirm/success/error; the last remaining team keeps a disabled Remove with an explanation instead of an empty state",
           "inventoryRefs": [
             "UI-061"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/org-teams.spec.ts",
+              "name": "a team is created, staffed, inspected and removed; membership never changes organization access",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/org-teams.spec.ts",
+              "name": "the only remaining team cannot be removed; the control explains why and follows the team count",
+              "kind": "e2e"
+            },
+            {
+              "file": "tests/management-dialog-reuse-browser.test.ts",
+              "name": "the last team cannot be removed and the rule follows removals of other teams",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/management-dialog-reuse-browser.test.ts",
+              "name": "a lone team shows a disabled Remove team with an explanation instead of an empty state",
+              "kind": "browser"
+            }
+          ]
         }
       ]
     },
@@ -9570,8 +9964,24 @@
           "inventoryRefs": [
             "P01"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "unit",
+          "tests": [
+            {
+              "file": "tests/management-performance.test.ts",
+              "name": "lists projects behind a loading skeleton that gives way to the owner's empty guidance",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/management-performance.test.ts",
+              "name": "tells a member an owner or admin must create the first project, without a create action",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/management-performance.test.ts",
+              "name": "shows a project list failure with its message and recovers through Try again",
+              "kind": "unit"
+            }
+          ]
         },
         {
           "id": "UI-064-E03",
@@ -9744,8 +10154,19 @@
           "inventoryRefs": [
             "UI-065"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/management-dialog-reuse-browser.test.ts",
+              "name": "project tabs and the section picker agree after every tab click, Back/Forward and deep link",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/management-dialog-reuse-browser.test.ts",
+              "name": "on a phone the section picker is a labelled shared select that replaces the tabs and navigates like them",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-065-E02",
@@ -9777,8 +10198,14 @@
           "inventoryRefs": [
             "M11"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/management-dialog-reuse-browser.test.ts",
+              "name": "on a phone the section picker is a labelled shared select that replaces the tabs and navigates like them",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-065-E04",
@@ -9788,8 +10215,14 @@
           "inventoryRefs": [
             "M11"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/management-dialog-reuse-browser.test.ts",
+              "name": "a picker choice is refused by the same departure guards as a tab click",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-065-E05",
@@ -9799,8 +10232,19 @@
           "inventoryRefs": [
             "M11"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/management-dialog-reuse-browser.test.ts",
+              "name": "project tabs and the section picker agree after every tab click, Back/Forward and deep link",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/management-dialog-reuse-browser.test.ts",
+              "name": "on a phone the section picker is a labelled shared select that replaces the tabs and navigates like them",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-065-E06",
@@ -9810,8 +10254,14 @@
           "inventoryRefs": [
             "M11"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "unit",
+          "tests": [
+            {
+              "file": "tests/project-section-navigation.test.ts",
+              "name": "serves the project sections as plain links with one current tab and no script-created picker at %s",
+              "kind": "unit"
+            }
+          ]
         },
         {
           "id": "UI-065-E07",
@@ -9874,8 +10324,34 @@
           "inventoryRefs": [
             "UI-066"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "tests/management-performance.test.ts",
+              "name": "shows actual deployment records and renders untrusted source and failure labels as text",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/management-performance.test.ts",
+              "name": "retains one route-specific skeleton and its selected tab until project access resolves",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/management-performance.test.ts",
+              "name": "retries a failed history read without refetching project details",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/management-performance.test.ts",
+              "name": "renders deployment navigation and CLI instructions before history and ignores late history after navigation",
+              "kind": "unit"
+            },
+            {
+              "file": "e2e/deployments.spec.ts",
+              "name": "a failed history read shows an isolated retry and the page chrome stays usable",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-066-E02",
@@ -9885,8 +10361,19 @@
           "inventoryRefs": [
             "P04"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "tests/management-performance.test.ts",
+              "name": "renders deployment navigation and CLI instructions before history and ignores late history after navigation",
+              "kind": "unit"
+            },
+            {
+              "file": "e2e/deployments.spec.ts",
+              "name": "a failed history read shows an isolated retry and the page chrome stays usable",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-066-E03",
@@ -9930,19 +10417,24 @@
           "inventoryRefs": [
             "P04"
           ],
-          "status": "untested",
-          "tests": []
-        },
-        {
-          "id": "UI-066-E06",
-          "from": "Project history loading",
-          "trigger": "Resolve, fail, retry, or supersede history request",
-          "expected": "full-history pagination would be a separately declared improvement",
-          "inventoryRefs": [
-            "P04"
-          ],
-          "status": "untested",
-          "tests": []
+          "status": "unit",
+          "tests": [
+            {
+              "file": "tests/deployment-boundaries.test.ts",
+              "name": "lists at most the latest 100 deployments of a project, newest first",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/management-performance.test.ts",
+              "name": "retries a failed history read without refetching project details",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/management-performance.test.ts",
+              "name": "renders deployment navigation and CLI instructions before history and ignores late history after navigation",
+              "kind": "unit"
+            }
+          ]
         },
         {
           "id": "UI-066-E07",
@@ -10022,8 +10514,19 @@
           "inventoryRefs": [
             "UI-067"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "unit",
+          "tests": [
+            {
+              "file": "tests/management-performance.test.ts",
+              "name": "never mixes deployment history between projects",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/management-performance.test.ts",
+              "name": "does not display cached deployment history when membership is revoked",
+              "kind": "unit"
+            }
+          ]
         },
         {
           "id": "UI-067-E02",
@@ -10085,8 +10588,24 @@
           "inventoryRefs": [
             "UI-068"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/deployments.spec.ts",
+              "name": "history moves from empty through staging, a failed attempt, a CLI push and a superseded release",
+              "kind": "e2e"
+            },
+            {
+              "file": "tests/management-ui-polish.test.ts",
+              "name": "offers Open documentation only when the project has an active deployment",
+              "kind": "unit"
+            },
+            {
+              "file": "e2e/shell-controls.spec.ts",
+              "name": "copy shows busy, Copied and then restores; repeats reset the timer and rejection recovers with guidance",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-068-E02",
@@ -10113,8 +10632,19 @@
           "inventoryRefs": [
             "P02"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "tests/management-ui-polish.test.ts",
+              "name": "shows the project and active-deployment IDs in full, truncates them visually, and copies each one or reports a refusal",
+              "kind": "unit"
+            },
+            {
+              "file": "e2e/shell-controls.spec.ts",
+              "name": "copy shows busy, Copied and then restores; repeats reset the timer and rejection recovers with guidance",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-068-E04",
@@ -10209,8 +10739,19 @@
           "inventoryRefs": [
             "P03"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/shell-controls.spec.ts",
+              "name": "copy shows busy, Copied and then restores; repeats reset the timer and rejection recovers with guidance",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/deployments.spec.ts",
+              "name": "history moves from empty through staging, a failed attempt, a CLI push and a superseded release",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-068-E10",
@@ -10419,8 +10960,14 @@
           "inventoryRefs": [
             "O03"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/management-dialog-reuse-browser.test.ts",
+              "name": "onboarding shows the handed-off organization label until the authoritative name arrives",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-070-E06",
@@ -10701,12 +11248,28 @@
           "id": "UI-072-E03",
           "from": "First-credential form ready",
           "trigger": "Choose scopes/expiry and generate key",
-          "expected": "four scope labels, docs read/write recommended",
+          "expected": "first-credential form offers the two recommended scope labels (Read deployments, Push documentation), both pre-checked; the four-scope list belongs to the API-keys dialog",
           "inventoryRefs": [
             "O05"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/api-keys.spec.ts",
+              "name": "an owner creates a scoped key with a one-time secret, uses it, and revoking it stops the very next request",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/org-onboarding.spec.ts",
+              "name": "an owner goes from project to key to a real CLI deployment with polling, outage recovery and one-time secret handling",
+              "kind": "e2e"
+            },
+            {
+              "file": "tests/management-ui-polish.test.ts",
+              "name": "groups permission checkboxes in a fieldset with the shared labels on both screens",
+              "kind": "unit"
+            }
+          ]
         },
         {
           "id": "UI-072-E04",
@@ -10840,8 +11403,14 @@
           "inventoryRefs": [
             "UI-073"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/management-dialog-reuse-browser.test.ts",
+              "name": "leaving onboarding is refused while the one-time key is unconfirmed, and disposal scrubs the key, stops polling and releases the guard",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-073-E02",
@@ -10885,8 +11454,19 @@
           "inventoryRefs": [
             "O06"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/org-onboarding.spec.ts",
+              "name": "an owner goes from project to key to a real CLI deployment with polling, outage recovery and one-time secret handling",
+              "kind": "e2e"
+            },
+            {
+              "file": "tests/management-dialog-reuse-browser.test.ts",
+              "name": "onboarding credentials recover from denial and protect the one-time secret after each success",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-073-E05",
@@ -10896,8 +11476,14 @@
           "inventoryRefs": [
             "O06"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/management-dialog-reuse-browser.test.ts",
+              "name": "leaving onboarding is refused while the one-time key is unconfirmed, and disposal scrubs the key, stops polling and releases the guard",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-073-E06",
@@ -10907,8 +11493,19 @@
           "inventoryRefs": [
             "O06"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/management-query-cache.test.ts",
+              "name": "never retains a one-time credential: the write and any seeded copy bypass the cache and leave nothing in diagnostics",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/management-dialog-reuse-browser.test.ts",
+              "name": "leaving onboarding is refused while the one-time key is unconfirmed, and disposal scrubs the key, stops polling and releases the guard",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-073-E07",
@@ -11048,8 +11645,14 @@
           "inventoryRefs": [
             "O07"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/management-dialog-reuse-browser.test.ts",
+              "name": "leaving onboarding is refused while the one-time key is unconfirmed, and disposal scrubs the key, stops polling and releases the guard",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-074-E07",
@@ -11059,8 +11662,19 @@
           "inventoryRefs": [
             "O07"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/management-dialog-reuse-browser.test.ts",
+              "name": "leaving onboarding is refused while the one-time key is unconfirmed, and disposal scrubs the key, stops polling and releases the guard",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/management-dialog-reuse-browser.test.ts",
+              "name": "a failing poll after disposal cannot report an interruption either",
+              "kind": "browser"
+            }
+          ]
         }
       ]
     },
@@ -11313,8 +11927,14 @@
           "inventoryRefs": [
             "P10"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/management-dialog-reuse-browser.test.ts",
+              "name": "API key project scope defaults to the first project, can be All projects, and is All projects when there are none",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-078-E03",
@@ -11599,8 +12219,14 @@
           "inventoryRefs": [
             "P11"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/management-dialog-reuse-browser.test.ts",
+              "name": "an unconfirmed one-time key cannot be dismissed by Escape, backdrop, route navigation or unload until it is confirmed",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-080-E06",
@@ -11610,8 +12236,19 @@
           "inventoryRefs": [
             "P11"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "tests/api-key-secret-lifecycle.test.ts",
+              "name": "clears secret text and copy closures after confirmed completion",
+              "kind": "unit"
+            },
+            {
+              "file": "e2e/api-keys.spec.ts",
+              "name": "an owner creates a scoped key with a one-time secret, uses it, and revoking it stops the very next request",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-080-E07",
@@ -11621,8 +12258,19 @@
           "inventoryRefs": [
             "P11"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/sign-out-browser.test.ts",
+              "name": "scrubs the open API-key reveal and focuses usable sign-in via %s",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/management-navigation.test.ts",
+              "name": "disposes on sign-out even with blockers, aborts requests and rejects late secrets",
+              "kind": "unit"
+            }
+          ]
         },
         {
           "id": "UI-080-E08",
@@ -11768,8 +12416,14 @@
           "inventoryRefs": [
             "UI-082"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/sign-out-browser.test.ts",
+              "name": "never reveals a key whose creation response arrives after the account signed out elsewhere",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-082-E02",
@@ -11898,8 +12552,19 @@
           "inventoryRefs": [
             "P12"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/api-keys.spec.ts",
+              "name": "an owner creates a scoped key with a one-time secret, uses it, and revoking it stops the very next request",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/api-keys.spec.ts",
+              "name": "expiry: a short-lived key works until it expires, then the next request is refused; bad creation fields are rejected",
+              "kind": "e2e"
+            }
+          ]
         }
       ]
     },
@@ -11970,8 +12635,19 @@
           "inventoryRefs": [
             "P09"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "tests/api-key-role-ux.test.ts",
+              "name": "uses the server identity and shows members a clear restriction without forbidden requests",
+              "kind": "unit"
+            },
+            {
+              "file": "e2e/api-keys.spec.ts",
+              "name": "owner, admin, member and outsider: who can see, create and revoke keys",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-084-E03",
@@ -12713,8 +13389,19 @@
           "inventoryRefs": [
             "UI-091"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/publications.spec.ts",
+              "name": "publish with validation, a tracked and a pinned publication, view them anonymously, then unpublish",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/publications.spec.ts",
+              "name": "a failed list read recovers with Try again, and publications from the API appear in the page",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-091-E02",
@@ -12775,8 +13462,14 @@
           "inventoryRefs": [
             "P05"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/management-dialog-reuse-browser.test.ts",
+              "name": "publication Copy URL shows its pending state, then Copied, then restores; a refusal restores at once with guidance",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-091-E06",
@@ -12803,8 +13496,24 @@
           "inventoryRefs": [
             "P05"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/publications.spec.ts",
+              "name": "publish with validation, a tracked and a pinned publication, view them anonymously, then unpublish",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/publications.spec.ts",
+              "name": "a failed list read recovers with Try again, and publications from the API appear in the page",
+              "kind": "e2e"
+            },
+            {
+              "file": "tests/management-loading-parity.test.ts",
+              "name": "matches the real SSR head and loading body for $kind",
+              "kind": "unit"
+            }
+          ]
         },
         {
           "id": "UI-091-E08",
@@ -12871,8 +13580,19 @@
           "inventoryRefs": [
             "UI-092"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/share-comment-errors-browser.test.ts",
+              "name": "copying a published document builds its public URL for the current document without creating a share",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/share-comment-errors-browser.test.ts",
+              "name": "copying a legacy document asks for a signed URL for that document and copies exactly what it returns",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-092-E02",
@@ -12882,8 +13602,14 @@
           "inventoryRefs": [
             "V13"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/viewer-chrome.spec.ts",
+              "name": "the avatar menu opens and closes by click, outside click and Escape, and leads to the account",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-092-E03",
@@ -12893,8 +13619,24 @@
           "inventoryRefs": [
             "V13"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/share-comment-errors-browser.test.ts",
+              "name": "copying a published document builds its public URL for the current document without creating a share",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/share-comment-errors-browser.test.ts",
+              "name": "copying a legacy document asks for a signed URL for that document and copies exactly what it returns",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/management-dialog-reuse-browser.test.ts",
+              "name": "private share creation can repeat after success and denial without retaining pending state",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-092-E04",
@@ -12904,8 +13646,14 @@
           "inventoryRefs": [
             "V13"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/share-comment-errors-browser.test.ts",
+              "name": "Share with no document selected explains what to do and sends nothing",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-092-E05",
@@ -12949,8 +13697,19 @@
           "inventoryRefs": [
             "V13"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/share-comment-errors-browser.test.ts",
+              "name": "copying uses the async clipboard when it works and falls back to selecting a temporary field when it does not",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/share-comment-errors-browser.test.ts",
+              "name": "clipboard failure stays readable and retries successfully",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-092-E08",
@@ -12960,8 +13719,19 @@
           "inventoryRefs": [
             "V13"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/share-comment-errors-browser.test.ts",
+              "name": "a share request that cannot reach the server is a retryable failure, not a copied link",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/share-comment-errors-browser.test.ts",
+              "name": "signing out %s leaves no feedback, notice or copied link",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-092-E09",
@@ -13257,8 +14027,14 @@
           "inventoryRefs": [
             "UI-095"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/sign-out-browser.test.ts",
+              "name": "cancels an open private-share revocation confirmation in the other tab",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-095-E02",
@@ -22214,8 +22990,34 @@
           "trigger": "Mutate, resume, invalidate, expire, or sign out",
           "expected": "Management data invalidation and organization display cache",
           "inventoryRefs": [],
-          "status": "untested",
-          "tests": []
+          "status": "unit",
+          "tests": [
+            {
+              "file": "tests/management-navigation.test.ts",
+              "name": "clears every retained management read on page exit and on sign-out",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/management-navigation.test.ts",
+              "name": "invalidates after both successful and uncertain failed mutations",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/management-query-cache.test.ts",
+              "name": "pins the 30 second freshness window and the 5 minute inactive lifetime",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/organization-list-cache.test.ts",
+              "name": "reuses quick navigation but refreshes external membership changes within 30 seconds",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/organization-list-cache.test.ts",
+              "name": "a %s from any organization read removes the persisted list so a reload cannot restore it",
+              "kind": "unit"
+            }
+          ]
         },
         {
           "id": "UI-158-E02",
@@ -22225,8 +23027,34 @@
           "inventoryRefs": [
             "M08"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "unit",
+          "tests": [
+            {
+              "file": "tests/management-query-cache.test.ts",
+              "name": "publication writes invalidate only that project's publications",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/management-query-cache.test.ts",
+              "name": "a team write aborts a read still in flight and the next read is fresh, before and after the write settles",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/management-navigation.test.ts",
+              "name": "invalidates after both successful and uncertain failed mutations",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/management-navigation.test.ts",
+              "name": "never answers a read issued after a write with a read that started before it, and cancels team roster reads on team writes",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/management-query-cache.test.ts",
+              "name": "project creation invalidates the list but preserves existing project details",
+              "kind": "unit"
+            }
+          ]
         },
         {
           "id": "UI-158-E03",
@@ -22236,8 +23064,19 @@
           "inventoryRefs": [
             "M08"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "unit",
+          "tests": [
+            {
+              "file": "tests/management-query-cache.test.ts",
+              "name": "unknown or authorization-changing writes invalidate all retained data",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/management-query-coverage-gaps.test.ts",
+              "name": "conservatively invalidates everything for %s",
+              "kind": "unit"
+            }
+          ]
         },
         {
           "id": "UI-158-E04",
@@ -22298,8 +23137,14 @@
           "inventoryRefs": [
             "M08"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "unit",
+          "tests": [
+            {
+              "file": "tests/management-navigation.test.ts",
+              "name": "clears every retained management read on page exit and on sign-out",
+              "kind": "unit"
+            }
+          ]
         },
         {
           "id": "UI-158-E08",
@@ -22353,8 +23198,24 @@
           "inventoryRefs": [
             "M15"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "unit",
+          "tests": [
+            {
+              "file": "tests/organization-list-cache.test.ts",
+              "name": "reuses quick navigation but refreshes external membership changes within 30 seconds",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/organization-list-cache.test.ts",
+              "name": "invalidates after %s",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/organization-list-cache.test.ts",
+              "name": "wires cross-tab invalidation and sign-out without refetching for visibility, reconnect or page exit",
+              "kind": "unit"
+            }
+          ]
         },
         {
           "id": "UI-158-E11",
@@ -22386,8 +23247,24 @@
           "inventoryRefs": [
             "M15"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "unit",
+          "tests": [
+            {
+              "file": "tests/organization-list-cache.test.ts",
+              "name": "keeps in-memory caching, invalidation and sign-out when session storage is blocked",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/organization-list-cache.test.ts",
+              "name": "works without BroadcastChannel: mutations still invalidate locally and sign-out still disposes",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/organization-list-cache.test.ts",
+              "name": "survives a BroadcastChannel that cannot be constructed or posted to",
+              "kind": "unit"
+            }
+          ]
         },
         {
           "id": "UI-158-E13",
@@ -22397,8 +23274,24 @@
           "inventoryRefs": [
             "M15"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "unit",
+          "tests": [
+            {
+              "file": "tests/organization-list-cache.test.ts",
+              "name": "a %s from any organization read removes the persisted list so a reload cannot restore it",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/organization-list-cache.test.ts",
+              "name": "clears on permission failures and does not retain malformed or rejected lists",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/organization-list-cache.test.ts",
+              "name": "clears %s organization data on sign-out and isolates the next account",
+              "kind": "unit"
+            }
+          ]
         },
         {
           "id": "UI-158-E14",
