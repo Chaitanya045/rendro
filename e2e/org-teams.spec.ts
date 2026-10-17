@@ -27,7 +27,7 @@ test.describe("teams", () => {
     const submit = dialog.getByRole("button", { name: "Create team", exact: true });
     await expect(trigger).toHaveText("Create team");
 
-    // Dialog: focus lands on the name, Cancel returns it; native validation precedes any request; failure keeps the name.
+    // Dialog: focus lands on the name, Cancel returns it; validation precedes any request; failure keeps the name.
     await trigger.click();
     await expect(dialog).toBeVisible();
     await expect(name).toBeFocused();
@@ -143,7 +143,7 @@ test.describe("teams", () => {
     expect((await rosterOf(page, organization.id, docsTeam.id)).members).toEqual([]);
     expect(await roles(page, organization.id)).toEqual(baseline);
 
-    // Deleting a team: cancel keeps it, failure keeps it, success removes it; the sole remaining team cannot be deleted.
+    // Deleting a team: cancel keeps it, failure keeps it, success removes it; the sole remaining team offers no removal.
     const removeTeam = docs.getByRole("button", { name: "Remove team", exact: true });
     await removeTeam.click();
     await expect(confirm.locator("#cp-confirm-title")).toHaveText("Remove team?");
@@ -167,11 +167,8 @@ test.describe("teams", () => {
     expect(await roles(page, organization.id)).toEqual(baseline);
 
     const lastTeam = card(page, "Teams Org");
-    await lastTeam.getByRole("button", { name: "Remove team", exact: true }).click();
-    await confirm.locator("[data-confirm-accept]").click();
-    await expect(toasts(page).filter({ hasText: "You are not allowed to delete this team" })).toHaveClass(/error/);
-    await expect(lastTeam).toBeVisible();
-    await expect(lastTeam.getByRole("button", { name: "Remove team", exact: true })).toBeEnabled();
+    await expect(lastTeam.getByRole("button", { name: "Remove team", exact: true })).toBeDisabled();
+    await expect(lastTeam.locator(".team-hint")).toBeVisible();
     expect(await teamsOf(page, organization.id)).toEqual(["Teams Org"]);
   });
 
@@ -258,8 +255,7 @@ test.describe("teams", () => {
     expect(new Set(await reopenedRows.locator("strong").allInnerTexts()).size).toBe(total + 1);
   });
 
-  // Known bug: Plain GETs are coalesced per page scope and a mutation does not discard them, so the refresh reuses the older, pre-assignment response.
-  test.fail("a roster refresh after an assignment is not answered by an older read still in flight (known bug)", async ({ actor }) => {
+  test("a roster refresh after an assignment is not answered by an older read still in flight", async ({ actor }) => {
     test.setTimeout(120_000);
     const owner = await actor("stale-owner", { organizations: ["Stale Org"] });
     const mate = await actor("stale-mate");
@@ -279,28 +275,69 @@ test.describe("teams", () => {
     await older.close();
   });
 
-  // Known bug: Neither the dialog (whitespace passes `required`, then is trimmed to empty) nor the API rejects an empty team name.
-  test.fail("a team cannot be created with a blank name (known bug)", async ({ actor }) => {
+  test("a team cannot be created with a blank name", async ({ actor }) => {
     const owner = await actor("blank-owner", { organizations: ["Blank Org"] });
     const [organization] = owner.organizations;
     const { page } = owner;
     await openSection(page, organization.id, "teams");
     await page.locator("#organization-page-action").click();
-    await page.locator("#team-dialog").getByLabel("Team name", { exact: true }).fill("   ");
-    await page.locator("#team-dialog").getByRole("button", { name: "Create team", exact: true }).click();
-    await expect(page.locator("#team-dialog #team-error")).not.toBeEmpty({ timeout: 5000 });
+    const dialog = page.locator("#team-dialog");
+    const name = dialog.getByLabel("Team name", { exact: true });
+    await name.fill("   ");
+    await dialog.getByRole("button", { name: "Create team", exact: true }).click();
+    // The error is announced, tied to the field, and focus stays in it; nothing is sent.
+    await expect(dialog.locator("#team-error")).toHaveText("Enter a team name.");
+    await expect(name).toHaveAttribute("aria-invalid", "true");
+    await expect(name).toHaveAccessibleDescription("Enter a team name.");
+    await expect(name).toBeFocused();
+    await expect(dialog).toBeVisible();
     expect(await teamsOf(page, organization.id)).toEqual(["Blank Org"]);
+    // The API refuses a blank name as well, for creation and for renaming, and stores trimmed names.
+    const blank = await api<{ message?: string }>(page, "/api/auth/organization/create-team", { organizationId: organization.id, name: "  \t " });
+    expect(blank.status).toBe(400);
+    expect(blank.body.message).toBe("Team name is required.");
+    const padded = await api<{ id: string; name: string }>(page, "/api/auth/organization/create-team", { organizationId: organization.id, name: "  Padded  " });
+    expect(padded.status).toBe(200);
+    expect(padded.body.name).toBe("Padded");
+    const rename = await api<{ message?: string }>(page, "/api/auth/organization/update-team", { teamId: padded.body.id, data: { organizationId: organization.id, name: " " } });
+    expect(rename.status).toBe(400);
+    expect(await teamsOf(page, organization.id)).toEqual(["Blank Org", "Padded"]);
   });
 
-  // Known bug: The page offers Remove team on the last team and renders an empty state for it, but the server always refuses to delete the last team.
-  test.fail("deleting the only remaining team leaves the empty state with Create first team (known bug)", async ({ actor }) => {
+  test("the only remaining team cannot be removed; the control explains why and follows the team count", async ({ actor }) => {
     const owner = await actor("last-owner", { organizations: ["Last Org"] });
+    const admin = await actor("last-admin");
     const [organization] = owner.organizations;
+    await join(owner, organization.id, admin, "admin");
     const { page } = owner;
     await openSection(page, organization.id, "teams");
-    await card(page, "Last Org").getByRole("button", { name: "Remove team", exact: true }).click();
+    const only = card(page, "Last Org");
+    const remove = only.getByRole("button", { name: "Remove team", exact: true });
+    await expect(remove).toBeDisabled();
+    await expect(remove).toHaveAccessibleDescription(/at least one team/);
+    await expect(only.locator(".team-hint")).toBeVisible();
+    await expect(page.getByRole("heading", { name: "No teams yet" })).toHaveCount(0);
+    // The server rule holds without the UI: an admin (whose session has no active team) is refused too.
+    const [team] = (await fullOrganization(page, organization.id)).body.teams;
+    const refused = await api<{ message?: string }>(admin.page, "/api/auth/organization/remove-team", { teamId: team.id, organizationId: organization.id });
+    expect(refused.status).toBe(400);
+    expect(refused.body.message).toBe("Unable to remove last team");
+    expect(await teamsOf(page, organization.id)).toEqual(["Last Org"]);
+
+    // A second team unlocks both; removing one locks the survivor again without a reload.
+    const created = await api(page, "/api/auth/organization/create-team", { organizationId: organization.id, name: "Second" });
+    expect(created.status).toBe(200);
+    await page.reload();
+    const second = card(page, "Second");
+    await expect(second.getByRole("button", { name: "Remove team", exact: true })).toBeEnabled();
+    await expect(remove).toBeEnabled();
+    await expect(page.locator(".team-hint")).toHaveCount(0);
+    await second.getByRole("button", { name: "Remove team", exact: true }).click();
     await confirmDialog(page).locator("[data-confirm-accept]").click();
-    await expect(page.getByRole("heading", { name: "No teams yet", level: 2 })).toBeVisible({ timeout: 5000 });
-    await expect(page.getByRole("button", { name: "Create first team", exact: true })).toBeVisible();
+    await expect(toasts(page).filter({ hasText: "Team removed." })).toHaveCount(1);
+    await expect(second).toHaveCount(0);
+    await expect(remove).toBeDisabled();
+    await expect(only.locator(".team-hint")).toBeVisible();
+    expect(await teamsOf(page, organization.id)).toEqual(["Last Org"]);
   });
 });

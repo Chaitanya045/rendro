@@ -181,6 +181,64 @@ describe("persistent management navigation", () => {
     expect(runtime.toast).toHaveBeenCalledWith("current");
   });
 
+  it("never answers a read issued after a write with a read that started before it, and cancels team roster reads on team writes", async () => {
+    const runtime = scopeRuntime();
+    const reads: Array<{ path: string; signal: AbortSignal; resolve(value: unknown): void }> = [];
+    runtime.request.mockImplementation((path: string, options: { method?: string; signal: AbortSignal }) => new Promise((resolve, reject) => {
+      if (options.method === "POST") return resolve({ ok: true });
+      if (path.startsWith("/api/rendro/management/access?")) return resolve({ id: "org-a", userId: "user-a", member: { userId: "user-a" } });
+      options.signal.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")));
+      reads.push({ path, signal: options.signal, resolve });
+    }));
+    const scope = runtime.ui.createPageScope();
+    const roster = "/api/rendro/management/team-members?organizationId=org-a&teamId=team-a";
+    const other = "/api/auth/organization/list-invitations?organizationId=org-a";
+
+    // A write elsewhere stops sharing the older read without cancelling it.
+    const olderOther = scope.request(other);
+    await scope.request("/api/auth/organization/update-member-role", { method: "POST", body: "{}" });
+    const newerOther = scope.request(other);
+    expect(reads.map(read => read.path)).toEqual([other, other]);
+    expect(reads[0].signal.aborted).toBe(false);
+    reads[0].resolve("before"); reads[1].resolve("after");
+    await expect(olderOther).resolves.toBe("before");
+    await expect(newerOther).resolves.toBe("after");
+
+    // A team write cancels the in-flight roster read and the refresh is a brand new request.
+    reads.length = 0;
+    const olderRoster = scope.request(roster);
+    const sharedRoster = scope.request(roster);
+    expect(reads).toHaveLength(1);
+    const olderRejection = expect(olderRoster).rejects.toMatchObject({ name: "AbortError" });
+    const sharedRejection = expect(sharedRoster).rejects.toMatchObject({ name: "AbortError" });
+    await scope.request("/api/auth/organization/add-team-member", { method: "POST", body: "{}" });
+    expect(reads[0].signal.aborted).toBe(true);
+    await olderRejection; await sharedRejection;
+    const refreshed = scope.request(roster);
+    expect(reads).toHaveLength(2);
+    expect(reads[1].signal.aborted).toBe(false);
+    reads[1].resolve({ members: ["fresh"] });
+    await expect(refreshed).resolves.toEqual({ members: ["fresh"] });
+
+    // A roster read that starts while the write is still pending is also discarded once the write settles.
+    reads.length = 0;
+    let settle!: () => void;
+    runtime.request.mockImplementationOnce(() => new Promise(resolve => { settle = () => resolve({ ok: true }); }));
+    const write = scope.request("/api/auth/organization/remove-team-member", { method: "POST", body: "{}" });
+    const during = scope.request(roster);
+    const duringRejection = expect(during).rejects.toMatchObject({ name: "AbortError" });
+    settle();
+    await write;
+    await duringRejection;
+    expect(reads[0].signal.aborted).toBe(true);
+
+    // Disposal drops the bookkeeping along with the reads it cancels.
+    const last = scope.request(roster);
+    const lastRejection = expect(last).rejects.toMatchObject({ name: "AbortError" });
+    runtime.ui.createPageScope();
+    await lastRejection;
+  });
+
   it("disposes on sign-out even with blockers, aborts requests and rejects late secrets", async () => {
     const runtime = scopeRuntime(true);
     let resolve!: (value: unknown) => void;

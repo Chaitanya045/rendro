@@ -185,6 +185,26 @@ describe("management query cache policy", () => {
     expect(mutationImpact("/api/unknown", { method: "POST", body: "broken JSON" }, identity).resource).toBe("all");
   });
 
+  it("a team write aborts a read still in flight and the next read is fresh, before and after the write settles", async () => {
+    const { cache, raw, authorize } = setup();
+    const older = gate<unknown>(); raw.mockReturnValueOnce(older.promise);
+    const shared = [cache.request(path, {}, authorize), cache.request(path, {}, authorize)];
+    expect(raw).toHaveBeenCalledTimes(1);
+    const rejected = shared.map(read => expect(read).rejects.toMatchObject({ name: "AbortError" }));
+    cache.invalidateMutation("/api/auth/organization/add-team-member", { method: "POST", body: JSON.stringify({ organizationId: "org-a" }) });
+    older.resolve({ projects: [{ name: "Before the write" }] });
+    await Promise.all(rejected);
+    raw.mockResolvedValueOnce({ projects: [{ name: "After the write" }] });
+    await expect(cache.request(path, {}, authorize)).resolves.toEqual({ projects: [{ name: "After the write" }] });
+    // The same applies to a read started while the write was pending: the settlement discards it as well.
+    const during = gate<unknown>(); raw.mockReturnValueOnce(during.promise);
+    const concurrent = expect(cache.request(project, {}, authorize)).rejects.toMatchObject({ name: "AbortError" });
+    cache.invalidateMutation("/api/auth/organization/add-team-member", { method: "POST", body: "{}" });
+    during.resolve({ project: { name: "Raced" } });
+    await concurrent;
+    expect(raw).toHaveBeenCalledTimes(3);
+  });
+
   it("ignores other-organization and malformed broadcast impacts", async () => {
     const { cache, raw, authorize } = setup(); await cache.request(path, {}, authorize);
     cache.applyImpact({ organizationId: "org-b", resource: "all" });

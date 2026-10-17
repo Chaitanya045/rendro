@@ -283,20 +283,13 @@ after load; timers advance only when the test says so. A real `beforeunload`
 prompt is not exercised: the guard is checked by dispatching the event and reading
 `defaultPrevented`.
 
-Expected failures (no `e2e` credit; an unexpected pass fails the suite):
-
-- **The API accepts organization slugs that violate the documented pattern.** `create` and `update` accept `Not A Valid Slug`; only the `pattern` attribute of the form enforces lowercase hyphenated slugs.
-- **Any member can read the pending invitations.** `list-invitations` only requires membership, so an ordinary member sees every invited address, role and status; the UI avoids requesting it for members, and a unit test names the request "forbidden".
-- **An expired invitation is listed as Pending** until someone revokes it: the list filters on `status` only.
-- **A blank team name is accepted.** Whitespace passes `required`, is trimmed to empty by the dialog, and neither it nor the API rejects it; the team card renders with an empty heading.
-- **The last team cannot be deleted, but the UI offers it.** The page renders Remove team and an empty state, while the server always refuses the last team, so the empty state is unreachable.
-- **A roster refresh after an assignment can be answered by an older read.** Plain GETs are coalesced per page scope and a mutation does not discard them, so a refresh issued while the first roster read is still in flight reuses that older, pre-assignment response.
+No organization expected failures remain: every journey above passes in all three engines.
 
 Not asserted (not credited): the invitation page's own read-failure state (the page consumes the
 server-rendered lookup instead of issuing a read that a browser test could fail), the organization
 creation form's Cancel (there is none), roster completion beyond 100 members, the onboarding
 credential step's third and fourth scope (the step offers only the two recommended ones), a
-real `beforeunload` prompt, and an empty team list (unreachable, see above).
+real `beforeunload` prompt, and an empty team list (unreachable: the server never deletes the last team).
 
 ## Vitest Chromium project
 

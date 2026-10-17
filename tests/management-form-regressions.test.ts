@@ -111,6 +111,10 @@ class ElementMock {
     }
   }
   appendChild(node: ElementMock) { this.append(node); return node; }
+  prepend(...nodes: ElementMock[]) {
+    for (const node of nodes) node.parentNode = this;
+    this.children.unshift(...nodes);
+  }
   before(...nodes: ElementMock[]) {
     const parent = this.parentNode;
     if (!parent) return;

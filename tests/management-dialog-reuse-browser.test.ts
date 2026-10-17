@@ -18,7 +18,7 @@ const heldDocuments = new Map<string, { arrived: boolean; ready: Promise<void>; 
 afterEach(() => { for (const held of heldDocuments.values()) held.release(); heldDocuments.clear(); });
 const harness = createBrowserHarness();
 const user = { id: 'user-a', name: 'Owner', email: 'owner@example.test' } as User;
-const organization = { id: 'org-a', name: 'Acme', slug: 'acme', members: [{ id: 'member-a', userId: user.id, role: 'owner', user }], teams: [] };
+const organization = { id: 'org-a', name: 'Acme', slug: 'acme', members: [{ id: 'member-a', userId: user.id, role: 'owner', user }], teams: [{ id: 'team-default', name: 'Acme' }] };
 const project = { _id: 'project-a', organizationId: 'org-a', name: 'Docs', slug: 'docs', activeDeploymentId: 'deployment-a' };
 const invitation = { id: 'invitation-a', email: user.email, organizationName: 'Acme', role: 'member', status: 'pending', expiresAt: '2099-01-01T00:00:00Z' };
 const base = '/organizations/org-a';
@@ -170,7 +170,7 @@ it.each(dialogs)('$name resets after success and can reopen and submit exactly o
     // Wait for invitation/team refresh to finish before reusing the persistent dialog.
     if (spec.id === 'invite') await page.getByText('No pending invitations.', { exact: true }).waitFor();
     if (spec.id === 'team') {
-      await page.getByRole('heading', { name: 'No teams yet' }).waitFor();
+      await page.getByRole('heading', { name: 'Acme', level: 2 }).waitFor();
       expect(await page.locator('#team-form [name=name]').inputValue()).toBe('');
     }
     if (spec.id === 'publication') {
@@ -522,4 +522,123 @@ it('management hidden controls stay out of layout through role and publication-m
   await page.locator('#publication-create').waitFor();
   expect(await page.locator('#publication-create').isEnabled()).toBe(true);
   expect(await page.locator('#publication-access-note').evaluate(node => getComputedStyle(node).display)).toBe('none');
+});
+
+async function accessibleDescription(page: Page, selector: string) {
+  return page.locator(selector).evaluate(element => (element.getAttribute('aria-describedby') ?? '').split(/\s+/).filter(Boolean)
+    .map(id => document.getElementById(id)?.textContent ?? '').join(' ').trim());
+}
+
+it('team dialog rejects a blank name inline, keeps focus in the field and sends the trimmed name', async () => {
+  const page = await open(`${base}/teams`);
+  const requests = await writes(page, '/api/auth/organization/create-team');
+  await page.locator('#organization-page-action').click();
+  const name = page.locator('#team-form [name=name]');
+  for (const blank of ['   ', '']) {
+    await name.fill(blank);
+    await page.locator('#team-form button[type=submit]').click();
+    await expect.poll(() => name.getAttribute('aria-invalid')).toBe('true');
+    expect(await accessibleDescription(page, '#team-form [name=name]')).toBe('Enter a team name.');
+    expect(await page.evaluate(() => document.activeElement?.getAttribute('name'))).toBe('name');
+    expect(await page.locator('#team-dialog').getAttribute('open')).not.toBeNull();
+    expect(await page.locator('#team-form button[type=submit]').getAttribute('aria-busy')).not.toBe('true');
+  }
+  expect(requests.bodies).toHaveLength(0);
+  // Editing the field clears the stale error, and a real name is trimmed before it is sent.
+  await name.fill('  Docs  ');
+  expect(await name.getAttribute('aria-invalid')).toBeNull();
+  expect(await page.locator('#team-error').textContent()).toBe('');
+  await page.locator('#team-form button[type=submit]').click();
+  await expect.poll(() => requests.bodies.length).toBe(1);
+  expect(requests.bodies[0]).toMatchObject({ name: 'Docs', organizationId: 'org-a' });
+  await requests.settle({ id: 'team-b' });
+  await page.locator('#team-dialog').waitFor({ state: 'hidden' });
+  // A cancelled dialog does not reopen with the previous complaint.
+  await page.locator('#organization-page-action').click();
+  await name.fill(' ');
+  await page.locator('#team-form button[type=submit]').click();
+  await expect.poll(() => name.getAttribute('aria-invalid')).toBe('true');
+  await page.keyboard.press('Escape');
+  await page.locator('#team-dialog').waitFor({ state: 'hidden' });
+  await page.locator('#organization-page-action').click();
+  expect(await name.getAttribute('aria-invalid')).toBeNull();
+  expect(await page.locator('#team-error').textContent()).toBe('');
+});
+
+it('the last team cannot be removed and the rule follows removals of other teams', async () => {
+  const teams = [{ id: 'team-one', name: 'Docs' }, { id: 'team-two', name: 'Platform' }];
+  const page = await open(`${base}/teams`);
+  await page.route('**/api/auth/organization/get-full-organization?*', route => route.fulfill({ json: { ...organization, teams } }));
+  await page.goto(harness.origin + `${base}/teams`);
+  const card = (title: string) => page.locator('.team-card', { has: page.getByRole('heading', { name: title, level: 2 }) });
+  const remove = (title: string) => card(title).getByRole('button', { name: 'Remove team', exact: true });
+  await card('Docs').waitFor();
+  expect(await page.locator('.team-hint').count()).toBe(0);
+  expect(await remove('Docs').isEnabled()).toBe(true);
+  expect(await remove('Platform').isEnabled()).toBe(true);
+
+  // A refused removal restores the control and keeps both teams removable.
+  const requests = await writes(page, '/api/auth/organization/remove-team');
+  await remove('Docs').click();
+  await page.locator('[data-confirm-accept]').click();
+  await expect.poll(() => requests.bodies.length).toBe(1);
+  await requests.settle({ message: 'Unable to remove last team' }, 400);
+  await expect.poll(() => remove('Docs').isEnabled()).toBe(true);
+  expect(await page.locator('.team-hint').count()).toBe(0);
+
+  await remove('Docs').click();
+  await page.locator('[data-confirm-accept]').click();
+  await expect.poll(() => requests.bodies.length).toBe(2);
+  await requests.settle({});
+  await card('Docs').waitFor({ state: 'detached' });
+  expect(await remove('Platform').isDisabled()).toBe(true);
+  expect(await accessibleDescription(page, '.team-card .remove-team')).toBe('Every organization keeps at least one team, so this team can’t be removed.');
+  expect(await page.locator('.team-hint').isVisible()).toBe(true);
+});
+
+it('a lone team shows a disabled Remove team with an explanation instead of an empty state', async () => {
+  const page = await open(`${base}/teams`);
+  await page.locator('.team-card').waitFor();
+  expect(await page.locator('.team-card .remove-team').isDisabled()).toBe(true);
+  expect(await accessibleDescription(page, '.team-card .remove-team')).toContain('at least one team');
+  expect(await page.getByText('No teams yet').count()).toBe(0);
+});
+
+it('lists an expired invitation as Expired, keeps it revocable and does not count it as pending', async () => {
+  const expired = { ...invitation, id: 'invitation-old', email: 'old@example.test', status: 'pending', expiresAt: new Date(Date.now() - 60_000).toISOString() };
+  const live = { ...invitation, id: 'invitation-new', email: 'new@example.test', status: 'pending', expiresAt: new Date(Date.now() + 86_400_000).toISOString() };
+  const invitations: unknown[] = [expired, live];
+  const stub = (page: Page) => page.route('**/api/auth/organization/list-invitations?*', route => route.fulfill({ json: invitations }));
+  const page = await harness.newPage();
+  await page.route(url => url.hostname === 'cdn.tailwindcss.com', route => route.fulfill({ body: '' }));
+  await stub(page);
+  await page.goto(harness.origin + `${base}/people`);
+  const row = (email: string) => page.locator('#invitation-list tr', { hasText: email });
+  await row('old@example.test').waitFor();
+  expect(await row('old@example.test').locator('td[data-label=Status] .badge').textContent()).toBe('Expired');
+  expect(await row('new@example.test').locator('td[data-label=Status] .badge').textContent()).toBe('Pending');
+  expect(await row('old@example.test').getByRole('button', { name: 'Revoke invitation for old@example.test' }).isEnabled()).toBe(true);
+
+  const revokes = await writes(page, '/api/auth/organization/cancel-invitation');
+  await row('old@example.test').getByRole('button', { name: 'Revoke invitation for old@example.test' }).click();
+  await page.locator('[data-confirm-accept]').click();
+  await expect.poll(() => revokes.bodies.length).toBe(1);
+  expect(revokes.bodies[0]).toEqual({ invitationId: 'invitation-old' });
+  await revokes.settle({});
+  await row('old@example.test').waitFor({ state: 'detached' });
+  expect(await row('new@example.test').count()).toBe(1);
+
+  // The overview checklist only counts invitations that can still be accepted.
+  const checklist = (target: Page) => target.locator('#workspace-checklist .checklist-row').last();
+  const overview = await harness.newPage();
+  await overview.route(url => url.hostname === 'cdn.tailwindcss.com', route => route.fulfill({ body: '' }));
+  invitations.splice(0, invitations.length, expired);
+  await stub(overview);
+  await overview.goto(harness.origin + base);
+  await checklist(overview).waitFor();
+  await overview.waitForTimeout(300);
+  expect(await checklist(overview).getAttribute('class')).not.toContain('complete');
+  invitations.splice(0, invitations.length, live);
+  await overview.goto(harness.origin + base);
+  await expect.poll(async () => checklist(overview).getAttribute('class')).toContain('complete');
 });

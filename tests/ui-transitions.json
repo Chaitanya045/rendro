@@ -6475,7 +6475,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "unit",
+      "status": "browser",
       "auditEvidence": "U",
       "auditNote": "management-performance.test.ts; organization-role-ux.test.ts",
       "edges": [
@@ -6542,8 +6542,14 @@
           "inventoryRefs": [
             "O08"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/management-dialog-reuse-browser.test.ts",
+              "name": "lists an expired invitation as Expired, keeps it revocable and does not count it as pending",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-039-E07",
@@ -8100,6 +8106,28 @@
               "kind": "e2e"
             }
           ]
+        },
+        {
+          "id": "UI-050-E08",
+          "from": "Invitation list loading",
+          "trigger": "Resolve list or cancel invitation",
+          "expected": "an invitation past its expiry is labelled Expired, stays revocable and is excluded from the pending count",
+          "inventoryRefs": [
+            "UI-050"
+          ],
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "tests/management-dialog-reuse-browser.test.ts",
+              "name": "lists an expired invitation as Expired, keeps it revocable and does not count it as pending",
+              "kind": "browser"
+            },
+            {
+              "file": "e2e/org-people.spec.ts",
+              "name": "an expired invitation is labelled Expired, stays revocable and is not counted as pending",
+              "kind": "e2e"
+            }
+          ]
         }
       ]
     },
@@ -8639,6 +8667,16 @@
               "file": "e2e/org-teams.spec.ts",
               "name": "a team is created, staffed, inspected and removed; membership never changes organization access",
               "kind": "e2e"
+            },
+            {
+              "file": "tests/management-dialog-reuse-browser.test.ts",
+              "name": "team dialog rejects a blank name inline, keeps focus in the field and sends the trimmed name",
+              "kind": "browser"
+            },
+            {
+              "file": "e2e/org-teams.spec.ts",
+              "name": "a team cannot be created with a blank name",
+              "kind": "e2e"
             }
           ]
         },
@@ -8646,12 +8684,28 @@
           "id": "UI-055-E04",
           "from": "Teams page ready",
           "trigger": "Create/delete team or reopen form",
-          "expected": "remove named team confirmation, delayed row removal and empty-state repair",
+          "expected": "remove named team confirmation, delayed row removal; the last team keeps a disabled Remove team with a hint (no empty state)",
           "inventoryRefs": [
             "O14"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "tests/management-dialog-reuse-browser.test.ts",
+              "name": "the last team cannot be removed and the rule follows removals of other teams",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/management-dialog-reuse-browser.test.ts",
+              "name": "a lone team shows a disabled Remove team with an explanation instead of an empty state",
+              "kind": "browser"
+            },
+            {
+              "file": "e2e/org-teams.spec.ts",
+              "name": "the only remaining team cannot be removed; the control explains why and follows the team count",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-055-E05",
@@ -8876,6 +8930,16 @@
               "file": "e2e/org-teams.spec.ts",
               "name": "a team is created, staffed, inspected and removed; membership never changes organization access",
               "kind": "e2e"
+            },
+            {
+              "file": "e2e/org-teams.spec.ts",
+              "name": "a roster refresh after an assignment is not answered by an older read still in flight",
+              "kind": "e2e"
+            },
+            {
+              "file": "tests/management-navigation.test.ts",
+              "name": "never answers a read issued after a write with a read that started before it, and cancels team roster reads on team writes",
+              "kind": "unit"
             }
           ]
         }
@@ -9033,6 +9097,11 @@
             {
               "file": "e2e/org-teams.spec.ts",
               "name": "a team is created, staffed, inspected and removed; membership never changes organization access",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/org-teams.spec.ts",
+              "name": "a roster refresh after an assignment is not answered by an older read still in flight",
               "kind": "e2e"
             }
           ]

@@ -334,15 +334,26 @@ test.describe("people and invitations", () => {
     await expect(member.page.getByRole("heading", { name: "Create your organization" })).toBeVisible();
   });
 
-  // Known bug: The invitation list filters on status only, so an expired invitation keeps showing as Pending until someone revokes it.
-  test.fail("an expired invitation is no longer listed as pending (known bug)", async ({ actor }) => {
+  test("an expired invitation is labelled Expired, stays revocable and is not counted as pending", async ({ actor }) => {
     const owner = await actor("expiry-owner", { organizations: ["Expiry Org"] });
     const [organization] = owner.organizations;
     const email = fresh("expired");
+    const other = fresh("current");
     const invitation = await api<{ id: string }>(owner.page, "/api/auth/organization/invite-member", { organizationId: organization.id, email, role: "member" });
     expect(invitation.status).toBe(200);
+    expect((await api(owner.page, "/api/auth/organization/invite-member", { organizationId: organization.id, email: other, role: "member" })).status).toBe(200);
     await authRecord("updateOne", { input: { model: "invitation", where: [{ field: "_id", value: invitation.body.id }], update: { expiresAt: Date.now() - 1000 } } });
     await openSection(owner.page, organization.id, "people");
-    await expect(owner.page.locator("#invitation-list tr", { hasText: email }).getByText("Pending", { exact: true })).toHaveCount(0, { timeout: 5000 });
+    const expired = owner.page.locator("#invitation-list tr", { hasText: email });
+    const current = owner.page.locator("#invitation-list tr", { hasText: other });
+    await expect(expired.locator("td[data-label=Status] .badge")).toHaveText("Expired");
+    await expect(current.locator("td[data-label=Status] .badge")).toHaveText("Pending");
+    await expect(expired.getByText("Pending", { exact: true })).toHaveCount(0);
+    // An expired invitation is cleaned up like any other: confirm, revoke, gone.
+    await expired.getByRole("button", { name: `Revoke invitation for ${email}` }).click();
+    await confirmDialog(owner.page).locator("[data-confirm-accept]").click();
+    await expect(toasts(owner.page).filter({ hasText: "Invitation revoked." })).toHaveCount(1);
+    await expect(expired).toHaveCount(0);
+    await expect(current).toHaveCount(1);
   });
 });

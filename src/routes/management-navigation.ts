@@ -1,6 +1,6 @@
 import { MANAGEMENT_PROJECT_PLACEHOLDER, managementLoadingPages } from "./management-loading-pages";
 
-export const MANAGEMENT_SHELL_VERSION = "25";
+export const MANAGEMENT_SHELL_VERSION = "26";
 
 export interface ManagementRouteIdentity {
   organizationId: string;
@@ -63,7 +63,7 @@ function managementNavigationRuntime(loadingPagesJson: string): string {
   }
   function createPageScope(){
     if(currentScope&&currentScope.active)currentScope.dispose();
-    var controller=new AbortController(),cleanups=[],blockers=[],pendingMutations=0,inflightGets=new Map(),readBatch=null,busyButtons=new Set();
+    var controller=new AbortController(),cleanups=[],blockers=[],pendingMutations=0,inflightGets=new Map(),rosterReads=new Map(),readBatch=null,busyButtons=new Set();
     var scope={active:true,signal:controller.signal};
     function isActive(){return !signedOut&&scope.active&&currentScope===scope;}
     function onCleanup(callback){if(typeof callback!=="function")return function(){};if(!isActive()){callback();return function(){};}cleanups.push(callback);return function(){var index=cleanups.indexOf(callback);if(index>=0)cleanups.splice(index,1);};}
@@ -75,18 +75,29 @@ function managementNavigationRuntime(loadingPagesJson: string): string {
       for(var index=0;index<blockers.length;index+=1){if(blockers[index](detail)===false)return false;}
       return true;
     }
-    function dispose(){if(!scope.active)return;scope.active=false;controller.abort();inflightGets.clear();readBatch=null;busyButtons.forEach(function(button){ui.busy(button,false);});busyButtons.clear();while(cleanups.length){try{cleanups.pop()();}catch(_error){}}}
+    function dispose(){if(!scope.active)return;scope.active=false;controller.abort();inflightGets.clear();rosterReads.clear();readBatch=null;busyButtons.forEach(function(button){ui.busy(button,false);});busyButtons.clear();while(cleanups.length){try{cleanups.pop()();}catch(_error){}}}
     // A controller load may contain sequential reads. Share its identity check
     // only until that explicit load finishes; mutations immediately discard it.
     function beginReadBatch(){var batch={access:null};readBatch=batch;return function(){if(readBatch===batch)readBatch=null;};}
+    // A write must not be answered by a read that started before it settled: stop sharing every in-flight GET, and cancel team roster
+    // reads outright when a team write lands, so the refresh that follows is always a new request.
+    function teamPath(path){return String(path).split("?")[0];}
+    function discardReads(path){
+      var cancelRosters=/^\/api\/auth\/organization\/(?:create-team|update-team|remove-team|add-team-member|remove-team-member)$/.test(teamPath(path));
+      inflightGets.clear();
+      rosterReads.forEach(function(controller){if(cancelRosters)controller.abort();});
+      rosterReads.clear();
+    }
     async function request(path,options){
       if(!isActive())throw new DOMException("Page navigation aborted","AbortError");
       var settings=Object.assign({},options||{}),method=String(settings.method||"GET").toUpperCase(),mutation=method!=="GET"&&method!=="HEAD";
       settings.signal=composeSignals(controller.signal,settings.signal);
-      if(mutation){readBatch=null;pendingMutations+=1;invalidateMutation(path,settings);}
+      if(mutation){readBatch=null;pendingMutations+=1;discardReads(path);invalidateMutation(path,settings);}
       var plainGet=method==="GET"&&(!options||Object.keys(options).every(function(key){return key==="method";}));
       var getKey=plainGet?String(path):"";
       if(getKey&&inflightGets.has(getKey))return inflightGets.get(getKey);
+      var rosterAbort=getKey&&teamPath(path)==="/api/rendro/management/team-members"?new AbortController():null;
+      if(rosterAbort)settings.signal=composeSignals(settings.signal,rosterAbort.signal);
       var accessRead=method==="GET"&&String(path)==="/api/rendro/management/access?organizationId="+encodeURIComponent(shellOrganization),batch=readBatch;
       if(accessRead&&batch&&batch.access)return batch.access;
       var needsAccess=Boolean(shellOrganization)&&method==="GET"&&(String(path).startsWith("/api/rendro/")||String(path).startsWith("/api/auth/organization/"))&&!String(path).startsWith("/api/rendro/management/access?");
@@ -97,7 +108,8 @@ function managementNavigationRuntime(loadingPagesJson: string): string {
       var pending=Promise.all([dataRequest,access]).then(function(values){if(!isActive())throw new DOMException("Page scope disposed","AbortError");var data=values[0];if(String(path).indexOf("/api/rendro/management/access?")===0&&(!data||data.id!==shellOrganization||data.userId!==shellUser||!data.member||data.member.userId!==shellUser)){clearQueryCache();var denied=new Error("Your account or organization access changed. Reload to continue.");denied.status=403;if(isActive())location.replace(location.href);throw denied;}return data;});
       if(accessRead&&batch){batch.access=pending;pending.catch(function(){if(batch.access===pending)batch.access=null;});}
       if(getKey)inflightGets.set(getKey,pending);
-      try{return await pending;}catch(error){if(error&&(error.status===401||error.status===403))clearQueryCache();throw error;}finally{if(mutation){pendingMutations=Math.max(0,pendingMutations-1);invalidateMutation(path,settings);}if(getKey&&inflightGets.get(getKey)===pending)inflightGets.delete(getKey);}
+      if(rosterAbort)rosterReads.set(pending,rosterAbort);
+      try{return await pending;}catch(error){if(error&&(error.status===401||error.status===403))clearQueryCache();throw error;}finally{if(mutation){pendingMutations=Math.max(0,pendingMutations-1);discardReads(path);invalidateMutation(path,settings);}if(getKey&&inflightGets.get(getKey)===pending)inflightGets.delete(getKey);rosterReads.delete(pending);}
     }
     function busy(button,on){if(!isActive()||!button)return;if(on)busyButtons.add(button);else busyButtons.delete(button);ui.busy(button,on);}
     function activeCall(name){return function(){if(!isActive())return name==="copyText"||name==="confirm"?Promise.resolve(false):undefined;return ui[name].apply(ui,arguments);};}
