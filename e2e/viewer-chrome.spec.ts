@@ -304,15 +304,22 @@ test.describe("desktop chrome", () => {
 });
 
 test.describe("menus and the document", () => {
-  test.fail("the account menu closes when the reader clicks in the document (known bug)", async ({ asOwner: tab, site }) => {
-    // The document is another frame: a click inside it never reaches the shell's own click handler, so the menu stays open
-    // over the page the reader is now reading. (The same holds for More on a phone.)
+  test("the account menu closes when the reader clicks in the document, and stays open for the keyboard", async ({ asOwner: tab, site }) => {
+    // The document is another frame: a click inside it never reaches the shell's own click handler, but it moves focus
+    // into the frame, which the shell sees as its window losing focus.
     await tab.setViewportSize(desktop);
     await open(tab, site.docs);
     await tab.locator("#avatar-btn").click();
     await expect(tab.locator("#avatar-menu")).toBeVisible();
+    // Keyboard use keeps focus in the shell: moving through the menu leaves it open.
+    await tab.keyboard.press("Tab");
+    await expect(tab.locator("#avatar-menu")).toBeVisible();
     await content(tab).locator("body").click({ position: { x: 600, y: 600 } });
     await expect(tab.locator("#avatar-menu")).toBeHidden();
+    await expect(tab.locator("#avatar-btn")).toHaveAttribute("aria-expanded", "false");
+    // It opens again afterwards.
+    await tab.locator("#avatar-btn").click();
+    await expect(tab.locator("#avatar-menu")).toBeVisible();
   });
 });
 

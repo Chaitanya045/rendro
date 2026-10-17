@@ -14035,6 +14035,16 @@
               "file": "e2e/deployment-tree.spec.ts",
               "name": "a CLI-pushed multi-folder deployment browses by directory page, deep link and keyboard",
               "kind": "e2e"
+            },
+            {
+              "file": "e2e/deployment-tree.spec.ts",
+              "name": "a closed folder's rows are skipped by Tab and hidden from assistive technology",
+              "kind": "e2e"
+            },
+            {
+              "file": "tests/viewer-chrome-browser.test.ts",
+              "name": "keeps a closed folder's rows out of Tab and the accessibility tree, and brings them back when it opens",
+              "kind": "browser"
             }
           ]
         },
@@ -14193,6 +14203,21 @@
               "file": "e2e/deployment-tree.spec.ts",
               "name": "folders and documents are reached by Tab; Enter and Space operate them and the arrow, Home, End and typed keys do nothing",
               "kind": "e2e"
+            },
+            {
+              "file": "e2e/deployment-tree.spec.ts",
+              "name": "a closed folder's rows are skipped by Tab and hidden from assistive technology",
+              "kind": "e2e"
+            },
+            {
+              "file": "tests/viewer-chrome-browser.test.ts",
+              "name": "keeps a closed folder's rows out of Tab and the accessibility tree, and brings them back when it opens",
+              "kind": "browser"
+            },
+            {
+              "file": "e2e/deployment-tree.spec.ts",
+              "name": "an open folder with a full page of rows pushes the rows after it down instead of overlapping them",
+              "kind": "e2e"
             }
           ]
         },
@@ -14259,8 +14284,24 @@
           "inventoryRefs": [
             "V02"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/deployment-tree.spec.ts",
+              "name": "an open folder with a full page of rows pushes the rows after it down instead of overlapping them",
+              "kind": "e2e"
+            },
+            {
+              "file": "tests/viewer-chrome-browser.test.ts",
+              "name": "sizes an open folder to its rows, so the rows after it start below the last one, however many pages are loaded",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/viewer-chrome-browser.test.ts",
+              "name": "animates a folder open and closed, and settles at the size of its rows",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-100-E06",
@@ -14484,6 +14525,11 @@
               "file": "e2e/viewer-chrome.spec.ts",
               "name": "the tree is a drawer: it opens and closes by button, backdrop and Escape, and choosing a document closes it",
               "kind": "e2e"
+            },
+            {
+              "file": "tests/viewer-chrome-browser.test.ts",
+              "name": "closes the phone More menu, and the account menu inside it, when the reader clicks in the document",
+              "kind": "browser"
             }
           ]
         },
@@ -15780,6 +15826,16 @@
               "file": "e2e/viewer-chrome.spec.ts",
               "name": "the avatar menu opens and closes by click, outside click and Escape, and leads to the account",
               "kind": "e2e"
+            },
+            {
+              "file": "e2e/viewer-chrome.spec.ts",
+              "name": "the account menu closes when the reader clicks in the document, and stays open for the keyboard",
+              "kind": "e2e"
+            },
+            {
+              "file": "tests/viewer-chrome-browser.test.ts",
+              "name": "closes the account menu when the reader clicks in the document, and leaves it alone for the keyboard",
+              "kind": "browser"
             }
           ]
         }
@@ -15842,6 +15898,21 @@
               "file": "e2e/viewer-links.spec.ts",
               "name": "further unsolicited links never retarget a visible prompt, and while dismissed only the latest is kept for Review",
               "kind": "e2e"
+            },
+            {
+              "file": "e2e/viewer-links.spec.ts",
+              "name": "a link to another site asks the reader, then opens in a new tab that cannot reach the viewer",
+              "kind": "e2e"
+            },
+            {
+              "file": "tests/lazy-tree-browser.test.ts",
+              "name": "asks first, then opens a new tab that has no handle back to the viewer, leaving the document where it is",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/lazy-tree-browser.test.ts",
+              "name": "can be dismissed and reviewed, keeping only the latest address, and opens nothing until confirmed",
+              "kind": "browser"
             }
           ]
         },
@@ -15869,6 +15940,21 @@
               "file": "e2e/viewer-links.spec.ts",
               "name": "further unsolicited links never retarget a visible prompt, and while dismissed only the latest is kept for Review",
               "kind": "e2e"
+            },
+            {
+              "file": "e2e/viewer-links.spec.ts",
+              "name": "a link to another site asks the reader, then opens in a new tab that cannot reach the viewer",
+              "kind": "e2e"
+            },
+            {
+              "file": "tests/lazy-tree-browser.test.ts",
+              "name": "asks first, then opens a new tab that has no handle back to the viewer, leaving the document where it is",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/lazy-tree-browser.test.ts",
+              "name": "can be dismissed and reviewed, keeping only the latest address, and opens nothing until confirmed",
+              "kind": "browser"
             }
           ]
         }
@@ -18846,6 +18932,21 @@
               "file": "e2e/auth.spec.ts",
               "name": "remember-me controls cookie persistence and survives reload",
               "kind": "e2e"
+            },
+            {
+              "file": "e2e/viewer-surfaces.spec.ts",
+              "name": "signing in returns to the document the reader asked for, and only to a same-origin path",
+              "kind": "e2e"
+            },
+            {
+              "file": "tests/auth-page-routes.test.ts",
+              "name": "falls back to the home page for returnTo %j, raw and encoded",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/tenant-architecture.test.ts",
+              "name": "carries the requested document and publisher query through sign-in, and nothing else",
+              "kind": "unit"
             }
           ]
         },

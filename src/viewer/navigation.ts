@@ -1,5 +1,5 @@
 import { coalesceMessage } from "./message-limits";
-import { validDocumentSearch, validRelativeDocumentPath } from "../lazy-tree/messages";
+import { externalLinkHref, validDocumentSearch, validRelativeDocumentPath } from "../lazy-tree/messages";
 import { shouldUseNativeLinkNavigation } from "../lazy-tree/navigation";
 import { replaceViewerFragment, scrollToFragment, sendDocumentFragment, validFragment } from "./fragments";
 
@@ -78,7 +78,16 @@ export function installDocumentNavigation(config: DocumentNavigationConfig, host
     const href = anchor.getAttribute("href");
     if (href === null) return;
     const link = classifyDocumentLink(href, doc.baseURI, host.location.href, config);
-    if (!link) return;
+    if (!link) {
+      // The frame cannot load another site, so a plain click would do nothing the reader can see. The parent asks first
+      // and opens it in a new tab. Shares and standalone documents keep their native navigation.
+      const external = !config.singleDocument && host.parent !== host ? externalLinkHref(href, doc.baseURI, origin) : null;
+      if (external) {
+        event.preventDefault();
+        host.parent.postMessage({ type: "doc-external", path: config.documentPath, href: external }, origin);
+      }
+      return;
+    }
     if (!validDocumentSearch(link.search)) { event.preventDefault(); return; }
     if (config.singleDocument && !link.sameDocument) {
       // Shares retain native document navigation and server-enforced grant scope.

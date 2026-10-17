@@ -336,10 +336,10 @@ Playwright can read where it is.
 
 | Spec | Covers |
 |---|---|
-| `deployment-tree.spec.ts` | Directory-page browsing (root page, folder pages and Load more by cursor, deep links beyond the first page), folder and Load more failure and Retry, failed deep-link reveal, root failure and empty listing, no deployment, Tab/Enter/Space operation (arrow, Home/End and typed keys do nothing), selection indicator, Back/Forward between documents |
-| `viewer-links.spec.ts` | Fragments within and across documents (Unicode ids, named anchors, bare and unmatched hashes, replace vs push, reload), `docQuery`, and the parent-owned link confirmation: a reader's click or Enter opens at once; a link followed with no reader action is offered (confirm, dismiss, review, repeat), a visible prompt is never retargeted, forged and malformed requests do nothing, new-tab and external links |
-| `viewer-chrome.spec.ts` | Theme (cycle, persistence, what the document is told and that its own colors are untouched), avatar menu, reading mode (control, shortcut, hot zones, Escape, persistence), sidebar resize (keyboard, drag, cancel, limits, viewport clamp, persistence), the phone tree drawer and More menu (focus, dismissal, one handler per action, desktop/landscape restore), 320/375/430px containment, document loading, never-arriving and replaced loads with their announcements, reduced motion, share failure notices |
-| `viewer-surfaces.spec.ts` | Private vs publication vs share chrome; outsider and signed-out access; a publication's deep links, Back/Forward and scope; a share's fragments and out-of-grant links; revoked and expired shares are 404 in the shell, the document and a viewer that was open; the anonymous viewers make no session lookup. Creating, listing and revoking shares and publications is #113's and is not repeated |
+| `deployment-tree.spec.ts` | Directory-page browsing (root page, folder pages and Load more by cursor, deep links beyond the first page), folder and Load more failure and Retry, failed deep-link reveal, root failure and empty listing, no deployment, Tab/Enter/Space operation (arrow, Home/End and typed keys do nothing; a closed folder's rows are inert and skipped by Tab; an open folder is as tall as its rows), selection indicator, Back/Forward between documents |
+| `viewer-links.spec.ts` | Fragments within and across documents (Unicode ids, named anchors, bare and unmatched hashes, replace vs push, reload), `docQuery`, and the parent-owned link confirmation: a reader's click or Enter opens at once; a link followed with no reader action is offered (confirm, dismiss, review, repeat), a visible prompt is never retargeted, forged and malformed requests do nothing, new-tab links, and a link to another site (asks first, then opens a new tab with no opener) |
+| `viewer-chrome.spec.ts` | Theme (cycle, persistence, what the document is told and that its own colors are untouched), avatar menu (also closed by a click in the document), reading mode (control, shortcut, hot zones, Escape, persistence), sidebar resize (keyboard, drag, cancel, limits, viewport clamp, persistence), the phone tree drawer and More menu (focus, dismissal, one handler per action, desktop/landscape restore), 320/375/430px containment, document loading, never-arriving and replaced loads with their announcements, reduced motion, share failure notices |
+| `viewer-surfaces.spec.ts` | Private vs publication vs share chrome; outsider and signed-out access (sign-in carries the requested document and publisher query, and only a same-origin path); a publication's deep links, Back/Forward and scope; a share's fragments and out-of-grant links; revoked and expired shares are 404 in the shell, the document and a viewer that was open; the anonymous viewers make no session lookup. Creating, listing and revoking shares and publications is #113's and is not repeated |
 
 Timing-sensitive steps never sleep. The loading specs install Playwright's fake clock and pause it
 where the page is idle, hold the document request at the browser boundary, and then advance time by
@@ -355,22 +355,11 @@ starts and polled for rather than waited out. Every test uses data provisioned f
 Back/Forward test asserts the current behavior and says so: reaching such an entry changes only the URL;
 the last document and its selection stay showing.
 
-Expected failures (their broken assertions get no `e2e` credit; an unexpected pass fails the suite):
-
-- **A closed folder's rows are still reached by Tab.** Closed folders hide their rows with
-  `max-height`/`opacity` only, so they stay focusable and in the accessibility tree. Fix: `inert` (or
-  `visibility: hidden`) on a closed folder's content.
-- **An open folder with a full page of rows overlaps the rows after it.** Open content is capped at
-  `max-height: 2000px` with visible overflow, so rows past about 60 draw over what follows. Fix: size to
-  content (or use `grid-template-rows` for the animation).
-- **A link to another site tells the reader nothing.** The shell refuses to frame it; Chromium replaces the
-  document with a browser error page, Firefox and WebKit do nothing visible. Fix: route such links
-  through the parent confirmation and open them in a new context.
-- **The account menu (and More on a phone) stays open when the reader clicks in the document.** The
-  document is another frame, so its clicks never reach the shell's outside-click handler. Fix: also close
-  on the window's `blur` (focus moving into the frame).
-- **Signing in does not return to the document the reader asked for.** The signed-out redirect keeps only
-  the path, so `?doc=` is lost. Fix: carry the `doc` and `docQuery` parameters in `returnTo`.
+The five viewer bugs this suite once pinned as expected failures (a closed folder's rows reached by Tab, an open
+folder overlapping the rows after it, a link to another site doing nothing visible, the account and More menus
+staying open when the reader clicks in the document, and sign-in losing the requested document) were fixed by #191
+and are now ordinary passing tests with registry credit. `tests/viewer-chrome-browser.test.ts` repeats the tree
+layout, `inert` and menu behavior against the real shell CSS in Chromium.
 
 ## Vitest Chromium project
 

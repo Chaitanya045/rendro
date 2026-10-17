@@ -1,11 +1,12 @@
 /**
  * Lazy tree — sidebar document tree with Material Symbols icons,
- * max-height animations, active indicator, and border-line indentation.
+ * grid-row animations, active indicator, and border-line indentation.
  */
 import { coalesceMessage, createDocumentNavigationGate } from "../viewer/message-limits";
 import { createNavigationConfirmation, type DocumentNavigationTarget } from "../viewer/navigation-confirmation";
 import { replaceViewerFragment, sendDocumentFragment, validFragment } from "../viewer/fragments";
 import {
+  externalLinkHref,
   isContentFrameSource,
   normalizeLoadedDocumentPath,
   validRelativeDocumentPath,
@@ -101,10 +102,20 @@ function refreshIndicator(animate = false) {
 
 // ── fold icon toggle ──
 
-function setFolderIcon(folder: HTMLElement, open: boolean) {
+// A closed folder's rows are hidden visually and, with `inert`, from Tab and assistive technology.
+const FOLDER_CONTENT = ":scope > .tree-folder-collapse > .tree-folder-content";
+
+function setFolderOpen(folder: HTMLElement, open: boolean) {
+  folder.classList.toggle("open", open);
   const icon = folder.querySelector(":scope > .tree-item .folder-icon");
   if (icon) icon.textContent = open ? "folder_open" : "folder";
   folder.querySelector(":scope > .tree-item")?.setAttribute("aria-expanded", String(open));
+  folder.querySelector(":scope > .tree-folder-collapse")?.toggleAttribute("inert", !open);
+}
+
+/** The element that animates a folder open and closed; the rows live inside it. */
+function folderCollapse(content: HTMLElement): HTMLElement {
+  return content.parentElement as HTMLElement;
 }
 
 function indexChildItems(content: HTMLElement) {
@@ -129,16 +140,15 @@ const folderLoads = new WeakMap<HTMLElement, Promise<void>>();
 async function expand(folder: HTMLElement) {
   const path = folder.dataset.path;
   if (!path) return;
-  const content = folder.querySelector<HTMLElement>(":scope > .tree-folder-content");
+  const content = folder.querySelector<HTMLElement>(FOLDER_CONTENT);
   if (!content) return;
-  content.style.transition = folderTransitionOverride(reducedMotion());
+  folderCollapse(content).style.transition = folderTransitionOverride(reducedMotion());
 
   if (folder.classList.contains("loading")) return folderLoads.get(folder);
 
   if (folder.classList.contains("loaded")) {
     indexChildItems(content);
-    folder.classList.add("open");
-    setFolderIcon(folder, true);
+    setFolderOpen(folder, true);
     if (activeEl) updateIndicator(activeEl);
     return;
   }
@@ -149,13 +159,12 @@ async function expand(folder: HTMLElement) {
     try {
       await loadPage(folder, path, content, undefined);
       indexChildItems(content);
-      folder.classList.add("loaded", "open");
-      setFolderIcon(folder, true);
+      folder.classList.add("loaded");
+      setFolderOpen(folder, true);
       if (activeEl) updateIndicator(activeEl);
     } catch {
       content.innerHTML = `<div class="tree-error" role="alert">Failed to load folder. <button class="load-more-btn folder-retry-btn" type="button">Retry</button></div>`;
-      folder.classList.add("open");
-      setFolderIcon(folder, true);
+      setFolderOpen(folder, true);
     } finally {
       folder.classList.remove("loading");
       folder.removeAttribute("aria-busy");
@@ -235,14 +244,13 @@ function setNextPage(folder: HTMLElement, content: HTMLElement, data: TreePageRe
 
 /** The tree container is the root folder and holds its own rows. */
 function folderContent(folder: HTMLElement): HTMLElement | null {
-  return folder === TREE ? TREE : folder.querySelector<HTMLElement>(":scope > .tree-folder-content");
+  return folder === TREE ? TREE : folder.querySelector<HTMLElement>(FOLDER_CONTENT);
 }
 
 function collapse(folder: HTMLElement) {
-  const content = folder.querySelector<HTMLElement>(":scope > .tree-folder-content");
-  if (content) content.style.transition = folderTransitionOverride(reducedMotion());
-  folder.classList.remove("open");
-  setFolderIcon(folder, false);
+  const content = folderContent(folder);
+  if (content) folderCollapse(content).style.transition = folderTransitionOverride(reducedMotion());
+  setFolderOpen(folder, false);
   if (activeEl) updateIndicator(activeEl);
 }
 
@@ -320,7 +328,7 @@ function renderFolder(node: TreeNode, depth: number): string {
       <span class="material-symbols-outlined text-[18px] folder-icon flex-shrink-0" aria-hidden="true">folder</span>
       <span class="font-body-md tree-label flex-1 min-w-0">${esc(node.name)}</span>
     </div>
-    <div class="tree-folder-content ml-4 space-y-0.5 border-l border-outline-variant/30 pl-2"></div>
+    <div class="tree-folder-collapse" inert><div class="tree-folder-content ml-4 space-y-0.5 border-l border-outline-variant/30 pl-2"></div></div>
   </div>`;
 }
 
@@ -346,7 +354,7 @@ function handleClick(e: Event) {
   if (folderRetry) {
     e.preventDefault();
     const folder = folderRetry.closest<HTMLElement>(".tree-folder");
-    const content = folder?.querySelector<HTMLElement>(":scope > .tree-folder-content");
+    const content = folder?.querySelector<HTMLElement>(FOLDER_CONTENT);
     if (folder && content) {
       content.replaceChildren();
       void expand(folder);
@@ -497,7 +505,12 @@ function offerDocumentNavigation(fullPath: string, search: string, fragment: str
   if (target) showNavigationConfirmation(target);
 }
 
-function showNavigationConfirmation({ fullPath, search, fragment }: DocumentNavigationTarget) {
+function offerExternalLink(href: string) {
+  const target = navigationConfirmation.request({ fullPath: "", search: "", fragment: "", href });
+  if (target) showNavigationConfirmation(target);
+}
+
+function showNavigationConfirmation({ fullPath, search, fragment, href }: DocumentNavigationTarget) {
   const notice = document.createElement("div");
   notice.id = "document-navigation-notice";
   notice.className = "document-navigation-notice";
@@ -505,14 +518,21 @@ function showNavigationConfirmation({ fullPath, search, fragment }: DocumentNavi
   label.id = "document-navigation-destination";
   label.setAttribute("role", "status");
   label.style.cssText = "margin:0 0 8px;overflow-wrap:anywhere;max-height:6em;overflow:auto";
-  label.textContent = `Open linked document ${relativeDocumentPath(fullPath)}${search}${fragment}?`;
+  label.textContent = href ? `Open external link ${href}?`
+    : `Open linked document ${relativeDocumentPath(fullPath)}${search}${fragment}?`;
   const open = document.createElement("button");
   open.type = "button";
   open.className = "load-more-btn";
   open.setAttribute("aria-describedby", label.id);
-  open.textContent = "Open linked document";
+  open.textContent = href ? "Open external link" : "Open linked document";
   open.addEventListener("click", () => {
-    loadDoc(fullPath, navigationGate.confirm(), fragment, search);
+    if (!href) {
+      loadDoc(fullPath, navigationGate.confirm(), fragment, search);
+      return;
+    }
+    // The document stays where it is; the other site gets a new tab with no handle back to this one.
+    clearNavigationNotice();
+    window.open(href, "_blank", "noopener,noreferrer");
   });
   const dismiss = document.createElement("button");
   dismiss.type = "button";
@@ -527,7 +547,7 @@ function showNavigationConfirmation({ fullPath, search, fragment }: DocumentNavi
     const review = document.createElement("button");
     review.type = "button";
     review.className = "load-more-btn";
-    review.textContent = "Review linked document";
+    review.textContent = href ? "Review external link" : "Review linked document";
     review.addEventListener("click", () => {
       const target = navigationConfirmation.reopen();
       if (!target) return;
@@ -656,7 +676,7 @@ function reconcileLoadedDocument(fullPath: string): void {
   if (fullPath === expectedLoadedPath) expectedLoadedPath = null;
 }
 
-function isDocumentMessage(value: unknown): value is { type: string; path: string; search?: unknown; fragment?: unknown } {
+function isDocumentMessage(value: unknown): value is { type: string; path: string; search?: unknown; fragment?: unknown; href?: unknown } {
   if (!value || typeof value !== "object") return false;
   return "type" in value
     && typeof value.type === "string"
@@ -679,7 +699,7 @@ function init() {
   // Re-sync indicator after folder expand/collapse animations finish
   TREE.addEventListener("transitionend", (event) => {
     if (!(event.target instanceof HTMLElement)) return;
-    if (event.target.classList.contains("tree-folder-content") && activeEl) {
+    if (event.target.classList.contains("tree-folder-collapse") && activeEl) {
       updateIndicator(activeEl);
     }
   });
@@ -723,6 +743,11 @@ function init() {
       const action = navigationGate.request(target, current);
       if (action === "confirm") offerDocumentNavigation(fullPath, search, fragment);
       else if (action) loadDoc(fullPath, action, fragment, search);
+    }
+    if (event.data.type === "doc-external") {
+      // Never navigates or opens anything by itself: the reader confirms the exact address shown.
+      const href = externalLinkHref(event.data.href, location.href, location.origin);
+      if (href) offerExternalLink(href);
     }
     if (event.data.type === "doc-loaded") {
       if (!ORG) return;
