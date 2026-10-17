@@ -7,7 +7,7 @@ import schema from "../convex/schema";
 import authSchema from "../convex/betterAuth/schema";
 import { components } from "../convex/_generated/api";
 import { createAuthOptions } from "../convex/auth";
-import { invitationListPrivacy, isOrganizationSlug, organizationSlugHooks } from "../convex/organizationPolicy";
+import { invitationListPrivacy, isOrganizationSlug, organizationFieldHooks } from "../convex/organizationPolicy";
 import rateLimiterTest from "./convex-rate-limiter";
 import worker from "../src/worker";
 
@@ -247,11 +247,64 @@ describe("organization slug", () => {
   });
 
   it("compares a new invalid slug against the stored one", async () => {
-    const currentSlug = vi.fn(() => Promise.resolve(undefined));
-    const hooks = organizationSlugHooks(currentSlug);
+    const current = vi.fn(() => Promise.resolve(undefined));
+    const hooks = organizationFieldHooks(current);
     await expect(hooks.beforeUpdateOrganization({ organization: { slug: "Bad" }, member: { organizationId: "missing" } })).rejects.toMatchObject({ statusCode: 400 });
-    expect(currentSlug).toHaveBeenCalledWith("missing");
+    expect(current).toHaveBeenCalledWith("missing");
     await hooks.beforeUpdateOrganization({ organization: {}, member: { organizationId: "org" } });
-    expect(currentSlug).toHaveBeenCalledTimes(1);
+    expect(current).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("organization name", () => {
+  const message = "Organization name must be 1–80 characters";
+  const invalid = ["", "   ", "x".repeat(81), `  ${"x".repeat(81)}  `, 7, null];
+
+  it.each(transports)("is trimmed and limited to the form's 80 characters when created and renamed (%s)", async (transport) => {
+    const f = await fixture();
+    const before = (await f.t.query(components.betterAuth.adapter.findMany, { model: "organization", paginationOpts: { numItems: 100, cursor: null } }) as { page: unknown[] }).page.length;
+    for (const name of invalid) {
+      const response = await f.call(transport, "owner", "/api/auth/organization/create", { name, slug: "bad-name" });
+      expect(response.status, JSON.stringify(name)).toBe(400);
+      // Better Auth rejects a missing or non-text name in its own schema before the hook.
+      if (typeof name === "string" && name) expect(await response.json(), name).toMatchObject({ code: "INVALID_ORGANIZATION_NAME", message });
+    }
+    const count = async () => (await f.t.query(components.betterAuth.adapter.findMany, { model: "organization", paginationOpts: { numItems: 100, cursor: null } }) as { page: unknown[] }).page.length;
+    expect(await count()).toBe(before);
+    const created = await f.call(transport, "owner", "/api/auth/organization/create", { name: `  ${"n".repeat(80)}  `, slug: "long-name" });
+    expect(created.status).toBe(200);
+    expect(await f.organization((await created.json() as { id: string }).id)).toMatchObject({ name: "n".repeat(80) });
+
+    for (const name of invalid.filter(value => typeof value === "string" && value)) {
+      const response = await f.call(transport, "owner", "/api/auth/organization/update", { organizationId: f.organizationId, data: { name } });
+      expect(response.status, String(name)).toBe(400);
+      expect(await response.json(), String(name)).toMatchObject({ code: "INVALID_ORGANIZATION_NAME", message });
+    }
+    expect(await f.organization(f.organizationId)).toMatchObject({ name: "Acme" });
+    expect((await f.call(transport, "admin", "/api/auth/organization/update", { organizationId: f.organizationId, data: { name: "  Acme Docs  " } })).status).toBe(200);
+    expect(await f.organization(f.organizationId)).toMatchObject({ name: "Acme Docs", slug: "acme" });
+    // Role checks still come first, with their own errors.
+    expect((await f.call(transport, "member", "/api/auth/organization/update", { organizationId: f.organizationId, data: { name: "x".repeat(81) } })).status).toBe(403);
+  });
+
+  it("refuses a name that is not text when the hooks are called directly", async () => {
+    const hooks = organizationFieldHooks(() => Promise.resolve({ name: "Stored" }));
+    expect(() => hooks.beforeCreateOrganization({ organization: { name: 7, slug: "ok" } })).toThrowError(expect.objectContaining({ statusCode: 400 }));
+    await expect(hooks.beforeUpdateOrganization({ organization: { name: 7 }, member: { organizationId: "org" } })).rejects.toMatchObject({ statusCode: 400 });
+    await expect(hooks.beforeUpdateOrganization({ organization: { name: "Stored" }, member: { organizationId: "org" } })).resolves.toEqual({ data: { name: "Stored" } });
+  });
+
+  it("keeps organizations with a legacy name working and validates only a new name", async () => {
+    const f = await fixture();
+    const longName = "L".repeat(120);
+    const legacy = await f.context.adapter.create<{ id: string }>({ model: "organization", data: { name: longName, slug: "legacy-name", createdAt: new Date() } });
+    const legacyId = String(legacy.id);
+    await f.context.adapter.create({ model: "member", data: { organizationId: legacyId, userId: f.users.owner.id, role: "owner", createdAt: new Date() } });
+    const update = (data: object) => f.call("convex", "owner", "/api/auth/organization/update", { organizationId: legacyId, data });
+    // The settings form always resubmits the stored name alongside the slug.
+    expect((await update({ name: longName, slug: "legacy-name-2" })).status).toBe(200);
+    expect((await update({ name: `${longName}!` })).status).toBe(400);
+    expect((await update({ name: "Short" })).status).toBe(200);
+    expect(await f.organization(legacyId)).toMatchObject({ name: "Short", slug: "legacy-name-2" });
   });
 });

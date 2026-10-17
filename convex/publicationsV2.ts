@@ -6,6 +6,7 @@ import { requireId } from "./ids";
 import { ConvexError, v } from "convex/values";
 import { internalMutation, internalQuery } from "./_generated/server";
 import { cleanPublicationPath } from "../shared/v2-paths";
+import { PUBLICATION_DESCRIPTION_MAX_LENGTH, PUBLICATION_TITLE_MAX_LENGTH } from "../shared/text-input";
 
 const slugPattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
@@ -25,6 +26,15 @@ export const createInternal = internalMutation({
   },
   handler: async (ctx, input) => {
     await requireActiveOrganization(ctx, input.organizationId);
+    // The publication form limits these; the API must too.
+    const title = input.title?.trim();
+    const description = input.description?.trim();
+    if (title && title.length > PUBLICATION_TITLE_MAX_LENGTH) {
+      throw new ConvexError(`Publication title must be at most ${PUBLICATION_TITLE_MAX_LENGTH} characters`);
+    }
+    if (description && description.length > PUBLICATION_DESCRIPTION_MAX_LENGTH) {
+      throw new ConvexError(`Publication description must be at most ${PUBLICATION_DESCRIPTION_MAX_LENGTH} characters`);
+    }
     const args = {
       ...input,
       projectId: requireId(ctx, "projects", input.projectId),
@@ -70,8 +80,8 @@ export const createInternal = internalMutation({
       entryFile,
       trackingMode: args.trackingMode,
       pinnedDeploymentId: args.trackingMode === "pinned" ? args.pinnedDeploymentId : undefined,
-      title: args.title?.trim() || project.name,
-      description: args.description?.trim() || undefined,
+      title: title || project.name,
+      description: description || undefined,
       createdBy: args.actorId,
       createdAt: now,
       updatedAt: now,

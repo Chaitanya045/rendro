@@ -21,14 +21,25 @@ function randomHex(byteLength: number): string {
     .join("");
 }
 
+// The UI offers 30 days, 90 days, 1 year or never. A year is 365 days there, so a leap day absorbs clock skew
+// between the caller and this server; anything later is not a product choice.
+export const API_KEY_MAX_LIFETIME_MS = 366 * 24 * 60 * 60 * 1000;
+
+// Keys are created with an absolute millisecond timestamp, which must be an exact integer in the future and no later
+// than the longest lifetime. Non-integers, 1e300 and the like are rejected rather than stored as an unrepresentable date.
+export function validExpiresAt(value: unknown, now: number): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value > now && value <= now + API_KEY_MAX_LIFETIME_MS;
+}
+
+// A repeated permission is requested once: the first occurrence keeps its position and the rest are dropped.
 function allowedScopeArray(value: unknown): string[] | null {
   if (!Array.isArray(value)) return null;
-  const scopes: string[] = [];
+  const scopes = new Set<string>();
   for (const scope of value as unknown[]) {
     if (typeof scope !== "string" || !allowedScopes.has(scope)) return null;
-    scopes.push(scope);
+    scopes.add(scope);
   }
-  return scopes;
+  return [...scopes];
 }
 
 export const createCredential = httpAction(async (ctx: GenericActionCtx<DataModel>, request: Request) => { let body: unknown;
@@ -47,7 +58,7 @@ if (
   || !scopes
   || scopes.length === 0
   || (projectId !== undefined && typeof projectId !== "string")
-  || (expiresAt !== undefined && (typeof expiresAt !== "number" || expiresAt <= Date.now()))
+  || (expiresAt !== undefined && !validExpiresAt(expiresAt, Date.now()))
 ) return clientFailure("Invalid credential fields");
 try {
   const { user } = await authorizeHttpOrganization(

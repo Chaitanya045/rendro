@@ -19,7 +19,7 @@ import {
   sendOrganizationInvitationEmail,
 } from "./authEmails";
 import { beforeDeleteOrganization } from "./organizationLifecycle";
-import { invitationListPrivacy, organizationSlugHooks } from "./organizationPolicy";
+import { invitationListPrivacy, organizationFieldHooks } from "./organizationPolicy";
 import { beforeCreateTeam, beforeUpdateTeam } from "../shared/team-names";
 import authSchema from "./betterAuth/schema";
 import { boundSessionLifetime, sessionLifetime } from "./sessionLifetime";
@@ -140,12 +140,9 @@ export function createAuthOptions(ctx: GenericCtx<DataModel>) {
       sessionLifetime(),
       organization({
         organizationHooks: {
-          ...organizationSlugHooks(async (organizationId) => {
-            const stored = await ctx.runQuery(components.betterAuth.adapter.findOne, {
-              model: "organization", where: [{ field: "_id", value: organizationId }],
-            }) as { slug?: unknown } | null;
-            return stored?.slug;
-          }),
+          ...organizationFieldHooks((organizationId) => ctx.runQuery(components.betterAuth.adapter.findOne, {
+            model: "organization", where: [{ field: "_id", value: organizationId }],
+          }) as Promise<{ name?: unknown; slug?: unknown } | null>),
           beforeDeleteOrganization: ({ organization, user }) => beforeDeleteOrganization(ctx, organization.id, user.id),
           beforeCreateTeam,
           beforeUpdateTeam,

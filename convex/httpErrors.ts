@@ -1,6 +1,7 @@
 import { apiCacheControl } from "../shared/http-cache";
 import { boundedRequest, BodyTooLargeError } from "../src/bounded-body";
 import { isRateLimitError } from "@convex-dev/rate-limiter";
+import { IllFormedTextError, requireWellFormedBody } from "../shared/text-input";
 import { requireCookieWrite, RequestAdmissionError, httpActionPolicies, type HttpPolicy } from "../shared/request-admission";
 import { isPublicErrorData, type PublicErrorData } from "../src/shared/public-errors";
 import { ConvexError } from "convex/values";
@@ -24,7 +25,7 @@ export function isApplicationError(error: unknown): error is ConvexError<string 
 // ConvexError is the explicit application-error contract across function calls.
 // The supplied status applies ONLY to those errors, never infrastructure faults.
 export function failure(error: unknown, applicationStatus = 400, operation = "httpAction"): Response {
-  if (error instanceof BodyTooLargeError) return error.response();
+  if (error instanceof BodyTooLargeError || error instanceof IllFormedTextError) return error.response();
   if (error instanceof ConvexError && error.data !== null && typeof error.data === "object" && isRateLimitError(error)) {
     const seconds = Math.max(1, Math.ceil((error as { data: { retryAfter: number } }).data.retryAfter / 1000));
     return Response.json({ error: `Too many writes. Please try again in ${seconds} seconds.`, code: "rate_limited" }, { status: 429, headers: { "Retry-After": String(seconds) } });
@@ -63,7 +64,9 @@ export const httpAction = (handler: Parameters<typeof registerHttpAction>[0], po
     let response: Response;
     try {
       if (policy === "cookie-json") requireCookieWrite(request, process.env.SITE_URL);
-      response = await handler(ctx, await boundedRequest(request));
+      const bounded = await boundedRequest(request);
+      await requireWellFormedBody(bounded);
+      response = await handler(ctx, bounded);
     } catch (error) {
       response = failure(error, 500);
     }

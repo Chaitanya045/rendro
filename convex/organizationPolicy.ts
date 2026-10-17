@@ -1,5 +1,6 @@
 import type { BetterAuthPlugin } from "better-auth";
 import { APIError, createAuthMiddleware } from "better-auth/api";
+import { DISPLAY_NAME_MAX_LENGTH } from "../shared/text-input";
 
 // The same rule as the create and settings forms' slug inputs.
 const slugPattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
@@ -17,21 +18,42 @@ function invalidSlug(): never {
   });
 }
 
+function invalidName(): never {
+  // The management forms display this message verbatim.
+  throw new APIError("BAD_REQUEST", {
+    code: "INVALID_ORGANIZATION_NAME",
+    message: `Organization name must be 1–${DISPLAY_NAME_MAX_LENGTH} characters`,
+  });
+}
+
+function organizationName(name: unknown): string | null {
+  const trimmed = typeof name === "string" ? name.trim() : "";
+  return trimmed && trimmed.length <= DISPLAY_NAME_MAX_LENGTH ? trimmed : null;
+}
+
+type StoredOrganization = { name?: unknown; slug?: unknown } | null | undefined;
+
 /**
  * Better Auth organization hooks: every create and update request, over HTTP or
- * the server API, validates a slug it writes. Organizations whose slugs predate
- * this validation keep them; resubmitting the stored value unchanged is allowed.
+ * the server API, validates the name (trimmed, 1–80 characters, as in the forms) and
+ * slug it writes. Organizations whose values predate this validation keep them;
+ * resubmitting the stored value unchanged is allowed.
  */
-export function organizationSlugHooks(currentSlug: (organizationId: string) => Promise<unknown>) {
+export function organizationFieldHooks(current: (organizationId: string) => Promise<StoredOrganization>) {
   return {
-    beforeCreateOrganization: ({ organization }: { organization: { slug?: unknown } }) => {
+    beforeCreateOrganization: ({ organization }: { organization: { name?: unknown; slug?: unknown } }) => {
+      const name = organizationName(organization.name);
+      if (name === null) invalidName();
       if (!isOrganizationSlug(organization.slug)) invalidSlug();
-      return Promise.resolve();
+      return Promise.resolve({ data: { name } });
     },
-    beforeUpdateOrganization: async ({ organization, member }: { organization: { slug?: unknown }; member: { organizationId: string } }) => {
-      const { slug } = organization;
-      if (slug === undefined || isOrganizationSlug(slug)) return;
-      if (slug !== await currentSlug(member.organizationId)) invalidSlug();
+    beforeUpdateOrganization: async ({ organization, member }: { organization: { name?: unknown; slug?: unknown }; member: { organizationId: string } }) => {
+      const { name, slug } = organization;
+      if (slug !== undefined && !isOrganizationSlug(slug) && slug !== (await current(member.organizationId))?.slug) invalidSlug();
+      if (name === undefined) return;
+      const trimmed = organizationName(name);
+      if (trimmed !== null) return { data: { name: trimmed } };
+      if (name !== (await current(member.organizationId))?.name) invalidName();
     },
   };
 }
