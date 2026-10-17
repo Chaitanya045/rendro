@@ -75,7 +75,7 @@ it.for([[], ["--source", "custom"], ["--source"]])("initializes the selected sou
 });
 it.each([false, true])("creates tracked or pinned publications (%s)", async pinned => {
   vi.stubEnv("RENDRO_API_KEY", "key");
-  const result = await run(["publication", "create", ...identity, "--slug", "docs", ...(pinned ? ["--pin", "deploy", "--path", "guide", "--entry", "home.html", "--title", "Guide", "--endpoint", "http://fixture.test/"] : [])], "Published docs:");
+  const result = await run(["publication", "create", ...identity, "--slug", "docs", ...(pinned ? ["--pin", "deploy", "--path", "guide", "--entry", "home.html", "--title", "Guide", "--endpoint", "https://fixture.test/"] : [])], "Published docs:");
   expect(result.exits).toBe(0);
   expect(requests[0].body).toMatchObject({ trackingMode: pinned ? "pinned" : "track_active", slug: "docs" });
 });
@@ -183,5 +183,27 @@ it.each(["count", "file", "total", "path", "changed-file", "changed-total", "man
   const result = await run(["push", ...identity, "--token", "key"], "never");
   expect(result.exits).toBe(1);
   expect(result.errors).toMatch(/1,000-file|8 MiB|128 MiB|1024 characters|2 MiB/);
+  expect(requests).toHaveLength(0);
+});
+it("dry-runs without identity, credentials or network", async () => {
+  const result = await run(["push", "--dry-run"], "Total:");
+  expect(result.exits).toBe(0); expect(result.errors).toBe("");
+  expect(result.output).toContain("→ Dry run for ./docs");
+  expect(result.output).toContain(`Dry run: 1 file(s) would be uploaded (nothing was sent):\n  index.html  ${bytes.byteLength} B\nTotal: 1 file(s), ${bytes.byteLength} B`);
+  expect(requests).toHaveLength(0); expect(io.git).not.toHaveBeenCalled();
+});
+it("warns about each sensitive file uploaded under --include-sensitive", async () => {
+  io.readdir.mockResolvedValue([entry("index.html"), entry(".env"), entry("tls.key")]);
+  const result = await run(["push", "--dry-run", "--include-sensitive"], "Total:");
+  expect(result.errors).toBe('warning: --include-sensitive is uploading 2 sensitive file(s) that are skipped by default:\n  ! ".env"\n  ! "tls.key"');
+  expect(result.output).toContain("Total: 3 file(s)");
+});
+it.for([["http://rendro.example.com", "Refusing endpoint"], ["ftp://rendro.example.com", "Refusing endpoint"], ["not a url", "Invalid --endpoint"]])("rejects the endpoint %s before any request", async ([endpoint, message]) => {
+  vi.stubEnv("RENDRO_API_KEY", "key");
+  for (const args of [["push", ...identity], ["publication", "list", ...identity]]) {
+    vi.resetModules();
+    const result = await run([...args, "--endpoint", endpoint], "never");
+    expect(result.errors).toContain(message); expect(result.exits).toBe(1);
+  }
   expect(requests).toHaveLength(0);
 });

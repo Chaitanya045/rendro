@@ -1,9 +1,9 @@
 import { internal } from "./_generated/api";
 import { httpAction } from "./httpErrors";
+import { bearerMatches } from "../shared/constant-time";
 
 function authorized(request: Request): boolean {
-  const secret = process.env.RETENTION_SECRET;
-  return Boolean(secret) && request.headers.get("Authorization") === `Bearer ${secret}`;
+  return bearerMatches(request.headers.get("Authorization"), process.env.RETENTION_SECRET);
 }
 
 export const listRetentionCandidates = httpAction(async (ctx, request) => {

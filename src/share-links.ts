@@ -1,5 +1,6 @@
 import { isLegacyStorageKey } from "@/storage-boundary";
-import { createHmac, timingSafeEqual } from "node:crypto";
+import { createHmac } from "node:crypto";
+import { constantTimeEqual } from "../shared/constant-time";
 import { AUTH_SECRET } from "@/config";
 
 const SHARE_TTL_SECONDS = 7 * 24 * 60 * 60;
@@ -27,12 +28,6 @@ function sign(payload: string): string {
   return createHmac("sha256", AUTH_SECRET).update(payload).digest("base64url");
 }
 
-function safeEqual(a: string, b: string): boolean {
-  const left = Buffer.from(a);
-  const right = Buffer.from(b);
-  return left.length === right.length && timingSafeEqual(left, right);
-}
-
 function encodeDocPath(key: string): string {
   return key.split("/").map(encodeURIComponent).join("/");
 }
@@ -54,7 +49,7 @@ export function createShareUrl(origin: string, key: string, nowSeconds?: number)
 export function verifyShareToken(token: string, nowSeconds = Math.floor(Date.now() / 1000)): ShareTokenResult {
   const [payload, signature, extra] = token.split(".");
   if (!payload || !signature || extra !== undefined) return { ok: false, status: 403, reason: "invalid" };
-  if (!safeEqual(signature, sign(payload))) return { ok: false, status: 403, reason: "invalid" };
+  if (!constantTimeEqual(signature, sign(payload))) return { ok: false, status: 403, reason: "invalid" };
 
   const decoded = base64UrlDecode(payload);
   if (!decoded) return { ok: false, status: 403, reason: "invalid" };

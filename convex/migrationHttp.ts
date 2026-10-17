@@ -1,10 +1,10 @@
 import { internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import { httpAction } from "./httpErrors";
+import { bearerMatches } from "../shared/constant-time";
 
 function authorized(request: Request): boolean {
-  const secret = process.env.MIGRATION_SECRET;
-  return Boolean(secret) && request.headers.get("Authorization") === `Bearer ${secret}`;
+  return bearerMatches(request.headers.get("Authorization"), process.env.MIGRATION_SECRET);
 }
 
 export const ensureMigrationProject = httpAction(async (ctx, request) => {

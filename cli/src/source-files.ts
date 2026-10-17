@@ -3,13 +3,19 @@ import { join } from "node:path";
 import { createIgnoreMatcher } from "./ignore";
 
 const excludedDirectories = new Set([".git", ".aws", ".ssh", "node_modules"]);
-const sensitiveFiles = /^(?:\.env(?:\..*)?|\.envrc(?:\..*)?|\.npmrc|\.pypirc|\.netrc|\.git-credentials|id_.*|.*\.(?:pem|key))$/i;
+const sensitiveFiles = new RegExp("^(?:" + [
+  "\\.env(?:\\..*)?", "\\.envrc(?:\\..*)?", "\\.npmrc", "\\.pypirc", "\\.netrc", "\\.git-credentials", "\\.htpasswd", "\\.pgpass", "\\.dockercfg",
+  "id_.*", ".*\\.(?:pem|key|p12|pfx|jks|keystore|ppk|tfstate|tfvars)",
+  // Credential stores by name; an HTML page called credentials.html stays eligible.
+  "credentials(?:\\.(?:json|ya?ml|toml|ini|csv|xml))?", "secrets?\\.(?:json|ya?ml|toml|ini)",
+].join("|") + ")$", "i");
 
 /** Filter before reading/hashing file contents. Never follow symbolic links. */
 export async function sourceFiles(
   root: string,
   includeSensitive: boolean,
   skipped: (path: string, reason: string) => void,
+  includedSensitive: (path: string) => void = () => {},
 ): Promise<string[]> {
   let ignoreText = "";
   try {
@@ -35,6 +41,7 @@ export async function sourceFiles(
         skipped(path + (directory ? "/" : ""), reason);
         continue;
       }
+      if (includeSensitive && !directory && sensitiveFiles.test(entry.name)) includedSensitive(path);
       const full = join(dir, entry.name);
       if (directory) files.push(...await walk(full, path + "/"));
       else files.push(full);
