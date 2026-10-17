@@ -147,7 +147,11 @@ describe("organization invitation list", () => {
     const query = { organizationId: f.organizationId };
     await expect(f.auth.api.listInvitations({ headers: headers("member"), query })).rejects.toMatchObject({ statusCode: 403 });
     expect(await f.auth.api.getFullOrganization({ headers: headers("member"), query })).toMatchObject({ invitations: [] });
+    // The hook re-resolves the endpoint's session from the request-local lookup.
+    const find = vi.spyOn(f.context.internalAdapter, "findSession");
     expect(await f.auth.api.listInvitations({ headers: headers("owner"), query })).toHaveLength(1);
+    expect(await f.auth.api.getFullOrganization({ headers: headers("owner"), query })).toMatchObject({ invitations: [{ email: "invitee@example.test" }] });
+    expect(find).toHaveBeenCalledTimes(2);
   });
 
   it("fails closed for results it cannot attribute to a manager", async () => {
