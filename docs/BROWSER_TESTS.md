@@ -359,7 +359,8 @@ The five viewer bugs this suite once pinned as expected failures (a closed folde
 folder overlapping the rows after it, a link to another site doing nothing visible, the account and More menus
 staying open when the reader clicks in the document, and sign-in losing the requested document) were fixed by #191
 and are now ordinary passing tests with registry credit. `tests/viewer-chrome-browser.test.ts` repeats the tree
-layout, `inert` and menu behavior against the real shell CSS in Chromium.
+layout, `inert` and menu behavior against the real shell CSS, base stylesheet and strict nonce CSP in Chromium.
+`viewer-chrome.spec.ts` and `viewer-links.spec.ts` fail any test that records a CSP violation (#89).
 
 ## Comments and recovery (#115)
 

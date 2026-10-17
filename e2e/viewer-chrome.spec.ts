@@ -35,6 +35,13 @@ const documentTheme = (tab: Page) => documentFrame(tab).evaluate(() => ({
   background: getComputedStyle(document.body).backgroundColor, color: getComputedStyle(document.body).color,
 }));
 
+// #89: the strict nonce CSP must allow everything the shell and the document do here. Requesting the recorder before
+// the test starts it with the page; the check runs after every test.
+test.beforeEach(({ cspViolations }) => { void cspViolations; });
+test.afterEach(({ cspViolations }) => {
+  expect(cspViolations.filter(message => !/x-frame-options/i.test(message)), "CSP violations").toEqual([]);
+});
+
 test.describe("desktop chrome", () => {
   test.use({ viewport: desktop });
 
