@@ -1033,6 +1033,7 @@ Client (lazy-tree.js, ~25KB IIFE built from src/lazy-tree/)
   │
   ├─ Scoped viewers: GET …/tree?dir=…&cursor=… per folder (root first), with "Load more" pagination
   │   └─ A deep link expands its ancestors and loads later pages of only those folders to reveal its row
+  │       (overlapping reveals share a folder that is still loading; only the newest marks its row)
   ├─ Legacy viewer: GET /api/tree/:org?prefix=… per folder, with "Load more" pagination
   ├─ File click → loadDoc(path, pushState)
   │   ├─ Optimistically select row + updateIndicator
@@ -1187,6 +1188,8 @@ publisher iframe <- scoped results  <- trusted parent shell <- reactive pages
 ```
 
 The iframe receives only document-scoped comment data and operation results, never a JWT or session credential. The parent derives organization, project, and document from its trusted configuration and frame URL, allowlists comment operations, and confines thread mutations to that document. Server-side membership and thread ownership checks in `convex/documentThreads.ts` and `convex/documentReplies.ts` remain authoritative. Author fields come from the authenticated identity.
+
+Convex delivers the reactive snapshot that contains a new comment or reply before the mutation's acknowledgement, so the widget treats either order as normal. Closing the composer returns focus to the control that opened it even when the snapshot closes the composer first, and a sent reply keeps keyboard focus in its (possibly re-rendered) reply box. A rendered action whose write is still outstanding stays disabled across re-renders.
 
 ### Comment permissions
 

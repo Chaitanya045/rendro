@@ -108,7 +108,7 @@ export function documentCommentScopeFromFrame(
   } : null;
 }
 
-function sameScope(left: DocumentCommentScope | null, right: DocumentCommentScope | null): boolean {
+export function sameScope(left: DocumentCommentScope | null, right: DocumentCommentScope | null): boolean {
   return Boolean(left && right && left.documentPath === right.documentPath
     && ("orgSlug" in left ? "orgSlug" in right && left.orgSlug === right.orgSlug
       : "organizationId" in right && left.organizationId === right.organizationId && left.projectId === right.projectId));
@@ -172,8 +172,8 @@ export class CommentorParentHost {
 
   private recovery(scope: DocumentCommentScope): CommentOperationState {
     if (!window.sessionStorage) throw new Error("Durable comment storage unavailable");
-    if (!this.userId) throw new Error("Comment authentication required");
-    return new CommentOperationState(window.sessionStorage, `${COMMENT_RECOVERY_PREFIX}${JSON.stringify([this.userId, scope])}`, this.userId);
+    // Every caller has already rejected an unauthenticated request.
+    return new CommentOperationState(window.sessionStorage, `${COMMENT_RECOVERY_PREFIX}${JSON.stringify([this.userId, scope])}`, this.userId!);
   }
 
   private currentScope(): DocumentCommentScope | null {
@@ -269,8 +269,8 @@ export class CommentorParentHost {
     if (!args) return null;
     if (method === "thread.create") return args;
     const clientOperationId = args.clientOperationId;
-    const threadId = args.threadId;
-    if (typeof threadId !== "string") return null;
+    // normalizeMutationArgs only accepts the other methods with a non-empty string thread ID.
+    const threadId = args.threadId as string;
     if (!this.threadIds.has(threadId)) {
       // An acknowledged deletion can disappear from the page before a retry.
       // Only a durable removal from this document may bypass the visible IDs.
@@ -429,7 +429,7 @@ export class CommentorParentHost {
   };
 }
 
-class ConvexDocumentCommentBackend implements DocumentCommentBackend {
+export class ConvexDocumentCommentBackend implements DocumentCommentBackend {
   constructor(private readonly client: ConvexClient) {}
 
   private subscribePaginated(

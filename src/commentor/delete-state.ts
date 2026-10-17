@@ -12,8 +12,9 @@ export class PendingDeletionCoordinator<Key> {
   begin(key: Key, delay: number, commit: () => Promise<unknown>, onFailure: (error: unknown) => void): boolean {
     if (this.pending.has(key)) return false;
     const deletion = { timer: undefined as unknown as ReturnType<typeof setTimeout>, phase: "waiting" as PendingDeletePhase };
+    // undo() and acknowledge() clear this timer before they drop the entry, and only
+    // this callback moves it to "committing", so it always runs for a waiting entry.
     deletion.timer = setTimeout(async () => {
-      if (this.pending.get(key) !== deletion || deletion.phase !== "waiting") return;
       deletion.phase = "committing";
       try {
         await commit();

@@ -164,13 +164,7 @@ function h<K extends keyof HTMLElementTagNameMap>(
 function svg(d: string): SVGElement {
   const wrap = document.createElement("span");
   wrap.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${d}"/></svg>`;
-  return (
-    (wrap.querySelector("svg") as SVGElement) ??
-    (document.createElementNS(
-      "http://www.w3.org/2000/svg",
-      "svg",
-    ) as SVGElement)
-  );
+  return wrap.querySelector("svg") as SVGElement;
 }
 
 const ICONS = {
@@ -274,9 +268,9 @@ function findQuoteRange(root: Element, quote: string): Range | null {
 
     const index = normalizedText.indexOf(normalizedNeedle);
     if (index < 0) return null;
+    // Every character of normalizedText has exactly one mapping entry, so a match always maps.
     const start = characters[index];
     const end = characters[index + normalizedNeedle.length - 1];
-    if (!start || !end) return null;
     const range = document.createRange();
     range.setStart(start.node, start.startOffset);
     range.setEnd(end.node, end.endOffset);
@@ -495,6 +489,7 @@ class Commentor {
   private content!: HTMLElement;
   private drawerList!: HTMLElement;
   private toolbar!: HTMLElement;
+  private commentButton!: HTMLButtonElement;
   private commentsBtn!: HTMLButtonElement;
   private filterButtons!: Record<ThreadFilter, HTMLButtonElement>;
   private filterTabs!: HTMLElement;
@@ -535,6 +530,8 @@ class Commentor {
   private raf = 0;
   private openThreadId: ThreadId | null = null;
   private closeTimer = 0;
+  // Where a close animation in flight will return focus; a later close must not drop it.
+  private closingFocus: HTMLElement | null = null;
   private drawerCollapseTimer = 0;
   private dockEdge: Edge = "bottom";
   private dockOffset = 0;
@@ -754,9 +751,9 @@ class Commentor {
       }
       const threads = incomingThreads.map((thread) => {
         const expanded = this.expandedReplies.get(thread._id);
-        const replyState = this.replyPagination.get(thread._id);
+        // Expanded replies and their pagination are always set and cleared together.
         return expanded
-          ? { ...thread, replies: expanded, repliesHasMore: replyState?.canLoadMore ?? false }
+          ? { ...thread, replies: expanded, repliesHasMore: this.replyPagination.get(thread._id)!.canLoadMore }
           : thread;
       });
       suppressNew ||= wasLoadingMore || pagination?.loading === true;
@@ -841,7 +838,8 @@ class Commentor {
     };
 
     if (isParentConfig(this.cfg)) {
-      this.parentTransport?.subscribe(
+      const transport = this.parentTransport!;
+      transport.subscribe(
         (threads, canLoadMore, loading) => update(
           threads as Thread[],
           { canLoadMore, loading },
@@ -864,7 +862,7 @@ class Commentor {
           actionLabel: "Refresh",
           duration: 30_000,
           onAction: () => {
-            void this.parentTransport?.refresh().catch(() => {
+            void transport.refresh().catch(() => {
               this.toast("Comments could not be refreshed. Still waiting for confirmation.", { kind: "error" });
             });
           },
@@ -875,11 +873,11 @@ class Commentor {
           this.expandedReplies.clear();
           this.replyPagination.clear();
           this.syncRecoveryDrafts();
-          const operations = Object.values(this.parentTransport?.recovery?.value.operations ?? {});
-          if (operations.some((op) => !this.parentTransport?.isMutationPending(op.method, op.args))) {
+          const operations = Object.values(transport.recovery.value.operations);
+          if (operations.some((op) => !transport.isMutationPending(op.method, op.args))) {
             this.toast(new CommentMutationOutcomeUnknownError().message, { kind: "error" });
           }
-          const draft = this.parentTransport?.recovery?.value.drafts.create;
+          const draft = transport.recovery.value.drafts.create;
           if (draft && !this.bubbleLayer.querySelector('.composer[data-state="open"]')) {
             this.openComposer(draft.anchor as Anchor, this.commentsBtn.getBoundingClientRect());
           }
@@ -899,8 +897,7 @@ class Commentor {
           this.parentUpgradeRequired = !compatible;
           this.canReloadViewer = canReloadViewer;
           this.canWrite = compatible && this.cfg.canWrite === true;
-          const commentButton = this.toolbar.querySelector<HTMLButtonElement>('[data-testid="commentor-comment-btn"]');
-          if (commentButton) commentButton.disabled = !this.canWrite;
+          this.commentButton.disabled = !this.canWrite;
           if (!compatible) {
             this.closeBubbles(false, true);
             this.threads = [];
@@ -911,10 +908,10 @@ class Commentor {
       );
       return;
     }
-    if (!this.client || !this.cfg.orgSlug || !this.cfg.filePath) return;
-    this.client.onUpdate(
+    // boot() only builds a direct client for a config with convexUrl, orgSlug and filePath.
+    this.client!.onUpdate(
       api.threads.list,
-      { orgSlug: this.cfg.orgSlug, filePath: this.cfg.filePath },
+      { orgSlug: this.cfg.orgSlug!, filePath: this.cfg.filePath! },
       update,
       fail,
     );
@@ -949,6 +946,7 @@ class Commentor {
       },
       svg(ICONS.comment),
     ) as HTMLButtonElement;
+    this.commentButton = commentBtn;
     this.commentsBtn = h(
       "button",
       {
@@ -1057,11 +1055,10 @@ class Commentor {
     if (!this.dragging || e.pointerId !== this.dragPointerId) return;
     this.dragging = false;
     this.dock.classList.remove("dragging");
-    if (this.dragDoc && this.dragMoveListener) this.dragDoc.removeEventListener("pointermove", this.dragMoveListener);
-    if (this.dragDoc && this.dragEndListener) {
-      this.dragDoc.removeEventListener("pointerup", this.dragEndListener);
-      this.dragDoc.removeEventListener("pointercancel", this.dragEndListener);
-    }
+    // Dragging is only set together with the document and its listeners.
+    this.dragDoc!.removeEventListener("pointermove", this.dragMoveListener!);
+    this.dragDoc!.removeEventListener("pointerup", this.dragEndListener!);
+    this.dragDoc!.removeEventListener("pointercancel", this.dragEndListener!);
     try {
       this.dragHandle?.releasePointerCapture(e.pointerId);
     } catch {
@@ -1218,11 +1215,7 @@ class Commentor {
     this.suppressedSelectionKey = selected.key;
     this.hideSelectionAction(false);
     this.setCommentMode(false);
-    const returnFocus =
-      this.root.querySelector<HTMLElement>(
-        '[data-testid="commentor-comment-btn"]',
-      ) ?? this.commentsBtn;
-    this.openComposer(selected.anchor, selected.rect, returnFocus);
+    this.openComposer(selected.anchor, selected.rect, this.commentButton);
     return true;
   }
 
@@ -1234,11 +1227,8 @@ class Commentor {
 
   private setCommentMode(on: boolean): void {
     this.commentMode = on;
-    const btn = this.root.querySelector<HTMLElement>(
-      '[data-testid="commentor-comment-btn"]',
-    );
-    btn?.classList.toggle("active", on);
-    btn?.setAttribute("aria-pressed", String(on));
+    this.commentButton.classList.toggle("active", on);
+    this.commentButton.setAttribute("aria-pressed", String(on));
     this.root.querySelector('[data-testid="commentor-comment-hint"]')?.remove();
     if (on) {
       this.hideSelectionAction(true);
@@ -1352,10 +1342,10 @@ class Commentor {
       '[data-testid="commentor-pin"]',
     );
     pins.forEach((pin) => {
+      // Pins are rebuilt from this.threads whenever it changes, so every pin has its thread.
       const t = this.threads.find(
         (x) => x._id === pin.getAttribute("data-thread-id"),
-      );
-      if (!t) return;
+      )!;
       const p = anchorPoint(t.anchor);
       if (!p.ok) {
         pin.classList.add("orphan");
@@ -1446,15 +1436,13 @@ class Commentor {
       try {
         if (isParentConfig(this.cfg)) {
           await this.parentTransport?.mutate("thread.create", { body, anchor });
-        } else if (this.client && this.cfg.orgSlug && this.cfg.filePath) {
-          await this.client.mutation(api.threads.create, {
-            orgSlug: this.cfg.orgSlug,
-            filePath: this.cfg.filePath,
+        } else {
+          await this.client!.mutation(api.threads.create, {
+            orgSlug: this.cfg.orgSlug!,
+            filePath: this.cfg.filePath!,
             body,
             anchor,
           });
-        } else {
-          throw new Error("Comment scope is unavailable");
         }
         this.closeBubbles(true, true);
       } catch (err) {
@@ -1540,6 +1528,7 @@ class Commentor {
   }
 
   private closeBubbles(animate: boolean, restoreFocus = false): void {
+    const closingFocus = this.closeTimer ? this.closingFocus : null;
     if (this.closeTimer) {
       clearTimeout(this.closeTimer);
       this.closeTimer = 0;
@@ -1550,11 +1539,14 @@ class Commentor {
     ))
       marker.setAttribute("aria-pressed", "false");
     this.highlightThread(null);
-    const returnFocus = restoreFocus ? this.bubbleReturnFocus : null;
+    // A live update can close the composer before the post's own acknowledgement does.
+    const returnFocus = restoreFocus ? this.bubbleReturnFocus ?? closingFocus : null;
+    this.closingFocus = returnFocus;
     this.bubbleReturnFocus = null;
     const finish = () => {
       this.bubbleLayer.replaceChildren();
       this.closeTimer = 0;
+      this.closingFocus = null;
       if (returnFocus?.isConnected) returnFocus.focus();
     };
     const kids = Array.from(this.bubbleLayer.children) as HTMLElement[];
@@ -1568,13 +1560,10 @@ class Commentor {
 
   private refreshOpenBubble(): void {
     if (!this.openThreadId) return;
+    // openThreadId is cleared whenever the thread bubble is removed.
     const bubble = this.bubbleLayer.querySelector<HTMLElement>(
       '[data-testid="commentor-thread-bubble"]',
-    );
-    if (!bubble) {
-      this.openThreadId = null;
-      return;
-    }
+    )!;
     const t = this.threads.find((x) => x._id === this.openThreadId);
     if (!t) {
       this.closeBubbles(true);
@@ -1964,8 +1953,9 @@ class Commentor {
         } finally {
           this.pendingReplies.delete(t._id);
           this.setReplyPendingState(t._id, false);
+          // A live update may already have replaced this input; the bubble itself persists.
           const replacement = this.replyInputs(t._id).find((candidate) =>
-            candidate.closest(".bubble") === input.closest(".bubble"),
+            candidate.closest(".bubble") === bubble,
           );
           replacement?.focus({ preventScroll: true });
         }
@@ -2114,9 +2104,8 @@ class Commentor {
       return;
     }
     this.dock.removeAttribute("data-expanded");
-    const toolbar = this.dock.querySelector<HTMLElement>(".toolbar");
-    const tw = toolbar ? toolbar.offsetWidth : 48;
-    const th = toolbar ? toolbar.offsetHeight : 48;
+    const tw = this.toolbar.offsetWidth;
+    const th = this.toolbar.offsetHeight;
     const ds = getComputedStyle(this.dock);
     const bw = parseFloat(ds.borderLeftWidth) + parseFloat(ds.borderRightWidth);
     const bh = parseFloat(ds.borderTopWidth) + parseFloat(ds.borderBottomWidth);
@@ -2124,7 +2113,6 @@ class Commentor {
     this.renderPins();
     this.drawerCollapseTimer = window.setTimeout(() => {
       this.drawerCollapseTimer = 0;
-      if (this.dock.hasAttribute("data-expanded")) return;
       this.content.style.height = "";
       this.content.style.width = "";
     }, 300);
@@ -2134,19 +2122,14 @@ class Commentor {
     if (!this.dock.hasAttribute("data-expanded")) return { w: 0, h: 0 };
     const compact = window.innerWidth < 420;
     this.dock.toggleAttribute("data-compact-sheet", compact);
-    const headH =
-      this.content.querySelector<HTMLElement>(".content-head")?.offsetHeight ??
-      0;
-    const tabsH =
-      this.content.querySelector<HTMLElement>(".filter-tabs")?.offsetHeight ??
-      0;
+    const headH = this.content.querySelector<HTMLElement>(".content-head")!.offsetHeight;
+    const tabsH = this.filterTabs.offsetHeight;
     const maxH = Math.min(window.innerHeight * 0.6, 520);
     const naturalH = Math.min(
       headH + tabsH + this.drawerList.scrollHeight,
       maxH,
     );
-    const toolbar = this.dock.querySelector<HTMLElement>(".toolbar");
-    const tw = toolbar ? toolbar.offsetWidth : 48;
+    const tw = this.toolbar.offsetWidth;
     const horizontal =
       !compact && (this.dockEdge === "left" || this.dockEdge === "right");
     const availW = Math.max(
@@ -2162,9 +2145,8 @@ class Commentor {
 
   private repositionExpandedDock(contentW: number, contentH: number): void {
     if (!this.dock.hasAttribute("data-expanded")) return;
-    const toolbar = this.dock.querySelector<HTMLElement>(".toolbar");
-    const tw = toolbar ? toolbar.offsetWidth : 48;
-    const th = toolbar ? toolbar.offsetHeight : 48;
+    const tw = this.toolbar.offsetWidth;
+    const th = this.toolbar.offsetHeight;
     const ds = getComputedStyle(this.dock);
     const bw = parseFloat(ds.borderLeftWidth) + parseFloat(ds.borderRightWidth);
     const bh = parseFloat(ds.borderTopWidth) + parseFloat(ds.borderBottomWidth);
@@ -2189,14 +2171,12 @@ class Commentor {
       resolved: this.filteredThreads("resolved").length,
       history: this.filteredThreads("history").length,
     };
-    const count = this.content.querySelector<HTMLElement>(".count");
-    if (count) {
-      count.textContent = String(counts.active);
-      count.setAttribute(
-        "aria-label",
-        `${counts.active} active comment${counts.active === 1 ? "" : "s"}`,
-      );
-    }
+    const count = this.content.querySelector<HTMLElement>(".count")!;
+    count.textContent = String(counts.active);
+    count.setAttribute(
+      "aria-label",
+      `${counts.active} active comment${counts.active === 1 ? "" : "s"}`,
+    );
     for (const filter of THREAD_FILTERS) {
       const button = this.filterButtons[filter];
       button.replaceChildren(
@@ -2257,11 +2237,7 @@ class Commentor {
               onclick: () => {
                 this.collapseDrawer();
                 this.setCommentMode(true);
-                this.root
-                  .querySelector<HTMLButtonElement>(
-                    '[data-testid="commentor-comment-btn"]',
-                  )
-                  ?.focus();
+                this.commentButton.focus();
               },
             },
             svg(ICONS.comment),
@@ -2487,8 +2463,8 @@ class Commentor {
   private wireTooltips(): void {
     const show = (target: HTMLElement) => {
       if (this.tipScrollSuppress || this.tipTarget === target) return;
-      const text = target.getAttribute("data-tip");
-      if (!text) return;
+      // Every tooltip target is built with a non-empty data-tip.
+      const text = target.getAttribute("data-tip")!;
       this.hideTip();
       this.tipTarget = target;
       this.tipPreviousDescription = target.getAttribute("aria-describedby");

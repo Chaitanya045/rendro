@@ -361,6 +361,33 @@ difference. The second run and both comparisons always execute, so a failure in
 only one of the two runs is reported with the exact tests. It also runs the e2e
 suite once per engine with retries disabled (`E2E_RETRIES=0`).
 
+## Comment widget lab (#118)
+
+`tests/commentor-{widget,drawer,protocol,edges}-browser.test.ts` run the real
+`commentor.js` in a publisher document inside a full-viewport iframe, with the real
+`CommentorParentHost` and `ParentCommentTransport` in the parent shell. Only Convex is
+replaced by the in-memory backend in `tests/fixtures/comment-lab-browser.ts`, which tests
+script through `window.lab` (`tests/helpers/comment-lab.ts`): seed or publish threads,
+hold a mutation open and settle it later, fail a method with a plain, public-code or
+quota error, serve older pages, and publish snapshots before or after an acknowledgement
+(`publishOnMutate`). Assertions read the final DOM, ARIA state, focus and announcements;
+protocol hardening cases speak to the parent from inside the publisher document.
+
+Ordering is controlled, not slept on. A Playwright clock (`install`/`runFor`/`setSystemTime`)
+drives the five-second delete window, the 60-second slow-write notice, quota countdowns and
+tooltip delays; `Lab.tick()` waits one real task so queued `selectionchange` events are
+delivered under a fake clock; a test that needs a live update to overtake a pending reveal
+holds `requestAnimationFrame` in the document and releases it explicitly. The fixture lays
+the iframe out over the whole viewport because the pinned Chromium stops running animation
+frames for off-screen frames under `CI=true`.
+
+Pure logic stays in Node: `commentor-protocol-units.test.ts` (message guards, argument
+validation, recovery state, pending deletions, transport edge cases),
+`commentor-host-units.test.ts` (host scoping, the Convex backends and `bootCommentorParentHost`
+with a mocked `ConvexClient`), `commentor-parent-entry.test.ts` and
+`commentor-direct-client.test.ts` (the accepted direct-Convex legacy configuration of the
+widget, with a mocked client).
+
 ## Shared fixture
 
 Call `createBrowserHarness()` from `tests/helpers/browser.ts` once at file
