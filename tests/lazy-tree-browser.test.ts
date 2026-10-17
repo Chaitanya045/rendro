@@ -348,14 +348,17 @@ describe("lazy tree document loading", () => {
     expect(await status(tab).textContent()).toBe("Document failed to load. Select it again to retry.");
     expect(await status(tab).getAttribute("aria-live")).toBe("assertive");
     expect(await tab.locator("#content-frame").getAttribute("aria-busy")).toBeNull();
-    await hold.release();
+    // The failed document's request stays held until the retry is asserted: releasing it
+    // earlier lets its late load event race the retry's handlers and clear the announcement.
     const next = await held(tab, "**/legacy-view/org/files/guide/b.html");
     await tab.locator('a.tree-link[href="/legacy-view/org/files/guide/b.html"]').click();
     await next.seen;
     expect(await tab.locator("html").getAttribute("class")).not.toContain("doc-loading-error");
     expect(await status(tab).getAttribute("aria-live")).toBe("polite");
     expect(await status(tab).textContent()).toBe("Loading document");
+    expect(await tab.locator("#content-frame").getAttribute("aria-busy")).toBe("true");
     await next.release();
+    await hold.release();
   });
 
   it("lets a late load error replace the pending loader and keeps it from being cleared", async () => {

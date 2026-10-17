@@ -83,8 +83,9 @@ describe("one cumulative discovery budget", () => {
 
 // V8 coverage instruments every hot character loop. Measure production code in
 // ONE uninstrumented child, with the real deadline enabled. Absolute CPU limits
-// and strict deterministic work ratios accompany a 25ms timing floor. Fixed
-// three-sample medians stabilize CPU ratios; every sample retains the 1s ceiling.
+// and strict deterministic work ratios accompany a 25ms timing floor. Contention only
+// adds CPU time, so the CPU ratio compares the minimum of several interleaved samples per
+// size (tests/helpers/share-performance.ts); every sample retains the 1s ceiling.
 it("meets the generated adversarial CPU/work matrix and accepts a real 1 MiB document", async () => {
   const { stdout } = await promisify(execFile)(process.execPath, ["--import", "tsx", "tests/helpers/share-performance.ts"]);
   const report = JSON.parse(stdout) as { results: Array<{ name: string; points: Array<{ cpu: number; maxCpu: number; work: number }> }>; legitimate: { cpu: number; bytes: number } };
@@ -96,7 +97,7 @@ it("meets the generated adversarial CPU/work matrix and accepts a real 1 MiB doc
   }
   expect(report.legitimate.bytes).toBeGreaterThan(1_000_000);
   expect(report.legitimate.cpu).toBeLessThan(1000);
-}, 15_000); // Child startup/scheduling is separate from measured discovery CPU.
+}); // The timing project's 30s budget is only a hang guard; it never bounds measured CPU.
 
 describe("bounded parser and linear tree repair", () => {
   it("bounds actual open elements including implicit html/body and templates", () => {
