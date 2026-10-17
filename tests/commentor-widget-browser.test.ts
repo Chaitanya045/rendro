@@ -184,7 +184,7 @@ describe("authoring", () => {
     expect(await post.isDisabled()).toBe(true);
     expect(await lab.tid("commentor-composer-textarea").isDisabled()).toBe(true);
     expect(await lab.tid("commentor-composer-cancel").isDisabled()).toBe(true);
-    await lab.host(l => l.settle(0, { kind: "convex", code: "forbidden" }));
+    await lab.release({ kind: "convex", code: "forbidden" });
     await expect.poll(() => toastText(lab).innerText()).toBe("You do not have permission to change this comment.");
     expect(await lab.tid("commentor-composer-textarea").inputValue()).toBe("Held comment");
     expect(await post.innerText()).toBe("Post");
@@ -250,7 +250,7 @@ describe("thread actions and permissions", () => {
     await expect.poll(() => resolve.getAttribute("aria-label")).toBe("Resolve comment by Ada in progress");
     expect(await resolve.getAttribute("aria-busy")).toBe("true");
     expect(await resolve.isDisabled()).toBe(true);
-    await lab.host(l => { l.holds = []; l.settle(0); });
+    await lab.release();
     await expect.poll(() => bubble.locator(".head .resolved").innerText()).toBe("Resolved");
     expect(await bubble.locator('[data-testid="commentor-resolve-btn"]').getAttribute("aria-label")).toBe("Reopen comment by Ada");
     expect(await lastCall(lab)).toMatchObject({ method: "thread.resolve", args: { threadId: "t1", resolved: true } });
@@ -271,6 +271,22 @@ describe("thread actions and permissions", () => {
     await lab.host(l => { l.failures = { "thread.archive": { kind: "plain" } }; });
     await bubble.locator('[data-testid="commentor-archive-btn"]').click();
     await expect.poll(() => toastText(lab).last().innerText()).toBe("Could not archive comment.");
+  });
+
+  it("shows a write as pending before the host holds it, and release waits for the host to receive it", async () => {
+    const lab = await commentLab.open();
+    await lab.ready([{ _id: "t1", body: "Fix me", anchor: heading }]);
+    await expect.poll(() => lab.pins().count()).toBe(1);
+    const bubble = await openBubble(lab);
+    const resolve = bubble.locator('[data-testid="commentor-resolve-btn"]');
+    // A slow host: the request reaches it long after the widget showed its pending state.
+    await lab.host(l => { const original = l.mutate.bind(l); l.mutate = (method, args) => new Promise(done => setTimeout(done, 300)).then(() => original(method, args)); l.holds = ["thread.resolve"]; });
+    await resolve.click();
+    await expect.poll(() => resolve.getAttribute("aria-busy")).toBe("true");
+    expect(await lab.host(l => l.held.length)).toBe(0);
+    await lab.release();
+    await expect.poll(() => bubble.locator(".head .resolved").innerText()).toBe("Resolved");
+    expect(await lab.host(l => l.held.length)).toBe(0);
   });
 
   it("offers Delete and Archive only where the server allows them, and nothing to read-only viewers", async () => {
@@ -381,7 +397,7 @@ describe("replies", () => {
     await expect.poll(() => send.innerText()).toBe("Sending…");
     expect(await send.getAttribute("aria-busy")).not.toBeNull();
     expect(await input.isDisabled()).toBe(true);
-    await lab.host(l => { l.holds = []; l.settle(0); });
+    await lab.release();
     await expect.poll(() => bubble.locator(".reply").count()).toBe(2);
     expect(await input.inputValue()).toBe("");
     expect(await send.innerText()).toBe("Reply");

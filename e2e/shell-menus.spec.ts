@@ -189,6 +189,9 @@ test.describe("account menu", () => {
     // Sign out in another tab of the same browser: the surviving tab closes its overlays.
     const other = await page.context().newPage();
     await other.goto("/account/security");
+    // The sign-in methods replace a skeleton and reveal the password form, which moves the footer's Sign out button:
+    // a click that straddles that layout shift is lost, so wait until the page stopped loading.
+    await expect(other.locator("#method-list")).toHaveAttribute("aria-busy", "false");
     await other.getByRole("button", { name: "Sign out" }).first().click();
     await expect(other.getByRole("heading", { name: "You're signed out" })).toBeVisible();
     await expect(avatar).toHaveAttribute("aria-expanded", "false");

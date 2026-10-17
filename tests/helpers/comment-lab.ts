@@ -86,6 +86,11 @@ export class Lab {
     return this.frame.evaluate(`(${action.toString()})(${JSON.stringify(arg ?? null)})`) as Promise<Awaited<T>>;
   }
   get calls() { return this.host(lab => lab.calls); }
+  /** Answer the oldest held request. The widget shows its pending state before the request crosses to the host, so wait for it to arrive. */
+  async release(failure?: Parameters<CommentLab["settle"]>[1]) {
+    await expect.poll(() => this.host(lab => lab.held.length)).toBeGreaterThan(0);
+    await this.host((lab, failure) => { lab.holds = []; lab.settle(0, failure ?? undefined); }, failure ?? null);
+  }
   /** Wait for the widget to be hydrated and subscribed, then publish the seed. */
   async ready(threads: Parameters<CommentLab["seed"]>[0] = []) {
     await this.ui.locator('[data-testid="commentor-dock"]').waitFor({ state: "attached" });

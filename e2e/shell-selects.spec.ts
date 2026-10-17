@@ -251,10 +251,8 @@ test.describe("select behavior on a management page", () => {
     await expect(page.locator("#probe-form .rd-select-trigger")).toHaveCount(2);
   });
 
-  // Product bug (reported with this slice): the reset listener schedules its refresh in a microtask,
-  // which runs before the browser restores the control when the user activates a Reset button.
-  // Programmatic form.reset() (used by every current controller) refreshes correctly, tested above.
-  test.fail("enhanced select follows a user-activated native Reset button (known bug)", async ({ page, pooled }) => {
+  // A user-activated Reset restores the control only after the reset event (and its microtasks), unlike form.reset().
+  test("enhanced select follows a user-activated native Reset button", async ({ page, pooled }) => {
     await page.goto(`/organizations/${pooled.organizations[4].id}/settings`);
     await shellReady(page);
     await page.evaluate(() => {
@@ -269,7 +267,12 @@ test.describe("select behavior on a management page", () => {
     await expect(trigger).toHaveText("Beta");
     await page.getByRole("button", { name: "Reset probe" }).click();
     await expect(page.locator("#reset-select")).toHaveValue("Alpha");
-    await expect(trigger).toHaveText("Alpha", { timeout: 3000 });
+    await expect(trigger).toHaveText("Alpha");
+    await expect(trigger).toHaveAttribute("title", "Alpha");
+    await trigger.click();
+    const popup = page.getByRole("listbox", { name: "Choice" });
+    await expect(popup.getByRole("option", { name: "Alpha" })).toHaveAttribute("aria-selected", "true");
+    await expect(popup.getByRole("option", { name: "Beta" })).toHaveAttribute("aria-selected", "false");
   });
 
   test("select popup flips near the viewport edge, clamps to the right edge and repositions on resize", async ({ page, pooled }) => {

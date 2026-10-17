@@ -343,6 +343,22 @@ describe("shared select in Chromium", () => {
     await tab.waitForFunction(() => document.querySelector("#mode + .rd-select-trigger .rd-select-value")!.textContent === "Choose a mode");
   });
 
+  it("follows a user-activated native Reset button: label, selection and ARIA state return to the native default", async () => {
+    const tab = await open();
+    await trigger(tab, "named").click();
+    await popup(tab, "Named choice").locator('[role="option"]', { hasText: "Two" }).click();
+    expect(await state(tab, "named")).toMatchObject({ value: "Two", text: "Two" });
+    // A real click on Reset: the browser restores the control only after the reset event and its microtasks.
+    await tab.locator("#reset").click();
+    await tab.waitForFunction(() => document.querySelector("#named + .rd-select-trigger")!.textContent === "One");
+    expect(await state(tab, "named")).toMatchObject({ value: "One", text: "One", expanded: "false" });
+    expect(await trigger(tab, "named").getAttribute("title")).toBe("One");
+    await trigger(tab, "named").click();
+    expect(await popup(tab, "Named choice").locator('[role="option"]').evaluateAll(items => items.map(item => [item.textContent, item.getAttribute("aria-selected")])))
+      .toEqual([["One", "true"], ["Two", "false"]]);
+    expect((await state(tab, "named")).activeText).toBe("One");
+  });
+
   it("shows a default message when a valid select is reported invalid without one", async () => {
     const tab = await open();
     await tab.evaluate(() => document.getElementById("named")!.dispatchEvent(new Event("invalid", { cancelable: true })));
