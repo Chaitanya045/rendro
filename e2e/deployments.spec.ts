@@ -205,7 +205,8 @@ test.describe("deployments", () => {
     await expect(projectRow.locator(".badge")).toHaveText("Deployed");
     await expect(checklist.nth(2)).toHaveClass(/complete/);
     await expect(recent.locator(".overview-row strong")).toHaveText("Overview Org docs");
-    await expect(recent.locator(".overview-row .cell-secondary")).toHaveText("Immutable deployment");
+    // A CLI run in CI records the commit it ran for; a local run has none.
+    await expect(recent.locator(".overview-row .cell-secondary")).toHaveText(/^(Immutable deployment|Commit [0-9a-f]{7,64})$/);
     await expect(recent.locator(".overview-row .badge")).toHaveText("Active");
     await expect(recent.locator(".overview-row .badge")).toHaveClass(/success/);
 
