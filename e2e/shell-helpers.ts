@@ -101,3 +101,21 @@ export async function holdFirst(page: Page, glob: string) {
 export async function settleFrames(page: Page) {
   await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(resolve, 0)))));
 }
+
+/** Replace the async clipboard so success, delay and rejection are deterministic in every engine. */
+export async function fakeClipboard(page: Page) {
+  await page.addInitScript(() => {
+    const state = { mode: "ok" as "ok" | "reject", delay: 250, writes: [] as string[] };
+    (window as unknown as { clipboardState: typeof state }).clipboardState = state;
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: {
+        writeText: (value: string) => new Promise<void>((resolve, reject) => setTimeout(() => {
+          if (state.mode === "reject") reject(new DOMException("denied", "NotAllowedError"));
+          else { state.writes.push(value); resolve(); }
+        }, state.delay)),
+      },
+    });
+  });
+}
+export const clipboard = (page: Page) => page.evaluate(() => (window as unknown as { clipboardState: { writes: string[] } }).clipboardState.writes);
