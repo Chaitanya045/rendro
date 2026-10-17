@@ -2,6 +2,8 @@ export interface DocumentNavigationTarget {
   fullPath: string;
   search: string;
   fragment: string;
+  /** A link to another site, confirmed by the reader and opened in a new tab; the document fields are then empty. */
+  href?: string;
 }
 
 /** One bounded pending destination; only the reader can reopen a dismissed prompt. */
@@ -13,7 +15,8 @@ export function createNavigationConfirmation() {
       // Never change the destination of a visible (possibly focused) Open button.
       if (state === "visible") return null;
       if (pending?.fullPath === target.fullPath && pending.search === target.search
-        && pending.fragment === target.fragment) return null;
+        && pending.fragment === target.fragment
+        && pending.href === target.href) return null;
       pending = { ...target };
       // Once dismissed, requests only update this slot: no timers, queue, DOM
       // changes or announcements. Time and frame messages cannot reopen it.

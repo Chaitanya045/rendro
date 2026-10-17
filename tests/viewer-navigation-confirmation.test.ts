@@ -52,12 +52,24 @@ describe("parent-owned navigation confirmation", () => {
     { ...first, fullPath: second.fullPath },
     { ...first, search: second.search },
     { ...first, fragment: second.fragment },
+    { ...first, href: "https://outside.test/" },
   ])("keeps changes to each destination component: %j", target => {
     const confirmation = createNavigationConfirmation();
     confirmation.request(first);
     confirmation.dismiss();
     expect(confirmation.request(target)).toBeNull();
     expect(confirmation.reopen()).toEqual(target);
+  });
+
+  it("holds a link to another site in the same slot, de-duplicated by its address", () => {
+    const confirmation = createNavigationConfirmation();
+    const link = { fullPath: "", search: "", fragment: "", href: "https://outside.test/a" };
+    expect(confirmation.request(link)).toEqual(link);
+    expect(confirmation.request({ ...link })).toBeNull();
+    expect(confirmation.dismiss()).toBe(true);
+    expect(confirmation.request({ ...link })).toBeNull();
+    expect(confirmation.request({ ...link, href: "https://outside.test/b" })).toBeNull();
+    expect(confirmation.reopen()).toEqual({ ...link, href: "https://outside.test/b" });
   });
 
   it("allows any number of reader-driven dismiss/reopen cycles with later links", () => {

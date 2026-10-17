@@ -281,11 +281,14 @@ test.describe("link confirmation", () => {
     await tab.route("https://docs.example.test/**", route => { requests.push(route.request().url()); return route.fulfill({ contentType: "text/html", body: "<h1>outside</h1>" }); });
     await tab.goto(site.docs);
     await expect(heading(tab, "Viewer home")).toBeVisible();
-    // The shell only allows its own origin in frames, so the navigation is refused before any request is made. What the
-    // frame shows afterwards, and whether it adds a history entry, differs by engine.
+    // The shell only allows its own origin in frames, so the frame never navigates: the click is handed to the shell,
+    // which asks before doing anything. No request is made, the document stays and no history entry is added.
+    const entries = await historyLength(tab);
     await content(tab).locator("#external").click();
+    await expect(notice(tab)).toBeVisible();
     await expect(tab).toHaveURL(new RegExp(`${site.docs.replaceAll("/", "\\/")}$`));
-    await expect(notice(tab)).toHaveCount(0);
+    await expect(heading(tab, "Viewer home")).toBeVisible();
+    expect(await historyLength(tab)).toBe(entries);
     expect(requests).toEqual([]);
     // Reloading the shell restores the document whatever the frame ended up showing.
     await tab.reload();
@@ -293,14 +296,41 @@ test.describe("link confirmation", () => {
     expect(requests).toEqual([]);
   });
 
-  test.fail("a link to another site asks the reader before leaving the document (known bug)", async ({ asOwner: tab, site }) => {
-    // Today the click does nothing visible in Firefox and WebKit and replaces the document with a browser error page in
-    // Chromium. Neither tells the reader anything, and the shell offers no way to follow the link.
-    await tab.route("https://docs.example.test/**", route => route.fulfill({ contentType: "text/html", body: "<h1>outside</h1>" }));
+  test("a link to another site asks the reader, then opens in a new tab that cannot reach the viewer", async ({ asOwner: tab, site, context }) => {
+    const requests: string[] = [];
+    await context.route("https://docs.example.test/**", route => { requests.push(route.request().url()); return route.fulfill({ contentType: "text/html", body: "<h1>outside</h1>" }); });
     await tab.goto(site.docs);
     await expect(heading(tab, "Viewer home")).toBeVisible();
     await content(tab).locator("#external").click();
-    await expect(notice(tab)).toBeVisible();
+    await expect(destination(tab)).toHaveText("Open external link https://docs.example.test/outside?");
+    await expect(notice(tab).getByRole("button", { name: "Open external link" })).toHaveAccessibleDescription("Open external link https://docs.example.test/outside?");
+    // Nothing is opened until the reader says so, and a second click on the same link does not replace the prompt.
+    await content(tab).locator("#external").click();
+    await expect(notice(tab)).toHaveCount(1);
+    expect(requests).toEqual([]);
+
+    // Dismissing keeps a Review button; the reader can bring the prompt back with the same address.
+    await notice(tab).getByRole("button", { name: "Dismiss" }).click();
+    await expect(notice(tab)).toHaveCount(0);
+    await review(tab).getByRole("button", { name: "Review external link" }).click();
+    await expect(destination(tab)).toHaveText("Open external link https://docs.example.test/outside?");
+    expect(requests).toEqual([]);
+
+    const entries = await historyLength(tab);
+    const popup = context.waitForEvent("page");
+    await notice(tab).getByRole("button", { name: "Open external link" }).click();
+    const opened = await popup;
+    await opened.waitForLoadState("domcontentloaded");
+    expect(opened.url()).toBe("https://docs.example.test/outside");
+    // The opened page has no handle back to the viewer.
+    expect(await opened.evaluate(() => window.opener === null)).toBe(true);
+    await opened.close();
+    await expect(notice(tab)).toHaveCount(0);
+    await expect(review(tab)).toHaveCount(0);
+    await expect(tab).toHaveURL(new RegExp(`${site.docs.replaceAll("/", "\\/")}$`));
+    await expect(heading(tab, "Viewer home")).toBeVisible();
+    expect(await historyLength(tab)).toBe(entries);
+    expect(requests).toEqual(["https://docs.example.test/outside"]);
   });
 
   test("a link that opens a new tab leaves the viewer where it was", async ({ asOwner: tab, site, context }) => {

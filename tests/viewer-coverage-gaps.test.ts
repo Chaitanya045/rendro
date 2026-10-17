@@ -1,7 +1,7 @@
 import { Window as DOMWindow } from "happy-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { managementLabel } from "@/ui/management-ui";
-import { isContentFrameSource, normalizeLoadedDocumentPath, validDocumentSearch } from "@/lazy-tree/messages";
+import { externalLinkHref, isContentFrameSource, normalizeLoadedDocumentPath, validDocumentSearch } from "@/lazy-tree/messages";
 import { replaceViewerFragment, sendDocumentFragment } from "@/viewer/fragments";
 import { createMessageRateLimit } from "@/viewer/message-limits";
 import { createStylesheetRenewer } from "@/viewer/stylesheets";
@@ -45,6 +45,21 @@ describe("shared labels and message validators", () => {
     expect(isContentFrameSource(null, null)).toBe(false);
     expect(validDocumentSearch("?a=1")).toBe(true);
     for (const value of ["?a#b", "?a\nb", "a=1", 1, "?" + "x".repeat(4096)]) expect(validDocumentSearch(value)).toBe(false);
+  });
+
+  it("accepts only an absolute http(s) address on another origin as an external link", () => {
+    const own = "https://rendro.test";
+    const base = `${own}/organizations/o/projects/p/docs/files/index.html`;
+    expect(externalLinkHref("https://other.test/a?b=1#c", base, own)).toBe("https://other.test/a?b=1#c");
+    expect(externalLinkHref("http://other.test", base, own)).toBe("http://other.test/");
+    expect(externalLinkHref("//other.test/x", base, own)).toBe("https://other.test/x");
+    expect(externalLinkHref("https://rendro.test:8443/x", base, own)).toBe("https://rendro.test:8443/x");
+    for (const value of ["/organizations", "files/other.html", "https://rendro.test/x", "mailto:a@other.test", "javascript:alert(1)",
+      "data:text/html,x", "ftp://other.test/", "https://", "http://[", 1, null, undefined, `https://other.test/${"x".repeat(2048)}`]) {
+      expect(externalLinkHref(value, base, own), String(value)).toBeNull();
+    }
+    // Short as written, long once resolved: the bound applies to what would be shown.
+    expect(externalLinkHref("//other.test/\u00e9".padEnd(700, "\u00e9"), base, own)).toBeNull();
   });
 
   it("rate-limits with the page clock by default", () => {
@@ -246,12 +261,35 @@ describe("document navigation edge cases", () => {
     ["a named window", '<a id="l" target="elsewhere" href="other.html">x</a>'],
     ["a download", '<a id="l" download href="other.html">x</a>'],
     ["an anchor with no href", '<a id="l" name="target">x</a>'],
-    ["an external link", '<a id="l" href="https://external.test/page.html">x</a>'],
   ])("leaves %s to the browser", (_name, html) => {
     const f = fixture(html);
     const event = click(f.win, "#l");
     expect(event.defaultPrevented).toBe(false);
     expect(f.parent.postMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "doc-navigate" }), origin);
+  });
+
+  it.each([
+    ["a link", '<a id="l" href="https://external.test/page.html?q=1#top">x</a>', "https://external.test/page.html?q=1#top"],
+    ["a protocol-relative link", '<a id="l" href="//external.test/a b">x</a>', "https://external.test/a%20b"],
+    ["a link that targets the frame", '<a id="l" target="_self" href="http://external.test:8080/">x</a>', "http://external.test:8080/"],
+  ])("hands %s to another site to the shell instead of loading it in the frame", (_name, html, href) => {
+    const f = fixture(html);
+    expect(click(f.win, "#l").defaultPrevented).toBe(true);
+    expect(f.parent.postMessage).toHaveBeenCalledWith({ type: "doc-external", path: config.documentPath, href }, origin);
+    expect(f.parent.postMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "doc-navigate" }), origin);
+  });
+
+  it.each([
+    ["a mail link", '<a id="l" href="mailto:someone@external.test">x</a>', {}],
+    ["a script URL", '<a id="l" href="javascript:void(0)">x</a>', {}],
+    ["a link on the viewer origin outside the document scope", `<a id="l" href="${origin}/organizations">x</a>`, {}],
+    ["a link too long to confirm", `<a id="l" href="https://external.test/${"x".repeat(2100)}">x</a>`, {}],
+    ["a link in a standalone document", '<a id="l" href="https://external.test/page.html">x</a>', { standalone: true }],
+    ["a link in a share", '<a id="l" href="https://external.test/page.html">x</a>', { singleDocument: true }],
+  ])("leaves %s to the browser", (_name, html, options) => {
+    const f = fixture(html, options);
+    expect(click(f.win, "#l").defaultPrevented).toBe(false);
+    expect(f.parent.postMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "doc-external" }), origin);
   });
 
   it.each(["_self", "content-frame"])("routes a %s target through the shell", target => {

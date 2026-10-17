@@ -42,7 +42,7 @@ function shell(options: Shell = {}): string {
   return `<!doctype html><html><head><meta charset="utf-8"><style>
 body{margin:0;font:14px system-ui}.sidebar{width:240px;float:left}.sidebar-tree{height:320px;overflow:auto;position:relative}
 .tree-item{display:flex;padding:4px 8px;position:relative}.tree-folder-content{margin-left:12px}.active-indicator{position:absolute;top:0;left:0;width:4px;height:24px;background:#06c}
-.tree-folder:not(.open)>.tree-folder-content{display:none}#content-frame{display:block;width:420px;height:300px;float:left;border:0}
+.tree-folder:not(.open)>.tree-folder-collapse{display:none}#content-frame{display:block;width:420px;height:300px;float:left;border:0}
 .document-navigation-notice{position:fixed;right:8px;bottom:8px;background:#fff;border:1px solid #333;padding:8px}
 ${options.noMatchMedia ? "" : ""}</style>
 ${options.noMatchMedia ? "<script>Object.defineProperty(window,'matchMedia',{value:undefined,configurable:true})</script>" : ""}
@@ -109,6 +109,7 @@ async function open(path: string, options: Options = {}) {
 const pageErrors = (tab: Page) => (tab as Page & { errors: string[] }).errors;
 const item = (tab: Page, path: string) => tab.locator(`.tree-item[data-path="${path}"]`);
 const folderItem = (tab: Page, path: string) => tab.locator(`.tree-folder[data-path="${path}"] > .tree-item`);
+const collapseOf = (tab: Page, path: string) => tab.locator(`.tree-folder[data-path="${path}"] > .tree-folder-collapse`);
 const frameSrc = (tab: Page) => tab.locator("#content-frame").getAttribute("src");
 const pushes = (tab: Page) => tab.evaluate(() => (window as unknown as { pushed: string[] }).pushed);
 const post = (tab: Page, payload: unknown) => tab.evaluate(message => document.querySelector<HTMLIFrameElement>("#content-frame")!.contentWindow!.postMessage({ type: "fixture-post", payload: message }, "*"), payload);
@@ -135,9 +136,12 @@ describe("lazy tree folders (legacy API)", () => {
     expect(await tab.locator("#tree-container").getAttribute("aria-busy")).toBeNull();
     const guide = folderItem(tab, "org/guide/");
     expect(await guide.getAttribute("aria-expanded")).toBe("false");
+    // A closed folder's rows are inert (out of Tab and the accessibility tree) until it opens, and again once it closes.
+    expect(await collapseOf(tab, "org/guide/").getAttribute("inert")).toBe("");
     await guide.click();
     await item(tab, "org/guide/a.html").waitFor();
     expect(await guide.getAttribute("aria-expanded")).toBe("true");
+    expect(await collapseOf(tab, "org/guide/").getAttribute("inert")).toBeNull();
     expect(await guide.locator(".folder-icon").textContent()).toBe("folder_open");
     expect(await tab.locator('.tree-folder[data-path="org/guide/"]').getAttribute("aria-busy")).toBeNull();
     // Opening the nested folder uses the depth of its parent.
@@ -145,10 +149,13 @@ describe("lazy tree folders (legacy API)", () => {
     await item(tab, "org/guide/deep/c.html").waitFor();
     await guide.click();
     expect(await guide.getAttribute("aria-expanded")).toBe("false");
+    expect(await collapseOf(tab, "org/guide/").getAttribute("inert")).toBe("");
+    expect(await collapseOf(tab, "org/guide/deep/").getAttribute("inert")).toBeNull();
     expect(await guide.locator(".folder-icon").textContent()).toBe("folder");
     const before = requests.filter(path => path.startsWith("/api/tree/")).length;
     await guide.click();
     expect(await guide.getAttribute("aria-expanded")).toBe("true");
+    expect(await collapseOf(tab, "org/guide/").getAttribute("inert")).toBeNull();
     expect(requests.filter(path => path.startsWith("/api/tree/")).length).toBe(before);
     // A folder with no children still opens, instead of staying busy.
     await folderItem(tab, "org/empty/").click();
@@ -182,6 +189,8 @@ describe("lazy tree folders (legacy API)", () => {
     expect(await error.getAttribute("role")).toBe("alert");
     expect(await error.textContent()).toContain("Failed to load folder.");
     expect(await folderItem(tab, "org/guide/").getAttribute("aria-expanded")).toBe("true");
+    // The error and its Retry button are reachable, so the folder is not inert.
+    expect(await collapseOf(tab, "org/guide/").getAttribute("inert")).toBeNull();
     expect(await tab.locator('.tree-folder[data-path="org/guide/"]').getAttribute("aria-busy")).toBeNull();
     fail = false;
     await error.getByRole("button", { name: "Retry" }).click();
@@ -702,6 +711,93 @@ describe("lazy tree navigation confirmation", () => {
     expect(await frameSrc(tab)).toBe("/legacy-view/org/files/guide/b.html?v=1");
   });
 
+  describe("a link to another site", () => {
+    const external = { type: "doc-external", path: "guide/a.html", href: "https://outside.test/page?q=1#top" };
+    // Opening is observed through window.open: the test never leaves the fixture origin.
+    const spyOpen = (tab: Page) => tab.evaluate(() => {
+      const calls: unknown[][] = [];
+      (window as unknown as { opened: unknown[][] }).opened = calls;
+      window.open = (...args: unknown[]) => { calls.push(args); return null; };
+    });
+    const opened = (tab: Page) => tab.evaluate(() => (window as unknown as { opened: unknown[][] }).opened);
+
+    it("asks first, then opens a new tab that has no handle back to the viewer, leaving the document where it is", async () => {
+      const tab = await open("/docs/org/guide/a.html");
+      await settled(tab);
+      await spyOpen(tab);
+      await post(tab, external);
+      await notice(tab).waitFor();
+      const label = tab.locator("#document-navigation-destination");
+      expect(await label.textContent()).toBe("Open external link https://outside.test/page?q=1#top?");
+      expect(await notice(tab).getByRole("button", { name: "Open external link" }).getAttribute("aria-describedby")).toBe("document-navigation-destination");
+      // Nothing happens until the reader confirms, however often the document asks.
+      await post(tab, external);
+      await post(tab, { ...external, href: "https://other.test/" });
+      expect(await label.textContent()).toBe("Open external link https://outside.test/page?q=1#top?");
+      expect(await opened(tab)).toEqual([]);
+      const history = (await pushes(tab)).length;
+      await notice(tab).getByRole("button", { name: "Open external link" }).click();
+      expect(await opened(tab)).toEqual([["https://outside.test/page?q=1#top", "_blank", "noopener,noreferrer"]]);
+      expect(await notice(tab).count()).toBe(0);
+      expect(await location(tab)).toBe("/docs/org/guide/a.html");
+      expect(await frameSrc(tab)).toBe("/legacy-view/org/files/guide/a.html");
+      expect((await pushes(tab)).length).toBe(history);
+      // The prompt is free for the next link.
+      await post(tab, external);
+      await notice(tab).waitFor();
+    });
+
+    it("can be dismissed and reviewed, keeping only the latest address, and opens nothing until confirmed", async () => {
+      const tab = await open("/docs/org/guide/a.html");
+      await settled(tab);
+      await spyOpen(tab);
+      await post(tab, external);
+      await notice(tab).waitFor();
+      await notice(tab).getByRole("button", { name: "Dismiss" }).click();
+      const review = tab.getByRole("button", { name: "Review external link" });
+      await review.waitFor();
+      await post(tab, { ...external, href: "https://later.test/" });
+      expect(await notice(tab).count()).toBe(0);
+      await review.click();
+      await notice(tab).waitFor();
+      expect(await tab.locator("#document-navigation-destination").textContent()).toBe("Open external link https://later.test/?");
+      expect(await opened(tab)).toEqual([]);
+      await notice(tab).getByRole("button", { name: "Open external link" }).click();
+      expect(await opened(tab)).toEqual([["https://later.test/", "_blank", "noopener,noreferrer"]]);
+    });
+
+    it("is replaced by a document the reader picks", async () => {
+      const tab = await open("/docs/org/guide/a.html");
+      await settled(tab);
+      await post(tab, external);
+      await notice(tab).waitFor();
+      await tab.locator('a.tree-link[href="/legacy-view/org/files/top.html"]').click();
+      await tab.waitForFunction(() => window.location.pathname === "/docs/org/top.html");
+      expect(await notice(tab).count()).toBe(0);
+    });
+
+    it.each([
+      ["a same-origin address", { href: "/organizations" }],
+      ["the shell's own origin", { href: "PAGE_ORIGIN/other" }],
+      ["a mail link", { href: "mailto:someone@outside.test" }],
+      ["a script URL", { href: "javascript:alert(1)" }],
+      ["a missing address", {}],
+      ["a non-string address", { href: 5 }],
+      ["an oversized address", { href: `https://outside.test/${"x".repeat(2100)}` }],
+    ])("drops %s", async (_name, fields) => {
+      const tab = await open("/docs/org/guide/a.html");
+      await settled(tab);
+      await spyOpen(tab);
+      const message = JSON.parse(JSON.stringify({ ...external, ...fields }).replace("PAGE_ORIGIN", harness.origin)) as Record<string, unknown>;
+      if (!("href" in fields)) delete message.href;
+      await post(tab, message);
+      await post(tab, { type: "doc-fragment", path: "guide/a.html", fragment: "#sentinel" });
+      await tab.waitForFunction(() => window.location.hash === "#sentinel");
+      expect(await notice(tab).count()).toBe(0);
+      expect(await opened(tab)).toEqual([]);
+    });
+  });
+
   it("drops a prompt, and its stale buttons, when the reader picks another document", async () => {
     const tab = await open("/docs/org/guide/a.html");
     await settled(tab);
@@ -743,7 +839,7 @@ describe("lazy tree with scoped documents", () => {
     // One root page, then only the deep link's folder: never wide/ or zeta/.
     expect(treeRequests()).toEqual([page(""), page("guide/")]);
     expect(await rows(tab, "#tree-container")).toEqual(["guide", "wide", "zeta", "top"]);
-    expect(await rows(tab, '.tree-folder[data-path="org/guide/"] > .tree-folder-content')).toEqual(["deep", "a", "b"]);
+    expect(await rows(tab, '.tree-folder[data-path="org/guide/"] > .tree-folder-collapse > .tree-folder-content')).toEqual(["deep", "a", "b"]);
     expect(await frameSrc(tab)).toBe(`${base}/files/guide/a.html?v=1`);
     await indicatorAt(tab, "org/guide/a.html");
     await folderItem(tab, "org/zeta/").click();
@@ -766,13 +862,13 @@ describe("lazy tree with scoped documents", () => {
     await folderItem(tab, "org/wide/").click();
     await item(tab, "org/wide/w2.html").waitFor();
     const more = tab.locator('.tree-folder[data-path="org/wide/"] .load-more-btn');
-    expect(await rows(tab, '.tree-folder[data-path="org/wide/"] > .tree-folder-content')).toEqual(["w1", "w2"]);
+    expect(await rows(tab, '.tree-folder[data-path="org/wide/"] > .tree-folder-collapse > .tree-folder-content')).toEqual(["w1", "w2"]);
     await more.click();
     await item(tab, "org/wide/w3.html").waitFor();
     await more.focus();
     await tab.keyboard.press("Enter");
     await item(tab, "org/wide/w4.html").waitFor();
-    expect(await rows(tab, '.tree-folder[data-path="org/wide/"] > .tree-folder-content')).toEqual(["w1", "w2", "w3", "w4"]);
+    expect(await rows(tab, '.tree-folder[data-path="org/wide/"] > .tree-folder-collapse > .tree-folder-content')).toEqual(["w1", "w2", "w3", "w4"]);
     expect(await more.count()).toBe(0);
     expect(treeRequests()).toEqual([page(""), page("wide/"), page("wide/", "1"), page("wide/", "2")]);
   });
@@ -887,7 +983,7 @@ describe("lazy tree with scoped documents", () => {
     await item(tab, "org/top.html").waitFor();
     await tab.evaluate(() => {
       const outside = document.createElement("div"); outside.className = "tree-folder"; outside.dataset.path = "elsewhere/x/";
-      outside.innerHTML = '<div class="tree-item" role="button" id="outside-item"><span class="folder-icon">folder</span></div><div class="tree-folder-content"></div>';
+      outside.innerHTML = '<div class="tree-item" role="button" id="outside-item"><span class="folder-icon">folder</span></div><div class="tree-folder-collapse"><div class="tree-folder-content"></div></div>';
       document.getElementById("tree-container")!.append(outside);
     });
     await tab.locator("#outside-item").click();
@@ -938,7 +1034,7 @@ describe("lazy tree active indicator", () => {
     });
     await frames(tab);
     expect(await misplaced(tab)).toBe(true);
-    await tab.evaluate(() => document.querySelector(".tree-folder-content")!.dispatchEvent(new Event("transitionend", { bubbles: true })));
+    await tab.evaluate(() => document.querySelector(".tree-folder-collapse")!.dispatchEvent(new Event("transitionend", { bubbles: true })));
     expect(await misplaced(tab)).toBe(false);
     await indicatorAt(tab, "org/guide/a.html");
   });
@@ -1019,7 +1115,7 @@ describe("lazy tree races and malformed shells", () => {
     await tab.evaluate(() => {
       const tree = document.getElementById("tree-container")!;
       const bare = document.createElement("div"); bare.className = "tree-folder"; bare.dataset.path = "org/guide/extra/";
-      bare.innerHTML = '<div class="tree-item" role="button" id="bare-item"></div><div class="tree-folder-content"></div>';
+      bare.innerHTML = '<div class="tree-item" role="button" id="bare-item"></div><div class="tree-folder-collapse"><div class="tree-folder-content"></div></div>';
       const hollow = document.createElement("div"); hollow.className = "tree-folder open"; hollow.dataset.path = "org/hollow/";
       hollow.innerHTML = '<div class="tree-item" role="button" id="hollow-item"></div>';
       const lonely = document.createElement("div"); lonely.className = "tree-load-more"; lonely.innerHTML = '<button class="load-more-btn" id="lonely">Load more...</button>';
