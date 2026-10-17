@@ -22,7 +22,6 @@ const ORG = TREE_HOST?.dataset.treeOrg;
 const DOCUMENT_BASE = TREE_HOST?.dataset.documentBase ?? "";
 interface TreeNode { name: string; path: string; type: "file" | "folder"; size?: number; }
 interface TreePageResponse { children: TreeNode[]; isTruncated: boolean; nextStartAfter?: string; }
-let scopedDocuments: string[] | null = null;
 
 const TREE = document.getElementById("tree-container") as HTMLElement;
 
@@ -160,56 +159,40 @@ async function expand(folder: HTMLElement) {
   }
 }
 
-async function ensureScopedDocuments(): Promise<void> {
-  if (!DOCUMENT_BASE || scopedDocuments) return;
-  const documents: string[] = [];
-  let cursor: string | null = null;
-  do {
-    const url = new URL(`${DOCUMENT_BASE}/tree`, location.origin);
-    if (cursor) url.searchParams.set("cursor", cursor);
-    const response = await fetch(`${url.pathname}${url.search}`);
-    if (!response.ok) throw new Error(`${response.status}`);
-    const result = await response.json() as { documents?: unknown; cursor?: unknown };
-    if (!Array.isArray(result.documents) || !result.documents.every((path) => typeof path === "string")) {
-      throw new Error("Invalid document tree");
-    }
-    documents.push(...result.documents);
-    cursor = typeof result.cursor === "string" && result.cursor ? result.cursor : null;
-  } while (cursor);
-  scopedDocuments = Array.from(new Set(documents));
-}
-
-function scopedChildren(path: string): TreeNode[] {
-  if (!ORG || !scopedDocuments || !path.startsWith(`${ORG}/`)) return [];
-  const relativePrefix = path.slice(ORG.length + 1);
-  const children = new Map<string, TreeNode>();
-  for (const documentPath of scopedDocuments) {
-    if (!documentPath.startsWith(relativePrefix)) continue;
-    const remainder = documentPath.slice(relativePrefix.length);
-    if (!remainder) continue;
-    const separator = remainder.indexOf("/");
-    const name = separator === -1 ? remainder : remainder.slice(0, separator);
-    const type: TreeNode["type"] = separator === -1 ? "file" : "folder";
-    const childPath = `${ORG}/${relativePrefix}${name}${type === "folder" ? "/" : ""}`;
-    children.set(`${type}:${name}`, { name, path: childPath, type });
-  }
-  return Array.from(children.values()).sort((left, right) =>
-    left.type === right.type ? left.name.localeCompare(right.name) : left.type === "folder" ? -1 : 1
-  );
+/** One directory page of a scoped deployment tree (#90). Folders are fetched
+ * only when expanded, and only page by page. */
+async function scopedPage(path: string, cursor?: string): Promise<TreePageResponse> {
+  const root = `${ORG}/`;
+  if (!path.startsWith(root)) return { children: [], isTruncated: false };
+  const url = new URL(`${DOCUMENT_BASE}/tree`, location.origin);
+  url.searchParams.set("dir", path.slice(root.length));
+  if (cursor) url.searchParams.set("cursor", cursor);
+  const response = await fetch(`${url.pathname}${url.search}`);
+  if (!response.ok) throw new Error(`${response.status}`);
+  const result = await response.json() as { children?: unknown; cursor?: unknown };
+  if (!Array.isArray(result.children)) throw new Error("Invalid document tree");
+  const children = result.children.map((child: unknown): TreeNode => {
+    const { name, type } = (child ?? {}) as { name?: unknown; type?: unknown };
+    if (typeof name !== "string" || !name || name.includes("/") || name === "." || name === ".."
+      || (type !== "file" && type !== "folder")) throw new Error("Invalid document tree");
+    return { name, type, path: `${path}${name}${type === "folder" ? "/" : ""}` };
+  });
+  const next = typeof result.cursor === "string" && result.cursor ? result.cursor : undefined;
+  return { children, isTruncated: !!next, nextStartAfter: next };
 }
 
 async function loadPage(folder: HTMLElement, path: string, content: HTMLElement, startAfter?: string) {
   let data: TreePageResponse;
   if (DOCUMENT_BASE) {
-    await ensureScopedDocuments();
-    data = { children: scopedChildren(path), isTruncated: false };
+    data = await scopedPage(path, startAfter);
   } else {
     const url = `/api/tree/${ORG}?prefix=${encodeURIComponent(path)}&limit=${PAGE_SIZE}${startAfter ? `&startAfter=${encodeURIComponent(startAfter)}` : ""}`;
     const res = await fetch(url);
     if (!res.ok) throw new Error(`${res.status}`);
     data = await res.json() as TreePageResponse;
   }
-  const childDepth = parseInt(folder.dataset.depth || "0") + 1;
+  // The tree container itself holds the root's later pages.
+  const childDepth = folder === TREE ? 0 : parseInt(folder.dataset.depth || "0") + 1;
   const children = data.children;
   const existingPaths = new Set(
     Array.from(content.querySelectorAll<HTMLElement>("[data-path]"))
@@ -229,6 +212,12 @@ async function loadPage(folder: HTMLElement, path: string, content: HTMLElement,
   );
   indexChildItems(content);
 
+  setNextPage(folder, content, data);
+
+  if (activeEl) updateIndicator(activeEl);
+}
+
+function setNextPage(folder: HTMLElement, content: HTMLElement, data: TreePageResponse) {
   if (data.isTruncated && data.nextStartAfter) {
     folder.dataset.nextStartAfter = data.nextStartAfter;
     content.insertAdjacentHTML("beforeend",
@@ -236,8 +225,11 @@ async function loadPage(folder: HTMLElement, path: string, content: HTMLElement,
   } else {
     delete folder.dataset.nextStartAfter;
   }
+}
 
-  if (activeEl) updateIndicator(activeEl);
+/** The tree container is the root folder and holds its own rows. */
+function folderContent(folder: HTMLElement): HTMLElement | null {
+  return folder === TREE ? TREE : folder.querySelector<HTMLElement>(":scope > .tree-folder-content");
 }
 
 function collapse(folder: HTMLElement) {
@@ -290,18 +282,20 @@ async function loadRootTree() {
   TREE.dataset.loadingRoot = "true";
   TREE.setAttribute("aria-busy", "true");
   try {
-    let children: TreeNode[];
+    let data: TreePageResponse;
     if (DOCUMENT_BASE) {
-      await ensureScopedDocuments();
-      children = scopedChildren(`${ORG}/`);
+      data = await scopedPage(`${ORG}/`);
     } else {
       const res = await fetch(`/api/tree/${ORG}?prefix=${encodeURIComponent(`${ORG}/`)}&limit=1000`);
       if (!res.ok) throw new Error(`${res.status}`);
-      const data = await res.json() as TreePageResponse;
-      children = data.children;
+      data = await res.json() as TreePageResponse;
     }
+    const children = data.children;
+    TREE.dataset.path = `${ORG}/`;
     TREE.innerHTML = renderActiveIndicator() + (children.length ? renderRows(children, 0) : renderEmptyTree());
     startTreeEntrance(TREE.querySelectorAll<HTMLElement>(".tree-item"));
+    // The first page renders at once; later root pages load on request.
+    setNextPage(TREE, TREE, data);
     const currentDoc = RENDRO_WINDOW.RENDRO_CURRENT_DOC || RENDRO_WINDOW.RENDRO_INITIAL_DOC || docFromPathname();
     if (currentDoc) syncActiveState(currentDoc);
   } catch {
@@ -354,25 +348,24 @@ function handleClick(e: Event) {
     return;
   }
 
-  const loadMoreBtn = target.closest<HTMLButtonElement>(".load-more-btn");
+  // The empty tree's "Return to project" link shares the button style only.
+  const loadMoreBtn = target.closest<HTMLButtonElement>("button.load-more-btn");
   if (loadMoreBtn) {
     e.preventDefault();
-    const folder = loadMoreBtn.closest<HTMLElement>(".tree-folder");
-    if (folder) {
-      const path = folder.dataset.path;
-      const content = folder.querySelector<HTMLElement>(":scope > .tree-folder-content");
-      const next = folder.dataset.nextStartAfter;
-      if (path && content && next) {
-        loadMoreBtn.textContent = "Loading…";
-        loadMoreBtn.disabled = true;
-        loadMoreBtn.setAttribute("aria-busy", "true");
-        void loadPage(folder, path, content, next).catch(() => {
-          if (!loadMoreBtn.isConnected) return;
-          loadMoreBtn.textContent = "Retry";
-          loadMoreBtn.disabled = false;
-          loadMoreBtn.removeAttribute("aria-busy");
-        });
-      }
+    const folder = loadMoreBtn.closest<HTMLElement>(".tree-folder") ?? TREE;
+    const path = folder.dataset.path;
+    const content = folderContent(folder);
+    const next = folder.dataset.nextStartAfter;
+    if (path && content && next) {
+      loadMoreBtn.textContent = "Loading…";
+      loadMoreBtn.disabled = true;
+      loadMoreBtn.setAttribute("aria-busy", "true");
+      void loadPage(folder, path, content, next).catch(() => {
+        if (!loadMoreBtn.isConnected) return;
+        loadMoreBtn.textContent = "Retry";
+        loadMoreBtn.disabled = false;
+        loadMoreBtn.removeAttribute("aria-busy");
+      });
     }
     return;
   }
@@ -601,26 +594,41 @@ async function navigateToDoc(org: string, relPath: string) {
   const fullPath = `${org}/${relPath}`;
   const parts = relPath.split("/");
   let currentPath = org;
+  let parent: HTMLElement = TREE;
 
   for (let i = 0; i < parts.length - 1; i++) {
     currentPath += "/" + parts[i];
-    const folder = document.querySelector<HTMLElement>(
-      `.tree-folder[data-path="${CSS.escape(currentPath)}/"]`,
-    );
+    const folder = await pagedRow<HTMLElement>(parent, `.tree-folder[data-path="${CSS.escape(currentPath)}/"]`);
     if (!folder) break;
     if (!folder.classList.contains("open")) {
       await expand(folder);
       if (!folder.classList.contains("open")) return;
     }
+    parent = folder;
   }
 
-  const item = document.querySelector<HTMLElement>(
-    `.tree-item[data-path="${CSS.escape(fullPath)}"]`,
-  );
+  const item = await pagedRow<HTMLElement>(parent, `.tree-item[data-path="${CSS.escape(fullPath)}"]`);
   if (!item) return;
   document.querySelectorAll(".tree-item.active").forEach((element) => element.classList.remove("active"));
   item.classList.add("active");
   updateIndicator(item, true);
+}
+
+/** Find a row, loading later pages of only its parent folder while the row is
+ * beyond the pages shown so far. A failed page leaves the row unrevealed. */
+async function pagedRow<T extends HTMLElement>(parent: HTMLElement, selector: string): Promise<T | null> {
+  let row = document.querySelector<T>(selector);
+  for (let next = parent.dataset.nextStartAfter; !row && next; ) {
+    try {
+      await loadPage(parent, parent.dataset.path as string, folderContent(parent) as HTMLElement, next);
+    } catch {
+      return null;
+    }
+    row = document.querySelector<T>(selector);
+    // A repeated cursor would never reach the row.
+    next = parent.dataset.nextStartAfter === next ? undefined : parent.dataset.nextStartAfter;
+  }
+  return row;
 }
 
 // Sync tree active state without reloading iframe (for doc-loaded messages)

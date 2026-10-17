@@ -245,7 +245,7 @@ Purpose: file-system orientation.
 - Resizable left column below the topbar. Default `280px`, minimum `220px`, maximum `420px` or viewport-constrained so the document keeps usable width.
 - Mirrors object prefixes in R2.
 - Folders lazy-load one level at a time.
-- Large directories show `Load more`; the button may say `Loading...` while fetching the next page.
+- Large directories, including the root, show `Load more`; the button may say `Loading...` while fetching the next page. The first page renders as soon as it arrives. A deep link to a row beyond the first page loads that folder's later pages until the row appears.
 - Sticky folder headers stack by depth so users keep local context while scrolling.
 - File and folder labels stay on one line and truncate with an ellipsis when the available sidebar width is insufficient; the complete name remains in the DOM.
 - Active document is shown with background/text color plus a 4px active indicator bar.
@@ -476,7 +476,7 @@ Theme mismatch rule:
 - No heavy image assets for chrome.
 - `lazy-tree.js` remains the only required script for document navigation enhancement.
 - Avoid layout reads after writes in tree interaction code.
-- Keep tree page size bounded; default lazy page size is 50.
+- Keep tree page size bounded; the legacy lazy page size is 50 and scoped directory pages hold 200 rows. Pages render on request instead of virtualizing, so the DOM only grows with the pages a reader asks for.
 - Compositor-friendly transitions where possible.
 - Cut animation before accepting jank.
 

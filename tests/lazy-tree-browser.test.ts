@@ -14,7 +14,26 @@ const legacyTree: Record<string, Node[]> = {
   "org/guide/deep/": [file("guide/deep/c.html")],
   "org/empty/": [],
 };
-const scopedDocuments = ["guide/b.html", "top.html", "guide/a.html", "guide/deep/c.html", "guide/a.html", "guide/", "zeta/z.html"];
+// Scoped viewers read directory pages (`?dir=&cursor=`) from the deployment index.
+type ScopedPage = { children: Array<{ name: string; type: "file" | "folder" }>; cursor: string | null };
+const pagedBase = "/organizations/o/projects/r/docs";
+const doc = (name: string) => ({ name, type: "file" as const });
+const dir = (name: string) => ({ name, type: "folder" as const });
+const scopedTree: Record<string, Record<string, ScopedPage[]>> = {
+  [base]: {
+    "": [{ children: [dir("guide"), dir("wide"), dir("zeta"), doc("top.html")], cursor: null }],
+    "guide/": [{ children: [dir("deep"), doc("a.html"), doc("b.html")], cursor: null }],
+    "guide/deep/": [{ children: [doc("c.html")], cursor: null }],
+    // The repeated w2 row is dropped; later pages load only on request.
+    "wide/": [{ children: [doc("w1.html"), doc("w2.html")], cursor: "1" }, { children: [doc("w2.html"), doc("w3.html")], cursor: "2" }, { children: [doc("w4.html")], cursor: null }],
+    "zeta/": [{ children: [doc("z.html")], cursor: null }],
+  },
+  [pagedBase]: {
+    "": [{ children: [dir("a")], cursor: "1" }, { children: [dir("b"), doc("later.html")], cursor: null }],
+    "a/": [{ children: [doc("first.html")], cursor: null }],
+    "b/": [{ children: [doc("inner.html")], cursor: null }],
+  },
+};
 const requests: string[] = [];
 
 interface Shell { orgAttr?: boolean; org?: string; base?: string; sandbox?: boolean; initial?: string; frame?: boolean; tree?: boolean; host?: boolean; late?: boolean; noMatchMedia?: boolean }
@@ -39,7 +58,7 @@ const variants: Record<string, Shell> = {
   legacy: {}, "legacy-initial": { initial: "org/guide/a.html" }, "legacy-late": { late: true }, "legacy-open": { sandbox: false },
   "legacy-no-frame": { frame: false }, "legacy-no-matchmedia": { noMatchMedia: true, initial: "org/guide/a.html" },
   "empty-org": { org: "" }, "empty-org-base": { org: "", base }, "empty-org-initial": { org: "", initial: "x/y.html" }, "no-org-attr": { orgAttr: false, initial: "x/y.html" }, "legacy-empty": { org: "void" }, "no-tree": { tree: false }, "no-host": { host: false },
-  base: { base }, "base-empty-project": { base: "/organizations/o/projects/q/docs" }, "base-empty-other": { base: "/other/docs" },
+  base: { base }, "base-paged": { base: pagedBase }, "base-empty-project": { base: "/organizations/o/projects/q/docs" }, "base-empty-other": { base: "/other/docs" },
 };
 function docPage(): string {
   return `<!doctype html><html><body><h1 id="top">Document</h1><a id="go" href="#">Go</a><script>
@@ -64,14 +83,13 @@ beforeAll(async () => {
       return json({ children: legacyTree[prefix] ?? [], isTruncated: false });
     }
     if (url.pathname === "/api/tree/void") return json({ children: [], isTruncated: false });
-    if (url.pathname.endsWith("/tree") && url.pathname !== `${base}/tree`) return json({ documents: [] });
-    if (url.pathname === `${base}/tree`) {
-      return url.searchParams.get("cursor") ? json({ documents: scopedDocuments.slice(3), cursor: "" })
-        : json({ documents: scopedDocuments.slice(0, 3), cursor: "next" });
+    if (url.pathname.endsWith("/tree")) {
+      const pages = scopedTree[url.pathname.slice(0, -"/tree".length)]?.[url.searchParams.get("dir") ?? ""] ?? [];
+      return json(pages[Number(url.searchParams.get("cursor") ?? "0")] ?? { children: [], cursor: null });
     }
     if (url.pathname.includes("/files/")) { response.setHeader("Content-Type", "text/html"); return void response.end(docPage()); }
     response.setHeader("Content-Type", "text/html");
-    const name = url.pathname.startsWith("/lt/") ? url.pathname.slice(4) : url.pathname.startsWith("/docs") ? "legacy" : url.pathname === base ? "base" : "";
+    const name = url.pathname.startsWith("/lt/") ? url.pathname.slice(4) : url.pathname.startsWith("/docs") ? "legacy" : url.pathname === base ? "base" : url.pathname === pagedBase ? "base-paged" : "";
     response.end(shell(variants[name] ?? {}));
   }, assets);
 });
@@ -474,7 +492,7 @@ describe("lazy tree deep links and history", () => {
     expect(await tab.locator("#tree-container").innerHTML()).toBe("");
     const scoped = await open("/lt/empty-org-base?doc=x/y.html");
     await scoped.waitForFunction(() => window.location.search !== "?doc=x/y.html");
-    expect(requests.filter(path => path.endsWith("/tree"))).toEqual([]);
+    expect(requests.filter(path => path.includes("/tree"))).toEqual([]);
     expect(await scoped.locator("#tree-container").innerHTML()).toBe("");
     expect(pageErrors(tab)).toEqual([]);
     expect(pageErrors(scoped)).toEqual([]);
@@ -709,30 +727,108 @@ describe("lazy tree navigation confirmation", () => {
 });
 
 describe("lazy tree with scoped documents", () => {
-  it("builds one sorted, de-duplicated tree from every page of the document list and opens the linked document", async () => {
+  const treeRequests = () => requests.filter(path => path.includes("/tree"));
+  const page = (directory: string, cursor?: string) => `${base}/tree?dir=${encodeURIComponent(directory)}${cursor ? `&cursor=${cursor}` : ""}`;
+  const rows = (tab: Page, selector: string) => tab.evaluate(target => Array.from(document.querySelector(target)!.children)
+    .filter(row => !row.classList.contains("tree-load-more") && row.id !== "active-indicator")
+    .map(row => row.querySelector(".tree-label")!.textContent), selector);
+
+  it("paints the root from one page, reveals a deep link from its folders only and opens the linked document", async () => {
     const tab = await open(`${base}?doc=guide/a.html&docQuery=%3Fv%3D1#top`);
     await tab.waitForFunction(() => document.querySelector(".tree-item.active")?.getAttribute("data-path") === "org/guide/a.html");
-    expect(requests.filter(path => path.includes("/tree"))).toEqual([`${base}/tree`, `${base}/tree?cursor=next`]);
-    expect(await tab.locator("#tree-container > .tree-folder > .tree-item .tree-label, #tree-container > .tree-item .tree-label").allTextContents()).toEqual(["guide", "zeta", "top"]);
-    expect(await tab.evaluate(() => Array.from(document.querySelector('.tree-folder[data-path="org/guide/"] > .tree-folder-content')!.children)
-      .map(row => row.querySelector(".tree-label")!.textContent))).toEqual(["deep", "a", "b"]);
+    // One root page, then only the deep link's folder: never wide/ or zeta/.
+    expect(treeRequests()).toEqual([page(""), page("guide/")]);
+    expect(await rows(tab, "#tree-container")).toEqual(["guide", "wide", "zeta", "top"]);
+    expect(await rows(tab, '.tree-folder[data-path="org/guide/"] > .tree-folder-content')).toEqual(["deep", "a", "b"]);
     expect(await frameSrc(tab)).toBe(`${base}/files/guide/a.html?v=1`);
     await indicatorAt(tab, "org/guide/a.html");
     await folderItem(tab, "org/zeta/").click();
     await item(tab, "org/zeta/z.html").waitFor();
+    expect(treeRequests()).toEqual([page(""), page("guide/"), page("zeta/")]);
     await tab.locator(`a.tree-link[href="${base}/files/guide/b.html"]`).click();
     await tab.waitForFunction(() => window.location.search === "?doc=guide%2Fb.html");
     expect(await location(tab)).toBe(`${base}?doc=guide%2Fb.html`);
     expect(await frameSrc(tab)).toBe(`${base}/files/guide/b.html`);
     expect(await activePath(tab)).toBe("org/guide/b.html");
-    // The document list is fetched once for the whole tree.
-    expect(requests.filter(path => path.includes("/tree"))).toHaveLength(2);
+    // Collapsing and re-expanding a loaded folder reads nothing again.
+    await folderItem(tab, "org/zeta/").click();
+    await folderItem(tab, "org/zeta/").click();
+    expect(treeRequests()).toHaveLength(3);
+    expect(pageErrors(tab)).toEqual([]);
+  });
+
+  it("pages a large folder on request, from the mouse and the keyboard, without duplicate rows", async () => {
+    const tab = await open(base);
+    await folderItem(tab, "org/wide/").click();
+    await item(tab, "org/wide/w2.html").waitFor();
+    const more = tab.locator('.tree-folder[data-path="org/wide/"] .load-more-btn');
+    expect(await rows(tab, '.tree-folder[data-path="org/wide/"] > .tree-folder-content')).toEqual(["w1", "w2"]);
+    await more.click();
+    await item(tab, "org/wide/w3.html").waitFor();
+    await more.focus();
+    await tab.keyboard.press("Enter");
+    await item(tab, "org/wide/w4.html").waitFor();
+    expect(await rows(tab, '.tree-folder[data-path="org/wide/"] > .tree-folder-content')).toEqual(["w1", "w2", "w3", "w4"]);
+    expect(await more.count()).toBe(0);
+    expect(treeRequests()).toEqual([page(""), page("wide/"), page("wide/", "1"), page("wide/", "2")]);
+  });
+
+  it("loads only the deep-linked folder's later pages to reveal a document beyond the first page", async () => {
+    const tab = await open(`${base}?doc=wide/w4.html`);
+    await tab.waitForFunction(() => document.querySelector(".tree-item.active")?.getAttribute("data-path") === "org/wide/w4.html");
+    await indicatorAt(tab, "org/wide/w4.html");
+    expect(treeRequests()).toEqual([page(""), page("wide/"), page("wide/", "1"), page("wide/", "2")]);
+    expect(await tab.locator('.tree-folder[data-path="org/wide/"] .load-more-btn').count()).toBe(0);
+  });
+
+  it("pages the root, and reveals deep links into later root pages", async () => {
+    const tab = await open(pagedBase);
+    await folderItem(tab, "org/a/").waitFor();
+    expect(await rows(tab, "#tree-container")).toEqual(["a"]);
+    await tab.locator("#tree-container > .tree-load-more .load-more-btn").click();
+    await item(tab, "org/later.html").waitFor();
+    expect(await rows(tab, "#tree-container")).toEqual(["a", "b", "later"]);
+    expect(await tab.locator("#tree-container > .tree-load-more").count()).toBe(0);
+    // Later root folders keep root depth and expand normally.
+    expect(await tab.locator('.tree-folder[data-path="org/b/"]').getAttribute("data-depth")).toBe("0");
+    await folderItem(tab, "org/b/").click();
+    await item(tab, "org/b/inner.html").waitFor();
+
+    const deep = await open(`${pagedBase}?doc=b/inner.html`);
+    await deep.waitForFunction(() => document.querySelector(".tree-item.active")?.getAttribute("data-path") === "org/b/inner.html");
+    await indicatorAt(deep, "org/b/inner.html");
+    expect(requests.filter(path => path.startsWith(`${pagedBase}/tree`)).slice(-3)).toEqual([
+      `${pagedBase}/tree?dir=`, `${pagedBase}/tree?dir=&cursor=1`, `${pagedBase}/tree?dir=b%2F`,
+    ]);
+  });
+
+  it("leaves a deep link unrevealed when a later page fails or repeats its cursor", async () => {
+    const failing = await open(`${base}?doc=wide/w4.html`, { routes: async tab => { await tab.route(`**${base}/tree?dir=wide%2F&cursor=1`, route => route.fulfill({ status: 502, body: "{}" })); } });
+    await failing.waitForFunction(() => !!document.getElementById("content-frame")!.getAttribute("src"));
+    await item(failing, "org/wide/w2.html").waitFor();
+    await failing.waitForFunction(() => document.querySelector('.tree-folder[data-path="org/wide/"] .load-more-btn')?.textContent === "Load more...");
+    expect(await activePath(failing)).toBeNull();
+    expect(pageErrors(failing)).toEqual([]);
+
+    let repeated = 0;
+    const looping = await open(`${base}?doc=wide/missing.html`, { routes: async tab => {
+      await tab.route(`**${base}/tree?dir=wide%2F*`, route => { repeated += 1; return route.fulfill({ contentType: "application/json", body: JSON.stringify({ children: [doc(`r${repeated}.html`)], cursor: "1" }) }); });
+    } });
+    await item(looping, "org/wide/r2.html").waitFor();
+    expect(repeated).toBe(2);
+    expect(await activePath(looping)).toBeNull();
+    expect(pageErrors(looping)).toEqual([]);
   });
 
   it.each([
     ["an HTTP failure", { status: 500, body: "{}" }],
-    ["a non-array list", { status: 200, body: JSON.stringify({ documents: "nope" }) }],
-    ["non-text entries", { status: 200, body: JSON.stringify({ documents: ["a.html", 7] }) }],
+    ["a non-array page", { status: 200, body: JSON.stringify({ children: "nope" }) }],
+    ["a legacy document list", { status: 200, body: JSON.stringify({ documents: ["top.html"], cursor: null }) }],
+    ["a null child", { status: 200, body: JSON.stringify({ children: [null] }) }],
+    ["a nested child name", { status: 200, body: JSON.stringify({ children: [{ name: "a/b.html", type: "file" }] }) }],
+    ["a dot-segment child", { status: 200, body: JSON.stringify({ children: [{ name: "..", type: "folder" }] }) }],
+    ["an empty child name", { status: 200, body: JSON.stringify({ children: [{ name: "", type: "file" }] }) }],
+    ["an unknown child type", { status: 200, body: JSON.stringify({ children: [{ name: "x.html", type: "link" }] }) }],
   ])("shows a retryable error after %s and recovers", async (_name, failure) => {
     let fail = true;
     const scoped = await open(base, { routes: async page => { await page.route(`**${base}/tree*`, route => fail ? route.fulfill({ ...failure, contentType: "application/json" }) : route.continue()); } });
@@ -747,14 +843,12 @@ describe("lazy tree with scoped documents", () => {
     expect(await error.count()).toBe(0);
   });
 
-  it("stops at a missing or malformed cursor and fails when a later page fails", async () => {
+  it("treats a missing or malformed cursor as the last page", async () => {
     const fetched: string[] = [];
-    const single = await open(base, { routes: async page => { await page.route(`**${base}/tree*`, route => { fetched.push(route.request().url()); return route.fulfill({ contentType: "application/json", body: JSON.stringify({ documents: ["only.html"], cursor: 7 }) }); }); } });
+    const single = await open(base, { routes: async page => { await page.route(`**${base}/tree*`, route => { fetched.push(route.request().url()); return route.fulfill({ contentType: "application/json", body: JSON.stringify({ children: [doc("only.html")], cursor: 7 }) }); }); } });
     await item(single, "org/only.html").waitFor();
     expect(fetched).toHaveLength(1);
-    const later = await open(base, { routes: async page => { await page.route(`**${base}/tree?cursor=*`, route => route.fulfill({ status: 502, body: "{}" })); } });
-    await later.locator("#tree-container .tree-error").waitFor();
-    expect(await later.locator("#tree-container .tree-item").count()).toBe(0);
+    expect(await single.locator(".load-more-btn").count()).toBe(0);
   });
 
   it.each([
@@ -772,6 +866,10 @@ describe("lazy tree with scoped documents", () => {
       expect(await link.textContent()).toBe("Return to project");
     }
     expect(await tab.locator("#active-indicator").count()).toBe(1);
+    if (returnTo) {
+      await link.click();
+      await tab.waitForURL(`${harness.origin}${returnTo}`);
+    }
   });
 
   it("falls back to an empty tree when a folder lies outside the scoped organization", async () => {
