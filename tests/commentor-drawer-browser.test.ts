@@ -232,9 +232,17 @@ describe("drawer details", () => {
     expect(await panel(lab).getAttribute("aria-expanded")).toBe("false");
     await panel(lab).click();
     await panel(lab).click();
-    await lab.host(l => l.host!.setUserId("user-b"));
+    // Let the collapse finish on the clock first: whether a reset beats the timer must not decide that it runs.
     await lab.page.clock.runFor(400);
     await expect.poll(() => lab.tid("commentor-drawer").evaluate(el => (el as HTMLElement).style.height)).toBe("");
+    await panel(lab).click();
+    await panel(lab).click();
+    await expect.poll(() => lab.tid("commentor-drawer").evaluate(el => (el as HTMLElement).style.height)).toBe("0px");
+    await lab.host(l => l.host!.setUserId("user-b"));
+    // The reset collapses at once, without waiting for the pending animation timer.
+    await expect.poll(() => lab.tid("commentor-drawer").evaluate(el => (el as HTMLElement).style.height)).toBe("");
+    await lab.page.clock.runFor(400);
+    expect(await panel(lab).getAttribute("aria-expanded")).toBe("false");
   });
 
   it("ignores controls inside a card when the card itself is activated, and ignores a card whose thread moved on before it opened", async () => {
