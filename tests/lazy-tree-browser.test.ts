@@ -686,7 +686,8 @@ describe("lazy tree navigation confirmation", () => {
     await notice(tab).getByRole("button", { name: "Open linked document" }).click();
     await tab.waitForFunction(() => window.location.pathname === "/docs/org/guide/deep/c.html");
     expect(await frameSrc(tab)).toBe("/legacy-view/org/files/guide/deep/c.html");
-    expect(await activePath(tab)).toBe("org/guide/deep/c.html");
+    // The row is marked once its folder, guide/deep/, has loaded.
+    await expect.poll(() => activePath(tab)).toBe("org/guide/deep/c.html");
     expect(await notice(tab).count()).toBe(0);
   });
 
@@ -997,6 +998,21 @@ describe("lazy tree races and malformed shells", () => {
     expect(pageErrors(tab)).toEqual([]);
   });
 
+  it("marks the newest document, not the earlier one, once a folder they share has loaded", async () => {
+    let hold!: Awaited<ReturnType<typeof held>>;
+    const tab = await open("/docs/org/guide/deep/c.html", { routes: async page => { hold = await held(page, "**/api/tree/org?prefix=org%2Fguide%2F&*"); } });
+    await hold.seen;
+    await tab.evaluate(() => window.dispatchEvent(new PopStateEvent("popstate", { state: { docPath: "org/guide/b.html" } })));
+    await hold.release();
+    // The earlier reveal still finishes loading its own folder, but leaves the selection alone.
+    await item(tab, "org/guide/deep/c.html").waitFor();
+    await expect.poll(() => activePath(tab)).toBe("org/guide/b.html");
+    expect(await tab.locator(".tree-item.active").count()).toBe(1);
+    expect(await frameSrc(tab)).toBe("/legacy-view/org/files/guide/b.html");
+    await indicatorAt(tab, "org/guide/b.html");
+    expect(pageErrors(tab)).toEqual([]);
+  });
+
   it("keeps working when folder rows are missing their icon, content or depth", async () => {
     const tab = await open("/lt/legacy");
     await item(tab, "org/top.html").waitFor();
@@ -1022,6 +1038,16 @@ describe("lazy tree races and malformed shells", () => {
     expect(await tab.locator('.tree-folder[data-path="org/hollow/"]').getAttribute("class")).not.toContain("open");
     await tab.locator("#lonely").click();
     expect(await tab.locator("#lonely").textContent()).toBe("Load more...");
+    // A document under a folder that cannot open still loads, without marking a row.
+    await tab.evaluate(() => {
+      const shut = document.createElement("div"); shut.className = "tree-folder"; shut.dataset.path = "org/shut/";
+      shut.innerHTML = '<div class="tree-item" role="button"></div>';
+      document.getElementById("tree-container")!.append(shut);
+      window.dispatchEvent(new PopStateEvent("popstate", { state: { docPath: "org/shut/x.html" } }));
+    });
+    expect(await frameSrc(tab)).toBe("/legacy-view/org/files/shut/x.html");
+    expect(await tab.locator('.tree-folder[data-path="org/shut/"]').getAttribute("class")).not.toContain("open");
+    expect(await activePath(tab)).toBeNull();
     expect(pageErrors(tab)).toEqual([]);
   });
 

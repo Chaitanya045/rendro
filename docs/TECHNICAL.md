@@ -1026,6 +1026,7 @@ Client (lazy-tree.js, ~25KB IIFE built from src/lazy-tree/)
   │
   ├─ Scoped viewers: GET …/tree?dir=…&cursor=… per folder (root first), with "Load more" pagination
   │   └─ A deep link expands its ancestors and loads later pages of only those folders to reveal its row
+  │       (overlapping reveals share a folder that is still loading; only the newest marks its row)
   ├─ Legacy viewer: GET /api/tree/:org?prefix=… per folder, with "Load more" pagination
   ├─ File click → loadDoc(path, pushState)
   │   ├─ Optimistically select row + updateIndicator

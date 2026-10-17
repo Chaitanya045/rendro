@@ -123,6 +123,8 @@ function indexChildItems(content: HTMLElement) {
 // ── expand / collapse ──
 
 const PAGE_SIZE = 50;
+// A folder's first page in flight, so a second expand (a newer reveal) can wait for it.
+const folderLoads = new WeakMap<HTMLElement, Promise<void>>();
 
 async function expand(folder: HTMLElement) {
   const path = folder.dataset.path;
@@ -131,7 +133,7 @@ async function expand(folder: HTMLElement) {
   if (!content) return;
   content.style.transition = folderTransitionOverride(reducedMotion());
 
-  if (folder.classList.contains("loading")) return;
+  if (folder.classList.contains("loading")) return folderLoads.get(folder);
 
   if (folder.classList.contains("loaded")) {
     indexChildItems(content);
@@ -143,20 +145,24 @@ async function expand(folder: HTMLElement) {
 
   folder.classList.add("loading");
   folder.setAttribute("aria-busy", "true");
-  try {
-    await loadPage(folder, path, content, undefined);
-    indexChildItems(content);
-    folder.classList.add("loaded", "open");
-    setFolderIcon(folder, true);
-    if (activeEl) updateIndicator(activeEl);
-  } catch {
-    content.innerHTML = `<div class="tree-error" role="alert">Failed to load folder. <button class="load-more-btn folder-retry-btn" type="button">Retry</button></div>`;
-    folder.classList.add("open");
-    setFolderIcon(folder, true);
-  } finally {
-    folder.classList.remove("loading");
-    folder.removeAttribute("aria-busy");
-  }
+  const load = (async () => {
+    try {
+      await loadPage(folder, path, content, undefined);
+      indexChildItems(content);
+      folder.classList.add("loaded", "open");
+      setFolderIcon(folder, true);
+      if (activeEl) updateIndicator(activeEl);
+    } catch {
+      content.innerHTML = `<div class="tree-error" role="alert">Failed to load folder. <button class="load-more-btn folder-retry-btn" type="button">Retry</button></div>`;
+      folder.classList.add("open");
+      setFolderIcon(folder, true);
+    } finally {
+      folder.classList.remove("loading");
+      folder.removeAttribute("aria-busy");
+    }
+  })();
+  folderLoads.set(folder, load);
+  return load;
 }
 
 /** One directory page of a scoped deployment tree (#90). Folders are fetched
@@ -590,7 +596,11 @@ function loadDoc(fullPath: string, pushState: false | "push" | "replace", fragme
   }
 }
 
+// Reveals overlap while folders load; only the newest may mark its row.
+let latestReveal = 0;
+
 async function navigateToDoc(org: string, relPath: string) {
+  const reveal = ++latestReveal;
   const fullPath = `${org}/${relPath}`;
   const parts = relPath.split("/");
   let currentPath = org;
@@ -608,7 +618,7 @@ async function navigateToDoc(org: string, relPath: string) {
   }
 
   const item = await pagedRow<HTMLElement>(parent, `.tree-item[data-path="${CSS.escape(fullPath)}"]`);
-  if (!item) return;
+  if (!item || reveal !== latestReveal) return;
   document.querySelectorAll(".tree-item.active").forEach((element) => element.classList.remove("active"));
   item.classList.add("active");
   updateIndicator(item, true);
