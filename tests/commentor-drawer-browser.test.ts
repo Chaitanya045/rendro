@@ -235,6 +235,8 @@ describe("drawer details", () => {
     // Let the collapse finish on the clock first: whether a reset beats the timer must not decide that it runs.
     await lab.page.clock.runFor(400);
     await expect.poll(() => lab.tid("commentor-drawer").evaluate(el => (el as HTMLElement).style.height)).toBe("");
+    // The next collapse must still be animating when it is reset, so its 300ms timer waits for the clock.
+    await lab.pauseClock();
     await panel(lab).click();
     await panel(lab).click();
     await expect.poll(() => lab.tid("commentor-drawer").evaluate(el => (el as HTMLElement).style.height)).toBe("0px");
@@ -306,6 +308,8 @@ describe("drawer details", () => {
     const lab = await commentLab.open();
     await lab.page.clock.install();
     await lab.ready([{ _id: "t1", anchor: heading }]);
+    // The pin must leave the screen before the 150ms show delay ends.
+    await lab.pauseClock();
     const tip = lab.tid("commentor-tip");
     await lab.pins().first().hover();
     await lab.pins().first().evaluate(pin => { (pin as HTMLElement).style.top = "-500px"; });
@@ -492,8 +496,11 @@ describe("tooltips, selection and appearance", () => {
     await expect.poll(() => action.getAttribute("data-state")).toBe("closed");
     await expect.poll(() => action.evaluate(el => (el as HTMLElement).hidden)).toBe(true);
     // The dismissed selection stays dismissed until it changes.
-    await lab.doc(() => document.dispatchEvent(new Event("selectionchange")));
+    await lab.selectionSettled();
+    expect(await action.getAttribute("data-state")).toBe("closed");
     await lab.select("#intro", 0, 3);
+    await lab.selectionSettled();
+    expect(await action.getAttribute("data-state")).toBe("closed");
     await lab.select("#intro", 0, 9);
     await expect.poll(() => action.getAttribute("data-state")).toBe("open");
     await lab.doc(() => window.scrollBy(0, 10));
@@ -504,9 +511,10 @@ describe("tooltips, selection and appearance", () => {
     // A thread bubble keeps the action away while it is open; whitespace never offers it.
     await lab.tid("commentor-composer-cancel").click();
     await lab.pins().first().click();
+    await expect.poll(() => lab.tid("commentor-thread-bubble").count()).toBe(1);
     await lab.select("#second", 0, 3);
-    await lab.doc(() => document.dispatchEvent(new Event("selectionchange")));
-    await expect.poll(() => action.getAttribute("data-state")).toBe("closed");
+    await lab.selectionSettled();
+    expect(await action.getAttribute("data-state")).toBe("closed");
     await lab.doc(() => window.getSelection()!.removeAllRanges());
     await lab.doc(() => { const s = document.getElementById("second")!.lastChild as Text; const r = document.createRange(); r.setStart(s, 0); r.setEnd(s, 0); getSelection()!.removeAllRanges(); getSelection()!.addRange(r); });
     await lab.doc(() => { const host = document.getElementById("commentor-host")!; const r = document.createRange(); r.selectNodeContents(host); getSelection()!.removeAllRanges(); getSelection()!.addRange(r); });

@@ -135,6 +135,8 @@ describe("authoring edge cases", () => {
     const lab = await commentLab.open({ document: richDocument });
     await lab.page.clock.install();
     await lab.ready();
+    // The reselection below must land inside the 150ms fade-out.
+    await lab.pauseClock();
     const action = lab.tid("commentor-selection-action");
     // A selection of the whole document has no element ancestor, and zero-size text is not commentable.
     await lab.doc(() => { window.focus(); const range = document.createRange(); range.selectNode(document.documentElement); getSelection()!.removeAllRanges(); getSelection()!.addRange(range); });
@@ -341,6 +343,8 @@ describe("ordering of acknowledgements and snapshots", () => {
     await lab.page.clock.install();
     await lab.ready([{ _id: "far", anchor: { kind: "element", path: ["main", "#footer"] } }]);
     await lab.openDrawer();
+    // The scroll end must come first; the 450ms fallback fires only when the clock is advanced.
+    await lab.pauseClock();
     await lab.ui.locator(".drawer-thread .body").click();
     await lab.doc(() => window.dispatchEvent(new Event("scrollend")));
     await expect.poll(() => lab.tid("commentor-thread-bubble").count()).toBe(1);
@@ -352,6 +356,8 @@ describe("ordering of acknowledgements and snapshots", () => {
     const lab = await commentLab.open();
     await lab.page.clock.install();
     await lab.ready();
+    // The scroll's 150ms hide timer must still be pending when the control finishes appearing.
+    await lab.pauseClock();
     await lab.doc(() => {
       const queue: FrameRequestCallback[] = [];
       Object.assign(window, { frames: queue, requestAnimationFrame: (callback: FrameRequestCallback) => queue.push(callback) });
@@ -364,5 +370,6 @@ describe("ordering of acknowledgements and snapshots", () => {
     await runFrame();
     await lab.page.clock.runFor(300);
     expect(await lab.tid("commentor-selection-action").getAttribute("data-state")).toBe("open");
+    expect(await lab.tid("commentor-selection-action").evaluate(el => (el as HTMLElement).hidden)).toBe(false);
   });
 });

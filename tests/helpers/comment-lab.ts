@@ -110,8 +110,19 @@ export class Lab {
     await this.tid("commentor-panel-btn").click();
     await expect.poll(() => this.tid("commentor-panel-btn").getAttribute("aria-expanded")).toBe("true");
   }
+  /** Stop the installed clock, so a short widget timer runs only when the test advances it rather than whenever real time passes. */
+  async pauseClock() {
+    await this.page.clock.pauseAt(await this.page.evaluate(() => Date.now()) + 1_000);
+  }
   /** A real task turn in the document, unaffected by a faked clock, so queued events (selectionchange) are delivered. */
   tick() { return this.doc(() => new Promise<void>(resolve => { const channel = new MessageChannel(); channel.port1.onmessage = () => resolve(); channel.port2.postMessage(0); })); }
+  /** Deliver a selection change now and let the frame the widget schedules for it run, so its outcome is final. */
+  async selectionSettled() {
+    await this.doc(() => new Promise<void>(resolve => {
+      document.dispatchEvent(new Event("selectionchange"));
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+    }));
+  }
   /** Test id of the widget's focused control (the shadow host is itself the document's active element). */
   focused() { return this.doc(() => document.getElementById("commentor-host")!.shadowRoot!.activeElement?.getAttribute("data-testid") ?? null); }
   async toasts() { return this.ui.locator(".toast").allInnerTexts(); }
