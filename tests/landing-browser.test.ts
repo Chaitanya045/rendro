@@ -37,6 +37,15 @@ async function open(options: Parameters<typeof harness.newPage>[0] = {}, path = 
   return Object.assign(page, { errors });
 }
 
+/** Serve documents without any script, as a browser with JavaScript disabled receives them. */
+async function withoutScripts(page: Page) {
+  await page.route(url => url.origin === harness.origin, async route => {
+    if (route.request().resourceType() !== 'document') return route.fallback();
+    const response = await route.fetch({ maxRedirects: 0 });
+    return route.fulfill({ response, body: (await response.text()).replace(/<script\b[\s\S]*?<\/script>/g, '') });
+  });
+}
+
 /** Hold the OAuth start request until released, answering with the given status/body. */
 async function holdOAuth(page: Page) {
   let release!: (response: { status: number; body: string } | 'abort') => void;
@@ -190,6 +199,8 @@ it('marks exactly the section in view in the primary navigation', async () => {
   expect(await current()).toEqual([]);
   for (const id of ['workflow', 'security', 'product'] as const) {
     await page.locator(`.nav-links a[data-scroll-section="${id}"]`).click();
+    // Let the smooth scroll land before judging the indicator, so one jump cannot overlap the next.
+    await expect.poll(() => scrollOffset(page, id), { message: id }).toBeCloseTo(0, 0);
     await expect.poll(current, { message: id }).toEqual([id]);
   }
   await page.evaluate(() => window.scrollTo({ top: 0, behavior: 'instant' }));
@@ -238,7 +249,9 @@ it('shows all content without motion under reduced-motion, print and no-JavaScri
   await expect.poll(() => unrevealed.evaluate(element => ({ opacity: getComputedStyle(element).opacity, transform: getComputedStyle(element).transform })))
     .toEqual({ opacity: '1', transform: 'none' });
 
-  const noScript = await open({ javaScriptEnabled: false });
+  const noScript = await harness.newPage({ viewport: { width: 1440, height: 900 } });
+  await withoutScripts(noScript);
+  await noScript.goto(harness.origin + '/');
   expect(await noScript.evaluate(() => document.documentElement.classList.contains('motion-ready'))).toBe(false);
   expect(await noScript.locator('#security .security-copy').evaluate(element => getComputedStyle(element).opacity)).toBe('1');
   expect(await noScript.getByRole('heading', { name: 'Private by default. Scoped by organization.' }).isVisible()).toBe(true);

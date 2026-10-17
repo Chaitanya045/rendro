@@ -104,6 +104,15 @@ beforeAll(async () => {
   vi.stubEnv("SITE_URL", harness.origin);
 });
 
+/** Serve documents without any script, as a browser with JavaScript disabled receives them. */
+async function withoutScripts(page: Page) {
+  await page.route(url => url.origin === harness.origin, async route => {
+    if (route.request().resourceType() !== "document") return route.fallback();
+    const response = await route.fetch({ maxRedirects: 0 });
+    return route.fulfill({ response, body: (await response.text()).replace(/<script\b[\s\S]*?<\/script>/g, "") });
+  });
+}
+
 type Transport = { subscriptions: number; closes: number; writes: number; updates: number };
 it("refetches HTML for a cached v19 controller and clears state on sign-out", async () => {
   const page = await harness.newPage();
@@ -285,7 +294,8 @@ it("closes the key-creation dialog and its top-layer select popover on cross-tab
 });
 
 it("shows the sign-out confirmation for GET without revoking, then signs out natively and permits signing back in", async () => {
-  const page = await harness.newPage({ javaScriptEnabled: false });
+  const page = await harness.newPage();
+  await withoutScripts(page);
   await page.context().addCookies([{ name: "better-auth.session_token", value: "opaque-session", url: harness.origin }]);
   const response = await page.goto(`${harness.origin}/api/auth/sign-out`);
   expect(response!.status()).toBe(200);
@@ -313,7 +323,8 @@ it("shows the sign-out confirmation for GET without revoking, then signs out nat
 });
 
 it("answers a failed native sign-out with Try again, keeping the session and cookies until a retry succeeds", async () => {
-  const page = await harness.newPage({ javaScriptEnabled: false });
+  const page = await harness.newPage();
+  await withoutScripts(page);
   await page.context().addCookies([{ name: "better-auth.session_token", value: "opaque-session", url: harness.origin }]);
   await page.goto(`${harness.origin}/api/auth/sign-out`);
   failSignOut = true;
@@ -397,7 +408,10 @@ const lateUpdate = (page: Page) => page.evaluate(() => (window as unknown as Ref
 
 it("renews the comment token only after confirming the identity, and survives transient and offline failures without ending the session", async () => {
   const page = await harness.newPage();
+  // The host's own first renewal (identity check, then token) must finish before the one under test.
+  const initialToken = page.waitForResponse(response => new URL(response.url()).pathname === "/api/auth/convex/token");
   await page.goto(`${harness.origin}/viewer`);
+  await initialToken;
   await expect.poll(async () => (await page.evaluate(() => (window as unknown as { transport: Transport }).transport)).subscriptions).toBe(2);
   const requested: string[] = [];
   page.on("request", request => { const path = new URL(request.url()).pathname; if (path.startsWith("/api/auth/")) requested.push(path); });
