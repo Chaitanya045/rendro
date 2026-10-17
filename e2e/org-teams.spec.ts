@@ -143,7 +143,7 @@ test.describe("teams", () => {
     expect((await rosterOf(page, organization.id, docsTeam.id)).members).toEqual([]);
     expect(await roles(page, organization.id)).toEqual(baseline);
 
-    // Deleting a team: cancel keeps it, failure keeps it, success removes it; the sole remaining team cannot be deleted.
+    // Deleting a team: cancel keeps it, failure keeps it, success removes it; the sole remaining team offers no removal.
     const removeTeam = docs.getByRole("button", { name: "Remove team", exact: true });
     await removeTeam.click();
     await expect(confirm.locator("#cp-confirm-title")).toHaveText("Remove team?");
@@ -167,11 +167,8 @@ test.describe("teams", () => {
     expect(await roles(page, organization.id)).toEqual(baseline);
 
     const lastTeam = card(page, "Teams Org");
-    await lastTeam.getByRole("button", { name: "Remove team", exact: true }).click();
-    await confirm.locator("[data-confirm-accept]").click();
-    await expect(toasts(page).filter({ hasText: "You are not allowed to delete this team" })).toHaveClass(/error/);
-    await expect(lastTeam).toBeVisible();
-    await expect(lastTeam.getByRole("button", { name: "Remove team", exact: true })).toBeEnabled();
+    await expect(lastTeam.getByRole("button", { name: "Remove team", exact: true })).toBeDisabled();
+    await expect(lastTeam.locator(".team-hint")).toBeVisible();
     expect(await teamsOf(page, organization.id)).toEqual(["Teams Org"]);
   });
 
@@ -309,7 +306,9 @@ test.describe("teams", () => {
 
   test("the only remaining team cannot be removed; the control explains why and follows the team count", async ({ actor }) => {
     const owner = await actor("last-owner", { organizations: ["Last Org"] });
+    const admin = await actor("last-admin");
     const [organization] = owner.organizations;
+    await join(owner, organization.id, admin, "admin");
     const { page } = owner;
     await openSection(page, organization.id, "teams");
     const only = card(page, "Last Org");
@@ -318,10 +317,11 @@ test.describe("teams", () => {
     await expect(remove).toHaveAccessibleDescription(/at least one team/);
     await expect(only.locator(".team-hint")).toBeVisible();
     await expect(page.getByRole("heading", { name: "No teams yet" })).toHaveCount(0);
-    // The server rule holds without the UI.
+    // The server rule holds without the UI: an admin (whose session has no active team) is refused too.
     const [team] = (await fullOrganization(page, organization.id)).body.teams;
-    const refused = await api<{ message?: string }>(page, "/api/auth/organization/remove-team", { teamId: team.id, organizationId: organization.id });
+    const refused = await api<{ message?: string }>(admin.page, "/api/auth/organization/remove-team", { teamId: team.id, organizationId: organization.id });
     expect(refused.status).toBe(400);
+    expect(refused.body.message).toBe("Unable to remove last team");
     expect(await teamsOf(page, organization.id)).toEqual(["Last Org"]);
 
     // A second team unlocks both; removing one locks the survivor again without a reload.
