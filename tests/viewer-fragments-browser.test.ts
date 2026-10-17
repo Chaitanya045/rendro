@@ -352,7 +352,11 @@ describe("viewer fragment navigation in Chromium", () => {
     const page = await newPage();
     await page.goto(harness.origin + base);
     await page.waitForTimeout(600);
-    const frame = page.frames().find(candidate => candidate.parentFrame() === page.mainFrame())!;
+    // Count only the click's navigation: on a loaded host the first document can still be committing here. A frame's
+    // URL is Playwright's own state, so waiting on it (unlike an evaluate) grants the shell no activation.
+    const documentFrame = () => page.frames().find(candidate => candidate.parentFrame() === page.mainFrame());
+    await expect.poll(() => documentFrame()?.url() ?? "").toContain("/files/");
+    const frame = documentFrame()!;
     let navigations = 0;
     page.on("framenavigated", navigated => { if (navigated === frame) navigations++; });
     await frame.getByRole("link", { name: "Query one", exact: true }).click();
