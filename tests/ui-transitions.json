@@ -16389,7 +16389,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "browser",
+      "status": "e2e",
       "auditEvidence": "U",
       "auditNote": "commentor-recovery-ui.test.ts",
       "edges": [
@@ -16468,8 +16468,14 @@
           "inventoryRefs": [
             "C01"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/comments-permissions.spec.ts",
+              "name": "an outsider and an anonymous visitor can neither read nor write comments, and share and public viewers offer none",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-112-E07",
@@ -16688,7 +16694,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "browser",
+      "status": "e2e",
       "auditEvidence": "U",
       "auditNote": "commentor-recovery-ui.test.ts",
       "edges": [
@@ -16711,7 +16717,7 @@
           "inventoryRefs": [
             "C05"
           ],
-          "status": "browser",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/commentor-widget-browser.test.ts",
@@ -16722,6 +16728,16 @@
               "file": "tests/commentor-widget-browser.test.ts",
               "name": "restores an unsent draft after the document reloads and clears it once posted",
               "kind": "browser"
+            },
+            {
+              "file": "e2e/comments-journeys.spec.ts",
+              "name": "a text selection and a clicked element become comments that a teammate sees arrive",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/comments-recovery.spec.ts",
+              "name": "a draft survives signing out in another tab and returns after signing back in, but never appears for another account",
+              "kind": "e2e"
             }
           ]
         },
@@ -16733,12 +16749,17 @@
           "inventoryRefs": [
             "C05"
           ],
-          "status": "browser",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/commentor-widget-browser.test.ts",
               "name": "comments on a clicked element, and clicking empty space or pressing Escape cancels",
               "kind": "browser"
+            },
+            {
+              "file": "e2e/comments-journeys.spec.ts",
+              "name": "a text selection and a clicked element become comments that a teammate sees arrive",
+              "kind": "e2e"
             }
           ]
         },
@@ -16750,7 +16771,7 @@
           "inventoryRefs": [
             "C05"
           ],
-          "status": "browser",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/commentor-widget-browser.test.ts",
@@ -16761,6 +16782,11 @@
               "file": "tests/commentor-widget-browser.test.ts",
               "name": "comments on a clicked element, and clicking empty space or pressing Escape cancels",
               "kind": "browser"
+            },
+            {
+              "file": "e2e/comments-journeys.spec.ts",
+              "name": "a text selection and a clicked element become comments that a teammate sees arrive",
+              "kind": "e2e"
             }
           ]
         },
@@ -16772,12 +16798,17 @@
           "inventoryRefs": [
             "C05"
           ],
-          "status": "browser",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/commentor-widget-browser.test.ts",
               "name": "posts a comment on selected text, focuses the toolbar again and shows the new pin",
               "kind": "browser"
+            },
+            {
+              "file": "e2e/comments-journeys.spec.ts",
+              "name": "a text selection and a clicked element become comments that a teammate sees arrive",
+              "kind": "e2e"
             }
           ]
         },
@@ -16800,12 +16831,17 @@
           "inventoryRefs": [
             "C05"
           ],
-          "status": "browser",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/commentor-widget-browser.test.ts",
               "name": "shows a pending post, keeps the draft on every failure and recovers",
               "kind": "browser"
+            },
+            {
+              "file": "e2e/comments-recovery.spec.ts",
+              "name": "a connection replaced mid-mutation reports an unknown outcome, and resubmitting is idempotent",
+              "kind": "e2e"
             }
           ]
         },
@@ -16817,12 +16853,17 @@
           "inventoryRefs": [
             "C05"
           ],
-          "status": "browser",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/commentor-widget-browser.test.ts",
               "name": "shows a pending post, keeps the draft on every failure and recovers",
               "kind": "browser"
+            },
+            {
+              "file": "e2e/comments-permissions.spec.ts",
+              "name": "a writer over the comment limit gets a friendly error with a retry hint, keeps the draft and can post once it lapses",
+              "kind": "e2e"
             }
           ]
         },
@@ -16834,12 +16875,17 @@
           "inventoryRefs": [
             "C05"
           ],
-          "status": "browser",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/commentor-widget-browser.test.ts",
               "name": "posts a comment on selected text, focuses the toolbar again and shows the new pin",
               "kind": "browser"
+            },
+            {
+              "file": "e2e/comments-journeys.spec.ts",
+              "name": "a text selection and a clicked element become comments that a teammate sees arrive",
+              "kind": "e2e"
             }
           ]
         },
@@ -16879,12 +16925,17 @@
           "inventoryRefs": [
             "UI-114"
           ],
-          "status": "browser",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/share-comment-errors-browser.test.ts",
               "name": "comment %s quota crosses the real bridge, retains the draft, counts down and retries",
               "kind": "browser"
+            },
+            {
+              "file": "e2e/comments-permissions.spec.ts",
+              "name": "a writer over the comment limit gets a friendly error with a retry hint, keeps the draft and can post once it lapses",
+              "kind": "e2e"
             }
           ]
         },
@@ -16957,7 +17008,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "browser",
+      "status": "e2e",
       "auditEvidence": "U",
       "auditNote": "commentor-recovery-ui.test.ts; commentor-parent-transport.test.ts",
       "edges": [
@@ -16980,12 +17031,17 @@
           "inventoryRefs": [
             "C07"
           ],
-          "status": "browser",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/commentor-drawer-browser.test.ts",
               "name": "pages older threads and replies on demand and says when more cannot be loaded",
               "kind": "browser"
+            },
+            {
+              "file": "e2e/comments-journeys.spec.ts",
+              "name": "older threads and replies load on demand, and a remote arrival while scrolled away offers the new comment",
+              "kind": "e2e"
             }
           ]
         },
@@ -17008,12 +17064,17 @@
           "inventoryRefs": [
             "C07"
           ],
-          "status": "browser",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/commentor-widget-browser.test.ts",
               "name": "replies with Enter, keeps Shift+Enter as a newline, and removes only deletable replies",
               "kind": "browser"
+            },
+            {
+              "file": "e2e/comments-journeys.spec.ts",
+              "name": "replies, resolving and reopening reach a teammate's open document and the server",
+              "kind": "e2e"
             }
           ]
         },
@@ -17042,12 +17103,17 @@
           "inventoryRefs": [
             "C07"
           ],
-          "status": "browser",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/commentor-edges-browser.test.ts",
               "name": "clears a sent reply when its acknowledgement beats the snapshot, and ignores a repeated delete",
               "kind": "browser"
+            },
+            {
+              "file": "e2e/comments-journeys.spec.ts",
+              "name": "replies, resolving and reopening reach a teammate's open document and the server",
+              "kind": "e2e"
             }
           ]
         },
@@ -17076,7 +17142,7 @@
           "inventoryRefs": [
             "C07"
           ],
-          "status": "browser",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/commentor-widget-browser.test.ts",
@@ -17087,6 +17153,16 @@
               "file": "tests/commentor-widget-browser.test.ts",
               "name": "replies with Enter, keeps Shift+Enter as a newline, and removes only deletable replies",
               "kind": "browser"
+            },
+            {
+              "file": "e2e/comments-permissions.spec.ts",
+              "name": "each role is offered exactly the actions it may perform, and forged requests are refused by the server",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/comments-journeys.spec.ts",
+              "name": "replies, resolving and reopening reach a teammate's open document and the server",
+              "kind": "e2e"
             }
           ]
         },
@@ -17160,7 +17236,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "browser",
+      "status": "e2e",
       "auditEvidence": "U",
       "auditNote": "document-ui-regressions.test.ts (delete-state unit assertions, not rendered Undo click)",
       "edges": [
@@ -17183,12 +17259,17 @@
           "inventoryRefs": [
             "C10"
           ],
-          "status": "browser",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/commentor-widget-browser.test.ts",
               "name": "deletes after an undo window and rolls back with an explanation when the delete fails",
               "kind": "browser"
+            },
+            {
+              "file": "e2e/comments-journeys.spec.ts",
+              "name": "a deleted comment can be undone within its window and is then removed for good",
+              "kind": "e2e"
             }
           ]
         },
@@ -17200,12 +17281,17 @@
           "inventoryRefs": [
             "C10"
           ],
-          "status": "browser",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/commentor-widget-browser.test.ts",
               "name": "deletes after an undo window and rolls back with an explanation when the delete fails",
               "kind": "browser"
+            },
+            {
+              "file": "e2e/comments-journeys.spec.ts",
+              "name": "a deleted comment can be undone within its window and is then removed for good",
+              "kind": "e2e"
             }
           ]
         },
@@ -17217,12 +17303,17 @@
           "inventoryRefs": [
             "C10"
           ],
-          "status": "browser",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/commentor-widget-browser.test.ts",
               "name": "deletes after an undo window and rolls back with an explanation when the delete fails",
               "kind": "browser"
+            },
+            {
+              "file": "e2e/comments-journeys.spec.ts",
+              "name": "a deleted comment can be undone within its window and is then removed for good",
+              "kind": "e2e"
             }
           ]
         },
@@ -17328,7 +17419,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "browser",
+      "status": "e2e",
       "auditEvidence": "U",
       "auditNote": "commentor-permissions-rendering.test.ts; commentor-recovery-ui.test.ts",
       "edges": [
@@ -17340,8 +17431,14 @@
           "inventoryRefs": [
             "UI-117"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/comments-permissions.spec.ts",
+              "name": "a role change reaches an open document, and a removed member loses the comments",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-117-E02",
@@ -17351,12 +17448,17 @@
           "inventoryRefs": [
             "C09"
           ],
-          "status": "browser",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/commentor-widget-browser.test.ts",
               "name": "offers Delete and Archive only where the server allows them, and nothing to read-only viewers",
               "kind": "browser"
+            },
+            {
+              "file": "e2e/comments-permissions.spec.ts",
+              "name": "each role is offered exactly the actions it may perform, and forged requests are refused by the server",
+              "kind": "e2e"
             }
           ]
         },
@@ -17368,7 +17470,7 @@
           "inventoryRefs": [
             "C09"
           ],
-          "status": "browser",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/commentor-widget-browser.test.ts",
@@ -17379,6 +17481,16 @@
               "file": "tests/commentor-widget-browser.test.ts",
               "name": "resolves and reopens, archives and unarchives, with accessible pending state and failures",
               "kind": "browser"
+            },
+            {
+              "file": "e2e/comments-permissions.spec.ts",
+              "name": "each role is offered exactly the actions it may perform, and forged requests are refused by the server",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/comments-journeys.spec.ts",
+              "name": "replies, resolving and reopening reach a teammate's open document and the server",
+              "kind": "e2e"
             }
           ]
         },
@@ -17390,8 +17502,19 @@
           "inventoryRefs": [
             "C09"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/comments-permissions.spec.ts",
+              "name": "each role is offered exactly the actions it may perform, and forged requests are refused by the server",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/comments-permissions.spec.ts",
+              "name": "a role change reaches an open document, and a removed member loses the comments",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-117-E05",
@@ -17412,8 +17535,14 @@
           "inventoryRefs": [
             "C09"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/comments-permissions.spec.ts",
+              "name": "each role is offered exactly the actions it may perform, and forged requests are refused by the server",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-117-E07",
@@ -17535,7 +17664,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "browser",
+      "status": "e2e",
       "auditEvidence": "U",
       "auditNote": "commentor-recovery-ui.test.ts; commentor-parent-recovery.test.ts",
       "edges": [
@@ -17547,8 +17676,14 @@
           "inventoryRefs": [
             "UI-119"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/comments-recovery.spec.ts",
+              "name": "a connection replaced mid-mutation reports an unknown outcome, and resubmitting is idempotent",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-119-E02",
@@ -17558,12 +17693,22 @@
           "inventoryRefs": [
             "C12"
           ],
-          "status": "browser",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/commentor-protocol-browser.test.ts",
               "name": "keeps an unconfirmed post across a reload, reuses its identity on resubmit and settles when the server shows it",
               "kind": "browser"
+            },
+            {
+              "file": "e2e/comments-recovery.spec.ts",
+              "name": "a draft survives signing out in another tab and returns after signing back in, but never appears for another account",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/comments-recovery.spec.ts",
+              "name": "a connection replaced mid-mutation reports an unknown outcome, and resubmitting is idempotent",
+              "kind": "e2e"
             }
           ]
         },
@@ -17575,7 +17720,7 @@
           "inventoryRefs": [
             "C12"
           ],
-          "status": "browser",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/commentor-protocol-browser.test.ts",
@@ -17586,6 +17731,16 @@
               "file": "tests/commentor-widget-browser.test.ts",
               "name": "keeps the reply draft on a rejected reply and explains it",
               "kind": "browser"
+            },
+            {
+              "file": "e2e/comments-recovery.spec.ts",
+              "name": "a connection replaced mid-mutation reports an unknown outcome, and resubmitting is idempotent",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/comments-permissions.spec.ts",
+              "name": "a writer over the comment limit gets a friendly error with a retry hint, keeps the draft and can post once it lapses",
+              "kind": "e2e"
             }
           ]
         },
@@ -17597,8 +17752,14 @@
           "inventoryRefs": [
             "C12"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/comments-recovery.spec.ts",
+              "name": "a connection replaced mid-mutation reports an unknown outcome, and resubmitting is idempotent",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-119-E05",
@@ -17608,12 +17769,17 @@
           "inventoryRefs": [
             "C12"
           ],
-          "status": "browser",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/commentor-protocol-browser.test.ts",
               "name": "keeps an unconfirmed post across a reload, reuses its identity on resubmit and settles when the server shows it",
               "kind": "browser"
+            },
+            {
+              "file": "e2e/comments-recovery.spec.ts",
+              "name": "a connection replaced mid-mutation reports an unknown outcome, and resubmitting is idempotent",
+              "kind": "e2e"
             }
           ]
         },
@@ -17698,7 +17864,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "browser",
+      "status": "e2e",
       "auditEvidence": "B",
       "auditNote": "sign-out-browser.test.ts; commentor-recovery-session.test.ts",
       "edges": [
@@ -17710,8 +17876,14 @@
           "inventoryRefs": [
             "UI-120"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/comments-recovery.spec.ts",
+              "name": "a draft survives signing out in another tab and returns after signing back in, but never appears for another account",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-120-E02",
@@ -17754,12 +17926,22 @@
           "inventoryRefs": [
             "C14"
           ],
-          "status": "browser",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/commentor-protocol-browser.test.ts",
               "name": "stops serving and releases its subscriptions when torn down",
               "kind": "browser"
+            },
+            {
+              "file": "e2e/comments-recovery.spec.ts",
+              "name": "a draft survives signing out in another tab and returns after signing back in, but never appears for another account",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/comments-recovery.spec.ts",
+              "name": "a revoked session is noticed when the page regains focus, and the draft returns once the person signs in again",
+              "kind": "e2e"
             }
           ]
         },
@@ -17771,12 +17953,17 @@
           "inventoryRefs": [
             "C14"
           ],
-          "status": "browser",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/commentor-protocol-browser.test.ts",
               "name": "starts over for a different signed-in reader",
               "kind": "browser"
+            },
+            {
+              "file": "e2e/comments-recovery.spec.ts",
+              "name": "a draft survives signing out in another tab and returns after signing back in, but never appears for another account",
+              "kind": "e2e"
             }
           ]
         },
@@ -17832,7 +18019,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "browser",
+      "status": "e2e",
       "auditEvidence": "UNTESTED",
       "auditNote": "commentor.ts selection and keyboard handlers; current browser test opens composer, not full anchor/keyboard matrix Reconciled with commentor.ts composer/reply keydown: plain Enter submits; Ctrl/Meta+Enter does not. The audit title was inaccurate.",
       "edges": [
@@ -17844,8 +18031,14 @@
           "inventoryRefs": [
             "UI-121"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/comments-journeys.spec.ts",
+              "name": "a text selection and a clicked element become comments that a teammate sees arrive",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-121-E02",
@@ -17855,7 +18048,7 @@
           "inventoryRefs": [
             "C04"
           ],
-          "status": "browser",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/commentor-widget-browser.test.ts",
@@ -17866,6 +18059,11 @@
               "file": "tests/commentor-drawer-browser.test.ts",
               "name": "opens the composer from a selection with the Comment control, and only for real selections",
               "kind": "browser"
+            },
+            {
+              "file": "e2e/comments-journeys.spec.ts",
+              "name": "a text selection and a clicked element become comments that a teammate sees arrive",
+              "kind": "e2e"
             }
           ]
         },
@@ -17894,12 +18092,17 @@
           "inventoryRefs": [
             "C04"
           ],
-          "status": "browser",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/commentor-widget-browser.test.ts",
               "name": "comments on a clicked element, and clicking empty space or pressing Escape cancels",
               "kind": "browser"
+            },
+            {
+              "file": "e2e/comments-journeys.spec.ts",
+              "name": "a text selection and a clicked element become comments that a teammate sees arrive",
+              "kind": "e2e"
             }
           ]
         },
@@ -17979,12 +18182,17 @@
           "inventoryRefs": [
             "C04"
           ],
-          "status": "browser",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/commentor-widget-browser.test.ts",
               "name": "anchors by quote across element boundaries and whitespace, and hides pins whose anchor is gone or off screen",
               "kind": "browser"
+            },
+            {
+              "file": "e2e/comments-recovery.spec.ts",
+              "name": "anchors that the new document no longer has are shown as orphaned, and the comments stay usable",
+              "kind": "e2e"
             }
           ]
         },
@@ -18034,7 +18242,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "browser",
+      "status": "e2e",
       "auditEvidence": "UNTESTED",
       "auditNote": "commentor.ts toggleDrawer/setThreadFilter",
       "edges": [
@@ -18046,8 +18254,14 @@
           "inventoryRefs": [
             "UI-122"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/comments-journeys.spec.ts",
+              "name": "filters and the collapsible drawer follow the comments' status",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-122-E02",
@@ -18057,12 +18271,17 @@
           "inventoryRefs": [
             "C02"
           ],
-          "status": "browser",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/commentor-widget-browser.test.ts",
               "name": "comments on a clicked element, and clicking empty space or pressing Escape cancels",
               "kind": "browser"
+            },
+            {
+              "file": "e2e/comments-journeys.spec.ts",
+              "name": "a text selection and a clicked element become comments that a teammate sees arrive",
+              "kind": "e2e"
             }
           ]
         },
@@ -18074,12 +18293,17 @@
           "inventoryRefs": [
             "C02"
           ],
-          "status": "browser",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/commentor-drawer-browser.test.ts",
               "name": "lists threads by view with live counts, keyboard-navigable tabs and helpful empty states",
               "kind": "browser"
+            },
+            {
+              "file": "e2e/comments-journeys.spec.ts",
+              "name": "filters and the collapsible drawer follow the comments' status",
+              "kind": "e2e"
             }
           ]
         },
@@ -18091,12 +18315,22 @@
           "inventoryRefs": [
             "C02"
           ],
-          "status": "browser",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/commentor-drawer-browser.test.ts",
               "name": "lists threads by view with live counts, keyboard-navigable tabs and helpful empty states",
               "kind": "browser"
+            },
+            {
+              "file": "e2e/comments-journeys.spec.ts",
+              "name": "filters and the collapsible drawer follow the comments' status",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/comments-journeys.spec.ts",
+              "name": "a text selection and a clicked element become comments that a teammate sees arrive",
+              "kind": "e2e"
             }
           ]
         },
@@ -18108,7 +18342,7 @@
           "inventoryRefs": [
             "C02"
           ],
-          "status": "browser",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/commentor-widget-browser.test.ts",
@@ -18119,6 +18353,11 @@
               "file": "tests/commentor-widget-browser.test.ts",
               "name": "comments on a clicked element, and clicking empty space or pressing Escape cancels",
               "kind": "browser"
+            },
+            {
+              "file": "e2e/comments-journeys.spec.ts",
+              "name": "a text selection and a clicked element become comments that a teammate sees arrive",
+              "kind": "e2e"
             }
           ]
         },
@@ -18130,12 +18369,17 @@
           "inventoryRefs": [
             "C02"
           ],
-          "status": "browser",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/commentor-drawer-browser.test.ts",
               "name": "lists threads by view with live counts, keyboard-navigable tabs and helpful empty states",
               "kind": "browser"
+            },
+            {
+              "file": "e2e/comments-journeys.spec.ts",
+              "name": "filters and the collapsible drawer follow the comments' status",
+              "kind": "e2e"
             }
           ]
         },
@@ -18181,12 +18425,17 @@
           "inventoryRefs": [
             "C08"
           ],
-          "status": "browser",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/commentor-drawer-browser.test.ts",
               "name": "lists threads by view with live counts, keyboard-navigable tabs and helpful empty states",
               "kind": "browser"
+            },
+            {
+              "file": "e2e/comments-journeys.spec.ts",
+              "name": "filters and the collapsible drawer follow the comments' status",
+              "kind": "e2e"
             }
           ]
         },
@@ -18215,12 +18464,22 @@
           "inventoryRefs": [
             "C08"
           ],
-          "status": "browser",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/commentor-drawer-browser.test.ts",
               "name": "lists threads by view with live counts, keyboard-navigable tabs and helpful empty states",
               "kind": "browser"
+            },
+            {
+              "file": "e2e/comments-journeys.spec.ts",
+              "name": "replies, resolving and reopening reach a teammate's open document and the server",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/comments-journeys.spec.ts",
+              "name": "filters and the collapsible drawer follow the comments' status",
+              "kind": "e2e"
             }
           ]
         },
@@ -18232,12 +18491,22 @@
           "inventoryRefs": [
             "C08"
           ],
-          "status": "browser",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/commentor-widget-browser.test.ts",
               "name": "resolves and reopens, archives and unarchives, with accessible pending state and failures",
               "kind": "browser"
+            },
+            {
+              "file": "e2e/comments-journeys.spec.ts",
+              "name": "replies, resolving and reopening reach a teammate's open document and the server",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/comments-journeys.spec.ts",
+              "name": "filters and the collapsible drawer follow the comments' status",
+              "kind": "e2e"
             }
           ]
         },
@@ -18249,12 +18518,17 @@
           "inventoryRefs": [
             "C08"
           ],
-          "status": "browser",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/commentor-widget-browser.test.ts",
               "name": "resolves and reopens, archives and unarchives, with accessible pending state and failures",
               "kind": "browser"
+            },
+            {
+              "file": "e2e/comments-journeys.spec.ts",
+              "name": "filters and the collapsible drawer follow the comments' status",
+              "kind": "e2e"
             }
           ]
         }
@@ -18293,7 +18567,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "browser",
+      "status": "e2e",
       "auditEvidence": "UNTESTED",
       "auditNote": "document-comment-pagination.test.ts tests backend pages; no rendered pagination assertions found",
       "edges": [
@@ -18316,12 +18590,22 @@
           "inventoryRefs": [
             "C11"
           ],
-          "status": "browser",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/commentor-edges-browser.test.ts",
               "name": "keeps reply focus and caret in the drawer across updates, drops it when the thread leaves and closes the open bubble",
               "kind": "browser"
+            },
+            {
+              "file": "e2e/comments-journeys.spec.ts",
+              "name": "replies, resolving and reopening reach a teammate's open document and the server",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/comments-journeys.spec.ts",
+              "name": "a deleted comment can be undone within its window and is then removed for good",
+              "kind": "e2e"
             }
           ]
         },
@@ -18344,7 +18628,7 @@
           "inventoryRefs": [
             "C11"
           ],
-          "status": "browser",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/commentor-drawer-browser.test.ts",
@@ -18355,6 +18639,11 @@
               "file": "tests/commentor-drawer-browser.test.ts",
               "name": "does not announce arrivals when the list is short, and scrolls to the newest on request ($motion motion)",
               "kind": "browser"
+            },
+            {
+              "file": "e2e/comments-journeys.spec.ts",
+              "name": "older threads and replies load on demand, and a remote arrival while scrolled away offers the new comment",
+              "kind": "e2e"
             }
           ]
         },
@@ -18366,7 +18655,7 @@
           "inventoryRefs": [
             "C11"
           ],
-          "status": "browser",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/commentor-drawer-browser.test.ts",
@@ -18377,6 +18666,11 @@
               "file": "tests/commentor-drawer-browser.test.ts",
               "name": "does not announce arrivals when the list is short, and scrolls to the newest on request ($motion motion)",
               "kind": "browser"
+            },
+            {
+              "file": "e2e/comments-journeys.spec.ts",
+              "name": "older threads and replies load on demand, and a remote arrival while scrolled away offers the new comment",
+              "kind": "e2e"
             }
           ]
         },
@@ -18454,7 +18748,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "browser",
+      "status": "e2e",
       "auditEvidence": "UNTESTED",
       "auditNote": "commentor.ts focusThread/anchor handlers",
       "edges": [
@@ -18477,7 +18771,7 @@
           "inventoryRefs": [
             "C06"
           ],
-          "status": "browser",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/commentor-widget-browser.test.ts",
@@ -18488,6 +18782,11 @@
               "file": "tests/commentor-drawer-browser.test.ts",
               "name": "scrolls to a thread's anchor and opens it from its card ($motion motion)",
               "kind": "browser"
+            },
+            {
+              "file": "e2e/comments-journeys.spec.ts",
+              "name": "replies, resolving and reopening reach a teammate's open document and the server",
+              "kind": "e2e"
             }
           ]
         },

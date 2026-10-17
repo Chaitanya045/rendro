@@ -372,6 +372,37 @@ Expected failures (their broken assertions get no `e2e` credit; an unexpected pa
 - **Signing in does not return to the document the reader asked for.** The signed-out redirect keeps only
   the path, so `?doc=` is lost. Fix: carry the `doc` and `docQuery` parameters in `returnTo`.
 
+## Comments and recovery (#115)
+
+Three specs run the document-comment journeys on the real Worker, local Convex and the sandboxed publisher frame in all
+three engines. Every person is an `actor` context (see #112/#113); documents are published through the deployment API
+because the journey under test is the comment UI. `e2e/comment-helpers.ts` re-reads server state with a person's *own*
+Convex JWT (never an ambient cookie), so "the server holds it" is asserted with the same functions the widget
+subscribes to, and a forged request is the same call the UI would have made. Final state is asserted in the widget's
+DOM, ARIA, focus and announced toasts (`role=status`/`alert`), on the server, and in a second person's open document.
+
+| Spec | Covers |
+|---|---|
+| `comments-journeys.spec.ts` | Comment on a pointer text selection (chip, anchor label, empty/whitespace Enter ignored, Shift+Enter newline, focus return) and on a clicked element (comment mode, Escape, hint); a teammate's open document receives the pin live. Reply with Enter, resolve/reopen by a teammate, reply removal, empty-state messages. Delete → announced Undo → undo, then delete again → committed exactly once and live for the teammate (paused page clock). Drawer: collapsed `inert`/`aria-hidden`, counts, Arrow/Home/End views, archive from the card and unarchive from the server, drawer stays inside the viewport. Older threads/replies on demand and the "new comment" prompt while scrolled away |
+| `comments-permissions.spec.ts` | The controls each of owner, admin and two members is offered (thread and reply level) and the forged request each refusal maps to (`forbidden`, nothing changed); an admin demoted/removed while the drawer is open loses controls without a reload and is refused as `not_found`; an outsider (other organization) and an anonymous caller refused (`not_found`/`unauthenticated`) and a private share and a public publication carry no widget at all; the write limit (below) |
+| `comments-recovery.spec.ts` | Signing out in another tab (signed-out notice, draft kept in user-bound storage, restored after sign-in, never shown to a different account); a revoked session found on focus; a connection replaced mid-mutation (request committed, answer lost, reload → "outcome unknown" alert, resubmit reuses the operation: one thread, same `clientOperationId`); a redeploy that rewrites the document (orphaned anchors listed, pins hidden, locate explains itself, orphaned thread still answerable and resolvable) |
+
+Timing. The widget's undo window, quota countdown and toast exits run on the page clock, which the tests install and
+pause once the widget is ready, advancing it explicitly (#174). The server's rate-limit bucket refills in **real** time
+and the widget's request is the thing being refused, so the test holds the page's outgoing WebSocket messages
+(`convexSocket(page).hold`) while it empties the bucket through the API (one write at a time: concurrent writers
+conflict with each other rather than with the limit) and releases them when the next token is more than a second away. The
+refusal therefore never depends on winning a race for a refilled token. The retry after the notice ends is a person
+trying again: a retry that arrives before the server's refill is refused with a fresh notice, and the test tries again.
+Nothing sleeps for a fixed time; every wait is on a readiness signal (`aria-busy`, subscribed pins, a server read).
+
+Not supported by the product, so not tested: a read-only "viewer" role (organization roles are owner/admin/member and the
+only page that mounts the widget always grants write; a reader who cannot comment is an anonymous share or public
+visitor, who gets no widget). Not asserted here (covered by the Chromium browser tests, or
+not at all, and not credited): toolbar drag/clamp and tooltips, mobile widths, duplicate-submit blocking, comment
+validation messages other than empty text, archive/delete failure rollbacks, pagination errors, sign-out racing a pending
+moderation. No product bug is pinned by this suite.
+
 ## Vitest Chromium project
 
 Run `pnpm exec playwright install chromium`, then `CI=true pnpm test:browser`.
