@@ -6,7 +6,7 @@ const cookie = "__Secure-better-auth.session_token=private-session-material";
 afterEach(() => { vi.useRealTimers(); });
 
 describe("encrypted private viewer capabilities", () => {
-  it.each(["", "__Secure-"])("retains the %s signed lifetime preference through both ticket kinds", async prefix => {
+  it.each(["", "__Secure-", "__Host-"])("retains the %s signed lifetime preference through both ticket kinds", async prefix => {
     const token = `${prefix}better-auth.session_token=signed-token`;
     const preference = `${prefix}better-auth.dont_remember=signed-preference`;
     const header = `theme=dark; ${preference}; ${token}; better-auth.session_data=unused; __Secure-better-auth.session_data.0=unused; better-auth.dont_remember_extra=unused`;

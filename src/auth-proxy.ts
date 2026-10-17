@@ -6,6 +6,7 @@ import { CONVEX_SITE_URL } from "@/config";
 import { logger } from "@/logger";
 import { backendFetch } from "@/backend-fetch";
 import { authClientIpHeaders } from "@/auth-client-ip";
+import { AUTH_COOKIE_NAMES } from "../shared/auth-cookies";
 
 // Only these pass-through API-key reads accept bearer credentials. Keep auth
 // and management routes cookie-only; deployment writes use dedicated Worker
@@ -22,22 +23,9 @@ const SESSION_REVOCATION_PATHS = new Set([
   "/api/auth/change-password", "/api/auth/reset-password", "/api/auth/delete-user",
 ]);
 
-const AUTH_COOKIE_NAMES = [
-  "__Secure-better-auth.session_token",
-  "better-auth.session_token",
-  "__Secure-better-auth.session_data",
-  "better-auth.session_data",
-  "__Secure-better-auth.session_data.0",
-  "better-auth.session_data.0",
-  "__Secure-better-auth.session_data.1",
-  "better-auth.session_data.1",
-  "__Secure-better-auth.state",
-  "better-auth.state",
-  "__Secure-better-auth.oauth_state",
-  "better-auth.oauth_state",
-  "convex_jwt",
-  "rendro-dev-user",
-] as const;
+// Every Better Auth cookie under current, legacy and local names, plus the
+// Node development identity cookie.
+const SIGN_OUT_COOKIE_NAMES = [...AUTH_COOKIE_NAMES, "rendro-dev-user"];
 
 function strippedSetCookies(headers: Headers): string[] {
   const setCookies = headers.getSetCookie?.();
@@ -56,10 +44,8 @@ function parentCookieDomain(hostname: string): string | undefined {
 }
 
 function appendExpiredCookie(headers: Headers, name: string, domain?: string) {
-  const attributes = name.startsWith("better-auth") || name.startsWith("__Secure-better-auth")
-    ? "Max-Age=0; Path=/; HttpOnly; SameSite=Lax"
-    : "Max-Age=0; Path=/; SameSite=Lax";
-  const secure = name.startsWith("__Secure-") ? "; Secure" : "";
+  const attributes = name.startsWith("rendro-") ? "Max-Age=0; Path=/; SameSite=Lax" : "Max-Age=0; Path=/; HttpOnly; SameSite=Lax";
+  const secure = /^__(?:Secure|Host)-/.test(name) ? "; Secure" : "";
   const domainAttribute = domain ? `; Domain=${domain}` : "";
   headers.append("Set-Cookie", `${name}=; ${attributes}${secure}${domainAttribute}`);
 }
@@ -67,9 +53,10 @@ function appendExpiredCookie(headers: Headers, name: string, domain?: string) {
 function appendAuthCookieCleanup(headers: Headers, hostname: string) {
   headers.set("Clear-Site-Data", '"cookies"');
   const parentDomain = parentCookieDomain(hostname);
-  for (const name of AUTH_COOKIE_NAMES) {
+  for (const name of SIGN_OUT_COOKIE_NAMES) {
     appendExpiredCookie(headers, name);
-    if (parentDomain) appendExpiredCookie(headers, name, parentDomain);
+    // Browsers reject `__Host-` cookies that carry a Domain, so none can exist.
+    if (parentDomain && !name.startsWith("__Host-")) appendExpiredCookie(headers, name, parentDomain);
   }
 }
 

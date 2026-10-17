@@ -195,6 +195,14 @@ describe("worker auth sign-out", () => {
     expect(joined).toContain("__Secure-better-auth.state=; Max-Age=0; Path=/; HttpOnly; SameSite=Lax; Secure; Domain=.rendro.app");
     expect(joined).toContain("__Secure-better-auth.session_token=; Max-Age=0; Path=/; HttpOnly; SameSite=Lax; Secure; Domain=.rendro.app");
     expect(joined).not.toContain("Domain=convex.site");
+    // Current host-only names are cleared without Domain (browsers would reject it).
+    for (const name of ["session_token", "session_data", "dont_remember", "convex_jwt", "state"]) {
+      expect(setCookies).toContain(`__Host-better-auth.${name}=; Max-Age=0; Path=/; HttpOnly; SameSite=Lax; Secure`);
+      expect(setCookies).toContain(`__Secure-better-auth.${name}=; Max-Age=0; Path=/; HttpOnly; SameSite=Lax; Secure`);
+      expect(setCookies).toContain(`better-auth.${name}=; Max-Age=0; Path=/; HttpOnly; SameSite=Lax; Domain=.rendro.app`);
+    }
+    expect(setCookies.filter(value => value.startsWith("__Host-") && /Domain=/i.test(value))).toEqual([]);
+    expect(setCookies).toContain("rendro-dev-user=; Max-Age=0; Path=/; SameSite=Lax; Domain=.rendro.app");
     expect(calls.some((call) => call.includes("/api/auth/sign-out"))).toBe(true);
   });
 

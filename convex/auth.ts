@@ -13,6 +13,7 @@ import { components } from "./_generated/api";
 import type { DataModel } from "./_generated/dataModel";
 import authConfig from "./auth.config";
 import { AUTH_CLIENT_IP_HEADER } from "../shared/auth-client-ip";
+import { authCookiePrefix } from "../shared/auth-cookies";
 import {
   sendAuthLinkEmail,
   sendExistingAccountNotice,
@@ -22,7 +23,7 @@ import { beforeDeleteOrganization } from "./organizationLifecycle";
 import { invitationListPrivacy, organizationFieldHooks } from "./organizationPolicy";
 import { beforeCreateTeam, beforeUpdateTeam } from "../shared/team-names";
 import authSchema from "./betterAuth/schema";
-import { boundSessionLifetime, sessionLifetime } from "./sessionLifetime";
+import { boundSessionLifetime, legacyCookieMigration, sessionLifetime } from "./sessionLifetime";
 
 export const authComponent = createClient<DataModel, typeof authSchema>(
   components.betterAuth,
@@ -56,6 +57,12 @@ export function createAuthOptions(ctx: GenericCtx<DataModel>) {
     trustedOrigins: [siteUrl],
     database: (options: BetterAuthOptions) => boundSessionLifetime(authComponent.adapter(ctx)(options)),
     advanced: {
+      // HTTPS: host-only `__Host-better-auth.*` cookies (Secure, Path=/, no
+      // Domain). Better Auth only knows `__Secure-`, so its automatic prefix is
+      // off and the prefix is part of the name. Local HTTP stays unprefixed.
+      useSecureCookies: false,
+      cookiePrefix: authCookiePrefix(siteUrl),
+      defaultCookieAttributes: { secure: siteUrl.startsWith("https://") },
       ipAddress: { ipAddressHeaders: [AUTH_CLIENT_IP_HEADER] },
       database: {
         generateId: false,
@@ -129,6 +136,8 @@ export function createAuthOptions(ctx: GenericCtx<DataModel>) {
       },
     },
     plugins: [
+      // First: every later hook and endpoint reads only current cookie names.
+      legacyCookieMigration(),
       sessionReadLimit((key) => {
         if (!("runMutation" in ctx)) throw new Error("Session HTTP reads require a mutation-capable context");
         return ctx.runMutation(components.betterAuth.sessionReadLimit.consume, { key });
