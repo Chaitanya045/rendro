@@ -654,7 +654,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "unit",
+      "status": "browser",
       "auditEvidence": "U",
       "auditNote": "landing-theme-navigation.test.ts; routes.test.ts (route/markup contracts, not click journey) Reconciled A01 with landing.ts: three Google CTAs (hero, security, final), not four.",
       "edges": [
@@ -666,8 +666,14 @@
           "inventoryRefs": [
             "UI-001"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/landing-browser.test.ts",
+              "name": "loads the landing page and resolves the sign-in, get-started, logo and Google call-to-action links",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-001-E02",
@@ -677,8 +683,19 @@
           "inventoryRefs": [
             "A01"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/landing-browser.test.ts",
+              "name": "loads the landing page and resolves the sign-in, get-started, logo and Google call-to-action links",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/landing-browser.test.ts",
+              "name": "starts Google sign-in with a JSON request only, from the originating call-to-action",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-001-E03",
@@ -688,8 +705,19 @@
           "inventoryRefs": [
             "A01"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/landing-browser.test.ts",
+              "name": "scrolls the Product, Workflow and Security anchors below the sticky header without adding history or fragments",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/landing-browser.test.ts",
+              "name": "marks exactly the section in view in the primary navigation",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-001-E04",
@@ -699,8 +727,14 @@
           "inventoryRefs": [
             "A01"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/landing-browser.test.ts",
+              "name": "removes legacy section fragments on load without adding history and keeps the query",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-001-E05",
@@ -710,8 +744,14 @@
           "inventoryRefs": [
             "A01"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/landing-browser.test.ts",
+              "name": "resolves the footer links without leaving the page and opens GitHub in a protected new tab",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-001-E06",
@@ -721,8 +761,14 @@
           "inventoryRefs": [
             "A01"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/landing-browser.test.ts",
+              "name": "keeps the product screenshot proportional, unfiltered and inside the viewport at %ipx",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-001-E07",
@@ -17893,8 +17939,44 @@
           "inventoryRefs": [
             "C14"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "tests/sign-out-browser.test.ts",
+              "name": "renews the comment token only after confirming the identity, and survives transient and offline failures without ending the session",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/sign-out-browser.test.ts",
+              "name": "stops following deployments after %s, without signing the viewer out",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/sign-out-browser.test.ts",
+              "name": "keeps following deployments through a transient deployment subscription failure and recovers on the next update",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/sign-out-browser.test.ts",
+              "name": "ends the comment session when the identity check at token renewal finds the account gone",
+              "kind": "browser"
+            },
+            {
+              "file": "e2e/comments-recovery.spec.ts",
+              "name": "a revoked session is noticed when the page regains focus, and the draft returns once the person signs in again",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/comments-permissions.spec.ts",
+              "name": "a role change reaches an open document, and a removed member loses the comments",
+              "kind": "e2e"
+            },
+            {
+              "file": "tests/commentor-recovery-ui.test.ts",
+              "name": "displays subscription failures for a legacy=%s parent and recovers",
+              "kind": "unit"
+            }
+          ]
         },
         {
           "id": "UI-120-E03",
@@ -17904,8 +17986,24 @@
           "inventoryRefs": [
             "C14"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "tests/commentor-protocol-browser.test.ts",
+              "name": "reports an unknown outcome, without replaying, when the parent is replaced during a post or reply",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/commentor-protocol-browser.test.ts",
+              "name": "offers Refresh for a slow change, keeps its guard and settles when the result finally arrives",
+              "kind": "browser"
+            },
+            {
+              "file": "e2e/comments-recovery.spec.ts",
+              "name": "a connection replaced mid-mutation reports an unknown outcome, and resubmitting is idempotent",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-120-E04",
@@ -17915,8 +18013,19 @@
           "inventoryRefs": [
             "C14"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/commentor-error-messages.test.ts",
+              "name": "maps %s without displaying backend diagnostics",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/commentor-drawer-browser.test.ts",
+              "name": "keeps notifications readable for their duration and removes them afterwards",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-120-E05",
@@ -19358,8 +19467,19 @@
           "inventoryRefs": [
             "A04"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/auth-pages-browser.test.ts",
+              "name": "keeps a safe return destination and the invitation context through every related authentication link",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/auth-pages-browser.test.ts",
+              "name": "drops an unsafe return target from every related link and the invitation context",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-128-E10",
@@ -19696,8 +19816,19 @@
           "inventoryRefs": [
             "A06"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/auth-pages-browser.test.ts",
+              "name": "keeps a safe return destination and the invitation context through every related authentication link",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/auth-pages-browser.test.ts",
+              "name": "drops an unsafe return target from every related link and the invitation context",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-131-E09",
@@ -19763,8 +19894,19 @@
           "inventoryRefs": [
             "UI-132"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "tests/auth-hidden-browser.test.ts",
+              "name": "signup hides alternatives, focuses success and restores a fresh form at %ipx",
+              "kind": "browser"
+            },
+            {
+              "file": "e2e/auth.spec.ts",
+              "name": "signup verifies the original mail and retains the destination",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-132-E02",
@@ -19823,8 +19965,19 @@
           "inventoryRefs": [
             "UI-133"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/auth.spec.ts",
+              "name": "verification resend is neutral and retains its destination",
+              "kind": "e2e"
+            },
+            {
+              "file": "tests/auth-ui-regressions.test.ts",
+              "name": "reports verification resend transport failure while keeping account privacy",
+              "kind": "unit"
+            }
+          ]
         },
         {
           "id": "UI-133-E02",
@@ -19885,8 +20038,14 @@
           "inventoryRefs": [
             "A07"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "unit",
+          "tests": [
+            {
+              "file": "tests/auth-ui-regressions.test.ts",
+              "name": "reports verification resend transport failure while keeping account privacy",
+              "kind": "unit"
+            }
+          ]
         },
         {
           "id": "UI-133-E06",
@@ -19977,12 +20136,18 @@
           "id": "UI-134-E01",
           "from": "Verification email token available",
           "trigger": "Follow callback, sign in, or recover expired token",
-          "expected": "Verification email token callback→verified screen→sign-in; expired token recovery",
+          "expected": "Verification email token callback→verified screen→sign-in",
           "inventoryRefs": [
             "UI-134"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/auth.spec.ts",
+              "name": "signup verifies the original mail and retains the destination",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-134-E02",
@@ -19998,6 +20163,17 @@
               "kind": "e2e"
             }
           ]
+        },
+        {
+          "id": "UI-134-E03",
+          "from": "Verification email token available",
+          "trigger": "Follow callback, sign in, or recover expired token",
+          "expected": "Invalid or expired token shows recovery with a resend form instead of the verified screen",
+          "inventoryRefs": [
+            "UI-134"
+          ],
+          "status": "untested",
+          "tests": []
         }
       ]
     },
@@ -20041,8 +20217,19 @@
           "inventoryRefs": [
             "UI-135"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/auth.spec.ts",
+              "name": "password recovery is neutral and reset revokes a second browser session",
+              "kind": "e2e"
+            },
+            {
+              "file": "tests/auth-ui-regressions.test.ts",
+              "name": "keeps recovery non-enumerating but reports server failures for retry",
+              "kind": "unit"
+            }
+          ]
         },
         {
           "id": "UI-135-E02",
@@ -20213,8 +20400,24 @@
           "inventoryRefs": [
             "A08"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "tests/auth-ui-regressions.test.ts",
+              "name": "restores reset controls after a failed request and permits retry",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/auth-pages-browser.test.ts",
+              "name": "excludes duplicate reset submissions while pending, then recovers from a rejection and completes on retry",
+              "kind": "browser"
+            },
+            {
+              "file": "e2e/auth.spec.ts",
+              "name": "missing, invalid and expired reset tokens recover without changing credentials",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-136-E07",
@@ -20241,8 +20444,19 @@
           "inventoryRefs": [
             "A08"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/auth-pages-browser.test.ts",
+              "name": "keeps a safe return destination and the invitation context through every related authentication link",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/auth-pages-browser.test.ts",
+              "name": "drops an unsafe return target from every related link and the invitation context",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-136-E09",
@@ -20417,8 +20631,24 @@
           "inventoryRefs": [
             "A05"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "tests/auth-pages-browser.test.ts",
+              "name": "explains each Google callback failure with fixed recovery copy and keeps every control usable",
+              "kind": "browser"
+            },
+            {
+              "file": "e2e/auth.spec.ts",
+              "name": "OAuth denial and mismatched state create no session and offer sign-in recovery",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/auth.spec.ts",
+              "name": "Google linking rejects a different provider email without replacing the session",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-138-E03",
@@ -20445,8 +20675,19 @@
           "inventoryRefs": [
             "A05"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "tests/auth-pages-browser.test.ts",
+              "name": "starts Google sign-in only for a callback inside this origin, whatever return target is requested",
+              "kind": "browser"
+            },
+            {
+              "file": "e2e/auth-transitions.spec.ts",
+              "name": "Google sign-in never leaves the origin, whatever return target was requested",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-138-E05",
@@ -20585,8 +20826,19 @@
           "inventoryRefs": [
             "A09"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "tests/auth-pages-browser.test.ts",
+              "name": "reveals, scrolls to and focuses the initial-password form, jumping instead of animating under reduced motion",
+              "kind": "browser"
+            },
+            {
+              "file": "e2e/auth.spec.ts",
+              "name": "OAuth callback creates a verified session and initial password requires freshness",
+              "kind": "e2e"
+            }
+          ]
         }
       ]
     },
@@ -20715,8 +20967,19 @@
           "inventoryRefs": [
             "A10"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/auth.spec.ts",
+              "name": "change password rejects wrong current credentials and revokes other sessions",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/auth-transitions.spec.ts",
+              "name": "changing a password can keep other sessions, and Back to workspace leaves account security",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-141-E04",
@@ -20770,8 +21033,19 @@
           "inventoryRefs": [
             "A10"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/auth-transitions.spec.ts",
+              "name": "changing a password can keep other sessions, and Back to workspace leaves account security",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/auth.spec.ts",
+              "name": "sign-out failure retries, clears both tabs and protects back-forward history",
+              "kind": "e2e"
+            }
+          ]
         }
       ]
     },
@@ -20873,8 +21147,24 @@
           "inventoryRefs": [
             "UI-143"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "tests/sign-out-browser.test.ts",
+              "name": "shows the sign-out confirmation for GET without revoking, then signs out natively and permits signing back in",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/sign-out-browser.test.ts",
+              "name": "tears down a background viewer within 2 seconds via %s and signs back in without a loop",
+              "kind": "browser"
+            },
+            {
+              "file": "e2e/auth.spec.ts",
+              "name": "sign-out failure retries, clears both tabs and protects back-forward history",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-143-E02",
@@ -20884,8 +21174,19 @@
           "inventoryRefs": [
             "G11"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/sign-out-browser.test.ts",
+              "name": "shows the sign-out confirmation for GET without revoking, then signs out natively and permits signing back in",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/sign-out-revocation.test.ts",
+              "name": "GET renders a POST confirmation and cannot revoke or cause upstream CSRF",
+              "kind": "unit"
+            }
+          ]
         },
         {
           "id": "UI-143-E03",
@@ -20895,8 +21196,29 @@
           "inventoryRefs": [
             "G11"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "tests/sign-out-browser.test.ts",
+              "name": "shows the sign-out confirmation for GET without revoking, then signs out natively and permits signing back in",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/sign-out-browser.test.ts",
+              "name": "tears down a background viewer within 2 seconds via %s and signs back in without a loop",
+              "kind": "browser"
+            },
+            {
+              "file": "e2e/auth.spec.ts",
+              "name": "sign-out failure retries, clears both tabs and protects back-forward history",
+              "kind": "e2e"
+            },
+            {
+              "file": "tests/sign-out-revocation.test.ts",
+              "name": "rejects untrusted Origin %s before forwarding",
+              "kind": "unit"
+            }
+          ]
         },
         {
           "id": "UI-143-E04",
@@ -20906,8 +21228,19 @@
           "inventoryRefs": [
             "G11"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/sign-out-browser.test.ts",
+              "name": "answers a failed native sign-out with Try again, keeping the session and cookies until a retry succeeds",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/sign-out-revocation.test.ts",
+              "name": "retains cookies and offers retry on upstream %s, evicting cached identity",
+              "kind": "unit"
+            }
+          ]
         },
         {
           "id": "UI-143-E05",
@@ -20917,8 +21250,14 @@
           "inventoryRefs": [
             "G11"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/sign-out-browser.test.ts",
+              "name": "shows the sign-out confirmation for GET without revoking, then signs out natively and permits signing back in",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-143-E06",
@@ -20945,8 +21284,14 @@
           "inventoryRefs": [
             "G11"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/sign-out-browser.test.ts",
+              "name": "tears down a background viewer within 2 seconds via %s and signs back in without a loop",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-143-E08",
@@ -20956,8 +21301,24 @@
           "inventoryRefs": [
             "G11"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/sign-out-browser.test.ts",
+              "name": "closes the key-creation dialog and its top-layer select popover on cross-tab sign-out",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/sign-out-browser.test.ts",
+              "name": "scrubs the open API-key reveal and focuses usable sign-in via %s",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/sign-out-browser.test.ts",
+              "name": "cancels an open private-share revocation confirmation in the other tab",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-143-E09",
@@ -21018,8 +21379,19 @@
           "inventoryRefs": [
             "G11"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/sign-out-browser.test.ts",
+              "name": "tears down a background viewer within 2 seconds via %s and signs back in without a loop",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/sign-out-browser.test.ts",
+              "name": "hides a restored page and keeps its drafts in the original namespace when the live identity is %s",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-143-E13",
@@ -21119,8 +21491,19 @@
           "inventoryRefs": [
             "UI-144"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/sign-out-browser.test.ts",
+              "name": "tears down a background viewer within 2 seconds via %s and signs back in without a loop",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/sign-out-browser.test.ts",
+              "name": "scrubs the open API-key reveal and focuses usable sign-in via %s",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-144-E02",
@@ -21188,8 +21571,19 @@
           "inventoryRefs": [
             "UI-145"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "tests/sign-out-browser.test.ts",
+              "name": "keeps the session and subscriptions on failure, then allows retry",
+              "kind": "browser"
+            },
+            {
+              "file": "e2e/auth.spec.ts",
+              "name": "sign-out failure retries, clears both tabs and protects back-forward history",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-145-E02",
@@ -21272,8 +21666,24 @@
           "inventoryRefs": [
             "UI-146"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "tests/sign-out-browser.test.ts",
+              "name": "hides a restored page and keeps its drafts in the original namespace when the live identity is %s",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/commentor-recovery-session.test.ts",
+              "name": "checks the live server session before BFCache hydration and handles iframe load while the check is pending",
+              "kind": "unit"
+            },
+            {
+              "file": "e2e/auth.spec.ts",
+              "name": "persisted pageshow checks the backend and hides a revoked account",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-146-E02",
@@ -21305,8 +21715,24 @@
           "inventoryRefs": [
             "G12"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "tests/sign-out-browser.test.ts",
+              "name": "hides a restored page and keeps its drafts in the original namespace when the live identity is %s",
+              "kind": "browser"
+            },
+            {
+              "file": "e2e/auth-transitions.spec.ts",
+              "name": "a restored page for a different account hides the previous account's data",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/auth.spec.ts",
+              "name": "persisted pageshow checks the backend and hides a revoked account",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-146-E04",
@@ -21316,8 +21742,19 @@
           "inventoryRefs": [
             "G12"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/sign-out-browser.test.ts",
+              "name": "does not mistake a failed identity check on restore for a sign-out, and still signs out once the session is gone",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/commentor-recovery-session.test.ts",
+              "name": "does not queue another check once the first resolves to a sign-out, and survives failed requests",
+              "kind": "unit"
+            }
+          ]
         },
         {
           "id": "UI-146-E05",
@@ -21327,8 +21764,24 @@
           "inventoryRefs": [
             "G12"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "tests/sign-out-browser.test.ts",
+              "name": "hides a restored page and keeps its drafts in the original namespace when the live identity is %s",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/commentor-recovery-session.test.ts",
+              "name": "keeps same-user recovery on navigation and clears it only on a different server-rendered identity",
+              "kind": "unit"
+            },
+            {
+              "file": "e2e/comments-recovery.spec.ts",
+              "name": "a draft survives signing out in another tab and returns after signing back in, but never appears for another account",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-146-E06",
@@ -21338,8 +21791,14 @@
           "inventoryRefs": [
             "G12"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/auth-transitions.spec.ts",
+              "name": "sign-out whose cookie cleanup is lost still leaves a usable signed-out tab and a working sign-in",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-146-E07",
@@ -21427,7 +21886,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "unit",
+      "status": "browser",
       "auditEvidence": "U",
       "auditNote": "session-lookup-failures.test.ts; session-cache-browsing.test.ts (HTTP/runtime coverage, browser retry remains open)",
       "edges": [
@@ -21439,8 +21898,19 @@
           "inventoryRefs": [
             "UI-147"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/session-outage-browser.test.ts",
+              "name": "keeps an upstream session outage distinct from signed out, preserves the cookie and recovers on Try again",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/session-lookup-failures.test.ts",
+              "name": "returns styled 503 on persistent %s failure (%#)",
+              "kind": "unit"
+            }
+          ]
         },
         {
           "id": "UI-147-E02",
@@ -21492,7 +21962,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "unit",
+      "status": "browser",
       "auditEvidence": "U",
       "auditNote": "sign-out-revocation.test.ts: GET renders POST confirmation; native confirmation-page click itself is not asserted",
       "edges": [
@@ -21504,8 +21974,19 @@
           "inventoryRefs": [
             "UI-152"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/sign-out-browser.test.ts",
+              "name": "shows the sign-out confirmation for GET without revoking, then signs out natively and permits signing back in",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/sign-out-revocation.test.ts",
+              "name": "GET renders a POST confirmation and cannot revoke or cause upstream CSRF",
+              "kind": "unit"
+            }
+          ]
         },
         {
           "id": "UI-152-E02",
@@ -21554,7 +22035,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "untested",
+      "status": "browser",
       "auditEvidence": "NOT_IN_AUDIT",
       "auditNote": "Additional family from the modernization inventory/route ledger.",
       "edges": [
@@ -21564,8 +22045,34 @@
           "trigger": "Reveal, scroll, print, restore, or disable JS/animation",
           "expected": "Landing motion and progressive fallback",
           "inventoryRefs": [],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/landing-browser.test.ts",
+              "name": "reveals below-the-fold content once as it enters view, including when focused first",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/landing-browser.test.ts",
+              "name": "marks exactly the section in view in the primary navigation",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/landing-browser.test.ts",
+              "name": "keeps content, navigation and sign-in usable when IntersectionObserver is unavailable",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/landing-browser.test.ts",
+              "name": "shows all content without motion under reduced-motion, print and no-JavaScript rendering",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/landing-browser.test.ts",
+              "name": "restores ready authentication buttons after Back and after a persisted page restore",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-153-E02",
@@ -21575,8 +22082,14 @@
           "inventoryRefs": [
             "A02"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/landing-browser.test.ts",
+              "name": "reveals below-the-fold content once as it enters view, including when focused first",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-153-E03",
@@ -21586,8 +22099,14 @@
           "inventoryRefs": [
             "A02"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/landing-browser.test.ts",
+              "name": "marks exactly the section in view in the primary navigation",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-153-E04",
@@ -21597,8 +22116,14 @@
           "inventoryRefs": [
             "A02"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/landing-browser.test.ts",
+              "name": "keeps content, navigation and sign-in usable when IntersectionObserver is unavailable",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-153-E05",
@@ -21608,8 +22133,14 @@
           "inventoryRefs": [
             "A02"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/landing-browser.test.ts",
+              "name": "shows all content without motion under reduced-motion, print and no-JavaScript rendering",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-153-E06",
@@ -21619,8 +22150,14 @@
           "inventoryRefs": [
             "A02"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/landing-browser.test.ts",
+              "name": "restores ready authentication buttons after Back and after a persisted page restore",
+              "kind": "browser"
+            }
+          ]
         }
       ]
     },
@@ -21652,7 +22189,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "untested",
+      "status": "browser",
       "auditEvidence": "NOT_IN_AUDIT",
       "auditNote": "Additional family from the modernization inventory/route ledger.",
       "edges": [
@@ -21662,8 +22199,29 @@
           "trigger": "Start OAuth and resolve/reject returned URL",
           "expected": "Landing OAuth pending and failure recovery",
           "inventoryRefs": [],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/landing-browser.test.ts",
+              "name": "starts Google sign-in with a JSON request only, from the originating call-to-action",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/landing-browser.test.ts",
+              "name": "guards every authentication action while a request is pending and gives feedback only on the originating call-to-action",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/landing-browser.test.ts",
+              "name": "restores controls, focus and an email sign-in link after a rejected, malformed or missing OAuth response",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/landing-browser.test.ts",
+              "name": "navigates to the returned authorization URL and starts over from a clean state on the next attempt",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-154-E02",
@@ -21673,8 +22231,14 @@
           "inventoryRefs": [
             "A03"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/landing-browser.test.ts",
+              "name": "starts Google sign-in with a JSON request only, from the originating call-to-action",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-154-E03",
@@ -21684,8 +22248,14 @@
           "inventoryRefs": [
             "A03"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/landing-browser.test.ts",
+              "name": "guards every authentication action while a request is pending and gives feedback only on the originating call-to-action",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-154-E04",
@@ -21695,8 +22265,14 @@
           "inventoryRefs": [
             "A03"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/landing-browser.test.ts",
+              "name": "guards every authentication action while a request is pending and gives feedback only on the originating call-to-action",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-154-E05",
@@ -21706,8 +22282,14 @@
           "inventoryRefs": [
             "A03"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/landing-browser.test.ts",
+              "name": "restores controls, focus and an email sign-in link after a rejected, malformed or missing OAuth response",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-154-E06",
@@ -21717,8 +22299,14 @@
           "inventoryRefs": [
             "A03"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/landing-browser.test.ts",
+              "name": "navigates to the returned authorization URL and starts over from a clean state on the next attempt",
+              "kind": "browser"
+            }
+          ]
         }
       ]
     },

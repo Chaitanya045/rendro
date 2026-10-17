@@ -403,6 +403,29 @@ not at all, and not credited): toolbar drag/clamp and tooltips, mobile widths, d
 validation messages other than empty text, archive/delete failure rollbacks, pagination errors, sign-out racing a pending
 moderation. No product bug is pinned by this suite.
 
+## Authentication, account, landing and sign-out transitions (#197)
+
+These edges needed no new product behavior; they needed assertions at the cheapest level that can see them.
+
+| Test | Covers |
+|---|---|
+| `tests/landing-browser.test.ts` | The production landing page and inline controller with the production security headers, in Chromium: header/logo/footer links, Product/Workflow/Security anchors (sticky-header clearance, no fragment or history entry, legacy fragments removed on load), the screenshot's proportions and unfiltered appearance at 320/375/430/1440 in both appearances; reveal-once, focus-reveal and the section indicator; no `IntersectionObserver`, reduced-motion, print and no-JavaScript rendering; Google start (JSON request only, every action guarded while pending, busy and error feedback only on the originating call-to-action, rejected/malformed/missing/offline responses restore controls, focus and an email sign-in link, success navigates), and the persisted-page restore (`pageshow`) |
+| `tests/auth-pages-browser.test.ts` | The production authentication pages in Chromium: safe `returnTo` and the invitation context carried through every related link (unsafe targets dropped), Google callback failure copy per error code, Google start confined to this origin, "Add below" reveal/scroll/focus with the reduced-motion fallback, reset pending exclusion and retry |
+| `tests/sign-out-browser.test.ts` | GET sign-out confirmation without revocation, native POST, the complete page's working Sign in, a failed native sign-out (Try again, cookies kept), restored pages whose live identity changed or ended (drafts stay in the original account's storage), failed identity checks (including offline) that are *not* a sign-out, comment-token renewal (identity first; transient/offline failures survive; denied token or deployment subscription stops following without signing out) |
+| `tests/session-outage-browser.test.ts` | The real session middleware: an upstream outage is a 503 page (cookie kept, no redirect) that recovers through Try again; a missing session redirects to sign-in |
+| `e2e/auth-transitions.spec.ts` | Google sign-in never leaves the origin; changing a password with "Sign out other sessions" off keeps the other browser signed in, and Back to workspace; a restored page for a different account; a sign-out whose cookie cleanup is lost |
+
+Timing: no fixed sleeps. Smooth scrolling is awaited by polling where the section landed (or the page bottom when the
+page is too short to reach it); CSS transitions are polled to their final value; negative assertions after a failed
+identity check synchronize on the request finishing and two animation frames.
+
+Expected failure (its broken assertion gets no `e2e` credit; an unexpected pass fails the suite):
+
+- **An invalid or expired verification link is reported as "Email verified".** Better Auth redirects a rejected token to
+  the callback with `&error=INVALID_TOKEN` (or `token_expired`), but `/verify-email` keys only on `verified=1`, so the
+  page shows the success screen and "Continue to sign in" while the account stays unverified. Fix: when the `error`
+  query parameter is present, render the unverified page with a "link invalid or expired" message and the resend form.
+
 ## Vitest Chromium project
 
 Run `pnpm exec playwright install chromium`, then `CI=true pnpm test:browser`.
