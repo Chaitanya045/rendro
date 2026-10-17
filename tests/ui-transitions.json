@@ -5453,6 +5453,16 @@
               "file": "e2e/org-lifecycle.spec.ts",
               "name": "a user without an organization creates the first one: slug derivation, validation, pending, conflict and retry",
               "kind": "e2e"
+            },
+            {
+              "file": "e2e/org-lifecycle.spec.ts",
+              "name": "the API rejects an organization slug that violates the documented pattern",
+              "kind": "e2e"
+            },
+            {
+              "file": "tests/organization-policy.test.ts",
+              "name": "is validated on create and update before anything is written (%s)",
+              "kind": "unit"
             }
           ]
         },
@@ -6937,6 +6947,11 @@
               "file": "e2e/org-lifecycle.spec.ts",
               "name": "settings guard unsaved edits, save canonical values to the chrome and server, and report a slug conflict without losing edits",
               "kind": "e2e"
+            },
+            {
+              "file": "e2e/org-lifecycle.spec.ts",
+              "name": "the API rejects an organization slug that violates the documented pattern",
+              "kind": "e2e"
             }
           ]
         },
@@ -7988,6 +8003,16 @@
               "file": "e2e/org-permissions.spec.ts",
               "name": "owner: People, Teams and Settings expose exactly the controls of that role",
               "kind": "e2e"
+            },
+            {
+              "file": "e2e/org-permissions.spec.ts",
+              "name": "an ordinary member cannot read the organization's pending invitations",
+              "kind": "e2e"
+            },
+            {
+              "file": "tests/organization-policy.test.ts",
+              "name": "is readable only by owners and admins through every endpoint that returns it (%s)",
+              "kind": "unit"
             }
           ]
         },

@@ -309,14 +309,34 @@ test.describe("organization settings and deletion", () => {
     await expect(owner.page.getByRole("heading", { name: "Create your organization" })).toBeVisible();
   });
 
-  // Known bug: Organization create/update accept any slug; only the browser pattern attribute enforces lowercase hyphenated slugs.
-  test.fail("the API rejects an organization slug that violates the documented pattern (known bug)", async ({ actor }) => {
+  test("the API rejects an organization slug that violates the documented pattern", async ({ actor }) => {
     const owner = await actor("slug", { organizations: ["Slug Org"] });
+    const [organization] = owner.organizations;
+    const invalid = { status: 400, body: { code: "INVALID_ORGANIZATION_SLUG", message: "Organization slug must contain lowercase letters, numbers, and hyphens" } };
     // Unique, so a repeated run cannot be refused for a duplicate instead of for the pattern.
     const unique = Date.now().toString(36);
-    const created = await api(owner.page, "/api/auth/organization/create", { name: "Bad Slug Org", slug: `Not A Valid Slug ${unique}` });
-    expect(created.status).toBeGreaterThanOrEqual(400);
-    const updated = await api(owner.page, "/api/auth/organization/update", { organizationId: owner.organizations[0].id, data: { slug: `Also Not Valid ${unique}` } });
-    expect(updated.status).toBeGreaterThanOrEqual(400);
+    const before = await organizationList(owner.page);
+    for (const slug of [`Not A Valid Slug ${unique}`, `trailing-${unique}-`, `${unique}-${"a".repeat(48)}`]) {
+      expect(await api(owner.page, "/api/auth/organization/create", { name: "Bad Slug Org", slug }), slug).toMatchObject(invalid);
+      expect(await api(owner.page, "/api/auth/organization/update", { organizationId: organization.id, data: { slug } }), slug).toMatchObject(invalid);
+    }
+    expect(await organizationList(owner.page)).toEqual(before);
+    expect((await fullOrganization(owner.page, organization.id)).body).toMatchObject({ name: "Slug Org", slug: organization.slug });
+
+    // Past the form's own pattern check, the settings form shows the server's refusal and keeps the edit.
+    await openSection(owner.page, organization.id, "settings");
+    const slug = owner.page.getByLabel("Slug", { exact: true });
+    await slug.evaluate(input => input.removeAttribute("pattern"));
+    await slug.fill(`Still Not Valid ${unique}`);
+    await owner.page.getByRole("button", { name: "Save changes", exact: true }).click();
+    await expect(owner.page.locator("#settings-error")).toHaveText(invalid.body.message);
+    await expect(slug).toHaveValue(`Still Not Valid ${unique}`);
+    await expect(toasts(owner.page)).toHaveCount(0);
+    expect((await fullOrganization(owner.page, organization.id)).body.slug).toBe(organization.slug);
+    // A conforming slug still saves.
+    await slug.fill(`valid-${unique}`);
+    await owner.page.getByRole("button", { name: "Save changes", exact: true }).click();
+    await expect(toasts(owner.page)).toHaveText(["Organization settings saved."]);
+    expect((await fullOrganization(owner.page, organization.id)).body.slug).toBe(`valid-${unique}`);
   });
 });

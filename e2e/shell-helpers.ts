@@ -52,7 +52,7 @@ export async function provision(page: Page, prefix: string, options: { organizat
   expect(signIn.status).toBe(200);
   const workspace: Workspace = { email, organizations: [], projects: [] };
   for (const name of options.organizations ?? []) {
-    const slug = `${label}-${name}`.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 48);
+    const slug = `${label}-${name}`.toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 48).replace(/^-|-$/g, "");
     const created = await api<{ id: string }>(page, "/api/auth/organization/create", { name, slug });
     expect(created.status).toBe(200);
     workspace.organizations.push({ id: created.body.id, name, slug });
