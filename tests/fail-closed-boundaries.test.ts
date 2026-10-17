@@ -15,7 +15,7 @@ afterEach(() => {
 describe("fail-closed API and manifest boundaries", () => {
   it("does not expose unhandled exception messages or request paths", async () => {
     const response = await workerApp.request(
-      "/unexpected-resource",
+      "/select.js",
       undefined,
       { ASSETS: { fetch: () => { throw new Error("storage password leaked in stack"); } } },
     );

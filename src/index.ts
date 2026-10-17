@@ -1,7 +1,7 @@
 import { securityHeaders } from "./middleware/security-headers";
-import { faviconAssets, faviconCacheControl } from "./routes/favicon";
 import { fontResponseHeaders } from "./routes/fonts";
-import { Hono } from "hono";
+import { publicAssetHeaders, publicAssetPaths } from "./routes/public-assets";
+import { Hono, type Context, type MiddlewareHandler } from "hono";
 import { requestLogPath } from "./request-log";
 import { serve, type HttpBindings } from "@hono/node-server";
 import { registerAuthClientIp } from "@/auth-client-ip";
@@ -20,36 +20,19 @@ const PORT = z.coerce.number().int().min(1).max(65535).default(3000).parse(proce
 export const app = new Hono<{ Bindings: HttpBindings; Variables: { user?: User } }>();
 app.use("*", securityHeaders);
 
-for (const [path, contentType] of Object.entries(faviconAssets)) {
-  app.use(path, async (c, next) => {
-    await next();
-    if (c.res.ok) {
-      c.header("Content-Type", contentType);
-      c.header("Cache-Control", faviconCacheControl);
-    }
-  }, serveStatic({ path: `./public${path}` }));
-}
-
-// Same contract as the Worker: hashed fonts and license texts only, with immutable caching.
-app.use("/fonts/*", async (c, next) => {
-  const fontHeaders = fontResponseHeaders(c.req.path);
-  if (!fontHeaders) return c.body(null, 404);
+// Same contract as the Worker: an explicit allowlist of public assets, served before session
+// middleware with identical headers. serveStatic only falls through for a missing file, so each
+// route ends the request itself instead of entering the app.
+const setAssetHeaders = (headersFor: (c: Context) => Record<string, string> | undefined): MiddlewareHandler => async (c, next) => {
+  const assetHeaders = headersFor(c);
+  if (!assetHeaders) return c.body(null, 404);
   await next();
-  if (c.res.ok) for (const [name, value] of Object.entries(fontHeaders)) c.header(name, value);
-}, serveStatic({ root: "./public" }));
-// serveStatic only falls through for a missing file: end the request instead of entering the app.
-app.get("/fonts/*", (c) => c.body(null, 404));
-
-// Serve static assets (commentor.js, etc.)
-app.use("/commentor.js", serveStatic({ path: "./public/commentor.js" }));
-app.use("/commentor-parent.js", serveStatic({ path: "./public/commentor-parent.js" }));
-app.use("/lazy-tree.js", serveStatic({ path: "./public/lazy-tree.js" }));
-app.use("/management-query.js", serveStatic({ path: "./public/management-query.js" }));
-app.use("/select.js", serveStatic({ path: "./public/select.js" }));
-app.use("/management-pages.js", serveStatic({ path: "./public/management-pages.js" }));
-app.use("/landing-product.webp", serveStatic({ path: "./public/landing-product.webp" }));
-
-app.use("/private-viewer.js", serveStatic({ path: "./public/private-viewer.js" }));
+  if (c.res.ok || c.res.status === 304) for (const [name, value] of Object.entries(assetHeaders)) c.header(name, value);
+};
+for (const path of publicAssetPaths) {
+  app.get(path, setAssetHeaders(c => publicAssetHeaders(path, new URL(c.req.url).search)), serveStatic({ path: `./public${path}` }), c => c.body(null, 404));
+}
+app.get("/fonts/*", setAssetHeaders(c => fontResponseHeaders(c.req.path)), serveStatic({ root: "./public" }), c => c.body(null, 404));
 
 // Request timing
 app.use("*", async (c, next) => {

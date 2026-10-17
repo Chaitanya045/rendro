@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import worker from "../src/worker";
 import { createShareToken } from "../src/share-links";
+import { MANAGEMENT_QUERY_VERSION } from "../src/routes/management-asset-versions";
 import { mockSecurityBackend, docsBase } from "./fixtures/security-headers";
 
 const routes = worker.routes.filter(route => route.method !== "ALL");
@@ -51,7 +52,7 @@ it("preserves the reviewed JWKS, static asset and public publication exceptions"
     expect(response.status).toBe(200);
     expect(response.headers.get("cache-control")).toBe("public, max-age=0, must-revalidate");
   }
-  const response = await worker.request("/management-query.js", {}, { ASSETS: { fetch: () => new Response("asset", { headers: { "Cache-Control": "public, max-age=31536000, immutable" } }) } });
+  const response = await worker.request(`/management-query.js?v=${MANAGEMENT_QUERY_VERSION}`, {}, { ASSETS: { fetch: () => new Response("asset", { headers: { "Cache-Control": "public, max-age=0, must-revalidate" } }) } });
   expect(response.headers.get("cache-control")).toBe("public, max-age=31536000, immutable");
   for (const [status, cookies, expected] of [
     [200, false, "public, max-age=300, must-revalidate"],
