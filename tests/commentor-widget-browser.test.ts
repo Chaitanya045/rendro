@@ -304,10 +304,13 @@ describe("thread actions and permissions", () => {
     await lab.page.clock.install();
     await lab.ready([{ _id: "t1", body: "Gone soon", anchor: heading }, { _id: "t2", body: "Stays", anchor: intro }]);
     await expect.poll(() => lab.pins().count()).toBe(2);
+    // The undo window and its toast last 5s of clock time and a closed toast leaves 150ms later: only the test moves the clock.
+    await lab.pauseClock();
     await openBubble(lab);
     const deleteButton = lab.tid("commentor-thread-bubble").locator('[data-testid="commentor-delete-btn"]');
     await deleteButton.click();
     await expect.poll(() => lab.pins().count()).toBe(1);
+    await lab.page.clock.runFor(200);
     await expect.poll(() => lab.tid("commentor-thread-bubble").count()).toBe(0);
     const status = lab.ui.locator('.toast[role="status"]');
     expect(await status.innerText()).toContain("Comment deleted.");
@@ -315,6 +318,7 @@ describe("thread actions and permissions", () => {
     await expect.poll(() => lab.pins().count()).toBe(2);
     await expect.poll(() => status.last().innerText()).toContain("Deletion undone.");
     await lab.page.clock.fastForward(6000);
+    await lab.page.clock.runFor(200);
     expect((await lab.calls).filter(call => call.method === "thread.remove")).toHaveLength(0);
     // A second delete commits when the window passes and the thread leaves for good.
     await openBubble(lab);
@@ -323,6 +327,7 @@ describe("thread actions and permissions", () => {
     await expect.poll(async () => (await lab.calls).filter(call => call.method === "thread.remove").length).toBe(1);
     expect(await lastCall(lab)).toMatchObject({ method: "thread.remove", args: { threadId: "t1" } });
     await expect.poll(() => lab.pins().count()).toBe(1);
+    await lab.page.clock.runFor(200);
     // Undo after the commit started explains that it is too late.
     await openBubble(lab);
     await lab.host(l => { l.holds = ["thread.remove"]; });
