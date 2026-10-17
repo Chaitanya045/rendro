@@ -149,9 +149,6 @@ async function newPage(): Promise<Page> {
     });
   });
   page.on("console", message => { if (/content security policy|violates.*policy/i.test(message.text())) consoleCsp.push(message.text()); });
-  // No external fonts/services are needed by this isolated route fixture.
-  await page.route(url => url.origin !== harness.origin, route => route.request().url().includes("cdn.tailwindcss.com")
-    ? route.fulfill({ contentType: "text/javascript; charset=utf-8", body: "window.tailwind = {};" }) : route.abort());
   return page;
 }
 

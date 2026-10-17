@@ -1,6 +1,7 @@
 import { securityHeaders } from "./middleware/security-headers";
 import { fontResponseHeaders } from "./routes/fonts";
 import { publicAssetHeaders, publicAssetPaths } from "./routes/public-assets";
+import { styleResponseHeaders } from "./routes/styles";
 import { Hono, type Context, type MiddlewareHandler } from "hono";
 import { requestLogPath } from "./request-log";
 import { serve, type HttpBindings } from "@hono/node-server";
@@ -33,6 +34,7 @@ for (const path of publicAssetPaths) {
   app.get(path, setAssetHeaders(c => publicAssetHeaders(path, new URL(c.req.url).search)), serveStatic({ path: `./public${path}` }), c => c.body(null, 404));
 }
 app.get("/fonts/*", setAssetHeaders(c => fontResponseHeaders(c.req.path)), serveStatic({ root: "./public" }), c => c.body(null, 404));
+app.get("/styles/*", setAssetHeaders(c => styleResponseHeaders(c.req.path)), serveStatic({ root: "./public" }), c => c.body(null, 404));
 
 // Request timing
 app.use("*", async (c, next) => {

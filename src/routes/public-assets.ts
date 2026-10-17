@@ -5,7 +5,8 @@ import { versionedBundles } from "./versioned-bundles";
 /*
  * Every static file the Worker and the Node server expose. All of them are public: they are served
  * before session middleware (no identity lookup, no cache eviction) from an explicit allowlist, so a
- * new file in public/ is a 404 until it is added here. Fonts live under /fonts/* (see ./fonts).
+ * new file in public/ is a 404 until it is added here. Fonts live under /fonts/* (see ./fonts) and
+ * hashed stylesheets under /styles/* (see ./styles).
  *
  * Versioned bundles map their public path to the version recorded in scripts/asset-versions.json,
  * which CI checks against the built bytes. A URL is immutable only for the current version; any other
@@ -20,7 +21,7 @@ const unversionedCacheControl = "no-store";
 // Stable URLs (also embedded in external previews) refresh daily rather than being immutable.
 const imageAssets: Readonly<Record<string, string>> = { "/landing-product.webp": "image/webp" };
 
-/** Exact paths served from ./public, excluding /fonts/* which has its own contract. */
+/** Exact paths served from ./public, excluding /fonts/* and /styles/*, which have their own contracts. */
 export const publicAssetPaths: readonly string[] = [
   ...Object.keys(versionedBundles), ...Object.keys(faviconAssets), ...Object.keys(imageAssets),
 ];

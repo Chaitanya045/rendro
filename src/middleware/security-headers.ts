@@ -26,15 +26,19 @@ function connectionSources(): string {
 }
 
 function appPolicy(nonce: string, path: string, embeddedError = false): string {
-  const viewerShell = /^\/(?:docs|p|public)(?:\/|$)/.test(path) || /\/docs$/.test(path);
-  const dynamicStyles = viewerShell || /^\/organizations(?:\/|$)/.test(path);
+  // Management navigation inserts each page's CSS at runtime, so only those
+  // shells allow inline style elements. Every other trusted page, including
+  // the document viewers (which no longer load a runtime CSS generator),
+  // accepts only nonced <style> elements and same-origin stylesheets.
+  const dynamicStyles = /^\/organizations(?:\/|$)/.test(path) && !/\/docs$/.test(path);
   return [
     "default-src 'self'",
-    `script-src 'self' 'nonce-${nonce}'${viewerShell ? " https://cdn.tailwindcss.com" : ""}`,
+    // Nonced scripts and the scripts they load. 'self' is the fallback for
+    // browsers without 'strict-dynamic' (CSP3 browsers ignore it here).
+    `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'`,
     "script-src-attr 'none'",
-    // Tailwind creates style elements; management navigation inserts page CSS,
-    // and the shell uses inline style attributes for sizing/loading feedback.
     `style-src 'self' ${dynamicStyles ? "'unsafe-inline'" : `'nonce-${nonce}'`}`,
+    // Shells use authored style attributes for sizing and loading feedback.
     "style-src-attr 'unsafe-inline'",
     "font-src 'self'",
     "img-src 'self' data: https://lh3.googleusercontent.com",
@@ -65,6 +69,9 @@ export const securityHeaders: MiddlewareHandler = async (c, next) => {
     || /^\/(?:docs|legacy-view)(?:\/|$)|^\/organizations\/[^/]+\/projects\/[^/]+\/docs(?:\/|$)/.test(c.req.path);
   if (/^\/api(?:\/|$)/.test(c.req.path)) {
     c.header("Cache-Control", apiCacheControl(c.req.raw, c.res));
+    // API data is never a cross-origin subresource: refuse no-cors embedding
+    // (script/img/style loads from other sites). CORS fetches are unaffected.
+    c.header("Cross-Origin-Resource-Policy", "same-origin");
   } else if (capability || !c.res.headers.has("Cache-Control")) {
     c.header("Cache-Control", "private, no-store");
   }
@@ -99,5 +106,11 @@ export const securityHeaders: MiddlewareHandler = async (c, next) => {
     c.header("Content-Security-Policy", appPolicy(nonce, c.res.status >= 400 ? "" : c.req.path, document));
     // Styled document errors must remain visible inside the owning viewer.
     c.header("X-Frame-Options", document ? "SAMEORIGIN" : "DENY");
+    c.header("Cross-Origin-Resource-Policy", "same-origin");
+    // Top-level trusted pages get their own browsing context group, so no
+    // cross-origin window they open or were opened by can script them. Sign-in
+    // uses full-page redirects and comments use the frame's postMessage
+    // channel, so neither needs an opener. Framed document errors are exempt.
+    if (!document) c.header("Cross-Origin-Opener-Policy", "same-origin");
   }
 };

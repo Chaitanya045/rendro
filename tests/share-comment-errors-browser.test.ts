@@ -29,7 +29,6 @@ beforeAll(async () => {
 });
 async function open(width = 1024, dark = false) {
   const page = await harness.newPage({ viewport: { width, height: 800 }, colorScheme: dark ? "dark" : "light", reducedMotion: "reduce" });
-  await page.route(url => url.hostname === "cdn.tailwindcss.com", route => route.fulfill({ body: "" }));
   await page.addInitScript(() => { Object.defineProperty(navigator, "clipboard", { value: { writeText: async () => {} } }); });
   await page.goto(harness.origin + base);
   return page;

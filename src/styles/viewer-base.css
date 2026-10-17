@@ -1,0 +1,21 @@
+/*
+ * Document viewer shell base reset. These are the Tailwind CSS v3.4.17 Preflight
+ * rules (MIT License, https://tailwindcss.com) that match elements the shell
+ * renders, kept byte-for-byte so the shell looks exactly as it did with the
+ * runtime CDN. It loads after the shell's own <style>, where the CDN inserted
+ * its stylesheet, so equal-specificity rules here still win.
+ */
+*,::after,::before{box-sizing:border-box;border-width:0;border-style:solid;border-color:#e5e7eb}
+html{line-height:1.5;-webkit-text-size-adjust:100%;-moz-tab-size:4;tab-size:4;font-family:ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";font-feature-settings:normal;font-variation-settings:normal;-webkit-tap-highlight-color:transparent}
+body{margin:0;line-height:inherit}
+h1,h2{font-size:inherit;font-weight:inherit}
+a{color:inherit;text-decoration:inherit}
+button{font-family:inherit;font-feature-settings:inherit;font-variation-settings:inherit;font-size:100%;font-weight:inherit;line-height:inherit;letter-spacing:inherit;color:inherit;margin:0;padding:0}
+button{text-transform:none}
+button{-webkit-appearance:button;background-color:transparent;background-image:none}
+:-moz-focusring{outline:auto}
+h1,h2,p{margin:0}
+[role=button],button{cursor:pointer}
+:disabled{cursor:default}
+iframe{display:block;vertical-align:middle}
+[hidden]:where(:not([hidden=until-found])){display:none}
