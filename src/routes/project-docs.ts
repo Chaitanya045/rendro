@@ -4,6 +4,7 @@ import { decodeStoragePath, isCanonicalStorageKey, modernStoragePrefix, modernSt
 import { Hono } from "hono";
 import { createViewerTicket, readViewerTicket, viewerSessionCookie } from "@/viewer-ticket";
 import { viewerScript, viewerUpdateNotice } from "@/viewer/markup";
+import { COMMENTOR_VERSION } from "@/viewer/asset-versions";
 import { escapeHtml } from "@/routes/html";
 import type { User } from "better-auth/types";
 import { CONVEX_SITE_URL, CONVEX_URL } from "@/config";
@@ -103,7 +104,7 @@ ${viewerScript("navigation", { prefix: `${options.base}/files/`, ticketBase: `${
     transport: "parent",
     canWrite: true,
   })};</script>
-<script defer src="/commentor.js?v=45"></script>`;
+<script defer src="/commentor.js?v=${COMMENTOR_VERSION}"></script>`;
 }
 
 app.get("/organizations/:organizationId/projects/:projectId/docs/tree", async (c) => {

@@ -381,11 +381,11 @@
       "reason": "Static browser code or favicon, not an HTML page."
     },
     {
-      "route": "GET /fonts/*",
-      "reason": "Static self-hosted font or license text, not an HTML page."
+      "route": "GET /landing-product.webp",
+      "reason": "Static image, not an HTML page."
     },
     {
-      "route": "ALL /fonts/*",
+      "route": "GET /fonts/*",
       "reason": "Static self-hosted font or license text, not an HTML page."
     },
     {
@@ -555,46 +555,6 @@
     {
       "route": "ALL /s/*",
       "reason": "Middleware registration (security/session/logging/CORS); page handlers are checked separately by method and path."
-    },
-    {
-      "route": "ALL /favicon.svg",
-      "reason": "Node static-file middleware; image/favicon/browser asset, not an HTML page."
-    },
-    {
-      "route": "ALL /favicon.ico",
-      "reason": "Node static-file middleware; image/favicon/browser asset, not an HTML page."
-    },
-    {
-      "route": "ALL /commentor.js",
-      "reason": "Node static-file middleware; image/favicon/browser asset, not an HTML page."
-    },
-    {
-      "route": "ALL /commentor-parent.js",
-      "reason": "Node static-file middleware; image/favicon/browser asset, not an HTML page."
-    },
-    {
-      "route": "ALL /lazy-tree.js",
-      "reason": "Node static-file middleware; image/favicon/browser asset, not an HTML page."
-    },
-    {
-      "route": "ALL /management-query.js",
-      "reason": "Node static-file middleware; image/favicon/browser asset, not an HTML page."
-    },
-    {
-      "route": "ALL /select.js",
-      "reason": "Node static-file middleware; image/favicon/browser asset, not an HTML page."
-    },
-    {
-      "route": "ALL /management-pages.js",
-      "reason": "Node static-file middleware; image/favicon/browser asset, not an HTML page."
-    },
-    {
-      "route": "ALL /landing-product.webp",
-      "reason": "Node static-file middleware; image/favicon/browser asset, not an HTML page."
-    },
-    {
-      "route": "ALL /private-viewer.js",
-      "reason": "Node static-file middleware; image/favicon/browser asset, not an HTML page."
     },
     {
       "route": "GET /api/auth/me",

@@ -72,8 +72,8 @@ import { securityHeaders } from "./middleware/security-headers";
     }
   }, configurable: true });
 })();
-import { faviconAssets, faviconCacheControl } from "./routes/favicon";
 import { fontResponseHeaders } from "./routes/fonts";
+import { publicAssetHeaders, publicAssetPaths } from "./routes/public-assets";
 import { Hono } from "hono";
 import { requestLogPath } from "./request-log";
 import type { Context } from "hono";
@@ -116,51 +116,32 @@ app.use("*", async (c, next) => { const start = Date.now(); await next(); logger
 // Public signed share routes intentionally bypass session middleware.
 mountPublicRoutes(app);
 
-// Favicons are public assets and must not trigger a session lookup.
-for (const [path, contentType] of Object.entries(faviconAssets)) {
-  app.get(path, async (c) => {
-    const response = await serveAsset(c);
-    if (!response.ok) return response;
-    const headers = new Headers(response.headers);
-    headers.set("Content-Type", contentType);
-    headers.set("Cache-Control", faviconCacheControl);
-    return new Response(response.body, { status: response.status, headers });
-  });
+// Public static assets never trigger a session lookup. Everything is an explicit allowlist (see
+// routes/public-assets.ts): a path outside it is a 404, never an ASSETS fallthrough. A 304 keeps the
+// same headers so a revalidation cannot downgrade an immutable entry.
+async function servePublicAsset(c: Context<WorkerEnv>, assetHeaders: Record<string, string> | undefined): Promise<Response> {
+  if (!assetHeaders) return c.body(null, 404);
+  const response = await serveAsset(c);
+  if (!response.ok && response.status !== 304) return response;
+  const headers = new Headers(response.headers);
+  for (const [name, value] of Object.entries(assetHeaders)) headers.set(name, value);
+  return new Response(response.body, { status: response.status, headers });
 }
 
-// Self-hosted fonts are public, content-hashed and immutable; no session lookup. Anything under
-// /fonts that is not a hashed font or a license text is a 404, never an ASSETS fallthrough.
-app.get("/fonts/*", async (c) => {
-  const fontHeaders = fontResponseHeaders(c.req.path);
-  if (!fontHeaders) return c.body(null, 404);
-  const response = await serveAsset(c);
-  if (!response.ok) return response;
-  const headers = new Headers(response.headers);
-  for (const [name, value] of Object.entries(fontHeaders)) headers.set(name, value);
-  return new Response(response.body, { status: response.status, headers });
-});
+for (const path of publicAssetPaths) {
+  app.get(path, (c) => servePublicAsset(c, publicAssetHeaders(path, new URL(c.req.url).search)));
+}
+// Self-hosted fonts are content-hashed and immutable. Anything under /fonts that is not a hashed
+// font or a license text is a 404.
+app.get("/fonts/*", (c) => servePublicAsset(c, fontResponseHeaders(c.req.path)));
 
-// Public, versioned browser code must not trigger an authenticated session RPC.
-app.get("/management-query.js", serveAsset);
-app.get("/select.js", serveAsset);
-app.get("/management-pages.js", serveAsset);
-app.get("/commentor-parent.js", serveAsset);
-app.get("/private-viewer.js", serveAsset);
 app.use("*", sessionMiddleware);
 
 mountSessionRoutes(app);
 
-// Static files from ASSETS binding
-app.get("/lazy-tree.js", serveAsset);
-app.get("/commentor.js", serveAsset);
-app.get("*", async (c) => {
-  const assets = c.env?.ASSETS;
-  if (assets?.fetch) {
-    const res = await assets.fetch(c.req.raw);
-    if (res.status !== 404) return res;
-  }
-  return notFoundResponse(c);
-});
+// Unknown GETs render the shared 404. There is no ASSETS fallthrough: only the allowlisted public
+// assets above are ever served from the binding.
+app.get("*", notFoundResponse);
 app.notFound(notFoundResponse);
 
 app.onError((_err, c) => {

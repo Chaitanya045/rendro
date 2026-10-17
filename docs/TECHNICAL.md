@@ -413,8 +413,10 @@ Request
   │   ├─ /s/:token, /s/:token/files/*                   private shares
   │   ├─ /share/:token                                  legacy HMAC share links
   │   └─ /public/:org/:slug/*                           legacy public folders
-  ├─ 6. Public static assets, before session middleware
-  │   └─ /management-query.js, /select.js, /management-pages.js, /commentor-parent.js, /private-viewer.js
+  ├─ 6. Public static assets, before session middleware (explicit allowlist, `src/routes/public-assets.ts`)
+  │   ├─ versioned bundles: /management-pages.js, /management-query.js, /select.js, /lazy-tree.js,
+  │   │   /private-viewer.js, /commentor-parent.js, /commentor.js
+  │   ├─ /favicon.svg, /favicon.ico, /landing-product.webp, /fonts/* (hashed fonts and licenses only)
   ├─ 7. Session middleware
   ├─ 8. Auth
   │   ├─ GET /api/auth/sign-out confirms; same-origin POST → Convex, cookie cleanup
@@ -436,12 +438,11 @@ Request
   │   ├─ /  → landing page, or redirect to /organizations when signed in
   │   ├─ legacy /docs/:org…, /files/*, /api/tree/:org, /api/sync/*, /api/orgs, /api/publications, /api/share/create
   ├─ 14. /health → "ok"
-  ├─ 15. /lazy-tree.js, /commentor.js → ASSETS binding
-  ├─ 16. GET * → ASSETS binding, else shared 404 HTML
-  └─ 17. Error handler → generic JSON 500
+  ├─ 15. GET * → shared 404 HTML (no ASSETS fallthrough)
+  └─ 16. Error handler → generic JSON 500
 ```
 
-`src/index.ts` is the Node.js entry for local development (`pnpm dev`, `pnpm start`). It mounts the same route groups from `src/app-routes.ts` and serves browser assets with `serveStatic`.
+`src/index.ts` is the Node.js entry for local development (`pnpm dev`, `pnpm start`). It mounts the same route groups from `src/app-routes.ts` and serves the same asset allowlist with `serveStatic` and the same headers.
 
 Public routes and static assets run before the session middleware so they never trigger a session lookup. Their safety comes from record and capability validation, not route position. Anonymous publication/share resolution also consumes the verified-IP budget: modern resolvers enforce it in Convex, while legacy routes run admission middleware before resolution. Between steps 7 and 8, shared write admission checks the request policy and body admission bounds bytes before any JSON/form parser; authorized binary uploads use the independent exact-size reader.
 
@@ -1073,7 +1074,7 @@ Client (lazy-tree.js, ~25KB IIFE built from src/lazy-tree/)
   └─ popstate / initial URL → loadDoc(path)
 ```
 
-The script URLs carry `?v=` cache-busting versions that change with each rebuild; read the current value in `src/routes/app.ts` rather than copying it.
+The script URLs carry `?v=` versions from the asset-version ledger (see "Public static assets"); read the current values in `src/routes/versioned-bundles.ts` rather than copying them.
 
 ### Document navigation authorization
 
@@ -1283,7 +1284,25 @@ deployment command. For development use `pnpm run deploy --env development`. Do 
 replace it with a bare Wrangler deployment from a fresh checkout: ignored
 comment/navigation bundles are generated release artifacts, not source files.
 
-`public/management-query.js`, `public/select.js`, and `public/management-pages.js` are tracked; `pnpm verify` rebuilds them and fails if they drift from source. `public/commentor.js`, `public/commentor-parent.js`, `public/lazy-tree.js`, `public/private-viewer.js`, and `bin/rendro.mjs` are ignored and built in the release path. When management controllers or templates change, rebuild assets and bump `MANAGEMENT_SHELL_VERSION` in `src/routes/management-navigation.ts`; a shell whose version does not match the loaded bundle refetches current HTML, falling back to full navigation if that HTML is incompatible. Bump `MANAGEMENT_QUERY_VERSION` or `SELECT_VERSION` in `src/routes/management-asset-versions.ts` when those bundles change. After `pnpm build:assets`, run `pnpm record:assets` to append the new version’s SHA-256 to `scripts/asset-versions.json`. The recorder and `pnpm verify:assets` reject changed bytes at an existing version. CI also compares the ledger against the PR base (or previous push), rejecting rewritten or deleted historical hashes. The viewer versions (`LAZY_TREE_VERSION`, `PRIVATE_VIEWER_VERSION`, and `COMMENTOR_PARENT_VERSION` in `src/viewer/asset-versions.ts`) also use this ledger and recording workflow, even though their built bundles are ignored. Bump the corresponding version before recording changed bytes. Builds never update the ledger automatically.
+`public/management-query.js`, `public/select.js`, and `public/management-pages.js` are tracked; `pnpm verify` rebuilds them and fails if they drift from source. `public/commentor.js`, `public/commentor-parent.js`, `public/lazy-tree.js`, `public/private-viewer.js`, and `bin/rendro.mjs` are ignored and built in the release path. When management controllers or templates change, rebuild assets and bump `MANAGEMENT_SHELL_VERSION` in `src/routes/management-navigation.ts`; a shell whose version does not match the loaded bundle refetches current HTML, falling back to full navigation if that HTML is incompatible. Bump `MANAGEMENT_QUERY_VERSION` or `SELECT_VERSION` in `src/routes/management-asset-versions.ts` when those bundles change. After `pnpm build:assets`, run `pnpm record:assets` to append the new version’s SHA-256 to `scripts/asset-versions.json`. The recorder and `pnpm verify:assets` reject changed bytes at an existing version. CI also compares the ledger against the PR base (or previous push), rejecting rewritten or deleted historical hashes. The viewer versions (`LAZY_TREE_VERSION`, `PRIVATE_VIEWER_VERSION`, `COMMENTOR_PARENT_VERSION` and `COMMENTOR_VERSION` in `src/viewer/asset-versions.ts`) also use this ledger and recording workflow, even though their built bundles are ignored. Bump the corresponding version before recording changed bytes. Builds never update the ledger automatically.
+
+### Public static assets
+
+Every file the Worker serves from `public/` is public and is served **before the session middleware** in both runtimes, so an asset request never costs a session lookup, never evicts a warm identity-cache entry and never gets the session's `private, no-store` policy. The allowlist is exact (`publicAssetPaths` in `src/routes/public-assets.ts`: no prefix other than `/fonts/*`, which has its own contract); a path outside it is a 404 and never an ASSETS fallthrough (the former `GET *` ASSETS route is gone, and `run_worker_first = true` still routes every request through the Worker). `tests/public-assets.test.ts` fails if a file appears in `public/` that is neither allowlisted nor a hashed font/license.
+
+| Class | Paths | `Cache-Control` | Notes |
+|---|---|---|---|
+| Versioned bundles | `/management-pages.js`, `/management-query.js`, `/select.js`, `/lazy-tree.js`, `/private-viewer.js`, `/commentor-parent.js`, `/commentor.js` | `public, max-age=31536000, immutable` only for the exact current `?v=<version>`; otherwise `no-store` | `text/javascript; charset=utf-8` |
+| Fonts | `/fonts/<name>.<hash>.woff2` | `public, max-age=31536000, immutable` | content-hashed name; license texts: one day |
+| Icons and images | `/favicon.svg`, `/favicon.ico`, `/landing-product.webp` | `public, max-age=86400` | stable URLs (the image is also an external preview), so a daily refresh rather than immutable |
+
+**Why `?v=` and not hashed file names.** The version of every bundle is already recorded with its SHA-256 in `scripts/asset-versions.json`; `pnpm verify` rebuilds the bundle and fails when the bytes do not match the recorded hash of the current version, and the CI guard forbids rewriting a recorded hash. So "this URL names exactly these bytes" is enforced by the existing ledger, with no second manifest to keep in sync. `src/routes/versioned-bundles.ts` is the single registry of path → current version: the Worker, the Node server and `scripts/verify-asset-versions.ts` all read it, and a new bundle is added there once. The `?v=` match is strict: the query string must be exactly `?v=<current version>`, so an extra, repeated, empty, differently cased or prefixed parameter is not immutable.
+
+**Old and unknown versions.** The Worker only holds the current build (the ledger keeps hashes, not bytes), so an open tab or a request that straddles a rollout can ask for a version that no longer exists, or a not-yet-live one on an older isolate. Such a request is answered `200` with the current bytes and `Cache-Control: no-store`: it works, but it is never cached under a URL that does not name those bytes. A `404` would break a page that is still loading; the management shell already detects a bundle/shell version mismatch and refetches or falls back to full navigation. A missing `?v=` is treated the same way. The ASSETS binding's 404 (an unbuilt bundle) is passed through unchanged and never labelled immutable, and a `304` revalidation keeps the same headers so it cannot downgrade a cached entry.
+
+**Adding or changing a bundle.** Bump its constant, `pnpm build:assets`, then `pnpm record:assets` (rebase onto `main` first; a version collision is a ledger conflict). `public/commentor.js` is now versioned and recorded like the others (`COMMENTOR_VERSION`, referenced by the project document frame). CSP nonces and SRI are unaffected: scripts are same-origin and nonce-bearing in HTML that stays `no-store`, and no integrity attribute is emitted, so there is nothing that could disagree with the served bytes.
+
+**Measured (mocked Convex, `/get-session` calls).** A signed-in request for `/lazy-tree.js`, `/commentor.js` or `/landing-product.webp` used to cost 1 session read each and evicted the cached identity; now 0. Three signed-in loads of an organization-scoped document page, each followed by `lazy-tree.js`, previously cost 6 reads (3 pages + 3 asset requests that also evicted the cached identity) and now cost 1; three loads of the landing page with its hero image went 6 → 3, and three loads of the legacy document shell (`commentor-parent.js`, `lazy-tree.js`, `private-viewer.js`) 6 → 3.
 
 ### Self-hosted fonts
 

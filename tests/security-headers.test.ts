@@ -5,6 +5,7 @@ import * as minio from "@/minio";
 import { securityHeaders } from "@/middleware/security-headers";
 import { nonceAttribute } from "@/middleware/html-nonce";
 import { createShareToken } from "@/share-links";
+import { MANAGEMENT_QUERY_VERSION } from "@/routes/management-asset-versions";
 import { docsBase, mockSecurityBackend } from "./fixtures/security-headers";
 
 const cookie = "better-auth.session_token=test-session";
@@ -169,12 +170,12 @@ describe("shared response security policy", () => {
     }
   });
 
-  it("covers static assets and preserves their cache headers", async () => {
-    const response = await worker.request("https://rendro.test/management-query.js", {}, {
+  it("covers static assets and applies the public asset cache policy", async () => {
+    const response = await worker.request(`https://rendro.test/management-query.js?v=${MANAGEMENT_QUERY_VERSION}`, {}, {
       ASSETS: { fetch: () => new Response("/* asset */", { headers: { "Content-Type": "text/javascript", "Cache-Control": "public, max-age=3600" } }) },
     });
     common(response);
-    expect(response.headers.get("Cache-Control")).toBe("public, max-age=3600");
+    expect(response.headers.get("Cache-Control")).toBe("public, max-age=31536000, immutable");
     expect(response.headers.has("Content-Security-Policy")).toBe(false);
     expect(await response.text()).not.toMatch(/\bnonce\s*=/i);
   });
