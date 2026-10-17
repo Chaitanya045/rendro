@@ -62,6 +62,16 @@ rate-limit tests use the unchanged production limiter. See
 [Browser tests](BROWSER_TESTS.md#authentication-journeys-111) for isolation,
 assertions, and documented expected failures.
 
+`/verify-email` treats any `error` query parameter as an invalid or expired
+link: Better Auth redirects there with `error=INVALID_TOKEN` or `token_expired`
+(sometimes alongside `verified=1`). The page then renders a "Verification link
+unavailable" heading, a `role="alert"` explanation, and the resend form, and the
+runtime focuses the heading. Success ("Email verified") shows only when
+`verified=1` arrives with no `error`; unknown error values get the same page. The
+message and resend response are identical for every address, so nothing reveals
+whether an account exists. The onboarding deployment poll reads the commit from
+`provenance.source.commit` (shortened to 12 characters) and omits it when absent.
+
 Auth-page styles enforce `[hidden]{display:none!important}`, matching the
 management shell, so layout rules cannot expose inactive controls. Sign-up
 success hides the credential form, Google button and divider; both sign-up and

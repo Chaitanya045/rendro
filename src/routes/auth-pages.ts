@@ -63,7 +63,7 @@ function signInErrorMessage(code: string): string {
   }
 }
 
-function pageBody(page: AuthPage, user?: User, verified = false, token = "", error = ""): string {
+function pageBody(page: AuthPage, user?: User, verified = false, token = "", error = "", linkInvalid = false): string {
   if (page === "sign-in") {
     return `<div class="heading"><p class="eyebrow">Welcome back</p><h1>Sign in to Rendro</h1><p>Open your team documentation and continue where you left off.</p></div>
       <button class="button google" id="google-auth" type="button"><span class="google-mark">G</span><span>Continue with Google</span></button>
@@ -93,8 +93,12 @@ function pageBody(page: AuthPage, user?: User, verified = false, token = "", err
       <p class="switch">Already have an account? <a data-return-link href="/sign-in">Sign in</a></p>`;
   }
   if (page === "verify-email") {
-    return `<div class="heading status-heading"><span class="status-icon ${verified ? "success" : "mail"}"><span class="material-symbols-outlined" aria-hidden="true">${verified ? "mark_email_read" : "mail"}</span></span><p class="eyebrow">Email verification</p><h1>${verified ? "Email verified" : "Verify your email"}</h1><p>${verified ? "Your account is ready. Sign in to continue." : "Open the verification link we sent to your work email. The link expires after one hour."}</p></div>
-      ${verified ? `<a class="button primary" data-return-link href="/sign-in">Continue to sign in</a>` : `<form id="resend-form" novalidate>${field("email", "Work email", "email", "email")}<p class="message" id="form-message" role="status"></p><button class="button secondary" type="submit"><span class="button-label">Resend verification email</span><span class="spinner" aria-hidden="true"></span></button></form><p class="switch"><a data-return-link href="/sign-in">Back to sign in</a></p>`}`;
+    const confirmed = verified && !linkInvalid;
+    const intro = linkInvalid
+      ? `<p role="alert" class="message error reset-invalid">This verification link is invalid or has expired. Request a new one below.</p>`
+      : `<p>${confirmed ? "Your account is ready. Sign in to continue." : "Open the verification link we sent to your work email. The link expires after one hour."}</p>`;
+    return `<div class="heading status-heading"><span class="status-icon ${confirmed ? "success" : "mail"}"><span class="material-symbols-outlined" aria-hidden="true">${confirmed ? "mark_email_read" : linkInvalid ? "link_off" : "mail"}</span></span><p class="eyebrow">Email verification</p><h1${linkInvalid ? ` tabindex="-1" data-autofocus` : ""}>${confirmed ? "Email verified" : linkInvalid ? "Verification link unavailable" : "Verify your email"}</h1>${intro}</div>
+      ${confirmed ? `<a class="button primary" data-return-link href="/sign-in">Continue to sign in</a>` : `<form id="resend-form" novalidate>${field("email", "Work email", "email", "email")}<p class="message" id="form-message" role="status"></p><button class="button secondary" type="submit"><span class="button-label">Resend verification email</span><span class="spinner" aria-hidden="true"></span></button></form><p class="switch"><a data-return-link href="/sign-in">Back to sign in</a></p>`}`;
   }
   if (page === "forgot-password") {
     return `<div class="heading status-heading"><span class="status-icon mail"><span class="material-symbols-outlined" aria-hidden="true">key</span></span><p class="eyebrow">Account recovery</p><h1>Reset your password</h1><p>Enter your work email. If an account exists, we will send a secure reset link.</p></div>
@@ -135,7 +139,7 @@ const authRefreshStyles = `
 
 function renderAuthPage(
   page: AuthPage,
-  options: { returnTo?: string; token?: string; user?: User; verified?: boolean; error?: string } = {},
+  options: { returnTo?: string; token?: string; user?: User; verified?: boolean; error?: string; linkInvalid?: boolean } = {},
 ): string {
   const returnTo = safeReturnTo(options.returnTo);
   const state = JSON.stringify({
@@ -165,7 +169,7 @@ html.dark{color-scheme:dark;--page:#09090b;--surface:#09090b;--surface-2:#18181b
 @media(max-width:520px){.main{padding:24px 12px;place-items:start center}.card{padding:26px 20px;border-radius:12px}.topbar{height:56px}.heading h1{font-size:26px}.form-row{align-items:flex-start}}
 @media(prefers-reduced-motion:reduce){*,*:before,*:after{scroll-behavior:auto!important;animation-duration:.01ms!important;transition-duration:.01ms!important}}
 </style><style${nonceAttribute()}>${authRefreshStyles}</style></head>
-<body><div class="shell"><header class="topbar"><a class="brand" href="/">Rendro<i>.</i></a>${renderThemeButton()}</header><main class="main${page === "security" ? " security-main" : ""}"><section class="card${wide}" data-page="${page}">${mobileContext}${pageBody(page, options.user, options.verified ?? false, options.token ?? "", options.error ?? "")}</section>${context}</main><footer class="footer">Rendro · Documentation that ships with your code</footer></div>
+<body><div class="shell"><header class="topbar"><a class="brand" href="/">Rendro<i>.</i></a>${renderThemeButton()}</header><main class="main${page === "security" ? " security-main" : ""}"><section class="card${wide}" data-page="${page}">${mobileContext}${pageBody(page, options.user, options.verified ?? false, options.token ?? "", options.error ?? "", options.linkInvalid ?? false)}</section>${context}</main><footer class="footer">Rendro · Documentation that ships with your code</footer></div>
 <script${nonceAttribute()}>window.__AUTH_STATE__=${state};</script>
 <script${nonceAttribute()} id="auth-runtime">
 
@@ -183,6 +187,7 @@ html.dark{color-scheme:dark;--page:#09090b;--surface:#09090b;--surface-2:#18181b
   function retryable(error){return !error || !error.status || error.status>=500;}
   async function google(){var button=document.getElementById("google-auth");if(!button)return;var submit=document.querySelector("#auth-form button[type=submit]");button.disabled=true;button.setAttribute("aria-busy","true");if(submit)submit.disabled=true;try{var data=await post("/api/auth/sign-in/social",{provider:"google",callbackURL:location.origin+state.returnTo});if(!data||typeof data.url!=="string")throw new Error("Google sign-in is unavailable.");location.assign(data.url);}catch(error){button.disabled=false;button.setAttribute("aria-busy","false");if(submit)submit.disabled=false;errorAt("form-error",error);}}
   var googleButton=document.getElementById("google-auth");if(googleButton)googleButton.addEventListener("click",google);
+  var autofocus=document.querySelector("[data-autofocus]");if(autofocus)autofocus.focus();
   var form=document.getElementById("auth-form");
   document.querySelectorAll("form").forEach(function(currentForm){currentForm.addEventListener("input",function(event){var input=event.target;if(!(input instanceof HTMLInputElement))return;input.removeAttribute("aria-invalid");input.removeAttribute("aria-describedby");var alert=currentForm.querySelector("[role=alert]");if(alert)alert.textContent="";});});
   if(form&&state.page==="sign-in")form.addEventListener("submit",async function(event){event.preventDefault();if(form.dataset.inFlight==="true"||!validate(form,"form-error"))return;busy(form,true);clearError("form-error");try{await post("/api/auth/sign-in/email",{email:form.email.value,password:form.password.value,rememberMe:form.rememberMe.checked,callbackURL:location.origin+state.returnTo});location.assign(state.returnTo);}catch(error){busy(form,false);errorAt("form-error",error);}});
@@ -231,6 +236,7 @@ app.get("/sign-up", (c) => {
 app.get("/verify-email", (c) => c.html(renderAuthPage("verify-email", {
   returnTo: safeReturnTo(c.req.query("returnTo")),
   verified: c.req.query("verified") === "1",
+  linkInvalid: c.req.query("error") !== undefined,
 })));
 app.get("/forgot-password", (c) => c.html(renderAuthPage("forgot-password", {
   returnTo: safeReturnTo(c.req.query("returnTo")),

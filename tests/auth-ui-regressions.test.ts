@@ -81,12 +81,13 @@ async function runtime(
   const successPanel = new ElementMock("section", document); successPanel.id = "success-panel"; successPanel.hidden = true;
   document.map.set("theme-toggle", theme); document.map.set("theme-icon", themeIcon); document.map.set("google-auth", page === "sign-up" ? google : null); document.map.set("divider", page === "sign-up" ? divider : null); document.map.set("auth-form", page === "verify-email" ? null : form); document.map.set("resend-form", page === "verify-email" ? form : null); document.map.set("form-error", error); document.map.set("form-message", formMessage); document.map.set("success-panel", successPanel);
   document.getElementById = (id: string) => document.map.get(id) ?? null;
-  document.querySelector = (selector: string) => selector === "#auth-form button[type=submit]" || selector === "button[type=submit]" ? submit : selector === ".divider" ? divider : null;
+  const heading = html.includes(" data-autofocus>") ? new ElementMock("h1", document) : null;
+  document.querySelector = (selector: string) => selector === "#auth-form button[type=submit]" || selector === "button[type=submit]" ? submit : selector === ".divider" ? divider : selector === "[data-autofocus]" ? heading : null;
   document.querySelectorAll = (selector: string) => selector === "form" ? [form] : [];
   const context: any = { window: { __AUTH_STATE__: state, RendroTheme: { mount() {} } }, document, matchMedia: () => ({ matches: false, addEventListener() {} }), localStorage: { getItem: () => null, setItem() {}, removeItem() {} }, location: { origin: "http://local", assign() {} }, fetch: fetchImpl, console, Error, HTMLInputElement: InputMock };
   context.window.matchMedia = context.matchMedia; context.window.localStorage = context.localStorage; context.window.location = context.location;
   vm.runInNewContext(script, context);
-  return { form, email, password, confirmPassword, name, submit, error, formMessage, successPanel, document };
+  return { form, email, password, confirmPassword, name, submit, error, formMessage, successPanel, heading, document };
 }
 
 describe("auth UI regressions", () => {
@@ -250,5 +251,14 @@ describe("auth UI regressions", () => {
     expect(ui.formMessage.textContent).toBe("We couldn't send that email. Please try again.");
     expect(ui.formMessage.textContent).not.toContain("account");
     expect(ui.submit.disabled).toBe(false);
+  });
+
+  it("focuses the heading of an invalid verification link and leaves the normal page unfocused", async () => {
+    const invalid = await runtime("verify-email", async () => ({ ok: true, json: async () => ({}) }), "?verified=1&error=INVALID_TOKEN");
+    expect(invalid.heading).not.toBeNull();
+    expect(invalid.document.activeElement).toBe(invalid.heading);
+    const plain = await runtime("verify-email", async () => ({ ok: true, json: async () => ({}) }));
+    expect(plain.heading).toBeNull();
+    expect(plain.document.activeElement).toBeNull();
   });
 });

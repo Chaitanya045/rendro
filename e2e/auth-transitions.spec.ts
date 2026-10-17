@@ -6,20 +6,19 @@ test.describe.configure({ timeout: 60_000 });
 
 const changedPassword = "Changed local password 197!";
 
-// Product bug: Better Auth redirects a rejected token to the callback with `&error=...`, but the
-// page keys only on `verified=1`, so an invalid or expired link is reported as a success.
-test.fail("an invalid verification link offers recovery instead of reporting the email as verified (known bug)", async ({ page }, info) => {
+// Better Auth redirects a rejected token to the callback with `&error=...`; the page must not claim success.
+test("an invalid verification link offers recovery instead of reporting the email as verified", async ({ page }, info) => {
   const email = `badlink-${info.project.name}-${info.retry}@example.test`;
   await signup(page, email);
   const link = new URL(await mailLink(email, /Verify/));
   const token = link.searchParams.get("token") ?? "";
   link.searchParams.set("token", `${token.slice(0, -2)}${token.endsWith("aa") ? "bb" : "aa"}`);
   await page.goto(link.href);
-  // These hold today: nothing was verified and nobody was signed in.
+  // Nothing was verified and nobody was signed in.
   const user = await authRecord<{ emailVerified: boolean }>("findOne", { model: "user", where: [{ field: "email", value: email }], select: ["emailVerified"] });
   expect(user.emailVerified).toBe(false);
   expect(await session(page)).toBeNull();
-  // Intended behaviour (fails today): no success claim, and the resend form is offered.
+  // No success claim, and the resend form is offered.
   await expect(page.getByRole("heading", { name: "Email verified", exact: true })).toBeHidden();
   await expect(page.getByRole("button", { name: "Resend verification email" })).toBeVisible();
 });

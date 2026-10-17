@@ -11663,8 +11663,19 @@
           "inventoryRefs": [
             "O07"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/management-dialog-reuse-browser.test.ts",
+              "name": "the received deployment shows the commit the API nests under provenance.source",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/management-dialog-reuse-browser.test.ts",
+              "name": "a received deployment with no commit, no source, or a long commit still renders its document count",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-074-E05",
@@ -20983,6 +20994,26 @@
               "file": "e2e/auth.spec.ts",
               "name": "signup verifies the original mail and retains the destination",
               "kind": "e2e"
+            },
+            {
+              "file": "e2e/auth-transitions.spec.ts",
+              "name": "an invalid verification link offers recovery instead of reporting the email as verified",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/auth.spec.ts",
+              "name": "an invalid or expired verification link never reports success and offers a fresh link",
+              "kind": "e2e"
+            },
+            {
+              "file": "tests/auth-hidden-browser.test.ts",
+              "name": "an invalid verification link (%s) focuses its heading, announces the problem and keeps the resend form working",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/auth-page-routes.test.ts",
+              "name": "never reports success for a verification link that arrives with error=%j",
+              "kind": "unit"
             }
           ]
         },
