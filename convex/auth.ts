@@ -20,6 +20,7 @@ import {
 } from "./authEmails";
 import { beforeDeleteOrganization } from "./organizationLifecycle";
 import { invitationListPrivacy, organizationSlugHooks } from "./organizationPolicy";
+import { beforeCreateTeam, beforeUpdateTeam } from "../shared/team-names";
 import authSchema from "./betterAuth/schema";
 import { boundSessionLifetime, sessionLifetime } from "./sessionLifetime";
 
@@ -146,6 +147,8 @@ export function createAuthOptions(ctx: GenericCtx<DataModel>) {
             return stored?.slug;
           }),
           beforeDeleteOrganization: ({ organization, user }) => beforeDeleteOrganization(ctx, organization.id, user.id),
+          beforeCreateTeam,
+          beforeUpdateTeam,
         },
         teams: { enabled: true },
         requireEmailVerificationOnInvitation: true,

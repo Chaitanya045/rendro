@@ -318,6 +318,10 @@ Session users may use the same read/write publication endpoints: any member can 
 
 The Better Auth component owns users, sessions, accounts, verification records, organizations, members, teams, team members, invitations, JWKs, and rate-limit state.
 
+Team names are normalized by the `beforeCreateTeam`/`beforeUpdateTeam` organization hooks (`shared/team-names.ts`): the name is trimmed and an empty result is refused with the same fixed `BAD_REQUEST` shape used by organization deletion (`Team name is required.`). Better Auth creates a default team with every organization and refuses to delete the last one, so an organization always has at least one team and the Teams screen has no empty state. Invitation rows keep `status: "pending"` until accepted, revoked or replaced; expiry is judged in the browser against the server's `expiresAt` at render time (no Convex query reads the clock), and an expired invitation is labelled **Expired**, stays revocable and is not counted as pending.
+
+The page scope (`createPageScope`, `src/routes/management-navigation.ts`) shares only in-flight plain GETs. A write discards that sharing when it starts and again when it settles, so a read issued after the write is never answered by one that began before it; team writes (`create-team`, `update-team`, `remove-team`, `add-team-member`, `remove-team-member`) additionally abort in-flight `team-members` roster reads. Cached endpoints go through the TanStack cache, whose `applyImpact` already removes (and so cancels) the affected queries at the same two points.
+
 The application schema (`convex/schema.ts`) owns:
 
 | Table | Purpose |

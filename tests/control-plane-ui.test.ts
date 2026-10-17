@@ -296,8 +296,9 @@ describe("control-plane UI", () => {
       expect(html, route).toContain(`class="empty-mark material-symbols-outlined" aria-hidden="true">${icon}</span>`);
       expect(html, route).toContain(".empty-mark.material-symbols-outlined{font-size:22px;font-weight:400}");
     }
+    // Every organization keeps at least one team, so the teams grid has no empty state.
     const teams = await (await app.request("/organizations/org-a/teams")).text();
-    expect(teams).toContain('statusEmpty("groups","No teams yet"');
-    expect(teams).toContain('class="empty-mark material-symbols-outlined" aria-hidden="true"');
+    expect(teams).not.toContain("No teams yet");
+    expect(teams).not.toContain("Create first team");
   });
 });
