@@ -434,22 +434,30 @@ test.describe("API keys", () => {
     await outage.close();
   });
 
-  // Expected failure: only "in the future" is checked, so an expiry no date can represent is stored, and its row
-  // reads "Invalid Date".
-  test.fail("a key expiry beyond the representable date range is rejected (known bug)", async ({ actor }) => {
+  // The expiry must be an exact integer in the future and within the longest product choice (a year).
+  test("a key expiry beyond the representable date range is rejected", async ({ actor }) => {
     test.setTimeout(90_000);
     const owner = await actor("keys-far", { organizations: ["Keys Far"] });
     const [organization] = owner.organizations;
-    const far = await api(owner.page, "/api/rendro/credentials", { organizationId: organization.id, name: "Far", scopes: ["docs:read"], expiresAt: 1e300 });
-    expect(far.status).toBe(400);
+    const now = Date.now();
+    for (const expiresAt of [1e300, now + 400 * 86_400_000, now - 1000, now + 1.5]) {
+      const refused = await api<{ error: string }>(owner.page, "/api/rendro/credentials", { organizationId: organization.id, name: "Far", scopes: ["docs:read"], expiresAt });
+      expect(refused.status, String(expiresAt)).toBe(400);
+      expect(refused.body).toEqual({ error: "Invalid credential fields" });
+    }
+    expect(await listKeys(owner.page, organization.id)).toEqual([]);
+    const year = await api(owner.page, "/api/rendro/credentials", { organizationId: organization.id, name: "Year", scopes: ["docs:read"], expiresAt: now + 365 * 86_400_000 });
+    expect(year.status).toBe(201);
   });
 
-  // Expected failure: permissions are not de-duplicated, so a repeated scope is stored twice and listed twice.
-  test.fail("a repeated permission is stored once (known bug)", async ({ actor }) => {
+  // Requested permissions are de-duplicated server-side, keeping the first occurrence of each.
+  test("a repeated permission is stored once", async ({ actor }) => {
     test.setTimeout(90_000);
     const owner = await actor("keys-dup", { organizations: ["Keys Dup"] });
     const [organization] = owner.organizations;
     const created = await api<{ credential: { scopes: string[] } }>(owner.page, "/api/rendro/credentials", { organizationId: organization.id, name: "Dup", scopes: ["docs:read", "docs:read"] });
-    expect(created.status === 400 || created.body.credential.scopes.length === 1).toBe(true);
+    expect(created.status).toBe(201);
+    expect(created.body.credential.scopes).toEqual(["docs:read"]);
+    expect((await listKeys(owner.page, organization.id)).map(key => key.scopes)).toEqual([["docs:read"]]);
   });
 });

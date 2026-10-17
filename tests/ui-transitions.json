@@ -9670,6 +9670,11 @@
               "file": "e2e/projects.spec.ts",
               "name": "an owner creates projects with validation, a slug conflict and a retained draft, then lands on the new project",
               "kind": "e2e"
+            },
+            {
+              "file": "e2e/projects.spec.ts",
+              "name": "invalid Unicode in a project name is a client error, not a backend outage",
+              "kind": "e2e"
             }
           ]
         },
@@ -11325,6 +11330,16 @@
               "file": "e2e/api-keys.spec.ts",
               "name": "an owner creates a scoped key with a one-time secret, uses it, and revoking it stops the very next request",
               "kind": "e2e"
+            },
+            {
+              "file": "e2e/api-keys.spec.ts",
+              "name": "a key expiry beyond the representable date range is rejected",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/api-keys.spec.ts",
+              "name": "a repeated permission is stored once",
+              "kind": "e2e"
             }
           ]
         },
@@ -11460,6 +11475,11 @@
             {
               "file": "e2e/api-keys.spec.ts",
               "name": "an owner creates a scoped key with a one-time secret, uses it, and revoking it stops the very next request",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/api-keys.spec.ts",
+              "name": "a key expiry beyond the representable date range is rejected",
               "kind": "e2e"
             }
           ]
@@ -12232,6 +12252,11 @@
               "file": "e2e/publications.spec.ts",
               "name": "publish with validation, a tracked and a pinned publication, view them anonymously, then unpublish",
               "kind": "e2e"
+            },
+            {
+              "file": "e2e/publications.spec.ts",
+              "name": "the API enforces the title length the publication form allows",
+              "kind": "e2e"
             }
           ]
         },
@@ -12355,6 +12380,11 @@
             {
               "file": "e2e/publications.spec.ts",
               "name": "a failed list read recovers with Try again, and publications from the API appear in the page",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/publications.spec.ts",
+              "name": "the API enforces the title length the publication form allows",
               "kind": "e2e"
             }
           ]

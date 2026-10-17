@@ -310,14 +310,18 @@ test.describe("projects", () => {
     expect(await listProjects(owner.page, organization.id)).toHaveLength(1);
   });
 
-  // Expected failure: the Worker proxies the body to the backend, which cannot store a lone surrogate. The caller sent
-  // invalid text, yet gets a 502 "Backend unavailable" (and the Worker logs a transport error) rather than a 400.
-  test.fail("invalid Unicode in a project name is a client error, not a backend outage (known bug)", async ({ actor }) => {
+  // Ill-formed text (a lone surrogate) cannot be stored. It is refused at the edge with a 400 rather than reaching the
+  // backend, where it used to surface as a 502 "Backend unavailable".
+  test("invalid Unicode in a project name is a client error, not a backend outage", async ({ actor }) => {
     test.setTimeout(90_000);
     const owner = await actor("project-unicode", { organizations: ["Project Unicode"] });
     const { page } = owner;
     const [organization] = owner.organizations;
-    const response = await api(page, "/api/rendro/projects", { organizationId: organization.id, name: "a\ud800b", slug: "unicode" });
+    const response = await api<{ error: string }>(page, "/api/rendro/projects", { organizationId: organization.id, name: "a\ud800b", slug: "unicode" });
     expect(response.status).toBe(400);
+    expect(response.body).toEqual({ error: "Request text must be well-formed Unicode" });
+    expect(await listProjects(page, organization.id)).toEqual([]);
+    // A valid surrogate pair is ordinary text.
+    expect((await api(page, "/api/rendro/projects", { organizationId: organization.id, name: "Docs \ud83d\ude00", slug: "emoji" })).status).toBe(201);
   });
 });

@@ -9,6 +9,13 @@ describe("team names", () => {
     }
   });
 
+  it("limits a name to the form's 80 characters after trimming", async () => {
+    expect(requireTeamName(` ${"t".repeat(80)} `)).toBe("t".repeat(80));
+    expect(() => requireTeamName("t".repeat(81))).toThrowError(expect.objectContaining({ status: "BAD_REQUEST", body: expect.objectContaining({ message: "Team name must be at most 80 characters." }) }));
+    await expect(beforeCreateTeam({ team: { name: "t".repeat(81) } })).rejects.toMatchObject({ status: "BAD_REQUEST" });
+    await expect(beforeUpdateTeam({ updates: { name: "t".repeat(81) } })).rejects.toMatchObject({ status: "BAD_REQUEST" });
+  });
+
   it("normalizes names when a team is created and renamed", async () => {
     await expect(beforeCreateTeam({ team: { name: " Platform " } })).resolves.toEqual({ data: { name: "Platform" } });
     await expect(beforeCreateTeam({ team: { name: "  " } })).rejects.toMatchObject({ status: "BAD_REQUEST" });

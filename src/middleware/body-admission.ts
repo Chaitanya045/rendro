@@ -1,6 +1,7 @@
 import type { MiddlewareHandler } from "hono";
 import { boundedRequest, BodyTooLargeError, requireBodyLength } from "../bounded-body";
 import { copyAuthClientIp } from "../auth-client-ip";
+import { IllFormedTextError, requireWellFormedBody } from "../../shared/text-input";
 import { MAX_MANIFEST_BODY_BYTES, MAX_HTTP_BODY_BYTES, MAX_FILE_BYTES } from "../../shared/deployment-limits";
 
 export const bodyAdmission: MiddlewareHandler = async (c, next) => {
@@ -14,9 +15,10 @@ export const bodyAdmission: MiddlewareHandler = async (c, next) => {
       c.req.raw = await boundedRequest(original, c.req.path === "/api/rendro/deployments/start"
         ? MAX_MANIFEST_BODY_BYTES : MAX_HTTP_BODY_BYTES);
       copyAuthClientIp(original, c.req.raw);
+      await requireWellFormedBody(c.req.raw);
     }
   } catch (error) {
-    if (error instanceof BodyTooLargeError) return error.response();
+    if (error instanceof BodyTooLargeError || error instanceof IllFormedTextError) return error.response();
     throw error;
   }
   await next();

@@ -407,16 +407,21 @@ test.describe("publications", () => {
     await expect(visitor.frameLocator("#content-frame").getByRole("heading", { name: "Public home v1" })).toBeVisible();
   });
 
-  // Expected failure: the form limits the title to 100 characters, but the API stores any title that fits in the request
-  // body, so the title shown on a public list and in the management table is unbounded.
-  test.fail("the API enforces the title length the publication form allows (known bug)", async ({ actor, baseURL }) => {
+  // The API enforces the 100-character title the publication form allows.
+  test("the API enforces the title length the publication form allows", async ({ actor, baseURL }) => {
     test.setTimeout(90_000);
     const owner = await actor("publish-title", { organizations: ["Publish Title"], project: true });
     const [organization] = owner.organizations;
     const [project] = owner.projects.map(entry => entry.id);
     const { rawKey } = await createKey(owner.page, organization.id, project);
     await pushSite(baseURL, organization.id, project, rawKey, site("v1"), "publish-title");
-    const response = await withKey(rawKey, "/api/rendro/publications", { organizationId: organization.id, projectId: project, slug: `title-${organization.id.slice(-8)}`.toLowerCase(), pathPrefix: "", entryFile: "index.html", trackingMode: "track_active", title: "T".repeat(5000) });
-    expect(response.status).toBe(400);
+    const slug = `title-${organization.id.slice(-8)}`.toLowerCase();
+    const publication = { organizationId: organization.id, projectId: project, slug, pathPrefix: "", entryFile: "index.html", trackingMode: "track_active" };
+    const refused = await withKey<{ error: string }>(rawKey, "/api/rendro/publications", { ...publication, title: "T".repeat(101) });
+    expect(refused.status).toBe(400);
+    expect(refused.body).toEqual({ error: "Publication title must be at most 100 characters" });
+    const accepted = await withKey<{ publication: { title: string } }>(rawKey, "/api/rendro/publications", { ...publication, title: "T".repeat(100) });
+    expect(accepted.status).toBe(201);
+    expect(accepted.body.publication.title).toBe("T".repeat(100));
   });
 });

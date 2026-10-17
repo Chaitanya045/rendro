@@ -318,12 +318,9 @@ says so). Not asserted (not credited): the sign-out and other-tab races of the k
 feedback timing (the copied values are asserted), legacy signed URLs, public-URL copy from the document toolbar,
 `?docQuery`/fragment restoration in a shared document, the mobile layout of these pages, and quota (429) responses.
 
-Expected failures (their broken assertions get no `e2e` credit; an unexpected pass fails the suite):
-
-- **A lone surrogate in a project name is a 502.** The Worker forwards the body, the backend cannot store the text, and the caller gets "Backend unavailable" (and a transport error is logged) instead of a 400.
-- **A key expiry beyond the representable date range is accepted.** Only "in the future" is checked; `1e300` is stored and its row reads "Invalid Date".
-- **A repeated permission is stored twice.** `["docs:read", "docs:read"]` is not de-duplicated and is listed twice.
-- **The API does not enforce the publication title length.** The form allows 100 characters; the API stores 5,000.
+The four expected failures this suite once pinned (a lone surrogate in a project name answered 502, an out-of-range
+key expiry was stored, a repeated permission was stored twice, and the publication title length was not enforced by
+the API) were fixed by #187 and are now ordinary passing tests with registry credit.
 
 Harness note: an oversized request body (the Worker answers 413 without reading it) makes the *next* request on that
 connection fail with miniflare's "Network connection lost" 500. This is the local development transport, not the

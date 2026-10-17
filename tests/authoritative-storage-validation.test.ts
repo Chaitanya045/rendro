@@ -163,6 +163,23 @@ describe("Convex storage validation authority", () => {
     expect((await f.t.fetch("/api/rendro/publications", json({ ...body, slug: "unattested" }))).status).toBe(400);
   });
 
+  it("enforces the publication form's title and description limits through the Worker and directly", async () => {
+    const f = await fixture(), deployment = await f.start(); await f.upload(deployment); await f.commit(deployment);
+    const proof = await signStorageValidation({ ...deployment, ...f.publish, purpose: "publication-entry" }, secret);
+    for (const patch of [{ title: "T".repeat(101) }, { title: ` ${"T".repeat(100)}` + "x" }, { description: "D".repeat(501) }]) {
+      for (const invoke of [() => worker.request("/api/rendro/publications", json({ ...f.publish, ...patch })), () => f.t.fetch("/api/rendro/publications", json({ ...f.publish, ...patch }, "all", proof))]) {
+        const response = await invoke();
+        expect(response.status).toBe(400);
+        expect(await response.json()).toEqual({ error: "title" in patch ? "Publication title must be at most 100 characters" : "Publication description must be at most 500 characters" });
+      }
+    }
+    expect(await f.t.query(internal.publicationsV2.listInternal, f.scope)).toEqual([]);
+    // The limits are inclusive and apply to the trimmed value, like the stored one.
+    const created = await worker.request("/api/rendro/publications", json({ ...f.publish, title: `  ${"T".repeat(100)}  `, description: ` ${"D".repeat(500)} ` }));
+    expect(created.status, await created.clone().text()).toBe(201);
+    expect(await f.t.query(internal.publicationsV2.listInternal, f.scope)).toMatchObject([{ title: "T".repeat(100), description: "D".repeat(500) }]);
+  });
+
   it("rejects publication proofs after active deployment changes but permits verified pinned superseded entries", async () => {
     const f = await fixture(), first = await f.start(); await f.upload(first); await f.commit(first);
     const proof = await signStorageValidation({ ...first, ...f.publish, purpose: "publication-entry" }, secret);
