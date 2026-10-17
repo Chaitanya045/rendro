@@ -6,6 +6,7 @@ import { renderProjectPage } from "@/routes/project-pages";
 import { getRequestListener } from "@hono/node-server";
 import { buildBrowserBundle as build } from "./helpers/browser";
 import { Hono } from "hono";
+import type { Page } from "playwright";
 import { afterAll, beforeAll, beforeEach, expect, it, vi } from "vitest";
 import { renderCommentRecoveryLifecycle } from "@/commentor/recovery-session";
 import { proxyAuthSignOut } from "@/auth-proxy";
@@ -15,10 +16,13 @@ import { serveFonts } from "./helpers/fonts";
 const harness = createBrowserHarness();
 let authenticated = true;
 let failSignOut = false;
+// What the live identity check receives; "signed-out" follows the sign-out state.
+let tokenMode: "ok" | "denied" | "unavailable" | "empty" = "ok";
+let identity: "reader" | "other" | "signed-out" | "unavailable" | "malformed" = "reader";
 let revokedShares = 0;
 const rawKey = "rd_fixture_secret_must_disappear";
 const reader = { id: "reader", name: "Reader", email: "reader@example.test" } as User;
-beforeEach(() => { authenticated = true; failSignOut = false; revokedShares = 0; });
+beforeEach(() => { authenticated = true; failSignOut = false; revokedShares = 0; identity = "reader"; tokenMode = "ok"; });
 afterAll(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
 beforeAll(async () => {
   // Production host, lifecycle and HTTP proxy; deterministic transport lets the
@@ -26,12 +30,14 @@ beforeAll(async () => {
   const parent = await build({ entryPoints: ["src/commentor/parent-entry.ts"], bundle: true, write: false, platform: "browser", plugins: [{ name: "transport", setup(build) {
     build.onResolve({ filter: /^convex\/browser$/ }, () => ({ path: "transport", namespace: "fixture" }));
     build.onLoad({ filter: /.*/, namespace: "fixture" }, () => ({ contents: `
+      import { ConvexError } from 'convex/values';
       export class ConvexClient {
         constructor() { window.transport = { subscriptions: 0, closes: 0, writes: 0, updates: 0 }; }
-        setAuth(token) { token(); }
-        onUpdate(query, args, update) {
+        setAuth(token) { window.refreshAuth = token; token(); }
+        onUpdate(query, args, update, onError) {
           window.transport.subscriptions++;
           window.lateUpdate = () => { window.transport.updates++; update('deploy-2'); };
+          window.failDeployment = code => onError(code ? new ConvexError({ code, message: 'private diagnostic' }) : new Error('private diagnostic'));
           return () => { window.transport.subscriptions--; window.lateUpdate = () => {}; };
         }
         onPaginatedUpdate_experimental(query, args, options, update) {
@@ -41,7 +47,7 @@ beforeAll(async () => {
         }
         mutation() { window.transport.writes++; return Promise.resolve('reply'); }
         close() { window.transport.closes++; return Promise.resolve(); }
-      }`, loader: "js" }));
+      }`, loader: "js", resolveDir: process.cwd() }));
   } }] });
   const assets = new Map([["/commentor-parent.js", parent.outputFiles[0].text]]);
   for (const [path, entry] of [["/management-query.js", "src/management-query/browser.ts"], ["/select.js", "src/ui/select-browser.ts"]]) {
@@ -56,8 +62,17 @@ beforeAll(async () => {
   const app = new Hono();
   app.get("/fonts/*", serveFonts);
   app.use("*", writeAdmission);
-  app.get("/api/auth/get-session", c => c.json(authenticated ? { user: { id: "reader" } } : null));
-  app.get("/api/auth/convex/token", c => c.json({ token: "fixture" }));
+  app.get("/api/auth/get-session", c => {
+    if (identity === "unavailable") return c.json({}, 500);
+    if (identity === "malformed") return c.body("not json", 200);
+    if (identity === "other") return c.json({ user: { id: "other" } });
+    return c.json(authenticated && identity === "reader" ? { user: { id: "reader" } } : null);
+  });
+  app.get("/api/auth/convex/token", c => {
+    if (tokenMode === "denied") return c.json({}, 403);
+    if (tokenMode === "unavailable") return c.json({}, 503);
+    return c.json(tokenMode === "empty" ? {} : { token: "fixture" });
+  });
   app.on(["GET", "POST"], "/api/auth/sign-out", c => proxyAuthSignOut(c.req.raw));
   app.get("/sign-in", c => c.html('<form method="post" action="/sign-in"><button>Sign in as reader</button></form>'));
   app.post("/sign-in", c => { authenticated = true; return c.redirect("/viewer"); });
@@ -83,11 +98,20 @@ beforeAll(async () => {
     <form method="post" action="/api/auth/sign-out"><button type="submit">Sign out</button></form>
     <iframe id="content-frame" src="/organizations/org/projects/project/docs/files/guide.html"></iframe>
     <script>window.RENDRO_SHARE_CONFIG={organizationId:'org',projectId:'project',convexUrl:'https://convex.invalid'};</script>
-    ${renderCommentRecoveryLifecycle("reader")}<script src="/commentor-parent.js"></script></body></html>`));
+    ${renderCommentRecoveryLifecycle(c.req.query("as") ?? "reader")}<script src="/commentor-parent.js"></script></body></html>`));
   const listener = getRequestListener(app.fetch);
   await harness.start((req, res) => { void listener(req, res); }, assets);
   vi.stubEnv("SITE_URL", harness.origin);
 });
+
+/** Serve documents without any script, as a browser with JavaScript disabled receives them. */
+async function withoutScripts(page: Page) {
+  await page.route(url => url.origin === harness.origin, async route => {
+    if (route.request().resourceType() !== "document") return route.fallback();
+    const response = await route.fetch({ maxRedirects: 0 });
+    return route.fulfill({ response, body: (await response.text()).replace(/<script\b[\s\S]*?<\/script>/g, "") });
+  });
+}
 
 type Transport = { subscriptions: number; closes: number; writes: number; updates: number };
 it("refetches HTML for a cached v19 controller and clears state on sign-out", async () => {
@@ -300,4 +324,192 @@ it("closes the key-creation dialog and its top-layer select popover on cross-tab
   expect(await tabB.locator("dialog[open], :popover-open").count()).toBe(0);
   await tabB.getByRole("link", { name: "Sign in", exact: true }).click();
   await tabB.waitForURL("**/sign-in");
+});
+
+it("shows the sign-out confirmation for GET without revoking, then signs out natively and permits signing back in", async () => {
+  const page = await harness.newPage();
+  await withoutScripts(page);
+  await page.context().addCookies([{ name: "better-auth.session_token", value: "opaque-session", url: harness.origin }]);
+  const response = await page.goto(`${harness.origin}/api/auth/sign-out`);
+  expect(response!.status()).toBe(200);
+  expect(response!.headers()).toMatchObject({ allow: "POST", "cache-control": "no-store" });
+  expect(await page.getByRole("heading", { name: "Sign out of Rendro?" }).isVisible()).toBe(true);
+  expect(await page.getByText("end your session in all open Rendro tabs").isVisible()).toBe(true);
+  // Following or prefetching the URL must not revoke anything.
+  expect(authenticated).toBe(true);
+  expect((await page.context().cookies()).map(cookie => cookie.name)).toEqual(["better-auth.session_token"]);
+  const posted = page.waitForResponse(candidate => candidate.request().method() === "POST" && new URL(candidate.url()).pathname === "/api/auth/sign-out");
+  await page.getByRole("button", { name: "Sign out", exact: true }).click();
+  const confirmation = await posted;
+  // Same-origin native POST, no script involved.
+  expect(confirmation.request().headers().origin).toBe(harness.origin);
+  expect(confirmation.status()).toBe(200);
+  await page.getByRole("heading", { name: "You're signed out" }).waitFor();
+  expect(authenticated).toBe(false);
+  expect(await page.context().cookies()).toEqual([]);
+  // The complete page is self-sufficient: it offers Sign in and that works.
+  await page.getByRole("link", { name: "Sign in", exact: true }).click();
+  await page.waitForURL("**/sign-in");
+  await page.getByRole("button", { name: "Sign in as reader" }).click();
+  await page.waitForURL("**/viewer");
+  expect(authenticated).toBe(true);
+});
+
+it("answers a failed native sign-out with Try again, keeping the session and cookies until a retry succeeds", async () => {
+  const page = await harness.newPage();
+  await withoutScripts(page);
+  await page.context().addCookies([{ name: "better-auth.session_token", value: "opaque-session", url: harness.origin }]);
+  await page.goto(`${harness.origin}/api/auth/sign-out`);
+  failSignOut = true;
+  await page.getByRole("button", { name: "Sign out", exact: true }).click();
+  await page.getByRole("heading", { name: "Sign-out wasn't completed" }).waitFor();
+  expect(await page.getByText("We couldn't confirm that your session ended. Please try again.").isVisible()).toBe(true);
+  expect(authenticated).toBe(true);
+  expect((await page.context().cookies()).map(cookie => cookie.name)).toEqual(["better-auth.session_token"]);
+  failSignOut = false;
+  await page.getByRole("button", { name: "Try again" }).click();
+  await page.getByRole("heading", { name: "You're signed out" }).waitFor();
+  expect(authenticated).toBe(false);
+  expect(await page.context().cookies()).toEqual([]);
+});
+
+const draftKey = 'commentor-operations:["reader","draft"]';
+const overlay = (page: Page) => page.locator("#rendro-signed-out");
+const restore = (page: Page) => page.evaluate(() => window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true })));
+async function openViewerWithDraft(page: Page) {
+  await page.goto(`${harness.origin}/viewer`);
+  await expect.poll(async () => (await page.evaluate(() => (window as unknown as { transport: Transport }).transport)).subscriptions).toBe(2);
+  await page.evaluate(key => sessionStorage.setItem(key, "local draft"), draftKey);
+}
+
+it.each(["a different account", "no session"] as const)("hides a restored page and keeps its drafts in the original namespace when the live identity is %s", async change => {
+  const page = await harness.newPage();
+  await openViewerWithDraft(page);
+  identity = change === "no session" ? "signed-out" : "other";
+  await restore(page);
+  await overlay(page).waitFor();
+  expect(await page.evaluate(() => document.activeElement?.id)).toBe("rendro-signed-out");
+  expect(await page.locator("#content-frame").isVisible()).toBe(false);
+  expect(await page.evaluate(() => [...document.body.children].filter(child => child.id !== "rendro-signed-out").every(child => (child as HTMLElement).inert))).toBe(true);
+  // Old data is no longer served, but stays bound to the account that wrote it.
+  expect(await page.evaluate(() => (window as unknown as { transport: Transport }).transport)).toMatchObject({ subscriptions: 0, closes: 1 });
+  expect(await page.evaluate(key => sessionStorage.getItem(key), draftKey)).toBe("local draft");
+  expect(await page.evaluate(() => sessionStorage.getItem("commentor-recovery-user"))).toBe("reader");
+  if (change === "a different account") {
+    // The other account loading in this tab removes the first account's drafts instead of hydrating them.
+    await page.goto(`${harness.origin}/viewer?as=other`);
+    await expect.poll(async () => (await page.evaluate(() => (window as unknown as { transport: Transport }).transport)).subscriptions).toBe(2);
+    expect(await page.evaluate(() => ({ drafts: Object.keys(sessionStorage).filter(key => key.startsWith("commentor-operations:")), owner: sessionStorage.getItem("commentor-recovery-user") })))
+      .toEqual({ drafts: [], owner: "other" });
+  }
+});
+
+it("does not mistake a failed identity check on restore for a sign-out, and still signs out once the session is gone", async () => {
+  const page = await harness.newPage();
+  await openViewerWithDraft(page);
+  const checked = () => page.waitForEvent("requestfinished", { predicate: request => request.url().includes("/api/auth/get-session") });
+  for (const failure of ["unavailable", "malformed", "offline"] as const) {
+    if (failure === "offline") {
+      await page.route("**/api/auth/get-session*", route => route.abort("connectionrefused"));
+      const failed = page.waitForEvent("requestfailed", { predicate: request => request.url().includes("/api/auth/get-session") });
+      await restore(page);
+      await failed;
+      await page.unroute("**/api/auth/get-session*");
+    } else {
+      identity = failure;
+      const finished = checked();
+      await restore(page);
+      await finished;
+    }
+    // Frame-synchronize with the page so any (incorrect) teardown would already have run.
+    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    expect(await overlay(page).count(), failure).toBe(0);
+    expect(await page.locator("#content-frame").isVisible(), failure).toBe(true);
+    expect(await page.evaluate(() => (window as unknown as { transport: Transport }).transport), failure).toMatchObject({ subscriptions: 2, closes: 0 });
+    expect(await page.evaluate(key => sessionStorage.getItem(key), draftKey)).toBe("local draft");
+  }
+  // The earlier failures left the checker usable.
+  identity = "signed-out";
+  await restore(page);
+  await overlay(page).waitFor();
+});
+
+type Refresh = Window & { refreshAuth(): Promise<string | null>; lateUpdate(): void; failDeployment(code?: string): void };
+const refresh = (page: Page) => page.evaluate(() => (window as unknown as Refresh).refreshAuth());
+const following = (page: Page) => page.locator("#content-frame").evaluate(frame => frame.dataset.activeDeployment ?? null);
+const lateUpdate = (page: Page) => page.evaluate(() => (window as unknown as Refresh).lateUpdate());
+
+it("renews the comment token only after confirming the identity, and survives transient and offline failures without ending the session", async () => {
+  const page = await harness.newPage();
+  // The host's own first renewal (identity check, then token) must finish before the one under test.
+  const initialToken = page.waitForResponse(response => new URL(response.url()).pathname === "/api/auth/convex/token");
+  await page.goto(`${harness.origin}/viewer`);
+  await initialToken;
+  await expect.poll(async () => (await page.evaluate(() => (window as unknown as { transport: Transport }).transport)).subscriptions).toBe(2);
+  const requested: string[] = [];
+  page.on("request", request => { const path = new URL(request.url()).pathname; if (path.startsWith("/api/auth/")) requested.push(path); });
+  expect(await refresh(page)).toBe("fixture");
+  expect(requested).toEqual(["/api/auth/get-session", "/api/auth/convex/token"]);
+  tokenMode = "unavailable";
+  expect(await refresh(page)).toBeNull();
+  await page.context().setOffline(true);
+  await expect(refresh(page)).rejects.toThrow();
+  await page.context().setOffline(false);
+  // Neither failure is an access loss: the viewer keeps following deployments and serving comments.
+  await lateUpdate(page);
+  expect(await following(page)).toBe("deploy-2");
+  expect(await overlay(page).count()).toBe(0);
+  expect(await page.evaluate(() => (window as unknown as { transport: Transport }).transport)).toMatchObject({ subscriptions: 2, closes: 0 });
+  tokenMode = "ok";
+  expect(await refresh(page)).toBe("fixture");
+});
+
+it.each([
+  ["a denied token", (page: Page) => { tokenMode = "denied"; return refresh(page); }],
+  ["a token response without a token", (page: Page) => { tokenMode = "empty"; return refresh(page); }],
+  ["a forbidden deployment subscription", (page: Page) => page.evaluate(() => (window as unknown as Refresh).failDeployment("forbidden"))],
+  ["a missing project subscription", (page: Page) => page.evaluate(() => (window as unknown as Refresh).failDeployment("not_found"))],
+] as const)("stops following deployments after %s, without signing the viewer out", async (_name, lose) => {
+  const page = await harness.newPage();
+  await page.goto(`${harness.origin}/viewer`);
+  await expect.poll(async () => (await page.evaluate(() => (window as unknown as { transport: Transport }).transport)).subscriptions).toBe(2);
+  await lateUpdate(page);
+  expect(await following(page)).toBe("deploy-2");
+  await lose(page);
+  await expect.poll(() => following(page)).toBeNull();
+  // The released deployment subscription can no longer repaint; the rest of the session is intact.
+  await lateUpdate(page);
+  expect(await following(page)).toBeNull();
+  expect(await page.evaluate(() => (window as unknown as { transport: Transport }).transport)).toMatchObject({ subscriptions: 1, closes: 0 });
+  expect(await overlay(page).count()).toBe(0);
+  expect(await page.locator("#content-frame").isVisible()).toBe(true);
+});
+
+it("keeps following deployments through a transient deployment subscription failure and recovers on the next update", async () => {
+  const page = await harness.newPage();
+  await page.goto(`${harness.origin}/viewer`);
+  await expect.poll(async () => (await page.evaluate(() => (window as unknown as { transport: Transport }).transport)).subscriptions).toBe(2);
+  await lateUpdate(page);
+  expect(await following(page)).toBe("deploy-2");
+  await page.evaluate(() => (window as unknown as Refresh).failDeployment());
+  await expect.poll(() => following(page)).toBeNull();
+  expect(await page.evaluate(() => (window as unknown as { transport: Transport }).transport)).toMatchObject({ subscriptions: 2, closes: 0 });
+  await lateUpdate(page);
+  expect(await following(page)).toBe("deploy-2");
+  expect(await overlay(page).count()).toBe(0);
+});
+
+it("ends the comment session when the identity check at token renewal finds the account gone", async () => {
+  const page = await harness.newPage();
+  await openViewerWithDraft(page);
+  identity = "signed-out";
+  expect(await refresh(page)).toBeNull();
+  await overlay(page).waitFor();
+  expect(await page.evaluate(() => (window as unknown as { transport: Transport }).transport)).toMatchObject({ subscriptions: 0, closes: 1 });
+  expect(await page.evaluate(key => sessionStorage.getItem(key), draftKey)).toBe("local draft");
+  // The next renewal attempt stays inert instead of re-requesting a token.
+  const tokenRequests: string[] = [];
+  page.on("request", request => { if (new URL(request.url()).pathname === "/api/auth/convex/token") tokenRequests.push(request.url()); });
+  expect(await refresh(page)).toBeNull();
+  expect(tokenRequests).toEqual([]);
 });

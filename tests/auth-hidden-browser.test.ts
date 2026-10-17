@@ -52,7 +52,11 @@ it.each([375, 1440])('signup hides alternatives, focuses success and restores a 
   await hidden(page, '#success-panel');
   expect(await page.locator('#google-auth').isVisible()).toBe(true);
   expect(await page.locator('#google-auth').isEnabled()).toBe(true);
+  // A rejected request keeps everything typed so the retry needs no re-entry.
+  expect(await page.locator('#name').inputValue()).toBe('Synthetic User');
+  expect(await page.locator('#email').inputValue()).toBe('person@example.test');
   expect(await page.locator('#password').inputValue()).toBe(password);
+  expect(await page.getByRole('button', { name: 'Create account' }).isEnabled()).toBe(true);
   await page.getByRole('button', { name: 'Create account' }).click();
   await expect.poll(() => page.locator('#success-panel').evaluate(node => node === document.activeElement)).toBe(true);
   for (const selector of ['#google-auth', '.divider', '#auth-form']) await hidden(page, selector);
