@@ -250,7 +250,7 @@ describe("fallback to the authoritative manifest", () => {
     const files: unknown[] = [
       "rows", [["a.html"]], ["a.html"], [["../a.html", SHA, 1, "text/html"]], [["a/%2F/../b", SHA, 1, "text/html"]], [["a//b", SHA, 1, "text/html"]],
       [[1, SHA, 1, "text/html"]], [["a.html", "x", 1, "text/html"]], [["a.html", 1, 1, "text/html"]], [["a.html", SHA, "1", "text/html"]],
-      [["a.html", SHA, -1, "text/html"]], [["a.html", SHA, 1, 1]], [["a.html", SHA, 1, "x".repeat(129)]], [good, good],
+      [["a.html", SHA, -1, "text/html"]], [["a.html", SHA, 1, 1]], [["a.html", SHA, 1, "x".repeat(129)]], [[`${"a".repeat(1_025)}.html`, SHA, 1, "text/html"]], [["a\u0000.html", SHA, 1, "text/html"]], [good, good],
     ];
     const tree: unknown[] = [
       "rows", [["", 0, []]], ["page"], [["a", 0, [], 0]], [["../", 0, [], 0]], [[1, 0, [], 0]], [["", -1, [], 0]], [["", 0.5, [], 0]],
