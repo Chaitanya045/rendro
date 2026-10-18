@@ -58,8 +58,8 @@ afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); deploymentMetadat
 describe.each(surfaces)("$name", surface => {
   const storageFailures = [
     ["a storage 5xx", () => Object.assign(new Error("secret-storage-detail"), { $metadata: { httpStatusCode: 503 } })],
-    ["a storage timeout", () => new DOMException("secret-storage-detail", "AbortError")],
-    ["a transport failure", () => new TypeError("secret-storage-detail")],
+    ["a storage timeout", () => new DOMException("secret-storage-detail", "TimeoutError")],
+    ["a transport failure", () => new TypeError("fetch failed: secret-storage-detail")],
   ] as const;
 
   describe.each([
@@ -102,7 +102,7 @@ describe.each(surfaces)("$name", surface => {
 
   describe("an unreadable manifest of an authorized deployment", () => {
     it.each([
-      ["a storage failure", () => { vi.mocked(minio.getObjectText).mockRejectedValue(new Error("secret-storage-detail")); }],
+      ["a storage failure", () => { vi.mocked(minio.getObjectText).mockRejectedValue(Object.assign(new Error("secret-storage-detail"), { $metadata: { httpStatusCode: 503 } })); }],
       ["a manifest storage lacks", () => { vi.mocked(minio.getObjectText).mockResolvedValue(null); }],
       ["a corrupt manifest", () => { vi.mocked(minio.getObjectText).mockResolvedValue("{ not json"); }],
     ])("is a retryable 503 for %s", async (_label, damage) => {
@@ -154,7 +154,7 @@ describe("tree and shell pages", () => {
     ["publication directory page", "/p/product/tree?dir=", {}],
     ["private directory page", `${docsBase}/tree?dir=`, { Cookie: cookie }],
   ])("%s answers JSON 503 when the manifest cannot be read", async (_name, path, headers) => {
-    vi.mocked(minio.getObjectText).mockRejectedValue(new Error("storage down"));
+    vi.mocked(minio.getObjectText).mockRejectedValue(new TypeError("fetch failed"));
     const response = await request(path, headers);
     expect([response.status, ...unavailableHeaders(response)]).toEqual([503, ...retryable]);
     expect(await response.json()).toEqual({ error: "Document temporarily unavailable", retryable: true });
@@ -177,10 +177,31 @@ describe("tree and shell pages", () => {
     expect([outage.status, ...unavailableHeaders(outage)]).toEqual([503, ...retryable]);
   });
 
-  it("logs only the route template of an unavailable response", async () => {
-    vi.mocked(minio.getObjectText).mockRejectedValue(new Error("secret-storage-detail"));
+  it("logs only the route template and the fault class of an unavailable response", async () => {
+    vi.mocked(minio.getObjectText).mockRejectedValue(Object.assign(new Error("secret-storage-detail"), { $metadata: { httpStatusCode: 503 } }));
+    await request("/p/product/files/index.html", { Accept: HTML });
+    expect(logger.warn).toHaveBeenCalledWith({ category: "DeliveryUnavailable", route: "/p/:slug/files/*", kind: "service", status: 503 }, "Document delivery unavailable");
+    vi.mocked(logger.warn).mockClear();
+    deploymentMetadataCache.clear();
+    vi.mocked(minio.getObjectText).mockResolvedValue(null);
     await request("/p/product/files/index.html", { Accept: HTML });
     expect(logger.warn).toHaveBeenCalledWith({ category: "DeliveryUnavailable", route: "/p/:slug/files/*" }, "Document delivery unavailable");
+  });
+
+  describe("a failure that is not a backend outage", () => {
+    it.each([
+      ["document", "/p/product/files/index.html", HTML],
+      ["asset", "/p/product/files/assets/site.css", "text/css,*/*;q=0.1"],
+      ["tree", "/p/product/tree", "application/json"],
+      ["private shell", docsBase, HTML],
+    ])("stays an internal error on the %s, with no retry hint and no leaked detail", async (_name, path, accept) => {
+      // A code defect or a rejection such as 403 is not retryable: it must not be dressed up as an outage.
+      vi.mocked(minio.getObjectText).mockRejectedValue(Object.assign(new Error("secret-storage-detail"), { $metadata: { httpStatusCode: 403 } }));
+      const response = await request(path, { Accept: accept, Cookie: cookie });
+      expect([response.status, response.headers.get("Retry-After"), response.headers.get("Cache-Control")]).toEqual([500, null, "private, no-store"]);
+      expect(await response.text()).not.toContain("secret-storage-detail");
+      expect(logger.error).toHaveBeenCalledWith({ category: "UnhandledError", route: expect.any(String), errorType: "Error" }, "Document delivery failed");
+    });
   });
 });
 
