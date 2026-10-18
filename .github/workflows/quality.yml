@@ -53,7 +53,8 @@ jobs:
   e2e-engine:
     name: e2e (${{ matrix.project }})
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # Stopgap: WebKit now needs ~29-31 min unsharded. #226 shards the suite and restores a tight bound.
+    timeout-minutes: 45
     permissions:
       contents: read
     strategy:
