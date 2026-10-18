@@ -43,7 +43,7 @@ describe("sign-out with the real Better Auth handler", () => {
     expect(await (await f.request("/get-session?disableCookieCache=true")).json()).toMatchObject({ user: { id: f.user.userId } });
     const response = await f.signOut();
     expect(response.status).toBe(200);
-    expect(response.headers.get("clear-site-data")).toBe('"cookies"');
+    expect(response.headers.get("clear-site-data")).toBe('"cache"');
     expect(await (await f.request("/get-session?disableCookieCache=true")).json()).toBeNull();
     expect(new Headers(f.fetch.mock.calls[0][1].headers).get("origin")).toBe(origin);
   });

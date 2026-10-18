@@ -5,9 +5,12 @@ import { blobKey, manifestKey, refKey, sidebarKey } from "@/ingest/orchestrator/
 import { mintCapability, sessionBinding } from "@/repo-read/capability";
 import { clearSnapshotMemory } from "@/repo-read/snapshot";
 import { ingestBranch } from "@/ingest/orchestrator/ingest";
+import { PREPARE_WINDOW_MS } from "@/repo-read/first-view";
+import { READINESS_HEADER } from "@/repo-read/preparing";
 import { imageProxyPath } from "@/image-proxy";
 import {
-  MemoryEdgeCache, privateRepo, publicRepo, repoReadFixture, sessionCookies, stubSessions, users,
+  FakeIngestCoordinator, freshRepo, MemoryEdgeCache, privateRepo, publicRepo, repoFiles, repoReadFixture,
+  sessionCookies, stubSessions, users,
 } from "./helpers/repo-read-fixture";
 
 const secret = process.env.REPO_CAPABILITY_SECRET as string;
@@ -577,6 +580,153 @@ describe("unusual snapshots", () => {
 
   it("is a 404 when the Worker has no bindings at all (the Node server)", async () => {
     expectPlainNotFound(await app.request(`https://rendro.test${pub}`));
+  });
+});
+
+describe("first views enqueue the ingest", () => {
+  const fresh = `/r/${freshRepo.owner}/${freshRepo.name}`;
+
+  function withCoordinator(): FakeIngestCoordinator {
+    fixture.access.addRepo(freshRepo);
+    const coordinator = new FakeIngestCoordinator();
+    fixture.env.REPO_INGEST = coordinator.namespace;
+    return coordinator;
+  }
+
+  /** Lets the request reach the coordinator before the test answers it. */
+  async function untilEnqueued(coordinator: FakeIngestCoordinator) {
+    for (let spins = 0; spins < 1000 && coordinator.calls.length === 0; spins += 1) await Promise.resolve();
+    expect(coordinator.calls).toEqual([{
+      repo: { id: freshRepo.id, owner: freshRepo.owner, name: freshRepo.name, private: freshRepo.private, installationId: null },
+      branch: "main",
+    }]);
+  }
+
+  it("renders the accessible preparing page while the build runs, then the docs", async () => {
+    const coordinator = withCoordinator();
+    vi.useFakeTimers({ toFake: ["setTimeout"] });
+    const first = get(fresh);
+    await untilEnqueued(coordinator);
+    await vi.advanceTimersByTimeAsync(PREPARE_WINDOW_MS);
+    const response = await first;
+    expect(response.status).toBe(200);
+    expect(response.headers.get(READINESS_HEADER)).toBe("preparing");
+    expect(response.headers.get("Retry-After")).toBe("5");
+    expect(response.headers.get("Cache-Control")).toBe("private, no-store");
+    expect(response.headers.get("Content-Type")).toMatch(/^text\/html/);
+    const html = await response.text();
+    expect(html).toContain('data-readiness="preparing"');
+    expect(html).toContain('aria-busy="true"');
+    expect(html).toContain("Preparing the docs for this repository");
+    vi.useRealTimers();
+    // The build finishes while readers poll: the next poll asks the coordinator
+    // again and its answer lands inside that request's window.
+    const freshSource = fixture.ingest.github.repo(freshRepo.owner, freshRepo.name, { id: freshRepo.id });
+    const freshCommit = freshSource.commit(repoFiles("Fresh home"));
+    await ingestBranch(fixture.ingest.deps, fixture.cache, freshSource.ref, "main");
+    coordinator.release({ status: "duplicate" }); // the first flight closes; later polls open their own
+    await fixture.settle();
+    coordinator.autoAnswer = { status: "current", commit: freshCommit, staleHint: false };
+    const second = await get(fresh);
+    expect(second.status).toBe(200);
+    expect(await second.text()).toContain('window.RENDRO_INITIAL_DOC="fresh-docs/docs/index.md"');
+    expect(coordinator.calls).toHaveLength(2);
+  });
+
+  it("stays on the preparing page while another reader's build is still open", async () => {
+    const coordinator = withCoordinator();
+    vi.useFakeTimers({ toFake: ["setTimeout"] });
+    const first = get(fresh);
+    await untilEnqueued(coordinator);
+    await vi.advanceTimersByTimeAsync(PREPARE_WINDOW_MS);
+    expect((await first).headers.get(READINESS_HEADER)).toBe("preparing");
+    const second = get(fresh);
+    await Promise.resolve(); // the poll joins the same flight: no second call lands
+    await vi.advanceTimersByTimeAsync(PREPARE_WINDOW_MS);
+    expect((await second).headers.get(READINESS_HEADER)).toBe("preparing");
+    expect(coordinator.calls).toHaveLength(1);
+  });
+
+  it("answers a failed outcome with the retry page", async () => {
+    const coordinator = withCoordinator();
+    const first = get(fresh);
+    await untilEnqueued(coordinator);
+    coordinator.release({ status: "failed", reason: "render", permanent: true, retryAt: null, commit: null });
+    const response = await first;
+    expect(response.status).toBe(503);
+    expect(response.headers.get(READINESS_HEADER)).toBe("failed");
+    expect(response.headers.get("Retry-After")).toBe("5");
+    expect(response.headers.get("Cache-Control")).toBe("private, no-store");
+    const html = await response.text();
+    expect(html).toContain('data-readiness="failed"');
+    expect(html).toContain('role="alert"');
+    expect(html).toContain("We couldn't prepare the docs for this repository");
+    expect(html).toContain(">Retry</a>");
+    expect(html).not.toContain("fetch(location.pathname");
+  });
+
+  it("re-renders the preparing page when the outcome lands in the window but the build is duplicated", async () => {
+    const coordinator = withCoordinator();
+    const first = get(fresh);
+    await untilEnqueued(coordinator);
+    coordinator.release({ status: "duplicate" });
+    const response = await first;
+    expect(response.status).toBe(200);
+    expect(response.headers.get(READINESS_HEADER)).toBe("preparing");
+    expect(response.headers.get("Cache-Control")).toBe("private, no-store");
+  });
+
+  it("answers an absent branch as a plain 404", async () => {
+    const coordinator = withCoordinator();
+    const first = get(fresh);
+    await untilEnqueued(coordinator);
+    coordinator.release({ status: "no-ref" });
+    const response = await first;
+    expectPlainNotFound(response);
+    expect(response.headers.get(READINESS_HEADER)).toBeNull();
+  });
+
+  it("enqueues nothing for a denied reader, an unknown repository, a commit URL or a frame target", async () => {
+    const coordinator = withCoordinator();
+    expectPlainNotFound(await get(priv, { cookie: sessionCookies.outsider }));
+    expectPlainNotFound(await get("/r/octo/never-heard-of-it"));
+    expectPlainNotFound(await get(`${fresh}/@${"b".repeat(40)}`));
+    expectPlainNotFound(await get(`${fresh}/files/docs/index.md`));
+    expect(coordinator.calls).toEqual([]);
+  });
+
+  it("treats a ready outcome with a missing pointer as a broken store, a retryable 503", async () => {
+    const coordinator = withCoordinator();
+    coordinator.autoAnswer = { status: "current", commit: "c".repeat(40), staleHint: false };
+    const response = await get(fresh);
+    expect(response.status).toBe(503);
+    expect(response.headers.get("Retry-After")).toMatch(/^\d+$/);
+    expect(response.headers.get("Cache-Control")).toBe("private, no-store");
+  });
+
+  it("enqueues the branch a URL names, not just the repository's default", async () => {
+    const coordinator = withCoordinator();
+    vi.useFakeTimers({ toFake: ["setTimeout"] });
+    const first = get(`${fresh}/~preview`);
+    for (let spins = 0; spins < 1000 && coordinator.calls.length === 0; spins += 1) await Promise.resolve();
+    expect(coordinator.calls[0]).toMatchObject({ repo: { id: freshRepo.id }, branch: "preview" });
+    await vi.advanceTimersByTimeAsync(PREPARE_WINDOW_MS);
+    expect((await first).headers.get(READINESS_HEADER)).toBe("preparing");
+  });
+
+  it("answers a coordinator transport failure as a retryable 503", async () => {
+    const coordinator = withCoordinator();
+    coordinator.transportError = "no route";
+    const response = await get(fresh);
+    expect(response.status).toBe(503);
+    expect(response.headers.get("Retry-After")).toBe("5");
+    expect(response.headers.get("Cache-Control")).toBe("private, no-store");
+    expect(await response.text()).toContain("Try again");
+  });
+
+  it("is a plain 404 where the coordinator is not configured", async () => {
+    fixture.access.addRepo(freshRepo);
+    expectPlainNotFound(await get(fresh));
   });
 });
 

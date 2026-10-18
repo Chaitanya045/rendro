@@ -140,10 +140,54 @@ export async function repoReadFixture() {
   for (const repo of Object.values(repos)) await ingestBranch(ingest.deps, cache, repo.ref, "main");
   const pending: Array<Promise<unknown>> = [];
   const kv = epochKv(access);
-  const env = { REPO_CONTENT: ingest.bucket, REPO_EPOCHS: kv, REPO_ACCESS: { fetch: repoAccessHandler(access) } };
+  const env = { REPO_CONTENT: ingest.bucket, REPO_EPOCHS: kv, REPO_ACCESS: { fetch: repoAccessHandler(access) }, REPO_INGEST: null as FakeIngestCoordinator["namespace"] | null };
   const ctx = { waitUntil: (promise: Promise<unknown>) => void pending.push(promise), passThroughOnException() {}, props: {} };
   const settle = async () => {
     while (pending.length) await Promise.allSettled(pending.splice(0));
   };
   return { ingest, access, repos, commits, env, ctx, pending, settle, kv, cache, bucket: ingest.bucket };
 }
+
+/**
+ * The ingest coordinator as a Durable Object namespace double (#242): every
+ * ensure call lands in a pending queue that tests resolve in order, or
+ * transport-fails. The serving Worker talks to it exactly as to the real one.
+ */
+export class FakeIngestCoordinator {
+  readonly calls: Array<{ repo: { id: number; owner: string; name: string; private: boolean; installationId: number | null }; branch: string }> = [];
+  /** When set, every ensure call fails like an unreachable coordinator. */
+  transportError: string | null = null;
+  /** When set, every ensure call answers immediately with this outcome. */
+  autoAnswer: unknown = null;
+  private pending: Array<{ resolve: (outcome: unknown) => void; reject: (error: Error) => void }> = [];
+
+  readonly namespace = {
+    idFromName: (name: string) => ({ name }),
+    get: () => ({
+      fetch: async (url: string, init?: RequestInit) => {
+        if (new URL(url).pathname !== "/ensure") return new Response("Bad request", { status: 400 });
+        const { repo, branch } = JSON.parse(String(init?.body as string)) as { repo: unknown; branch: string };
+        this.calls.push({ repo: repo as typeof this.calls[number]["repo"], branch });
+        if (this.transportError) return new Response(this.transportError, { status: 502 });
+        if (this.autoAnswer !== null) return Response.json(this.autoAnswer);
+        return await new Promise<Response>((resolve, reject) => this.pending.push({
+          resolve: outcome => resolve(Response.json(outcome)),
+          reject,
+        }));
+      },
+    }),
+  };
+
+  /** Resolves the oldest pending ensure call with an outcome. */
+  release(outcome: unknown): void {
+    this.pending.shift()?.resolve(outcome);
+  }
+
+  /** Rejects the oldest pending ensure call like a coordinator transport fault. */
+  failCall(): void {
+    this.pending.shift()?.reject(new Error("Coordinator unreachable"));
+  }
+}
+
+/** A repository the fixture knows but has built no snapshot for yet. */
+export const freshRepo: RepoRecord = { id: 503, owner: "octo", name: "fresh-docs", private: false, defaultBranch: "main" };

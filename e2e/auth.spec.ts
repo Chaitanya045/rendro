@@ -1,7 +1,10 @@
+import { readFileSync } from "node:fs";
+import { chromium } from "playwright";
 import { test, expect } from "./fixtures";
 import { password } from "./seed";
 import { ageRecord, authRecord, fontsSettled, holdRequest, login, mailFor, mailLink, oauthFixture, requestPasswordReset, securityReady, session, signout, signup, tamperedToken, verifiedUser } from "./auth-helpers";
 import { localHttp } from "./backend";
+import type { RepoFixtures } from "./repo-fixtures";
 
 test.describe.configure({ timeout: 60_000 });
 
@@ -443,6 +446,86 @@ test("sign-out failure retries, clears both tabs and protects back-forward histo
   await page.goForward();
   await expect(page.getByRole("heading", { name: "Sign-in methods" })).toBeHidden();
   expect(await session(page)).toBeNull();
+});
+
+test("sign-out tells the browser to evict cached site data", async ({ page }) => {
+  await login(page, "owner@example.test");
+  let clearSiteData: string | null = null;
+  // Intercept to capture the origin's headers: Chromium strips Clear-Site-Data
+  // from the response once it has consumed it, so only the network layer sees it.
+  await page.route("**/api/auth/sign-out", async route => {
+    const upstream = await route.fetch();
+    clearSiteData = upstream.headers()["clear-site-data"] ?? null;
+    // route.fetch() has already applied Set-Cookie to the jar; replay the rest.
+    const headers = Object.fromEntries(Object.entries(upstream.headers()).filter(([name]) => name !== "set-cookie"));
+    await route.fulfill({ response: upstream, headers });
+  });
+  await signout(page);
+  expect(clearSiteData).toBe('"cache"');
+});
+
+test("sign-out evicts the immutably cached private frame a shared-machine reader warmed", async ({ baseURL }, info) => {
+  if (info.project.name !== "chromium") test.skip(true, "Cache eviction is proven on Chromium; the header value itself is engine-independent above.");
+  const { closed } = JSON.parse(readFileSync(process.env.RENDRO_E2E_REPOS as string, "utf8")) as RepoFixtures;
+  const framePath = `/r/${closed.owner}/${closed.name}/@${closed.commit}/files/docs/index.md`;
+  // Any Playwright route handler disables the browser HTTP cache (Playwright
+  // #1090), so the shared guarded contexts cannot watch eviction: this proof
+  // runs its own bare Chromium and counts frame transmissions in the network
+  // layer instead of origin logs — `response.fromCache()` marks the ones that
+  // never left the machine, exactly what a cache hit is.
+  const browser = await chromium.launch({ timeout: 45_000 });
+  try {
+    const context = await browser.newContext({ baseURL, serviceWorkers: "block" });
+    const page = await context.newPage();
+    // A fresh session of the seeded owner: the seed's own session stays read-only
+    // for every other spec, so the sign-out below only revokes this one.
+    await login(page, "owner@example.test");
+    await expect(page).toHaveURL(/\/account\/security$/);
+    // Transmissions that reached the network, like an origin's request log
+    // would record: CDP sees disk-cache services (fromDiskCache) while routes
+    // stay off, so only genuine misses are counted.
+    const session = await context.newCDPSession(page);
+    await session.send("Network.enable");
+    const transmissions = new Map<string, number>();
+    session.on("Network.responseReceived", event => {
+      if (event.response.fromDiskCache) return;
+      const pathname = new URL(event.response.url).pathname;
+      transmissions.set(pathname, (transmissions.get(pathname) ?? 0) + 1);
+    });
+
+    // Prime the HTTP cache with the private frame; the first load transmits.
+    const primed = await page.goto(framePath);
+    expect(primed?.headers()["cache-control"]).toBe("private, max-age=31536000, immutable");
+    expect(transmissions.get(framePath)).toBe(1);
+
+    // Chromium may finish writing the cache entry late, so settle with repeated
+    // navigations: the first one that produces no transmission proves the
+    // priming actually cached the frame.
+    let cached = false;
+    for (let attempt = 0; attempt < 6 && !cached; attempt++) {
+      await page.goto(framePath);
+      cached = (transmissions.get(framePath) ?? 0) === 1;
+    }
+    expect(cached, "The frame never stopped reaching the network; the priming is not cacheable").toBe(true);
+
+    // Sign out through the real confirmation flow, like a signed-in viewer would.
+    await page.goto("/api/auth/sign-out");
+    await page.getByRole("button", { name: "Sign out", exact: true }).click();
+    // The lifecycle on the signed-out page completes the flow and shows the sign-in gate.
+    await page.waitForURL("**/sign-in");
+
+    // Eviction lands asynchronously, so poll until one navigation misses both
+    // caches and transmits the frame again.
+    let refetched = false;
+    for (let attempt = 0; attempt < 8 && !refetched; attempt++) {
+      await page.goto(framePath);
+      refetched = (transmissions.get(framePath) ?? 0) > 1;
+      if (!refetched) await page.waitForTimeout(250);
+    }
+    expect(refetched, "The cached frame survived sign-out; Clear-Site-Data 'cache' was not honored").toBe(true);
+  } finally {
+    await browser.close();
+  }
 });
 
 test("signup success hides Google and the credential divider [AUTH-111-01]", async ({ page }, info) => {
