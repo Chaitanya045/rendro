@@ -171,6 +171,24 @@ export function buildTree(entries: DocEntry[], prefix: string): DocTree[] {
   return root;
 }
 
+/** How long a read may wait on storage before it counts as a failure (a retryable 503 for readers). */
+export const STORAGE_READ_TIMEOUT_MS = 10_000;
+
+/** Runs a storage read under a deadline that aborts the request; the timer never outlives it. The expiry surfaces as a
+ * `TimeoutError`, which `transientStorageFault` classifies as retryable. */
+async function withReadDeadline<T>(read: (signal: AbortSignal) => Promise<T>): Promise<T> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), STORAGE_READ_TIMEOUT_MS);
+  try {
+    return await read(controller.signal);
+  } catch (error) {
+    if (controller.signal.aborted) throw new DOMException("Storage read timed out", "TimeoutError");
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /** Inclusive byte positions of an object whose total length is `size`. */
 export type ObjectRange = { start: number; end: number; size: number };
 
@@ -186,7 +204,8 @@ export async function getObjectStream(key: string, range?: ObjectRange): Promise
       Key: key,
       ...(range ? { Range: `bytes=${range.start}-${range.end}` } : {}),
     });
-    const res = await s3.send(cmd);
+    // The deadline covers the response headers; the body then streams without one.
+    const res = await withReadDeadline(abortSignal => s3.send(cmd, { abortSignal }));
     if (!res.Body) return null;
     const stream = res.Body.transformToWebStream() as ReadableStream<Uint8Array>;
     if (range && res.ContentRange !== `bytes ${range.start}-${range.end}/${range.size}`) {
@@ -243,8 +262,10 @@ export async function listAllKeys(prefix: string, limits?: { maxKeys: number; ma
 
 export async function getObjectText(key: string): Promise<string | null> {
   try {
-    const response = await s3.send(new GetObjectCommand({ Bucket: MINIO_BUCKET, Key: key }));
-    return response.Body ? await response.Body.transformToString() : null;
+    return await withReadDeadline(async abortSignal => {
+      const response = await s3.send(new GetObjectCommand({ Bucket: MINIO_BUCKET, Key: key }), { abortSignal });
+      return response.Body ? await response.Body.transformToString() : null;
+    });
   } catch (error: unknown) {
     if ((error as { $metadata?: { httpStatusCode?: number } }).$metadata?.httpStatusCode === 404) {
       return null;

@@ -217,9 +217,9 @@ describe("scoped tree directory pages", () => {
     });
   });
 
-  it("returns 404 when neither an index nor a manifest exists", async () => {
-    expect((await docsApp.request(`${DOCS}/tree?dir=`, cookie)).status).toBe(404);
-    expect((await docsApp.request(`${DOCS}/tree`, cookie)).status).toBe(404);
+  it("returns a retryable 503 when neither an index nor a manifest exists for an authorized deployment", async () => {
+    expect((await docsApp.request(`${DOCS}/tree?dir=`, cookie)).status).toBe(503);
+    expect((await docsApp.request(`${DOCS}/tree`, cookie)).status).toBe(503);
   });
 
   it("selects index.html, else the first document, and serves assets from the index", async () => {
@@ -241,9 +241,11 @@ describe("scoped tree directory pages", () => {
     fresh();
     await store(manifestOf([file("a.css", "text/css")]));
     expect((await docsApp.request(DOCS, cookie)).status).toBe(404);
+    // A deployment the database vouches for but whose manifest is gone is "could not check", not "no document".
     storage.objects.clear();
     fresh();
-    expect((await docsApp.request(DOCS, cookie)).status).toBe(404);
+    const unreadable = await docsApp.request(DOCS, cookie);
+    expect([unreadable.status, unreadable.headers.get("Retry-After"), unreadable.headers.get("Cache-Control")]).toEqual([503, "1", "private, no-store"]);
   });
 });
 
@@ -276,8 +278,11 @@ describe("publication and share delivery", () => {
     expect(await (await publicRoutes.request("/p/docs/tree?dir=&cursor=1")).json()).toEqual({ children: [{ name: "200.html", type: "file" }], cursor: null });
   });
 
-  it("returns 404 for publication trees and shells without metadata", async () => {
-    for (const path of ["/p/docs/tree?dir=", "/p/docs/tree", "/p/docs"]) expect((await publicRoutes.request(path)).status).toBe(404);
+  it("returns a retryable 503, not a 404, for publication trees and shells without metadata", async () => {
+    for (const path of ["/p/docs/tree?dir=", "/p/docs/tree", "/p/docs", "/p/docs/files/index.html"]) {
+      const response = await publicRoutes.request(path);
+      expect([path, response.status, response.headers.get("Retry-After"), response.headers.get("Cache-Control")]).toEqual([path, 503, "1", "private, no-store"]);
+    }
   });
 
   it("keeps share grants authoritative over index contents", async () => {

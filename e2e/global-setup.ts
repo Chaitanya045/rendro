@@ -4,7 +4,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { createTestHarness } from "wrangler";
-import { startIdentityFixtures, startStorage } from "./services";
+import { startFaults, startIdentityFixtures, startStorage } from "./services";
 import { localEnvironment, startBackend } from "./backend";
 import { seedWorkspace } from "./seed";
 import { registerResources } from "./resource-journal";
@@ -18,7 +18,7 @@ export default async function globalSetup() {
   const closers: Array<() => Promise<void>> = [];
   const originalFetch = globalThis.fetch;
   const blockedOrigins = new Set<string>();
-  const environmentKeys = ["CLOUDFLARE_LOAD_DEV_VARS_FROM_DOT_ENV", "WRANGLER_SEND_METRICS", "RENDRO_E2E_ORIGIN", "RENDRO_E2E_CONVEX", "RENDRO_E2E_CONVEX_SITE", "RENDRO_E2E_MAIL", "RENDRO_E2E_SEED", "RENDRO_E2E_DIRECTORY"];
+  const environmentKeys = ["CLOUDFLARE_LOAD_DEV_VARS_FROM_DOT_ENV", "WRANGLER_SEND_METRICS", "RENDRO_E2E_ORIGIN", "RENDRO_E2E_CONVEX", "RENDRO_E2E_CONVEX_SITE", "RENDRO_E2E_MAIL", "RENDRO_E2E_FAULTS", "RENDRO_E2E_SEED", "RENDRO_E2E_DIRECTORY"];
   const previousEnvironment = new Map(environmentKeys.map(key => [key, process.env[key]]));
   async function cleanup() {
     const errors: unknown[] = [];
@@ -76,6 +76,8 @@ export default async function globalSetup() {
 
     await run("pnpm", ["cli:build"], { cwd: root, env: localEnvironment(), timeout: 120_000 });
     const allowedOrigins = new Set([convex.origin, convex.site, storage.origin]);
+    const faults = await startFaults({ storage: storage.origin, convex: [convex.origin, convex.site] });
+    closers.push(() => faults.close());
     // Wrangler 4.149.0's harness outboundService delegates to globalThis.fetch.
     // Keep real HTTP to our fixtures; return redirects without following them (auth redirects belong to the browser).
     globalThis.fetch = async (input, init) => {
@@ -87,7 +89,7 @@ export default async function globalSetup() {
         blockedOrigins.add(url.origin);
         throw new Error(`Blocked external Worker origin: ${url.origin}`);
       }
-      return originalFetch(request, { redirect: "manual" });
+      return faults.intercept(request) ?? originalFetch(request, { redirect: "manual" });
     };
     resources.assertActive();
     const server = createTestHarness({
@@ -113,6 +115,7 @@ export default async function globalSetup() {
     process.env.RENDRO_E2E_CONVEX = convex.origin;
     process.env.RENDRO_E2E_CONVEX_SITE = convex.site;
     process.env.RENDRO_E2E_MAIL = identity.control;
+    process.env.RENDRO_E2E_FAULTS = faults.control;
     process.env.RENDRO_E2E_SEED = seedPath;
     process.env.RENDRO_E2E_DIRECTORY = directory;
     console.log("E2E: real workerd ready; real local Convex/S3Proxy, captured mail and OAuth, external fetch blocked.");

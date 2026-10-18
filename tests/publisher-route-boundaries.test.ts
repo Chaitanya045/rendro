@@ -115,11 +115,12 @@ it.each([{ user: {} }, { user: { id: "user-a" } }])("fails closed on a malformed
 });
 
 it("handles absent/malformed manifests without granting access to publisher objects", async () => {
-  for (const manifest of [null, "not-json", JSON.stringify({ files: [] })]) {
+  // A manifest that storage lacks or that cannot be parsed is retryable; an empty one is a definite 404.
+  for (const [manifest, shell, tree] of [[null, 503, 503], ["not-json", 503, 503], [JSON.stringify({ files: [] }), 404, 200]] as const) {
     vi.mocked(minio.getObjectText).mockResolvedValue(manifest);
     for (const base of [docsBase, "/p/product"]) {
-      expect((await request(base)).status).toBe(404);
-      expect((await request(`${base}/tree`)).status).toBe(manifest?.includes("files") ? 200 : 404);
+      expect((await request(base)).status).toBe(shell);
+      expect((await request(`${base}/tree`)).status).toBe(tree);
     }
   }
   expect(minio.getObjectStream).not.toHaveBeenCalled();

@@ -17,7 +17,8 @@ it("rejects invalid selected documents before serving the publication shell", as
 });
 it("handles unavailable manifests and objects without a successful viewer response", async () => {
   vi.mocked(storage.getObjectText).mockResolvedValue(null);
-  for (const path of ["/p/docs", "/p/docs/tree", "/p/docs/files/index.html"]) expect((await publicRoutes.request(path)).status).toBe(404);
+  // A manifest storage lacks is "could not check" (503); an object it reports absent is a definite 404.
+  for (const path of ["/p/docs", "/p/docs/tree", "/p/docs/files/index.html"]) expect((await publicRoutes.request(path)).status).toBe(503);
   vi.mocked(storage.getObjectText).mockResolvedValue(manifest);
   vi.mocked(storage.getObjectStream).mockResolvedValue(null);
   expect((await publicRoutes.request("/p/docs/files/index.html")).status).toBe(404);
