@@ -938,6 +938,10 @@ class Commentor {
             this.markersLayer.replaceChildren();
           }
           this.renderDrawerList();
+          // A selection made before this handshake was dropped by the canWrite guard in
+          // scheduleSelectionAction; re-read it now. Revoked access must also retract a live chip.
+          if (this.canWrite) this.scheduleSelectionAction();
+          else this.hideSelectionAction(false);
         },
       );
       return;

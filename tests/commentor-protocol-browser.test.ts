@@ -73,6 +73,28 @@ describe("parent compatibility and recovery", () => {
     expect((await lab.calls).filter(call => call.method === "thread.create")).toHaveLength(1);
   });
 
+  it("offers the selection chip when write access arrives after a selection, and retracts it when access is revoked", async () => {
+    const lab = await commentLab.open();
+    await lab.ready([{ _id: "t1", anchor: heading }]);
+    const chip = lab.tid("commentor-selection-action");
+    // Without write access a selection must not offer an unwritable comment…
+    await parentReady(lab, { protocolVersion: 1, canReloadViewer: true });
+    await lab.select("#intro", 4, 15);
+    await lab.selectionSettled();
+    expect(await chip.getAttribute("data-state")).toBe("closed");
+    await expect.poll(() => chip.evaluate(el => (el as HTMLElement).hidden)).toBe(true);
+    // …and write access arriving later must re-read the pending selection without a new selectionchange.
+    await parentReady(lab, { protocolVersion: 2, parentGeneration: "compatible-again", canReloadViewer: true, userId: "user-a" });
+    await lab.selectionSettled();
+    await expect.poll(() => chip.getAttribute("data-state")).toBe("open");
+    expect(await chip.evaluate(el => (el as HTMLElement).hidden)).toBe(false);
+    await chip.click();
+    await expect.poll(() => lab.tid("commentor-composer-textarea").count()).toBe(1);
+    // Revoking write access retracts the live chip as well.
+    await parentReady(lab, { protocolVersion: 1, canReloadViewer: true });
+    await expect.poll(() => chip.getAttribute("data-state")).toBe("closed");
+  });
+
   it("keeps an unconfirmed post across a reload, reuses its identity on resubmit and settles when the server shows it", async () => {
     const lab = await commentLab.open();
     await lab.ready();
