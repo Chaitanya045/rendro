@@ -9,8 +9,16 @@ import { password } from "./seed";
  * under the `__Secure-` names: the migration code path is the same (legacy name → current name).
  */
 const legacy = (name: string) => `__Secure-${name}`;
+// An expired cookie is no longer part of the jar: the browser never sends it. Firefox can still list one that a
+// `Max-Age=0` response just expired (observed in CI: its expiry is the response time, and no later request carried it),
+// so the jar is read the way a request would see it.
 const authCookies = async (context: BrowserContext) =>
-  (await context.cookies()).filter(cookie => /^(?:__Secure-)?better-auth\./.test(cookie.name));
+  (await context.cookies()).filter(cookie => /^(?:__Secure-)?better-auth\./.test(cookie.name) && (cookie.expires === -1 || cookie.expires > Date.now() / 1000));
+// The legacy cookie names a fresh same-origin session read actually puts on the wire.
+const legacyNamesSent = async (page: Page) => {
+  const [request] = await Promise.all([page.waitForRequest(/\/api\/auth\/get-session/), session(page)]);
+  return ((await request.allHeaders()).cookie ?? "").split(/;\s*/).map(pair => pair.split("=")[0]).filter(name => name.startsWith("__Secure-"));
+};
 
 async function asLegacyBrowser(page: Page, context: BrowserContext, project: string) {
   const current = await authCookies(context);
@@ -38,12 +46,10 @@ for (const remember of [false, true]) {
     await expect(page).toHaveURL(new RegExp(`/organizations/${seed.organizationId}$`));
 
     // Writes: the next successful auth read (the page's own, or this probe's) re-issues the session under the
-    // current name and expires the legacy one. A transiently failed read leaves the legacy cookie usable.
-    await expect.poll(async () => {
-      const names = (await authCookies(context)).map(cookie => cookie.name).filter(name => name.startsWith("__Secure-"));
-      if (names.length) await session(page);
-      return names;
-    }).toEqual([]);
+    // current name and expires the legacy one. A transiently failed read leaves the legacy cookie usable, so wait
+    // for the signal that matters: a read that no longer carries any legacy cookie.
+    await expect.poll(() => legacyNamesSent(page)).toEqual([]);
+    expect((await authCookies(context)).filter(cookie => cookie.name.startsWith("__Secure-"))).toEqual([]);
     const migrated = (await authCookies(context)).find(cookie => cookie.name === "better-auth.session_token");
     expect(migrated?.value).toBe(token.value);
     // #145: a non-remembered session stays a browser-session cookie; a remembered one persists.
