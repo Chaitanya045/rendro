@@ -41,7 +41,7 @@ app.get("/s/:token/files/*", async (c) => {
   const documentPath = resolution.grant.documentPath;
   const directory = documentPath.includes("/") ? documentPath.slice(0, documentPath.lastIndexOf("/") + 1) : "";
   // The grant was resolved freshly above; only immutable metadata is cached.
-  const entry = await (await openDeploymentIndex(resolution.deployment.manifestKey))?.file(path);
+  const entry = await (await openDeploymentIndex(resolution.deployment.manifestKey)).file(path);
   if (!entry) return assetError(c, () => renderNotFoundPage({ path: "Document unavailable" }));
   const type = normalizeMediaType(entry.contentType);
   const isExactDocument = path === documentPath;

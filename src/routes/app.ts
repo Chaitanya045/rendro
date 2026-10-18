@@ -956,6 +956,9 @@ ${renderStylesheet("viewer-base")}
   window.addEventListener("blur",function(){if(document.activeElement===document.getElementById("content-frame")){setAvatarMenu(false);setMobileMore(false,false);}});
   // Engines that do not report that blur are told by the document itself: it posts a bare message on a press inside it.
   window.addEventListener("message",function(e){var frame=document.getElementById("content-frame");if(frame&&e.source===frame.contentWindow&&e.data&&e.data.type==="doc-pointer"){setAvatarMenu(false);setMobileMore(false,false);}});
+  // The document's "Try again" page (a 503 while a backend was unreachable) cannot reload itself with the session cookie from
+  // inside the sandbox, so it asks this page to: src is the document the shell chose, and replace keeps the history entry.
+  window.addEventListener("message",function(e){var frame=document.getElementById("content-frame");if(frame&&frame.contentWindow&&e.source===frame.contentWindow&&e.data&&e.data.type==="doc-retry")frame.contentWindow.location.replace(frame.src);});
 })();
 </script>
 <script${nonceAttribute()}>window.RENDRO_INITIAL_DOC=${inlineJson(selectedDoc)};window.RENDRO_ORG=${inlineJson(org)};window.RENDRO_DOCUMENT_BASE=${inlineJson(documentBase)};window.RENDRO_PUBLICATION_BASE=${inlineJson(isPublicDocument ? documentBase : "")};window.RENDRO_SHARE_CONFIG=${inlineJson(options.shareConfig ?? null)};window.RENDRO_LEGACY_COMMENT_CONFIG=${inlineJson(options.legacyCommentConfig ?? null)};</script>

@@ -46,7 +46,7 @@ describe.each(["", "guide/"])("share delivery under %j", directory => {
     // A different isolate (empty metadata cache) cannot read the manifest.
     deploymentMetadataCache.clear();
     vi.mocked(storage.getObjectText).mockResolvedValue(null);
-    expect((await f.request("index.html")).status).toBe(404);
+    expect((await f.request("index.html")).status).toBe(503);
     expect(f.read).not.toHaveBeenCalled();
   });
   it("preserves streamed text charset and bytes (#138), including missing charset", async () => {

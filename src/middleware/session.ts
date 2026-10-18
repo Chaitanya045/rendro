@@ -194,8 +194,10 @@ export async function sessionMiddleware(
       c.header("Retry-After", retryAfter);
       appendTiming(c, "session", sessionDuration);
       const wantsHtml = !path.startsWith("/api/") && c.req.header("accept")?.includes("text/html");
-      c.res = /^\/legacy-view\/[^/]+\/files\//.test(path)
-        ? unavailableResponse(c, { unavailable: true, retryAfter }, "asset")
+      // Cookie-authenticated document and asset reads get the plain asset error, so an
+      // image or stylesheet in a viewer frame is never answered with a JSON body.
+      c.res = /^(?:\/legacy-view\/[^/]+|\/organizations\/[^/]+\/projects\/[^/]+\/docs)\/files\//.test(path)
+        ? unavailableResponse(c, { unavailable: true, retryAfter, subject: "session" }, "asset")
         : wantsHtml
         ? c.html(renderSessionUnavailablePage(), 503)
         : c.json({ error: "Session temporarily unavailable", retryable: true }, 503);

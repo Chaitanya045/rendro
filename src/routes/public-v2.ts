@@ -46,7 +46,7 @@ app.get("/p/:slug/files/*", async (c) => {
   const relativePath = decodeStoragePath(c.req.path.slice(c.req.path.indexOf("/files/") + 7));
   const fullPath = relativePath ? publicationPath(result, relativePath) : null;
   if (!relativePath || !fullPath) return assetError(c, () => renderNotFoundPage({ path: "Document unavailable" }));
-  const entry = await (await openDeploymentIndex(result.deployment.manifestKey))?.file(fullPath);
+  const entry = await (await openDeploymentIndex(result.deployment.manifestKey)).file(fullPath);
   if (!entry) return assetError(c, () => renderNotFoundPage({ path: "Document unavailable" }));
   const key = objectKey(result, fullPath);
   const htmlAsset = isHtmlAsset(fullPath, entry.contentType);
@@ -79,7 +79,6 @@ app.get("/p/:slug/tree", async (c) => {
   if (directory === undefined) {
     // Clients that predate directory pages list every document (rollout only).
     const all = await deploymentDocuments(result.deployment.manifestKey);
-    if (!all) return c.json({ error: "Manifest unavailable" }, 404);
     const documents = all.filter((path) => path.startsWith(prefix)).map((path) => path.slice(prefix.length));
     const offset = Math.max(0, Number.parseInt(c.req.query("cursor") ?? "0", 10) || 0);
     const page = documents.slice(offset, offset + 200);
@@ -91,7 +90,6 @@ app.get("/p/:slug/tree", async (c) => {
   // anything outside its path prefix.
   if (!validTreeDirectory(directory) || pageNumber === null) return c.json({ error: "Invalid tree page" }, 400);
   const index = await openDeploymentIndex(result.deployment.manifestKey);
-  if (!index) return c.json({ error: "Manifest unavailable" }, 404);
   const page = await index.treePage(prefix + directory, pageNumber);
   return c.json({ children: page?.children ?? [], cursor: page?.more ? String(pageNumber + 1) : null }, 200, cache);
 });
@@ -100,7 +98,6 @@ app.get("/p/:slug", async (c) => {
   const result = await resolvePublication(c.req.param("slug"), c.req.raw);
   if (!result) return c.html(renderNotFoundPage({ path: c.req.path }), 404);
   const index = await openDeploymentIndex(result.deployment.manifestKey);
-  if (!index) return c.html(renderNotFoundPage({ path: c.req.path }), 404);
   const requested = c.req.query("doc");
   const selected = requested ?? result.publication.entryFile;
   const fullPath = selected ? publicationPath(result, selected) : null;
