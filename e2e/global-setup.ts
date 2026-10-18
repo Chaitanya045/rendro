@@ -61,9 +61,12 @@ export default async function globalSetup() {
     const compatibilityDate = /^compatibility_date = "([^"]+)"/m.exec(productionConfig)?.[1];
     const bucketName = /^\[\[r2_buckets\]\]\nbinding = "STORAGE"\nbucket_name = "([^"]+)"/m.exec(productionConfig)?.[1];
     if (!compatibilityDate || !bucketName) throw new Error("wrangler.toml must declare compatibility_date and the STORAGE bucket");
+    // The one deliberate difference: STORAGE becomes a service that wraps the local R2 bucket, so a spec can fail storage.
+    const bucketBinding = /^\[\[r2_buckets\]\]\nbinding = "STORAGE"\nbucket_name = "[^"]+"\n/m;
     await writeFile(configPath, productionConfig
       .replace('main = "src/worker.ts"', `main = ${JSON.stringify(join(root, "src/worker.ts"))}`)
-      .replace('directory = "./public"', `directory = ${JSON.stringify(join(root, "public"))}`));
+      .replace('directory = "./public"', `directory = ${JSON.stringify(join(root, "public"))}`)
+      .replace(bucketBinding, '[[services]]\nbinding = "STORAGE"\nservice = "storage-faults"\n'));
     // The empty file also prevents loading shell credentials through required secrets.
     await writeFile(join(directory, ".dev.vars"), "# Only explicit synthetic bindings are used.\n");
     process.env.CLOUDFLARE_LOAD_DEV_VARS_FROM_DOT_ENV = "false";
@@ -92,8 +95,7 @@ export default async function globalSetup() {
     const server = createTestHarness({
       root,
       workers: [
-        // The Worker's STORAGE binding is replaced by a service that wraps the real (local) R2 bucket, so a spec can make storage fail.
-        { configPath, vars, secrets: vars, bindingOverrides: { STORAGE: "storage-faults" } },
+        { configPath, vars, secrets: vars },
         { config: {
           name: "storage-faults", main: join(root, "e2e/storage-faults-worker.mjs"),
           compatibility_date: compatibilityDate, compatibility_flags: ["nodejs_compat"],

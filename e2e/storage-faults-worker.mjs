@@ -4,7 +4,8 @@ import { WorkerEntrypoint } from "cloudflare:workers";
  * E2E-only stand-in for the Worker's STORAGE binding: it forwards every call to the real (local) R2 bucket, after asking
  * the harness whether a spec has scheduled an outage for that key (`startFaults` in e2e/services.ts). An outage fails
  * the call with the error shape a real R2 outage has: "<operation>: <text> (10043)".
- * Results cross a service boundary, so R2 objects are flattened into plain data plus the body stream.
+ * Results cross a service boundary, so R2 objects are flattened into plain data plus the body stream (a stream
+ * can be passed once, which is why storage.ts reads text through the body rather than `text()`).
  */
 const PROBE = "http://r2-faults.invalid/";
 
@@ -23,7 +24,7 @@ export default class StorageFaults extends WorkerEntrypoint {
     await this.#gate("get", key);
     const object = await this.env.BUCKET.get(key, options);
     if (!object) return null;
-    return { ...StorageFaults.#flatten(object), body: object.body, text: () => object.text() };
+    return { ...StorageFaults.#flatten(object), body: object.body };
   }
 
   async head(key) {

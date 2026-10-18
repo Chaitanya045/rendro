@@ -31,6 +31,27 @@ async function retried<T>(run: () => Promise<T>, signal?: AbortSignal): Promise<
   }
 }
 
+/** How long a read may wait on storage before it counts as a failure (a retryable 503 for readers). */
+export const STORAGE_READ_TIMEOUT_MS = 10_000;
+
+/**
+ * Runs a storage read, replays included, under one deadline. Expiry surfaces as a `TimeoutError`, which
+ * `transientStorageFault` classifies as retryable; the timer never outlives the read. The binding cannot cancel
+ * an operation already started, so a late answer is simply dropped.
+ */
+async function withReadDeadline<T>(read: (signal: AbortSignal) => Promise<T>): Promise<T> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), STORAGE_READ_TIMEOUT_MS);
+  try {
+    return await read(controller.signal);
+  } catch (error) {
+    if (controller.signal.aborted) throw new DOMException("Storage read timed out", "TimeoutError");
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export interface DocEntry {
   key: string;
   name: string;
@@ -137,7 +158,8 @@ export type ObjectRange = { start: number; end: number; size: number };
  * fails closed instead of sending mislabelled bytes. A missing object is null.
  */
 export async function getObjectStream(key: string, range?: ObjectRange): Promise<ReadableStream<Uint8Array> | null> {
-  const object = await retried(() => storage().get(key, range ? { range: { offset: range.start, length: range.end - range.start + 1 } } : undefined));
+  // The deadline covers the response headers; the body then streams without one.
+  const object = await withReadDeadline(signal => retried(() => storage().get(key, range ? { range: { offset: range.start, length: range.end - range.start + 1 } } : undefined), signal));
   if (!object) return null;
   if (range && (object.size !== range.size || object.range?.offset !== range.start || object.range.length !== range.end - range.start + 1)) {
     void object.body.cancel().catch(() => {});
@@ -180,8 +202,10 @@ export async function listKeyPage(prefix: string, limit: number): Promise<{ keys
 }
 
 export async function getObjectText(key: string): Promise<string | null> {
-  const object = await retried(() => storage().get(key));
-  return object ? await object.text() : null;
+  return withReadDeadline(async signal => {
+    const object = await retried(() => storage().get(key), signal);
+    return object ? await new Response(object.body).text() : null;
+  });
 }
 
 /**

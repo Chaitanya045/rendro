@@ -1,7 +1,7 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   bindStorage, copyObject, deleteObject, deleteObjects, getObjectStream, getObjectText, headObject, listAllKeys, listImmediate,
-  listKeyPage, putObject, type StorageBucket,
+  listKeyPage, putObject, STORAGE_READ_TIMEOUT_MS, type StorageBucket,
 } from "../src/storage";
 import { memoryBucket, r2Error } from "./helpers/memory-bucket";
 import { r2Simulation } from "./helpers/r2-simulation";
@@ -219,7 +219,7 @@ describe("storage failure handling", () => {
     seed(write.bucket, "a", "bytes");
     const cancel = vi.fn(() => Promise.reject(new Error("closed")));
     vi.spyOn(write.bucket, "get").mockResolvedValueOnce({
-      key: "a", size: 5, etag: "e", uploaded: new Date(0), body: new ReadableStream({ cancel }), text: () => Promise.resolve("bytes"),
+      key: "a", size: 5, etag: "e", uploaded: new Date(0), body: new ReadableStream({ cancel }),
     });
     await settle(copyObject("a", "c"));
     expect(cancel).toHaveBeenCalledOnce();
@@ -230,6 +230,29 @@ describe("storage failure handling", () => {
     seed(denied.bucket, "a", "bytes");
     await expect(settle(copyObject("a", "d"))).rejects.toThrow("(10003)");
     expect(denied.calls).toHaveBeenCalledOnce();
+  });
+
+  it.each([["stream", () => getObjectStream("k")], ["text", () => getObjectText("k")]] as const)(
+    "ends a stalled %s read as a TimeoutError at the read deadline, once, without replaying it", async (_name, read) => {
+      const { calls } = failing("get");
+      calls.mockImplementation(() => new Promise(() => {}));
+      const outcome = expect(read()).rejects.toMatchObject({ name: "TimeoutError" });
+      await vi.advanceTimersByTimeAsync(STORAGE_READ_TIMEOUT_MS - 1);
+      expect(calls).toHaveBeenCalledOnce();
+      await vi.advanceTimersByTimeAsync(1);
+      await outcome;
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(calls).toHaveBeenCalledOnce();
+      expect(vi.getTimerCount()).toBe(0);
+    });
+
+  it("leaves no timer behind once reads have answered", async () => {
+    const { bucket } = failing("get");
+    seed(bucket, "k", "x");
+    expect(await text(await getObjectStream("k"))).toBe("x");
+    expect(await getObjectText("k")).toBe("x");
+    expect(await getObjectText("absent")).toBeNull();
+    expect(vi.getTimerCount()).toBe(0);
   });
 
   it("lets the caller's abort signal end a write at once, without replaying it", async () => {

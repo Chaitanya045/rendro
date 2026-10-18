@@ -79,7 +79,13 @@ or copy `.env.local` into this workflow.
 Storage is the Worker's own `STORAGE` R2 binding on Miniflare's local simulation (the
 production `wrangler.toml` bindings, an empty bucket per run), so no storage container,
 port, endpoint or credential exists. The Worker and the CLI exercise reads, ranges,
-uploads, listings and commits through the binding. The public smoke publication is created
+uploads, listings and commits through the binding. Specs still make storage fail through `e2e/faults.ts`,
+but the mechanism follows the transport: the generated Wrangler config (the production file with only paths and the
+`STORAGE` binding changed) points `STORAGE` at a small service Worker (`e2e/storage-faults-worker.mjs`) that forwards
+every call to the real local R2 bucket after asking the harness whether a rule matches the key. A matching rule fails the
+call with an R2 `10043` error, which the application classifies, replays and reports as a 503 like a real outage.
+Production code has no test hook; R2 objects cross that service boundary as plain data plus the body stream.
+The public smoke publication is created
 through the real API after a real CLI push. Its missing-object control deliberately
 deletes one already-uploaded object; its manifest remains intact.
 

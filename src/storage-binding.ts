@@ -18,7 +18,6 @@ export interface BucketObjectBody extends BucketObject {
   body: ReadableStream<Uint8Array>;
   /** The slice actually returned, with `offset` and `length` always filled in. */
   range?: { offset?: number; length?: number };
-  text(): Promise<string>;
 }
 export interface StorageBucket {
   get(key: string, options?: { range?: { offset: number; length: number } }): Promise<BucketObjectBody | null>;

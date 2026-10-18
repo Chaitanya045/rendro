@@ -30,7 +30,7 @@ export function memoryBucket(): StorageBucket & { objects: Map<string, Stored> }
         bytes = bytes.slice(range.offset, range.offset + length);
       }
       const body = new Blob([bytes as Uint8Array<ArrayBuffer>]).stream() as ReadableStream<Uint8Array>;
-      return Promise.resolve<BucketObjectBody>({ ...describe(key, value), range, body, text: () => Promise.resolve(new TextDecoder().decode(bytes)) });
+      return Promise.resolve<BucketObjectBody>({ ...describe(key, value), range, body });
     },
     head(key) {
       const value = objects.get(key);
