@@ -2,6 +2,7 @@ import { ViewerBackendError } from "@/viewer-backend";
 import type { Context, MiddlewareHandler } from "hono";
 import { logger } from "@/logger";
 import { requestLogPath } from "@/request-log";
+import { transientStorageFault } from "@/storage-fault";
 import { assetError } from "@/routes/asset-headers";
 import { renderSessionUnavailablePage } from "@/routes/session-unavailable";
 
@@ -44,10 +45,21 @@ export const viewerErrorCache: MiddlewareHandler = async (c, next) => {
 /** Tree pages and ticket renewals are fetched by scripts; everything else is a document or asset. */
 const jsonRoute = /\/(?:tree|viewer-ticket)$/;
 
+/**
+ * `onError` of every delivery route. A failure that means "could not check" (a ViewerBackendError, or a storage error
+ * `transientStorageFault` calls transient) is the retryable 503; anything else is a defect and stays an internal error,
+ * as on the deployment routes. Only the route template and enumerations are logged: no path, token, key or exception text.
+ */
 export function viewerErrorResponse(error: Error, c: Context): Response {
-  // Only the static route template is logged: no path, token, key or exception text.
   const route = requestLogPath(c);
-  logger.warn({ category: "DeliveryUnavailable", route }, "Document delivery unavailable");
-  return unavailableResponse(c, error instanceof ViewerBackendError ? error : new ViewerBackendError(),
-    jsonRoute.test(route) ? "json" : "asset");
+  const json = jsonRoute.test(route);
+  const fault = error instanceof ViewerBackendError ? null : transientStorageFault(error);
+  if (error instanceof ViewerBackendError || fault) {
+    logger.warn({ category: "DeliveryUnavailable", route, ...fault }, "Document delivery unavailable");
+    return unavailableResponse(c, error instanceof ViewerBackendError ? error : new ViewerBackendError(), json ? "json" : "asset");
+  }
+  logger.error({ category: "UnhandledError", route, errorType: error.name }, "Document delivery failed");
+  c.header("Cache-Control", "private, no-store");
+  return json ? c.json({ error: "Internal server error" }, 500)
+    : assetError(c, () => renderSessionUnavailablePage(500, "document"), 500);
 }

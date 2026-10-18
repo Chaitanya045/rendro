@@ -190,7 +190,7 @@ it("preserves an authoritative denial when discarding its body fails", async () 
   expect(minio.getObjectStream).not.toHaveBeenCalled();
 });
 it.each(["/p/product", "/p/product/files/index.html", "/p/product/files/assets/site.css"])("returns 503 for failed manifest reads at %s", async path => {
-  vi.mocked(minio.getObjectText).mockRejectedValue(new Error("private-backend-detail"));
+  vi.mocked(minio.getObjectText).mockRejectedValue(Object.assign(new Error("private-backend-detail"), { $metadata: { httpStatusCode: 503 } }));
   await errorResponse(await request(path), 503, path.endsWith(".css"));
 });
 it.each([false, true])("honors a real legacy deletion result (%s)", async deleted => {

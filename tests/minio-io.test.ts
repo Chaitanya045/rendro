@@ -85,7 +85,7 @@ describe("storage requests and responses", () => {
     it.each([getObjectStream, getObjectText])("aborts a stalled storage read as a failure, not as a missing object (%o)", async read => {
       vi.useFakeTimers();
       stalls();
-      const outcome = expect(read("a")).rejects.toMatchObject({ name: "AbortError" });
+      const outcome = expect(read("a")).rejects.toMatchObject({ name: "TimeoutError" });
       await vi.advanceTimersByTimeAsync(STORAGE_READ_TIMEOUT_MS - 1);
       expect(send.mock.calls.at(-1)![1].abortSignal.aborted).toBe(false);
       await vi.advanceTimersByTimeAsync(1);

@@ -174,12 +174,16 @@ export function buildTree(entries: DocEntry[], prefix: string): DocTree[] {
 /** How long a read may wait on storage before it counts as a failure (a retryable 503 for readers). */
 export const STORAGE_READ_TIMEOUT_MS = 10_000;
 
-/** Runs a storage read under a deadline that aborts the request; the timer never outlives it. */
+/** Runs a storage read under a deadline that aborts the request; the timer never outlives it. The expiry surfaces as a
+ * `TimeoutError`, which `transientStorageFault` classifies as retryable. */
 async function withReadDeadline<T>(read: (signal: AbortSignal) => Promise<T>): Promise<T> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), STORAGE_READ_TIMEOUT_MS);
   try {
     return await read(controller.signal);
+  } catch (error) {
+    if (controller.signal.aborted) throw new DOMException("Storage read timed out", "TimeoutError");
+    throw error;
   } finally {
     clearTimeout(timer);
   }
