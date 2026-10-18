@@ -226,6 +226,8 @@ describe("the document tree while it loads and with long names", () => {
 
   it("animates only the active row while a document loads, and leaves the active bar where it is", async () => {
     const page = await open(1280, "no-preference");
+    // The rows' own entrance animation (staggered, so slower on a loaded runner) is not the motion under test.
+    await page.waitForFunction(() => document.querySelectorAll("#tree-container .tree-item").length > 0 && !document.querySelector(".tree-item-entering"));
     let release!: () => void;
     const gate = new Promise<void>(resolve => { release = resolve; });
     let arrived!: () => void;
