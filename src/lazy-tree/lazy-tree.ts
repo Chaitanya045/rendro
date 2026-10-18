@@ -258,9 +258,9 @@ function collapse(folder: HTMLElement) {
 
 function renderFile(node: TreeNode): string {
   const fp = documentFrameUrl(node.path);
-  return `<div class="tree-item flex items-center gap-2 px-3 py-1.5 rounded-lg text-on-surface-variant cursor-pointer" data-path="${esc(node.path)}">
-    <span class="material-symbols-outlined text-[18px] flex-shrink-0" aria-hidden="true">article</span>
-    <a href="${esc(fp)}" class="tree-link tree-label flex-1 min-w-0" target="content-frame">${esc(node.name.replace(/\.html$/, ""))}</a>
+  return `<div class="tree-item" data-path="${esc(node.path)}">
+    <span class="material-symbols-outlined tree-icon" aria-hidden="true">article</span>
+    <a href="${esc(fp)}" class="tree-link tree-label" target="content-frame">${esc(node.name.replace(/\.html$/, ""))}</a>
   </div>`;
 }
 
@@ -323,12 +323,12 @@ async function loadRootTree() {
 function renderFolder(node: TreeNode, depth: number): string {
   const path = node.path.endsWith("/") ? node.path : `${node.path}/`;
   return `<div class="tree-folder" data-path="${esc(path)}" data-depth="${depth}">
-    <div class="tree-item flex items-center gap-2 px-3 py-1.5 rounded-lg text-on-surface-variant cursor-pointer" role="button" tabindex="0" aria-expanded="false">
-      <span class="material-symbols-outlined text-[18px] caret-icon flex-shrink-0" aria-hidden="true">chevron_right</span>
-      <span class="material-symbols-outlined text-[18px] folder-icon flex-shrink-0" aria-hidden="true">folder</span>
-      <span class="font-body-md tree-label flex-1 min-w-0">${esc(node.name)}</span>
+    <div class="tree-item" role="button" tabindex="0" aria-expanded="false">
+      <span class="material-symbols-outlined tree-icon caret-icon" aria-hidden="true">chevron_right</span>
+      <span class="material-symbols-outlined tree-icon folder-icon" aria-hidden="true">folder</span>
+      <span class="tree-folder-name tree-label">${esc(node.name)}</span>
     </div>
-    <div class="tree-folder-collapse" inert><div class="tree-folder-content ml-4 space-y-0.5 border-l border-outline-variant/30 pl-2"></div></div>
+    <div class="tree-folder-collapse" inert><div class="tree-folder-content tree-stack"></div></div>
   </div>`;
 }
 

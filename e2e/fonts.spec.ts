@@ -142,7 +142,7 @@ test.describe("self-hosted fonts", () => {
     expect((await faces(page)).some(face => face.family === iconFont && face.status === "loaded")).toBe(true);
     expect(await exposedIcons(page)).toEqual([]);
     expect(await page.locator(".tree-item .material-symbols-outlined").evaluateAll(icons => icons.every(icon => icon.scrollWidth <= icon.clientWidth))).toBe(true);
-    expect([...tracked.origins].filter(origin => origin !== new URL(page.url()).origin && origin !== "https://cdn.tailwindcss.com")).toEqual([]);
+    expect([...tracked.origins].filter(origin => origin !== new URL(page.url()).origin)).toEqual([]);
     for (const response of tracked.responses) expect(response).toMatchObject({ status: 200, type: "font/woff2", cache: "public, max-age=31536000, immutable" });
   });
 });

@@ -86,8 +86,6 @@ async function pageFor(signedIn = false): Promise<Page> {
     });
   });
   page.on("console", message => { if (/content security policy|violates.*policy/i.test(message.text())) consoleCsp.push(message.text()); });
-  // Page routes fulfill the intentional CDN fixture before the offline guard.
-  await page.route(url => url.hostname === "cdn.tailwindcss.com", route => route.fulfill({ contentType: "text/javascript; charset=utf-8", body: "window.tailwind={}" }));
   return page;
 }
 
@@ -189,7 +187,9 @@ describe("Chromium security header smoke", () => {
         });
       });
       await browserStep("load viewer shell", () => page.goto(harness.origin + docsBase));
-      expect(await page.evaluate(() => typeof (window as unknown as { tailwind?: unknown }).tailwind)).toBe("object");
+      // The base stylesheet is same-origin and applied; no CSS runtime script exists.
+      expect(await page.evaluate(() => typeof (window as unknown as { tailwind?: unknown }).tailwind)).toBe("undefined");
+      expect(await page.evaluate(() => [...document.styleSheets].some(sheet => /\/styles\/viewer-base\.[0-9a-f]{10}\.css$/.test(sheet.href ?? "") && sheet.cssRules.length > 0))).toBe(true);
       await browserStep("tree script selects a document and reveals the iframe", () => page.locator("#content-frame").waitFor({ state: "visible" }));
       const frame = page.frameLocator("#content-frame");
       await browserStep("opaque document and comment widget load", () => frame.locator("#commentor-host").waitFor({ state: "attached" }));

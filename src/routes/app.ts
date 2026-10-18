@@ -6,6 +6,7 @@ import { renderCommentRecoveryLifecycle } from "../commentor/recovery-session";
 import { nonceAttribute } from "@/middleware/html-nonce";
 import { renderFaviconLinks } from "./favicon";
 import { renderFontHead } from "./fonts";
+import { renderStylesheet } from "./styles";
 import { Hono } from "hono";
 import { headObject } from "@/minio";
 import { logOrgAccess } from "@/orgs";
@@ -179,10 +180,6 @@ function renderOrgTreePage(user: User | null, org: string, selectedDoc = "", opt
 <title>${displayNameEsc} — Rendro</title>
 ${renderFontHead({ icons: true, weights: [400, 600, 700] })}
 ${renderThemeAssets()}
-<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
-<script${nonceAttribute()}>
-tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e4e7","background":"#ffffff","surface-container-high":"#f4f4f5","on-secondary-fixed":"#09090b","on-surface-variant":"#71717a","primary":"#c2410c","primary-fixed-dim":"#fed7aa","surface":"#ffffff","surface-container-low":"#fafafa","secondary-container":"#ffedd5","on-secondary-container":"#09090b","on-surface":"#09090b","outline":"#71717a","on-primary":"#ffffff","surface-container":"#f4f4f5"},fontFamily:{"body-md":["Inter"]},fontSize:{"body-md":["14px",{lineHeight:"20px",fontWeight:"400"}],"headline-sm":["20px",{lineHeight:"28px",fontWeight:"600"}],"headline-md":["24px",{lineHeight:"32px",fontWeight:"600"}]}}}}
-</script>
 <style${nonceAttribute()}>
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
   :root{--sidebar-expanded-width:280px;--sidebar-width:var(--sidebar-expanded-width);--tree-row-height:33px;--viewer-focus:#c2410c}
@@ -302,7 +299,7 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
   /* The collapse wrapper animates a 0fr→1fr row, so an open folder is exactly as tall as its rows, however many pages are loaded. */
   .tree-folder-collapse{display:grid;grid-template-rows:0fr;transition:grid-template-rows .4s cubic-bezier(.34,1.56,.64,1),opacity .3s ease;opacity:0}
   .tree-folder.open>.tree-folder-collapse{grid-template-rows:1fr;opacity:1}
-  .tree-folder-content{min-height:0;overflow:hidden}
+  .tree-folder-content{margin-left:16px;padding-left:8px;border-left-width:1px;border-color:rgb(228 228 231 / .3);min-height:0;overflow:hidden}
   .tree-folder.open>.tree-folder-collapse>.tree-folder-content{overflow:visible}
   /* ── sticky folder headers (VS Code-style stacking) ── */
   .tree-folder.open>.tree-item{position:sticky;background:var(--sidebar-bg,#fff)}
@@ -320,20 +317,23 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
   .load-more-btn:disabled{color:#71717a;cursor:not-allowed;opacity:.5}
   @keyframes treeItemIn{from{opacity:0;transform:translateX(-6px)}to{opacity:1;transform:translateX(0)}}
   @keyframes treeFolderLoading{0%{background-position:-200% 50%}100%{background-position:200% 50%}}
-  .tree-item{position:relative;display:flex;align-items:center;gap:8px;min-height:var(--tree-row-height);padding:6px 12px;border-radius:4px;color:#71717a;cursor:pointer;overflow:hidden;transition:translate .15s cubic-bezier(.4,0,.2,1),background-color .2s,color .2s}
+  .tree-item{position:relative;display:flex;align-items:center;gap:8px;min-height:var(--tree-row-height);padding:6px 12px;border-radius:8px;color:#71717a;cursor:pointer;overflow:hidden;transition:translate .15s cubic-bezier(.4,0,.2,1),background-color .2s,color .2s}
   .tree-item:focus-visible,.tree-item:has(.tree-link:focus-visible){outline:2px solid var(--viewer-focus);outline-offset:-2px}
   .tree-link:focus-visible{outline:none}
   .tree-item>*{position:relative;z-index:1}
   .tree-item.tree-item-entering{animation:treeItemIn .32s cubic-bezier(.4,0,.2,1) both;animation-delay:calc(var(--tree-index,0) * 35ms)}
   .tree-folder.loading>.tree-item{cursor:progress}
-  .tree-folder.loading>.tree-item .folder-icon,.tree-folder.loading>.tree-item .font-body-md{color:transparent;background:linear-gradient(90deg,#7c2d12 0%,#f97316 32%,#9a3412 55%,#fb923c 76%,#7c2d12 100%);background-size:200% 100%;background-clip:text;-webkit-background-clip:text;-webkit-text-fill-color:transparent;animation:treeFolderLoading 1.1s cubic-bezier(.4,0,.2,1) infinite}
+  .tree-folder.loading>.tree-item .folder-icon,.tree-folder.loading>.tree-item .tree-folder-name{color:transparent;background:linear-gradient(90deg,#7c2d12 0%,#f97316 32%,#9a3412 55%,#fb923c 76%,#7c2d12 100%);background-size:200% 100%;background-clip:text;-webkit-background-clip:text;-webkit-text-fill-color:transparent;animation:treeFolderLoading 1.1s cubic-bezier(.4,0,.2,1) infinite}
   .tree-item:hover{background:#f4f4f5;color:#09090b}
   .tree-item.active{background:#ffedd5;color:#c2410c}
   .tree-item[data-path]>.material-symbols-outlined{transition:transform .15s cubic-bezier(.4,0,.2,1),color .15s}
   .tree-item[data-path]:hover,.tree-item[data-path]:focus-within{translate:0 -1px}
   .tree-item[data-path]:hover>.material-symbols-outlined,.tree-item[data-path]:focus-within>.material-symbols-outlined{color:#c2410c;transform:translateX(2px) scale(1.06)}
   .tree-link{color:inherit;text-decoration:none}
-  .tree-label{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .tree-label{flex:1 1 0%;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .tree-icon{font-size:18px;flex-shrink:0}
+  .tree-folder-name{font-family:Inter}
+  .tree-stack>:not([hidden])~:not([hidden]){margin-top:2px}
   .tree-size{color:#71717a;font-size:11px;flex-shrink:0}
   .tree-empty{color:#71717a;padding:6px 12px;font-size:12px}
   .tree-empty-create{padding:0 12px 8px}
@@ -391,7 +391,7 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
   .topbar-avatar:focus-visible{border-color:#d4d4d8}
   @media(prefers-reduced-motion:reduce){.topbar-btn-icon,.topbar-avatar{transition:none}.topbar-btn-icon:active,.topbar-avatar:active{transform:none!important}}
   @media(prefers-reduced-motion:reduce){.topbar-btn,.avatar-menu-item,.load-more-btn{transition:none}.topbar-btn:active,.avatar-menu-item:active,.load-more-btn:active{transform:none!important}.avatar-menu,.mobile-more-menu{animation:none!important}.topbar-btn-share.is-feedback #share-feedback-icon{transform:none}#share-feedback-icon,.mobile-tree-backdrop{transition:none!important}}
-  @media (prefers-reduced-motion: reduce){.tree-item.tree-item-entering{animation:none!important;animation-delay:0s!important;opacity:1!important;transform:none!important}.tree-folder.loading>.tree-item .folder-icon,.tree-folder.loading>.tree-item .font-body-md{animation:none!important;background:none!important;color:#c2410c!important;-webkit-text-fill-color:currentColor!important}html.doc-loading .tree-item.active{animation:none!important;transform:none!important}html.doc-loading .tree-item.active::before{animation:none!important}html.dark .tree-folder.loading>.tree-item .folder-icon,html.dark .tree-folder.loading>.tree-item .font-body-md{color:#fb923c!important}}
+  @media (prefers-reduced-motion: reduce){.tree-item.tree-item-entering{animation:none!important;animation-delay:0s!important;opacity:1!important;transform:none!important}.tree-folder.loading>.tree-item .folder-icon,.tree-folder.loading>.tree-item .tree-folder-name{animation:none!important;background:none!important;color:#c2410c!important;-webkit-text-fill-color:currentColor!important}html.doc-loading .tree-item.active{animation:none!important;transform:none!important}html.doc-loading .tree-item.active::before{animation:none!important}html.dark .tree-folder.loading>.tree-item .folder-icon,html.dark .tree-folder.loading>.tree-item .tree-folder-name{color:#fb923c!important}}
   @media (prefers-reduced-motion: reduce){.tree-item[data-path],.tree-item[data-path]>.material-symbols-outlined{transition-property:background-color,color!important}.tree-item[data-path]:hover,.tree-item[data-path]:focus-within{translate:none!important}.tree-item[data-path]:hover>.material-symbols-outlined,.tree-item[data-path]:focus-within>.material-symbols-outlined{transform:none!important}}
   @media (prefers-reduced-motion: reduce){.tree-folder>.tree-item .caret-icon,.tree-folder>.tree-item .folder-icon{transition-property:color!important}.tree-folder>.tree-item:hover .caret-icon,.tree-folder>.tree-item:focus-within .caret-icon{translate:none!important}}
 
@@ -438,7 +438,7 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
   html.dark .tree-item.active{background:rgba(251,146,60,.16);color:#fb923c}
   html.dark.doc-loading .tree-item.active::before{background:linear-gradient(90deg,rgba(251,146,60,0) 0%,rgba(251,146,60,.18) 38%,rgba(253,186,116,.32) 56%,rgba(251,146,60,.14) 72%,rgba(251,146,60,0) 100%);background-size:220% 100%}
   html.dark.doc-loading-error .tree-item.active::before{background:rgba(252,165,165,.14)}
-  html.dark .tree-folder.loading>.tree-item .folder-icon,html.dark .tree-folder.loading>.tree-item .font-body-md{background:linear-gradient(90deg,#fb923c 0%,#ffedd5 32%,#f97316 55%,#fed7aa 76%,#fb923c 100%);background-size:200% 100%;background-clip:text;-webkit-background-clip:text}
+  html.dark .tree-folder.loading>.tree-item .folder-icon,html.dark .tree-folder.loading>.tree-item .tree-folder-name{background:linear-gradient(90deg,#fb923c 0%,#ffedd5 32%,#f97316 55%,#fed7aa 76%,#fb923c 100%);background-size:200% 100%;background-clip:text;-webkit-background-clip:text}
   html.dark .active-indicator{background:#fb923c}
   html.dark .tree-size{color:#a1a1aa}
   html.dark .tree-empty{color:#a1a1aa}
@@ -504,6 +504,7 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
   }
   ${menuSurfaceStyles}
 </style>
+${renderStylesheet("viewer-base")}
 <body>
 
 <header class="topbar">
@@ -538,7 +539,7 @@ tailwind.config={darkMode:"class",theme:{extend:{colors:{"outline-variant":"#e4e
 <aside class="sidebar" id="doc-sidebar" aria-labelledby="doc-sidebar-title">
   <div class="sidebar-divider" id="doc-sidebar-title">Docs</div>
   <div class="sidebar-tree" data-tree-org="${orgEsc}"${documentBase ? ` data-document-base="${escapeHtml(documentBase)}"` : ""}>
-    <div class="space-y-0.5 relative" id="tree-container" style="position:relative">
+    <div class="tree-stack" id="tree-container" style="position:relative">
       <div class="active-indicator" id="active-indicator" style="opacity:0;transition:none"></div>
       ${renderTreeSkeleton()}
     </div>

@@ -25,7 +25,7 @@ Rendro has two visual layers with different ownership:
 ### Runtime stack
 
 - Server-rendered HTML from Hono routes on Cloudflare Workers.
-- The document viewer (`src/routes/app.ts`) loads Tailwind CDN utilities for small structural classes; the management, auth, landing, and 404 surfaces use inline CSS only.
+- No surface loads a CSS runtime or CDN stylesheet. The document viewer (`src/routes/app.ts`) uses its own inline CSS plus a small self-hosted, hashed base reset (`src/styles/viewer-base.css`); the management, auth, landing, and 404 surfaces use inline CSS only.
 - Critical app chrome CSS lives inline in the route templates so first paint has no extra stylesheet dependency.
 - Tree behavior ships as `public/lazy-tree.js`, built from `src/lazy-tree/lazy-tree.ts`.
 - Comment widget ships as `public/commentor.js` (built from `src/commentor/commentor.ts`); the viewer-side comment bridge ships as `public/commentor-parent.js` (built from `src/commentor/parent-entry.ts`). Both are gitignored build outputs.

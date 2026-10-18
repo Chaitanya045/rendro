@@ -26,6 +26,13 @@ const scrolledTo = async (tab: Page, selector: string, tolerance = 2) => expect.
 const documentScroll = (tab: Page) => documentFrame(tab).evaluate(() => Math.round(document.scrollingElement?.scrollTop ?? -1));
 const focusInNotice = (tab: Page) => tab.evaluate(() => !!document.activeElement?.closest("#document-navigation-notice, #document-navigation-review"));
 
+// #89: the strict nonce CSP must allow everything the shell and the document do here. Requesting the recorder before
+// the test starts it with the page; the check runs after every test.
+test.beforeEach(({ cspViolations }) => { void cspViolations; });
+test.afterEach(({ cspViolations }) => {
+  expect(cspViolations.filter(message => !/x-frame-options/i.test(message)), "CSP violations").toEqual([]);
+});
+
 test.describe("fragments and anchors", () => {
   test("a fragment link scrolls its own document and is reported to the shell without navigating or reloading", async ({ asOwner: tab, site }) => {
     await tab.goto(site.docs);

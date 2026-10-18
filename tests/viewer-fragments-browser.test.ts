@@ -149,9 +149,6 @@ async function newPage(): Promise<Page> {
     });
   });
   page.on("console", message => { if (/content security policy|violates.*policy/i.test(message.text())) consoleCsp.push(message.text()); });
-  // No external fonts/services are needed by this isolated route fixture.
-  await page.route(url => url.origin !== harness.origin, route => route.request().url().includes("cdn.tailwindcss.com")
-    ? route.fulfill({ contentType: "text/javascript; charset=utf-8", body: "window.tailwind = {};" }) : route.abort());
   return page;
 }
 
@@ -355,7 +352,11 @@ describe("viewer fragment navigation in Chromium", () => {
     const page = await newPage();
     await page.goto(harness.origin + base);
     await page.waitForTimeout(600);
-    const frame = page.frames().find(candidate => candidate.parentFrame() === page.mainFrame())!;
+    // Count only the click's navigation: on a loaded host the first document can still be committing here. A frame's
+    // URL is Playwright's own state, so waiting on it (unlike an evaluate) grants the shell no activation.
+    const documentFrame = () => page.frames().find(candidate => candidate.parentFrame() === page.mainFrame());
+    await expect.poll(() => documentFrame()?.url() ?? "").toContain("/files/");
+    const frame = documentFrame()!;
     let navigations = 0;
     page.on("framenavigated", navigated => { if (navigated === frame) navigations++; });
     await frame.getByRole("link", { name: "Query one", exact: true }).click();

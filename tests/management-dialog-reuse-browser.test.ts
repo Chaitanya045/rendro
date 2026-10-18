@@ -83,7 +83,6 @@ afterAll(() => { vi.unstubAllGlobals(); });
 
 async function open(path: string, emptyOrganizations = false) {
   const page = await harness.newPage();
-  await page.route(url => url.hostname === 'cdn.tailwindcss.com', route => route.fulfill({ body: '' }));
   if (emptyOrganizations) await page.route('**/api/auth/organization/list', route => route.fulfill({ json: [] }));
   await browserStep(`open ${path}`, () => page.goto(harness.origin + path));
   return page;
@@ -605,7 +604,6 @@ it('the active team of the session cannot be removed, other teams can, and the h
   sessionActiveTeamId = 'team-two';
   const teams = [{ id: 'team-one', name: 'Docs' }, { id: 'team-two', name: 'Platform' }, { id: 'team-three', name: 'Support' }];
   const page = await harness.newPage();
-  await page.route(url => url.hostname === 'cdn.tailwindcss.com', route => route.fulfill({ body: '' }));
   await page.route('**/api/auth/organization/get-full-organization?*', route => route.fulfill({ json: { ...organization, teams } }));
   const sessionReads: string[] = [];
   page.on('request', request => { if (request.url().includes('/api/auth/get-session')) sessionReads.push(request.url()); });
@@ -643,7 +641,6 @@ it('a failed session read leaves Remove team enabled and shows the server refusa
   sessionStatus = 503;
   const teams = [{ id: 'team-one', name: 'Docs' }, { id: 'team-two', name: 'Platform' }];
   const page = await harness.newPage();
-  await page.route(url => url.hostname === 'cdn.tailwindcss.com', route => route.fulfill({ body: '' }));
   await page.route('**/api/auth/organization/get-full-organization?*', route => route.fulfill({ json: { ...organization, teams } }));
   await page.goto(harness.origin + `${base}/teams`);
   const remove = page.locator('.team-card', { has: page.getByRole('heading', { name: 'Platform', level: 2 }) }).getByRole('button', { name: 'Remove team', exact: true });
@@ -661,7 +658,6 @@ it('a failed session read leaves Remove team enabled and shows the server refusa
 
 it('Back restores the saved scroll offset only after the restored page has rendered, unless the user scrolls first', async () => {
   const page = await harness.newPage();
-  await page.route(url => url.hostname === 'cdn.tailwindcss.com', route => route.fulfill({ body: '' }));
   await page.setViewportSize({ width: 1440, height: 300 });
   const navLink = (name: string) => page.locator('.cp-nav').getByRole('link', { name, exact: true });
   const scrollY = () => page.evaluate(() => Math.round(window.scrollY));
@@ -720,7 +716,6 @@ it('lists an expired invitation as Expired, keeps it revocable and does not coun
   const invitations: unknown[] = [expired, live];
   const stub = (page: Page) => page.route('**/api/auth/organization/list-invitations?*', route => route.fulfill({ json: invitations }));
   const page = await harness.newPage();
-  await page.route(url => url.hostname === 'cdn.tailwindcss.com', route => route.fulfill({ body: '' }));
   await stub(page);
   await page.goto(harness.origin + `${base}/people`);
   const row = (email: string) => page.locator('#invitation-list tr', { hasText: email });
@@ -741,7 +736,6 @@ it('lists an expired invitation as Expired, keeps it revocable and does not coun
   // The overview checklist only counts invitations that can still be accepted.
   const checklist = (target: Page) => target.locator('#workspace-checklist .checklist-row').last();
   const overview = await harness.newPage();
-  await overview.route(url => url.hostname === 'cdn.tailwindcss.com', route => route.fulfill({ body: '' }));
   invitations.splice(0, invitations.length, expired);
   await stub(overview);
   await overview.goto(harness.origin + base);

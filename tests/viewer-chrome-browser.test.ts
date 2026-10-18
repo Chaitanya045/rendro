@@ -1,14 +1,20 @@
 import { getRequestListener } from "@hono/node-server";
 import { Hono } from "hono";
 import type { User } from "better-auth/types";
-import { beforeAll, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import type { Page } from "playwright";
+import { securityHeaders } from "@/middleware/security-headers";
 import { renderScopedDocumentShell } from "../src/routes/app";
 import { bundleBrowserAsset, createBrowserHarness, waitForSettled } from "./helpers/browser";
 import { serveFonts } from "./helpers/fonts";
+import { serveStyles } from "./helpers/styles";
 
-/** The real viewer shell (its CSS and inline script) with the real tree script and a stubbed deployment. */
+/**
+ * The real viewer shell (its CSS, base stylesheet, inline script and strict CSP) with the real tree script and a
+ * stubbed deployment.
+ */
 const harness = createBrowserHarness();
+const violations: string[] = [];
 const base = "/organizations/org-a/projects/project-a/docs";
 const user = { id: "u", email: "reader@example.test", name: "Reader" } as User;
 type Entry = { name: string; type: "file" | "folder" };
@@ -24,7 +30,9 @@ const pages: Record<string, Entry[][]> = {
 beforeAll(async () => {
   const assets = new Map([["/lazy-tree.js", await bundleBrowserAsset("src/lazy-tree/lazy-tree.ts")]]);
   const app = new Hono();
+  app.use("*", securityHeaders);
   app.get("/fonts/*", serveFonts);
+  app.get("/styles/*", serveStyles);
   app.get(`${base}/tree`, c => {
     const entries = pages[c.req.query("dir") ?? ""] ?? [[]];
     const index = Number(c.req.query("cursor") ?? "0");
@@ -36,9 +44,16 @@ beforeAll(async () => {
   await harness.start((req, res) => { void listener(req, res).catch(error => res.destroy(error as Error)); }, assets);
 });
 
+beforeEach(() => { violations.length = 0; });
+afterEach(() => { expect(violations, "CSP violations in the shell and the document").toEqual([]); });
+
 async function open(width = 1280, reducedMotion: "reduce" | "no-preference" = "reduce") {
   const page = await harness.newPage({ viewport: { width, height: 800 }, reducedMotion });
-  await page.route(url => url.hostname === "cdn.tailwindcss.com", route => route.fulfill({ body: "" }));
+  await page.exposeFunction("recordViolation", (value: string) => { violations.push(value); });
+  await page.addInitScript(() => document.addEventListener("securitypolicyviolation", event => {
+    (window as unknown as { recordViolation: (value: string) => void }).recordViolation(`${event.effectiveDirective}: ${event.blockedURI}`);
+  }));
+  page.on("console", message => { if (/content security policy/i.test(message.text())) violations.push(message.text()); });
   await page.goto(harness.origin + base);
   await page.locator('.tree-item[data-path="org-a/index.html"].active').waitFor();
   await page.frameLocator("#content-frame").getByRole("heading", { name: "index.html" }).waitFor();

@@ -132,10 +132,6 @@ describe("private viewer republishing", () => {
     publisherBase = `<base href="${href}">`;
     const page = await harness.newPage();
     await page.context().addCookies([{ name: "better-auth.session_token", value: "fixture.signature", url: harness.origin }]);
-    await page.route(url => url.origin !== harness.origin, route => route.fulfill({
-      contentType: route.request().url().includes("cdn.tailwindcss.com") ? "text/javascript; charset=utf-8" : "text/css",
-      body: route.request().url().includes("cdn.tailwindcss.com") ? "window.tailwind = {};" : "",
-    }));
     await page.goto(`${harness.origin}${base}?doc=${documentPath}`);
     const frame = page.frameLocator("#content-frame");
     await expect.poll(() => page.locator("#content-frame").getAttribute("data-loaded-deployment")).toBe("deploy-1");
@@ -173,10 +169,6 @@ describe("private viewer republishing", () => {
     </script>`;
     const page = await harness.newPage();
     await page.context().addCookies([{ name: "better-auth.session_token", value: "fixture.signature", url: harness.origin }]);
-    await page.route(url => url.origin !== harness.origin, route => route.fulfill({
-      contentType: route.request().url().includes("cdn.tailwindcss.com") ? "text/javascript; charset=utf-8" : "text/css",
-      body: route.request().url().includes("cdn.tailwindcss.com") ? "window.tailwind = {};" : "",
-    }));
     const violations: string[] = [];
     const consoleMessages: string[] = [];
     const failedRequests: string[] = [];

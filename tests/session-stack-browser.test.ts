@@ -132,7 +132,6 @@ it("signs in and browses management and docs without a 503 on the real local ser
   page.on("response", response => {
     if (response.status() >= 500) failures.push(`${response.status()} ${new URL(response.url()).pathname}`);
   });
-  await page.route(url => url.hostname === "cdn.tailwindcss.com", route => route.fulfill({ contentType: "text/javascript; charset=utf-8", body: "" }));
   const orgPath = `/organizations/${organizationId}`;
   await page.goto(`${harness.origin}/sign-in?returnTo=${encodeURIComponent(orgPath)}`);
   await page.locator("#email").fill("stack@example.test");

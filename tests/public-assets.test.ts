@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import worker from "@/worker";
 import * as deletion from "@/soft-delete";
 import { fontResponseHeaders } from "@/routes/fonts";
+import { styleResponseHeaders } from "@/routes/styles";
 import { faviconAssets, faviconCacheControl } from "@/routes/favicon";
 import { bundleCacheControl, publicAssetHeaders, publicAssetPaths } from "@/routes/public-assets";
 import { versionedBundles } from "@/routes/versioned-bundles";
@@ -32,13 +33,14 @@ describe("public asset inventory", () => {
     expect(Object.keys(ledger).sort()).toEqual(bundles.map(([path]) => `public${path}`).sort());
   });
 
-  it("classifies every file in public/: allowlisted, a hashed font or license, or absent", () => {
+  it("classifies every file in public/: allowlisted, a hashed font, license or stylesheet, or absent", () => {
     const served = new Set(publicAssetPaths);
     const files = readdirSync("public", { recursive: true, withFileTypes: true }).filter(entry => entry.isFile())
       .map(entry => `/${(entry.parentPath.replace(/^public\/?/, "") + "/" + entry.name).replace(/^\//, "")}`);
     expect(files.length).toBeGreaterThan(3);
     for (const file of files) {
-      expect(served.has(file) || (file.startsWith("/fonts/") && fontResponseHeaders(file) !== undefined), `public${file} is not served or is not allowlisted`).toBe(true);
+      expect(served.has(file) || (file.startsWith("/fonts/") && fontResponseHeaders(file) !== undefined)
+        || (file.startsWith("/styles/") && styleResponseHeaders(file) !== undefined), `public${file} is not served or is not allowlisted`).toBe(true);
     }
   });
 

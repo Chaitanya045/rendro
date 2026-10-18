@@ -100,10 +100,15 @@ independent while leaving the application's limits enabled.
 
 The Worker outbound guard allows only the exact local services. Redirect responses
 are returned to the browser without following them. The browser guard permits
-Worker and local Convex HTTP/WebSocket traffic and fulfills font/CDN resources
-locally. Any other destination fails. Teardown closes workerd, Convex, the proxy,
+Worker and local Convex HTTP/WebSocket traffic. Fonts and the viewer base stylesheet
+are self-hosted, so no CDN is stubbed. Any other destination fails. Teardown closes workerd, Convex, the proxy,
 mail sink and S3Proxy and removes temporary data, including on setup/test failure.
 An empty temporary `.dev.vars` and disabled dotenv loading isolate Worker secrets.
+
+Trusted pages send `Cross-Origin-Opener-Policy: same-origin` (#89). In Firefox, Playwright drops emulated media
+(`emulateMedia`, and the context's `colorScheme`) when a navigation enters a new browsing context group, as the
+first navigation from `about:blank` to a trusted page does. A spec that needs a non-default preference on its first
+load navigates to the origin first, then emulates, then makes the load it measures (see `shell-theme.spec.ts`).
 
 The three engines run the original nonce/CSP, opaque publication/SVG and 404 MIME
 smokes, role/tenant allowed-and-denied checks, local OAuth success/state rejection,
@@ -359,7 +364,8 @@ The five viewer bugs this suite once pinned as expected failures (a closed folde
 folder overlapping the rows after it, a link to another site doing nothing visible, the account and More menus
 staying open when the reader clicks in the document, and sign-in losing the requested document) were fixed by #191
 and are now ordinary passing tests with registry credit. `tests/viewer-chrome-browser.test.ts` repeats the tree
-layout, `inert` and menu behavior against the real shell CSS in Chromium.
+layout, `inert` and menu behavior against the real shell CSS, base stylesheet and strict nonce CSP in Chromium.
+`viewer-chrome.spec.ts` and `viewer-links.spec.ts` fail any test that records a CSP violation (#89).
 
 ## Comments and recovery (#115)
 
@@ -524,9 +530,9 @@ held HTTP responses. Release deliberately held fixture promises in a test's
 pass a `message` to `expect.poll` for server-side request assertions.
 
 The context blocks service workers, WebSockets, and HTTP requests outside the
-fixture origin, and reports unexpected origins after each test. Fulfill any
-intentional CDN/font fixtures with `page.route` before navigation (page routes
-take precedence over the context guard). Do not use `route.continue()` for
+fixture origin, and reports unexpected origins after each test. The app needs no
+CDN or font service; fulfill any other intentional fixture with `page.route` before
+navigation (page routes take precedence over the context guard). Do not use `route.continue()` for
 external resources. Node/backend requests must also use mocks; the context
 route guard does not intercept Node fetch or Playwright's APIRequestContext.
 Default CI must never require a live account, CDN, font service, or backend.

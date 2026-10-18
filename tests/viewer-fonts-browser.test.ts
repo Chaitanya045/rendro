@@ -43,9 +43,6 @@ describe("opaque viewer CORS resources in Chromium", () => {
       if (/cors|access-control|font|content security policy/i.test(message.text()) && message.type() === "error") errors.push(message.text());
     });
     page.on("pageerror", error => errors.push(error.message));
-    // Shell-only third-party services are outside this offline asset regression.
-    await page.route(url => url.origin !== harness.origin, route => route.request().url().includes("cdn.tailwindcss.com")
-      ? route.fulfill({ contentType: "text/javascript; charset=utf-8", body: "window.tailwind = {};" }) : route.abort());
     if (base === privateBase) {
       await page.context().addCookies([{ name: "better-auth.session_token", value: "fixture.signature", url: harness.origin, sameSite: "Lax" }]);
     }

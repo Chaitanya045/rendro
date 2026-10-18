@@ -23,6 +23,10 @@ function sandbox(response: Response) {
   common(response);
   expect(response.headers.get("X-Frame-Options")).toBe("SAMEORIGIN");
   expect(response.headers.get("Content-Security-Policy")).toBe("sandbox allow-scripts allow-forms allow-popups allow-downloads; frame-ancestors 'self'");
+  // Opaque-origin publisher documents: COOP would refuse them in sandboxed
+  // popups, and CORP would block their own no-cors subresource loads.
+  expect(response.headers.has("Cross-Origin-Opener-Policy")).toBe(false);
+  expect(response.headers.has("Cross-Origin-Resource-Policy")).toBe(false);
 }
 beforeEach(mockSecurityBackend);
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
@@ -52,16 +56,42 @@ describe("shared response security policy", () => {
     if (!csp.includes("style-src 'self' 'unsafe-inline'")) {
       for (const tag of html.matchAll(/<style\b[^>]*>/g)) expect(tag[0]).toContain(`nonce="${nonce}"`);
     }
-    for (const tag of html.matchAll(/<script\b[^>]*>/g)) {
-      if (!tag[0].includes(" src=") || /data-viewer=|src="\/lazy-tree\.js/.test(tag[0])) {
-        expect(tag[0]).toContain(`nonce="${nonce}"`);
-      }
-    }
+    // 'strict-dynamic' ignores 'self': every parser-inserted script and script
+    // preload must carry the request nonce, or CSP3 browsers refuse it.
+    expect(csp.match(/script-src [^;]+/)![0]).toBe(`script-src 'self' 'nonce-${nonce}' 'strict-dynamic'`);
+    for (const tag of html.matchAll(/<script\b[^>]*>|<link\b[^>]*\bas="script"[^>]*>/g)) expect(tag[0]).toContain(`nonce="${nonce}"`);
+    expect(csp).not.toMatch(/tailwind|cdn\./i);
+    expect(html).not.toMatch(/cdn\.tailwindcss\.com/);
+    expect(response.headers.get("Cross-Origin-Opener-Policy")).toBe("same-origin");
+    expect(response.headers.get("Cross-Origin-Resource-Policy")).toBe("same-origin");
+  });
+
+  it.each([
+    // Management navigation inserts page CSS at runtime.
+    ["/organizations/org-a", true, "'unsafe-inline'"],
+    ["/organizations", true, "'unsafe-inline'"],
+    // Viewer shells no longer run a CSS generator: nonced styles only.
+    [docsBase, true, "nonce"], ["/docs/example", true, "nonce"], ["/p/product", false, "nonce"],
+    ["/public/example/product", false, "nonce"], ["/s/test", false, "nonce"],
+    ["/", false, "nonce"], ["/sign-in", false, "nonce"], ["/account/security", true, "nonce"],
+  ] as const)("uses the style policy for its route class: %s", async (path, signedIn, styles) => {
+    const csp = (await request(path, signedIn)).headers.get("Content-Security-Policy")!;
+    const nonce = csp.match(/'nonce-([^']+)'/)![1];
+    expect(csp.match(/style-src [^;]+/)![0]).toBe(`style-src 'self' ${styles === "nonce" ? `'nonce-${nonce}'` : styles}`);
+    expect(csp).toContain("style-src-attr 'unsafe-inline'");
+  });
+
+  it("serves the viewer base stylesheet from this origin, not a CSS runtime", async () => {
+    const html = await (await request("/p/product")).text();
+    expect(html).toMatch(/<link rel="stylesheet" href="\/styles\/viewer-base\.[0-9a-f]{10}\.css">\n<body>/);
   });
 
   it.each(["/share/unknown", "/p/product/files/missing.html", "/s/test/files/missing.html", `${docsBase}/view/invalid/files/index.html`])("uses nonces and no-store for styled document errors: %s", async path => {
     const response = await request(path);
     expect(response.status).toBe(404);
+    // Framed inside the viewer: no opener policy, but never embeddable cross-origin.
+    expect(response.headers.has("Cross-Origin-Opener-Policy")).toBe(false);
+    expect(response.headers.get("Cross-Origin-Resource-Policy")).toBe("same-origin");
     const csp = response.headers.get("Content-Security-Policy")!;
     expect(csp).toContain("default-src 'self'");
     expect(csp).toContain("frame-ancestors 'self'");
@@ -153,6 +183,9 @@ describe("shared response security policy", () => {
     const response = await request(path);
     common(response);
     expect(response.headers.has("Content-Security-Policy")).toBe(false);
+    expect(response.headers.has("Cross-Origin-Opener-Policy")).toBe(false);
+    // Only API data refuses cross-origin no-cors embedding; trees and health stay as they were.
+    expect(response.headers.get("Cross-Origin-Resource-Policy")).toBe(path.startsWith("/api/") ? "same-origin" : null);
   });
 
   it("keeps auth error redirects in the baseline header class", async () => {
@@ -175,6 +208,9 @@ describe("shared response security policy", () => {
       ASSETS: { fetch: () => new Response("/* asset */", { headers: { "Content-Type": "text/javascript", "Cache-Control": "public, max-age=3600" } }) },
     });
     common(response);
+    // Opaque viewer frames load app scripts with no-cors <script src>.
+    expect(response.headers.has("Cross-Origin-Resource-Policy")).toBe(false);
+    expect(response.headers.has("Cross-Origin-Opener-Policy")).toBe(false);
     expect(response.headers.get("Cache-Control")).toBe("public, max-age=31536000, immutable");
     expect(response.headers.has("Content-Security-Policy")).toBe(false);
     expect(await response.text()).not.toMatch(/\bnonce\s*=/i);
@@ -190,5 +226,7 @@ describe("shared response security policy", () => {
     common(error);
     expect(error.status).toBe(502);
     expect(error.headers.has("Content-Security-Policy")).toBe(false);
+    expect(error.headers.get("Cross-Origin-Resource-Policy")).toBe("same-origin");
+    expect(preflight.headers.get("Cross-Origin-Resource-Policy")).toBe("same-origin");
   });
 });

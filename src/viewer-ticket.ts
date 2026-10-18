@@ -1,6 +1,7 @@
 import { legacyStoragePrefix, modernStoragePrefix } from "@/storage-boundary";
 import { EncryptJWT, jwtDecrypt } from "jose";
 import { AUTH_SECRET } from "@/config";
+import { authCookiePair } from "../shared/auth-cookies";
 
 export const VIEWER_TICKET_SECONDS = 15 * 60;
 const audience = "rendro:private-document-viewer:v1";
@@ -11,9 +12,13 @@ export interface ViewerScope {
 }
 interface ViewerTicket extends ViewerScope { cookie: string }
 
+const sessionTokenPair = authCookiePair("session_token");
+const preferencePair = authCookiePair("dont_remember");
+
+/** Session-token pairs under every name Convex reads (current and legacy). */
 export function sessionTokenCookie(cookie: string): string {
   return cookie.split(";").map(part => part.trim())
-    .filter(part => /^(?:__Secure-)?better-auth\.session_token=.+$/.test(part)).join("; ");
+    .filter(part => sessionTokenPair.test(part)).join("; ");
 }
 
 export function viewerSessionCookie(cookie: string): string {
@@ -23,7 +28,7 @@ export function viewerSessionCookie(cookie: string): string {
   // preference from the persisted session, regardless of this client marker.
   // Never forward session_data, unrelated cookies, or bearer API credentials.
   const preference = cookie.split(";").map(part => part.trim())
-    .filter(part => /^(?:__Secure-)?better-auth\.dont_remember=.+$/.test(part));
+    .filter(part => preferencePair.test(part));
   return [token, ...preference].join("; ");
 }
 

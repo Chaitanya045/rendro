@@ -71,6 +71,9 @@ describe("bounded isolate session cache", () => {
     expect((await cache.lookup(cookie, resolve)).id).toBe("reader");
     // Identical values under a different cookie name must not share a result.
     expect((await cache.lookup(`__Secure-${cookie}`, () => Promise.resolve(success("secure")))).id).toBe("secure");
+    // Migrating a legacy cookie to its __Host- name is a fresh lookup, not a hit.
+    expect((await cache.lookup(`__Host-${cookie}`, () => Promise.resolve(success("host")))).id).toBe("host");
+    expect(await sessionCacheKey(`__Host-${cookie}`)).toBe(await sessionCacheKey(cookie));
   });
 
   it("coalesces concurrent reads and does not extend TTL by backend latency", async () => {
@@ -121,7 +124,7 @@ describe("bounded isolate session cache", () => {
     const reject = vi.fn(() => Promise.reject(new Error("offline")));
     for (let i = 0; i < 2; i++) await expect(cache.lookup(cookie, reject)).rejects.toThrow("offline");
     expect(reject).toHaveBeenCalledTimes(2);
-    for (const header of ["", `${cookie}; __Secure-${cookie}`, `${cookie}; ${cookie}-other`]) {
+    for (const header of ["", `${cookie}; __Secure-${cookie}`, `__Host-${cookie}; __Secure-${cookie}`, `${cookie}; ${cookie}-other`]) {
       const resolve = vi.fn(() => Promise.resolve(success()));
       await cache.lookup(header, resolve);
       await cache.lookup(header, resolve);

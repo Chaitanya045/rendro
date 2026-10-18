@@ -74,6 +74,7 @@ import { securityHeaders } from "./middleware/security-headers";
 })();
 import { fontResponseHeaders } from "./routes/fonts";
 import { publicAssetHeaders, publicAssetPaths } from "./routes/public-assets";
+import { styleResponseHeaders } from "./routes/styles";
 import { Hono } from "hono";
 import { requestLogPath } from "./request-log";
 import type { Context } from "hono";
@@ -131,9 +132,10 @@ async function servePublicAsset(c: Context<WorkerEnv>, assetHeaders: Record<stri
 for (const path of publicAssetPaths) {
   app.get(path, (c) => servePublicAsset(c, publicAssetHeaders(path, new URL(c.req.url).search)));
 }
-// Self-hosted fonts are content-hashed and immutable. Anything under /fonts that is not a hashed
-// font or a license text is a 404.
+// Self-hosted fonts and stylesheets are content-hashed and immutable. Anything under /fonts or
+// /styles that is not a hashed font, license text or hashed stylesheet is a 404.
 app.get("/fonts/*", (c) => servePublicAsset(c, fontResponseHeaders(c.req.path)));
+app.get("/styles/*", (c) => servePublicAsset(c, styleResponseHeaders(c.req.path)));
 
 app.use("*", sessionMiddleware);
 
