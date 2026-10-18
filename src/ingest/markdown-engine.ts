@@ -26,6 +26,11 @@ export function initMarkdownEngine(module: WebAssembly.Module): void {
   if (state === "uninitialized") state = "ready";
 }
 
+/** True once comrak has crashed in this isolate; every later Markdown render is refused. */
+export function markdownEngineFailed(): boolean {
+  return state === "failed";
+}
+
 export function markdownToUnsafeHtml(markdown: string): string {
   if (state === "uninitialized") throw new Error("initMarkdownEngine must be called before rendering Markdown");
   if (state === "failed") throw new RenderError("The Markdown engine failed earlier in this isolate", "engine");
