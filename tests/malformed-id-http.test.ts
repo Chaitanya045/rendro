@@ -16,7 +16,7 @@ const storage = vi.hoisted(() => ({
   copyObject: vi.fn(), getObjectText: vi.fn(), headObject: vi.fn(),
   listAllKeys: vi.fn(), putObject: vi.fn(), getObjectStream: vi.fn(),
 }));
-vi.mock("../src/minio", () => storage);
+vi.mock("../src/storage", () => storage);
 
 import { internal } from "../convex/_generated/api";
 import schema from "../convex/schema";

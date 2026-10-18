@@ -11,7 +11,7 @@ import { sanitizeProvenance } from "../shared/provenance";
 import publicRoutes from "../src/routes/public-v2";
 import shareRoutes from "../src/routes/share-v2";
 import { proxyConvexRequest } from "../src/auth-proxy";
-import * as storage from "../src/minio";
+import * as storage from "../src/storage";
 vi.mock("../src/config", async importOriginal => ({ ...await importOriginal<object>(), CONVEX_SITE_URL: "https://some.convex.site" }));
 const modules = import.meta.glob("../convex/**/*.ts");
 const secret = process.env.CONVEX_INTERNAL_SECRET!;

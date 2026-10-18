@@ -24,7 +24,7 @@ import { app as node } from "../src/index";
 import { logger } from "../src/logger";
 import { requestLogPath } from "../src/request-log";
 import { createShareToken } from "../src/share-links";
-import * as minio from "../src/minio";
+import * as blobs from "../src/storage";
 import { mockSecurityBackend, docsBase, testUser } from "./fixtures/security-headers";
 
 const secret = "SYNTHETIC_PRIVATE_CAPABILITY_88";
@@ -82,7 +82,7 @@ it("captures successful share/ticket responses and storage/proxy errors without 
   expect(ticket).toBeTruthy();
   noSecrets();
 
-  vi.mocked(minio.getObjectStream).mockRejectedValue(faulty());
+  vi.mocked(blobs.getObjectStream).mockRejectedValue(faulty());
   expect((await worker.request(`https://test/share/${share}${query}`)).status).toBe(503);
   expect((await worker.request(`https://test/public/example/product/files/index.html${query}`)).status).toBe(503);
   const failure = await worker.request(`https://test/select.js${query}`, {}, { ASSETS: { fetch: () => { throw faulty(); } } });

@@ -7,7 +7,7 @@ import { getFunctionName, makeFunctionReference } from "convex/server";
 import { convexTest } from "convex-test";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import worker from "@/worker";
-import * as minio from "@/minio";
+import * as blobs from "@/storage";
 import * as deletion from "@/soft-delete";
 import { api } from "../convex/_generated/api";
 import schema from "../convex/schema";
@@ -41,9 +41,9 @@ beforeAll(async () => {
   author = backend.withIdentity(identity);
   mockSecurityBackend();
   vi.spyOn(deletion, "isDeleted").mockResolvedValue(false);
-  vi.spyOn(minio, "listImmediate").mockResolvedValue({ entries: [], isTruncated: false });
-  vi.mocked(minio.headObject).mockImplementation(key => Promise.resolve({ contentType: key.endsWith(".css") ? "text/css" : key.endsWith(".svg") ? "image/svg+xml" : "text/html" }));
-  vi.mocked(minio.getObjectStream).mockImplementation(key => {
+  vi.spyOn(blobs, "listImmediate").mockResolvedValue({ entries: [], isTruncated: false });
+  vi.mocked(blobs.headObject).mockImplementation(key => Promise.resolve({ contentType: key.endsWith(".css") ? "text/css" : key.endsWith(".svg") ? "image/svg+xml" : "text/html" }));
+  vi.mocked(blobs.getObjectStream).mockImplementation(key => {
     assetsSeen.add(key);
     const content = key.endsWith(".css") ? 'body{color:rgb(1,2,3)}' : key.endsWith(".svg")
       ? '<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><rect width="10" height="10" fill="green"/></svg>'

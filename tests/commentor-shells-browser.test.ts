@@ -4,7 +4,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import publicDocs from "@/routes/public-v2";
 import shareDocs from "@/routes/share-v2";
 import { securityHeaders } from "@/middleware/security-headers";
-import * as minio from "@/minio";
+import * as blobs from "@/storage";
 import { browserStep, bundleBrowserAsset, createBrowserHarness } from "./helpers/browser";
 
 /** A publisher script can speak the comment protocol; only a private viewer has a parent that answers it. */
@@ -23,8 +23,8 @@ parent.postMessage({ type: "probe-done" }, location.origin);
 beforeAll(async () => {
   const viewer = await bundleBrowserAsset("src/viewer/entry.ts");
   const tree = await bundleBrowserAsset("src/lazy-tree/lazy-tree.ts");
-  vi.spyOn(minio, "getObjectText").mockResolvedValue(JSON.stringify({ version: 1, files: [{ path: "index.html", contentType: "text/html", size: 100 }] }));
-  vi.spyOn(minio, "getObjectStream").mockImplementation(() => Promise.resolve(new Response(page).body));
+  vi.spyOn(blobs, "getObjectText").mockResolvedValue(JSON.stringify({ version: 1, files: [{ path: "index.html", contentType: "text/html", size: 100 }] }));
+  vi.spyOn(blobs, "getObjectStream").mockImplementation(() => Promise.resolve(new Response(page).body));
   vi.stubGlobal("fetch", vi.fn((input: string | URL | Request) => {
     const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url);
     if (url.pathname.endsWith("/publications/public")) return Promise.resolve(Response.json({ publication: { slug: "fixture", pathPrefix: "", entryFile: "index.html" }, project: { name: "Docs" }, deployment: { manifestKey } }));

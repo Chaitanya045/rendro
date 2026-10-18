@@ -69,7 +69,7 @@ export function permissionProblems(text: string, allowedWriters: string[] = []):
 
 describe("workflow supply chain policy", () => {
   it("covers every workflow file", () => {
-    expect(workflows).toEqual(["quality.yml", "release.yml", "retention.yml", "stability.yml"]);
+    expect(workflows).toEqual(["quality.yml", "r2-public-access.yml", "release.yml", "stability.yml"]);
   });
 
   it.each(workflows)("%s pins every external action to a commit SHA with a version comment", name => {

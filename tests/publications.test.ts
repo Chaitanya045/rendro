@@ -10,7 +10,7 @@ function emptyImmediateList() {
   return { entries: [], isTruncated: false };
 }
 
-vi.mock("@/minio", () => ({
+vi.mock("@/storage", () => ({
   buildTree: vi.fn(() => []),
   deleteObject: vi.fn((key: string) => {
     objects.delete(key);
@@ -310,8 +310,8 @@ describe("legacy publication metadata failures", () => {
     const { publication } = await savePublication(input);
     objects.set("__rendro/publications/acme/missing.json", "");
     objects.delete("__rendro/publications/acme/missing.json");
-    const minio = await import("@/minio");
-    vi.mocked(minio.listAllKeys).mockResolvedValueOnce(["__rendro/publications/acme/guide.txt", "__rendro/publications/acme/missing.json"]);
+    const blobs = await import("@/storage");
+    vi.mocked(blobs.listAllKeys).mockResolvedValueOnce(["__rendro/publications/acme/guide.txt", "__rendro/publications/acme/missing.json"]);
     expect(await listPublications("acme")).toEqual([]);
     expect(await removePublication("acme", "missing")).toBe(false);
     expect(await listPublishedDocumentPaths({ ...publication, sourcePrefix: "other/" })).toEqual([]);

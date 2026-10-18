@@ -5,7 +5,7 @@ import { createHash } from "node:crypto";
 import { captureCliPush } from "./helpers/cli-push";
 import { getRequestListener } from "@hono/node-server";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import * as minio from "@/minio";
+import * as blobs from "@/storage";
 import worker from "@/worker";
 import { cookie, publisherIsolationFixture } from "./fixtures/publisher-isolation";
 import { bundleBrowserAsset, createBrowserHarness } from "./helpers/browser";
@@ -25,16 +25,16 @@ describe.each(["stored charset", "in-band charset"])("%s", mode => {
     "renders a Windows-1252 non-ASCII CSS selector through %s", async name => {
       const { routes } = await publisherIsolationFixture();
       const cssType = mode === "stored charset" ? "text/css; charset=windows-1252" : "text/css";
-      vi.mocked(minio.getObjectText).mockResolvedValue(JSON.stringify({ files: [
+      vi.mocked(blobs.getObjectText).mockResolvedValue(JSON.stringify({ files: [
         { path: "index.html", contentType: "text/html; charset=utf-8" },
         { path: "style.css", contentType: cssType },
       ] }));
-      vi.mocked(minio.headObject).mockImplementation(key => Promise.resolve({
+      vi.mocked(blobs.headObject).mockImplementation(key => Promise.resolve({
         contentType: key.endsWith("/style.css") ? cssType : "text/html; charset=utf-8",
       }));
       const declaration = mode === "in-band charset" ? '@charset "windows-1252"; ' : '';
       const css = Buffer.from(declaration + '.caf\xe9 { color: rgb(1, 2, 3) }', "latin1");
-      vi.mocked(minio.getObjectStream).mockImplementation(key => Promise.resolve(new Response(key.endsWith("/style.css")
+      vi.mocked(blobs.getObjectStream).mockImplementation(key => Promise.resolve(new Response(key.endsWith("/style.css")
         ? css : '<!doctype html><link rel="stylesheet" href="style.css"><p class="café">Publisher text</p>').body));
       const page = await harness.newPage();
       await page.context().addCookies([{ name: cookie.split("=")[0], value: cookie.split("=")[1], url: harness.origin }]);
@@ -56,13 +56,13 @@ describe.each(["stored charset", "in-band charset"])("%s", mode => {
     "preserves Windows-1252 HTML rendering through %s", async name => {
       const { routes } = await publisherIsolationFixture();
       const htmlType = mode === "stored charset" ? "text/html; charset=windows-1252" : "text/html";
-      vi.mocked(minio.getObjectText).mockResolvedValue(JSON.stringify({ files: [
+      vi.mocked(blobs.getObjectText).mockResolvedValue(JSON.stringify({ files: [
         { path: "index.html", contentType: htmlType },
       ] }));
-      vi.mocked(minio.headObject).mockResolvedValue({ contentType: htmlType });
+      vi.mocked(blobs.headObject).mockResolvedValue({ contentType: htmlType });
       const declaration = mode === "in-band charset" ? '<meta charset="windows-1252">' : '';
       const html = Buffer.from(`<!doctype html><html><head>${declaration}</head><body><p>caf\xe9</p></body></html>`, "latin1");
-      vi.mocked(minio.getObjectStream).mockImplementation(() => Promise.resolve(new Response(html).body));
+      vi.mocked(blobs.getObjectStream).mockImplementation(() => Promise.resolve(new Response(html).body));
       const page = await harness.newPage();
       await page.context().addCookies([{ name: cookie.split("=")[0], value: cookie.split("=")[1], url: harness.origin }]);
       const response = await page.goto(harness.origin + routes.find(route => route.name === name)!.url(0));
@@ -99,10 +99,10 @@ it.each(["fresh", "reused", "existing UTF-8"])("renders CLI CSS café € throug
     // Old manifests are still valid; exercise them unchanged as well.
     const manifest = mode === "existing UTF-8" ? { ...capture.manifest, files: capture.manifest.files.map(file =>
       file.path === "style.css" ? previous[0] : { ...file, contentType: "text/html; charset=utf-8" }) } : capture.manifest;
-    vi.mocked(minio.getObjectText).mockResolvedValue(JSON.stringify(manifest));
+    vi.mocked(blobs.getObjectText).mockResolvedValue(JSON.stringify(manifest));
     // Copied objects retain old storage metadata. Modern routes use the manifest.
-    vi.mocked(minio.headObject).mockResolvedValue({ contentType: "text/css; charset=utf-8" });
-    vi.mocked(minio.getObjectStream).mockImplementation(key => Promise.resolve(new Response(new Uint8Array(key.endsWith("/style.css")
+    vi.mocked(blobs.headObject).mockResolvedValue({ contentType: "text/css; charset=utf-8" });
+    vi.mocked(blobs.getObjectStream).mockImplementation(key => Promise.resolve(new Response(new Uint8Array(key.endsWith("/style.css")
       ? capture.uploads.get("style.css")?.bytes ?? css : capture.uploads.get("index.html")!.bytes)).body));
     for (const name of ["public", "private", "private ticket"]) {
       const page = await harness.newPage();

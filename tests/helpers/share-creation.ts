@@ -2,7 +2,7 @@ import { vi } from "vitest";
 import { registerAuthClientIp } from "../../src/auth-client-ip";
 import { Hono } from "hono";
 import shareApi from "../../src/routes/share-api";
-import * as storage from "../../src/minio";
+import * as storage from "../../src/storage";
 import { cookieWriteFixture, admissionHeaders } from "./cookie-write-fixture";
 
 const path = "/api/rendro/shares";

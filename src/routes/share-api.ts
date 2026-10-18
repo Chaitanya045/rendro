@@ -4,7 +4,7 @@ import { authClientIpHeaders } from "@/auth-client-ip";
 import { backendFetch } from "@/backend-fetch";
 import { signStorageValidation, STORAGE_ATTESTATION_HEADER } from "../../shared/storage-attestation";
 import { CONVEX_INTERNAL_SECRET, CONVEX_SITE_URL } from "@/config";
-import { getObjectStream, getObjectText } from "@/minio";
+import { getObjectStream, getObjectText } from "@/storage";
 import { parseStoredManifest } from "@/stored-manifest";
 import { isCanonicalStorageKey, modernStoragePrefix } from "@/storage-boundary";
 import { collectShareAssets, ShareAssetError } from "@/share-assets";

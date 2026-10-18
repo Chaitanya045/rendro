@@ -7,7 +7,7 @@ import schema from "../convex/schema";
 import { registerAuth, seedIdentity, seedLegacyMember } from "./helpers/auth-identity";
 import { mappedOrganization } from "../convex/legacyAccess";
 import worker from "@/worker";
-import * as minio from "@/minio";
+import * as blobs from "@/storage";
 import { createShareToken } from "@/share-links";
 import { createLegacyViewerTicket } from "@/viewer-ticket";
 import { filterDeleted, isDeleted, markDeleted } from "@/soft-delete";
@@ -119,12 +119,12 @@ describe("legacy Worker authorization and persistence", () => {
   beforeEach(() => {
     mapped = "org-id"; deleted = false; failure = ""; mutationResult = null; email = "same@example.com";
     access = { id: "org-id", userId: "user", member: { userId: "user", role: "owner" } };
-    vi.spyOn(minio, "headObject").mockResolvedValue({ contentType: "text/html" });
-    vi.spyOn(minio, "getObjectStream").mockImplementation(key => Promise.resolve(new Response(key.startsWith("__rendro/") ? JSON.stringify(publication) : "<h1>Document</h1>").body));
-    vi.spyOn(minio, "listImmediate").mockResolvedValue({ entries: [], isTruncated: false });
-    vi.spyOn(minio, "listAllKeys").mockImplementation(prefix => Promise.resolve(prefix.startsWith("__rendro") ? ["__rendro/publications/example/guide.json"] : ["example/guide/index.html"]));
-    vi.spyOn(minio, "putObject").mockResolvedValue();
-    vi.spyOn(minio, "deleteObject").mockResolvedValue();
+    vi.spyOn(blobs, "headObject").mockResolvedValue({ contentType: "text/html" });
+    vi.spyOn(blobs, "getObjectStream").mockImplementation(key => Promise.resolve(new Response(key.startsWith("__rendro/") ? JSON.stringify(publication) : "<h1>Document</h1>").body));
+    vi.spyOn(blobs, "listImmediate").mockResolvedValue({ entries: [], isTruncated: false });
+    vi.spyOn(blobs, "listAllKeys").mockImplementation(prefix => Promise.resolve(prefix.startsWith("__rendro") ? ["__rendro/publications/example/guide.json"] : ["example/guide/index.html"]));
+    vi.spyOn(blobs, "putObject").mockResolvedValue();
+    vi.spyOn(blobs, "deleteObject").mockResolvedValue();
     vi.stubGlobal("fetch", vi.fn(async (input, init) => {
       const url = String(input);
       if (url.endsWith("/api/rendro/admission/public")) return Response.json({ admitted: true });
@@ -153,8 +153,8 @@ describe("legacy Worker authorization and persistence", () => {
   it("denies every route for an unmapped or inactive organization without reading storage", async () => {
     mapped = null;
     for (const path of [...await privatePaths(), ...publicPaths()]) expect((await request(path)).status, path).toBe(404);
-    expect(minio.getObjectStream).not.toHaveBeenCalled();
-    expect(minio.headObject).not.toHaveBeenCalled();
+    expect(blobs.getObjectStream).not.toHaveBeenCalled();
+    expect(blobs.headObject).not.toHaveBeenCalled();
   });
   it.each(["same@example.com", "consumer@gmail.com", "other@other.test"])("denies reads and every publication/share mutation for nonmember %s", async address => {
     email = address;
@@ -166,14 +166,14 @@ describe("legacy Worker authorization and persistence", () => {
       expect((await request("/api/publications/guide?org=example", { method: "DELETE" })).status).toBe(404);
       expect((await request("/api/legacy/content?key=example/guide/index.html", { method: "DELETE" })).status).toBe(404);
     }
-    expect(minio.putObject).not.toHaveBeenCalled();
-    expect(minio.deleteObject).not.toHaveBeenCalled();
-    expect(minio.getObjectStream).not.toHaveBeenCalled();
+    expect(blobs.putObject).not.toHaveBeenCalled();
+    expect(blobs.deleteObject).not.toHaveBeenCalled();
+    expect(blobs.getObjectStream).not.toHaveBeenCalled();
   });
   it("returns 503 for mapping uncertainty everywhere, before content reads", async () => {
     failure = "legacyAccess:resolve";
     for (const path of [...await privatePaths(), ...publicPaths()]) expect((await request(path)).status, path).toBe(503);
-    expect(minio.getObjectStream).not.toHaveBeenCalled();
+    expect(blobs.getObjectStream).not.toHaveBeenCalled();
   });
   it.each([null, false, 0, "", [], {}, { id: "org-id", userId: "user", member: { userId: "user", role: null } }])("returns retryable 503 for malformed management success %j", async data => {
     const original = vi.mocked(fetch).getMockImplementation()!;
@@ -185,9 +185,9 @@ describe("legacy Worker authorization and persistence", () => {
       expect(response.headers.get("Retry-After"), path).toBe("1");
       expect(response.headers.get("Cache-Control"), path).toBe("private, no-store");
     }
-    expect(minio.getObjectStream).not.toHaveBeenCalled();
-    expect(minio.headObject).not.toHaveBeenCalled();
-    expect(minio.listImmediate).not.toHaveBeenCalled();
+    expect(blobs.getObjectStream).not.toHaveBeenCalled();
+    expect(blobs.headObject).not.toHaveBeenCalled();
+    expect(blobs.listImmediate).not.toHaveBeenCalled();
   });
   it.each([401, 403, 404])("keeps genuine management denial %s opaque", async status => {
     const original = vi.mocked(fetch).getMockImplementation()!;
@@ -198,7 +198,7 @@ describe("legacy Worker authorization and persistence", () => {
       expect(response.status, path).toBe(404);
       expect(response.headers.get("Retry-After"), path).toBeNull();
     }
-    expect(minio.getObjectStream).not.toHaveBeenCalled();
+    expect(blobs.getObjectStream).not.toHaveBeenCalled();
   });
   it("checks deletion on anonymous content reads and fails closed on invalid metadata", async () => {
     for (const value of [true, null, {}, "false"]) {
@@ -212,8 +212,8 @@ describe("legacy Worker authorization and persistence", () => {
     for (const [path, method] of [["/api/orgs", "POST"], ["/api/sync/upload", "POST"], ["/api/sync/delete", "DELETE"], ["/api/sync/check", "GET"], ["/api/sync/list", "GET"], ["/api/publications?org=example", "POST"], ["/api/publications/guide?org=example", "DELETE"], ["/api/publications?org=example", "GET"]]) {
       expect((await request(path, { method, headers: { Authorization: "Bearer old-key" } })).status).toBe(410);
     }
-    expect(minio.putObject).not.toHaveBeenCalled();
-    expect(minio.deleteObject).not.toHaveBeenCalled();
+    expect(blobs.putObject).not.toHaveBeenCalled();
+    expect(blobs.deleteObject).not.toHaveBeenCalled();
   });
   it("requires owner/admin for destructive operations and never succeeds on failed persistence", async () => {
     const content = "/api/legacy/content?key=example/guide/index.html";
@@ -222,7 +222,7 @@ describe("legacy Worker authorization and persistence", () => {
     for (const path of [content, publicationPath]) expect((await request(path, { method: "DELETE" })).status).toBe(404);
     const create = { method: "POST", body: JSON.stringify({ slug: "guide", sourcePrefix: "example/guide/", entryFile: "index.html" }) };
     expect((await request("/api/publications?org=example", create)).status).toBe(200);
-    vi.mocked(minio.putObject).mockRejectedValue(new Error("storage failure"));
+    vi.mocked(blobs.putObject).mockRejectedValue(new Error("storage failure"));
     expect((await request("/api/publications?org=example", create)).status).toBe(503);
     access = { id: "org-id", userId: "user", member: { userId: "user", role: "member, admin" } };
     expect((await request(content, { method: "DELETE" })).status).toBe(200);
@@ -231,12 +231,12 @@ describe("legacy Worker authorization and persistence", () => {
     failure = ""; mutationResult = false;
     expect((await request(content, { method: "DELETE" })).status).toBe(503);
     expect((await request(publicationPath, { method: "DELETE" })).status).toBe(200);
-    vi.mocked(minio.deleteObject).mockRejectedValue(new Error("storage failure"));
+    vi.mocked(blobs.deleteObject).mockRejectedValue(new Error("storage failure"));
     expect((await request(publicationPath, { method: "DELETE" })).status).toBe(503);
   });
   it("rejects malformed content/tree requests and preserves missing-document errors", async () => {
     expect((await request("/public/tenants/guide")).status).toBe(404);
-    expect(minio.getObjectStream).not.toHaveBeenCalled();
+    expect(blobs.getObjectStream).not.toHaveBeenCalled();
     expect((await request("/api/legacy/content", { method: "DELETE" })).status).toBe(404);
     expect((await request("/api/legacy/content?key=example", { method: "DELETE" })).status).toBe(404);
     expect((await request("/api/tree/example?prefix=other/")).status).toBe(400);
@@ -244,7 +244,7 @@ describe("legacy Worker authorization and persistence", () => {
     deleted = true;
     expect((await request("/docs/example/guide/index.html")).status).toBe(404);
     deleted = false;
-    vi.mocked(minio.headObject).mockResolvedValue(null);
+    vi.mocked(blobs.headObject).mockResolvedValue(null);
     expect((await request("/docs/example/guide/index.html")).status).toBe(404);
     expect(await legacyMember("example", cookie)).toBe(true);
     const { legacyRequestMember } = await import("@/legacy-access");

@@ -22,7 +22,7 @@
  * never "no such document": it throws ViewerBackendError (a retryable 503), and
  * only a lookup in a manifest that was read answers null for an absent path.
  */
-import { getObjectText } from "@/minio";
+import { getObjectText } from "@/storage";
 import { ViewerBackendError } from "@/viewer-backend";
 import { isHtmlAsset } from "@/routes/asset-headers";
 import { deploymentMetadataCache } from "@/immutable-cache";

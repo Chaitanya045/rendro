@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import * as minio from "@/minio";
+import * as blobs from "@/storage";
 import worker from "@/worker";
 import { assetContentType, assetHeaders, isHtmlAsset } from "@/routes/asset-headers";
 import { cookie, publisherIsolationFixture } from "./fixtures/publisher-isolation";
@@ -72,12 +72,12 @@ describe("HTML encoding parity with main", () => {
     ["text/html; charset=unknown", "text/html"],
   ])("preserves private stream bytes and declares buffered UTF-8 for %s", async (stored, expected) => {
     const { routes, files } = await publisherIsolationFixture();
-    vi.mocked(minio.getObjectText).mockResolvedValue(JSON.stringify({ files: files.map(file => ({
+    vi.mocked(blobs.getObjectText).mockResolvedValue(JSON.stringify({ files: files.map(file => ({
       path: file.path, contentType: stored,
     })) }));
-    vi.mocked(minio.headObject).mockResolvedValue({ contentType: stored });
+    vi.mocked(blobs.headObject).mockResolvedValue({ contentType: stored });
     const bytes = new Uint8Array(Buffer.from('<!doctype html><html><head></head><body><p>caf\xe9</p></body></html>', "latin1"));
-    vi.mocked(minio.getObjectStream).mockImplementation(() => Promise.resolve(new Response(bytes).body));
+    vi.mocked(blobs.getObjectStream).mockImplementation(() => Promise.resolve(new Response(bytes).body));
     for (const route of routes) {
       const response = await worker.request(`https://rendro.test${route.url(0)}`, {
         headers: route.signedIn ? { Cookie: cookie } : {},
@@ -118,10 +118,10 @@ it.each(["legacy publication", "legacy share"])(
     const { routes } = await publisherIsolationFixture();
     const route = routes.find(route => route.name === name)!;
     const html = '<!doctype html><html><head><meta charset="windows-1252"></head><body><p>café</p></body></html>';
-    vi.mocked(minio.getObjectStream).mockImplementation(() => Promise.resolve(new Response(html).body));
+    vi.mocked(blobs.getObjectStream).mockImplementation(() => Promise.resolve(new Response(html).body));
     for (const stored of ["text/html", "text/html; charset=windows-1252", "text/html; charset=utf-8", "text/html; charset=unknown"]) {
-      vi.mocked(minio.getObjectText).mockResolvedValue(JSON.stringify({ files: [{ path: "index.html", contentType: stored }] }));
-      vi.mocked(minio.headObject).mockResolvedValue({ contentType: stored });
+      vi.mocked(blobs.getObjectText).mockResolvedValue(JSON.stringify({ files: [{ path: "index.html", contentType: stored }] }));
+      vi.mocked(blobs.headObject).mockResolvedValue({ contentType: stored });
       const response = await worker.request(`https://rendro.test${route.url(0)}`);
       expect(response.status).toBe(200);
       expect(response.headers.get("Content-Type")).toBe("text/html; charset=utf-8");

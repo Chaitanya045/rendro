@@ -3,7 +3,7 @@ import { inspect } from "node:util";
 import { ConvexError } from "convex/values";
 const mocks = vi.hoisted(() => ({ error: vi.fn(), getObjectText: vi.fn(), listAllKeys: vi.fn() }));
 vi.mock("../src/logger", () => ({ logger: { error: mocks.error } }));
-vi.mock("../src/minio", () => ({ ...mocks, putObject: vi.fn(), copyObject: vi.fn(), headObject: vi.fn() }));
+vi.mock("../src/storage", () => ({ ...mocks, putObject: vi.fn(), copyObject: vi.fn(), headObject: vi.fn() }));
 import deploymentApp from "../src/routes/deployments";
 import publicationApp from "../src/routes/publication-api";
 import { proxyAuthSignOut, proxyConvexRequest } from "../src/auth-proxy";

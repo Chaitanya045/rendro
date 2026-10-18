@@ -3,7 +3,7 @@ import { assetHeaders } from "@/routes/asset-headers";
 import { decodeStoragePath, legacyStoragePrefix } from "@/storage-boundary";
 import { viewerScript } from "@/viewer/markup";
 import { Hono } from "hono";
-import { getObjectStream } from "@/minio";
+import { getObjectStream } from "@/storage";
 import { isDeleted } from "@/soft-delete";
 import {
   getPublication,

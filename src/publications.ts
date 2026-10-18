@@ -6,7 +6,7 @@ import {
   headObject,
   listAllKeys,
   putObject,
-} from "@/minio";
+} from "@/storage";
 import { filterDeleted } from "@/soft-delete";
 import { isValidSlug } from "@/orgs";
 

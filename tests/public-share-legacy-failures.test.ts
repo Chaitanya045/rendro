@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { logger } from "@/logger";
 import worker from "@/worker";
-import * as minio from "@/minio";
+import * as blobs from "@/storage";
 import * as deletion from "@/soft-delete";
 import { createLegacyViewerTicket } from "@/viewer-ticket";
 import { mockSecurityBackend } from "./fixtures/security-headers";
@@ -61,19 +61,19 @@ for (const viewer of viewers) describe(`${viewer.name} viewer backend failures`,
       const base = await viewer.base();
       vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(new Response("private-backend-detail", { status }))));
       await errorResponse(await request(base + suffix), viewer.name === "legacy" ? 503 : 404, asset);
-      expect(minio.getObjectStream).not.toHaveBeenCalled();
+      expect(blobs.getObjectStream).not.toHaveBeenCalled();
     });
     it.each([null, false, 0, "", "invalid", [], {}, { deployment: {} }])("treats malformed success %j as retryable", async data => {
       const base = await viewer.base();
       vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(Response.json(data))));
       await errorResponse(await request(base + suffix), 503, asset);
-      expect(minio.getObjectStream).not.toHaveBeenCalled();
+      expect(blobs.getObjectStream).not.toHaveBeenCalled();
     });
     it.each([408, 429, 500, 502, 503, 504])("returns retryable 503 for upstream %s", async status => {
       const base = await viewer.base();
       vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(new Response("private-backend-detail", { status, headers: { "Retry-After": "7" } }))));
       await errorResponse(await request(base + suffix), status === 429 && viewer.name !== "legacy" ? 429 : 503, asset, "7");
-      expect(minio.getObjectStream).not.toHaveBeenCalled();
+      expect(blobs.getObjectStream).not.toHaveBeenCalled();
     });
     it("returns retryable 503 on transport failure", async () => {
       const base = await viewer.base();
@@ -96,13 +96,13 @@ for (const viewer of viewers) describe(`${viewer.name} viewer backend failures`,
       expect(vi.getTimerCount()).toBe(0);
     });
     it("keeps missing storage objects at 404", async () => {
-      vi.mocked(minio.getObjectStream).mockResolvedValue(null);
+      vi.mocked(blobs.getObjectStream).mockResolvedValue(null);
       await errorResponse(await request(await viewer.base() + suffix), 404, asset);
     });
     it.each(["5xx", "timeout"])("returns 503 for storage %s", async kind => {
       const error = kind === "timeout" ? new DOMException("private-backend-detail", "TimeoutError")
-        : Object.assign(new Error("private-backend-detail"), { $metadata: { httpStatusCode: 503 } });
-      vi.mocked(minio.getObjectStream).mockRejectedValue(error);
+        : new Error("get: private-backend-detail (10043)");
+      vi.mocked(blobs.getObjectStream).mockRejectedValue(error);
       await errorResponse(await request(await viewer.base() + suffix), 503, asset);
     });
     it("leaves successful content and caching unchanged", async () => {
@@ -139,7 +139,7 @@ it.each(["/p/product", "/p/product/tree", "/s/share-token"])("treats null succes
   expect(response.status).toBe(503);
   expect(response.headers.get("Retry-After")).toBe("1");
   expect(response.headers.get("Cache-Control")).toBe("private, no-store");
-  expect(minio.getObjectStream).not.toHaveBeenCalled();
+  expect(blobs.getObjectStream).not.toHaveBeenCalled();
 });
 it.each([404, 503])("returns uncached public tree errors (%s)", async status => {
   vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(new Response(null, { status }))));
@@ -168,7 +168,7 @@ it("ignores an ambient session when revalidating a legacy ticket", async () => {
 it.each(["index.html", "assets/site.css"])("keeps deleted legacy %s at 404", async path => {
   vi.mocked(deletion.isDeleted).mockResolvedValue(true);
   await errorResponse(await request(await viewers[2].base() + "/files/" + path), 404, path.endsWith(".css"));
-  expect(minio.getObjectStream).not.toHaveBeenCalled();
+  expect(blobs.getObjectStream).not.toHaveBeenCalled();
 });
 it.each([500, 429])("fails closed on legacy deletion backend %s", async status => {
   vi.mocked(deletion.isDeleted).mockRestore();
@@ -176,7 +176,7 @@ it.each([500, 429])("fails closed on legacy deletion backend %s", async status =
   vi.mocked(fetch).mockImplementation((input, init) => (input instanceof Request ? input.url : input.toString()).endsWith("/api/query")
     ? Promise.resolve(new Response(null, { status })) : original(input, init));
   await errorResponse(await request(await viewers[2].base() + "/files/index.html"), 503, false);
-  expect(minio.getObjectStream).not.toHaveBeenCalled();
+  expect(blobs.getObjectStream).not.toHaveBeenCalled();
 });
 it.each(["/p/product", "/s/share-token"])("keeps missing %s shells uncached", async path => {
   vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(new Response(null, { status: 404 }))));
@@ -187,10 +187,10 @@ it("preserves an authoritative denial when discarding its body fails", async () 
   vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(new Response(new ReadableStream({ cancel }), { status: 403 }))));
   await errorResponse(await request("/s/share-token"), 404, false);
   expect(cancel).toHaveBeenCalledOnce();
-  expect(minio.getObjectStream).not.toHaveBeenCalled();
+  expect(blobs.getObjectStream).not.toHaveBeenCalled();
 });
 it.each(["/p/product", "/p/product/files/index.html", "/p/product/files/assets/site.css"])("returns 503 for failed manifest reads at %s", async path => {
-  vi.mocked(minio.getObjectText).mockRejectedValue(Object.assign(new Error("private-backend-detail"), { $metadata: { httpStatusCode: 503 } }));
+  vi.mocked(blobs.getObjectText).mockRejectedValue(new Error("get: private-backend-detail (10043)"));
   await errorResponse(await request(path), 503, path.endsWith(".css"));
 });
 it.each([false, true])("honors a real legacy deletion result (%s)", async deleted => {

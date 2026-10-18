@@ -15,7 +15,7 @@ import { httpOrganizationAccess } from "../convex/authorization";
 import { sessionCache, sessionMiddleware } from "@/middleware/session";
 import { registerAuthClientIp } from "@/auth-client-ip";
 import { mountSessionRoutes } from "@/app-routes";
-import * as minio from "@/minio";
+import * as blobs from "@/storage";
 
 vi.mock("@/logger", () => ({ logger: { debug() {}, warn() {}, error() {} } }));
 // Vitest timeouts do not cancel async bodies. Stop the round loop and drain
@@ -71,8 +71,8 @@ async function fixture() {
   });
   await commitWithProof(backend, { organizationId, projectId, deploymentId: deployment.deploymentId, actorId: readers[0].user.id });
   const pages = ["index.html", "guide/next.html", "space name.html", "日本語.html", "100%.html", "hash#name.html", "no-head.html", "base.html"];
-  vi.spyOn(minio, "getObjectText").mockResolvedValue(JSON.stringify({ version: 1, files: pages.map(path => ({ path, contentType: "text/html", sha256: "b".repeat(64), size: 100 })) }));
-  vi.spyOn(minio, "getObjectStream").mockImplementation(() => Promise.resolve(new Response("<html><head></head><body><h1>Docs</h1></body></html>").body));
+  vi.spyOn(blobs, "getObjectText").mockResolvedValue(JSON.stringify({ version: 1, files: pages.map(path => ({ path, contentType: "text/html", sha256: "b".repeat(64), size: 100 })) }));
+  vi.spyOn(blobs, "getObjectStream").mockImplementation(() => Promise.resolve(new Response("<html><head></head><body><h1>Docs</h1></body></html>").body));
   const counts = { session: 0, authorization: 0, errors: [] as number[] };
   vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
     const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url);

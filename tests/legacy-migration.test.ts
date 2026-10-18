@@ -10,7 +10,7 @@ const disk = vi.hoisted(() => ({
 }));
 const storage = vi.hoisted(() => ({ getObjectText: vi.fn(), putObject: vi.fn(), listAllKeys: vi.fn(), headObject: vi.fn(), copyObject: vi.fn(), getObjectStream: vi.fn() }));
 vi.mock("node:fs/promises", () => disk);
-vi.mock("../src/minio", () => storage);
+vi.mock("../src/storage", () => storage);
 import deploymentRoutes from "../src/routes/deployments";
 import migrationRoutes from "../src/routes/migration";
 import publicationRoutes from "../src/routes/publication-api";
@@ -491,6 +491,7 @@ describe("legacy migration with mocked source storage and backend HTTP", () => {
   });
 
   it("prints sanitized source and destination details before the first apply and rollback writes", async () => {
+    vi.stubEnv("LEGACY_SOURCE_S3_ENDPOINT", "http://localhost:9000");
     const assertSummaryBeforeWrites = () => {
       const writes = vi.mocked(fetch).mock.calls.flatMap(([url, init], index) =>
         (url instanceof Request ? url.url : String(url)).includes("/api/rendro/") && ["POST", "PUT"].includes(init?.method ?? "GET")
@@ -521,7 +522,7 @@ describe("legacy migration with mocked source storage and backend HTTP", () => {
 
   it("never prints URL credentials, paths, query secrets, or fragments in the environment summary", async () => {
     vi.stubEnv("RENDRO_ENDPOINT", "https://operator:worker-password@worker.test/secret-path?token=worker-token#worker-fragment");
-    vi.stubEnv("MINIO_ENDPOINT", "https://operator:storage-password@storage.test/secret-path?token=storage-token#storage-fragment");
+    vi.stubEnv("LEGACY_SOURCE_S3_ENDPOINT", "https://operator:storage-password@storage.test/secret-path?token=storage-token#storage-fragment");
     vi.stubEnv("CONVEX_URL", "https://operator:convex-password@convex.test/secret-path?token=convex-token#convex-fragment");
     vi.resetModules();
     const script = await import("../scripts/migrate-legacy-tenancy");
@@ -601,10 +602,10 @@ it("refuses rollback without matching target credentials", async () => {
   await expect(main(["--map", "targets.json", ...confirmedApply, "--rollback", "record.json"])).rejects.toThrow("Missing target credentials");
 });
 it("prints sanitized fallback and invalid source origins", async () => {
-  vi.stubEnv("MINIO_ENDPOINT", undefined);
+  vi.stubEnv("LEGACY_SOURCE_S3_ENDPOINT", undefined);
   vi.stubEnv("CONVEX_URL", "not a URL");
   vi.stubEnv("RENDRO_ENDPOINT", undefined);
-  vi.stubEnv("MINIO_ACCESS_KEY", undefined);
+  vi.stubEnv("LEGACY_SOURCE_S3_ACCESS_KEY", undefined);
   vi.resetModules();
   await (await import("../scripts/migrate-legacy-tenancy")).main(["--map", "targets.json"]);
   expect(console.log).toHaveBeenCalledWith(expect.stringContaining("AWS SDK default"));

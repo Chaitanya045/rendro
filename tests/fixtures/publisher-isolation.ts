@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { vi } from "vitest";
-import * as minio from "@/minio";
+import * as blobs from "@/storage";
 import { createShareToken } from "@/share-links";
 import { createLegacyViewerTicket, createViewerTicket } from "@/viewer-ticket";
 import { docsBase, mockSecurityBackend } from "./security-headers";
@@ -31,11 +31,11 @@ export async function publisherIsolationFixture(assetPaths?: string[]) {
   mockSecurityBackend();
   const files = mediaCases.map((entry, i) => ({ ...entry, legacyPath: `case-${i}.html` }));
   const find = (key: string) => files.find(file => key.endsWith(`/${file.path}`) || key === `example/${file.legacyPath}`);
-  vi.mocked(minio.getObjectText).mockResolvedValue(JSON.stringify({ version: 1, files: files.map(file => ({
+  vi.mocked(blobs.getObjectText).mockResolvedValue(JSON.stringify({ version: 1, files: files.map(file => ({
     path: file.path, contentType: file.type, sha256: "a", size: Buffer.byteLength(file.body),
   })) }));
-  vi.mocked(minio.headObject).mockImplementation(key => Promise.resolve(find(key) ? { contentType: find(key)!.type } : null));
-  vi.mocked(minio.getObjectStream).mockImplementation(key => Promise.resolve(find(key) ? new Response(find(key)!.body).body : null));
+  vi.mocked(blobs.headObject).mockImplementation(key => Promise.resolve(find(key) ? { contentType: find(key)!.type } : null));
+  vi.mocked(blobs.getObjectStream).mockImplementation(key => Promise.resolve(find(key) ? new Response(find(key)!.body).body : null));
   const backend = vi.mocked(fetch).getMockImplementation()!;
   vi.mocked(fetch).mockImplementation((input, init) => {
     const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url);

@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import publicRoutes from "../src/routes/public-v2";
 import shareRoutes from "../src/routes/share-v2";
-import * as storage from "../src/minio";
+import * as storage from "../src/storage";
 import { deploymentMetadataCache } from "../src/immutable-cache";
 const publication = { publication: { slug: "docs", entryFile: "index.html", title: "Docs", pathPrefix: "" }, deployment: { manifestKey: "root/manifest.json" } };
 const share = { grant: { documentPath: "index.html", expiresAt: Date.now() + 60_000 }, project: { name: "Docs" }, deployment: publication.deployment };

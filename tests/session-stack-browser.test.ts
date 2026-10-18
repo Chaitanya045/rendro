@@ -5,6 +5,10 @@ import rateLimiterTest from "./convex-rate-limiter";
 import { spawn, type ChildProcess } from "node:child_process";
 import { createServer, get, request as httpRequest } from "node:http";
 import { once } from "node:events";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { r2Simulation } from "./helpers/r2-simulation";
 import { getRequestListener } from "@hono/node-server";
 import { convexTest } from "convex-test";
 import { hashPassword } from "better-auth/crypto";
@@ -17,7 +21,7 @@ import { subprocessArgs, subprocessEnv } from "./helpers/subprocess-coverage";
 
 // Run the actual local server entry point, including the auth proxy,
 // session middleware and all routes. Only remote services are local substitutes:
-// Convex HTTP actions/component adapter run in convex-test; S3 serves two objects.
+// Convex HTTP actions/component adapter run in convex-test; storage is a Miniflare R2 directory seeded with two objects.
 const harness = createBrowserHarness();
 let server: ChildProcess | undefined;
 let organizationId: string, projectId: string;
@@ -25,7 +29,7 @@ const password = "local-stack-fixture-password-only";
 const backend = convexTest(schema, import.meta.glob("../convex/**/*.ts"));
 rateLimiterTest.register(backend);
 backend.registerComponent("betterAuth", authSchema, import.meta.glob("../convex/betterAuth/**/*.ts"));
-const objects = new Map<string, string>();
+let state: string;
 
 beforeAll(async () => {
   const assets = new Map<string, string>();
@@ -55,8 +59,7 @@ beforeAll(async () => {
         ...(request.method === "GET" || request.method === "HEAD" ? {} : { body: await request.text() }),
       });
     }
-    const body = objects.get(decodeURIComponent(url.pathname));
-    return body === undefined ? new Response(null, { status: 404 }) : new Response(body);
+    return new Response(null, { status: 404 });
   });
   await harness.start((request, response) => {
     if (request.url?.startsWith("/mock-")) {
@@ -92,12 +95,16 @@ beforeAll(async () => {
   });
   await commitWithProof(backend, { organizationId, projectId, deploymentId: deployment.deploymentId, actorId: user._id });
   const document = "<!doctype html><html><head><title>Stack guide</title></head><body><h1>Local stack document loaded</h1></body></html>";
-  objects.set(`/mock-storage/docs/${deployment.manifestKey}`, JSON.stringify({ version: 1, files: [{ path: "index.html", contentType: "text/html", sha256: "b".repeat(64), size: document.length }] }));
-  objects.set(`/mock-storage/docs/${deployment.objectRoot}/files/index.html`, document);
+  state = await mkdtemp(join(tmpdir(), "rendro-stack-r2-"));
+  const seeding = await r2Simulation(state);
+  try {
+    await seeding.bucket.put(deployment.manifestKey, JSON.stringify({ version: 1, files: [{ path: "index.html", contentType: "text/html", sha256: "b".repeat(64), size: document.length }] }));
+    await seeding.bucket.put(`${deployment.objectRoot}/files/index.html`, document);
+  } finally { await seeding.dispose(); }
   server = spawn(process.execPath, [...subprocessArgs(), "--import", "tsx", "src/index.ts"], {
     cwd: process.cwd(), stdio: "ignore", env: subprocessEnv({
       ...process.env, PORT: String(port), LOG_LEVEL: "silent", CONVEX_SITE_URL: `${harness.origin}/mock-convex`,
-      MINIO_ENDPOINT: `${harness.origin}/mock-storage`, MINIO_BUCKET: "docs",
+      RENDRO_LOCAL_STATE_DIR: state,
     }),
   });
   await vi.waitFor(async () => {
@@ -110,6 +117,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   vi.unstubAllEnvs();
+  await rm(state, { recursive: true, force: true });
   if (server && server.exitCode === null) {
     const stopped = once(server, "exit");
     server.kill("SIGTERM");

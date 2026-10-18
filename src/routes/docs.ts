@@ -2,7 +2,7 @@ import { viewerErrorResponse } from "@/routes/viewer-unavailable";
 import { assetError, assetHeaders, isHtmlAsset } from "@/routes/asset-headers";
 import { decodeStoragePath, isLegacyStorageKey, isLegacyStoragePrefix, legacyStoragePrefix } from "@/storage-boundary";
 import { Hono } from "hono";
-import { getObjectStream, headObject, listImmediate, buildTree, type ObjectRange } from "@/minio";
+import { getObjectStream, headObject, listImmediate, buildTree, type ObjectRange } from "@/storage";
 import { legacyMember, legacyRequestMember, legacyUnavailable, retiredLegacy } from "@/legacy-access";
 import { markDeleted, isDeleted } from "@/soft-delete";
 import type { User } from "better-auth/types";

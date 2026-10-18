@@ -13,7 +13,7 @@ import {
   headObject,
   listAllKeys,
   putObject,
-} from "@/minio";
+} from "@/storage";
 import { MAX_REUSED_FILES_PER_REQUEST, MAX_DEPLOYMENT_FILES, MAX_COMMIT_LIST_PAGES } from "../../shared/deployment-limits";
 import { decodeStoragePath } from "../../shared/storage-path";
 import { cleanDeploymentPath } from "../../shared/v2-paths";

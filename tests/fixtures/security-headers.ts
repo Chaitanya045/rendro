@@ -1,7 +1,7 @@
 import { sessionCache } from "@/middleware/session";
 import { vi } from "vitest";
 import * as publications from "@/publications";
-import * as minio from "@/minio";
+import * as blobs from "@/storage";
 import { managementAccessFixture } from "./management-access";
 
 export const docsBase = "/organizations/org-a/projects/project-a/docs";
@@ -24,9 +24,9 @@ export function mockSecurityBackend() {
     { path: "index.html", sha256: "a", size: 100, contentType: "text/html" },
     { path: "assets/site.css", sha256: "b", size: 20, contentType: "text/css" },
   ];
-  vi.spyOn(minio, "headObject").mockImplementation(key => Promise.resolve({ contentType: key.endsWith(".css") ? "text/css" : "text/html" }));
-  vi.spyOn(minio, "getObjectText").mockResolvedValue(JSON.stringify({ version: 1, files }));
-  vi.spyOn(minio, "getObjectStream").mockImplementation(key => Promise.resolve(new Response(key.endsWith(".css") ? "body{color:rgb(1,2,3)}" : publisherHtml).body));
+  vi.spyOn(blobs, "headObject").mockImplementation(key => Promise.resolve({ contentType: key.endsWith(".css") ? "text/css" : "text/html" }));
+  vi.spyOn(blobs, "getObjectText").mockResolvedValue(JSON.stringify({ version: 1, files }));
+  vi.spyOn(blobs, "getObjectStream").mockImplementation(key => Promise.resolve(new Response(key.endsWith(".css") ? "body{color:rgb(1,2,3)}" : publisherHtml).body));
   vi.stubGlobal("fetch", vi.fn((input: string | URL | Request, init?: RequestInit) => {
     const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url);
     if (url.pathname === "/api/rendro/admission/public") return Promise.resolve(Response.json({ admitted: true }));

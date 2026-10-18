@@ -7,7 +7,7 @@ import rateLimiterTest from "./convex-rate-limiter";
 import { registerAuth } from "./helpers/auth-identity";
 import { signStorageValidation, STORAGE_ATTESTATION_HEADER, type StorageValidation } from "../shared/storage-attestation";
 import worker from "../src/worker";
-import * as storage from "../src/minio";
+import * as storage from "../src/storage";
 
 vi.mock("../src/logger", () => ({ logger: { error: vi.fn(), warn: vi.fn(), info: vi.fn(), debug: vi.fn() } }));
 

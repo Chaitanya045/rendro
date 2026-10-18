@@ -8,7 +8,7 @@ import { COMMENTOR_VERSION } from "@/viewer/asset-versions";
 import { escapeHtml } from "@/routes/html";
 import type { User } from "better-auth/types";
 import { CONVEX_SITE_URL, CONVEX_URL } from "@/config";
-import { getObjectStream, type ObjectRange } from "@/minio";
+import { getObjectStream, type ObjectRange } from "@/storage";
 import { renderScopedDocumentShell } from "@/routes/app";
 import { unavailableResponse, viewerErrorResponse, type ViewerUnavailable } from "@/routes/viewer-unavailable";
 import { renderNotFoundPage } from "@/routes/not-found";

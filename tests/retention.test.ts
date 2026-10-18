@@ -1,278 +1,126 @@
-import rateLimiterTest from "./convex-rate-limiter";
-import { publishWithProof, shareWithProof } from "./helpers/storage-proof";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getDocumentSize } from "convex/values";
-import { convexTest } from "convex-test";
-import { internal } from "../convex/_generated/api";
-import schema from "../convex/schema";
-import type { Doc, Id } from "../convex/_generated/dataModel";
-import { PURGE_CLAIM_MS, STAGING_DRAIN_MS, STAGING_LEASE_MS } from "../convex/retentionPolicy";
+import { memoryBucket, r2Error } from "./helpers/memory-bucket";
 
-const modules = import.meta.glob("../convex/**/*.ts");
-function expectDocumentFits(document: Doc<"deployments"> | Doc<"deploymentPurges">) {
-  expect(getDocumentSize(document)).toBeLessThanOrEqual(1024 * 1024);
-  // Convex serialized document accounting includes system fields and UTF-8.
+const log = vi.hoisted(() => ({ info: vi.fn(), error: vi.fn() }));
+vi.mock("../src/logger", () => ({ logger: log }));
+
+const SECRET = "r".repeat(32);
+const claim = { _id: "deployment", organizationId: "org", projectId: "project", purgeToken: "token" };
+const prefix = "tenants/org/projects/project/deployments/deployment/";
+const fetchMock = vi.fn<typeof fetch>();
+
+async function load(env: Record<string, string | undefined> = { CONVEX_SITE_URL: "https://retention.invalid", RETENTION_SECRET: SECRET }) {
+  vi.resetModules();
+  for (const [key, value] of Object.entries(env)) vi.stubEnv(key, value);
+  const storage = await import("../src/storage");
+  const bucket = memoryBucket();
+  storage.bindStorage(bucket);
+  const { purgeExpiredDeployments } = await import("../src/retention");
+  return { purgeExpiredDeployments, bucket };
 }
+const seed = (bucket: ReturnType<typeof memoryBucket>, ...keys: string[]) => { for (const key of keys) bucket.objects.set(key, { bytes: new Uint8Array(1), uploaded: new Date(0) }); };
+const candidates = (deployments = [claim], cycleComplete = true) => Response.json({ deployments, cycleComplete });
+const finalizedBody = (call: number) => JSON.parse(fetchMock.mock.calls[call]![1]?.body as string) as Record<string, unknown>;
 
-const now = 100 * 86_400_000;
-const provenance = { source: { kind: "local" as const }, execution: { kind: "local" as const }, cliVersion: "test", manifestSha256: "a".repeat(64) };
-function fixture() {
-  const backend = convexTest({ schema, modules, transactionLimits: true });
-  rateLimiterTest.register(backend);
-  const project = () => backend.run(ctx => ctx.db.insert("projects", { organizationId: "org", name: "Docs", slug: "docs", createdBy: "user", createdAt: 1 }));
-  const seed = (projectId: Id<"projects">, fields: Partial<Doc<"deployments">> = {}) => backend.run(ctx => ctx.db.insert("deployments", {
-    organizationId: "org", projectId, status: "superseded", createdAt: 1, createdBy: "user", manifestKey: "pending", manifestSha256: "a".repeat(64), fileCount: 1, byteCount: 1, provenance, ...fields,
-  }));
-  const pin = (projectId: Id<"projects">, deploymentId: Id<"deployments">, slug = "pin") => publishWithProof(backend, {
-    organizationId: "org", projectId, trackingMode: "pinned", pinnedDeploymentId: deploymentId, pathPrefix: "", entryFile: "index.html", slug, actorId: "user",
-  });
-  const page = (token = "claim") => backend.mutation(internal.retention.candidatesInternal, { token });
-  const cycle = async (token = "claim") => {
-    const claims = [];
-    for (let i = 0; i < 1_000; i++) {
-      const result = await page(token);
-      claims.push(...result.deployments);
-      if (result.cycleComplete) return claims;
-    }
-    throw new Error("Scan did not finish");
-  };
-  return { backend, project, seed, pin, page, cycle };
-}
+beforeEach(() => { vi.clearAllMocks(); vi.stubGlobal("fetch", fetchMock); fetchMock.mockReset(); });
+afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
-beforeEach(() => vi.spyOn(Date, "now").mockReturnValue(now));
-afterEach(() => vi.restoreAllMocks());
-
-describe("durable retention", () => {
-  it("advances across pinned pages and excludes active/purged rows from the scan", async () => {
-    const f = fixture(), projectId = await f.project();
-    // Cross several three-row pages and leave a partial pinned page before
-    // the eligible row; the cursor invariant does not require thousands of rows.
-    await f.backend.run(async ctx => {
-      for (let i = 0; i < 10; i++) {
-        const row = { organizationId: "org", projectId, createdAt: i, createdBy: "user", manifestKey: "pending", manifestSha256: "a".repeat(64), fileCount: 1, byteCount: 1, provenance };
-        const id = await ctx.db.insert("deployments", { ...row, status: "superseded" });
-        await ctx.db.insert("publications", { organizationId: "org", projectId, pinnedDeploymentId: id, trackingMode: "pinned", slug: `pin-${i}`, pathPrefix: "", entryFile: "index.html", createdAt: 1, updatedAt: 1, createdBy: "user" });
-        if (i === 0) {
-          await ctx.db.insert("deployments", { ...row, status: "failed", purgedAt: 0 });
-          await ctx.db.insert("deployments", { ...row, status: "active" });
-        }
-      }
-    });
-    const eligible = await f.seed(projectId, { createdAt: 11 });
-    expect((await f.page()).scanned).toBe(0); // failed: purged rows are excluded by the index
-    for (let i = 0; i < 3; i++) {
-      const result = await f.page();
-      expect(result.scanned).toBe(3);
-      expect(result.deployments).toEqual([]);
-    }
-    // Simulated process restart: no local cursor is supplied to the next run.
-    const claims = await f.cycle();
-    expect(claims.map(c => c._id)).toEqual([eligible]);
-    expect(await f.backend.run(ctx => ctx.db.query("retentionProgress").collect())).toHaveLength(1);
+describe("scheduled deployment purge", () => {
+  it("deletes only the claimed deployment's objects across pages, then confirms with the claim token", async () => {
+    const { purgeExpiredDeployments, bucket } = await load();
+    seed(bucket, ...Array.from({ length: 1500 }, (_, i) => `${prefix}files/${i}`), `${prefix.replace("deployment/", "deployment-2/")}keep`, "tenants/org/projects/project/deployments/other/x");
+    fetchMock.mockResolvedValueOnce(candidates([], false)).mockResolvedValueOnce(candidates([claim], false))
+      .mockResolvedValueOnce(Response.json({ purged: true })).mockResolvedValueOnce(candidates([], true));
+    const list = vi.spyOn(bucket, "list");
+    await expect(purgeExpiredDeployments()).resolves.toEqual({ purged: 1, failures: 0 });
+    expect([...bucket.objects.keys()].sort()).toEqual([`${prefix.replace("deployment/", "deployment-2/")}keep`, "tenants/org/projects/project/deployments/other/x"]);
+    expect(list.mock.calls.map(call => call[0])).toEqual([{ prefix, limit: 1000 }, { prefix, limit: 1000 }, { prefix, limit: 1000 }]);
+    expect(finalizedBody(2)).toEqual({ deploymentId: "deployment", purgeToken: "token", objectCount: 1500 });
+    expect(fetchMock.mock.calls[1]![0]).toBe("https://retention.invalid/api/rendro/retention/candidates");
+    expect(fetchMock.mock.calls[1]![1]).toMatchObject({ method: "GET", headers: { Authorization: `Bearer ${SECRET}` } });
+    expect(fetchMock.mock.calls[2]![0]).toBe("https://retention.invalid/api/rendro/retention/purged");
+    expect(log.info).toHaveBeenCalledWith({ deploymentId: "deployment", objectCount: 1500 }, "Retention purged deployment");
   });
 
-  it("advances through fifty legacy 400 KiB rows and a near-limit row with transaction limits enabled", async () => {
-    const f = fixture(), projectId = await f.project();
-    const ids = [];
-    for (let i = 0; i < 51; i++) {
-      // Current start rejects oversized provenance. Seed the pre-cap persisted
-      // shape directly, then exercise the real fail/claim/finalize mutations.
-      const id = await f.seed(projectId, {
-        status: "staging",
-        provenance: { ...provenance, execution: { kind: "ci", workflow: "x".repeat(i === 50 ? 1_000_000 : 400 * 1024) } },
-      });
-      await f.backend.mutation(internal.deployments.failInternal, { organizationId: "org", projectId, deploymentId: id, reason: "interrupted" });
-      if (i === 50) await f.backend.run(async ctx => {
-        const row = (await ctx.db.get(id))!;
-        // Leave no room for claim fields. Byte accounting includes Convex's
-        // system fields; retention must not rewrite this document.
-        await ctx.db.patch(id, { provenance: { ...row.provenance, execution: { kind: "ci", workflow: "x".repeat(1_000_000 + 1024 * 1024 - getDocumentSize(row)) } } });
-        expect(getDocumentSize((await ctx.db.get(id))!)).toBe(1024 * 1024);
-      });
-      ids.push(id);
-    }
-    for (const id of ids) {
-      const result = await f.page();
-      expect(result.scanned).toBe(1);
-      expect(result.deployments.map(row => row._id)).toEqual([id]);
-      expectDocumentFits((await f.backend.run(ctx => ctx.db.get(id)))!);
-      expect(await f.backend.mutation(internal.retention.markPurgedInternal, { deploymentId: id, purgeToken: "claim", objectCount: 0 })).toBe(true);
-    }
-    expect(await f.cycle()).toEqual([]);
-  }, 120_000);
-
-  it("drains multiple pages and recovers lost responses and partial deletion with a new token", async () => {
-    const f = fixture(), projectId = await f.project();
-    const ids = [];
-    for (let i = 0; i < 101; i++) ids.push(await f.seed(projectId, { status: "failed" }));
-    expect((await f.page("lost-response")).deployments).toHaveLength(3);
-    expect((await f.cycle()).map(c => c._id)).toHaveLength(98);
-    expect(await f.cycle()).toEqual([]); // unexpired workers own every claim
-    vi.mocked(Date.now).mockReturnValue(now + PURGE_CLAIM_MS);
-    const retry = await f.cycle("retry");
-    expect(retry.map(c => c._id).sort()).toEqual(ids.sort());
-    const deploymentId = ids[0];
-    expect(await f.backend.mutation(internal.retention.markPurgedInternal, { deploymentId, purgeToken: "lost-response", objectCount: 1 })).toBe(false);
-    const finish = () => f.backend.mutation(internal.retention.markPurgedInternal, { deploymentId, purgeToken: "retry", objectCount: 0 });
-    expect(await finish()).toBe(true);
-    expect(await finish()).toBe(true);
-    expect(await f.backend.run(ctx => ctx.db.query("auditEvents").collect())).toHaveLength(1);
-    expect(await f.backend.run(ctx => ctx.db.query("deploymentPurges").withIndex("by_deployment", q => q.eq("deploymentId", deploymentId)).unique())).toMatchObject({ purgedAt: now + PURGE_CLAIM_MS });
+  it("finalizes an already-empty prefix with a zero count", async () => {
+    const { purgeExpiredDeployments } = await load();
+    fetchMock.mockResolvedValueOnce(candidates()).mockResolvedValueOnce(Response.json({ purged: true }));
+    await purgeExpiredDeployments();
+    expect(finalizedBody(1)).toMatchObject({ objectCount: 0 });
   });
 
-  it("gives exactly one winner for each controlled pin/claim ordering and protects pinned bytes", async () => {
-    for (const pinFirst of [true, false]) {
-      const f = fixture(), projectId = await f.project(), deploymentId = await f.seed(projectId);
-      const bytes = new Set([deploymentId]);
-      if (pinFirst) await f.pin(projectId, deploymentId);
-      const claims = await f.cycle();
-      if (!pinFirst) await expect(f.pin(projectId, deploymentId)).rejects.toThrow("Publication deployment not found");
-      for (const claim of claims) {
-        bytes.delete(claim._id);
-        await f.backend.mutation(internal.retention.markPurgedInternal, { deploymentId: claim._id, purgeToken: claim.purgeToken, objectCount: 1 });
-      }
-      expect(claims.length).toBe(pinFirst ? 0 : 1);
-      expect(bytes.has(deploymentId)).toBe(pinFirst);
-      if (!pinFirst) await expect(f.pin(projectId, deploymentId)).rejects.toThrow("Publication deployment not found");
-    }
+  it("does not finalize a failed deletion, continues the other claims and reports the retry", async () => {
+    const { purgeExpiredDeployments, bucket } = await load();
+    const second = { ...claim, _id: "second" };
+    seed(bucket, `${prefix}a`);
+    vi.spyOn(bucket, "delete").mockRejectedValueOnce(r2Error(10003, "delete"));
+    fetchMock.mockResolvedValueOnce(candidates([claim, second])).mockResolvedValueOnce(Response.json({ purged: true }));
+    await expect(purgeExpiredDeployments()).rejects.toThrow("remain claimed for retry");
+    expect(fetchMock.mock.calls).toHaveLength(2);
+    expect(finalizedBody(1).deploymentId).toBe("second");
+    expect(bucket.objects.size).toBe(1);
+    // The backend renews the claim; the retry deletes what is left.
+    fetchMock.mockResolvedValueOnce(candidates([{ ...claim, purgeToken: "retry" }])).mockResolvedValueOnce(Response.json({ purged: true }));
+    await purgeExpiredDeployments();
+    expect(bucket.objects.size).toBe(0);
+    expect(finalizedBody(3)).toMatchObject({ purgeToken: "retry", objectCount: 1 });
   });
 
-  it("rejects legacy purged pins, ignores track-active pin input, and denies purge without a claim", async () => {
-    const f = fixture(), projectId = await f.project(), deploymentId = await f.seed(projectId, { purgedAt: 0 });
-    await expect(f.pin(projectId, deploymentId)).rejects.toThrow("Publication deployment not found");
-    const active = await f.seed(projectId, { status: "active" });
-    await f.backend.run(ctx => ctx.db.patch(projectId, { activeDeploymentId: active }));
-    const publication = await publishWithProof(f.backend, { organizationId: "org", projectId, trackingMode: "track_active", pinnedDeploymentId: deploymentId, pathPrefix: "", entryFile: "index.html", slug: "tracked", actorId: "user" });
-    expect(publication?.pinnedDeploymentId).toBeUndefined();
-    expect(await f.backend.mutation(internal.retention.markPurgedInternal, { deploymentId, purgeToken: "x", objectCount: 0 })).toBe(false);
-    await f.backend.run(ctx => ctx.db.delete(deploymentId));
-    expect(await f.backend.mutation(internal.retention.markPurgedInternal, { deploymentId, purgeToken: "x", objectCount: 0 })).toBe(false);
+  it.each([["http", "private details"], ["fenced", "private details"], ["truncated", "private details"]])("leaves a retryable claim after a %s failure, without logging details", async failure => {
+    const { purgeExpiredDeployments, bucket } = await load();
+    fetchMock.mockResolvedValueOnce(candidates());
+    if (failure === "truncated") vi.spyOn(bucket, "list").mockResolvedValueOnce({ objects: [], delimitedPrefixes: [], truncated: true, cursor: "next" });
+    else fetchMock.mockResolvedValueOnce(failure === "http" ? new Response("private details", { status: 500 }) : Response.json({ purged: false }));
+    await expect(purgeExpiredDeployments()).rejects.toThrow("remain claimed for retry");
+    expect(JSON.stringify(log.error.mock.calls)).not.toContain("private details");
+    expect(log.error).toHaveBeenCalledWith({ category: "RetentionRetry", deploymentId: "deployment", errorType: "Error" }, "Retention retry required");
   });
 
-  it("protects live shares and active pointers, but not expired or revoked shares", async () => {
-    const f = fixture(), projectId = await f.project();
-    const live = await f.seed(projectId, { status: "active" });
-    await f.backend.run(ctx => ctx.db.patch(projectId, { activeDeploymentId: live }));
-    await shareWithProof(f.backend, { organizationId: "org", projectId, documentPath: "index.html", tokenHash: "live", expiresAt: now + 100, actorId: "user" });
-    const expired = await f.seed(projectId), revoked = await f.seed(projectId), pointer = await f.seed(projectId);
-    await f.backend.run(async ctx => {
-      await ctx.db.patch(live, { status: "superseded" });
-      await ctx.db.patch(projectId, { activeDeploymentId: pointer });
-      for (const [deploymentId, expiresAt, revokedAt] of [[expired, now, undefined], [revoked, now + 100, 1]] as const) {
-        await ctx.db.insert("shareGrants", { organizationId: "org", projectId, deploymentId, expiresAt, revokedAt, documentPath: "index.html", tokenHash: deploymentId, createdBy: "user", createdAt: 1 });
-      }
-    });
-    expect((await f.cycle()).map(c => c._id).sort()).toEqual([expired, revoked].sort());
-    vi.mocked(Date.now).mockReturnValue(now + 100);
-    expect((await f.cycle()).map(c => c._id)).toEqual([live]);
+  it("describes a thrown non-error by type only", async () => {
+    const { purgeExpiredDeployments } = await load();
+    fetchMock.mockResolvedValueOnce(candidates()).mockRejectedValueOnce("secret-in-a-string");
+    await expect(purgeExpiredDeployments()).rejects.toThrow("remain claimed for retry");
+    expect(JSON.stringify(log.error.mock.calls)).not.toContain("secret-in-a-string");
+    expect(log.error).toHaveBeenCalledWith({ category: "RetentionRetry", deploymentId: "deployment", errorType: "string" }, "Retention retry required");
   });
 
-  it("claims orphaned deployments without needing a project row", async () => {
-    const f = fixture(), projectId = await f.project(), deploymentId = await f.seed(projectId);
-    await f.backend.run(ctx => ctx.db.delete(projectId));
-    expect((await f.cycle()).map(c => c._id)).toEqual([deploymentId]);
-  });
-});
-
-describe("staging leases", () => {
-  it("renews active uploads, rejects late renewal and commit, and drains expired and legacy leases", async () => {
-    const f = fixture(), projectId = await f.project();
-    const start = await f.backend.mutation(internal.deployments.startInternal, { organizationId: "org", projectId, fileCount: 1, byteCount: 1, manifestSha256: "a".repeat(64), provenance, actorId: "user" });
-    const identity = { organizationId: "org", projectId, deploymentId: start.deploymentId };
-    expect(start.stagingExpiresAt).toBe(now + STAGING_LEASE_MS);
-    expect((await f.backend.mutation(internal.deployments.refreshStagingInternal, identity))?.stagingExpiresAt).toBe(start.stagingExpiresAt);
-    vi.mocked(Date.now).mockReturnValue(now + STAGING_LEASE_MS - 1);
-    expect((await f.backend.mutation(internal.deployments.refreshStagingInternal, identity))?.stagingExpiresAt).toBe(now + 2 * STAGING_LEASE_MS - 1);
-    const legacy = await f.seed(projectId, { status: "staging" });
-    const recentLegacy = await f.seed(projectId, { status: "staging", createdAt: now });
-    const live = await f.seed(projectId, { status: "staging", stagingExpiresAt: now + 10 * STAGING_DRAIN_MS });
-    expect((await f.cycle()).map(c => c._id)).toEqual([legacy]);
-    expect(await f.backend.run(ctx => ctx.db.get(legacy))).toMatchObject({ status: "staging" });
-    expect(await f.backend.run(ctx => ctx.db.query("deploymentPurges").withIndex("by_deployment", q => q.eq("deploymentId", legacy)).unique())).not.toBeNull();
-    vi.mocked(Date.now).mockReturnValue(now + 2 * STAGING_LEASE_MS - 1);
-    await expect(f.backend.mutation(internal.deployments.refreshStagingInternal, identity)).rejects.toThrow("Staging lease expired");
-    await expect(f.backend.mutation(internal.deployments.commitInternal, { ...identity, actorId: "user" })).rejects.toThrow("Staging lease expired");
-    await f.cycle(); // update the fixed scan cutoff
-    expect((await f.cycle()).map(c => c._id)).not.toContain(start.deploymentId);
-    vi.mocked(Date.now).mockReturnValue(now + 2 * STAGING_LEASE_MS + STAGING_DRAIN_MS);
-    const drained = [...await f.cycle(), ...await f.cycle()].map(c => c._id);
-    expect(drained).toContain(start.deploymentId);
-    expect(drained).toContain(recentLegacy);
-    expect(drained).not.toContain(live);
+  it("bounds candidate requests even if every scanned page is protected", async () => {
+    const { purgeExpiredDeployments } = await load();
+    fetchMock.mockImplementation(() => Promise.resolve(candidates([], false)));
+    await expect(purgeExpiredDeployments()).resolves.toEqual({ purged: 0, failures: 0 });
+    expect(fetchMock).toHaveBeenCalledTimes(100);
   });
 
-  it("checks lease renewal identity/status and retains recently failed upload leases", async () => {
-    const f = fixture(), projectId = await f.project(), other = await f.project();
-    const deploymentId = await f.seed(projectId, { status: "staging", stagingExpiresAt: now + 1 });
-    const identity = { organizationId: "org", projectId, deploymentId };
-    expect(await f.backend.mutation(internal.deployments.refreshStagingInternal, { ...identity, organizationId: "other" })).toBeNull();
-    expect(await f.backend.mutation(internal.deployments.refreshStagingInternal, { ...identity, projectId: other })).toBeNull();
-    await f.backend.mutation(internal.deployments.failInternal, { ...identity, reason: "interrupted" });
-    expect(await f.backend.mutation(internal.deployments.refreshStagingInternal, identity)).toBeNull();
-    expect(await f.cycle()).toEqual([]);
-    await f.backend.run(ctx => ctx.db.delete(deploymentId));
-    expect(await f.backend.mutation(internal.deployments.refreshStagingInternal, identity)).toBeNull();
+  it("stops inside the invocation's subrequest allowance without finalizing partial progress", async () => {
+    const { purgeExpiredDeployments, bucket } = await load();
+    // Every key is re-created after each delete, so the prefix never drains.
+    const realDelete = bucket.delete.bind(bucket);
+    seed(bucket, `${prefix}a`);
+    vi.spyOn(bucket, "delete").mockImplementation(async keys => { await realDelete(keys); seed(bucket, `${prefix}a`); });
+    const list = vi.spyOn(bucket, "list");
+    fetchMock.mockResolvedValueOnce(candidates([claim], false));
+    await expect(purgeExpiredDeployments()).rejects.toThrow("remain claimed for retry");
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(list.mock.calls.length * 2 + 1).toBeLessThanOrEqual(903);
+    expect(list.mock.calls.length).toBeGreaterThan(400);
   });
-});
 
-describe("references cannot expose purged storage", () => {
-  it.each([{ purgeState: "purging" as const }, { purgedAt: 0 }])("rejects shares and public resolution for %j", async fields => {
-    const f = fixture(), projectId = await f.project(), deploymentId = await f.seed(projectId, { status: "active" });
-    await f.backend.run(ctx => ctx.db.patch(projectId, { activeDeploymentId: deploymentId }));
-    await f.pin(projectId, deploymentId);
-    await shareWithProof(f.backend, { organizationId: "org", projectId, documentPath: "index.html", tokenHash: "live", expiresAt: now + 100, actorId: "user" });
-    await f.backend.run(ctx => ctx.db.patch(deploymentId, fields));
-    await expect(shareWithProof(f.backend, { organizationId: "org", projectId, documentPath: "index.html", tokenHash: "new", expiresAt: now + 100, actorId: "user" })).rejects.toThrow("Project has no active deployment");
-    expect(await f.backend.query(internal.shareGrants.resolveInternal, { tokenHash: "live" })).toBeNull();
-    expect(await f.backend.query(internal.publicationsV2.resolvePublicInternal, { slug: "pin" })).toBeNull();
+  it.each([false, true])("respects the time budget with storage pending=%s", async pending => {
+    const { purgeExpiredDeployments, bucket } = await load();
+    let now = 1;
+    vi.spyOn(Date, "now").mockImplementation(() => now);
+    const list = vi.spyOn(bucket, "list");
+    fetchMock.mockImplementation(() => { now += 600_000; return Promise.resolve(candidates(pending ? [claim] : [], false)); });
+    if (pending) await expect(purgeExpiredDeployments()).rejects.toThrow("remain claimed for retry");
+    else await purgeExpiredDeployments();
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(list).not.toHaveBeenCalled();
   });
-});
 
-it("claims and finalizes fifty 1 MiB legacy rows without growing any deployment or skipping a cursor", async () => {
-  const f = fixture(), projectId = await f.project();
-  const ids = [];
-  for (let i = 0; i < 50; i++) {
-    const id = await f.seed(projectId, { status: "staging" });
-    await f.backend.run(async ctx => {
-      const row = (await ctx.db.get(id))!;
-      // The round-2 probe used a huge digest; also cover historical object keys.
-      const field = i % 2 ? "manifestSha256" : "manifestKey";
-      await ctx.db.patch(id, { [field]: "x".repeat(1024 * 1024 - getDocumentSize(row) + row[field].length) });
-      expect(getDocumentSize((await ctx.db.get(id))!)).toBe(1024 * 1024);
-    });
-    ids.push(id);
-  }
-  const claims = await f.cycle();
-  expect(claims.map(c => c._id)).toEqual(ids);
-  for (const id of ids) {
-    const before = await f.backend.run(ctx => ctx.db.get(id));
-    expectDocumentFits(before!);
-    expect(await f.backend.mutation(internal.retention.markPurgedInternal, { deploymentId: id, purgeToken: "claim", objectCount: 0 })).toBe(true);
-    expect(await f.backend.run(ctx => ctx.db.get(id))).toEqual(before);
-    const claim = await f.backend.run(ctx => ctx.db.query("deploymentPurges").withIndex("by_deployment", q => q.eq("deploymentId", id)).unique());
-    expectDocumentFits(claim!);
-    expect(claim?.purgedAt).toBe(now);
-  }
-  expect(await f.cycle()).toEqual([]);
-}, 120_000);
-
-it("honors legacy claim leases before moving retries into the separate table", async () => {
-  const f = fixture(), projectId = await f.project();
-  const deploymentId = await f.seed(projectId, { purgeState: "purging", purgeToken: "legacy", purgeClaimUntil: now + 1 });
-  expect(await f.cycle()).toEqual([]);
-  vi.mocked(Date.now).mockReturnValue(now + 1);
-  expect((await f.cycle()).map(c => c._id)).toEqual([deploymentId]);
-});
-
-it("denies all reference paths against separate-table claims", async () => {
-  const f = fixture(), projectId = await f.project(), deploymentId = await f.seed(projectId, { status: "active" });
-  await f.backend.run(ctx => ctx.db.patch(projectId, { activeDeploymentId: deploymentId }));
-  await f.pin(projectId, deploymentId);
-  const share = { organizationId: "org", projectId, documentPath: "index.html", tokenHash: "sidecar", expiresAt: now + 1000, actorId: "user" };
-  await shareWithProof(f.backend, share);
-  await f.backend.run(ctx => ctx.db.insert("deploymentPurges", { deploymentId, purgeToken: "claim", claimUntil: now + PURGE_CLAIM_MS }));
-  await expect(f.pin(projectId, deploymentId, "new")).rejects.toThrow("Publication deployment not found");
-  await expect(shareWithProof(f.backend, share)).rejects.toThrow("no active deployment");
-  expect(await f.backend.query(internal.publicationsV2.resolvePublicInternal, { slug: "pin" })).toBeNull();
-  expect(await f.backend.query(internal.shareGrants.resolveInternal, { tokenHash: "sidecar" })).toBeNull();
+  it.each([["CONVEX_SITE_URL", { RETENTION_SECRET: SECRET }], ["RETENTION_SECRET", { CONVEX_URL: "https://x.convex.cloud" }]])("is disabled, loudly, without %s", async (_name, env) => {
+    const { purgeExpiredDeployments } = await load({ CONVEX_SITE_URL: undefined, CONVEX_URL: undefined, RETENTION_SECRET: undefined, ...env });
+    await expect(purgeExpiredDeployments()).rejects.toThrow("are required");
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(log.error).toHaveBeenCalledWith({ category: "RetentionDisabled" }, expect.any(String));
+  });
 });

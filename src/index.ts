@@ -13,6 +13,7 @@ import { mountPublicRoutes, mountSessionRoutes } from "@/app-routes";
 import { z } from "zod/v4";
 import { logger } from "@/logger";
 import { notFoundResponse } from "@/routes/not-found";
+import { bindLocalStorage } from "@/local-storage";
 import type { User } from "better-auth/types";
 
 // Only the local Node server listens on a port; Workers do not read PORT.
@@ -20,6 +21,10 @@ const PORT = z.coerce.number().int().min(1).max(65535).default(3000).parse(proce
 
 export const app = new Hono<{ Bindings: HttpBindings; Variables: { user?: User } }>();
 app.use("*", securityHeaders);
+
+// Blob storage is the R2 simulation shared with `wrangler dev`; requests wait for it, then fail closed if it is absent.
+const storageReady = bindLocalStorage();
+app.use("*", async (_c, next) => { await storageReady; await next(); });
 
 // Same contract as the Worker: an explicit allowlist of public assets, served before session
 // middleware with identical headers. serveStatic only falls through for a missing file, so each

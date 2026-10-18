@@ -15,7 +15,7 @@ import { renderFaviconLinks } from "./favicon";
 import { renderThemeAssets } from "./theme";
 import { Hono } from "hono";
 import { CONVEX_INTERNAL_SECRET, CONVEX_SITE_URL } from "@/config";
-import { getObjectStream, type ObjectRange } from "@/minio";
+import { getObjectStream, type ObjectRange } from "@/storage";
 import { renderNotFoundPage } from "@/routes/not-found";
 import { injectMobileViewportScrollbarStream, injectViewerHeadStream } from "@/routes/document-html";
 import { contentEtag, contentSize, serveObject } from "@/routes/object-delivery";

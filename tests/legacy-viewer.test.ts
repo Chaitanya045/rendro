@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import worker from "@/worker";
-import * as minio from "@/minio";
+import * as blobs from "@/storage";
 import * as deletion from "@/soft-delete";
 import { createLegacyViewerTicket, createViewerTicket, readLegacyViewerTicket, readViewerTicket } from "@/viewer-ticket";
 import { mockSecurityBackend } from "./fixtures/security-headers";
@@ -51,16 +51,16 @@ describe("legacy viewer routes", () => {
   it("revalidates ticket sessions and deletion state before storage reads", async () => {
     const token = await createLegacyViewerTicket("example", cookie);
     const url = `${base}/view/${token}/files/index.html`;
-    vi.mocked(minio.getObjectStream).mockClear();
+    vi.mocked(blobs.getObjectStream).mockClear();
     const original = vi.mocked(fetch).getMockImplementation()!;
     vi.mocked(fetch).mockImplementation((input, init) => (input instanceof Request ? input.url : input.toString()).includes("management/access")
       ? Promise.resolve(new Response(null, { status: 403 })) : original(input, init));
     expect((await request(url)).status).toBe(404);
-    expect(minio.getObjectStream).not.toHaveBeenCalled();
+    expect(blobs.getObjectStream).not.toHaveBeenCalled();
     vi.mocked(fetch).mockImplementation(original);
     vi.mocked(deletion.isDeleted).mockResolvedValue(true);
     expect((await request(url)).status).toBe(404);
-    expect(minio.getObjectStream).not.toHaveBeenCalled();
+    expect(blobs.getObjectStream).not.toHaveBeenCalled();
   });
   it.each(["image.png", "font.woff2", "style.css", "script.js"])("uses empty uncached errors for legacy %s requests", async path => {
     const token = await createLegacyViewerTicket("example", cookie);
@@ -88,7 +88,7 @@ describe("legacy viewer routes", () => {
     expect((await request(path, true)).status).toBeGreaterThanOrEqual(400);
   });
   it("preserves publisher-relative bases through the ticket", async () => {
-    vi.mocked(minio.getObjectStream).mockResolvedValue(new Response('<html><head><base href="../assets/"><script src="app.js"></script></head></html>').body);
+    vi.mocked(blobs.getObjectStream).mockResolvedValue(new Response('<html><head><base href="../assets/"><script src="app.js"></script></head></html>').body);
     const html = await (await request(`${base}/files/guide/index.html`, true)).text();
     expect(html).toMatch(/<base data-rendro-viewer href="\/legacy-view\/example\/view\/[^/]+\/files\/assets\/">/);
   });

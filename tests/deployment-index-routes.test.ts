@@ -32,7 +32,7 @@ const storage = vi.hoisted(() => {
   };
 });
 const SHA_OF_X = vi.hoisted(() => "2d711642b726b04401627ca9fbac32f5c8530fb1903cc4db02258717921a4881");
-vi.mock("../src/minio", () => storage);
+vi.mock("../src/storage", () => storage);
 
 import deployments from "../src/routes/deployments";
 import projectDocs from "../src/routes/project-docs";

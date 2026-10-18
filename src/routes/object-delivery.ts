@@ -15,7 +15,7 @@
  * (RFC 9110 §14.2 allows this and it bounds the work an attacker can request).
  * A valid but unsatisfiable range is 416. Range applies to GET only.
  */
-import type { ObjectRange } from "@/minio";
+import type { ObjectRange } from "@/storage";
 
 export type ByteRange = { start: number; end: number };
 

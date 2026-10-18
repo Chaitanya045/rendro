@@ -1,7 +1,7 @@
 import { afterEach, expect, it, vi } from "vitest";
 import { Hono } from "hono";
 const storage = vi.hoisted(() => ({ copyObject: vi.fn(), getObjectText: vi.fn(), headObject: vi.fn(), listAllKeys: vi.fn(), putObject: vi.fn() }));
-vi.mock("../src/minio", () => storage);
+vi.mock("../src/storage", () => storage);
 import deployments from "../src/routes/deployments";
 import publications from "../src/routes/publication-api";
 import { proxyConvexRequest } from "../src/auth-proxy";
