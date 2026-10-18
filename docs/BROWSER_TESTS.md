@@ -147,9 +147,9 @@ Playwright cuts the ordered test list into contiguous ranges, balanced by test
 count. The first half (auth, organizations, comments, projects) is multi-actor and
 roughly twice as slow per test as the second (shell, viewer), so an even split gave
 shard 1 about twice the wall time of shard 2 (WebKit 20.6 against 10.2 minutes).
-`PWTEST_SHARD_WEIGHTS=41:69` (an internal Playwright variable, honoured by 1.64;
+`PWTEST_SHARD_WEIGHTS=47:63` (an internal Playwright variable, honoured by 1.64;
 `tests/repository-quality-gates.test.ts` fails if an upgrade stops honouring it)
-gives shard 1 about 37% of the tests. To retune after adding specs, compare the two
+gives shard 1 about 43% of the tests (the second shard also spends about two minutes beyond the sum of its test times, so equal test time is not equal wall time). To retune after adding specs, compare the two
 shards' wall times in the job summaries and move a few points of weight toward the
 faster shard; the weights must have one entry per shard. Open a trace with
 `pnpm exec playwright show-trace test-results/e2e/<test>/trace.zip`.

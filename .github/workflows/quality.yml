@@ -56,7 +56,7 @@ jobs:
   # checks they agree. Playwright cuts the test list into contiguous ranges, and the
   # first half (auth, organizations, comments) is about twice as slow per test as
   # the second (shell, viewer), so an even split by count leaves shard 1 with twice
-  # the wall time. The weights give shard 1 about 37% of the tests; retune them from
+  # the wall time. The weights give shard 1 about 43% of the tests; retune them from
   # the per-shard wall times in the job summaries (see docs/BROWSER_TESTS.md).
   e2e-engine:
     name: e2e (${{ matrix.project }} ${{ matrix.shard }}/2)
@@ -73,7 +73,7 @@ jobs:
       VITEST_MAX_WORKERS: "2"
       WRANGLER_SEND_METRICS: "false"
       # Relative share of the tests per shard (shard 1 : shard 2).
-      PWTEST_SHARD_WEIGHTS: "41:69"
+      PWTEST_SHARD_WEIGHTS: "47:63"
     steps:
       # First step, so the duration guard at the end measures the whole job.
       - name: Record job start
