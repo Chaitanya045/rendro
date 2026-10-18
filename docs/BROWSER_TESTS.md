@@ -19,6 +19,8 @@ VITEST_MAX_WORKERS=2 pnpm e2e --project=firefox
 VITEST_MAX_WORKERS=2 pnpm e2e --project=webkit
 # All three, still sequential (one Playwright worker):
 VITEST_MAX_WORKERS=2 pnpm e2e
+# Half of an engine, as CI runs it (i/2; each run starts its own harness and seed):
+VITEST_MAX_WORKERS=2 pnpm e2e --project=webkit --shard=1/2
 ```
 
 `e2e/playwright.config.ts` owns the projects and global setup. Setup rebuilds
@@ -122,11 +124,24 @@ and uses `failOnFlakyTests` so a passing retry cannot hide a first failure.
 `E2E_RETRIES` overrides the count; the nightly stability workflow sets it to `0`.
 [`retain-on-failure`](https://playwright.dev/docs/trace-viewer) records the
 original failed attempt even without retries. In `quality.yml` each engine runs as
-its own `e2e (chromium|firefox|webkit)` job (`pnpm e2e --project=<engine>`), so wall
-time follows the slowest engine rather than the sum. A final `e2e` job depends on
-all three and fails unless every one succeeded, keeping a single required check
-name. Each engine uploads its traces, failure screenshots and HTML report for
-seven days as `workerd-e2e-failures-<engine>`. Open a trace with
+two shards, each its own `e2e (<engine> <i>/2)` job
+(`pnpm e2e --project=<engine> --shard=<i>/2`), so wall time is roughly half of the
+slowest engine (WebKit took 21–29 minutes unsharded, against a 30-minute job
+timeout). A shard is independent: its runner starts its own workerd, Convex and
+storage and seeds its own data, and no spec depends on another file's state
+(Playwright splits whole files across shards; there are no serial groups). A final
+`e2e` job depends on all six legs and fails unless every one succeeded, so a
+failed, cancelled or skipped shard fails it and it stays the single required check
+name. Each shard uploads its traces, failure screenshots and HTML report for seven
+days as `workerd-e2e-failures-<engine>-<i>` when it fails. Shards also upload a
+blob report; when any shard failed, the optional `e2e report (<engine>)` job merges
+them into one HTML report per engine, `e2e-report-<engine>`. Nothing depends on
+that job. Each shard ends with a duration guard: it adds the wall time to the job
+summary and emits a `::warning::` annotation above 60% of the 30-minute timeout.
+It warns instead of failing, because runner speed varies by tens of percent and a
+hard failure would block unrelated pull requests while the job still has headroom;
+reshard (raise the `/2` and the `shard` list in `quality.yml` and `stability.yml`)
+when the warning appears. Open a trace with
 `pnpm exec playwright show-trace test-results/e2e/<test>/trace.zip`.
 `pnpm verify` continues to run the existing Vitest layers independently.
 `e2e/` is typechecked/linted test infrastructure, outside the production
@@ -496,7 +511,7 @@ writes Vitest's JSON report (`RENDRO_TEST_OUTCOMES=<file>`) and keeps its
 per-test outcome difference and `tests/helpers/diff-coverage.ts` on any counter
 difference. The second run and both comparisons always execute, so a failure in
 only one of the two runs is reported with the exact tests. It also runs the e2e
-suite once per engine with retries disabled (`E2E_RETRIES=0`).
+suite once per engine and shard (`e2e-no-retries (<engine> <i>/2)`) with retries disabled (`E2E_RETRIES=0`).
 
 ## Comment widget lab (#118)
 

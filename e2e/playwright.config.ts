@@ -16,7 +16,8 @@ export default defineConfig({
   globalTimeout: 2_700_000,
   expect: { timeout: 10_000 },
   outputDir: "../test-results/e2e",
-  reporter: [["list"], ["html", { outputFolder: "../playwright-report", open: "never" }]],
+  // CI also writes a blob report so the sharded jobs' results can be merged into one HTML report per engine.
+  reporter: [["list"], ["html", { outputFolder: "../playwright-report", open: "never" }], ...(process.env.CI ? [["blob", { outputDir: "../blob-report" }] as const] : [])],
   use: {
     actionTimeout: 10_000,
     navigationTimeout: 15_000,
