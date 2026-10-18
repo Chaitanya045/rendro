@@ -32,7 +32,7 @@ export async function publisherIsolationFixture(assetPaths?: string[]) {
   const files = mediaCases.map((entry, i) => ({ ...entry, legacyPath: `case-${i}.html` }));
   const find = (key: string) => files.find(file => key.endsWith(`/${file.path}`) || key === `example/${file.legacyPath}`);
   vi.mocked(minio.getObjectText).mockResolvedValue(JSON.stringify({ version: 1, files: files.map(file => ({
-    path: file.path, contentType: file.type, sha256: "a", size: file.body.length,
+    path: file.path, contentType: file.type, sha256: "a", size: Buffer.byteLength(file.body),
   })) }));
   vi.mocked(minio.headObject).mockImplementation(key => Promise.resolve(find(key) ? { contentType: find(key)!.type } : null));
   vi.mocked(minio.getObjectStream).mockImplementation(key => Promise.resolve(find(key) ? new Response(find(key)!.body).body : null));

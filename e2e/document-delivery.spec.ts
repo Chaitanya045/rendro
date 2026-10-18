@@ -202,7 +202,7 @@ test.describe("document delivery", () => {
     // Revoking access ends validators and ranges at once, with the same 404 as an unknown file.
     const grants = await api<{ shares: Array<{ _id: string }> }>(page, `/api/rendro/shares?organizationId=${organization.id}&projectId=${project}`);
     expect((await api(page, "/api/rendro/shares/revoke", { organizationId: organization.id, grantId: grants.body.shares[0]._id })).status).toBe(200);
-    for (const headers of [conditional, { "If-None-Match": "*" }, { Range: "bytes=0-9" }]) {
+    for (const headers of [conditional, { "If-None-Match": "*" }, { Range: "bytes=0-9" }] as Array<Record<string, string>>) {
       const gone = await send(secondContext.request, targets[1].url, headers);
       expect(gone.status, JSON.stringify(headers)).toBe(404);
       expect(gone.headers.etag).toBeUndefined();

@@ -92,7 +92,7 @@ describe("serveObject", () => {
   });
 
   it("reports a vanished object as missing for both full and ranged reads", async () => {
-    for (const headers of [{}, { Range: "bytes=0-1" }]) {
+    for (const headers of [{}, { Range: "bytes=0-1" }] as Array<Record<string, string>>) {
       const response = await serveObject(base({ open: () => Promise.resolve(null) }, headers));
       expect(response.status).toBe(404);
       expect(response.headers.has("content-range")).toBe(false);
