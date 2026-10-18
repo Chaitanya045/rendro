@@ -1624,6 +1624,228 @@ Two scripts run guarded Convex fixture actions against the development Convex de
 
 Fixture runs test deployed HTTP authorization. They do not replace signed-in multi-user browser testing or email delivery checks.
 
+## Repository Content Ingest (GitHub pivot, P3a)
+
+`src/ingest/` holds the pure content pipeline that the future ingest Worker
+(a Queue consumer, epic #214) will call. Nothing on the request path imports
+it yet. The Worker bundle is byte-identical with and without these modules, at
+2,504.56 KiB / 473.16 KiB gzip. The modules need no network and no GitHub credentials.
+
+```text
+tree listing ──► configFilesToRead ──► (caller fetches ≤ 24 small blobs) ──► detectDocs ──► doc sets
+blob + path ──► renderDocument:
+   Markdown: front matter ─► comrak (WASM, GFM) ─► HTML string ┐
+   HTML:                                                       ├► bounded parse5 ─► rewrite URLs ─► allowlist sanitize
+                                                               ┘   ─► alerts, heading ids, link/img attributes, highlight
+                                                                   ─► serialize ─► re-parse + re-sanitize until byte-stable
+rendered titles ──► buildSidebar ──► per-commit sidebar tree
+```
+
+| Module | Role |
+|---|---|
+| `detect.ts` | Docs detection from the recursive tree listing |
+| `render.ts` | `renderDocument(source, path)`, `renderKey(blobSha, path)` |
+| `markdown-engine.ts` | comrak WASM wrapper; `initMarkdownEngine(module)` must run once per isolate |
+| `parse-html.ts` | parse5 with depth, formatting-list, attribute and work bounds |
+| `sanitize.ts` | Allowlist schemas and fixed-point serialization (the security boundary) |
+| `transforms.ts`, `paths.ts` | URL rewriting, GitHub heading slugs, alerts, link/image attributes |
+| `highlight.ts`, `highlight-theme.ts` | Class-only highlighting and its stylesheet |
+| `sidebar.ts` | Sidebar tree with titles |
+
+### Library choices
+
+The comparison was measured on 2026-10-18 on an i5-8300H (8 threads, shared and
+loaded, with load averages of 1.5 to 4 during the final runs). It used Node 24.18 and
+`workerd` 2026-10-06, run directly with a capnp config. The corpus was 379 real
+READMEs (2.87 MB: npm and crates.io packages, 235 with code fences, mostly
+JS/TS, shell, Rust and TOML). Throughput is the median of passes 2–6 over the
+whole corpus. Cold start is the median of 7 runs from `workerd` spawn to first response.
+
+| Pipeline (parse + sanitize + serialize) | Node ms/doc | workerd ms/doc | workerd MB/s | Cold start | Bundle (min / gzip) |
+|---|---|---|---|---|---|
+| Empty Worker | – | – | – | 54 ms | – |
+| micromark/mdast (remark stack) + hast-util-raw | 11.9 | 10.6 | 0.71 | 59 ms | 392 / 116 KiB |
+| comrak WASM + parse5 | 2.8 | 2.2 | 3.48 | 64 ms | 245 / 70 KiB JS + 2.32 / 1.01 MiB WASM |
+| comrak + parse5 + lowlight | 4.8 | 4.5 | 1.68 | – | +176 / 54 KiB |
+| comrak + parse5 + Shiki (JS regex engine, 31 grammars, `transformerStyleToClass`) | 15.8 | – | – | 126 ms (Shiki alone) | +2.52 MiB / 317 KiB |
+| **Shipped pipeline** (comrak + bounded parse5 + lowlight + fixed-point check) | **6.1** | **6.3** | **1.20** | **83 ms** | **406 / 124 KiB JS + 2.32 / 1.01 MiB WASM** |
+
+Highlighting the corpus's 689 KB of fenced code took lowlight 0.59 s (12 ms
+init). Shiki took 4.6 s warm, with 320 ms of init for 31 grammars.
+
+- **Markdown parser: comrak** (`comrak-wasm` 0.0.11, a port of cmark-gfm 0.56). It
+  has full GFM: tables, task lists, footnotes, strikethrough and autolink
+  literals. It is GitHub's own renderer lineage, ported, so quirks match
+  GitHub. It decided on hostile input. Among 26 pathological inputs capped at
+  1 MiB, comrak's slowest was 0.9 s. micromark is quadratic or worse on several:
+  - 8,000 nested brackets: 1.1 s, growing to roughly 700 s at 1 MiB;
+  - a 1,000-level indented list: 55 s;
+  - 100k autolink literals: 45 s;
+  - 50k link references: 12 s.
+
+  A hostile repo could pin ingest CPU that way. Through the whole shipped
+  pipeline, each of 31 pathological inputs either renders or is rejected by a
+  limit within about 1 s. The slowest that render are bounded by output size: a
+  150k-row table and 100k autolinks, near the 8 MiB HTML cap, take 8.7 s at load
+  about 7. That is inside a Queue consumer's 30 s CPU limit when each blob is its
+  own unit of work. Heading ids and alerts are added
+  after sanitizing, not by comrak. The npm package is built from source by GitHub
+  Actions with SHA-pinned actions and carries npm SLSA provenance, verified with
+  `npm audit signatures`. Its only WASM imports are wasm-bindgen
+  value-marshalling helpers for the options object, so it has no ambient authority.
+- **Highlighter: highlight.js 11.11 via lowlight 3.3.** It emits `hljs-*`
+  classes natively, so there are never inline styles under the strict CSP. Compared
+  with Shiki it is about 8x faster, initializes about 25x faster and is 14x
+  smaller. The cost is regex grammars instead of TextMate grammars. There are 45
+  languages: lowlight's `common` set plus Dart, Dockerfile, Elixir, Haskell, nginx,
+  PowerShell, Protobuf and Scala. There is no auto-detection. `HIGHLIGHT_CSS`
+  carries GitHub's light and dark palettes, taken from highlight.js's github themes
+  (BSD-3-Clause).
+- **Sanitizer: `hast-util-sanitize` over parse5** (the same spec-compliant tree
+  builder `share-html.ts` uses). sanitize-html (htmlparser2, with 2026 parser-differential
+  CVEs) and DOMPurify (needs a DOM) were ruled out. ammonia has no maintained
+  WASM build, and adding a Rust toolchain to the build was not justified.
+
+### Sanitization model
+
+- **Parse, never filter strings.** Repo HTML is parsed as a document. comrak's
+  output is parsed as `<body>` children, which is innerHTML semantics.
+  `parse-html.ts` bounds parse5's real stacks:
+  - open elements and active formatting elements ≤ 512 (Chromium stops nesting at 512);
+  - ≤ 128 attributes per tag;
+  - a 32M-unit work budget for adoption-agency scans.
+
+  Sources are capped at 1 MiB and 50,000 `<` markers, and comrak's output at 8 MiB.
+  Every limit throws `RenderError` with `reason` `too-large`, `too-complex` or
+  `too-deep`. A crashed engine throws `engine`, and the isolate refuses further
+  Markdown, because wasm-bindgen cannot re-instantiate after a Rust panic.
+- **Allowlist schema.** GitHub-style content elements and attributes only.
+  - Script-capable, raw-text, embedding and foreign-namespace elements are removed
+    with their content: `script`, `style`, `svg`, `math`, `iframe`, `object`, `template`,
+    `noscript`, `textarea`, `xmp`, `base`, `meta`, `link`, media and so on.
+  - Unknown elements, including MDX components, are unwrapped.
+  - No `style`, event handler, `srcset`, `ping`, `formaction` or other URL-bearing attribute survives.
+  - Inputs are disabled checkboxes.
+  - Table parts outside a table are dropped rather than re-parented.
+  - Author `id`/`name`/`aria-describedby` get the `user-content-` prefix, as on
+    GitHub, so content cannot clobber globals in the viewer frame.
+- **URLs.** Before sanitizing, `href`/`src` are normalized the way the URL
+  parser will read them: tabs, newlines and controls stripped, backslashes treated
+  as slashes.
+  - Only `http(s)` and `mailto:` (links only) remain.
+  - Protocol-relative URLs become `https:`.
+  - Fragments gain `user-content-`, matching the prefixed ids.
+  - Relative and `/`-rooted references resolve against the document's repo path, the
+    way GitHub resolves README links. They are emitted as `/<repo path>`, and the
+    serving layer maps that namespace onto the commit being viewed.
+  - A reference that leaves the repository, or encodes a separator or control
+    character, loses its `href`.
+  - External links get `rel="nofollow noopener noreferrer"`. Images get
+    `loading="lazy" decoding="async" referrerpolicy="no-referrer"`.
+- **Fixed point.** The trusted transforms (alerts, heading ids, highlighting,
+  attributes) emit only what a second `outputSchema` allows. The serialized HTML
+  must survive parse → sanitize(outputSchema) → serialize byte for byte. That
+  proves the browser's re-parse matches the sanitized tree, which catches
+  mutation-XSS differentials and transform mistakes. Output that does not settle
+  within three passes throws `unstable`.
+- **Evidence.** `tests/fixtures/ingest/hostile-corpus.ts` holds 102 public
+  vectors:
+  - scripts and handlers;
+  - `javascript:`/`vbscript:`/`data:` and entity- or whitespace-obfuscated schemes;
+  - SVG/MathML namespace confusion;
+  - mXSS nesting and raw-text differentials, including the 2026 sanitize-html CVE shapes;
+  - `<base>`, `<meta http-equiv>`, forms and `formaction`, `srcset`, `ping`, CSS `url()`;
+  - comments, CDATA and entities.
+
+  `ingest-sanitize.test.ts` checks every output against an independent statement of
+  the contract, using stock parse5. `ingest-sanitize-browser.test.ts` loads every
+  output in Chromium with no CSP behind it, with a canary installed (and a
+  positive control proving the canary fires). It asserts that no script or
+  handler ran, no request left the origin, and the live DOM holds only allowed
+  elements, attributes and URL schemes. The sandboxed iframe and strict CSP
+  remain defence in depth.
+
+### Headings, titles and render keys
+
+- **Heading ids** use github-slugger over the heading text in document order,
+  with `-1`, `-2` for repeats, so README `#fragment` links keep working. The
+  resulting id is `user-content-<slug>`. An emoji-only heading has an empty slug
+  and no id, as on GitHub. An author-set heading id is kept, but the slug counter
+  still advances. `headings` returns `{depth, text, slug, id}` for the TOC and
+  comment anchors.
+- **Titles** come from front matter `title`, then the first `h1`, then the first
+  heading. For HTML documents, `<title>` comes before the headings.
+- **GitHub alerts** (`> [!NOTE]` and the rest) become `markdown-alert` markup.
+- **MDX** top-level `import`/`export` blocks are removed.
+- **Render keys** are `render/v<RENDERER_VERSION>/<kind>/<blobSha>/<sha256(directory)[:32]>`.
+  Output depends on the renderer version, the document kind and the blob, and also
+  on the directory, because relative links resolve against it. An unchanged file
+  in an unchanged directory reuses its render across commits. Bumping
+  `RENDERER_VERSION` invalidates everything.
+
+### Docs detection
+
+`configFilesToRead(entries)` names at most 24 config blobs of 64 KiB or less to
+fetch. `detectDocs(entries, { configs, pagesSource })` returns every doc set
+`{root, generator, signal, kind, entry, pages, truncated}`. `primary` is the first.
+Without config contents, each generator's default applies. The signals, strongest first:
+
+1. Mintlify `docs.json` (verified when read; unread, only beside MDX pages) or `mint.json`.
+2. `.gitbook.yaml` `root` (default `./`).
+3. `mkdocs.yml` `docs_dir` (default `docs`).
+4. `book.toml` `[book] src` (default `src`).
+5. `.vitepress/config.*`: the parent directory plus `srcDir`.
+6. `.readthedocs.yaml` `sphinx.configuration` or `mkdocs.configuration`.
+7. `docusaurus.config.*`: `docs/` beside it.
+8. Sphinx `conf.py` next to an `index.*`.
+9. Docsify: `index.html` with `window.$docsify`, or the `_sidebar.md` / `.nojekyll`+README hints.
+10. The GitHub Pages source, if the caller passes it.
+11. A conventional folder (`docs`, `doc`, `documentation`, `website`, `site`,
+    `guide(s)`, `book`, `manual`, `wiki`, `handbook`) up to depth 3 that holds Markdown.
+12. Prebuilt HTML: `index.html` plus at least 3 HTML pages in the root, `docs`,
+    `site`, `build`, `public`, `_site`, `out`, `dist`, `html`, `book` or `_build/html`.
+13. The root README.
+
+Rules that apply to every signal:
+- Paths under `node_modules`, `vendor`, `third_party`, `bower_components` and hidden
+  folders never count. Neither do `_build`/`_site` output inside a source root.
+- A configured path outside the repository falls back to the default.
+- A candidate with no renderable page (`.md`, `.markdown`, `.mdx`, `.html`, `.htm`)
+  is discarded. reStructuredText is not rendered.
+
+**Tie-break.** Every input is sorted first, so listing order never matters.
+Doc sets are ordered by:
+1. not under a test or example folder;
+2. tier: configuration or Pages, then folder, then prebuilt, then README;
+3. depth of the signal's directory;
+4. the precedence above;
+5. more pages;
+6. root path, then signal path, in code-unit order.
+
+Then:
+- The same root keeps the first set.
+- A folder or prebuilt guess that overlaps a stronger set is dropped.
+- The README stands only when nothing else does.
+
+**Entry pages** are `index.md`, `index.mdx`, `README.md`, … `index.html` in the root,
+else the shallowest page. `SUMMARY.md` and `_*.md` navigation files are never
+entries. The Docsify shell `index.html` is not a page. Sets hold at most 5,000 pages.
+
+`buildSidebar(docSet, titles)` returns the entry first, then the tree under the
+root:
+- A directory's README/index becomes its landing page, and its title (when the page has one) titles the directory.
+- Untitled pages are named from the file name (`getting-started.md` → "Getting started").
+- Siblings sort naturally (`2-setup` before `10-deploy`) by code unit, never by locale.
+
+### Open points for the serving phases
+
+- Repo HTML loses its scripts, inline styles and `<link>` stylesheets, so it is
+  shown in Rendro's typography. Allowing repo-relative stylesheets is a product decision.
+- External images load from their origin, which shares the reader's IP with the
+  image host. A camo-style proxy or an `img-src` policy decides this at serve time.
+- Math (`$…$`) and Mermaid fences stay as text and code. mdBook `SUMMARY.md`,
+  MkDocs `nav` and Docusaurus sidebars are not yet used for ordering.
+
 ## Key Technical Decisions
 
 | Decision | Reason |
@@ -1636,6 +1858,7 @@ Fixture runs test deployed HTTP authorization. They do not replace signed-in mul
 | Hashed, revocable credentials and share grants | Raw secrets are shown once and can be expired or revoked without changing storage |
 | Server HTML and vanilla JavaScript | The operational UI stays compatible with the existing no-framework browser architecture |
 | iframe document rendering | Publisher HTML remains isolated from application chrome |
+| Repo docs rendered and sanitized once at ingest | comrak (cmark-gfm lineage) is linear on hostile Markdown; a parse5 allowlist with a fixed-point re-parse check is the XSS boundary, and readers never pay render cost |
 
 ## Known Limitations
 
