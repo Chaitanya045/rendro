@@ -310,8 +310,14 @@ test.describe("drawer", () => {
     await expect(cards).toHaveCount(20);
     const olderThreads = ui.getByTestId("commentor-load-older-threads");
     await expect(olderThreads).toHaveText("Load older comments");
-    await olderThreads.click();
+    // Loading older comments adds them above without moving the card the reader is looking at.
+    const list = ui.getByTestId("commentor-drawer-list");
+    const first = ui.locator(`.drawer-thread[data-thread-id="${ids[1]}"]`);
+    await list.evaluate(element => { element.scrollTop = 60; });
+    const place = await first.evaluate(card => Math.round(card.getBoundingClientRect().top - card.parentElement!.getBoundingClientRect().top));
+    await olderThreads.evaluate(button => (button as HTMLButtonElement).click());
     await expect(cards).toHaveCount(21);
+    expect(await first.evaluate(card => Math.round(card.getBoundingClientRect().top - card.parentElement!.getBoundingClientRect().top))).toBe(place);
     await expect(olderThreads).toHaveCount(0);
 
     // The newest thread previews its latest ten replies and offers the oldest on demand.
@@ -322,10 +328,13 @@ test.describe("drawer", () => {
     await olderReplies.click();
     await expect(newest.locator(".reply")).toHaveCount(11);
     await expect(newest.locator(".reply").first()).toContainText("Reply 00");
+    // Each reply shows how long ago it was written, like the thread above it.
+    await expect(newest.locator(".reply .when")).toHaveCount(11);
+    await expect(newest.locator(".reply .when").first()).toHaveText(/^\d+[smhd]$/);
+    await expect(newest.locator(".reply").first()).toHaveText(/^.+ \d+[smhd] Reply 00$/);
     await expect(olderReplies).toHaveCount(0);
 
     // Scrolled away from the end, a teammate's new comment is announced and revealed on request, not forced.
-    const list = ui.getByTestId("commentor-drawer-list");
     await list.evaluate(element => { element.scrollTop = 0; });
     await createThread(helper.page, site, "Late arrival", intro);
     const banner = ui.locator(".new-comments");

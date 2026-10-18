@@ -21,7 +21,7 @@ async function offers(page: Page): Promise<Record<string, Offer>> {
     const has = (id: string) => card.querySelector(`.thread-view > .head [data-testid="${id}"]`) !== null;
     return [card.querySelector(".thread-view > .body")?.textContent ?? "", {
       resolve: has("commentor-resolve-btn"), archive: has("commentor-archive-btn"), delete: has("commentor-delete-btn"),
-      replies: Object.fromEntries([...card.querySelectorAll(".reply")].map(reply => [(reply.textContent ?? "").slice((reply.querySelector(".reply-who")?.textContent ?? "").length), reply.querySelector('[data-testid="commentor-delete-reply-btn"]') !== null])),
+      replies: Object.fromEntries([...card.querySelectorAll(".reply")].map(reply => [[...reply.childNodes].filter(node => node.nodeType === Node.TEXT_NODE).map(node => node.textContent).join("").trim(), reply.querySelector('[data-testid="commentor-delete-reply-btn"]') !== null])),
     }];
   })));
 }

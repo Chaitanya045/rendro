@@ -94,6 +94,13 @@ type Anchor =
       endOffset: number;
     }
   | { kind: "element"; path: string[] };
+interface DrawerPlace {
+  filter: ThreadFilter;
+  lastId: string;
+  atEnd: boolean;
+  anchorId: string;
+  anchorOffset: number;
+}
 interface Reply {
   _id: ReplyId;
   _creationTime: number;
@@ -1925,6 +1932,9 @@ class Commentor {
             class: `reply${this.newReplyIds.has(r._id) ? " is-new" : ""}`,
           },
           h("span", { class: "reply-who" }, r.authorName),
+          " ",
+          h("span", { class: "when" }, timeAgo(r._creationTime)),
+          " ",
           r.body,
           this.canWrite && r.canDelete === true && isParentConfig(this.cfg)
             ? h("button", {
@@ -2262,6 +2272,7 @@ class Commentor {
         h("span", { class: "filter-count" }, String(counts[filter])),
       );
     }
+    const place = this.captureDrawerPlace();
     this.drawerList.replaceChildren();
     if (this.parentUpgradeRequired) {
       this.drawerList.append(h("div", { class: "empty", role: "status", "aria-live": "polite" },
@@ -2372,7 +2383,40 @@ class Commentor {
       });
       this.drawerList.append(card);
     }
+    this.restoreDrawerPlace(place, visible);
     this.highlightThread(this.highlightedThreadId);
+  }
+
+  // Rebuilding the list resets its scroll, so note where the reader is first:
+  // pinned to the end (follow new comments, as a chat does), or else the first
+  // card in view and how far below the list's top it sits.
+  private captureDrawerPlace(): DrawerPlace | null {
+    const list = this.drawerList;
+    const cards = Array.from(list.querySelectorAll<HTMLElement>(".drawer-thread"));
+    if (cards.length === 0) return null;
+    const ids = cards.map((card) => card.dataset.threadId!);
+    const listTop = list.getBoundingClientRect().top;
+    const first = cards.find((card) => card.getBoundingClientRect().bottom > listTop) ?? cards[0];
+    return {
+      filter: this.threadFilter,
+      lastId: ids[ids.length - 1],
+      atEnd: list.scrollTop + list.clientHeight >= list.scrollHeight - 48,
+      anchorId: first.dataset.threadId!,
+      anchorOffset: first.getBoundingClientRect().top - listTop,
+    };
+  }
+
+  private restoreDrawerPlace(place: DrawerPlace | null, visible: Thread[]): void {
+    if (!place || place.filter !== this.threadFilter) return;
+    const list = this.drawerList;
+    if (place.atEnd && visible[visible.length - 1]._id !== place.lastId) {
+      list.scrollTop = list.scrollHeight;
+      return;
+    }
+    const anchor = Array.from(list.querySelectorAll<HTMLElement>(".drawer-thread"))
+      .find((card) => card.dataset.threadId === place.anchorId);
+    if (!anchor) return;
+    list.scrollTop += anchor.getBoundingClientRect().top - list.getBoundingClientRect().top - place.anchorOffset;
   }
 
   private highlightThread(threadId: ThreadId | null): void {
@@ -3417,7 +3461,8 @@ textarea:disabled {
   font-size: 12px;
 }
 .reply.is-new { animation: reply-in var(--duration-base) var(--ease-standard); }
-.reply-who { margin-right: 4px; font-weight: 650; }
+.reply-who { font-weight: 650; }
+.reply .when { font-size: 11px; }
 .actions {
   display: flex;
   gap: 6px;

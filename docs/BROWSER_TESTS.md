@@ -376,9 +376,9 @@ opaque-frame asset delivery (`private-viewer-renewal.test.ts`, `private-viewer-b
 `viewer-publisher-content-browser.test.ts`, `viewer-stream-errors.test.ts`), the comment widget's handshake, drafts, theme,
 shells and scope (`commentor-gaps-browser.test.ts`, `commentor-theme-browser.test.ts`, `commentor-shells-browser.test.ts`,
 `commentor-ticket-scope.test.ts`), and shell chrome and navigation (`viewer-chrome-browser.test.ts`,
-`viewer-fragments-browser.test.ts`). Two product bugs are pinned as expected failures with no registry credit: a reply
-shows no time (UI-115-E03), and the comments drawer list loses its scroll position on a live update. Change each
-`it.fails` to `it` when it is fixed. A third, long names inside an open tree folder (UI-100-E09), was fixed in round 2:
+`viewer-fragments-browser.test.ts`). Two product bugs were first pinned as expected failures with no registry credit,
+and are now fixed with normal tests: a reply shows its age like a thread does (UI-115-E03), and the comments drawer list
+keeps the reader's place when older comments load or new ones arrive (UI-123-E01). A third, long names inside an open tree folder (UI-100-E09), was fixed in round 2:
 the folder's collapse wrapper now keeps a `minmax(0,1fr)` column, so labels truncate at the row.
 
 ## Comments and recovery (#115)
