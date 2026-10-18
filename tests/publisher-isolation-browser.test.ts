@@ -20,6 +20,10 @@ fetch('/api/auth/get-session', {credentials:'include'}).then(r => r.text()).then
 beforeAll(async () => {
   fixture = await publisherIsolationFixture(["style.css", "image.svg", "font.woff2"]);
   const original = vi.mocked(minio.getObjectStream).getMockImplementation()!;
+  // Responses announce the manifest size, so a replaced body must be re-measured.
+  const manifest = JSON.parse(await minio.getObjectText("") as string) as { files: Array<{ path: string; size: number }> };
+  vi.mocked(minio.getObjectText).mockResolvedValue(JSON.stringify({ ...manifest, files: manifest.files.map(file =>
+    file.path === "image.svg" ? { ...file, size: Buffer.byteLength(svg) } : file) }));
   vi.mocked(minio.getObjectStream).mockImplementation(key => {
     if (key.endsWith("/image.svg")) return Promise.resolve(new Response(svg).body);
     if (key.endsWith("/index.html")) return Promise.resolve(new Response(`<!doctype html><html><head>

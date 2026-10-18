@@ -83,11 +83,11 @@ describe("HTML encoding parity with main", () => {
         headers: route.signedIn ? { Cookie: cookie } : {},
       });
       expect(response.status, route.name).toBe(200);
-      const privateStream = ["share", "private", "private ticket", "legacy private", "legacy ticket"].includes(route.name);
+      const privateStream = ["public", "share", "private", "private ticket", "legacy private", "legacy ticket"].includes(route.name);
       expect(response.headers.get("Content-Type"), route.name).toBe(privateStream ? expected : "text/html; charset=utf-8");
       const body = new Uint8Array(await response.arrayBuffer());
-      // Streaming injectors preserve bytes and manifest charsets. Buffered routes decode UTF-8.
-      if (privateStream || route.name === "share") expect(body, route.name).toEqual(bytes);
+      // Streaming injectors preserve bytes and manifest charsets. Buffered legacy routes decode UTF-8.
+      if (privateStream) expect(body, route.name).toEqual(bytes);
       else expect(new TextDecoder().decode(body), route.name).toContain("caf\ufffd");
     }
   });
@@ -113,7 +113,7 @@ it.each(["text/css", "text/html"])("keeps an absent charset distinct from a fall
   }
 });
 
-it.each(["public", "legacy publication", "legacy share"])(
+it.each(["legacy publication", "legacy share"])(
   "labels re-encoded HTML as UTF-8 through %s regardless of stored or in-band charset", async name => {
     const { routes } = await publisherIsolationFixture();
     const route = routes.find(route => route.name === name)!;

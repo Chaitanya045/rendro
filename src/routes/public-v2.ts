@@ -8,10 +8,11 @@ import { decodeStoragePath, isCanonicalStorageKey } from "@/storage-boundary";
 import { viewerScript } from "@/viewer/markup";
 import { Hono } from "hono";
 import { CONVEX_INTERNAL_SECRET, CONVEX_SITE_URL } from "@/config";
-import { getObjectStream } from "@/minio";
+import { getObjectStream, type ObjectRange } from "@/minio";
 import { renderScopedDocumentShell } from "@/routes/app";
 import { renderNotFoundPage } from "@/routes/not-found";
-import { injectMobileViewportScrollbarStyle } from "@/routes/document-html";
+import { HEAD_INJECTION_VERSION, injectMobileViewportScrollbarStream, injectViewerHeadStream } from "@/routes/document-html";
+import { contentEtag, contentSize, serveObject, transformedEtag } from "@/routes/object-delivery";
 import { deploymentDocuments, openDeploymentIndex, validTreeDirectory } from "@/deployment-index";
 import { treePageCursor } from "@/routes/tree-pages";
 
@@ -39,25 +40,6 @@ function objectKey(result: WorkerPublication, path: string): string {
   return `${result.deployment.manifestKey.slice(0, -"manifest.json".length)}files/${path}`;
 }
 
-async function readStream(stream: ReadableStream<Uint8Array>): Promise<string> {
-  const reader = stream.getReader();
-  const decoder = new TextDecoder();
-  let output = "";
-  while (true) {
-    const result = await reader.read();
-    if (result.done) break;
-    if (result.value) output += decoder.decode(result.value, { stream: true });
-  }
-  return output + decoder.decode();
-}
-
-function injectNavigation(html: string, slug: string, path: string, url: string): string {
-  html = injectMobileViewportScrollbarStyle(html);
-  const basePath = `/p/${encodeURIComponent(slug)}/files/`;
-  const script = viewerScript("navigation", { prefix: basePath, documentPath: path }, url);
-  return /<\/body\s*>/i.test(html) ? html.replace(/<\/body\s*>/i, `${script}</body>`) : html + script;
-}
-
 app.get("/p/:slug/files/*", async (c) => {
   const result = await resolvePublication(c.req.param("slug"), c.req.raw);
   if (!result) return assetError(c, () => renderNotFoundPage({ path: "Document unavailable" }));
@@ -66,21 +48,25 @@ app.get("/p/:slug/files/*", async (c) => {
   if (!relativePath || !fullPath) return assetError(c, () => renderNotFoundPage({ path: "Document unavailable" }));
   const entry = await (await openDeploymentIndex(result.deployment.manifestKey))?.file(fullPath);
   if (!entry) return assetError(c, () => renderNotFoundPage({ path: "Document unavailable" }));
-  const stream = await getObjectStream(objectKey(result, fullPath));
-  if (!stream) return assetError(c, () => renderNotFoundPage({ path: "Document unavailable" }));
+  const key = objectKey(result, fullPath);
   const htmlAsset = isHtmlAsset(fullPath, entry.contentType);
   const headers = {
     "Cache-Control": "public, max-age=0, must-revalidate",
-    // readStream fully decodes HTML as UTF-8; its output is re-encoded below.
-    ...assetHeaders(fullPath, true, htmlAsset ? "text/html; charset=utf-8" : entry.contentType),
+    ...assetHeaders(fullPath, true, entry.contentType),
+    ...(htmlAsset ? { "Referrer-Policy": "strict-origin-when-cross-origin" } : {}),
   };
-  if (!htmlAsset) return new Response(stream, { headers });
-  const html = injectNavigation(await readStream(stream), result.publication.slug, relativePath, c.req.url);
-  return new Response(html, {
-    headers: {
-      ...headers,
-      "Referrer-Policy": "strict-origin-when-cross-origin",
-    },
+  const delivery = {
+    request: c.req.raw, headers, missing: () => assetError(c, () => renderNotFoundPage({ path: "Document unavailable" })),
+    open: (...range: [ObjectRange?]) => getObjectStream(key, ...range),
+  };
+  if (!htmlAsset) return serveObject({ ...delivery, etag: contentEtag(entry.sha256), size: contentSize(entry.size) });
+  // The navigation script is the same for every reader of this document, so the
+  // injected representation has a validator of its own (source hash + markup).
+  const markup = viewerScript("navigation", { prefix: `/p/${encodeURIComponent(result.publication.slug)}/files/`, documentPath: relativePath }, c.req.url);
+  return serveObject({
+    ...delivery,
+    etag: await transformedEtag(entry.sha256, HEAD_INJECTION_VERSION, markup),
+    transform: stream => injectViewerHeadStream(injectMobileViewportScrollbarStream(stream), () => markup),
   });
 });
 

@@ -76,6 +76,25 @@ describe("storage requests and responses", () => {
     }
   });
 
+  it("issues ranged reads and fails closed on an unexpected slice or total", async () => {
+    const range = { start: 10, end: 19, size: 100 };
+    const stream = new Response("0123456789").body;
+    send.mockResolvedValueOnce({ Body: { transformToWebStream: () => stream }, ContentRange: "bytes 10-19/100" });
+    expect(await getObjectStream("a", range)).toBe(stream);
+    expect(send.mock.calls[0][0].input).toMatchObject({ Key: "a", Range: "bytes=10-19" });
+    // Whole-object reads never send a Range.
+    send.mockResolvedValueOnce({ Body: { transformToWebStream: () => new Response("x").body } });
+    await getObjectStream("a");
+    expect(send.mock.calls[1][0].input).not.toHaveProperty("Range");
+    // A store that ignores the range, or reports a different slice/total, is an error.
+    for (const ContentRange of [undefined, "bytes 0-99/100", "bytes 10-19/101", "bytes 10-18/100"]) {
+      const cancel = vi.fn(() => Promise.reject(new Error("closed")));
+      send.mockResolvedValueOnce({ Body: { transformToWebStream: () => new ReadableStream({ cancel }) }, ContentRange });
+      await expect(getObjectStream("a", range)).rejects.toThrow("unexpected byte range");
+      expect(cancel).toHaveBeenCalledOnce();
+    }
+  });
+
   it("propagates an absent thrown stream error without treating it as a missing key", async () => {
     send.mockRejectedValueOnce(undefined);
     await expect(getObjectStream("a")).rejects.toBeUndefined();

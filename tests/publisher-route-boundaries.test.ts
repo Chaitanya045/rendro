@@ -180,11 +180,20 @@ it("handles empty storage chunks without changing public HTML delivery", async (
     controller.enqueue(new TextEncoder().encode("<body>fixture</body>"));
     controller.close();
   } })));
-  for (const path of ["/p/product/files/index.html", "/public/example/product/files/index.html"]) {
-    const response = await request(path, false);
-    expect(response.status).toBe(200);
-    expect(await response.text()).toContain("fixture");
-  }
+  const response = await request("/public/example/product/files/index.html", false);
+  expect(response.status).toBe(200);
+  expect(await response.text()).toContain("fixture");
+});
+
+it("streams public publication HTML across empty storage chunks", async () => {
+  vi.mocked(minio.getObjectStream).mockImplementation(() => Promise.resolve(new ReadableStream({ start(controller) {
+    controller.enqueue(new Uint8Array());
+    controller.enqueue(new TextEncoder().encode("<body>fixture</body>"));
+    controller.close();
+  } })));
+  const response = await request("/p/product/files/index.html", false);
+  expect(response.status).toBe(200);
+  expect(await response.text()).toContain("fixture");
 });
 
 it("preserves a private access denial when cancelling its upstream response fails", async () => {

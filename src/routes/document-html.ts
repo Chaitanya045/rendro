@@ -12,6 +12,10 @@ function parseDocument(html: string) {
   return { document, head, body, root };
 }
 
+/** Bump when the injectors change what they emit for the same input: it is
+ * part of the validator of head-injected representations (object-delivery.ts). */
+export const HEAD_INJECTION_VERSION = 1;
+
 const MOBILE_VIEWPORT_SCROLLBAR_STYLE = `<style data-rendro-mobile-viewport>
 @media (max-width: 760px) {
   :root { scrollbar-width: none; }

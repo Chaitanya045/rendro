@@ -31,7 +31,7 @@ it("paginates root publications and renders HTML fragments", async () => {
   deploymentMetadataCache.clear();
   vi.mocked(storage.getObjectText).mockResolvedValue(manifest);
   vi.mocked(storage.getObjectStream).mockResolvedValue(new ReadableStream<Uint8Array>({ start(controller) {
-    controller.enqueue(undefined as unknown as Uint8Array);
+    controller.enqueue(new Uint8Array());
     controller.enqueue(new TextEncoder().encode("<h1>Docs</h1>"));
     controller.close();
   } }));
