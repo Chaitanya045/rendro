@@ -15,8 +15,11 @@ const legacyTree: Record<string, Node[]> = {
   "org/empty/": [],
 };
 // Scoped viewers read directory pages (`?dir=&cursor=`) from the deployment index.
-type ScopedPage = { children: Array<{ name: string; type: "file" | "folder" }>; cursor: string | null };
+type ScopedPage = { children: Array<{ name: string; type: "file" | "folder"; title?: unknown }>; cursor: string | null };
 const pagedBase = "/organizations/o/projects/r/docs";
+// Repository docs (#234): the shell keeps the branch URL; frames and tree pages come from the pinned commit.
+const repoBase = "/r/octo/docs";
+const pinnedBase = `${repoBase}/@${"c".repeat(40)}`;
 const doc = (name: string) => ({ name, type: "file" as const });
 const dir = (name: string) => ({ name, type: "folder" as const });
 const scopedTree: Record<string, Record<string, ScopedPage[]>> = {
@@ -28,6 +31,10 @@ const scopedTree: Record<string, Record<string, ScopedPage[]>> = {
     "wide/": [{ children: [doc("w1.html"), doc("w2.html")], cursor: "1" }, { children: [doc("w2.html"), doc("w3.html")], cursor: "2" }, { children: [doc("w4.html")], cursor: null }],
     "zeta/": [{ children: [doc("z.html")], cursor: null }],
   },
+  [pinnedBase]: {
+    "": [{ children: [{ ...dir("guide"), title: "The guide" }, { ...doc("index.md"), title: "Home" }, { ...doc("plain.md"), title: "" }, { ...doc("odd.md"), title: 7 }], cursor: null }],
+    "guide/": [{ children: [{ ...doc("start.md"), title: "Getting started" }], cursor: null }],
+  },
   [pagedBase]: {
     "": [{ children: [dir("a")], cursor: "1" }, { children: [dir("b"), doc("later.html")], cursor: null }],
     "a/": [{ children: [doc("first.html")], cursor: null }],
@@ -36,7 +43,7 @@ const scopedTree: Record<string, Record<string, ScopedPage[]>> = {
 };
 const requests: string[] = [];
 
-interface Shell { orgAttr?: boolean; org?: string; base?: string; sandbox?: boolean; initial?: string; frame?: boolean; tree?: boolean; host?: boolean; late?: boolean; noMatchMedia?: boolean }
+interface Shell { orgAttr?: boolean; org?: string; base?: string; frameBase?: string; sandbox?: boolean; initial?: string; frame?: boolean; tree?: boolean; host?: boolean; late?: boolean; noMatchMedia?: boolean }
 function shell(options: Shell = {}): string {
   const org = options.org ?? "org";
   return `<!doctype html><html><head><meta charset="utf-8"><style>
@@ -48,7 +55,7 @@ ${options.noMatchMedia ? "" : ""}</style>
 ${options.noMatchMedia ? "<script>Object.defineProperty(window,'matchMedia',{value:undefined,configurable:true})</script>" : ""}
 <script>window.pushed=[];for(const name of ["pushState","replaceState"]){const original=history[name].bind(history);history[name]=(state,title,url)=>{pushed.push(name+" "+(url?String(url).replace(location.origin,""):""));return original(state,title,url)}}</script>
 ${options.initial ? `<script>window.RENDRO_INITIAL_DOC=${JSON.stringify(options.initial)}</script>` : ""}</head><body>
-${options.host === false ? "" : `<div class="sidebar"><div class="sidebar-resizer"></div><div class="sidebar-tree" ${options.orgAttr === false ? "" : `data-tree-org="${org}"`}${options.base !== undefined ? ` data-document-base="${options.base}"` : ""}>${options.tree === false ? "" : '<div id="tree-container"></div>'}</div></div>`}
+${options.host === false ? "" : `<div class="sidebar"><div class="sidebar-resizer"></div><div class="sidebar-tree" ${options.orgAttr === false ? "" : `data-tree-org="${org}"`}${options.base !== undefined ? ` data-document-base="${options.base}"` : ""}${options.frameBase ? ` data-frame-base="${options.frameBase}"` : ""}>${options.tree === false ? "" : '<div id="tree-container"></div>'}</div></div>`}
 <div id="main-placeholder">Choose a document</div>
 ${options.frame === false ? "" : `<iframe id="content-frame" name="content-frame" ${options.sandbox === false ? "" : 'sandbox="allow-scripts"'} title="Document"></iframe>`}
 ${options.late ? '<script>addEventListener("load",()=>{const s=document.createElement("script");s.src="/lazy-tree.js";document.body.append(s)})</script>' : '<script src="/lazy-tree.js"></script>'}
@@ -58,7 +65,7 @@ const variants: Record<string, Shell> = {
   legacy: {}, "legacy-initial": { initial: "org/guide/a.html" }, "legacy-late": { late: true }, "legacy-open": { sandbox: false },
   "legacy-no-frame": { frame: false }, "legacy-no-matchmedia": { noMatchMedia: true, initial: "org/guide/a.html" },
   "empty-org": { org: "" }, "empty-org-base": { org: "", base }, "empty-org-initial": { org: "", initial: "x/y.html" }, "no-org-attr": { orgAttr: false, initial: "x/y.html" }, "legacy-empty": { org: "void" }, "no-tree": { tree: false }, "no-host": { host: false },
-  base: { base }, "base-paged": { base: pagedBase }, "base-empty-project": { base: "/organizations/o/projects/q/docs" }, "base-empty-other": { base: "/other/docs" },
+  base: { base }, "base-paged": { base: pagedBase }, repo: { org: "docs", base: repoBase, frameBase: pinnedBase }, "base-empty-project": { base: "/organizations/o/projects/q/docs" }, "base-empty-other": { base: "/other/docs" },
 };
 function docPage(): string {
   return `<!doctype html><html><body><h1 id="top">Document</h1><a id="go" href="#">Go</a><script>
@@ -89,7 +96,7 @@ beforeAll(async () => {
     }
     if (url.pathname.includes("/files/")) { response.setHeader("Content-Type", "text/html"); return void response.end(docPage()); }
     response.setHeader("Content-Type", "text/html");
-    const name = url.pathname.startsWith("/lt/") ? url.pathname.slice(4) : url.pathname.startsWith("/docs") ? "legacy" : url.pathname === base ? "base" : url.pathname === pagedBase ? "base-paged" : "";
+    const name = url.pathname.startsWith("/lt/") ? url.pathname.slice(4) : url.pathname.startsWith("/docs") ? "legacy" : url.pathname === base ? "base" : url.pathname === pagedBase ? "base-paged" : url.pathname === repoBase ? "repo" : "";
     response.end(shell(variants[name] ?? {}));
   }, assets);
 });
@@ -854,6 +861,21 @@ describe("lazy tree with scoped documents", () => {
     await folderItem(tab, "org/zeta/").click();
     await folderItem(tab, "org/zeta/").click();
     expect(treeRequests()).toHaveLength(3);
+    expect(pageErrors(tab)).toEqual([]);
+  });
+
+  it("loads frames and tree pages from the pinned base, keeps history on the shell's URL and shows titles", async () => {
+    const tab = await open(`${repoBase}?doc=guide/start.md`);
+    await tab.waitForFunction(() => document.querySelector(".tree-item.active")?.getAttribute("data-path") === "docs/guide/start.md");
+    expect(treeRequests()).toEqual([`${pinnedBase}/tree?dir=`, `${pinnedBase}/tree?dir=guide%2F`]);
+    expect(await frameSrc(tab)).toBe(`${pinnedBase}/files/guide/start.md`);
+    // Titles when the page names one; the file name otherwise, including for an empty or non-string title.
+    expect(await rows(tab, "#tree-container")).toEqual(["The guide", "Home", "plain.md", "odd.md"]);
+    expect(await rows(tab, '.tree-folder[data-path="docs/guide/"] > .tree-folder-collapse > .tree-folder-content')).toEqual(["Getting started"]);
+    await tab.locator(`a.tree-link[href="${pinnedBase}/files/index.md"]`).click();
+    await tab.waitForFunction(() => window.location.search === "?doc=index.md");
+    expect(await location(tab)).toBe(`${repoBase}?doc=index.md`);
+    expect(await frameSrc(tab)).toBe(`${pinnedBase}/files/index.md`);
     expect(pageErrors(tab)).toEqual([]);
   });
 

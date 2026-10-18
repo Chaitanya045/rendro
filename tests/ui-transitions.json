@@ -583,6 +583,10 @@
     {
       "route": "ALL /share/*",
       "reason": "Anonymous request admission middleware; the concrete share routes are inventoried separately."
+    },
+    {
+      "route": "ALL /r/*",
+      "reason": "Middleware registration (security/session/logging/CORS); page handlers are checked separately by method and path."
     }
   ],
   "testSkips": [
@@ -25361,6 +25365,312 @@
               "file": "e2e/shell-selects.spec.ts",
               "name": "select popup closes on outside pointer, scroll, blur, dialog close, route leave and sign-out",
               "kind": "e2e"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "UI-161",
+      "title": "Repository docs viewer: authorized snapshot reads (/r/)",
+      "area": "Repository docs (GitHub pivot)",
+      "routes": [
+        "GET /r/*"
+      ],
+      "sources": [
+        "src/repo-read/routes.ts",
+        "src/repo-read/authorize.ts",
+        "src/repo-read/frame.ts",
+        "src/repo-read/tree.ts"
+      ],
+      "roles": [
+        "anonymous",
+        "owner",
+        "outsider"
+      ],
+      "viewports": [
+        1440
+      ],
+      "engines": [
+        "chromium",
+        "firefox",
+        "webkit"
+      ],
+      "status": "e2e",
+      "auditEvidence": "NOT_IN_AUDIT",
+      "auditNote": "New surface from epic #214 phase P4a (#234).",
+      "edges": [
+        {
+          "id": "UI-161-E01",
+          "from": "Public repository URL, anonymous reader",
+          "trigger": "Open /r/{owner}/{repo} (default branch)",
+          "expected": "Shell revalidated per navigation (private, no-cache); frame pinned to the served commit; entry page rendered with its image and alert; sidebar shows page titles; no cookie set",
+          "inventoryRefs": [
+            "UI-161"
+          ],
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "tests/repo-read-routes.test.ts",
+              "name": "serves the shell for the default branch without a cookie, pinned to the served commit",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/repo-read-routes.test.ts",
+              "name": "serves a commit-pinned document frame as immutable public HTML with links relative to the page",
+              "kind": "unit"
+            },
+            {
+              "file": "e2e/repo-docs.spec.ts",
+              "name": "an anonymous reader browses a public repository: entry page, sidebar titles, links, images and history",
+              "kind": "e2e"
+            }
+          ]
+        },
+        {
+          "id": "UI-161-E02",
+          "from": "Repository document open in the viewer",
+          "trigger": "Click a link inside the rendered page",
+          "expected": "Shell opens the linked page through the frame bridge; ?doc and the active sidebar row update; Back returns to the previous page",
+          "inventoryRefs": [
+            "UI-161"
+          ],
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/repo-docs.spec.ts",
+              "name": "an anonymous reader browses a public repository: entry page, sidebar titles, links, images and history",
+              "kind": "e2e"
+            }
+          ]
+        },
+        {
+          "id": "UI-161-E03",
+          "from": "Repository document open in the viewer",
+          "trigger": "Select another page in the sidebar",
+          "expected": "Frame and tree pages load from the pinned commit while the address bar keeps the branch URL; the document switches",
+          "inventoryRefs": [
+            "UI-161"
+          ],
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "tests/lazy-tree-browser.test.ts",
+              "name": "loads frames and tree pages from the pinned base, keeps history on the shell's URL and shows titles",
+              "kind": "browser"
+            },
+            {
+              "file": "e2e/repo-docs.spec.ts",
+              "name": "an anonymous reader browses a public repository: entry page, sidebar titles, links, images and history",
+              "kind": "e2e"
+            }
+          ]
+        },
+        {
+          "id": "UI-161-E04",
+          "from": "Private repository, signed-in reader with access",
+          "trigger": "Open the repository",
+          "expected": "Granted once through the permission source; HttpOnly SameSite=Lax capability cookie set; later requests skip the session and the source; images load through the frame's asset ticket",
+          "inventoryRefs": [
+            "UI-161"
+          ],
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "tests/repo-read-routes.test.ts",
+              "name": "grants a reader once, sets a host-only capability cookie and then serves without the session or the source",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/repo-read-routes.test.ts",
+              "name": "serves private images through the ticket alone, privately, and refuses a tampered or foreign ticket before any read",
+              "kind": "unit"
+            },
+            {
+              "file": "e2e/repo-docs.spec.ts",
+              "name": "a granted reader browses a private repository with a capability cookie and ticketed images; others get a plain 404",
+              "kind": "e2e"
+            }
+          ]
+        },
+        {
+          "id": "UI-161-E05",
+          "from": "Private repository, outsider or anonymous reader",
+          "trigger": "Open the repository, a frame or a tree page",
+          "expected": "Plain 404 identical to a missing repository: no validators, no retry hint, never cached",
+          "inventoryRefs": [
+            "UI-161"
+          ],
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "tests/repo-read-routes.test.ts",
+              "name": "answers anonymous readers with a plain 404 and remembers the denial briefly",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/repo-read-routes.test.ts",
+              "name": "answers a signed-in reader without access with the same 404 as a missing repository",
+              "kind": "unit"
+            },
+            {
+              "file": "e2e/repo-docs.spec.ts",
+              "name": "a granted reader browses a private repository with a capability cookie and ticketed images; others get a plain 404",
+              "kind": "e2e"
+            }
+          ]
+        },
+        {
+          "id": "UI-161-E06",
+          "from": "Reader holding a capability cookie or ticket",
+          "trigger": "Revocation epoch bumped by the permission system",
+          "expected": "Next request is a plain 404 and clears the cookie; tickets stop at once; a reader who kept access gets a cookie at the new epoch",
+          "inventoryRefs": [
+            "UI-161"
+          ],
+          "status": "unit",
+          "tests": [
+            {
+              "file": "tests/repo-read-routes.test.ts",
+              "name": "revokes at once when the reader's epoch moves past the cookie",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/repo-read-routes.test.ts",
+              "name": "re-mints the cookie at the new epoch when access survived the bump",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/repo-read-routes.test.ts",
+              "name": "revokes tickets with the epoch too",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/repo-read-workerd.test.ts",
+              "name": "grants a private reader through the control Worker, serves images by ticket, and revokes with a KV epoch",
+              "kind": "unit"
+            }
+          ]
+        },
+        {
+          "id": "UI-161-E07",
+          "from": "Reader with a forged, expired, signed-out, other-session or other-repository cookie",
+          "trigger": "Open the repository",
+          "expected": "Cookie ignored and cleared; access decided afresh through the session and the permission source",
+          "inventoryRefs": [
+            "UI-161"
+          ],
+          "status": "unit",
+          "tests": [
+            {
+              "file": "tests/repo-read-routes.test.ts",
+              "name": "ignores a forged, signed-out, other-session or other-repository cookie and clears it",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/repo-read-routes.test.ts",
+              "name": "re-authorizes an expired cookie",
+              "kind": "unit"
+            }
+          ]
+        },
+        {
+          "id": "UI-161-E08",
+          "from": "Reader whose cookie is past half its lifetime",
+          "trigger": "Open any page",
+          "expected": "Served at once; a background refresh renews the cookie on the next request, or denies it when access is gone",
+          "inventoryRefs": [
+            "UI-161"
+          ],
+          "status": "unit",
+          "tests": [
+            {
+              "file": "tests/repo-read-routes.test.ts",
+              "name": "refreshes a cookie past half its life in the background and renews it on the next request",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/repo-read-routes.test.ts",
+              "name": "denies on the next request when the background refresh finds access gone",
+              "kind": "unit"
+            }
+          ]
+        },
+        {
+          "id": "UI-161-E09",
+          "from": "Any repository URL",
+          "trigger": "Permission source, epoch store or session backend unavailable",
+          "expected": "Retryable 503 with Retry-After and no-store: retry page for documents, JSON for tree pages, empty body for images",
+          "inventoryRefs": [
+            "UI-161"
+          ],
+          "status": "unit",
+          "tests": [
+            {
+              "file": "tests/repo-read-routes.test.ts",
+              "name": "when %s fails",
+              "kind": "unit"
+            }
+          ]
+        },
+        {
+          "id": "UI-161-E10",
+          "from": "Branch URL",
+          "trigger": "Branch points at a snapshot storage no longer has, or storage times out",
+          "expected": "Retryable 503, never a 404",
+          "inventoryRefs": [
+            "UI-161"
+          ],
+          "status": "unit",
+          "tests": [
+            {
+              "file": "tests/repo-read-routes.test.ts",
+              "name": "when a branch points at a snapshot storage no longer has",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/repo-read-routes.test.ts",
+              "name": "when a stored object is malformed or storage times out",
+              "kind": "unit"
+            }
+          ]
+        },
+        {
+          "id": "UI-161-E11",
+          "from": "Repository document open in the viewer",
+          "trigger": "Open a page ingest could not render",
+          "expected": "Frame shows an explanatory notice instead of the page",
+          "inventoryRefs": [
+            "UI-161"
+          ],
+          "status": "unit",
+          "tests": [
+            {
+              "file": "tests/repo-read-routes.test.ts",
+              "name": "shows a notice for a page ingest could not render",
+              "kind": "unit"
+            }
+          ]
+        },
+        {
+          "id": "UI-161-E12",
+          "from": "Any repository URL",
+          "trigger": "Path with traversal, encoded separators, backslashes or a malformed ref",
+          "expected": "Plain 404 before authorization or any storage read",
+          "inventoryRefs": [
+            "UI-161"
+          ],
+          "status": "unit",
+          "tests": [
+            {
+              "file": "tests/repo-read-routes.test.ts",
+              "name": "refuses %s with a 404",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/repo-read-routes.test.ts",
+              "name": "never parses a malformed URL far enough to authorize it",
+              "kind": "unit"
             }
           ]
         }

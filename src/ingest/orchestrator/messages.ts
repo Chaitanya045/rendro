@@ -29,6 +29,15 @@ const REASONS = new Set<IngestReason>(["push", "reconcile", "install", "view"]);
 /** GitHub logins and repository names. */
 const OWNER = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/;
 const NAME = /^[A-Za-z0-9._-]{1,100}$/;
+
+export function isOwnerLogin(value: unknown): value is string {
+  return typeof value === "string" && OWNER.test(value);
+}
+
+export function isRepoName(value: unknown): value is string {
+  return typeof value === "string" && NAME.test(value) && value !== "." && value !== "..";
+}
+
 const DELIVERY = /^[A-Za-z0-9-]{1,64}$/;
 
 function positiveInteger(value: unknown): value is number {
@@ -37,8 +46,7 @@ function positiveInteger(value: unknown): value is number {
 
 export function parseRepoRef(value: unknown): RepoRef | null {
   const repo = value as Partial<Record<keyof RepoRef, unknown>> | null;
-  if (!repo || typeof repo !== "object" || !positiveInteger(repo.id) || typeof repo.owner !== "string" || !OWNER.test(repo.owner)
-    || typeof repo.name !== "string" || !NAME.test(repo.name) || repo.name === "." || repo.name === ".."
+  if (!repo || typeof repo !== "object" || !positiveInteger(repo.id) || !isOwnerLogin(repo.owner) || !isRepoName(repo.name)
     || typeof repo.private !== "boolean" || !(repo.installationId === null || positiveInteger(repo.installationId))) {
     return null;
   }

@@ -6,7 +6,7 @@ import { publicationSlug, type Mail } from "./services";
 
 export const roles = ["owner", "admin", "member", "outsider"] as const;
 export type Role = typeof roles[number];
-export type Seed = { organizationId: string; otherOrganizationId: string; projectId: string; cookies: Record<Role, string> };
+export type Seed = { organizationId: string; otherOrganizationId: string; projectId: string; cookies: Record<Role, string>; userIds: Record<Role, string> };
 export const password = "Local fixture password 109!";
 export async function pushDocuments(source: string, endpoint: string, organizationId: string, projectId: string, token: string, concurrency = 1, timeout = 60_000) {
   assertLoopback(endpoint);
@@ -15,6 +15,7 @@ export async function pushDocuments(source: string, endpoint: string, organizati
 }
 export async function seedWorkspace(input: { site: string; worker: string; secret: string; mail: Mail[]; directory: string; fetch: typeof fetch }): Promise<Seed> {
   const cookies = {} as Record<Role, string>;
+  const userIds = {} as Record<Role, string>;
   async function call<T>(role: Role, path: string, data?: unknown): Promise<T> {
     const request = new Request(`${input.site}${path}`, { method: data === undefined ? "GET" : "POST",
       headers: { Origin: input.worker, "Content-Type": "application/json", Cookie: cookies[role] ?? "" },
@@ -39,7 +40,7 @@ export async function seedWorkspace(input: { site: string; worker: string; secre
     // A failed verification would otherwise surface as a misleading sign-in error.
     const outcome = `${verified.status} ${(await verified.text()).slice(0, 200)}`;
     if (verified.status >= 400) throw new Error(`Seed verification for ${role} failed (${outcome})`);
-    await call(role, "/api/auth/sign-in/email", { email, password });
+    userIds[role] = (await call<{ user: { id: string } }>(role, "/api/auth/sign-in/email", { email, password })).user.id;
   }
   const organization = await call<{ id: string }>("owner", "/api/auth/organization/create", { name: "E2E primary", slug: "e2e-primary" });
   const other = await call<{ id: string }>("outsider", "/api/auth/organization/create", { name: "E2E other", slug: "e2e-other" });
@@ -60,5 +61,5 @@ export async function seedWorkspace(input: { site: string; worker: string; secre
     headers: { Authorization: `Bearer ${rawKey}`, "Content-Type": "application/json" },
     body: JSON.stringify({ organizationId: organization.id, projectId: project._id, slug: publicationSlug, pathPrefix: "", entryFile: "index.html", trackingMode: "track_active", title: "Worker publication" }) });
   if (!response.ok) throw new Error(`Seed publication failed (${response.status}): ${await response.text()}`);
-  return { organizationId: organization.id, otherOrganizationId: other.id, projectId: project._id, cookies };
+  return { organizationId: organization.id, otherOrganizationId: other.id, projectId: project._id, cookies, userIds };
 }

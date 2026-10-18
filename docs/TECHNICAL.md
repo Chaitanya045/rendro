@@ -463,6 +463,7 @@ Request
   ├─ 5. Public routes, before session middleware
   │   ├─ /p/:slug, /p/:slug/tree, /p/:slug/files/*      publications
   │   ├─ /s/:token, /s/:token/files/*                   private shares
+  │   ├─ /r/{owner}/{repo}/…                            repository docs (own capability cookie; session only on a miss)
   │   ├─ /share/:token                                  legacy HMAC share links
   │   └─ /public/:org/:slug/*                           legacy public folders
   ├─ 6. Public static assets, before session middleware (explicit allowlist, `src/routes/public-assets.ts`)
@@ -550,6 +551,8 @@ invocation logs remain disabled because they include request URLs.
 | Private project HTML (`…/docs/files/*`, `…/docs/view/:ticket/files/*`) | `frame-ancestors 'self'`; `X-Frame-Options: SAMEORIGIN` | Preserve `sandbox allow-scripts allow-forms allow-popups allow-downloads` (no `allow-same-origin`); keep `no-referrer`, `private, no-store`, ticket base, renewal, and comments bridge |
 | Publication/share HTML (`/p/:slug/files/*`, `/s/:token/files/*`, `/public/:org/:slug/files/*`, legacy `/share/:token`) | Same self-only framing | Opaque sandbox as above, without app resource restrictions or nonce rewriting; publisher scripts, styles, resource origins and base URLs remain publisher-controlled |
 | Share shell (`/s/:token`) | Deny framing; `frame-src 'self'` | App policy with nonced scripts/styles; preserve `no-referrer` and private caching |
+| Repository docs shell (`/r/{owner}/{repo}[/{ref}]`) | Deny framing; `frame-src 'self'` | App policy with nonced scripts/styles and `no-referrer`. The one trusted shell whose `Cache-Control` stays `private, no-cache` (revalidated on every navigation, so each gets a fresh nonce, but bfcache-eligible) |
+| Repository document frames (`/r/…/files/*`, `/r/…/view/:ticket/files/*`) | `frame-ancestors 'self'`; `X-Frame-Options: SAMEORIGIN` | `sandbox allow-scripts allow-popups`, `default-src 'none'`, scripts only from `/private-viewer.js`, styles only from `/styles/`, images from self and `https:`; content was sanitized at ingest, so this is defence in depth |
 | Legacy authenticated documents (`/files/*` → `/docs/:org/:path`; frame `/legacy-view/:org/files/*`, assets `/legacy-view/:org/view/:ticket/files/*`) | Shell denies framing; document frames are self-only | Same opaque sandbox as project docs: `sandbox allow-scripts allow-forms allow-popups allow-downloads`, never `allow-same-origin`; private/no-store, no-referrer, ticket assets and parent comment bridge |
 | JSON/API, redirects, and static/document assets | No added framing restriction | Baseline headers only; existing asset `default-src 'none'`, cache, CORS and cookie headers remain intact; no HTML policy is applied |
 
@@ -1446,7 +1449,7 @@ The base stylesheet is 1,435 bytes (778 gzip), against a 419 KB CDN script (126 
 
 `src/config.ts` validates the Worker environment at startup. The table lists every named string setting read by Worker code; `ASSETS` (static assets) and `STORAGE` (the R2 bucket) are separate bindings in `wrangler.toml`; there is no storage endpoint, region or access key setting. Google OAuth credentials are read only by Convex, and `BASE_URL` is unused. The local Node entry reads `PORT` separately.
 
-Both production (top-level) and `development` declare the same required secrets: `CONVEX_INTERNAL_SECRET`, `AUTH_SECRET` and `IMAGE_PROXY_SECRET`. Wrangler checks these at deploy time, and `src/config.ts` validates them at startup. Production commands use the top-level configuration without an `--env` flag; development commands use `--env development`.
+Both production (top-level) and `development` declare the same required secrets: `CONVEX_INTERNAL_SECRET`, `AUTH_SECRET`, `IMAGE_PROXY_SECRET` and `REPO_CAPABILITY_SECRET`. Wrangler checks these at deploy time, and `src/config.ts` validates them at startup. Production commands use the top-level configuration without an `--env` flag; development commands use `--env development`.
 
 | Variable | Storage | Purpose |
 |---|---|---|
@@ -1457,6 +1460,8 @@ Both production (top-level) and `development` declare the same required secrets:
 | `AUTH_SECRET` | Secret (required, ≥16 chars) | Encrypts scoped private viewer tickets and signs legacy `/share/:token` HMAC links. Better Auth signing happens in Convex |
 | `RETENTION_SECRET` | Secret (optional, ≥32 chars) | Bearer for Convex's retention endpoints, used by the scheduled purge; same value as in Convex. Without it the purge reports itself disabled and fails |
 | `IMAGE_PROXY_SECRET` | Secret (required, ≥32 chars) | HMAC key for same-origin image proxy URLs (see [Image proxy](#image-proxy)). Set the same value on the ingest Worker. Rotating it requires a `RENDERER_VERSION` bump, so stored renders are rebuilt with new signatures |
+| `REPO_CAPABILITY_SECRET` | Secret (required, ≥32 chars, Worker only) | Signs repository capability cookies and asset tickets (see "Repository read path"). Must not equal `AUTH_SECRET`, `CONVEX_INTERNAL_SECRET`, `RETENTION_SECRET` or `IMAGE_PROXY_SECRET`; rotating it only sends readers back through the permission source |
+| `REPO_CONTENT`, `REPO_EPOCHS`, `REPO_ACCESS` | Bindings (R2, KV, service), not configured yet | The repository read path's snapshot bucket, revocation epochs and permission source. Until P5 binds all three, every `/r/` URL is a 404 |
 | `LOG_LEVEL` | Var (optional) | Pino log level; defaults to `debug` outside production, `info` in production |
 | `PORT` | Local only; not read by Worker | Validated in `src/index.ts`; Node.js server port (integer 1–65535, default 3000) |
 
@@ -2069,6 +2074,147 @@ GitHub never retries a failed webhook, and sends no event for some bulk pushes. 
 - **Heads.** For each `tracked/` entry, the repository's coordinator re-checks every tracked branch with its stored ETag. A head that differs from the pointer is queued like a push; a head with a recorded permanent failure is skipped. Repositories share the token's governor, so once GitHub rate-limits one check, the rest wait for the next run.
 - **Redelivery.** The `WebhookDeliveries` client lists app webhook deliveries (newest first) back to the checkpoint, minus an hour of overlap, and never further than GitHub's three-day window. It groups them by GUID and redelivers those whose newest attempt failed, oldest first, up to 20 per run. A GUID that failed three times is logged and left alone. The checkpoint advances only when a run saw the whole window and handled every failure. The app JWT comes with P1; until then the step reports `not-configured`.
 
+## Repository Read Path (GitHub pivot, P4a)
+
+This section covers how a reader gets an ingested snapshot (#234, part of epic #214). A page view never calls GitHub or the database: a signed capability cookie answers "may this reader see this repository", and the bytes come from isolate memory, the colo's Cache API or R2, in that order. The code is in `src/repo-read/`. It is mounted before the session middleware and looks the session up only when the cookie cannot answer.
+
+| Module | Role |
+|---|---|
+| `paths.ts` | URL grammar; rejects traversal, encoded separators and malformed refs before anything else runs |
+| `capability.ts` | Capability tokens: HMAC-SHA256, derived keys imported once per isolate, constant-time comparison |
+| `access.ts` | The `RepoPermissionSource` and `RevocationEpochs` interfaces, the control-Worker protocol (client and `repoAccessHandler`), and the KV epoch reader |
+| `authorize.ts`, `grant.ts` | Authorization order, cookie minting and background refresh, asset tickets; issues the `RepoGrant` every read requires |
+| `snapshot.ts` | Memory → Cache API → R2 reads of #229's key schema; pointer stale-while-revalidate |
+| `frame.ts`, `tree.ts`, `routes.ts` | Document frame, sidebar directory pages, the Hono route |
+
+### URLs
+
+| URL | Serves |
+|---|---|
+| `/r/{owner}/{repo}` | Shell for the default branch; `?doc=<repo path>` selects the document (default: the snapshot's entry page) |
+| `/r/{owner}/{repo}/~{branch}` | Shell for a branch. The branch is one segment: a `/` in its name is written `%2F` |
+| `/r/{owner}/{repo}/@{commit}` | Shell for one commit (immutable) |
+| `…[/{ref}]/files/{path}` | A rendered page as a document frame, or an image's bytes |
+| `…[/{ref}]/tree?dir=&cursor=` | One sidebar directory page (JSON), as the viewer's lazy tree reads it |
+| `/r/{owner}/{repo}/@{commit}/view/{ticket}/files/{path}` | Private repositories: the same, authorized by the asset ticket alone |
+| `/r/{owner}/{repo}/@{commit}/viewer-ticket?manifestKey={commit}` | Ticket renewal for the trusted shell (cookie-authorized, JSON) |
+
+Owner and repository names must be literal GitHub names and match case-insensitively. A `{path}` is decoded once per segment; an empty, `.` or `..` segment, an encoded `/`, a backslash or a control character is a 404 before authorization. A path is only a lookup key into the manifest's `files` map (own properties only), never part of a storage key: every key comes from the manifest (render key, blob SHA) and from #229's key functions, so traversal has nothing to reach. Anything else under `/r/` is a 404.
+
+### Order of a request
+
+1. Parse the URL (above).
+2. Authorize (below). A denial is a plain 404 page, JSON or empty asset body: `private, no-store`, no `ETag`, no `Retry-After`, the same bytes as a repository that does not exist. Nothing private has been looked up yet.
+3. Resolve the ref: a commit as given, or a branch through its pointer (`ref/{branch}.json`, the default branch from the permission source). A branch with no pointer is a 404.
+4. Read the manifest. A pointer whose manifest is missing or malformed means a broken store, so the answer is #225's retryable 503, never a 404. Malformed pointers, sidebars and render objects, storage timeouts (10 s) and transient faults (`transientStorageFault`) are 503s too.
+5. Serve the shell, a tree page, a renewal, a frame or an asset.
+
+### Capability cookie
+
+A private grant sets `__Host-rendro-repo.{repoId}` (`rendro-repo.{repoId}` over local HTTP, where `Secure` is unavailable): `HttpOnly; SameSite=Lax; Path=/; Max-Age=300`. Its value is `v1.<base64url claims>.<base64url HMAC-SHA256>`:
+
+| Claim | Meaning |
+|---|---|
+| `u`, `r`, `n` | Rendro user ID, GitHub repository ID, lower-cased `owner/name` |
+| `p`, `b` | Visibility and default branch when granted |
+| `e` | The user's revocation epoch, read before the grant |
+| `s` | Binding to the session cookie: an HMAC of the session-token cookie, so signing out or switching accounts invalidates it at once and no session material is stored |
+| `i`, `x` | Issued and expiry times (five minutes) |
+
+Keys are derived per purpose from `REPO_CAPABILITY_SECRET` (`HMAC(secret, "rendro-repo-capability:v1:<purpose>")`) and imported once per isolate. Verifying costs one HMAC and `constantTimeEqual` (`shared/constant-time.ts`); claims are parsed only after the signature matches. Over HTTPS only the `__Host-` name counts, so a sibling subdomain cannot plant one. A cookie that fails to verify, belongs to another session or names another repository ID is cleared (on denials and private responses only: a public response may be cached by anyone, so it never sets a cookie); cookies for other repositories are left alone.
+
+Authorization, in order:
+
+1. A public repository seen by this isolate in the last minute: no lookup at all.
+2. A valid cookie for this `owner/name` whose epoch is current: granted. Only the epoch store is read.
+3. Past half its lifetime, the cookie is still honoured, and a refresh (session, epoch, permission source) runs in `waitUntil`, one per session and repository at a time. Its result serves this isolate's next request with that session's cookie: a renewed cookie, or a denial that clears it. Another session of the same user is unaffected.
+4. Otherwise: the session (Convex, the middleware's 15 s cache), then the epoch, then the permission source. A private grant mints a cookie; a public answer goes to the isolate's public-repository memory; an anonymous denial is remembered for 30 s so unauthenticated probing does not reach the permission source.
+
+An unknown answer from the session, the epoch store or the permission source is a 503 with `Retry-After`, never a denial.
+
+### Asset tickets for private frames
+
+The document frame is an opaque sandbox (#79), and requests it makes carry no cookies. A private frame's `<base>` therefore points at `/r/{owner}/{repo}/@{commit}/view/{ticket}/files/…`, where the ticket is a capability for the same user and repository bound to that commit instead of a session (15 minutes). Ticket requests check the signature, repository, commit and the epoch on every request. Renewal reuses the private viewer's protocol: the frame asks the trusted shell, the shell calls `…/viewer-ticket` with its cookie, and resource URLs are swapped in place. A ticket cannot renew itself.
+
+### Revocation epochs, and what P5 must implement
+
+`RevocationEpochs.currentEpoch(userId)` is read on every private request (cookie or ticket). A capability minted at an older epoch is stale: the request falls through to the permission source, which re-mints or denies. The Worker reads `epoch:<userId>` from the `REPO_EPOCHS` KV namespace (decimal milliseconds; absent is 0; anything else is a 503) with `cacheTtl: 60`.
+
+P5 implements:
+
+- **The permission source.** A control Worker, bound to the serving Worker as the `REPO_ACCESS` service, mounts `repoAccessHandler(source)`. Its `authorize(viewer, owner, name)` returns `{ id, owner, name, private, defaultBranch }` for the repository `owner/name` (case-insensitive) when `viewer` (a Rendro user ID, or null for anonymous readers, who see public repositories only) may read it now, and null when the repository is missing or forbidden, without distinguishing the two. It throws when it cannot tell; the client turns that, a non-200/404 status, a timeout (5 s) or an answer about another repository into a 503. It must build the answer from its mirror of the user's installation repositories (`GET /user/installations/{id}/repositories`), never by calling GitHub per view.
+- **The epoch bumps.** On `member`, `membership`, `team` (`added_to_repository`, `removed_from_repository`, `edited`), `organization.member_removed`, `repository` (`privatized`, `publicized`, `transferred`, `deleted`), `installation_repositories`, `installation` (`deleted`, `suspend`) and `github_app_authorization`: first update the mirror so `authorize` already denies, then write `epoch:<userId>` = the current time in milliseconds for every affected user. Write a time, not an increment: KV has no compare-and-swap, and a read-modify-write loses concurrent bumps. The order matters: the serving Worker reads the epoch before it asks for a grant, so a bump that lands in between leaves the new cookie already stale.
+- **The KV tier.** Revocation takes effect when the bumped epoch reaches the reader's colo. KV Classic propagates in about 60 s or more, and its colo cache (`cacheTtl`, at least 60 s) adds up to a minute, so expect 60–90 s, bounded above by the five-minute cookie in any case. KV Instant (private beta) replicates in under a second (p99 256 ms) and reads in about 1.6 ms, but allows 1 MB and one write per second per namespace, so it fits only if P5 stores just recently bumped epochs and batches writes.
+- **Grants webhooks do not cover** (enterprise policy, IdP sessions) end with the cookie's lifetime and the source's own mirror TTL.
+
+### Read order and caches
+
+| Object | Memory (per isolate) | `caches.default` (per colo) | R2 |
+|---|---|---|---|
+| Ref pointer (mutable) | Fresh 5 s, then served stale up to 60 s while one refresh runs | Never | On a miss |
+| Manifest, sidebar, rendered page, image blob (immutable keys) | 16 MiB LRU, entries up to 1 MiB, parsed | `{origin}/__repo-cache/v1/{storage key}`, filled in `waitUntil` | On a miss |
+
+Edge cache keys live under a path no route serves, so only this code can read them, and only with a `RepoGrant`. Bytes are cached as stored and opened per read, so P9's per-repository encryption will apply to the colo cache too. A commit-pinned URL without a snapshot at the current renderer version falls back to the previous version's while a rebuild runs. Public repositories still go through `caches.default` only; a tiered `fetch()` path for them is an open point.
+
+### Headers
+
+| Response | `Cache-Control` | Validator |
+|---|---|---|
+| Shell | `private, no-cache` (never `no-store`; each response has its own nonce) | none |
+| Frame or image at a commit URL | `public` or `private`, `max-age=31536000, immutable` | Public frames `"page-<render key>-<template tag>"`; images `"git-<blob SHA>"`. A 304 needs no object read |
+| Frame or image at a branch URL | `public` or `private`, `max-age=10, stale-if-error=86400` | Same |
+| Private frame | as above | none: it embeds a per-reader ticket |
+| Ticket-authorized image | `private, max-age=900` | `"git-<blob SHA>"` |
+| Tree page | as the URL's ref | `"tree-<commit>-r<renderer>"` |
+| Renewal, denials, faults | `private, no-store` | none |
+
+Images get `Content-Security-Policy: default-src 'none'; sandbox; frame-ancestors 'self'`, ranges and HEAD through `serveObject` (#94). Frames are generated, so they are never ranged. Every response has `Referrer-Policy: no-referrer`.
+
+### Viewer integration
+
+The shell is `renderScopedDocumentShell` with the lazy tree, as for projects and publications:
+
+- `data-document-base` is the URL the reader opened (`/r/o/r` or `/~branch`), so history and copied links follow the branch.
+- `data-frame-base` pins frames and tree pages to the commit the branch served (lazy tree v46). A branch view therefore stays consistent while browsing; a reload picks up a newer commit.
+- Tree pages come from the snapshot's sidebar index, with titles. Folders between the repository root and the docs root appear too, and a directory's landing page is its first child.
+- Private shells add the private viewer's parent script (ticket renewal) and its update notice.
+- The share button copies the viewer URL ("Copy link").
+
+The frame wraps the sanitized page in Rendro's markup: the hashed `repo-doc` stylesheet (GitHub-style typography plus `HIGHLIGHT_CSS`, kept identical by a test), the navigation bridge and, for private repositories, the ticket base and renewal client. Ingest emits repository-internal links as `/<repo path>`; the frame rewrites each `href`/`src` to a path relative to the page (parse5, with dot segments dropped), so it resolves under the commit, branch or ticket base the frame was loaded from. External images that ingest wrote as signed image-proxy paths (`/img/<sig>/<url>`, see "Image proxy") stay absolute, but only when `verifyImageProxyPath` accepts them, so a repository folder named `img` still resolves inside the repository. The rewritten body depends only on the render key (which names the page's directory), so it is derived once per isolate and kept in memory. A page ingest could not render shows a notice instead.
+
+### Bindings and configuration
+
+| Binding | Type | Purpose |
+|---|---|---|
+| `REPO_CONTENT` | R2 | The ingest bucket (`gh/v1/`), read through #229's `ObjectStore` and `ContentSealer` |
+| `REPO_EPOCHS` | KV | Revocation epochs |
+| `REPO_ACCESS` | Service binding | The control Worker's permission source |
+
+None is configured in `wrangler.toml` yet: P5 adds them with the control Worker. Until then every `/r/` URL is a 404 in production and development. `REPO_CAPABILITY_SECRET` is required now, so the secret exists before the bindings do. The E2E suite and `tests/repo-read-workerd.test.ts` add all three bindings to a copy of the production configuration (`e2e/repo-read-config.ts`), with a fixture control Worker (`e2e/repo-access/`) speaking the real protocol.
+
+### Measurements
+
+Measured with `tests/repo-read-workerd.test.ts` on 2026-10-18. Setup: the production Worker on local workerd (Wrangler's test harness), sequential keep-alive HTTP straight to workerd's socket, 200 requests per row (80 for the R2 row), two runs, on a shared i5-8300H with load average about 12. These are wall times through the local development stack. `/health` measures that stack's own floor (Miniflare's entry Worker, Hono's middleware, loopback), so the read path's server time is roughly the difference. The R2 row uses Miniflare's on-disk R2, not production R2, which publishes no latency figures. The cookie-miss row answers the session lookup in-process, so a real deployment adds one Convex round trip (once per reader, repository and five minutes).
+
+| Request | p50 ms (run 1 / run 2) | p90 ms | Over `/health` (p50) |
+|---|---|---|---|
+| `/health` (Hono stack, no storage) | 5.2 / 5.1 | 9.3 / 8.0 | – |
+| Cached private frame, capability cookie hit (HMAC verify + KV epoch + memory) | 7.5 / 9.3 | 13.7 / 20.1 | +2.3 / +4.2 |
+| Cached public frame | 5.3 / 5.8 | 8.2 / 10.7 | +0.1 / +0.6 |
+| Cached private shell at a branch URL (pointer from memory, ~150 KB HTML) | 7.9 / 7.9 | 12.8 / 12.8 | +2.7 / +2.8 |
+| R2 miss (rendered page read from R2, parsed and rewritten; manifest warm) | 10.5 / 10.9 | 16.5 / 22.3 | +5.3 / +5.8 |
+| Capability-cookie miss (session, KV epoch, control Worker over the service binding, new cookie) | 11.8 / 10.7 | 22.4 / 17.2 | +6.6 / +5.6 |
+
+An earlier pair of runs at load about 9 (before the rewritten body was memoized) measured `/health` at 3.5–4.0 ms and a cached private frame at 5.3–6.3 ms, the same 2 ms above the floor. A cached view stays well inside the 10 ms server-time target. The shell costs more than a frame because it renders the full viewer template. In-shell navigation fetches only frames and tree pages, which are immutable at commit URLs.
+
+### Open points
+
+- A tiered `fetch()` path for public repositories, so Tiered Cache and Cache Reserve back the per-colo Cache API.
+- First view of a repository that has no snapshot yet: today a 404. It should enqueue an ingest (P3b's `firstViewEnsurer`) and show progress.
+- The repository shell has no account menu: the capability cookie carries no display identity. P1's GitHub sign-in reworks the shell.
+- Sign-out does not clear the browser's HTTP cache, so a private frame cached immutably stays in that browser profile. `Clear-Site-Data: "cache"` on sign-out would remove it.
+- `Server-Timing` phases and real-user monitoring (P0) for these routes.
+
 ---
 
 ## Key Technical Decisions
@@ -2084,6 +2230,7 @@ GitHub never retries a failed webhook, and sends no event for some bulk pushes. 
 | Server HTML and vanilla JavaScript | The operational UI stays compatible with the existing no-framework browser architecture |
 | iframe document rendering | Publisher HTML remains isolated from application chrome |
 | Repo docs rendered and sanitized once at ingest | comrak (cmark-gfm lineage) is linear on hostile Markdown; a parse5 allowlist with a fixed-point re-parse check is the XSS boundary, and readers never pay render cost |
+| Stateless repository capability cookie plus revocation epoch | A cached repository page view verifies one HMAC and reads one epoch; GitHub and the database are reached only on a cookie miss, and revocation reaches every colo with the epoch store |
 
 ## Known Limitations
 

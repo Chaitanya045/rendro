@@ -5,7 +5,7 @@ import { join } from "node:path";
 export const styleDirectory = "public/styles";
 export const manifestPath = "src/routes/style-manifest.ts";
 /** Stylesheet name → committed source. Each is served under a content-hashed name. */
-export const styleSources = { "viewer-base": "src/styles/viewer-base.css" } as const;
+export const styleSources = { "viewer-base": "src/styles/viewer-base.css", "repo-doc": "src/styles/repo-doc.css" } as const;
 
 export interface StyleBuild {
   /** File name inside public/styles → bytes. */

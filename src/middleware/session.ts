@@ -153,6 +153,22 @@ async function lookupWithRetry(request: Request, cookie: string, cached: boolean
 }
 
 
+/**
+ * The signed-in user for a route mounted before this middleware (the repository read path calls it only when its
+ * capability cookie cannot answer). Uses the same coalesced 15-second cache and retry as the middleware.
+ */
+export async function sessionViewer(request: Request): Promise<{ kind: "anonymous" } | { kind: "user"; id: string } | { kind: "unavailable"; retryAfter: string }> {
+  const cookie = viewerSessionCookie(request.headers.get("cookie") || "");
+  if (!sessionTokenCookie(cookie)) return { kind: "anonymous" };
+  const result = await lookupWithRetry(request, cookie, true);
+  if (result.kind === "failure") return { kind: "unavailable", retryAfter: String(Math.max(1, Math.ceil((result.retryAfterMs ?? 1_000) / 1_000))) };
+  if (result.kind === "anonymous") {
+    await sessionCache.evict(cookie);
+    return { kind: "anonymous" };
+  }
+  return { kind: "user", id: result.user.id };
+}
+
 export async function sessionMiddleware(
   c: Context<{ Variables: { user?: User } }>,
   next: Next,

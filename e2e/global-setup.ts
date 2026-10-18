@@ -8,6 +8,9 @@ import { removeSmokeAsset, startFaults, startIdentityFixtures, startImageHost, s
 import { localEnvironment, startBackend } from "./backend";
 import { seedWorkspace } from "./seed";
 import { registerResources } from "./resource-journal";
+import { repoReadWorker, withRepoReadBindings } from "./repo-read-config";
+import { seedRepositories } from "./repo-fixtures";
+import type { R2BucketLike } from "../src/ingest/orchestrator/store";
 
 const run = promisify(execFile);
 const root = resolve(import.meta.dirname, "..");
@@ -18,7 +21,7 @@ export default async function globalSetup() {
   const closers: Array<() => Promise<void>> = [];
   const originalFetch = globalThis.fetch;
   const blockedOrigins = new Set<string>();
-  const environmentKeys = ["CLOUDFLARE_LOAD_DEV_VARS_FROM_DOT_ENV", "WRANGLER_SEND_METRICS", "RENDRO_E2E_ORIGIN", "RENDRO_E2E_CONVEX", "RENDRO_E2E_CONVEX_SITE", "RENDRO_E2E_MAIL", "RENDRO_E2E_FAULTS", "RENDRO_E2E_IMAGES", "RENDRO_E2E_IMAGE_PROXY_SECRET", "RENDRO_E2E_SEED", "RENDRO_E2E_DIRECTORY"];
+  const environmentKeys = ["CLOUDFLARE_LOAD_DEV_VARS_FROM_DOT_ENV", "WRANGLER_SEND_METRICS", "RENDRO_E2E_ORIGIN", "RENDRO_E2E_CONVEX", "RENDRO_E2E_CONVEX_SITE", "RENDRO_E2E_MAIL", "RENDRO_E2E_FAULTS", "RENDRO_E2E_IMAGES", "RENDRO_E2E_IMAGE_PROXY_SECRET", "RENDRO_E2E_SEED", "RENDRO_E2E_DIRECTORY", "RENDRO_E2E_REPOS"];
   const previousEnvironment = new Map(environmentKeys.map(key => [key, process.env[key]]));
   async function cleanup() {
     const errors: unknown[] = [];
@@ -50,13 +53,15 @@ export default async function globalSetup() {
       CONVEX_INTERNAL_SECRET: randomBytes(32).toString("hex"),
       AUTH_SECRET: randomBytes(32).toString("hex"),
       IMAGE_PROXY_SECRET: randomBytes(32).toString("hex"),
+      REPO_CAPABILITY_SECRET: randomBytes(32).toString("hex"),
     };
     // Always rebuild: existence alone cannot detect stale ignored browser bundles.
     await run("pnpm", ["build:assets"], {
       cwd: root, env: { ...localEnvironment(), ...vars, VITEST_MAX_WORKERS: "2" }, timeout: 120_000,
     });
 
-    // Relocate only paths. Flags, compatibility date and asset routing come from production.
+    // Relocate only paths. Flags, compatibility date and asset routing come from production; the repository
+    // read path's bindings (unbound in production until P5) point at local R2/KV and the fixture control Worker.
     const productionConfig = await readFile(join(root, "wrangler.toml"), "utf8");
     const configPath = join(directory, "wrangler.toml");
     const compatibilityDate = /^compatibility_date = "([^"]+)"/m.exec(productionConfig)?.[1];
@@ -64,10 +69,10 @@ export default async function globalSetup() {
     if (!compatibilityDate || !bucketName) throw new Error("wrangler.toml must declare compatibility_date and the STORAGE bucket");
     // The one deliberate difference: STORAGE becomes a service that wraps the local R2 bucket, so a spec can fail storage.
     const bucketBinding = /^\[\[r2_buckets\]\]\nbinding = "STORAGE"\nbucket_name = "[^"]+"\n/m;
-    await writeFile(configPath, productionConfig
+    await writeFile(configPath, withRepoReadBindings(productionConfig
       .replace('main = "src/worker.ts"', `main = ${JSON.stringify(join(root, "src/worker.ts"))}`)
       .replace('directory = "./public"', `directory = ${JSON.stringify(join(root, "public"))}`)
-      .replace(bucketBinding, '[[services]]\nbinding = "STORAGE"\nservice = "storage-faults"\n'));
+      .replace(bucketBinding, '[[services]]\nbinding = "STORAGE"\nservice = "storage-faults"\n')));
     // The empty file also prevents loading shell credentials through required secrets.
     await writeFile(join(directory, ".dev.vars"), "# Only explicit synthetic bindings are used.\n");
     process.env.CLOUDFLARE_LOAD_DEV_VARS_FROM_DOT_ENV = "false";
@@ -106,6 +111,7 @@ export default async function globalSetup() {
           compatibility_date: compatibilityDate, compatibility_flags: ["nodejs_compat"],
           r2_buckets: [{ binding: "BUCKET", bucket_name: bucketName }],
         } },
+        { configPath: repoReadWorker.accessConfig },
       ],
     });
     closers.push(() => server.close());
@@ -123,6 +129,12 @@ export default async function globalSetup() {
     const { BUCKET } = await server.getWorker<{ BUCKET: Parameters<typeof removeSmokeAsset>[0] }>("storage-faults").getEnv();
     await removeSmokeAsset(BUCKET, seed.organizationId, seed.projectId);
     await writeFile(join(directory, "backend-admin.json"), JSON.stringify({ origin: convex.origin, adminKey: convex.adminKey }), { mode: 0o600 });
+    const workerEnv = await server.getWorker<{ REPO_CONTENT: R2BucketLike }>().getEnv();
+    const accessEnv = await server.getWorker<{ GRANTS: { put(key: string, value: string): Promise<void> } }>(repoReadWorker.access).getEnv();
+    const repos = await seedRepositories(workerEnv.REPO_CONTENT, accessEnv.GRANTS, seed.userIds.owner);
+    const reposPath = join(directory, "repos.json");
+    await writeFile(reposPath, JSON.stringify(repos), { mode: 0o600 });
+    process.env.RENDRO_E2E_REPOS = reposPath;
     const seedPath = join(directory, "seed.json");
     await writeFile(seedPath, JSON.stringify(seed), { mode: 0o600 });
     process.env.RENDRO_E2E_ORIGIN = url.origin;

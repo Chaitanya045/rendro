@@ -51,8 +51,12 @@ function appPolicy(nonce: string, path: string, embeddedError = false): string {
   ].join("; ");
 }
 
+/** Repository document frames and assets (#234): /r/{owner}/{repo}[/{ref}]/files/… and the ticket form. */
+const repoDocument = /^\/r\/[^/]+\/[^/]+(?:\/[~@][^/]+)?\/(?:files\/|view\/[^/]+\/files\/)/;
+
 function documentRoute(path: string): boolean {
-  return /^\/organizations\/[^/]+\/projects\/[^/]+\/docs\/(?:files\/|view\/[^/]+\/files\/)/.test(path)
+  return repoDocument.test(path)
+    || /^\/organizations\/[^/]+\/projects\/[^/]+\/docs\/(?:files\/|view\/[^/]+\/files\/)/.test(path)
     || /^\/(?:p|s)\/[^/]+\/files\//.test(path)
     || /^\/public\/[^/]+\/[^/]+\/files\//.test(path)
     || /^\/legacy-view\/[^/]+\/(?:files\/|view\/[^/]+\/files\/)/.test(path)
@@ -100,9 +104,14 @@ export const securityHeaders: MiddlewareHandler = async (c, next) => {
   } else {
     // Nonces must never be reused from a stored response. Preserve private
     // no-store policies; replace public/revalidation policies on all app shells.
+    // Repository shells (#234) alone keep `private, no-cache`: always revalidated, so a
+    // navigation gets a fresh nonce, yet not no-store, so the back/forward cache still works.
     const cacheControl = String(c.res.headers.get("Cache-Control"));
-    c.header("Cache-Control", /(?:^|,)\s*private\s*(?:,|$)/i.test(cacheControl)
-      ? "private, no-store" : "no-store");
+    const revalidatedShell = /^\/r\//.test(c.req.path) && c.res.status < 400 && cacheControl === "private, no-cache";
+    if (!revalidatedShell) {
+      c.header("Cache-Control", /(?:^|,)\s*private\s*(?:,|$)/i.test(cacheControl)
+        ? "private, no-store" : "no-store");
+    }
     c.header("Content-Security-Policy", appPolicy(nonce, c.res.status >= 400 ? "" : c.req.path, document));
     // Styled document errors must remain visible inside the owning viewer.
     c.header("X-Frame-Options", document ? "SAMEORIGIN" : "DENY");

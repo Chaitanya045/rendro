@@ -1,0 +1,9 @@
+# Fixture control Worker for repository read-path tests (#234). TESTS ONLY: never deployed.
+name = "rendro-repo-access-fixture"
+main = "worker.ts"
+compatibility_date = "2025-07-06"
+workers_dev = false
+
+[[kv_namespaces]]
+binding = "GRANTS"
+id = "repo-access-fixture-grants"

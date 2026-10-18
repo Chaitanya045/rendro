@@ -18,7 +18,15 @@ const envSchema = z.object({
   RETENTION_SECRET: z.string().min(32, "RETENTION_SECRET must be at least 32 characters").optional(),
   // Signs same-origin image proxy URLs (/img/<sig>/<url>) at ingest; dedicated, never reused.
   IMAGE_PROXY_SECRET: z.string().min(32, "IMAGE_PROXY_SECRET must be at least 32 characters"),
-});
+  // Signs repository capability cookies and asset tickets (#234). Its own secret: rotating it
+  // only signs readers back in through the permission source.
+  REPO_CAPABILITY_SECRET: z
+    .string()
+    .min(32, "REPO_CAPABILITY_SECRET must be at least 32 characters"),
+}).refine(
+  (value) => ![value.AUTH_SECRET, value.CONVEX_INTERNAL_SECRET, value.RETENTION_SECRET, value.IMAGE_PROXY_SECRET].includes(value.REPO_CAPABILITY_SECRET),
+  { path: ["REPO_CAPABILITY_SECRET"], message: "REPO_CAPABILITY_SECRET must not reuse another secret" },
+);
 
 type Env = z.infer<typeof envSchema>;
 
@@ -48,3 +56,4 @@ export const CONVEX_SITE_URL = env.CONVEX_SITE_URL
 export const AUTH_SECRET = env.AUTH_SECRET;
 export const RETENTION_SECRET = env.RETENTION_SECRET;
 export const IMAGE_PROXY_SECRET = env.IMAGE_PROXY_SECRET;
+export const REPO_CAPABILITY_SECRET = env.REPO_CAPABILITY_SECRET;

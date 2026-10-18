@@ -20,26 +20,32 @@ const file = styleManifest["viewer-base"];
 afterEach(() => vi.restoreAllMocks());
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 
+const sources = Object.keys(styleSources).length;
+
 function project(): string {
   const root = mkdtempSync(join(scratch, "project-"));
   mkdirSync(join(root, "src/styles"), { recursive: true });
-  writeFileSync(join(root, styleSources["viewer-base"]), "a{color:red}\n");
+  for (const source of Object.values(styleSources)) writeFileSync(join(root, source), `a{color:red}/* ${source} */\n`);
   return root;
 }
 
 describe("viewer stylesheet build", () => {
   it("matches the committed files byte for byte", () => {
     expect(diffStyleBuild(repo, build)).toEqual([]);
-    expect([...build.files.keys()]).toEqual([file]);
-    expect(file).toMatch(/^viewer-base\.[0-9a-f]{10}\.css$/);
-    expect(readFileSync(join(repo, styleDirectory, file))).toEqual(readFileSync(join(repo, styleSources["viewer-base"])));
+    expect([...build.files.keys()]).toEqual(Object.values(styleManifest));
+    for (const [name, source] of Object.entries(styleSources)) {
+      const committed = styleManifest[name as keyof typeof styleManifest];
+      expect(committed).toMatch(new RegExp(`^${name}\\.[0-9a-f]{10}\\.css$`));
+      expect(readFileSync(join(repo, styleDirectory, committed))).toEqual(readFileSync(join(repo, source)));
+    }
   });
 
   it("reports drift: missing, changed and stale files and an outdated manifest", () => {
     const root = project();
     const fresh = buildStyles(root);
-    const [name] = fresh.files.keys();
-    expect(diffStyleBuild(root, fresh).sort()).toEqual([`public/styles/${name} is missing`, "src/routes/style-manifest.ts is out of date"]);
+    const names = [...fresh.files.keys()];
+    const [name] = names;
+    expect(diffStyleBuild(root, fresh).sort()).toEqual([...names.map(file => `public/styles/${file} is missing`), "src/routes/style-manifest.ts is out of date"].sort());
     mkdirSync(join(root, "src/routes"), { recursive: true });
     writeStyleBuild(root, fresh);
     expect(diffStyleBuild(root, fresh)).toEqual([]);
@@ -52,7 +58,7 @@ describe("viewer stylesheet build", () => {
       "src/routes/style-manifest.ts is out of date",
     ].sort());
     writeStyleBuild(root, fresh);
-    expect(readdirSync(join(root, styleDirectory))).toEqual([name]);
+    expect(readdirSync(join(root, styleDirectory)).sort()).toEqual([...names].sort());
   });
 
   it("renames the output when the source changes", () => {
@@ -69,9 +75,9 @@ describe("viewer stylesheet build", () => {
     expect(runStyleBuild(root, ["--check"], log)).toBe(1);
     expect(log).toHaveBeenLastCalledWith(expect.stringContaining("Run pnpm build:styles"));
     expect(runStyleBuild(root, [], log)).toBe(0);
-    expect(log).toHaveBeenLastCalledWith("Built 1 style files.");
+    expect(log).toHaveBeenLastCalledWith(`Built ${sources} style files.`);
     expect(runStyleBuild(root, ["--check"], log)).toBe(0);
-    expect(log).toHaveBeenLastCalledWith("Styles verified (1 files).");
+    expect(log).toHaveBeenLastCalledWith(`Styles verified (${sources} files).`);
   });
 
   it("runs against the working directory with the real console", async () => {
@@ -81,7 +87,7 @@ describe("viewer stylesheet build", () => {
     process.argv = [argv[0], "scripts/build-styles.ts", "--check"];
     try {
       await import("../scripts/build-styles");
-      expect(info).toHaveBeenCalledWith("Styles verified (1 files).");
+      expect(info).toHaveBeenCalledWith(`Styles verified (${sources} files).`);
       expect(process.exitCode).toBe(0);
     } finally {
       process.argv = argv;

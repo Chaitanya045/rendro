@@ -24,6 +24,7 @@ import publicV2Routes from "@/routes/public-v2";
 import publicRoutes from "@/routes/public";
 import publicationRoutes from "@/routes/publications";
 import imageProxyRoutes from "@/routes/image-proxy";
+import repoReadRoutes from "@/repo-read/routes";
 
 // Route mounting shared by the Node server (src/index.ts) and the Cloudflare
 // Worker (src/worker.ts). Each entry point owns its middleware, static assets,
@@ -38,6 +39,8 @@ export function mountPublicRoutes<E extends AppEnv>(app: Hono<E>): void {
   app.route("/", imageProxyRoutes);
   app.route("/", publicV2Routes);
   app.route("/", shareV2Routes);
+  // Repository docs authorize with their own capability cookie and look the session up only on a miss.
+  app.route("/", repoReadRoutes);
   app.route("/", shareRoutes);
   app.route("/", publicRoutes);
 }
