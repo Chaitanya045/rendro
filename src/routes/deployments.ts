@@ -3,6 +3,7 @@ import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { authClientIpHeaders } from "@/auth-client-ip";
 import { logger } from "@/logger";
+import { transientStorageFault } from "@/storage-fault";
 import { backendFetch } from "@/backend-fetch";
 import { signStorageValidation, STORAGE_ATTESTATION_HEADER } from "../../shared/storage-attestation";
 import { CONVEX_INTERNAL_SECRET, CONVEX_SITE_URL } from "@/config";
@@ -22,6 +23,12 @@ import { deploymentIndexObjects, openDeploymentIndex } from "@/deployment-index"
 const app = new Hono();
 app.onError((error, c) => {
   if (error instanceof HTTPException) return error.getResponse();
+  // Every storage write here is idempotent (fixed key, manifest-checked bytes), so the CLI may replay it.
+  const fault = transientStorageFault(error);
+  if (fault) {
+    logger.error({ category: "StorageError", ...fault }, "Deployment storage unavailable");
+    return c.json({ error: "Storage temporarily unavailable", retryable: true }, 503, { "Retry-After": "1", "Cache-Control": "private, no-store" });
+  }
   logger.error({ errorType: error.name }, "Deployment request failed");
   return c.json({ error: "Internal server error" }, 500);
 });

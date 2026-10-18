@@ -197,6 +197,28 @@ test.describe("account menu", () => {
     await expect(avatar).toHaveAttribute("aria-expanded", "false");
     await expect(page.locator("#cp-account-menu")).toBeHidden();
   });
+
+  test("pressing the organization switcher while the page fills in the organization's name still opens it", async ({ page }, info) => {
+    await page.setViewportSize(desktop);
+    const workspace = await provision(page, `label-${info.project.name}`, { organizations: ["Alpha", "Beta"] });
+    // The overview shows a placeholder name until this response arrives. WebKit drops a click whose pressed text node is
+    // removed before the button is released, so the page must rewrite the label in place.
+    const hold = await holdFirst(page, "**/api/auth/organization/get-full-organization*");
+    await page.goto(`/organizations/${workspace.organizations[0].id}`);
+    const switcher = page.locator("button#cp-org-switcher");
+    const label = switcher.locator("[data-org-name]");
+    await expect(label).toHaveText("Organization");
+    const box = (await label.boundingBox())!;
+    await page.mouse.move(box.x + 4, box.y + box.height / 2);
+    await page.mouse.down();
+    hold.release();
+    await hold.delivered();
+    await expect(label).toHaveText("Alpha");
+    await page.mouse.up();
+    await expect(switcher).toHaveAttribute("aria-expanded", "true");
+    await expect(page.locator("#cp-org-menu")).toBeVisible();
+    await hold.close();
+  });
 });
 
 async function open(page: Page) {

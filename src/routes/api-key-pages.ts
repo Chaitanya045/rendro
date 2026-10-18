@@ -22,8 +22,7 @@ const apiKeyScript = String.raw`
       var organization=await ui.request("/api/rendro/management/access"+query);
       if(version!==loadVersion||!active())return;
       if(!organization)throw new Error("Organization not found.");
-      document.querySelectorAll("[data-org-name]").forEach(function(node){if(node.textContent!==organization.name)node.textContent=organization.name;});
-      document.querySelectorAll("[data-org-mark]").forEach(function(node){var initial=organization.name.charAt(0).toUpperCase();if(node.textContent!==initial)node.textContent=initial;});
+      window.RendroUI.setOrganizationChrome(organization.name,organization.name.charAt(0).toUpperCase());
       var member=organization.member;
       var canManage=Boolean(member&&member.role.split(",").some(function(role){return role.trim()==="owner"||role.trim()==="admin";}));
       create.hidden=!canManage;
