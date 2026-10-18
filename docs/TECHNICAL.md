@@ -1852,9 +1852,121 @@ root:
 - Repo HTML loses its scripts, inline styles and `<link>` stylesheets, so it is
   shown in Rendro's typography. Allowing repo-relative stylesheets is a product decision.
 - External images load from their origin, which shares the reader's IP with the
-  image host. A camo-style proxy or an `img-src` policy decides this at serve time.
+  image host. A camo-style proxy or an `img-src` policy decides this. For rewriting
+  at ingest (#224), `renderDocument` takes a `rewriteImageUrl` option (see P3b below).
 - Math (`$…$`) and Mermaid fences stay as text and code. mdBook `SUMMARY.md`,
   MkDocs `nav` and Docusaurus sidebars are not yet used for ordering.
+
+## Repository Ingest Orchestration (GitHub pivot, P3b)
+
+This section covers how a GitHub commit becomes a ready-to-serve snapshot (#220, part of epic #214). It is built and tested against a fake GitHub, and nothing on the request path uses it yet. The webhook route arrives with P1 (GitHub App), and serving arrives with P4. The content step sits behind the `ContentPipeline` interface in `src/ingest/orchestrator/pipeline.ts`. `contentPipeline()` (`content-pipeline.ts`) adapts the P3a modules above to it: `configFilesToRead`, `detectDocs`, `renderDocument`, `renderKey` and `buildSidebar`. The ingest Worker's main module, `entry.ts`, imports the comrak binary as a `WebAssembly.Module` and initializes the engine before anything renders.
+
+| Module | Role |
+|---|---|
+| `src/ingest/github/source.ts`, `http-source.ts` | The `GitHubSource` interface and its REST implementation: refs with ETag/304, recursive and per-directory trees, raw blobs checked against their git ID, and archives |
+| `src/ingest/github/rate-governor.ts` | Client-side pacing and backoff for one token's budget |
+| `src/ingest/github/tar.ts` | Streaming tar reader for GitHub archives (pax, GNU long names, base-256 sizes, checksums) |
+| `src/ingest/github/webhook.ts`, `deliveries.ts` | Push webhook verification and parsing (not routed yet); webhook redelivery client |
+| `src/ingest/orchestrator/content-pipeline.ts` | The P3a pipeline behind `ContentPipeline`; render failures become per-page failures |
+| `src/ingest/orchestrator/snapshot.ts`, `ingest.ts` | Snapshot build and the render-then-flip pointer move |
+| `src/ingest/orchestrator/coordinator.ts` | Per-repository Durable Object logic: serialization, single flight, dedupe |
+| `src/ingest/orchestrator/consumer.ts`, `reconcile.ts`, `worker.ts`, `entry.ts` | Queue consumer, cron reconciliation, the ingest Worker, and its main module |
+
+### Ingest Worker and bindings (development and tests only)
+
+`wrangler.ingest.toml` defines a separate ingest Worker, `rendro-ingest-dev`. It has no routes, no `workers.dev` URL and no deploy script, and `wrangler.toml` does not refer to it. `tests/ingest-workerd.test.ts` runs it on real workerd through Wrangler's test harness, with outbound fetches routed to the in-process fake GitHub.
+
+| Binding | Type | Purpose |
+|---|---|---|
+| `INGEST_BUCKET` | R2 | Content cache under `gh/v1/` (GitHub stays the source of truth) |
+| `INGEST_QUEUE` | Queue producer and consumer (`rendro-ingest-dev`, dead-letter queue `rendro-ingest-dev-dlq`, 10 retries) | One message per "bring this branch up to date" |
+| `INGEST_COORDINATOR` | Durable Object `RepoIngestCoordinator` (SQLite-backed, migration `v1`) | One instance per repository, named `repo:<GitHub repository ID>` |
+| Cron `*/10 * * * *` | Scheduled handler | Re-checks heads and redelivers failed webhooks |
+| `GITHUB_API_ORIGIN`, `GITHUB_ARCHIVE_ORIGINS` | Vars, optional | Point the client at a fake GitHub; the defaults are `api.github.com` and `codeload.github.com` |
+| `GITHUB_DEV_TOKEN` | Secret, optional | Development token until P1 mints installation tokens; without it requests are unauthenticated |
+
+### Storage key schema
+
+Every key a repository owns sits under `gh/v1/repo/<repo id>/`. The prefix uses GitHub's numeric repository ID, so renames and transfers move nothing, and purging a repository (P9) is one prefix delete. The ref pointer is the only mutable object; every other key names immutable bytes.
+
+```text
+gh/v1/
+├── repo/{repoId}/
+│   ├── blob/{blobSha}                                  raw blob bytes, content-addressed
+│   ├── render/v{rv}/{kind}/{blobSha}/{dirHash}         rendered page { html, title, headings }, or a cached { error } (renderKey)
+│   ├── tree/{treeSha}.json                             one directory listing (truncated-tree walks only)
+│   ├── snapshot/{commitSha}/r{rv}/sidebar.json
+│   ├── snapshot/{commitSha}/r{rv}/manifest.json        written last; its presence means the snapshot is complete
+│   └── ref/{encodeURIComponent(branch)}.json           the pointer: { commit, rendererVersion, sequence, flippedAt }
+├── tracked/{repoId}.json                               reconciliation registry: { repo, branches }
+└── reconcile/redelivery.json                           redelivery checkpoint
+```
+
+- Snapshot keys include the renderer version (`r{rv}`). After a renderer change, a commit's snapshot is rebuilt next to the old one, never overwritten, so caches keyed by commit stay valid. The rebuild reads blobs from R2 and makes no GitHub requests.
+- Blobs are fetched once per repository and reused across commits. A rename or move costs no fetch.
+- The manifest maps each page and asset path to `{ sha, size, render?, title?, error? }`. A page that cannot be rendered records `error`, and the rest of the snapshot is still built. The reason is `too-large` when the tree listing already shows the page over 1 MiB (it is never fetched), otherwise the `RenderError` reason: `too-large`, `too-complex`, `too-deep`, `unstable` or `engine`.
+- Render failures are deterministic for a blob, a directory and a renderer version, so the failure is stored at the render key like an output. A hostile page is rendered once, not on every push.
+- The exception is the engine itself. After comrak crashes, the isolate refuses all further Markdown. The page that crashed it is recorded as `engine`. Later Markdown pages fail the attempt with the transient `markdown-engine-unavailable`, which the queue retries, so good pages are never marked as broken. A Durable Object may keep its isolate across retries, so recovery waits for the isolate to be recycled (#223 brings an engine that can be re-instantiated).
+- Pages are keyed by directory as well as blob, because relative links resolve against the directory. A page moved to another directory is rendered again, from the blob in R2 and without a GitHub request. Assets need nothing.
+- Assets are images (`png`, `jpg`, `gif`, `svg`, `webp`, `avif`, `ico`, `bmp`) under the docs root, outside vendored and hidden folders. The sanitizer removes stylesheets, scripts and media elements, so no other file types are ever referenced.
+- Private-repository content (blobs, renders, tree listings, sidebar and manifest) is written through the `ContentSealer` hook. Today the hook stores bytes as they are; P9 adds per-repo AES-GCM. The pointer, the registry and the checkpoint hold only IDs and names, and are not sealed.
+
+### Render-then-flip
+
+1. Under the repository's coordinator, read the pointer, then GitHub's current head. The head request is conditional; a 304 costs no primary quota.
+2. If the head is already served at the current renderer version, stop.
+3. If `manifest.json` already exists for the head, skip to step 6.
+4. List the tree: one recursive request. When GitHub truncates the listing (past 100,000 entries or 7 MB), walk it one directory at a time instead. Each directory listing is cached by its tree ID, so the next push fetches only the directories on changed paths. `node_modules`, `vendor` and similar folders are never entered.
+5. Read the config files detection asks for, detect, and diff against the previous snapshot.
+   - If the docs root's tree ID, the detection and the renderer are all unchanged, reuse the previous file map and sidebar: one manifest write, no blob fetches.
+   - Otherwise fetch only blobs missing from R2, checking with an R2 HEAD first. A first import with at least 32 missing blobs takes them from one archive, provided the repository is under 512 MiB and either under 16 MiB or at least a quarter docs by bytes.
+   - The archive redirect is followed at once and never stored, since private-repo links expire in five minutes. The installation token is never sent to the archive host. Archive entries carry no blob IDs, so each wanted entry is hashed and checked against the tree listing.
+   - Files whose archive bytes differ from their blob (export-subst, LFS) are fetched one by one, as is everything still missing when the archive fails partway (an expired link, a cut connection, a different commit in the pax header).
+   - Pages render as their bytes arrive. Then write the sidebar, and the manifest last.
+   - Image hook (#224): `contentPipeline({ rewriteImageUrl })` passes every external (`http`/`https`) image source through a rewrite. It runs on sanitized content before serialization, so the output allowlist and the fixed-point check still apply to the rewritten URL, and returning null drops the source. The output depends on the rule, so changing it must bump `RENDERER_VERSION`. No rule is configured yet.
+6. Flip: write the new pointer with a compare-and-swap on the pointer object's ETag (R2 `onlyIf`). If another writer got there first, the attempt fails and retries.
+7. Re-check the head (normally a free 304). If it moved during the build, ingest again, up to two follow-ups per call.
+
+The pointer moves only in step 6, so a crash, eviction or failure anywhere earlier leaves the previous snapshot served. The objects already written are reused on retry. The workerd test reloads the Worker mid-ingest to show this.
+
+### Single flight, idempotency and dedupe
+
+- **One coordinator per repository.** The Durable Object for `repo:<id>` runs one ingest at a time, however many isolates, queue batches or readers ask. Durable Objects are single-instance per name, but their input gates open while a request awaits network I/O, so the coordinator serializes with its own promise chain. It also refuses messages for any other repository ID.
+- **Single flight per branch.** A request joins the running job if it carries no hint or the same commit. Otherwise it joins the one job queued behind it, which reads the head when it starts and so covers any hint. Concurrent first views of an unseen repository are coalesced twice: per isolate by `firstViewEnsurer`, then across isolates by the coordinator. With the snapshot built, `ensure` answers from the pointer without calling GitHub.
+- **Forward-only.** The head observed by a job is never older than the one behind the current pointer, because jobs are serialized and each reads GitHub's head. A late or duplicate delivery therefore cannot move a branch back. Push payloads (`after`) are hints only.
+- **Stale hints.** A hint that is neither the served commit nor in the branch's flip history (the last 50) may come from a push the ref API has not shown yet. The consumer re-checks it twice, 15 seconds apart, then leaves it to reconciliation.
+- **Delivery dedupe.** `X-GitHub-Delivery` is the dedupe key; redeliveries reuse it. A delivery is remembered only once its work has settled (flipped, current, no branch, or a permanent failure), for four days, which is longer than GitHub's three-day redelivery window. A transient failure or an unconfirmed hint leaves it retryable. Dedupe saves work; commit-level idempotency (manifest present means already built; pointer at the head means nothing to do) is what makes duplicates safe.
+- **Failures.** GitHub 404, 403 and too-large responses, and a tree past 20,000 directories, are permanent: the message is acked and the failure is recorded against that head, so reconciliation skips it until the head moves. Everything else (5xx, network errors, rate limits, storage errors, pointer conflicts) is retried by the queue. Rate limits use GitHub's retry time; other failures back off exponentially from 10 s up to an hour, then go to the dead-letter queue.
+
+### GitHub budget
+
+- One `RateGovernor` per token allows 4 requests in flight, well under GitHub's 100-concurrent secondary limit and the Workers 6-connection limit. It paces each endpoint at 10 requests/s after a burst of 10, under the 900-per-minute endpoint limit.
+- After a primary limit (remaining 0), it sends nothing until `x-ratelimit-reset`. After a secondary limit, it waits for `Retry-After`, or 60 s doubling to 15 minutes. Waits of up to 1 s happen in place; longer ones fail the attempt with `retryAt`, so a queue retry is delayed instead of holding the consumer.
+- 5xx and network errors get two retries with jittered backoff.
+- A 401 drops the token and retries once, since installation tokens rotate hourly.
+- Redirects are followed only within the API origin, so renamed repositories keep working.
+
+Measured against the fake GitHub for a repository with 300 docs pages, 40 images and 1,500 other files (`tests/ingest-measure.test.ts`, real comrak rendering). Billable requests are the ones that cost primary quota: 304s and the archive download are free. In Node with no network latency, the first import took 0.9–1.9 s (archive) and 0.5–0.9 s (per-blob, pacing excluded). Pushes took 25–100 ms. The host load average was 13–21.
+
+| Scenario | Billable requests | Blob requests | Pacing time |
+|---|---|---|---|
+| First import, archive | 3 (ref, tree, archive) | 0 | 0 s |
+| First import, per-blob (forced) | 343 | 341 | about 33 s |
+| Push changing 2 pages and 1 image | 5 | 3 | 0 s |
+| Push outside the docs folder | 2 | 0 | 0 s |
+| Duplicate delivery | 0 | 0 | 0 s |
+| Reconciliation, nothing moved | 0 (one 304) | 0 | 0 s |
+
+On workerd (`tests/ingest-workerd.test.ts`, local machine, real comrak bundled as WASM), a private repository with 61 pages, 6 images and 40 other files went from queue message to flipped pointer in about 2.3 s for the first import (3 billable requests) and about 1.2 s for a two-file push (4 billable). Both times include the queue's one-second batch window.
+
+### Reconciliation
+
+GitHub never retries a failed webhook, and sends no event for some bulk pushes. The cron therefore runs two independent steps; a failure in one is logged and does not stop the other.
+
+- **Heads.** For each `tracked/` entry, the repository's coordinator re-checks every tracked branch with its stored ETag. A head that differs from the pointer is queued like a push; a head with a recorded permanent failure is skipped. Repositories share the token's governor, so once GitHub rate-limits one check, the rest wait for the next run.
+- **Redelivery.** The `WebhookDeliveries` client lists app webhook deliveries (newest first) back to the checkpoint, minus an hour of overlap, and never further than GitHub's three-day window. It groups them by GUID and redelivers those whose newest attempt failed, oldest first, up to 20 per run. A GUID that failed three times is logged and left alone. The checkpoint advances only when a run saw the whole window and handled every failure. The app JWT comes with P1; until then the step reports `not-configured`.
+
+---
 
 ## Key Technical Decisions
 

@@ -1,0 +1,41 @@
+# Ingest Worker for the GitHub pivot (#214, phase P3b). DEVELOPMENT AND TESTS ONLY.
+# No route, no workers.dev URL, no deploy script; nothing in wrangler.toml refers to it.
+# tests/ingest-workerd.test.ts runs it on real workerd against a fake GitHub.
+# Bindings are documented in docs/TECHNICAL.md ("Repository ingest orchestration").
+name = "rendro-ingest-dev"
+main = "src/ingest/orchestrator/entry.ts"
+compatibility_date = "2025-07-06"
+workers_dev = false
+
+[observability.logs]
+enabled = true
+invocation_logs = false
+
+# Content cache: GitHub stays the source of truth (gh/v1/ key schema).
+[[r2_buckets]]
+binding = "INGEST_BUCKET"
+bucket_name = "rendro-ingest-dev"
+
+[[queues.producers]]
+binding = "INGEST_QUEUE"
+queue = "rendro-ingest-dev"
+
+[[queues.consumers]]
+queue = "rendro-ingest-dev"
+max_batch_size = 10
+max_batch_timeout = 1
+max_retries = 10
+dead_letter_queue = "rendro-ingest-dev-dlq"
+
+# One coordinator per repository: single flight, serialized ingest, delivery dedupe.
+[[durable_objects.bindings]]
+name = "INGEST_COORDINATOR"
+class_name = "RepoIngestCoordinator"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["RepoIngestCoordinator"]
+
+# Reconciliation: re-check branch heads with ETags; redeliver failed webhooks (from P1).
+[triggers]
+crons = ["*/10 * * * *"]

@@ -83,4 +83,3 @@ export async function acceptPushWebhook(request: Request, options: { secret: str
   await options.queue.send(parsed.message);
   return new Response(null, { status: 202 });
 }
-
