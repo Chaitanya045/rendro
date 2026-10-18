@@ -27,14 +27,7 @@ describe.each(["public", "share", "private ticket", "private cookie"])("%s deliv
     const path = file.replace("guide/", "");
     objects.mockImplementation(() => Promise.resolve(interrupted(first)));
     const response = await app.request(viewer.prefix + path, { headers: viewer.cookie ? { Cookie: fixtureCookie } : {} });
-    if (name === "public" && path.endsWith(".html")) {
-      // A publication buffers its HTML to place the integration, so the failure is still ahead of the status line.
-      expect(response.status).toBe(503);
-      expect(response.headers.get("Cache-Control")).toBe("private, no-store");
-      expect(await response.text()).not.toContain("Partial");
-      return;
-    }
-    // Everything else streams: the status is sent, so the body is what must not look complete.
+    // Every surface streams, public HTML included since #209: the status is sent, so the body is what must not look complete.
     expect(response.status).toBe(200);
     await expect(response.text()).rejects.toThrow("storage stream interrupted");
   });
