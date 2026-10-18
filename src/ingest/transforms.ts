@@ -89,6 +89,21 @@ export function decorateLinksAndImages(tree: Root): void {
   });
 }
 
+/**
+ * Pass external (http/https) image sources through `rewrite`, e.g. to route
+ * them via an image proxy (#224). Runs on sanitized content, before
+ * serialization, so the output allowlist and fixed-point check still apply to
+ * the rewritten URL. Returning null drops the source.
+ */
+export function rewriteExternalImages(tree: Root, docPath: string, rewrite: (url: string, docPath: string) => string | null): void {
+  walkElements(tree, (node: Element) => {
+    if (node.tagName !== "img" || typeof node.properties.src !== "string" || !/^https?:/.test(node.properties.src)) return;
+    const next = rewrite(node.properties.src, docPath);
+    if (next === null) delete node.properties.src;
+    else node.properties.src = next;
+  });
+}
+
 /** First h1, else the first heading of any level. */
 export function titleFromHeadings(headings: Heading[]): string | null {
   const heading = headings.find((candidate) => candidate.depth === 1) ?? headings[0];

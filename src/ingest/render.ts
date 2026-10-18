@@ -8,7 +8,7 @@ import { markdownToUnsafeHtml } from "@/ingest/markdown-engine";
 import { parseHtmlDocument, parseHtmlFragment } from "@/ingest/parse-html";
 import { dirnameOf, extensionOf } from "@/ingest/paths";
 import { sanitizeContent, serializeVerified } from "@/ingest/sanitize";
-import { assignHeadingIds, convertAlerts, decorateLinksAndImages, rewriteUrls, titleFromHeadings, type Heading } from "@/ingest/transforms";
+import { assignHeadingIds, convertAlerts, decorateLinksAndImages, rewriteExternalImages, rewriteUrls, titleFromHeadings, type Heading } from "@/ingest/transforms";
 
 export type DocumentKind = "markdown" | "mdx" | "html";
 
@@ -27,17 +27,26 @@ export interface RenderedDocument {
   headings: Heading[];
 }
 
+export interface RenderOptions {
+  /**
+   * Hook for external image sources (the image proxy, #224). The output
+   * depends on it, so a change of rewrite rule must change the render key
+   * (bump RENDERER_VERSION). Unset, external images keep their URLs.
+   */
+  rewriteImageUrl?: (url: string, docPath: string) => string | null;
+}
+
 /**
  * Render one repository file at `path` into sanitized HTML. Pure and
  * synchronous; throws RenderError when the file exceeds a limit or its
  * output cannot be proven stable.
  */
-export function renderDocument(source: string, path: string): RenderedDocument {
+export function renderDocument(source: string, path: string, options: RenderOptions = {}): RenderedDocument {
   const kind = documentKindOf(path);
   if (!kind) throw new TypeError(`Not a renderable document: ${path}`);
   checkSourceLimits(source);
   const { tree, title } = kind === "html" ? parseRepoHtml(source) : parseMarkdown(source, kind === "mdx");
-  return { rendererVersion: RENDERER_VERSION, kind, ...finish(tree, path, title) };
+  return { rendererVersion: RENDERER_VERSION, kind, ...finish(tree, path, title, options) };
 }
 
 function parseMarkdown(source: string, mdx: boolean): { tree: Root; title: string | null } {
@@ -54,9 +63,10 @@ function parseRepoHtml(source: string): { tree: Root; title: string | null } {
   return { tree: { type: "root", children: body }, title: title || null };
 }
 
-function finish(tree: Root, path: string, title: string | null): Pick<RenderedDocument, "html" | "title" | "headings"> {
+function finish(tree: Root, path: string, title: string | null, options: RenderOptions): Pick<RenderedDocument, "html" | "title" | "headings"> {
   rewriteUrls(tree, path);
   const clean = sanitizeContent(tree);
+  if (options.rewriteImageUrl) rewriteExternalImages(clean, path, options.rewriteImageUrl);
   convertAlerts(clean);
   const headings = assignHeadingIds(clean);
   decorateLinksAndImages(clean);
