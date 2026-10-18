@@ -700,7 +700,8 @@ describe("viewer fragment navigation in Chromium", () => {
     expect(await review.count()).toBe(0);
     expect(await notice.locator("p").textContent()).toBe("Open linked document guide/page.html?v=2#section?");
     expect(await focused()).toBe("Open linked document");
-    expect(requests.filter(path => path.includes("/files/")).length).toBe(1);
+    // Dismiss, a remembered request and Review load nothing: only the first open document was fetched (the list names a stray one).
+    expect(requests.filter(path => path.includes("/files/"))).toEqual([`${privateBase}/files/${documents[0]}`]);
 
     await press(notice.getByRole("button", { name: "Open linked document", exact: true }));
     await readyFrame(page, { search: "?v=2" });

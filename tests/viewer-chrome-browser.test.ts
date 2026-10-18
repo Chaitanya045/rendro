@@ -207,9 +207,7 @@ describe("the document tree while it loads and with long names", () => {
     expect(await page.locator(`.tree-item[data-path="org-a/${longFile}"]`).getAttribute("class")).toContain("active");
   });
 
-  // Known bug: the open folder's grid column grows to its widest label (`.tree-folder-content` has no `min-width: 0`), so
-  // inside a folder a long name is not clipped at the row: it pushes the tree sideways. Remove `.fails` with the fix.
-  it.fails("truncates long Unicode file and folder names inside an open folder (known bug)", async () => {
+  it("truncates long Unicode file and folder names inside an open folder, which keeps its column at the tree's width", async () => {
     const page = await open(1280, "reduce");
     await folder(page, "guide").locator("> .tree-item").click();
     await page.locator(`.tree-item[data-path="org-a/guide/${longFile}"]`).waitFor();
@@ -220,8 +218,9 @@ describe("the document tree while it loads and with long names", () => {
       expect(long.row, selector).toBe(short.row);
     }
     expect(await treeScrollsSideways(page)).toBe(false);
-    expect(await page.getByRole("link", { name: longFile.replace(/\.html$/, ""), exact: true }).count()).toBe(1);
-    expect(await page.getByRole("button", { name: longFolder, exact: true }).count()).toBe(1);
+    const guide = folder(page, "guide");
+    expect(await guide.getByRole("link", { name: longFile.replace(/\.html$/, ""), exact: true }).count()).toBe(1);
+    expect(await guide.getByRole("button", { name: longFolder, exact: true }).count()).toBe(1);
   });
 
   it("animates only the active row while a document loads, and leaves the active bar where it is", async () => {

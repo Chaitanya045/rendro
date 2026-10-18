@@ -371,6 +371,13 @@ test.describe("share viewer", () => {
     const share = await makeShare("index.html");
     const requests: string[] = [];
     await anon.context().route("https://docs.example.test/**", route => { requests.push(route.request().url()); return route.fulfill({ contentType: "text/html", body: "<h1>outside</h1>" }); });
+    // The prompt is built from DOM only, under the strict nonce policy: nothing it needs is blocked.
+    const violations: string[] = [];
+    await anon.exposeFunction("recordViolation", (value: string) => { violations.push(value); });
+    await anon.addInitScript(() => document.addEventListener("securitypolicyviolation", event => {
+      (window as unknown as { recordViolation: (value: string) => void }).recordViolation(`${event.effectiveDirective}: ${event.blockedURI}`);
+    }));
+    anon.on("console", message => { if (/content.security.policy/i.test(message.text()) && !/x-frame-options/i.test(message.text())) violations.push(message.text()); });
     await anon.goto(`/s/${share.token}`);
     await expect(heading(anon, "Viewer home")).toBeVisible();
     const url = anon.url();
@@ -379,6 +386,12 @@ test.describe("share viewer", () => {
     // The frame never loads another site; the click is handed to the shell, which asks and changes nothing meanwhile.
     await content(anon).locator("#external").click();
     await expect(destination(anon)).toHaveText("Open external link https://docs.example.test/outside?");
+    // Its styling comes from the shell's nonced stylesheet: a floating card, not an unstyled block at the foot of the page.
+    expect(await notice(anon).evaluate(element => {
+      const style = getComputedStyle(element);
+      const buttons = element.querySelectorAll("button");
+      return { position: style.position, shadow: style.boxShadow !== "none", gap: getComputedStyle(buttons[1]).marginLeft };
+    })).toEqual({ position: "fixed", shadow: true, gap: "12px" });
     await expect(notice(anon).getByRole("button", { name: "Open external link" })).toHaveAccessibleDescription("Open external link https://docs.example.test/outside?");
     await content(anon).locator("#external").click();
     await expect(notice(anon)).toHaveCount(1);
@@ -411,6 +424,7 @@ test.describe("share viewer", () => {
     expect(requests).toEqual(["https://docs.example.test/outside"]);
     // The share still grants only its one document.
     await expect(anon.locator("#content-frame")).toHaveAttribute("sandbox", "allow-scripts allow-forms allow-popups allow-downloads");
+    expect(violations, "CSP violations in the share shell").toEqual([]);
   });
 
   test("a revoked share is not found, in the shell, in the document and in a viewer that was already open", async ({ anon, makeShare, revokeShare }) => {

@@ -15303,8 +15303,14 @@
           "inventoryRefs": [
             "V02"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/viewer-chrome-browser.test.ts",
+              "name": "truncates long Unicode file and folder names inside an open folder, which keeps its column at the tree's width",
+              "kind": "browser"
+            }
+          ]
         }
       ]
     },

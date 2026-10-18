@@ -24,7 +24,6 @@ export function createNavigationNotice({ describe, open: onOpen }: NavigationNot
     const label = doc.createElement("p");
     label.id = "document-navigation-destination";
     label.setAttribute("role", "status");
-    label.style.cssText = "margin:0 0 8px;overflow-wrap:anywhere;max-height:6em;overflow:auto";
     label.textContent = words.question;
     const open = doc.createElement("button");
     open.type = "button";
@@ -36,7 +35,6 @@ export function createNavigationNotice({ describe, open: onOpen }: NavigationNot
     dismiss.type = "button";
     dismiss.className = "load-more-btn";
     dismiss.textContent = "Dismiss";
-    dismiss.style.marginLeft = "12px";
     dismiss.addEventListener("click", () => {
       if (!confirmation.dismiss()) return;
       const collapsed = doc.createElement("div");
