@@ -312,13 +312,18 @@ test.describe("drawer", () => {
     await expect(olderThreads).toHaveText("Load older comments");
     // Loading older comments adds them above without moving the card the reader is looking at.
     const list = ui.getByTestId("commentor-drawer-list");
-    const first = ui.locator(`.drawer-thread[data-thread-id="${ids[1]}"]`);
+    // Every live update rebuilds the list with replaceChildren(), so the card is looked up by its
+    // thread id at read time inside one evaluation: a card element held from an earlier moment can
+    // already be detached from the list when the measurement runs.
+    const placeOf = (threadId: string) =>
+      list.evaluate((element, id) =>
+        element.querySelector<HTMLElement>(`.drawer-thread[data-thread-id="${id}"]`)!.getBoundingClientRect().top - element.getBoundingClientRect().top, threadId);
     await list.evaluate(element => { element.scrollTop = 60; });
-    const place = await first.evaluate(card => card.getBoundingClientRect().top - card.parentElement!.getBoundingClientRect().top);
+    const place = await placeOf(ids[1]);
     await olderThreads.evaluate(button => (button as HTMLButtonElement).click());
     await expect(cards).toHaveCount(21);
     // Browsers snap a scroll position to whole pixels, so allow the one pixel of rounding.
-    const after = await first.evaluate(card => card.getBoundingClientRect().top - card.parentElement!.getBoundingClientRect().top);
+    const after = await placeOf(ids[1]);
     expect(Math.abs(after - place)).toBeLessThanOrEqual(1);
     await expect(olderThreads).toHaveCount(0);
 
