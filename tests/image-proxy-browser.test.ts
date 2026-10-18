@@ -74,7 +74,9 @@ it("keeps a proxied SVG inert when it is opened directly", async () => {
   // Positive control: the same SVG served plainly does run its script.
   await browserStep("open the unprotected SVG", () => page.goto(`${harness.origin}/control/scripted.svg`, { waitUntil: "load" }));
   await expect.poll(() => page.evaluate(() => document.documentElement.getAttribute("data-ran"))).toBe("1");
-  await expect.poll(() => beacons.includes("?script")).toBe(true);
+  // Both control beacons must have arrived before the list is reset, or a late one would be blamed on the proxy.
+  await expect.poll(() => [...beacons].sort()).toEqual(["?onload", "?script"]);
+  await browserStep("leave the control document", () => page.goto("about:blank"));
   beacons.length = 0;
 
   const response = await browserStep("open the proxied SVG", () => page.goto(`${harness.origin}${paths.svg}`, { waitUntil: "load" }));
