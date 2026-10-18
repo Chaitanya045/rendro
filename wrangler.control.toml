@@ -1,0 +1,34 @@
+# Control Worker for the GitHub pivot (#214, phase P5, #243). DEVELOPMENT AND TESTS ONLY.
+# No route, no workers.dev URL, no deploy script; wrangler.toml does not bind it yet.
+# It is the serving Worker's REPO_ACCESS service (the repository permission source) and receives
+# GitHub's permission webhooks. Bindings and what the owner must configure are documented in
+# docs/TECHNICAL.md ("Repository permission mirror"). tests/repo-access-workerd.test.ts and the
+# E2E suite run it on real workerd against a fake GitHub.
+name = "rendro-control-dev"
+main = "src/repo-access/entry.ts"
+compatibility_date = "2025-07-06"
+workers_dev = false
+
+# GITHUB_TOKEN_KEY seals stored user tokens (AES-GCM); GITHUB_WEBHOOK_SECRET verifies deliveries.
+# GITHUB_APP_CLIENT_ID/GITHUB_APP_CLIENT_SECRET (token refresh) and GITHUB_DEV_TOKEN are optional until P1.
+[secrets]
+required = ["GITHUB_TOKEN_KEY", "GITHUB_WEBHOOK_SECRET"]
+
+[observability.logs]
+enabled = true
+invocation_logs = false
+
+# Registry, per-user mirrors, sealed tokens, delivery dedupe and the epoch outbox: one instance.
+[[durable_objects.bindings]]
+name = "REPO_ACCESS_DIRECTORY"
+class_name = "RepoAccessDirectory"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["RepoAccessDirectory"]
+
+# Revocation epochs: written here, read by the serving Worker (its REPO_EPOCHS binding).
+# The ID is a placeholder; the owner creates the namespace (see docs/TECHNICAL.md).
+[[kv_namespaces]]
+binding = "REPO_EPOCHS"
+id = "rendro-repo-epochs-dev"

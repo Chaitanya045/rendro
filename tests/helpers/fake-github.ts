@@ -1,4 +1,4 @@
-import { createHash, randomBytes } from "node:crypto";
+import { createHash, createHmac, randomBytes, randomUUID } from "node:crypto";
 import { githubArchive, gzip } from "./tar-writer";
 
 /**
@@ -7,6 +7,11 @@ import { githubArchive, gzip } from "./tar-writer";
  * REST shapes. Conditional requests, rate-limit headers, truncated recursive
  * trees, expiring archive links, app webhook deliveries and scripted faults
  * are all modelled, so HttpGitHubSource is tested against it unchanged.
+ *
+ * For the permission mirror (#243) it also models users, app installations,
+ * collaborators, teams and organization base permissions, user-to-server
+ * tokens that expire and rotate on refresh, the listing endpoints a GitHub App
+ * user token reads, and signed webhook deliveries.
  */
 
 export type FileSpec = string | Uint8Array | { symlink: string } | { submodule: string } | { executable: string };
@@ -19,7 +24,34 @@ interface TreeItem {
   size?: number;
 }
 
-export type Endpoint = "ref" | "tree" | "blob" | "tarball" | "archive" | "deliveries" | "redeliver" | "other";
+export type Endpoint = "ref" | "tree" | "blob" | "tarball" | "archive" | "deliveries" | "redeliver"
+  | "user-installations" | "installation-repositories" | "installation" | "repository" | "permission" | "oauth" | "other";
+
+export interface FakeUser {
+  id: number;
+  login: string;
+}
+
+export interface FakeInstallation {
+  id: number;
+  account: string;
+  suspended: boolean;
+  /** Repository IDs the installation was granted, or all of the account's repositories. */
+  repositories: "all" | Set<number>;
+}
+
+export interface FakeTeam {
+  org: string;
+  members: Set<number>;
+  repos: Set<number>;
+}
+
+export interface FakeUserTokens {
+  accessToken: string;
+  accessTokenExpiresAt: number | null;
+  refreshToken: string;
+  refreshTokenExpiresAt: number;
+}
 
 export interface LoggedRequest {
   method: string;
@@ -65,7 +97,11 @@ export class FakeRepo {
   archiveComment: string | null = null;
   readonly files = new Map<string, Map<string, FileSpec>>();
 
-  constructor(readonly github: FakeGitHub, readonly owner: string, readonly name: string, readonly id: number, readonly isPrivate: boolean) {}
+  /** Users (by ID) with a direct collaborator grant. */
+  readonly collaborators = new Set<number>();
+  defaultBranch = "main";
+
+  constructor(readonly github: FakeGitHub, readonly owner: string, readonly name: string, readonly id: number, public isPrivate: boolean) {}
 
   get ref() {
     return { id: this.id, owner: this.owner, name: this.name, private: this.isPrivate, installationId: 42 };
@@ -125,6 +161,93 @@ export class FakeGitHub {
 
   /** Old "owner/name" → repository, after a rename or transfer. */
   readonly renamed = new Map<string, FakeRepo>();
+
+  readonly webOrigin = "https://github.test";
+  readonly clientId = "fake-client-id";
+  readonly clientSecret = "fake-client-secret";
+  readonly users = new Map<number, FakeUser>();
+  readonly installations = new Map<number, FakeInstallation>();
+  readonly teams = new Map<string, FakeTeam>();
+  /** Organization login → members who may read every repository of it (base permission "read"). */
+  readonly orgReaders = new Map<string, Set<number>>();
+  /** Lifetime of user access tokens in milliseconds; null issues tokens that never expire. */
+  userTokenLifetime: number | null = 8 * 60 * 60 * 1000;
+  refreshTokenLifetime = 184 * 24 * 60 * 60 * 1000;
+  private readonly accessTokens = new Map<string, { user: number; expiresAt: number | null }>();
+  private readonly refreshTokens = new Map<string, { user: number; expiresAt: number }>();
+  private readonly installationTokens = new Map<string, number>();
+
+  user(login: string, id = 5000 + this.users.size + 1): FakeUser {
+    const user = { id, login };
+    this.users.set(id, user);
+    return user;
+  }
+
+  install(account: string, options: { id?: number; repositories?: "all" | number[]; suspended?: boolean } = {}): FakeInstallation {
+    const repositories = options.repositories ?? "all";
+    const installation: FakeInstallation = { id: options.id ?? 70 + this.installations.size + 1, account, suspended: options.suspended ?? false, repositories: repositories === "all" ? "all" : new Set(repositories) };
+    this.installations.set(installation.id, installation);
+    return installation;
+  }
+
+  team(org: string, slug: string, members: FakeUser[] = [], repos: FakeRepo[] = []): FakeTeam {
+    const team = { org, members: new Set(members.map((member) => member.id)), repos: new Set(repos.map((repo) => repo.id)) };
+    this.teams.set(`${org}/${slug}`, team);
+    return team;
+  }
+
+  /** The installation that covers a repository, if any. */
+  installationOf(repo: FakeRepo): FakeInstallation | undefined {
+    return [...this.installations.values()].find((installation) => installation.account.toLowerCase() === repo.owner.toLowerCase()
+      && (installation.repositories === "all" || installation.repositories.has(repo.id)));
+  }
+
+  /** Explicit read access, as /user/installations/{id}/repositories counts it: owner, collaborator, team or organization base permission. */
+  canRead(user: FakeUser, repo: FakeRepo): boolean {
+    return repo.owner.toLowerCase() === user.login.toLowerCase() || repo.collaborators.has(user.id)
+      || [...this.teams.values()].some((team) => team.members.has(user.id) && team.repos.has(repo.id))
+      || (this.orgReaders.get(repo.owner)?.has(user.id) ?? false);
+  }
+
+  /** What the OAuth callback hands over at sign-in: a user-to-server token pair. */
+  signIn(user: FakeUser): FakeUserTokens {
+    const accessToken = `ghu_${randomBytes(12).toString("hex")}`;
+    const refreshToken = `ghr_${randomBytes(12).toString("hex")}`;
+    const accessTokenExpiresAt = this.userTokenLifetime === null ? null : this.now() + this.userTokenLifetime;
+    const refreshTokenExpiresAt = this.now() + this.refreshTokenLifetime;
+    this.accessTokens.set(accessToken, { user: user.id, expiresAt: accessTokenExpiresAt });
+    this.refreshTokens.set(refreshToken, { user: user.id, expiresAt: refreshTokenExpiresAt });
+    return { accessToken, accessTokenExpiresAt, refreshToken, refreshTokenExpiresAt };
+  }
+
+  /** The user revoked the app's authorization: every token of theirs stops working. */
+  revokeAuthorization(user: FakeUser): void {
+    for (const tokens of [this.accessTokens, this.refreshTokens]) {
+      for (const [token, grant] of tokens) if (grant.user === user.id) tokens.delete(token);
+    }
+  }
+
+  /** An installation-scoped token, as P1 will mint (the shared `token` reads everything). */
+  installationToken(installation: FakeInstallation): string {
+    const token = `ghs_${installation.id}_${randomBytes(6).toString("hex")}`;
+    this.installationTokens.set(token, installation.id);
+    return token;
+  }
+
+  /** A signed delivery as GitHub sends it. */
+  webhook(secret: string, event: string, payload: unknown, delivery: string = randomUUID()): { body: string; headers: Record<string, string> } {
+    const body = JSON.stringify(payload);
+    return { body, headers: {
+      "content-type": "application/json", "x-github-event": event, "x-github-delivery": delivery,
+      "x-hub-signature-256": `sha256=${createHmac("sha256", secret).update(body).digest("hex")}`,
+    } };
+  }
+
+  /** A repository as webhook payloads and the REST API describe it. */
+  repoJson(repo: FakeRepo): Record<string, unknown> {
+    return { id: repo.id, node_id: `R_${repo.id}`, name: repo.name, full_name: `${repo.owner}/${repo.name}`, private: repo.isPrivate,
+      visibility: repo.isPrivate ? "private" : "public", owner: { login: repo.owner, id: 9000 + repo.id }, default_branch: repo.defaultBranch };
+  }
 
   /** Rename a repository in place; its old path answers 301, as GitHub's does. */
   rename(repo: FakeRepo, owner: string, name: string): FakeRepo {
@@ -239,7 +362,7 @@ export class FakeGitHub {
       fault.times -= 1;
       response = await fault.response();
     } else {
-      response = this.route(request, url, endpoint);
+      response = url.origin === this.webOrigin ? await this.oauth(request, url) : this.route(request, url, endpoint);
     }
     this.requests.push({ method: request.method, path: url.pathname + url.search, endpoint, status: response.status, authorization });
     return response;
@@ -249,20 +372,37 @@ export class FakeGitHub {
     if (url.origin === this.archiveOrigin) return this.archive(url);
     if (url.origin !== this.origin) return new Response("unknown origin", { status: 502 });
     if (url.pathname.startsWith("/app/")) return this.app(request, url);
-    const match = /^\/repos\/([^/]+)\/([^/]+)\/(.+)$/.exec(url.pathname);
+    if (url.pathname.startsWith("/user/")) return this.userApi(request, url);
+    const authorization = request.headers.get("authorization");
+    const scope = this.installationScope(authorization);
+    if (scope === "invalid") return this.json({ message: "Bad credentials" }, 401);
+    if (scope !== "all" && scope?.suspended) return this.json({ message: "This installation has been suspended" }, 403);
+    if (url.pathname === "/installation/repositories") {
+      if (!scope) return this.json({ message: "Requires authentication" }, 401);
+      const repos = [...this.repos.values()].filter((repo) => scope === "all" || this.installationOf(repo) === scope);
+      return this.billed(this.json({ total_count: repos.length, repositories: repos.slice(0, Number(url.searchParams.get("per_page") ?? 30)).map((repo) => this.repoJson(repo)) }));
+    }
+    const exact = /^\/repos\/([^/]+)\/([^/]+)$/.exec(url.pathname);
+    const match = exact ? [exact[0], exact[1], exact[2], ""] : /^\/repos\/([^/]+)\/([^/]+)\/(.+)$/.exec(url.pathname);
     const moved = match ? this.renamed.get(`${decodeURIComponent(match[1])}/${decodeURIComponent(match[2])}`) : undefined;
     if (match && moved) {
-      return this.json({ message: "Moved Permanently", url: "x" }, 301, { location: `/repos/${moved.owner}/${moved.name}/${match[3]}${url.search}` });
+      return this.json({ message: "Moved Permanently", url: "x" }, 301, { location: `/repos/${moved.owner}/${moved.name}${match[3] ? `/${match[3]}` : ""}${url.search}` });
     }
     const repo = match ? this.repos.get(`${decodeURIComponent(match[1])}/${decodeURIComponent(match[2])}`) : undefined;
-    const authorization = request.headers.get("authorization");
-    if (authorization && authorization !== `Bearer ${this.token}`) return this.json({ message: "Bad credentials" }, 401);
-    if (!match || !repo || (repo.isPrivate && !authorization)) return this.json({ message: "Not Found" }, 404);
+    if (!match || !repo || (repo.isPrivate && !authorization) || (scope && scope !== "all" && this.installationOf(repo) !== scope)) return this.json({ message: "Not Found" }, 404);
     if (this.rate.remaining <= 0) {
       return this.withRate(this.json({ message: "API rate limit exceeded for installation." }, 403));
     }
     const rest = match[3];
     const etag = request.headers.get("if-none-match");
+    if (endpoint === "repository") return this.billed(this.json(this.repoJson(repo)));
+    if (endpoint === "permission") {
+      const login = decodeURIComponent(rest.slice("collaborators/".length, -"/permission".length));
+      const user = [...this.users.values()].find((candidate) => candidate.login.toLowerCase() === login.toLowerCase());
+      if (!user) return this.billed(this.json({ message: "Not Found" }, 404));
+      const permission = this.canRead(user, repo) ? "read" : "none";
+      return this.billed(this.json({ permission, role_name: permission, user: { login: user.login, id: user.id } }));
+    }
     if (endpoint === "ref") {
       if (repo.branches.size === 0) return this.billed(this.json({ message: "Git Repository is empty." }, 409));
       const branch = rest.slice("git/ref/heads/".length).split("/").map(decodeURIComponent).join("/");
@@ -310,6 +450,62 @@ export class FakeGitHub {
       return this.billed(new Response(null, { status: 302, headers: { location: `${this.archiveOrigin}/${repo.owner}/${repo.name}/legacy.tar.gz/${sha}?token=${token}` } }));
     }
     return this.billed(this.json({ message: "Not Found" }, 404));
+  }
+
+  /** "all" for the shared token, the installation for a scoped one, undefined without a token, "invalid" for anything else. */
+  private installationScope(authorization: string | null): "all" | FakeInstallation | "invalid" | undefined {
+    if (!authorization) return undefined;
+    if (authorization === `Bearer ${this.token}`) return "all";
+    const installation = this.installations.get(this.installationTokens.get(authorization.slice("Bearer ".length)) ?? -1);
+    return installation ?? "invalid";
+  }
+
+  private userApi(request: Request, url: URL): Response {
+    const grant = this.accessTokens.get((request.headers.get("authorization") ?? "").slice("Bearer ".length));
+    const user = grant && (grant.expiresAt === null || grant.expiresAt > this.now()) ? this.users.get(grant.user) : undefined;
+    if (!user) return this.json({ message: "Bad credentials" }, 401);
+    if (this.rate.remaining <= 0) return this.withRate(this.json({ message: "API rate limit exceeded for user." }, 403));
+    const perPage = Number(url.searchParams.get("per_page") ?? 30);
+    const page = Number(url.searchParams.get("page") ?? 1);
+    const reachable = (installation: FakeInstallation) => installation.account.toLowerCase() === user.login.toLowerCase()
+      || [...this.repos.values()].some((repo) => this.installationOf(repo) === installation && this.canRead(user, repo));
+    const listed = (key: string, items: unknown[], extra: Record<string, unknown> = {}) => {
+      const slice = items.slice((page - 1) * perPage, page * perPage);
+      const body = JSON.stringify({ total_count: items.length, ...extra, [key]: slice });
+      const tag = `W/"${sha1(body)}"`;
+      if (request.headers.get("if-none-match") === tag) return this.withRate(new Response(null, { status: 304, headers: { etag: tag } }));
+      const headers: Record<string, string> = { "content-type": "application/json", etag: tag };
+      if (page * perPage < items.length) headers.link = `<${this.origin}${url.pathname}?per_page=${perPage}&page=${page + 1}>; rel="next"`;
+      return this.billed(new Response(body, { headers }));
+    };
+    if (url.pathname === "/user/installations") {
+      const installations = [...this.installations.values()].filter(reachable).sort((a, b) => a.id - b.id);
+      return listed("installations", installations.map((installation) => ({
+        id: installation.id, account: { login: installation.account }, suspended_at: installation.suspended ? new Date(this.now()).toISOString() : null,
+      })));
+    }
+    const match = /^\/user\/installations\/(\d+)\/repositories$/.exec(url.pathname);
+    const installation = match ? this.installations.get(Number(match[1])) : undefined;
+    if (!installation || !reachable(installation)) return this.billed(this.json({ message: "Not Found" }, 404));
+    if (installation.suspended) return this.billed(this.json({ message: "This installation has been suspended" }, 403));
+    const repos = [...this.repos.values()].filter((repo) => this.installationOf(repo) === installation && this.canRead(user, repo)).sort((a, b) => a.id - b.id);
+    return listed("repositories", repos.map((repo) => ({ ...this.repoJson(repo), permissions: { admin: false, maintain: false, push: false, triage: false, pull: true } })), { repository_selection: installation.repositories === "all" ? "all" : "selected" });
+  }
+
+  /** POST /login/oauth/access_token with grant_type=refresh_token. GitHub answers errors with 200 and an `error` code. */
+  private async oauth(request: Request, url: URL): Promise<Response> {
+    if (request.method !== "POST" || url.pathname !== "/login/oauth/access_token") return new Response("Not found", { status: 404 });
+    const form = new URLSearchParams(await request.text());
+    if (form.get("client_id") !== this.clientId || form.get("client_secret") !== this.clientSecret) return this.json({ error: "incorrect_client_credentials" });
+    const grant = this.refreshTokens.get(form.get("refresh_token") ?? "");
+    if (form.get("grant_type") !== "refresh_token" || !grant || grant.expiresAt <= this.now()) return this.json({ error: "bad_refresh_token" });
+    // Refresh tokens rotate: the one just used stops working.
+    this.refreshTokens.delete(form.get("refresh_token") as string);
+    const tokens = this.signIn(this.users.get(grant.user) as FakeUser);
+    return this.json({
+      access_token: tokens.accessToken, expires_in: tokens.accessTokenExpiresAt === null ? undefined : Math.round((tokens.accessTokenExpiresAt - this.now()) / 1000),
+      refresh_token: tokens.refreshToken, refresh_token_expires_in: Math.round(this.refreshTokenLifetime / 1000), token_type: "bearer", scope: "",
+    });
   }
 
   private archive(url: URL): Response {
@@ -371,6 +567,12 @@ export class FakeGitHub {
 
 function classify(url: URL): Endpoint {
   if (url.hostname.startsWith("codeload")) return "archive";
+  if (url.hostname === "github.test") return "oauth";
+  if (/^\/user\/installations\/\d+\/repositories$/.test(url.pathname)) return "installation-repositories";
+  if (url.pathname === "/user/installations") return "user-installations";
+  if (url.pathname === "/installation/repositories") return "installation";
+  if (/^\/repos\/[^/]+\/[^/]+$/.test(url.pathname)) return "repository";
+  if (/^\/repos\/[^/]+\/[^/]+\/collaborators\/[^/]+\/permission$/.test(url.pathname)) return "permission";
   if (/\/attempts$/.test(url.pathname)) return "redeliver";
   if (url.pathname.startsWith("/app/hook/deliveries")) return "deliveries";
   if (/\/git\/ref\//.test(url.pathname)) return "ref";

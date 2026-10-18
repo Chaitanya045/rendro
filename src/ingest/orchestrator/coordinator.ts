@@ -1,3 +1,4 @@
+import { DeliveryDedupe, DELIVERY_RETENTION_MS } from "../github/delivery-dedupe";
 import { GitHubError, type CachedRef, type RepoRef } from "../github/source";
 import { toIngestError } from "./errors";
 import { CommitIngestError, ingestBranch, readPointer, type IngestDependencies, type IngestResult, type RefEtagCache } from "./ingest";
@@ -61,7 +62,6 @@ interface Job {
 }
 
 const HISTORY = 50;
-const PRUNE_BATCH = 100;
 
 /**
  * The per-repository coordinator behind the RepoIngestCoordinator Durable
@@ -75,11 +75,11 @@ export class IngestCoordinator {
   private readonly running = new Map<string, Job>();
   private readonly pending = new Map<string, Job>();
   private readonly maxFollowUps: number;
-  private readonly deliveryRetentionMs: number;
+  private readonly deliveries: DeliveryDedupe;
 
   constructor(private readonly state: DurableStateLike, private readonly deps: IngestDependencies, options: CoordinatorOptions = {}) {
     this.maxFollowUps = options.maxFollowUps ?? 2;
-    this.deliveryRetentionMs = options.deliveryRetentionMs ?? 4 * 24 * 60 * 60 * 1000;
+    this.deliveries = new DeliveryDedupe(state.storage, options.deliveryRetentionMs ?? DELIVERY_RETENTION_MS);
   }
 
   async fetch(request: Request): Promise<Response> {
@@ -106,13 +106,13 @@ export class IngestCoordinator {
   async ingest(message: IngestMessage): Promise<IngestOutcome> {
     const misrouted = await this.claim(message.repo);
     if (misrouted) return misrouted;
-    if (message.deliveryId && await this.state.storage.get(`delivery:${message.deliveryId}`) !== undefined) {
+    if (message.deliveryId && await this.deliveries.seen(message.deliveryId)) {
       return { status: "duplicate" };
     }
     const outcome = await this.schedule(message.repo, message.branch, message.sha);
     // A delivery is remembered once its work is done; transient failures and unconfirmed hints stay retryable.
     const settled = outcome.status === "failed" ? outcome.permanent : outcome.status === "no-ref" || !outcome.staleHint;
-    if (message.deliveryId && settled) await this.rememberDelivery(message.deliveryId);
+    if (message.deliveryId && settled) await this.deliveries.remember(message.deliveryId, this.deps.now());
     return outcome;
   }
 
@@ -223,15 +223,6 @@ export class IngestCoordinator {
     }
   }
 
-  private async rememberDelivery(id: string): Promise<void> {
-    const { storage } = this.state;
-    const now = this.deps.now();
-    await storage.put(`delivery:${id}`, now);
-    await storage.put(`delivery-at:${timeKey(now)}:${id}`, id);
-    const expired = await storage.list<string>({ prefix: "delivery-at:", end: `delivery-at:${timeKey(now - this.deliveryRetentionMs)}`, limit: PRUNE_BATCH });
-    if (expired.size > 0) await storage.delete([...expired.keys(), ...[...expired.values()].map((old) => `delivery:${old}`)]);
-  }
-
   private etags(): RefEtagCache {
     const { storage } = this.state;
     return {
@@ -239,8 +230,4 @@ export class IngestCoordinator {
       set: (branch, value) => storage.put(`etag:${branch}`, value),
     };
   }
-}
-
-function timeKey(ms: number): string {
-  return String(Math.max(0, ms)).padStart(16, "0");
 }

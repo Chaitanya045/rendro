@@ -6,9 +6,10 @@ import type { RepoFixtures } from "./repo-fixtures";
 
 /**
  * Repository docs read through /r/ (#234): snapshots built by the P3b ingest pipeline from a fake GitHub (global setup),
- * authorized by the fixture control Worker over the real access protocol. A public repository is read anonymously; a
- * private one by a granted reader through the capability cookie, with images through the frame's asset ticket. Everyone
- * else gets the same plain 404 as a repository that does not exist.
+ * authorized by the real control Worker (#243), whose permission mirror reads that fake GitHub. A public repository is
+ * read anonymously; a private one by a granted reader through the capability cookie, with images through the frame's
+ * asset ticket. Everyone else gets the same plain 404 as a repository that does not exist, and a membership webhook
+ * revokes a reader for their very next view.
  */
 test.use({ viewport: desktop });
 
@@ -82,4 +83,27 @@ test("a granted reader browses a private repository with a capability cookie and
     const frame = await other.goto(`${url}/@${closed.commit}/files/docs/index.md`);
     expect(frame?.status(), reader).toBe(404);
   }
+});
+
+test("a membership webhook revokes a team reader: allowed, then the next view is a plain 404", async ({ page, seed, baseURL }) => {
+  const { team, control } = repos();
+  const membership = async (action: "added" | "removed") => (await (await fetch(`${control}/membership/${action}`, { method: "POST" })).json()) as { status: number };
+  const url = `/r/${team.owner}/${team.name}`;
+  const capability = async () => (await page.context().cookies()).find(cookie => /^(?:__Host-)?rendro-repo\.9003$/.test(cookie.name));
+  // Idempotent start: the member is on the team (a retry or another engine may have removed them).
+  expect(await membership("added")).toEqual({ status: 202 });
+  await signInSeeded(page.context(), baseURL, seed, "member");
+  expect((await page.goto(url))?.status()).toBe(200);
+  await expect(heading(page, "Team home")).toBeVisible();
+  await expectLogoRendered(page);
+  expect(await capability()).toBeDefined();
+
+  // GitHub removes them from the team and delivers the webhook: the mirror denies, then the epoch moves.
+  expect(await membership("removed")).toEqual({ status: 202 });
+  const denied = await page.goto(url);
+  expect(denied?.status()).toBe(404);
+  expect(denied?.headers()["cache-control"]).toBe("private, no-store");
+  await expect(page.getByRole("heading", { name: "Page not found" })).toBeVisible();
+  expect(await capability()).toBeUndefined();
+  expect((await page.goto(`${url}/@${team.commit}/files/docs/index.md`))?.status()).toBe(404);
 });

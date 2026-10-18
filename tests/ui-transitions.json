@@ -25378,9 +25378,11 @@
         "GET /r/*"
       ],
       "sources": [
-        "src/repo-read/routes.ts",
+        "src/repo-access/directory.ts",
+        "src/repo-access/worker.ts",
         "src/repo-read/authorize.ts",
         "src/repo-read/frame.ts",
+        "src/repo-read/routes.ts",
         "src/repo-read/tree.ts"
       ],
       "roles": [
@@ -25523,12 +25525,12 @@
         {
           "id": "UI-161-E06",
           "from": "Reader holding a capability cookie or ticket",
-          "trigger": "Revocation epoch bumped by the permission system",
+          "trigger": "Revocation epoch bumped by the permission system (a membership, team, collaborator, installation or authorization webhook)",
           "expected": "Next request is a plain 404 and clears the cookie; tickets stop at once; a reader who kept access gets a cookie at the new epoch",
           "inventoryRefs": [
             "UI-161"
           ],
-          "status": "unit",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/repo-read-routes.test.ts",
@@ -25549,6 +25551,21 @@
               "file": "tests/repo-read-workerd.test.ts",
               "name": "grants a private reader through the control Worker, serves images by ticket, and revokes with a KV epoch",
               "kind": "unit"
+            },
+            {
+              "file": "tests/repo-access-revocation.test.ts",
+              "name": "denies a reader removed from a team on the very next view, with their cookie and tickets",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/repo-access-workerd.test.ts",
+              "name": "grants a team member, then a membership webhook denies their next view; measures the revocation",
+              "kind": "unit"
+            },
+            {
+              "file": "e2e/repo-docs.spec.ts",
+              "name": "a membership webhook revokes a team reader: allowed, then the next view is a plain 404",
+              "kind": "e2e"
             }
           ]
         },
@@ -25609,6 +25626,11 @@
             {
               "file": "tests/repo-read-routes.test.ts",
               "name": "when %s fails",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/repo-access-revocation.test.ts",
+              "name": "denies everyone after an uninstall, and 503s rather than allowing when GitHub is down past the TTL",
               "kind": "unit"
             }
           ]
@@ -25693,6 +25715,28 @@
               "file": "tests/repo-read-browser.test.ts",
               "name": "render proxied images and ticketed repository images in a private frame and block an external one",
               "kind": "browser"
+            }
+          ]
+        },
+        {
+          "id": "UI-161-E14",
+          "from": "Anonymous reader of a public repository",
+          "trigger": "The repository is made private on GitHub (repository webhook)",
+          "expected": "Plain 404 once the serving isolate's one-minute public-repository memory lapses; readers GitHub still lists keep reading with a capability cookie",
+          "inventoryRefs": [
+            "UI-161"
+          ],
+          "status": "unit",
+          "tests": [
+            {
+              "file": "tests/repo-access-revocation.test.ts",
+              "name": "denies anonymous readers of a repository made private once the serving isolate's public memory expires",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/repo-access-directory.test.ts",
+              "name": "denies anonymous readers as soon as a repository is made private",
+              "kind": "unit"
             }
           ]
         }
