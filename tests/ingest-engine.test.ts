@@ -1,5 +1,4 @@
 import { readFileSync } from "node:fs";
-import { createRequire } from "node:module";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { RenderError } from "../src/ingest/limits";
@@ -10,11 +9,11 @@ import { TEST_RENDER_OPTIONS } from "./helpers/ingest-render";
  * (uninitialized, ready, failed) starts over, as it would in a new isolate.
  */
 afterEach(() => {
-  vi.doUnmock("comrak-wasm");
+  vi.doUnmock("../src/ingest/comrak-engine/comrak_engine.js");
   vi.resetModules();
 });
 
-const wasm = () => new WebAssembly.Module(readFileSync(createRequire(import.meta.url).resolve("comrak-wasm/comrak_wasm_bg.wasm")));
+const wasm = () => new WebAssembly.Module(readFileSync(new URL("../src/ingest/comrak-engine/comrak_engine_bg.wasm", import.meta.url)));
 
 describe("markdown engine lifecycle", () => {
   it("must be initialized before use, and tolerates repeated initialization", async () => {
@@ -28,7 +27,7 @@ describe("markdown engine lifecycle", () => {
 
   it("refuses all further work after the engine fails", async () => {
     const markdownToHtml = vi.fn(() => { throw new WebAssembly.RuntimeError("unreachable"); });
-    vi.doMock("comrak-wasm", () => ({ initSync: vi.fn(), markdownToHtml }));
+    vi.doMock("../src/ingest/comrak-engine/comrak_engine.js", () => ({ initSync: vi.fn(), markdownToHtml }));
     const engine = await import("../src/ingest/markdown-engine");
     const { renderDocument } = await import("../src/ingest/render");
     engine.initMarkdownEngine(wasm());
