@@ -127,6 +127,14 @@ function publisherContentPolicy(contentType: string, restrictResources: boolean)
     : `${restrictResources ? "default-src 'none'; " : ""}sandbox; frame-ancestors 'self'`;
 }
 
+/**
+ * The frame policy for ingest-rendered repository documents (epic #214, not
+ * served yet): the publisher frame policy with images limited to our origin,
+ * where repo files and the signed image proxy live. Uploaded publisher HTML
+ * keeps `publisherContentPolicy`, because it may load images from any host.
+ */
+export const RENDERED_DOCUMENT_POLICY = "sandbox allow-scripts allow-forms allow-popups allow-downloads; img-src 'self'; frame-ancestors 'self'";
+
 /** Call only after access checks. Retain resource restrictions where already used;
  * adding default-src to public SVGs would also suppress their image styling. */
 export function assetHeaders(path: string, allowOpaqueOrigin: boolean, storedType?: string, restrictResources = false): Record<string, string> {

@@ -5,6 +5,7 @@ process.env.AUTH_SECRET = "test-auth-secret-32-chars-long!!";
 process.env.NODE_ENV = "test";
 process.env.CONVEX_URL = "http://127.0.0.1:3210";
 process.env.CONVEX_INTERNAL_SECRET = "test-convex-internal-secret-32-chars";
+process.env.IMAGE_PROXY_SECRET = "test-image-proxy-secret-32-chars!";
 
 // Convex auth tests still need these; the Worker config tests explicitly unset them.
 process.env.GOOGLE_CLIENT_ID = "test-google-client-id";

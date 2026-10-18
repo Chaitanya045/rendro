@@ -33,6 +33,7 @@ cp .env.example .env
 |---|---|---|
 | `AUTH_SECRET` | Yes (≥16 chars; use 32+) | Signs legacy `/share/:token` links only. It does not need to match Convex |
 | `CONVEX_INTERNAL_SECRET` | Yes (≥32 chars) | Sent with legacy API-key and soft-delete Convex calls (`src/convex-internal.ts`); must equal the Convex value |
+| `IMAGE_PROXY_SECRET` | Yes (≥32 chars) | Signs same-origin image proxy URLs (`/img/<sig>/<url>`) written at ingest. Dedicated; reuse no other secret |
 | `CONVEX_URL` | No at startup; needed for the full app | From `convex dev` (step 3); defaults to empty, disabling legacy Convex calls and comments |
 | `CONVEX_SITE_URL` | No | Derived from `CONVEX_URL` when unset |
 | `RETENTION_SECRET` | No (≥32 chars) | Bearer for Convex's retention endpoints; only the scheduled purge reads it. Same value as in Convex |
@@ -148,7 +149,7 @@ pnpm exec convex deploy
 
 Use two **private** R2 buckets, bound as `STORAGE` in `wrangler.toml`: `rendro-docs` for production (the top-level configuration) and `dev-rendro` for the `development` environment (`rendro-dev`). A new account creates them first; the names in the file are the single source of truth. Do not create an S3 API token, an `r2.dev` URL or a custom domain: the Worker reaches the bucket through its binding, so there is no credential to leak.
 
-`wrangler.toml` sets `NODE_ENV` as a var. Both production and `development` require exactly these two secrets at startup and in Wrangler: `CONVEX_INTERNAL_SECRET` and `AUTH_SECRET`. List secret names with `pnpm exec wrangler secret list` for production (`rendro`) and `pnpm exec wrangler secret list --env development` for development (`rendro-dev`). Production uses the top-level configuration; there is no named `--env production` environment.
+`wrangler.toml` sets `NODE_ENV` as a var. Both production and `development` require exactly these three secrets at startup and in Wrangler: `CONVEX_INTERNAL_SECRET`, `AUTH_SECRET` and `IMAGE_PROXY_SECRET`. List secret names with `pnpm exec wrangler secret list` for production (`rendro`) and `pnpm exec wrangler secret list --env development` for development (`rendro-dev`). Production uses the top-level configuration; there is no named `--env production` environment.
 
 Configure the Worker settings below. `CONVEX_URL`, the optional `CONVEX_SITE_URL` override and `RETENTION_SECRET` remain outside `secrets.required`: startup and `/health` work without them, but auth and project routes need a Convex HTTP origin and the nightly purge needs `RETENTION_SECRET`. Google credentials are Convex-only; the Worker does not read `BASE_URL`.
 
@@ -158,6 +159,7 @@ pnpm exec wrangler secret put CONVEX_URL
 pnpm exec wrangler secret put CONVEX_SITE_URL         # optional
 pnpm exec wrangler secret put CONVEX_INTERNAL_SECRET
 pnpm exec wrangler secret put RETENTION_SECRET        # same value as in Convex
+pnpm exec wrangler secret put IMAGE_PROXY_SECRET      # openssl rand -hex 32
 pnpm run deploy
 ```
 

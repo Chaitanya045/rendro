@@ -1,5 +1,8 @@
-/** Bumping this invalidates every stored render, because it is part of the render key. */
-export const RENDERER_VERSION = 1;
+/**
+ * Bumping this invalidates every stored render, because it is part of the render key.
+ * 2: external images go through the signed image proxy (#224).
+ */
+export const RENDERER_VERSION = 2;
 
 /** Larger sources are not rendered; the caller decides how to present them. */
 export const MAX_SOURCE_BYTES = 1024 * 1024;

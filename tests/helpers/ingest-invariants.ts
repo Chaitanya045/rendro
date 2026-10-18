@@ -21,7 +21,8 @@ export const ALLOWED_ATTRIBUTES = new Set([
 ]);
 
 const SAFE_HREF = /^(?:https?:\/\/[^\s]+|mailto:[^\s]*|\/(?![/\\])[^\s]*|#[^\s]*)$/i;
-const SAFE_SRC = /^(?:https?:\/\/[^\s]+|\/(?![/\\])[^\s]*)$/i;
+// Images are same-origin only: repo files, or external images through the signed proxy (/img/).
+const SAFE_SRC = /^\/(?![/\\])[^\s]*$/;
 
 type Node = DefaultTreeAdapterMap["node"];
 

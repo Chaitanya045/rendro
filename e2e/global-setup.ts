@@ -4,7 +4,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { createTestHarness } from "wrangler";
-import { removeSmokeAsset, startFaults, startIdentityFixtures, storageProbeOrigin } from "./services";
+import { removeSmokeAsset, startFaults, startIdentityFixtures, startImageHost, storageProbeOrigin } from "./services";
 import { localEnvironment, startBackend } from "./backend";
 import { seedWorkspace } from "./seed";
 import { registerResources } from "./resource-journal";
@@ -18,7 +18,7 @@ export default async function globalSetup() {
   const closers: Array<() => Promise<void>> = [];
   const originalFetch = globalThis.fetch;
   const blockedOrigins = new Set<string>();
-  const environmentKeys = ["CLOUDFLARE_LOAD_DEV_VARS_FROM_DOT_ENV", "WRANGLER_SEND_METRICS", "RENDRO_E2E_ORIGIN", "RENDRO_E2E_CONVEX", "RENDRO_E2E_CONVEX_SITE", "RENDRO_E2E_MAIL", "RENDRO_E2E_FAULTS", "RENDRO_E2E_SEED", "RENDRO_E2E_DIRECTORY"];
+  const environmentKeys = ["CLOUDFLARE_LOAD_DEV_VARS_FROM_DOT_ENV", "WRANGLER_SEND_METRICS", "RENDRO_E2E_ORIGIN", "RENDRO_E2E_CONVEX", "RENDRO_E2E_CONVEX_SITE", "RENDRO_E2E_MAIL", "RENDRO_E2E_FAULTS", "RENDRO_E2E_IMAGES", "RENDRO_E2E_IMAGE_PROXY_SECRET", "RENDRO_E2E_SEED", "RENDRO_E2E_DIRECTORY"];
   const previousEnvironment = new Map(environmentKeys.map(key => [key, process.env[key]]));
   async function cleanup() {
     const errors: unknown[] = [];
@@ -49,6 +49,7 @@ export default async function globalSetup() {
       CONVEX_SITE_URL: convex.site,
       CONVEX_INTERNAL_SECRET: randomBytes(32).toString("hex"),
       AUTH_SECRET: randomBytes(32).toString("hex"),
+      IMAGE_PROXY_SECRET: randomBytes(32).toString("hex"),
     };
     // Always rebuild: existence alone cannot detect stale ignored browser bundles.
     await run("pnpm", ["build:assets"], {
@@ -76,6 +77,8 @@ export default async function globalSetup() {
     const allowedOrigins = new Set([convex.origin, convex.site, storageProbeOrigin]);
     const faults = await startFaults({ storage: storageProbeOrigin, convex: [convex.origin, convex.site] });
     closers.push(() => faults.close());
+    const images = await startImageHost();
+    closers.push(() => images.close());
     // Wrangler 4.149.0's harness outboundService delegates to globalThis.fetch.
     // Keep real HTTP to our fixtures; return redirects without following them (auth redirects belong to the browser).
     globalThis.fetch = async (input, init) => {
@@ -83,6 +86,8 @@ export default async function globalSetup() {
       // Normalize before applying overrides, rather than losing headers via spread.
       const request = new Request(input, init);
       const url = new URL(request.url);
+      const image = images.intercept(request);
+      if (image) return image;
       if (!allowedOrigins.has(url.origin)) {
         blockedOrigins.add(url.origin);
         throw new Error(`Blocked external Worker origin: ${url.origin}`);
@@ -125,9 +130,11 @@ export default async function globalSetup() {
     process.env.RENDRO_E2E_CONVEX_SITE = convex.site;
     process.env.RENDRO_E2E_MAIL = identity.control;
     process.env.RENDRO_E2E_FAULTS = faults.control;
+    process.env.RENDRO_E2E_IMAGES = images.control;
+    process.env.RENDRO_E2E_IMAGE_PROXY_SECRET = vars.IMAGE_PROXY_SECRET;
     process.env.RENDRO_E2E_SEED = seedPath;
     process.env.RENDRO_E2E_DIRECTORY = directory;
-    console.log("E2E: real workerd ready; real local Convex, local R2 simulation, captured mail and OAuth, external fetch blocked.");
+    console.log("E2E: real workerd ready; real local Convex, local R2 simulation, captured mail and OAuth, a fake image host, external fetch blocked.");
     return cleanup;
   } catch (error) {
     try { await cleanup(); } catch (cleanupError) {
