@@ -14,7 +14,7 @@ function page(markup: string) {
   const ui = (win as unknown as { RendroUI: { setOrganizationChrome(name: string, mark: string): void } }).RendroUI;
   return { win, document: win.document, set: (name: string, mark = name.charAt(0).toUpperCase()) => ui.setOrganizationChrome(name, mark) };
 }
-const records = (win: Window, root: Node) => {
+const records = (win: Window, root: unknown) => {
   const observer = new win.MutationObserver(() => {});
   observer.observe(root as never, { childList: true, characterData: true, subtree: true });
   return () => observer.takeRecords();

@@ -16,6 +16,12 @@ export async function mailLink(email: string, subject: RegExp) {
   if (!link || new URL(link).origin !== process.env.RENDRO_E2E_ORIGIN) throw new Error("Mail link escaped local Worker");
   return link;
 }
+/** A token the server must reject. The last characters of a base64url signature carry unused bits, so changing only
+ * them can decode to the same bytes and leave the token valid; the first signature character has no spare bits. */
+export function tamperedToken(token: string): string {
+  const at = token.lastIndexOf(".") + 1;
+  return `${token.slice(0, at)}${token[at] === "A" ? "B" : "A"}${token.slice(at + 1)}`;
+}
 export async function signup(page: Page, email: string, returnTo = "/account/security") {
   await page.goto(`/sign-up?returnTo=${encodeURIComponent(returnTo)}`);
   await page.getByLabel("Full name", { exact: true }).fill("Auth Journey");
