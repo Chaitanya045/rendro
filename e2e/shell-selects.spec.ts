@@ -1,7 +1,7 @@
 import type { Locator, Page } from "@playwright/test";
 import { test, expect } from "./shell-fixtures";
 import type { Pool } from "./shell-fixtures";
-import { desktop, mobile, shellReady } from "./shell-helpers";
+import { desktop, mobile, pageSettled, shellReady } from "./shell-helpers";
 
 const activeOption = (trigger: Locator) => trigger.evaluate(element => {
   const id = element.getAttribute("aria-activedescendant");
@@ -303,7 +303,8 @@ test.describe("select behavior on a management page", () => {
   test("select popup closes on outside pointer, scroll, blur, dialog close, route leave and sign-out", async ({ page, pooled }) => {
     const base = `/organizations/${pooled.organizations[4].id}`;
     await page.goto(`${base}/settings`);
-    await shellReady(page);
+    // The probe sits below the page's own content, so it must not be used while that content is still arriving.
+    await pageSettled(page);
     await injectProbe(page);
     await page.evaluate(() => { const spacer = document.createElement("div"); spacer.id = "probe-spacer"; spacer.style.height = "2400px"; document.querySelector(".cp-main")!.append(spacer); });
     const trigger = page.locator("#probe-form").getByRole("combobox", { name: "Letters" });
@@ -319,6 +320,7 @@ test.describe("select behavior on a management page", () => {
     await trigger.click(); await expanded();
     await page.locator(".cp-nav").getByRole("link", { name: "Teams", exact: true }).evaluate((link: HTMLElement) => link.click());
     await expect(page).toHaveURL(new RegExp(`${base}/teams$`));
+    await pageSettled(page);
     // Sign-out event closes an open popup.
     await injectProbe(page);
     // Smooth wheel scrolling keeps emitting scroll events after the first one; wait until the offset has

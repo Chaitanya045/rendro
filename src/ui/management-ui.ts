@@ -94,7 +94,7 @@ export const managementUiRuntime = String.raw`
   function setDocsLink(href,projectId){document.querySelectorAll("[data-cp-open-docs]").forEach(function(link){if(href){link.setAttribute("href",href);link.setAttribute("data-cp-docs-project",projectId||"");link.hidden=false;}else{link.hidden=true;link.removeAttribute("data-cp-docs-project");}});}
   // The organization name and mark sit in the switcher the reader may be pressing while this page hydrates. WebKit drops a
   // click whose pressed text node is removed before release, so a changed label is rewritten in place, never replaced.
-  function setText(node,value){var text=node.firstChild;if(node.childNodes.length===1&&text.nodeType===3){if(text.data!==value)text.data=value;}else if(node.textContent!==value)node.textContent=value;}
+  function setText(node,value){var kids=node.childNodes;if(kids&&kids.length===1&&kids[0].nodeType===3){if(kids[0].data!==value)kids[0].data=value;}else if(node.textContent!==value)node.textContent=value;}
   function setOrganizationChrome(name,mark){document.querySelectorAll("[data-org-name]").forEach(function(node){setText(node,name);});document.querySelectorAll("[data-org-mark]").forEach(function(node){setText(node,mark);});}
   var dialog=null,resolver=null,returnFocus=null;
   function finish(result){var resolve=resolver;resolver=null;var target=returnFocus;returnFocus=null;if(dialog&&dialog.open)dialog.close();if(!document.documentElement.dataset.rendroSignedOut&&target&&target.isConnected&&typeof target.focus==="function")target.focus({preventScroll:true});if(resolve)resolve(result);}

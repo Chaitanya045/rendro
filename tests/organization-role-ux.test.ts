@@ -287,7 +287,7 @@ describe("organization role UX", () => {
         __RENDRO_PAGE_STATE__: { organizationId: "org-a", projectId: "", userId: user.id },
         RendroUI: {
           request: async () => ({ name: "Acme", members: [{ userId: user.id, role: "member" }] }),
-          busy() {}, toast() {},
+          busy() {}, toast() {}, setOrganizationChrome() {},
         },
         addEventListener() {},
       },
