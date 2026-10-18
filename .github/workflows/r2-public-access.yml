@@ -1,0 +1,50 @@
+name: R2 bucket exposure
+
+# Fails if any R2 bucket bound in wrangler.toml is readable without the Worker: a managed r2.dev
+# URL or any custom domain. Needs two repository secrets (see docs/SETUP.md, "Keep the bucket private"):
+#   CLOUDFLARE_ACCOUNT_ID  the account that owns the buckets
+#   CLOUDFLARE_API_TOKEN   a token limited to read access on R2 (Account > Workers R2 Storage > Read)
+# Until they are set the job fails with "was NOT verified" instead of passing silently.
+on:
+  schedule:
+    - cron: "17 4 * * *"
+  workflow_dispatch:
+  # Edits to this workflow or the script are exercised (as a dry run, with no secrets) before merge.
+  pull_request:
+    paths:
+      - .github/workflows/r2-public-access.yml
+      - scripts/check-r2-public-access.ts
+      - wrangler.toml
+
+permissions: {}
+
+concurrency:
+  group: r2-public-access-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # Pull requests never receive the secrets: list the requests the real check would make.
+      - name: Dry run
+        if: github.event_name == 'pull_request'
+        run: pnpm check:r2-public --dry-run
+      - name: Verify the buckets are private
+        if: github.event_name != 'pull_request'
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: pnpm check:r2-public

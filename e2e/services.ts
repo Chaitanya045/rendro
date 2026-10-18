@@ -4,14 +4,12 @@ import { createServer as createTlsServer } from "node:https";
 import { readFile, writeFile } from "node:fs/promises";
 import type { Duplex } from "node:stream";
 import { join } from "node:path";
-import { CreateBucketCommand, DeleteObjectCommand, ListObjectsV2Command, S3Client } from "@aws-sdk/client-s3";
 import { SignJWT, generateKeyPair, exportJWK } from "jose";
-import { localEnvironment, localHttp, ready, run } from "./backend";
-
-import type { ResourceJournal } from "./resource-journal";
+import { run } from "./backend";
 
 export const publicationSlug = "workerd-smoke";
-export const storageImage = "andrewgaul/s3proxy@sha256:87662b2a5afcdfa5f478a1c61650bae4c87bbd15f6ff2823236bcfd66ef7fe04";
+/** Where the storage wrapper asks whether a bucket operation should fail; answered inside the E2E harness, never on a network. */
+export const storageProbeOrigin = "http://r2-faults.invalid";
 export async function listen(handler: RequestListener) {
   const server = createServer(handler);
   await new Promise<void>((resolve, reject) => {
@@ -181,29 +179,16 @@ export async function startIdentityFixtures(directory: string) {
   };
 }
 
-export async function startStorage(directory: string, resources: ResourceJournal) {
-  const accessKeyId = randomBytes(24).toString("hex");
-  const secretAccessKey = randomBytes(32).toString("hex");
-  const envFile = join(directory, "storage.env");
-  await writeFile(envFile, `S3PROXY_IDENTITY=${accessKeyId}\nS3PROXY_CREDENTIAL=${secretAccessKey}\nS3PROXY_AUTHORIZATION=aws-v4\nS3PROXY_JAVA_OPTS=-Xmx256m -XX:ActiveProcessorCount=2\nJCLOUDS_PROVIDER=filesystem\nJCLOUDS_FILESYSTEM_BASEDIR=/data\n`, { mode: 0o600 });
-  const name = `rendro-e2e-${randomBytes(8).toString("hex")}`;
-  resources.createContainer(name, ["--rm", "--publish", "127.0.0.1::80", "--tmpfs", "/data",
-    "--env-file", envFile, storageImage]);
-  await run("docker", ["start", name], { env: localEnvironment(), timeout: 120_000 });
-  const close = async () => { await run("docker", ["rm", "--force", name]); };
-  try {
-    const { stdout } = await run("docker", ["port", name, "80/tcp"]);
-    const origin = `http://${stdout.trim()}`;
-    await ready(async () => (await localHttp(`${origin}/healthz`)).status === 200, "S3Proxy");
-    const client = new S3Client({ endpoint: origin, region: "us-east-1", forcePathStyle: true, credentials: { accessKeyId, secretAccessKey } });
-    await client.send(new CreateBucketCommand({ Bucket: "docs" }));
-    return { origin, accessKeyId, secretAccessKey, close: async () => { client.destroy(); await close(); },
-      async removeSmokeAsset(organizationId: string, projectId: string) {
-        const objects = await client.send(new ListObjectsV2Command({ Bucket: "docs", Prefix: `tenants/${organizationId}/projects/${projectId}/` }));
-        const key = objects.Contents?.find(object => object.Key?.endsWith("/files/deleted.svg"))?.Key;
-        if (!key) throw new Error("Seed missing-object control was not uploaded");
-        await client.send(new DeleteObjectCommand({ Bucket: "docs", Key: key }));
-      },
-    };
-  } catch (error) { await close(); throw error; }
+/** The slice of the Worker's R2 binding (Miniflare's simulation) that seeding needs. */
+type Bucket = {
+  list(options: { prefix: string }): Promise<{ objects: Array<{ key: string }> }>;
+  delete(key: string): Promise<void>;
+};
+
+/** Deletes one already-uploaded object, leaving its manifest intact, as the missing-object control. */
+export async function removeSmokeAsset(bucket: Bucket, organizationId: string, projectId: string) {
+  const objects = await bucket.list({ prefix: `tenants/${organizationId}/projects/${projectId}/` });
+  const key = objects.objects.find(object => object.key.endsWith("/files/deleted.svg"))?.key;
+  if (!key) throw new Error("Seed missing-object control was not uploaded");
+  await bucket.delete(key);
 }
