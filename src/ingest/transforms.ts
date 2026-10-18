@@ -1,7 +1,6 @@
 import type { Element, Root } from "hast";
 import GithubSlugger from "github-slugger";
 
-import { imageProxyPath } from "@/image-proxy";
 import { element, isElement, textOf, walkElements } from "@/ingest/hast";
 import { rewriteUrl, USER_CONTENT_PREFIX } from "@/ingest/paths";
 
@@ -91,24 +90,25 @@ export function decorateLinksAndImages(tree: Root): void {
 }
 
 /**
- * Runs on the sanitized tree. Every external image becomes a signed
- * same-origin proxy path (src/image-proxy.ts), so a reader's browser never
- * requests a third-party host. An image that cannot be proxied (a blocked
- * target or an overlong URL) loses its src. Repo-relative images are already
- * same-origin. The output schema accepts only root-relative image sources.
+ * Pass external (http/https) image sources through `rewrite`: the image proxy
+ * (#224) turns them into signed same-origin paths, so a reader's browser never
+ * requests a third-party host. Runs on sanitized content, before
+ * serialization, so the output allowlist (same-origin images only) and the
+ * fixed-point check apply to the rewritten URL. Returning null drops the
+ * source. Each distinct URL is rewritten once.
  */
-export async function proxyExternalImages(tree: Root, secret: string): Promise<void> {
+export async function rewriteExternalImages(tree: Root, docPath: string, rewrite: (url: string, docPath: string) => string | null | Promise<string | null>): Promise<void> {
   const images: Array<{ node: Element; src: string }> = [];
   walkElements(tree, (node) => {
     const src = node.properties.src;
     if (node.tagName === "img" && typeof src === "string" && /^https?:/.test(src)) images.push({ node, src });
   });
-  const paths = new Map<string, Promise<string | null>>();
-  for (const { src } of images) if (!paths.has(src)) paths.set(src, imageProxyPath(secret, src));
+  const rewritten = new Map<string, Promise<string | null>>();
+  for (const { src } of images) if (!rewritten.has(src)) rewritten.set(src, Promise.resolve(rewrite(src, docPath)));
   for (const { node, src } of images) {
-    const path = await paths.get(src);
-    if (path) node.properties.src = path;
-    else delete node.properties.src;
+    const next = await rewritten.get(src);
+    if (next === null) delete node.properties.src;
+    else node.properties.src = next;
   }
 }
 

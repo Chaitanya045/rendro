@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { imageProxyPath } from "../src/image-proxy";
+import { imageProxyPath, imageProxyRewriter } from "../src/image-proxy";
 import { renderDocument } from "../src/ingest/render";
 import { initNodeMarkdownEngine } from "../tests/helpers/markdown-engine";
 import { test, expect } from "./org-fixtures";
@@ -44,7 +44,7 @@ test.describe("image proxy", () => {
     const svg = `${imageHostOrigin}/scripted.svg?run=${run}`;
 
     initNodeMarkdownEngine();
-    const rendered = await renderDocument(`# Proxied images\n\n![Pixel](${pixel})\n\n<img src="${svg}" alt="Vector" width="8" height="8">\n`, "README.md", { imageProxySecret: secret() });
+    const rendered = await renderDocument(`# Proxied images\n\n![Pixel](${pixel})\n\n<img src="${svg}" alt="Vector" width="8" height="8">\n`, "README.md", { rewriteImageUrl: imageProxyRewriter(secret()) });
     expect(rendered.html).not.toContain(imageHostOrigin);
     const { rawKey } = await createKey(page, organization.id, project);
     await pushSite(baseURL, organization.id, project, rawKey, { "index.html": html("Proxied images", rendered.html) }, "images");

@@ -8,7 +8,7 @@ import { markdownToUnsafeHtml } from "@/ingest/markdown-engine";
 import { parseHtmlDocument, parseHtmlFragment } from "@/ingest/parse-html";
 import { dirnameOf, extensionOf } from "@/ingest/paths";
 import { sanitizeContent, serializeVerified } from "@/ingest/sanitize";
-import { assignHeadingIds, convertAlerts, decorateLinksAndImages, proxyExternalImages, rewriteUrls, titleFromHeadings, type Heading } from "@/ingest/transforms";
+import { assignHeadingIds, convertAlerts, decorateLinksAndImages, rewriteExternalImages, rewriteUrls, titleFromHeadings, type Heading } from "@/ingest/transforms";
 
 export type DocumentKind = "markdown" | "mdx" | "html";
 
@@ -29,19 +29,24 @@ export interface RenderedDocument {
 
 export interface RenderOptions {
   /**
-   * IMAGE_PROXY_SECRET: external images are rewritten to same-origin proxy
-   * URLs signed with it (#224). The output depends on the secret but the
-   * render key does not, so rotating it must bump RENDERER_VERSION.
+   * Hook for external image sources: the image proxy (#224) passes
+   * `imageProxyRewriter(IMAGE_PROXY_SECRET)`. It may be async (signing uses
+   * WebCrypto). Returning null drops the source. Unset, every external image
+   * loses its source, because the output schema allows same-origin images
+   * only. The output depends on the rule (and the proxy's secret) but the
+   * render key does not, so changing either must bump RENDERER_VERSION.
    */
-  imageProxySecret: string;
+  rewriteImageUrl?: (url: string, docPath: string) => string | null | Promise<string | null>;
 }
+
+const dropImage = () => null;
 
 /**
  * Render one repository file at `path` into sanitized HTML. Pure apart from
- * WebCrypto (image proxy signatures); rejects with RenderError when the file
- * exceeds a limit or its output cannot be proven stable.
+ * the image hook; rejects with RenderError when the file exceeds a limit or
+ * its output cannot be proven stable.
  */
-export async function renderDocument(source: string, path: string, options: RenderOptions): Promise<RenderedDocument> {
+export async function renderDocument(source: string, path: string, options: RenderOptions = {}): Promise<RenderedDocument> {
   const kind = documentKindOf(path);
   if (!kind) throw new TypeError(`Not a renderable document: ${path}`);
   checkSourceLimits(source);
@@ -66,11 +71,11 @@ function parseRepoHtml(source: string): { tree: Root; title: string | null } {
 async function finish(tree: Root, path: string, title: string | null, options: RenderOptions): Promise<Pick<RenderedDocument, "html" | "title" | "headings">> {
   rewriteUrls(tree, path);
   const clean = sanitizeContent(tree);
+  await rewriteExternalImages(clean, path, options.rewriteImageUrl ?? dropImage);
   convertAlerts(clean);
   const headings = assignHeadingIds(clean);
   decorateLinksAndImages(clean);
   highlightCodeBlocks(clean);
-  await proxyExternalImages(clean, options.imageProxySecret);
   return { html: serializeVerified(clean), title: title ?? titleFromHeadings(headings), headings };
 }
 

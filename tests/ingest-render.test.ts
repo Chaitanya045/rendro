@@ -3,8 +3,8 @@ import { beforeAll, describe, expect, it } from "vitest";
 import { HIGHLIGHT_CSS } from "../src/ingest/highlight-theme";
 import { MAX_HIGHLIGHT_BLOCK_CHARS, MAX_HIGHLIGHT_DOCUMENT_CHARS, MAX_INTERMEDIATE_HTML_CHARS, MAX_SOURCE_BYTES, MAX_TAG_MARKERS, RENDERER_VERSION, RenderError } from "../src/ingest/limits";
 import { documentKindOf, renderDocument, renderKey } from "../src/ingest/render";
-import { TEST_RENDER_OPTIONS } from "./helpers/ingest-render";
-import { MAX_PROXIED_URL_CHARS, verifyImageProxyPath } from "../src/image-proxy";
+import { TEST_IMAGE_PROXY_SECRET, TEST_RENDER_OPTIONS } from "./helpers/ingest-render";
+import { imageProxyRewriter, MAX_PROXIED_URL_CHARS, verifyImageProxyPath } from "../src/image-proxy";
 import { parseHtmlFragment } from "../src/ingest/parse-html";
 import { serializeVerified } from "../src/ingest/sanitize";
 import { outputViolations } from "./helpers/ingest-invariants";
@@ -137,7 +137,7 @@ describe("links and images", () => {
       "[external image link](https://img.example/a.png)",
     ].join("\n\n"));
     const sources = [...html.matchAll(/<img ([^>]*)>/g)].map((match) => /src="([^"]*)"/.exec(match[1])?.[1] ?? null);
-    const decoded = await Promise.all(sources.map((src) => (src?.startsWith("/img/") ? verifyImageProxyPath(TEST_RENDER_OPTIONS.imageProxySecret, src) : Promise.resolve(src))));
+    const decoded = await Promise.all(sources.map((src) => (src?.startsWith("/img/") ? verifyImageProxyPath(TEST_IMAGE_PROXY_SECRET, src) : Promise.resolve(src))));
     expect(decoded).toEqual([
       "https://img.example/a.png", "https://img.example/a.png", "https://cdn.example/b.gif",
       "http://img.example/c%20d.png?x=1#f", null, "/docs/guide/pic.png",
@@ -156,10 +156,10 @@ describe("links and images", () => {
   it("signs with the secret it is given", async () => {
     const source = "![a](https://img.example/a.png)";
     const first = (await md(source)).html;
-    const second = (await renderDocument(source, "docs/guide/intro.md", { imageProxySecret: "another-image-proxy-secret-32-chars" })).html;
+    const second = (await renderDocument(source, "docs/guide/intro.md", { rewriteImageUrl: imageProxyRewriter("another-image-proxy-secret-32-chars") })).html;
     expect(second).not.toBe(first);
     const src = /src="([^"]*)"/.exec(second)?.[1] as string;
-    expect(await verifyImageProxyPath(TEST_RENDER_OPTIONS.imageProxySecret, src)).toBeNull();
+    expect(await verifyImageProxyPath(TEST_IMAGE_PROXY_SECRET, src)).toBeNull();
     expect(await verifyImageProxyPath("another-image-proxy-secret-32-chars", src)).toBe("https://img.example/a.png");
   });
 

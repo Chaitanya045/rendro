@@ -7,8 +7,8 @@ import { IngestError } from "./errors";
 import { PageRenderError, type ContentPipeline } from "./pipeline";
 
 export interface ContentPipelineOptions {
-  /** IMAGE_PROXY_SECRET: external images become signed same-origin proxy URLs (#224). See RenderOptions. */
-  imageProxySecret: string;
+  /** External image rewrite: the image proxy (#224). See RenderOptions.rewriteImageUrl. */
+  rewriteImageUrl?: RenderOptions["rewriteImageUrl"];
 }
 
 /**
@@ -33,8 +33,8 @@ export function isDocsAsset(path: string): boolean {
  * pages fail the attempt instead, so it is retried rather than marking pages
  * that are fine as broken.
  */
-export function contentPipeline(options: ContentPipelineOptions): ContentPipeline {
-  const renderOptions: RenderOptions = { imageProxySecret: options.imageProxySecret };
+export function contentPipeline(options: ContentPipelineOptions = {}): ContentPipeline {
+  const renderOptions: RenderOptions = options.rewriteImageUrl ? { rewriteImageUrl: options.rewriteImageUrl } : {};
   return {
     rendererVersion: RENDERER_VERSION,
     maxSourceBytes: MAX_SOURCE_BYTES,

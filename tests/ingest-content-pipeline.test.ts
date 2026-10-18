@@ -5,7 +5,7 @@ import { RENDERER_VERSION } from "../src/ingest/limits";
 import { contentPipeline, isDocsAsset } from "../src/ingest/orchestrator/content-pipeline";
 import { PageRenderError } from "../src/ingest/orchestrator/pipeline";
 import { initNodeMarkdownEngine } from "./helpers/markdown-engine";
-import { TEST_RENDER_OPTIONS } from "./helpers/ingest-render";
+import { TEST_IMAGE_PROXY_SECRET, TEST_RENDER_OPTIONS } from "./helpers/ingest-render";
 import { verifyImageProxyPath } from "../src/image-proxy";
 
 const SHA = "a".repeat(40);
@@ -58,16 +58,45 @@ describe("contentPipeline: the #215 modules behind the orchestrator", () => {
   });
 });
 
-describe("contentPipeline: external images go through the image proxy (#224)", () => {
-  it("signs external images with the configured secret and leaves repo images alone", async () => {
-    const markdown = "![a](https://images.example.com/a.png) ![b](http://169.254.169.254/b.gif) ![c](./local.png)";
-    const { html } = await contentPipeline(TEST_RENDER_OPTIONS).render(markdown, "docs/x.md");
-    const sources = [...html.matchAll(/<img ([^>]*)>/g)].map((match) => /src="([^"]*)"/.exec(match[1])?.[1] ?? null);
-    expect(sources).toHaveLength(3);
-    expect(await verifyImageProxyPath(TEST_RENDER_OPTIONS.imageProxySecret, sources[0] as string)).toBe("https://images.example.com/a.png");
+describe("contentPipeline: the image hook and the image proxy (#224)", () => {
+  const markdown = "![a](https://images.example.com/a.png) ![b](http://img.test/b.gif) ![c](./local.png) ![d](https://images.example.com/a.png)";
+  const sources = (html: string) => [...html.matchAll(/<img ([^>]*)>/g)].map((match) => /src="([^"]*)"/.exec(match[1])?.[1] ?? null);
+
+  it("signs external images through the proxy hook and leaves repo images alone", async () => {
+    const { html } = await contentPipeline(TEST_RENDER_OPTIONS).render("![a](https://images.example.com/a.png) ![b](http://169.254.169.254/b.gif) ![c](./local.png)", "docs/x.md");
+    const [proxied, ...rest] = sources(html);
+    expect(await verifyImageProxyPath(TEST_IMAGE_PROXY_SECRET, proxied as string)).toBe("https://images.example.com/a.png");
     // A non-public target is never signed: the image loses its src.
-    expect(sources.slice(1)).toEqual([null, "/docs/local.png"]);
+    expect(rest).toEqual([null, "/docs/local.png"]);
     expect(html).not.toContain("images.example.com");
+  });
+
+  it("fails closed without a hook: external images lose their source, repo images stay", async () => {
+    const { html } = await contentPipeline().render(markdown, "docs/x.md");
+    expect(sources(html)).toEqual([null, null, "/docs/local.png", null]);
+  });
+
+  it("calls a sync or async hook once per external URL, and the output allowlist still checks the result", async () => {
+    const seen: Array<[string, string]> = [];
+    const pipeline = contentPipeline({
+      rewriteImageUrl: (url, docPath) => {
+        seen.push([url, docPath]);
+        if (url.includes("img.test")) return "javascript:alert(1)";
+        return Promise.resolve(`/img/test/${encodeURIComponent(url)}`);
+      },
+    });
+    const { html } = await pipeline.render(markdown, "docs/x.md");
+    expect(seen).toEqual([["https://images.example.com/a.png", "docs/x.md"], ["http://img.test/b.gif", "docs/x.md"]]);
+    expect(sources(html)).toEqual(["/img/test/https%3A%2F%2Fimages.example.com%2Fa.png", null, "/docs/local.png", "/img/test/https%3A%2F%2Fimages.example.com%2Fa.png"]);
+    expect(html).not.toContain("javascript:");
+    // A hook that returns another absolute host is refused by the same-origin output schema.
+    expect(sources((await contentPipeline({ rewriteImageUrl: () => "https://camo.example/x" }).render(markdown, "a.md")).html)).toEqual([null, null, "/local.png", null]);
+  });
+
+  it("drops a source the hook refuses", async () => {
+    const { html } = await contentPipeline({ rewriteImageUrl: () => null }).render("![a](https://x.test/a.png)", "a.md");
+    expect(html).not.toContain("x.test");
+    expect(html).toContain("<img");
   });
 });
 

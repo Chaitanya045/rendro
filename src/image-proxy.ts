@@ -47,6 +47,11 @@ export async function imageProxyPath(secret: string, url: string): Promise<strin
   return `${IMAGE_PROXY_PREFIX}${await sign(secret, url)}/${base64url(encoder.encode(url))}`;
 }
 
+/** The ingest `rewriteImageUrl` hook (src/ingest/render.ts): external images become signed proxy paths. */
+export function imageProxyRewriter(secret: string): (url: string) => Promise<string | null> {
+  return (url) => imageProxyPath(secret, url);
+}
+
 /**
  * The URL a proxy path names, or null unless it is exactly a path this secret
  * produced. The encoding must be canonical, so each URL has one signed path,

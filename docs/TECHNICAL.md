@@ -1663,7 +1663,7 @@ rendered titles ──► buildSidebar ──► per-commit sidebar tree
 | Module | Role |
 |---|---|
 | `detect.ts` | Docs detection from the recursive tree listing |
-| `render.ts` | `renderDocument(source, path, { imageProxySecret })` (async: image signatures use WebCrypto), `renderKey(blobSha, path)` |
+| `render.ts` | `renderDocument(source, path, { rewriteImageUrl })` (async: the image hook may be, and the proxy's signing is), `renderKey(blobSha, path)` |
 | `markdown-engine.ts` | comrak WASM wrapper; `initMarkdownEngine(module)` must run once per isolate |
 | `parse-html.ts` | parse5 with depth, formatting-list, attribute and work bounds |
 | `sanitize.ts` | Allowlist schemas and fixed-point serialization (the security boundary) |
@@ -1761,8 +1761,9 @@ init). Shiki took 4.6 s warm, with 320 ms of init for 31 grammars.
     character, loses its `href`.
   - External links get `rel="nofollow noopener noreferrer"`. Images get
     `loading="lazy" decoding="async" referrerpolicy="no-referrer"`.
-  - External images become signed same-origin proxy paths after sanitizing
-    (see [Image proxy](#image-proxy)). An image that cannot be proxied (a blocked
+  - External images go through the `rewriteImageUrl` hook after sanitizing; the
+    ingest Worker sets it to the signed same-origin image proxy
+    (see [Image proxy](#image-proxy)). Without a hook they lose their `src`. An image that cannot be proxied (a blocked
     target or a URL over 2,048 characters) loses its `src`. The output schema
     accepts only root-relative image sources, so no third-party host survives in
     rendered output even if a transform forgets one. `srcset` never survives
@@ -2008,7 +2009,7 @@ gh/v1/
    - The archive redirect is followed at once and never stored, since private-repo links expire in five minutes. The installation token is never sent to the archive host. Archive entries carry no blob IDs, so each wanted entry is hashed and checked against the tree listing.
    - Files whose archive bytes differ from their blob (export-subst, LFS) are fetched one by one, as is everything still missing when the archive fails partway (an expired link, a cut connection, a different commit in the pax header).
    - Pages render as their bytes arrive. Then write the sidebar, and the manifest last.
-   - Image proxy (#224): `contentPipeline({ imageProxySecret })` signs every external (`http`/`https`) image as a same-origin `/img/` URL, after sanitizing and before serialization, so the output allowlist and the fixed-point check apply to the rewritten URL. Images with non-public targets lose their source. `ContentPipeline.render` is async because signing uses WebCrypto. The output depends on the secret, so rotating it must bump `RENDERER_VERSION` (now 2 for the proxy).
+   - Image hook (#224): `contentPipeline({ rewriteImageUrl })` passes every external (`http`/`https`) image source through a rewrite, after sanitizing and before serialization, so the output allowlist (same-origin images only) and the fixed-point check apply to the rewritten URL. Returning null drops the source; without a hook every external image loses its source (fail closed). The ingest Worker sets `rewriteImageUrl: imageProxyRewriter(env.IMAGE_PROXY_SECRET)`, so external images become signed `/img/` proxy URLs and non-public targets lose their source. The hook may be async (signing uses WebCrypto), so `ContentPipeline.render` is async. The output depends on the rule and the secret, so changing either must bump `RENDERER_VERSION` (now 2 for the proxy).
 6. Flip: write the new pointer with a compare-and-swap on the pointer object's ETag (R2 `onlyIf`). If another writer got there first, the attempt fails and retries.
 7. Re-check the head (normally a free 304). If it moved during the build, ingest again, up to two follow-ups per call.
 

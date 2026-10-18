@@ -13,6 +13,7 @@ import { consumeIngestBatch, type IngestLog, type MessageBatchLike } from "./con
 import type { IngestDependencies } from "./ingest";
 import type { IngestMessage, QueueLike } from "./messages";
 import { contentPipeline } from "./content-pipeline";
+import { imageProxyRewriter } from "../../image-proxy";
 import { reconcileHeads, redeliverFailedDeliveries } from "./reconcile";
 import { plaintextSealer, r2Store, type R2BucketLike } from "./store";
 
@@ -40,7 +41,7 @@ export function ingestDependencies(env: IngestWorkerEnv): IngestDependencies {
     }),
     store: r2Store(env.INGEST_BUCKET),
     sealer: plaintextSealer,
-    pipeline: contentPipeline({ imageProxySecret: env.IMAGE_PROXY_SECRET }),
+    pipeline: contentPipeline({ rewriteImageUrl: imageProxyRewriter(env.IMAGE_PROXY_SECRET) }),
     now: () => Date.now(),
   };
 }
