@@ -1,6 +1,6 @@
 import { test, expect } from "./fixtures";
 import { password } from "./seed";
-import { ageRecord, authRecord, holdRequest, login, mailFor, mailLink, oauthFixture, requestPasswordReset, securityReady, session, signout, signup, verifiedUser } from "./auth-helpers";
+import { ageRecord, authRecord, holdRequest, login, mailFor, mailLink, oauthFixture, requestPasswordReset, securityReady, session, signout, signup, tamperedToken, verifiedUser } from "./auth-helpers";
 import { localHttp } from "./backend";
 
 test.describe.configure({ timeout: 60_000 });
@@ -77,7 +77,7 @@ test("an invalid or expired verification link never reports success and offers a
   await signup(page, email);
   const link = new URL(await mailLink(email, /Verify/));
   const token = link.searchParams.get("token") ?? "";
-  link.searchParams.set("token", `${token.slice(0, -1)}${token.endsWith("A") ? "B" : "A"}`);
+  link.searchParams.set("token", tamperedToken(token));
   await page.goto(link.toString());
   const heading = page.getByRole("heading", { name: "Verification link unavailable", exact: true });
   await expect(heading).toBeFocused();

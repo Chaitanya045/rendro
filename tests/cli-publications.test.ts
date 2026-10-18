@@ -32,11 +32,12 @@ describe("publication CLI", () => {
       await expect(run()).rejects.toMatchObject({ code: 1, stderr: "400 Invalid ID\n" });
       status = 500;
       body = "ArgumentValidationError: private backend details\n at handler (convex/projects.ts:1:2)";
-      await expect(run()).rejects.toMatchObject({ code: 1, stderr: "500 Backend unavailable\n" });
+      // Reads are replayed after a server error (1, 2 and 4 seconds), then the sanitized failure is the last line.
+      await expect(run()).rejects.toMatchObject({ code: 1, stderr: expect.stringMatching(/^(?:Server error \(500\)\. Retrying in [\d.]+s \(\d\/3\)…\n){3}500 Backend unavailable\n$/) });
     } finally {
       await new Promise<void>((done, reject) => server.close(error => error ? reject(error) : done()));
     }
-  });
+  }, 30_000);
 
   it("creates, lists, and removes project publications through the management API", async () => {
     const requests: CapturedRequest[] = [];

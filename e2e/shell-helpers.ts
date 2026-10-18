@@ -71,6 +71,13 @@ export async function shellReady(page: Page) {
   await expect(page.locator(".cp-content[aria-busy=true]")).toHaveCount(0);
 }
 
+/** Wait until the page has also filled in its own data. Skeletons are replaced by content of another height, which
+ * moves every control below them: a press that straddles the swap, or a popup opened just before it, is lost. */
+export async function pageSettled(page: Page) {
+  await shellReady(page);
+  await expect(page.locator(".cp-main .loading-view[aria-busy=true]")).toHaveCount(0);
+}
+
 export const heading = (page: Page) => page.locator(".cp-page-heading");
 
 /** Hold only the first matching request; later requests continue untouched. Release resolves the first. */

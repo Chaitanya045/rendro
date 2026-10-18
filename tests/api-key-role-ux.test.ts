@@ -29,6 +29,7 @@ async function runtime(role: string, requestError = false, activePage = true) {
   });
   const renderKeys = vi.fn();
   const context = vm.createContext({
+    window: { RendroUI: { setOrganizationChrome: vi.fn() } },
     state, ui: { request, isActive: () => activePage }, keyList, loadVersion: 0, loading: "loading", projects: new Map(),
     projectSelect: { innerHTML: "", value: "" }, renderKeys,
     document: {

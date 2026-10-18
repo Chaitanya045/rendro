@@ -40,18 +40,69 @@ describe("CLI rate-limit handling", () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
-  it("bounds retries and does not retry outages or ambiguous transport failures", async () => {
+  it("bounds the retries of a rate limit that never clears", async () => {
     const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(limited()));
     vi.stubGlobal("fetch", fetchMock);
     const pending = fetchWithRateLimit("https://rendro.test/read");
     await vi.runAllTimersAsync();
     expect((await pending).status).toBe(429);
     expect(fetchMock).toHaveBeenCalledTimes(4);
-    fetchMock.mockReset().mockResolvedValue(new Response(null, { status: 502 }));
-    expect((await fetchWithRateLimit("https://rendro.test/read")).status).toBe(502);
+  });
+
+  it.each([{ method: "PUT", body: "identical-bytes" }, { method: "POST", body: '{"paths":["index.html"]}' }, {}])("replays the same request after a transient failure, whether a 5xx or a lost connection (%j)", async init => {
+    const outage = (status: number, headers?: Record<string, string>) => Response.json({ error: "Storage temporarily unavailable", retryable: true }, { status, headers });
+    const fetchMock = vi.fn().mockResolvedValueOnce(outage(503, { "Retry-After": "1" })).mockResolvedValueOnce(new Response("Error: Network connection lost.", { status: 500 }))
+      .mockRejectedValueOnce(new TypeError("fetch failed")).mockResolvedValueOnce(Response.json({ ok: true }));
+    vi.stubGlobal("fetch", fetchMock);
+    const pending = fetchWithRateLimit("https://rendro.test/safe", init, true);
+    await vi.advanceTimersByTimeAsync(1124);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(2125);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    await vi.advanceTimersByTimeAsync(4125);
+    expect((await pending).status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+    for (const call of fetchMock.mock.calls) expect(call).toEqual(["https://rendro.test/safe", init]);
+    expect(console.error).toHaveBeenCalledWith(expect.stringContaining("Server error (503). Retrying in 1.1s (1/3)"));
+    expect(console.error).toHaveBeenCalledWith(expect.stringContaining("Server error (500). Retrying in 2.1s (2/3)"));
+    expect(console.error).toHaveBeenCalledWith(expect.stringContaining("Network error. Retrying in 4.1s (3/3)"));
+  });
+
+  it.each([500, 502, 503, 504])("reports a %i that does not clear after the last retry", async status => {
+    const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(new Response(null, { status })));
+    vi.stubGlobal("fetch", fetchMock);
+    const pending = fetchWithRateLimit("https://rendro.test/safe", { method: "PUT", body: "x" }, true);
+    await vi.runAllTimersAsync();
+    expect((await pending).status).toBe(status);
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+    fetchMock.mockReset().mockRejectedValue(new Error("Transport failed"));
+    const lost = fetchWithRateLimit("https://rendro.test/safe", { method: "PUT", body: "x" }, true);
+    const settled = expect(lost).rejects.toThrow("Transport failed");
+    await vi.runAllTimersAsync();
+    await settled;
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+  });
+
+  it("never replays a server error or lost connection of an operation that is unsafe to replay", async () => {
+    const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(Response.json({ error: "down" }, { status: 503, headers: { "Retry-After": "1" } })));
+    vi.stubGlobal("fetch", fetchMock);
+    expect((await fetchWithRateLimit("https://rendro.test/start", { method: "POST", body: "{}" })).status).toBe(503);
+    expect(fetchMock).toHaveBeenCalledOnce();
+    fetchMock.mockReset().mockResolvedValue(new Response(null, { status: 500 }));
+    expect((await fetchWithRateLimit("https://rendro.test/commit", { method: "POST", body: "{}" })).status).toBe(500);
     expect(fetchMock).toHaveBeenCalledOnce();
     fetchMock.mockReset().mockRejectedValue(new Error("Transport failed"));
-    await expect(fetchWithRateLimit("https://rendro.test/read")).rejects.toThrow("Transport failed");
+    await expect(fetchWithRateLimit("https://rendro.test/start", { method: "POST", body: "{}" })).rejects.toThrow("Transport failed");
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("does not retry other statuses", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 501 }));
+    vi.stubGlobal("fetch", fetchMock);
+    expect((await fetchWithRateLimit("https://rendro.test/read")).status).toBe(501);
     expect(fetchMock).toHaveBeenCalledOnce();
   });
 

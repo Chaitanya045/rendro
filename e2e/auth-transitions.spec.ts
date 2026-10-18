@@ -1,6 +1,6 @@
 import { test, expect } from "./fixtures";
 import { password } from "./seed";
-import { authRecord, login, mailLink, oauthFixture, securityReady, session, signout, signup, verifiedUser } from "./auth-helpers";
+import { authRecord, login, mailLink, oauthFixture, securityReady, session, signout, signup, tamperedToken, verifiedUser } from "./auth-helpers";
 
 test.describe.configure({ timeout: 60_000 });
 
@@ -12,7 +12,7 @@ test("an invalid verification link offers recovery instead of reporting the emai
   await signup(page, email);
   const link = new URL(await mailLink(email, /Verify/));
   const token = link.searchParams.get("token") ?? "";
-  link.searchParams.set("token", `${token.slice(0, -2)}${token.endsWith("aa") ? "bb" : "aa"}`);
+  link.searchParams.set("token", tamperedToken(token));
   await page.goto(link.href);
   // Nothing was verified and nobody was signed in.
   const user = await authRecord<{ emailVerified: boolean }>("findOne", { model: "user", where: [{ field: "email", value: email }], select: ["emailVerified"] });
