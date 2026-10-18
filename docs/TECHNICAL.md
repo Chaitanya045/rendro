@@ -16,7 +16,7 @@ Browser / CI
 Cloudflare Workers (Hono)
       ├── Better Auth HTTP proxy ──► Convex component (users, sessions, organizations, teams)
       ├── Rendro metadata API ─────► Convex app tables (HTTP actions)
-      └── immutable file delivery ─► R2 via the S3 API
+      └── immutable file delivery ─► R2 through the Worker's native bucket binding
 ```
 
 ### Component Roles
@@ -26,14 +26,35 @@ Cloudflare Workers (Hono)
 | **Edge application** | Hono on Cloudflare Workers | Request routing, SSR, auth proxy, authorization handoff, sandboxed file streaming |
 | **Identity and tenancy** | Better Auth Convex component | Google and email/password identity, email verification, sessions, organizations, teams, invitations, roles |
 | **Application metadata** | Convex | Projects, immutable deployments, publications, scoped credentials, revocable shares, comments, audit events |
-| **Blob storage** | Cloudflare R2, reached through the AWS S3 client (`src/minio.ts`, `MINIO_*` variables) | Deployment manifests and immutable objects under organization-ID prefixes |
+| **Blob storage** | Cloudflare R2, reached only through the Worker's native `STORAGE` binding (`src/storage.ts`); no S3 endpoint or access key exists | Deployment manifests and immutable objects under organization-ID prefixes |
 | **CLI** | Node.js, bundled to one executable | Manifest hashing, delta upload, provenance, deployment commit, publication management |
 | **Browser UI** | Server HTML + vanilla JavaScript | Organization/project management, document navigation, comments |
 
-The Worker has no R2 binding. Local development uses MinIO with the same S3 client.
-E2E uses disposable S3Proxy filesystem storage. The Worker DOM shim exposes
-iterable named XML attributes with a length, matching the AWS SDK browser parser;
-empty S3 listing fields (including continuation tokens) deserialize as empty strings.
+Storage is the `STORAGE` R2 binding declared in `wrangler.toml` (production `rendro-docs`, `development` `rendro-docs-dev`). There are no storage credentials: a leaked secret cannot read the bucket from outside the Worker, and the bucket must stay private (see [R2 bucket privacy](#r2-bucket-privacy)). Local development (`pnpm dev` through `src/local-storage.ts`, and `wrangler dev`) and E2E use Miniflare's R2 simulation; nothing needs Docker or an S3 server for storage.
+
+### Storage API (`src/storage.ts`)
+
+All storage goes through a handful of functions; routes never see the binding. `src/storage-binding.ts` holds the isolate's bucket: the Worker calls `bindStorage(env.STORAGE)` in its first middleware and in the `scheduled` handler, the Node dev server binds the Miniflare bucket once, and a missing or malformed binding makes every call throw (fail closed).
+
+| Function | R2 operation | Notes |
+|---|---|---|
+| `getObjectStream(key, range?)` | `get(key, { range: { offset, length } })` | `null` for a missing key. A ranged read must come back with exactly the requested `offset`/`length` and the manifest's total size, otherwise it throws and the unread stream is cancelled, so mislabelled bytes are never sent. A start past the end is rejected by R2 itself (10039) |
+| `getObjectText(key)` | `get(key)` then `.text()` | `null` for a missing key |
+| `headObject(key)` | `head(key)` | `etag` is R2's unquoted `etag` (S3 returned it quoted and the old code stripped the quotes); `metadata` is `customMetadata` (case preserved; S3 lowercased keys); `contentType` is `httpMetadata.contentType` |
+| `putObject(key, body, type, metadata, signal)` | `put(key, body, { httpMetadata, customMetadata })` | Bodies are strings or bytes, so a replay is safe. Single-shot puts only: uploads are capped at 8 MiB per file, far below R2's 5 GiB limit, so multipart is not used |
+| `copyObject(from, to, signal)` | `get(from)` then `put(to, body, { httpMetadata, customMetadata })` | R2 has no server-side copy, so the bytes stream through the Worker (one R2 read and one write, no buffering). Content type and metadata are carried over; a missing source throws |
+| `listImmediate(prefix, { maxKeys, startAfter })` | `list({ prefix, delimiter: "/", limit, startAfter })` | `.html` objects plus `delimitedPrefixes` as folders; `nextStartAfter` is the last returned key, as before |
+| `listAllKeys(prefix, limits?)` | `list({ prefix, cursor })` | Same 8-page / 1,000-key commit budget; the cursor is followed only while `truncated` |
+| `listKeyPage(prefix, limit)`, `deleteObjects(keys)` | `list({ prefix, limit })`, `delete(keys[])` | Retention: up to 1,000 keys per call |
+| `deleteObject(key)` | `delete(key)` | A missing key is not an error |
+
+Behaviours that are deliberately unchanged: HEAD requests and `304` answers still never touch storage (validators derive from the manifest hash, so R2's `onlyIf` conditional reads are not needed); `If-Range` and range parsing are decided before any storage read; and the legacy-private route keeps its `"s3-<etag>"` validator text so clients' cached validators stay valid. Differences to know: R2 reports `etag` unquoted (`httpEtag` is quoted); an unsatisfiable `range` throws instead of answering 416, which only happens if a manifest disagrees with storage; `put` cannot be cancelled once started, so an abort signal ends the caller's wait but a started write may still land inside the staging prefix (retention drains it); and every operation is replayed up to three attempts in all after a transient fault (the same budget the S3 SDK had).
+
+Errors from the binding are plain `Error`s whose message ends in an R2 code, `<operation>: <text> (<code>)`. `transientStorageFault` (`src/storage-fault.ts`) treats `10001` (internal), `10043` (temporarily unavailable) and `10058` (rate limited) as retryable service faults and `10054` (client disconnected mid-transfer) as a dropped connection. Rejections that describe the request (`10003` permission, `10007`, `10012`, `10020`, `10031`, `10039`, ...) and anything unrecognised stay final. Only the enumerated kind and status are ever logged, never the message. `tests/storage-r2.test.ts` runs every behaviour above against both an in-memory bucket and Miniflare's real R2 simulation, so the fake used elsewhere cannot drift.
+
+### R2 bucket privacy
+
+Worker routes are the only authorization boundary, so no bucket may be reachable any other way: no managed `r2.dev` URL and no custom domain. `pnpm check:r2-public` (`scripts/check-r2-public-access.ts`) asks the Cloudflare API for both lists for every bucket in `wrangler.toml` and exits non-zero if either is enabled, if a custom domain is attached at all, or if a bucket cannot be verified. It needs `CLOUDFLARE_ACCOUNT_ID` and a `CLOUDFLARE_API_TOKEN` limited to R2 read access; without them it exits `2` ("was NOT verified"), never `0`. `--dry-run` prints the requests without credentials. `.github/workflows/r2-public-access.yml` runs it daily and on demand with those two repository secrets, and as a dry run on pull requests that touch the script, the workflow or `wrangler.toml`.
 
 ---
 
@@ -436,8 +457,7 @@ Deployment keys are immutable. A push writes objects under a new staging deploym
 ```
 Request
   │
-  ├─ 1. DOMParser/Node polyfill (IIFE, module load time)
-  ├─ 2. Env bridging (string c.env values → process.env, without overwriting)
+  ├─ 1. Storage binding (env.STORAGE → src/storage-binding.ts) and env bridging (string c.env values → process.env, without overwriting)
   ├─ 3. CORS for legacy /api/sync/*
   ├─ 4. Debug request logging
   ├─ 5. Public routes, before session middleware
@@ -555,18 +575,6 @@ Trusted HTML policies also use `object-src 'none'`, `base-uri 'self'`, and `form
 
 `tests/security-headers.test.ts` covers route policies, nonce isolation, HTTPS detection, existing private protections and non-HTML responses. `tests/security-headers-browser.test.ts` runs Chromium against actual Worker routes on an isolated local server, with fixture auth/storage/comment backends, a `securitypolicyviolation` listener in every frame and CSP console checks. It exercises landing, sign-in errors and auth error redirects, email verification, ordinary and share 404/410s, `/docs/:org` 404s, management navigation, ticket-backed CSS and the real comments postMessage host/widget. The suite uses the shared offline Chromium harness and runs in the serialized browser project included by `pnpm verify` (see [Chromium tests](BROWSER_TESTS.md)). Font responses are deterministic fixtures; any external request, including a CSS CDN, fails the suite. The former `CSP_SMOKE_EXTERNAL` switch is no longer supported by this offline suite. It does not perform a live Google login or contact production Convex.
 
-### DOMParser Polyfill
-
-The AWS SDK S3 client uses browser XML APIs for parsing ListObjectsV2 responses. Workers lacks these.
-
-**Polyfill provides:**
-- `globalThis.Node` with type constants (ELEMENT_NODE=1, TEXT_NODE=3, etc.)
-- `globalThis.DOMParser` class with `parseFromString()` → Document-like object
-- A minimal node class `X` implementing: `nodeType`, `nodeName`, `nodeValue`, `tagName`, `textContent`, `childNodes`, `firstChild`, `getElementsByTagName()`
-- `documentElement` property pointing to root element (not #document node)
-
-**Tree-shaking protection**: The polyfill is wrapped in an IIFE. Without it, esbuild evaluates `typeof DOMParser === "undefined"` at build time (where it IS defined) and removes the entire block.
-
 ### Convex access from the Worker
 
 The Worker never opens a WebSocket to Convex. It calls Convex HTTP actions at `CONVEX_SITE_URL` for auth and `/api/rendro/*`. The legacy `legacy-access.ts` and `soft-delete.ts` modules call the Convex query/mutation HTTP API at `CONVEX_URL` with `CONVEX_INTERNAL_SECRET`, through `src/convex-internal.ts`:
@@ -618,15 +626,15 @@ starting. Limit errors name the relevant maximum. Split larger documentation set
 into projects or reduce generated assets before pushing.
 
 Commit normally makes **4 external requests** at the maximum: staging authorization,
-manifest GET, one S3 LIST (1,000 keys), and the attested Convex commit. Listings are
+manifest GET, one R2 list (1,000 keys), and the attested Convex commit. Listings are
 additionally bounded to **8 pages and 1,000 keys**, failing closed without activation
 on overflow; short or repeated continuation pages cannot loop indefinitely. Sorting,
 path comparisons and manifest hashing therefore operate on bounded inputs. With
-three attempts for each of the nine possible S3 reads plus two Convex calls, the
+three attempts for each of the nine possible R2 reads plus two Convex calls, the
 worst configured commit budget is **29 external requests**, leaving room below
 Workers' 50-request Free-plan subrequest ceiling. Cloudflare's Paid default is
 10,000; both plans have 128 MB memory. These are subrequest budgets, not a promise
-that SDK/crypto work fits the Free plan's 10 ms CPU allowance; production should
+that crypto work fits the Free plan's 10 ms CPU allowance; production should
 use a paid Worker CPU budget. [Cloudflare limits](https://developers.cloudflare.com/workers/platform/limits/)
 
 An upload cannot exceed the independent 8 MiB server cap, even if its manifest
@@ -1065,13 +1073,13 @@ The HTML injectors rewrite the stream, so those bodies are never byte-ranged (`A
 
 `If-None-Match` follows the weak comparison of RFC 9110: lists, `W/"…"` members and `*` are accepted, malformed members are skipped, and a header longer than 2 KiB never matches (the request gets a full 200). `*` is satisfied by any authorized current representation. `If-Range` needs a strong entity-tag equal to the current `ETag`; a weak tag, a date (no `Last-Modified` is sent) or a stale tag restores the full 200. `If-Match`, `If-Modified-Since` and `If-Unmodified-Since` are not evaluated.
 
-`Range` accepts exactly one `bytes` range (`a-b`, `a-`, `-n`; the unit is case-insensitive). A valid but unsatisfiable range (`start ≥ size`, `-0`, any range of an empty object) is `416` with `Content-Range: bytes */size`. Syntactically invalid headers, other units, headers over 128 bytes, and multi-range requests are ignored and answered with the full `200` (RFC 9110 permits ignoring `Range`; multi-range is deliberately not a 416 or `multipart/byteranges`, so a hostile list costs one length check). Positions are clamped, so overflowing digit strings behave as "past EOF" (416) or "to the end" (206) and never lose precision. The size comes from the manifest; `getObjectStream(key, range)` issues a ranged S3 `GET` and fails closed if the store ignores the range or reports a different slice or total length.
+`Range` accepts exactly one `bytes` range (`a-b`, `a-`, `-n`; the unit is case-insensitive). A valid but unsatisfiable range (`start ≥ size`, `-0`, any range of an empty object) is `416` with `Content-Range: bytes */size`. Syntactically invalid headers, other units, headers over 128 bytes, and multi-range requests are ignored and answered with the full `200` (RFC 9110 permits ignoring `Range`; multi-range is deliberately not a 416 or `multipart/byteranges`, so a hostile list costs one length check). Positions are clamped, so overflowing digit strings behave as "past EOF" (416) or "to the end" (206) and never lose precision. The size comes from the manifest; `getObjectStream(key, range)` issues a ranged R2 `get` and fails closed if the store ignores the range or reports a different slice or total length.
 
 Every response shape (200, 206, 304, 416, HEAD) carries the same `Content-Type` (including the validated charset), `X-Content-Type-Options: nosniff`, sandbox CSP, `Cache-Control`, `Referrer-Policy`, opaque-origin CORS header and `ETag`; `Content-Length` is omitted on 304. workerd sends streamed 200/206 bodies with chunked framing and drops a handler-set `Content-Length` (HEAD and 416 keep it), so clients size a download from `Content-Range` and HEAD. Cache policy per route class is unchanged: public publication files `public, max-age=0, must-revalidate`; share, project, ticket and legacy-private files `private, no-store` (the validator saves bandwidth for clients that revalidate; it does not make those responses cacheable). Client-error statuses on `/p/*` and `/s/*` (including 416) are rewritten to `private, no-store` by the viewer error policy, so a 416 is never cached. No `Vary` is sent today because the representation does not depend on request headers (Cloudflare adds `Vary: Accept-Encoding` and may weaken strong tags when it compresses text; ranged 206 responses are not compressed).
 
 A 304 or HEAD does not read storage, so for an object the manifest lists but storage has lost they report the manifest's view; a full or ranged `GET` still returns the ordinary 404 for it.
 
-`tests/object-delivery.test.ts` tables the Range/If-None-Match grammar (overflowing positions, past-EOF, many ranges, lists, `*`, weak and malformed validators, non-terminating-input guards). `tests/document-conditional-delivery.test.ts` runs the real Worker over all six route classes: header tables for 200/206/304/416/HEAD, ranged storage reads, If-Range, revoked membership/publication/share answered 404 before any validator, injected-HTML validators, and a delayed-tail multi-megabyte public HTML stream that must emit its injected head before the tail is available with bounded read-ahead. `e2e/document-delivery.spec.ts` repeats the matrix on workerd with S3Proxy storage, including 2 MiB range reassembly and manual conditional requests (the E2E harness's request interception disables the browser HTTP cache, so revalidation is asserted on headers and bytes).
+`tests/object-delivery.test.ts` tables the Range/If-None-Match grammar (overflowing positions, past-EOF, many ranges, lists, `*`, weak and malformed validators, non-terminating-input guards). `tests/document-conditional-delivery.test.ts` runs the real Worker over all six route classes: header tables for 200/206/304/416/HEAD, ranged storage reads, If-Range, revoked membership/publication/share answered 404 before any validator, injected-HTML validators, and a delayed-tail multi-megabyte public HTML stream that must emit its injected head before the tail is available with bounded read-ahead. `e2e/document-delivery.spec.ts` repeats the matrix on workerd with Miniflare R2 storage, including 2 MiB range reassembly and manual conditional requests (the E2E harness's request interception disables the browser HTTP cache, so revalidation is asserted on headers and bytes).
 
 ### Private viewer asset authorization
 
@@ -1376,7 +1384,7 @@ Local and deployed environments use the same Better Auth session and organizatio
 | Worker | Cloudflare Workers custom-domain deployment |
 | Convex API | `CONVEX_URL` |
 | Convex HTTP actions | `CONVEX_SITE_URL` |
-| Blob storage | Cloudflare R2 S3 endpoint |
+| Blob storage | Cloudflare R2 bucket bound as `STORAGE` (private; no public URL) |
 
 ### Deploy Commands
 
@@ -1435,9 +1443,9 @@ The base stylesheet is 1,435 bytes (778 gzip), against a 419 KB CDN script (126 
 
 ### Environment Variables (Workers)
 
-`src/config.ts` validates the Worker environment at startup. The table lists every named string setting read by Worker code; `ASSETS` is the separate static-asset fetch binding in `src/worker.ts`. Google OAuth credentials are read only by Convex, and `BASE_URL` is unused. The local Node entry reads `PORT` separately.
+`src/config.ts` validates the Worker environment at startup. The table lists every named string setting read by Worker code; `ASSETS` (static assets) and `STORAGE` (the R2 bucket) are separate bindings in `wrangler.toml`; there is no storage endpoint, region or access key setting. Google OAuth credentials are read only by Convex, and `BASE_URL` is unused. The local Node entry reads `PORT` separately.
 
-Both production (top-level) and `development` declare the same required secrets: `CONVEX_INTERNAL_SECRET`, `AUTH_SECRET`, `MINIO_ENDPOINT`, `MINIO_ACCESS_KEY`, and `MINIO_SECRET_KEY`. Wrangler checks these at deploy time, and `src/config.ts` validates them at startup. Production commands use the top-level configuration without an `--env` flag; development commands use `--env development`.
+Both production (top-level) and `development` declare the same required secrets: `CONVEX_INTERNAL_SECRET` and `AUTH_SECRET`. Wrangler checks these at deploy time, and `src/config.ts` validates them at startup. Production commands use the top-level configuration without an `--env` flag; development commands use `--env development`.
 
 | Variable | Storage | Purpose |
 |---|---|---|
@@ -1446,8 +1454,7 @@ Both production (top-level) and `development` declare the same required secrets:
 | `CONVEX_SITE_URL` | Var/secret (optional) | Convex HTTP action origin for auth and project routes; derived from `CONVEX_URL` when unset. Startup and `/health` work without either URL; backend routes do not |
 | `CONVEX_INTERNAL_SECRET` | Secret (required by `wrangler.toml`, ≥32 chars) | Worker-only legacy functions, ingress proofs and storage resolver proofs; same value in Convex |
 | `AUTH_SECRET` | Secret (required, ≥16 chars) | Encrypts scoped private viewer tickets and signs legacy `/share/:token` HMAC links. Better Auth signing happens in Convex |
-| `MINIO_ENDPOINT`, `MINIO_ACCESS_KEY`, `MINIO_SECRET_KEY` | Secrets (required, nonempty) | R2 S3 access |
-| `MINIO_BUCKET`, `MINIO_REGION`, `MINIO_FORCE_PATH_STYLE` | Vars/secrets | R2 bucket configuration (defaults `docs`, `us-east-1`, `true`) |
+| `RETENTION_SECRET` | Secret (optional, ≥32 chars) | Bearer for Convex's retention endpoints, used by the scheduled purge; same value as in Convex. Without it the purge reports itself disabled and fails |
 | `LOG_LEVEL` | Var (optional) | Pino log level; defaults to `debug` outside production, `info` in production |
 | `PORT` | Local only; not read by Worker | Validated in `src/index.ts`; Node.js server port (integer 1–65535, default 3000) |
 
@@ -1470,7 +1477,7 @@ Both production (top-level) and `development` declare the same required secrets:
 |---|---|---|
 | `.github/workflows/quality.yml` | Pull requests, pushes to `main`/`development`, manual | Independent `verify` (`pnpm verify`, dependency audit), `coverage` (`pnpm coverage`, summary artifacts), and `e2e-engine` (Playwright Test/workerd, two shards per browser engine, `e2e (<engine> <i>/2)`, each with a duration guard that warns above 60% of its timeout) with an aggregate required `e2e` job and an optional `e2e-report` job that merges failed shards' blob reports; read-only permissions, no deployment credentials |
 | `.github/workflows/release.yml` | `v*` tags (and edits to the file itself, which stop before publishing) | `gate` calls `quality.yml` (`verify`, `coverage`, `e2e`) as a reusable workflow; `build` (read-only) builds `bin/rendro.mjs` and `SHA256SUMS`; `publish` (the only job with `contents`, `id-token` and `attestations` write) re-checks the sums, attaches a build provenance attestation (`actions/attest-build-provenance`) and creates the GitHub release with both files. Verify a download with `sha256sum -c SHA256SUMS` and `gh attestation verify rendro.mjs --repo Chaitanya045/rendro` |
-| `.github/workflows/retention.yml` | Daily cron, manual | `pnpm cleanup:retention` |
+| `.github/workflows/r2-public-access.yml` | Daily cron, manual; dry run on pull requests touching it | `pnpm check:r2-public` ([R2 bucket privacy](#r2-bucket-privacy)); needs `CLOUDFLARE_ACCOUNT_ID` and a read-only R2 `CLOUDFLARE_API_TOKEN` |
 | `.github/workflows/stability.yml` | Nightly cron, manual | `coverage-twice` (two consecutive `taskset -c 0,1 pnpm coverage` runs, then per-test outcome and coverage-counter diffs; the second run and diffs always execute) and `e2e-no-retries` (per engine and shard, `E2E_RETRIES=0`); read-only permissions, no secrets; any failure fails the workflow |
 
 Supply-chain policy (enforced by `tests/workflow-supply-chain.test.ts`): every external `uses:` is pinned to a full
@@ -1487,7 +1494,7 @@ The E2E job pushes application code only to a harness-owned disposable loopback 
 the production compatibility flags and static-asset configuration, isolated
 loopback ports, generated test secrets, and guarded outbound requests. The
 suite uses pinned local Convex with real Better Auth, HTTP actions and WebSockets,
-disposable S3Proxy, an in-memory mail sink, and a deterministic OAuth provider fixture.
+Miniflare's local R2 simulation, an in-memory mail sink, and a deterministic OAuth provider fixture.
 A generated local instance/admin key, loopback target assertion, sanitized CLI
 environment and temporary source copy isolate every Convex push from shared deployments.
 Every cached Convex archive is SHA-256 checked against its pinned release digest
@@ -1576,7 +1583,7 @@ Operators should privately review historical deployment provenance for embedded 
 
 ### Retention
 
-`pnpm cleanup:retention` scans failed deployments older than 24 hours, superseded deployments older than 30 days (both measured from creation), and expired staging leases after their 24-hour drain period. Failed rows also honor the staging drain deadline. Active deployments and project active pointers are protected. Publication pins and unexpired, unrevoked shares protect their deployment with indexed existence checks (`by_pinned_deployment`, `by_deployment_live`), without collecting a project's publications or an organization's shares.
+The Worker's nightly cron trigger (`03:23 UTC`, `[triggers]` in `wrangler.toml`, `scheduled` in `src/worker.ts`, `src/retention.ts`) scans failed deployments older than 24 hours, superseded deployments older than 30 days (both measured from creation), and expired staging leases after their 24-hour drain period. Failed rows also honor the staging drain deadline. Active deployments and project active pointers are protected. Publication pins and unexpired, unrevoked shares protect their deployment with indexed existence checks (`by_pinned_deployment`, `by_deployment_live`), without collecting a project's publications or an organization's shares.
 
 Upload and copy requests freshly re-authorize the current staging lease after body/source validation and immediately before storage dispatch. A lease renewed by another request remains usable. An expired lease returns HTTP 409 with “Staging lease expired. Run rendro push again to start a new deployment.”; the CLI preserves that diagnostic and attempts failure cleanup. Storage operations retain their five-minute/lease deadline and the retention drain interval.
 
@@ -1584,15 +1591,15 @@ The operator-only `GET /retention/candidates` is a non-cacheable claim operation
 
 Claims insert a `deploymentPurges` record and token before any storage deletion. Publication/share mutations read that record and legacy purge fields in their transaction; Convex conflict handling ensures that either the reference protects the bytes or the claim blocks the reference. Public resolvers also reject purging and purged rows. Claim worker ownership expires after 30 minutes, but **purging never reverts to readable/pinnable**: another scan can issue a replacement token and retry the immutable prefix. A lost claim response, interrupted deletion, per-object error, or failed finalization is therefore recoverable. Finalization requires the current token and is idempotent, emitting one `deployment.purged` audit event. Its object count describes the successful attempt, not previously deleted objects from interrupted attempts.
 
-The script drains up to 100 metadata pages, 1,000 storage-list pages or ten minutes per run, stopping at the first bound or completed scan. Each HTTP/storage call has a 30-second deadline; an in-flight call may extend the wall-time bound. It re-lists a prefix from the beginning after each successful delete and checks `DeleteObjects.Errors`, then verifies the prefix is empty before finalization. Errors keep claims retryable, allow other candidates to proceed, and fail the job. `.github/workflows/retention.yml` runs daily with a 15-minute job timeout and serializes runs. Required secrets: `CONVEX_SITE_URL`, `RETENTION_SECRET`, and `R2_ENDPOINT`/`R2_ACCESS_KEY`/`R2_SECRET_KEY`/`R2_BUCKET` (mapped to `MINIO_*`).
+The purge drains up to 100 metadata pages, stopping early at ten minutes or after 900 subrequests (candidate, list, delete and finalize calls; the next run resumes whatever is left). Each Convex call has a 30-second deadline. It re-lists a prefix from the beginning after each successful delete (`list` then `delete` of up to 1,000 keys through the binding; a failing delete throws, and deleting a missing key is not an error), then verifies the prefix is empty before finalization. Errors keep claims retryable, allow other candidates to proceed, and fail the scheduled run so it shows in Cloudflare's cron history; only the error's type and the deployment ID are logged. It needs the Worker secret `RETENTION_SECRET` (the value Convex checks) and a Convex origin; without them it logs `RetentionDisabled` and fails. The purge runs inside the Worker, so no storage credential exists in GitHub Actions. To run it by hand, trigger the cron from the Cloudflare dashboard or `wrangler dev --test-scheduled`.
 
-Rollout: release the separate claim table, optional compatibility fields/indexes and claim-aware Convex endpoints, then the lease-aware Worker, then the cleanup script/workflow. Keep cleanup disabled during mixed-version rollout; the old script cannot finalize tokenized claims, but still must not run alongside the new protocol. All old deployment rows remain readable without backfill. To roll back, stop the cleanup workflow and preserve purging claims/tombstones until outstanding deletions have been reconciled; never clear a purging flag to restore a potentially partially deleted deployment.
+Rollout: release the separate claim table, optional compatibility fields/indexes and claim-aware Convex endpoints, then the lease-aware Worker, then the scheduled purge. Keep cleanup disabled during mixed-version rollout. The retired GitHub Actions script (S3 keys, `pnpm cleanup:retention`) must be deleted from the repository secrets (`R2_*`) and never run alongside the new purge. All old deployment rows remain readable without backfill. To roll back, remove the cron trigger and preserve purging claims/tombstones until outstanding deletions have been reconciled; never clear a purging flag to restore a potentially partially deleted deployment.
 
 ### Legacy migration
 
 Legacy migration remains supported: slug-based publications, comments, `/share`, `/public`, and `/docs/:org` remain available, and production migration verification has not been recorded. Keep the migration tool until that verification is complete. It copies slug-prefixed object bytes into immutable deployments using the same Worker start/upload/commit protocol as `rendro push`.
 
-1. Set the same random `MIGRATION_SECRET` in Convex and the operator environment. Set `RENDRO_ENDPOINT` to the target Worker origin (default `http://localhost:3000`) and the `MINIO_*` variables to the source bucket. Set `CONVEX_URL` and `CONVEX_INTERNAL_SECRET` to the authoritative legacy Convex database used by that Worker and bucket; apply refuses to continue if deletion state cannot be read.
+1. Set the same random `MIGRATION_SECRET` in Convex and the operator environment. Set `RENDRO_ENDPOINT` to the target Worker origin (default `http://localhost:3000`) and the `LEGACY_SOURCE_S3_ENDPOINT`, `LEGACY_SOURCE_S3_ACCESS_KEY`, `LEGACY_SOURCE_S3_SECRET_KEY`, `LEGACY_SOURCE_S3_BUCKET` (default `docs`), `LEGACY_SOURCE_S3_REGION` and `LEGACY_SOURCE_S3_FORCE_PATH_STYLE` variables to the legacy source bucket (an operator-supplied, short-lived read-only S3 key: the Worker never holds one, and this is the only remaining use of the S3 SDK, a dev dependency of this one tool). Set `CONVEX_URL` and `CONVEX_INTERNAL_SECRET` to the authoritative legacy Convex database used by that Worker and bucket; apply refuses to continue if deletion state cannot be read.
 2. Create a JSON array containing `legacyOrgSlug`, Better Auth `organizationId`, an organization-scoped migration `apiKey`, and optionally `projectId`, `projectName`, and `legacySessionCookie`. The current key needs `docs:write`; publication migration additionally needs `docs:read`, `publications:read`, and `publications:write`. The session cookie reads `/api/publications?org=<legacy slug>` with live mapped membership. The target project must be empty or contain an identical completed migration from this legacy slug.
 3. Run `pnpm migrate:legacy -- --map targets.json` for a read-only inventory.
 4. Run again with `--apply`. For a non-local Worker, also supply `--confirm-endpoint <Worker origin>` (for example, `--confirm-endpoint https://rendro.example`). Apply and rollback print the sanitized Worker origin, source storage origin/bucket, source Convex origin, and organization/project mappings before any remote writes; the confirmation must match the displayed Worker origin. The tool queries `deletedFiles:filterFn` (the `deleted_files` table, indexed by full object key), excludes soft-deleted objects, then hashes the remaining objects and creates/reuses a dedicated project. It sends the sorted manifest to `/api/rendro/deployments/start`, reads `deployment.deploymentId`, uploads bytes through `PUT /api/rendro/deployments/:id/files/*`, then commits through `POST /api/rendro/deployments/:id/commit`. The Worker writes the manifest/tree index and validates uploaded hashes and sizes. When `legacySessionCookie` is supplied, the tool reads the current legacy publication records and recreates them as pinned mappings. Removed publication records are not recreated. Files inside published folders that legacy public routes cannot serve (non-HTML or ambiguous paths) are excluded from the deployment, since v2 can serve any manifest entry. A deleted/missing entry document stops migration before destination writes. Before any destination write, the complete inventory (including private and deleted objects), publication prefixes, and entry paths must survive the shared v2 publication/deployment path functions unchanged; invalid paths and normalization collisions abort the target with the offending paths listed. The single terminal slash in a legacy folder prefix is its delimiter; extra slashes, whitespace trimming, decoding, and dot segments cannot silently change scope. Case and Unicode code points remain distinct, exactly as in v2. Deletion and publication filtering use the validated paths; the migration never repairs or remaps an unsafe source path. Deletion and publication state are checked again before publishing; changes stop publication.

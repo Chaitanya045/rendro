@@ -6,7 +6,6 @@ Local development and deployment guide. For architecture, APIs, and runbooks, se
 
 - **Node.js** ≥ 22
 - **pnpm** 10 (the repo pins `pnpm@10.18.3` via `packageManager`; `corepack enable` picks it up)
-- **Docker** — local MinIO
 - **Google Cloud** — OAuth 2.0 client for sign-in
 - **Convex** — account for auth + database
 - **Cloudflare** — Workers + R2 for deployment
@@ -28,7 +27,7 @@ pnpm install
 cp .env.example .env
 ```
 
-`pnpm dev`, `pnpm start`, and `pnpm init:minio` read `.env`. `src/config.ts` validates Worker settings at startup; `src/index.ts` validates the local Node port. Google OAuth credentials belong only to Convex (step 3), and `BASE_URL` is unused:
+`pnpm dev` and `pnpm start` read `.env`. `src/config.ts` validates Worker settings at startup; `src/index.ts` validates the local Node port. Google OAuth credentials belong only to Convex (step 3), and `BASE_URL` is unused:
 
 | Variable | Required | Notes |
 |---|---|---|
@@ -36,8 +35,7 @@ cp .env.example .env
 | `CONVEX_INTERNAL_SECRET` | Yes (≥32 chars) | Sent with legacy API-key and soft-delete Convex calls (`src/convex-internal.ts`); must equal the Convex value |
 | `CONVEX_URL` | No at startup; needed for the full app | From `convex dev` (step 3); defaults to empty, disabling legacy Convex calls and comments |
 | `CONVEX_SITE_URL` | No | Derived from `CONVEX_URL` when unset |
-| `MINIO_ENDPOINT`, `MINIO_ACCESS_KEY`, `MINIO_SECRET_KEY` | Yes | Local MinIO defaults are in `.env.example` |
-| `MINIO_BUCKET`, `MINIO_REGION`, `MINIO_FORCE_PATH_STYLE` | No | Defaults `docs`, `us-east-1`, `true` |
+| `RETENTION_SECRET` | No (≥32 chars) | Bearer for Convex's retention endpoints; only the scheduled purge reads it. Same value as in Convex |
 | `NODE_ENV` | No | Defaults to `development`; Wrangler sets `production` |
 | `PORT` | No (local Node server only) | Defaults to `3000`; must be an integer from 1 to 65535 |
 | `LOG_LEVEL` | No | Pino level; defaults to `debug` outside production (`src/logger.ts`) |
@@ -66,19 +64,17 @@ pnpm exec convex env set AUTH_EMAIL_FROM "Rendro <auth@your-domain>"
 
 `SITE_URL`, `AUTH_SECRET`, and the Google values are required by Better Auth (`convex/auth.ts`). Without `RESEND_API_KEY` and `AUTH_EMAIL_FROM`, email sign-up, verification, password reset, and invitation email fail (`convex/authEmails.ts`); Google sign-in still works. The full list is in [TECHNICAL.md](TECHNICAL.md#environment-variables-convex).
 
-### 4. Start MinIO and the app
+### 4. Start the app
 
 ```bash
-docker compose up -d minio
-pnpm init:minio
 pnpm build:assets
 pnpm dev
 ```
 
-- `pnpm init:minio` creates `MINIO_BUCKET` if missing and seeds four sample pages under legacy slug prefixes (`acme-corp/`, `startup-io/`). They do not appear in projects; push docs with the CLI (step 7).
+- There is no storage service to start and no storage setting to configure. Documents live in the `STORAGE` R2 binding from `wrangler.toml`, which the local server serves from Miniflare's R2 simulation (the same one `wrangler dev` uses), persisted under `.wrangler/state/`. Delete that directory to start with an empty bucket. Nothing talks to Cloudflare, and there is no access key.
 - `pnpm build:assets` generates the git-ignored `public/commentor.js`, `public/commentor-parent.js`, and `public/lazy-tree.js` that the document viewer loads.
 
-The app starts at `http://localhost:3000`; MinIO's S3 API and console use ports 9000 and 9001. Add `http://localhost:3000/api/auth/callback/google` as an authorized redirect URI on the OAuth client.
+The app starts at `http://localhost:3000` (the first request waits a few seconds while the R2 simulation starts). Add `http://localhost:3000/api/auth/callback/google` as an authorized redirect URI on the OAuth client.
 
 ### 5. Create the organization and project
 
@@ -146,38 +142,49 @@ pnpm exec convex env set --prod MIGRATION_SECRET <random-32-plus-characters>  # 
 pnpm exec convex deploy
 ```
 
-`RETENTION_SECRET` must also be set in GitHub Actions, and `MIGRATION_SECRET` in the operator environment that runs `pnpm migrate:legacy`. Neither is read by the Worker.
+`RETENTION_SECRET` must also be a Worker secret (see [Scheduled retention](#scheduled-retention)); the Worker's nightly purge sends it to Convex. `MIGRATION_SECRET` belongs only in the operator environment that runs `pnpm migrate:legacy`; the Worker does not read it.
 
 ### Cloudflare Workers and R2
 
-Create the private `rendro-docs` R2 bucket and an S3 API token restricted to that bucket. The endpoint is `https://<account-id>.r2.cloudflarestorage.com`; do not append the bucket name.
+Create the two **private** R2 buckets that `wrangler.toml` binds as `STORAGE`: `rendro-docs` for production (the top-level configuration) and `rendro-docs-dev` for the `development` environment (`rendro-dev`). If your buckets have other names, change `bucket_name` in both places; the names in the file are the single source of truth. Do not create an S3 API token, an `r2.dev` URL or a custom domain: the Worker reaches the bucket through its binding, so there is no credential to leak.
 
-`wrangler.toml` sets `NODE_ENV` as a var. Both production (the top-level configuration) and `development` require exactly these five secrets at startup and in Wrangler: `CONVEX_INTERNAL_SECRET`, `AUTH_SECRET`, `MINIO_ENDPOINT`, `MINIO_ACCESS_KEY`, and `MINIO_SECRET_KEY`.
+`wrangler.toml` sets `NODE_ENV` as a var. Both production and `development` require exactly these two secrets at startup and in Wrangler: `CONVEX_INTERNAL_SECRET` and `AUTH_SECRET`. List secret names with `pnpm exec wrangler secret list` for production (`rendro`) and `pnpm exec wrangler secret list --env development` for development (`rendro-dev`). Production uses the top-level configuration; there is no named `--env production` environment.
 
-List secret names with `pnpm exec wrangler secret list` for production (`rendro`) and `pnpm exec wrangler secret list --env development` for development (`rendro-dev`). Production uses the top-level configuration; there is no named `--env production` environment.
-
-Configure the Worker settings below. `CONVEX_URL` and the optional `CONVEX_SITE_URL` override remain outside `secrets.required`: startup and `/health` work without them, but auth and project routes need a Convex HTTP origin. Google credentials are Convex-only; the Worker does not read `BASE_URL`.
+Configure the Worker settings below. `CONVEX_URL`, the optional `CONVEX_SITE_URL` override and `RETENTION_SECRET` remain outside `secrets.required`: startup and `/health` work without them, but auth and project routes need a Convex HTTP origin and the nightly purge needs `RETENTION_SECRET`. Google credentials are Convex-only; the Worker does not read `BASE_URL`.
 
 ```bash
 pnpm exec wrangler secret put AUTH_SECRET
 pnpm exec wrangler secret put CONVEX_URL
 pnpm exec wrangler secret put CONVEX_SITE_URL         # optional
 pnpm exec wrangler secret put CONVEX_INTERNAL_SECRET
-pnpm exec wrangler secret put MINIO_ENDPOINT
-pnpm exec wrangler secret put MINIO_ACCESS_KEY
-pnpm exec wrangler secret put MINIO_SECRET_KEY
-pnpm exec wrangler secret put MINIO_BUCKET            # rendro-docs
-pnpm exec wrangler secret put MINIO_REGION            # auto
+pnpm exec wrangler secret put RETENTION_SECRET        # same value as in Convex
 pnpm run deploy
 ```
 
 `pnpm run deploy` runs `pnpm build:assets` before `wrangler deploy`; a bare `wrangler deploy` from a fresh checkout ships without the git-ignored viewer bundles. For the `rendro-dev` Worker (`dev.rendro.app`), add `--env development` to each `wrangler secret put` and run `pnpm run deploy --env development`. Use the explicit `run`: `pnpm deploy` is an unrelated pnpm command. See [Deploy Commands](TECHNICAL.md#deploy-commands) and [Environment Variables (Workers)](TECHNICAL.md#environment-variables-workers).
 
-Do not configure public R2 access. Worker routes are the authorization boundary.
+#### Migrating from S3 access keys
+
+Earlier releases reached R2 with an S3 endpoint and an access key pair (`MINIO_*` Worker secrets). After deploying a Worker that has the binding and confirming documents load:
+
+1. Delete the old secrets from each Worker: `wrangler secret delete MINIO_ENDPOINT`, `MINIO_ACCESS_KEY`, `MINIO_SECRET_KEY`, `MINIO_BUCKET` and `MINIO_REGION` (add `--env development` for `rendro-dev`). They are now ignored.
+2. **Revoke the R2 API token** in the Cloudflare dashboard (R2 > Manage API tokens), so the old key pair is dead everywhere, not just unused.
+3. Delete the repository secrets `R2_ENDPOINT`, `R2_ACCESS_KEY`, `R2_SECRET_KEY` and `R2_BUCKET`. Retention no longer runs in GitHub Actions.
+
+#### Keep the bucket private
+
+Worker routes are the authorization boundary. Never enable the bucket's `r2.dev` URL or attach a custom domain. Verify with the scheduled check:
+
+```bash
+CLOUDFLARE_ACCOUNT_ID=<account-id> CLOUDFLARE_API_TOKEN=<token> pnpm check:r2-public
+pnpm check:r2-public --dry-run        # print the Cloudflare API requests; no credentials needed
+```
+
+`.github/workflows/r2-public-access.yml` runs it daily and on demand. It needs two repository secrets: `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN`, where the token is an API token (My Profile > API Tokens) with only **Account > Workers R2 Storage > Read**. Until both are set, the scheduled job fails with "was NOT verified" rather than passing silently. Pull requests that touch the script, the workflow or `wrangler.toml` run it as a dry run.
 
 ### Scheduled retention
 
-Configure the repository secrets used by `.github/workflows/retention.yml`: `CONVEX_SITE_URL`, `RETENTION_SECRET`, `R2_ENDPOINT`, `R2_ACCESS_KEY`, `R2_SECRET_KEY`, and `R2_BUCKET`. The nightly job runs `pnpm cleanup:retention`; eligibility rules are in [Retention](TECHNICAL.md#retention).
+The Worker purges expired deployments from storage itself: a cron trigger (`[triggers]` in `wrangler.toml`, 03:23 UTC) calls `scheduled` in `src/worker.ts`, which deletes through the R2 binding and confirms each purge with Convex. Set the Worker secret `RETENTION_SECRET` to the same value as the Convex one (`wrangler secret put RETENTION_SECRET`, plus `--env development`). Without it the run logs `RetentionDisabled` and fails in the Cloudflare cron history. Eligibility rules are in [Retention](TECHNICAL.md#retention).
 
 ## Builds
 
@@ -196,11 +203,10 @@ pnpm build:assets   # public/commentor.js, commentor-parent.js, lazy-tree.js,
 | Script | Purpose |
 |---|---|
 | `pnpm dev` / `pnpm start` | Local Node server (`src/index.ts`) with or without file watching |
-| `pnpm init:minio` | Create the local bucket and seed legacy sample pages |
 | `pnpm build:assets` | Build browser bundles into `public/` |
 | `pnpm cli:build` | Build the CLI into `bin/rendro.mjs` |
 | `pnpm run deploy` | Build assets and deploy the Worker |
-| `pnpm cleanup:retention` | Purge expired deployment objects ([Retention](TECHNICAL.md#retention)) |
+| `pnpm check:r2-public` | Verify no R2 bucket has an `r2.dev` URL or custom domain ([Keep the bucket private](#keep-the-bucket-private)) |
 | `pnpm migrate:legacy` | Copy legacy slug-prefixed objects into projects ([Legacy migration](TECHNICAL.md#legacy-migration)) |
 
 QA fixture scripts (`scripts/run-permission-qa.mjs`, `scripts/run-workspace-qa.mjs`) target the development deployment only; see [Development QA fixtures](TECHNICAL.md#development-qa-fixtures).
@@ -223,13 +229,15 @@ pnpm audit --audit-level=high
 rendro/
 ├── src/
 │   ├── index.ts              # Local Node server
-│   ├── worker.ts             # Cloudflare Workers entry (env bridging, DOMParser polyfill)
+│   ├── worker.ts             # Cloudflare Workers entry (storage binding, env bridging, cron)
 │   ├── app-routes.ts         # Route mounting shared by both entries
 │   ├── config.ts             # Zod env validation
 │   ├── logger.ts             # Pino logger
 │   ├── auth-proxy.ts         # /api/auth and /api/rendro proxy to Convex
 │   ├── convex-internal.ts    # Internal-secret Convex calls (legacy)
-│   ├── minio.ts              # R2/MinIO S3 client
+│   ├── storage.ts            # R2 bucket binding: get/head/put/list/delete/copy
+│   ├── storage-binding.ts    # The isolate's bucket and its fail-closed accessor
+│   ├── retention.ts          # Scheduled purge of expired deployments
 │   ├── stored-manifest.ts, bounded-body.ts
 │   ├── api-keys.ts, soft-delete.ts, orgs.ts, publications.ts, share-links.ts  # legacy slug tenancy
 │   ├── middleware/session.ts # Better Auth session lookup
@@ -253,12 +261,11 @@ rendro/
 │   └── qaPermissionFixtures.ts, qaWorkspaceFixtures.ts  # Dev-only QA fixtures
 ├── shared/deployment-limits.ts  # Limits shared by CLI and Worker
 ├── cli/src/index.ts          # CLI source
-├── scripts/                  # Asset/CLI builds, init-minio, retention, legacy migration, QA runners
+├── scripts/                  # Asset/CLI builds, R2 exposure check, legacy migration, QA runners
 ├── public/                   # Browser bundles and static assets
 ├── tests/                    # Vitest suites and fixtures
 ├── docs/                     # Product, technical, design docs; archive/ holds dated QA reports
 ├── .github/workflows/        # quality, release, retention
-├── docker-compose.yml        # Local MinIO
 ├── wrangler.toml             # Worker config (production and development envs)
 └── convex.json
 ```

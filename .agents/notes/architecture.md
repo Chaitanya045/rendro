@@ -11,15 +11,16 @@ Browser / CI (CLI)
 Cloudflare Worker (Hono)                         src/
   ├─ /api/auth/* proxy ──► Convex HTTP actions running Better Auth (convex/betterAuth/)
   ├─ metadata API ───────► Convex HTTP actions (convex/*Http.ts)
-  └─ file delivery ──────► R2 through the AWS S3 SDK (src/minio.ts; MinIO locally)
+  └─ file delivery ──────► R2 through the native STORAGE binding (src/storage.ts; Miniflare locally)
 ```
 
 - `src/worker.ts` (Workers) and `src/index.ts` (local Node via `@hono/node-server`)
   both mount the same routes from `src/app-routes.ts`. Each entry point owns its
   own middleware, static assets and error handling, so changes to one often
   need the same change in the other.
-- The Worker has no R2 binding. It reaches R2 through the S3 SDK, which needs the
-  hand-written DOMParser polyfill at the top of `src/worker.ts`.
+- Storage is the Worker's native R2 binding (`STORAGE`); there are no S3 keys.
+  `src/storage.ts` is the only code that touches the bucket. The local Node server
+  borrows Miniflare's R2 simulation (`src/local-storage.ts`).
 - The browser never talks to Convex directly. Everything goes browser → Worker →
   Convex HTTP action. Much of the session-cache, signed-IP-proof and rate-limit
   machinery in `docs/TECHNICAL.md` exists because of that hop.

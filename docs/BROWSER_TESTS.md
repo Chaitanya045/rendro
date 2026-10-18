@@ -4,8 +4,8 @@ There are two independent layers. The **Vitest browser project** below runs
 focused Chromium tests against Node HTTP fixtures, including real Worker route
 handlers where useful. **Playwright Test E2E** runs the actual `src/worker.ts` in
 workerd with Chromium, Firefox, and WebKit. It exercises Worker bundling,
-compatibility flags, HTTP, the ASSETS binding, browser CSP enforcement and the
-S3 client together. Neither layer replaces the other.
+compatibility flags, HTTP, the ASSETS and R2 bindings, and browser CSP enforcement
+together. Neither layer replaces the other.
 
 ## Playwright Test E2E (#108, #109)
 
@@ -76,10 +76,10 @@ The real schema, HTTP actions, Better Auth/rate-limiter components, authorizatio
 and WebSocket subscriptions execute unchanged. Never supply a shared deployment
 or copy `.env.local` into this workflow.
 
-S3Proxy **4.1.1** runs from the digest-pinned image in `e2e/services.ts`, with a loopback-only host
-port, fresh credentials, a tmpfs data directory, and a fresh bucket. The actual
-AWS SDK and CLI exercise signed reads, uploads, listings and commits. No persistent
-volume or named shared container is used. The public smoke publication is created
+Storage is the Worker's own `STORAGE` R2 binding on Miniflare's local simulation (the
+production `wrangler.toml` bindings, an empty bucket per run), so no storage container,
+port, endpoint or credential exists. The Worker and the CLI exercise reads, ranges,
+uploads, listings and commits through the binding. The public smoke publication is created
 through the real API after a real CLI push. Its missing-object control deliberately
 deletes one already-uploaded object; its manifest remains intact.
 
@@ -104,7 +104,7 @@ The Worker outbound guard allows only the exact local services. Redirect respons
 are returned to the browser without following them. The browser guard permits
 Worker and local Convex HTTP/WebSocket traffic. Fonts and the viewer base stylesheet
 are self-hosted, so no CDN is stubbed. Any other destination fails. Teardown closes workerd, Convex, the proxy,
-mail sink and S3Proxy and removes temporary data, including on setup/test failure.
+mail sink and removes temporary data, including on setup/test failure.
 An empty temporary `.dev.vars` and disabled dotenv loading isolate Worker secrets.
 
 Trusted pages send `Cross-Origin-Opener-Policy: same-origin` (#89). In Firefox, Playwright drops emulated media
@@ -146,14 +146,12 @@ when the warning appears. Open a trace with
 `pnpm verify` continues to run the existing Vitest layers independently.
 `e2e/` is typechecked/linted test infrastructure, outside the production
 coverage denominator. The loopback/environment guards have a separate 100% coverage
-regression. The Worker XML polyfill exposes an array of named attributes, so the SDK reads
-empty S3 listing elements as strings instead of objects. A focused regression
-covers this compatibility fix; no generated Convex module is modified.
+regression. The Worker no longer bundles the S3 SDK or its XML polyfill; no generated Convex module is modified.
 
 `tests/convex-public-rpc.test.ts` now always starts its own pinned backend: all 12
 RPC envelope/cursor tests execute in `pnpm verify` and in an explicit mandatory
 step of the E2E job. There is no opt-in skip or shared deployment credential.
-CI caches the verified backend archive and S3Proxy image layers as well as pnpm dependencies.
+CI caches the verified backend archive as well as pnpm dependencies.
 The workflow jobs have no conditional opt-out or allowed failure. Repository
 branch protection must require the existing `verify`, `coverage`, and `e2e` checks.
 
@@ -307,7 +305,7 @@ real `beforeunload` prompt, and an empty team list (unreachable: the server neve
 
 ## Projects, deployments, API keys, shares and publications (#113)
 
-Five specs run the project journeys on the real Worker, local Convex, S3Proxy and the built CLI in all three
+Five specs run the project journeys on the real Worker, local Convex, Miniflare R2 and the built CLI in all three
 engines. They reuse the `actor` fixture of `e2e/org-fixtures.ts` (one independent browser context per person, own
 cookies and ingress address, provisioned through real signup, mail verification and organization APIs), so each test
 owns its users, organization and slugs; none uses the seeded users. Final state is
@@ -886,7 +884,7 @@ merge. Raw dumps are deleted once converted, leaving
 
 Subprocesses write only to temp directories and local loopback fixtures: build
 scripts run with a copied `src/` in a scratch working directory, the QA runners
-see a stand-in `pnpm` as the only executable on `PATH`, and `init-minio` talks to
+see a stand-in `pnpm` as the only executable on `PATH`, and the legacy migration talks to
 a loopback fake. The deliberately uninstrumented child in `share-budget.test.ts`
 measures CPU time and stays outside the collector.
 
