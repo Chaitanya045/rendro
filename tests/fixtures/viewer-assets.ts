@@ -8,7 +8,7 @@ import shareDocs from "@/routes/share-v2";
 import { securityHeaders } from "@/middleware/security-headers";
 import { createViewerTicket } from "@/viewer-ticket";
 import { collectShareAssets } from "@/share-assets";
-import * as minio from "@/minio";
+import * as blobs from "@/storage";
 
 export const privateBase = "/organizations/org/projects/project/docs";
 export const fixtureCookie = "better-auth.session_token=fixture.signature";
@@ -56,8 +56,8 @@ export async function createAssetFixture(moduleSource = publisherModule, options
     return Promise.resolve(new Response(null, { status: 404 }));
   });
   vi.stubGlobal("fetch", backend);
-  vi.spyOn(minio, "getObjectText").mockResolvedValue(JSON.stringify({ version: 1, files }));
-  const objects = vi.spyOn(minio, "getObjectStream").mockImplementation(key => {
+  vi.spyOn(blobs, "getObjectText").mockResolvedValue(JSON.stringify({ version: 1, files }));
+  const objects = vi.spyOn(blobs, "getObjectStream").mockImplementation(key => {
     const file = files.find(file => key === `${manifestKey.slice(0, -"manifest.json".length)}files/${file.path}`);
     return Promise.resolve(file ? new Response(file.body).body : null);
   });

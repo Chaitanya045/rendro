@@ -1,15 +1,28 @@
 import { describe, expect, it } from "vitest";
 import { transientStorageFault } from "../src/storage-fault";
 
-const service = (httpStatusCode: number) => Object.assign(new Error("private-diagnostic"), { $metadata: { httpStatusCode } });
+const r2 = (code: number, operation = "get") => new Error(`${operation}: private-diagnostic (${code})`);
 
 describe("transient storage fault classification", () => {
-  it.each([500, 502, 503, 504, 408, 429])("treats a storage %i answer as retryable", status => {
-    expect(transientStorageFault(service(status))).toEqual({ kind: "service", status });
+  it.each([[10001, 500], [10043, 503], [10058, 429]])("treats R2 error %i as a retryable service fault", (code, status) => {
+    for (const operation of ["get", "head", "put", "list", "delete"]) {
+      expect(transientStorageFault(r2(code, operation))).toEqual({ kind: "service", status });
+    }
   });
 
-  it.each([400, 403, 404, 409])("treats a storage %i rejection as final", status => {
-    expect(transientStorageFault(service(status))).toBeNull();
+  it("treats a client disconnected mid-transfer (10054) as a dropped connection", () => {
+    expect(transientStorageFault(r2(10054, "put"))).toEqual({ kind: "network", status: null });
+  });
+
+  it.each([10002, 10003, 10006, 10007, 10012, 10020, 10031, 10039, 10069, 100100])("treats R2 rejection %i as final", code => {
+    expect(transientStorageFault(r2(code))).toBeNull();
+  });
+
+  it("reads the code only from R2-shaped Error messages", () => {
+    expect(transientStorageFault(new Error("The value (10001)"))).toBeNull();
+    expect(transientStorageFault(new Error("get: no code in this one"))).toBeNull();
+    expect(transientStorageFault({ message: "get: spoofed (10001)" })).toBeNull();
+    expect(transientStorageFault(new Error("get: line one\nstill the same message (10043)"))).toEqual({ kind: "service", status: 503 });
   });
 
   it("recognises timeouts and dropped connections", () => {

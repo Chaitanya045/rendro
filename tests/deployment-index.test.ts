@@ -13,7 +13,7 @@ const storage = vi.hoisted(() => {
     }),
   };
 });
-vi.mock("../src/minio", () => ({ getObjectText: storage.getObjectText }));
+vi.mock("../src/storage", () => ({ getObjectText: storage.getObjectText }));
 
 import { ViewerBackendError } from "../src/viewer-backend";
 import {

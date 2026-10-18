@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import type { DocEntry, DocTree } from "@/minio";
-import { buildTree } from "@/minio";
+import type { DocEntry, DocTree } from "@/storage";
+import { buildTree } from "@/storage";
 
 function makeEntries(keys: string[]): DocEntry[] {
   return keys.map((key) => ({

@@ -1,7 +1,7 @@
 import { legacyOrganization, legacyUnavailable } from "@/legacy-access";
 import { assetHeaders } from "@/routes/asset-headers";
 import { Hono } from "hono";
-import { getObjectStream } from "@/minio";
+import { getObjectStream } from "@/storage";
 import { isDeleted } from "@/soft-delete";
 import { verifyShareToken } from "@/share-links";
 import { logger } from "@/logger";

@@ -28,7 +28,7 @@ vi.mock("@/legacy-access", async importOriginal => ({
   legacyOrganization: () => Promise.resolve("mapped-org"),
 }));
 vi.mock("@/soft-delete", () => ({ isDeleted: fixtures.deleted }));
-vi.mock("@/minio", () => ({ getObjectStream: fixtures.stream, listObjects: fixtures.list, headObject: fixtures.head }));
+vi.mock("@/storage", () => ({ getObjectStream: fixtures.stream, listObjects: fixtures.list, headObject: fixtures.head }));
 import worker from "@/worker";
 
 beforeEach(() => {

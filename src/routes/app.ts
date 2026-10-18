@@ -8,7 +8,7 @@ import { renderFaviconLinks } from "./favicon";
 import { renderFontHead } from "./fonts";
 import { renderStylesheet } from "./styles";
 import { Hono } from "hono";
-import { headObject } from "@/minio";
+import { headObject } from "@/storage";
 import { logOrgAccess } from "@/orgs";
 import type { User } from "better-auth/types";
 import { legacyRequestMember, legacyUnavailable, retiredLegacy } from "@/legacy-access";

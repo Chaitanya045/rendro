@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import worker from "@/worker";
-import * as minio from "@/minio";
+import * as blobs from "@/storage";
 import { deploymentMetadataCache } from "@/immutable-cache";
 import { createLegacyViewerTicket, createViewerTicket } from "@/viewer-ticket";
 import { cookie, manifestKey } from "./fixtures/publisher-isolation";
@@ -35,14 +35,14 @@ async function fixture() {
     { path: "index.html", sha256: sha(html), size: html.length, contentType: "text/html; charset=utf-8" },
     { path: "assets/site.css", sha256: sha("b"), size: 1, contentType: "text/css" },
   ];
-  vi.mocked(minio.getObjectText).mockResolvedValue(JSON.stringify({ version: 1, files: manifest }));
+  vi.mocked(blobs.getObjectText).mockResolvedValue(JSON.stringify({ version: 1, files: manifest }));
   const bytes = (key: string) => key.endsWith("image.png") ? image : key.endsWith("index.html") ? encoder.encode(html) : encoder.encode("b");
   const stored = (key: string) => /\/(?:image\.png|index\.html|assets\/site\.css)$/.test(key);
-  vi.mocked(minio.headObject).mockImplementation(key => Promise.resolve(stored(key) ? {
+  vi.mocked(blobs.headObject).mockImplementation(key => Promise.resolve(stored(key) ? {
     contentType: key.endsWith("image.png") ? "image/png" : "text/html", etag: "abc123", size: bytes(key).length,
   } : null));
-  const reads: Array<{ key: string; range?: minio.ObjectRange }> = [];
-  vi.mocked(minio.getObjectStream).mockImplementation((key, range) => {
+  const reads: Array<{ key: string; range?: blobs.ObjectRange }> = [];
+  vi.mocked(blobs.getObjectStream).mockImplementation((key, range) => {
     reads.push({ key, range });
     const all = bytes(key);
     return Promise.resolve(new Response(range ? all.slice(range.start, range.end + 1) : all).body);
@@ -332,7 +332,7 @@ describe("conditional and ranged delivery: head-injected HTML", () => {
 describe("conditional and ranged delivery: objects without hashes", () => {
   it("serves entries of older manifests whole, without validators or ranges", async () => {
     const f = await fixture();
-    vi.mocked(minio.getObjectText).mockResolvedValue(JSON.stringify({ files: [{ path: "image.png", contentType: "image/png" }] }));
+    vi.mocked(blobs.getObjectText).mockResolvedValue(JSON.stringify({ files: [{ path: "image.png", contentType: "image/png" }] }));
     const route = f.routes.find(route => route.name === "private")!;
     const response = await f.get(route, { Range: "bytes=0-9", "If-None-Match": imageEtag });
     expect(response.status).toBe(200);
@@ -353,7 +353,7 @@ describe("public publication HTML streaming", () => {
     let pulled = 0;
     let release!: () => void;
     const gate = new Promise<void>(resolve => { release = resolve; });
-    vi.mocked(minio.getObjectStream).mockImplementation(() => Promise.resolve(new ReadableStream<Uint8Array>({
+    vi.mocked(blobs.getObjectStream).mockImplementation(() => Promise.resolve(new ReadableStream<Uint8Array>({
       async pull(controller) {
         if (pulled === 0) controller.enqueue(head);
         else if (pulled <= total) {

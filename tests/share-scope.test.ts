@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import shareRoutes from "../src/routes/share-v2";
-import * as storage from "../src/minio";
+import * as storage from "../src/storage";
 import { deploymentMetadataCache } from "../src/immutable-cache";
 
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import worker from "@/worker";
-import * as minio from "@/minio";
+import * as blobs from "@/storage";
 import * as deletion from "@/soft-delete";
 import { deploymentMetadataCache } from "@/immutable-cache";
 import { logger } from "@/logger";
@@ -57,7 +57,7 @@ afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); deploymentMetadat
 
 describe.each(surfaces)("$name", surface => {
   const storageFailures = [
-    ["a storage 5xx", () => Object.assign(new Error("secret-storage-detail"), { $metadata: { httpStatusCode: 503 } })],
+    ["a storage 5xx", () => new Error("get: secret-storage-detail (10043)")],
     ["a storage timeout", () => new DOMException("secret-storage-detail", "TimeoutError")],
     ["a transport failure", () => new TypeError("fetch failed: secret-storage-detail")],
   ] as const;
@@ -67,7 +67,7 @@ describe.each(surfaces)("$name", surface => {
     ["stylesheet", "assets/site.css", "text/css,*/*;q=0.1"],
   ])("%s", (kind, path, accept) => {
     it.each(storageFailures)("answers %s with a retryable 503 once access is established", async (_label, failure) => {
-      vi.mocked(minio.getObjectStream).mockRejectedValue(failure());
+      vi.mocked(blobs.getObjectStream).mockRejectedValue(failure());
       const response = await request(await surface.url(path), { ...surface.headers, Accept: accept });
       expect(response.status).toBe(503);
       expect(unavailableHeaders(response)).toEqual(retryable);
@@ -88,7 +88,7 @@ describe.each(surfaces)("$name", surface => {
     });
 
     it("keeps an object that storage reports absent a plain 404", async () => {
-      vi.mocked(minio.getObjectStream).mockResolvedValue(null);
+      vi.mocked(blobs.getObjectStream).mockResolvedValue(null);
       const response = await request(await surface.url(path), { ...surface.headers, Accept: accept });
       expect([response.status, response.headers.has("Retry-After"), response.headers.get("Cache-Control")]).toEqual([404, false, "private, no-store"]);
     });
@@ -97,27 +97,27 @@ describe.each(surfaces)("$name", surface => {
   it("keeps a path the manifest does not list a plain 404, without touching storage", async () => {
     const response = await request(await surface.url("missing/page.html"), { ...surface.headers, Accept: HTML });
     expect([response.status, response.headers.has("Retry-After")]).toEqual([404, false]);
-    expect(minio.getObjectStream).not.toHaveBeenCalled();
+    expect(blobs.getObjectStream).not.toHaveBeenCalled();
   });
 
   describe("an unreadable manifest of an authorized deployment", () => {
     it.each([
-      ["a storage failure", () => { vi.mocked(minio.getObjectText).mockRejectedValue(Object.assign(new Error("secret-storage-detail"), { $metadata: { httpStatusCode: 503 } })); }],
-      ["a manifest storage lacks", () => { vi.mocked(minio.getObjectText).mockResolvedValue(null); }],
-      ["a corrupt manifest", () => { vi.mocked(minio.getObjectText).mockResolvedValue("{ not json"); }],
+      ["a storage failure", () => { vi.mocked(blobs.getObjectText).mockRejectedValue(new Error("get: secret-storage-detail (10043)")); }],
+      ["a manifest storage lacks", () => { vi.mocked(blobs.getObjectText).mockResolvedValue(null); }],
+      ["a corrupt manifest", () => { vi.mocked(blobs.getObjectText).mockResolvedValue("{ not json"); }],
     ])("is a retryable 503 for %s", async (_label, damage) => {
       damage();
       const response = await request(await surface.url("index.html"), { ...surface.headers, Accept: HTML });
       expect(response.status).toBe(503);
       expect(unavailableHeaders(response)).toEqual(retryable);
       expect(await response.text()).not.toContain("secret-storage-detail");
-      expect(minio.getObjectStream).not.toHaveBeenCalled();
+      expect(blobs.getObjectStream).not.toHaveBeenCalled();
     });
   });
 
   it("answers a denied request with a plain 404 and no existence signal, even while storage is failing", async () => {
-    vi.mocked(minio.getObjectText).mockRejectedValue(new Error("storage down"));
-    vi.mocked(minio.getObjectStream).mockRejectedValue(new Error("storage down"));
+    vi.mocked(blobs.getObjectText).mockRejectedValue(new Error("storage down"));
+    vi.mocked(blobs.getObjectStream).mockRejectedValue(new Error("storage down"));
     const denied = surface.name.startsWith("share") || surface.name.startsWith("public")
       ? (() => { backend(url => /\/(?:shares|publications)\/public$/.test(url.pathname) ? new Response(null, { status: 404 }) : undefined); return surface.headers; })()
       : surface.name.includes("ticket") ? {} : { Cookie: "" };
@@ -126,8 +126,8 @@ describe.each(surfaces)("$name", surface => {
     const response = await request(url, { ...denied, Accept: HTML });
     expect(response.status).toBe(404);
     expect([response.headers.has("Retry-After"), response.headers.has("ETag"), response.headers.has("Accept-Ranges")]).toEqual([false, false, false]);
-    expect(minio.getObjectText).not.toHaveBeenCalled();
-    expect(minio.getObjectStream).not.toHaveBeenCalled();
+    expect(blobs.getObjectText).not.toHaveBeenCalled();
+    expect(blobs.getObjectStream).not.toHaveBeenCalled();
   });
 });
 
@@ -154,7 +154,7 @@ describe("tree and shell pages", () => {
     ["publication directory page", "/p/product/tree?dir=", {}],
     ["private directory page", `${docsBase}/tree?dir=`, { Cookie: cookie }],
   ])("%s answers JSON 503 when the manifest cannot be read", async (_name, path, headers) => {
-    vi.mocked(minio.getObjectText).mockRejectedValue(new TypeError("fetch failed"));
+    vi.mocked(blobs.getObjectText).mockRejectedValue(new TypeError("fetch failed"));
     const response = await request(path, headers);
     expect([response.status, ...unavailableHeaders(response)]).toEqual([503, ...retryable]);
     expect(await response.json()).toEqual({ error: "Document temporarily unavailable", retryable: true });
@@ -164,7 +164,7 @@ describe("tree and shell pages", () => {
     ["private shell", docsBase, { Cookie: cookie }],
     ["publication shell", "/p/product", {}],
   ])("%s offers a retry page when the manifest cannot be read", async (_name, path, headers) => {
-    vi.mocked(minio.getObjectText).mockResolvedValue(null);
+    vi.mocked(blobs.getObjectText).mockResolvedValue(null);
     const response = await request(path, { ...headers, Accept: HTML });
     expect([response.status, ...unavailableHeaders(response)]).toEqual([503, ...retryable]);
     expect(await response.text()).toContain('<a class="retry" href="">Try again</a>');
@@ -178,12 +178,12 @@ describe("tree and shell pages", () => {
   });
 
   it("logs only the route template and the fault class of an unavailable response", async () => {
-    vi.mocked(minio.getObjectText).mockRejectedValue(Object.assign(new Error("secret-storage-detail"), { $metadata: { httpStatusCode: 503 } }));
+    vi.mocked(blobs.getObjectText).mockRejectedValue(new Error("get: secret-storage-detail (10043)"));
     await request("/p/product/files/index.html", { Accept: HTML });
     expect(logger.warn).toHaveBeenCalledWith({ category: "DeliveryUnavailable", route: "/p/:slug/files/*", kind: "service", status: 503 }, "Document delivery unavailable");
     vi.mocked(logger.warn).mockClear();
     deploymentMetadataCache.clear();
-    vi.mocked(minio.getObjectText).mockResolvedValue(null);
+    vi.mocked(blobs.getObjectText).mockResolvedValue(null);
     await request("/p/product/files/index.html", { Accept: HTML });
     expect(logger.warn).toHaveBeenCalledWith({ category: "DeliveryUnavailable", route: "/p/:slug/files/*" }, "Document delivery unavailable");
   });
@@ -196,7 +196,7 @@ describe("tree and shell pages", () => {
       ["private shell", docsBase, HTML],
     ])("stays an internal error on the %s, with no retry hint and no leaked detail", async (_name, path, accept) => {
       // A code defect or a rejection such as 403 is not retryable: it must not be dressed up as an outage.
-      vi.mocked(minio.getObjectText).mockRejectedValue(Object.assign(new Error("secret-storage-detail"), { $metadata: { httpStatusCode: 403 } }));
+      vi.mocked(blobs.getObjectText).mockRejectedValue(new Error("get: secret-storage-detail (10003)"));
       const response = await request(path, { Accept: accept, Cookie: cookie });
       expect([response.status, response.headers.get("Retry-After"), response.headers.get("Cache-Control")]).toEqual([500, null, "private, no-store"]);
       expect(await response.text()).not.toContain("secret-storage-detail");
@@ -211,7 +211,7 @@ describe("legacy pages", () => {
     ["public document", "/public/example/product/files/index.html"],
     ["legacy share", `/share/${token}`],
   ])("%s: a browser gets the retry page, a script the JSON envelope", async (_name, path) => {
-    vi.mocked(minio.getObjectStream).mockRejectedValue(new Error("storage down"));
+    vi.mocked(blobs.getObjectStream).mockRejectedValue(new Error("storage down"));
     const page = await request(path, { Accept: HTML });
     expect([page.status, ...unavailableHeaders(page)]).toEqual([503, ...retryable]);
     expect(page.headers.get("Content-Type")).toContain("text/html");

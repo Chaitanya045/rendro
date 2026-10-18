@@ -1,5 +1,5 @@
 import { beforeEach, expect, it, vi } from "vitest";
-vi.mock("../src/minio", () => ({ getObjectText: vi.fn() }));
+vi.mock("../src/storage", () => ({ getObjectText: vi.fn() }));
 import app from "../src/routes/publication-api";
 
 beforeEach(() => {

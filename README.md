@@ -190,7 +190,7 @@ return retryable 503. See the [legacy operator runbook](docs/TECHNICAL.md#legacy
 | Layer | Choice |
 |---|---|
 | Host | Cloudflare Workers (Hono) |
-| Document storage | Cloudflare R2 (S3 API) |
+| Document storage | Cloudflare R2 (native Worker binding, no access keys) |
 | Metadata | Convex (projects, deployments, publications, shares, API keys, comments) |
 | Auth | Better Auth on Convex: Google OAuth or email/password with email verification; organizations and teams |
 | CLI | Node.js 22+ (zero runtime dependencies) |

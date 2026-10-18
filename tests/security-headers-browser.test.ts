@@ -1,6 +1,6 @@
 import { managementPagesSource } from "../scripts/management-pages-source";
 import AxeBuilder from "@axe-core/playwright";
-import * as minio from "@/minio";
+import * as blobs from "@/storage";
 import { getRequestListener } from "@hono/node-server";
 import { readFile } from "node:fs/promises";
 import { buildBrowserBundle as build } from "./helpers/browser";
@@ -19,7 +19,7 @@ const consoleCsp: string[] = [];
 
 beforeAll(async () => {
   mockSecurityBackend();
-  vi.spyOn(minio, "listImmediate").mockResolvedValue({ entries: [], isTruncated: false });
+  vi.spyOn(blobs, "listImmediate").mockResolvedValue({ entries: [], isTruncated: false });
   // verify runs tests before build:assets, so a clean CI checkout has none of
   // these ignored bundles. Build from source instead of reading stale local JS.
   const assets = new Map<string, string>();
@@ -237,7 +237,7 @@ describe("untrusted reload requests across viewer shells", () => {
     ["legacy private", "/docs/example/index.html", true, true],
     ["private", `${docsBase}?doc=index.html`, true, true],
   ] as const)("never navigates the %s shell without a parent gesture", async (_name, path, signedIn, offersNotice) => {
-    const stream = vi.mocked(minio.getObjectStream);
+    const stream = vi.mocked(blobs.getObjectStream);
     const original = stream.getMockImplementation()!;
     stream.mockImplementation(key => key.endsWith(".css") ? original(key) : Promise.resolve(new Response(
       publisherHtml.replace("</body>", `<script>

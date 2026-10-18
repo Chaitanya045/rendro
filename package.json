@@ -54,9 +54,8 @@
     "cli": "tsx cli/src/index.ts",
     "cli:build": "node scripts/build-cli.mjs",
     "prepack": "node scripts/build-cli.mjs",
-    "init:minio": "tsx --env-file=.env scripts/init-minio.ts",
     "migrate:legacy": "tsx --env-file-if-exists=.env scripts/migrate-legacy-tenancy.ts",
-    "cleanup:retention": "tsx --env-file-if-exists=.env scripts/cleanup-retention.ts",
+    "check:r2-public": "tsx scripts/check-r2-public-access.ts",
     "deploy": "pnpm build:assets && wrangler deploy --config wrangler.toml",
     "e2e": "playwright test --config e2e/playwright.config.ts"
   },

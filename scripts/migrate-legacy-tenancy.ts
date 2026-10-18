@@ -137,15 +137,15 @@ interface RollbackRecord {
 
 const endpoint = (process.env.RENDRO_ENDPOINT ?? "http://localhost:3000").replace(/\/$/, "");
 const migrationSecret = process.env.MIGRATION_SECRET;
-const bucket = process.env.MINIO_BUCKET ?? "docs";
+const bucket = process.env.LEGACY_SOURCE_S3_BUCKET ?? "docs";
 const s3 = new S3Client({
-  endpoint: process.env.MINIO_ENDPOINT,
-  region: process.env.MINIO_REGION ?? "us-east-1",
-  credentials: process.env.MINIO_ACCESS_KEY && process.env.MINIO_SECRET_KEY ? {
-    accessKeyId: process.env.MINIO_ACCESS_KEY,
-    secretAccessKey: process.env.MINIO_SECRET_KEY,
+  endpoint: process.env.LEGACY_SOURCE_S3_ENDPOINT,
+  region: process.env.LEGACY_SOURCE_S3_REGION ?? "us-east-1",
+  credentials: process.env.LEGACY_SOURCE_S3_ACCESS_KEY && process.env.LEGACY_SOURCE_S3_SECRET_KEY ? {
+    accessKeyId: process.env.LEGACY_SOURCE_S3_ACCESS_KEY,
+    secretAccessKey: process.env.LEGACY_SOURCE_S3_SECRET_KEY,
   } : undefined,
-  forcePathStyle: process.env.MINIO_FORCE_PATH_STYLE !== "false",
+  forcePathStyle: process.env.LEGACY_SOURCE_S3_FORCE_PATH_STYLE !== "false",
 });
 
 async function requestJson<T>(url: string, key: string, init?: RequestInit): Promise<T> {
@@ -392,7 +392,7 @@ function sanitizedOrigin(value: string | undefined, fallback: string): string {
 
 function printEnvironment(targets: MigrationTarget[], records?: RollbackRecord[]): void {
   console.log(`Destination Worker: ${sanitizedOrigin(endpoint, "<unset>")}`);
-  console.log(`Source storage: ${sanitizedOrigin(process.env.MINIO_ENDPOINT, `AWS SDK default (region ${process.env.MINIO_REGION ?? "us-east-1"})`)}; bucket: ${bucket}`);
+  console.log(`Source storage: ${sanitizedOrigin(process.env.LEGACY_SOURCE_S3_ENDPOINT, `AWS SDK default (region ${process.env.LEGACY_SOURCE_S3_REGION ?? "us-east-1"})`)}; bucket: ${bucket}`);
   console.log(`Source legacy Convex: ${sanitizedOrigin(process.env.CONVEX_URL, "<unset>")}`);
   for (const target of records ?? targets) {
     console.log(`  ${target.legacyOrgSlug}/ → organization ${target.organizationId}, project ${target.projectId ?? `<new: legacy-${target.legacyOrgSlug}>`}`);

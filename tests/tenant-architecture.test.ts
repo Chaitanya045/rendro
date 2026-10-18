@@ -5,7 +5,7 @@ import publicRoutes from "@/routes/public-v2";
 import shareRoutes from "@/routes/share-v2";
 import publicationApiRoutes from "@/routes/publication-api";
 import projectDocsRoutes from "@/routes/project-docs";
-import * as minio from "@/minio";
+import * as blobs from "@/storage";
 
 function jsonResponse(value: unknown, status = 200): Response {
   return Response.json(value, { status });
@@ -64,8 +64,8 @@ afterEach(() => {
 describe("deployment-backed publications", () => {
   it("serves only objects present inside the explicit publication path", async () => {
     vi.stubGlobal("fetch", vi.fn().mockImplementation(() => Promise.resolve(jsonResponse(publication))));
-    vi.spyOn(minio, "getObjectText").mockResolvedValue(manifest);
-    const read = vi.spyOn(minio, "getObjectStream").mockResolvedValue(stream("<h1>Docs</h1>"));
+    vi.spyOn(blobs, "getObjectText").mockResolvedValue(manifest);
+    const read = vi.spyOn(blobs, "getObjectStream").mockResolvedValue(stream("<h1>Docs</h1>"));
 
     const allowed = await publicRoutes.request("/p/product/files/index.html");
     expect(allowed.status).toBe(200);
@@ -81,7 +81,7 @@ describe("deployment-backed publications", () => {
 
   it("renders the canonical public shell for entry and selected HTML documents", async () => {
     vi.stubGlobal("fetch", vi.fn().mockImplementation(() => Promise.resolve(jsonResponse(publication))));
-    vi.spyOn(minio, "getObjectText").mockResolvedValue(manifest);
+    vi.spyOn(blobs, "getObjectText").mockResolvedValue(manifest);
 
     const entry = await publicRoutes.request("/p/product");
     const entryHtml = await entry.text();
@@ -104,7 +104,7 @@ describe("deployment-backed publications", () => {
 
   it("returns 404 immediately after publication resolution is removed", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({ error: "Not found" }, 404)));
-    const read = vi.spyOn(minio, "getObjectStream");
+    const read = vi.spyOn(blobs, "getObjectStream");
     const response = await publicRoutes.request("/p/product/files/index.html");
     expect(response.status).toBe(404);
     expect(read).not.toHaveBeenCalled();
@@ -118,7 +118,7 @@ describe("deployment-backed publications", () => {
       size: 1,
       contentType: "text/html; charset=utf-8",
     }));
-    vi.spyOn(minio, "getObjectText").mockResolvedValue(JSON.stringify({ version: 1, files }));
+    vi.spyOn(blobs, "getObjectText").mockResolvedValue(JSON.stringify({ version: 1, files }));
     const first = await publicRoutes.request("/p/product/tree?cursor=0");
     const firstBody = await first.json() as { documents: string[]; cursor: string | null };
     expect(firstBody.documents).toHaveLength(200);
@@ -132,7 +132,7 @@ describe("deployment-backed publications", () => {
   it("keeps manifest-controlled document paths inside inline state", async () => {
     const hostilePath = 'reference/guide</script><script>window.injected=true</script>.html';
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(publication)));
-    vi.spyOn(minio, "getObjectText").mockResolvedValue(JSON.stringify({
+    vi.spyOn(blobs, "getObjectText").mockResolvedValue(JSON.stringify({
       version: 1,
       files: [{ path: hostilePath, sha256: "x", size: 1, contentType: "text/html; charset=utf-8" }],
     }));
@@ -151,7 +151,7 @@ describe("publication release validation", () => {
       deployment: { _id: "deploy-a", manifestKey: publication.deployment.manifestKey, status: "active" },
     })));
     vi.stubGlobal("fetch", fetchMock);
-    vi.spyOn(minio, "getObjectText").mockResolvedValue(manifest);
+    vi.spyOn(blobs, "getObjectText").mockResolvedValue(manifest);
     const response = await publicationApiRoutes.request("/api/rendro/publications", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -180,13 +180,13 @@ describe("revocable private shares", () => {
   };
 
   beforeEach(() => {
-    vi.spyOn(minio, "getObjectText").mockResolvedValue(JSON.stringify({ files: [
+    vi.spyOn(blobs, "getObjectText").mockResolvedValue(JSON.stringify({ files: [
       { path: "guide/index.html", contentType: "text/html" }, { path: "guide/app.css", contentType: "text/css" },
     ] }));
   });
   it("allows the exact HTML document and legacy same-directory assets but not another HTML document", async () => {
     vi.stubGlobal("fetch", vi.fn().mockImplementation(() => Promise.resolve(jsonResponse(resolution))));
-    const read = vi.spyOn(minio, "getObjectStream").mockImplementation(() => Promise.resolve(stream()));
+    const read = vi.spyOn(blobs, "getObjectStream").mockImplementation(() => Promise.resolve(stream()));
     const document = await shareRoutes.request("/s/token/files/guide/index.html");
     expect(document.status).toBe(200);
     expect(await document.clone().text()).toContain("data-rendro-mobile-viewport");
@@ -206,14 +206,14 @@ describe("revocable private shares", () => {
     "/s/token/files/guide/%E0%A4%A.css",
   ])("rejects malformed or traversal file paths without reading storage: %s", async (path) => {
     vi.stubGlobal("fetch", vi.fn().mockImplementation(() => Promise.resolve(jsonResponse(resolution))));
-    const read = vi.spyOn(minio, "getObjectStream");
+    const read = vi.spyOn(blobs, "getObjectStream");
     expect((await shareRoutes.request(path)).status).toBe(404);
     expect(read).not.toHaveBeenCalled();
   });
 
   it("stops serving when the grant lookup is revoked or expired", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({ error: "Share not found" }, 404)));
-    const read = vi.spyOn(minio, "getObjectStream");
+    const read = vi.spyOn(blobs, "getObjectStream");
     const response = await shareRoutes.request("/s/revoked/files/guide/index.html");
     expect(response.status).toBe(404);
     expect(read).not.toHaveBeenCalled();
@@ -245,7 +245,7 @@ describe("private project documents", () => {
       deployment: publication.deployment,
     })));
     vi.stubGlobal("fetch", fetchMock);
-    vi.spyOn(minio, "getObjectText").mockResolvedValue(manifest);
+    vi.spyOn(blobs, "getObjectText").mockResolvedValue(manifest);
 
     const response = await app.request("/organizations/org-a/projects/project-a/docs", {
       headers: { Cookie: "better-auth.session_token=abc; unrelated=ignored" },
@@ -272,8 +272,8 @@ describe("private project documents", () => {
       project: { name: "Product" },
       deployment: publication.deployment,
     }))));
-    vi.spyOn(minio, "getObjectText").mockResolvedValue(manifest);
-    vi.spyOn(minio, "getObjectStream").mockImplementation((key) => Promise.resolve(
+    vi.spyOn(blobs, "getObjectText").mockResolvedValue(manifest);
+    vi.spyOn(blobs, "getObjectStream").mockImplementation((key) => Promise.resolve(
       stream(key.endsWith("app.css") ? "body{color:red}" : "<!doctype html><body><h1>Publisher docs</h1></body>")
     ));
 
@@ -302,11 +302,11 @@ describe("private project documents", () => {
       project: { name: "Product" },
       deployment: publication.deployment,
     })));
-    vi.spyOn(minio, "getObjectText").mockResolvedValue(JSON.stringify({
+    vi.spyOn(blobs, "getObjectText").mockResolvedValue(JSON.stringify({
       version: 1,
       files: [{ path: hostilePath, contentType: "text/html; charset=utf-8" }],
     }));
-    vi.spyOn(minio, "getObjectStream").mockResolvedValue(stream("<body>Safe publisher content</body>"));
+    vi.spyOn(blobs, "getObjectStream").mockResolvedValue(stream("<body>Safe publisher content</body>"));
 
     const response = await app.request(`/organizations/org-a/projects/project-a/docs/files/${hostilePath.split("/").map(encodeURIComponent).join("/")}`, { headers: { Cookie: "better-auth.session_token=fixture" } });
     const html = await response.text();

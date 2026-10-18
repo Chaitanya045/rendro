@@ -4,7 +4,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import worker from "@/worker";
 import docs from "@/routes/docs";
 import projectDocs from "@/routes/project-docs";
-import * as minio from "@/minio";
+import * as blobs from "@/storage";
 import * as deletion from "@/soft-delete";
 import * as publications from "@/publications";
 import * as boundary from "@/storage-boundary";
@@ -30,13 +30,13 @@ it("keeps legacy share creation gated by identity, scope, deletion and object ex
   }
   vi.mocked(deletion.isDeleted).mockResolvedValueOnce(true);
   expect((await request("/api/share/create?key=example/index.html")).status).toBe(404);
-  vi.mocked(minio.headObject).mockResolvedValueOnce(null);
+  vi.mocked(blobs.headObject).mockResolvedValueOnce(null);
   expect((await request("/api/share/create?key=example/index.html")).status).toBe(404);
   const result = await request("/api/share/create?key=example/index.html");
   expect(result.status).toBe(200);
   const { url } = await result.json() as { url: string };
   expect(verifyShareToken(new URL(url).pathname.slice("/share/".length))).toMatchObject({ ok: true, key: "example/index.html" });
-  vi.mocked(minio.headObject).mockRejectedValueOnce(new Error("storage unavailable"));
+  vi.mocked(blobs.headObject).mockRejectedValueOnce(new Error("storage unavailable"));
   expect((await request("/api/share/create?key=example/index.html")).status).toBe(503);
 });
 
@@ -44,7 +44,7 @@ it("denies anonymous and deleted/missing legacy bookmarks", async () => {
   expect((await request("/files/example/index.html", false)).status).toBe(401);
   vi.mocked(deletion.isDeleted).mockResolvedValueOnce(true);
   expect((await request("/files/example/index.html")).status).toBe(404);
-  vi.mocked(minio.headObject).mockResolvedValueOnce(null);
+  vi.mocked(blobs.headObject).mockResolvedValueOnce(null);
   expect((await request("/files/example/index.html")).status).toBe(404);
 });
 
@@ -56,12 +56,12 @@ it("retires legacy sync operations before credential or storage work", async () 
       expect(await response.json()).toMatchObject({ error: expect.stringContaining("rendro@2") });
     }
   }
-  expect(minio.getObjectStream).not.toHaveBeenCalled();
+  expect(blobs.getObjectStream).not.toHaveBeenCalled();
 });
 
 it("filters deleted tree entries while preserving file and directory metadata and pagination", async () => {
   const now = new Date("2026-01-01");
-  vi.spyOn(minio, "listImmediate").mockResolvedValue({ entries: [
+  vi.spyOn(blobs, "listImmediate").mockResolvedValue({ entries: [
     { key: "example/index.html", name: "index.html", size: 7, lastModified: now },
     { key: "example/guide/page.html", name: "page.html", size: 3, lastModified: now },
     { key: "example/deleted.html", name: "deleted.html", size: 1, lastModified: now },
@@ -75,13 +75,13 @@ it("filters deleted tree entries while preserving file and directory metadata an
     expect(result.children.map(node => node.name).sort()).toEqual(["guide", "index.html"]);
     expect(result).toMatchObject({ isTruncated: true, nextStartAfter: "example/index.html" });
   }
-  expect(minio.listImmediate).toHaveBeenLastCalledWith("example/", { maxKeys: 1000, startAfter: "example/a.html" });
+  expect(blobs.listImmediate).toHaveBeenLastCalledWith("example/", { maxKeys: 1000, startAfter: "example/a.html" });
 });
 
 it("preserves external/out-of-tree bases, rejects malformed bases, and handles absent legacy MIME metadata", async () => {
-  vi.mocked(minio.headObject).mockResolvedValue({});
+  vi.mocked(blobs.headObject).mockResolvedValue({});
   for (const base of ["https://external.test/", "/elsewhere/", "http://["]) {
-    vi.mocked(minio.getObjectStream).mockImplementation(() => Promise.resolve(new Response(`<html><head><base href="${base}"></head><body>fixture</body></html>`).body));
+    vi.mocked(blobs.getObjectStream).mockImplementation(() => Promise.resolve(new Response(`<html><head><base href="${base}"></head><body>fixture</body></html>`).body));
     for (const path of ["/legacy-view/example/files/index.html", `${docsBase}/files/index.html`]) {
       const response = await request(path);
       expect(response.status).toBe(200);
@@ -103,7 +103,7 @@ it("rechecks storage boundaries even after earlier route and ticket validation",
   const ticket = await tickets.readLegacyViewerTicket(token, "example");
   vi.spyOn(tickets, "readLegacyViewerTicket").mockResolvedValueOnce({ ...ticket!, storagePrefix: "other/" });
   expect((await request(`/legacy-view/example/view/${token}/files/index.html`, false)).status).toBe(404);
-  expect(minio.getObjectStream).not.toHaveBeenCalled();
+  expect(blobs.getObjectStream).not.toHaveBeenCalled();
 });
 
 it.each([{ user: {} }, { user: { id: "user-a" } }])("fails closed on a malformed ticket session: %j", async session => {
@@ -111,19 +111,19 @@ it.each([{ user: {} }, { user: { id: "user-a" } }])("fails closed on a malformed
   vi.mocked(fetch).mockResolvedValue(Response.json(session));
   const response = await request(`/legacy-view/example/view/${token}/files/index.html`, false);
   expect(response.status).toBe(503);
-  expect(minio.getObjectStream).not.toHaveBeenCalled();
+  expect(blobs.getObjectStream).not.toHaveBeenCalled();
 });
 
 it("handles absent/malformed manifests without granting access to publisher objects", async () => {
   // A manifest that storage lacks or that cannot be parsed is retryable; an empty one is a definite 404.
   for (const [manifest, shell, tree] of [[null, 503, 503], ["not-json", 503, 503], [JSON.stringify({ files: [] }), 404, 200]] as const) {
-    vi.mocked(minio.getObjectText).mockResolvedValue(manifest);
+    vi.mocked(blobs.getObjectText).mockResolvedValue(manifest);
     for (const base of [docsBase, "/p/product"]) {
       expect((await request(base)).status).toBe(shell);
       expect((await request(`${base}/tree`)).status).toBe(tree);
     }
   }
-  expect(minio.getObjectStream).not.toHaveBeenCalled();
+  expect(blobs.getObjectStream).not.toHaveBeenCalled();
 });
 
 it("rejects invalid and empty public/private shell document selections", async () => {
@@ -134,7 +134,7 @@ it("rejects invalid and empty public/private shell document selections", async (
 });
 
 it("paginates the authorized private document tree", async () => {
-  vi.mocked(minio.getObjectText).mockResolvedValue(JSON.stringify({ files: Array.from({ length: 201 }, (_, i) => ({ path: `${i}.html`, contentType: "Text/HTML" })) }));
+  vi.mocked(blobs.getObjectText).mockResolvedValue(JSON.stringify({ files: Array.from({ length: 201 }, (_, i) => ({ path: `${i}.html`, contentType: "Text/HTML" })) }));
   const first = await (await request(`${docsBase}/tree`)).json() as { documents: string[]; cursor: string };
   expect(first.documents).toHaveLength(200);
   expect(first.cursor).toBe("200");
@@ -166,7 +166,7 @@ it("keeps legacy publication and share failures opaque and handles storage strea
   const share = `/share/${createShareToken("example/index.html")}`;
   vi.mocked(deletion.isDeleted).mockResolvedValueOnce(true);
   expect((await request(share, false)).status).toBe(404);
-  vi.mocked(minio.getObjectStream).mockRejectedValue(new Error("storage unavailable"));
+  vi.mocked(blobs.getObjectStream).mockRejectedValue(new Error("storage unavailable"));
   for (const path of [share, "/public/example/product/files/index.html"]) expect((await request(path, false)).status).toBe(503);
   for (const query of ["?doc=unknown.html", "?doc=image.svg"]) expect((await request(`/public/example/product${query}`, false)).status).toBe(404);
   expect((await request("/public/example/product/files/%ZZ", false)).status).toBe(404);
@@ -175,7 +175,7 @@ it("keeps legacy publication and share failures opaque and handles storage strea
 });
 
 it("handles empty storage chunks without changing public HTML delivery", async () => {
-  vi.mocked(minio.getObjectStream).mockImplementation(() => Promise.resolve(new ReadableStream({ start(controller) {
+  vi.mocked(blobs.getObjectStream).mockImplementation(() => Promise.resolve(new ReadableStream({ start(controller) {
     // Exercise a storage adapter emitting a missing chunk before valid bytes.
     controller.enqueue(undefined);
     controller.enqueue(new TextEncoder().encode("<body>fixture</body>"));
@@ -187,7 +187,7 @@ it("handles empty storage chunks without changing public HTML delivery", async (
 });
 
 it("streams public publication HTML across empty storage chunks", async () => {
-  vi.mocked(minio.getObjectStream).mockImplementation(() => Promise.resolve(new ReadableStream({ start(controller) {
+  vi.mocked(blobs.getObjectStream).mockImplementation(() => Promise.resolve(new ReadableStream({ start(controller) {
     controller.enqueue(new Uint8Array());
     controller.enqueue(new TextEncoder().encode("<body>fixture</body>"));
     controller.close();
@@ -204,5 +204,5 @@ it("preserves a private access denial when cancelling its upstream response fail
     ? Promise.resolve(new Response(new ReadableStream({ cancel }), { status: 403 })) : backend(input, init));
   expect((await request(`${docsBase}/files/index.html`)).status).toBe(404);
   expect(cancel).toHaveBeenCalledOnce();
-  expect(minio.getObjectStream).not.toHaveBeenCalled();
+  expect(blobs.getObjectStream).not.toHaveBeenCalled();
 });

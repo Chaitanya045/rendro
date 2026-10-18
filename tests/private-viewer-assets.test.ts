@@ -8,7 +8,7 @@ import { Window as DOMWindow } from "happy-dom";
 import { createAuthOptions } from "../convex/auth";
 import projectDocs from "@/routes/project-docs";
 import { sessionCache, sessionMiddleware } from "@/middleware/session";
-import * as minio from "@/minio";
+import * as blobs from "@/storage";
 import { createViewerTicket } from "@/viewer-ticket";
 import { viewerHtmlForms } from "./fixtures/private-viewer-html";
 
@@ -61,8 +61,8 @@ async function fixture() {
     return new Response(null, { status: 404 });
   });
   vi.stubGlobal("fetch", backend);
-  vi.spyOn(minio, "getObjectText").mockResolvedValue(JSON.stringify({ version: 1, files }));
-  const objects = vi.spyOn(minio, "getObjectStream").mockImplementation(key => {
+  vi.spyOn(blobs, "getObjectText").mockResolvedValue(JSON.stringify({ version: 1, files }));
+  const objects = vi.spyOn(blobs, "getObjectStream").mockImplementation(key => {
     const entry = files.find(file => key.endsWith(`/files/${file.path}`));
     return Promise.resolve(entry ? new Response(entry.content).body : null);
   });

@@ -15,7 +15,7 @@ import { sha256 } from "../convex/credentialHash";
 import rateLimiterTest from "./convex-rate-limiter";
 import projectDocs from "../src/routes/project-docs";
 import { createViewerTicket } from "../src/viewer-ticket";
-import * as storage from "../src/minio";
+import * as storage from "../src/storage";
 
 const modules = import.meta.glob("../convex/**/*.ts");
 const provenance = { source: { kind: "local" as const }, execution: { kind: "local" as const }, cliVersion: "test", manifestSha256: "a".repeat(64) };

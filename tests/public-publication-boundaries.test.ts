@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import publicRoutes from "@/routes/public-v2";
-import * as minio from "@/minio";
+import * as blobs from "@/storage";
 
 const resolution = {
   publication: { slug: "product", pathPrefix: "public", entryFile: "index.html", title: "Product" },
@@ -30,8 +30,8 @@ describe("anonymous publication revocation and path isolation", () => {
     "returns 404 after publication revocation without reading storage: %s",
     async (path) => {
       vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({ error: "Not found" }, { status: 404 })));
-      const manifestRead = vi.spyOn(minio, "getObjectText");
-      const objectRead = vi.spyOn(minio, "getObjectStream");
+      const manifestRead = vi.spyOn(blobs, "getObjectText");
+      const objectRead = vi.spyOn(blobs, "getObjectStream");
 
       expect((await publicRoutes.request(path)).status).toBe(404);
       expect(manifestRead).not.toHaveBeenCalled();
@@ -46,8 +46,8 @@ describe("anonymous publication revocation and path isolation", () => {
     "/p/product/files/%E0%A4%A.html",
   ])("rejects outside, multiply encoded, and malformed paths without object reads: %s", async (path) => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json(resolution)));
-    vi.spyOn(minio, "getObjectText").mockResolvedValue(manifest);
-    const objectRead = vi.spyOn(minio, "getObjectStream");
+    vi.spyOn(blobs, "getObjectText").mockResolvedValue(manifest);
+    const objectRead = vi.spyOn(blobs, "getObjectStream");
 
     expect((await publicRoutes.request(path)).status).toBe(404);
     expect(objectRead).not.toHaveBeenCalled();
@@ -55,14 +55,14 @@ describe("anonymous publication revocation and path isolation", () => {
 
   it("serves only a manifest-listed asset inside the publication prefix", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json(resolution)));
-    vi.spyOn(minio, "getObjectText").mockResolvedValue(manifest);
+    vi.spyOn(blobs, "getObjectText").mockResolvedValue(manifest);
     const body = new ReadableStream<Uint8Array>({
       start(controller) {
         controller.enqueue(new TextEncoder().encode("body{}"));
         controller.close();
       },
     });
-    const objectRead = vi.spyOn(minio, "getObjectStream").mockResolvedValue(body);
+    const objectRead = vi.spyOn(blobs, "getObjectStream").mockResolvedValue(body);
 
     const response = await publicRoutes.request("/p/product/files/assets/app.css");
     expect(response.status).toBe(200);

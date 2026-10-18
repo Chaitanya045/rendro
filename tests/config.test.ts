@@ -4,13 +4,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const requiredSettings = {
   CONVEX_INTERNAL_SECRET: "test-internal-secret-at-least-32-characters",
   AUTH_SECRET: "test-share-signing-secret",
-  MINIO_ENDPOINT: "http://localhost:9000",
-  MINIO_ACCESS_KEY: "test-access-key",
-  MINIO_SECRET_KEY: "test-storage-secret",
 };
 const optionalSettings = [
-  "NODE_ENV", "LOG_LEVEL", "CONVEX_URL", "CONVEX_SITE_URL",
-  "MINIO_BUCKET", "MINIO_REGION", "MINIO_FORCE_PATH_STYLE",
+  "NODE_ENV", "LOG_LEVEL", "CONVEX_URL", "CONVEX_SITE_URL", "RETENTION_SECRET",
 ];
 
 beforeEach(() => {
@@ -27,7 +23,7 @@ afterEach(() => {
 });
 
 describe("Worker environment validation", () => {
-  it("loads with only the five required settings, without Google credentials", async () => {
+  it("loads with only the two required settings, without Google credentials", async () => {
     const config = await import("../src/config");
     expect(config).toMatchObject({
       ...requiredSettings,
@@ -35,9 +31,7 @@ describe("Worker environment validation", () => {
       LOG_LEVEL: "debug",
       CONVEX_URL: "",
       CONVEX_SITE_URL: "",
-      MINIO_BUCKET: "docs",
-      MINIO_REGION: "us-east-1",
-      MINIO_FORCE_PATH_STYLE: true,
+      RETENTION_SECRET: undefined,
     });
   });
 
@@ -84,17 +78,26 @@ describe("Worker environment validation", () => {
     await expect(import("../src/config")).resolves.toHaveProperty("CONVEX_SITE_URL", siteUrl);
   });
 
-  it("honors optional backend, storage, and logging overrides", async () => {
+  it("honors optional backend, retention, and logging overrides", async () => {
     const overrides = {
       CONVEX_SITE_URL: "https://backend.example.com",
-      MINIO_BUCKET: "rendro-docs",
-      MINIO_REGION: "auto",
+      RETENTION_SECRET: "r".repeat(32),
       NODE_ENV: "production",
       LOG_LEVEL: "warn",
     };
     for (const [key, value] of Object.entries(overrides)) vi.stubEnv(key, value);
-    vi.stubEnv("MINIO_FORCE_PATH_STYLE", "false");
-    await expect(import("../src/config")).resolves.toMatchObject({ ...overrides, MINIO_FORCE_PATH_STYLE: false });
+    await expect(import("../src/config")).resolves.toMatchObject(overrides);
+  });
+
+  it("enforces the minimum length of the optional RETENTION_SECRET", async () => {
+    vi.stubEnv("RETENTION_SECRET", "x".repeat(31));
+    await expect(import("../src/config")).rejects.toThrow("RETENTION_SECRET must be at least 32 characters");
+  });
+
+  it("exports no storage endpoint or credential setting, and ignores any left in the environment", async () => {
+    for (const key of ["MINIO_ENDPOINT", "MINIO_ACCESS_KEY", "MINIO_SECRET_KEY", "MINIO_BUCKET"]) vi.stubEnv(key, "leftover");
+    const config = await import("../src/config");
+    expect(Object.keys(config).filter(name => /MINIO|S3|ACCESS_KEY|SECRET_KEY|ENDPOINT/.test(name))).toEqual([]);
   });
 
   it("defaults production logging to info", async () => {
@@ -118,5 +121,16 @@ describe("Worker environment validation", () => {
     for (const declaration of declarations) {
       expect((JSON.parse(declaration[3]) as string[]).sort()).toEqual(Object.keys(requiredSettings).sort());
     }
+  });
+
+  it("binds a private R2 bucket and the retention cron in every Wrangler environment, with no storage keys", () => {
+    const wrangler = readFileSync(new URL("../wrangler.toml", import.meta.url), "utf8").replace(/#.*$/gm, "");
+    expect(wrangler).not.toMatch(/MINIO|S3_|ACCESS_KEY|SECRET_KEY|r2\.cloudflarestorage|r2\.dev/);
+    const buckets = [...wrangler.matchAll(/^\[\[((?:env\.[\w-]+\.)?r2_buckets)\]\]\nbinding = "(\w+)"\nbucket_name = "([\w-]+)"/gm)];
+    expect(buckets.map(match => [match[1], match[2]])).toEqual([["r2_buckets", "STORAGE"], ["env.development.r2_buckets", "STORAGE"]]);
+    expect(new Set(buckets.map(match => match[3])).size).toBe(2);
+    // The E2E-only storage-faults service exists solely in the generated harness config (e2e/global-setup.ts), never in a deployable one.
+    expect(wrangler).not.toMatch(/services|storage-faults|\[\[[^\]]*(?:service|durable)/i);
+    expect([...wrangler.matchAll(/^\[((?:env\.[\w-]+\.)?triggers)\]\ncrons = \["23 3 \* \* \*"\]/gm)].map(match => match[1])).toEqual(["triggers", "env.development.triggers"]);
   });
 });

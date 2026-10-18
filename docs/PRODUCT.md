@@ -189,7 +189,7 @@ Superseded deployments are kept for 30 days and failed deployments for 24 hours,
 ### v0.1 — Core Platform (July 2026)
 - SSR doc platform with Hono
 - Sidebar tree with lazy loading
-- Document streaming from MinIO
+- Document streaming from R2 through the Worker's native binding
 - Google OAuth with better-auth + SQLite
 - Email-domain org derivation
 
@@ -208,7 +208,6 @@ Superseded deployments are kept for 30 days and failed deployments for 24 hours,
 
 ### v0.4 — Workers
 - Cloudflare Workers deployment
-- DOMParser polyfill for AWS SDK
 - D1 for auth sessions (later replaced)
 - CLI distribution (npm package)
 

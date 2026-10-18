@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import type { User } from "better-auth/types";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import projectDocs from "@/routes/project-docs";
-import * as minio from "@/minio";
+import * as blobs from "@/storage";
 import { documentCommentScopeFromFrame } from "@/commentor/parent-host";
 
 const manifestKey = "tenants/org-a/projects/project-a/deployments/deploy-a/manifest.json";
@@ -17,8 +17,8 @@ function app() {
   hono.use("*", async (c, next) => { c.set("user", user); await next(); });
   hono.route("/", projectDocs);
   vi.stubGlobal("fetch", vi.fn().mockImplementation(() => Promise.resolve(Response.json({ project: { name: "Product" }, deployment: { manifestKey } }))));
-  vi.spyOn(minio, "getObjectText").mockResolvedValue(manifest);
-  vi.spyOn(minio, "getObjectStream").mockImplementation(() => Promise.resolve(new Response("<!doctype html><body><h1>Docs</h1></body>").body));
+  vi.spyOn(blobs, "getObjectText").mockResolvedValue(manifest);
+  vi.spyOn(blobs, "getObjectStream").mockImplementation(() => Promise.resolve(new Response("<!doctype html><body><h1>Docs</h1></body>").body));
   return hono;
 }
 

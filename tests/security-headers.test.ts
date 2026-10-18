@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import worker from "@/worker";
-import * as minio from "@/minio";
+import * as blobs from "@/storage";
 import { securityHeaders } from "@/middleware/security-headers";
 import { nonceAttribute } from "@/middleware/html-nonce";
 import { createShareToken } from "@/share-links";
@@ -110,7 +110,7 @@ describe("shared response security policy", () => {
   });
 
   it("retires self-service namespace creation without writing starter HTML or keys", async () => {
-    const put = vi.spyOn(minio, "putObject").mockResolvedValue(undefined);
+    const put = vi.spyOn(blobs, "putObject").mockResolvedValue(undefined);
     const response = await worker.request("https://rendro.test/api/orgs", { method: "POST", headers: { Cookie: cookie } });
     expect(response.status).toBe(410);
     expect(await response.json()).toMatchObject({ error: expect.stringContaining("rendro@2") });

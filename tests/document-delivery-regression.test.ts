@@ -3,7 +3,7 @@ import { Hono } from "hono";
 import type { User } from "better-auth/types";
 import { Script } from "node:vm";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import * as minio from "@/minio";
+import * as blobs from "@/storage";
 import * as publications from "@/publications";
 import * as softDelete from "@/soft-delete";
 import { createShareToken } from "@/share-links";
@@ -48,11 +48,11 @@ describe.each(fixtures)("document delivery regression: %s", (_name, html) => {
       orgSlug: "example-test", slug: "docs", sourcePrefix: "example-test/docs/", entryFile: "index.html",
       title: "Regression docs", createdAt: "2026-09-20", updatedAt: "2026-09-20",
     });
-    vi.spyOn(minio, "headObject").mockResolvedValue({ contentType: "text/html; charset=utf-8" });
-    vi.spyOn(minio, "getObjectText").mockResolvedValue(JSON.stringify({
+    vi.spyOn(blobs, "headObject").mockResolvedValue({ contentType: "text/html; charset=utf-8" });
+    vi.spyOn(blobs, "getObjectText").mockResolvedValue(JSON.stringify({
       version: 1, files: [{ path: "index.html", sha256: "fixture", size: html.length, contentType: "text/html; charset=utf-8" }],
     }));
-    vi.spyOn(minio, "getObjectStream").mockImplementation(() => Promise.resolve(new ReadableStream({
+    vi.spyOn(blobs, "getObjectStream").mockImplementation(() => Promise.resolve(new ReadableStream({
       start(controller) { controller.enqueue(new TextEncoder().encode(html)); controller.close(); },
     })));
     const requests = {

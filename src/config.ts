@@ -5,14 +5,6 @@ const envSchema = z.object({
   NODE_ENV: z.enum(["development", "production", "test"]).default("development"),
   LOG_LEVEL: z.enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"]).optional(),
 
-  // MinIO
-  MINIO_ENDPOINT: z.string().min(1),
-  MINIO_ACCESS_KEY: z.string().min(1),
-  MINIO_SECRET_KEY: z.string().min(1),
-  MINIO_BUCKET: z.string().default("docs"),
-  MINIO_REGION: z.string().default("us-east-1"),
-  MINIO_FORCE_PATH_STYLE: z.string().optional().transform((value) => value !== "false"),
-
   // Convex (Google OAuth credentials belong only to Convex)
   CONVEX_URL: z.string().default(""),
   CONVEX_SITE_URL: z.string().url().optional(),
@@ -21,6 +13,9 @@ const envSchema = z.object({
     .min(32, "CONVEX_INTERNAL_SECRET must be at least 32 characters"),
   // Signs legacy /share/:token links; independent of Convex Better Auth.
   AUTH_SECRET: z.string().min(16, "AUTH_SECRET must be at least 16 characters"),
+  // Bearer for Convex's retention endpoints, used only by the scheduled purge. Optional so a
+  // deployment without it still serves traffic; the purge then reports itself disabled.
+  RETENTION_SECRET: z.string().min(32, "RETENTION_SECRET must be at least 32 characters").optional(),
 });
 
 type Env = z.infer<typeof envSchema>;
@@ -39,13 +34,6 @@ function loadEnv(): Env {
 
 const env = loadEnv();
 
-export const MINIO_ENDPOINT = env.MINIO_ENDPOINT;
-export const MINIO_ACCESS_KEY = env.MINIO_ACCESS_KEY;
-export const MINIO_SECRET_KEY = env.MINIO_SECRET_KEY;
-export const MINIO_BUCKET = env.MINIO_BUCKET;
-export const MINIO_REGION = env.MINIO_REGION;
-export const MINIO_FORCE_PATH_STYLE = env.MINIO_FORCE_PATH_STYLE;
-
 export const NODE_ENV = env.NODE_ENV;
 export const LOG_LEVEL = env.LOG_LEVEL ?? (NODE_ENV === "production" ? "info" : "debug");
 export const CONVEX_URL = env.CONVEX_URL;
@@ -56,3 +44,4 @@ export const CONVEX_SITE_URL = env.CONVEX_SITE_URL
     : CONVEX_URL.replace(/\.cloud$/, ".site"));
 
 export const AUTH_SECRET = env.AUTH_SECRET;
+export const RETENTION_SECRET = env.RETENTION_SECRET;

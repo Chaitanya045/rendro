@@ -12,7 +12,7 @@ const storage = vi.hoisted(() => ({
   putObject: vi.fn(), getObjectText: vi.fn(), getObjectStream: vi.fn(),
   headObject: vi.fn(), copyObject: vi.fn<(source: string, destination: string) => Promise<void>>(), listAllKeys: vi.fn(),
 }));
-vi.mock("../src/minio", () => storage);
+vi.mock("../src/storage", () => storage);
 import deployments from "../src/routes/deployments";
 import publications from "../src/routes/publication-api";
 import publicReader from "../src/routes/public-v2";

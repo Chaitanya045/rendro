@@ -7,7 +7,7 @@ import projectDocs from "@/routes/project-docs";
 import publicDocs from "@/routes/public-v2";
 import shareDocs from "@/routes/share-v2";
 import { securityHeaders } from "@/middleware/security-headers";
-import * as minio from "@/minio";
+import * as blobs from "@/storage";
 import { browserStep, bundleBrowserAsset, createBrowserHarness } from "./helpers/browser";
 
 const privateBase = "/organizations/org/projects/project/docs";
@@ -93,9 +93,9 @@ function publisherHtml(path: string): string {
 beforeAll(async () => {
   const viewer = await bundleBrowserAsset("src/viewer/entry.ts");
   const tree = await bundleBrowserAsset("src/lazy-tree/lazy-tree.ts");
-  vi.spyOn(minio, "getObjectText").mockResolvedValue(JSON.stringify({ version: 1,
+  vi.spyOn(blobs, "getObjectText").mockResolvedValue(JSON.stringify({ version: 1,
     files: documents.map(path => ({ path, contentType: "text/html", size: 100 })) }));
-  vi.spyOn(minio, "getObjectStream").mockImplementation(key => {
+  vi.spyOn(blobs, "getObjectStream").mockImplementation(key => {
     const path = documents.find(path => key.endsWith(`/files/${path}`));
     return Promise.resolve(path ? new Response(publisherHtml(path)).body : null);
   });

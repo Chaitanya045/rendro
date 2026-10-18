@@ -4,7 +4,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { createTestHarness } from "wrangler";
-import { startFaults, startIdentityFixtures, startStorage } from "./services";
+import { removeSmokeAsset, startFaults, startIdentityFixtures, storageProbeOrigin } from "./services";
 import { localEnvironment, startBackend } from "./backend";
 import { seedWorkspace } from "./seed";
 import { registerResources } from "./resource-journal";
@@ -42,8 +42,6 @@ export default async function globalSetup() {
     identity.allowedOrigins.add(convex.site);
     identity.allowedOrigins.add(convex.origin);
     closers.push(() => convex.close());
-    const storage = await startStorage(directory, resources);
-    closers.push(() => storage.close());
     const vars = {
       NODE_ENV: "production",
       LOG_LEVEL: "error",
@@ -51,12 +49,6 @@ export default async function globalSetup() {
       CONVEX_SITE_URL: convex.site,
       CONVEX_INTERNAL_SECRET: randomBytes(32).toString("hex"),
       AUTH_SECRET: randomBytes(32).toString("hex"),
-      MINIO_ENDPOINT: storage.origin,
-      MINIO_ACCESS_KEY: storage.accessKeyId,
-      MINIO_SECRET_KEY: storage.secretAccessKey,
-      MINIO_BUCKET: "docs",
-      MINIO_REGION: "us-east-1",
-      MINIO_FORCE_PATH_STYLE: "true",
     };
     // Always rebuild: existence alone cannot detect stale ignored browser bundles.
     await run("pnpm", ["build:assets"], {
@@ -66,17 +58,23 @@ export default async function globalSetup() {
     // Relocate only paths. Flags, compatibility date and asset routing come from production.
     const productionConfig = await readFile(join(root, "wrangler.toml"), "utf8");
     const configPath = join(directory, "wrangler.toml");
+    const compatibilityDate = /^compatibility_date = "([^"]+)"/m.exec(productionConfig)?.[1];
+    const bucketName = /^\[\[r2_buckets\]\]\nbinding = "STORAGE"\nbucket_name = "([^"]+)"/m.exec(productionConfig)?.[1];
+    if (!compatibilityDate || !bucketName) throw new Error("wrangler.toml must declare compatibility_date and the STORAGE bucket");
+    // The one deliberate difference: STORAGE becomes a service that wraps the local R2 bucket, so a spec can fail storage.
+    const bucketBinding = /^\[\[r2_buckets\]\]\nbinding = "STORAGE"\nbucket_name = "[^"]+"\n/m;
     await writeFile(configPath, productionConfig
       .replace('main = "src/worker.ts"', `main = ${JSON.stringify(join(root, "src/worker.ts"))}`)
-      .replace('directory = "./public"', `directory = ${JSON.stringify(join(root, "public"))}`));
+      .replace('directory = "./public"', `directory = ${JSON.stringify(join(root, "public"))}`)
+      .replace(bucketBinding, '[[services]]\nbinding = "STORAGE"\nservice = "storage-faults"\n'));
     // The empty file also prevents loading shell credentials through required secrets.
     await writeFile(join(directory, ".dev.vars"), "# Only explicit synthetic bindings are used.\n");
     process.env.CLOUDFLARE_LOAD_DEV_VARS_FROM_DOT_ENV = "false";
     process.env.WRANGLER_SEND_METRICS = "false";
 
     await run("pnpm", ["cli:build"], { cwd: root, env: localEnvironment(), timeout: 120_000 });
-    const allowedOrigins = new Set([convex.origin, convex.site, storage.origin]);
-    const faults = await startFaults({ storage: storage.origin, convex: [convex.origin, convex.site] });
+    const allowedOrigins = new Set([convex.origin, convex.site, storageProbeOrigin]);
+    const faults = await startFaults({ storage: storageProbeOrigin, convex: [convex.origin, convex.site] });
     closers.push(() => faults.close());
     // Wrangler 4.149.0's harness outboundService delegates to globalThis.fetch.
     // Keep real HTTP to our fixtures; return redirects without following them (auth redirects belong to the browser).
@@ -89,12 +87,21 @@ export default async function globalSetup() {
         blockedOrigins.add(url.origin);
         throw new Error(`Blocked external Worker origin: ${url.origin}`);
       }
+      // The storage probe is answered here (see e2e/storage-faults-worker.mjs); it never leaves the machine.
+      if (url.origin === storageProbeOrigin) return faults.intercept(request) ?? new Response(null, { status: 204 });
       return faults.intercept(request) ?? originalFetch(request, { redirect: "manual" });
     };
     resources.assertActive();
     const server = createTestHarness({
       root,
-      workers: [{ configPath, vars, secrets: vars }],
+      workers: [
+        { configPath, vars, secrets: vars },
+        { config: {
+          name: "storage-faults", main: join(root, "e2e/storage-faults-worker.mjs"),
+          compatibility_date: compatibilityDate, compatibility_flags: ["nodejs_compat"],
+          r2_buckets: [{ binding: "BUCKET", bucket_name: bucketName }],
+        } },
+      ],
     });
     closers.push(() => server.close());
     const { url } = await server.listen();
@@ -107,7 +114,9 @@ export default async function globalSetup() {
       RESEND_API_KEY: randomBytes(32).toString("hex"), AUTH_EMAIL_FROM: "Rendro <fixture@example.test>" });
     await convex.push();
     const seed = await seedWorkspace({ site: convex.site, worker: url.origin, secret: vars.CONVEX_INTERNAL_SECRET, mail: identity.mail, directory, fetch: originalFetch });
-    await storage.removeSmokeAsset(seed.organizationId, seed.projectId);
+    // Storage is the Worker's own R2 binding on Miniflare's local simulation: no service, endpoint or key.
+    const { BUCKET } = await server.getWorker<{ BUCKET: Parameters<typeof removeSmokeAsset>[0] }>("storage-faults").getEnv();
+    await removeSmokeAsset(BUCKET, seed.organizationId, seed.projectId);
     await writeFile(join(directory, "backend-admin.json"), JSON.stringify({ origin: convex.origin, adminKey: convex.adminKey }), { mode: 0o600 });
     const seedPath = join(directory, "seed.json");
     await writeFile(seedPath, JSON.stringify(seed), { mode: 0o600 });
@@ -118,7 +127,7 @@ export default async function globalSetup() {
     process.env.RENDRO_E2E_FAULTS = faults.control;
     process.env.RENDRO_E2E_SEED = seedPath;
     process.env.RENDRO_E2E_DIRECTORY = directory;
-    console.log("E2E: real workerd ready; real local Convex/S3Proxy, captured mail and OAuth, external fetch blocked.");
+    console.log("E2E: real workerd ready; real local Convex, local R2 simulation, captured mail and OAuth, external fetch blocked.");
     return cleanup;
   } catch (error) {
     try { await cleanup(); } catch (cleanupError) {

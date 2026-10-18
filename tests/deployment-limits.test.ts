@@ -4,7 +4,7 @@ import { Hono } from "hono";
 import { bodyAdmission } from "../src/middleware/body-admission";
 import { MAX_DEPLOYMENT_FILES, MAX_DEPLOYMENT_BYTES, MAX_FILE_BYTES, MAX_DEPLOYMENT_PATH_LENGTH, MAX_MIME_LENGTH, MAX_COMMIT_LIST_PAGES, validDeploymentCounts, deploymentFileLimitError } from "../shared/deployment-limits";
 const storage = vi.hoisted(() => ({ putObject: vi.fn(), getObjectText: vi.fn(), listAllKeys: vi.fn() }));
-vi.mock("../src/minio", () => storage);
+vi.mock("../src/storage", () => storage);
 import deployments from "../src/routes/deployments";
 const app = new Hono();
 app.use("*", bodyAdmission);

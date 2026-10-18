@@ -8,7 +8,7 @@ import { decodeStoragePath, isCanonicalStorageKey } from "@/storage-boundary";
 import { viewerScript } from "@/viewer/markup";
 import { Hono } from "hono";
 import { CONVEX_INTERNAL_SECRET, CONVEX_SITE_URL } from "@/config";
-import { getObjectStream, type ObjectRange } from "@/minio";
+import { getObjectStream, type ObjectRange } from "@/storage";
 import { renderScopedDocumentShell } from "@/routes/app";
 import { renderNotFoundPage } from "@/routes/not-found";
 import { HEAD_INJECTION_VERSION, injectMobileViewportScrollbarStream, injectViewerHeadStream } from "@/routes/document-html";

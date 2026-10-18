@@ -5,7 +5,7 @@ import { EncryptJWT } from "jose";
 import worker from "@/worker";
 import { decodeStoragePath, isCanonicalStorageKey, isLegacyStorageKey, isLegacyStoragePrefix, legacyStoragePrefix, modernStorageKey, modernStoragePrefix } from "@/storage-boundary";
 import { AUTH_SECRET } from "@/config";
-import * as minio from "@/minio";
+import * as blobs from "@/storage";
 import * as deletion from "@/soft-delete";
 import { createLegacyViewerTicket, createViewerTicket, readLegacyViewerTicket } from "@/viewer-ticket";
 import { mockSecurityBackend, docsBase, testUser } from "./fixtures/security-headers";
@@ -32,9 +32,9 @@ beforeEach(() => {
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 function noStorageReads() {
-  expect(minio.getObjectStream).not.toHaveBeenCalled();
-  expect(minio.getObjectText).not.toHaveBeenCalled();
-  expect(minio.headObject).not.toHaveBeenCalled();
+  expect(blobs.getObjectStream).not.toHaveBeenCalled();
+  expect(blobs.getObjectText).not.toHaveBeenCalled();
+  expect(blobs.headObject).not.toHaveBeenCalled();
 }
 
 function backend(email: string, activeKey: string | null) {
@@ -79,20 +79,20 @@ describe("disjoint storage authorization", () => {
   it("does not let a valid legacy ticket read modern objects through either route", async () => {
     const ticket = await createLegacyViewerTicket("example", cookie);
     // Storage contains only an actual modern object, not a legacy copy of it.
-    vi.mocked(minio.headObject).mockImplementation(key => Promise.resolve(key === modernKey ? { contentType: "text/html" } : null));
+    vi.mocked(blobs.headObject).mockImplementation(key => Promise.resolve(key === modernKey ? { contentType: "text/html" } : null));
     expect((await request(`/legacy-view/example/view/${ticket}/files/${modernKey}`)).status).toBe(404);
     expect((await request(`${docsBase}/view/${ticket}/files/index.html`)).status).toBe(404);
-    expect(minio.headObject).not.toHaveBeenCalledWith(modernKey);
-    expect(minio.getObjectStream).not.toHaveBeenCalled();
+    expect(blobs.headObject).not.toHaveBeenCalledWith(modernKey);
+    expect(blobs.getObjectStream).not.toHaveBeenCalled();
   });
 
   it("does not let a modern ticket read legacy objects or cross into a legacy route", async () => {
     const ticket = await createViewerTicket(scope);
-    vi.mocked(minio.getObjectText).mockResolvedValue(JSON.stringify({ version: 1, files: [{ path: "example/index.html", contentType: "text/html" }] }));
-    vi.mocked(minio.getObjectStream).mockImplementation(key => Promise.resolve(key === "example/index.html" ? new Response("private legacy").body : null));
+    vi.mocked(blobs.getObjectText).mockResolvedValue(JSON.stringify({ version: 1, files: [{ path: "example/index.html", contentType: "text/html" }] }));
+    vi.mocked(blobs.getObjectStream).mockImplementation(key => Promise.resolve(key === "example/index.html" ? new Response("private legacy").body : null));
     expect((await request(`${docsBase}/view/${ticket}/files/example/index.html`)).status).toBe(404);
-    expect(minio.getObjectStream).toHaveBeenCalledWith(manifestKey.replace("manifest.json", "files/example/index.html"));
-    expect(minio.getObjectStream).not.toHaveBeenCalledWith("example/index.html");
+    expect(blobs.getObjectStream).toHaveBeenCalledWith(manifestKey.replace("manifest.json", "files/example/index.html"));
+    expect(blobs.getObjectStream).not.toHaveBeenCalledWith("example/index.html");
     expect((await request(`/legacy-view/example/view/${ticket}/files/index.html`)).status).toBe(404);
   });
 
@@ -128,8 +128,8 @@ describe("disjoint storage authorization", () => {
       const encoded = path.split("/").map(encodeURIComponent).join("/");
       const content = `<h1>${path}</h1>`;
       const objects = new Map([[key, content]]);
-      vi.mocked(minio.headObject).mockImplementation(key => Promise.resolve(objects.has(key) ? { contentType: "text/html" } : null));
-      vi.mocked(minio.getObjectStream).mockImplementation(key => Promise.resolve(objects.has(key) ? new Response(objects.get(key)).body : null));
+      vi.mocked(blobs.headObject).mockImplementation(key => Promise.resolve(objects.has(key) ? { contentType: "text/html" } : null));
+      vi.mocked(blobs.getObjectStream).mockImplementation(key => Promise.resolve(objects.has(key) ? new Response(objects.get(key)).body : null));
       const bookmark = await request(`/files/example/${encoded}`, true);
       expect(bookmark.status).toBe(302);
       expect(bookmark.headers.get("location")).toBe(`/docs/example/${encoded}`);
@@ -148,7 +148,7 @@ describe("disjoint storage authorization", () => {
         expect(response.status, url).toBe(200);
         expect(await response.text()).toContain(content);
       }
-      expect(vi.mocked(minio.getObjectStream).mock.calls.map(([key]) => key)).toEqual(Array(4).fill(key));
+      expect(vi.mocked(blobs.getObjectStream).mock.calls.map(([key]) => key)).toEqual(Array(4).fill(key));
 
     },
   );
@@ -159,12 +159,12 @@ describe("disjoint storage authorization", () => {
       const legacy = await createLegacyViewerTicket("example", cookie);
       const modern = await createViewerTicket(scope);
       const key = modernStorageKey(scope, path)!;
-      vi.mocked(minio.getObjectText).mockResolvedValue(JSON.stringify({ version: 1, files: [{ path, contentType: "text/html" }] }));
+      vi.mocked(blobs.getObjectText).mockResolvedValue(JSON.stringify({ version: 1, files: [{ path, contentType: "text/html" }] }));
       for (const url of [
         `/legacy-view/example/view/${legacy}/files/${encoded}`,
         `${docsBase}/view/${modern}/files/${encoded}`,
       ]) expect((await request(url)).status).toBe(200);
-      expect(vi.mocked(minio.getObjectStream).mock.calls.map(([key]) => key)).toEqual([`example/${path}`, key]);
+      expect(vi.mocked(blobs.getObjectStream).mock.calls.map(([key]) => key)).toEqual([`example/${path}`, key]);
       expect(key).toBe(manifestKey.replace("manifest.json", `files/${path}`));
     },
   );
@@ -173,7 +173,7 @@ describe("disjoint storage authorization", () => {
     "decodes modern file URLs and shell queries only once: %s", async path => {
       const encoded = path.split("/").map(encodeURIComponent).join("/");
       const key = modernStorageKey(scope, path)!;
-      vi.mocked(minio.getObjectText).mockResolvedValue(JSON.stringify({ version: 1, files: [{ path, contentType: "text/html" }] }));
+      vi.mocked(blobs.getObjectText).mockResolvedValue(JSON.stringify({ version: 1, files: [{ path, contentType: "text/html" }] }));
       const originalFetch = globalThis.fetch;
       vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
         const response = await originalFetch(input, init);
@@ -185,7 +185,7 @@ describe("disjoint storage authorization", () => {
         expect((await request(`${base}?doc=${encodeURIComponent(path)}`, true)).status).toBe(200);
         expect((await request(`${base}/files/${encoded}`, true)).status).toBe(200);
       }
-      expect(vi.mocked(minio.getObjectStream).mock.calls.map(([key]) => key)).toEqual(Array(3).fill(key));
+      expect(vi.mocked(blobs.getObjectStream).mock.calls.map(([key]) => key)).toEqual(Array(3).fill(key));
     },
   );
 
@@ -204,13 +204,13 @@ describe("disjoint storage authorization", () => {
   );
 
   it("rejects colliding legacy API keys before sync reads or writes", async () => {
-    vi.spyOn(minio, "putObject").mockResolvedValue(undefined);
+    vi.spyOn(blobs, "putObject").mockResolvedValue(undefined);
     const response = await worker.fetch(new Request("https://rendro.test/api/sync/upload", {
       method: "POST", headers: { Authorization: "Bearer fixture", "Content-Type": "application/json" },
       body: JSON.stringify({ key: modernKey, content: "replacement" }),
     }), {});
     expect(response.status).toBe(410);
-    expect(minio.putObject).not.toHaveBeenCalled();
+    expect(blobs.putObject).not.toHaveBeenCalled();
     noStorageReads();
   });
 });

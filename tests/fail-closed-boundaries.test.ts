@@ -5,7 +5,7 @@ import workerApp from "@/worker";
 import deploymentRoutes from "@/routes/deployments";
 import projectDocsRoutes from "@/routes/project-docs";
 import publicRoutes from "@/routes/public-v2";
-import * as minio from "@/minio";
+import * as blobs from "@/storage";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -29,8 +29,8 @@ describe("fail-closed API and manifest boundaries", () => {
       project: { name: "Product", slug: "product" },
       deployment: { manifestKey: "tenants/org-a/projects/project-a/deployments/deploy-a/manifest.json" },
     })));
-    vi.spyOn(minio, "getObjectText").mockResolvedValue(JSON.stringify({ files: { path: "index.html" } }));
-    const objectRead = vi.spyOn(minio, "getObjectStream");
+    vi.spyOn(blobs, "getObjectText").mockResolvedValue(JSON.stringify({ files: { path: "index.html" } }));
+    const objectRead = vi.spyOn(blobs, "getObjectStream");
 
     expect((await publicRoutes.request("/p/product/files/index.html")).status).toBe(503);
     expect(objectRead).not.toHaveBeenCalled();
@@ -41,8 +41,8 @@ describe("fail-closed API and manifest boundaries", () => {
       project: { name: "Product" },
       deployment: { manifestKey: "tenants/org-a/projects/project-a/deployments/deploy-a/manifest.json" },
     })));
-    vi.spyOn(minio, "getObjectText").mockResolvedValue(JSON.stringify({ files: [null] }));
-    const objectRead = vi.spyOn(minio, "getObjectStream");
+    vi.spyOn(blobs, "getObjectText").mockResolvedValue(JSON.stringify({ files: [null] }));
+    const objectRead = vi.spyOn(blobs, "getObjectStream");
     const app = new Hono<{ Variables: { user?: User } }>();
     app.use("*", async (c, next) => {
       c.set("user", {
@@ -68,7 +68,7 @@ describe("fail-closed API and manifest boundaries", () => {
         manifestKey: "tenants/org-a/projects/project-a/deployments/deploy-a/manifest.json",
       },
     })));
-    vi.spyOn(minio, "getObjectText").mockResolvedValue(JSON.stringify({
+    vi.spyOn(blobs, "getObjectText").mockResolvedValue(JSON.stringify({
       version: 1,
       files: [{
         path: "index.html",
@@ -77,7 +77,7 @@ describe("fail-closed API and manifest boundaries", () => {
         contentType: "text/html; charset=utf-8",
       }],
     }));
-    const put = vi.spyOn(minio, "putObject");
+    const put = vi.spyOn(blobs, "putObject");
 
     const response = await deploymentRoutes.request(
       "/api/rendro/deployments/deploy-a/files/index.html?organizationId=org-a&projectId=project-a",

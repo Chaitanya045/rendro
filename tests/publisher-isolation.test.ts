@@ -49,7 +49,7 @@ describe.each(mediaCases.map((file, index) => ({ ...file, index })))("publisher 
 
 it("fails closed on missing assets and denies legacy non-HTML publication paths", async () => {
   const { routes } = await publisherIsolationFixture();
-  vi.mocked((await import("@/minio")).getObjectStream).mockResolvedValue(null);
+  vi.mocked((await import("@/storage")).getObjectStream).mockResolvedValue(null);
   for (const route of routes) {
     const response = await worker.request(`https://rendro.test${route.url(0)}`, { headers: route.signedIn ? { Cookie: cookie } : {} });
     expect(response.status, route.name).toBe(404);

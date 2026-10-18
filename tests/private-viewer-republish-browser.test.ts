@@ -7,7 +7,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vites
 import type { CommentRecoveryState } from "@/commentor/operation-state";
 import projectDocs from "@/routes/project-docs";
 import { securityHeaders } from "@/middleware/security-headers";
-import * as minio from "@/minio";
+import * as blobs from "@/storage";
 import { browserStep, bundleBrowserAsset, createBrowserHarness } from "./helpers/browser";
 
 const harness = createBrowserHarness();
@@ -60,14 +60,14 @@ beforeAll(async () => {
     }
     if (event.data.type === 'commentor-parent-response') document.body.dataset[event.data.requestId] = String(event.data.ok);
   });` } })).outputFiles[0].text);
-  vi.spyOn(minio, "getObjectText").mockResolvedValue(JSON.stringify({ version: 1, files: [
+  vi.spyOn(blobs, "getObjectText").mockResolvedValue(JSON.stringify({ version: 1, files: [
     { path: documentPath, contentType: "text/html" },
     { path: "guide/deferred.svg", contentType: "image/svg+xml" },
     { path: "guide/background.svg", contentType: "image/svg+xml" },
     { path: "guide/deferred.woff2", contentType: "font/woff2" },
     { path: "guide/import.css", contentType: "text/css" },
   ] }));
-  vi.spyOn(minio, "getObjectStream").mockImplementation(key => {
+  vi.spyOn(blobs, "getObjectStream").mockImplementation(key => {
     const content = key.endsWith(".svg")
       ? '<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><rect width="10" height="10" fill="green"/></svg>'
       : `<!doctype html><html><head>${publisherBase}<title>Version ${version}</title></head><body data-version="${version}">

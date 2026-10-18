@@ -51,6 +51,8 @@ export default tseslint.config(
       "scripts/**",
       // Plain-JS preload for subprocesses, outside the TypeScript project.
       "tests/helpers/exit-on-sigterm.mjs",
+      // Plain-JS service Worker for the E2E harness, bundled by Wrangler (see its header comment).
+      "e2e/storage-faults-worker.mjs",
     ],
   }
 );

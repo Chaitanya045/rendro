@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { MAX_REUSED_FILES_PER_REQUEST } from "../shared/deployment-limits";
 
 const storage = vi.hoisted(() => ({ copyObject: vi.fn(), headObject: vi.fn(), getObjectText: vi.fn(), listAllKeys: vi.fn(), putObject: vi.fn() }));
-vi.mock("../src/minio", () => storage);
+vi.mock("../src/storage", () => storage);
 import deployments from "../src/routes/deployments";
 import { Hono } from "hono";
 // Match the Worker's global error boundary: lease conflicts must be handled by
