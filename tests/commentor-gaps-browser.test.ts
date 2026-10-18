@@ -332,6 +332,27 @@ describe("drawer list", () => {
     expect(await lab.ui.locator(".new-comments").innerText()).toBe("1 new comment");
   });
 
+  it("holds the reader's place across many updates and takes the new place once the reader scrolls", async () => {
+    const lab = await commentLab.open({ height: 600 });
+    await lab.ready(many(14));
+    await lab.openDrawer();
+    const list = lab.tid("commentor-drawer-list");
+    await list.evaluate(el => { el.scrollTop = 220; });
+    const place = await listTop(lab, "t05");
+    for (let index = 0; index < 6; index++) {
+      await arrive(lab, `z-new-${index}`);
+      await expect.poll(() => lab.ui.locator(".drawer-thread").count()).toBe(15 + index);
+      expect(await listTop(lab, "t05")).toBe(place);
+    }
+    // After the reader scrolls, the place they chose is the one that is kept.
+    await list.evaluate(el => { el.scrollTop += 40; });
+    const moved = await listTop(lab, "t05");
+    expect(moved).toBe(place - 40);
+    await arrive(lab, "z-new-last");
+    await expect.poll(() => lab.ui.locator(".drawer-thread").count()).toBe(21);
+    expect(await listTop(lab, "t05")).toBe(moved);
+  });
+
   it("keeps the same card where the reader left it when older comments are added above", async () => {
     const lab = await commentLab.open({ height: 600 });
     await lab.ready(many(14));

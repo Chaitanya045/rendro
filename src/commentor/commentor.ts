@@ -95,7 +95,6 @@ type Anchor =
     }
   | { kind: "element"; path: string[] };
 interface DrawerPlace {
-  filter: ThreadFilter;
   lastId: string;
   atEnd: boolean;
   anchorId: string;
@@ -548,6 +547,10 @@ class Commentor {
   private canLoadMoreThreads = false;
   private loadingMoreThreads = false;
   private newCommentCount = 0;
+  // Where the last restore left the list. While the reader has not scrolled since, the next restore aims at the same
+  // offset rather than at the measured one, so a browser that snaps scroll positions to whole pixels cannot drift by
+  // a fraction on every update.
+  private restoredPlace: { anchorId: string; anchorOffset: number; scrollTop: number } | null = null;
   private highlightedThreadId: ThreadId | null = null;
   private commentMode = false;
   private canWrite: boolean;
@@ -2125,7 +2128,7 @@ class Commentor {
       button.setAttribute("aria-selected", String(name === filter));
       button.tabIndex = name === filter ? 0 : -1;
     }
-    this.renderDrawerList();
+    this.renderDrawerList(false);
     this.renderPins();
     requestAnimationFrame(() => {
       const { w, h } = this.sizeContent();
@@ -2164,7 +2167,7 @@ class Commentor {
     this.content.setAttribute("aria-hidden", "false");
     this.commentsBtn.setAttribute("aria-expanded", "true");
     this.commentsBtn.classList.add("active");
-    this.renderDrawerList();
+    this.renderDrawerList(false);
     this.renderPins();
     requestAnimationFrame(() => {
       const { w, h } = this.sizeContent();
@@ -2253,7 +2256,8 @@ class Commentor {
     this.repositionDock(dockW, dockH);
   }
 
-  private renderDrawerList(): void {
+  // `keepPlace` is false when the list starts afresh (the drawer opening, another tab), so no layout is read for it.
+  private renderDrawerList(keepPlace = true): void {
     const counts: Record<ThreadFilter, number> = {
       active: this.filteredThreads("active").length,
       resolved: this.filteredThreads("resolved").length,
@@ -2272,7 +2276,7 @@ class Commentor {
         h("span", { class: "filter-count" }, String(counts[filter])),
       );
     }
-    const place = this.captureDrawerPlace();
+    const place = keepPlace && this.dock.hasAttribute("data-expanded") ? this.captureDrawerPlace() : null;
     this.drawerList.replaceChildren();
     if (this.parentUpgradeRequired) {
       this.drawerList.append(h("div", { class: "empty", role: "status", "aria-live": "polite" },
@@ -2397,17 +2401,20 @@ class Commentor {
     const ids = cards.map((card) => card.dataset.threadId!);
     const listTop = list.getBoundingClientRect().top;
     const first = cards.find((card) => card.getBoundingClientRect().bottom > listTop) ?? cards[0];
+    const anchorId = first.dataset.threadId!;
+    const restored = this.restoredPlace;
+    const unmoved = restored?.anchorId === anchorId && restored.scrollTop === list.scrollTop;
     return {
-      filter: this.threadFilter,
       lastId: ids[ids.length - 1],
       atEnd: list.scrollTop + list.clientHeight >= list.scrollHeight - 48,
-      anchorId: first.dataset.threadId!,
-      anchorOffset: first.getBoundingClientRect().top - listTop,
+      anchorId,
+      anchorOffset: unmoved ? restored.anchorOffset : first.getBoundingClientRect().top - listTop,
     };
   }
 
   private restoreDrawerPlace(place: DrawerPlace | null, visible: Thread[]): void {
-    if (!place || place.filter !== this.threadFilter) return;
+    this.restoredPlace = null;
+    if (!place) return;
     const list = this.drawerList;
     if (place.atEnd && visible[visible.length - 1]._id !== place.lastId) {
       list.scrollTop = list.scrollHeight;
@@ -2417,6 +2424,7 @@ class Commentor {
       .find((card) => card.dataset.threadId === place.anchorId);
     if (!anchor) return;
     list.scrollTop += anchor.getBoundingClientRect().top - list.getBoundingClientRect().top - place.anchorOffset;
+    this.restoredPlace = { anchorId: place.anchorId, anchorOffset: place.anchorOffset, scrollTop: list.scrollTop };
   }
 
   private highlightThread(threadId: ThreadId | null): void {

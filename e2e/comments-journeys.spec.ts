@@ -314,10 +314,12 @@ test.describe("drawer", () => {
     const list = ui.getByTestId("commentor-drawer-list");
     const first = ui.locator(`.drawer-thread[data-thread-id="${ids[1]}"]`);
     await list.evaluate(element => { element.scrollTop = 60; });
-    const place = await first.evaluate(card => Math.round(card.getBoundingClientRect().top - card.parentElement!.getBoundingClientRect().top));
+    const place = await first.evaluate(card => card.getBoundingClientRect().top - card.parentElement!.getBoundingClientRect().top);
     await olderThreads.evaluate(button => (button as HTMLButtonElement).click());
     await expect(cards).toHaveCount(21);
-    expect(await first.evaluate(card => Math.round(card.getBoundingClientRect().top - card.parentElement!.getBoundingClientRect().top))).toBe(place);
+    // Browsers snap a scroll position to whole pixels, so allow the one pixel of rounding.
+    const after = await first.evaluate(card => card.getBoundingClientRect().top - card.parentElement!.getBoundingClientRect().top);
+    expect(Math.abs(after - place)).toBeLessThanOrEqual(1);
     await expect(olderThreads).toHaveCount(0);
 
     // The newest thread previews its latest ten replies and offers the oldest on demand.

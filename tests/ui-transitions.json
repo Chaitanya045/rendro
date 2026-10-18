@@ -20482,6 +20482,11 @@
             },
             {
               "file": "tests/commentor-gaps-browser.test.ts",
+              "name": "holds the reader's place across many updates and takes the new place once the reader scrolls",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/commentor-gaps-browser.test.ts",
               "name": "keeps the same card where the reader left it when older comments are added above",
               "kind": "browser"
             },
