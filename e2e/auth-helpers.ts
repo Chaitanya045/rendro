@@ -22,8 +22,15 @@ export function tamperedToken(token: string): string {
   const at = token.lastIndexOf(".") + 1;
   return `${token.slice(0, at)}${token[at] === "A" ? "B" : "A"}${token.slice(at + 1)}`;
 }
+/** Auth pages apply their preloaded webfonts right after the first paint; a pointer event dispatched
+ * inside that swap window can land on a reflowing layout and silently do nothing. Interacting only once
+ * the font loading is settled keeps clicks (and the form submits behind them) real. */
+export async function fontsSettled(page: Page) {
+  await page.evaluate(() => document.fonts.ready.then(() => undefined));
+}
 export async function signup(page: Page, email: string, returnTo = "/account/security") {
   await page.goto(`/sign-up?returnTo=${encodeURIComponent(returnTo)}`);
+  await fontsSettled(page);
   await page.getByLabel("Full name", { exact: true }).fill("Auth Journey");
   await page.getByLabel("Work email", { exact: true }).fill(email);
   await page.getByLabel("Password", { exact: true }).fill(password);
