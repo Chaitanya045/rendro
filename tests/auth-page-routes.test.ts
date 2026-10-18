@@ -55,6 +55,26 @@ describe('auth route rendering boundaries', () => {
     expect(response.headers.get('Location')).toBe(destination);
   });
 
+  it.each(['INVALID_TOKEN', 'token_expired', 'something_new', ''])('never reports success for a verification link that arrives with error=%j', async (error) => {
+    for (const query of [`error=${error}`, `verified=1&error=${error}&returnTo=%2Faccount%2Fsecurity`]) {
+      const html = await (await authPages.request(`/verify-email?${query}`)).text();
+      expect(html).not.toContain('Email verified');
+      expect(html).not.toContain('Continue to sign in');
+      expect(html).toContain('<h1 tabindex="-1" data-autofocus>Verification link unavailable</h1>');
+      expect(html).toContain('<p role="alert" class="message error reset-invalid">This verification link is invalid or has expired.');
+      expect(html).toContain('id="resend-form"');
+      expect(html).not.toContain(error ? `>${error}<` : 'undefined');
+    }
+    expect(await (await authPages.request('/verify-email?error=INVALID_TOKEN&returnTo=%2Faccount%2Fsecurity')).text()).toContain('"returnTo":"/account/security"');
+  });
+
+  it('keeps the plain verification page free of the invalid-link state', async () => {
+    const html = await (await authPages.request('/verify-email')).text();
+    expect(html).toContain('Verify your email');
+    expect(html).not.toContain(' data-autofocus>');
+    expect(html).not.toContain('invalid or has expired');
+  });
+
   it('renders verification completion and safely handles missing profile email', async () => {
     const verified = await (await authPages.request('/verify-email?verified=1')).text();
     expect(verified).toContain('Email verified');

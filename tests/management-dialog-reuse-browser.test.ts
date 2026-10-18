@@ -997,13 +997,29 @@ it('a received first deployment replaces the waiting state with the document cou
   expect(await unloadBlocked()).toBe(true);
 });
 
-it.fails('the received deployment shows its commit (known bug: the poll reads provenance.commit, but the API nests it under provenance.source)', async () => {
+it('the received deployment shows the commit the API nests under provenance.source', async () => {
   const { page, polls } = await onboardingWithKey();
   await page.clock.runFor(5000);
   await expect.poll(() => polls.length).toBe(1);
   await polls[0].release({ deployments: [{ _id: 'deployment-a', status: 'active', fileCount: 3, provenance: { source: { commit: 'abcdef1234' } } }] });
   await page.locator('#deployment-success .cell-secondary').waitFor();
   expect(await page.locator('#deployment-success .cell-secondary').textContent()).toBe('3 documents · commit abcdef1234');
+});
+
+it('a received deployment with no commit, no source, or a long commit still renders its document count', async () => {
+  for (const [deployment, expected] of [
+    [{ provenance: { source: {} } }, '3 documents'],
+    [{ provenance: {} }, '3 documents'],
+    [{}, '3 documents'],
+    [{ provenance: { source: { commit: 'abcdef1234567890abcdef' } } }, '3 documents · commit abcdef123456'],
+  ] as const) {
+    const { page, polls } = await onboardingWithKey();
+    await page.clock.runFor(5000);
+    await expect.poll(() => polls.length).toBe(1);
+    await polls[0].release({ deployments: [{ _id: 'deployment-a', status: 'active', fileCount: 3, ...deployment }] });
+    await page.locator('#deployment-success .cell-secondary').waitFor();
+    expect(await page.locator('#deployment-success .cell-secondary').textContent()).toBe(expected);
+  }
 });
 
 it('publication Copy URL shows its pending state, then Copied, then restores; a refusal restores at once with guidance', async () => {

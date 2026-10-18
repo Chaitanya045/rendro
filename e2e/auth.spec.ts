@@ -72,6 +72,43 @@ test("verification resend is neutral and retains its destination", async ({ page
   expect(await session(page)).toBeNull();
 });
 
+test("an invalid or expired verification link never reports success and offers a fresh link", async ({ page }, info) => {
+  const email = `badlink-${info.project.name}-${info.retry}-${info.repeatEachIndex}@example.test`;
+  await signup(page, email);
+  const link = new URL(await mailLink(email, /Verify/));
+  const token = link.searchParams.get("token") ?? "";
+  link.searchParams.set("token", `${token.slice(0, -1)}${token.endsWith("A") ? "B" : "A"}`);
+  await page.goto(link.toString());
+  const heading = page.getByRole("heading", { name: "Verification link unavailable", exact: true });
+  await expect(heading).toBeFocused();
+  await expect(page.getByRole("alert")).toHaveText(/invalid or has expired/);
+  await expect(page.getByRole("heading", { name: "Email verified" })).toHaveCount(0);
+  await expect(page.getByRole("link", { name: "Continue to sign in" })).toHaveCount(0);
+  expect(await session(page)).toBeNull();
+  const user = await authRecord<{ emailVerified: boolean }>("findOne", { model: "user", where: [{ field: "email", value: email }], select: ["emailVerified"] });
+  expect(user.emailVerified).toBe(false);
+
+  // The resend form stays neutral and keeps the destination.
+  const before = (await mailFor(email)).length;
+  await page.getByLabel("Work email", { exact: true }).fill(email);
+  await page.getByRole("button", { name: "Resend verification email" }).click();
+  await expect(page.getByRole("status")).toContainText("If the address is eligible");
+  await expect.poll(async () => (await mailFor(email)).length).toBeGreaterThan(before);
+
+  // An expired token and success alongside an error get the same page; unknown codes too.
+  for (const query of ["error=token_expired", "verified=1&error=INVALID_TOKEN", "verified=1&error=brand_new_code"]) {
+    await page.goto(`/verify-email?${query}`);
+    await expect(heading).toBeFocused();
+    await expect(page.getByRole("alert")).toHaveText(/invalid or has expired/);
+    await expect(page.getByRole("heading", { name: "Email verified" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Resend verification email" })).toBeVisible();
+  }
+
+  // The genuine link still verifies.
+  await page.goto(await mailLink(email, /Verify/));
+  await expect(page.getByRole("heading", { name: "Email verified", exact: true })).toBeVisible();
+});
+
 test("auth validation, reveal, pending exclusion and transport recovery preserve inputs", async ({ page }) => {
   for (const path of ["/sign-up", "/sign-in"]) {
     await page.goto(path);
