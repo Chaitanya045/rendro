@@ -146,7 +146,7 @@ pnpm exec convex deploy
 
 ### Cloudflare Workers and R2
 
-Create the two **private** R2 buckets that `wrangler.toml` binds as `STORAGE`: `rendro-docs` for production (the top-level configuration) and `rendro-docs-dev` for the `development` environment (`rendro-dev`). If your buckets have other names, change `bucket_name` in both places; the names in the file are the single source of truth. Do not create an S3 API token, an `r2.dev` URL or a custom domain: the Worker reaches the bucket through its binding, so there is no credential to leak.
+Use two **private** R2 buckets, bound as `STORAGE` in `wrangler.toml`: `rendro-docs` for production (the top-level configuration) and `dev-rendro` for the `development` environment (`rendro-dev`). A new account creates them first; the names in the file are the single source of truth. Do not create an S3 API token, an `r2.dev` URL or a custom domain: the Worker reaches the bucket through its binding, so there is no credential to leak.
 
 `wrangler.toml` sets `NODE_ENV` as a var. Both production and `development` require exactly these two secrets at startup and in Wrangler: `CONVEX_INTERNAL_SECRET` and `AUTH_SECRET`. List secret names with `pnpm exec wrangler secret list` for production (`rendro`) and `pnpm exec wrangler secret list --env development` for development (`rendro-dev`). Production uses the top-level configuration; there is no named `--env production` environment.
 

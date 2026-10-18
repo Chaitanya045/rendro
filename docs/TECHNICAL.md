@@ -30,7 +30,7 @@ Cloudflare Workers (Hono)
 | **CLI** | Node.js, bundled to one executable | Manifest hashing, delta upload, provenance, deployment commit, publication management |
 | **Browser UI** | Server HTML + vanilla JavaScript | Organization/project management, document navigation, comments |
 
-Storage is the `STORAGE` R2 binding declared in `wrangler.toml` (production `rendro-docs`, `development` `rendro-docs-dev`). There are no storage credentials: a leaked secret cannot read the bucket from outside the Worker, and the bucket must stay private (see [R2 bucket privacy](#r2-bucket-privacy)). Local development (`pnpm dev` through `src/local-storage.ts`, and `wrangler dev`) and E2E use Miniflare's R2 simulation; nothing needs Docker or an S3 server for storage.
+Storage is the `STORAGE` R2 binding declared in `wrangler.toml` (production `rendro-docs`, `development` `dev-rendro`). There are no storage credentials: a leaked secret cannot read the bucket from outside the Worker, and the bucket must stay private (see [R2 bucket privacy](#r2-bucket-privacy)). Local development (`pnpm dev` through `src/local-storage.ts`, and `wrangler dev`) and E2E use Miniflare's R2 simulation; nothing needs Docker or an S3 server for storage.
 
 ### Storage API (`src/storage.ts`)
 

@@ -24,15 +24,15 @@ afterEach(() => vi.restoreAllMocks());
 
 describe("R2 bucket exposure check", () => {
   it("reads every bucket bound in wrangler.toml, once", () => {
-    expect(wranglerBuckets(readFileSync("wrangler.toml", "utf8"))).toEqual(["rendro-docs", "rendro-docs-dev"]);
+    expect(wranglerBuckets(readFileSync("wrangler.toml", "utf8"))).toEqual(["rendro-docs", "dev-rendro"]);
     expect(wranglerBuckets('# bucket_name = "commented"\n[[r2_buckets]]\nbucket_name = "a"\n[[x]]\nbucket_name = "a"\nbucket_name = "b"')).toEqual(["a", "b"]);
   });
 
   it("passes private buckets, with no r2.dev URL and no custom domain", async () => {
-    const fetchMock = api({ "rendro-docs": { managed: { enabled: false, domain: "pub-x.r2.dev" }, custom: { domains: [] } }, "rendro-docs-dev": { managed: { enabled: false }, custom: { domains: [] } } });
+    const fetchMock = api({ "rendro-docs": { managed: { enabled: false, domain: "pub-x.r2.dev" }, custom: { domains: [] } }, "dev-rendro": { managed: { enabled: false }, custom: { domains: [] } } });
     const { code, lines } = await run([], fetchMock);
     expect(code).toBe(0);
-    expect(lines).toEqual(["ok   rendro-docs: no r2.dev URL and no custom domain", "ok   rendro-docs-dev: no r2.dev URL and no custom domain"]);
+    expect(lines).toEqual(["ok   rendro-docs: no r2.dev URL and no custom domain", "ok   dev-rendro: no r2.dev URL and no custom domain"]);
     expect(fetchMock.mock.calls.map(([input]) => (input as string))).toContain("https://api.cloudflare.com/client/v4/accounts/acct/r2/buckets/rendro-docs/domains/managed");
     expect(fetchMock.mock.calls[0]![1]).toMatchObject({ headers: { Authorization: "Bearer token-never-printed" } });
   });
@@ -55,13 +55,13 @@ describe("R2 bucket exposure check", () => {
   it("checks the remaining buckets after one fails, and fails closed when a bucket cannot be verified", async () => {
     const fetchMock = api({
       "rendro-docs": url => url.endsWith("/managed") ? Response.json({ success: false, errors: [{ message: "private token detail" }] }, { status: 403 }) : ok({ domains: [] }),
-      "rendro-docs-dev": url => url.endsWith("/managed") ? new Response("not json", { status: 200 }) : ok({ domains: [] }),
+      "dev-rendro": url => url.endsWith("/managed") ? new Response("not json", { status: 200 }) : ok({ domains: [] }),
       third: { managed: { enabled: false }, custom: { domains: [] } },
     });
-    const { code, text } = await run(["--bucket", "rendro-docs", "--bucket", "rendro-docs-dev", "--bucket", "third"], fetchMock);
+    const { code, text } = await run(["--bucket", "rendro-docs", "--bucket", "dev-rendro", "--bucket", "third"], fetchMock);
     expect(code).toBe(1);
     expect(text).toContain("FAIL rendro-docs: could not be verified (Cloudflare API answered 403 for /accounts/acct/r2/buckets/rendro-docs/domains/managed)");
-    expect(text).toContain("FAIL rendro-docs-dev: could not be verified (Cloudflare API answered 200");
+    expect(text).toContain("FAIL dev-rendro: could not be verified (Cloudflare API answered 200");
     expect(text).toContain("ok   third");
     expect(text).not.toContain("private token detail");
     expect(text).not.toContain("token-never-printed");
@@ -96,8 +96,8 @@ describe("R2 bucket exposure check", () => {
     expect(lines).toEqual([
       "GET https://api.cloudflare.com/client/v4/accounts/<CLOUDFLARE_ACCOUNT_ID>/r2/buckets/rendro-docs/domains/managed",
       "GET https://api.cloudflare.com/client/v4/accounts/<CLOUDFLARE_ACCOUNT_ID>/r2/buckets/rendro-docs/domains/custom",
-      "GET https://api.cloudflare.com/client/v4/accounts/<CLOUDFLARE_ACCOUNT_ID>/r2/buckets/rendro-docs-dev/domains/managed",
-      "GET https://api.cloudflare.com/client/v4/accounts/<CLOUDFLARE_ACCOUNT_ID>/r2/buckets/rendro-docs-dev/domains/custom",
+      "GET https://api.cloudflare.com/client/v4/accounts/<CLOUDFLARE_ACCOUNT_ID>/r2/buckets/dev-rendro/domains/managed",
+      "GET https://api.cloudflare.com/client/v4/accounts/<CLOUDFLARE_ACCOUNT_ID>/r2/buckets/dev-rendro/domains/custom",
       "Dry run: no request was made.",
     ]);
     const named = await run(["--dry-run", "--bucket", "only"], fetchMock, { env });

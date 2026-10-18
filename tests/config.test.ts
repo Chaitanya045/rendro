@@ -129,6 +129,8 @@ describe("Worker environment validation", () => {
     const buckets = [...wrangler.matchAll(/^\[\[((?:env\.[\w-]+\.)?r2_buckets)\]\]\nbinding = "(\w+)"\nbucket_name = "([\w-]+)"/gm)];
     expect(buckets.map(match => [match[1], match[2]])).toEqual([["r2_buckets", "STORAGE"], ["env.development.r2_buckets", "STORAGE"]]);
     expect(new Set(buckets.map(match => match[3])).size).toBe(2);
+    // The E2E-only storage-faults service exists solely in the generated harness config (e2e/global-setup.ts), never in a deployable one.
+    expect(wrangler).not.toMatch(/services|storage-faults|\[\[[^\]]*(?:service|durable)/i);
     expect([...wrangler.matchAll(/^\[((?:env\.[\w-]+\.)?triggers)\]\ncrons = \["23 3 \* \* \*"\]/gm)].map(match => match[1])).toEqual(["triggers", "env.development.triggers"]);
   });
 });
