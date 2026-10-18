@@ -60,6 +60,30 @@ describe("widget with a direct Convex client", () => {
     expect(await authenticate()).toBeNull();
   });
 
+  it("holds a scheduled token refresh while the tab is hidden", async () => {
+    const { client } = await start(legacy);
+    const authenticate = client.setAuth.mock.calls[0][0] as (args?: { forceRefreshToken: boolean }) => Promise<string | null>;
+    const fetcher = vi.fn(() => Promise.resolve(Response.json({ token: "jwt" })));
+    vi.stubGlobal("fetch", fetcher);
+    const show = (state: "visible" | "hidden") => {
+      Object.defineProperty(document, "visibilityState", { configurable: true, value: state });
+      document.dispatchEvent(new Event("visibilitychange"));
+    };
+    try {
+      show("hidden");
+      expect(await authenticate({ forceRefreshToken: false })).toBe("jwt");
+      fetcher.mockClear();
+      const refresh = authenticate({ forceRefreshToken: true });
+      await flush();
+      expect(fetcher).not.toHaveBeenCalled();
+      show("visible");
+      expect(await refresh).toBe("jwt");
+      expect(fetcher).toHaveBeenCalledTimes(1);
+    } finally {
+      Reflect.deleteProperty(document, "visibilityState");
+    }
+  });
+
   it("lists threads without pagination and explains subscription failures in plain words", async () => {
     const { client, root, publish, toast } = await start(legacy);
     publish([thread(), thread({ _id: "thread-2", repliesHasMore: true, replies: [{ _id: "r1", _creationTime: Date.now(), authorName: "Grace", authorEmail: "g@example.test", body: "Reply" }] })]);

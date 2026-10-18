@@ -19625,6 +19625,11 @@
           "tests": [
             {
               "file": "tests/sign-out-browser.test.ts",
+              "name": "holds the comment token refresh of a hidden tab for an hour, renews when it returns, and still ends a session whose account is gone",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/sign-out-browser.test.ts",
               "name": "renews the comment token only after confirming the identity, and survives transient and offline failures without ending the session",
               "kind": "browser"
             },
@@ -19769,6 +19774,11 @@
           ],
           "status": "e2e",
           "tests": [
+            {
+              "file": "tests/sign-out-browser.test.ts",
+              "name": "holds the comment token refresh of a hidden tab for an hour, renews when it returns, and still ends a session whose account is gone",
+              "kind": "browser"
+            },
             {
               "file": "tests/commentor-protocol-browser.test.ts",
               "name": "stops serving and releases its subscriptions when torn down",
@@ -20025,6 +20035,11 @@
           ],
           "status": "e2e",
           "tests": [
+            {
+              "file": "tests/commentor-pin-layout-browser.test.ts",
+              "name": "places element, quoted and missing anchors after a scroll, a resize and an update",
+              "kind": "browser"
+            },
             {
               "file": "tests/commentor-widget-browser.test.ts",
               "name": "anchors by quote across element boundaries and whitespace, and hides pins whose anchor is gone or off screen",

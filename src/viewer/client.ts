@@ -110,8 +110,13 @@ export function installViewerFrame(config: FrameConfig, host: Window = window): 
   let renewedAt = Date.now();
   let requestedAt = 0;
   let requestId = "";
+  // A resource failure that happened while hidden; the next visible moment retries it.
+  let forceOnResume = false;
   function renew(force = false) {
-    if (host.parent === host || Date.now() - requestedAt < 30_000) return;
+    if (host.parent === host) return;
+    // Hidden documents neither heartbeat nor renew; becoming visible settles it.
+    if (doc.visibilityState === "hidden") { forceOnResume ||= force; return; }
+    if (Date.now() - requestedAt < 30_000) return;
     if (!force && Date.now() - renewedAt < 5 * 60_000) return;
     requestedAt = Date.now();
     requestId = crypto.randomUUID();
@@ -188,10 +193,26 @@ export function installViewerFrame(config: FrameConfig, host: Window = window): 
     renewedAt = Date.now();
     requestId = "";
   });
-  host.setInterval(() => renew(), 60_000);
+  // The heartbeat only exists while the document is visible: a hidden tab
+  // holds no timer and issues no renewals, whatever its throttling policy.
+  let heartbeat: ReturnType<Window["setInterval"]> | undefined;
+  const startHeartbeat = () => { heartbeat ??= host.setInterval(() => renew(), 60_000); };
+  if (doc.visibilityState !== "hidden") startHeartbeat();
   host.addEventListener("pageshow", () => renew());
   host.addEventListener("focus", () => renew());
-  doc.addEventListener("visibilitychange", () => { if (!doc.hidden) renew(); });
+  doc.addEventListener("visibilitychange", () => {
+    if (doc.visibilityState === "hidden") {
+      if (heartbeat !== undefined) host.clearInterval(heartbeat);
+      heartbeat = undefined;
+      return;
+    }
+    startHeartbeat();
+    // Wall-clock age decides: a ticket that is near expiry or already expired
+    // is replaced now, without waiting for the next heartbeat.
+    const force = forceOnResume;
+    forceOnResume = false;
+    renew(force);
+  });
   // Covers a suspended tab resuming after ticket expiry before its timer fires.
   doc.addEventListener("error", () => renew(true), true);
 }
