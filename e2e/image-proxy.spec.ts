@@ -51,8 +51,14 @@ test.describe("image proxy", () => {
 
     const imageRequests: string[] = [];
     page.on("request", request => { if (request.resourceType() === "image") imageRequests.push(request.url()); });
-    const consoleErrors: string[] = [];
-    page.on("console", message => { if (/content.security.policy|violates/i.test(message.text())) consoleErrors.push(message.text()); });
+    // Real CSP violations in any frame (browsers' informational CSP console warnings are not violations).
+    const violations: string[] = [];
+    await page.context().exposeBinding("recordImageProxyViolation", (_source, value: string) => { violations.push(value); });
+    await page.context().addInitScript(() => {
+      document.addEventListener("securitypolicyviolation", event => {
+        void (window as unknown as { recordImageProxyViolation(value: string): Promise<void> }).recordImageProxyViolation(`${event.effectiveDirective}: ${event.blockedURI}`);
+      });
+    });
 
     await test.step("the viewer shows both images, requested from our origin only", async () => {
       await page.goto(`/organizations/${organization.id}/projects/${project}/docs?doc=index.html`);
@@ -64,7 +70,7 @@ test.describe("image proxy", () => {
       const proxied = imageRequests.filter(url => new URL(url).pathname.startsWith("/img/"));
       expect(proxied).toHaveLength(2);
       expect(imageRequests.filter(url => new URL(url).origin !== baseURL)).toEqual([]);
-      expect(consoleErrors).toEqual([]);
+      expect(violations).toEqual([]);
     });
 
     await test.step("the Worker, not the reader, fetched them, with nothing of the reader's", async () => {
