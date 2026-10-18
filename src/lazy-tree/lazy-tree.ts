@@ -24,6 +24,9 @@ const ORG = TREE_HOST?.dataset.treeOrg;
 const DOCUMENT_BASE = TREE_HOST?.dataset.documentBase ?? "";
 // Frames and tree pages may load from a pinned base (a repository branch view pins its commit).
 const FRAME_BASE = TREE_HOST?.dataset.frameBase || DOCUMENT_BASE;
+// Instant in-shell prefetch is opt-in for the repository read path, the only shell that pins frames
+// to a commit base. Every other viewer keeps the plain single-request navigation and its history.
+const PREFETCH_OPT_IN = TREE_HOST?.dataset.frameBase !== undefined;
 interface TreeNode { name: string; path: string; type: "file" | "folder"; title?: string; size?: number; }
 interface TreePageResponse { children: TreeNode[]; isTruncated: boolean; nextStartAfter?: string; }
 
@@ -98,7 +101,7 @@ const framePreloader = createFramePreloader({ host: frameHost });
 /** Begin loading the frame document a tree link points at, when the reader's
  * connection allows it and the shell is a repository read path. */
 function prefetchFrameLink(href: unknown) {
-  if (!DOCUMENT_BASE || typeof href !== "string") return;
+  if (!PREFETCH_OPT_IN || typeof href !== "string") return;
   const connection = (navigator as Navigator & { connection?: NetworkInformation }).connection;
   if (!prefetchPermitted(connection)) return;
   if (!framePrefetchUrl(href, location.href, location.origin)) return;
@@ -631,7 +634,7 @@ function loadDoc(fullPath: string, pushState: false | "push" | "replace", fragme
 
   const frameUrl = documentFrameUrl(fullPath) + search;
   performance.mark(FRAME_SWITCH_START);
-  const preloaded = frame ? framePreloader.take(frameUrl) : null;
+  const preloaded = PREFETCH_OPT_IN && frame ? framePreloader.take(frameUrl) : null;
 
   if (frame && preloaded) {
     adoptPreloadedFrame(preloaded, frame, loadId, fullPath);

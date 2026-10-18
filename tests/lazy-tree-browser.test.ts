@@ -1208,6 +1208,7 @@ describe("lazy tree races and malformed shells", () => {
 describe("lazy tree instant navigation (#245)", () => {
   const indexHref = `${pinnedBase}/files/index.md`;
   const plainHref = `${pinnedBase}/files/plain.md`;
+  const startHref = `${pinnedBase}/files/guide/start.md`;
   const oddHref = `${pinnedBase}/files/odd.md`;
   const extraHref = `${pinnedBase}/files/extra.md`;
   const link = (tab: Page, href: string) => tab.locator(`a.tree-link[href="${href}"]`);
@@ -1410,6 +1411,32 @@ describe("lazy tree instant navigation (#245)", () => {
     await tab.waitForFunction(() => performance.getEntriesByName("rendro:frame-switch").length > 0);
     expect(await poolSize(tab)).toBe(0);
     expect(frameHrefCount(indexHref)).toBe(1);
+    expect(pageErrors(tab)).toEqual([]);
+  });
+
+  it("keeps the visible frame, URL and selection agreeing through Back and Forward after a swap", async () => {
+    const tab = await openRepo();
+    await link(tab, indexHref).waitFor();
+    await link(tab, indexHref).hover();
+    await waitForPreloaded(tab, indexHref);
+    await link(tab, indexHref).click();
+    await settled(tab);
+    await tab.waitForFunction(target => document.getElementById("content-frame")!.getAttribute("src") === target, indexHref);
+    expect(await tab.locator("iframe#content-frame").count()).toBe(1);
+    // Back returns to the document the reader started on.
+    await tab.goBack();
+    await settled(tab);
+    await tab.waitForFunction(target => document.getElementById("content-frame")!.getAttribute("src") === target, startHref);
+    expect(tab.url()).toContain("doc=guide/start.md");
+    expect(await activePath(tab)).toBe("docs/guide/start.md");
+    expect(await tab.locator("#content-frame").getAttribute("name")).toBe("content-frame");
+    // Forward returns to the document that was adopted by a swap.
+    await tab.goForward();
+    await settled(tab);
+    await tab.waitForFunction(target => document.getElementById("content-frame")!.getAttribute("src") === target, indexHref);
+    expect(tab.url()).toContain("doc=index.md");
+    expect(await activePath(tab)).toBe("docs/index.md");
+    expect(await tab.locator("#content-frame").getAttribute("name")).toBe("content-frame");
     expect(pageErrors(tab)).toEqual([]);
   });
 
