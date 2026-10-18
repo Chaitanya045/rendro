@@ -26,6 +26,27 @@ async function layoutsDuring(lab: Lab, action: () => Promise<void>) {
     await cdp.detach();
   }
 }
+/**
+ * Pause the widget's timers (tooltip, drawer collapse, selection action) while leaving animation
+ * frames real. A timer that happens to come due can force a layout inside the frames a test
+ * measures; with the clock paused it waits for the test instead. Playwright's clock fakes
+ * requestAnimationFrame too, so the real one is handed back: the pin pass must still run in the
+ * same real frame as the scroll that scheduled it.
+ */
+async function pauseTimers(lab: Lab) {
+  await lab.doc(() => {
+    const g = globalThis as unknown as { realRaf: typeof requestAnimationFrame; realCancelRaf: typeof cancelAnimationFrame };
+    g.realRaf = window.requestAnimationFrame;
+    g.realCancelRaf = window.cancelAnimationFrame;
+  });
+  await lab.page.clock.install();
+  await lab.pauseClock();
+  await lab.doc(() => {
+    const g = globalThis as unknown as { realRaf: typeof requestAnimationFrame; realCancelRaf: typeof cancelAnimationFrame };
+    window.requestAnimationFrame = g.realRaf;
+    window.cancelAnimationFrame = g.realCancelRaf;
+  });
+}
 /** Scroll by `delta` and wait until the widget's frame for it has run. */
 const scrollFrame = (lab: Lab, delta: number) => lab.doc(delta => new Promise<void>(resolve => {
   window.scrollBy(0, delta);
@@ -159,6 +180,7 @@ describe("batched pin layout", () => {
     const lab = await commentLab.open({ document: rowsDocument(20, 48), height: 600 });
     await lab.ready([{ _id: "row", anchor: rowAnchor(4) }, { _id: "quote", anchor: rowQuote(6) }]);
     await expect.poll(() => lab.pins().count()).toBe(2);
+    await pauseTimers(lab);
     await lab.openDrawer();
     // The card's hover highlights the anchor without the pin's delayed tooltip.
     await lab.ui.locator(".drawer-thread").first().dispatchEvent("pointerenter");
