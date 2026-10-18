@@ -1,6 +1,6 @@
 import { test, expect } from "./fixtures";
 import { password } from "./seed";
-import { ageRecord, authRecord, holdRequest, login, mailFor, mailLink, oauthFixture, requestPasswordReset, securityReady, session, signout, signup, tamperedToken, verifiedUser } from "./auth-helpers";
+import { ageRecord, authRecord, fontsSettled, holdRequest, login, mailFor, mailLink, oauthFixture, requestPasswordReset, securityReady, session, signout, signup, tamperedToken, verifiedUser } from "./auth-helpers";
 import { localHttp } from "./backend";
 
 test.describe.configure({ timeout: 60_000 });
@@ -54,6 +54,7 @@ test("verification resend is neutral and retains its destination", async ({ page
   await expect.poll(async () => (await mailFor(email)).length).toBe(1);
   const before = (await mailFor(email)).length;
   await page.goto("/verify-email?returnTo=%2Faccount%2Fsecurity");
+  await fontsSettled(page);
   await page.getByRole("button", { name: "Resend verification email" }).click();
   await expect(page.getByLabel("Work email", { exact: true })).toBeFocused();
   await page.getByLabel("Work email", { exact: true }).fill(email);
@@ -79,6 +80,7 @@ test("an invalid or expired verification link never reports success and offers a
   const token = link.searchParams.get("token") ?? "";
   link.searchParams.set("token", tamperedToken(token));
   await page.goto(link.toString());
+  await fontsSettled(page);
   const heading = page.getByRole("heading", { name: "Verification link unavailable", exact: true });
   await expect(heading).toBeFocused();
   await expect(page.getByRole("alert")).toHaveText(/invalid or has expired/);

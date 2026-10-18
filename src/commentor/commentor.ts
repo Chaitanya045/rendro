@@ -930,6 +930,7 @@ class Commentor {
         (compatible, canReloadViewer) => {
           this.parentUpgradeRequired = !compatible;
           this.canReloadViewer = canReloadViewer;
+          const wasWritable = this.canWrite;
           this.canWrite = compatible && this.cfg.canWrite === true;
           this.commentButton.disabled = !this.canWrite;
           if (!compatible) {
@@ -938,6 +939,19 @@ class Commentor {
             this.markersLayer.replaceChildren();
           }
           this.renderDrawerList();
+          // Access changes only matter when they cross the guard, and the re-read must not
+          // defer: a throttled or manually controlled frame schedule would leave a pending
+          // rAF in selectionRaf, blocking scheduleSelectionAction and racing a hide timer.
+          if (this.canWrite === wasWritable) return;
+          const selected = this.canWrite ? this.selectedAnchor() : null;
+          if (selected && selected.key !== this.suppressedSelectionKey && this.bubbleLayer.children.length === 0) {
+            clearTimeout(this.selectionHideTimer);
+            this.selectionAction.hidden = false;
+            this.selectionAction.setAttribute("data-state", "open");
+            placeFloating(this.selectionAction, selected.rect, 6);
+          } else if (!this.selectionAction.hidden) {
+            this.hideSelectionAction(false);
+          }
         },
       );
       return;
