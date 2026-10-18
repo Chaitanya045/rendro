@@ -23,7 +23,7 @@ describe("fail-closed API and manifest boundaries", () => {
     expect(await response.json()).toEqual({ error: "Internal server error" });
   });
 
-  it("rejects a malformed public manifest before reading an object", async () => {
+  it("treats a malformed public manifest as unavailable before reading an object", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({
       publication: { slug: "product", pathPrefix: "", entryFile: "index.html" },
       project: { name: "Product", slug: "product" },
@@ -32,7 +32,7 @@ describe("fail-closed API and manifest boundaries", () => {
     vi.spyOn(minio, "getObjectText").mockResolvedValue(JSON.stringify({ files: { path: "index.html" } }));
     const objectRead = vi.spyOn(minio, "getObjectStream");
 
-    expect((await publicRoutes.request("/p/product/files/index.html")).status).toBe(404);
+    expect((await publicRoutes.request("/p/product/files/index.html")).status).toBe(503);
     expect(objectRead).not.toHaveBeenCalled();
   });
 

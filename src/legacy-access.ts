@@ -2,6 +2,8 @@ import type { Context } from "hono";
 import { CONVEX_SITE_URL } from "./config";
 import { convexQueryRequired } from "./convex-internal";
 import { viewerBackendJson, ViewerBackendError } from "./viewer-backend";
+import { acceptsHtml } from "./routes/asset-headers";
+import { unavailableResponse } from "./routes/viewer-unavailable";
 import { viewerSessionCookie } from "./viewer-ticket";
 import { legacyStoragePrefix } from "./storage-boundary";
 
@@ -31,7 +33,9 @@ export function legacyRequestMember(c: Context, org: string, destructive = false
   return legacyMember(org, viewerSessionCookie(c.req.header("Cookie") ?? ""), destructive);
 }
 
+/** Script callers keep the JSON envelope; a browser navigating to a legacy page gets the retry page. */
 export function legacyUnavailable(_error: Error, c: Context): Response {
+  if (acceptsHtml(c)) return unavailableResponse(c, { unavailable: true, retryAfter: "1" });
   return c.json({ error: "Legacy backend unavailable", retryable: true }, 503, { "Retry-After": "1", "Cache-Control": "private, no-store" });
 }
 

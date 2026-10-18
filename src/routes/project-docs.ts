@@ -10,7 +10,7 @@ import type { User } from "better-auth/types";
 import { CONVEX_SITE_URL, CONVEX_URL } from "@/config";
 import { getObjectStream, type ObjectRange } from "@/minio";
 import { renderScopedDocumentShell } from "@/routes/app";
-import { unavailableResponse, type ViewerUnavailable } from "@/routes/viewer-unavailable";
+import { unavailableResponse, viewerErrorResponse, type ViewerUnavailable } from "@/routes/viewer-unavailable";
 import { renderNotFoundPage } from "@/routes/not-found";
 import { injectViewerHeadStream } from "@/routes/document-html";
 import { contentEtag, contentSize, serveObject } from "@/routes/object-delivery";
@@ -19,6 +19,8 @@ import { treePageCursor } from "@/routes/tree-pages";
 import { validDocumentSearch } from "@/lazy-tree/messages";
 
 const app = new Hono<{ Variables: { user?: User } }>();
+// Storage failures (and any other unexpected one) are "could not check", never a bare 500.
+app.onError(viewerErrorResponse);
 
 type ActiveDeployment = { project: { name: string }; deployment: { manifestKey: string } };
 
@@ -120,7 +122,6 @@ app.get("/organizations/:organizationId/projects/:projectId/docs/tree", async (c
   if (directory === undefined) {
     // Clients that predate directory pages list every document (rollout only).
     const documents = await deploymentDocuments(active.deployment.manifestKey);
-    if (!documents) return c.json({ error: "Manifest unavailable" }, 404);
     const offset = Math.max(0, Number.parseInt(c.req.query("cursor") ?? "0", 10) || 0);
     const page = documents.slice(offset, offset + 200);
     return c.json({ documents: page, cursor: offset + page.length < documents.length ? String(offset + page.length) : null });
@@ -128,7 +129,6 @@ app.get("/organizations/:organizationId/projects/:projectId/docs/tree", async (c
   const pageNumber = treePageCursor(c.req.query("cursor"));
   if (!validTreeDirectory(directory) || pageNumber === null) return c.json({ error: "Invalid tree page" }, 400);
   const index = await openDeploymentIndex(active.deployment.manifestKey);
-  if (!index) return c.json({ error: "Manifest unavailable" }, 404);
   const page = await index.treePage(directory, pageNumber);
   return c.json({ children: page?.children ?? [], cursor: page?.more ? String(pageNumber + 1) : null });
 });
@@ -181,7 +181,7 @@ app.on("GET", [
   const active = await activeDeployment(organizationId, projectId, cookie);
   if (active && "unavailable" in active) return unavailableResponse(c, active, "asset");
   if (!active || (ticket && ticket.manifestKey !== active.deployment.manifestKey)) return missing();
-  const entry = await (await openDeploymentIndex(active.deployment.manifestKey))?.file(path);
+  const entry = await (await openDeploymentIndex(active.deployment.manifestKey)).file(path);
   if (!entry) return missing();
   const key = modernStorageKey({ organizationId, projectId, manifestKey: active.deployment.manifestKey }, path);
   if (!key) return missing();
@@ -244,7 +244,6 @@ app.get("/organizations/:organizationId/projects/:projectId/docs", async (c) => 
   if (active && "unavailable" in active) return unavailableResponse(c, active);
   if (!active) return c.html(renderNotFoundPage({ path: c.req.path }), 404);
   const index = await openDeploymentIndex(active.deployment.manifestKey);
-  if (!index) return c.html(renderNotFoundPage({ path: c.req.path }), 404);
   const isDocument = async (path: string) => {
     const entry = await index.file(path);
     return !!entry && isHtmlAsset(path, entry.contentType);

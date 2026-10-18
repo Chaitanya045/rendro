@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { S3Client } from "@aws-sdk/client-s3";
-import { copyObject, deleteObject, getObjectStream, getObjectText, headObject, listAllKeys, listImmediate, listObjects, putObject } from "../src/minio";
+import { STORAGE_READ_TIMEOUT_MS, copyObject, deleteObject, getObjectStream, getObjectText, headObject, listAllKeys, listImmediate, listObjects, putObject } from "../src/minio";
 
 const send = vi.fn();
 beforeEach(() => { send.mockReset(); vi.spyOn(S3Client.prototype, "send").mockImplementation(send); });
@@ -74,6 +74,36 @@ describe("storage requests and responses", () => {
       send.mockRejectedValueOnce(failure);
       await expect(read("a")).rejects.toBe(failure);
     }
+  });
+
+  describe("read deadline", () => {
+    afterEach(() => vi.useRealTimers());
+    const stalls = () => send.mockImplementation((_command: unknown, options: { abortSignal: AbortSignal }) => new Promise((_resolve, reject) => {
+      options.abortSignal.addEventListener("abort", () => reject(Object.assign(new Error("aborted"), { name: "AbortError" })));
+    }));
+
+    it.each([getObjectStream, getObjectText])("aborts a stalled storage read as a failure, not as a missing object (%o)", async read => {
+      vi.useFakeTimers();
+      stalls();
+      const outcome = expect(read("a")).rejects.toMatchObject({ name: "AbortError" });
+      await vi.advanceTimersByTimeAsync(STORAGE_READ_TIMEOUT_MS - 1);
+      expect(send.mock.calls.at(-1)![1].abortSignal.aborted).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      await outcome;
+      expect(send.mock.calls.at(-1)![1].abortSignal.aborted).toBe(true);
+      expect(vi.getTimerCount()).toBe(0);
+    });
+
+    it("leaves the timer and signal alone once a read has answered", async () => {
+      vi.useFakeTimers();
+      send.mockResolvedValueOnce({ Body: { transformToWebStream: () => new Response("x").body } })
+        .mockResolvedValueOnce({ Body: { transformToString: () => Promise.resolve("x") } });
+      await getObjectStream("a");
+      expect(await getObjectText("a")).toBe("x");
+      expect(vi.getTimerCount()).toBe(0);
+      await vi.advanceTimersByTimeAsync(STORAGE_READ_TIMEOUT_MS * 2);
+      expect(send.mock.calls.map(call => (call[1] as { abortSignal: AbortSignal }).abortSignal.aborted)).toEqual([false, false]);
+    });
   });
 
   it("issues ranged reads and fails closed on an unexpected slice or total", async () => {

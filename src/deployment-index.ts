@@ -16,8 +16,14 @@
  * Deployments without a valid index, and lookups whose shard is missing or
  * corrupt, use the authoritative manifest instead. Every parsed object is held
  * in the per-isolate immutable metadata cache; authorization never is.
+ *
+ * Read-mode callers hold a deployment that the database just authorized, so a
+ * manifest that storage lacks or that cannot be parsed means "could not check",
+ * never "no such document": it throws ViewerBackendError (a retryable 503), and
+ * only a lookup in a manifest that was read answers null for an absent path.
  */
 import { getObjectText } from "@/minio";
+import { ViewerBackendError } from "@/viewer-backend";
 import { isHtmlAsset } from "@/routes/asset-headers";
 import { deploymentMetadataCache } from "@/immutable-cache";
 import {
@@ -305,7 +311,11 @@ function indexShard<T>(
 }
 
 function shardedIndex(manifestKey: string, root: Root, mode: Mode): DeploymentIndex<ManifestFile> {
-  const fallback = () => manifestIndex(manifestKey, mode) as Promise<DeploymentIndex<ManifestFile> | null>;
+  const fallback = async () => {
+    const manifest = await manifestIndex(manifestKey, mode) as DeploymentIndex<ManifestFile> | null;
+    if (!manifest && mode === "read") throw new ViewerBackendError();
+    return manifest;
+  };
   return {
     firstDocument: root.firstDocument,
     async file(path) {
@@ -320,17 +330,22 @@ function shardedIndex(manifestKey: string, root: Root, mode: Mode): DeploymentIn
   };
 }
 
-/** Open the deployment's index for exact-path and directory lookups. Returns
- * null only when neither an index nor a readable manifest exists. */
+/** Open the deployment's index for exact-path and directory lookups. Staging
+ * returns null when neither an index nor a readable manifest exists; reading
+ * throws ViewerBackendError instead (see the note at the top). */
 export async function openDeploymentIndex(manifestKey: string, mode: "staging"): Promise<DeploymentIndex<ManifestFile> | null>;
-export async function openDeploymentIndex(manifestKey: string, mode?: "read"): Promise<DeploymentIndex<StoredFile> | null>;
+export async function openDeploymentIndex(manifestKey: string, mode?: "read"): Promise<DeploymentIndex<StoredFile>>;
 export async function openDeploymentIndex(manifestKey: string, mode: Mode = "read"): Promise<DeploymentIndex<StoredFile> | null> {
   const root = await indexRoot(manifestKey);
-  return root ? shardedIndex(manifestKey, root, mode) : manifestIndex(manifestKey, mode);
+  const index = root ? shardedIndex(manifestKey, root, mode) : await manifestIndex(manifestKey, mode);
+  if (!index && mode === "read") throw new ViewerBackendError();
+  return index;
 }
 
 /** Every HTML document in manifest order, for tree clients that predate
  * directory pages. Served from the cached manifest. */
-export async function deploymentDocuments(manifestKey: string): Promise<string[] | null> {
-  return (await manifestIndex(manifestKey, "read"))?.documents ?? null;
+export async function deploymentDocuments(manifestKey: string): Promise<string[]> {
+  const manifest = await manifestIndex(manifestKey, "read");
+  if (!manifest) throw new ViewerBackendError();
+  return manifest.documents;
 }

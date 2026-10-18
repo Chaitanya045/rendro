@@ -1398,8 +1398,14 @@
           "inventoryRefs": [
             "V18"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/backend-unavailable.spec.ts",
+              "name": "a storage or database outage is a retryable 503 on every delivery surface, never a false 404",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-006-E05",

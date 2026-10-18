@@ -15,6 +15,7 @@ const storage = vi.hoisted(() => {
 });
 vi.mock("../src/minio", () => ({ getObjectText: storage.getObjectText }));
 
+import { ViewerBackendError } from "../src/viewer-backend";
 import {
   INDEX_SHARD_TARGET_FILES,
   TREE_PAGE_SIZE,
@@ -214,10 +215,12 @@ describe("fallback to the authoritative manifest", () => {
     expect(await (await openDeploymentIndex(MANIFEST_KEY, "staging"))!.file("a.html")).toEqual(file("a.html"));
   });
 
-  it("does not retain a missing manifest, and returns no index without one", async () => {
-    expect(await openDeploymentIndex(MANIFEST_KEY)).toBeNull();
-    expect(await deploymentDocuments(MANIFEST_KEY)).toBeNull();
-    expect(await openDeploymentIndex("manifest")).toBeNull();
+  it("does not retain a missing manifest, and reports unavailable (not absent) for readers without one", async () => {
+    await expect(openDeploymentIndex(MANIFEST_KEY)).rejects.toBeInstanceOf(ViewerBackendError);
+    await expect(deploymentDocuments(MANIFEST_KEY)).rejects.toBeInstanceOf(ViewerBackendError);
+    await expect(openDeploymentIndex("manifest")).rejects.toBeInstanceOf(ViewerBackendError);
+    // Staging keeps the absent answer: it decides whether a deployment can be started.
+    expect(await openDeploymentIndex(MANIFEST_KEY, "staging")).toBeNull();
     storage.objects.set(MANIFEST_KEY, JSON.stringify({ files: [] }));
     const index = (await openDeploymentIndex(MANIFEST_KEY))!;
     expect(index.firstDocument).toBeNull();
@@ -286,12 +289,17 @@ describe("fallback to the authoritative manifest", () => {
       await index.file("docs/section-000/page-000000.html");
       expect(storage.reads.map(read => read.key)).toEqual([expect.stringMatching(/files\/[0-3]\.json$/)]);
     }
-    // A damaged shard of a deployment whose manifest is also gone fails closed.
+    // A damaged shard of a deployment whose manifest is also gone cannot be checked: retryable, never "absent".
     deploymentMetadataCache.clear();
     storage.objects.delete(MANIFEST_KEY);
     const index = (await openDeploymentIndex(MANIFEST_KEY))!;
-    expect(await index.file("docs/section-000/page-000000.html")).toBeNull();
-    expect(await index.treePage("", 0)).toBeNull();
+    await expect(index.file("docs/section-000/page-000000.html")).rejects.toBeInstanceOf(ViewerBackendError);
+    await expect(index.treePage("", 0)).rejects.toBeInstanceOf(ViewerBackendError);
+    // Staging answers null there, as before.
+    deploymentMetadataCache.clear();
+    const staging = (await openDeploymentIndex(MANIFEST_KEY, "staging"))!;
+    expect(await staging.file("docs/section-000/page-000000.html")).toBeNull();
+    expect(await staging.treePage("", 0)).toBeNull();
   });
 });
 
