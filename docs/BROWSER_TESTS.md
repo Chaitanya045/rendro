@@ -345,6 +345,7 @@ Playwright can read where it is.
 | `viewer-links.spec.ts` | Fragments within and across documents (Unicode ids, named anchors, bare and unmatched hashes, replace vs push, reload), `docQuery`, and the parent-owned link confirmation: a reader's click or Enter opens at once; a link followed with no reader action is offered (confirm, dismiss, review, repeat), a visible prompt is never retargeted, forged and malformed requests do nothing, new-tab links, and a link to another site (asks first, then opens a new tab with no opener) |
 | `viewer-chrome.spec.ts` | Theme (cycle, persistence, what the document is told and that its own colors are untouched), avatar menu (also closed by a click in the document), reading mode (control, shortcut, hot zones, Escape, persistence), sidebar resize (keyboard, drag, cancel, limits, viewport clamp, persistence), the phone tree drawer and More menu (focus, dismissal, one handler per action, desktop/landscape restore), 320/375/430px containment, document loading, never-arriving and replaced loads with their announcements, reduced motion, share failure notices |
 | `viewer-surfaces.spec.ts` | Private vs publication vs share chrome; outsider and signed-out access (sign-in carries the requested document and publisher query, and only a same-origin path); a publication's deep links, Back/Forward and scope; a share's fragments and out-of-grant links; revoked and expired shares are 404 in the shell, the document and a viewer that was open; the anonymous viewers make no session lookup. Creating, listing and revoking shares and publications is #113's and is not repeated |
+| `viewer-comment-links.spec.ts` | A same-document link keeps the document, its scroll and the comment being written; a waiting or dismissed link confirmation leaves theme, tree and comment actions working. |
 
 Timing-sensitive steps never sleep. The loading specs install Playwright's fake clock and pause it
 where the page is idle, hold the document request at the browser boundary, and then advance time by
@@ -366,6 +367,19 @@ staying open when the reader clicks in the document, and sign-in losing the requ
 and are now ordinary passing tests with registry credit. `tests/viewer-chrome-browser.test.ts` repeats the tree
 layout, `inert` and menu behavior against the real shell CSS, base stylesheet and strict nonce CSP in Chromium.
 `viewer-chrome.spec.ts` and `viewer-links.spec.ts` fail any test that records a CSP violation (#89).
+
+**#199 (safety net).** The share viewer confirms links to other sites like the other viewers (#202):
+`tests/viewer-fragments-browser.test.ts` ("share external link confirmation in Chromium") and the share test in
+`viewer-surfaces.spec.ts` assert prompt, Dismiss/Review, and a new tab with `noopener,noreferrer`. The rest of the batch
+closes the untested edges of the viewer, frame and comment families in the registry: ticket renewal, republish and
+opaque-frame asset delivery (`private-viewer-renewal.test.ts`, `private-viewer-browser.test.ts`,
+`viewer-publisher-content-browser.test.ts`, `viewer-stream-errors.test.ts`), the comment widget's handshake, drafts, theme,
+shells and scope (`commentor-gaps-browser.test.ts`, `commentor-theme-browser.test.ts`, `commentor-shells-browser.test.ts`,
+`commentor-ticket-scope.test.ts`), and shell chrome and navigation (`viewer-chrome-browser.test.ts`,
+`viewer-fragments-browser.test.ts`). Two product bugs are pinned as expected failures with no registry credit: a reply
+shows no time (UI-115-E03), and the comments drawer list loses its scroll position on a live update. Change each
+`it.fails` to `it` when it is fixed. A third, long names inside an open tree folder (UI-100-E09), was fixed in round 2:
+the folder's collapse wrapper now keeps a `minmax(0,1fr)` column, so labels truncate at the row.
 
 ## Comments and recovery (#115)
 

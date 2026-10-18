@@ -1,4 +1,4 @@
-import type { Frame, Page } from "playwright";
+import type { Frame, Locator, Page } from "playwright";
 import AxeBuilder from "@axe-core/playwright";
 import { Hono } from "hono";
 import type { User } from "better-auth/types";
@@ -25,6 +25,16 @@ const activationModes = [privateBase, "/p/fixture"].flatMap(base =>
   [false, true].map(missing => ({ base, missing })));
 
 
+// Fragment text a hostile publisher could put in a link: markup, selector syntax and script text.
+const hostileFragments = [
+  '#<img src=x onerror="parent.pwned=1;window.pwned=1">',
+  '#x"][onclick="parent.pwned=1;window.pwned=1',
+  "#' onmouseover='parent.pwned=1;window.pwned=1",
+  "#%3Cscript%3Eparent.pwned=1%3C/script%3E",
+  "#\\\"; parent.pwned=1; //",
+];
+const hostileLinks = hostileFragments.map((fragment, index) => `<a id="hostile-${index}" href="${fragment.replaceAll("&", "&amp;").replaceAll('"', "&quot;")}">Hostile ${index}</a>`).join("");
+
 function publisherHtml(path: string): string {
   return `<!doctype html><html><head><meta charset="utf-8">${publisherBase}<title>Fragment fixture</title>
     <style>body{margin:0}nav{position:fixed;top:0;background:white}section{height:900px}h2{margin:0}</style>
@@ -35,7 +45,9 @@ function publisherHtml(path: string): string {
     <a href="other.html#section">Other page</a><a href="#日本語">Unicode</a>
     <a href="#caf%C3%A9">Encoded</a><a href="#legacy">Legacy name</a>
     <a href="#">Empty hash</a><a href="#ToP">Top</a><a href="#missing">Missing</a>
-    </nav><section><textarea>Comment draft</textarea></section>
+    </nav>
+    <div style="position:fixed;bottom:0;left:0;right:0;background:white"><a id="external" href="https://outside.test/page?q=1#top">External</a>
+    <a id="external-later" href="https://later.test/">Later</a>${hostileLinks}</div><section><textarea>Comment draft</textarea></section>
     <h2 id="details">Details</h2><section></section><h2 id="section">Section</h2>
     <section></section><h2 id="日本語">Unicode target</h2><section></section>
     <h2 id="café">Encoded target</h2><section></section><a name="legacy">Named target</a><section></section>
@@ -662,6 +674,45 @@ describe("viewer fragment navigation in Chromium", () => {
       await page.close();
     });
 
+  it.each(["click", "Enter", "Space"] as const)("operates Dismiss, Review and Open the same way by %s", async mode => {
+    const page = await newPage();
+    // Without the activation API every unsolicited link needs the reader, so the three controls are the only way through.
+    await page.addInitScript(() => { Object.defineProperty(navigator, "userActivation", { value: undefined }); });
+    await page.goto(harness.origin + privateBase);
+    const frame = await readyFrame(page);
+    const press = (button: Locator) => mode === "click" ? button.click() : button.press(mode === "Space" ? " " : "Enter");
+    const notice = page.locator("#document-navigation-notice");
+    const review = page.getByRole("button", { name: "Review linked document", exact: true });
+    const focused = () => page.evaluate(() => document.activeElement?.textContent ?? null);
+    await frame.getByRole("link", { name: "Query one", exact: true }).click();
+    await notice.waitFor();
+    expect(await notice.locator("p").textContent()).toBe("Open linked document guide/page.html?v=1#details?");
+
+    await press(notice.getByRole("button", { name: "Dismiss", exact: true }));
+    expect(await notice.count()).toBe(0);
+    expect(await focused()).toBe("Review linked document");
+    // A later request while dismissed is only remembered.
+    await frame.getByRole("link", { name: "Query two", exact: true }).click();
+    await page.waitForFunction(() => (window as unknown as { activations: boolean[] }).activations.length >= 2);
+    expect(await notice.count()).toBe(0);
+
+    await press(review);
+    expect(await review.count()).toBe(0);
+    expect(await notice.locator("p").textContent()).toBe("Open linked document guide/page.html?v=2#section?");
+    expect(await focused()).toBe("Open linked document");
+    // Dismiss, a remembered request and Review load nothing: only the first open document was fetched (the list names a stray one).
+    expect(requests.filter(path => path.includes("/files/"))).toEqual([`${privateBase}/files/${documents[0]}`]);
+
+    await press(notice.getByRole("button", { name: "Open linked document", exact: true }));
+    await readyFrame(page, { search: "?v=2" });
+    expect(new URL(page.url()).searchParams.get("docQuery")).toBe("?v=2");
+    expect(new URL(page.url()).hash).toBe("#section");
+    expect(await notice.count()).toBe(0);
+    expect(await review.count()).toBe(0);
+    await expectHistoryLength(page, 3);
+    await page.close();
+  });
+
   it.each([false, true])("keeps sign-in and dialog teardown usable with a pending confirmation (dismissed: %s)", async dismissed => {
     const page = await newPage();
     await page.goto(harness.origin + privateBase);
@@ -755,6 +806,37 @@ describe("viewer fragment navigation in Chromium", () => {
     expect(await page.evaluate(() => (window as unknown as { activations: boolean[] }).activations)).toEqual([true]);
     await expectHistoryLength(page, 3);
     await page.close();
+  });
+
+  it.each([privateBase, "/p/fixture", "/s/fixture"])("treats hostile fragment text as data, never as a selector or markup, in %s", async base => {
+    const { page, frame } = await open(base);
+    const errors: string[] = [];
+    page.on("pageerror", error => errors.push(error.message));
+    const dialogs: string[] = [];
+    page.on("dialog", dialog => { dialogs.push(dialog.message()); void dialog.dismiss(); });
+    try {
+      const loads = requests.filter(path => path === `${base}/files/${documents[0]}`).length;
+      const historyLength = await readHistoryLength(page);
+      const scroll = await frame.evaluate(() => scrollY);
+      const inspect = (target: Page | Frame) => target.evaluate(() => ({
+        injected: document.querySelectorAll('img[src="x"], script:not([src]):not([data-viewer]):not([nonce]), [onerror], [onclick], [onmouseover]').length,
+        pwned: "pwned" in window,
+      }));
+      const baseline = { shell: await inspect(page), frame: await inspect(frame) };
+      for (const [index, fragment] of hostileFragments.entries()) {
+        await frame.locator(`#hostile-${index}`).click();
+        // The shell learns the fragment as the URL parser spells it: text, never evaluated.
+        const spelled = new URL(`https://fragment.test/${fragment}`).hash;
+        await browserStep(`synchronize hostile fragment ${index}`, () => expect.poll(() => new URL(page.url()).hash).toBe(spelled));
+        expect({ shell: await inspect(page), frame: await inspect(frame) }, fragment).toEqual(baseline);
+      }
+      // No target matched, so the document did not move, reload or grow history.
+      expect(await frame.evaluate(() => scrollY)).toBe(scroll);
+      expect(requests.filter(path => path === `${base}/files/${documents[0]}`).length).toBe(loads);
+      expect(await readHistoryLength(page)).toBe(historyLength);
+      expect(dialogs).toEqual([]);
+      expect(errors).toEqual([]);
+    } finally { await page.close(); }
   });
 
   it.each([privateBase, "/p/fixture", "/s/fixture"])("coalesces fragment floods without history growth in %s", async base => {
@@ -1121,6 +1203,97 @@ describe("viewer fragment navigation in Chromium", () => {
         ]) window.dispatchEvent(new MessageEvent("message", event));
       });
       expect(page.url()).toBe(url);
+    } finally { await page.close(); }
+  });
+});
+
+// A share keeps its sandbox and its single-document grant; only the confirmation of a link to another site is the
+// private and publication viewers' (the parent asks, then opens a new tab with no handle back to the viewer).
+describe("share external link confirmation in Chromium", () => {
+  const external = "https://outside.test/page?q=1#top";
+  const notice = (page: Page) => page.locator("#document-navigation-notice");
+  const label = (page: Page) => page.locator("#document-navigation-destination");
+  // The test never leaves the fixture origin: window.open is observed, not performed.
+  const spyOpen = (page: Page) => page.evaluate(() => {
+    const calls: unknown[][] = [];
+    (window as unknown as { opened: unknown[][] }).opened = calls;
+    window.open = (...args: unknown[]) => { calls.push(args); return null; };
+  });
+  const opened = (page: Page) => page.evaluate(() => (window as unknown as { opened: unknown[][] }).opened);
+
+  it("asks first, then opens a new tab without a handle back, leaving the document, its URL and history alone", async () => {
+    const { page, frame } = await open("/s/fixture");
+    try {
+      await spyOpen(page);
+      const url = page.url();
+      const history = await readHistoryLength(page);
+      const loads = requests.filter(path => path.includes("/files/")).length;
+      await frame.locator("#external").click();
+      await notice(page).waitFor();
+      expect(await label(page).textContent()).toBe(`Open external link ${external}?`);
+      expect(await notice(page).getByRole("button", { name: "Open external link", exact: true }).getAttribute("aria-describedby")).toBe("document-navigation-destination");
+      // Nothing opens until the reader says so, however often the document asks, and the prompt keeps its address.
+      await frame.locator("#external").click();
+      await frame.locator("#external-later").click();
+      expect(await notice(page).count()).toBe(1);
+      expect(await label(page).textContent()).toBe(`Open external link ${external}?`);
+      expect(await opened(page)).toEqual([]);
+      // The sandbox and the grant are as strict as before.
+      expect(await page.locator("#content-frame").getAttribute("sandbox")).toBe("allow-scripts allow-forms allow-popups allow-downloads");
+      expect(frame.url()).toBe(`${harness.origin}/s/fixture/files/${documents[0]}`);
+
+      await notice(page).getByRole("button", { name: "Open external link", exact: true }).click();
+      expect(await opened(page)).toEqual([[external, "_blank", "noopener,noreferrer"]]);
+      expect(await notice(page).count()).toBe(0);
+      expect(page.url()).toBe(url);
+      expect(frame.url()).toBe(`${harness.origin}/s/fixture/files/${documents[0]}`);
+      expect(await readHistoryLength(page)).toBe(history);
+      expect(requests.filter(path => path.includes("/files/")).length).toBe(loads);
+      // The prompt is free for the next link.
+      await frame.locator("#external-later").click();
+      await notice(page).waitFor();
+      expect(await label(page).textContent()).toBe("Open external link https://later.test/?");
+    } finally { await page.close(); }
+  });
+
+  it("can be dismissed and reviewed, keeping only the latest address, and opens nothing until confirmed", async () => {
+    const { page, frame } = await open("/s/fixture");
+    try {
+      await spyOpen(page);
+      await frame.locator("#external").click();
+      await notice(page).waitFor();
+      await notice(page).getByRole("button", { name: "Dismiss", exact: true }).click();
+      const review = page.getByRole("button", { name: "Review external link", exact: true });
+      await review.waitFor();
+      expect(await notice(page).count()).toBe(0);
+      // A dismissed prompt is not reopened by the document; it only remembers the latest address.
+      await frame.locator("#external-later").click();
+      expect(await notice(page).count()).toBe(0);
+      await review.click();
+      await notice(page).waitFor();
+      expect(await label(page).textContent()).toBe("Open external link https://later.test/?");
+      expect(await opened(page)).toEqual([]);
+      await notice(page).getByRole("button", { name: "Open external link", exact: true }).click();
+      expect(await opened(page)).toEqual([["https://later.test/", "_blank", "noopener,noreferrer"]]);
+    } finally { await page.close(); }
+  });
+
+  it("drops forged and unsupported external-link messages from the document", async () => {
+    const { page, frame } = await open("/s/fixture");
+    try {
+      await spyOpen(page);
+      await frame.evaluate(() => {
+        const send = (message: unknown) => parent.postMessage(message, location.origin);
+        const path = "guide/page.html";
+        send({ type: "doc-external", path: "guide/other.html", href: "https://outside.test/" });
+        for (const href of ["/organizations", `${location.origin}/s/other`, "mailto:someone@outside.test", "javascript:alert(1)", 5, undefined, `https://outside.test/${"x".repeat(2100)}`]) {
+          send({ type: "doc-external", path, href });
+        }
+        send({ type: "doc-fragment", path, fragment: "#sentinel" });
+      });
+      await browserStep("wait for the sentinel fragment", () => page.waitForFunction(() => location.hash === "#sentinel"));
+      expect(await notice(page).count()).toBe(0);
+      expect(await opened(page)).toEqual([]);
     } finally { await page.close(); }
   });
 });

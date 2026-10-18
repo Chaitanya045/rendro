@@ -1197,15 +1197,20 @@ works with mouse and keyboard even when the activation API is absent. Shell
 `toggle` messages also fail closed when the API is absent. Share viewers retain
 their native, document-scoped navigation path.
 
-A link to another site (an absolute `http(s)` address on a different origin, in a scoped or legacy viewer
+A link to another site (an absolute `http(s)` address on a different origin, in a scoped, legacy or share viewer
 frame) never loads in the sandboxed frame, which the shell's frame policy would refuse. The frame cancels the click
-and sends `doc-external` with the resolved address; shares, standalone documents, `mailto:` and script URLs keep
-native behavior. The parent re-validates the address (a string of at most 2,048 characters, `http(s)`, not its own
+and sends `doc-external` with the resolved address; standalone documents, `mailto:` and script URLs keep
+native behavior. The parent (the project and publication shells in `lazy-tree.ts`, the share shell in
+`installShareFragments`) re-validates the address (a string of at most 2,048 characters, `http(s)`, not its own
 origin) and offers it through the same bounded confirmation as a document: one visible prompt that is never
 retargeted, one silently replaced pending address while dismissed, and a parent-owned "Review external link"
 button. The label is assigned with `textContent`. Only the reader's "Open external link" press opens it, with
 `window.open(href, "_blank", "noopener,noreferrer")`, so the other site gets a new tab with no handle back to the
-viewer and the document, its history and its selection stay where they were. The sandbox is unchanged.
+viewer and the document, its history and its selection stay where they were. The sandbox is unchanged, and so is a
+share's grant: the share shell accepts `doc-external` only from its own frame (`event.source`, opaque `"null"`
+origin, the granted document path) and never navigates to anything else. The prompt itself is one component,
+`createNavigationNotice()` in `src/viewer/navigation-notice.ts` (state machine in `navigation-confirmation.ts`), used by
+`lazy-tree.ts` and the share shell; each shell supplies its own `.document-navigation-notice` and `.load-more-btn` styles.
 
 A first authorized navigation pushes history; explicit parent confirmations or
 tree selections while activation remains consumed replace that entry. Fragment

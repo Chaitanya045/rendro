@@ -28,9 +28,12 @@ const publisherHtml = `<!doctype html><html><head><meta charset="utf-8"><title>A
 
 export const publisherModule = 'document.body.dataset.module = "loaded";';
 
-export async function createAssetFixture(moduleSource = publisherModule) {
-  const files = [
-    { path: "guide/index.html", contentType: "text/html", body: publisherHtml },
+type AssetFile = { path: string; contentType: string; body: string | Uint8Array<ArrayBuffer> };
+
+/** `html` replaces the guide document; `extraFiles` are added to the deployment (and, for shares, discovered from the document). */
+export async function createAssetFixture(moduleSource = publisherModule, options: { html?: string; extraFiles?: AssetFile[] } = {}) {
+  const files: AssetFile[] = [
+    { path: "guide/index.html", contentType: "text/html", body: options.html ?? publisherHtml },
     { path: "guide/assets/site.css", contentType: "text/css", body: '@font-face { font-family: Fixture; src: url(font.woff2) format("woff2"); } #font { font-family: Fixture; }' + fontTypes.flatMap(([extension]) => [extension, extension.toUpperCase()].map(ext => `@font-face { font-family: Unused-${ext}; src: url(font.${ext}); }`)).join("") },
     { path: "guide/assets/image.svg", contentType: "image/svg+xml", body: '<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><rect width="10" height="10" fill="green"/></svg>' },
     { path: "guide/assets/module.js", contentType: "application/javascript", body: moduleSource },
@@ -39,6 +42,7 @@ export async function createAssetFixture(moduleSource = publisherModule) {
       path: `guide/assets/font.${ext}`, contentType: "application/octet-stream",
       body: new Uint8Array(readFileSync(new URL("./viewer-font.woff2", import.meta.url))),
     }))),
+    ...options.extraFiles ?? [],
   ];
   const assetPaths = await collectShareAssets({ files }, "guide/index.html", path => Promise.resolve(new Response(files.find(file => file.path === path)!.body).body));
   const backend = vi.fn((input: string | URL | Request) => {

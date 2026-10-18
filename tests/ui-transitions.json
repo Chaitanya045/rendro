@@ -4996,8 +4996,14 @@
           "inventoryRefs": [
             "G02"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/viewer-chrome-browser.test.ts",
+              "name": "slides its icon over 300ms and reveals the new theme as a 520ms circle that grows from the button",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-027-E05",
@@ -5308,8 +5314,24 @@
           "inventoryRefs": [
             "G03"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "unit",
+          "tests": [
+            {
+              "file": "tests/theme-runtime.test.ts",
+              "name": "applies another tab's storage choice immediately, without starting or replaying an animation (mounted: %s)",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/theme-runtime.test.ts",
+              "name": "syncs storage and system changes and supports the legacy external hook",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/theme-runtime.test.ts",
+              "name": "keeps passive screens synchronized before a control mounts",
+              "kind": "unit"
+            }
+          ]
         },
         {
           "id": "UI-029-E04",
@@ -5319,8 +5341,14 @@
           "inventoryRefs": [
             "G03"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "unit",
+          "tests": [
+            {
+              "file": "tests/theme-runtime.test.ts",
+              "name": "reconciles back/forward restoration without animation (mounted: %s)",
+              "kind": "unit"
+            }
+          ]
         },
         {
           "id": "UI-029-E05",
@@ -5330,8 +5358,19 @@
           "inventoryRefs": [
             "G03"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "tests/commentor-drawer-browser.test.ts",
+              "name": "follows the parent's theme and ignores messages from anywhere else",
+              "kind": "browser"
+            },
+            {
+              "file": "e2e/viewer-chrome.spec.ts",
+              "name": "the theme control cycles system, dark and light, persists, and tells the document without restyling it",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-029-E06",
@@ -5415,7 +5454,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "unit",
+      "status": "browser",
       "auditEvidence": "U",
       "auditNote": "document-ui-regressions.test.ts: requests parent theme only after iframe listener ready",
       "edges": [
@@ -5427,8 +5466,14 @@
           "inventoryRefs": [
             "UI-151"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/commentor-theme-browser.test.ts",
+              "name": "asks the parent for its theme only once it can hear the answer",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-151-E02",
@@ -14400,8 +14445,29 @@
           "inventoryRefs": [
             "UI-098"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/viewer-surfaces.spec.ts",
+              "name": "a private project viewer has the account and comments; a publication and a share have neither, and neither looks up a session",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/viewer-surfaces.spec.ts",
+              "name": "an outsider and a signed-out visitor never get the private viewer",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/viewer-surfaces.spec.ts",
+              "name": "a revoked share is not found, in the shell, in the document and in a viewer that was already open",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/viewer-surfaces.spec.ts",
+              "name": "an expired share is not found, and the viewer that was open when it lapsed cannot reload it",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-098-E02",
@@ -14428,8 +14494,14 @@
           "inventoryRefs": [
             "V01"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/lazy-tree-browser.test.ts",
+              "name": "shows no document for %s",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-098-E04",
@@ -14615,8 +14687,44 @@
           "inventoryRefs": [
             "V17"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "tests/share-scope.test.ts",
+              "name": "serves exactly the manifest document and allowlist, denying HTML aliases even if listed",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/viewer-fragments-browser.test.ts",
+              "name": "reopens query document state after reload and a copied URL in %s",
+              "kind": "browser"
+            },
+            {
+              "file": "e2e/viewer-surfaces.spec.ts",
+              "name": "a shared document scrolls to its fragments and keeps the bar; a link to any other file shows it is unavailable inside the frame",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/viewer-surfaces.spec.ts",
+              "name": "a revoked share is not found, in the shell, in the document and in a viewer that was already open",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/viewer-surfaces.spec.ts",
+              "name": "an expired share is not found, and the viewer that was open when it lapsed cannot reload it",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/shares.spec.ts",
+              "name": "a share made from a document opens for an anonymous recipient, stays within the document and its assets, and revoking it ends access",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/shares.spec.ts",
+              "name": "expiry: short-lived links stop at their time, the list tells the states apart, and invalid shares are refused",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-098-E13",
@@ -15026,8 +15134,14 @@
           "inventoryRefs": [
             "V02"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/viewer-chrome-browser.test.ts",
+              "name": "shows a loading skeleton until the root listing arrives, then replaces it with folder and file rows",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-100-E03",
@@ -15189,8 +15303,14 @@
           "inventoryRefs": [
             "V02"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/viewer-chrome-browser.test.ts",
+              "name": "truncates long Unicode file and folder names inside an open folder, which keeps its column at the tree's width",
+              "kind": "browser"
+            }
+          ]
         }
       ]
     },
@@ -15355,8 +15475,14 @@
           "inventoryRefs": [
             "V12"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/viewer-chrome-browser.test.ts",
+              "name": "ellipsizes a long title on a %spx screen while the tree toggle, share and More stay on screen",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-101-E07",
@@ -15465,8 +15591,14 @@
           "inventoryRefs": [
             "V04"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/viewer-chrome-browser.test.ts",
+              "name": "animates only the active row while a document loads, and leaves the active bar where it is",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-102-E03",
@@ -15665,8 +15797,19 @@
           "inventoryRefs": [
             "V05"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/lazy-tree-browser.test.ts",
+              "name": "converts a legacy ?doc parameter into a canonical document URL and drops dev parameters",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/lazy-tree-browser.test.ts",
+              "name": "opens a deep link with its query and fragment, revealing and marking the document",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-103-E04",
@@ -15776,8 +15919,19 @@
           "inventoryRefs": [
             "V06"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/viewer-comment-links.spec.ts",
+              "name": "a link within the document scrolls it without reloading it or losing the comment being written",
+              "kind": "e2e"
+            },
+            {
+              "file": "tests/viewer-fragments-browser.test.ts",
+              "name": "scrolls without a reload and restores Unicode deep links in %s",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-103-E10",
@@ -15882,8 +16036,19 @@
           "inventoryRefs": [
             "V06"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/viewer-fragments-browser.test.ts",
+              "name": "treats hostile fragment text as data, never as a selector or markup, in %s",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/viewer-fragments.test.ts",
+              "name": "matches decoded literal IDs, then anchor names, then the top fallback",
+              "kind": "unit"
+            }
+          ]
         },
         {
           "id": "UI-103-E16",
@@ -16000,8 +16165,24 @@
           "inventoryRefs": [
             "UI-104"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/private-viewer-browser.test.ts",
+              "name": "loads first-used inline, block, imported and linked CSS images after the initial ticket expires",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/private-viewer-browser.test.ts",
+              "name": "retains the %s cascade through delayed, overlapping and failed %s replacement",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/private-viewer-browser.test.ts",
+              "name": "keeps the same document, its scroll position, focus and an unsent draft through every renewal",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-104-E02",
@@ -16011,8 +16192,24 @@
           "inventoryRefs": [
             "V15"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "unit",
+          "tests": [
+            {
+              "file": "tests/viewer-ticket.test.ts",
+              "name": "expires at fifteen minutes, even if the underlying session is valid",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/viewer-ticket.test.ts",
+              "name": "gives legacy tickets the same fifteen-minute lifetime and keeps the two kinds from authorizing each other",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/legacy-viewer.test.ts",
+              "name": "rejects expired, tampered, cross-org and cross-model tickets",
+              "kind": "unit"
+            }
+          ]
         },
         {
           "id": "UI-104-E03",
@@ -16022,8 +16219,39 @@
           "inventoryRefs": [
             "V15"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "unit",
+          "tests": [
+            {
+              "file": "tests/private-viewer-renewal.test.ts",
+              "name": "refreshes resource URLs over multiple lifetimes without replacing the document or drafts",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/private-viewer-renewal.test.ts",
+              "name": "checks every minute and renews once the ticket is five minutes old",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/private-viewer-renewal.test.ts",
+              "name": "renews on %s only once the ticket is five minutes old, and at most once per request window",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/private-viewer-renewal.test.ts",
+              "name": "recovers after tab suspension and ignores forged, stale, or out-of-scope renewal messages",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/private-viewer-renewal.test.ts",
+              "name": "retries resource errors with bounded requests",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/private-viewer-renewal.test.ts",
+              "name": "allows only the current opaque frame to request cookie-authenticated renewal",
+              "kind": "unit"
+            }
+          ]
         },
         {
           "id": "UI-104-E04",
@@ -16033,8 +16261,19 @@
           "inventoryRefs": [
             "V15"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "unit",
+          "tests": [
+            {
+              "file": "tests/private-viewer-assets.test.ts",
+              "name": "skips the redundant cookie lookup on ticket assets while still revalidating authorization",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/private-viewer-assets.test.ts",
+              "name": "rejects an already-issued ticket immediately after %s revocation/change",
+              "kind": "unit"
+            }
+          ]
         },
         {
           "id": "UI-104-E05",
@@ -16044,8 +16283,14 @@
           "inventoryRefs": [
             "V15"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "unit",
+          "tests": [
+            {
+              "file": "tests/commentor-ticket-scope.test.ts",
+              "name": "is configured with the document's identity only: no ticket, no session, and its scope ignores a ticketed frame URL",
+              "kind": "unit"
+            }
+          ]
         },
         {
           "id": "UI-104-E06",
@@ -16055,8 +16300,24 @@
           "inventoryRefs": [
             "V15"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/private-viewer-browser.test.ts",
+              "name": "keeps the same document, its scroll position, focus and an unsent draft through every renewal",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/private-viewer-browser.test.ts",
+              "name": "updates a block without imports synchronously without replacing its element or losing rules",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/private-viewer-renewal.test.ts",
+              "name": "refreshes resource URLs over multiple lifetimes without replacing the document or drafts",
+              "kind": "unit"
+            }
+          ]
         },
         {
           "id": "UI-104-E07",
@@ -16066,8 +16327,24 @@
           "inventoryRefs": [
             "V15"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/private-viewer-browser.test.ts",
+              "name": "retains the %s cascade through delayed, overlapping and failed %s replacement",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/private-viewer-renewal.test.ts",
+              "name": "backs off failed stylesheet replacements and retries from the latest ticket",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/private-viewer-renewal.test.ts",
+              "name": "times out silent inline imports, backs off failures, and recovers with the latest ticket",
+              "kind": "unit"
+            }
+          ]
         },
         {
           "id": "UI-104-E08",
@@ -16077,8 +16354,19 @@
           "inventoryRefs": [
             "V15"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/private-viewer-browser.test.ts",
+              "name": "retains the %s cascade through delayed, overlapping and failed %s replacement",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/private-viewer-renewal.test.ts",
+              "name": "allows only the current opaque frame to request cookie-authenticated renewal",
+              "kind": "unit"
+            }
+          ]
         },
         {
           "id": "UI-104-E09",
@@ -16088,8 +16376,24 @@
           "inventoryRefs": [
             "V15"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "unit",
+          "tests": [
+            {
+              "file": "tests/private-viewer-renewal.test.ts",
+              "name": "backs off failed stylesheet replacements and retries from the latest ticket",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/private-viewer-renewal.test.ts",
+              "name": "times out silent inline imports, backs off failures, and recovers with the latest ticket",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/private-viewer-renewal.test.ts",
+              "name": "caps the stylesheet retry backoff at fifteen minutes however often replacement fails",
+              "kind": "unit"
+            }
+          ]
         },
         {
           "id": "UI-104-E10",
@@ -16099,8 +16403,24 @@
           "inventoryRefs": [
             "V15"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "unit",
+          "tests": [
+            {
+              "file": "tests/private-viewer-renewal.test.ts",
+              "name": "refreshes resource URLs over multiple lifetimes without replacing the document or drafts",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/viewer-coverage-gaps.test.ts",
+              "name": "keeps fragment-only and out-of-scope resource URLs, and renews the rest",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/private-viewer-css.test.ts",
+              "name": "preserves fragments and non-scoped URL forms in every URL context",
+              "kind": "unit"
+            }
+          ]
         },
         {
           "id": "UI-104-E11",
@@ -16177,8 +16497,19 @@
           "inventoryRefs": [
             "UI-105"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/private-viewer-republish-browser.test.ts",
+              "name": "recovers after %s at the same URL with drafts and pending operations",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/private-viewer-republish-browser.test.ts",
+              "name": "announces a publication with publisher base %s",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-105-E02",
@@ -16188,8 +16519,24 @@
           "inventoryRefs": [
             "V16"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/private-viewer-republish-browser.test.ts",
+              "name": "recovers after %s at the same URL with drafts and pending operations",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/private-viewer-renewal.test.ts",
+              "name": "compares a subscription update %s the frame reports its actual manifest",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/private-viewer-renewal.test.ts",
+              "name": "announces only the exact superseded signal and reloads only on user action",
+              "kind": "unit"
+            }
+          ]
         },
         {
           "id": "UI-105-E03",
@@ -16199,8 +16546,14 @@
           "inventoryRefs": [
             "V16"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/private-viewer-republish-browser.test.ts",
+              "name": "recovers after %s at the same URL with drafts and pending operations",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-105-E04",
@@ -16210,8 +16563,19 @@
           "inventoryRefs": [
             "V16"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/private-viewer-republish-browser.test.ts",
+              "name": "recovers after %s at the same URL with drafts and pending operations",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/private-viewer-renewal.test.ts",
+              "name": "announces only the exact superseded signal and reloads only on user action",
+              "kind": "unit"
+            }
+          ]
         },
         {
           "id": "UI-105-E05",
@@ -16221,8 +16585,14 @@
           "inventoryRefs": [
             "V16"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "unit",
+          "tests": [
+            {
+              "file": "tests/private-viewer-renewal.test.ts",
+              "name": "ignores a superseded reply after %s",
+              "kind": "unit"
+            }
+          ]
         },
         {
           "id": "UI-105-E06",
@@ -16232,8 +16602,14 @@
           "inventoryRefs": [
             "V16"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/private-viewer-republish-browser.test.ts",
+              "name": "recovers after %s at the same URL with drafts and pending operations",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-105-E07",
@@ -16312,8 +16688,24 @@
           "inventoryRefs": [
             "UI-106"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/viewer-fonts-browser.test.ts",
+              "name": "loads relative fonts, images, modules and fetch in %s",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/viewer-publisher-content-browser.test.ts",
+              "name": "runs inline and external scripts and styles, imports, modules and media in %s",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/legacy-viewer-browser.test.ts",
+              "name": "runs publisher scripts with no parent access, loads assets, and creates/reads a legacy comment through the bridge",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-106-E02",
@@ -16323,8 +16715,19 @@
           "inventoryRefs": [
             "V14"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/viewer-publisher-content-browser.test.ts",
+              "name": "runs inline and external scripts and styles, imports, modules and media in %s",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/viewer-fonts-browser.test.ts",
+              "name": "loads relative fonts, images, modules and fetch in %s",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-106-E03",
@@ -16334,8 +16737,24 @@
           "inventoryRefs": [
             "V14"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/viewer-fonts-browser.test.ts",
+              "name": "loads relative fonts, images, modules and fetch in %s",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/viewer-publisher-content-browser.test.ts",
+              "name": "runs inline and external scripts and styles, imports, modules and media in %s",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/private-viewer-assets.test.ts",
+              "name": "loads CSS, image, nested CSS and font without cookies from the real document base (original regression)",
+              "kind": "unit"
+            }
+          ]
         },
         {
           "id": "UI-106-E04",
@@ -16345,8 +16764,29 @@
           "inventoryRefs": [
             "V14"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/viewer-asset-headers.test.ts",
+              "name": "serves %s fonts with the correct MIME and scoped CORS",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/viewer-asset-headers.test.ts",
+              "name": "uses the same CORS policy for images, modules, fetches and HTML",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/viewer-asset-headers.test.ts",
+              "name": "does not grant CORS access to missing or unauthorized assets",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/viewer-fonts-browser.test.ts",
+              "name": "loads relative fonts, images, modules and fetch in %s",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-106-E05",
@@ -16356,8 +16796,19 @@
           "inventoryRefs": [
             "V14"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "unit",
+          "tests": [
+            {
+              "file": "tests/viewer-asset-headers.test.ts",
+              "name": "serves %s fonts with the correct MIME and scoped CORS",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/viewer-asset-headers.test.ts",
+              "name": "uses the same CORS policy for images, modules, fetches and HTML",
+              "kind": "unit"
+            }
+          ]
         },
         {
           "id": "UI-106-E06",
@@ -16367,8 +16818,14 @@
           "inventoryRefs": [
             "V14"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "unit",
+          "tests": [
+            {
+              "file": "tests/viewer-asset-headers.test.ts",
+              "name": "serves %s fonts with the correct MIME and scoped CORS",
+              "kind": "unit"
+            }
+          ]
         },
         {
           "id": "UI-106-E07",
@@ -16378,8 +16835,29 @@
           "inventoryRefs": [
             "V14"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/viewer-publisher-content-browser.test.ts",
+              "name": "runs inline and external scripts and styles, imports, modules and media in %s",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/viewer-publisher-content-browser.test.ts",
+              "name": "resolves relative resources against a publisher base inside the document tree in %s",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/viewer-publisher-content-browser.test.ts",
+              "name": "keeps an external publisher base in charge of relative resources in %s",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/document-delivery-regression.test.ts",
+              "name": "preserves publisher code through the %s route",
+              "kind": "unit"
+            }
+          ]
         },
         {
           "id": "UI-106-E08",
@@ -16389,8 +16867,34 @@
           "inventoryRefs": [
             "V14"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "unit",
+          "tests": [
+            {
+              "file": "tests/private-viewer-stream.test.ts",
+              "name": "inserts before the first resource across every byte split: %s",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/private-viewer-stream.test.ts",
+              "name": "finds a publisher base even when it arrives after title/meta in another chunk",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/private-viewer-stream.test.ts",
+              "name": "preserves a BOM and releases a bounded oversized head before EOF",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/document-html-boundaries.test.ts",
+              "name": "never damages publisher bytes for %j",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/private-viewer-assets.test.ts",
+              "name": "establishes the ticket before resources with %s",
+              "kind": "unit"
+            }
+          ]
         },
         {
           "id": "UI-106-E09",
@@ -16400,8 +16904,29 @@
           "inventoryRefs": [
             "V14"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "unit",
+          "tests": [
+            {
+              "file": "tests/viewer-asset-headers.test.ts",
+              "name": "uses empty untyped failures for %s (%s)",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/viewer-asset-headers.test.ts",
+              "name": "preserves status %s and retry headers without caching asset errors",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/viewer-stream-errors.test.ts",
+              "name": "never completes %s successfully",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/document-functional.test.ts",
+              "name": "propagates a failed upstream HTML stream instead of returning a truncated successful document",
+              "kind": "unit"
+            }
+          ]
         },
         {
           "id": "UI-106-E10",
@@ -16478,8 +17003,29 @@
           "inventoryRefs": [
             "UI-107"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/viewer-links.spec.ts",
+              "name": "forged, malformed and stale requests do not navigate, prompt or leave the shell",
+              "kind": "e2e"
+            },
+            {
+              "file": "tests/viewer-fragments-browser.test.ts",
+              "name": "ignores forged navigation and load-report loops without a gesture in %s",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/viewer-fragments-browser.test.ts",
+              "name": "never reopens or mutates dismissed UI under duplicate and changing-target floods in %s",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/lazy-tree-browser.test.ts",
+              "name": "drops a fragment report that was queued before the reader opened another document",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-107-E02",
@@ -16523,8 +17069,19 @@
           "inventoryRefs": [
             "V07"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/lazy-tree-browser.test.ts",
+              "name": "acknowledges loaded documents without navigating or fetching",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/viewer-fragments-browser.test.ts",
+              "name": "ignores forged navigation and load-report loops without a gesture in %s",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-107-E05",
@@ -16534,8 +17091,19 @@
           "inventoryRefs": [
             "V07"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/lazy-tree-browser.test.ts",
+              "name": "drops a fragment report that was queued before the reader opened another document",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/viewer-fragments-browser.test.ts",
+              "name": "rejects forged sources/origins, malformed hashes and stale-document messages",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-107-E06",
@@ -16937,8 +17505,14 @@
           "inventoryRefs": [
             "V09"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/viewer-fragments-browser.test.ts",
+              "name": "operates Dismiss, Review and Open the same way by %s",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-109-E09",
@@ -17054,8 +17628,19 @@
           "inventoryRefs": [
             "V08"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/viewer-fragments-browser.test.ts",
+              "name": "allows only one navigation across delayed replacement-frame requests in %s",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/viewer-fragments-browser.test.ts",
+              "name": "reserves expired Review, Dismiss and Open activation in $base (missing API: $missing)",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-110-E04",
@@ -17065,8 +17650,19 @@
           "inventoryRefs": [
             "V08"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/viewer-fragments-browser.test.ts",
+              "name": "allows two legitimate sequential clicks after observing activation expiry",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/viewer-fragments-browser.test.ts",
+              "name": "coalesces a rapid legitimate confirmed link so one Back returns before the burst",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-110-E05",
@@ -17110,8 +17706,19 @@
           "inventoryRefs": [
             "V08"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/viewer-fragments-browser.test.ts",
+              "name": "uses deduplicated text-only parent confirmation without userActivation in %s",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/viewer-fragments-browser.test.ts",
+              "name": "reserves $control input before same-gesture frame messages in $base (missing API: $missing)",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-110-E08",
@@ -17205,7 +17812,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "browser",
+      "status": "e2e",
       "auditEvidence": "B",
       "auditNote": "viewer-fragments-browser.test.ts",
       "edges": [
@@ -17217,8 +17824,19 @@
           "inventoryRefs": [
             "UI-111"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "tests/viewer-fragments-browser.test.ts",
+              "name": "keeps sign-in and dialog teardown usable with a pending confirmation (dismissed: %s)",
+              "kind": "browser"
+            },
+            {
+              "file": "e2e/viewer-comment-links.spec.ts",
+              "name": "a link confirmation that is waiting, or dismissed, leaves the theme, the tree and the comment actions working",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-111-E02",
@@ -17284,8 +17902,29 @@
           "inventoryRefs": [
             "UI-112"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/commentor-protocol-browser.test.ts",
+              "name": "tells the reader to reload when the parent speaks another protocol, and recovers when it matches",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/commentor-recovery-ui.test.ts",
+              "name": "enables comments only after the compatible parent handshake",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/commentor-gaps-browser.test.ts",
+              "name": "reloads the page only when the reader presses the parent Reload button",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/commentor-parent-recovery.test.ts",
+              "name": "preserves the absent-target %s toggle",
+              "kind": "unit"
+            }
+          ]
         },
         {
           "id": "UI-112-E02",
@@ -17295,8 +17934,29 @@
           "inventoryRefs": [
             "C01"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/commentor-host-units.test.ts",
+              "name": "does not start for a signed-out page, without configuration or without the document frame",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/commentor-host-units.test.ts",
+              "name": "shares one session check among concurrent callers and hands out tokens only while access holds",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/commentor-parent-entry.test.ts",
+              "name": "waits for the document to finish loading, and mounts only once when the host declines to start",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/commentor-protocol-browser.test.ts",
+              "name": "answers only well-formed, in-scope requests from its own document frame",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-112-E03",
@@ -17306,8 +17966,19 @@
           "inventoryRefs": [
             "C01"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/commentor-gaps-browser.test.ts",
+              "name": "subscribes with the scope of the document the frame shows, and again for the next document",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/commentor-host-units.test.ts",
+              "name": "pages thread and reply subscriptions, reversing replies and reporting pagination state",
+              "kind": "unit"
+            }
+          ]
         },
         {
           "id": "UI-112-E04",
@@ -17368,8 +18039,14 @@
           "inventoryRefs": [
             "C01"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/commentor-gaps-browser.test.ts",
+              "name": "leaves the document readable when the comment script is blocked or the backend fails",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-112-E08",
@@ -17413,8 +18090,19 @@
           "inventoryRefs": [
             "C13"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/commentor-gaps-browser.test.ts",
+              "name": "reloads the page only when the reader presses the parent Reload button",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/commentor-protocol-browser.test.ts",
+              "name": "tells the reader to reload when the parent speaks another protocol, and recovers when it matches",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-112-E11",
@@ -17424,8 +18112,14 @@
           "inventoryRefs": [
             "C13"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/commentor-shells-browser.test.ts",
+              "name": "ignores a document's reload and comment requests in %s: nothing reloads, appears or answers",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-112-E12",
@@ -17452,8 +18146,19 @@
           "inventoryRefs": [
             "C13"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "unit",
+          "tests": [
+            {
+              "file": "tests/commentor-parent-recovery.test.ts",
+              "name": "preserves the absent-target %s toggle",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/comment-idempotency.test.ts",
+              "name": "preserves legacy %s toggles and requires a target with an ID",
+              "kind": "unit"
+            }
+          ]
         },
         {
           "id": "UI-112-E14",
@@ -17519,8 +18224,19 @@
           "inventoryRefs": [
             "UI-113"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/legacy-viewer-browser.test.ts",
+              "name": "runs publisher scripts with no parent access, loads assets, and creates/reads a legacy comment through the bridge",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/commentor-host-units.test.ts",
+              "name": "serves legacy documents from the inline-reply API and keeps their identity fields",
+              "kind": "unit"
+            }
+          ]
         },
         {
           "id": "UI-113-E02",
@@ -17589,8 +18305,24 @@
           "inventoryRefs": [
             "UI-114"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/commentor-recovery-ui.test.ts",
+              "name": "allows a corrected %s after oversized validation and a definitive permission rejection",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/commentor-parent-recovery.test.ts",
+              "name": "validates %s before preparing it, allowing an edited submission",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/commentor-widget-browser.test.ts",
+              "name": "shows a pending post, keeps the draft on every failure and recovers",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-114-E02",
@@ -17703,8 +18435,19 @@
           "inventoryRefs": [
             "C05"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/commentor-gaps-browser.test.ts",
+              "name": "sends one write however fast the reader submits again",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/commentor-edges-browser.test.ts",
+              "name": "refuses a second post while one is unconfirmed and keeps the countdown dismissible and recoverable",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-114-E07",
@@ -17780,8 +18523,19 @@
           "inventoryRefs": [
             "C05"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/commentor-gaps-browser.test.ts",
+              "name": "does not clear an unrelated draft when an earlier post is confirmed late",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/commentor-parent-recovery.test.ts",
+              "name": "an abandoned %s acknowledgement cannot erase the ID before a subsequent iframe reload",
+              "kind": "unit"
+            }
+          ]
         },
         {
           "id": "UI-114-E11",
@@ -17903,8 +18657,34 @@
           "inventoryRefs": [
             "UI-115"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/commentor-recovery-ui.test.ts",
+              "name": "Refresh preserves the %s guard across rendered controls and accepts the late result",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/commentor-recovery-ui.test.ts",
+              "name": "settles an in-flight thread deletion after %s without replaying it",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/commentor-parent-recovery.test.ts",
+              "name": "refresh keeps one uncommitted %s and reconciles its late acknowledgement",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/commentor-parent-recovery.test.ts",
+              "name": "delivers an explicit late rejection after refreshing",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/commentor-protocol-browser.test.ts",
+              "name": "offers Refresh for a slow change, keeps its guard and settles when the result finally arrives",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-115-E02",
@@ -18131,8 +18911,24 @@
           "inventoryRefs": [
             "UI-116"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/commentor-widget-browser.test.ts",
+              "name": "deletes after an undo window and rolls back with an explanation when the delete fails",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/document-ui-regressions.test.ts",
+              "name": "coordinates independent Undo timers and restores a rejected deletion",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/commentor-widget-browser.test.ts",
+              "name": "restores a thread whose delete failed for an unknown reason",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-116-E02",
@@ -18247,8 +19043,19 @@
           "inventoryRefs": [
             "C10"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/document-comment-pagination.test.ts",
+              "name": "tombstones immediately and scrubs a large reply history in bounded cleanup jobs",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/commentor-edges-browser.test.ts",
+              "name": "keeps a thread hidden while its deletion is pending, even if another update arrives",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-116-E08",
@@ -18407,8 +19214,14 @@
           "inventoryRefs": [
             "C09"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "unit",
+          "tests": [
+            {
+              "file": "tests/legacy-comment-safety.test.ts",
+              "name": "preserves all operations with author-only archive/delete and explicit permissions",
+              "kind": "unit"
+            }
+          ]
         },
         {
           "id": "UI-117-E06",
@@ -18480,7 +19293,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "unit",
+      "status": "browser",
       "auditEvidence": "U",
       "auditNote": "commentor-recovery-ui.test.ts; commentor-parent-recovery.test.ts",
       "edges": [
@@ -18492,8 +19305,34 @@
           "inventoryRefs": [
             "UI-118"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/commentor-recovery-ui.test.ts",
+              "name": "displays subscription failures for a legacy=%s parent and recovers",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/commentor-protocol-browser.test.ts",
+              "name": "offers Refresh for a slow change, keeps its guard and settles when the result finally arrives",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/commentor-recovery-ui.test.ts",
+              "name": "Refresh preserves the %s guard across rendered controls and accepts the late result",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/commentor-protocol-browser.test.ts",
+              "name": "reports an unknown outcome, without replaying, when the parent is replaced during a post or reply",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/commentor-recovery-ui.test.ts",
+              "name": "settles an in-flight thread deletion after %s without replaying it",
+              "kind": "unit"
+            }
+          ]
         },
         {
           "id": "UI-118-E02",
@@ -18691,8 +19530,14 @@
           "inventoryRefs": [
             "C12"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/commentor-gaps-browser.test.ts",
+              "name": "keeps session credentials out of recovery storage and out of every message between the widget and the parent",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-119-E08",
@@ -18812,6 +19657,26 @@
               "file": "tests/commentor-recovery-ui.test.ts",
               "name": "displays subscription failures for a legacy=%s parent and recovers",
               "kind": "unit"
+            },
+            {
+              "file": "tests/commentor-drawer-browser.test.ts",
+              "name": "keeps notifications readable for their duration and removes them afterwards",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/commentor-host-units.test.ts",
+              "name": "shares one session check among concurrent callers and hands out tokens only while access holds",
+              "kind": "unit"
+            },
+            {
+              "file": "e2e/comments-recovery.spec.ts",
+              "name": "a connection replaced mid-mutation reports an unknown outcome, and resubmitting is idempotent",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/comments-permissions.spec.ts",
+              "name": "an outsider and an anonymous visitor can neither read nor write comments, and share and public viewers offer none",
+              "kind": "e2e"
             }
           ]
         },
@@ -18839,6 +19704,26 @@
               "file": "e2e/comments-recovery.spec.ts",
               "name": "a connection replaced mid-mutation reports an unknown outcome, and resubmitting is idempotent",
               "kind": "e2e"
+            },
+            {
+              "file": "tests/commentor-parent-transport.test.ts",
+              "name": "bounds unanswered read/control requests without suggesting a page reload",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/commentor-parent-transport.test.ts",
+              "name": "accepts a successful resolve after a 53-second delay",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/commentor-parent-transport.test.ts",
+              "name": "still reports an explicit server rejection after a slow mutation",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/commentor-parent-recovery.test.ts",
+              "name": "keeps the identity and original payload when the backend outcome is unknown",
+              "kind": "unit"
             }
           ]
         },
@@ -18861,6 +19746,16 @@
               "file": "tests/commentor-drawer-browser.test.ts",
               "name": "keeps notifications readable for their duration and removes them afterwards",
               "kind": "browser"
+            },
+            {
+              "file": "tests/commentor-widget-browser.test.ts",
+              "name": "shows a pending post, keeps the draft on every failure and recovers",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/commentor-error-messages.test.ts",
+              "name": "rounds milliseconds up and treats quota denial as definitive",
+              "kind": "unit"
             }
           ]
         },
@@ -19150,8 +20045,19 @@
           "inventoryRefs": [
             "C04"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/commentor-gaps-browser.test.ts",
+              "name": "renders comment text, names and quotes as text, never as markup",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/commentor-gaps-browser.test.ts",
+              "name": "labels a selected quote that looks like markup as text in the composer",
+              "kind": "browser"
+            }
+          ]
         }
       ]
     },
@@ -19525,8 +20431,29 @@
           "inventoryRefs": [
             "UI-123"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "tests/commentor-gaps-browser.test.ts",
+              "name": "keeps a half-written reply when older comments load and when new ones arrive, and offers a prompt rather than moving the reader",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/commentor-drawer-browser.test.ts",
+              "name": "pages older threads and replies on demand and says when more cannot be loaded",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/commentor-drawer-browser.test.ts",
+              "name": "announces comments that arrive while the reader is away from the end of the list",
+              "kind": "browser"
+            },
+            {
+              "file": "e2e/comments-journeys.spec.ts",
+              "name": "older threads and replies load on demand, and a remote arrival while scrolled away offers the new comment",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-123-E02",
@@ -19563,8 +20490,14 @@
           "inventoryRefs": [
             "C11"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/commentor-gaps-browser.test.ts",
+              "name": "animates only the comments and replies that are new",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-123-E04",
@@ -19706,8 +20639,29 @@
           "inventoryRefs": [
             "UI-124"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "tests/commentor-drawer-browser.test.ts",
+              "name": "scrolls to a thread's anchor and opens it from its card ($motion motion)",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/commentor-drawer-browser.test.ts",
+              "name": "highlights a card's anchor while hovered or focused and keeps it for an open thread",
+              "kind": "browser"
+            },
+            {
+              "file": "e2e/comments-recovery.spec.ts",
+              "name": "anchors that the new document no longer has are shown as orphaned, and the comments stay usable",
+              "kind": "e2e"
+            },
+            {
+              "file": "tests/commentor-gaps-browser.test.ts",
+              "name": "scrolls only the publisher's document when a thread is located, never the page around the frame",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-124-E02",
@@ -19766,8 +20720,14 @@
           "inventoryRefs": [
             "C06"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/commentor-gaps-browser.test.ts",
+              "name": "scrolls only the publisher's document when a thread is located, never the page around the frame",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-124-E05",
@@ -19850,8 +20810,29 @@
           "inventoryRefs": [
             "UI-125"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/commentor-drawer-browser.test.ts",
+              "name": "drags to the nearest edge, snaps there and keeps the drawer usable on every edge",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/commentor-drawer-browser.test.ts",
+              "name": "moves with the keyboard along its edge and remembers where it was left",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/commentor-drawer-browser.test.ts",
+              "name": "ignores invalid saved placement and falls back to the bottom edge",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/commentor-drawer-browser.test.ts",
+              "name": "works in a sandboxed document that cannot persist placement",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-125-E02",
@@ -19951,8 +20932,14 @@
           "inventoryRefs": [
             "C03"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/commentor-gaps-browser.test.ts",
+              "name": "caps the list at the screen and scrolls it",
+              "kind": "browser"
+            }
+          ]
         },
         {
           "id": "UI-125-E08",
@@ -19962,8 +20949,14 @@
           "inventoryRefs": [
             "C03"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/commentor-gaps-browser.test.ts",
+              "name": "lets the reader move the widget off text it covers, keeping the selection",
+              "kind": "browser"
+            }
+          ]
         }
       ]
     },
@@ -23324,8 +24317,14 @@
           "inventoryRefs": [
             "V10"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/viewer-chrome-browser.test.ts",
+              "name": "keeps the revealed header while the account menu is under the pointer and while focus moves through it",
+              "kind": "browser"
+            }
+          ]
         }
       ]
     },

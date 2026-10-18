@@ -297,7 +297,7 @@ ${renderThemeAssets()}
   html.shell-hidden .main{margin-left:0;margin-top:0;height:100vh}
 
   /* The collapse wrapper animates a 0fr→1fr row, so an open folder is exactly as tall as its rows, however many pages are loaded. */
-  .tree-folder-collapse{display:grid;grid-template-rows:0fr;transition:grid-template-rows .4s cubic-bezier(.34,1.56,.64,1),opacity .3s ease;opacity:0}
+  .tree-folder-collapse{display:grid;grid-template-columns:minmax(0,1fr);grid-template-rows:0fr;transition:grid-template-rows .4s cubic-bezier(.34,1.56,.64,1),opacity .3s ease;opacity:0}
   .tree-folder.open>.tree-folder-collapse{grid-template-rows:1fr;opacity:1}
   .tree-folder-content{margin-left:16px;padding-left:8px;border-left-width:1px;border-color:rgb(228 228 231 / .3);min-height:0;overflow:hidden}
   .tree-folder.open>.tree-folder-collapse>.tree-folder-content{overflow:visible}
@@ -311,6 +311,8 @@ ${renderThemeAssets()}
   .tree-folder[data-depth="5"].open>.tree-item{top:calc(var(--tree-row-height) * 5);z-index:5}
   .document-navigation-notice{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);z-index:1000;width:max-content;max-width:calc(100vw - 32px);padding:12px 16px;border:1px solid #e4e4e7;border-radius:8px;background:#fff;color:#09090b;box-shadow:0 4px 16px #0002}
   html.dark .document-navigation-notice{background:#09090b;color:#fafafa;border-color:#27272a}
+  #document-navigation-destination{margin:0 0 8px;overflow-wrap:anywhere;max-height:6em;overflow:auto}
+  .document-navigation-notice .load-more-btn+.load-more-btn{margin-left:12px}
   .load-more-btn{display:inline-flex;align-items:center;justify-content:center;min-height:36px;padding:6px 10px;border:1px solid #e4e4e7;border-radius:6px;background:transparent;color:#c2410c;font:600 12px/20px Inter,system-ui,sans-serif;text-decoration:none;cursor:pointer;transition:background-color 150ms cubic-bezier(.4,0,.2,1),border-color 150ms cubic-bezier(.4,0,.2,1),transform 150ms cubic-bezier(.4,0,.2,1)}
   .load-more-btn:hover:not(:disabled){background:#f4f4f5;border-color:#d4d4d8}
   .load-more-btn:active:not(:disabled){transform:scale(.98)}

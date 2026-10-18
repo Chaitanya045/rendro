@@ -176,6 +176,11 @@ test.describe("link confirmation", () => {
     await expect(notice(tab)).toBeVisible();
     await expect(destination(tab)).toHaveText("Open linked document guide/intro.html#details?");
     await expect(destination(tab)).toHaveAttribute("role", "status");
+    // The shell's nonced stylesheet makes it a floating card, and spaces its two buttons.
+    expect(await notice(tab).evaluate(element => {
+      const buttons = element.querySelectorAll("button");
+      return { position: getComputedStyle(element).position, gap: getComputedStyle(buttons[1]).marginLeft };
+    })).toEqual({ position: "fixed", gap: "12px" });
     await expect(notice(tab).getByRole("button", { name: "Open linked document" })).toHaveAccessibleDescription("Open linked document guide/intro.html#details?");
     await expect(notice(tab)).toHaveCount(1);
     expect(frameFile(tab)).toBe("late.html");

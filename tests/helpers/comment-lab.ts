@@ -17,6 +17,12 @@ body{margin:0;font:16px/24px sans-serif}main{padding:24px;width:520px}p{margin:0
 export type LabOptions = {
   width?: number; height?: number; canWrite?: boolean; sandbox?: boolean; user?: string; document?: string;
   motion?: "reduce" | "no-preference"; colorScheme?: "light" | "dark"; storage?: boolean;
+  /** Install the real shell behaviour behind the Reload notice (a Reload press reloads the page). */
+  viewerShell?: boolean;
+  /** Refuse the widget script, as an extension, network failure or content blocker would. */
+  blockWidget?: boolean;
+  /** Runs in every frame before any script of the page does. */
+  init?: () => void;
 };
 
 /** One server and browser per test file: parent shell with the real host, publisher document with the real widget. */
@@ -51,7 +57,7 @@ export function useCommentLab() {
         } else if (url.pathname === docsBase) {
           response.setHeader("Content-Type", "text/html; charset=utf-8");
           const sandbox = url.searchParams.has("sandbox") ? ' sandbox="allow-scripts allow-forms allow-popups allow-downloads"' : "";
-          response.end(`<!doctype html><html><body style="margin:0"><iframe id="content-frame"${sandbox} src="${docPath}" style="position:fixed;inset:0;width:100%;height:100%;border:0"></iframe><div id="viewer-update-notice" hidden><span role="status"></span><button type="button">Reload</button></div><script src="/lab.js"></script></body></html>`);
+          response.end(`<!doctype html><html><body style="margin:0"><iframe id="content-frame"${sandbox} src="${docPath}" style="position:fixed;inset:0;width:100%;height:100%;border:0"></iframe><div id="viewer-update-notice" hidden style="position:fixed;z-index:100;top:12px;right:12px;background:#fff"><span role="status"></span><button type="button">Reload</button></div><script src="/lab.js"></script></body></html>`);
         } else {
           response.writeHead(404).end();
         }
@@ -64,8 +70,11 @@ export function useCommentLab() {
         viewport: { width: options.width ?? 1024, height: options.height ?? 800 },
         reducedMotion: options.motion ?? "reduce", colorScheme: options.colorScheme ?? "light",
       });
+      if (options.blockWidget) await page.route("**/commentor.js", route => route.abort("blockedbyclient"));
+      if (options.init) await page.addInitScript(options.init);
       const params = new URLSearchParams();
       if (options.sandbox) params.set("sandbox", "");
+      if (options.viewerShell) params.set("viewer", "");
       if (options.user !== undefined) params.set("user", options.user);
       await page.goto(`${harness.origin}${docsBase}?${params}`);
       return new Lab(page);

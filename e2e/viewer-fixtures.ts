@@ -79,6 +79,11 @@ export const pages: Record<string, string> = {
     ${spacer(2200)}<h2 id="details">Details</h2>${spacer(1200)}`),
   "guide/deep/topic.html": html("Deep topic", '<a id="to-home" href="../../index.html">Home</a>'),
   "other/elsewhere.html": html("Elsewhere"),
+  // Text to comment on, a link within the document and, with the publisher script, one that follows its own link unasked.
+  "comment.html": html("Comment page", `
+    <p id="intro">The quick brown fox jumps over the lazy dog.</p>
+    <a id="to-later" href="#later">Jump to a later section</a> <a id="go" href="guide/intro.html#details">Go</a>
+    ${spacer(1600)}<h2 id="later">Later section</h2>${spacer(900)}${remote}`),
   "late.html": html("Late link", `<a id="go" href="guide/intro.html#details">Go</a>${remote}`),
   // Unsolicited targets, one wave at a time.
   "flood.html": html("Flood", `
@@ -226,8 +231,11 @@ export async function trackActivation(page: Page) {
     };
   });
   return {
-    /** Resolves after the shell handled `count` document-navigation requests; watches requests only, never the page. */
-    handled: (count: number) => expect.poll(() => acknowledged.length, { message: "document-navigation requests handled by the shell" }).toBeGreaterThanOrEqual(count),
+    /**
+     * Resolves after the shell handled `count` document-navigation requests; watches requests only, never the page. The request
+     * is only sent once activation has lapsed (several seconds), which a loaded host can stretch past the default timeout.
+     */
+    handled: (count: number) => expect.poll(() => acknowledged.length, { message: "document-navigation requests handled by the shell", timeout: 30_000 }).toBeGreaterThanOrEqual(count),
     async untilInactive() {
       const done = new Promise<void>(resolve => { lapsed = resolve; });
       await page.evaluate(() => (window as unknown as { watchInactive: (message?: unknown) => void }).watchInactive());
