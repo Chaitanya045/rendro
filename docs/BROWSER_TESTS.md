@@ -135,7 +135,7 @@ two shards, each its own `e2e (<engine> <i>/2)` job
 slowest engine (WebKit took 21–29 minutes unsharded, against a 30-minute job
 timeout). A shard is independent: its runner starts its own workerd, Convex and
 storage and seeds its own data, and no spec depends on another file's state
-(Playwright splits whole files across shards; there are no serial groups). A final
+(there are no serial groups, so `fullyParallel: true` makes every test its own group and a shard boundary can fall inside a file; the single worker still runs them in file order). A final
 `e2e` job depends on all six legs and fails unless every one succeeded, so a
 failed, cancelled or skipped shard fails it and it stays the single required check
 name. Each shard uploads its traces, failure screenshots and HTML report for seven
@@ -146,8 +146,18 @@ that job. Each shard ends with a duration guard: it adds the wall time to the jo
 summary and emits a `::warning::` annotation above 60% of the 30-minute timeout.
 It warns instead of failing, because runner speed varies by tens of percent and a
 hard failure would block unrelated pull requests while the job still has headroom;
-reshard (raise the `/2` and the `shard` list in `quality.yml` and `stability.yml`)
-when the warning appears. Open a trace with
+reshard (raise the `/2`, the `shard` list and `PWTEST_SHARD_WEIGHTS` in
+`quality.yml` and `stability.yml`) when the warning appears.
+
+Playwright cuts the ordered test list into contiguous ranges, balanced by test
+count. The first half (auth, organizations, comments, projects) is multi-actor and
+roughly twice as slow per test as the second (shell, viewer), so an even split gave
+shard 1 about twice the wall time of shard 2 (WebKit 20.6 against 10.2 minutes).
+`PWTEST_SHARD_WEIGHTS=47:63` (an internal Playwright variable, honoured by 1.64;
+`tests/repository-quality-gates.test.ts` fails if an upgrade stops honouring it)
+gives shard 1 about 43% of the tests (the second shard also spends about two minutes beyond the sum of its test times, so equal test time is not equal wall time). To retune after adding specs, compare the two
+shards' wall times in the job summaries and move a few points of weight toward the
+faster shard; the weights must have one entry per shard. Open a trace with
 `pnpm exec playwright show-trace test-results/e2e/<test>/trace.zip`.
 `pnpm verify` continues to run the existing Vitest layers independently.
 `e2e/` is typechecked/linted test infrastructure, outside the production

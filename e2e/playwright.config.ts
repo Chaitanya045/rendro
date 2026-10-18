@@ -5,7 +5,10 @@ export default defineConfig({
   testMatch: "**/*.spec.ts",
   globalSetup: "./global-setup.ts",
   globalTeardown: "./global-teardown.ts",
-  fullyParallel: false,
+  // Tests are independent (fresh contexts, per-test ingress, no serial groups), so each is its own
+  // group: `--shard` can then split inside a file instead of at file boundaries. The single
+  // worker still runs them one after another, in file order.
+  fullyParallel: true,
   workers: 1,
   forbidOnly: !!process.env.CI,
   // E2E_RETRIES=0 (nightly stability job) surfaces first-attempt flakes that a retry would hide.

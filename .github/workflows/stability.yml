@@ -100,6 +100,8 @@ jobs:
       WRANGLER_SEND_METRICS: "false"
       # Playwright reads this in e2e/playwright.config.ts; the first failure is final.
       E2E_RETRIES: "0"
+      # Same split as quality.yml; see the comment there.
+      PWTEST_SHARD_WEIGHTS: "47:63"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

@@ -52,8 +52,12 @@ jobs:
   # harness (workerd, Convex, storage, seed data) on its own runner, so shards
   # share nothing. The aggregate `e2e` job below preserves the single required
   # check name. To change the shard count, update the `/2` in the job name and in
-  # `--shard`, plus the `shard` list; tests/repository-quality-gates.test.ts
-  # checks they agree.
+  # `--shard`, the `shard` list and PWTEST_SHARD_WEIGHTS; tests/repository-quality-gates.test.ts
+  # checks they agree. Playwright cuts the test list into contiguous ranges, and the
+  # first half (auth, organizations, comments) is about twice as slow per test as
+  # the second (shell, viewer), so an even split by count leaves shard 1 with twice
+  # the wall time. The weights give shard 1 about 43% of the tests; retune them from
+  # the per-shard wall times in the job summaries (see docs/BROWSER_TESTS.md).
   e2e-engine:
     name: e2e (${{ matrix.project }} ${{ matrix.shard }}/2)
     runs-on: ubuntu-latest
@@ -68,6 +72,8 @@ jobs:
     env:
       VITEST_MAX_WORKERS: "2"
       WRANGLER_SEND_METRICS: "false"
+      # Relative share of the tests per shard (shard 1 : shard 2).
+      PWTEST_SHARD_WEIGHTS: "47:63"
     steps:
       # First step, so the duration guard at the end measures the whole job.
       - name: Record job start
@@ -146,7 +152,7 @@ jobs:
   # Optional: one merged HTML report per engine when any shard failed. Nothing
   # depends on this job, so it can never change the required `e2e` result.
   e2e-report:
-    name: e2e report (${{ matrix.project }})
+    name: e2e report
     runs-on: ubuntu-latest
     timeout-minutes: 10
     needs: e2e-engine

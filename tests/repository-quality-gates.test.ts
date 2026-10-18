@@ -109,7 +109,36 @@ describe("repository quality gates", () => {
     expect(quality).toContain("pattern: e2e-blob-${{ matrix.project }}-*");
     // The blob reporter is what feeds that job.
     expect(readFileSync(join(root, "e2e/playwright.config.ts"), "utf8")).toContain('"blob"');
+    // A skipped matrix job shows its name unevaluated, so it must not use an expression.
+    expect(quality).toMatch(/\n {4}name: e2e report\n/);
   });
+
+  it("balances e2e shards by weight, and Playwright honours the weights", () => {
+    const quality = readFileSync(join(root, ".github/workflows/quality.yml"), "utf8");
+    const stability = readFileSync(join(root, ".github/workflows/stability.yml"), "utf8");
+    const weights = (text: string) => /PWTEST_SHARD_WEIGHTS: "([\d:]+)"/.exec(text)?.[1];
+    // Both workflows share one split, with one weight per shard.
+    expect(weights(quality)).toBeDefined();
+    expect(weights(stability)).toBe(weights(quality));
+    const parts = weights(quality)!.split(":").map(Number);
+    expect(parts).toHaveLength(2);
+    // Tests must be separate groups, or --shard can only cut at file boundaries.
+    expect(readFileSync(join(root, "e2e/playwright.config.ts"), "utf8")).toMatch(/\n {2}fullyParallel: true,/);
+    // Listing runs no setup and no browser; the test titles are enough to count.
+    const count = (shard: number, value?: string) => {
+      const env = { ...process.env };
+      if (value === undefined) delete env.PWTEST_SHARD_WEIGHTS; else env.PWTEST_SHARD_WEIGHTS = value;
+      const result = spawnSync("pnpm", ["exec", "playwright", "test", "--config", "e2e/playwright.config.ts", "--project=chromium", `--shard=${shard}/2`, "--list"], { cwd: root, env, encoding: "utf8" });
+      expect(result.status, result.stderr).toBe(0);
+      return result.stdout.split("\n").filter(line => line.includes("[chromium] ›")).length;
+    };
+    const even = [count(1), count(2)];
+    const weighted = [count(1, weights(quality)), count(2, weights(quality))];
+    expect(weighted[0] + weighted[1]).toBe(even[0] + even[1]);
+    // The weights move tests out of the slow first half, in the configured proportion.
+    expect(weighted[0]).toBeLessThan(even[0]);
+    expect(weighted[0] / (weighted[0] + weighted[1])).toBeCloseTo(parts[0] / (parts[0] + parts[1]), 1);
+  }, 60_000);
 
   it("rebuilds ignored browser assets in the canonical deployment command", () => {
     expect(scripts.deploy).toBe("pnpm build:assets && wrangler deploy --config wrangler.toml");
