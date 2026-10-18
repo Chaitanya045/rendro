@@ -3,7 +3,7 @@ name: Test stability
 # Surfaces intermittent failures early. The coverage suite runs twice on two CPUs
 # (the constrained configuration that exposed #151) and any difference in
 # per-test outcomes or in per-counter coverage hits between the runs fails the
-# workflow. The end-to-end suite runs once per engine with retries disabled.
+# workflow. The end-to-end suite runs once per engine (in two shards) with retries disabled.
 on:
   schedule:
     - cron: "41 2 * * *"
@@ -85,7 +85,7 @@ jobs:
           if-no-files-found: warn
 
   e2e-no-retries:
-    name: e2e-no-retries (${{ matrix.project }})
+    name: e2e-no-retries (${{ matrix.project }} ${{ matrix.shard }}/2)
     runs-on: ubuntu-latest
     timeout-minutes: 40
     permissions:
@@ -94,6 +94,8 @@ jobs:
       fail-fast: false
       matrix:
         project: [chromium, firefox, webkit]
+        # Same split as quality.yml, so the nightly run keeps the same headroom.
+        shard: [1, 2]
     env:
       WRANGLER_SEND_METRICS: "false"
       # Playwright reads this in e2e/playwright.config.ts; the first failure is final.
@@ -126,11 +128,11 @@ jobs:
       - name: Cache pinned local storage image
         if: steps.s3proxy-cache.outputs.cache-hit != 'true'
         run: docker save andrewgaul/s3proxy@sha256:87662b2a5afcdfa5f478a1c61650bae4c87bbd15f6ff2823236bcfd66ef7fe04 --output /tmp/rendro-s3proxy.tar
-      - run: pnpm e2e --project=${{ matrix.project }}
+      - run: pnpm e2e --project=${{ matrix.project }} --shard=${{ matrix.shard }}/2
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: failure()
         with:
-          name: stability-e2e-failures-${{ matrix.project }}
+          name: stability-e2e-failures-${{ matrix.project }}-${{ matrix.shard }}
           path: |
             test-results/e2e/
             playwright-report/
