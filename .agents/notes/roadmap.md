@@ -108,7 +108,7 @@ ship as soon as they are reviewed.
 The suite is 2,188 tests passing, 12 skipped (`convex-public-rpc` needs `CONVEX_TEST_BACKEND`).
 A full run takes about 6.5 minutes with 2 workers. `viewer-fragments-browser` alone takes about 290 s.
 
-UI transitions: 152 families. 64 are untested, 62 have only unit evidence, 26 have browser evidence.
+UI transitions: **0 untested** after #217 (2026-10-18): all 892 edges asserted (605 e2e, 187 browser, 100 unit). Enforced by #228.
 
 Why the numbers understate risk:
 - Node V8 coverage cannot see code running in Chromium.
@@ -133,5 +133,27 @@ Use root-anchored patterns.
 - **2026-10-16:**
   - Widened coverage reached about 76% statements, 76% branches, 79% functions and 76% lines (from 66/65/71/68 at baseline), measured on PR #144's head.
   - Merged on `main`: #102 registry, #103 coverage gate, #108 workerd harness and #109 local Convex E2E.
-  - Also merged: #111 auth journeys (#144), #145 session lifetime (#152), #154 share/comment error UX (#155), #104 Chromium coverage (#143), #117 Convex coverage gaps (#156; all convex/ files at 100%), #91 read-only API-key auth (#158), #116 Worker coverage gaps (#163), #159 no clock in cached queries (#164), #110 shell/nav E2E (#160), #151 stability + per-engine E2E + nightly stability job (#166). With browser coverage merged, the CI coverage job measures 88.3% statements, 86.8% branches, 90.9% functions and 89.4% lines (head `9b902a9`).
-  - In progress: #118 batch A browser-bundle coverage, #165 self-hosted fonts. Filed: #157, #161, #162, #165.
+  - Also merged: #111 auth journeys (#144), #145 session lifetime (#152), #154 share/comment error UX (#155), #104 Chromium coverage (#143), #117 Convex coverage gaps (#156; all convex/ files at 100%), #91 read-only API-key auth (#158), #116 Worker coverage gaps (#163), #159 no clock in cached queries (#164), #110 shell/nav E2E (#160), #151 stability + per-engine E2E + nightly stability job (#166), #118 batch A coverage (#168), #165 self-hosted fonts (#171), #107+#119 subprocess coverage (#172), #90 deployment path index (#173), #112 org/people/teams E2E (#175), #170 load flakes (#178), #176 invitation-list privacy + slug validation (#180), #118 batch B commentor coverage (#174; coverage ledger now EMPTY), #177 org/team UX (#181), #161+#182 shell scroll restore + active team (#183), #179 select scroll-close bug (#184), #113 projects/deployments/keys/shares/publications E2E (#186), #185+#162 flakes + select reset (#188), #187 API input validation (#189), #89 part B Actions pinning + CLI safeguards + constant-time (#192), #114 viewer/tree E2E (#190), #115 comments E2E (#196), #95 static assets before session (#195), #191 viewer/tree bugs (#194), #198 management transition sweep (#204), #197 auth transition sweep (#203), #205 verify-email + onboarding commit (#207), #89 part A __Host- cookies + strict CSP + self-hosted viewer CSS (#201), #94 Range/ETag/streaming (#209). With browser coverage merged, the CI coverage job measures 88.3% statements, 86.8% branches, 90.9% functions and 89.4% lines (head `9b902a9`).
+  - In progress: #185+#200 stability. Filed: #157, #161, #162, #169, #170, #176, #177.
+
+## Pivot under discussion: GitHub-only (owner direction, 2026-10-18)
+- Sign-in is GitHub only. Google and email/password sign-in go away. Orgs, projects, API keys and the CLI upload pipeline are expected to go too.
+- Integration: a GitHub App with user authorization during install. That gives a single click with read-only access to chosen repos, short-lived tokens and push webhooks. A plain OAuth App would need the full `repo` scope.
+- Repos hold **both** HTML and Markdown. Markdown is rendered once, when a push is processed, and sanitized.
+- Docs location: **auto-detected**. Rendro finds the docs in the repo itself, with no per-repo configuration.
+- Viewing: **anyone with read access to the repo** (GitHub is the permission source). Public repos are readable by anyone.
+- No production launch yet (owner, 2026-10-18), so there are no accounts to migrate. Google/email auth is deleted outright.
+- R2 stays as a **disposable cache**; GitHub is the source of truth. Storage security, required:
+  - Use the native R2 binding instead of S3 access keys (`MINIO_*` in `src/minio.ts`; a leaked key reads the whole bucket), then revoke the keys.
+  - Public bucket access off, with a deploy-time check.
+  - Purge on uninstall or lost access, plus an idle-repo lifecycle (~30 days).
+  - Recommended: per-repo envelope encryption (AES-GCM) for private-repo content.
+- Performance design:
+  - Never call GitHub on a page view.
+  - Fetch one tarball per commit.
+  - Key files by blob SHA in R2, which also gives free strong ETags and lets unchanged files be reused across commits.
+  - A push webhook feeds a Cloudflare Queue that prepares the commit ahead of any reader.
+  - A single fetch per repo when several readers arrive together.
+  - The permission check is cached per user and repo with a short TTL, and webhooks invalidate it.
+  - The branch head and repo list are cached and updated by webhooks.
+- Hold epics #100/#101 and the email-verification work (UI-134-E03) until the pivot is scoped; much of that surface would be deleted.
