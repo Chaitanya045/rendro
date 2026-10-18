@@ -1720,11 +1720,15 @@ init). Shiki took 4.6 s warm, with 320 ms of init for 31 grammars.
   fixed options Rendro uses; the compiled module, its glue and a SHA-256 file are
   committed under `src/ingest/comrak-engine`, so `pnpm verify` needs no Rust
   toolchain. `pnpm rebuild:wasm` recompiles and requires byte-identical output,
-  and the `comrak-engine` CI job does the same. The artifact is 360 KiB raw /
-  121 KiB gzip WASM and 7 / 2 KiB gzip glue, against 2.32 MiB / 1.01 MiB for the
-  npm build. Output is byte-identical to the npm build over 4,026 inputs
-  (READMEs, fuzzed Markdown and GFM probes). Its only WASM imports are
-  wasm-bindgen value-marshalling helpers, so it has no ambient authority.
+  and the `comrak-engine` CI job does the same. The build is reproducible off a
+  different machine: it disables incremental compilation, sets `SOURCE_DATE_EPOCH`
+  and passes `--remap-path-prefix` for the checkout, `CARGO_HOME` and `RUSTUP_HOME`,
+  so no host path can leak into the module (rustc records crate source paths in
+  panic-location strings). The artifact is 360 KiB raw / 122 KiB gzip WASM and
+  7 / 2 KiB gzip glue, against 2.32 MiB / 1.01 MiB for the npm build. Output is
+  byte-identical to the npm build over 5,009 inputs (READMEs, fuzzed Markdown and
+  GFM probes). Its only WASM imports are wasm-bindgen value-marshalling helpers,
+  so it has no ambient authority.
 - **Highlighter: highlight.js 11.11 via lowlight 3.3.** It emits `hljs-*`
   classes natively, so there are never inline styles under the strict CSP. Compared
   with Shiki it is about 8x faster, initializes about 25x faster and is 14x

@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 
 /*
@@ -29,26 +29,64 @@ export type Log = (message: string) => void;
 const crateDir = (root: string) => join(root, "wasm/comrak-engine");
 const artifactsDir = (root: string) => join(root, "src/ingest/comrak-engine");
 
-const sha256 = (path: string) => createHash("sha256").update(readFileSync(path)).digest("hex");
+/*
+ * A Rust->WebAssembly build is only reproducible if no build-machine path is
+ * embedded in the artifact: rustc records the absolute source path of every
+ * crate (including registry dependencies) in panic-location strings, so the
+ * same source built under a different checkout or CARGO_HOME yields different
+ * bytes. Remap every path that can appear to a fixed prefix. Longest prefix
+ * first, so a nested path is rewritten by the most specific rule.
+ */
+export function reproducibleRustflags(root: string, target: string, env: NodeJS.ProcessEnv): string {
+  const home = env.HOME ?? homedir();
+  const remaps: ReadonlyArray<readonly [string, string]> = [
+    [crateDir(root), "/build"],
+    [target, "/target"],
+    [env.CARGO_HOME ?? join(home, ".cargo"), "/cargo"],
+    [env.RUSTUP_HOME ?? join(home, ".rustup"), "/rustup"],
+  ];
+  return [...remaps]
+    .sort(([a], [b]) => b.length - a.length)
+    .map(([from, to]) => `--remap-path-prefix=${from}=${to}`)
+    .join(" ");
+}
+
+const sha256 = (data: Buffer) => createHash("sha256").update(data).digest("hex");
+
+/** Index of the first byte that differs, or -1 if one buffer is a copy of the other. */
+export function firstDifference(a: Uint8Array, b: Uint8Array): number {
+  const limit = Math.min(a.length, b.length);
+  for (let i = 0; i < limit; i++) if (a[i] !== b[i]) return i;
+  return a.length === b.length ? -1 : limit;
+}
 
 export function checksumManifest(root: string): string {
-  return artifacts.map(name => `${sha256(join(artifactsDir(root), name))}  ${name}`).join("\n") + "\n";
+  return artifacts.map(name => `${sha256(readFileSync(join(artifactsDir(root), name)))}  ${name}`).join("\n") + "\n";
 }
 
 /** Rebuild from source in a clean target directory, so stale objects cannot mask a change. */
 function rebuild(root: string): string {
   const target = mkdtempSync(join(tmpdir(), "comrak-engine-build-"));
   const out = join(target, "pkg");
+  // wasm-bindgen is given paths relative to the target directory so its argv is
+  // identical everywhere; the numbers below pin the inputs of the Rust build.
+  const builtWasm = "wasm32-unknown-unknown/release/comrak_engine.wasm";
   try {
     execFileSync("cargo", ["build", "--release", "--target", "wasm32-unknown-unknown", "--locked"], {
       cwd: crateDir(root),
-      env: { ...process.env, CARGO_TARGET_DIR: target },
+      env: {
+        ...process.env,
+        CARGO_TARGET_DIR: target,
+        CARGO_INCREMENTAL: "0",
+        SOURCE_DATE_EPOCH: "0",
+        RUSTFLAGS: reproducibleRustflags(root, target, process.env),
+      },
       stdio: "inherit",
     });
     execFileSync(
       process.env.WASM_BINDGEN ?? "wasm-bindgen",
-      ["--target", "web", "--out-dir", out, "--out-name", "comrak_engine", join(target, "wasm32-unknown-unknown/release/comrak_engine.wasm")],
-      { stdio: "inherit" },
+      ["--target", "web", "--out-dir", "pkg", "--out-name", "comrak_engine", builtWasm],
+      { cwd: target, env: { ...process.env, SOURCE_DATE_EPOCH: "0" }, stdio: "inherit" },
     );
     // Keep the built tree alive only long enough to copy what we need.
     return out;
@@ -71,18 +109,16 @@ export function verifyCommitted(root: string, log: Log): void {
 export function rebuildAndCompare(root: string, log: Log): void {
   const built = rebuild(root);
   try {
-    const mismatches = artifacts.filter(name => {
+    const mismatches = artifacts.flatMap(name => {
       const committed = readFileSync(join(artifactsDir(root), name));
       const rebuilt = readFileSync(join(built, name));
-      return !committed.equals(rebuilt);
+      if (committed.equals(rebuilt)) return [];
+      return [`  ${name}: committed ${sha256(committed)} != rebuilt ${sha256(rebuilt)} (first difference at byte ${firstDifference(committed, rebuilt)})`];
     });
     if (mismatches.length > 0) {
-      const detail = mismatches
-        .map(name => `  ${name}: committed ${sha256(join(artifactsDir(root), name))} != rebuilt ${sha256(join(built, name))}`)
-        .join("\n");
-      throw new Error(`Rebuilding wasm/comrak-engine is not reproducible; these artifacts differ:\n${detail}`);
+      throw new Error(`Rebuilding wasm/comrak-engine is not reproducible; these artifacts differ:\n${mismatches.join("\n")}`);
     }
-    log(`Comrak WebAssembly rebuild is byte-identical (${artifacts.length} artifacts, sha256 ${sha256(join(artifactsDir(root), "comrak_engine_bg.wasm"))}).`);
+    log(`Comrak WebAssembly rebuild is byte-identical (${artifacts.length} artifacts, sha256 ${sha256(readFileSync(join(artifactsDir(root), "comrak_engine_bg.wasm")))}).`);
   } finally {
     rmSync(built, { recursive: true, force: true });
   }

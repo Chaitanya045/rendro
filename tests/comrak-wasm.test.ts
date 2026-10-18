@@ -1,9 +1,9 @@
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { performance } from "node:perf_hooks";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { artifacts, checksumManifest, runComrakWasm, verifyCommitted } from "../scripts/comrak-wasm/build";
+import { artifacts, checksumManifest, firstDifference, reproducibleRustflags, runComrakWasm, verifyCommitted } from "../scripts/comrak-wasm/build";
 import { hostileInputs, runHostileBenchmark } from "../scripts/comrak-wasm/benchmark";
 
 const directories: string[] = [];
@@ -71,6 +71,35 @@ function toolchain(root: string) {
   return bin;
 }
 
+describe("reproducible rebuild flags", () => {
+  it("reports the first differing byte, or -1 when the buffers match", () => {
+    expect(firstDifference(Uint8Array.from([1, 9, 3]), Uint8Array.from([1, 2, 3]))).toBe(1);
+    expect(firstDifference(Uint8Array.from([1, 2, 3]), Uint8Array.from([1, 2, 3, 4]))).toBe(3);
+    expect(firstDifference(Uint8Array.from([1, 2, 3]), Uint8Array.from([1, 2, 3]))).toBe(-1);
+  });
+
+  it("remaps every path a build machine could embed, longest prefix first", () => {
+    expect(reproducibleRustflags("/work/repo", "/tmp/target", { HOME: "/home/x", CARGO_HOME: "/home/x/.cargo-custom", RUSTUP_HOME: "/home/x/.rustup-custom" })).toBe(
+      [
+        "--remap-path-prefix=/work/repo/wasm/comrak-engine=/build",
+        "--remap-path-prefix=/home/x/.rustup-custom=/rustup",
+        "--remap-path-prefix=/home/x/.cargo-custom=/cargo",
+        "--remap-path-prefix=/tmp/target=/target",
+      ].join(" "),
+    );
+  });
+
+  it("falls back to HOME for the default cargo and rustup homes", () => {
+    const flags = reproducibleRustflags("/work/repo", "/tmp/target", { HOME: "/home/x" });
+    expect(flags).toContain("--remap-path-prefix=/home/x/.cargo=/cargo");
+    expect(flags).toContain("--remap-path-prefix=/home/x/.rustup=/rustup");
+  });
+
+  it("falls back to the process home when HOME is unset", () => {
+    expect(reproducibleRustflags("/work/repo", "/tmp/target", {})).toContain(`--remap-path-prefix=${join(homedir(), ".cargo")}=/cargo`);
+  });
+});
+
 describe("comrak wasm artifacts", () => {
   it("verifies the committed checksum and fails closed on drift", () => {
     const root = workspace();
@@ -97,7 +126,7 @@ describe("comrak wasm artifacts", () => {
     toolchain(root);
     vi.stubEnv("FAKE_WASM", `${fixture.wasm}-drifted`);
     const log = vi.fn();
-    expect(() => runComrakWasm(root, ["--rebuild"], log)).toThrow(/not reproducible[\s\S]*comrak_engine_bg\.wasm: committed [0-9a-f]{64} != rebuilt [0-9a-f]{64}/);
+    expect(() => runComrakWasm(root, ["--rebuild"], log)).toThrow(/not reproducible[\s\S]*comrak_engine_bg\.wasm: committed [0-9a-f]{64} != rebuilt [0-9a-f]{64} \(first difference at byte \d+\)/);
   });
 
   it("writes the rebuilt artifacts and checksum, and cleans up when cargo fails", () => {

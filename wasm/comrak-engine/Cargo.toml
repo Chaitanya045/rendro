@@ -22,5 +22,6 @@ wasm-bindgen = "=0.2.129"
 opt-level = "z"
 lto = true
 codegen-units = 1
+debug = false
 panic = "abort"
 strip = true
