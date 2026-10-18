@@ -171,15 +171,28 @@ export function buildTree(entries: DocEntry[], prefix: string): DocTree[] {
   return root;
 }
 
-export async function getObjectStream(key: string): Promise<ReadableStream<Uint8Array> | null> {
+/** Inclusive byte positions of an object whose total length is `size`. */
+export type ObjectRange = { start: number; end: number; size: number };
+
+/**
+ * Stream an object, or only `range` of it. A partial read is issued to storage
+ * as a ranged GET; a store that ignores the range, or answers with a different
+ * slice or total length, fails closed instead of sending mislabelled bytes.
+ */
+export async function getObjectStream(key: string, range?: ObjectRange): Promise<ReadableStream<Uint8Array> | null> {
   try {
     const cmd = new GetObjectCommand({
       Bucket: MINIO_BUCKET,
       Key: key,
+      ...(range ? { Range: `bytes=${range.start}-${range.end}` } : {}),
     });
     const res = await s3.send(cmd);
     if (!res.Body) return null;
     const stream = res.Body.transformToWebStream() as ReadableStream<Uint8Array>;
+    if (range && res.ContentRange !== `bytes ${range.start}-${range.end}/${range.size}`) {
+      void stream.cancel().catch(() => {});
+      throw new Error("Storage returned an unexpected byte range");
+    }
     return stream;
   } catch (err: unknown) {
     if ((err as { $metadata?: { httpStatusCode?: number } })?.$metadata?.httpStatusCode === 404) {

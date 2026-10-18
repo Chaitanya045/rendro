@@ -2,13 +2,14 @@ import { viewerErrorResponse } from "@/routes/viewer-unavailable";
 import { assetError, assetHeaders, isHtmlAsset } from "@/routes/asset-headers";
 import { decodeStoragePath, isLegacyStorageKey, isLegacyStoragePrefix, legacyStoragePrefix } from "@/storage-boundary";
 import { Hono } from "hono";
-import { getObjectStream, headObject, listImmediate, buildTree } from "@/minio";
+import { getObjectStream, headObject, listImmediate, buildTree, type ObjectRange } from "@/minio";
 import { legacyMember, legacyRequestMember, legacyUnavailable, retiredLegacy } from "@/legacy-access";
 import { markDeleted, isDeleted } from "@/soft-delete";
 import type { User } from "better-auth/types";
 import { createShareUrl, isShareableDocKey } from "@/share-links";
 import { renderNotFoundPage } from "@/routes/not-found";
 import { injectViewerHeadStream } from "@/routes/document-html";
+import { contentSize, serveObject } from "@/routes/object-delivery";
 import { createLegacyViewerTicket, readLegacyViewerTicket, viewerSessionCookie } from "@/viewer-ticket";
 import { viewerScript } from "@/viewer/markup";
 import { documentFeatures } from "@/routes/project-docs";
@@ -88,20 +89,21 @@ app.on("GET", ["/legacy-view/:org/files/*", "/legacy-view/:org/view/:viewerToken
   if (await isDeleted(key)) return missing();
   const object = await headObject(key);
   if (!object) return missing();
-  const stream = await getObjectStream(key);
-  if (!stream) return missing();
   const html = isHtmlAsset(path, object.contentType ?? "text/html");
   const headers = {
     ...assetHeaders(path, Boolean(ticket), object.contentType ?? "text/html"),
     "Cache-Control": "private, no-store", "Referrer-Policy": "no-referrer",
   };
-  if (!html) return new Response(stream, { headers });
+  const delivery = { request: c.req.raw, headers, missing, open: (...range: [ObjectRange?]) => getObjectStream(key, ...range) };
+  // Legacy objects are mutable and carry no manifest hash: the store's own
+  // entity tag and length (from the HEAD above) validate exactly the bytes sent.
+  if (!html) return serveObject({ ...delivery, etag: object.etag ? `"s3-${object.etag}"` : undefined, size: contentSize(object.size) });
   const frameToken = token ?? await createLegacyViewerTicket(org, cookie);
   const prefix = `${base}/view/${frameToken}/files/`;
   const encodedPath = path.split("/").map(encodeURIComponent).join("/");
   const features = viewerScript("frame", { base, prefix, manifestKey: org }, c.req.url)
     + documentFeatures({ organizationId: org, projectId: org, legacyOrg: org, documentPath: path, base, url: c.req.url });
-  return new Response(injectViewerHeadStream(stream, publisherBase => {
+  return serveObject({ ...delivery, transform: stream => injectViewerHeadStream(stream, publisherBase => {
     let href = prefix + encodedPath;
     if (publisherBase !== undefined) {
       // Resolve legacy authored bases against the original /files URL.
@@ -114,7 +116,7 @@ app.on("GET", ["/legacy-view/:org/files/*", "/legacy-view/:org/view/:viewerToken
       } catch { return features; }
     }
     return `<base data-rendro-viewer href="${escapeHtml(href)}">` + features;
-  }), { headers });
+  }) });
 });
 
 // Legacy credentials no longer authorize any operation.

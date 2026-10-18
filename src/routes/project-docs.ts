@@ -8,11 +8,12 @@ import { COMMENTOR_VERSION } from "@/viewer/asset-versions";
 import { escapeHtml } from "@/routes/html";
 import type { User } from "better-auth/types";
 import { CONVEX_SITE_URL, CONVEX_URL } from "@/config";
-import { getObjectStream } from "@/minio";
+import { getObjectStream, type ObjectRange } from "@/minio";
 import { renderScopedDocumentShell } from "@/routes/app";
 import { unavailableResponse, type ViewerUnavailable } from "@/routes/viewer-unavailable";
 import { renderNotFoundPage } from "@/routes/not-found";
 import { injectViewerHeadStream } from "@/routes/document-html";
+import { contentEtag, contentSize, serveObject } from "@/routes/object-delivery";
 import { deploymentDocuments, openDeploymentIndex, validTreeDirectory } from "@/deployment-index";
 import { treePageCursor } from "@/routes/tree-pages";
 import { validDocumentSearch } from "@/lazy-tree/messages";
@@ -184,14 +185,17 @@ app.on("GET", [
   if (!entry) return missing();
   const key = modernStorageKey({ organizationId, projectId, manifestKey: active.deployment.manifestKey }, path);
   if (!key) return missing();
-  const stream = await getObjectStream(key);
-  if (!stream) return missing();
   const headers = {
     "Cache-Control": "private, no-store",
     "Referrer-Policy": "no-referrer",
     ...assetHeaders(path, Boolean(ticket), entry.contentType, true),
   };
-  if (!isHtmlAsset(path, entry.contentType)) return new Response(stream, { headers });
+  const open = (...range: [ObjectRange?]) => getObjectStream(key, ...range);
+  const delivery = { request: c.req.raw, headers, open, missing };
+  if (!isHtmlAsset(path, entry.contentType)) {
+    return serveObject({ ...delivery, etag: contentEtag(entry.sha256), size: contentSize(entry.size) });
+  }
+  // The injected ticket makes these bytes differ per request: no validator, no ranges.
   const token = viewerToken ?? await createViewerTicket({ organizationId, projectId, manifestKey: active.deployment.manifestKey, cookie });
   const frameBase = `${base}/view/${token}/files/`;
   const documentUrl = `${frameBase}${path.split("/").map(encodeURIComponent).join("/")}`;
@@ -202,7 +206,7 @@ app.on("GET", [
   }, c.req.url) + documentFeatures({ organizationId, projectId, documentPath: path, base, url: c.req.url });
   // Keep the iframe's canonical src so tree/deep links and comment authorization
   // retain their existing identity. Relative resources inherit the ticket base.
-  return new Response(injectViewerHeadStream(stream, publisherBase => {
+  return serveObject({ ...delivery, transform: stream => injectViewerHeadStream(stream, publisherBase => {
     let href = documentUrl;
     if (publisherBase !== undefined) {
       // Preserve publisher base semantics. A base resolving inside this private
@@ -216,7 +220,7 @@ app.on("GET", [
       } catch { return features; }
     }
     return `<base data-rendro-viewer href="${escapeHtml(href)}">` + features;
-  }), { headers });
+  }) });
 });
 
 app.get("/organizations/:organizationId/projects/:projectId/docs", async (c) => {

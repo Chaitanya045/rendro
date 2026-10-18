@@ -15,9 +15,10 @@ import { renderFaviconLinks } from "./favicon";
 import { renderThemeAssets } from "./theme";
 import { Hono } from "hono";
 import { CONVEX_INTERNAL_SECRET, CONVEX_SITE_URL } from "@/config";
-import { getObjectStream } from "@/minio";
+import { getObjectStream, type ObjectRange } from "@/minio";
 import { renderNotFoundPage } from "@/routes/not-found";
 import { injectMobileViewportScrollbarStream, injectViewerHeadStream } from "@/routes/document-html";
+import { contentEtag, contentSize, serveObject } from "@/routes/object-delivery";
 
 const app = new Hono();
 app.use("/s/*", viewerErrorCache);
@@ -49,20 +50,22 @@ app.get("/s/:token/files/*", async (c) => {
     : resolution.grant.assetPaths.includes(path));
   if (!isExactDocument && !allowedAsset) return assetError(c, () => renderNotFoundPage({ path: "Document unavailable" }));
   const key = `${resolution.deployment.manifestKey.slice(0, -"manifest.json".length)}files/${path}`;
-  const stream = await getObjectStream(key);
-  if (!stream) return assetError(c, () => renderNotFoundPage({ path: "Document unavailable" }));
-  const body = type === "text/html"
-    ? injectViewerHeadStream(injectMobileViewportScrollbarStream(stream), () => viewerScript("navigation", {
-      prefix: `/s/${encodeURIComponent(c.req.param("token"))}/files/`, documentPath, singleDocument: true,
-    }, c.req.url)) : stream;
-  return new Response(body, {
-    headers: {
-      "Cache-Control": "private, no-store",
-      ...assetHeaders(path, true, entry.contentType, true),
-      "Referrer-Policy": "no-referrer",
-      "X-Robots-Tag": "noindex, nofollow, noarchive",
-    },
-  });
+  const headers = {
+    "Cache-Control": "private, no-store",
+    ...assetHeaders(path, true, entry.contentType, true),
+    "Referrer-Policy": "no-referrer",
+    "X-Robots-Tag": "noindex, nofollow, noarchive",
+  };
+  const delivery = {
+    request: c.req.raw, headers, missing: () => assetError(c, () => renderNotFoundPage({ path: "Document unavailable" })),
+    open: (...range: [ObjectRange?]) => getObjectStream(key, ...range),
+  };
+  // Capability responses stay private/no-store; validators only save bandwidth.
+  // Head-injected HTML embeds this token's navigation config: whole, unvalidated.
+  if (type !== "text/html") return serveObject({ ...delivery, etag: contentEtag(entry.sha256), size: contentSize(entry.size) });
+  return serveObject({ ...delivery, transform: stream => injectViewerHeadStream(injectMobileViewportScrollbarStream(stream), () => viewerScript("navigation", {
+    prefix: `/s/${encodeURIComponent(c.req.param("token"))}/files/`, documentPath, singleDocument: true,
+  }, c.req.url)) });
 });
 
 app.get("/s/:token", async (c) => {

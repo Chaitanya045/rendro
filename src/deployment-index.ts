@@ -36,7 +36,8 @@ export const INDEX_SHARD_TARGET_FILES = 256;
 export const TREE_PAGE_SIZE = 200;
 const MAX_INDEX_SHARDS = 1 << 16;
 
-export type StoredFile = { path: string; contentType: string };
+/** Manifests written before hashes and sizes were required may omit them. */
+export type StoredFile = { path: string; contentType: string; sha256?: string; size?: number };
 export type TreeChild = { name: string; type: "file" | "folder" };
 export type TreePage = { children: TreeChild[]; more: boolean };
 
