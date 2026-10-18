@@ -7,6 +7,10 @@ main = "src/ingest/orchestrator/entry.ts"
 compatibility_date = "2025-07-06"
 workers_dev = false
 
+# Signs image proxy URLs in rendered pages (#224): the same value as the serving Worker's.
+[secrets]
+required = ["IMAGE_PROXY_SECRET"]
+
 [observability.logs]
 enabled = true
 invocation_logs = false

@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const requiredSettings = {
   CONVEX_INTERNAL_SECRET: "test-internal-secret-at-least-32-characters",
   AUTH_SECRET: "test-share-signing-secret",
+  IMAGE_PROXY_SECRET: "test-image-proxy-secret-at-least-32-chars",
 };
 const optionalSettings = [
   "NODE_ENV", "LOG_LEVEL", "CONVEX_URL", "CONVEX_SITE_URL", "RETENTION_SECRET",
@@ -23,7 +24,7 @@ afterEach(() => {
 });
 
 describe("Worker environment validation", () => {
-  it("loads with only the two required settings, without Google credentials", async () => {
+  it("loads with only the three required settings, without Google credentials", async () => {
     const config = await import("../src/config");
     expect(config).toMatchObject({
       ...requiredSettings,
@@ -54,6 +55,7 @@ describe("Worker environment validation", () => {
   it.each([
     ["AUTH_SECRET", 16],
     ["CONVEX_INTERNAL_SECRET", 32],
+    ["IMAGE_PROXY_SECRET", 32],
   ] as const)("enforces the minimum length of %s", async (key, minimum) => {
     vi.stubEnv(key, "x".repeat(minimum - 1));
     await expect(import("../src/config")).rejects.toThrow(`${key} must be at least ${minimum} characters`);

@@ -9,6 +9,7 @@ import { plaintextSealer, r2Store, type ContentSealer } from "../../src/ingest/o
 import { FakeGitHub } from "./fake-github";
 import { FakeDurableStorage, FakeR2Bucket } from "./fake-storage";
 import { initNodeMarkdownEngine } from "./markdown-engine";
+import { TEST_RENDER_OPTIONS } from "./ingest-render";
 
 initNodeMarkdownEngine();
 
@@ -54,7 +55,7 @@ export function ingestFixture(options: FixtureOptions = {}) {
     governor: new RateGovernor({ clock, ...options.governor }),
   });
   const deps: IngestDependencies = {
-    source, store, sealer: options.sealer ?? plaintextSealer, pipeline: options.pipeline ?? contentPipeline(), now: clock.now,
+    source, store, sealer: options.sealer ?? plaintextSealer, pipeline: options.pipeline ?? contentPipeline(TEST_RENDER_OPTIONS), now: clock.now,
     ...(options.snapshot ? { snapshot: options.snapshot } : {}),
   };
   const storage = new FakeDurableStorage();

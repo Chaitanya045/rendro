@@ -79,6 +79,44 @@ export async function startFaults(origins: { storage: string; convex: string[] }
   };
 }
 
+/** A request the Worker made to the fake external image host. */
+export type ImageHostRequest = { url: string; headers: Record<string, string> };
+
+export const imageHostOrigin = "https://images.e2e.example";
+const pixel = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==", "base64");
+
+/**
+ * A third-party image host for the image proxy (#224), answered inside the Worker's outbound fetch: nothing leaves the
+ * machine. It records what the Worker sent so specs can check that readers' cookies, IPs and user agents never reach it.
+ * Paths: `/pixel.png` (sets a cookie), `/scripted.svg`, `/page.html` (not an image) and `/to-private` (redirects to a
+ * loopback address). Any query is ignored, so specs add a unique one to stay clear of the Worker's cache.
+ */
+export async function startImageHost() {
+  const requests: ImageHostRequest[] = [];
+  const control = await listen((req, res) => {
+    res.setHeader("Content-Type", "application/json");
+    if (req.method === "GET" && req.url === "/requests") { res.end(JSON.stringify(requests)); return; }
+    res.writeHead(404).end("{}");
+  });
+  return {
+    control: control.origin,
+    close: () => control.close(),
+    /** The fixture's response for a Worker request, or undefined if it is not for the image host. */
+    intercept(request: Request): Response | undefined {
+      const url = new URL(request.url);
+      if (url.origin !== imageHostOrigin) return undefined;
+      requests.push({ url: request.url, headers: Object.fromEntries(request.headers) });
+      if (url.pathname === "/pixel.png") return new Response(pixel, { headers: { "Content-Type": "image/png", "Set-Cookie": "tracker=1; Path=/", "Cache-Control": "max-age=600" } });
+      if (url.pathname === "/scripted.svg") {
+        return new Response('<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8"><rect width="8" height="8" fill="teal"/><script>document.documentElement.setAttribute("data-ran","1")</script></svg>', { headers: { "Content-Type": "image/svg+xml" } });
+      }
+      if (url.pathname === "/page.html") return new Response("<p>not an image</p>", { headers: { "Content-Type": "text/html" } });
+      if (url.pathname === "/to-private") return new Response(null, { status: 302, headers: { Location: "http://127.0.0.1:9/pixel.png" } });
+      return new Response("Not found", { status: 404 });
+    },
+  };
+}
+
 /** No external forwarding: HTTPS mail/Google requests terminate in this fixture.
  * The only forwarded HTTP origins are the harness's own Worker and Convex.
  */

@@ -13,6 +13,7 @@ import { consumeIngestBatch, type IngestLog, type MessageBatchLike } from "./con
 import type { IngestDependencies } from "./ingest";
 import type { IngestMessage, QueueLike } from "./messages";
 import { contentPipeline } from "./content-pipeline";
+import { imageProxyRewriter } from "../../image-proxy";
 import { reconcileHeads, redeliverFailedDeliveries } from "./reconcile";
 import { plaintextSealer, r2Store, type R2BucketLike } from "./store";
 
@@ -26,6 +27,8 @@ export interface IngestWorkerEnv {
   GITHUB_ARCHIVE_ORIGINS?: string;
   /** Development and tests only, until P1 mints installation tokens. */
   GITHUB_DEV_TOKEN?: string;
+  /** Signs image proxy URLs in rendered pages (#224); the serving Worker's IMAGE_PROXY_SECRET. */
+  IMAGE_PROXY_SECRET: string;
 }
 
 export function ingestDependencies(env: IngestWorkerEnv): IngestDependencies {
@@ -38,7 +41,7 @@ export function ingestDependencies(env: IngestWorkerEnv): IngestDependencies {
     }),
     store: r2Store(env.INGEST_BUCKET),
     sealer: plaintextSealer,
-    pipeline: contentPipeline(),
+    pipeline: contentPipeline({ rewriteImageUrl: imageProxyRewriter(env.IMAGE_PROXY_SECRET) }),
     now: () => Date.now(),
   };
 }

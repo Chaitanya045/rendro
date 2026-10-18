@@ -4,6 +4,7 @@ import { beforeAll, describe, expect, it } from "vitest";
 import { RenderError } from "../src/ingest/limits";
 import { parseHtmlFragment } from "../src/ingest/parse-html";
 import { renderDocument } from "../src/ingest/render";
+import { TEST_RENDER_OPTIONS } from "./helpers/ingest-render";
 import { contentSchema, outputSchema, sanitizeContent, serializeVerified, stabilize } from "../src/ingest/sanitize";
 import { hostileCorpus } from "./fixtures/ingest/hostile-corpus";
 import { outputViolations } from "./helpers/ingest-invariants";
@@ -11,17 +12,18 @@ import { initNodeMarkdownEngine } from "./helpers/markdown-engine";
 
 beforeAll(() => initNodeMarkdownEngine());
 
-const render = (kind: "html" | "markdown", source: string) => renderDocument(source, kind === "html" ? "docs/page.html" : "docs/page.md").html;
+const render = async (kind: "html" | "markdown", source: string) => (await renderDocument(source, kind === "html" ? "docs/page.html" : "docs/page.md", TEST_RENDER_OPTIONS)).html;
 
 describe("hostile corpus", () => {
-  it.each(hostileCorpus.map((entry) => [entry.name, entry] as const))("neutralizes %s", (_name, entry) => {
-    const html = render(entry.kind, entry.source);
+  it.each(hostileCorpus.map((entry) => [entry.name, entry] as const))("neutralizes %s", async (_name, entry) => {
+    const html = await render(entry.kind, entry.source);
     expect(outputViolations(html)).toEqual([]);
     // Markup is escaped in text and attribute values, so a literal "<tag" means a real element.
     expect(html).not.toMatch(/<(?:script|style|iframe|object|embed|svg|math|base|meta|link|form|template|noscript|textarea|xmp|plaintext)\b/i);
     expect(attributeUrls(html, "href|src").filter((url) => /^\s*(?:javascript|vbscript|data|file|blob|intent|feed):/i.test(url))).toEqual([]);
-    // Nothing is fetched from the attacker's host; only the protocol-relative case may keep it as a plain link.
-    expect(attributeUrls(html, "src").filter((url) => url.includes("evil.invalid"))).toEqual([]);
+    // A reader's browser fetches nothing from the attacker's host: every image is same-origin (a repo
+    // file or the signed proxy), and only the protocol-relative case may keep the host as a plain link.
+    expect(attributeUrls(html, "src").filter((url) => !/^\/(?![/\\])/.test(url))).toEqual([]);
     if (entry.name !== "protocol-relative and backslash hosts") expect(attributeUrls(html, "href").filter((url) => url.includes("evil.invalid"))).toEqual([]);
     if (entry.keeps) expect(textContent(html)).toContain(entry.keeps);
     // The output is its own fixed point: parse, sanitize and serialize again changes nothing.
@@ -54,8 +56,8 @@ function textContent(html: string): string {
 }
 
 describe("allowlist details", () => {
-  it("keeps GitHub-style content markup", () => {
-    const html = render("html", [
+  it("keeps GitHub-style content markup", async () => {
+    const html = await render("html", [
       '<p align="center"><img src="logo.png" alt="Logo" width="120" height="40"></p>',
       '<details open><summary>More</summary><kbd>Ctrl</kbd>+<kbd>C</kbd></details>',
       '<table><caption>c</caption><colgroup><col></colgroup><thead><tr><th scope="col" colspan="2">h</th></tr></thead><tbody><tr><td rowspan="1">d</td></tr></tbody></table>',
@@ -71,14 +73,20 @@ describe("allowlist details", () => {
     expect(outputViolations(html)).toEqual([]);
   });
 
-  it("prefixes author ids and names so they cannot clobber globals", () => {
-    const html = render("html", '<a id="install" name="anchor" href="#install">i</a><p id="user-content-x">p</p>');
+  it("lets only same-origin image sources through the output schema", () => {
+    // A transform that forgot to proxy an external image cannot leak it: the output pass drops the src.
+    const tree = parseHtmlFragment('<img src="https://img.example/a.png" alt="a"><img src="//img.example/b.png"><img src="/img/sig/url" alt="c"><img src="/docs/d.png">');
+    expect(serializeVerified(tree)).toBe('<img alt="a"><img><img src="/img/sig/url" alt="c"><img src="/docs/d.png">');
+  });
+
+  it("prefixes author ids and names so they cannot clobber globals", async () => {
+    const html = await render("html", '<a id="install" name="anchor" href="#install">i</a><p id="user-content-x">p</p>');
     expect(html).toBe('<a id="user-content-install" name="user-content-anchor" href="#user-content-install">i</a><p id="user-content-user-content-x">p</p>');
   });
 
-  it("unwraps unknown elements but drops raw-text and embedding elements with their content", () => {
-    expect(render("html", "<custom-el><font color=red>kept</font></custom-el><center>c</center>")).toBe("keptc");
-    expect(render("html", "<object><p>fallback</p></object><button>b</button><select><option>o</option></select><video>v</video>")).toBe("b");
+  it("unwraps unknown elements but drops raw-text and embedding elements with their content", async () => {
+    expect(await render("html", "<custom-el><font color=red>kept</font></custom-el><center>c</center>")).toBe("keptc");
+    expect(await render("html", "<object><p>fallback</p></object><button>b</button><select><option>o</option></select><video>v</video>")).toBe("b");
   });
 
   it("drops table parts outside a table instead of letting the browser re-parent them", () => {
@@ -86,12 +94,12 @@ describe("allowlist details", () => {
     expect(serializeVerified(sanitizeContent(tree))).toBe("x");
   });
 
-  it("restricts input to disabled checkboxes", () => {
-    expect(render("html", '<input type="text" value="v" name="n"><input type="checkbox" checked>')).toBe('<input type="checkbox" disabled><input type="checkbox" checked disabled>');
+  it("restricts input to disabled checkboxes", async () => {
+    expect(await render("html", '<input type="text" value="v" name="n"><input type="checkbox" checked>')).toBe('<input type="checkbox" disabled><input type="checkbox" checked disabled>');
   });
 
-  it("only allows the classes the pipeline emits", () => {
-    const html = render("html", '<div class="markdown-alert markdown-alert-note x"><p class="markdown-alert-title">t</p></div><span class="hljs-keyword">k</span><code class="language-js evil">c</code>');
+  it("only allows the classes the pipeline emits", async () => {
+    const html = await render("html", '<div class="markdown-alert markdown-alert-note x"><p class="markdown-alert-title">t</p></div><span class="hljs-keyword">k</span><code class="language-js evil">c</code>');
     expect(html).toBe('<div><p>t</p></div><span>k</span><code class="language-js">c</code>');
   });
 

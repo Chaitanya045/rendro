@@ -562,6 +562,7 @@ invocation logs remain disabled because they include request URLs.
 | `/api/*` (JSON, redirects, preflights, errors) | none | `same-origin` | Refuses no-cors embedding of API data by other sites (`<script>`, `<img>`, `<link>`). CORS fetches, including the CLI and same-origin fetches, are unaffected. |
 | Publisher documents (sandbox CSP) | none | none | Their origin is opaque: CORP would block their own no-cors subresources, and COOP on a document opened in a sandboxed popup would make the navigation fail. The sandbox policy is unchanged. |
 | Static assets (`/*.js`, `/fonts/*`, `/styles/*`, favicons) and document assets | none | none | Opaque-origin viewer frames load `/private-viewer.js` and `/commentor.js` with no-cors `<script src>`. |
+| Image proxy (`/img/<sig>/<url>`) | none | `cross-origin` | Opaque-origin viewer frames load proxied images with no-cors `<img>`; `same-origin` or `same-site` would block them. The bytes are public third-party images, behind a signature (see [Image proxy](#image-proxy)). |
 
 A Rendro page opened from a publisher document's link (a sandboxed popup without `allow-popups-to-escape-sandbox`) now shows the browser's COOP error instead of running in an opaque origin, where its storage access already failed.
 
@@ -1445,7 +1446,7 @@ The base stylesheet is 1,435 bytes (778 gzip), against a 419 KB CDN script (126 
 
 `src/config.ts` validates the Worker environment at startup. The table lists every named string setting read by Worker code; `ASSETS` (static assets) and `STORAGE` (the R2 bucket) are separate bindings in `wrangler.toml`; there is no storage endpoint, region or access key setting. Google OAuth credentials are read only by Convex, and `BASE_URL` is unused. The local Node entry reads `PORT` separately.
 
-Both production (top-level) and `development` declare the same required secrets: `CONVEX_INTERNAL_SECRET` and `AUTH_SECRET`. Wrangler checks these at deploy time, and `src/config.ts` validates them at startup. Production commands use the top-level configuration without an `--env` flag; development commands use `--env development`.
+Both production (top-level) and `development` declare the same required secrets: `CONVEX_INTERNAL_SECRET`, `AUTH_SECRET` and `IMAGE_PROXY_SECRET`. Wrangler checks these at deploy time, and `src/config.ts` validates them at startup. Production commands use the top-level configuration without an `--env` flag; development commands use `--env development`.
 
 | Variable | Storage | Purpose |
 |---|---|---|
@@ -1455,6 +1456,7 @@ Both production (top-level) and `development` declare the same required secrets:
 | `CONVEX_INTERNAL_SECRET` | Secret (required by `wrangler.toml`, ≥32 chars) | Worker-only legacy functions, ingress proofs and storage resolver proofs; same value in Convex |
 | `AUTH_SECRET` | Secret (required, ≥16 chars) | Encrypts scoped private viewer tickets and signs legacy `/share/:token` HMAC links. Better Auth signing happens in Convex |
 | `RETENTION_SECRET` | Secret (optional, ≥32 chars) | Bearer for Convex's retention endpoints, used by the scheduled purge; same value as in Convex. Without it the purge reports itself disabled and fails |
+| `IMAGE_PROXY_SECRET` | Secret (required, ≥32 chars) | HMAC key for same-origin image proxy URLs (see [Image proxy](#image-proxy)). Set the same value on the ingest Worker. Rotating it requires a `RENDERER_VERSION` bump, so stored renders are rebuilt with new signatures |
 | `LOG_LEVEL` | Var (optional) | Pino log level; defaults to `debug` outside production, `info` in production |
 | `PORT` | Local only; not read by Worker | Validated in `src/index.ts`; Node.js server port (integer 1–65535, default 3000) |
 
@@ -1661,11 +1663,11 @@ rendered titles ──► buildSidebar ──► per-commit sidebar tree
 | Module | Role |
 |---|---|
 | `detect.ts` | Docs detection from the recursive tree listing |
-| `render.ts` | `renderDocument(source, path)`, `renderKey(blobSha, path)` |
+| `render.ts` | `renderDocument(source, path, { rewriteImageUrl })` (async: the image hook may be, and the proxy's signing is), `renderKey(blobSha, path)` |
 | `markdown-engine.ts` | comrak WASM wrapper; `initMarkdownEngine(module)` must run once per isolate |
 | `parse-html.ts` | parse5 with depth, formatting-list, attribute and work bounds |
 | `sanitize.ts` | Allowlist schemas and fixed-point serialization (the security boundary) |
-| `transforms.ts`, `paths.ts` | URL rewriting, GitHub heading slugs, alerts, link/image attributes |
+| `transforms.ts`, `paths.ts` | URL rewriting, GitHub heading slugs, alerts, link/image attributes, image proxy rewrite |
 | `highlight.ts`, `highlight-theme.ts` | Class-only highlighting and its stylesheet |
 | `sidebar.ts` | Sidebar tree with titles |
 
@@ -1759,6 +1761,13 @@ init). Shiki took 4.6 s warm, with 320 ms of init for 31 grammars.
     character, loses its `href`.
   - External links get `rel="nofollow noopener noreferrer"`. Images get
     `loading="lazy" decoding="async" referrerpolicy="no-referrer"`.
+  - External images go through the `rewriteImageUrl` hook after sanitizing; the
+    ingest Worker sets it to the signed same-origin image proxy
+    (see [Image proxy](#image-proxy)). Without a hook they lose their `src`. An image that cannot be proxied (a blocked
+    target or a URL over 2,048 characters) loses its `src`. The output schema
+    accepts only root-relative image sources, so no third-party host survives in
+    rendered output even if a transform forgets one. `srcset` never survives
+    sanitizing, so `src` is the only image URL.
 - **Fixed point.** The trusted transforms (alerts, heading ids, highlighting,
   attributes) emit only what a second `outputSchema` allows. The serialized HTML
   must survive parse → sanitize(outputSchema) → serialize byte for byte. That
@@ -1799,6 +1808,76 @@ init). Shiki took 4.6 s warm, with 320 ms of init for 31 grammars.
   on the directory, because relative links resolve against it. An unchanged file
   in an unchanged directory reuses its render across commits. Bumping
   `RENDERER_VERSION` invalidates everything.
+
+### Image proxy
+
+Sanitized repo content would otherwise keep `<img src="https://…">` pointing at
+any host, so every reader's browser would tell the repo author's chosen host
+its IP address and user agent. Like GitHub's camo, Rendro rewrites external
+images at ingest to `/img/<sig>/<encoded-url>` on its own origin and fetches
+them server-side (#224).
+
+- **Signing** (`src/image-proxy.ts`). `encoded-url` is the base64url of the exact
+  URL (as normalized by `new URL().href`), and `sig` the base64url HMAC-SHA256 of
+  that URL under `IMAGE_PROXY_SECRET`. The HMAC key is imported once per isolate.
+  The proxy recomputes the signature and compares the strings with
+  `constantTimeEqual`, so no character of either segment can vary. It also requires
+  the canonical encoding, so a URL has exactly one signed path. Anything else,
+  including an unsigned or mis-signed path, is an empty 404 that never fetches.
+- **Upstream checks** (`src/image-proxy-target.ts`), applied when ingest signs a URL
+  and again on every redirect hop. Only `http(s)` on the default port, without
+  credentials. IP-literal hosts in loopback, private, CGNAT, link-local (cloud
+  metadata), reserved, documentation and multicast IPv4 ranges are refused. For IPv6
+  only global unicast (`2000::/3`) is allowed, minus documentation, 6to4 and Teredo,
+  which rules out loopback, ULA, link-local, and mapped or NAT64 IPv4. Single-label
+  names, local suffixes (`.localhost`, `.local`, `.internal`, `.home.arpa`, …) and
+  known metadata hostnames are refused.
+  - **Residual risk.** Workers cannot resolve DNS, so a public name that resolves
+    to a private address is not caught by these checks. Workers egress does not
+    reach private networks: subrequests [cannot target IP addresses
+    directly](https://developers.cloudflare.com/workers/platform/known-issues/#fetch-to-ip-addresses),
+    and private services are only reachable through an explicit [Workers
+    VPC](https://developers.cloudflare.com/workers-vpc/) binding, which Rendro
+    does not have. The local Node server has no such boundary and is for
+    development only.
+- **Fetch** (`src/routes/image-proxy.ts`, mounted before session middleware). A GET
+  with `redirect: "manual"`, at most 3 redirects (each re-checked), a fixed
+  `User-Agent: Rendro-Image-Proxy/1.0 (+https://rendro.app)`, and no cookies,
+  credentials, referrer or reader headers. Cloudflare's egress carries its own
+  address, not the reader's. A 10 s deadline covers every hop and the whole body.
+- **Response.** Only status 200 with a type from the allowlist (`image/png`,
+  `jpeg`, `gif`, `webp`, `avif`, `svg+xml`, `x-icon` and its alias
+  `vnd.microsoft.icon`). The body is streamed and cut off past 10 MiB (a larger
+  `Content-Length` is refused before reading). Only fixed headers leave, so
+  upstream `Set-Cookie`, validators, CORS and links are all dropped:
+  - `Content-Type` (the normalized type), `Cache-Control`;
+  - `Content-Security-Policy: default-src 'none'; style-src 'unsafe-inline'; sandbox`
+    on every response, which keeps an SVG inert even when opened directly;
+  - `Content-Disposition: inline`, `X-Content-Type-Options: nosniff`,
+    `Referrer-Policy: no-referrer`;
+  - `Cross-Origin-Resource-Policy: cross-origin`. The viewer frames are sandboxed
+    without `allow-same-origin`, so their image requests carry an opaque origin.
+    Chromium and Firefox then block `same-origin` and `same-site` CORP responses
+    (`tests/image-proxy-browser.test.ts` keeps a control for this). The proxied
+    bytes are public third-party content, and only signed URLs are served.
+  Failures (refused target, redirect limit, bad status or type, oversize,
+  timeout, network error) are an empty 502.
+- **Cache.** The Workers Cache API, keyed by the SHA-256 of the URL. A success
+  lives for the upstream's `max-age`/`s-maxage`, clamped to 5 minutes–7 days
+  (1 day when absent; 5 minutes for `no-cache`, `no-store` or `private`, so
+  badges stay fresh). Failures live 60 s. A body that fails mid-stream is stored as
+  a failure instead. Storing runs in `waitUntil`; the Node server has no cache.
+- **Frame CSP.** `RENDERED_DOCUMENT_POLICY` in `src/routes/asset-headers.ts` is the
+  publisher frame policy plus `img-src 'self'`, for ingest-rendered documents when
+  the serving path (P4) lands. It is not applied to uploaded publisher HTML:
+  uploaded sites legitimately load images from other hosts, and tightening their
+  frame would break them. Sanitized output needs no `data:` images.
+- **Tests.** `tests/image-proxy.test.ts` covers signing, target checks and the route's
+  abuse cases. `tests/image-proxy-browser.test.ts` runs the real responses in
+  Chromium. `e2e/image-proxy.spec.ts` renders a Markdown document with external
+  images, publishes it and checks, in every engine, that the reader's browser
+  requests only our origin, while the Worker fetches the harness's fake image host
+  with nothing of the reader's.
 
 ### Docs detection
 
@@ -1858,9 +1937,8 @@ root:
 
 - Repo HTML loses its scripts, inline styles and `<link>` stylesheets, so it is
   shown in Rendro's typography. Allowing repo-relative stylesheets is a product decision.
-- External images load from their origin, which shares the reader's IP with the
-  image host. A camo-style proxy or an `img-src` policy decides this. For rewriting
-  at ingest (#224), `renderDocument` takes a `rewriteImageUrl` option (see P3b below).
+- External images are rewritten at ingest to the signed same-origin image proxy
+  (#224, see [Image proxy](#image-proxy)), so readers' IPs never reach the image host.
 - Math (`$…$`) and Mermaid fences stay as text and code. mdBook `SUMMARY.md`,
   MkDocs `nav` and Docusaurus sidebars are not yet used for ordering.
 
@@ -1891,6 +1969,7 @@ This section covers how a GitHub commit becomes a ready-to-serve snapshot (#220,
 | Cron `*/10 * * * *` | Scheduled handler | Re-checks heads and redelivers failed webhooks |
 | `GITHUB_API_ORIGIN`, `GITHUB_ARCHIVE_ORIGINS` | Vars, optional | Point the client at a fake GitHub; the defaults are `api.github.com` and `codeload.github.com` |
 | `GITHUB_DEV_TOKEN` | Secret, optional | Development token until P1 mints installation tokens; without it requests are unauthenticated |
+| `IMAGE_PROXY_SECRET` | Secret, required | Signs image proxy URLs in rendered pages (#224); must equal the serving Worker's value |
 
 ### Storage key schema
 
@@ -1930,7 +2009,7 @@ gh/v1/
    - The archive redirect is followed at once and never stored, since private-repo links expire in five minutes. The installation token is never sent to the archive host. Archive entries carry no blob IDs, so each wanted entry is hashed and checked against the tree listing.
    - Files whose archive bytes differ from their blob (export-subst, LFS) are fetched one by one, as is everything still missing when the archive fails partway (an expired link, a cut connection, a different commit in the pax header).
    - Pages render as their bytes arrive. Then write the sidebar, and the manifest last.
-   - Image hook (#224): `contentPipeline({ rewriteImageUrl })` passes every external (`http`/`https`) image source through a rewrite. It runs on sanitized content before serialization, so the output allowlist and the fixed-point check still apply to the rewritten URL, and returning null drops the source. The output depends on the rule, so changing it must bump `RENDERER_VERSION`. No rule is configured yet.
+   - Image hook (#224): `contentPipeline({ rewriteImageUrl })` passes every external (`http`/`https`) image source through a rewrite, after sanitizing and before serialization, so the output allowlist (same-origin images only) and the fixed-point check apply to the rewritten URL. Returning null drops the source; without a hook every external image loses its source (fail closed). The ingest Worker sets `rewriteImageUrl: imageProxyRewriter(env.IMAGE_PROXY_SECRET)`, so external images become signed `/img/` proxy URLs and non-public targets lose their source. The hook may be async (signing uses WebCrypto), so `ContentPipeline.render` is async. The output depends on the rule and the secret, so changing either must bump `RENDERER_VERSION` (now 2 for the proxy).
 6. Flip: write the new pointer with a compare-and-swap on the pointer object's ETag (R2 `onlyIf`). If another writer got there first, the attempt fails and retries.
 7. Re-check the head (normally a free 304). If it moved during the build, ingest again, up to two follow-ups per call.
 

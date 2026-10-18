@@ -3,6 +3,7 @@ import { createRequire } from "node:module";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { RenderError } from "../src/ingest/limits";
+import { TEST_RENDER_OPTIONS } from "./helpers/ingest-render";
 
 /*
  * Each test gets a fresh module graph so the engine's per-isolate state
@@ -32,10 +33,10 @@ describe("markdown engine lifecycle", () => {
     const { renderDocument } = await import("../src/ingest/render");
     engine.initMarkdownEngine(wasm());
     const reason = (action: () => unknown) => { try { action(); return null; } catch (error) { return error instanceof Error && "reason" in error ? (error as RenderError).reason : error; } };
-    expect(reason(() => renderDocument("# x", "a.md"))).toBe("engine");
+    await expect(renderDocument("# x", "a.md", TEST_RENDER_OPTIONS)).rejects.toMatchObject({ reason: "engine" });
     expect(reason(() => engine.markdownToUnsafeHtml("y"))).toBe("engine");
     // HTML documents do not use the engine and still render.
-    expect(renderDocument("<p>ok</p>", "a.html").html).toBe("<p>ok</p>");
+    expect((await renderDocument("<p>ok</p>", "a.html", TEST_RENDER_OPTIONS)).html).toBe("<p>ok</p>");
     expect(markdownToHtml).toHaveBeenCalledTimes(1);
   });
 });

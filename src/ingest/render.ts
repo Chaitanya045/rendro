@@ -29,24 +29,29 @@ export interface RenderedDocument {
 
 export interface RenderOptions {
   /**
-   * Hook for external image sources (the image proxy, #224). The output
-   * depends on it, so a change of rewrite rule must change the render key
-   * (bump RENDERER_VERSION). Unset, external images keep their URLs.
+   * Hook for external image sources: the image proxy (#224) passes
+   * `imageProxyRewriter(IMAGE_PROXY_SECRET)`. It may be async (signing uses
+   * WebCrypto). Returning null drops the source. Unset, every external image
+   * loses its source, because the output schema allows same-origin images
+   * only. The output depends on the rule (and the proxy's secret) but the
+   * render key does not, so changing either must bump RENDERER_VERSION.
    */
-  rewriteImageUrl?: (url: string, docPath: string) => string | null;
+  rewriteImageUrl?: (url: string, docPath: string) => string | null | Promise<string | null>;
 }
 
+const dropImage = () => null;
+
 /**
- * Render one repository file at `path` into sanitized HTML. Pure and
- * synchronous; throws RenderError when the file exceeds a limit or its
- * output cannot be proven stable.
+ * Render one repository file at `path` into sanitized HTML. Pure apart from
+ * the image hook; rejects with RenderError when the file exceeds a limit or
+ * its output cannot be proven stable.
  */
-export function renderDocument(source: string, path: string, options: RenderOptions = {}): RenderedDocument {
+export async function renderDocument(source: string, path: string, options: RenderOptions = {}): Promise<RenderedDocument> {
   const kind = documentKindOf(path);
   if (!kind) throw new TypeError(`Not a renderable document: ${path}`);
   checkSourceLimits(source);
   const { tree, title } = kind === "html" ? parseRepoHtml(source) : parseMarkdown(source, kind === "mdx");
-  return { rendererVersion: RENDERER_VERSION, kind, ...finish(tree, path, title, options) };
+  return { rendererVersion: RENDERER_VERSION, kind, ...await finish(tree, path, title, options) };
 }
 
 function parseMarkdown(source: string, mdx: boolean): { tree: Root; title: string | null } {
@@ -63,10 +68,10 @@ function parseRepoHtml(source: string): { tree: Root; title: string | null } {
   return { tree: { type: "root", children: body }, title: title || null };
 }
 
-function finish(tree: Root, path: string, title: string | null, options: RenderOptions): Pick<RenderedDocument, "html" | "title" | "headings"> {
+async function finish(tree: Root, path: string, title: string | null, options: RenderOptions): Promise<Pick<RenderedDocument, "html" | "title" | "headings">> {
   rewriteUrls(tree, path);
   const clean = sanitizeContent(tree);
-  if (options.rewriteImageUrl) rewriteExternalImages(clean, path, options.rewriteImageUrl);
+  await rewriteExternalImages(clean, path, options.rewriteImageUrl ?? dropImage);
   convertAlerts(clean);
   const headings = assignHeadingIds(clean);
   decorateLinksAndImages(clean);

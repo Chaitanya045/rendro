@@ -16,6 +16,8 @@ const envSchema = z.object({
   // Bearer for Convex's retention endpoints, used only by the scheduled purge. Optional so a
   // deployment without it still serves traffic; the purge then reports itself disabled.
   RETENTION_SECRET: z.string().min(32, "RETENTION_SECRET must be at least 32 characters").optional(),
+  // Signs same-origin image proxy URLs (/img/<sig>/<url>) at ingest; dedicated, never reused.
+  IMAGE_PROXY_SECRET: z.string().min(32, "IMAGE_PROXY_SECRET must be at least 32 characters"),
 });
 
 type Env = z.infer<typeof envSchema>;
@@ -45,3 +47,4 @@ export const CONVEX_SITE_URL = env.CONVEX_SITE_URL
 
 export const AUTH_SECRET = env.AUTH_SECRET;
 export const RETENTION_SECRET = env.RETENTION_SECRET;
+export const IMAGE_PROXY_SECRET = env.IMAGE_PROXY_SECRET;

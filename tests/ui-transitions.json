@@ -361,6 +361,10 @@
   ],
   "routeSkips": [
     {
+      "route": "GET /img/*",
+      "reason": "Signed same-origin image proxy (#224): image bytes or an empty error, never an HTML page."
+    },
+    {
       "route": "GET /p/:slug/tree",
       "reason": "JSON tree data consumed by the registered viewer; no standalone HTML page."
     },

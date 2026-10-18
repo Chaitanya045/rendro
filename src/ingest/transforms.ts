@@ -90,18 +90,26 @@ export function decorateLinksAndImages(tree: Root): void {
 }
 
 /**
- * Pass external (http/https) image sources through `rewrite`, e.g. to route
- * them via an image proxy (#224). Runs on sanitized content, before
- * serialization, so the output allowlist and fixed-point check still apply to
- * the rewritten URL. Returning null drops the source.
+ * Pass external (http/https) image sources through `rewrite`: the image proxy
+ * (#224) turns them into signed same-origin paths, so a reader's browser never
+ * requests a third-party host. Runs on sanitized content, before
+ * serialization, so the output allowlist (same-origin images only) and the
+ * fixed-point check apply to the rewritten URL. Returning null drops the
+ * source. Each distinct URL is rewritten once.
  */
-export function rewriteExternalImages(tree: Root, docPath: string, rewrite: (url: string, docPath: string) => string | null): void {
-  walkElements(tree, (node: Element) => {
-    if (node.tagName !== "img" || typeof node.properties.src !== "string" || !/^https?:/.test(node.properties.src)) return;
-    const next = rewrite(node.properties.src, docPath);
+export async function rewriteExternalImages(tree: Root, docPath: string, rewrite: (url: string, docPath: string) => string | null | Promise<string | null>): Promise<void> {
+  const images: Array<{ node: Element; src: string }> = [];
+  walkElements(tree, (node) => {
+    const src = node.properties.src;
+    if (node.tagName === "img" && typeof src === "string" && /^https?:/.test(src)) images.push({ node, src });
+  });
+  const rewritten = new Map<string, Promise<string | null>>();
+  for (const { src } of images) if (!rewritten.has(src)) rewritten.set(src, Promise.resolve(rewrite(src, docPath)));
+  for (const { node, src } of images) {
+    const next = await rewritten.get(src);
     if (next === null) delete node.properties.src;
     else node.properties.src = next;
-  });
+  }
 }
 
 /** First h1, else the first heading of any level. */

@@ -93,7 +93,8 @@ export const outputSchema: Schema = {
     a: [...LINK_ATTRIBUTES, ["name", prefixed], ["ariaDescribedBy", prefixed], ["rel", "nofollow", "noopener", "noreferrer"]],
     code: [["className", LANGUAGE_CLASS, "hljs"]],
     div: [["className", "markdown-alert", /^markdown-alert-(?:note|tip|important|warning|caution)$/]],
-    img: [...IMAGE_ATTRIBUTES, ["loading", "lazy"], ["decoding", "async"], ["referrerPolicy", "no-referrer"]],
+    // Only root-relative sources: repo files and the signed image proxy. No external host survives.
+    img: [["src", /^\/(?![/\\])/], "alt", "width", "height", ["loading", "lazy"], ["decoding", "async"], ["referrerPolicy", "no-referrer"]],
     p: [["className", "markdown-alert-title"]],
     // highlight.js emits hljs-<scope> plus sub-scope classes such as "function_".
     span: [["className", /^hljs-[a-z][a-z0-9-]{0,40}$/, /^[a-z][a-z0-9]{0,40}_+$/]],

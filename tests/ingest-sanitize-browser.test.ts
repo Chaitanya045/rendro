@@ -1,6 +1,7 @@
 import { beforeAll, expect, it } from "vitest";
 
 import { renderDocument } from "../src/ingest/render";
+import { TEST_RENDER_OPTIONS } from "./helpers/ingest-render";
 import { hostileCorpus } from "./fixtures/ingest/hostile-corpus";
 import { browserStep, createBrowserHarness } from "./helpers/browser";
 import { ALLOWED_ATTRIBUTES, ALLOWED_TAGS } from "./helpers/ingest-invariants";
@@ -21,10 +22,10 @@ beforeAll(async () => {
   initNodeMarkdownEngine();
   // Positive control: the same payloads unsanitized must trip the canary.
   pages.set("/control", `<!doctype html><html><head><meta charset="utf-8">${CANARY}</head><body><img src="x" onerror="__xss(1)"><details open ontoggle="__xss(2)"></details></body></html>`);
-  hostileCorpus.forEach((entry, index) => {
-    const html = renderDocument(entry.source, entry.kind === "html" ? "docs/page.html" : "docs/page.md").html;
+  for (const [index, entry] of hostileCorpus.entries()) {
+    const { html } = await renderDocument(entry.source, entry.kind === "html" ? "docs/page.html" : "docs/page.md", TEST_RENDER_OPTIONS);
     pages.set(`/case/${index}`, `<!doctype html><html><head><meta charset="utf-8">${CANARY}</head><body>${html}</body></html>`);
-  });
+  }
   await harness.start((request, response) => {
     const page = pages.get(new URL(request.url ?? "/", "http://localhost").pathname);
     response.writeHead(page ? 200 : 404, { "Content-Type": page ? "text/html; charset=utf-8" : "text/plain" });

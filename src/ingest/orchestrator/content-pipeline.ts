@@ -7,7 +7,7 @@ import { IngestError } from "./errors";
 import { PageRenderError, type ContentPipeline } from "./pipeline";
 
 export interface ContentPipelineOptions {
-  /** External image rewrite (image proxy, #224). See RenderOptions.rewriteImageUrl. */
+  /** External image rewrite: the image proxy (#224). See RenderOptions.rewriteImageUrl. */
   rewriteImageUrl?: RenderOptions["rewriteImageUrl"];
 }
 
@@ -42,10 +42,10 @@ export function contentPipeline(options: ContentPipelineOptions = {}): ContentPi
     configFilesToRead,
     detect: (entries, configs) => detectDocs(entries, { configs }),
     renderKey,
-    render(source, path) {
+    async render(source, path) {
       const engineWasDown = markdownEngineFailed();
       try {
-        const rendered = renderDocument(source, path, renderOptions);
+        const rendered = await renderDocument(source, path, renderOptions);
         return { html: rendered.html, title: rendered.title, headings: rendered.headings };
       } catch (error) {
         if (!(error instanceof RenderError)) throw error;

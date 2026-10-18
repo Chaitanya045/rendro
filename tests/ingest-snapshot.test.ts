@@ -2,9 +2,10 @@ import { describe, expect, it, vi } from "vitest";
 import { blobKey, manifestKey, renderObjectKey } from "../src/ingest/orchestrator/keys";
 import { RENDERER_VERSION } from "../src/ingest/limits";
 import { contentPipeline } from "../src/ingest/orchestrator/content-pipeline";
+import { TEST_RENDER_OPTIONS } from "./helpers/ingest-render";
 import { PageRenderError, type ContentPipeline, type PipelineDocSet } from "../src/ingest/orchestrator/pipeline";
 
-const real = contentPipeline();
+const real = contentPipeline(TEST_RENDER_OPTIONS);
 const RV = RENDERER_VERSION;
 import { buildSnapshot, type SnapshotManifest, type SnapshotOptions } from "../src/ingest/orchestrator/snapshot";
 import { RepoContent, type ContentSealer } from "../src/ingest/orchestrator/store";
@@ -54,7 +55,7 @@ describe("buildSnapshot: first import", () => {
       docSets: [{ root: "docs", generator: "folder", kind: "markdown", entry: "docs/index.md" }],
     });
     expect(manifest.docs?.rootTree).toMatch(/^[0-9a-f]{40}$/);
-    expect(manifest.files["docs/index.md"]).toMatchObject({ title: "Home", render: expect.stringMatching(/^render\/v1\/markdown\//) as unknown });
+    expect(manifest.files["docs/index.md"]).toMatchObject({ title: "Home", render: expect.stringMatching(new RegExp(`^render/v${RV}/markdown/`)) as unknown });
     expect(manifest.files["docs/img/figure-0.png"]).toEqual({ sha: expect.any(String) as unknown, size: 2048 });
     const rendered = await fixture.content.getJson<{ html: string }>(renderObjectKey(11, manifest.files["docs/index.md"].render as string));
     expect(rendered?.html).toContain("Welcome.");
@@ -194,7 +195,7 @@ describe("buildSnapshot: first import", () => {
 describe("buildSnapshot: page failures", () => {
   it("records expected render failures and carries on", async () => {
     const pipeline: ContentPipeline = { ...real, render: (source, path) => {
-      if (path.endsWith("bad.md")) throw new PageRenderError("too deep", "too-deep");
+      if (path.endsWith("bad.md")) return Promise.reject(new PageRenderError("too deep", "too-deep"));
       return real.render(source, path);
     } };
     const fixture = setup({ pipeline });
@@ -214,7 +215,7 @@ describe("buildSnapshot: page failures", () => {
   });
 
   it("stores an empty outline for pipelines without headings", async () => {
-    const pipeline: ContentPipeline = { ...real, render: (source) => ({ html: `<p>${source.length}</p>`, title: "T" }) };
+    const pipeline: ContentPipeline = { ...real, render: (source) => Promise.resolve({ html: `<p>${source.length}</p>`, title: "T" }) };
     const fixture = setup({ pipeline });
     const head = fixture.repo.commit({ "docs/index.md": "# Home\n" });
     const { manifest } = await fixture.build(head);
@@ -222,7 +223,7 @@ describe("buildSnapshot: page failures", () => {
   });
 
   it("fails the build on an unexpected render error, writing no manifest", async () => {
-    const pipeline: ContentPipeline = { ...real, render: () => { throw new Error("renderer bug"); } };
+    const pipeline: ContentPipeline = { ...real, render: () => Promise.reject(new Error("renderer bug")) };
     const fixture = setup({ pipeline });
     const head = fixture.repo.commit({ "docs/index.md": "# Home\n" });
     await expect(fixture.build(head)).rejects.toThrow("renderer bug");
