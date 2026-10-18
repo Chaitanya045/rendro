@@ -30,7 +30,13 @@ The harness uses the same local workerd development runtime as `wrangler dev`;
 it does not import the Worker into Node or replace its route handlers. A temporary
 copy of `wrangler.toml` relocates only the entry point and asset directory to
 absolute paths, preserving the production compatibility date, `nodejs_compat`,
-ASSETS binding and `run_worker_first`. `NODE_ENV` remains `production`.
+ASSETS binding and `run_worker_first`. `NODE_ENV` remains `production`. The copy
+also binds the repository read path (#234), which production leaves unbound until
+P5: a local R2 bucket and KV namespace, and a second Worker, the fixture control
+Worker in `e2e/repo-access/` that answers the real access protocol from grants in
+its own KV. After seeding, setup ingests two repositories (public and private)
+with the P3b pipeline from the fake GitHub straight into that bucket
+(`e2e/repo-fixtures.ts`) and grants the private one to the seeded owner.
 
 We evaluated both APIs exposed by the locked Wrangler version.
 [`createTestHarness`](https://developers.cloudflare.com/workers/wrangler/api/)

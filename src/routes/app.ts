@@ -91,6 +91,10 @@ export interface PublicShellPublication {
 interface OrgTreePageOptions {
   publication?: PublicShellPublication;
   documentBase?: string;
+  /** Frames and tree pages load from here instead of `documentBase` (a branch view pins its commit). */
+  frameBase?: string;
+  /** Copy the viewer URL under neutral labels (repository docs, public or private). */
+  copyLink?: boolean;
   displayName?: string;
   backHref?: string;
   backLabel?: string;
@@ -112,6 +116,8 @@ export interface ScopedDocumentShellOptions {
   backHref?: string;
   backLabel?: string;
   publicDocument?: boolean;
+  frameBase?: string;
+  copyLink?: boolean;
   shareConfig?: {
     organizationId: string;
     projectId: string;
@@ -139,12 +145,14 @@ export function renderScopedDocumentShell(options: ScopedDocumentShellOptions): 
     backLabel: options.backLabel,
     publicDocument: options.publicDocument,
     shareConfig: options.shareConfig,
+    frameBase: options.frameBase,
+    copyLink: options.copyLink,
   });
 }
 
 function renderOrgTreePage(user: User | null, org: string, selectedDoc = "", options: OrgTreePageOptions = {}): string {
   const publication = options.publication;
-  const isPublicDocument = Boolean(publication || options.publicDocument);
+  const isPublicDocument = Boolean(publication || options.publicDocument || options.copyLink);
   const documentBase = options.documentBase ?? (publication
     ? `/public/${encodeURIComponent(publication.orgSlug)}/${encodeURIComponent(publication.slug)}`
     : "");
@@ -155,9 +163,9 @@ function renderOrgTreePage(user: User | null, org: string, selectedDoc = "", opt
   // Match the management shell's account avatar: first character of the
   // display name (or email), so one account reads the same everywhere.
   const initials = user ? escapeHtml((user.name || user.email).trim().charAt(0).toUpperCase() || "R") : "";
-  const shareLabel = isPublicDocument ? "Copy public URL" : options.shareConfig ? "Share document" : "Copy signed URL";
-  const sharePendingLabel = isPublicDocument ? "Copying public URL…" : options.shareConfig ? "Creating share…" : "Creating signed URL…";
-  const shareDoneLabel = isPublicDocument ? "Public URL copied!" : options.shareConfig ? "Share link copied!" : "Signed URL copied!";
+  const shareLabel = options.copyLink ? "Copy link" : isPublicDocument ? "Copy public URL" : options.shareConfig ? "Share document" : "Copy signed URL";
+  const sharePendingLabel = options.copyLink ? "Copying link…" : isPublicDocument ? "Copying public URL…" : options.shareConfig ? "Creating share…" : "Creating signed URL…";
+  const shareDoneLabel = options.copyLink ? "Link copied!" : isPublicDocument ? "Public URL copied!" : options.shareConfig ? "Share link copied!" : "Signed URL copied!";
   const sandboxAttribute = ' sandbox="allow-scripts allow-forms allow-popups allow-downloads"';
   const backMarkup = options.backHref
     ? `<a class="topbar-btn topbar-btn-back" href="${escapeHtml(options.backHref)}" aria-label="${escapeHtml(options.backLabel ?? "Back")}"><span class="material-symbols-outlined" aria-hidden="true">arrow_back</span><span class="topbar-back-label">${escapeHtml(options.backLabel ?? "Back")}</span></a>`
@@ -540,7 +548,7 @@ ${renderStylesheet("viewer-base")}
 
 <aside class="sidebar" id="doc-sidebar" aria-labelledby="doc-sidebar-title">
   <div class="sidebar-divider" id="doc-sidebar-title">Docs</div>
-  <div class="sidebar-tree" data-tree-org="${orgEsc}"${documentBase ? ` data-document-base="${escapeHtml(documentBase)}"` : ""}>
+  <div class="sidebar-tree" data-tree-org="${orgEsc}"${documentBase ? ` data-document-base="${escapeHtml(documentBase)}"` : ""}${options.frameBase ? ` data-frame-base="${escapeHtml(options.frameBase)}"` : ""}>
     <div class="tree-stack" id="tree-container" style="position:relative">
       <div class="active-indicator" id="active-indicator" style="opacity:0;transition:none"></div>
       ${renderTreeSkeleton()}
@@ -931,7 +939,7 @@ ${renderStylesheet("viewer-base")}
       var publicBase=window.RENDRO_PUBLICATION_BASE||"",shareConfig=window.RENDRO_SHARE_CONFIG;
       if(publicBase){
         var publicUrl=new URL(publicBase,window.location.origin);publicUrl.searchParams.set("doc",relativeDoc);
-        copying=true;await copyText(publicUrl.href);setShareFeedback("Public URL copied!");
+        copying=true;await copyText(publicUrl.href);setShareFeedback(${JSON.stringify(shareDoneLabel)});
       }else if(shareConfig){
         var res=await fetch("/api/rendro/shares",{signal:shareController.signal,method:"POST",headers:{"Content-Type":"application/json",accept:"application/json"},body:JSON.stringify({organizationId:shareConfig.organizationId,projectId:shareConfig.projectId,documentPath:relativeDoc,expiresInSeconds:604800})});
         if(signedOut)return;

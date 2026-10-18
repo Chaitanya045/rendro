@@ -149,12 +149,13 @@ pnpm exec convex deploy
 
 Use two **private** R2 buckets, bound as `STORAGE` in `wrangler.toml`: `rendro-docs` for production (the top-level configuration) and `dev-rendro` for the `development` environment (`rendro-dev`). A new account creates them first; the names in the file are the single source of truth. Do not create an S3 API token, an `r2.dev` URL or a custom domain: the Worker reaches the bucket through its binding, so there is no credential to leak.
 
-`wrangler.toml` sets `NODE_ENV` as a var. Both production and `development` require exactly these three secrets at startup and in Wrangler: `CONVEX_INTERNAL_SECRET`, `AUTH_SECRET` and `IMAGE_PROXY_SECRET`. List secret names with `pnpm exec wrangler secret list` for production (`rendro`) and `pnpm exec wrangler secret list --env development` for development (`rendro-dev`). Production uses the top-level configuration; there is no named `--env production` environment.
+`wrangler.toml` sets `NODE_ENV` as a var. Both production and `development` require exactly these four secrets at startup and in Wrangler: `CONVEX_INTERNAL_SECRET`, `AUTH_SECRET`, `IMAGE_PROXY_SECRET` and `REPO_CAPABILITY_SECRET`. `REPO_CAPABILITY_SECRET` signs repository capability cookies and asset tickets (`/r/…`, [TECHNICAL.md](TECHNICAL.md#repository-read-path-github-pivot-p4a)); it is Worker-only and must differ from every other secret. List secret names with `pnpm exec wrangler secret list` for production (`rendro`) and `pnpm exec wrangler secret list --env development` for development (`rendro-dev`). Production uses the top-level configuration; there is no named `--env production` environment.
 
 Configure the Worker settings below. `CONVEX_URL`, the optional `CONVEX_SITE_URL` override and `RETENTION_SECRET` remain outside `secrets.required`: startup and `/health` work without them, but auth and project routes need a Convex HTTP origin and the nightly purge needs `RETENTION_SECRET`. Google credentials are Convex-only; the Worker does not read `BASE_URL`.
 
 ```bash
 pnpm exec wrangler secret put AUTH_SECRET
+pnpm exec wrangler secret put REPO_CAPABILITY_SECRET  # openssl rand -hex 32; Worker only
 pnpm exec wrangler secret put CONVEX_URL
 pnpm exec wrangler secret put CONVEX_SITE_URL         # optional
 pnpm exec wrangler secret put CONVEX_INTERNAL_SECRET

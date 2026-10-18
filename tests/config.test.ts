@@ -5,6 +5,7 @@ const requiredSettings = {
   CONVEX_INTERNAL_SECRET: "test-internal-secret-at-least-32-characters",
   AUTH_SECRET: "test-share-signing-secret",
   IMAGE_PROXY_SECRET: "test-image-proxy-secret-at-least-32-chars",
+  REPO_CAPABILITY_SECRET: "test-repo-capability-secret-at-least-32",
 };
 const optionalSettings = [
   "NODE_ENV", "LOG_LEVEL", "CONVEX_URL", "CONVEX_SITE_URL", "RETENTION_SECRET",
@@ -24,7 +25,7 @@ afterEach(() => {
 });
 
 describe("Worker environment validation", () => {
-  it("loads with only the three required settings, without Google credentials", async () => {
+  it("loads with only the four required settings, without Google credentials", async () => {
     const config = await import("../src/config");
     expect(config).toMatchObject({
       ...requiredSettings,
@@ -56,12 +57,20 @@ describe("Worker environment validation", () => {
     ["AUTH_SECRET", 16],
     ["CONVEX_INTERNAL_SECRET", 32],
     ["IMAGE_PROXY_SECRET", 32],
+    ["REPO_CAPABILITY_SECRET", 32],
   ] as const)("enforces the minimum length of %s", async (key, minimum) => {
     vi.stubEnv(key, "x".repeat(minimum - 1));
     await expect(import("../src/config")).rejects.toThrow(`${key} must be at least ${minimum} characters`);
     vi.stubEnv(key, "x".repeat(minimum));
     vi.resetModules();
     await expect(import("../src/config")).resolves.toHaveProperty(key, "x".repeat(minimum));
+  });
+
+  it.each(["AUTH_SECRET", "CONVEX_INTERNAL_SECRET", "RETENTION_SECRET", "IMAGE_PROXY_SECRET"])("refuses a repository capability secret that reuses %s", async (key) => {
+    const shared = "a-secret-shared-by-two-settings-0123456789";
+    vi.stubEnv(key, shared);
+    vi.stubEnv("REPO_CAPABILITY_SECRET", shared);
+    await expect(import("../src/config")).rejects.toThrow("REPO_CAPABILITY_SECRET must not reuse another secret");
   });
 
   it("ignores unused Google/BASE_URL settings and the Node-only PORT", async () => {

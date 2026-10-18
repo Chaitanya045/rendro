@@ -21,7 +21,9 @@ const RENDRO_WINDOW = window as RendroWindow;
 const TREE_HOST = document.querySelector<HTMLElement>("[data-tree-org]");
 const ORG = TREE_HOST?.dataset.treeOrg;
 const DOCUMENT_BASE = TREE_HOST?.dataset.documentBase ?? "";
-interface TreeNode { name: string; path: string; type: "file" | "folder"; size?: number; }
+// Frames and tree pages may load from a pinned base (a repository branch view pins its commit).
+const FRAME_BASE = TREE_HOST?.dataset.frameBase || DOCUMENT_BASE;
+interface TreeNode { name: string; path: string; type: "file" | "folder"; title?: string; size?: number; }
 interface TreePageResponse { children: TreeNode[]; isTruncated: boolean; nextStartAfter?: string; }
 
 const TREE = document.getElementById("tree-container") as HTMLElement;
@@ -50,7 +52,7 @@ function docUrl(fullPath: string): string {
 
 function documentFrameUrl(fullPath: string): string {
   return DOCUMENT_BASE
-    ? `${DOCUMENT_BASE}/files/${encodePath(relativeDocumentPath(fullPath))}`
+    ? `${FRAME_BASE}/files/${encodePath(relativeDocumentPath(fullPath))}`
     : `/legacy-view/${encodeURIComponent(ORG ?? "")}/files/${encodePath(relativeDocumentPath(fullPath))}`;
 }
 
@@ -179,7 +181,7 @@ async function expand(folder: HTMLElement) {
 async function scopedPage(path: string, cursor?: string): Promise<TreePageResponse> {
   const root = `${ORG}/`;
   if (!path.startsWith(root)) return { children: [], isTruncated: false };
-  const url = new URL(`${DOCUMENT_BASE}/tree`, location.origin);
+  const url = new URL(`${FRAME_BASE}/tree`, location.origin);
   url.searchParams.set("dir", path.slice(root.length));
   if (cursor) url.searchParams.set("cursor", cursor);
   const response = await fetch(`${url.pathname}${url.search}`);
@@ -187,10 +189,11 @@ async function scopedPage(path: string, cursor?: string): Promise<TreePageRespon
   const result = await response.json() as { children?: unknown; cursor?: unknown };
   if (!Array.isArray(result.children)) throw new Error("Invalid document tree");
   const children = result.children.map((child: unknown): TreeNode => {
-    const { name, type } = (child ?? {}) as { name?: unknown; type?: unknown };
+    const { name, type, title } = (child ?? {}) as { name?: unknown; type?: unknown; title?: unknown };
     if (typeof name !== "string" || !name || name.includes("/") || name === "." || name === ".."
       || (type !== "file" && type !== "folder")) throw new Error("Invalid document tree");
-    return { name, type, path: `${path}${name}${type === "folder" ? "/" : ""}` };
+    // An optional display title (repository sidebars); the name stays the path segment.
+    return { name, type, path: `${path}${name}${type === "folder" ? "/" : ""}`, ...(typeof title === "string" && title ? { title } : {}) };
   });
   const next = typeof result.cursor === "string" && result.cursor ? result.cursor : undefined;
   return { children, isTruncated: !!next, nextStartAfter: next };
@@ -260,7 +263,7 @@ function renderFile(node: TreeNode): string {
   const fp = documentFrameUrl(node.path);
   return `<div class="tree-item" data-path="${esc(node.path)}">
     <span class="material-symbols-outlined tree-icon" aria-hidden="true">article</span>
-    <a href="${esc(fp)}" class="tree-link tree-label" target="content-frame">${esc(node.name.replace(/\.html$/, ""))}</a>
+    <a href="${esc(fp)}" class="tree-link tree-label" target="content-frame">${esc(node.title ?? node.name.replace(/\.html$/, ""))}</a>
   </div>`;
 }
 
@@ -326,7 +329,7 @@ function renderFolder(node: TreeNode, depth: number): string {
     <div class="tree-item" role="button" tabindex="0" aria-expanded="false">
       <span class="material-symbols-outlined tree-icon caret-icon" aria-hidden="true">chevron_right</span>
       <span class="material-symbols-outlined tree-icon folder-icon" aria-hidden="true">folder</span>
-      <span class="tree-folder-name tree-label">${esc(node.name)}</span>
+      <span class="tree-folder-name tree-label">${esc(node.title ?? node.name)}</span>
     </div>
     <div class="tree-folder-collapse" inert><div class="tree-folder-content tree-stack"></div></div>
   </div>`;

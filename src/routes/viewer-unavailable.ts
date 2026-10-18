@@ -17,7 +17,7 @@ export type ViewerUnavailable = {
 /** Canonical cookie-authenticated document URLs. A link followed inside the sandboxed viewer frame is cross-site and carries no
  * session cookie, so on these the shell (which does) reloads the frame instead (`doc-retry`). Ticket, share and public URLs
  * need no cookie and retry by plain link. */
-const cookieDocument = /^\/(?:legacy-view\/[^/]+|organizations\/[^/]+\/projects\/[^/]+\/docs)\/files\//;
+const cookieDocument = /^\/(?:legacy-view\/[^/]+|organizations\/[^/]+\/projects\/[^/]+\/docs|r\/[^/]+\/[^/]+(?:\/[~@][^/]+)?)\/files\//;
 
 /**
  * The one response for "could not check", as opposed to "not found": a retryable 503 that carries
@@ -50,9 +50,10 @@ const jsonRoute = /\/(?:tree|viewer-ticket)$/;
  * `transientStorageFault` calls transient) is the retryable 503; anything else is a defect and stays an internal error,
  * as on the deployment routes. Only the route template and enumerations are logged: no path, token, key or exception text.
  */
-export function viewerErrorResponse(error: Error, c: Context): Response {
+export function viewerErrorResponse(error: Error, c: Context, scripted?: boolean): Response {
   const route = requestLogPath(c);
-  const json = jsonRoute.test(route);
+  // Routes behind one wildcard template (/r/*) say themselves whether a script asked.
+  const json = scripted ?? jsonRoute.test(route);
   const fault = error instanceof ViewerBackendError ? null : transientStorageFault(error);
   if (error instanceof ViewerBackendError || fault) {
     logger.warn({ category: "DeliveryUnavailable", route, ...fault }, "Document delivery unavailable");
