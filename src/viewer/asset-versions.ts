@@ -2,4 +2,4 @@
 export const LAZY_TREE_VERSION = "45";
 export const PRIVATE_VIEWER_VERSION = "18";
 export const COMMENTOR_PARENT_VERSION = "17";
-export const COMMENTOR_VERSION = "50";
+export const COMMENTOR_VERSION = "49";
