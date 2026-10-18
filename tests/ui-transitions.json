@@ -25741,6 +25741,189 @@
           ]
         }
       ]
+    },
+    {
+      "id": "UI-162",
+      "title": "Repository docs viewer: instant in-shell navigation",
+      "area": "Repository docs (GitHub pivot)",
+      "routes": [
+        "GET /r/*",
+        "GET /speculation-rules/repo.json"
+      ],
+      "sources": [
+        "src/lazy-tree/lazy-tree.ts",
+        "src/lazy-tree/prefetch.ts",
+        "src/repo-read/routes.ts",
+        "src/repo-read/speculation.ts"
+      ],
+      "roles": [
+        "anonymous",
+        "owner"
+      ],
+      "viewports": [
+        1440
+      ],
+      "engines": [
+        "chromium"
+      ],
+      "status": "browser",
+      "auditEvidence": "NOT_IN_AUDIT",
+      "auditNote": "New surface from epic #214 phase P4b (#245): hover/focus prefetch, revealed sibling frames, and same-origin Speculation Rules.",
+      "edges": [
+        {
+          "id": "UI-162-E01",
+          "from": "Reader hovers a sidebar document link",
+          "trigger": "Pointer or keyboard focus warms the link's document in a hidden sibling frame, then the reader clicks it",
+          "expected": "The rendered frame is revealed in place with a view transition, no document request is repeated, and the in-shell switch measures under 200 ms",
+          "inventoryRefs": [
+            "UI-162"
+          ],
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/lazy-tree-browser.test.ts",
+              "name": "adopts a preload with no second request, a view transition, and an under-budget switch",
+              "kind": "browser"
+            }
+          ]
+        },
+        {
+          "id": "UI-162-E02",
+          "from": "Reader clicks a document link that was never preloaded",
+          "trigger": "A click arrives with no ready preload for the target",
+          "expected": "The document loads normally through the frame's own navigation",
+          "inventoryRefs": [
+            "UI-162"
+          ],
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/lazy-tree-browser.test.ts",
+              "name": "loads the document normally when the reader clicks a link that was not preloaded",
+              "kind": "browser"
+            }
+          ]
+        },
+        {
+          "id": "UI-162-E03",
+          "from": "A preload fails to load",
+          "trigger": "The preloaded frame is aborted (its document never announces itself), then the reader clicks the link",
+          "expected": "The click falls back to a normal load with no error state, and a later announcement from the abandoned frame is ignored",
+          "inventoryRefs": [
+            "UI-162"
+          ],
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/lazy-tree-browser.test.ts",
+              "name": "falls back to a normal load when the preload fails",
+              "kind": "browser"
+            }
+          ]
+        },
+        {
+          "id": "UI-162-E04",
+          "from": "Reader moves across more links than the pool holds",
+          "trigger": "A fourth distinct link is warmed while three preloads are in flight",
+          "expected": "The oldest preload is discarded and its frame reused; the newest stay in flight",
+          "inventoryRefs": [
+            "UI-162"
+          ],
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/lazy-tree-browser.test.ts",
+              "name": "keeps only the newest preloads in flight",
+              "kind": "browser"
+            }
+          ]
+        },
+        {
+          "id": "UI-162-E05",
+          "from": "Reader tabs to a document link, or a row is not a frame link",
+          "trigger": "Keyboard focus reaches a tree link, an SVG/plain row, a cross-origin link and a link without an href",
+          "expected": "Only the same-origin frame link is preloaded once; the other rows are ignored",
+          "inventoryRefs": [
+            "UI-162"
+          ],
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/lazy-tree-browser.test.ts",
+              "name": "preloads on keyboard focus and ignores rows that are not frame links",
+              "kind": "browser"
+            }
+          ]
+        },
+        {
+          "id": "UI-162-E06",
+          "from": "Reader is on a metered or slow connection",
+          "trigger": "Save-Data is set, or effectiveType is 2g",
+          "expected": "Nothing is preloaded and the click keeps the plain load",
+          "inventoryRefs": [
+            "UI-162"
+          ],
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/lazy-tree-browser.test.ts",
+              "name": "keeps the plain click-to-load path on a metered or slow connection",
+              "kind": "browser"
+            }
+          ]
+        },
+        {
+          "id": "UI-162-E07",
+          "from": "Reader prefers reduced motion, or the browser lacks the view transitions API",
+          "trigger": "Motion is reduced (or startViewTransition is unavailable) and a ready preload is clicked",
+          "expected": "The frame is revealed without starting a view transition and still settles",
+          "inventoryRefs": [
+            "UI-162"
+          ],
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/lazy-tree-browser.test.ts",
+              "name": "swaps without a view transition when motion is reduced or the API is missing",
+              "kind": "browser"
+            }
+          ]
+        },
+        {
+          "id": "UI-162-E08",
+          "from": "Reader opens two preloaded links in the same frame in quick succession",
+          "trigger": "Two clicks arrive before the first switch settles",
+          "expected": "The newest link wins: the frame ends on the second document with the loader settled",
+          "inventoryRefs": [
+            "UI-162"
+          ],
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/lazy-tree-browser.test.ts",
+              "name": "settles the newest preload when two links are opened in the same frame",
+              "kind": "browser"
+            }
+          ]
+        },
+        {
+          "id": "UI-162-E09",
+          "from": "Shell renders a repository document page",
+          "trigger": "The shell response is served",
+          "expected": "The shell advertises same-origin speculation rules through a Speculation-Rules header, and the referenced JSON is served cacheable with the expected rules",
+          "inventoryRefs": [
+            "UI-162"
+          ],
+          "status": "unit",
+          "tests": [
+            {
+              "file": "tests/repo-read-routes.test.ts",
+              "name": "serves same-origin speculation rules the shell can point at",
+              "kind": "unit"
+            }
+          ]
+        }
+      ]
     }
   ]
 }

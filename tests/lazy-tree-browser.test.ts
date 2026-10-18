@@ -32,7 +32,7 @@ const scopedTree: Record<string, Record<string, ScopedPage[]>> = {
     "zeta/": [{ children: [doc("z.html")], cursor: null }],
   },
   [pinnedBase]: {
-    "": [{ children: [{ ...dir("guide"), title: "The guide" }, { ...doc("index.md"), title: "Home" }, { ...doc("plain.md"), title: "" }, { ...doc("odd.md"), title: 7 }], cursor: null }],
+    "": [{ children: [{ ...dir("guide"), title: "The guide" }, { ...doc("index.md"), title: "Home" }, { ...doc("plain.md"), title: "" }, { ...doc("odd.md"), title: 7 }, { ...doc("extra.md"), title: "Extra" }], cursor: null }],
     "guide/": [{ children: [{ ...doc("start.md"), title: "Getting started" }], cursor: null }],
   },
   [pagedBase]: {
@@ -57,7 +57,7 @@ ${options.noMatchMedia ? "<script>Object.defineProperty(window,'matchMedia',{val
 ${options.initial ? `<script>window.RENDRO_INITIAL_DOC=${JSON.stringify(options.initial)}</script>` : ""}</head><body>
 ${options.host === false ? "" : `<div class="sidebar"><div class="sidebar-resizer"></div><div class="sidebar-tree" ${options.orgAttr === false ? "" : `data-tree-org="${org}"`}${options.base !== undefined ? ` data-document-base="${options.base}"` : ""}${options.frameBase ? ` data-frame-base="${options.frameBase}"` : ""}>${options.tree === false ? "" : '<div id="tree-container"></div>'}</div></div>`}
 <div id="main-placeholder">Choose a document</div>
-${options.frame === false ? "" : `<iframe id="content-frame" name="content-frame" ${options.sandbox === false ? "" : 'sandbox="allow-scripts"'} title="Document"></iframe>`}
+${options.frame === false ? "" : `<div class="doc-frames" style="position:relative;width:420px;height:300px;float:left"><iframe id="content-frame" name="content-frame" ${options.sandbox === false ? "" : 'sandbox="allow-scripts"'} title="Document" style="position:absolute;top:0;left:0;width:100%;height:100%;border:0"></iframe></div>`}
 ${options.late ? '<script>addEventListener("load",()=>{const s=document.createElement("script");s.src="/lazy-tree.js";document.body.append(s)})</script>' : '<script src="/lazy-tree.js"></script>'}
 </body></html>`;
 }
@@ -67,10 +67,11 @@ const variants: Record<string, Shell> = {
   "empty-org": { org: "" }, "empty-org-base": { org: "", base }, "empty-org-initial": { org: "", initial: "x/y.html" }, "no-org-attr": { orgAttr: false, initial: "x/y.html" }, "legacy-empty": { org: "void" }, "no-tree": { tree: false }, "no-host": { host: false },
   base: { base }, "base-paged": { base: pagedBase }, repo: { org: "docs", base: repoBase, frameBase: pinnedBase }, "base-empty-project": { base: "/organizations/o/projects/q/docs" }, "base-empty-other": { base: "/other/docs" },
 };
-function docPage(): string {
+function docPage(announce = false): string {
   return `<!doctype html><html><body><h1 id="top">Document</h1><a id="go" href="#">Go</a><script>
 window.received=[];window.nextNavigation={type:"doc-navigate",path:"guide/b.html",search:"?v=2",fragment:"#sec"};
 addEventListener("message",e=>{if(e.source!==parent)return;if(e.data&&e.data.type==="fixture-post")parent.postMessage(e.data.payload,"*");else received.push(e.data)});
+${announce ? 'parent.postMessage({type:"doc-loaded",path:location.pathname.slice(location.pathname.lastIndexOf("/files/")+7),search:location.search,fragment:location.hash},"*");' : ""}
 document.getElementById("go").addEventListener("click",e=>{e.preventDefault();parent.postMessage(nextNavigation,"*")});
 </script></body></html>`;
 }
@@ -94,7 +95,7 @@ beforeAll(async () => {
       const pages = scopedTree[url.pathname.slice(0, -"/tree".length)]?.[url.searchParams.get("dir") ?? ""] ?? [];
       return json(pages[Number(url.searchParams.get("cursor") ?? "0")] ?? { children: [], cursor: null });
     }
-    if (url.pathname.includes("/files/")) { response.setHeader("Content-Type", "text/html"); return void response.end(docPage()); }
+    if (url.pathname.includes("/files/")) { response.setHeader("Content-Type", "text/html"); return void response.end(docPage(url.pathname.endsWith(".md"))); }
     response.setHeader("Content-Type", "text/html");
     const name = url.pathname.startsWith("/lt/") ? url.pathname.slice(4) : url.pathname.startsWith("/docs") ? "legacy" : url.pathname === base ? "base" : url.pathname === pagedBase ? "base-paged" : url.pathname === repoBase ? "repo" : "";
     response.end(shell(variants[name] ?? {}));
@@ -102,13 +103,14 @@ beforeAll(async () => {
 });
 beforeEach(() => { requests.length = 0; });
 
-type Options = { clock?: boolean; motion?: boolean; routes?: (tab: Page) => Promise<void> };
+type Options = { clock?: boolean; motion?: boolean; routes?: (tab: Page) => Promise<void>; init?: string };
 async function open(path: string, options: Options = {}) {
   const tab = await harness.newPage({ viewport: { width: 800, height: 600 }, reducedMotion: options.motion ? "no-preference" : "reduce" });
   const errors: string[] = [];
   tab.on("pageerror", error => errors.push(error.message));
   Object.assign(tab, { errors });
   if (options.clock) { await tab.clock.install({ time: new Date("2026-01-01T00:00:00Z") }); await tab.clock.pauseAt(new Date("2026-01-01T00:00:01Z")); }
+  if (options.init) await tab.addInitScript(options.init);
   await options.routes?.(tab);
   await browserStep(`open ${path}`, () => tab.goto(harness.origin + path));
   return tab;
@@ -870,7 +872,7 @@ describe("lazy tree with scoped documents", () => {
     expect(treeRequests()).toEqual([`${pinnedBase}/tree?dir=`, `${pinnedBase}/tree?dir=guide%2F`]);
     expect(await frameSrc(tab)).toBe(`${pinnedBase}/files/guide/start.md`);
     // Titles when the page names one; the file name otherwise, including for an empty or non-string title.
-    expect(await rows(tab, "#tree-container")).toEqual(["The guide", "Home", "plain.md", "odd.md"]);
+    expect(await rows(tab, "#tree-container")).toEqual(["The guide", "Home", "plain.md", "odd.md", "Extra"]);
     expect(await rows(tab, '.tree-folder[data-path="docs/guide/"] > .tree-folder-collapse > .tree-folder-content')).toEqual(["Getting started"]);
     await tab.locator(`a.tree-link[href="${pinnedBase}/files/index.md"]`).click();
     await tab.waitForFunction(() => window.location.search === "?doc=index.md");
@@ -1199,6 +1201,258 @@ describe("lazy tree races and malformed shells", () => {
     expect((await pushes(tab)).length).toBe(initial);
     expect(await frameSrc(tab)).toBe("/legacy-view//files/");
     expect(await tab.locator("#document-navigation-notice").count()).toBe(0);
+    expect(pageErrors(tab)).toEqual([]);
+  });
+});
+
+describe("lazy tree instant navigation (#245)", () => {
+  const indexHref = `${pinnedBase}/files/index.md`;
+  const plainHref = `${pinnedBase}/files/plain.md`;
+  const startHref = `${pinnedBase}/files/guide/start.md`;
+  const oddHref = `${pinnedBase}/files/odd.md`;
+  const extraHref = `${pinnedBase}/files/extra.md`;
+  const link = (tab: Page, href: string) => tab.locator(`a.tree-link[href="${href}"]`);
+  const inPool = (href: string) => `document.querySelector('iframe[data-preload=${JSON.stringify(href)}]')`;
+  const poolSize = (tab: Page) => tab.locator("iframe[data-preload]").count();
+  const frameHrefCount = (href: string) => requests.filter(path => path === href).length;
+  const measures = (tab: Page) => tab.evaluate(() => performance.getEntriesByName("rendro:frame-switch").length);
+  const waitForPreloaded = (tab: Page, href: string) => tab.waitForFunction(
+    `!!${inPool(href)} && ${inPool(href)}.dataset.state === "ready"`);
+  const openRepo = (options: Options = {}) => open(`${repoBase}?doc=guide/start.md`, options);
+
+  it("adopts a preload with no second request, a view transition, and an under-budget switch", async () => {
+    const tab = await openRepo({ motion: true });
+    await link(tab, indexHref).waitFor();
+    await tab.evaluate(() => {
+      const holder = window as unknown as { vt: string[] };
+      holder.vt = [];
+      const original = document.startViewTransition.bind(document);
+      document.startViewTransition = function (this: Document, update: () => void) {
+        holder.vt.push(typeof update);
+        return original(update);
+      };
+    });
+    await link(tab, indexHref).hover();
+    await waitForPreloaded(tab, indexHref);
+    expect(frameHrefCount(indexHref)).toBe(1);
+    const before = await measures(tab);
+    await link(tab, indexHref).click();
+    await tab.waitForFunction(n => performance.getEntriesByName("rendro:frame-switch").length > n, before);
+    expect(await frameSrc(tab)).toBe(indexHref);
+    // Adoption revealed the same browsing context: the document is not fetched again.
+    expect(frameHrefCount(indexHref)).toBe(1);
+    expect(await tab.evaluate(() => (window as unknown as { vt: string[] }).vt)).toEqual(["function"]);
+    const duration = await tab.evaluate(() => performance.getEntriesByName("rendro:frame-switch").at(-1)!.duration);
+    expect(duration).toBeLessThan(200);
+    // The preload slot is empty: the reader's frame is the preloaded element.
+    expect(await poolSize(tab)).toBe(0);
+    expect(pageErrors(tab)).toEqual([]);
+  });
+
+  it("loads the document normally when the reader clicks a link that was not preloaded", async () => {
+    const tab = await openRepo();
+    await link(tab, indexHref).waitFor();
+    const before = await measures(tab);
+    await tab.evaluate(href => (document.querySelector(`a.tree-link[href="${href}"]`) as HTMLElement).click(), indexHref);
+    await tab.waitForFunction(n => performance.getEntriesByName("rendro:frame-switch").length > n, before);
+    expect(await frameSrc(tab)).toBe(indexHref);
+    expect(frameHrefCount(indexHref)).toBe(1);
+    expect(await poolSize(tab)).toBe(0);
+    expect(pageErrors(tab)).toEqual([]);
+  });
+
+  it("falls back to a normal load when the preload fails", async () => {
+    let first = true;
+    const tab = await openRepo({ routes: async page => {
+      await page.route(`**${plainHref}`, route => { if (first) { first = false; return route.abort(); } return route.continue(); });
+    } });
+    await link(tab, plainHref).waitFor();
+    await link(tab, plainHref).hover();
+    await tab.waitForFunction(href => !!document.querySelector(`iframe[data-preload="${href}"]`), plainHref);
+    await link(tab, plainHref).click();
+    await settled(tab);
+    expect(await frameSrc(tab)).toBe(plainHref);
+    expect(await tab.locator("html").getAttribute("class") ?? "").not.toContain("doc-loading-error");
+    expect(await poolSize(tab)).toBe(0);
+    expect(pageErrors(tab)).toEqual([]);
+  });
+
+  it("keeps only the newest preloads in flight", async () => {
+    const tab = await openRepo();
+    await link(tab, indexHref).waitFor();
+    await link(tab, indexHref).hover();
+    await link(tab, plainHref).hover();
+    await link(tab, oddHref).hover();
+    await tab.waitForFunction(() => document.querySelectorAll("iframe[data-preload]").length === 3);
+    await link(tab, extraHref).hover();
+    await tab.waitForFunction(href => !document.querySelector(`iframe[data-preload="${href}"]`), indexHref);
+    expect(await poolSize(tab)).toBe(3);
+    expect(await tab.locator(`iframe[data-preload="${extraHref}"]`).count()).toBe(1);
+    expect(pageErrors(tab)).toEqual([]);
+  });
+
+  it("preloads on keyboard focus and ignores rows that are not frame links", async () => {
+    const tab = await openRepo();
+    await link(tab, indexHref).waitFor();
+    await link(tab, indexHref).focus();
+    await tab.waitForFunction(href => !!document.querySelector(`iframe[data-preload="${href}"]`), indexHref);
+    await tab.evaluate(() => {
+      const tree = document.getElementById("tree-container")!;
+      const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+      const plainRow = document.createElement("div");
+      plainRow.className = "tree-item";
+      tree.append(svg, plainRow);
+      svg.dispatchEvent(new Event("pointerover", { bubbles: true }));
+      plainRow.dispatchEvent(new Event("pointerover", { bubbles: true }));
+      const foreign = document.createElement("div");
+      foreign.className = "tree-item";
+      foreign.innerHTML = '<a class="tree-link" target="content-frame" href="https://outside.test/x.md">foreign</a>';
+      const noHref = document.createElement("div");
+      noHref.className = "tree-item";
+      noHref.innerHTML = '<a class="tree-link" target="content-frame">no href</a>';
+      tree.append(foreign, noHref);
+      document.querySelector<HTMLElement>('a.tree-link[href="https://outside.test/x.md"]')!.dispatchEvent(new Event("pointerover", { bubbles: true }));
+      document.querySelector<HTMLElement>("a.tree-link:not([href])")!.dispatchEvent(new Event("pointerover", { bubbles: true }));
+    });
+    expect(frameHrefCount(indexHref)).toBe(1);
+    expect(await poolSize(tab)).toBe(1);
+    expect(pageErrors(tab)).toEqual([]);
+  });
+
+  it("keeps the plain click-to-load path on a metered or slow connection", async () => {
+    const saveData = await openRepo({ init: "Object.defineProperty(navigator,'connection',{value:{saveData:true},configurable:true})" });
+    await link(saveData, indexHref).waitFor();
+    await link(saveData, indexHref).hover();
+    await link(saveData, indexHref).focus();
+    expect(await poolSize(saveData)).toBe(0);
+    expect(frameHrefCount(indexHref)).toBe(0);
+    await link(saveData, indexHref).click();
+    await settled(saveData);
+    expect(await frameSrc(saveData)).toBe(indexHref);
+    expect(frameHrefCount(indexHref)).toBe(1);
+    expect(pageErrors(saveData)).toEqual([]);
+
+    const slow = await openRepo({ init: "Object.defineProperty(navigator,'connection',{value:{effectiveType:'2g'},configurable:true})" });
+    await link(slow, indexHref).waitFor();
+    await link(slow, indexHref).hover();
+    expect(await poolSize(slow)).toBe(0);
+    expect(pageErrors(slow)).toEqual([]);
+  });
+
+  it("swaps without a view transition when motion is reduced or the API is missing", async () => {
+    const reduced = await openRepo();
+    await link(reduced, indexHref).waitFor();
+    await reduced.evaluate(() => {
+      const holder = window as unknown as { vt: number };
+      holder.vt = 0;
+      const original = document.startViewTransition.bind(document);
+      document.startViewTransition = function (this: Document, update: () => void) { holder.vt += 1; return original(update); };
+    });
+    await link(reduced, indexHref).hover();
+    await waitForPreloaded(reduced, indexHref);
+    await link(reduced, indexHref).click();
+    await settled(reduced);
+    expect(await reduced.evaluate(() => (window as unknown as { vt: number }).vt)).toBe(0);
+
+    const missing = await openRepo({ motion: true });
+    await link(missing, indexHref).waitFor();
+    await missing.evaluate(() => { Reflect.deleteProperty(document, "startViewTransition"); });
+    await link(missing, indexHref).hover();
+    await waitForPreloaded(missing, indexHref);
+    await link(missing, indexHref).click();
+    await settled(missing);
+    expect(await frameSrc(missing)).toBe(indexHref);
+    expect(pageErrors(reduced)).toEqual([]);
+    expect(pageErrors(missing)).toEqual([]);
+  });
+
+  it("settles the newest preload when two links are opened in the same frame", async () => {
+    const tab = await openRepo();
+    await link(tab, indexHref).waitFor();
+    await link(tab, indexHref).hover();
+    await link(tab, plainHref).hover();
+    await waitForPreloaded(tab, indexHref);
+    await waitForPreloaded(tab, plainHref);
+    await tab.evaluate(([first, second]) => {
+      (document.querySelector(`a.tree-link[href="${first}"]`) as HTMLElement).click();
+      (document.querySelector(`a.tree-link[href="${second}"]`) as HTMLElement).click();
+    }, [indexHref, plainHref]);
+    await tab.waitForFunction(href => document.getElementById("content-frame")!.getAttribute("src") === href, plainHref);
+    await tab.waitForFunction(() => !document.getElementById("content-frame")!.hasAttribute("aria-busy")
+      && performance.getEntriesByName("rendro:frame-switch").length > 0);
+    expect(await frameSrc(tab)).toBe(plainHref);
+    expect(pageErrors(tab)).toEqual([]);
+  });
+
+  it("preloads into the content area even once the reader's frame is gone", async () => {
+    const tab = await openRepo();
+    await link(tab, indexHref).waitFor();
+    await tab.evaluate(() => document.getElementById("content-frame")!.remove());
+    await link(tab, indexHref).hover();
+    await tab.waitForFunction(href => {
+      const frame = document.querySelector(`iframe[data-preload="${href}"]`);
+      return !!frame && frame.parentElement === document.body && !frame.hasAttribute("sandbox");
+    }, indexHref);
+    expect(frameHrefCount(indexHref)).toBe(1);
+    expect(pageErrors(tab)).toEqual([]);
+  });
+
+  it("does not re-warm the document the reader is already showing, and titles a frame that has none", async () => {
+    const tab = await openRepo();
+    await link(tab, indexHref).waitFor();
+    await link(tab, indexHref).hover();
+    await waitForPreloaded(tab, indexHref);
+    await tab.evaluate(() => document.getElementById("content-frame")!.removeAttribute("title"));
+    await link(tab, indexHref).click();
+    await settled(tab);
+    await tab.waitForFunction(href => document.getElementById("content-frame")!.getAttribute("src") === href, indexHref);
+    expect(await tab.locator("#content-frame").getAttribute("title")).toBe("Document content");
+    await tab.evaluate(href => document.querySelector<HTMLElement>(`a.tree-link[href="${href}"]`)!.dispatchEvent(new Event("pointerover", { bubbles: true })), indexHref);
+    await tab.waitForFunction(() => performance.getEntriesByName("rendro:frame-switch").length > 0);
+    expect(await poolSize(tab)).toBe(0);
+    expect(frameHrefCount(indexHref)).toBe(1);
+    expect(pageErrors(tab)).toEqual([]);
+  });
+
+  it("keeps the visible frame, URL and selection agreeing through Back and Forward after a swap", async () => {
+    const tab = await openRepo();
+    await link(tab, indexHref).waitFor();
+    await link(tab, indexHref).hover();
+    await waitForPreloaded(tab, indexHref);
+    await link(tab, indexHref).click();
+    await settled(tab);
+    await tab.waitForFunction(target => document.getElementById("content-frame")!.getAttribute("src") === target, indexHref);
+    expect(await tab.locator("iframe#content-frame").count()).toBe(1);
+    // Back returns to the document the reader started on.
+    await tab.goBack();
+    await settled(tab);
+    await tab.waitForFunction(target => document.getElementById("content-frame")!.getAttribute("src") === target, startHref);
+    expect(tab.url()).toContain("doc=guide/start.md");
+    expect(await activePath(tab)).toBe("docs/guide/start.md");
+    expect(await tab.locator("#content-frame").getAttribute("name")).toBe("content-frame");
+    // Forward returns to the document that was adopted by a swap.
+    await tab.goForward();
+    await settled(tab);
+    await tab.waitForFunction(target => document.getElementById("content-frame")!.getAttribute("src") === target, indexHref);
+    expect(tab.url()).toContain("doc=index.md");
+    expect(await activePath(tab)).toBe("docs/index.md");
+    expect(await tab.locator("#content-frame").getAttribute("name")).toBe("content-frame");
+    expect(pageErrors(tab)).toEqual([]);
+  });
+
+  it("settles the reveal when the view transition update rejects", async () => {
+    const tab = await openRepo({ motion: true });
+    await link(tab, indexHref).waitFor();
+    await tab.evaluate(() => {
+      (document as unknown as { startViewTransition: (update: () => void) => { updateCallbackDone: Promise<unknown> } }).startViewTransition =
+        (update: () => void) => { update(); return { updateCallbackDone: Promise.reject(new Error("view transition failed")) }; };
+    });
+    await link(tab, indexHref).hover();
+    await waitForPreloaded(tab, indexHref);
+    await link(tab, indexHref).click();
+    await settled(tab);
+    expect(await frameSrc(tab)).toBe(indexHref);
+    expect(await measures(tab)).toBeGreaterThan(0);
     expect(pageErrors(tab)).toEqual([]);
   });
 });
