@@ -22052,8 +22052,24 @@
           "inventoryRefs": [
             "UI-134"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/auth.spec.ts",
+              "name": "an invalid or expired verification link never reports success and offers a fresh link",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/auth-transitions.spec.ts",
+              "name": "an invalid verification link offers recovery instead of reporting the email as verified",
+              "kind": "e2e"
+            },
+            {
+              "file": "tests/auth-hidden-browser.test.ts",
+              "name": "an invalid verification link (%s) focuses its heading, announces the problem and keeps the resend form working",
+              "kind": "browser"
+            }
+          ]
         }
       ]
     },
