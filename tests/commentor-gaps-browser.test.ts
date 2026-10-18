@@ -384,10 +384,11 @@ describe("drawer list", () => {
     await arrive(lab, "z-new");
     await expect.poll(() => lab.ui.locator(".drawer-thread").count()).toBe(15);
     expect(await atEnd()).toBe(true);
-    expect(await lab.ui.locator('.drawer-thread[data-thread-id="z-new"]').evaluate(card => {
-      const rect = card.getBoundingClientRect();
-      const bounds = card.parentElement!.getBoundingClientRect();
-      return rect.bottom <= bounds.bottom + 1;
+    // Looked up by thread id at read time inside one evaluation: every live update rebuilds the
+    // list with replaceChildren(), so a card element held from an earlier moment can be detached.
+    expect(await list.evaluate(el => {
+      const card = el.querySelector(".drawer-thread[data-thread-id=\"z-new\"]")!;
+      return card.getBoundingClientRect().bottom <= el.getBoundingClientRect().bottom + 1;
     })).toBe(true);
     expect(await lab.ui.locator(".new-comments").isHidden()).toBe(true);
   });
