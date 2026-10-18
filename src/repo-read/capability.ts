@@ -49,13 +49,13 @@ const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 const keys = new Map<string, Promise<CryptoKey>>();
 
-function base64url(bytes: Uint8Array): string {
+export function base64url(bytes: Uint8Array): string {
   let binary = "";
   for (const byte of bytes) binary += String.fromCharCode(byte);
   return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
-function fromBase64url(value: string): Uint8Array | null {
+export function fromBase64url(value: string): Uint8Array | null {
   if (!/^[A-Za-z0-9_-]*$/.test(value)) return null;
   try {
     const binary = atob(value.replace(/-/g, "+").replace(/_/g, "/"));

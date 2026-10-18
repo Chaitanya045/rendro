@@ -2136,16 +2136,17 @@ An unknown answer from the session, the epoch store or the permission source is 
 
 The document frame is an opaque sandbox (#79), and requests it makes carry no cookies. A private frame's `<base>` therefore points at `/r/{owner}/{repo}/@{commit}/view/{ticket}/files/…`, where the ticket is a capability for the same user and repository bound to that commit instead of a session (15 minutes). Ticket requests check the signature, repository, commit and the epoch on every request. Renewal reuses the private viewer's protocol: the frame asks the trusted shell, the shell calls `…/viewer-ticket` with its cookie, and resource URLs are swapped in place. A ticket cannot renew itself.
 
-### Revocation epochs, and what P5 must implement
+### Revocation epochs, and the contract P5 implements
 
 `RevocationEpochs.currentEpoch(userId)` is read on every private request (cookie or ticket). A capability minted at an older epoch is stale: the request falls through to the permission source, which re-mints or denies. The Worker reads `epoch:<userId>` from the `REPO_EPOCHS` KV namespace (decimal milliseconds; absent is 0; anything else is a 503) with `cacheTtl: 60`.
 
-P5 implements:
+P5 implements this contract (#243): see [Repository Permission Mirror](#repository-permission-mirror-github-pivot-p5).
 
 - **The permission source.** A control Worker, bound to the serving Worker as the `REPO_ACCESS` service, mounts `repoAccessHandler(source)`. Its `authorize(viewer, owner, name)` returns `{ id, owner, name, private, defaultBranch }` for the repository `owner/name` (case-insensitive) when `viewer` (a Rendro user ID, or null for anonymous readers, who see public repositories only) may read it now, and null when the repository is missing or forbidden, without distinguishing the two. It throws when it cannot tell; the client turns that, a non-200/404 status, a timeout (5 s) or an answer about another repository into a 503. It must build the answer from its mirror of the user's installation repositories (`GET /user/installations/{id}/repositories`), never by calling GitHub per view.
 - **The epoch bumps.** On `member`, `membership`, `team` (`added_to_repository`, `removed_from_repository`, `edited`), `organization.member_removed`, `repository` (`privatized`, `publicized`, `transferred`, `deleted`), `installation_repositories`, `installation` (`deleted`, `suspend`) and `github_app_authorization`: first update the mirror so `authorize` already denies, then write `epoch:<userId>` = the current time in milliseconds for every affected user. Write a time, not an increment: KV has no compare-and-swap, and a read-modify-write loses concurrent bumps. The order matters: the serving Worker reads the epoch before it asks for a grant, so a bump that lands in between leaves the new cookie already stale.
 - **The KV tier.** Revocation takes effect when the bumped epoch reaches the reader's colo. KV Classic propagates in about 60 s or more, and its colo cache (`cacheTtl`, at least 60 s) adds up to a minute, so expect 60–90 s, bounded above by the five-minute cookie in any case. KV Instant (private beta) replicates in under a second (p99 256 ms) and reads in about 1.6 ms, but allows 1 MB and one write per second per namespace, so it fits only if P5 stores just recently bumped epochs and batches writes.
 - **Grants webhooks do not cover** (enterprise policy, IdP sessions) end with the cookie's lifetime and the source's own mirror TTL.
+- **Repositories made private.** Anonymous readers hold no cookie: the serving isolate's one-minute public-repository memory is the bound, after the source already denies.
 
 ### Read order and caches
 
@@ -2190,7 +2191,7 @@ The frame wraps the sanitized page in Rendro's markup: the hashed `repo-doc` sty
 | `REPO_EPOCHS` | KV | Revocation epochs |
 | `REPO_ACCESS` | Service binding | The control Worker's permission source |
 
-None is configured in `wrangler.toml` yet: P5 adds them with the control Worker. Until then every `/r/` URL is a 404 in production and development. `REPO_CAPABILITY_SECRET` is required now, so the secret exists before the bindings do. The E2E suite and `tests/repo-read-workerd.test.ts` add all three bindings to a copy of the production configuration (`e2e/repo-read-config.ts`), with a fixture control Worker (`e2e/repo-access/`) speaking the real protocol.
+None is configured in `wrangler.toml` yet. The control Worker exists (`wrangler.control.toml`, development and tests only, #243), and the owner wires both once the GitHub App exists ([SETUP.md](SETUP.md#github-repository-reads-not-configured-yet)). Until then every `/r/` URL is a 404 in production and development. `REPO_CAPABILITY_SECRET` is required now, so the secret exists before the bindings do. Test configurations add all three bindings to a copy of the production configuration (`e2e/repo-read-config.ts`): the E2E suite and `tests/repo-access-workerd.test.ts` with the real control Worker over a fake GitHub, `tests/repo-read-workerd.test.ts` with a fixture control Worker (`e2e/repo-access/`) that speaks the same protocol from grants it is given.
 
 ### Measurements
 
@@ -2215,6 +2216,146 @@ An earlier pair of runs at load about 9 (before the rewritten body was memoized)
 - Sign-out does not clear the browser's HTTP cache, so a private frame cached immutably stays in that browser profile. `Clear-Site-Data: "cache"` on sign-out would remove it.
 - `Server-Timing` phases and real-user monitoring (P0) for these routes.
 
+## Repository Permission Mirror (GitHub pivot, P5)
+
+This section covers who may read which repository (#243, part of epic #214): the permission source and revocation epochs the read path's contract asks for (above). GitHub is the authority; the control Worker keeps a mirror current enough that a view never waits on GitHub, and it fails closed: anything it cannot decide is a 503, never a grant. It is built and tested against a fake GitHub (`tests/helpers/fake-github.ts`). Real sign-in (P1) plugs into two interfaces: the account hand-over below, and `InstallationTokenProvider` (#229) for installation tokens.
+
+| Module | Role |
+|---|---|
+| `src/repo-access/worker.ts`, `entry.ts` | The control Worker: routes, configuration checks, the `RepoAccessDirectory` Durable Object class |
+| `src/repo-access/directory.ts` | The directory: registry, per-user mirrors, single-repository checks, webhook application, the epoch outbox |
+| `src/repo-access/events.ts` | Webhook payload → plan (pure) |
+| `src/repo-access/github.ts` | The permission endpoints, paced by a `RateGovernor` per user and per installation |
+| `src/repo-access/tokens.ts` | User-to-server tokens: sealing at rest, refresh |
+
+### Control Worker
+
+`wrangler.control.toml` defines `rendro-control-dev`. It has no route, no `workers.dev` URL and no deploy script, and `wrangler.toml` does not bind it yet. It answers:
+
+| Request | Who sends it | What it does |
+|---|---|---|
+| `POST https://repo-access.internal/v1/authorize` | The serving Worker (`REPO_ACCESS`) | `repoAccessHandler` over the directory: the read path's protocol (#234) |
+| `POST https://repo-access.internal/v1/accounts/link` | P1's sign-in | `{ userId, githubId, login, tokens }`: binds a Rendro user to a GitHub account and stores its user-to-server tokens. 204, no body |
+| `POST https://repo-access.internal/v1/accounts/unlink` | P1's sign-out of GitHub | `{ userId }`: drops the tokens and mirror and revokes the user |
+| `POST /v1/github/webhook` | GitHub | Permission events. 202 applied, 200 duplicate, 204 ignored, 400 malformed, 401 bad signature, 503 not configured |
+
+Internal endpoints answer only requests addressed to `repo-access.internal`, a host only a service binding can send, so the public route the webhook will need never exposes them.
+
+One Durable Object, `RepoAccessDirectory` (named `directory`, SQLite-backed), holds everything. A single instance makes the registry and the mirrors change consistently, and every `authorize` reaches it only on a capability-cookie miss (at most once per reader, repository and five minutes) or for an anonymous reader whose isolate has not seen the repository in a minute. That is the scaling limit to watch; sharding mirrors by user is the next step when it binds.
+
+### What the directory keeps
+
+- **Registry**: every repository the app can see (`repo:<id>`: owner, name, visibility, default branch, installation, removed, `check`), a name index, and each installation's state (`active`, `suspended`, `deleted`). A name resolves only to an active repository in an active installation.
+- **Mirror per user**: the repository IDs `GET /user/installations` and `GET /user/installations/{id}/repositories` list for the user's token, with each page's ETag. A mirror is used for `MIRROR_TTL_MS` (five minutes), then refreshed with conditional requests (a 304 costs no primary quota). A listing stops after 20 pages of 100; an installation listed only in part falls back to `GET /repos/{o}/{r}/collaborators/{login}/permission` (installation token) for the one repository asked about, cached like a mirror. GraphQL `viewerPermission` would only help batch many single checks, which the listing already avoids, so it is not used.
+- **Who holds what**: `holder:<repo>:<user>` and `member:<installation>:<user>`, written before the mirror they come from, so every user a mirror lets read a repository can be found when it must be revoked.
+- **Tokens**: sealed (below), with a version that changes whenever they are replaced or dropped.
+- **Delivery dedupe** (#229's, `DeliveryDedupe`) and the **epoch outbox**.
+
+`authorize(viewer, owner, name)`: resolve the name in the registry; a public repository is granted to anyone. Otherwise an anonymous reader, an unknown user or a user without tokens is denied. A linked user's mirror is refreshed if stale (single flight per user), the name is resolved again (a listing may have taught the registry a repository no webhook announced), and the repository is granted only if the mirror lists it, or the single-repository check says so.
+
+### Webhooks
+
+Deliveries are verified with #229's `readVerifiedWebhook` (HMAC-SHA256 over the raw body, 25 MB cap, nothing parsed before the signature matches) and deduplicated by `X-GitHub-Delivery`. A delivery is remembered once it is applied, so a failure stays retryable.
+
+A signature covers the body, not the delivery ID, and payloads carry no timestamp, so a captured body could be replayed under a new ID. Plans are therefore built so that a payload can only deny:
+
+| Event | Registry | Users reached | Epoch bump |
+|---|---|---|---|
+| `member` added / edited / removed | – | The named user | edited, removed |
+| `membership` added / removed | – | The named user | removed |
+| `organization` member_added / member_removed | – | The named user | member_removed |
+| `organization` renamed | Owner renamed, repositories re-checked | – | – |
+| `organization` deleted | Installation deleted | Everyone the installation lists | yes |
+| `team` removed_from_repository, edited (with a repository) | – | Holders of the repository | yes |
+| `team` deleted, edited (without one) | – | Everyone the installation lists | yes |
+| `team` created, added_to_repository | – | Everyone the installation lists | – |
+| `repository` deleted | Removed | Holders | yes |
+| `repository` privatized | Private at once | – (cookie holders keep access) | – |
+| `repository` transferred | Re-checked | Holders | yes |
+| `repository` publicized, renamed, edited, created, … | Re-checked | – | – |
+| `installation` deleted / suspend | Deleted / suspended | Everyone the installation lists | yes |
+| `installation` created / unsuspend / new_permissions_accepted | Active, re-checked; announced repositories re-checked | Everyone the installation lists | – |
+| `installation_repositories` added / removed | Re-checked / removed | Installation users / holders | removed |
+| `github_app_authorization` revoked | – | The named user: tokens and mirror dropped | yes |
+
+"Re-checked" sets `check`: before that record grants anything again, the directory asks GitHub with an installation token (`GET /repos/{o}/{r}`, or `GET /installation/repositories` for an installation, whose token GitHub refuses once suspended). A replayed `publicized` or `unsuspend` therefore grants nothing GitHub does not confirm. Reaching a user means a new generation: their mirror and single-repository checks are no longer used, and the next authorize asks GitHub. People events never trust the payload's direction either; GitHub's listing decides.
+
+**Order.** The plan updates the registry, then reaches users (mirrors are now stale, so `authorize` already asks GitHub and denies), then queues the epochs, remembers the delivery and writes the epochs. Epochs are written from a durable outbox (`pending:<user>`): inline after each delivery, and by the Durable Object's alarm, which also retries failed KV writes every 10 s. Each value is `max(now, previous + 1)` in milliseconds, written by one serialized pass at a time, so a user's epoch only grows. KV keys expire after an hour (`EPOCH_TTL_SECONDS`): an epoch outlives every capability minted before it (cookies five minutes, tickets fifteen), and KV holds only recently bumped users, which is what KV Instant needs.
+
+**Races.** The Durable Object's input gates open while it awaits GitHub, so a webhook can land mid-refresh or mid-check. Two rules keep a stale grant out:
+
+- Every answer is decided from storage alone, with no other await in between, so it reflects every webhook applied so far. When the decision needs GitHub first (an installation or repository check, a stale mirror, a single-repository check), that work runs and the decision is taken again from storage afterwards. After six rounds (webhooks kept changing the answer) it is a 503.
+- GitHub work never commits a result an event overtook. A refresh records the user's generation and the registry's event sequence when it starts. It commits nothing if the user's generation changed, and it never overwrites a registry record an event changed after it started (tombstones included). A repository or installation check, or a single-repository check, is dropped the same way. So a listing GitHub sent before a revocation is never committed after it, and an uninstall that lands while a repository is being confirmed decides that very request.
+
+### Failing closed
+
+| Situation | Answer |
+|---|---|
+| GitHub error, timeout or rate limit while a mirror is fresh | The mirror answers (within `MIRROR_TTL_MS`) |
+| The same once the mirror is stale | 503; for 5 s (`FAILURE_COOLDOWN_MS`) the same work answers 503 without calling GitHub again |
+| Token near expiry | Renewed first (one renewal per user at a time: GitHub rotates the refresh token on use) |
+| Renewal fails (network, 5xx, no OAuth client configured) | 503 |
+| GitHub refuses the refresh token, or refuses a freshly renewed access token | The user is forgotten (tokens and mirror dropped, epoch bumped): private repositories are denied until they sign in again |
+| Stored tokens cannot be opened (another key) | 503 |
+| Unknown user, no tokens, no installation | Denied (public repositories stay readable) |
+| A `check` that GitHub cannot answer | 503 |
+| `GITHUB_TOKEN_KEY` missing, under 32 characters or equal to another secret | Every directory request 503 |
+| `GITHUB_WEBHOOK_SECRET` missing | Webhooks 503 (GitHub records a failure the reconciler can redeliver) |
+
+### Tokens
+
+User-to-server tokens (`{ accessToken, accessTokenExpiresAt, refreshToken, refreshTokenExpiresAt }`) are stored as `v1.<IV>.<ciphertext>`: AES-256-GCM with a fresh 12-byte IV, under a key derived with HKDF-SHA256 from the dedicated `GITHUB_TOKEN_KEY` secret and imported once per isolate. The additional data is the Rendro user ID, so a sealed value moved to another user does not open. Tokens never appear in a response, a log line or the serving Worker. Refresh uses GitHub's documented `POST /login/oauth/access_token` with `grant_type=refresh_token`; only `bad_refresh_token` is final. Rotating the key secret makes stored tokens unreadable (503) until users sign in again.
+
+### Rate budget
+
+User-token requests go through a `RateGovernor` per user (`user:<id>`: user tokens share the user's own 5,000 per hour) and installation-token requests through one per installation (`installation:<id>`), at most 1,000 budgets in memory. A refresh costs one `GET /user/installations` page plus one page per 100 repositories per installation, all conditional; it runs at most once per user per mirror TTL, or after an event reaches the user. Unknown names never reach GitHub.
+
+### Revocation bounds
+
+From GitHub's change to the first denied view:
+
+| Change | Bound |
+|---|---|
+| Covered by a webhook, KV Classic | GitHub's delivery latency (unpublished; usually seconds) + the control Worker (measured below) + the epoch reaching the reader's colo: KV Classic is visible elsewhere within about 60 s, the serving Worker's `cacheTtl: 60` adds up to a minute, so expect 60–90 s |
+| Covered by a webhook, KV Instant | Delivery latency + under a second (p99 256 ms replication); the serving Worker's `cacheTtl` would then be the floor to lower |
+| If the epoch never arrives (KV outage) | The cookie's five minutes for pages and branch views; fifteen minutes for frame resources through a ticket already issued |
+| No webhook (enterprise policy, a lost delivery the reconciler has not redelivered) | Mirror TTL + cookie lifetime: at most ten minutes for pages (tested: `tests/repo-access-revocation.test.ts`); a ticket issued just before can add its fifteen minutes for frame resources of that commit |
+| Repository made private, anonymous readers | Delivery latency + the serving isolate's one-minute public-repository memory (no epoch involved) |
+
+Measured on workerd (`tests/repo-access-workerd.test.ts`, 2026-10-18, final code, local machine at load about 10, 25 revocations per run, two runs). The production Worker reads through the real control Worker over the service binding. KV is Miniflare's, with no propagation delay, so "delivery to first denied view" is only the Workers' own share. `/health` is the local stack's floor. The refresh rows include the harness's round trip from workerd to the fake GitHub in the Node test process, which dominates them.
+
+| Request | p50 ms (run 1 / run 2) | p90 ms |
+|---|---|---|
+| `/health` (floor) | 4.2 / 4.7 | 5.7 / 10.1 |
+| Webhook: verify, apply in the directory, write the KV epoch | 10.4 / 11.7 | 12.0 / 15.8 |
+| Delivery to the first denied view (includes that view's mirror refresh) | 67.9 / 55.5 | 75.3 / 74.4 |
+| Capability-cookie miss, fresh mirror (session, epoch, control Worker) | 11.4 / 12.3 | 13.0 / 20.2 |
+| Capability-cookie miss with a mirror refresh (two conditional GitHub requests) | 86.6 / 94.0 | 99.1 / 100.6 |
+
+Real GitHub adds its own latency to a refresh (typically 100–300 ms per request from the edge, unmeasured here); it is paid once per user and mirror TTL, or after an event, never on a cookie hit.
+
+### Bindings and configuration (development and tests only)
+
+| Binding | Type | Purpose |
+|---|---|---|
+| `REPO_ACCESS_DIRECTORY` | Durable Object `RepoAccessDirectory` (SQLite, migration `v1`) | The directory |
+| `REPO_EPOCHS` | KV | Epochs, written here; the serving Worker binds the same namespace to read them |
+| `GITHUB_TOKEN_KEY` | Secret, required | Seals stored user tokens. Dedicated: never equal to another secret |
+| `GITHUB_WEBHOOK_SECRET` | Secret, required | The GitHub App's webhook secret |
+| `GITHUB_APP_CLIENT_ID`, `GITHUB_APP_CLIENT_SECRET` | Var and secret, optional until P1 | Token refresh; without them an expired user token is a 503 |
+| `GITHUB_DEV_TOKEN` | Secret, optional | Installation token for checks until P1 mints installation tokens |
+| `GITHUB_API_ORIGIN`, `GITHUB_WEB_ORIGIN` | Vars, optional | Point at a fake GitHub; the defaults are `api.github.com` and `github.com` |
+
+What the owner configures later is in [SETUP.md](SETUP.md#github-repository-reads-not-configured-yet).
+
+### Open points
+
+- One GitHub App has one webhook URL, but push events go to the ingest Worker (#229) and permission events here. P1 decides on a single ingress; the recommendation is the control Worker verifying once and forwarding `push` to the ingest queue.
+- The account hand-over is a service-binding call; if P1's sign-in runs in Convex rather than a Worker, it needs an authenticated public path instead.
+- Asset tickets live fifteen minutes and are only epoch-checked, so a missed webhook can leave frame resources of an open commit readable that long; five minutes would match the cookie.
+- With KV Instant, the serving Worker's `cacheTtl: 60` becomes the dominant term.
+- Commit-pinned frames of public repositories are cached `public, immutable`; a repository made private stays readable from browser caches that already hold a page.
+
 ---
 
 ## Key Technical Decisions
@@ -2231,6 +2372,7 @@ An earlier pair of runs at load about 9 (before the rewritten body was memoized)
 | iframe document rendering | Publisher HTML remains isolated from application chrome |
 | Repo docs rendered and sanitized once at ingest | comrak (cmark-gfm lineage) is linear on hostile Markdown; a parse5 allowlist with a fixed-point re-parse check is the XSS boundary, and readers never pay render cost |
 | Stateless repository capability cookie plus revocation epoch | A cached repository page view verifies one HMAC and reads one epoch; GitHub and the database are reached only on a cookie miss, and revocation reaches every colo with the epoch store |
+| One Durable Object for the permission registry and mirrors; webhook payloads may only deny | Registry and mirrors change consistently and races with webhooks are detectable; a replayed body cannot grant, because permissive changes are confirmed with GitHub first |
 
 ## Known Limitations
 

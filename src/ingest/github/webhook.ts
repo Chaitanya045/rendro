@@ -8,12 +8,18 @@ import { parseIngestMessage, type IngestMessage, type QueueLike } from "../orche
  * and its secret, and the route then calls acceptPushWebhook. It verifies the
  * signature, turns a branch push into a queue message and answers at once;
  * GitHub fails a delivery that takes over ten seconds and never retries it.
+ * The permission events (#243) go through the same `readVerifiedWebhook`.
  */
 
 /** GitHub caps payloads at 25 MB. */
 export const MAX_WEBHOOK_BYTES = 25 * 1024 * 1024;
 const encoder = new TextEncoder();
 const DELIVERY = /^[A-Za-z0-9-]{1,64}$/;
+
+/** A well-formed `X-GitHub-Delivery` (a GUID; redeliveries reuse it, so it is the dedupe key). */
+export function isDeliveryId(value: unknown): value is string {
+  return typeof value === "string" && DELIVERY.test(value);
+}
 
 /** Check X-Hub-Signature-256 (HMAC-SHA256 of the raw body). WebCrypto's verify compares in constant time. */
 export async function verifyWebhookSignature(secret: string, body: Uint8Array<ArrayBuffer>, header: string | null): Promise<boolean> {
@@ -51,14 +57,25 @@ export function parsePush(event: string | null, deliveryId: string | null, paylo
     },
     branch: push.ref.slice("refs/heads/".length),
     sha: push.after,
-    deliveryId: deliveryId && DELIVERY.test(deliveryId) ? deliveryId : null,
+    deliveryId: isDeliveryId(deliveryId) ? deliveryId : null,
     reason: "push",
   });
   return message ? { kind: "ingest", message } : { kind: "ignored", reason: "malformed" };
 }
 
-/** Verify, enqueue, answer. 202 when queued, 204 when ignored, 401 for a bad signature. */
-export async function acceptPushWebhook(request: Request, options: { secret: string; queue: QueueLike<IngestMessage> }): Promise<Response> {
+export interface VerifiedWebhook {
+  event: string | null;
+  deliveryId: string | null;
+  payload: unknown;
+}
+
+/**
+ * Read a webhook request without ever holding more than GitHub's 25 MB, check
+ * its signature, then parse it. A Response is the answer to send instead:
+ * 405, 413, 400, or 401 for a missing or wrong signature (nothing is parsed
+ * before the signature matches).
+ */
+export async function readVerifiedWebhook(request: Request, secret: string): Promise<VerifiedWebhook | Response> {
   if (request.method !== "POST") return new Response(null, { status: 405 });
   if (Number(request.headers.get("content-length")) > MAX_WEBHOOK_BYTES) return new Response(null, { status: 413 });
   let body: Uint8Array<ArrayBuffer>;
@@ -68,16 +85,21 @@ export async function acceptPushWebhook(request: Request, options: { secret: str
   } catch (error) {
     return new Response(null, { status: error instanceof GitHubError && error.kind === "too-large" ? 413 : 400 });
   }
-  if (!await verifyWebhookSignature(options.secret, body, request.headers.get("x-hub-signature-256"))) {
+  if (!await verifyWebhookSignature(secret, body, request.headers.get("x-hub-signature-256"))) {
     return new Response(null, { status: 401 });
   }
-  let payload: unknown;
   try {
-    payload = JSON.parse(new TextDecoder().decode(body));
+    return { event: request.headers.get("x-github-event"), deliveryId: request.headers.get("x-github-delivery"), payload: JSON.parse(new TextDecoder().decode(body)) };
   } catch {
     return new Response(null, { status: 400 });
   }
-  const parsed = parsePush(request.headers.get("x-github-event"), request.headers.get("x-github-delivery"), payload);
+}
+
+/** Verify, enqueue, answer. 202 when queued, 204 when ignored, 401 for a bad signature. */
+export async function acceptPushWebhook(request: Request, options: { secret: string; queue: QueueLike<IngestMessage> }): Promise<Response> {
+  const webhook = await readVerifiedWebhook(request, options.secret);
+  if (webhook instanceof Response) return webhook;
+  const parsed = parsePush(webhook.event, webhook.deliveryId, webhook.payload);
   if (parsed.kind === "ignored") return new Response(null, { status: 204 });
   // A failed send surfaces as a 5xx, so GitHub records the delivery as failed and the reconciler redelivers it.
   await options.queue.send(parsed.message);

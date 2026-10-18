@@ -8,8 +8,8 @@ import { removeSmokeAsset, startFaults, startIdentityFixtures, startImageHost, s
 import { localEnvironment, startBackend } from "./backend";
 import { seedWorkspace } from "./seed";
 import { registerResources } from "./resource-journal";
-import { repoReadWorker, withRepoReadBindings } from "./repo-read-config";
-import { seedRepositories } from "./repo-fixtures";
+import { controlWorker, controlWorkerConfig, withRepoReadBindings } from "./repo-read-config";
+import { repositoryWorld, seedRepositories } from "./repo-fixtures";
 import type { R2BucketLike } from "../src/ingest/orchestrator/store";
 
 const run = promisify(execFile);
@@ -61,7 +61,8 @@ export default async function globalSetup() {
     });
 
     // Relocate only paths. Flags, compatibility date and asset routing come from production; the repository
-    // read path's bindings (unbound in production until P5) point at local R2/KV and the fixture control Worker.
+    // read path's bindings (unbound in production until the owner configures P5) point at local R2/KV and the
+    // real control Worker (wrangler.control.toml), which reads a fake GitHub in this process.
     const productionConfig = await readFile(join(root, "wrangler.toml"), "utf8");
     const configPath = join(directory, "wrangler.toml");
     const compatibilityDate = /^compatibility_date = "([^"]+)"/m.exec(productionConfig)?.[1];
@@ -72,7 +73,15 @@ export default async function globalSetup() {
     await writeFile(configPath, withRepoReadBindings(productionConfig
       .replace('main = "src/worker.ts"', `main = ${JSON.stringify(join(root, "src/worker.ts"))}`)
       .replace('directory = "./public"', `directory = ${JSON.stringify(join(root, "public"))}`)
-      .replace(bucketBinding, '[[services]]\nbinding = "STORAGE"\nservice = "storage-faults"\n')));
+      .replace(bucketBinding, '[[services]]\nbinding = "STORAGE"\nservice = "storage-faults"\n'), controlWorker.name));
+    const controlPath = join(directory, "wrangler.control.toml");
+    await writeFile(controlPath, await controlWorkerConfig(root));
+    const world = repositoryWorld();
+    const controlVars = { GITHUB_API_ORIGIN: world.github.origin, GITHUB_WEB_ORIGIN: world.github.webOrigin, GITHUB_APP_CLIENT_ID: world.github.clientId };
+    const controlSecrets = {
+      GITHUB_WEBHOOK_SECRET: randomBytes(32).toString("hex"), GITHUB_TOKEN_KEY: randomBytes(32).toString("hex"),
+      GITHUB_APP_CLIENT_SECRET: world.github.clientSecret, GITHUB_DEV_TOKEN: world.github.token,
+    };
     // The empty file also prevents loading shell credentials through required secrets.
     await writeFile(join(directory, ".dev.vars"), "# Only explicit synthetic bindings are used.\n");
     process.env.CLOUDFLARE_LOAD_DEV_VARS_FROM_DOT_ENV = "false";
@@ -93,6 +102,8 @@ export default async function globalSetup() {
       const url = new URL(request.url);
       const image = images.intercept(request);
       if (image) return image;
+      // The control Worker's GitHub is the in-process fake.
+      if (url.origin === world.github.origin || url.origin === world.github.webOrigin) return world.github.fetch(request);
       if (!allowedOrigins.has(url.origin)) {
         blockedOrigins.add(url.origin);
         throw new Error(`Blocked external Worker origin: ${url.origin}`);
@@ -111,7 +122,7 @@ export default async function globalSetup() {
           compatibility_date: compatibilityDate, compatibility_flags: ["nodejs_compat"],
           r2_buckets: [{ binding: "BUCKET", bucket_name: bucketName }],
         } },
-        { configPath: repoReadWorker.accessConfig },
+        { configPath: controlPath, vars: controlVars, secrets: controlSecrets },
       ],
     });
     closers.push(() => server.close());
@@ -130,10 +141,14 @@ export default async function globalSetup() {
     await removeSmokeAsset(BUCKET, seed.organizationId, seed.projectId);
     await writeFile(join(directory, "backend-admin.json"), JSON.stringify({ origin: convex.origin, adminKey: convex.adminKey }), { mode: 0o600 });
     const workerEnv = await server.getWorker<{ REPO_CONTENT: R2BucketLike }>().getEnv();
-    const accessEnv = await server.getWorker<{ GRANTS: { put(key: string, value: string): Promise<void> } }>(repoReadWorker.access).getEnv();
-    const repos = await seedRepositories(workerEnv.REPO_CONTENT, accessEnv.GRANTS, seed.userIds.owner);
+    const controlHandle = server.getWorker(controlWorker.name);
+    const repos = await seedRepositories({
+      bucket: workerEnv.REPO_CONTENT, world, webhookSecret: controlSecrets.GITHUB_WEBHOOK_SECRET, userIds: seed.userIds,
+      control: (url, init) => controlHandle.fetch(url, init) as unknown as Promise<Response>,
+    });
+    closers.push(() => repos.close());
     const reposPath = join(directory, "repos.json");
-    await writeFile(reposPath, JSON.stringify(repos), { mode: 0o600 });
+    await writeFile(reposPath, JSON.stringify(repos.fixtures), { mode: 0o600 });
     process.env.RENDRO_E2E_REPOS = reposPath;
     const seedPath = join(directory, "seed.json");
     await writeFile(seedPath, JSON.stringify(seed), { mode: 0o600 });

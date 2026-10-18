@@ -166,6 +166,16 @@ pnpm run deploy
 
 `pnpm run deploy` runs `pnpm build:assets` before `wrangler deploy`; a bare `wrangler deploy` from a fresh checkout ships without the git-ignored viewer bundles. For the `rendro-dev` Worker (`dev.rendro.app`), add `--env development` to each `wrangler secret put` and run `pnpm run deploy --env development`. Use the explicit `run`: `pnpm deploy` is an unrelated pnpm command. See [Deploy Commands](TECHNICAL.md#deploy-commands) and [Environment Variables (Workers)](TECHNICAL.md#environment-variables-workers).
 
+#### GitHub repository reads (not configured yet)
+
+`/r/` stays a 404 until these exist; nothing below is needed for today's deploys. The pieces are in the repository ([TECHNICAL.md](TECHNICAL.md#repository-permission-mirror-github-pivot-p5)); the owner provides the accounts, secrets and bindings once the GitHub App exists (P1):
+
+1. Create a KV namespace for revocation epochs per environment (`pnpm exec wrangler kv namespace create rendro-repo-epochs`). Put its ID in `wrangler.control.toml` (`REPO_EPOCHS`) and bind the same namespace as `REPO_EPOCHS` in the serving Worker's `wrangler.toml`. KV Instant, when available to the account, shortens revocation from about a minute to about a second.
+2. Set the control Worker's secrets: `GITHUB_TOKEN_KEY` (`openssl rand -hex 32`; dedicated, never reused), `GITHUB_WEBHOOK_SECRET` (the GitHub App's webhook secret), and `GITHUB_APP_CLIENT_SECRET` with the `GITHUB_APP_CLIENT_ID` var (the App's OAuth client, for token refresh). Use `wrangler secret put <NAME> --config wrangler.control.toml`.
+3. Deploy the control Worker (`pnpm exec wrangler deploy --config wrangler.control.toml`), with Smart Placement or a location hint near Convex. Route only `/v1/github/webhook` to it publicly and set that URL as the App's webhook URL; its other endpoints answer service bindings only.
+4. In `wrangler.toml`, add the `REPO_ACCESS` service binding to the control Worker and the `REPO_CONTENT` R2 binding to the ingest bucket. Deploy the control Worker before the serving Worker, since a service binding to a missing Worker fails the deploy.
+5. P1 replaces `GITHUB_DEV_TOKEN` with installation tokens minted per installation, and calls `/v1/accounts/link` at sign-in.
+
 #### Migrating from S3 access keys
 
 Earlier releases reached R2 with an S3 endpoint and an access key pair (`MINIO_*` Worker secrets). After deploying a Worker that has the binding and confirming documents load:
