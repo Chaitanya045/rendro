@@ -142,6 +142,13 @@ describe("UI transition registry", () => {
     }
   });
 
+  // #121: every transition is asserted somewhere. A new edge must arrive with its test; there is no "untested" backlog.
+  it("leaves no transition untested", () => {
+    const untested = registry.families.flatMap(family => family.edges.filter(edge => edge.status === "untested").map(edge => edge.id));
+    expect(untested).toEqual([]);
+    expect(registry.families.filter(family => family.status === "untested").map(family => family.id)).toEqual([]);
+  });
+
   const testFiles = [...new Set(registry.families.flatMap(family => family.edges.flatMap(edge => edge.tests.map(test => test.file))))];
   it.each(testFiles)("resolves enabled test declarations in %s", file => {
     expect(existsSync(resolve(file)), file).toBe(true);
