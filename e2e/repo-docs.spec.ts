@@ -32,6 +32,12 @@ test("an anonymous reader browses a public repository: entry page, sidebar title
   const response = await page.goto(`/r/${open.owner}/${open.name}`);
   expect(response?.status()).toBe(200);
   expect(response?.headers()["cache-control"]).toBe("private, no-cache");
+  // The shell points Chromium at same-origin speculation rules (#245).
+  expect(response?.headers()["speculation-rules"]).toBe('"/speculation-rules/repo.json"');
+  const rules = await page.request.get("/speculation-rules/repo.json");
+  expect(rules.status()).toBe(200);
+  expect(rules.headers()["content-type"]).toBe("application/json; charset=utf-8");
+  expect(await rules.json()).toMatchObject({ prefetch: [{ source: "document", eagerness: "moderate" }] });
   await expect(heading(page, "Open home")).toBeVisible();
   await expect(page.locator(".tree-item.active .tree-label")).toHaveText("Open home");
   // The branch view keeps its URL; the frame is pinned to the commit the branch served.
@@ -52,6 +58,8 @@ test("an anonymous reader browses a public repository: entry page, sidebar title
   await expect(heading(page, "Advanced")).toBeVisible();
   await expect(content(page).locator("pre code.hljs")).toContainText("answer = 42");
   await expect(page).toHaveURL(/\?doc=docs%2Fguide%2Fadvanced\.md$/);
+  // An in-shell switch is measured so the switch budget stays observable (#245).
+  expect(await page.evaluate(() => performance.getEntriesByName("rendro:frame-switch").length)).toBeGreaterThan(0);
   // Public reads never set a capability cookie.
   expect((await page.context().cookies()).filter(cookie => cookie.name.includes("rendro-repo"))).toEqual([]);
 });

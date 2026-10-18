@@ -28,6 +28,7 @@ import { FRAME_TEMPLATE_TAG, FRAME_VERSION, failureBody, frameBody, frameContent
 import type { RepoGrant } from "./grant";
 import { encodeRepoPath, parseRepoPath, repoBase, type RepoRefSpec, type RepoRequestPath } from "./paths";
 import { isPagePath, manifestFile, readDeadline, RepoSnapshots, type EdgeCache } from "./snapshot";
+import { REPO_SPECULATION_RULES_PATH, repoSpeculationRules } from "./speculation";
 import { treePage } from "./tree";
 
 /** As on the other delivery routes: a stalled store becomes a retryable 503. */
@@ -122,7 +123,8 @@ function shell(c: Context, grant: RepoGrant, request: RepoRequestPath, manifest:
   // Private frames load their images through tickets, which only the trusted shell may renew.
   const body = grant.repo.private ? html.replace("</body>", viewerUpdateNotice() + viewerScript("parent", { base: pinned }) + "</body>") : html;
   // Revalidated on every navigation (each response has its own nonce), but never no-store: back/forward cache stays usable.
-  return c.html(body, 200, { "Cache-Control": "private, no-cache" });
+  // The shell points at same-origin speculation rules so Chromium prefetches the frames the sidebar links to (#245).
+  return c.html(body, 200, { "Cache-Control": "private, no-cache", "Speculation-Rules": `"${REPO_SPECULATION_RULES_PATH}"` });
 }
 
 async function tree(c: Context, grant: RepoGrant, request: RepoRequestPath, manifest: SnapshotManifest, services: Services): Promise<Response> {
@@ -215,6 +217,13 @@ async function renewal(c: Context, grant: RepoGrant, request: RepoRequestPath, m
 
 const app = new Hono();
 app.use("/r/*", viewerErrorCache);
+// Chromium reads this from the shell's `Speculation-Rules` header. Same-origin JSON, never under /r/
+// so a reader's capability cookie cannot reach it. The rules are constant and tiny; the Worker serves
+// every route private by default, so this one is too rather than holding a cacheable public copy.
+app.get(REPO_SPECULATION_RULES_PATH, (c) => c.body(repoSpeculationRules(), 200, {
+  "Content-Type": "application/json; charset=utf-8",
+  "Cache-Control": "private, no-store",
+}));
 // Storage faults and broken snapshots surface here; tree pages and renewals are read by scripts and get JSON.
 app.onError((error, c) => viewerErrorResponse(error, c, representation(parseRepoPath(new URL(c.req.url).pathname)?.target.kind) === "json"));
 

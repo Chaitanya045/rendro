@@ -70,6 +70,7 @@ describe("public repositories", () => {
     expect(response.headers.get("Cross-Origin-Opener-Policy")).toBe("same-origin");
     expect(response.headers.get("Cross-Origin-Resource-Policy")).toBe("same-origin");
     expect(response.headers.get("Content-Security-Policy")).toMatch(/script-src 'self' 'nonce-[^']+' 'strict-dynamic'/);
+    expect(response.headers.get("Speculation-Rules")).toBe('"/speculation-rules/repo.json"');
     expect(response.headers.get("Referrer-Policy")).toBe("no-referrer");
     expect(setCookies(response)).toEqual([]);
     const html = await response.text();
@@ -80,6 +81,20 @@ describe("public repositories", () => {
     expect(html).not.toContain('data-viewer="parent"');
     // Anonymous public reads never reach the session.
     expect(sessionLookups).toEqual([]);
+  });
+
+  it("serves same-origin speculation rules the shell can point at", async () => {
+    const response = await get("/speculation-rules/repo.json");
+    expect(response.status).toBe(200);
+    expect(response.headers.get("Content-Type")).toBe("application/json; charset=utf-8");
+    expect(response.headers.get("Cache-Control")).toBe("private, no-store");
+    expect(await response.json()).toEqual({
+      prefetch: [{
+        source: "document",
+        where: { and: [{ href_matches: "/r/*/@*/files/*" }, { not: { href_matches: "/r/*/@*/view/*" } }] },
+        eagerness: "moderate",
+      }],
+    });
   });
 
   it("matches owner and repository names case-insensitively and selects ?doc", async () => {

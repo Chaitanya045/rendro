@@ -15,6 +15,7 @@ import {
 import { documentLoadAccessibility } from "./load-state";
 import { emptyTreeAction, shouldUseNativeLinkNavigation } from "./navigation";
 import { folderTransitionOverride, indicatorTransition } from "./motion";
+import { createFramePreloader, framePrefetchUrl, prefetchPermitted, ACTIVE_FRAME_STYLE, BUFFER_FRAME_STYLE, type NetworkInformation } from "./prefetch";
 
 type RendroWindow = Window & { RENDRO_INITIAL_DOC?: string; RENDRO_CURRENT_DOC?: string };
 const RENDRO_WINDOW = window as RendroWindow;
@@ -73,6 +74,45 @@ let activeEl: HTMLElement | null = null;
 
 function reducedMotion(): boolean {
   return window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
+}
+
+// ── instant navigation: hidden-frame prefetch (#245) ──
+
+/** Marks a click-to-swap so tests and the field can measure the in-shell switch. */
+const FRAME_SWITCH_MEASURE = "rendro:frame-switch";
+const FRAME_SWITCH_START = `${FRAME_SWITCH_MEASURE}:start`;
+const FRAME_SWITCH_END = `${FRAME_SWITCH_MEASURE}:end`;
+
+/**
+ * The content area that holds the reader's frame. Preloads live here as hidden
+ * siblings so adoption toggles them in place instead of moving a frame, which
+ * would discard its browsing context and re-request the document.
+ */
+function frameHost(): HTMLElement {
+  const frame = document.getElementById("content-frame");
+  return frame?.parentElement ?? document.body;
+}
+
+const framePreloader = createFramePreloader({ host: frameHost });
+
+/** Begin loading the frame document a tree link points at, when the reader's
+ * connection allows it and the shell is a repository read path. */
+function prefetchFrameLink(href: unknown) {
+  if (!DOCUMENT_BASE || typeof href !== "string") return;
+  const connection = (navigator as Navigator & { connection?: NetworkInformation }).connection;
+  if (!prefetchPermitted(connection)) return;
+  if (!framePrefetchUrl(href, location.href, location.origin)) return;
+  const frame = document.getElementById("content-frame") as HTMLIFrameElement | null;
+  // The reader's current document needs no preload, and re-warming it after
+  // adoption would pull the same URL a second time.
+  if (frame && frame.getAttribute("src") === href) return;
+  framePreloader.warm(href, frame?.getAttribute("sandbox") ?? null);
+}
+
+function prefetchFromEvent(event: Event) {
+  if (!(event.target instanceof HTMLElement)) return;
+  const link = event.target.closest<HTMLAnchorElement>("a.tree-link[target='content-frame']");
+  if (link) prefetchFrameLink(link.getAttribute("href"));
 }
 
 // ── active indicator ──
@@ -517,6 +557,63 @@ function offerExternalLink(href: string) {
   navigationNotice.offer({ fullPath: "", search: "", fragment: "", href });
 }
 
+function markFrameSwitch() {
+  performance.mark(FRAME_SWITCH_END);
+  performance.measure(FRAME_SWITCH_MEASURE, FRAME_SWITCH_START, FRAME_SWITCH_END);
+}
+
+/** Reveal a preloaded sibling frame in the reader's cell, keeping the browsing
+ * context and rendered document it already has. Both frames stay children of the
+ * content area throughout — only visibility and identity change — because moving
+ * an iframe discards its browsing context. The switch runs inside a same-document
+ * view transition so the old and new documents cross-fade instead of flashing,
+ * unless the reader prefers reduced motion. */
+function adoptPreloadedFrame(preloaded: HTMLIFrameElement, current: HTMLIFrameElement, loadId: number, fullPath: string) {
+  const className = current.className;
+  const title = current.getAttribute("title") ?? "Document content";
+  const reveal = () => {
+    // Drop the shared identity first: two frames must never both be the target
+    // `content-frame` at once, or a link click could navigate the wrong one.
+    current.removeAttribute("name");
+    current.removeAttribute("id");
+    current.setAttribute("aria-hidden", "true");
+    current.tabIndex = -1;
+    current.style.cssText = BUFFER_FRAME_STYLE;
+    preloaded.id = "content-frame";
+    preloaded.name = "content-frame";
+    preloaded.className = className;
+    preloaded.setAttribute("title", title);
+    preloaded.removeAttribute("aria-hidden");
+    delete preloaded.dataset.preload;
+    preloaded.tabIndex = 0;
+    preloaded.setAttribute("aria-busy", "true");
+    preloaded.style.cssText = ACTIVE_FRAME_STYLE;
+  };
+  // The document is already rendered, so settling waits only for the reveal.
+  const settle = () => {
+    if (loadId !== activeDocLoadId) return;
+    hideDocLoader(preloaded);
+    sendDocumentFragment(preloaded, relativeDocumentPath(fullPath), location.hash);
+    markFrameSwitch();
+  };
+  const startViewTransition = (document as Document & {
+    startViewTransition?: (update: () => void) => { updateCallbackDone: Promise<unknown> };
+  }).startViewTransition;
+  if (reducedMotion() || typeof startViewTransition !== "function") {
+    reveal();
+    requestAnimationFrame(settle);
+  } else {
+    // The transition may run the update callback on a later frame, so wait for it
+    // before hiding the loader; otherwise the loader would clear before the reveal
+    // reapplies aria-busy.
+    const transition = startViewTransition.call(document, reveal);
+    void transition.updateCallbackDone.then(() => requestAnimationFrame(settle), () => requestAnimationFrame(settle));
+  }
+  // The private viewer announced itself to the frame while it was hidden; ask
+  // this browsing context to repeat its deployment now that it is the reader's frame.
+  preloaded.contentWindow?.postMessage({ type: "viewer-identify" }, "*");
+}
+
 function loadDoc(fullPath: string, pushState: false | "push" | "replace", fragment = "", search = "") {
   navigationNotice.clear();
   const frame = document.getElementById("content-frame") as HTMLIFrameElement | null;
@@ -528,21 +625,28 @@ function loadDoc(fullPath: string, pushState: false | "push" | "replace", fragme
   syncActiveState(fullPath);
 
   activeDocLoadId++;
+  const loadId = activeDocLoadId;
   if (docLoadTimeout !== undefined) window.clearTimeout(docLoadTimeout);
   showDocLoader(frame);
 
-  if (frame) {
+  const frameUrl = documentFrameUrl(fullPath) + search;
+  performance.mark(FRAME_SWITCH_START);
+  const preloaded = frame ? framePreloader.take(frameUrl) : null;
+
+  if (frame && preloaded) {
+    adoptPreloadedFrame(preloaded, frame, loadId, fullPath);
+  } else if (frame) {
     frame.onload = () => {
       window.clearTimeout(docLoadTimeout);
       hideDocLoader(frame);
       sendDocumentFragment(frame, relativeDocumentPath(fullPath), location.hash);
+      markFrameSwitch();
     };
     frame.onerror = () => {
       window.clearTimeout(docLoadTimeout);
       showDocLoadError(frame);
     };
     docLoadTimeout = window.setTimeout(() => showDocLoadError(frame), 15000);
-    const frameUrl = documentFrameUrl(fullPath) + search;
     frame.src = frameUrl;
     // Keep src authoritative for comments/tickets, but replace the pending
     // frame navigation: the shell alone owns document history entries.
@@ -646,6 +750,9 @@ function init() {
   void loadRootTree();
   TREE.addEventListener("click", handleClick);
   TREE.addEventListener("keydown", handleKeydown);
+  // Hovering or tabbing to a document row preloads its frame.
+  TREE.addEventListener("pointerover", prefetchFromEvent);
+  TREE.addEventListener("focusin", prefetchFromEvent);
 
   // Re-sync indicator after folder expand/collapse animations finish
   TREE.addEventListener("transitionend", (event) => {
@@ -672,6 +779,9 @@ function init() {
     }
   });
   window.addEventListener("message", (event) => {
+    // A hidden preload announcing itself is ready, and its messages are not the
+    // reader's frame's. Consume them before the content-frame checks.
+    if (framePreloader.ready(event.source)) return;
     const frame = document.getElementById("content-frame") as HTMLIFrameElement | null;
     if (!isContentFrameSource(event.source, frame?.contentWindow ?? null)) return;
     if (event.origin !== (frame?.hasAttribute("sandbox") ? "null" : location.origin)) return;

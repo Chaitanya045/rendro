@@ -1296,6 +1296,18 @@ Document loading has no standalone DOM loader and never covers the iframe. The s
 
 The iframe stays at full opacity throughout. There is no fixed header line, main-area progress bar, document skeleton, or active-indicator pulse.
 
+### In-Shell Navigation and Prefetch
+
+The repository shell (`/r/…`) keeps navigation inside the shell and makes a likely next document ready before the reader clicks (#245):
+
+- The shell advertises same-origin Speculation Rules through a `Speculation-Rules` response header pointing at `/speculation-rules/repo.json` (never an inline `<script type="speculationrules">`, which the nonce CSP would not allow). Chromium prefetches the frame documents the sidebar links to (`/r/*/@*/files/*`, excluding `/r/*/@*/view/*`) with `eagerness: "moderate"`; other engines ignore the header.
+- Independently, `lazy-tree.js` warms a hidden frame on `pointerover`/`focusin` of a `target="content-frame"` tree link, gated on a repository read path (`data-document-base`), a same-origin frame document, and a connection that is neither Save-Data nor slow (`navigator.connection`).
+- A shell `fetch()` cannot warm the opaque sandboxed frame: the HTTP cache is partitioned by the frame's opaque origin, so the prefetch must load a real frame carrying the content frame's `sandbox` attribute.
+- Preloads are **hidden sibling frames in the content area, never moved**. Moving an iframe to a new parent — even a `replaceWith` in the same task — discards its browsing context in Chromium and re-requests the document. The pool keeps at most three buffers as absolute, invisible siblings; adopting one toggles visibility and identity in place, so the browsing context and the painted document survive with no second request.
+- Readiness is the frame's own `doc-loaded` announcement, not its `load` event: an aborted subframe navigation still fires `load` on Chromium's error page, so silence is the only failure signal. A preload that has not spoken is cancelled rather than adopted, and the click loads normally.
+- The reveal runs inside `document.startViewTransition` so the old and new documents cross-fade instead of flashing, unless the reader prefers reduced motion or the API is absent. Either way a `rendro:frame-switch` `performance.measure` records the switch (the target is under 200 ms for a warmed frame).
+- After a reveal the private viewer is asked to redeploy in its new cell (`viewer-identify`); the shell re-sends the fragment and settles the loader exactly as a fresh load does.
+
 ### Sticky Headers (CSS)
 
 ```css
