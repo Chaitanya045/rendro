@@ -166,7 +166,7 @@ Better Auth only knows the `__Secure-` prefix, so `convex/auth.ts` turns its aut
 - **Reads:** `onRequest` rewrites every HTTP request's Cookie header before routing, so all hooks and endpoints see only current names. A legacy cookie whose current twin is absent is *promoted* to the current name; one whose current twin is present is *shadowed* and dropped, because the current cookie always wins. `sessionCookieHeaders` applies the same rewrite to server-side session reads, including cookies inside viewer tickets minted before the switch. The Worker's own matchers (`src/viewer-ticket.ts`, session middleware, session cache) accept `__Host-`, `__Secure-` and unprefixed token names and leave precedence to Convex.
 - **Re-issue:** after a successful GET that resolves a live session from a promoted legacy token (for example `/get-session`, `/convex/token`, or the organization reads every management page makes), the response sets the current session cookie with the same signed value. Its lifetime comes from the persisted session, never a client cookie (#145): remembered sessions get `Max-Age` = the 7-day session lifetime; non-remembered sessions stay browser-session cookies plus the signed `dont_remember` marker. The stored expiry is not extended.
 - **Expiry:** promoted legacy cookies are expired (`Max-Age=0; Path=/; HttpOnly; Secure; SameSite=Lax`) only by such a read, or when the response itself sets or clears the current session cookie (sign-in, refresh, sign-out, an invalid or expired token). A failed or writing request never removes them, so a transient error cannot sign anyone out. Shadowed legacy cookies are expired on any response. A caller cannot supply the internal migration record: `onRequest` replaces it, and server-side calls never carry it.
-- **Sign-out** expires every name under all three prefixes (host-only, plus the parent domain except for `__Host-`, which browsers reject with a Domain) and still sends `Clear-Site-Data: "cookies"`.
+- **Sign-out** expires every name under all three prefixes (host-only, plus the parent domain except for `__Host-`, which browsers reject with a Domain) and sends `Clear-Site-Data: "cache"`, so the browser also drops the HTTP cache holding any private frame the viewer cached immutably in that profile (#242). The `"cookies"` directive is deliberately absent: it would clear cookies for the whole registrable domain, so a sign-out on one subdomain would wipe sessions on every other one, while the per-name expiry below is exact.
 
 **Rollout order: Worker first, then Convex.** The new Worker accepts all three names, so it works with the old Convex deployment (which still sets and reads `__Secure-` names). The old Worker only recognizes `__Secure-`/unprefixed session tokens: behind it, users holding `__Host-` cookies would look signed out on pages and viewer tickets. To roll back, revert Convex first (users already migrated to `__Host-` sign in again once), then the Worker. Reverting only the Worker while the new Convex is live is not supported.
 
@@ -304,7 +304,7 @@ Management controllers and account forms submit JSON to relative application URL
 1. **Header allowlist**: only `accept`, `content-type`, `cookie`, `origin`, `sec-fetch-site`, and `user-agent` are forwarded. `Host` and `cf-*` headers are excluded.
 2. **Domain stripping**: Convex sets `Domain=convex.site` on cookies. The Worker strips the Domain attribute so cookies bind to the Worker origin.
 3. **Redirect control**: `redirect: "manual"` leaves redirects to the browser.
-4. **Sign-out**: `GET /api/auth/sign-out` shows confirmation; a same-origin `POST` calls Convex sign-out, then expires every known auth cookie under the current, legacy and local names (host-only and parent domain; `__Host-` names host-only) and sends `Clear-Site-Data: "cookies"`.
+4. **Sign-out**: `GET /api/auth/sign-out` shows confirmation; a same-origin `POST` calls Convex sign-out, then expires every known auth cookie under the current, legacy and local names (host-only and parent domain; `__Host-` names host-only) and sends `Clear-Site-Data: "cache"` (#242). `"cookies"` is deliberately absent: it clears cookies for the whole registrable domain, not just this origin, and the expirations are already exact per name.
 
 The generic `/api/rendro/*` proxy uses the same header allowlist, with an exact GET-path exception for `/api/rendro/credentials/validate`, `/api/rendro/deployments/active`, `/api/rendro/deployments/staging`, and `/api/rendro/deployments`: these forward `Authorization` for scoped API-key validation. Other generic and Better Auth routes remain cookie-only. Dedicated deployment write and publication routes forward `Authorization` explicitly; deployment commits go through the Worker's storage checks. Pass-through requests retain authenticated client-IP forwarding. The dedicated migration project route also forwards its operator bearer secret to the secret-gated Convex action.
 
@@ -2052,7 +2052,7 @@ The pointer moves only in step 6, so a crash, eviction or failure anywhere earli
 ### Single flight, idempotency and dedupe
 
 - **One coordinator per repository.** The Durable Object for `repo:<id>` runs one ingest at a time, however many isolates, queue batches or readers ask. Durable Objects are single-instance per name, but their input gates open while a request awaits network I/O, so the coordinator serializes with its own promise chain. It also refuses messages for any other repository ID.
-- **Single flight per branch.** A request joins the running job if it carries no hint or the same commit. Otherwise it joins the one job queued behind it, which reads the head when it starts and so covers any hint. Concurrent first views of an unseen repository are coalesced twice: per isolate by `firstViewEnsurer`, then across isolates by the coordinator. With the snapshot built, `ensure` answers from the pointer without calling GitHub.
+- **Single flight per branch.** A request joins the running job if it carries no hint or the same commit. Otherwise it joins the one job queued behind it, which reads the head when it starts and so covers any hint. Concurrent first views of an unseen repository are coalesced twice: per isolate by `firstViewEnsurer`, then across isolates by the coordinator; the serving Worker's read path uses both directly (the subsection "First view: ingest on first visit" of "Repository read path", #242). With the snapshot built, `ensure` answers from the pointer without calling GitHub.
 - **Forward-only.** The head observed by a job is never older than the one behind the current pointer, because jobs are serialized and each reads GitHub's head. A late or duplicate delivery therefore cannot move a branch back. Push payloads (`after`) are hints only.
 - **Stale hints.** A hint that is neither the served commit nor in the branch's flip history (the last 50) may come from a push the ref API has not shown yet. The consumer re-checks it twice, 15 seconds apart, then leaves it to reconciliation.
 - **Delivery dedupe.** `X-GitHub-Delivery` is the dedupe key; redeliveries reuse it. A delivery is remembered only once its work has settled (flipped, current, no branch, or a permanent failure), for four days, which is longer than GitHub's three-day redelivery window. A transient failure or an unconfirmed hint leaves it retryable. Dedupe saves work; commit-level idempotency (manifest present means already built; pointer at the head means nothing to do) is what makes duplicates safe.
@@ -2117,7 +2117,7 @@ Owner and repository names must be literal GitHub names and match case-insensiti
 
 1. Parse the URL (above).
 2. Authorize (below). A denial is a plain 404 page, JSON or empty asset body: `private, no-store`, no `ETag`, no `Retry-After`, the same bytes as a repository that does not exist. Nothing private has been looked up yet.
-3. Resolve the ref: a commit as given, or a branch through its pointer (`ref/{branch}.json`, the default branch from the permission source). A branch with no pointer is a 404.
+3. Resolve the ref: a commit as given, or a branch through its pointer (`ref/{branch}.json`, the default branch from the permission source). A branch with no pointer is a plain 404 — except for the shell of a branch or default URL, which instead enqueues an ingest and renders the preparing page (the subsection "First view: ingest on first visit" below). A commit URL or any other target is 404 in every case.
 4. Read the manifest. A pointer whose manifest is missing or malformed means a broken store, so the answer is #225's retryable 503, never a 404. Malformed pointers, sidebars and render objects, storage timeouts (10 s) and transient faults (`transientStorageFault`) are 503s too.
 5. Serve the shell, a tree page, a renewal, a frame or an asset.
 
@@ -2183,6 +2183,25 @@ Edge cache keys live under a path no route serves, so only this code can read th
 
 Images get `Content-Security-Policy: default-src 'none'; sandbox; frame-ancestors 'self'`, ranges and HEAD through `serveObject` (#94). Frames are generated, so they are never ranged. Every response has `Referrer-Policy: no-referrer`.
 
+### First view: ingest on first visit (#242)
+
+A reader who opens a repository or branch nobody has ingested yet should not have to wait for a webhook. After authorization succeeds, the read path asks the per-repository coordinator Durable Object (`REPO_INGEST` binding, the serving Worker's cross-script binding to the ingest Worker's `RepoIngestCoordinator`) to `ensure` the branch: the same single flight, admission state, pointer write and failure recording as the queue path (above). `installationIds` stay in the permission source's mirror; the reader's `RepoRef` carries `installationId: null`.
+
+What the reader sees depends on the outcome inside a 5-second window (`PREPARE_WINDOW_MS`):
+
+- **Outcome arrives in window.** `flipped`/`current`: the pointer is read again, this time fresh (the same request's "never ingested" pointer miss would otherwise hide the just-published branch for up to 5 s, so `RepoSnapshots.pointer` takes a `fresh` flag), and the response is the ordinary docs. `duplicate`: still building, the preparing page. `no-ref`: a plain 404, no readiness header. `failed`: the retry page, 503.
+- **Window expires.** The response is the preparing page (200) while the build continues unattended (`waitUntil` holds the coordinator call; the build proceeds whatever the reader does). Every later poll runs its own `ensure` — the per-isolate `SingleFlight` still shares any call still open, and the coordinator coalesces the rest — so the page is self-healing and the server stays stateless. A transport failure from the coordinator is #225's retryable 503; it never becomes a 404. "Ready but no pointer" (the coordinator answered while the store lost the pointer) is a broken store, so also a retryable 503.
+
+The preparing page (`renderPreparingPage` in `src/repo-read/preparing.ts`) is `aria-busy`, announces itself politely (`role="status"`), polls its own URL with `fetch` (`cache: "no-store"`) after the response's `Retry-After` (5 s) doubling per attempt, capped at 60 s, pausing while the tab is hidden. The poll reads the state from `X-Rendro-Readiness` and the status: a 404 stops with "These docs are no longer available.", a `failed` state loads the retry page with `location.replace`, and anything else that is no longer `preparing` reloads into the docs. The server never polls itself from `waitUntil` and stores no per-reader state: any reader of the URL can re-check what any other is preparing. The retry page (503) is the same layout with `role="alert"` and a `Retry` link to the URL itself; the retry re-runs `ensure` (the coordinator records the failure but always re-attempts, so reader retries are fresh attempts).
+
+| Response | `Cache-Control` | State header |
+|---|---|---|
+| Preparing page (200) and retry page (503) | `private, no-store` | `X-Rendro-Readiness: preparing` / `failed`, `Retry-After: 5` |
+
+Enqueueing happens strictly after authorization, so an unauthorized reader neither leaks the repository's existence into the coordinator nor triggers a build; commit-pinned URLs and every non-shell target (frames, trees, tickets, files) are plain 404s with no enqueue. Where the binding is absent (today: production and the E2E worker), every URL under `/r/` behaves exactly as before, 404 included; no migration to `wrangler.toml` is made until the ingest Worker ships.
+
+The binding is read per request through `services(c)`'s shape check (`durableFirstView`), shaped once per isolate per namespace (`WeakMap`). Tests: `tests/repo-read-routes.test.ts` (first-view dispatch, preparing/retry/404, single flight across requests, transport 503), `tests/repo-read-units.test.ts` (window race, outcomes, page rendering, backoff) and `tests/repo-read-first-view-workerd.test.ts` (real cross-script binding, gate on GitHub, preparing then docs).
+
 ### Viewer integration
 
 The shell is `renderScopedDocumentShell` with the lazy tree, as for projects and publications:
@@ -2223,9 +2242,7 @@ An earlier pair of runs at load about 9 (before the rewritten body was memoized)
 ### Open points
 
 - A tiered `fetch()` path for public repositories, so Tiered Cache and Cache Reserve back the per-colo Cache API.
-- First view of a repository that has no snapshot yet: today a 404. It should enqueue an ingest (P3b's `firstViewEnsurer`) and show progress.
 - The repository shell has no account menu: the capability cookie carries no display identity. P1's GitHub sign-in reworks the shell.
-- Sign-out does not clear the browser's HTTP cache, so a private frame cached immutably stays in that browser profile. `Clear-Site-Data: "cache"` on sign-out would remove it.
 - `Server-Timing` phases and real-user monitoring (P0) for these routes.
 
 ## Repository Permission Mirror (GitHub pivot, P5)

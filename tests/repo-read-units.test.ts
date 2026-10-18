@@ -10,7 +10,7 @@ import { authorizeRepo, authorizeTicket, clearAuthorizationMemory, mintTicket, t
 import { mintCapability, peekCapability, sessionBinding, verifyCapability, type CapabilityClaims } from "@/repo-read/capability";
 import { failureBody, frameBody, relativeUrl } from "@/repo-read/frame";
 import { imageProxyPath, verifyImageProxyPath } from "@/image-proxy";
-import { issueGrant } from "@/repo-read/grant";
+import { issueGrant, type RepoGrant } from "@/repo-read/grant";
 import { encodeRepoPath, parseRepoPath, repoBase } from "@/repo-read/paths";
 import { clearSnapshotMemory, isPagePath, manifestFile, readDeadline, RepoSnapshots } from "@/repo-read/snapshot";
 import { treePage, TREE_PAGE_SIZE } from "@/repo-read/tree";
@@ -20,6 +20,13 @@ import { ViewerBackendError } from "@/viewer-backend";
 import { readFileSync } from "node:fs";
 import { HIGHLIGHT_CSS } from "@/ingest/highlight-theme";
 import { styleManifest } from "@/routes/style-manifest";
+import {
+  durableFirstView, interpretOutcome, prepareRepo, repoIngestTarget, type RepoFirstView,
+} from "@/repo-read/first-view";
+import { pollDelayMs, readinessAccessibility, renderPreparingPage } from "@/repo-read/preparing";
+import { nonceContext } from "@/middleware/html-nonce";
+import type { RepoRef } from "@/ingest/github/source";
+import type { IngestOutcome } from "@/ingest/orchestrator/coordinator";
 import { FakeR2Bucket } from "./helpers/fake-storage";
 import { InMemoryRepoAccess, MemoryEdgeCache, sessionCookies, stubSessions, users } from "./helpers/repo-read-fixture";
 
@@ -584,5 +591,107 @@ describe("session viewer for routes before the session middleware", () => {
     globalThis.fetch = vi.fn(() => Promise.resolve(new Response("busy", { status: 503, headers: { "Retry-After": "7" } }))) as typeof fetch;
     const request = new Request("https://rendro.test/r/o/r", { headers: { cookie: "better-auth.session_token=busy.sig" } });
     expect(await sessionViewer(request)).toEqual({ kind: "unavailable", retryAfter: "7" });
+  });
+});
+
+describe("first-view preparation", () => {
+  const branchRepo: RepoRef = { id: 9, owner: "octo", name: "docs", private: true, installationId: 42 };
+
+  it("builds one ensurer per namespace object and refuses bindings without the DO surface", () => {
+    expect(durableFirstView(null)).toBeNull();
+    expect(durableFirstView({ idFromName: () => ({}) })).toBeNull();
+    const namespace = { idFromName: (name: string) => ({ name }), get: () => ({ fetch: () => Promise.resolve(new Response()) }) };
+    const view = durableFirstView(namespace) as RepoFirstView;
+    expect(view).not.toBeNull();
+    expect(durableFirstView(namespace)).toBe(view as unknown);
+  });
+
+  it("maps the grant onto the ingest target with no installation", () => {
+    const { repo, branch } = repoIngestTarget(
+      { viewer: "user-1", repo: { id: 7, owner: "OCTO", name: "Docs", private: true, defaultBranch: "main" } } as RepoGrant, "feature");
+    expect(repo).toEqual({ id: 7, owner: "OCTO", name: "Docs", private: true, installationId: null });
+    expect(branch).toBe("feature");
+  });
+
+  it("reads every outcome exactly once", () => {
+    expect(interpretOutcome({ status: "flipped", commit: "c", previous: null, snapshot: "built", headMoved: true, staleHint: false })).toBe("ready");
+    expect(interpretOutcome({ status: "current", commit: "c", staleHint: false })).toBe("ready");
+    expect(interpretOutcome({ status: "duplicate" })).toBe("preparing");
+    expect(interpretOutcome({ status: "no-ref" })).toBe("absent");
+    expect(interpretOutcome({ status: "failed", reason: "render", permanent: true, retryAt: null, commit: null })).toBe("failed");
+  });
+
+  it("hands an answered build to waitUntil and keeps unattended work running", async () => {
+    const waited: Array<Promise<unknown>> = [];
+    const outcome = await prepareRepo({ ensure: () => Promise.resolve({ status: "current", commit: "c", staleHint: false }) },
+      branchRepo, "main", 5_000, promise => void waited.push(promise));
+    expect(outcome.outcome).toEqual({ status: "current", commit: "c", staleHint: false });
+    expect(waited).toHaveLength(1);
+    await expect(waited[0]).resolves.toEqual({ status: "current", commit: "c", staleHint: false });
+  });
+
+  it("stops waiting at the window while the build continues", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout"] });
+    const waited: Array<Promise<unknown>> = [];
+    let release!: (outcome: IngestOutcome) => void;
+    const attempt = prepareRepo({
+      ensure: () => new Promise<IngestOutcome>(resolve => { release = resolve; }),
+    }, branchRepo, "main", 5_000, promise => void waited.push(promise));
+    await vi.advanceTimersByTimeAsync(4_999);
+    expect(vi.getTimerCount()).toBe(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(await attempt).toEqual({ outcome: null });
+    release({ status: "current", commit: "c", staleHint: false });
+    await expect(waited[0]).resolves.toEqual({ status: "current", commit: "c", staleHint: false });
+    vi.useRealTimers();
+  });
+
+  it("propagates a transport failure that arrives inside the window as a retryable fault", async () => {
+    await expect(prepareRepo({ ensure: () => Promise.reject(new Error("Coordinator answered 502")) },
+      branchRepo, "main", 5_000, () => {})).rejects.toThrow("Coordinator answered 502");
+  });
+});
+
+describe("the preparing page", () => {
+  it("renders polling for preparing and retry for failed, with the announced state and nonce", () => {
+    let preparing = "";
+    let failed = "";
+    nonceContext.run("n0nce", () => {
+      preparing = renderPreparingPage("preparing", 5);
+      failed = renderPreparingPage("failed", 5);
+    });
+    expect(preparing).toContain('<main data-readiness="preparing" aria-busy="true"');
+    expect(preparing).toContain('role="status" aria-live="polite"');
+    expect(preparing).toContain("Preparing the docs for this repository");
+    expect(preparing).toContain('script nonce="n0nce"');
+    expect(preparing).toContain('style nonce="n0nce"');
+    expect(preparing).toContain('res.headers.get("x-rendro-readiness")');
+    expect(preparing).toContain("base=5000");
+    expect(preparing).toContain("location.reload()");
+    expect(preparing).toContain("location.replace(location.href)");
+    expect(preparing).toContain("These docs are no longer available.");
+    expect(preparing).not.toContain("Retry</a>");
+    expect(failed).toContain('data-readiness="failed"');
+    expect(failed).toContain('aria-busy="false"');
+    expect(failed).toContain('role="alert"');
+    expect(failed).toContain("We couldn't prepare the docs for this repository");
+    expect(failed).toContain('href="">Retry</a>');
+    expect(failed).not.toContain("<script");
+  });
+
+  it("announces each state once for readers", () => {
+    expect(readinessAccessibility("preparing")).toEqual({ busy: true, message: "Preparing the docs for this repository…", assertive: false });
+    expect(readinessAccessibility("failed")).toEqual({
+      busy: false, message: "We couldn't prepare the docs for this repository. Use Retry to try again.", assertive: true,
+    });
+  });
+
+  it("grows each poll's wait from the server's Retry-After, clamped and capped", () => {
+    expect(pollDelayMs(5, 0)).toBe(5_000);
+    expect(pollDelayMs(5, 1)).toBe(10_000);
+    expect(pollDelayMs(5, 4)).toBe(60_000);
+    expect(pollDelayMs(0, 0)).toBe(1_000);
+    expect(pollDelayMs(120, 0)).toBe(60_000);
+    expect(pollDelayMs(1.4, 0)).toBe(1_000);
   });
 });

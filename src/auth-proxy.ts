@@ -51,7 +51,18 @@ function appendExpiredCookie(headers: Headers, name: string, domain?: string) {
 }
 
 function appendAuthCookieCleanup(headers: Headers, hostname: string) {
-  headers.set("Clear-Site-Data", '"cookies"');
+  // "cache" evicts everything the browser cached for this origin while the
+  // reader was signed in — in particular the `private, immutable` frames
+  // private viewers serve, so no reader of another account can reuse them
+  // from a shared machine's disk (#242). "cookies" stays off on purpose: the
+  // cookie directive clears cookies for the whole registrable domain, so
+  // signing out on one subdomain would wipe sessions on every other one;
+  // the exact cookie names below expire precisely this origin's session.
+  // "storage" would also wipe drafts and reader state that other accounts of
+  // the next reader legitimately never see but comment recovery keeps
+  // user-bound, and it cleared nothing the cache directive leaves behind, so
+  // it stays off until a flow needs it.
+  headers.set("Clear-Site-Data", '"cache"');
   const parentDomain = parentCookieDomain(hostname);
   for (const name of SIGN_OUT_COOKIE_NAMES) {
     appendExpiredCookie(headers, name);

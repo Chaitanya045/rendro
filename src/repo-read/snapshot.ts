@@ -121,12 +121,17 @@ export class RepoSnapshots {
     });
   }
 
-  /** The commit a branch serves, or null when the branch has never been ingested. */
-  async pointer(grant: RepoGrant, branch: string): Promise<RefPointer | null> {
+  /**
+   * The commit a branch serves, or null when the branch has never been
+   * ingested. `fresh` bypasses the memoized answer (including a recent
+   * "never ingested" miss): the first-view outcome of "ready" can land inside
+   * that window while this reader is the one waiting for the pointer (#242).
+   */
+  async pointer(grant: RepoGrant, branch: string, fresh = false): Promise<RefPointer | null> {
     const key = refKey(grant.repo.id, branch);
     const now = this.deps.now();
     const entry = pointers.get(key);
-    if (entry && now - entry.at < POINTER_FRESH_MS) return entry.value;
+    if (!fresh && entry && now - entry.at < POINTER_FRESH_MS) return entry.value;
     const load = async () => {
       const object = await this.deps.store.get(key);
       const value = object ? validPointer(parseJson(object.bytes), grant.repo.id) : null;
@@ -135,7 +140,7 @@ export class RepoSnapshots {
       if (pointers.size > MAX_POINTERS) pointers.delete(pointers.keys().next().value as string);
       return value;
     };
-    if (entry && now - entry.at < POINTER_STALE_MS) {
+    if (!fresh && entry && now - entry.at < POINTER_STALE_MS) {
       // Stale while revalidate: one refresh per pointer; a failed one leaves the stale value in place.
       entry.refresh ??= load().then(() => {}, () => { entry.refresh = null; });
       this.deps.waitUntil(entry.refresh);

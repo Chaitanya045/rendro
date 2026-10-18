@@ -24,15 +24,19 @@ import { ViewerBackendError } from "@/viewer-backend";
 import { viewerScript, viewerUpdateNotice } from "@/viewer/markup";
 import { kvRevocationEpochs, serviceRepoPermissions, type Fetcher, type KvReader } from "./access";
 import { authorizeRepo, authorizeTicket, mintTicket, type Authorization, type AuthorizeDependencies } from "./authorize";
+import { durableFirstView, interpretOutcome, prepareRepo, PREPARE_WINDOW_MS, repoIngestTarget, type RepoFirstView } from "./first-view";
 import { FRAME_TEMPLATE_TAG, FRAME_VERSION, failureBody, frameBody, frameContentSecurityPolicy, renderFrameDocument } from "./frame";
 import type { RepoGrant } from "./grant";
 import { encodeRepoPath, parseRepoPath, repoBase, type RepoRefSpec, type RepoRequestPath } from "./paths";
+import { READINESS_HEADER, renderPreparingPage, type PreparingState } from "./preparing";
 import { isPagePath, manifestFile, readDeadline, RepoSnapshots, type EdgeCache } from "./snapshot";
 import { REPO_SPECULATION_RULES_PATH, repoSpeculationRules } from "./speculation";
 import { treePage } from "./tree";
 
 /** As on the other delivery routes: a stalled store becomes a retryable 503. */
 const READ_TIMEOUT_MS = 10_000;
+/** How long a first-view request waits for the ingest before it renders the preparing page (#242). */
+const PREPARING_RETRY_SECONDS = 5;
 const IMMUTABLE = "max-age=31536000, immutable";
 /** Branch URLs: a short freshness window, then revalidation by ETag; stale copies survive an outage. */
 const BRANCH = "max-age=10, stale-if-error=86400";
@@ -43,13 +47,28 @@ const IMAGE_TYPES: Record<string, string> = {
 };
 
 type Representation = "html" | "json" | "asset";
-type Services = { authorize: AuthorizeDependencies; snapshots: RepoSnapshots };
+
+interface Services {
+  authorize: AuthorizeDependencies;
+  snapshots: RepoSnapshots;
+  waitUntil: (promise: Promise<unknown>) => void;
+  /** Set only where the ingest coordinator Durable Object is configured; first views enqueue there. */
+  firstView: RepoFirstView | null;
+}
+
+/** The preparing/retry page a first-view outcome leaves the reader on (#242). */
+function readinessResponse(c: Context, state: PreparingState): Response {
+  c.header("Cache-Control", "private, no-store");
+  c.header(READINESS_HEADER, state);
+  c.header("Retry-After", String(PREPARING_RETRY_SECONDS));
+  return c.html(renderPreparingPage(state, PREPARING_RETRY_SECONDS), state === "preparing" ? 200 : 503);
+}
 
 function hasMethods(value: unknown, names: string[]): boolean {
   return typeof value === "object" && value !== null && names.every(name => typeof (value as Record<string, unknown>)[name] === "function");
 }
 
-/** The surface exists only where all three bindings are configured; elsewhere every URL under /r/ is a 404. */
+/** The surface exists only where its bindings are configured; elsewhere every URL under /r/ is a 404. */
 function services(c: Context): Services | null {
   const env = (c.env ?? {}) as Record<string, unknown>;
   const bucket = env.REPO_CONTENT, epochs = env.REPO_EPOCHS, access = env.REPO_ACCESS;
@@ -72,6 +91,8 @@ function services(c: Context): Services | null {
       store: readDeadline(r2Store(bucket as R2BucketLike), READ_TIMEOUT_MS), sealer: plaintextSealer, edge,
       origin: new URL(c.req.url).origin, waitUntil, now,
     }),
+    waitUntil,
+    firstView: durableFirstView(env.REPO_INGEST),
   };
 }
 
@@ -98,10 +119,13 @@ function cachePolicy(grant: RepoGrant, ref: RepoRefSpec): string {
   return `${grant.repo.private ? "private" : "public"}, ${ref.kind === "commit" ? IMMUTABLE : BRANCH}`;
 }
 
-/** The snapshot a ref serves. A pointer to a missing snapshot is a broken store (503), never "not found". */
-async function resolveSnapshot(snapshots: RepoSnapshots, grant: RepoGrant, ref: RepoRefSpec): Promise<SnapshotManifest | null> {
+/** The snapshot a ref serves. A pointer to a missing snapshot is a broken store (503), never "not found".
+ * A fresh pointer read skips the memoized "never ingested" miss the same request may have just cached. */
+async function resolveSnapshot(
+  snapshots: RepoSnapshots, grant: RepoGrant, ref: RepoRefSpec, freshPointer = false,
+): Promise<SnapshotManifest | null> {
   if (ref.kind === "commit") return snapshots.manifest(grant, ref.commit);
-  const pointer = await snapshots.pointer(grant, ref.kind === "branch" ? ref.branch : grant.repo.defaultBranch);
+  const pointer = await snapshots.pointer(grant, ref.kind === "branch" ? ref.branch : grant.repo.defaultBranch, freshPointer);
   if (!pointer) return null;
   const manifest = await snapshots.manifest(grant, pointer.commit, pointer.rendererVersion);
   if (!manifest) throw new ViewerBackendError();
@@ -245,19 +269,55 @@ app.get("/r/*", async (c) => {
   if (authorization.kind === "unavailable") return unavailableResponse(c, { unavailable: true, retryAfter: authorization.retryAfter }, kind);
   if (authorization.kind === "denied") return notFound(c, kind);
   const { grant } = authorization;
+  const scope = configured;
+  const path = request;
 
-  const manifest = await resolveSnapshot(configured.snapshots, grant, request.ref);
-  if (!manifest) return notFound(c, kind);
-  if (target.kind === "shell") return shell(c, grant, request, manifest);
-  if (target.kind === "tree") return tree(c, grant, request, manifest, configured);
-  if (target.kind === "viewer-ticket") return renewal(c, grant, request, manifest, configured);
-  const file = manifestFile(manifest, target.path);
-  if (!file) return notFound(c, kind);
-  const delivery: Delivery = {
-    grant, request, file, path: target.path, services: configured, ticket: target.kind === "ticket-files" ? target.ticket : null,
-    missing: () => notFound(c, "asset"),
-  };
-  return isPagePath(target.path) ? frame(c, manifest, delivery) : asset(c, delivery);
+  async function respond(target: RepoRequestPath["target"], manifest: SnapshotManifest): Promise<Response> {
+    if (target.kind === "shell") return shell(c, grant, path, manifest);
+    if (target.kind === "tree") return tree(c, grant, path, manifest, scope);
+    if (target.kind === "viewer-ticket") return renewal(c, grant, path, manifest, scope);
+    const file = manifestFile(manifest, target.path);
+    if (!file) return notFound(c, kind);
+    const delivery: Delivery = {
+      grant, request: path, file, path: target.path, services: scope, ticket: target.kind === "ticket-files" ? target.ticket : null,
+      missing: () => notFound(c, "asset"),
+    };
+    return isPagePath(target.path) ? frame(c, manifest, delivery) : asset(c, delivery);
+  }
+
+  let manifest = await resolveSnapshot(configured.snapshots, grant, request.ref);
+  if (!manifest) {
+    // First view of a repository or branch with no snapshot yet (#242): only
+    // the shell of a branch URL enqueues; a commit URL or any other target is
+    // a plain 404 that neither leaks nor builds, and so is an unauthorized
+    // visit above. The outcome may land inside this request's window.
+    if (configured.firstView === null || target.kind !== "shell" || request.ref.kind === "commit") return notFound(c, kind);
+    const branch = request.ref.kind === "branch" ? request.ref.branch : grant.repo.defaultBranch;
+    const { repo } = repoIngestTarget(grant, branch);
+    let attempt;
+    try {
+      attempt = await prepareRepo(configured.firstView, repo, branch, PREPARE_WINDOW_MS, configured.waitUntil);
+    } catch {
+      // Only the ensurer's transport raises here: could-not-check is #225's retryable 503.
+      return unavailableResponse(c, { unavailable: true, retryAfter: String(PREPARING_RETRY_SECONDS) }, kind);
+    }
+    if (attempt.outcome) {
+      const state = interpretOutcome(attempt.outcome);
+      if (state === "ready") {
+        // The coordinator promises a pointer; without one here the store is broken (retryable 503).
+        manifest = await resolveSnapshot(configured.snapshots, grant, request.ref, true);
+        if (!manifest) throw new ViewerBackendError();
+      } else if (state === "preparing") {
+        return readinessResponse(c, "preparing");
+      } else if (state === "failed") {
+        return readinessResponse(c, "failed");
+      } else {
+        return notFound(c, kind);
+      }
+    }
+    if (!manifest) return readinessResponse(c, "preparing");
+  }
+  return respond(target, manifest);
 });
 
 export default app;
