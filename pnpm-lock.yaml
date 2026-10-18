@@ -71,9 +71,6 @@ importers:
       better-call:
         specifier: 1.3.7
         version: 1.3.7(zod@4.4.3)
-      comrak-wasm:
-        specifier: 0.0.11
-        version: 0.0.11
       convex:
         specifier: ^1.42.0
         version: 1.42.0(react@19.2.7)
@@ -1732,9 +1729,6 @@ packages:
   common-tags@1.8.2:
     resolution: {integrity: sha512-gk/Z852D2Wtb//0I+kRFNKKE9dIIVirjoqPoA1wJU+XePVXZfGeBpk45+A1rKO4Q43prqWBNY/MiIeRLbPWUaA==}
     engines: {node: '>=4.0.0'}
-
-  comrak-wasm@0.0.11:
-    resolution: {integrity: sha512-Lq/FoHOSD63Fi3gaDW2IlyKBew2Vwy6VEKzEQjAfdWKLa3A99vIPS34Zel2W42pU3oSRNijM79IqZftFON7h9A==}
 
   convert-source-map@2.0.0:
     resolution: {integrity: sha512-Kvp459HrV2FEJ1CAsi1Ku+MY3kasH19TFykTz2xWmMeq6bk2NU3XXvfJ+Q61m0xktWwt+1HSYf3JZsTms3aRJg==}
@@ -4142,8 +4136,6 @@ snapshots:
   comma-separated-tokens@2.0.3: {}
 
   common-tags@1.8.2: {}
-
-  comrak-wasm@0.0.11: {}
 
   convert-source-map@2.0.0: {}
 

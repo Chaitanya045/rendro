@@ -1,0 +1,27 @@
+[package]
+name = "comrak-engine"
+version = "0.0.0"
+edition = "2021"
+publish = false
+description = "A minimal WebAssembly build of the upstream comrak crate for the Rendro ingest pipeline"
+license = "BSD-2-Clause"
+
+# This crate is only a build recipe; the compiled WebAssembly module is committed
+# under src/ingest/comrak-engine/ and verified by scripts/verify-comrak-wasm.ts.
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+# Exact pin: the rendering must match comrak-wasm@0.0.11, which wraps this version
+# (see its Cargo.toml and `version()`). Default features are off so the build does
+# not pull the CLI, syntect or emoji tables, none of which affect core GFM output.
+comrak = { version = "=0.56.0", default-features = false }
+wasm-bindgen = "=0.2.129"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+debug = false
+panic = "abort"
+strip = true

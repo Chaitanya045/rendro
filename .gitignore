@@ -27,4 +27,8 @@ test-results/
 playwright-report/
 blob-report/
 
+# Rust build output for the comrak WebAssembly engine (the artifact is committed
+# under src/ingest/comrak-engine; only intermediate objects live here).
+/wasm/comrak-engine/target/
+
 /coverage/

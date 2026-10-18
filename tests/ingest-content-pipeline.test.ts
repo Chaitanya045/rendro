@@ -1,5 +1,4 @@
 import { readFileSync } from "node:fs";
-import { createRequire } from "node:module";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { RENDERER_VERSION } from "../src/ingest/limits";
 import { contentPipeline, isDocsAsset } from "../src/ingest/orchestrator/content-pipeline";
@@ -102,7 +101,7 @@ describe("contentPipeline: the image hook and the image proxy (#224)", () => {
 
 describe("contentPipeline: a crashed Markdown engine", () => {
   afterEach(() => {
-    vi.doUnmock("comrak-wasm");
+    vi.doUnmock("../src/ingest/comrak-engine/comrak_engine.js");
     vi.resetModules();
   });
 
@@ -110,12 +109,12 @@ describe("contentPipeline: a crashed Markdown engine", () => {
     // A fresh module graph is a fresh isolate: the engine starts uninitialized.
     vi.resetModules();
     const markdownToHtml = vi.fn(() => { throw new WebAssembly.RuntimeError("unreachable"); });
-    vi.doMock("comrak-wasm", () => ({ initSync: vi.fn(), markdownToHtml }));
+    vi.doMock("../src/ingest/comrak-engine/comrak_engine.js", () => ({ initSync: vi.fn(), markdownToHtml }));
     const engine = await import("../src/ingest/markdown-engine");
     const adapter = await import("../src/ingest/orchestrator/content-pipeline");
     const errors = await import("../src/ingest/orchestrator/errors");
     const pipelineModule = await import("../src/ingest/orchestrator/pipeline");
-    engine.initMarkdownEngine(new WebAssembly.Module(readFileSync(createRequire(import.meta.url).resolve("comrak-wasm/comrak_wasm_bg.wasm"))));
+    engine.initMarkdownEngine(new WebAssembly.Module(readFileSync(new URL("../src/ingest/comrak-engine/comrak_engine_bg.wasm", import.meta.url))));
     const pipeline = adapter.contentPipeline(TEST_RENDER_OPTIONS);
     const thrown = async (path: string) => { try { await pipeline.render("# x", path); return null; } catch (error) { return error; } };
     const first = await thrown("a.md");
@@ -130,14 +129,14 @@ describe("contentPipeline: a crashed Markdown engine", () => {
 
   it("the Worker entry initializes the engine before exporting the Worker", async () => {
     vi.resetModules();
-    const module = new WebAssembly.Module(readFileSync(createRequire(import.meta.url).resolve("comrak-wasm/comrak_wasm_bg.wasm")));
-    vi.doMock("comrak-wasm/comrak_wasm_bg.wasm", () => ({ default: module }));
+    const module = new WebAssembly.Module(readFileSync(new URL("../src/ingest/comrak-engine/comrak_engine_bg.wasm", import.meta.url)));
+    vi.doMock("../src/ingest/comrak-engine/comrak_engine_bg.wasm", () => ({ default: module }));
     const entry = await import("../src/ingest/orchestrator/entry");
     const worker = await import("../src/ingest/orchestrator/worker");
     expect(entry.default).toBe(worker.default);
     expect(entry.RepoIngestCoordinator).toBe(worker.RepoIngestCoordinator);
     const engine = await import("../src/ingest/markdown-engine");
     expect(engine.markdownToUnsafeHtml("*x*")).toBe("<p><em>x</em></p>\n");
-    vi.doUnmock("comrak-wasm/comrak_wasm_bg.wasm");
+    vi.doUnmock("../src/ingest/comrak-engine/comrak_engine_bg.wasm");
   });
 });

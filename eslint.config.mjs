@@ -48,6 +48,9 @@ export default tseslint.config(
       "node_modules/**",
       "public/**",
       "src/commentor/**",
+      // Generated wasm-bindgen glue and TypeScript types for the comrak engine
+      // (wasm/comrak-engine); regenerate with `pnpm build:wasm`.
+      "src/ingest/comrak-engine/**",
       "scripts/**",
       // Plain-JS preload for subprocesses, outside the TypeScript project.
       "tests/helpers/exit-on-sigterm.mjs",

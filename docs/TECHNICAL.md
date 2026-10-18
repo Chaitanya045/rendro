@@ -1689,14 +1689,18 @@ whole corpus. Cold start is the median of 7 runs from `workerd` spawn to first r
 | comrak + parse5 + Shiki (JS regex engine, 31 grammars, `transformerStyleToClass`) | 15.8 | – | – | 126 ms (Shiki alone) | +2.52 MiB / 317 KiB |
 | **Shipped pipeline** (comrak + bounded parse5 + lowlight + fixed-point check) | **6.1** | **6.3** | **1.20** | **83 ms** | **406 / 124 KiB JS + 2.32 / 1.01 MiB WASM** |
 
+The comrak WASM and JS figures are the `comrak-wasm` npm build current at the
+time; #223 replaced it with the smaller self-built engine described below.
+
 Highlighting the corpus's 689 KB of fenced code took lowlight 0.59 s (12 ms
 init). Shiki took 4.6 s warm, with 320 ms of init for 31 grammars.
 
-- **Markdown parser: comrak** (`comrak-wasm` 0.0.11, a port of cmark-gfm 0.56). It
-  has full GFM: tables, task lists, footnotes, strikethrough and autolink
-  literals. It is GitHub's own renderer lineage, ported, so quirks match
+- **Markdown parser: comrak** (the upstream `comrak` crate, a Rust port of
+  cmark-gfm 0.56). It has full GFM: tables, task lists, footnotes, strikethrough
+  and autolink literals. It is GitHub's own renderer lineage, so quirks match
   GitHub. It decided on hostile input. Among 26 pathological inputs capped at
-  1 MiB, comrak's slowest was 0.9 s. micromark is quadratic or worse on several:
+  1 MiB, comrak's slowest (a 150k-row table) rendered in about 1 s. micromark is
+  quadratic or worse on several:
   - 8,000 nested brackets: 1.1 s, growing to roughly 700 s at 1 MiB;
   - a 1,000-level indented list: 55 s;
   - 100k autolink literals: 45 s;
@@ -1708,10 +1712,23 @@ init). Shiki took 4.6 s warm, with 320 ms of init for 31 grammars.
   150k-row table and 100k autolinks, near the 8 MiB HTML cap, take 8.7 s at load
   about 7. That is inside a Queue consumer's 30 s CPU limit when each blob is its
   own unit of work. Heading ids and alerts are added
-  after sanitizing, not by comrak. The npm package is built from source by GitHub
-  Actions with SHA-pinned actions and carries npm SLSA provenance, verified with
-  `npm audit signatures`. Its only WASM imports are wasm-bindgen
-  value-marshalling helpers for the options object, so it has no ambient authority.
+  after sanitizing, not by comrak.
+
+  Rather than depend on the one-maintainer `comrak-wasm` npm package, Rendro
+  builds the crate itself (#223). `wasm/comrak-engine` pins `comrak 0.56.0` and
+  `wasm-bindgen 0.2.129` (toolchain `1.96.1`) and exposes one renderer with the
+  fixed options Rendro uses; the compiled module, its glue and a SHA-256 file are
+  committed under `src/ingest/comrak-engine`, so `pnpm verify` needs no Rust
+  toolchain. `pnpm rebuild:wasm` recompiles and requires byte-identical output,
+  and the `comrak-engine` CI job does the same. The build is reproducible off a
+  different machine: it disables incremental compilation, sets `SOURCE_DATE_EPOCH`
+  and passes `--remap-path-prefix` for the checkout, `CARGO_HOME` and `RUSTUP_HOME`,
+  so no host path can leak into the module (rustc records crate source paths in
+  panic-location strings). The artifact is 360 KiB raw / 122 KiB gzip WASM and
+  7 / 2 KiB gzip glue, against 2.32 MiB / 1.01 MiB for the npm build. Output is
+  byte-identical to the npm build over 5,009 inputs (READMEs, fuzzed Markdown and
+  GFM probes). Its only WASM imports are wasm-bindgen value-marshalling helpers,
+  so it has no ambient authority.
 - **Highlighter: highlight.js 11.11 via lowlight 3.3.** It emits `hljs-*`
   classes natively, so there are never inline styles under the strict CSP. Compared
   with Shiki it is about 8x faster, initializes about 25x faster and is 14x
@@ -1992,7 +2009,7 @@ gh/v1/
 - Blobs are fetched once per repository and reused across commits. A rename or move costs no fetch.
 - The manifest maps each page and asset path to `{ sha, size, render?, title?, error? }`. A page that cannot be rendered records `error`, and the rest of the snapshot is still built. The reason is `too-large` when the tree listing already shows the page over 1 MiB (it is never fetched), otherwise the `RenderError` reason: `too-large`, `too-complex`, `too-deep`, `unstable` or `engine`.
 - Render failures are deterministic for a blob, a directory and a renderer version, so the failure is stored at the render key like an output. A hostile page is rendered once, not on every push.
-- The exception is the engine itself. After comrak crashes, the isolate refuses all further Markdown. The page that crashed it is recorded as `engine`. Later Markdown pages fail the attempt with the transient `markdown-engine-unavailable`, which the queue retries, so good pages are never marked as broken. A Durable Object may keep its isolate across retries, so recovery waits for the isolate to be recycled (#223 brings an engine that can be re-instantiated).
+- The exception is the engine itself. After comrak crashes, the isolate refuses all further Markdown. The page that crashed it is recorded as `engine`. Later Markdown pages fail the attempt with the transient `markdown-engine-unavailable`, which the queue retries, so good pages are never marked as broken. A Durable Object may keep its isolate across retries, so recovery waits for the isolate to be recycled; re-instantiating a fresh engine in a live isolate is not yet supported.
 - Pages are keyed by directory as well as blob, because relative links resolve against the directory. A page moved to another directory is rendered again, from the blob in R2 and without a GitHub request. Assets need nothing.
 - Assets are images (`png`, `jpg`, `gif`, `svg`, `webp`, `avif`, `ico`, `bmp`) under the docs root, outside vendored and hidden folders. The sanitizer removes stylesheets, scripts and media elements, so no other file types are ever referenced.
 - Private-repository content (blobs, renders, tree listings, sidebar and manifest) is written through the `ContentSealer` hook. Today the hook stores bytes as they are; P9 adds per-repo AES-GCM. The pointer, the registry and the checkpoint hold only IDs and names, and are not sealed.

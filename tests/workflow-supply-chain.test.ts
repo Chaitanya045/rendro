@@ -183,7 +183,7 @@ describe("release workflow", () => {
 
   it("keeps the required check names of the quality workflow", () => {
     const { jobs } = split(quality);
-    expect([...jobs.keys()]).toEqual(["verify", "e2e-engine", "e2e", "e2e-report", "coverage"]);
+    expect([...jobs.keys()]).toEqual(["verify", "comrak-engine", "e2e-engine", "e2e", "e2e-report", "coverage"]);
     expect(jobs.get("verify")).not.toMatch(/\n {4}name:/);
     expect(jobs.get("coverage")).not.toMatch(/\n {4}name:/);
   });

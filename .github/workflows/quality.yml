@@ -47,6 +47,33 @@ jobs:
       # No credentials or deployed test-user creation in untrusted PR jobs.
       - run: pnpm audit --audit-level=high
 
+  # Rebuilds the ingest Markdown engine (wasm/comrak-engine) from its pinned
+  # Rust crate and fails unless the output is byte-identical to the committed
+  # wasm + wasm-bindgen glue. It runs in its own job so `pnpm verify` and
+  # contributors never need a Rust toolchain; there it only checks the
+  # committed artifact's SHA-256 (scripts/verify-comrak-wasm.ts).
+  comrak-engine:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # rust-toolchain.toml pins the compiler and target; wasm-bindgen-cli must
+      # match the wasm-bindgen crate version or it refuses to run.
+      - run: rustup toolchain install 1.96.1 --profile minimal --target wasm32-unknown-unknown
+      - run: cargo install wasm-bindgen-cli --version 0.2.129 --locked
+        working-directory: wasm/comrak-engine
+      - run: pnpm rebuild:wasm
+
   # One job per Playwright project and shard keeps wall time near half of the
   # slowest engine instead of the sum of all three. Each shard starts its own
   # harness (workerd, Convex, storage, seed data) on its own runner, so shards
