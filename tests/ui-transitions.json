@@ -18722,8 +18722,19 @@
           "inventoryRefs": [
             "C07"
           ],
-          "status": "untested",
-          "tests": []
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "tests/commentor-gaps-browser.test.ts",
+              "name": "shows when a reply was written the way a thread does: relative age, in the drawer card and the open thread",
+              "kind": "browser"
+            },
+            {
+              "file": "e2e/comments-journeys.spec.ts",
+              "name": "older threads and replies load on demand, and a remote arrival while scrolled away offers the new comment",
+              "kind": "e2e"
+            }
+          ]
         },
         {
           "id": "UI-115-E04",
@@ -20457,6 +20468,31 @@
             {
               "file": "tests/commentor-gaps-browser.test.ts",
               "name": "keeps a half-written reply when older comments load and when new ones arrive, and offers a prompt rather than moving the reader",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/commentor-gaps-browser.test.ts",
+              "name": "keeps the reader's place when the card in view is removed, and starts a switched tab from its top",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/commentor-gaps-browser.test.ts",
+              "name": "follows the newest comment when the reader is already at the end, and offers no prompt",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/commentor-gaps-browser.test.ts",
+              "name": "holds the reader's place across many updates and takes the new place once the reader scrolls",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/commentor-gaps-browser.test.ts",
+              "name": "keeps the same card where the reader left it when older comments are added above",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/commentor-gaps-browser.test.ts",
+              "name": "keeps the same card where the reader left it when a new comment arrives below",
               "kind": "browser"
             },
             {

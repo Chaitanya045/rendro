@@ -131,12 +131,26 @@ describe("rendering", () => {
     expect(texts[1]).toContain("Third thought");
   });
 
-  it.fails("shows when a reply was written, like a thread does (known bug)", async () => {
+  it("shows when a reply was written the way a thread does: relative age, in the drawer card and the open thread", async () => {
     const lab = await commentLab.open();
     await lab.ready();
-    await lab.host(l => l.seed([{ _id: "t1", anchor: { kind: "element", path: ["main", "h1"] }, replies: [l.reply({ authorName: "Grace", body: "Second thought" })] }]));
+    await lab.pauseClock();
+    const now = await lab.page.evaluate(() => Date.now());
+    await lab.host((l, now) => l.seed([{ _id: "t1", anchor: { kind: "element", path: ["main", "h1"] }, _creationTime: now - 3 * 3_600_000, replies: [
+      l.reply({ authorName: "Grace", body: "Second thought", _creationTime: now - 5 * 60_000 }),
+      l.reply({ authorName: "Linus", body: "Third thought", _creationTime: now - 2 * 86_400_000 }),
+    ] }]), now);
+    await lab.openDrawer();
+    const card = lab.ui.locator('.drawer-thread[data-thread-id="t1"]');
+    // The clock is paused, so the ages are exact rather than "about" anything.
+    expect(await card.locator(".head .when").innerText()).toBe("3h");
+    expect(await card.locator(".replies .reply .when").allInnerTexts()).toEqual(["5m", "2d"]);
+    expect(await card.locator(".replies .reply").first().innerText()).toBe("Grace 5m Second thought");
     await lab.pins().first().click();
-    expect(await lab.tid("commentor-thread-bubble").locator(".replies .reply .when").count()).toBe(1);
+    const bubble = lab.tid("commentor-thread-bubble");
+    expect(await bubble.locator(".replies .reply .when").allInnerTexts()).toEqual(["5m", "2d"]);
+    // The age is part of the reply's text for a screen reader, read between the author and the body.
+    expect(await bubble.locator(".replies .reply").nth(1).innerText()).toBe("Linus 2d Third thought");
   });
 
   it("renders comment text, names and quotes as text, never as markup", async () => {
@@ -300,7 +314,10 @@ describe("drawer list", () => {
     expect(await draft.inputValue()).toBe("Half-written reply");
   });
 
-  it.fails("keeps the reader's place in the list when older comments load or new ones arrive (known bug)", async () => {
+  const arrive = (lab: Lab, id: string) =>
+    lab.host((l, id) => { l.threads.push(l.thread({ _id: id, body: "Newest comment", anchor: { kind: "element", path: ["main", "h1"] } })); l.publish(); }, id);
+
+  it("keeps the same card where the reader left it when a new comment arrives below", async () => {
     const lab = await commentLab.open({ height: 600 });
     await lab.ready(many(14));
     await lab.openDrawer();
@@ -308,10 +325,99 @@ describe("drawer list", () => {
     await list.evaluate(el => { el.scrollTop = 220; });
     const place = await listTop(lab, "t05");
     expect(await list.evaluate(el => Math.round(el.scrollTop))).toBe(220);
-    await lab.host(l => { l.threads.push(l.thread({ _id: "z-new", body: "Newest comment", anchor: { kind: "element", path: ["main", "h1"] } })); l.publish(); });
+    await arrive(lab, "z-new");
     await expect.poll(() => lab.ui.locator(".drawer-thread").count()).toBe(15);
-    // The same card stays where the reader left it.
     expect(await listTop(lab, "t05")).toBe(place);
+    expect(await list.evaluate(el => Math.round(el.scrollTop))).toBe(220);
+    expect(await lab.ui.locator(".new-comments").innerText()).toBe("1 new comment");
+  });
+
+  it("holds the reader's place across many updates and takes the new place once the reader scrolls", async () => {
+    const lab = await commentLab.open({ height: 600 });
+    await lab.ready(many(14));
+    await lab.openDrawer();
+    const list = lab.tid("commentor-drawer-list");
+    await list.evaluate(el => { el.scrollTop = 220; });
+    const place = await listTop(lab, "t05");
+    for (let index = 0; index < 6; index++) {
+      await arrive(lab, `z-new-${index}`);
+      await expect.poll(() => lab.ui.locator(".drawer-thread").count()).toBe(15 + index);
+      expect(await listTop(lab, "t05")).toBe(place);
+    }
+    // After the reader scrolls, the place they chose is the one that is kept.
+    await list.evaluate(el => { el.scrollTop += 40; });
+    const moved = await listTop(lab, "t05");
+    expect(moved).toBe(place - 40);
+    await arrive(lab, "z-new-last");
+    await expect.poll(() => lab.ui.locator(".drawer-thread").count()).toBe(21);
+    expect(await listTop(lab, "t05")).toBe(moved);
+  });
+
+  it("keeps the same card where the reader left it when older comments are added above", async () => {
+    const lab = await commentLab.open({ height: 600 });
+    await lab.ready(many(14));
+    await lab.openDrawer();
+    const list = lab.tid("commentor-drawer-list");
+    await list.evaluate(el => { el.scrollTop = 220; });
+    const place = await listTop(lab, "t05");
+    await lab.host(l => {
+      l.olderThreads = [l.thread({ _id: "a-old", body: "Older comment", _creationTime: 1, anchor: { kind: "element", path: ["main", "h1"] } }),
+        l.thread({ _id: "a-older", body: "Even older comment", _creationTime: 0, anchor: { kind: "element", path: ["main", "h1"] } })];
+      l.pagination = { canLoadMore: true, loading: false };
+      l.publish();
+    });
+    await lab.tid("commentor-load-older-threads").evaluate(button => (button as HTMLButtonElement).click());
+    await expect.poll(() => lab.ui.locator(".drawer-thread").count()).toBe(16);
+    expect(await listTop(lab, "t05")).toBe(place);
+    // The older cards are above the reader, not under them.
+    expect(await listTop(lab, "a-old")).toBeLessThan(0);
+  });
+
+  it("follows the newest comment when the reader is already at the end, and offers no prompt", async () => {
+    const lab = await commentLab.open({ height: 600 });
+    await lab.ready(many(14));
+    await lab.openDrawer();
+    const list = lab.tid("commentor-drawer-list");
+    await list.evaluate(el => { el.scrollTop = el.scrollHeight; });
+    const atEnd = () => list.evaluate(el => el.scrollTop + el.clientHeight >= el.scrollHeight - 2);
+    expect(await atEnd()).toBe(true);
+    await arrive(lab, "z-new");
+    await expect.poll(() => lab.ui.locator(".drawer-thread").count()).toBe(15);
+    expect(await atEnd()).toBe(true);
+    expect(await lab.ui.locator('.drawer-thread[data-thread-id="z-new"]').evaluate(card => {
+      const rect = card.getBoundingClientRect();
+      const bounds = card.parentElement!.getBoundingClientRect();
+      return rect.bottom <= bounds.bottom + 1;
+    })).toBe(true);
+    expect(await lab.ui.locator(".new-comments").isHidden()).toBe(true);
+  });
+
+  it("keeps the reader's place when the card in view is removed, and starts a switched tab from its top", async () => {
+    const lab = await commentLab.open({ height: 600 });
+    await lab.ready(many(14));
+    await lab.openDrawer();
+    const list = lab.tid("commentor-drawer-list");
+    await list.evaluate(el => { el.scrollTop = 220; });
+    const before = await list.evaluate(el => Math.round(el.scrollTop));
+    // The card in view is resolved from elsewhere: the list still shows a nearby card, not the top.
+    await lab.host(l => { l.threads.find(thread => thread._id === "t03")!.resolved = true; l.publish(); });
+    await expect.poll(() => lab.ui.locator(".drawer-thread").count()).toBe(13);
+    expect(Math.abs((await list.evaluate(el => Math.round(el.scrollTop))) - before)).toBeLessThan(200);
+    expect(await list.evaluate(el => el.scrollTop)).toBeGreaterThan(0);
+    // A different tab is a different list: it begins at its own top.
+    await lab.ui.getByRole("tab", { name: /^Resolved/ }).click();
+    expect(await list.evaluate(el => el.scrollTop)).toBe(0);
+  });
+
+  it("updates a collapsed drawer without error and shows its list from the top", async () => {
+    const lab = await commentLab.open({ height: 600 });
+    await lab.ready(many(14));
+    await lab.openDrawer();
+    await lab.tid("commentor-panel-btn").click();
+    await arrive(lab, "z-new");
+    await lab.openDrawer();
+    await expect.poll(() => lab.ui.locator(".drawer-thread").count()).toBe(15);
+    expect(await lab.tid("commentor-drawer-list").evaluate(el => el.scrollTop)).toBe(0);
   });
 
   it("animates only the comments and replies that are new", async () => {
