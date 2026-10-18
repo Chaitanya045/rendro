@@ -25673,6 +25673,28 @@
               "kind": "unit"
             }
           ]
+        },
+        {
+          "id": "UI-161-E13",
+          "from": "Repository document open in the viewer frame",
+          "trigger": "Page holds a signed image-proxy image, a repository image and an external image",
+          "expected": "Proxied and repository images render (in a private repository the repository image loads through the frame's asset ticket); the frame policy blocks the external image before any request leaves",
+          "inventoryRefs": [
+            "UI-161"
+          ],
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/repo-read-browser.test.ts",
+              "name": "render proxied and repository images in a public frame and block an external one",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/repo-read-browser.test.ts",
+              "name": "render proxied images and ticketed repository images in a private frame and block an external one",
+              "kind": "browser"
+            }
+          ]
         }
       ]
     }

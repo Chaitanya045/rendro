@@ -107,7 +107,7 @@ describe("public repositories", () => {
     expect(response.headers.get("Content-Type")).toBe("text/html; charset=utf-8");
     expect(response.headers.get("Content-Security-Policy")).toBe(
       "sandbox allow-scripts allow-popups; default-src 'none'; script-src https://rendro.test/private-viewer.js; style-src https://rendro.test/styles/; "
-      + "img-src https://rendro.test https:; base-uri https://rendro.test; form-action 'none'; frame-ancestors 'self'");
+      + "img-src https://rendro.test; base-uri https://rendro.test; form-action 'none'; frame-ancestors 'self'");
     expect(response.headers.get("X-Frame-Options")).toBe("SAMEORIGIN");
     expect(response.headers.get("Cross-Origin-Opener-Policy")).toBeNull();
     expect(response.headers.get("Accept-Ranges")).toBe("none");

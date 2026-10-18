@@ -4,7 +4,7 @@
  * navigation bridge and, for private repositories, the asset ticket base.
  * The response's own policy is stricter than the publisher frames': the only
  * script is Rendro's viewer bundle, and nothing may load except same-origin
- * resources and external images.
+ * resources (external images arrive through the signed image proxy).
  */
 import { parseFragment, serialize, type DefaultTreeAdapterMap } from "parse5";
 import { IMAGE_PROXY_PREFIX } from "@/image-proxy";
@@ -87,7 +87,9 @@ export function frameContentSecurityPolicy(origin: string): string {
     "default-src 'none'",
     `script-src ${origin}/private-viewer.js`,
     `style-src ${origin}/styles/`,
-    `img-src ${origin} https:`,
+    // Same-origin only: since #224 ingest writes every external image as a signed /img/ proxy path or drops it,
+    // so an external URL reaching a frame is a bug, and the policy keeps it from the reader (as RENDERED_DOCUMENT_POLICY).
+    `img-src ${origin}`,
     `base-uri ${origin}`,
     "form-action 'none'",
     "frame-ancestors 'self'",
