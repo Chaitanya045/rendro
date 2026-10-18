@@ -22,7 +22,7 @@ function events() {
 }
 
 /** A renewal client in a document that is `visible` or hidden to begin with. */
-function viewer(initially: "visible" | "hidden" = "visible") {
+function viewer(initially: "visible" | "hidden" = "visible", standalone = false) {
   vi.useFakeTimers();
   const win = new DOMWindow({ url: `${origin}${base}/files/guide/index.html`, settings: { disableCSSFileLoading: true } });
   windows.push(win);
@@ -31,7 +31,9 @@ function viewer(initially: "visible" | "hidden" = "visible") {
   const parent = { postMessage: vi.fn() };
   const setInterval = vi.fn(globalThis.setInterval);
   const clearInterval = vi.fn(globalThis.clearInterval);
-  const host = { ...bus, location: win.location, document: win.document, parent, setInterval, clearInterval } as unknown as Window;
+  const host = { ...bus, location: win.location, document: win.document, parent, setInterval, clearInterval } as unknown as Window & { parent: unknown };
+  // A document opened on its own has no shell to ask.
+  if (standalone) host.parent = host;
   const show = (state: "visible" | "hidden") => {
     Object.defineProperty(win.document, "visibilityState", { configurable: true, value: state });
     win.document.dispatchEvent(new win.Event("visibilitychange"));
@@ -106,11 +108,23 @@ describe("viewer renewal in a hidden tab", () => {
     expect(f.requests()).toBe(12);
   });
 
+  it("asks no shell for a ticket in a document opened on its own, hidden or not", () => {
+    const f = viewer("visible", true);
+    vi.advanceTimersByTime(60 * minute);
+    f.bus.emit("focus");
+    f.show("hidden");
+    f.show("visible");
+    expect(f.parent.postMessage).not.toHaveBeenCalled();
+  });
+
   it("starts no heartbeat in a tab that opens hidden, until it is shown", () => {
     const f = viewer("hidden");
     expect(f.setInterval).not.toHaveBeenCalled();
     vi.advanceTimersByTime(60 * minute);
     expect(f.requests()).toBe(0);
+    // Hidden again while never shown: there is no timer to clear.
+    f.show("hidden");
+    expect(f.clearInterval).not.toHaveBeenCalled();
     f.show("visible");
     expect(f.setInterval).toHaveBeenCalledTimes(1);
     expect(f.requests()).toBe(1);
