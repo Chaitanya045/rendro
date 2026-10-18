@@ -210,6 +210,17 @@ describe("storage failure handling", () => {
     expect((await settle(listKeyPage("root/", 5))).keys).toEqual(["root/a.html"]);
   });
 
+  it("cancels the stream of a mismatched ranged read and ignores a failing cancel", async () => {
+    const cancel = vi.fn(() => Promise.reject(new Error("closed")));
+    const bucket = memoryBucket();
+    bindStorage(bucket);
+    vi.spyOn(bucket, "get").mockResolvedValueOnce({
+      key: "k", size: 11, etag: "e", uploaded: new Date(0), range: { offset: 0, length: 5 }, body: new ReadableStream({ cancel }),
+    });
+    await expect(getObjectStream("k", { start: 2, end: 4, size: 11 })).rejects.toThrow("unexpected byte range");
+    expect(cancel).toHaveBeenCalledOnce();
+  });
+
   it("copies by re-reading the source after a transient fault in either half, and cancels the unused stream", async () => {
     const read = failing("get", r2Error(10043));
     seed(read.bucket, "a", "bytes");

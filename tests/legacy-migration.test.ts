@@ -614,6 +614,17 @@ it("prints sanitized fallback and invalid source origins", async () => {
   await main(["--map", "targets.json"]);
   expect(console.log).toHaveBeenCalledWith("Source legacy Convex: <unset>");
 });
+it("signs source reads with the operator's key pair when both halves are given", async () => {
+  vi.stubEnv("LEGACY_SOURCE_S3_ACCESS_KEY", "operator-access");
+  vi.stubEnv("LEGACY_SOURCE_S3_SECRET_KEY", "operator-secret");
+  vi.resetModules();
+  const script = await import("../scripts/migrate-legacy-tenancy");
+  const read = send.getMockImplementation()!;
+  let client: { config: { credentials(): Promise<{ accessKeyId: string; secretAccessKey: string }> } } | undefined;
+  send.mockImplementation(function (this: unknown, command: unknown) { client = this as typeof client; return (read as (command: unknown) => Promise<unknown>)(command); });
+  await script.main(["--map", "targets.json"]);
+  expect(await client!.config.credentials()).toMatchObject({ accessKeyId: "operator-access", secretAccessKey: "operator-secret" });
+});
 it.each([new Error("CLI failure"), "CLI failure"])("exits unsuccessfully on a direct CLI failure (%#)", async error => {
   vi.resetModules();
   const exit = vi.spyOn(process, "exit").mockImplementation(() => undefined as never);
