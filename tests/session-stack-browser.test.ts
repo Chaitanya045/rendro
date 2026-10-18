@@ -112,7 +112,8 @@ beforeAll(async () => {
     const probe = get(`http://127.0.0.1:${port}/health`, response => { response.resume(); resolve(response.statusCode ?? 0); });
     probe.on("error", () => resolve(0));
     })).toBe(200);
-  }, { timeout: 10_000, interval: 100 });
+  // The server first starts Miniflare's R2 simulation (seconds on a loaded runner, slower under coverage).
+  }, { timeout: 60_000, interval: 100 });
 });
 
 afterAll(async () => {
