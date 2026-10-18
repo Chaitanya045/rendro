@@ -374,6 +374,46 @@ describe("booting the parent host", () => {
     window.dispatchEvent(new Event("focus"));
   });
 
+  it("holds a scheduled token refresh while the tab is hidden and runs it when the tab returns", async () => {
+    const fetcher = session();
+    const dispose = bootCommentorParentHost()!;
+    await vi.waitFor(() => expect(clients[0].setAuth).toHaveBeenCalled());
+    const authenticate = clients[0].setAuth.mock.calls[0][0] as (args?: { forceRefreshToken: boolean }) => Promise<string | null>;
+    const show = (state: "visible" | "hidden") => {
+      Object.defineProperty(document, "visibilityState", { configurable: true, value: state });
+      document.dispatchEvent(new Event("visibilitychange"));
+    };
+    try {
+      fetcher.mockClear();
+      show("hidden");
+      // A cached token is only checked, and the client can always ask without forcing.
+      expect(await authenticate({ forceRefreshToken: false })).toBe("jwt");
+      expect(fetcher).toHaveBeenCalledTimes(2);
+      fetcher.mockClear();
+      const refresh = authenticate({ forceRefreshToken: true });
+      const rejected = authenticate({ forceRefreshToken: true });
+      for (let turn = 0; turn < 10; turn++) await Promise.resolve();
+      expect(fetcher).not.toHaveBeenCalled();
+      show("visible");
+      expect(await Promise.all([refresh, rejected])).toEqual(["jwt", "jwt"]);
+      expect(fetcher.mock.calls.filter(([url]) => String(url).includes("convex/token"))).toHaveLength(2);
+      // A visible tab refreshes at once.
+      fetcher.mockClear();
+      expect(await authenticate({ forceRefreshToken: true })).toBe("jwt");
+      expect(fetcher).toHaveBeenCalledTimes(2);
+      // A page closed while hidden hands the late refresh nothing.
+      fetcher.mockClear();
+      show("hidden");
+      const late = authenticate({ forceRefreshToken: true });
+      dispose();
+      show("visible");
+      expect(await late).toBeNull();
+      expect(fetcher).not.toHaveBeenCalled();
+    } finally {
+      Reflect.deleteProperty(document, "visibilityState");
+    }
+  });
+
   it.each([
     { name: "a token", reply: () => new Response(JSON.stringify({ token: "late" })) },
     { name: "a refusal", reply: () => new Response("{}", { status: 401 }) },

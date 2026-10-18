@@ -1,5 +1,5 @@
 // Keep shell URLs and the immutable build ledger on the same versions.
 export const LAZY_TREE_VERSION = "45";
-export const PRIVATE_VIEWER_VERSION = "17";
-export const COMMENTOR_PARENT_VERSION = "16";
-export const COMMENTOR_VERSION = "46";
+export const PRIVATE_VIEWER_VERSION = "18";
+export const COMMENTOR_PARENT_VERSION = "17";
+export const COMMENTOR_VERSION = "47";

@@ -54,7 +54,7 @@ function frameFixture() {
     <textarea>Comment draft</textarea></body></html>`);
   const bus = events();
   const parent = { postMessage: vi.fn() };
-  const host = { ...bus, location: win.location, document: win.document, parent, setInterval: globalThis.setInterval } as unknown as Window;
+  const host = { ...bus, location: win.location, document: win.document, parent, setInterval: globalThis.setInterval, clearInterval: globalThis.clearInterval } as unknown as Window;
   installViewerFrame({ base, prefix, manifestKey: "release/manifest.json", deploymentId: "release" }, host);
   const renew = (next: string) => {
     const request = parent.postMessage.mock.lastCall![0];

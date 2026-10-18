@@ -1,6 +1,7 @@
 import { CommentWriteCooldown } from "./write-cooldown";
 import { commentErrorMessage, commentRetryAfter } from "./errors";
 import { CommentOperationConflictError } from "./operation-state";
+import { whenVisible } from "./visibility";
 // commentor.ts — a drop-in commenting widget for any HTML file.
 //
 //   <script>window.COMMENTOR = { ... };</script>
@@ -56,7 +57,9 @@ function isParentConfig(config: Config): config is Config & {
   );
 }
 
-async function requestAuthToken(): Promise<string | null> {
+async function requestAuthToken(args?: { forceRefreshToken?: boolean }): Promise<string | null> {
+  // Scheduled refreshes of a hidden tab wait until it is visible again.
+  if (args?.forceRefreshToken) await whenVisible();
   const response = await fetch("/api/auth/convex/token", {
     credentials: "same-origin",
     headers: { Accept: "application/json" },
@@ -450,11 +453,27 @@ interface Rect {
   right: number;
   bottom: number;
 }
-function placeFloating(el: HTMLElement, rect: Rect, gap = 8): void {
-  const vw = window.innerWidth;
-  const vh = window.innerHeight;
-  const ew = el.offsetWidth;
-  const eh = el.offsetHeight;
+interface FloatingMeasure {
+  vw: number;
+  vh: number;
+  ew: number;
+  eh: number;
+}
+/** Layout reads for placeFloating, separable so a caller can take them before its own writes. */
+function measureFloating(el: HTMLElement): FloatingMeasure {
+  return {
+    vw: window.innerWidth,
+    vh: window.innerHeight,
+    ew: el.offsetWidth,
+    eh: el.offsetHeight,
+  };
+}
+function placeFloating(
+  el: HTMLElement,
+  rect: Rect,
+  gap = 8,
+  { vw, vh, ew, eh }: FloatingMeasure = measureFloating(el),
+): void {
   const roomBelow = vh - 8 - (rect.bottom + gap);
   const roomAbove = rect.top - gap - 8;
   let top: number;
@@ -713,6 +732,11 @@ class Commentor {
       }
       this.scheduleReposition();
     });
+    // Content that reflows without a scroll or window resize (images, fonts, expanding
+    // sections) moves the anchors too. The observer's first callback is the initial frame.
+    const reflow = new ResizeObserver(() => this.scheduleReposition());
+    reflow.observe(document.documentElement);
+    reflow.observe(document.body);
     document.addEventListener("keydown", (e) => {
       if (e.key === "Escape") {
         if (this.commentMode) this.setCommentMode(false);
@@ -1314,57 +1338,111 @@ class Commentor {
       );
       this.markersLayer.append(pin);
     });
-    this.repositionPins();
-    this.highlightThread(this.highlightedThreadId);
+    this.repositionPins({ highlight: true });
+    this.syncHighlightClasses();
   }
 
+  /** Coalesces scroll, resize and content-size changes into one layout pass per animation frame. */
   private scheduleReposition(): void {
     if (this.raf) return;
     this.raf = requestAnimationFrame(() => {
       this.raf = 0;
-      this.repositionPins();
-      const open = this.bubbleLayer.querySelector<HTMLElement>(
-        '[data-testid="commentor-thread-bubble"]',
-      );
-      if (open) {
-        const tid = open.getAttribute("data-thread-id");
-        const pin = this.markersLayer.querySelector<HTMLElement>(
-          `[data-thread-id="${tid}"]`,
-        );
-        if (pin) placeFloating(open, pin.getBoundingClientRect());
-      }
-      this.positionAnchorHighlight();
+      this.repositionPins({ bubble: true, highlight: true });
     });
   }
 
-  private repositionPins(): void {
-    const pins = this.markersLayer.querySelectorAll<HTMLElement>(
-      '[data-testid="commentor-pin"]',
+  /**
+   * One layout pass: every read (viewport, anchors, the open bubble's pin and size, the highlighted
+   * anchor) happens before the first write, so the pass costs a single layout however many pins
+   * there are. A write ahead of a later read would force a fresh layout for each pin.
+   */
+  private repositionPins({
+    bubble = false,
+    highlight = false,
+  }: { bubble?: boolean; highlight?: boolean } = {}): void {
+    const width = window.innerWidth;
+    const height = window.innerHeight;
+    const threadById = new Map(this.threads.map((t) => [t._id, t]));
+    const pins = Array.from(
+      this.markersLayer.querySelectorAll<HTMLElement>(
+        '[data-testid="commentor-pin"]',
+      ),
     );
-    pins.forEach((pin) => {
-      // Pins are rebuilt from this.threads whenever it changes, so every pin has its thread.
-      const t = this.threads.find(
-        (x) => x._id === pin.getAttribute("data-thread-id"),
-      )!;
-      const p = anchorPoint(t.anchor);
+    // Pins are rebuilt from this.threads whenever it changes, so every pin has its thread.
+    const points = pins.map((pin) =>
+      anchorPoint(
+        threadById.get(pin.getAttribute("data-thread-id") as ThreadId)!.anchor,
+      ),
+    );
+    const open = bubble ? this.measureOpenBubble() : null;
+    const highlightRects = highlight ? this.measureAnchorHighlight() : null;
+
+    let openRect: Rect | undefined;
+    for (const [index, pin] of pins.entries()) {
+      const p = points[index];
       if (!p.ok) {
         pin.classList.add("orphan");
         pin.style.display = "none";
-        return;
+        if (pin === open?.pin) openRect = { left: 0, top: 0, right: 0, bottom: 0 };
+        continue;
       }
       // Hide the pin when its anchor has scrolled out of the viewport.
       // Without this, clamp() pins the tooltip to the viewport edge and
       // the pin (and its tooltip) appear "sticky" — visible even though
       // the commented element is off-screen.
-      if (p.y < 0 || p.y > window.innerHeight) {
+      if (p.y < 0 || p.y > height) {
         pin.style.display = "none";
-        return;
+        if (pin === open?.pin) openRect = { left: 0, top: 0, right: 0, bottom: 0 };
+        continue;
       }
+      const left = clamp(8, width - 30, p.x - 10);
+      const top = clamp(8, height - 30, p.y - 26);
       pin.classList.remove("orphan");
       pin.style.display = "";
-      pin.style.left = `${clamp(8, window.innerWidth - 30, p.x - 10)}px`;
-      pin.style.top = `${clamp(8, window.innerHeight - 30, p.y - 26)}px`;
-    });
+      pin.style.left = `${left}px`;
+      pin.style.top = `${top}px`;
+      if (pin === open?.pin && open.placed) {
+        const { rect } = open.placed;
+        const dx = left - open.placed.left;
+        const dy = top - open.placed.top;
+        openRect = { left: rect.left + dx, right: rect.right + dx, top: rect.top + dy, bottom: rect.bottom + dy };
+      }
+    }
+
+    if (open) {
+      // A fixed pin moves by exactly the change in its left/top, so its new box is its old box
+      // shifted, with no layout read after the writes above. Only a pin that was not placed
+      // before needs one.
+      const rect = openRect ?? open.pin?.getBoundingClientRect();
+      if (rect) placeFloating(open.el, rect, 8, open.size);
+    }
+    if (highlightRects) this.paintAnchorHighlight(highlightRects, width, height);
+  }
+
+  /** Reads for re-anchoring the open thread bubble to its pin. */
+  private measureOpenBubble(): {
+    el: HTMLElement;
+    pin: HTMLElement | null;
+    size: FloatingMeasure;
+    placed: { left: number; top: number; rect: Rect } | null;
+  } | null {
+    const el = this.bubbleLayer.querySelector<HTMLElement>(
+      '[data-testid="commentor-thread-bubble"]',
+    );
+    if (!el) return null;
+    const pin = this.markersLayer.querySelector<HTMLElement>(
+      `[data-thread-id="${el.getAttribute("data-thread-id")}"]`,
+    );
+    const left = parseFloat(pin?.style.left ?? "");
+    const top = parseFloat(pin?.style.top ?? "");
+    const placed =
+      pin &&
+      pin.style.display !== "none" &&
+      Number.isFinite(left) &&
+      Number.isFinite(top)
+        ? { left, top, rect: pin.getBoundingClientRect() }
+        : null;
+    return { el, pin, size: measureFloating(el), placed };
   }
 
   private syncRecoveryDrafts(): void {
@@ -2299,6 +2377,12 @@ class Commentor {
 
   private highlightThread(threadId: ThreadId | null): void {
     this.highlightedThreadId = threadId;
+    this.syncHighlightClasses();
+    this.positionAnchorHighlight();
+  }
+
+  private syncHighlightClasses(): void {
+    const threadId = this.highlightedThreadId;
     for (const el of this.root.querySelectorAll<HTMLElement>(
       "[data-thread-id]",
     )) {
@@ -2307,21 +2391,31 @@ class Commentor {
         Boolean(threadId && el.dataset.threadId === threadId),
       );
     }
-    this.positionAnchorHighlight();
   }
 
   private positionAnchorHighlight(): void {
+    this.paintAnchorHighlight(
+      this.measureAnchorHighlight(),
+      window.innerWidth,
+      window.innerHeight,
+    );
+  }
+
+  private measureAnchorHighlight(): Rect[] {
     const thread = this.threads.find(
       (candidate) => candidate._id === this.highlightedThreadId,
     );
-    const rects = thread ? anchorRects(thread.anchor) : [];
+    return thread ? anchorRects(thread.anchor) : [];
+  }
+
+  private paintAnchorHighlight(rects: Rect[], width: number, height: number): void {
     let visibleCount = 0;
     for (const rect of rects) {
       if (
         rect.bottom < 0 ||
-        rect.top > window.innerHeight ||
+        rect.top > height ||
         rect.right < 0 ||
-        rect.left > window.innerWidth
+        rect.left > width
       )
         continue;
       let segment = this.anchorHighlight.children[

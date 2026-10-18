@@ -33,7 +33,13 @@ beforeAll(async () => {
       import { ConvexError } from 'convex/values';
       export class ConvexClient {
         constructor() { window.transport = { subscriptions: 0, closes: 0, writes: 0, updates: 0 }; }
-        setAuth(token) { window.refreshAuth = token; token(); }
+        setAuth(token) {
+          window.refreshAuth = token; token();
+          // Convex's own loop: refetch with forceRefreshToken shortly before a fifteen minute token expires,
+          // and schedule the next refetch only once the previous one has settled.
+          window.settledRefreshes = 0;
+          window.keepTokenFresh = () => { const next = () => setTimeout(async () => { await token({ forceRefreshToken: true }); window.settledRefreshes++; next(); }, 890_000); next(); };
+        }
         onUpdate(query, args, update, onError) {
           window.transport.subscriptions++;
           window.lateUpdate = () => { window.transport.updates++; update('deploy-2'); };
@@ -434,7 +440,7 @@ it("does not mistake a failed identity check on restore for a sign-out, and stil
   await overlay(page).waitFor();
 });
 
-type Refresh = Window & { refreshAuth(): Promise<string | null>; lateUpdate(): void; failDeployment(code?: string): void };
+type Refresh = Window & { refreshAuth(args?: { forceRefreshToken: boolean }): Promise<string | null>; keepTokenFresh(): void; settledRefreshes: number; lateUpdate(): void; failDeployment(code?: string): void };
 const refresh = (page: Page) => page.evaluate(() => (window as unknown as Refresh).refreshAuth());
 const following = (page: Page) => page.locator("#content-frame").evaluate(frame => frame.dataset.activeDeployment ?? null);
 const lateUpdate = (page: Page) => page.evaluate(() => (window as unknown as Refresh).lateUpdate());
@@ -512,4 +518,62 @@ it("ends the comment session when the identity check at token renewal finds the 
   page.on("request", request => { if (new URL(request.url()).pathname === "/api/auth/convex/token") tokenRequests.push(request.url()); });
   expect(await refresh(page)).toBeNull();
   expect(tokenRequests).toEqual([]);
+});
+
+/** What the browser reports for a tab in the background. */
+const setVisibility = (page: Page, state: "visible" | "hidden") => page.evaluate(state => {
+  Object.defineProperty(document, "visibilityState", { configurable: true, get: () => state });
+  document.dispatchEvent(new Event("visibilitychange"));
+}, state);
+
+it("holds the comment token refresh of a hidden tab for an hour, renews when it returns, and still ends a session whose account is gone", async () => {
+  const page = await harness.newPage();
+  const initialToken = page.waitForResponse(response => new URL(response.url()).pathname === "/api/auth/convex/token");
+  await page.clock.install();
+  await page.goto(`${harness.origin}/viewer`);
+  await initialToken;
+  await expect.poll(async () => (await page.evaluate(() => (window as unknown as { transport: Transport }).transport)).subscriptions).toBe(2);
+  await page.clock.pauseAt(await page.evaluate(() => Date.now()) + 1_000);
+  const requested: string[] = [];
+  page.on("request", request => { const path = new URL(request.url()).pathname; if (path.startsWith("/api/auth/")) requested.push(path); });
+  const refreshes = () => requested.filter(path => path === "/api/auth/convex/token").length;
+  // The next refresh is only scheduled once the previous one has settled, so move the clock after that.
+  const settled = (count: number) => expect.poll(() => page.evaluate(() => (window as unknown as Refresh).settledRefreshes)).toBe(count);
+  await page.evaluate(() => (window as unknown as Refresh).keepTokenFresh());
+
+  // A visible tab refreshes shortly before each token expires: an identity check and a token every ~15 minutes.
+  await page.clock.fastForward(890_000);
+  await expect.poll(refreshes).toBe(1);
+  expect(requested).toEqual(["/api/auth/get-session", "/api/auth/convex/token"]);
+  await settled(1);
+
+  requested.length = 0;
+  await setVisibility(page, "hidden");
+  await page.clock.fastForward(60 * 60_000);
+  // A marker request queues behind anything the page sent before it, so nothing hides in flight.
+  await page.evaluate(() => fetch("/api/auth/marker"));
+  expect(requested, "requests during an hour hidden").toEqual(["/api/auth/marker"]);
+  // The refresh is held, not dropped: the client still has the session, and the next one is not scheduled yet.
+  expect(await page.evaluate(() => (window as unknown as { transport: Transport }).transport)).toMatchObject({ subscriptions: 2, closes: 0 });
+  expect(await overlay(page).count()).toBe(0);
+
+  requested.length = 0;
+  await setVisibility(page, "visible");
+  await expect.poll(refreshes).toBe(1);
+  expect(requested).toEqual(["/api/auth/get-session", "/api/auth/convex/token"]);
+  await settled(2);
+  // Back to its normal rhythm.
+  requested.length = 0;
+  await page.clock.fastForward(890_000);
+  await expect.poll(refreshes).toBe(1);
+  await settled(3);
+
+  // The identity check still gates a refresh held while hidden.
+  await setVisibility(page, "hidden");
+  await page.clock.fastForward(890_000);
+  requested.length = 0;
+  identity = "signed-out";
+  await setVisibility(page, "visible");
+  await overlay(page).waitFor();
+  expect(requested).toEqual(["/api/auth/get-session"]);
 });

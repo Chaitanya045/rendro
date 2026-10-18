@@ -2,6 +2,7 @@ import { getRequestListener } from "@hono/node-server";
 import { buildBrowserBundle as build } from "./helpers/browser";
 import { Hono } from "hono";
 import type { User } from "better-auth/types";
+import type { Page } from "playwright";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CommentRecoveryState } from "@/commentor/operation-state";
 import projectDocs from "@/routes/project-docs";
@@ -298,4 +299,59 @@ describe("private viewer republishing", () => {
     expect(shellLoads).toBe(2);
     expect(violations).toEqual([]);
   });
+});
+
+describe("private viewer in a hidden tab", () => {
+  const minute = 60_000;
+  /** What the browser reports for a tab in the background: the shell and the opaque document inside it. */
+  const setVisibility = (page: Page, state: "visible" | "hidden") => Promise.all(page.frames().map(frame => frame.evaluate(state => {
+    Object.defineProperty(document, "visibilityState", { configurable: true, get: () => state });
+    Object.defineProperty(document, "hidden", { configurable: true, get: () => state === "hidden" });
+    document.dispatchEvent(new Event("visibilitychange"));
+  }, state)));
+
+  it("renews nothing for a simulated hour hidden, then renews on return and when a resource failed meanwhile, keeping the draft", async () => {
+    const page = await harness.newPage();
+    await page.context().addCookies([{ name: "better-auth.session_token", value: "fixture.signature", url: harness.origin }]);
+    // Timers are created at load, so the clock is installed first and then held still.
+    await page.clock.install();
+    await browserStep("open the private viewer", () => page.goto(`${harness.origin}${base}?doc=${documentPath}`));
+    const frame = (await (await page.locator("#content-frame").elementHandle())!.contentFrame())!;
+    await browserStep("initialize comment bridge", () => frame.waitForFunction(() => document.body.dataset.subscribe === "true"));
+    await page.clock.pauseAt(await page.evaluate(() => Date.now()) + 1_000);
+    const ticket = () => frame.evaluate(() => document.baseURI);
+    const initialTicket = await ticket();
+    await frame.locator("#focus-target").fill("Half-written note");
+    // A visible tab renews once its ticket is five minutes old: the heartbeat is alive before it is hidden.
+    // fastForward jumps over the shell's 100ms polling instead of replaying an hour of it.
+    await page.clock.fastForward(6 * minute);
+    await expect.poll(() => renewals).toBe(1);
+    await expect.poll(ticket).not.toBe(initialTicket);
+
+    const visibleHour = renewals;
+    const settledTicket = await ticket();
+    await setVisibility(page, "hidden");
+    await page.clock.fastForward(60 * minute);
+    expect(renewals - visibleHour, "requests during an hour hidden").toBe(0);
+    expect(await ticket()).toBe(settledTicket);
+    expect(await frame.locator("#focus-target").inputValue()).toBe("Half-written note");
+
+    await setVisibility(page, "visible");
+    await expect.poll(() => renewals).toBe(visibleHour + 1);
+    await expect.poll(ticket).not.toBe(settledTicket);
+    expect(await frame.locator("#focus-target").inputValue()).toBe("Half-written note");
+
+    // A resource that fails in the background is retried on return, although the new ticket is fresh.
+    const fresh = await ticket();
+    await setVisibility(page, "hidden");
+    await frame.locator("#deferred").evaluate(element => { (element as HTMLImageElement).src = "missing.svg"; });
+    await frame.waitForFunction(() => { const image = document.getElementById("deferred") as HTMLImageElement; return image.complete && image.naturalWidth === 0; });
+    await page.clock.fastForward(2 * minute);
+    expect(renewals).toBe(visibleHour + 1);
+    await setVisibility(page, "visible");
+    await expect.poll(() => renewals).toBe(visibleHour + 2);
+    await expect.poll(ticket).not.toBe(fresh);
+    expect(await frame.locator("#focus-target").inputValue()).toBe("Half-written note");
+    expect(shellLoads).toBe(1);
+  }, 120_000);
 });

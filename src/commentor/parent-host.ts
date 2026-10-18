@@ -3,6 +3,7 @@ import { isPublicErrorData } from "../shared/public-errors";
 import { showViewerUpdateNotice, updateViewerActiveDeployment } from "../viewer/client";
 import { commentErrorMessage, commentRetryAfter, isDefinitiveCommentRejection } from "./errors";
 import { COMMENT_RECOVERY_PREFIX, syncCommentRecoveryUser } from "./recovery-session";
+import { whenVisible } from "./visibility";
 import { normalizeMutationArgs, record, validAnchor } from "./mutation-args";
 import { CommentOperationState, mutationKey } from "./operation-state";
 import { ConvexClient } from "convex/browser";
@@ -597,7 +598,10 @@ export function bootCommentorParentHost(frameAlreadyLoaded = false): (() => void
     // The iframe may have loaded while checking the session.
     host.start(frameLoaded || document.readyState === "complete");
     frame.removeEventListener("load", rememberLoad);
-    client.setAuth(async () => {
+    client.setAuth(async args => {
+      // Convex refreshes before expiry (and after a rejection) with forceRefreshToken. A hidden tab
+      // has nobody to serve: hold the refresh, and settle it the moment the tab is visible again.
+      if (args?.forceRefreshToken) await whenVisible();
       if (!await checkIdentity() || disposed || signedOut) return null;
       const token = await requestAuthToken(() => { if (!disposed && !signedOut) stopDeployment(); });
       return disposed || signedOut ? null : token;

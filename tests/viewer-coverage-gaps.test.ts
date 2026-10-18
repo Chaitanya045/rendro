@@ -197,7 +197,7 @@ describe("viewer frame edge cases", () => {
     win.document.write(`<html><head><base data-rendro-viewer href="${origin}${prefix}guide/index.html"></head><body>${html}</body></html>`);
     const bus = events();
     const parent = { postMessage: vi.fn() };
-    const host = { ...bus, location: win.location, document: win.document, parent, setInterval: globalThis.setInterval } as unknown as Window;
+    const host = { ...bus, location: win.location, document: win.document, parent, setInterval: globalThis.setInterval, clearInterval: globalThis.clearInterval } as unknown as Window;
     installViewerFrame(config, host);
     const renew = (next: string) => bus.emit("message", { source: parent, origin,
       data: { type: "viewer-renewed", requestId: parent.postMessage.mock.lastCall![0].requestId, prefix: next } });
@@ -223,10 +223,10 @@ describe("viewer frame edge cases", () => {
     vi.useFakeTimers();
     const f = frameFixture("");
     vi.setSystemTime(Date.now() + 16 * 60_000);
-    Object.defineProperty(f.win.document, "hidden", { configurable: true, value: true });
+    Object.defineProperty(f.win.document, "visibilityState", { configurable: true, value: "hidden" });
     f.win.document.dispatchEvent(new f.win.Event("visibilitychange"));
     expect(f.parent.postMessage).not.toHaveBeenCalled();
-    Object.defineProperty(f.win.document, "hidden", { configurable: true, value: false });
+    Object.defineProperty(f.win.document, "visibilityState", { configurable: true, value: "visible" });
     f.win.document.dispatchEvent(new f.win.Event("visibilitychange"));
     expect(f.parent.postMessage).toHaveBeenCalledWith(expect.objectContaining({ type: "viewer-renew" }), origin);
   });
