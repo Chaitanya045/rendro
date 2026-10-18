@@ -7,8 +7,8 @@ import { IngestError } from "./errors";
 import { PageRenderError, type ContentPipeline } from "./pipeline";
 
 export interface ContentPipelineOptions {
-  /** External image rewrite (image proxy, #224). See RenderOptions.rewriteImageUrl. */
-  rewriteImageUrl?: RenderOptions["rewriteImageUrl"];
+  /** IMAGE_PROXY_SECRET: external images become signed same-origin proxy URLs (#224). See RenderOptions. */
+  imageProxySecret: string;
 }
 
 /**
@@ -33,8 +33,8 @@ export function isDocsAsset(path: string): boolean {
  * pages fail the attempt instead, so it is retried rather than marking pages
  * that are fine as broken.
  */
-export function contentPipeline(options: ContentPipelineOptions = {}): ContentPipeline {
-  const renderOptions: RenderOptions = options.rewriteImageUrl ? { rewriteImageUrl: options.rewriteImageUrl } : {};
+export function contentPipeline(options: ContentPipelineOptions): ContentPipeline {
+  const renderOptions: RenderOptions = { imageProxySecret: options.imageProxySecret };
   return {
     rendererVersion: RENDERER_VERSION,
     maxSourceBytes: MAX_SOURCE_BYTES,
@@ -42,10 +42,10 @@ export function contentPipeline(options: ContentPipelineOptions = {}): ContentPi
     configFilesToRead,
     detect: (entries, configs) => detectDocs(entries, { configs }),
     renderKey,
-    render(source, path) {
+    async render(source, path) {
       const engineWasDown = markdownEngineFailed();
       try {
-        const rendered = renderDocument(source, path, renderOptions);
+        const rendered = await renderDocument(source, path, renderOptions);
         return { html: rendered.html, title: rendered.title, headings: rendered.headings };
       } catch (error) {
         if (!(error instanceof RenderError)) throw error;

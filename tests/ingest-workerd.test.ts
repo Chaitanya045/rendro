@@ -7,6 +7,7 @@ import { manifestKey, refKey } from "../src/ingest/orchestrator/keys";
 import type { IngestMessage } from "../src/ingest/orchestrator/messages";
 import { FakeGitHub } from "./helpers/fake-github";
 import { docsRepoFiles } from "./helpers/ingest-fixture";
+import { verifyImageProxyPath } from "../src/image-proxy";
 
 /**
  * The ingest Worker on real workerd (wrangler's test harness): Queue consumer,
@@ -65,7 +66,7 @@ beforeAll(async () => {
     workers: [{
       configPath: "wrangler.ingest.toml",
       vars: { GITHUB_API_ORIGIN: github.origin, GITHUB_ARCHIVE_ORIGINS: github.archiveOrigin },
-      secrets: { GITHUB_DEV_TOKEN: github.token },
+      secrets: { GITHUB_DEV_TOKEN: github.token, IMAGE_PROXY_SECRET: process.env.IMAGE_PROXY_SECRET as string },
     }],
   });
   await server.listen();
@@ -100,13 +101,19 @@ describe("ingest Worker on workerd", () => {
     expect(page.html).toContain('<h1 id="user-content-page-0">Page 0</h1>');
 
     github.resetLog();
-    const second = repo.change({ "docs/page-1.md": "# Changed\n", "docs/new-page.md": "# New\n" });
+    const second = repo.change({ "docs/page-1.md": "# Changed\n\n![Badge](https://img.shields.io/badge/docs-ok-green.svg)\n", "docs/new-page.md": "# New\n" });
     started = performance.now();
     await env.INGEST_QUEUE.send({ v: 1, repo: repo.ref, branch: "main", sha: second, deliveryId: "workerd-2", reason: "push" });
     await waitFor(async () => ((await pointer(101))?.commit === second ? true : null));
     const incrementalMs = performance.now() - started;
     expect(github.count("tarball")).toBe(0);
     expect(github.count("blob")).toBe(2);
+    // The external image was rewritten in workerd to a same-origin proxy URL signed with the Worker's secret (#224).
+    const secondManifest = JSON.parse(await (await env.INGEST_BUCKET.get(manifestKey(101, second, RENDERER_VERSION)))?.text() as string) as { files: Record<string, { render?: string }> };
+    const changed = JSON.parse(await (await env.INGEST_BUCKET.get(`gh/v1/repo/101/${secondManifest.files["docs/page-1.md"].render as string}`))?.text() as string) as { html: string };
+    const src = /<img src="([^"]+)" alt="Badge"/.exec(changed.html)?.[1] as string;
+    expect(await verifyImageProxyPath(process.env.IMAGE_PROXY_SECRET as string, src)).toBe("https://img.shields.io/badge/docs-ok-green.svg");
+    expect(changed.html).not.toContain("shields.io");
     console.log(`workerd ingest: first import ${firstMs.toFixed(0)} ms / ${firstRequests} billable GitHub requests; `
       + `incremental push ${incrementalMs.toFixed(0)} ms / ${github.billable()} billable (includes queue batching, max_batch_timeout 1 s)`);
   });

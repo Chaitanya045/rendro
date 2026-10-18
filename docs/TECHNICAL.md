@@ -1936,9 +1936,8 @@ root:
 
 - Repo HTML loses its scripts, inline styles and `<link>` stylesheets, so it is
   shown in Rendro's typography. Allowing repo-relative stylesheets is a product decision.
-- External images load from their origin, which shares the reader's IP with the
-  image host. A camo-style proxy or an `img-src` policy decides this. For rewriting
-  at ingest (#224), `renderDocument` takes a `rewriteImageUrl` option (see P3b below).
+- External images are rewritten at ingest to the signed same-origin image proxy
+  (#224, see [Image proxy](#image-proxy)), so readers' IPs never reach the image host.
 - Math (`$…$`) and Mermaid fences stay as text and code. mdBook `SUMMARY.md`,
   MkDocs `nav` and Docusaurus sidebars are not yet used for ordering.
 
@@ -1969,6 +1968,7 @@ This section covers how a GitHub commit becomes a ready-to-serve snapshot (#220,
 | Cron `*/10 * * * *` | Scheduled handler | Re-checks heads and redelivers failed webhooks |
 | `GITHUB_API_ORIGIN`, `GITHUB_ARCHIVE_ORIGINS` | Vars, optional | Point the client at a fake GitHub; the defaults are `api.github.com` and `codeload.github.com` |
 | `GITHUB_DEV_TOKEN` | Secret, optional | Development token until P1 mints installation tokens; without it requests are unauthenticated |
+| `IMAGE_PROXY_SECRET` | Secret, required | Signs image proxy URLs in rendered pages (#224); must equal the serving Worker's value |
 
 ### Storage key schema
 
@@ -2008,7 +2008,7 @@ gh/v1/
    - The archive redirect is followed at once and never stored, since private-repo links expire in five minutes. The installation token is never sent to the archive host. Archive entries carry no blob IDs, so each wanted entry is hashed and checked against the tree listing.
    - Files whose archive bytes differ from their blob (export-subst, LFS) are fetched one by one, as is everything still missing when the archive fails partway (an expired link, a cut connection, a different commit in the pax header).
    - Pages render as their bytes arrive. Then write the sidebar, and the manifest last.
-   - Image hook (#224): `contentPipeline({ rewriteImageUrl })` passes every external (`http`/`https`) image source through a rewrite. It runs on sanitized content before serialization, so the output allowlist and the fixed-point check still apply to the rewritten URL, and returning null drops the source. The output depends on the rule, so changing it must bump `RENDERER_VERSION`. No rule is configured yet.
+   - Image proxy (#224): `contentPipeline({ imageProxySecret })` signs every external (`http`/`https`) image as a same-origin `/img/` URL, after sanitizing and before serialization, so the output allowlist and the fixed-point check apply to the rewritten URL. Images with non-public targets lose their source. `ContentPipeline.render` is async because signing uses WebCrypto. The output depends on the secret, so rotating it must bump `RENDERER_VERSION` (now 2 for the proxy).
 6. Flip: write the new pointer with a compare-and-swap on the pointer object's ETag (R2 `onlyIf`). If another writer got there first, the attempt fails and retries.
 7. Re-check the head (normally a free 304). If it moved during the build, ingest again, up to two follow-ups per call.
 

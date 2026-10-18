@@ -123,6 +123,7 @@ describe("ingest Worker entry", () => {
       GITHUB_API_ORIGIN: github.origin,
       GITHUB_ARCHIVE_ORIGINS: ` ${github.archiveOrigin} ,`,
       GITHUB_DEV_TOKEN: github.token,
+      IMAGE_PROXY_SECRET: process.env.IMAGE_PROXY_SECRET as string,
       ...overrides,
     };
     env.INGEST_COORDINATOR = {

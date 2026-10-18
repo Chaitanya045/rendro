@@ -26,6 +26,8 @@ export interface IngestWorkerEnv {
   GITHUB_ARCHIVE_ORIGINS?: string;
   /** Development and tests only, until P1 mints installation tokens. */
   GITHUB_DEV_TOKEN?: string;
+  /** Signs image proxy URLs in rendered pages (#224); the serving Worker's IMAGE_PROXY_SECRET. */
+  IMAGE_PROXY_SECRET: string;
 }
 
 export function ingestDependencies(env: IngestWorkerEnv): IngestDependencies {
@@ -38,7 +40,7 @@ export function ingestDependencies(env: IngestWorkerEnv): IngestDependencies {
     }),
     store: r2Store(env.INGEST_BUCKET),
     sealer: plaintextSealer,
-    pipeline: contentPipeline(),
+    pipeline: contentPipeline({ imageProxySecret: env.IMAGE_PROXY_SECRET }),
     now: () => Date.now(),
   };
 }

@@ -378,7 +378,7 @@ class FileBuilder {
     for (const page of pages) {
       let stored: RenderedObject;
       try {
-        const rendered = pipeline.render(source, page.path);
+        const rendered = await pipeline.render(source, page.path);
         stored = { html: rendered.html, title: rendered.title, headings: rendered.headings ?? [] };
         this.files[page.path] = { sha, size: page.size, render: page.key, title: rendered.title };
         this.stats.rendered += 1;

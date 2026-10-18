@@ -49,8 +49,8 @@ export interface ContentPipeline {
   detect(entries: readonly PipelineTreeEntry[], configs: ReadonlyMap<string, string>): PipelineDetection;
   /** Storage key (below the repo prefix) of a page's rendered output. */
   renderKey(blobSha: string, path: string): Promise<string>;
-  /** Render one page. Throws PageRenderError for an expected per-page failure. */
-  render(source: string, path: string): RenderedPage;
+  /** Render one page. Rejects with PageRenderError for an expected per-page failure. */
+  render(source: string, path: string): Promise<RenderedPage>;
   /** Non-page files under the docs root that the viewer serves (images, stylesheets, fonts). */
   isAsset(path: string): boolean;
   sidebar(docSet: PipelineDocSet, titles: ReadonlyMap<string, string | null>): unknown;
