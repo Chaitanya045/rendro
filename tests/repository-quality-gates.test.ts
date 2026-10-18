@@ -69,7 +69,10 @@ describe("repository quality gates", () => {
     expect(workflow).toContain("tests/helpers/diff-outcomes.ts");
     expect(workflow).toContain("tests/helpers/diff-coverage.ts");
     expect(workflow).toContain('E2E_RETRIES: "0"');
-    expect(workflow).toContain("run: pnpm e2e --project=${{ matrix.project }}");
+    expect(workflow).toContain("shard: [1, 2]");
+    expect(workflow).toContain("run: pnpm e2e --project=${{ matrix.project }} --shard=${{ matrix.shard }}/2");
+    expect(workflow).toContain("name: e2e-no-retries (${{ matrix.project }} ${{ matrix.shard }}/2)");
+    expect(workflow).toContain("name: stability-e2e-failures-${{ matrix.project }}-${{ matrix.shard }}");
     // The overrides must reach their tools; a typo would silently restore the defaults.
     expect(readFileSync(join(root, "e2e/playwright.config.ts"), "utf8")).toContain("process.env.E2E_RETRIES");
     expect(readFileSync(join(root, "vitest.config.ts"), "utf8")).toContain("process.env.RENDRO_TEST_OUTCOMES");
@@ -79,10 +82,33 @@ describe("repository quality gates", () => {
   it("runs each e2e engine as its own job behind one aggregate required check named e2e", () => {
     const quality = readFileSync(join(root, ".github/workflows/quality.yml"), "utf8");
     expect(quality).toContain("project: [chromium, firefox, webkit]");
-    expect(quality).toContain("run: pnpm e2e --project=${{ matrix.project }}");
+    expect(quality).toContain("shard: [1, 2]");
+    expect(quality).toContain("name: e2e (${{ matrix.project }} ${{ matrix.shard }}/2)");
+    expect(quality).toContain("run: pnpm e2e --project=${{ matrix.project }} --shard=${{ matrix.shard }}/2");
     expect(quality).toMatch(/\n {2}e2e:\n {4}runs-on: ubuntu-latest\n {4}needs: e2e-engine\n {4}if: \$\{\{ always\(\) \}\}/);
     expect(quality).toContain('test "$RESULT" = success');
-    expect(quality).toContain("name: workerd-e2e-failures-${{ matrix.project }}");
+    expect(quality).toContain("name: workerd-e2e-failures-${{ matrix.project }}-${{ matrix.shard }}");
+  });
+
+  it("keeps the e2e shard count, job names and duration guard consistent, and the merge job optional", () => {
+    const quality = readFileSync(join(root, ".github/workflows/quality.yml"), "utf8");
+    const engine = /\n {2}e2e-engine:\n([\s\S]*?)\n {2}e2e:\n/.exec(quality)?.[1] ?? "";
+    // One literal total everywhere: the matrix list, the job name and the Playwright flag.
+    const shards = /shard: \[([\d, ]+)\]/.exec(engine)?.[1].split(",").map(Number);
+    expect(shards).toEqual([1, 2]);
+    expect(engine.match(/\{\{ matrix\.shard \}\}\/(\d+)/g)?.every(use => use.endsWith(`/${shards!.length}`))).toBe(true);
+    // The guard warns (never fails) above 60% of the job timeout and reads the same timeout.
+    const timeout = /timeout-minutes: (\d+)/.exec(engine)?.[1];
+    expect(engine).toContain(`TIMEOUT_MINUTES: "${timeout}"`);
+    expect(engine).toContain("TIMEOUT_MINUTES * 60 * 60 / 100");
+    expect(engine).toContain("::warning title=");
+    expect(engine).not.toMatch(/Check shard duration[\s\S]*exit 1/);
+    // Nothing the required check waits for may depend on the optional merged-report job.
+    expect(quality).toMatch(/\n {2}e2e:\n {4}runs-on: ubuntu-latest\n {4}needs: e2e-engine\n/);
+    expect(quality).not.toMatch(/needs:[^\n]*e2e-report/);
+    expect(quality).toContain("pattern: e2e-blob-${{ matrix.project }}-*");
+    // The blob reporter is what feeds that job.
+    expect(readFileSync(join(root, "e2e/playwright.config.ts"), "utf8")).toContain('"blob"');
   });
 
   it("rebuilds ignored browser assets in the canonical deployment command", () => {

@@ -25,5 +25,6 @@ paseo.json
 # Playwright Test E2E artifacts
 test-results/
 playwright-report/
+blob-report/
 
 /coverage/
