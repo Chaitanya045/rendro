@@ -8,7 +8,7 @@ export const COMMENTOR_STYLES = /* css */ `
   --bg: #ffffff;
   --bg-elev: #ffffff;
   --fg: #09090b;
-  --fg-muted: #71717a;
+  --fg-muted: #52525b;
   --border: #e4e4e7;
   --border-soft: #f4f4f5;
   --accent: #c2410c;
@@ -54,7 +54,7 @@ export const COMMENTOR_STYLES = /* css */ `
   --bg: #ffffff;
   --bg-elev: #ffffff;
   --fg: #09090b;
-  --fg-muted: #71717a;
+  --fg-muted: #52525b;
   --border: #e4e4e7;
   --border-soft: #f4f4f5;
   --accent: #c2410c;

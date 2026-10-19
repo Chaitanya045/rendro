@@ -293,7 +293,7 @@ ${renderThemeAssets()}
   .repo-search-item{display:flex;flex-direction:column;gap:2px;width:100%;text-align:left;border:0;background:transparent;border-radius:6px;padding:6px 8px;cursor:pointer;font-family:inherit}
   .repo-search-item:hover,.repo-search-item[data-active="true"]{background:#f4f4f5}
   .repo-search-item:focus-visible{outline:2px solid #c2410c;outline-offset:-2px}
-  .repo-search-item-path{font-size:11px;color:#71717a;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .repo-search-item-path{font-size:11px;color:#52525b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .repo-search-item-title{font-size:13px;font-weight:600;color:#09090b}
   .repo-search-item-snippet{font-size:12px;color:#3f3f46;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
   .repo-search-item mark{background:rgba(251,146,60,.35);color:inherit;border-radius:2px}
