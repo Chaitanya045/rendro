@@ -79,7 +79,7 @@ export default async function globalSetup() {
       .replace(bucketBinding, '[[services]]\nbinding = "STORAGE"\nservice = "storage-faults"\n'), controlWorker.name));
     const controlPath = join(directory, "wrangler.control.toml");
     await writeFile(controlPath, await controlWorkerConfig(root));
-    const world = repositoryWorld();
+    const world = repositoryWorld({ visual: process.env.RENDRO_E2E_VISUAL === "1" });
     // The control Worker also tells the local Convex about revocations and removed repositories (#254).
     const controlVars = { GITHUB_API_ORIGIN: world.github.origin, GITHUB_WEB_ORIGIN: world.github.webOrigin, GITHUB_APP_CLIENT_ID: world.github.clientId, CONVEX_URL: convex.origin };
     const controlSecrets = {

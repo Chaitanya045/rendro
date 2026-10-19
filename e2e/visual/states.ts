@@ -3,13 +3,13 @@ import type { Page } from "@playwright/test";
 /** Shared determinism helpers for the visual baseline and axe runs (#120). */
 
 export type Theme = "light" | "dark";
-export type Width = 375 | 768 | 1440;
+export type Width = 320 | 375 | 768 | 1440;
 
 export const widths: Width[] = [375, 768, 1440];
 
-/** Heights match the shared spec conventions: 812 for phones, 900 for larger screens. */
+/** Heights match the shared spec conventions: 812 for phones (740 for the 320px floor of #268), 900 for larger screens. */
 export const sizeFor = (width: Width): { width: number; height: number } =>
-  width === 375 ? { width: 375, height: 812 } : { width, height: 900 };
+  width === 320 ? { width, height: 740 } : width === 375 ? { width, height: 812 } : { width, height: 900 };
 
 /** The in-page readiness step of `settleVisual`, evaluated per document (main frame and every open frame). */
 const settleDocument = async () => {

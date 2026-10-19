@@ -501,10 +501,32 @@ the repository) are rewritten to a fixed string before the shot (`pinVolatileTex
 panel with local ids and port, and the API key prefix are masked. The functional specs assert the real values by name. A baseline run is repeatable: the whole suite is run twice in a row
 without a pixel of difference before baselines are committed.
 
-**Baseline families (first slice).** Landing, sign-in, sign-up, organization overview, projects (list, empty, loading, error,
-create dialog), project deployments (list and loading), teams, API keys, account menu, viewer (tree, document loading,
-menu), comments drawer, and `/r/` (home, search, not found) at the widths and themes above. Below the desktop breakpoint
+**Baseline families.** First slice (#120): landing, sign-in, sign-up, organization overview, projects (list, empty, loading,
+error, create dialog), project deployments (list and loading), teams, API keys, account menu, viewer (tree, document
+loading, menu), comments drawer, and `/r/` (home, search, not found) at 375/768/1440px. Second slice (#268), chosen from the
+surfaces that survive the GitHub-only pivot (#214):
+
+| Family | States added |
+|---|---|
+| landing | scrolled to the Workflow, Product and Security sections; every cell also asserts the reduced-motion render holds nothing back for a reveal (`html.motion-ready` absent, no hidden `[data-reveal]`) |
+| repo (viewer shell and `/r/`) | private repository (signed-in collaborator), nested Markdown with highlighted code and a table, a long page title, a large document opened at a deep link, an expanded three-level tree, a document-not-found error inside the shell, the external-link confirmation dialog, access denied (signed-in outsider), the retryable 503 when the reader cannot be checked, the "Preparing these docs…" first view (#249) and its retry page |
+| repo search | no results, server error, rate limited (the shell renders any failed search as one message with Retry) |
+| comments | resolved tab, reply composer with a draft, the deletion toast with Undo, a send that stays pending while offline, and a write the server refuses |
+
+The shell states are also baselined at 320px (the narrowest supported layout), and the card pages (denied, unavailable,
+preparing, retry, rate limited) at 375 and 1440 only: their centred card is the same at 768. Below the desktop breakpoint
 the cell opens the tree drawer first (the `/r/` search panel and the viewer's document tree live in it).
+
+Data for the second slice is deterministic as well: the public repository `e2e-org/visual-docs`
+(`e2e/visual/visual-repo-docs.ts`) is ingested by the global setup only when `RENDRO_E2E_VISUAL=1`, and the comment states
+use two extra threads on their own page (`guide/advanced.html`), created inside the seeding's 25 second window so every age
+rounds to the same "5m". Two states cannot come from the e2e Worker alone and are produced at a boundary the product owns:
+the "Preparing…" page is the product's own renderer (`renderPreparingPage`) fulfilled at the browser, because the e2e Worker
+has no ingest coordinator (the Worker route and its polling are covered by `tests/repo-read-first-view-workerd.test.ts`), and
+the comment states go through a routed Convex socket that never forwards a write: an offline send is simply not sent, and a
+refused write is answered locally with the server's public `forbidden` error, so no cell changes seeded data. The deletion
+state also stretches the widget's long timers (the five second undo window and toast lifetime) so it cannot lapse between
+settling and the shot, and its close clicks Undo.
 
 ### Updating a baseline
 
@@ -527,18 +549,21 @@ pnpm visual:update -g "projects — list"   # extra arguments go to `playwright 
 An axe violation fails the run; there is no threshold to adjust. A known violation can only be listed in
 `e2e/visual/axe-states.spec.ts` with a written reason and an open issue, scoped to one rule, one state and one element,
 reviewed like any baseline change. An entry that no longer matches fails the run, so fixing the issue deletes the entry.
-Today's entries are the contrast findings of #267.
+Today's entries are the contrast findings of #267 and the dark-appearance findings listed in the table of `known` in
+`e2e/visual/axe-states.spec.ts`. Every axe state is scanned in light and in dark.
 
 CI jobs: `visual (chromium baselines)` and `a11y (chromium|firefox|webkit)` in `quality.yml`, each with a 20 minute
 timeout (the suites take a few minutes). Both upload their diffs and traces on failure.
 
 ### Not yet covered
 
-Follow-ups are tracked in #268: the remaining viewer shell states (error, forbidden, link-confirmation
-dialog, dropdowns), the `/r/` repo states beyond home/search/not-found (private repo, markdown and large docs), comment
-thread states (resolved, reply composer, error), search results empty/error, and the remaining auth states (verify,
-reset, errors). The org/project management families belong to the pre-pivot product and are expected to be replaced when
-the GitHub-only pivot lands; remove their baselines together with their pages.
+Tracked in #268: the auth families (verify-email, reset and forgot password, error banners, Google start) and the
+organization/project/teams/API-key management pages. They belong to the pre-pivot product and are deleted by the GitHub-only
+pivot (#214), so they get no new baselines; remove the existing ones together with their pages. The comment widget states
+are rendered on the pre-pivot project viewer because that is where seeded threads exist today; when the pivot removes it,
+re-host them on `/r/` (the widget and its markup are shared) and keep the baselines. The comment *edit* state of the issue does
+not exist: the widget has no edit action. The landing no-JS variant is not covered (the page's script is its only dynamic part,
+and the reduced-motion assertion above covers what it holds back).
 
 ## Vitest Chromium project
 

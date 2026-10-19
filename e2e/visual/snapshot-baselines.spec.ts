@@ -1,6 +1,6 @@
 import { expect } from "../fixtures";
 import { testVisual } from "./state";
-import { applyTheme, fixClock, settleVisual, sizeFor, widths, type Theme } from "./states";
+import { applyTheme, fixClock, settleVisual, sizeFor, widths, type Theme, type Width } from "./states";
 import { maskFor, openState, pinVolatileText, type Cell } from "./render-states";
 
 /**
@@ -11,8 +11,13 @@ import { maskFor, openState, pinVolatileText, type Cell } from "./render-states"
  * intentionally run-specific (server ids and key prefixes); their content is asserted by the
  * functional specs, not this suite.
  */
+const cards: Width[] = [375, 1440];
+const shell: Width[] = [320, 375, 768, 1440];
 const cells: Cell[] = [
   { family: "landing", state: "default" },
+  { family: "landing", state: "workflow" },
+  { family: "landing", state: "product" },
+  { family: "landing", state: "security" },
   { family: "sign-in", state: "default" },
   { family: "sign-up", state: "default" },
   { family: "org", state: "overview" },
@@ -30,9 +35,28 @@ const cells: Cell[] = [
   { family: "viewer", state: "loading" },
   { family: "viewer", state: "menu" },
   { family: "comments", state: "drawer" },
+  { family: "comments", state: "resolved" },
+  { family: "comments", state: "reply" },
+  { family: "comments", state: "deleted" },
+  { family: "comments", state: "offline" },
+  { family: "comments", state: "refused" },
   { family: "repo", state: "home" },
   { family: "repo", state: "search" },
+  { family: "repo", state: "search-empty" },
+  { family: "repo", state: "search-error" },
+  { family: "repo", state: "search-limited", widths: cards },
   { family: "repo", state: "not-found" },
+  { family: "repo", state: "denied", widths: cards },
+  { family: "repo", state: "unavailable", widths: cards },
+  { family: "repo", state: "preparing", widths: cards },
+  { family: "repo", state: "prepare-failed", widths: cards },
+  { family: "repo", state: "private" },
+  { family: "repo", state: "markdown", widths: shell },
+  { family: "repo", state: "long-title", widths: shell },
+  { family: "repo", state: "large" },
+  { family: "repo", state: "tree-expanded", widths: shell },
+  { family: "repo", state: "doc-error" },
+  { family: "repo", state: "link-confirm", widths: shell },
 ];
 
 const themes: Theme[] = ["light", "dark"];
@@ -44,7 +68,7 @@ testVisual.beforeAll(() => {
 
 for (const cell of cells) {
   testVisual(`${cell.family} — ${cell.state}`, async ({ page, visual }) => {
-    for (const width of widths) {
+    for (const width of cell.widths ?? widths) {
       await page.setViewportSize(sizeFor(width));
       for (const theme of themes) {
         await applyTheme(page, theme);
