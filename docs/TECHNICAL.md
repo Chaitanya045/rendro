@@ -2006,6 +2006,7 @@ This section covers how a GitHub commit becomes a ready-to-serve snapshot (#220,
 | `GITHUB_API_ORIGIN`, `GITHUB_ARCHIVE_ORIGINS` | Vars, optional | Point the client at a fake GitHub; the defaults are `api.github.com` and `codeload.github.com` |
 | `GITHUB_DEV_TOKEN` | Secret, optional | Development token until P1 mints installation tokens; without it requests are unauthenticated |
 | `IMAGE_PROXY_SECRET` | Secret, required | Signs image proxy URLs in rendered pages (#224); must equal the serving Worker's value |
+| `REPO_SEARCH` | D1, optional | The repository search index (#251); absent where no database is provisioned, and ingest then skips indexing |
 
 ### Storage key schema
 
@@ -2110,6 +2111,7 @@ This section covers how a reader gets an ingested snapshot (#234, part of epic #
 | `/r/{owner}/{repo}/@{commit}` | Shell for one commit (immutable) |
 | `…[/{ref}]/files/{path}` | A rendered page as a document frame, or an image's bytes |
 | `…[/{ref}]/tree?dir=&cursor=` | One sidebar directory page (JSON), as the viewer's lazy tree reads it |
+| `…[/{ref}]/search?q=&limit=` | Full-text search over the snapshot (#251), JSON; optional binding (`REPO_SEARCH`) |
 | `/r/{owner}/{repo}/@{commit}/view/{ticket}/files/{path}` | Private repositories: the same, authorized by the asset ticket alone |
 | `/r/{owner}/{repo}/@{commit}/viewer-ticket?manifestKey={commit}` | Ticket renewal for the trusted shell (cookie-authorized, JSON) |
 | `POST /r/{owner}/{repo}/comment-access` | Comment access for the trusted shell: authorized like a page view, then recorded in Convex (same-origin, JSON; see [Comments on Repository Docs](#comments-on-repository-docs-github-pivot-p6)) |
@@ -2224,8 +2226,9 @@ The frame wraps the sanitized page in Rendro's markup: the comment widget (#254)
 | `REPO_CONTENT` | R2 | The ingest bucket (`gh/v1/`), read through #229's `ObjectStore` and `ContentSealer` |
 | `REPO_EPOCHS` | KV | Revocation epochs |
 | `REPO_ACCESS` | Service binding | The control Worker's permission source |
+| `REPO_SEARCH` | D1 | The repository search index (#251); without it the search URL is the plain 404 |
 
-None is configured in `wrangler.toml` yet. The control Worker exists (`wrangler.control.toml`, development and tests only, #243), and the owner wires both once the GitHub App exists ([SETUP.md](SETUP.md#github-repository-reads-not-configured-yet)). Until then every `/r/` URL is a 404 in production and development. `REPO_CAPABILITY_SECRET` is required now, so the secret exists before the bindings do. Test configurations add all three bindings to a copy of the production configuration (`e2e/repo-read-config.ts`): the E2E suite and `tests/repo-access-workerd.test.ts` with the real control Worker over a fake GitHub, `tests/repo-read-workerd.test.ts` with a fixture control Worker (`e2e/repo-access/`) that speaks the same protocol from grants it is given.
+None is configured in `wrangler.toml` yet. The control Worker exists (`wrangler.control.toml`, development and tests only, #243), and the owner wires both once the GitHub App exists ([SETUP.md](SETUP.md#github-repository-reads-not-configured-yet)). Until then every `/r/` URL is a 404 in production and development. `REPO_CAPABILITY_SECRET` is required now, so the secret exists before the bindings do. Test configurations add all four bindings to a copy of the production configuration (`e2e/repo-read-config.ts`): the E2E suite and `tests/repo-access-workerd.test.ts` with the real control Worker over a fake GitHub, `tests/repo-read-workerd.test.ts` with a fixture control Worker (`e2e/repo-access/`) that speaks the same protocol from grants it is given.
 
 ### Measurements
 
@@ -2247,6 +2250,48 @@ An earlier pair of runs at load about 9 (before the rewritten body was memoized)
 - A tiered `fetch()` path for public repositories, so Tiered Cache and Cache Reserve back the per-colo Cache API.
 - The repository shell has no account menu: the capability cookie carries no display identity. P1's GitHub sign-in reworks the shell.
 - `Server-Timing` phases and real-user monitoring (P0) for these routes.
+
+## Repository Search (GitHub pivot, P7)
+
+Full-text search over one repository's docs (#251, part of epic #214). Sections are indexed from the rendered hast at ingest into a D1 FTS5 table, and a bounded JSON endpoint under the read path's authorization answers queries that the shell's search box runs. The index is optional: without a `REPO_SEARCH` binding (production, until P-deploy provisions it) the search URL is the plain 404 and ingest behaves exactly as before.
+
+| Module | Role |
+|---|---|
+| `src/ingest/sections.ts` | `extractSections(tree)`: document-order heading sections from the rendered hast; `sectionsFromHtml(html)` for the reuse path |
+| `src/search/index.ts`, `d1.ts` | The `SearchIndex` interface and the D1 implementation (external-content FTS5 over a plain `sections` table) |
+| `src/search/query.ts` | `neutralizeQuery`: free text → quoted trigram phrases; FTS syntax becomes separators |
+| `src/repo-read/search.ts` | The query boundary: bounds, commit scoping by manifest, ranking passthrough |
+| `src/lazy-tree/lazy-tree.ts` | The shell's search box: `/` focus, debounce, keyboard navigation, in-shell activation |
+
+### Index model
+
+One row per heading section: `(repo_id, blob_sha, slug)` primary key, plus the heading's title and the section's text; an external-content FTS5 virtual table (`tokenize='trigram'`) over it, kept in step by triggers, and queried with `bm25(sections_fts, 5.0, 1.0)` (the title weighs five times the body). Trigram was chosen over unicode61 because code identifiers must match: a search for `neutralizeQuery` finds the function's section, and a prefix-free quoted phrase (`"install"`) matches inside words, which a unicode61 term cannot without a prefix `*` operator that hostile input must never reach. The cost is the three-character minimum: terms shorter than three characters are dropped at the query boundary and match nothing at the index (a deliberate bound, announced in the UI).
+
+Section text is extracted after heading ids are assigned but before link decoration and code highlighting, so it is plain prose. Each section's text (8,000 chars), title (512), the page's total text (200,000) and section count (256) are capped, and whitespace/control characters collapse to single spaces so the `\u0002`/`\u0003` code points stay reserved for query snippets. Rows are keyed by blob SHA and are content-addressed like renders: a blob rendered at two paths is indexed once.
+
+### Incremental ingest hook
+
+`buildSnapshot` gains an optional `search` (the `SearchIndex`; absent where no binding is configured). A fresh render indexes its blob's sections after the render object is stored; a reused render (a page moved, a key changed) re-indexes only when `hasBlob` says the blob has no rows, so unchanged blobs reuse their rows across commits instead of paying a rewrite per push — the same reuse discipline the render cache follows. Writes happen before the pointer flip, so a commit is served only once its pages are indexed; a D1 outage fails the attempt and the queue retries it. A snapshot built before the binding existed is not backfilled; it gains rows the next time one of its blobs renders or its render key changes (P-deploy can backfill once, if ever needed).
+
+### Query endpoint
+
+`GET /r/{owner}/{repo}[/{ref}]/search?q=&limit=` sits behind the same authorization as every other `/r/` read (#239): a denial is the plain 404, and the URL is script-read JSON, so its denial and errors are JSON like a tree page's, `private, no-store`. Bounds: `q` at most 200 characters (shared with the shell input's `maxlength`), `limit` clamped to 1–50 (default 20). `neutralizeQuery` never passes reader text to FTS5 as syntax: terms are reduced to `\p{L}\p{N}` runs of at least three characters (at most 16 terms, each at most 64 characters) and quoted, so `NEAR`, `*`, quotes, column filters and parentheses become separators and cannot error or widen the query.
+
+Candidates are fetched at four times the page size, then mapped back onto the served snapshot's manifest by blob SHA: a hit is returned only when a renderable page of this exact snapshot carries that blob, so content that moved still resolves to its current path and nothing leaks across repositories or commits (the unit suite pins both). `more` reports that the candidate fetch filled up, approximately.
+
+### Shell UI
+
+The search box sits in the repository shell's sidebar (`renderRepoSearch`, markup also mirrored in the browser-test fixture). `/` focuses it from anywhere outside a typing context; typing is debounced (200 ms) into one request to the pinned commit's `/search`; results are a listbox of options with `path#slug`, the title and a snippet whose matched runs arrive wrapped in `\u0002`/`\u0003` and are rendered as `<mark>` text nodes — snippet text is never parsed as HTML. Arrow keys move the selection (wrapping), Enter or a click activates it through the same in-shell `loadDoc` a tree row uses, so the shell owns the history entry and the frame scrolls to the section. Escape, an outside click and the clear button close the panel. Loading ("Searching…"), empty and error states (with a Retry control) are announced through a `role="status"` live region, and the shell's `maxlength` bounds the input client-side. Asset version: lazy-tree 50.
+
+### Measurements
+
+Measured with `tests/repo-read-workerd.test.ts` on 2026-10-19 (`search query (1,000-page repo, limit 20)`, 200 sequential keep-alive requests cycling four terms): p50 11.6–18.3 ms and p90 14.5–30.4 ms wall time through local workerd and its local D1 (Miniflare SQLite) across runs, on the shared i5-8300H under load 12–15, against the 50 ms p50 target. Roughly `/health`'s 3.2 ms stack floor plus the FTS5 MATCH + bm25 ranking over 1,000 pages and the commit-scoping map. Production D1 adds its network round trip in place of Miniflare's in-process SQLite.
+
+### Open points
+
+- No index GC: rows of blobs a repository no longer contains stay until P9's purge removes the repository's D1 prefix wholesale (purging one repository is one D1 delete by `repo_id`).
+- Backfill of pre-existing snapshots (above) is manual if ever needed.
+- The abuse-driven FTS settings (16 terms, 64 chars each, 200-char queries) are generous for humans and bounded for robots; tightening later is a constant change.
 
 ## Repository Permission Mirror (GitHub pivot, P5)
 

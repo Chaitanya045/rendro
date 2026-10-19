@@ -8,6 +8,7 @@ import { markdownToUnsafeHtml } from "@/ingest/markdown-engine";
 import { parseHtmlDocument, parseHtmlFragment } from "@/ingest/parse-html";
 import { dirnameOf, extensionOf } from "@/ingest/paths";
 import { sanitizeContent, serializeVerified } from "@/ingest/sanitize";
+import { extractSections, type PageSection } from "@/ingest/sections";
 import { assignHeadingIds, convertAlerts, decorateLinksAndImages, rewriteExternalImages, rewriteUrls, titleFromHeadings, type Heading } from "@/ingest/transforms";
 
 export type DocumentKind = "markdown" | "mdx" | "html";
@@ -25,6 +26,8 @@ export interface RenderedDocument {
   html: string;
   title: string | null;
   headings: Heading[];
+  /** Document-order heading sections for the repository search index (#251). */
+  sections: PageSection[];
 }
 
 export interface RenderOptions {
@@ -68,15 +71,18 @@ function parseRepoHtml(source: string): { tree: Root; title: string | null } {
   return { tree: { type: "root", children: body }, title: title || null };
 }
 
-async function finish(tree: Root, path: string, title: string | null, options: RenderOptions): Promise<Pick<RenderedDocument, "html" | "title" | "headings">> {
+async function finish(tree: Root, path: string, title: string | null, options: RenderOptions): Promise<Pick<RenderedDocument, "html" | "title" | "headings" | "sections">> {
   rewriteUrls(tree, path);
   const clean = sanitizeContent(tree);
   await rewriteExternalImages(clean, path, options.rewriteImageUrl ?? dropImage);
   convertAlerts(clean);
   const headings = assignHeadingIds(clean);
+  // Extract before decoration/highlighting so the section text is plain prose,
+  // not the classes and spans the later passes add.
+  const sections = extractSections(clean);
   decorateLinksAndImages(clean);
   highlightCodeBlocks(clean);
-  return { html: serializeVerified(clean), title: title ?? titleFromHeadings(headings), headings };
+  return { html: serializeVerified(clean), title: title ?? titleFromHeadings(headings), headings, sections };
 }
 
 const BLOB_SHA = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;

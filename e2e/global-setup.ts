@@ -11,6 +11,7 @@ import { registerResources } from "./resource-journal";
 import { controlWorker, controlWorkerConfig, withRepoReadBindings } from "./repo-read-config";
 import { repositoryWorld, seedRepositories } from "./repo-fixtures";
 import type { R2BucketLike } from "../src/ingest/orchestrator/store";
+import { d1SearchIndex, type SearchD1 } from "../src/search/d1";
 
 const run = promisify(execFile);
 const root = resolve(import.meta.dirname, "..");
@@ -141,11 +142,12 @@ export default async function globalSetup() {
     const { BUCKET } = await server.getWorker<{ BUCKET: Parameters<typeof removeSmokeAsset>[0] }>("storage-faults").getEnv();
     await removeSmokeAsset(BUCKET, seed.organizationId, seed.projectId);
     await writeFile(join(directory, "backend-admin.json"), JSON.stringify({ origin: convex.origin, adminKey: convex.adminKey }), { mode: 0o600 });
-    const workerEnv = await server.getWorker<{ REPO_CONTENT: R2BucketLike }>().getEnv();
+    const workerEnv = await server.getWorker<{ REPO_CONTENT: R2BucketLike; REPO_SEARCH: SearchD1 }>().getEnv();
     const controlHandle = server.getWorker(controlWorker.name);
     const repos = await seedRepositories({
       bucket: workerEnv.REPO_CONTENT, world, webhookSecret: controlSecrets.GITHUB_WEBHOOK_SECRET, userIds: seed.userIds,
       control: (url, init) => controlHandle.fetch(url, init) as unknown as Promise<Response>,
+      search: d1SearchIndex(workerEnv.REPO_SEARCH),
     });
     closers.push(() => repos.close());
     const reposPath = join(directory, "repos.json");

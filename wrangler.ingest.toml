@@ -40,6 +40,13 @@ class_name = "RepoIngestCoordinator"
 tag = "v1"
 new_sqlite_classes = ["RepoIngestCoordinator"]
 
+# Repository search index (#251): sections in a D1-backed FTS5 table.
+# Development and tests only; P-deploy provisions the production database.
+[[d1_databases]]
+binding = "REPO_SEARCH"
+database_name = "rendro-repo-search-dev"
+database_id = "rendro-repo-search-dev"
+
 # Reconciliation: re-check branch heads with ETags; redeliver failed webhooks (from P1).
 [triggers]
 crons = ["*/10 * * * *"]

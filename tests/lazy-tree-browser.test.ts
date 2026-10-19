@@ -43,7 +43,7 @@ const scopedTree: Record<string, Record<string, ScopedPage[]>> = {
 };
 const requests: string[] = [];
 
-interface Shell { orgAttr?: boolean; org?: string; base?: string; frameBase?: string; sandbox?: boolean; initial?: string; frame?: boolean; tree?: boolean; host?: boolean; late?: boolean; noMatchMedia?: boolean }
+interface Shell { orgAttr?: boolean; org?: string; base?: string; frameBase?: string; sandbox?: boolean; initial?: string; frame?: boolean; tree?: boolean; host?: boolean; late?: boolean; noMatchMedia?: boolean; search?: true | string }
 function shell(options: Shell = {}): string {
   const org = options.org ?? "org";
   return `<!doctype html><html><head><meta charset="utf-8"><style>
@@ -55,7 +55,7 @@ ${options.noMatchMedia ? "" : ""}</style>
 ${options.noMatchMedia ? "<script>Object.defineProperty(window,'matchMedia',{value:undefined,configurable:true})</script>" : ""}
 <script>window.pushed=[];for(const name of ["pushState","replaceState"]){const original=history[name].bind(history);history[name]=(state,title,url)=>{pushed.push(name+" "+(url?String(url).replace(location.origin,""):""));return original(state,title,url)}}</script>
 ${options.initial ? `<script>window.RENDRO_INITIAL_DOC=${JSON.stringify(options.initial)}</script>` : ""}</head><body>
-${options.host === false ? "" : `<div class="sidebar"><div class="sidebar-resizer"></div><div class="sidebar-tree" ${options.orgAttr === false ? "" : `data-tree-org="${org}"`}${options.base !== undefined ? ` data-document-base="${options.base}"` : ""}${options.frameBase ? ` data-frame-base="${options.frameBase}"` : ""}>${options.tree === false ? "" : '<div id="tree-container"></div>'}</div></div>`}
+${options.host === false ? "" : `<div class="sidebar"><div class="sidebar-resizer"></div><div class="sidebar-tree" ${options.orgAttr === false ? "" : `data-tree-org="${org}"`}${options.base !== undefined ? ` data-document-base="${options.base}"` : ""}${options.frameBase ? ` data-frame-base="${options.frameBase}"` : ""}>${options.tree === false ? "" : '<div id="tree-container"></div>'}${options.search ? `${typingSurfaces()}${searchField(typeof options.search === "string" ? options.search : null)}` : ""}</div></div>`}
 <div id="main-placeholder">Choose a document</div>
 ${options.frame === false ? "" : `<div class="doc-frames" style="position:relative;width:420px;height:300px;float:left"><iframe id="content-frame" name="content-frame" ${options.sandbox === false ? "" : 'sandbox="allow-scripts"'} title="Document" style="position:absolute;top:0;left:0;width:100%;height:100%;border:0"></iframe></div>`}
 ${options.late ? '<script>addEventListener("load",()=>{const s=document.createElement("script");s.src="/lazy-tree.js";document.body.append(s)})</script>' : '<script src="/lazy-tree.js"></script>'}
@@ -66,7 +66,33 @@ const variants: Record<string, Shell> = {
   "legacy-no-frame": { frame: false }, "legacy-no-matchmedia": { noMatchMedia: true, initial: "org/guide/a.html" },
   "empty-org": { org: "" }, "empty-org-base": { org: "", base }, "empty-org-initial": { org: "", initial: "x/y.html" }, "no-org-attr": { orgAttr: false, initial: "x/y.html" }, "legacy-empty": { org: "void" }, "no-tree": { tree: false }, "no-host": { host: false },
   base: { base }, "base-paged": { base: pagedBase }, repo: { org: "docs", base: repoBase, frameBase: pinnedBase }, "base-empty-project": { base: "/organizations/o/projects/q/docs" }, "base-empty-other": { base: "/other/docs" },
+  "repo-search": { org: "docs", base: repoBase, frameBase: pinnedBase, search: true },
+  "search-no-form": { org: "docs", base: repoBase, frameBase: pinnedBase, search: "form" },
+  "search-no-input": { org: "docs", base: repoBase, frameBase: pinnedBase, search: "input" },
+  "search-no-results": { org: "docs", base: repoBase, frameBase: pinnedBase, search: "results" },
+  "search-no-status": { org: "docs", base: repoBase, frameBase: pinnedBase, search: "status" },
+  "search-no-clear": { org: "docs", base: repoBase, frameBase: pinnedBase, search: "clear" },
+  "search-no-contexts": { search: true }, "search-no-tree": { org: "docs", base: repoBase, frameBase: pinnedBase, search: true, tree: false },
 };
+/** The repository search control, mirroring renderRepoSearch()'s markup (src/routes/app.ts); `omit` removes one element. */
+function searchField(omit: string | null = null): string {
+  const input = `<input class="repo-search-input" id="repo-search-input" type="search" name="q" placeholder="Search documents" aria-label="Search documents" role="combobox" aria-autocomplete="list" aria-controls="repo-search-results" aria-expanded="false" autocomplete="off" spellcheck="false" maxlength="200" />`;
+  const clear = `<button class="repo-search-clear" id="repo-search-clear" type="button" aria-label="Clear search" hidden><span class="material-symbols-outlined" aria-hidden="true">close</span></button>`;
+  const field = `<form class="repo-search-field" role="search">
+      <span class="material-symbols-outlined repo-search-icon" aria-hidden="true">search</span>
+      ${omit === "input" ? "" : input}
+      ${omit === "clear" ? "" : clear}
+    </form>`;
+  const results = `<div class="repo-search-results" id="repo-search-results" role="listbox" aria-label="Search results" hidden></div>`;
+  const status = `<div class="repo-search-status" id="repo-search-status" role="status" aria-live="polite" aria-atomic="true"></div>`;
+  const parts = [omit === "form" ? "" : field, omit === "results" ? "" : results, omit === "status" ? "" : status].filter(Boolean).join("\n");
+  return `<div class="repo-search" id="repo-search" data-repo-search hidden>${parts}</div>`;
+}
+
+/** Fixture-only typing surfaces a reader could be in when pressing /. */
+function typingSurfaces(): string {
+  return `<textarea id="docs-note"></textarea><select id="docs-language"><option>en</option></select><div id="docs-edit" contenteditable="true"></div>`;
+}
 function docPage(announce = false): string {
   return `<!doctype html><html><body><h1 id="top">Document</h1><a id="go" href="#">Go</a><script>
 window.received=[];window.nextNavigation={type:"doc-navigate",path:"guide/b.html",search:"?v=2",fragment:"#sec"};
@@ -91,6 +117,31 @@ beforeAll(async () => {
       return json({ children: legacyTree[prefix] ?? [], isTruncated: false });
     }
     if (url.pathname === "/api/tree/void") return json({ children: [], isTruncated: false });
+    if (url.pathname === `${pinnedBase}/search`) {
+      const q = url.searchParams.get("q") ?? "";
+      if (q === "boom") { response.writeHead(500, { "Content-Type": "application/json" }); return void response.end("{}"); }
+      if (q === "junk") return json({ status: "ok", results: "nope", more: false });
+      if (q === "nul") return json(null);
+      if (q === "junkitems") return json({ status: "ok", results: [null, "x", { path: 5, slug: "", title: "", snippet: "" }], more: false });
+      if (q === "slowbody") {
+        response.on("error", () => {});
+        response.writeHead(200, { "Content-Type": "application/json" });
+        response.write("{");
+        // Complete the body late: a newer query's abort rejects the first body read quietly.
+        setTimeout(() => { try { response.end('"done"'); } catch { /* abandoned */ } }, 600);
+        return;
+      }
+      if (q === "marks") {
+        return json({ status: "ok", results: [
+          { path: "guide/advanced.md", slug: "user-content-advanced", title: "", snippet: `\u0002matched\u0003 at start \u0002also\u0003 end` },
+        ], more: false });
+      }
+      const results = q === "nothing left" ? [] : [
+        { path: "guide/start.md", slug: "user-content-start-here", title: "Getting started", snippet: `Run the \u0002installer\u0003 first. Then the ${q.slice(0, 3)} setup.` },
+        { path: "top.html", slug: "", title: "top", snippet: `No \u0002anchor\u0003 on this one.` },
+      ];
+      return json({ status: "ok", results, more: false });
+    }
     if (url.pathname.endsWith("/tree")) {
       const pages = scopedTree[url.pathname.slice(0, -"/tree".length)]?.[url.searchParams.get("dir") ?? ""] ?? [];
       return json(pages[Number(url.searchParams.get("cursor") ?? "0")] ?? { children: [], cursor: null });
@@ -1464,3 +1515,311 @@ describe("lazy tree instant navigation (#245)", () => {
     expect(pageErrors(tab)).toEqual([]);
   });
 });
+
+describe("repository sidebar search (#251)", () => {
+  const box = (tab: Page) => tab.locator("#repo-search-input");
+  const panel = (tab: Page) => tab.locator("#repo-search-results");
+  const searchStatus = (tab: Page) => tab.locator("#repo-search-status");
+  const resultOptions = (tab: Page) => panel(tab).locator(".repo-search-item");
+  const openSearch = (options: Options = {}) => open("/lt/repo-search", options);
+  const searchRequests = () => requests.filter(path => path.includes("/search?"));
+
+  it("opens with /, requires three characters and announces the hint without a request", async () => {
+    const tab = await openSearch({ clock: true });
+    await item(tab, "docs/index.md").waitFor();
+    expect(await tab.locator("#repo-search").isHidden()).toBe(false);
+    await tab.keyboard.press("/");
+    expect(await tab.evaluate(() => document.activeElement?.id)).toBe("repo-search-input");
+    await box(tab).pressSequentially("ab");
+    await tab.clock.runFor(300);
+    expect(await panel(tab).isHidden()).toBe(true);
+    expect(await box(tab).getAttribute("aria-expanded")).toBe("false");
+    expect(await searchStatus(tab).textContent()).toBe("Enter at least 3 characters to search");
+    expect(searchRequests()).toEqual([]);
+    expect(pageErrors(tab)).toEqual([]);
+  });
+
+  it("debounces typing into one bounded request and announces the count", async () => {
+    const tab = await openSearch({ clock: true });
+    await item(tab, "docs/index.md").waitFor();
+    await tab.keyboard.press("/");
+    await box(tab).pressSequentially("installer");
+    await tab.clock.runFor(190);
+    expect(searchRequests()).toEqual([]);
+    await tab.clock.runFor(60);
+    await tab.waitForFunction(() => document.querySelectorAll("#repo-search-results .repo-search-item").length === 2);
+    expect(searchRequests()).toEqual([`${pinnedBase}/search?q=installer&limit=20`]);
+    expect(await box(tab).getAttribute("aria-expanded")).toBe("true");
+    expect(await searchStatus(tab).textContent()).toBe("2 results");
+    expect(pageErrors(tab)).toEqual([]);
+  });
+
+  it("highlights matches, moves with the arrow keys and activates with Enter in-shell", async () => {
+    const tab = await openSearch({ clock: true });
+    await item(tab, "docs/index.md").waitFor();
+    await tab.keyboard.press("/");
+    await box(tab).fill("installer");
+    await tab.clock.runFor(300);
+    const first = resultOptions(tab).nth(0);
+    await first.waitFor();
+    expect(await first.getAttribute("aria-selected")).toBe("true");
+    expect(await box(tab).getAttribute("aria-activedescendant")).toBe("repo-search-option-0");
+    expect(await first.locator("mark").textContent()).toBe("installer");
+    expect(await first.locator(".repo-search-item-path").textContent()).toBe("guide/start.md#user-content-start-here");
+    // The snippet is text content: the marker code points never reach the page.
+    // eslint-disable-next-line no-control-regex -- the assertion is the absence of the marker code points.
+    expect(await first.locator(".repo-search-item-snippet").innerHTML()).not.toMatch(/[\u0002\u0003]/);
+    await tab.keyboard.press("ArrowDown");
+    expect(await resultOptions(tab).nth(1).getAttribute("aria-selected")).toBe("true");
+    expect(await box(tab).getAttribute("aria-activedescendant")).toBe("repo-search-option-1");
+    await tab.keyboard.press("ArrowUp");
+    expect(await box(tab).getAttribute("aria-activedescendant")).toBe("repo-search-option-0");
+    // The ends wrap: down from the last returns to the first, up from the first to the last.
+    await tab.keyboard.press("ArrowDown");
+    expect(await box(tab).getAttribute("aria-activedescendant")).toBe("repo-search-option-1");
+    await tab.keyboard.press("ArrowDown");
+    expect(await box(tab).getAttribute("aria-activedescendant")).toBe("repo-search-option-0");
+    await tab.keyboard.press("ArrowUp");
+    expect(await box(tab).getAttribute("aria-activedescendant")).toBe("repo-search-option-1");
+    await tab.keyboard.press("ArrowUp");
+    expect(await box(tab).getAttribute("aria-activedescendant")).toBe("repo-search-option-0");
+    await tab.keyboard.press("Enter");
+    await tab.waitForFunction((href: string) => document.getElementById("content-frame")!.getAttribute("src") === href, `${pinnedBase}/files/guide/start.md`);
+    expect(await panel(tab).isHidden()).toBe(true);
+    expect(await box(tab).inputValue()).toBe("");
+    expect(tab.url()).toContain("doc=guide%2Fstart.md#user-content-start-here");
+    await expect.poll(async () => (await receivedByFrame(tab)).at(-1)).toEqual({ type: "doc-fragment", path: "guide/start.md", fragment: "#user-content-start-here" });
+    expect(pageErrors(tab)).toEqual([]);
+  });
+
+  it("shows an empty state, an error state with retry, and closes on Escape, outside clicks and clear", async () => {
+    let failed = true;
+    const tab = await openSearch({ clock: true, routes: async page => {
+      // The first query for `installer` is aborted; its retry reaches the fixture server.
+      await page.route("**/search*", route => {
+        const q = new URL(route.request().url()).searchParams.get("q");
+        if (q === "installer" && failed) { failed = false; return route.abort(); }
+        return route.continue();
+      });
+    } });
+    await item(tab, "docs/index.md").waitFor();
+    // Empty state.
+    await box(tab).fill("nothing left");
+    await tab.clock.runFor(300);
+    await tab.waitForFunction(() => !document.getElementById("repo-search-results")!.hidden);
+    expect(await panel(tab).textContent()).toContain("No results for “nothing left”");
+    expect(await searchStatus(tab).textContent()).toBe("No results for nothing left");
+    // Error state, then its retry button succeeds.
+    await box(tab).fill("installer");
+    await tab.clock.runFor(300);
+    await tab.waitForFunction(() => (document.getElementById("repo-search-results")?.textContent ?? "").includes("Search failed."));
+    expect(await searchStatus(tab).textContent()).toBe("Search failed");
+    await panel(tab).getByRole("button", { name: "Retry" }).click();
+    await tab.waitForFunction(() => document.querySelectorAll("#repo-search-results .repo-search-item").length === 2);
+    // Escape closes (the input regains focus by the reader typing there).
+    await box(tab).press("Escape");
+    expect(await panel(tab).isHidden()).toBe(true);
+    expect(await box(tab).getAttribute("aria-expanded")).toBe("false");
+    // Reopen by typing, then an outside click closes.
+    await box(tab).pressSequentially("installer");
+    await tab.clock.runFor(300);
+    await tab.waitForFunction(() => !document.getElementById("repo-search-results")!.hidden);
+    await tab.mouse.click(700, 10);
+    expect(await panel(tab).isHidden()).toBe(true);
+    // The clear button empties the field and closes.
+    await box(tab).pressSequentially("installer");
+    await tab.clock.runFor(300);
+    await tab.waitForFunction(() => !document.getElementById("repo-search-clear")!.hidden);
+    await tab.locator("#repo-search-clear").click();
+    expect(await box(tab).inputValue()).toBe("");
+    expect(await panel(tab).isHidden()).toBe(true);
+    expect(await tab.evaluate(() => document.activeElement?.id)).toBe("repo-search-input");
+    expect(pageErrors(tab)).toEqual([]);
+  });
+
+  it("ignores a stale response after a newer query", async () => {
+    const tab = await openSearch({ clock: true, routes: async page => {
+      // The first request's answer arrives late, after the reader extended the query.
+      await page.route("**/search*", async route => {
+        const q = new URL(route.request().url()).searchParams.get("q");
+        if (q === "installers") {
+          return route.fulfill({ status: 200, contentType: "application/json",
+            body: JSON.stringify({ status: "ok", results: [{ path: "installers-hit.md", slug: "", title: "new", snippet: "new" }], more: false }) });
+        }
+        await new Promise(resolve => setTimeout(resolve, 250));
+        try { await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ status: "ok", results: [{ path: "installer-hit.md", slug: "", title: "stale", snippet: "stale" }], more: false }) }); } catch { /* the request was aborted */ }
+      });
+    } });
+    await item(tab, "docs/index.md").waitFor();
+    await tab.keyboard.press("/");
+    await box(tab).pressSequentially("installer");
+    await tab.clock.runFor(300);
+    // The extended query aborts the first request and answers at once.
+    await box(tab).pressSequentially("s");
+    await tab.clock.runFor(300);
+    await tab.waitForFunction(() => document.querySelector("#repo-search-results .repo-search-item-path")?.textContent === "installers-hit.md");
+    expect(await tab.locator(".repo-search-item-path", { hasText: "installer-hit.md" }).count()).toBe(0);
+    expect(pageErrors(tab)).toEqual([]);
+  });
+
+  it("does not steal / from typing contexts or modifier combinations", async () => {
+    const tab = await openSearch({ clock: true });
+    await item(tab, "docs/index.md").waitFor();
+    await box(tab).focus();
+    await tab.keyboard.press("/");
+    expect(await box(tab).inputValue()).toBe("/");
+    await tab.evaluate(() => (document.activeElement as HTMLElement).blur());
+    await tab.keyboard.press("Meta+/");
+    await tab.keyboard.press("Control+/");
+    expect(await tab.evaluate(() => document.activeElement?.id)).toBe("");
+    expect(pageErrors(tab)).toEqual([]);
+  });
+});
+describe("repository sidebar search robustness (#251)", () => {
+  const box = (tab: Page) => tab.locator("#repo-search-input");
+  const panel = (tab: Page) => tab.locator("#repo-search-results");
+  const status = (tab: Page) => tab.locator("#repo-search-status");
+  const searchStatus = status;
+  const resultOptions = (tab: Page) => panel(tab).locator(".repo-search-item");
+  const searchRequests = () => requests.filter(path => path.includes("/search?"));
+  it.each([
+    ["form", "search-no-form"], ["input", "search-no-input"], ["results", "search-no-results"], ["status", "search-no-status"], ["clear", "search-no-clear"],
+  ])("initializes only with complete markup, also without the %s element", async (_element, variant) => {
+    const tab = await open(`/lt/${variant}`, { clock: true });
+    await item(tab, "docs/index.md").waitFor();
+    // Without any element (or with everything) the box behaves deliberately: hidden where the
+    // markup is incomplete, and a complete-but-clearless search still works.
+    if (variant === "search-no-clear") {
+      await box(tab).fill("installer");
+      await tab.clock.runFor(300);
+      await tab.waitForFunction(() => document.querySelectorAll("#repo-search-results .repo-search-item").length === 2);
+      expect(await status(tab).textContent()).toBe("2 results");
+      // Activating without a clear button in the markup still navigates in-shell.
+      await box(tab).press("Enter");
+      await tab.waitForFunction((href: string) => document.getElementById("content-frame")!.getAttribute("src") === href, `${pinnedBase}/files/guide/start.md`);
+      expect(await panel(tab).isHidden()).toBe(true);
+    } else {
+      expect(await panel(tab).isHidden()).toBe(true);
+      expect(await tab.locator("#repo-search").isHidden()).toBe(true);
+    }
+    expect(pageErrors(tab)).toEqual([]);
+  });
+
+  it("clears an untouched box back into focus, and announces the empty query hint", async () => {
+    const tab = await openSearch({ clock: true });
+    await item(tab, "docs/index.md").waitFor();
+    await box(tab).focus();
+    await box(tab).press("Escape");
+    // The clear button works before anything was typed: no timer is pending
+    // (untouched, it is still hidden; the handler runs anyway).
+    await tab.locator("#repo-search-clear").evaluate((button: HTMLElement) => { button.click(); });
+    expect(await box(tab).inputValue()).toBe("");
+    expect(await tab.evaluate(() => document.activeElement?.id)).toBe("repo-search-input");
+    expect(pageErrors(tab)).toEqual([]);
+  });
+
+  const openSearch = (options: Options = {}) => open("/lt/repo-search", options);
+
+  it("mounts nothing where the shell has no repository context", async () => {
+    const tab = await open("/lt/search-no-contexts", { clock: true });
+    await item(tab, "org/top.html").waitFor();
+    expect(await tab.locator("#repo-search").isHidden()).toBe(true);
+    await tab.keyboard.press("/");
+    // The / shortcut never hijacks the page when search is not mounted.
+    expect(await tab.evaluate(() => document.activeElement === document.body)).toBe(true);
+    expect(pageErrors(tab)).toEqual([]);
+  });
+
+  it("mounts nothing where the tree never loads", async () => {
+    const tab = await open("/lt/search-no-tree", { clock: true });
+    expect(await tab.locator("#repo-search").isHidden()).toBe(true);
+    expect(pageErrors(tab)).toEqual([]);
+  });
+
+  it("does not hijack / focused in a textarea, a select or editable content", async () => {
+    const tab = await openSearch({ clock: true });
+    await item(tab, "docs/index.md").waitFor();
+    for (const id of ["docs-note", "docs-language", "docs-edit"]) {
+      await tab.evaluate(target => (document.getElementById(target) as HTMLElement).focus(), id);
+      await tab.keyboard.press("/");
+      expect(await tab.evaluate(() => document.activeElement?.id, id)).toBe(id);
+    }
+    // A keydown whose object is not an element (the document itself) is ignored too.
+    await tab.evaluate(() => document.dispatchEvent(new KeyboardEvent("keydown", { key: "/" })));
+    expect(await tab.evaluate(() => document.activeElement?.id)).toBe("docs-edit");
+    expect(searchRequests()).toEqual([]);
+    expect(pageErrors(tab)).toEqual([]);
+  });
+
+  it("keeps reader-proof responses as data: malformed payloads, error statuses and marker edge cases", async () => {
+    const tab = await openSearch({ clock: true });
+    await item(tab, "docs/index.md").waitFor();
+    for (const query of ["junk", "nul", "junkitems"]) {
+      await box(tab).fill(query);
+      await tab.clock.runFor(300);
+      await tab.waitForFunction(() => (document.getElementById("repo-search-results")?.textContent ?? "").includes("No results for"));
+      expect(await resultOptions(tab).count()).toBe(0);
+    }
+    // An HTTP error status reaches the same error state as a network failure.
+    await box(tab).fill("boom");
+    await tab.clock.runFor(300);
+    await tab.waitForFunction(() => (document.getElementById("repo-search-results")?.textContent ?? "").includes("Search failed."));
+    // A snippet that starts with a marker, another marker run and an empty title: all text data.
+    await box(tab).fill("marks");
+    await tab.clock.runFor(300);
+    await tab.waitForFunction(() => document.querySelectorAll("#repo-search-results .repo-search-item").length === 1);
+    expect(await resultOptions(tab).nth(0).locator("mark").allTextContents()).toEqual(["matched", "also"]);
+    expect(await resultOptions(tab).nth(0).locator(".repo-search-item-title").textContent()).toBe("advanced.md");
+    await tab.keyboard.press("Escape");
+    expect(await panel(tab).isHidden()).toBe(true);
+    // Escape on a closed panel is inert (the box keeps focus for the next query).
+    await box(tab).press("Escape");
+    expect(await tab.evaluate(() => document.activeElement?.id)).toBe("repo-search-input");
+    expect(await panel(tab).isHidden()).toBe(true);
+    // Clearing the field empties the hint and closing the panel again is quiet; Enter on a hint
+    // navigates nothing (the submit handler prevents the default GET).
+    for (let back = 0; back < 9; back += 1) await box(tab).press("Backspace");
+    await tab.clock.runFor(300);
+    expect(await box(tab).inputValue()).toBe("");
+    expect(await searchStatus(tab).textContent()).toBe("");
+    await box(tab).press("Enter");
+    expect(tab.url()).not.toContain("q=");
+    expect(await panel(tab).isHidden()).toBe(true);
+    expect(pageErrors(tab)).toEqual([]);
+  });
+
+  it("shows no error state when a superseded request's body read aborts", async () => {
+    const tab = await openSearch({ clock: true });
+    await item(tab, "docs/index.md").waitFor();
+    await tab.keyboard.press("/");
+    await box(tab).pressSequentially("slowbody");
+    await tab.clock.runFor(300);
+    // Extending the query aborts the first body read and answers with the newer results.
+    await box(tab).pressSequentially("x");
+    await tab.clock.runFor(300);
+    await tab.waitForFunction(() => document.querySelectorAll("#repo-search-results .repo-search-item").length === 2);
+    expect(await resultOptions(tab).nth(0).locator(".repo-search-item-path").textContent()).toBe("guide/start.md#user-content-start-here");
+    expect(pageErrors(tab)).toEqual([]);
+  });
+
+  it("activates an option by pointer and cancels a pending query with the clear button", async () => {
+    const tab = await openSearch({ clock: true });
+    await item(tab, "docs/index.md").waitFor();
+    await tab.keyboard.press("/");
+    await box(tab).fill("installer");
+    await tab.clock.runFor(300);
+    // Pointer activation of the slugless option navigates without a fragment.
+    await resultOptions(tab).nth(1).click();
+    await tab.waitForFunction((href: string) => document.getElementById("content-frame")!.getAttribute("src") === href, `${pinnedBase}/files/top.html`);
+    expect(tab.url()).toContain("doc=top.html");
+    expect(tab.url()).not.toContain("doc=top.html#");
+    // A pending debounce is cancelled by clearing before it fires.
+    requests.length = 0;
+    await tab.keyboard.press("/");
+    await box(tab).pressSequentially("installer");
+    await tab.locator("#repo-search-clear").click();
+    expect(await box(tab).inputValue()).toBe("");
+    await tab.clock.runFor(300);
+    expect(searchRequests()).toEqual([]);
+    expect(pageErrors(tab)).toEqual([]);
+  });});

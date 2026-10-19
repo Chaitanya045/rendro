@@ -10,6 +10,7 @@ import worker, { ingestDependencies, log, RepoIngestCoordinator, type IngestWork
 import { FakeGitHub } from "./helpers/fake-github";
 import { FakeDurableStorage, FakeR2Bucket } from "./helpers/fake-storage";
 import { rejectWith } from "./helpers/ingest-fixture";
+import { SqliteSearchD1 } from "./helpers/search-sqlite";
 
 const SECRET = "webhook-secret";
 const SHA = "a".repeat(40);
@@ -140,12 +141,17 @@ describe("ingest Worker entry", () => {
     return { github, bucket, sent, env };
   }
 
-  it("builds its dependencies from the environment", () => {
+  it("builds its dependencies from the environment", async () => {
     const deps = ingestDependencies({ INGEST_BUCKET: new FakeR2Bucket() } as unknown as IngestWorkerEnv);
     expect(deps.source).toBeInstanceOf(HttpGitHubSource);
     expect(deps.pipeline.rendererVersion).toBe(RENDERER_VERSION);
     expect(deps.now()).toBeGreaterThan(0);
     expect(ingestDependencies({ INGEST_BUCKET: new FakeR2Bucket(), GITHUB_ARCHIVE_ORIGINS: " , " } as unknown as IngestWorkerEnv).source).toBeInstanceOf(HttpGitHubSource);
+    // The search index binds only when the D1 binding exists (#251).
+    expect(ingestDependencies({ INGEST_BUCKET: new FakeR2Bucket() } as unknown as IngestWorkerEnv).search).toBeUndefined();
+    const withSearch = ingestDependencies({ INGEST_BUCKET: new FakeR2Bucket(), REPO_SEARCH: new SqliteSearchD1() } as unknown as IngestWorkerEnv);
+    expect(withSearch.search).toBeDefined();
+    expect(await withSearch.search?.hasBlob(1, "a".repeat(40))).toBe(false);
   });
 
   it("serves no routes", () => {

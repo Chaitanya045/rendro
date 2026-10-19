@@ -16,6 +16,8 @@ import { renderScopedDocumentShell } from "@/routes/app";
 import { assetError } from "@/routes/asset-headers";
 import { renderNotFoundPage } from "@/routes/not-found";
 import { serveObject } from "@/routes/object-delivery";
+import { d1SearchIndex, type SearchD1 } from "@/search/d1";
+import type { SearchIndex } from "@/search/index";
 import { treePageCursor } from "@/routes/tree-pages";
 import { unavailableResponse, viewerErrorCache, viewerErrorResponse } from "@/routes/viewer-unavailable";
 import { validTreeDirectory } from "@/deployment-index";
@@ -30,6 +32,7 @@ import { FRAME_TEMPLATE_TAG, FRAME_VERSION, failureBody, frameBody, frameContent
 import type { RepoGrant } from "./grant";
 import { encodeRepoPath, parseRepoPath, repoBase, type RepoRefSpec, type RepoRequestPath } from "./paths";
 import { READINESS_HEADER, renderPreparingPage, type PreparingState } from "./preparing";
+import { searchManifest } from "./search";
 import { isPagePath, manifestFile, readDeadline, RepoSnapshots, type EdgeCache } from "./snapshot";
 import { REPO_SPECULATION_RULES_PATH, repoSpeculationRules } from "./speculation";
 import { treePage } from "./tree";
@@ -58,6 +61,8 @@ interface Services {
   firstView: RepoFirstView | null;
   /** Where comment grants are recorded (#254). */
   comments: CommentGrants;
+  /** Set only where the repository search index is bound (#251); the search URL is otherwise the plain 404. */
+  search: SearchIndex | null;
 }
 
 /** The preparing/retry page a first-view outcome leaves the reader on (#242). */
@@ -75,7 +80,7 @@ function hasMethods(value: unknown, names: string[]): boolean {
 /** The surface exists only where its bindings are configured; elsewhere every URL under /r/ is a 404. */
 function services(c: Context): Services | null {
   const env = (c.env ?? {}) as Record<string, unknown>;
-  const bucket = env.REPO_CONTENT, epochs = env.REPO_EPOCHS, access = env.REPO_ACCESS;
+  const bucket = env.REPO_CONTENT, epochs = env.REPO_EPOCHS, access = env.REPO_ACCESS, search = env.REPO_SEARCH;
   if (!hasMethods(bucket, ["get", "head", "put", "list"]) || !hasMethods(epochs, ["get"]) || !hasMethods(access, ["fetch"])) return null;
   const waitUntil = (promise: Promise<unknown>) => {
     try {
@@ -98,6 +103,8 @@ function services(c: Context): Services | null {
     waitUntil,
     firstView: durableFirstView(env.REPO_INGEST),
     comments: convexCommentGrants,
+    // The search index is optional: without a D1 binding the search URL is the plain 404.
+    search: hasMethods(search, ["prepare", "batch", "exec"]) ? d1SearchIndex(search as SearchD1) : null,
   };
 }
 
@@ -109,7 +116,7 @@ async function isProxiedImage(src: string): Promise<boolean> {
 /** Unparsed URLs are answered like files: a page for navigations, an empty body for subresources. */
 function representation(target: RepoRequestPath["target"]["kind"] | undefined): Representation {
   if (target === "shell") return "html";
-  return target === "tree" || target === "viewer-ticket" || target === "comment-access" ? "json" : "asset";
+  return target === "tree" || target === "viewer-ticket" || target === "comment-access" || target === "search" ? "json" : "asset";
 }
 
 /** Plain 404: no validators, no retry hint, never cached; capability URLs are never echoed. */
@@ -149,7 +156,7 @@ function shell(c: Context, grant: RepoGrant, request: RepoRequestPath, manifest:
   const repoCommentConfig = { repoId: grant.repo.id, accessUrl: `${repoBase(request.owner, request.name, { kind: "default" })}/comment-access`, convexUrl: CONVEX_URL };
   const html = renderScopedDocumentShell({
     user: null, namespace: request.name, title: `${request.owner}/${request.name}`,
-    basePath: repoBase(request.owner, request.name, request.ref), frameBase: pinned, selectedPath: selected, copyLink: true, repoCommentConfig,
+    basePath: repoBase(request.owner, request.name, request.ref), frameBase: pinned, selectedPath: selected, copyLink: true, repoCommentConfig, repoSearch: true,
   });
   // Private frames load their images through tickets, which only the trusted shell may renew.
   const body = grant.repo.private ? html.replace("</body>", viewerUpdateNotice() + viewerScript("parent", { base: pinned }) + "</body>") : html;
@@ -171,6 +178,16 @@ async function tree(c: Context, grant: RepoGrant, request: RepoRequestPath, mani
     "Cache-Control": cachePolicy(grant, request.ref),
     ETag: `"tree-${manifest.commit}-r${manifest.rendererVersion}"`,
   });
+}
+
+async function search(c: Context, manifest: SnapshotManifest, services: Services): Promise<Response> {
+  c.header("Cache-Control", "private, no-store");
+  // No index bound (production, until P-deploy provisions one): the URL does not exist.
+  if (!services.search) return notFound(c, "json");
+  const limit = c.req.query("limit") === undefined ? undefined : Number(c.req.query("limit"));
+  const outcome = await searchManifest(services.search, manifest, c.req.query("q") ?? "", limit);
+  if (outcome.status === "invalid") return c.json({ error: "Invalid search query" }, 400);
+  return c.json(outcome);
 }
 
 interface Delivery {
@@ -298,6 +315,7 @@ app.get("/r/*", async (c) => {
   async function respond(target: Exclude<RepoRequestPath["target"], { kind: "comment-access" }>, manifest: SnapshotManifest): Promise<Response> {
     if (target.kind === "shell") return shell(c, grant, path, manifest);
     if (target.kind === "tree") return tree(c, grant, path, manifest, scope);
+    if (target.kind === "search") return search(c, manifest, scope);
     if (target.kind === "viewer-ticket") return renewal(c, grant, path, manifest, scope);
     const file = manifestFile(manifest, target.path);
     if (!file) return notFound(c, kind);

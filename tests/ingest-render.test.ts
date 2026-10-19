@@ -215,6 +215,7 @@ describe("repo HTML documents", () => {
       html: '<h1 id="user-content-api">API</h1><p>Body</p>',
       title: "API Reference",
       headings: [{ depth: 1, text: "API", slug: "api", id: "user-content-api" }],
+      sections: [{ slug: "user-content-api", title: "API", text: "Body" }],
     });
   });
 

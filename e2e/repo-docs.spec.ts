@@ -90,7 +90,47 @@ test("a granted reader browses a private repository with a capability cookie and
     await expect(other.getByRole("heading", { name: "Page not found" })).toBeVisible();
     const frame = await other.goto(`${url}/@${closed.commit}/files/docs/index.md`);
     expect(frame?.status(), reader).toBe(404);
+    // The search endpoint sits behind the same authorization (#251): a denial is the plain 404.
+    const search = await other.request.get(`${url}/search?q=answer`);
+    expect(search.status()).toBe(404);
   }
+});
+
+test("the shell's search finds a section and navigates in-shell; a signed-in reader searches a private repository", async ({ page, seed, baseURL }) => {
+  const { open, closed } = repos();
+  await page.goto(`/r/${open.owner}/${open.name}`);
+  await expect(heading(page, "Open home")).toBeVisible();
+  const input = page.locator("#repo-search-input");
+  // / focuses the box; a short query announces the hint and asks nothing.
+  await page.keyboard.press("/");
+  await expect(input).toBeFocused();
+  await input.fill("ba");
+  await expect(page.locator("#repo-search-status")).toHaveText("Enter at least 3 characters to search");
+  expect(await page.evaluate(() => performance.getEntriesByName("rendro:repo-search-request").length)).toBe(0);
+  // A real query returns the section the word lives in, with its anchor.
+  await input.fill("back");
+  const results = page.locator("#repo-search-results .repo-search-item");
+  await expect(results.first()).toBeVisible();
+  await expect(results.first().locator(".repo-search-item-path")).toHaveText("docs/guide/start.md#user-content-start-here");
+  await expect(results.first().locator("mark")).toHaveText("back");
+  // Enter navigates in-shell to path#slug.
+  await page.keyboard.press("Enter");
+  await expect(heading(page, "Start here")).toBeVisible();
+  await expect(page).toHaveURL(new RegExp(`doc=docs%2Fguide%2Fstart\\.md#user-content-start-here$`));
+  // The measure marks every search request, so the query budget stays observable.
+  expect(await page.evaluate(() => performance.getEntriesByName("rendro:repo-search-request").length)).toBeGreaterThan(0);
+
+  // A granted reader searches the private repository through the capability cookie.
+  const url = `/r/${closed.owner}/${closed.name}`;
+  await signInSeeded(page.context(), baseURL, seed, "owner");
+  await page.goto(url);
+  await expect(heading(page, "Closed home")).toBeVisible();
+  const search = await page.request.get(`${url}/search?q=answer`);
+  expect(search.status()).toBe(200);
+  const payload = (await search.json()) as { status: string; results: Array<{ path: string; slug: string }> };
+  expect(payload.status).toBe("ok");
+  expect(payload.results.map(result => result.path)).toEqual(["docs/guide/advanced.md"]);
+  expect(payload.results[0].slug).toBe("user-content-advanced");
 });
 
 test("a membership webhook revokes a team reader: allowed, then the next view is a plain 404", async ({ page, seed, baseURL }) => {

@@ -1,6 +1,8 @@
 import { matchesBlobId, toHex } from "../github/git-objects";
 import type { GitHubSource, GitTreeEntry, RepoRef } from "../github/source";
 import { readTar, TarError } from "../github/tar";
+import type { SearchIndex } from "../../search/index";
+import { sectionsFromHtml, type PageSection } from "../sections";
 import { workPool } from "./concurrency";
 import { blobKey, manifestKey, renderObjectKey, sidebarKey } from "./keys";
 import { PageRenderError, type ContentPipeline, type PipelineDocSet, type PipelineTreeEntry } from "./pipeline";
@@ -101,6 +103,8 @@ export interface SnapshotContext {
   pipeline: ContentPipeline;
   now: () => number;
   options?: SnapshotOptions;
+  /** Repository search index (#251); absent when no D1 binding is configured. */
+  search?: SearchIndex;
 }
 
 const DEFAULT_TARBALL: TarballPolicy = {
@@ -266,6 +270,10 @@ class FileBuilder {
       if (rendered) {
         this.files[path] = "error" in rendered ? { sha: entry.sha, size, render: key, error: rendered.error } : { sha: entry.sha, size, render: key, title: rendered.title };
         this.stats.reusedRenders += 1;
+        // A reused render whose key changed (a renderer bump, a new path): the
+        // stored HTML still carries the heading ids, so index from it — once,
+        // only when the blob has no rows yet; unchanged blobs reuse their rows.
+        if ("html" in rendered && !(await this.indexed(entry.sha))) await this.index(entry.sha, sectionsFromHtml(rendered.html));
         return;
       }
       const waiting = this.waiting.get(entry.sha) ?? [];
@@ -382,6 +390,7 @@ class FileBuilder {
         stored = { html: rendered.html, title: rendered.title, headings: rendered.headings ?? [] };
         this.files[page.path] = { sha, size: page.size, render: page.key, title: rendered.title };
         this.stats.rendered += 1;
+        await this.index(sha, rendered.sections);
       } catch (error) {
         if (!(error instanceof PageRenderError)) throw error;
         stored = { error: error.reason };
@@ -389,5 +398,20 @@ class FileBuilder {
       }
       await content.putJson(renderObjectKey(repo.id, page.key), stored);
     }
+  }
+
+  /**
+   * Index one blob's sections (#251). Content-addressed, so a blob rendered
+   * twice or at two paths is stored once; the section list may be absent under
+   * a test pipeline, in which case there is nothing to index.
+   */
+  private async index(blobSha: string, sections: readonly PageSection[] | undefined): Promise<void> {
+    if (!this.context.search || sections === undefined) return;
+    await this.context.search.putBlob(this.context.repo.id, blobSha, sections);
+  }
+
+  /** Whether the blob already has rows: false without a bound index (nothing is ever reused). */
+  private async indexed(blobSha: string): Promise<boolean> {
+    return this.context.search ? this.context.search.hasBlob(this.context.repo.id, blobSha) : true;
   }
 }

@@ -95,6 +95,8 @@ interface OrgTreePageOptions {
   frameBase?: string;
   /** Copy the viewer URL under neutral labels (repository docs, public or private). */
   copyLink?: boolean;
+  /** Repository shell: render the in-sidebar document search (#251). */
+  repoSearch?: boolean;
   displayName?: string;
   backHref?: string;
   backLabel?: string;
@@ -127,6 +129,7 @@ export interface ScopedDocumentShellOptions {
   frameBase?: string;
   copyLink?: boolean;
   repoCommentConfig?: RepoCommentConfig;
+  repoSearch?: boolean;
   shareConfig?: {
     organizationId: string;
     projectId: string;
@@ -157,6 +160,7 @@ export function renderScopedDocumentShell(options: ScopedDocumentShellOptions): 
     frameBase: options.frameBase,
     copyLink: options.copyLink,
     repoCommentConfig: options.repoCommentConfig,
+    repoSearch: options.repoSearch,
   });
 }
 
@@ -274,6 +278,28 @@ ${renderThemeAssets()}
   .sidebar-org-name{font-size:20px;font-weight:600;line-height:28px;color:#09090b}
   .sidebar-org-meta{font-size:12px;font-weight:600;color:#71717a;letter-spacing:.05em;line-height:16px}
   .sidebar-divider{padding:8px 12px;font-size:10px;font-weight:600;color:#71717a;text-transform:uppercase;letter-spacing:.05em}
+  .repo-search{position:relative;padding:0 12px 8px}
+  .repo-search-field{display:flex;align-items:center;gap:6px;background:#f4f4f5;border:1px solid #e4e4e7;border-radius:6px;padding:4px 8px;transition:border-color .15s}
+  .repo-search-field:focus-within{border-color:#c2410c}
+  .repo-search-icon{font-size:18px;color:#71717a;flex:0 0 auto}
+  .repo-search-input{flex:1;min-width:0;border:0;outline:0;background:transparent;font-family:inherit;font-size:14px;color:#09090b;padding:2px 0}
+  .repo-search-input::placeholder{color:#71717a}
+  .repo-search-clear{display:flex;align-items:center;border:0;background:transparent;color:#71717a;cursor:pointer;padding:0;border-radius:4px}
+  .repo-search-clear:hover{color:#09090b}
+  .repo-search-clear:focus-visible{outline:2px solid #c2410c;outline-offset:1px}
+  .repo-search-clear .material-symbols-outlined{font-size:18px}
+  .repo-search-results{position:absolute;left:12px;right:12px;top:100%;z-index:60;max-height:min(60vh,420px);overflow-y:auto;background:#fff;border:1px solid #e4e4e7;border-radius:8px;box-shadow:0 8px 24px rgba(9,9,11,.12);padding:4px}
+  .repo-search-results[hidden]{display:none}
+  .repo-search-item{display:flex;flex-direction:column;gap:2px;width:100%;text-align:left;border:0;background:transparent;border-radius:6px;padding:6px 8px;cursor:pointer;font-family:inherit}
+  .repo-search-item:hover,.repo-search-item[data-active="true"]{background:#f4f4f5}
+  .repo-search-item:focus-visible{outline:2px solid #c2410c;outline-offset:-2px}
+  .repo-search-item-path{font-size:11px;color:#71717a;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .repo-search-item-title{font-size:13px;font-weight:600;color:#09090b}
+  .repo-search-item-snippet{font-size:12px;color:#3f3f46;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+  .repo-search-item mark{background:rgba(251,146,60,.35);color:inherit;border-radius:2px}
+  .repo-search-message{padding:8px;font-size:12px;color:#71717a}
+  .repo-search-message button{margin-left:6px}
+  .repo-search-status{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
   .sidebar-footer{padding:12px 16px;border-top:1px solid #e4e4e7;margin-top:auto}
   .sidebar-tree{flex:1;padding:0 12px;overflow-y:auto;--sidebar-bg:#fff;scrollbar-width:thin;scrollbar-color:rgba(161,161,170,.35) transparent}
   .sidebar-tree::-webkit-scrollbar{width:1.5px}
@@ -438,6 +464,19 @@ ${renderThemeAssets()}
   html.dark .topbar-btn-create{background:#fb923c;color:#09090b}
   html.dark .topbar-btn-create:hover{background:#fdba74;opacity:1}
   html.dark .sidebar-tree{--sidebar-bg:#09090b;scrollbar-color:#3f3f46 transparent}
+  html.dark .repo-search-field{background:#18181b;border-color:#27272a}
+  html.dark .repo-search-field:focus-within{border-color:#fb923c}
+  html.dark .repo-search-input{color:#fafafa}
+  html.dark .repo-search-input::placeholder{color:#a1a1aa}
+  html.dark .repo-search-icon{color:#a1a1aa}
+  html.dark .repo-search-clear{color:#a1a1aa}
+  html.dark .repo-search-clear:hover{color:#fafafa}
+  html.dark .repo-search-results{background:#18181b;border-color:#27272a;box-shadow:0 8px 24px rgba(0,0,0,.5)}
+  html.dark .repo-search-item:hover,html.dark .repo-search-item[data-active="true"]{background:#27272a}
+  html.dark .repo-search-item-title{color:#fafafa}
+  html.dark .repo-search-item-snippet{color:#d4d4d8}
+  html.dark .repo-search-item-path,html.dark .repo-search-message{color:#a1a1aa}
+  html.dark .repo-search-item mark{background:rgba(251,146,60,.35)}
   html.dark .sidebar-tree::-webkit-scrollbar-thumb{background:#3f3f46}
   html.dark .sidebar-tree::-webkit-scrollbar-thumb:hover{background:#52525b}
   html.dark .topbar-avatar{background:rgba(251,146,60,.16);color:#fb923c;border-color:rgba(251,146,60,.35)}
@@ -558,6 +597,7 @@ ${renderStylesheet("viewer-base")}
 
 <aside class="sidebar" id="doc-sidebar" aria-labelledby="doc-sidebar-title">
   <div class="sidebar-divider" id="doc-sidebar-title">Docs</div>
+  ${options.repoSearch ? renderRepoSearch() : ""}
   <div class="sidebar-tree" data-tree-org="${orgEsc}"${documentBase ? ` data-document-base="${escapeHtml(documentBase)}"` : ""}${options.frameBase ? ` data-frame-base="${escapeHtml(options.frameBase)}"` : ""}>
     <div class="tree-stack" id="tree-container" style="position:relative">
       <div class="active-indicator" id="active-indicator" style="opacity:0;transition:none"></div>
@@ -987,6 +1027,18 @@ ${options.shareConfig?.convexUrl || options.legacyCommentConfig?.convexUrl || op
 </html>`;
 }
 
+
+function renderRepoSearch(): string {
+  return `<div class="repo-search" id="repo-search" data-repo-search hidden>
+    <form class="repo-search-field" role="search">
+      <span class="material-symbols-outlined repo-search-icon" aria-hidden="true">search</span>
+      <input class="repo-search-input" id="repo-search-input" type="search" name="q" placeholder="Search documents" aria-label="Search documents" role="combobox" aria-autocomplete="list" aria-controls="repo-search-results" aria-expanded="false" autocomplete="off" spellcheck="false" maxlength="200" />
+      <button class="repo-search-clear" id="repo-search-clear" type="button" aria-label="Clear search" hidden><span class="material-symbols-outlined" aria-hidden="true">close</span></button>
+    </form>
+    <div class="repo-search-results" id="repo-search-results" role="listbox" aria-label="Search results" hidden></div>
+    <div class="repo-search-status" id="repo-search-status" role="status" aria-live="polite" aria-atomic="true"></div>
+  </div>`;
+}
 
 function renderTreeSkeleton(): string {
   return `<div class="tree-skeleton" aria-label="Loading documents" aria-busy="true">

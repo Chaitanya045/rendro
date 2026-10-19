@@ -7,6 +7,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createTestHarness } from "wrangler";
 import { ingestBranch } from "../src/ingest/orchestrator/ingest";
 import { r2Store, type R2BucketLike } from "../src/ingest/orchestrator/store";
+import { d1SearchIndex, type SearchD1 } from "../src/search/d1";
 import { repoReadWorker, workerConfigWithRepoRead } from "../e2e/repo-read-config";
 import { ingestFixture } from "./helpers/ingest-fixture";
 import { repoFiles } from "./helpers/repo-read-fixture";
@@ -19,7 +20,7 @@ import { repoFiles } from "./helpers/repo-read-fixture";
  */
 
 interface KvLike { put(key: string, value: string): Promise<void> }
-interface ProductEnv { REPO_CONTENT: R2BucketLike; REPO_EPOCHS: KvLike }
+interface ProductEnv { REPO_CONTENT: R2BucketLike; REPO_EPOCHS: KvLike; REPO_SEARCH: SearchD1 }
 interface AccessEnv { GRANTS: KvLike }
 
 const root = fileURLToPath(new URL("..", import.meta.url));
@@ -34,9 +35,12 @@ let env: ProductEnv;
 const ingest = ingestFixture();
 const publicRepo = ingest.github.repo("octo", "open-docs", { id: 701 });
 const privateRepo = ingest.github.repo("octo", "closed-docs", { id: 702, private: true });
+// The search measurement fixture (#251): 1,000 docs pages, indexed at ingest into local D1.
+const searchRepo = ingest.github.repo("octo", "big-docs", { id: 703 });
 let publicCommit: string;
 let privateCommit: string;
 const pages = 80;
+const searchPages = 1_000;
 // Each scenario's sample count; the R2-miss scenario reads every page once.
 const samples = 200;
 
@@ -88,6 +92,12 @@ beforeAll(async () => {
   for (let index = 0; index < pages; index += 1) files[`docs/pages/page-${index}.md`] = `# Page ${index}\n\n${"Some text. ".repeat(300)}\n`;
   publicCommit = publicRepo.commit(files);
   privateCommit = privateRepo.commit(repoFiles("Closed home"));
+  const bigFiles: Record<string, string> = {};
+  for (let index = 0; index < searchPages; index += 1) {
+    bigFiles[`docs/pages/page-${index}.md`] =
+      `# Page ${index}\n\nThe zebra${index % 10} section explains installation. ${"Prose follows here. ".repeat(40)}\n`;
+  }
+  searchRepo.commit(bigFiles);
   // Wrangler's harness hands every outbound Worker fetch to globalThis.fetch: only the session lookup leaves the Worker.
   globalThis.fetch = (input, init) => {
     const request = new Request(input, init);
@@ -110,12 +120,16 @@ beforeAll(async () => {
   const deps = { ...ingest.deps, store: r2Store(env.REPO_CONTENT) };
   const etags = { get: () => Promise.resolve(null), set: () => Promise.resolve() };
   for (const repo of [publicRepo, privateRepo]) await ingestBranch(deps, etags, repo.ref, "main");
+  // The 1,000-page repository is indexed at ingest into the Worker's local D1 (#251).
+  const bigDeps = { ...deps, search: d1SearchIndex(env.REPO_SEARCH) };
+  await ingestBranch(bigDeps, etags, searchRepo.ref, "main");
   const access = await server.getWorker<AccessEnv>(repoReadWorker.access).getEnv();
   await access.GRANTS.put("grants", JSON.stringify({ repos: [
     { id: 701, owner: "octo", name: "open-docs", private: false, defaultBranch: "main", readers: [] },
     { id: 702, owner: "octo", name: "closed-docs", private: true, defaultBranch: "main", readers: ["user-reader"] },
+    { id: 703, owner: "octo", name: "big-docs", private: false, defaultBranch: "main", readers: [] },
   ] }));
-}, 180_000);
+}, 240_000);
 
 afterAll(async () => {
   agent.destroy();
@@ -193,5 +207,31 @@ describe("repository read path on workerd", () => {
     console.log(["workerd, loopback HTTP, sequential requests (p50 / p90 ms):",
       ...Object.entries(results).map(([name, { p50, p90 }]) => `  ${name}: ${p50.toFixed(2)} / ${p90.toFixed(2)}`)].join("\n"));
     expect(results["cached private frame (cookie hit)"].p50).toBeGreaterThan(0);
+  }, 120_000);
+
+  it("searches the 1,000-page repository through the pinned commit, bounded, and measures the server time", async () => {
+    // Results come from this repository's served snapshot only: path and slug resolve onto it.
+    const response = await get("/r/octo/big-docs/search?q=zebra&limit=20");
+    expect(response.status).toBe(200);
+    expect(response.headers.get("Cache-Control")).toBe("private, no-store");
+    const payload = await response.json() as { status: string; more: boolean; results: Array<{ path: string; slug: string; snippet: string }> };
+    expect(payload.status).toBe("ok");
+    expect(payload.results).toHaveLength(20);
+    expect(payload.results[0].path).toMatch(/^docs\/pages\/page-\d+\.md$/);
+    expect(payload.results[0].slug).toMatch(/^user-content-page-\d+$/);
+    expect(payload.results[0].snippet).toContain("\u0002zebra");
+    // The query is scoped by repository id: another repository (open-docs, ingested without an
+    // index pass here) and a blob outside this manifest contribute nothing.
+    const other = await get("/r/octo/open-docs/search?q=zebra");
+    expect(((await other.json()) as { results: unknown[] }).results).toEqual([]);
+
+    // Server time over sequential requests, cycling the query terms.
+    const terms = ["zebra", "installation", "prose", "follows"];
+    const results = {
+      "search query (1,000-page repo, limit 20)": await sample(samples, index => `/r/octo/big-docs/search?q=${terms[index % terms.length]}&limit=20`),
+    };
+    console.log(["repository search, workerd loopback HTTP (p50 / p90 ms):",
+      ...Object.entries(results).map(([name, { p50, p90 }]) => `  ${name}: ${p50.toFixed(2)} / ${p90.toFixed(2)}`)].join("\n"));
+    expect(results["search query (1,000-page repo, limit 20)"].p50).toBeGreaterThan(0);
   }, 120_000);
 });

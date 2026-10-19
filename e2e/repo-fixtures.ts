@@ -4,6 +4,7 @@ import { staticTokenProvider } from "../src/ingest/github/token";
 import { contentPipeline } from "../src/ingest/orchestrator/content-pipeline";
 import { ingestBranch } from "../src/ingest/orchestrator/ingest";
 import { plaintextSealer, r2Store, type R2BucketLike } from "../src/ingest/orchestrator/store";
+import type { SearchIndex } from "../src/search/index";
 import { FakeGitHub } from "../tests/helpers/fake-github";
 import { initNodeMarkdownEngine } from "../tests/helpers/markdown-engine";
 
@@ -67,6 +68,8 @@ export type RepositoryWorld = ReturnType<typeof repositoryWorld>;
 
 export async function seedRepositories(input: {
   bucket: R2BucketLike; world: RepositoryWorld; control: ControlFetch; webhookSecret: string; userIds: Record<"owner" | "outsider" | "member", string>;
+  /** The repository search index (#251), when the harness binds one; sections are written at ingest. */
+  search?: SearchIndex;
 }): Promise<{ fixtures: RepoFixtures; close(): Promise<void> }> {
   initNodeMarkdownEngine();
   const { github, installation, repos, people, team } = input.world;
@@ -77,6 +80,7 @@ export async function seedRepositories(input: {
   const deps = {
     source: new HttpGitHubSource({ tokens: staticTokenProvider(github.token), fetch: github.fetch, apiOrigin: github.origin, archiveOrigins: [github.archiveOrigin] }),
     store: r2Store(input.bucket), sealer: plaintextSealer, pipeline: contentPipeline(), now: () => Date.now(),
+    ...(input.search ? { search: input.search } : {}),
   };
   const etags = { get: () => Promise.resolve(null), set: () => Promise.resolve() };
   for (const repo of Object.values(repos)) {

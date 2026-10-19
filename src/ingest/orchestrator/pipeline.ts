@@ -4,6 +4,7 @@
  * pure modules of #215 (src/ingest/detect.ts, render.ts, sidebar.ts); tests
  * substitute their own to inject failures.
  */
+import type { PageSection } from "../sections";
 
 /** A recursive tree entry, as #215's detectDocs takes it. */
 export interface PipelineTreeEntry {
@@ -36,6 +37,8 @@ export interface RenderedPage {
   title: string | null;
   /** Heading outline (ids and text) for the table of contents and comment anchors. */
   headings?: unknown[];
+  /** Document-order sections for the repository search index (#251). */
+  sections?: PageSection[];
 }
 
 export interface ContentPipeline {

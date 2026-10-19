@@ -27,6 +27,7 @@ export type RepoTarget =
   | { kind: "shell" }
   | { kind: "files"; path: string }
   | { kind: "tree" }
+  | { kind: "search" }
   | { kind: "ticket-files"; ticket: string; path: string }
   | { kind: "viewer-ticket" }
   | { kind: "comment-access" };
@@ -57,6 +58,7 @@ function parseRef(segment: string): RepoRefSpec | null {
 function parseTarget(rest: string[], ref: RepoRefSpec): RepoTarget | null {
   if (rest.length === 0) return { kind: "shell" };
   if (rest.length === 1 && rest[0] === "tree") return { kind: "tree" };
+  if (rest.length === 1 && rest[0] === "search") return { kind: "search" };
   // Comment access belongs to the repository, not to a ref.
   if (rest.length === 1 && rest[0] === "comment-access") return ref.kind === "default" ? { kind: "comment-access" } : null;
   if (rest[0] === "files" && rest.length > 1) {

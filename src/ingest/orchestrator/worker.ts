@@ -14,6 +14,7 @@ import type { IngestDependencies } from "./ingest";
 import type { IngestMessage, QueueLike } from "./messages";
 import { contentPipeline } from "./content-pipeline";
 import { imageProxyRewriter } from "../../image-proxy";
+import { d1SearchIndex, type SearchD1 } from "../../search/d1";
 import { reconcileHeads, redeliverFailedDeliveries } from "./reconcile";
 import { plaintextSealer, r2Store, type R2BucketLike } from "./store";
 
@@ -29,6 +30,8 @@ export interface IngestWorkerEnv {
   GITHUB_DEV_TOKEN?: string;
   /** Signs image proxy URLs in rendered pages (#224); the serving Worker's IMAGE_PROXY_SECRET. */
   IMAGE_PROXY_SECRET: string;
+  /** Repository search index (#251). Development and tests only; P-deploy provisions it. */
+  REPO_SEARCH?: SearchD1;
 }
 
 export function ingestDependencies(env: IngestWorkerEnv): IngestDependencies {
@@ -43,6 +46,7 @@ export function ingestDependencies(env: IngestWorkerEnv): IngestDependencies {
     sealer: plaintextSealer,
     pipeline: contentPipeline({ rewriteImageUrl: imageProxyRewriter(env.IMAGE_PROXY_SECRET) }),
     now: () => Date.now(),
+    ...(env.REPO_SEARCH ? { search: d1SearchIndex(env.REPO_SEARCH) } : {}),
   };
 }
 
