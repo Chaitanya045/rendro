@@ -590,8 +590,9 @@ describe("unusual snapshots", () => {
   it("rewrites a version-2 render's repo-path links and images on the way out", async () => {
     const legacy = RENDERER_VERSION - 1;
     const render = `render/v${legacy}/markdown/${"f".repeat(40)}/${"0".repeat(32)}`;
+    const proxied = await imageProxyPath(process.env.IMAGE_PROXY_SECRET as string, "https://example.com/badge.svg") as string;
     await fixture.bucket.put(`gh/v1/repo/${publicRepo.id}/${render}`, new TextEncoder().encode(JSON.stringify({
-      html: '<p><a href="/docs/guide/start.md">guide</a> <img src="/docs/img/logo.png" alt="Logo"></p>', title: "Legacy", headings: [],
+      html: `<p><a href="/docs/guide/start.md">guide</a> <img src="/docs/img/logo.png" alt="Logo"> <img src="${proxied}" alt="Badge"></p>`, title: "Legacy", headings: [],
     })));
     await snapshot({ "docs/badges.md": { sha: "f".repeat(40), size: 1, render } }, null, legacy);
     clearSnapshotMemory();
@@ -599,6 +600,8 @@ describe("unusual snapshots", () => {
     // The pre-#242 shim still rewrites `/repo/path` for snapshots the old renderer wrote.
     expect(html).toContain('<a href="../docs/guide/start.md">guide</a>');
     expect(html).toContain('<img src="../docs/img/logo.png" alt="Logo">');
+    // An external image stays on its verified signed proxy path, even under a repository folder named `img`.
+    expect(html).toContain(`<img src="${proxied}" alt="Badge">`);
   });
 
   it("is a 404 when the Worker has no bindings at all (the Node server)", async () => {
@@ -785,12 +788,12 @@ describe("the read order", () => {
 
 describe("the shared cache route", () => {
   const encode = (value: string) => new TextEncoder().encode(value);
+  const signedPath = async (storageKey: string, epoch = 0) => new URL(await sharedCacheUrl(secret, "https://rendro.test", storageKey, epoch)).pathname;
 
   it("serves a signed public object from R2, cacheable and immutable", async () => {
     const key = blobKey(publicRepo.id, "a".repeat(40));
     await fixture.bucket.put(key, encode("hello"));
-    const signed = await sharedCacheUrl(secret, "https://rendro.test", key);
-    const response = await get(new URL(signed).pathname);
+    const response = await get(await signedPath(key));
     expect(response.status).toBe(200);
     expect(response.headers.get("Cache-Control")).toBe(`public, max-age=${SHARED_CACHE_TTL_SECONDS}, immutable`);
     expect(response.headers.get("Content-Type")).toBe("application/octet-stream");
@@ -798,12 +801,49 @@ describe("the shared cache route", () => {
     expect(await response.text()).toBe("hello");
   });
 
+  it("re-checks the visibility epoch before serving: a privatized repository's outstanding URL is a plain 404", async () => {
+    const key = blobKey(publicRepo.id, "a".repeat(40));
+    await fixture.bucket.put(key, encode("hello"));
+    const stale = await signedPath(key);
+    expect((await get(stale)).status).toBe(200);
+    // The control plane marks the repository invisible (KV `epoch:repo:<id>`); the URL minted at
+    // epoch 0 no longer matches, and never will again. The KV read's colo TTL (60 s) is the bound.
+    fixture.access.epochs.set(`repo:${publicRepo.id}`, Date.now());
+    expectPlainNotFound(await get(stale));
+    // A URL minted now carries the new epoch and serves again only while the repository is public.
+    const fresh = await signedPath(key, fixture.access.epochs.get(`repo:${publicRepo.id}`) as number);
+    expect((await get(fresh)).status).toBe(200);
+  });
+
+  it("answers a tampered signature and a forged one with the same plain 404", async () => {
+    const key = blobKey(publicRepo.id, "a".repeat(40));
+    await fixture.bucket.put(key, encode("hello"));
+    const url = new URL(await sharedCacheUrl(secret, "https://rendro.test", key, 0));
+    const [signature, epoch, encoded] = url.pathname.slice(SHARED_CACHE_PATH.length).split("/");
+    const flip = (text: string, at: number) => `${text.slice(0, at)}${text[at] === "A" ? "B" : "A"}${text.slice(at + 1)}`;
+    expectPlainNotFound(await get(`${SHARED_CACHE_PATH}${flip(signature, 0)}/${epoch}/${encoded}`));
+    expectPlainNotFound(await get(`${SHARED_CACHE_PATH}${signature}/${epoch}/${flip(encoded, 0)}`));
+    expectPlainNotFound(await get(`${SHARED_CACHE_PATH}${flip(signature, 42)}/${epoch}/${encoded}`));
+  });
+
   it("is a plain 404 for a bad signature, a missing object or an unconfigured worker", async () => {
-    const path = new URL(await sharedCacheUrl(secret, "https://rendro.test", blobKey(publicRepo.id, "a".repeat(40)))).pathname;
+    const path = await signedPath(blobKey(publicRepo.id, "a".repeat(40)));
     const encoded = path.split("/").pop() as string;
-    expectPlainNotFound(await get(`${SHARED_CACHE_PATH}${"A".repeat(43)}/${encoded}`));
-    expectPlainNotFound(await get(`${SHARED_CACHE_PATH}${path.slice(SHARED_CACHE_PATH.length)}`)); // object not in R2
+    expectPlainNotFound(await get(`${SHARED_CACHE_PATH}${"A".repeat(43)}/0/${encoded}`));
+    expectPlainNotFound(await get(path)); // object not in R2
+    // A correctly signed URL over a key that names no repository: nothing to check, nothing to serve.
+    expectPlainNotFound(await get(await signedPath("not-a-repository-key")));
     expectPlainNotFound(await get(SHARED_CACHE_PATH));
-    expectPlainNotFound(await app.request(await sharedCacheUrl(secret, "https://rendro.test", blobKey(publicRepo.id, "a".repeat(40))), {}, {}, fixture.ctx));
+    expectPlainNotFound(await app.request(await sharedCacheUrl(secret, "https://rendro.test", blobKey(publicRepo.id, "a".repeat(40)), 0), {}, {}, fixture.ctx));
+  });
+
+  it("is a retryable 503, never an allow, when the epoch store cannot answer", async () => {
+    const key = blobKey(publicRepo.id, "a".repeat(40));
+    await fixture.bucket.put(key, encode("hello"));
+    fixture.access.epochsUnavailable = true;
+    const response = await get(await signedPath(key));
+    expect(response.status).toBe(503);
+    expect(response.headers.get("Cache-Control")).toBe("private, no-store");
+    expect(response.headers.get("Retry-After")).toMatch(/^\d+$/);
   });
 });

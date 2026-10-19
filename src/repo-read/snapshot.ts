@@ -43,6 +43,8 @@ export interface SnapshotDependencies {
   /**
    * Cacheable subrequests for public repository objects, or null where there is
    * none (Node, tests without one). Never consulted for private repositories.
+   * Takes the repository id, so the reader can sign the URL with the
+   * repository's current visibility epoch (#242).
    */
   shared: SharedCacheReader | null;
   waitUntil(promise: Promise<unknown>): void;
@@ -113,7 +115,7 @@ export class RepoSnapshots {
   private async stored(grant: RepoGrant, key: string): Promise<Uint8Array | null> {
     const { edge, shared } = this.deps;
     if (!grant.repo.private && shared) {
-      const bytes = await shared(key);
+      const bytes = await shared(grant.repo.id, key);
       if (bytes) return bytes;
     }
     const cacheKey = `${this.deps.origin}${EDGE_PREFIX}${key}`;

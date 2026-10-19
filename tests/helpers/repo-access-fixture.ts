@@ -28,12 +28,12 @@ export class FakeDirectoryStorage extends FakeDurableStorage implements Director
 /** The REPO_EPOCHS namespace, shared by the control Worker (writes) and the serving Worker (reads). */
 export class FakeEpochKv implements EpochStore, KvReader {
   readonly data = new Map<string, string>();
-  readonly puts: Array<{ key: string; value: string; expirationTtl: number }> = [];
+  readonly puts: Array<{ key: string; value: string; expirationTtl?: number }> = [];
   /** Runs before a write lands (to observe what is already true when the epoch moves). */
   beforePut: ((key: string) => void | Promise<void>) | null = null;
   failPut: ((key: string) => boolean) | null = null;
 
-  async put(key: string, value: string, options: { expirationTtl: number }): Promise<void> {
+  async put(key: string, value: string, options: { expirationTtl?: number }): Promise<void> {
     await this.beforePut?.(key);
     if (this.failPut?.(key)) throw new Error("KV write failed");
     this.puts.push({ key, value, expirationTtl: options.expirationTtl });
@@ -46,6 +46,10 @@ export class FakeEpochKv implements EpochStore, KvReader {
 
   epoch(userId: string): number {
     return Number(this.data.get(`epoch:${userId}`) ?? 0);
+  }
+
+  visibilityEpoch(repoId: number): number {
+    return Number(this.data.get(`epoch:repo:${repoId}`) ?? 0);
   }
 }
 
