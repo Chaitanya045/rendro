@@ -3,7 +3,7 @@ import { GitHubError } from "../src/ingest/github/source";
 import { RepoAccessUnavailable } from "../src/repo-read/access";
 import { EPOCH_TTL_SECONDS, FAILURE_COOLDOWN_MS, MAX_REPOSITORY_PAGES, MIRROR_TTL_MS } from "../src/repo-access/directory";
 import { openTokens, sealTokens, type TokenRefresher } from "../src/repo-access/tokens";
-import { accessFixture, TOKEN_KEY } from "./helpers/repo-access-fixture";
+import { accessFixture, mintedInstallationTokens, TOKEN_KEY } from "./helpers/repo-access-fixture";
 
 /**
  * The permission mirror and revocation epochs (#243) against a fake GitHub:
@@ -11,7 +11,9 @@ import { accessFixture, TOKEN_KEY } from "./helpers/repo-access-fixture";
  * and that every doubt is a 503 or a denial, never a stale grant.
  */
 
-const revoked = (world: { kv: { puts: Array<{ key: string }> } }) => world.kv.puts.map((put) => put.key.slice("epoch:".length)).sort();
+const revoked = (world: { kv: { puts: Array<{ key: string }> } }) =>
+  world.kv.puts.filter((put) => put.key.startsWith("epoch:") && !put.key.startsWith("epoch:repo:"))
+    .map((put) => put.key.slice("epoch:".length)).sort();
 
 const record = (repo: { id: number; owner: string; name: string; isPrivate: boolean }) =>
   ({ id: repo.id, owner: repo.owner, name: repo.name, private: repo.isPrivate, defaultBranch: "main" });
@@ -190,8 +192,81 @@ describe("webhooks update the mirror, then the epoch", () => {
     expect(await world.read(null, world.open)).toEqual(record(world.open));
   });
 
-  it("treats a replayed 'publicized' body under a fresh delivery ID as a hint GitHub refutes", async () => {
+  it("bumps a repository's visibility epoch when it becomes private, and only then", async () => {
     const world = accessFixture();
+    await world.setup();
+    expect(world.kv.visibilityEpoch(world.open.id)).toBe(0);
+    world.open.isPrivate = true;
+    world.clock.time += 1_000;
+    await world.deliver("repository", { action: "privatized", ...world.repoPayload(world.open) });
+    expect(world.kv.visibilityEpoch(world.open.id)).toBe(world.clock.time);
+    // The entry never expires: reverting to 0 would revive outstanding signed URLs (#242).
+    expect(world.kv.puts.find(put => put.key === `epoch:repo:${world.open.id}`))
+      .toEqual({ key: `epoch:repo:${world.open.id}`, value: String(world.clock.time) });
+    // Staying private writes nothing new.
+    world.kv.puts.length = 0;
+    world.clock.time += 1_000;
+    await world.deliver("repository", { action: "privatized", ...world.repoPayload(world.open) });
+    expect(world.kv.puts.filter(put => put.key.startsWith("epoch:repo:"))).toEqual([]);
+    // Public again, then GitHub confirms it is private after all: the epoch moves again.
+    world.open.isPrivate = false;
+    await world.deliver("repository", { action: "publicized", ...world.repoPayload(world.open) });
+    const before = world.kv.visibilityEpoch(world.open.id);
+    world.open.isPrivate = true;
+    world.clock.time += 1_000;
+    await world.read("reader", world.open); // forces the GitHub check that confirms the privatization
+    await world.directory.alarm(); // the enqueue flushes from the alarm, as it does in production
+    expect(world.kv.visibilityEpoch(world.open.id)).toBeGreaterThan(before);
+  });
+
+  it("bumps every repository's visibility epoch when its installation stops being active", async () => {
+    const world = accessFixture();
+    await world.setup();
+    await world.deliver("installation", { action: "suspend" });
+    expect(world.kv.visibilityEpoch(world.open.id)).toBeGreaterThan(0);
+    expect(world.kv.visibilityEpoch(world.closed.id)).toBeGreaterThan(0);
+    // A re-listed repository of the suspended installation learned later is bumped on removal.
+    const before = world.kv.visibilityEpoch(world.open.id);
+    world.clock.time += 1_000;
+    await world.apply({ repos: { change: "remove", hints: [{ id: world.open.id, owner: "octo", name: "open-docs", private: false }], installation: world.installation.id }, revoke: false });
+    expect(world.kv.visibilityEpoch(world.open.id)).toBeGreaterThan(before);
+  });
+
+  it("bumps the visibility epoch when GitHub confirms a suspension, and retries a write the epoch store refused", async () => {
+    // Installation-scoped tokens, so the confirmed check sees the suspension the shared token cannot.
+    const world = accessFixture({ installationTokens: (github) => mintedInstallationTokens(github) });
+    await world.setup();
+    // The webhook announced "unsuspend" (re-checked with GitHub); GitHub answers inactive: the confirmed suspension bumps.
+    world.installation.suspended = true;
+    await world.deliver("installation", { action: "unsuspend" });
+    expect(world.kv.visibilityEpoch(world.open.id)).toBe(0);
+    await world.read(null, world.open);
+    await world.directory.alarm(); // the enqueue flushes from the alarm, as it does in production
+    expect(world.kv.visibilityEpoch(world.open.id)).toBeGreaterThan(0);
+
+    // A refused write for a repository that just stopped being public stays queued and lands from the alarm.
+    world.kv.failPut = (key) => key === "epoch:repo:807";
+    world.clock.time += 1_000;
+    await world.apply({ repos: { change: "remove", hints: [{ id: 807, owner: "octo", name: "gone-docs", private: false }], installation: world.installation.id }, revoke: false });
+    expect(world.kv.visibilityEpoch(807)).toBe(0);
+    expect(world.logs.some((entry) => entry.event === "access.epochs-failed")).toBe(true);
+    world.kv.failPut = null;
+    await world.directory.alarm();
+    expect(world.kv.visibilityEpoch(807)).toBeGreaterThan(0);
+    // An enqueue that lands again while the write is in flight stays queued for the next pass.
+    world.kv.beforePut = async (key) => {
+      if (key === "epoch:repo:808") await world.storage.put("pending-repo:808", 2);
+    };
+    world.clock.time += 1_000;
+    await world.apply({ repos: { change: "remove", hints: [{ id: 808, owner: "octo", name: "gone-docs", private: false }], installation: world.installation.id }, revoke: false });
+    expect(await world.storage.get("pending-repo:808")).toBe(2);
+    world.kv.beforePut = null;
+    await world.directory.alarm();
+    expect(await world.storage.get("pending-repo:808")).toBeUndefined();
+    expect(world.kv.visibilityEpoch(808)).toBeGreaterThan(0);
+  });
+
+  it("treats a replayed 'publicized' body under a fresh delivery ID as a hint GitHub refutes", async () => {    const world = accessFixture();
     await world.setup();
     const replayed = { action: "publicized", repository: { ...world.github.repoJson(world.closed), private: false } };
     await world.deliver("repository", replayed);

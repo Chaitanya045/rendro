@@ -66,13 +66,13 @@ describe("contentPipeline: the image hook and the image proxy (#224)", () => {
     const [proxied, ...rest] = sources(html);
     expect(await verifyImageProxyPath(TEST_IMAGE_PROXY_SECRET, proxied as string)).toBe("https://images.example.com/a.png");
     // A non-public target is never signed: the image loses its src.
-    expect(rest).toEqual([null, "/docs/local.png"]);
+    expect(rest).toEqual([null, "local.png"]);
     expect(html).not.toContain("images.example.com");
   });
 
   it("fails closed without a hook: external images lose their source, repo images stay", async () => {
     const { html } = await contentPipeline().render(markdown, "docs/x.md");
-    expect(sources(html)).toEqual([null, null, "/docs/local.png", null]);
+    expect(sources(html)).toEqual([null, null, "local.png", null]);
   });
 
   it("calls a sync or async hook once per external URL, and the output allowlist still checks the result", async () => {
@@ -86,10 +86,10 @@ describe("contentPipeline: the image hook and the image proxy (#224)", () => {
     });
     const { html } = await pipeline.render(markdown, "docs/x.md");
     expect(seen).toEqual([["https://images.example.com/a.png", "docs/x.md"], ["http://img.test/b.gif", "docs/x.md"]]);
-    expect(sources(html)).toEqual(["/img/test/https%3A%2F%2Fimages.example.com%2Fa.png", null, "/docs/local.png", "/img/test/https%3A%2F%2Fimages.example.com%2Fa.png"]);
+    expect(sources(html)).toEqual(["/img/test/https%3A%2F%2Fimages.example.com%2Fa.png", null, "local.png", "/img/test/https%3A%2F%2Fimages.example.com%2Fa.png"]);
     expect(html).not.toContain("javascript:");
     // A hook that returns another absolute host is refused by the same-origin output schema.
-    expect(sources((await contentPipeline({ rewriteImageUrl: () => "https://camo.example/x" }).render(markdown, "a.md")).html)).toEqual([null, null, "/local.png", null]);
+    expect(sources((await contentPipeline({ rewriteImageUrl: () => "https://camo.example/x" }).render(markdown, "a.md")).html)).toEqual([null, null, "local.png", null]);
   });
 
   it("drops a source the hook refuses", async () => {

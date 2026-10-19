@@ -20,9 +20,11 @@ export const ALLOWED_ATTRIBUTES = new Set([
   "scope", "abbr",
 ]);
 
-const SAFE_HREF = /^(?:https?:\/\/[^\s]+|mailto:[^\s]*|\/(?![/\\])[^\s]*|#[^\s]*)$/i;
-// Images are same-origin only: repo files, or external images through the signed proxy (/img/).
-const SAFE_SRC = /^\/(?![/\\])[^\s]*$/;
+// A same-origin reference: a repo path (`/repo/file`) or a document-relative path. No scheme (so no
+// other host), no protocol-relative `//host` or `\host`, no backslash or control characters.
+// eslint-disable-next-line no-control-regex
+const SAME_ORIGIN = /^(?:\/(?![/\\])[^\\\u0000-\u001f\u007f]*|(?![a-zA-Z][a-zA-Z0-9+.-]*:)(?![/\\])[^\\\u0000-\u001f\u007f]+)$/;
+const SAFE_HREF = /^(?:https?:\/\/[^\s]+|mailto:[^\s]*|#[^\s]*)$/i;
 
 type Node = DefaultTreeAdapterMap["node"];
 
@@ -40,8 +42,8 @@ export function outputViolations(html: string): string[] {
     if (!ALLOWED_TAGS.has(tag)) violations.push(`element <${tag}>`);
     for (const { name, value } of node.attrs) {
       if (!ALLOWED_ATTRIBUTES.has(name)) violations.push(`attribute ${name} on <${tag}>`);
-      if (name === "href" && !SAFE_HREF.test(value)) violations.push(`href ${JSON.stringify(value)}`);
-      if (name === "src" && !SAFE_SRC.test(value)) violations.push(`src ${JSON.stringify(value)}`);
+      if (name === "href" && !(SAFE_HREF.test(value) || SAME_ORIGIN.test(value))) violations.push(`href ${JSON.stringify(value)}`);
+      if (name === "src" && !SAME_ORIGIN.test(value)) violations.push(`src ${JSON.stringify(value)}`);
       if ((name === "id" || name === "name" || name === "aria-describedby") && !value.split(/\s+/).every((part) => part.startsWith("user-content-"))) {
         violations.push(`${name} ${JSON.stringify(value)} lacks the user-content- prefix`);
       }

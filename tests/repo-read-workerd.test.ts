@@ -98,10 +98,14 @@ beforeAll(async () => {
       `# Page ${index}\n\nThe zebra${index % 10} section explains installation. ${"Prose follows here. ".repeat(40)}\n`;
   }
   searchRepo.commit(bigFiles);
-  // Wrangler's harness hands every outbound Worker fetch to globalThis.fetch: only the session lookup leaves the Worker.
+  // Wrangler's harness hands every outbound Worker fetch to globalThis.fetch: the session lookup
+  // leaves the Worker, and the public objects' cacheable subrequest (#242) loops back to the Worker.
   globalThis.fetch = (input, init) => {
     const request = new Request(input, init);
     if (request.url.startsWith(`${convexSite}/api/auth/get-session`)) return Promise.resolve(sessionResponse(request));
+    if (server && origin && request.url.startsWith(origin) && new URL(request.url).pathname.startsWith("/__repo-cache/tiered/")) {
+      return server.fetch(request as never) as unknown as Promise<Response>;
+    }
     return Promise.reject(new Error(`Blocked outbound fetch to ${new URL(request.url).origin}`));
   };
   process.env.WRANGLER_SEND_METRICS = "false";
@@ -157,7 +161,7 @@ describe("repository read path on workerd", () => {
     expect(await shell.text()).toContain(`data-frame-base="/r/octo/open-docs/@${publicCommit}"`);
     const frame = await get(`/r/octo/open-docs/@${publicCommit}/files/docs/index.md`);
     expect(frame.headers.get("Cache-Control")).toBe("public, max-age=31536000, immutable");
-    expect(await frame.text()).toContain('<a href="../docs/guide/start.md">guide</a>');
+    expect(await frame.text()).toContain('<a href="guide/start.md">guide</a>');
     const image = await get(`/r/octo/open-docs/@${publicCommit}/files/docs/img/logo.png`);
     expect(image.headers.get("Content-Type")).toBe("image/png");
     expect((await image.arrayBuffer()).byteLength).toBe(12);

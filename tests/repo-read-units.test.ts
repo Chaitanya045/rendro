@@ -4,7 +4,7 @@ import { blobKey, manifestKey, refKey, sidebarKey } from "@/ingest/orchestrator/
 import { plaintextSealer, r2Store, type ContentSealer, type ObjectStore } from "@/ingest/orchestrator/store";
 import type { SidebarIndex } from "@/ingest/sidebar";
 import {
-  kvRevocationEpochs, parseRepoRecord, repoAccessHandler, RepoAccessUnavailable, serviceRepoPermissions, type RepoRecord,
+  kvRevocationEpochs, kvVisibilityEpochs, parseRepoRecord, repoAccessHandler, RepoAccessUnavailable, serviceRepoPermissions, type RepoRecord,
 } from "@/repo-read/access";
 import { authorizeRepo, authorizeTicket, clearAuthorizationMemory, mintTicket, type AuthorizeDependencies, type Viewer } from "@/repo-read/authorize";
 import { mintCapability, peekCapability, sessionBinding, verifyCapability, type CapabilityClaims } from "@/repo-read/capability";
@@ -13,6 +13,7 @@ import { imageProxyPath, verifyImageProxyPath } from "@/image-proxy";
 import { issueGrant, type RepoGrant } from "@/repo-read/grant";
 import { encodeRepoPath, parseRepoPath, repoBase } from "@/repo-read/paths";
 import { clearSnapshotMemory, isPagePath, manifestFile, readDeadline, RepoSnapshots } from "@/repo-read/snapshot";
+import { SHARED_CACHE_PATH, sharedCacheReader, sharedCacheUrl, verifySharedCachePath, type SharedCacheProbe } from "@/repo-read/shared-cache";
 import { treePage, TREE_PAGE_SIZE } from "@/repo-read/tree";
 import { sessionViewer } from "@/middleware/session";
 import { sessionCache } from "@/session-cache";
@@ -167,6 +168,18 @@ describe("repository access protocol", () => {
     await expect(epochs.currentEpoch("c")).rejects.toBeInstanceOf(RepoAccessUnavailable);
     await expect(kvRevocationEpochs({ get: () => Promise.reject(new Error("KV down")) }).currentEpoch("a")).rejects.toBeInstanceOf(RepoAccessUnavailable);
   });
+
+  it("reads visibility epochs from KV under epoch:repo:<id>, with the same doubt rules", async () => {
+    const values = new Map<string, string>([["epoch:repo:7", "1792000000000"], ["epoch:repo:8", "x"], ["epoch:repo:9", "1".repeat(16)]]);
+    const get = vi.fn((key: string, _options: { cacheTtl: number }) => Promise.resolve(values.get(key) ?? null));
+    const epochs = kvVisibilityEpochs({ get });
+    expect(await epochs.visibilityEpoch(7)).toBe(1792000000000);
+    expect(await epochs.visibilityEpoch(10)).toBe(0);
+    expect(get).toHaveBeenCalledWith("epoch:repo:7", { cacheTtl: 60 });
+    await expect(epochs.visibilityEpoch(8)).rejects.toBeInstanceOf(RepoAccessUnavailable);
+    await expect(epochs.visibilityEpoch(9)).rejects.toBeInstanceOf(RepoAccessUnavailable);
+    await expect(kvVisibilityEpochs({ get: () => Promise.reject(new Error("KV down")) }).visibilityEpoch(7)).rejects.toBeInstanceOf(RepoAccessUnavailable);
+  });
 });
 
 describe("URL grammar", () => {
@@ -285,6 +298,79 @@ describe("sidebar tree pages", () => {
   });
 });
 
+describe("shared cache", () => {
+  const key = blobKey(7, "b".repeat(40));
+  const path = (url: string) => new URL(url).pathname;
+  const epochOf = () => Promise.resolve(0);
+
+  it("signs a public object so its route recovers exactly that key and epoch", async () => {
+    const url = await sharedCacheUrl(secret, "https://rendro.test", key, 0);
+    expect(url.startsWith(`https://rendro.test${SHARED_CACHE_PATH}`)).toBe(true);
+    expect(await verifySharedCachePath(secret, path(url))).toEqual({ storageKey: key, epoch: 0 });
+    // A different secret, or any other byte, does not verify.
+    expect(await verifySharedCachePath("another-secret", path(url))).toBeNull();
+    // The epoch is in the path and in the signed material, so one minted later is another URL.
+    const later = await sharedCacheUrl(secret, "https://rendro.test", key, 9);
+    expect(await verifySharedCachePath(secret, path(later))).toEqual({ storageKey: key, epoch: 9 });
+    expect(path(later)).not.toBe(path(url));
+  });
+
+  it("rejects anything that is not one canonical, correctly signed key and epoch", async () => {
+    const url = await sharedCacheUrl(secret, "https://rendro.test", key, 5);
+    const [signature, epoch, encoded] = path(url).slice(SHARED_CACHE_PATH.length).split("/");
+    // A signature over another epoch: the path carries 5, so the signature for 6 never verifies.
+    const otherEpoch = path(await sharedCacheUrl(secret, "https://rendro.test", key, 6)).replace(/\/6\//, "/5/");
+    expect(await verifySharedCachePath(secret, "/elsewhere/a/b/c")).toBeNull();
+    expect(await verifySharedCachePath(secret, `${SHARED_CACHE_PATH}${signature}/`)).toBeNull();
+    expect(await verifySharedCachePath(secret, `${SHARED_CACHE_PATH}${signature}/${epoch}/${encoded}/extra`)).toBeNull();
+    expect(await verifySharedCachePath(secret, `${SHARED_CACHE_PATH}${signature.slice(0, 42)}/${epoch}/${encoded}`)).toBeNull();
+    expect(await verifySharedCachePath(secret, `${SHARED_CACHE_PATH}${signature}/!!!!/${encoded}`)).toBeNull();
+    expect(await verifySharedCachePath(secret, `${SHARED_CACHE_PATH}${signature}/05/${encoded}`)).toBeNull();
+    expect(await verifySharedCachePath(secret, otherEpoch)).toBeNull();
+    // A canonical key whose signature is for the wrong secret, one whose bytes are not canonical,
+    // and one whose key does not decode at all.
+    expect(await verifySharedCachePath(secret, `${SHARED_CACHE_PATH}${"A".repeat(43)}/${epoch}/${encoded}`)).toBeNull();
+    expect(await verifySharedCachePath(secret, `${SHARED_CACHE_PATH}${signature}/${epoch}/ab`)).toBeNull();
+    expect(await verifySharedCachePath(secret, `${SHARED_CACHE_PATH}${signature}/${epoch}/a`)).toBeNull();
+  });
+
+  it("reads through a cacheable subrequest and reports a miss or an outage as null", async () => {
+    const fetcher = vi.fn(() => Promise.resolve(new Response(new Uint8Array([7, 8]))));
+    expect(await sharedCacheReader(secret, "https://rendro.test", epochOf, fetcher as unknown as typeof fetch)(7, key)).toEqual(new Uint8Array([7, 8]));
+    const [url, init] = fetcher.mock.calls[0] as unknown as [string, { cf: { cacheEverything: boolean } }];
+    expect(url.startsWith(`https://rendro.test${SHARED_CACHE_PATH}`)).toBe(true);
+    expect(init.cf.cacheEverything).toBe(true);
+    const miss = sharedCacheReader(secret, "https://rendro.test", epochOf, (() => Promise.resolve(new Response(null, { status: 404 }))) as unknown as typeof fetch);
+    expect(await miss(7, key)).toBeNull();
+    const down = sharedCacheReader(secret, "https://rendro.test", epochOf, (() => Promise.reject(new Error("down"))) as unknown as typeof fetch);
+    expect(await down(7, key)).toBeNull();
+  });
+
+  it("signs with the repository's visibility epoch and surfaces what the cache said", async () => {
+    const epochOf = (repoId: number) => Promise.resolve(repoId === 7 ? 12 : 0);
+    const fetcher = vi.fn(() => Promise.resolve(new Response(new Uint8Array([1]), { headers: { "CF-Cache-Status": "HIT", "Age": "9" } })));
+    const probes: SharedCacheProbe[] = [];
+    const cached = sharedCacheReader(secret, "https://rendro.test", epochOf, fetcher as unknown as typeof fetch,
+      probe => probes.push(probe));
+    expect(await cached(7, key)).toEqual(new Uint8Array([1]));
+    const [url] = fetcher.mock.calls[0] as unknown as [string];
+    expect(await verifySharedCachePath(secret, path(url))).toEqual({ storageKey: key, epoch: 12 });
+    expect(probes).toEqual([{ cacheStatus: "HIT", age: "9", served: true }]);
+    const failing = sharedCacheReader(secret, "https://rendro.test", epochOf, (() => Promise.reject(new Error("down"))) as unknown as typeof fetch,
+      probe => probes.push(probe));
+    expect(await failing(7, key)).toBeNull();
+    expect(probes[1]).toEqual({ cacheStatus: null, age: null, served: false });
+  });
+
+  it("skips the tier, never the read, when the visibility epoch cannot be decided", async () => {
+    const epochOf = () => Promise.reject(new Error("KV down"));
+    const fetcher = vi.fn(() => Promise.resolve(new Response(new Uint8Array([1]))));
+    const reader = sharedCacheReader(secret, "https://rendro.test", epochOf, fetcher as unknown as typeof fetch);
+    expect(await reader(7, key)).toBeNull();
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+});
+
 describe("snapshot reader", () => {
   let bucket: FakeR2Bucket;
   let pending: Array<Promise<unknown>>;
@@ -292,7 +378,7 @@ describe("snapshot reader", () => {
   const grant = issueGrant(repo, "user-1", 0);
   const put = (key: string, value: unknown) => bucket.put(key, encoder.encode(typeof value === "string" ? value : JSON.stringify(value)));
   const reader = (overrides: Partial<ConstructorParameters<typeof RepoSnapshots>[0]> = {}) => new RepoSnapshots({
-    store: r2Store(bucket), sealer: plaintextSealer, edge: null, origin: "https://rendro.test",
+    store: r2Store(bucket), sealer: plaintextSealer, edge: null, origin: "https://rendro.test", shared: null,
     waitUntil: promise => void pending.push(promise), now: () => clock, ...overrides,
   });
   const manifest = (overrides: Record<string, unknown> = {}) => ({ schema: 1, repoId: 7, commit, tree: "t", rendererVersion: RENDERER_VERSION, createdAt: "", docs: null, docSets: [], files: {}, sidebar: null, assetsTruncated: false, ...overrides });
@@ -420,6 +506,36 @@ describe("snapshot reader", () => {
     edge.entries.set(`https://rendro.test/__repo-cache/v1/${blobKey(7, "b".repeat(40))}`, new Uint8Array([9]));
     clearSnapshotMemory();
     expect(await snapshots.asset(grant, { sha: "b".repeat(40), size: 2 })).toEqual(new Uint8Array([9]));
+  });
+
+  it("reads a public object through the shared cache before the colo cache and R2", async () => {
+    const edge = new MemoryEdgeCache();
+    edge.entries.set(`https://rendro.test/__repo-cache/v1/${blobKey(7, "b".repeat(40))}`, new Uint8Array([9]));
+    const shared = vi.fn((_repoId: number, _storageKey: string) => Promise.resolve(new Uint8Array([7])));
+    const snapshots = reader({ edge, shared });
+    clearSnapshotMemory();
+    expect(await snapshots.asset(issueGrant({ ...repo, private: false }, "user-1", 0), { sha: "b".repeat(40), size: 2 })).toEqual(new Uint8Array([7]));
+    expect(shared).toHaveBeenCalledWith(7, blobKey(7, "b".repeat(40)));
+  });
+
+  it("falls back to the colo cache when the shared read misses, and never signs a private object", async () => {
+    const edge = new MemoryEdgeCache();
+    edge.entries.set(`https://rendro.test/__repo-cache/v1/${blobKey(7, "b".repeat(40))}`, new Uint8Array([9]));
+    await bucket.put(blobKey(7, "e".repeat(40)), new Uint8Array([4]));
+    const shared = vi.fn((_repoId: number, _storageKey: string) => Promise.resolve(null));
+    const snapshots = reader({ edge, shared });
+    clearSnapshotMemory();
+    expect(await snapshots.asset(issueGrant({ ...repo, private: false }, "user-1", 0), { sha: "b".repeat(40), size: 2 })).toEqual(new Uint8Array([9]));
+    expect(await snapshots.asset(grant, { sha: "e".repeat(40), size: 1 })).toEqual(new Uint8Array([4]));
+    expect(shared).toHaveBeenCalledTimes(1);
+    expect(shared).toHaveBeenCalledWith(7, blobKey(7, "b".repeat(40)));
+  });
+
+  it("reads raw stored bytes with no grant and no cache for the shared route", async () => {
+    await bucket.put(blobKey(7, "f".repeat(40)), new Uint8Array([1, 2]));
+    const snapshots = reader();
+    expect(await snapshots.raw(blobKey(7, "f".repeat(40)))).toEqual(new Uint8Array([1, 2]));
+    expect(await snapshots.raw(blobKey(7, "a".repeat(40)))).toBeNull();
   });
 
   it("classifies paths and never returns inherited manifest properties", () => {

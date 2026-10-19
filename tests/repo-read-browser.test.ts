@@ -38,7 +38,7 @@ async function addImagesPage(repoId: number, commit: string) {
   await fixture.bucket.put(blobKey(repoId, pixel), new Uint8Array(PNG));
   await fixture.bucket.put(`gh/v1/repo/${repoId}/${render}`, encoder.encode(JSON.stringify({
     title: "Images", headings: [],
-    html: `<p><img id="proxied" src="${proxied}" alt="proxied"> <img id="repository" src="/docs/img/pixel.png" alt="repository"> <img id="external" src="${EXTERNAL}" alt="external"></p>`,
+    html: `<p><img id="proxied" src="${proxied}" alt="proxied"> <img id="repository" src="img/pixel.png" alt="repository"> <img id="external" src="${EXTERNAL}" alt="external"></p>`,
   })));
   const key = manifestKey(repoId, commit, RENDERER_VERSION);
   const manifest = fixture.bucket.json<{ files: Record<string, unknown> }>(key) as { files: Record<string, unknown> };

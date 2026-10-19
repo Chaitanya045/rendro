@@ -9,6 +9,7 @@
  * never connects anywhere: it talks to the trusted shell (#254).
  */
 import { parseFragment, serialize, type DefaultTreeAdapterMap } from "parse5";
+import { RENDERER_VERSION } from "@/ingest/limits";
 import { IMAGE_PROXY_PREFIX } from "@/image-proxy";
 import { escapeHtml } from "@/routes/html";
 import { styleManifest } from "@/routes/style-manifest";
@@ -27,11 +28,22 @@ const REASONS: Record<string, string> = {
 };
 
 /**
- * Ingest emits links and images inside the repository as `/<repo path>`
- * ("the serving layer maps that namespace onto the commit being viewed").
- * Here they become relative to the page, so they resolve under whatever URL
- * (commit, branch or ticket base) the frame was loaded from. Dot segments
- * never come out of ingest; any that do lose their URL.
+ * Version-3 renders emit links and images already relative to the document
+ * (src/ingest/paths.ts), so the read path serves their HTML untouched (#242).
+ * Older snapshots were written as `/<repo path>` and need `frameBody` below;
+ * a commit-pinned URL keeps serving the previous renderer's manifest until a
+ * rebuild lands, so the shim stays until those are gone.
+ */
+export function needsRelativeRewrite(rendererVersion: number): boolean {
+  return rendererVersion < RENDERER_VERSION;
+}
+
+/**
+ * The compatibility shim for pre-v3 renders, which wrote links and images as
+ * `/<repo path>` ("the serving layer maps that namespace onto the commit being
+ * viewed"). Here they become relative to the page, so they resolve under
+ * whatever URL (commit, branch or ticket base) the frame was loaded from. Dot
+ * segments never come out of ingest; any that do lose their URL.
  */
 export function relativeUrl(value: string, documentPath: string): string | null {
   if (!value.startsWith("/") || value.startsWith("//")) return value;
@@ -51,10 +63,11 @@ export function relativeUrl(value: string, documentPath: string): string | null 
 }
 
 /**
- * The page body as the frame serves it. Ingest also writes external images as
- * signed same-origin proxy paths (`/img/<sig>/<url>`, #224); those are already
- * absolute and stay as they are, but only when `isProxied` verifies them, so a
- * repository folder named `img` still resolves as part of the repository.
+ * The body of a pre-v3 render as the frame serves it (see `needsRelativeRewrite`).
+ * Ingest also wrote external images as signed same-origin proxy paths
+ * (`/img/<sig>/<url>`, #224); those are already absolute and stay as they are,
+ * but only when `isProxied` verifies them, so a repository folder named `img`
+ * still resolves as part of the repository.
  */
 export async function frameBody(html: string, documentPath: string, isProxied: (src: string) => Promise<boolean>): Promise<string> {
   const fragment = parseFragment(html);

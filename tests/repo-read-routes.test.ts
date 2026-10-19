@@ -4,6 +4,7 @@ import { RENDERER_VERSION } from "@/ingest/limits";
 import { blobKey, manifestKey, refKey, sidebarKey } from "@/ingest/orchestrator/keys";
 import { mintCapability, sessionBinding } from "@/repo-read/capability";
 import { clearSnapshotMemory } from "@/repo-read/snapshot";
+import { SHARED_CACHE_PATH, SHARED_CACHE_TTL_SECONDS, sharedCacheUrl } from "@/repo-read/shared-cache";
 import { ingestBranch } from "@/ingest/orchestrator/ingest";
 import { PREPARE_WINDOW_MS } from "@/repo-read/first-view";
 import { READINESS_HEADER } from "@/repo-read/preparing";
@@ -135,8 +136,8 @@ describe("public repositories", () => {
     expect(etag).toMatch(/^"page-render\/v\d+\/markdown\/[0-9a-f]{40}\/[0-9a-f]{32}-f\d+\.v\d+\.c\d+\.[0-9a-f]{10}"$/);
     const html = await response.text();
     expect(html).toContain('<h1 id="user-content-home">Home</h1>');
-    expect(html).toContain('<a href="../docs/guide/start.md">guide</a>');
-    expect(html).toContain('<img src="../docs/img/logo.png" alt="Logo"');
+    expect(html).toContain('<a href="guide/start.md">guide</a>');
+    expect(html).toContain('<img src="img/logo.png" alt="Logo"');
     expect(html).toContain('class="markdown-alert markdown-alert-note"');
     expect(html).toContain('data-viewer="navigation"');
     // The comment widget, configured the same for every reader: repository, page and blob only (#254).
@@ -280,7 +281,7 @@ describe("private repositories", () => {
     expect(html).toContain(`<base data-rendro-viewer href="${prefix}docs/guide/start.md">`);
     expect(html).toContain('data-viewer="frame"');
     expect(html).toContain("<title>Getting started</title>");
-    expect(html).toContain('<a href="../../docs/index.md#user-content-home">home</a>');
+    expect(html).toContain('<a href="../index.md#user-content-home">home</a>');
     expect(html).toContain('<a href="#user-content-start-here">Top</a>');
   });
 
@@ -529,12 +530,12 @@ describe("the URL boundary", () => {
 describe("unusual snapshots", () => {
   const commit = "e".repeat(40);
   const base = `${pub}/@${commit}`;
-  async function snapshot(files: Record<string, unknown>, sidebar: unknown) {
+  async function snapshot(files: Record<string, unknown>, sidebar: unknown, rendererVersion = RENDERER_VERSION) {
     const write = (key: string, value: unknown) => fixture.bucket.put(key, new TextEncoder().encode(JSON.stringify(value)));
-    if (sidebar) await write(sidebarKey(publicRepo.id, commit, RENDERER_VERSION), sidebar);
-    await write(manifestKey(publicRepo.id, commit, RENDERER_VERSION), {
-      schema: 1, repoId: publicRepo.id, commit, tree: "t", rendererVersion: RENDERER_VERSION, createdAt: "", docSets: [],
-      docs: { entry: "index.md" }, files, sidebar: sidebar ? sidebarKey(publicRepo.id, commit, RENDERER_VERSION) : null, assetsTruncated: false,
+    if (sidebar) await write(sidebarKey(publicRepo.id, commit, rendererVersion), sidebar);
+    await write(manifestKey(publicRepo.id, commit, rendererVersion), {
+      schema: 1, repoId: publicRepo.id, commit, tree: "t", rendererVersion, createdAt: "", docSets: [],
+      docs: { entry: "index.md" }, files, sidebar: sidebar ? sidebarKey(publicRepo.id, commit, rendererVersion) : null, assetsTruncated: false,
     });
   }
 
@@ -577,12 +578,30 @@ describe("unusual snapshots", () => {
     const proxied = await imageProxyPath(process.env.IMAGE_PROXY_SECRET as string, "https://example.com/badge.svg") as string;
     const render = `render/v${RENDERER_VERSION}/markdown/${"f".repeat(40)}/${"0".repeat(32)}`;
     await fixture.bucket.put(`gh/v1/repo/${publicRepo.id}/${render}`, new TextEncoder().encode(JSON.stringify({
-      html: `<p><img src="${proxied}" alt="Badge"> <img src="/docs/img/logo.png" alt="Logo"></p>`, title: "Badges", headings: [],
+      html: `<p><img src="${proxied}" alt="Badge"> <img src="img/logo.png" alt="Logo"></p>`, title: "Badges", headings: [],
     })));
     await snapshot({ "docs/badges.md": { sha: "f".repeat(40), size: 1, render } }, null);
     const html = await (await get(`${base}/files/docs/badges.md`)).text();
+    // A version-3 render is served as ingested: the proxy path stays absolute, the repo image already points at the page.
     expect(html).toContain(`<img src="${proxied}" alt="Badge">`);
+    expect(html).toContain('<img src="img/logo.png" alt="Logo">');
+  });
+
+  it("rewrites a version-2 render's repo-path links and images on the way out", async () => {
+    const legacy = RENDERER_VERSION - 1;
+    const render = `render/v${legacy}/markdown/${"f".repeat(40)}/${"0".repeat(32)}`;
+    const proxied = await imageProxyPath(process.env.IMAGE_PROXY_SECRET as string, "https://example.com/badge.svg") as string;
+    await fixture.bucket.put(`gh/v1/repo/${publicRepo.id}/${render}`, new TextEncoder().encode(JSON.stringify({
+      html: `<p><a href="/docs/guide/start.md">guide</a> <img src="/docs/img/logo.png" alt="Logo"> <img src="${proxied}" alt="Badge"></p>`, title: "Legacy", headings: [],
+    })));
+    await snapshot({ "docs/badges.md": { sha: "f".repeat(40), size: 1, render } }, null, legacy);
+    clearSnapshotMemory();
+    const html = await (await get(`${base}/files/docs/badges.md`)).text();
+    // The pre-#242 shim still rewrites `/repo/path` for snapshots the old renderer wrote.
+    expect(html).toContain('<a href="../docs/guide/start.md">guide</a>');
     expect(html).toContain('<img src="../docs/img/logo.png" alt="Logo">');
+    // An external image stays on its verified signed proxy path, even under a repository folder named `img`.
+    expect(html).toContain(`<img src="${proxied}" alt="Badge">`);
   });
 
   it("is a 404 when the Worker has no bindings at all (the Node server)", async () => {
@@ -764,5 +783,95 @@ describe("the read order", () => {
     clearSnapshotMemory();
     expect((await get(`${pub}/@${fixture.commits.public}/files/docs/index.md`)).status).toBe(200);
     await fixture.settle();
+  });
+});
+
+describe("the shared cache route", () => {
+  const encode = (value: string) => new TextEncoder().encode(value);
+  const signedPath = async (storageKey: string, epoch = 0) => new URL(await sharedCacheUrl(secret, "https://rendro.test", storageKey, epoch)).pathname;
+
+  it("serves a signed public object from R2, cacheable and immutable", async () => {
+    const key = blobKey(publicRepo.id, "a".repeat(40));
+    await fixture.bucket.put(key, encode("hello"));
+    const response = await get(await signedPath(key));
+    expect(response.status).toBe(200);
+    expect(response.headers.get("Cache-Control")).toBe(`public, max-age=${SHARED_CACHE_TTL_SECONDS}, immutable`);
+    expect(response.headers.get("Content-Type")).toBe("application/octet-stream");
+    expect(response.headers.get("X-Content-Type-Options")).toBe("nosniff");
+    expect(await response.text()).toBe("hello");
+  });
+
+  it("re-checks the visibility epoch before serving: a privatized repository's outstanding URL is a plain 404", async () => {
+    const key = blobKey(publicRepo.id, "a".repeat(40));
+    await fixture.bucket.put(key, encode("hello"));
+    const stale = await signedPath(key);
+    expect((await get(stale)).status).toBe(200);
+    // The control plane marks the repository invisible (KV `epoch:repo:<id>`); the URL minted at
+    // epoch 0 no longer matches, and never will again. The KV read's colo TTL (60 s) is the bound.
+    fixture.access.epochs.set(`repo:${publicRepo.id}`, Date.now());
+    expectPlainNotFound(await get(stale));
+    // A URL minted now carries the new epoch and serves again only while the repository is public.
+    const fresh = await signedPath(key, fixture.access.epochs.get(`repo:${publicRepo.id}`) as number);
+    expect((await get(fresh)).status).toBe(200);
+  });
+
+  it("answers a tampered signature and a forged one with the same plain 404", async () => {
+    const key = blobKey(publicRepo.id, "a".repeat(40));
+    await fixture.bucket.put(key, encode("hello"));
+    const url = new URL(await sharedCacheUrl(secret, "https://rendro.test", key, 0));
+    const [signature, epoch, encoded] = url.pathname.slice(SHARED_CACHE_PATH.length).split("/");
+    const flip = (text: string, at: number) => `${text.slice(0, at)}${text[at] === "A" ? "B" : "A"}${text.slice(at + 1)}`;
+    expectPlainNotFound(await get(`${SHARED_CACHE_PATH}${flip(signature, 0)}/${epoch}/${encoded}`));
+    expectPlainNotFound(await get(`${SHARED_CACHE_PATH}${signature}/${epoch}/${flip(encoded, 0)}`));
+    expectPlainNotFound(await get(`${SHARED_CACHE_PATH}${flip(signature, 42)}/${epoch}/${encoded}`));
+  });
+
+  it("is a plain 404 for a bad signature, a missing object or an unconfigured worker", async () => {
+    const path = await signedPath(blobKey(publicRepo.id, "a".repeat(40)));
+    const encoded = path.split("/").pop() as string;
+    expectPlainNotFound(await get(`${SHARED_CACHE_PATH}${"A".repeat(43)}/0/${encoded}`));
+    expectPlainNotFound(await get(path)); // object not in R2
+    // A correctly signed URL over a key that names no repository: nothing to check, nothing to serve.
+    expectPlainNotFound(await get(await signedPath("not-a-repository-key")));
+    expectPlainNotFound(await get(SHARED_CACHE_PATH));
+    expectPlainNotFound(await app.request(await sharedCacheUrl(secret, "https://rendro.test", blobKey(publicRepo.id, "a".repeat(40)), 0), {}, {}, fixture.ctx));
+  });
+
+  it("names the shared-cache subrequest on a public frame only for a dev-flagged deployment", async () => {
+    process.env.REPO_SHARED_CACHE_DEBUG = "1";
+    try {
+      const sessions = globalThis.fetch;
+      // Answer the Worker's own subrequest out of the fixture bucket, as the platform's cache would.
+      globalThis.fetch = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+        const url = new URL(input instanceof Request ? input.url : String(input));
+        if (!url.pathname.startsWith(SHARED_CACHE_PATH)) return sessions(input as never, init);
+        const encoded = url.pathname.split("/").pop() as string;
+        const storageKey = new TextDecoder().decode(Uint8Array.from(atob(encoded.replaceAll("-", "+").replaceAll("_", "/")), char => char.charCodeAt(0)));
+        const object = fixture.bucket.objects.get(storageKey);
+        // A manifest miss carries no cache headers, as the platform answers an uncached fill.
+        if (!object || storageKey.endsWith("manifest.json")) return Promise.resolve(new Response(null, { status: 404 }));
+        return Promise.resolve(new Response(object.bytes as Uint8Array<ArrayBuffer>, { headers: { "CF-Cache-Status": "HIT", "Age": "9" } }));
+      }) as typeof fetch;
+      const path = `${pub}/@${fixture.commits.public}/files/docs/index.md`;
+      const frame = await get(path);
+      expect(frame.status).toBe(200);
+      expect(frame.headers.get("X-Repo-Shared-Cache")).toBe("cf=HIT; age=9");
+      // A warm isolate reads nothing through the tier, so the response names nothing.
+      const warm = await get(path);
+      expect(warm.status).toBe(200);
+      expect(warm.headers.get("X-Repo-Shared-Cache")).toBeNull();
+    } finally {
+      delete process.env.REPO_SHARED_CACHE_DEBUG;
+    }
+  });
+
+  it("is a retryable 503, never an allow, when the epoch store cannot answer", async () => {
+    const key = blobKey(publicRepo.id, "a".repeat(40));
+    await fixture.bucket.put(key, encode("hello"));
+    fixture.access.epochsUnavailable = true;
+    const response = await get(await signedPath(key));
+    expect(response.status).toBe(503);
+    expect(response.headers.get("Cache-Control")).toBe("private, no-store");
+    expect(response.headers.get("Retry-After")).toMatch(/^\d+$/);
   });
 });

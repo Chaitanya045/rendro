@@ -1472,8 +1472,9 @@ Both production (top-level) and `development` declare the same required secrets:
 | `AUTH_SECRET` | Secret (required, ≥16 chars) | Encrypts scoped private viewer tickets and signs legacy `/share/:token` HMAC links. Better Auth signing happens in Convex |
 | `RETENTION_SECRET` | Secret (optional, ≥32 chars) | Bearer for Convex's retention endpoints, used by the scheduled purge; same value as in Convex. Without it the purge reports itself disabled and fails |
 | `IMAGE_PROXY_SECRET` | Secret (required, ≥32 chars) | HMAC key for same-origin image proxy URLs (see [Image proxy](#image-proxy)). Set the same value on the ingest Worker. Rotating it requires a `RENDERER_VERSION` bump, so stored renders are rebuilt with new signatures |
-| `REPO_CAPABILITY_SECRET` | Secret (required, ≥32 chars, Worker only) | Signs repository capability cookies and asset tickets (see "Repository read path"). Must not equal `AUTH_SECRET`, `CONVEX_INTERNAL_SECRET`, `RETENTION_SECRET` or `IMAGE_PROXY_SECRET`; rotating it only sends readers back through the permission source |
-| `REPO_CONTENT`, `REPO_EPOCHS`, `REPO_ACCESS` | Bindings (R2, KV, service), not configured yet | The repository read path's snapshot bucket, revocation epochs and permission source. Until P5 binds all three, every `/r/` URL is a 404 |
+| `REPO_CAPABILITY_SECRET` | Secret (required, ≥32 chars, Worker only) | Signs repository capability cookies, asset tickets and the public shared-cache subrequest URLs (see "Repository read path"). Must not equal `AUTH_SECRET`, `CONVEX_INTERNAL_SECRET`, `RETENTION_SECRET` or `IMAGE_PROXY_SECRET`; rotating it only sends readers back through the permission source |
+| `REPO_CONTENT`, `REPO_EPOCHS`, `REPO_ACCESS` | Bindings (R2, KV, service), not configured yet | The repository read path's snapshot bucket, revocation and visibility epochs and permission source. Until P5 binds all three, every `/r/` URL is a 404 |
+| `REPO_SHARED_CACHE_DEBUG` | Var (optional, development only) | Set to `1` to surface the shared-cache subrequest's `CF-Cache-Status`/`Age` as `X-Repo-Shared-Cache` on public frame responses (see "Repository read path"). Never set in production: it reports cache internals on a public response |
 | `LOG_LEVEL` | Var (optional) | Pino log level; defaults to `debug` outside production, `info` in production |
 | `PORT` | Local only; not read by Worker | Validated in `src/index.ts`; Node.js server port (integer 1–65535, default 3000) |
 
@@ -1791,17 +1792,18 @@ init). Shiki took 4.6 s warm, with 320 ms of init for 31 grammars.
   - Protocol-relative URLs become `https:`.
   - Fragments gain `user-content-`, matching the prefixed ids.
   - Relative and `/`-rooted references resolve against the document's repo path, the
-    way GitHub resolves README links. They are emitted as `/<repo path>`, and the
-    serving layer maps that namespace onto the commit being viewed.
-  - A reference that leaves the repository, or encodes a separator or control
-    character, loses its `href`.
+    way GitHub resolves README links, and are emitted relative to the document's own
+    directory, so the frame resolves them under whatever commit, branch or ticket base
+    it was loaded from without rewriting the HTML (#242). A reference that leaves the
+    repository, or encodes a separator or control character, loses its `href`.
   - External links get `rel="nofollow noopener noreferrer"`. Images get
     `loading="lazy" decoding="async" referrerpolicy="no-referrer"`.
   - External images go through the `rewriteImageUrl` hook after sanitizing; the
     ingest Worker sets it to the signed same-origin image proxy
     (see [Image proxy](#image-proxy)). Without a hook they lose their `src`. An image that cannot be proxied (a blocked
     target or a URL over 2,048 characters) loses its `src`. The output schema
-    accepts only root-relative image sources, so no third-party host survives in
+    accepts only same-origin image sources — the signed proxy's `/`-rooted path or a
+    path relative to the document — so no third-party host survives in
     rendered output even if a transform forgets one. `srcset` never survives
     sanitizing, so `src` is the only image URL.
 - **Fixed point.** The trusted transforms (alerts, heading ids, highlighting,
@@ -1841,9 +1843,10 @@ init). Shiki took 4.6 s warm, with 320 ms of init for 31 grammars.
 - **MDX** top-level `import`/`export` blocks are removed.
 - **Render keys** are `render/v<RENDERER_VERSION>/<kind>/<blobSha>/<sha256(directory)[:32]>`.
   Output depends on the renderer version, the document kind and the blob, and also
-  on the directory, because relative links resolve against it. An unchanged file
-  in an unchanged directory reuses its render across commits. Bumping
-  `RENDERER_VERSION` invalidates everything.
+  on the directory, because links and images are emitted relative to it. An unchanged
+  file in an unchanged directory reuses its render across commits. Bumping
+  `RENDERER_VERSION` invalidates everything: version 3 emits document-relative links
+  and images, where version 2 emitted `/<repo path>` for the serving layer to rewrite.
 
 ### Image proxy
 
@@ -2046,7 +2049,7 @@ gh/v1/
    - The archive redirect is followed at once and never stored, since private-repo links expire in five minutes. The installation token is never sent to the archive host. Archive entries carry no blob IDs, so each wanted entry is hashed and checked against the tree listing.
    - Files whose archive bytes differ from their blob (export-subst, LFS) are fetched one by one, as is everything still missing when the archive fails partway (an expired link, a cut connection, a different commit in the pax header).
    - Pages render as their bytes arrive. Then write the sidebar, and the manifest last.
-   - Image hook (#224): `contentPipeline({ rewriteImageUrl })` passes every external (`http`/`https`) image source through a rewrite, after sanitizing and before serialization, so the output allowlist (same-origin images only) and the fixed-point check apply to the rewritten URL. Returning null drops the source; without a hook every external image loses its source (fail closed). The ingest Worker sets `rewriteImageUrl: imageProxyRewriter(env.IMAGE_PROXY_SECRET)`, so external images become signed `/img/` proxy URLs and non-public targets lose their source. The hook may be async (signing uses WebCrypto), so `ContentPipeline.render` is async. The output depends on the rule and the secret, so changing either must bump `RENDERER_VERSION` (now 2 for the proxy).
+   - Image hook (#224): `contentPipeline({ rewriteImageUrl })` passes every external (`http`/`https`) image source through a rewrite, after sanitizing and before serialization, so the output allowlist (same-origin images only) and the fixed-point check apply to the rewritten URL. Returning null drops the source; without a hook every external image loses its source (fail closed). The ingest Worker sets `rewriteImageUrl: imageProxyRewriter(env.IMAGE_PROXY_SECRET)`, so external images become signed `/img/` proxy URLs and non-public targets lose their source. The hook may be async (signing uses WebCrypto), so `ContentPipeline.render` is async. The output depends on the rule and the secret, so changing either must bump `RENDERER_VERSION` (now 3, which adds document-relative links and images on top of the version-2 image proxy).
 6. Flip: write the new pointer with a compare-and-swap on the pointer object's ETag (R2 `onlyIf`). If another writer got there first, the attempt fails and retries.
 7. Re-check the head (normally a free 304). If it moved during the build, ingest again, up to two follow-ups per call.
 
@@ -2115,6 +2118,7 @@ This section covers how a reader gets an ingested snapshot (#234, part of epic #
 | `/r/{owner}/{repo}/@{commit}/view/{ticket}/files/{path}` | Private repositories: the same, authorized by the asset ticket alone |
 | `/r/{owner}/{repo}/@{commit}/viewer-ticket?manifestKey={commit}` | Ticket renewal for the trusted shell (cookie-authorized, JSON) |
 | `POST /r/{owner}/{repo}/comment-access` | Comment access for the trusted shell: authorized like a page view, then recorded in Convex (same-origin, JSON; see [Comments on Repository Docs](#comments-on-repository-docs-github-pivot-p6)) |
+| `/__repo-cache/tiered/v1/{sig}/{epoch}/{key}` | Not a reader URL: the Worker's own cacheable subrequest for one public immutable object (see [Read order and caches](#read-order-and-caches), #242). The signature covers `public\n{epoch}\n{key}` and `{epoch}` is the repository's visibility epoch; a bad signature, a stale epoch, an unknown object or an unconfigured Worker is a plain 404 |
 
 Owner and repository names must be literal GitHub names and match case-insensitively. A `{path}` is decoded once per segment; an empty, `.` or `..` segment, an encoded `/`, a backslash or a control character is a 404 before authorization. A path is only a lookup key into the manifest's `files` map (own properties only), never part of a storage key: every key comes from the manifest (render key, blob SHA) and from #229's key functions, so traversal has nothing to reach. Anything else under `/r/` is a 404.
 
@@ -2167,12 +2171,14 @@ P5 implements this contract (#243): see [Repository Permission Mirror](#reposito
 
 ### Read order and caches
 
-| Object | Memory (per isolate) | `caches.default` (per colo) | R2 |
-|---|---|---|---|
-| Ref pointer (mutable) | Fresh 5 s, then served stale up to 60 s while one refresh runs | Never | On a miss |
-| Manifest, sidebar, rendered page, image blob (immutable keys) | 16 MiB LRU, entries up to 1 MiB, parsed | `{origin}/__repo-cache/v1/{storage key}`, filled in `waitUntil` | On a miss |
+| Object | Memory (per isolate) | Public: cacheable subrequest (all tiers) | `caches.default` (per colo) | R2 |
+|---|---|---|---|---|
+| Ref pointer (mutable) | Fresh 5 s, then served stale up to 60 s while one refresh runs | Never | Never | On a miss |
+| Manifest, sidebar, rendered page, image blob (immutable keys) | 16 MiB LRU, entries up to 1 MiB, parsed | `{origin}/__repo-cache/tiered/v1/{sig}/{storage key}`, `Cache-Control: public, max-age=31536000, immutable` | `{origin}/__repo-cache/v1/{storage key}`, filled in `waitUntil` | On a miss |
 
-Edge cache keys live under a path no route serves, so only this code can read them, and only with a `RepoGrant`. Bytes are cached as stored and opened per read, so P9's per-repository encryption will apply to the colo cache too. A commit-pinned URL without a snapshot at the current renderer version falls back to the previous version's while a rebuild runs. Public repositories still go through `caches.default` only; a tiered `fetch()` path for them is an open point.
+Every immutable object is read in that order: memory, then — for a public repository — a signed cacheable subrequest, then the per-colo `caches.default`, then R2. `caches.default` is per colo and a `cache.put` never reaches Cloudflare's Tiered Cache or Cache Reserve, so a public miss is fetched from the Worker's own origin as a subrequest instead: the Worker reads R2 and answers with an immutable `Cache-Control`, and the colo cache and every tier above it keep the copy, which the next isolate (or colo) reuses. The subrequest path carries an HMAC over `public\n<visibility epoch>\n<storage key>` under `REPO_CAPABILITY_SECRET`, with the epoch in the path, so the route only serves keys this Worker decided are public at the epoch they were decided at: a private key has no valid signature, no two objects or repositories share a cache key, and a privatized repository's outstanding URLs die at the epoch. Before serving, the route re-reads the repository's visibility epoch from KV (`epoch:repo:<id>`, written by the access directory when a repository is made private, removed, or left by its installation; never expiring, since a revert to 0 would revive old URLs): a URL minted before the bump no longer matches and is the plain 404, an epoch store that cannot answer is a retryable 503, and the KV read's colo TTL (60 s) is the revocation bound. The subrequest is cacheable (`cf.cacheEverything` with per-status TTLs: a year for 200s, a minute for the revocation 404, never a 5xx — the signed URL is deterministic, so a cached faulting fill would poison every later read) and only GET/HEAD apply. Private repositories skip the subrequest entirely — their objects are sealed and must not enter a shared cache — and read through `caches.default` and R2 as before. The `caches.default` keys live under a path no route serves, so only this code can read them, and only with a `RepoGrant`; the tiered route is the one exception, and it serves only signed public keys straight from R2 (it must not recurse into the layered reader). Bytes are cached as stored and opened per read, so P9's per-repository encryption will apply to both caches. A commit-pinned URL without a snapshot at the current renderer version falls back to the previous version's while a rebuild runs.
+
+**Deployment requirement.** A same-zone `fetch()` re-invokes the Worker only when it runs on a Custom Domain (on a route or `workers.dev`, the platform refuses same-zone Worker-to-Worker fetches), and the Custom Domain makes the Worker its own origin, so there is no separate origin to configure and no loop: the subrequest re-enters the Worker once at the signed route, which answers from R2 without issuing further subrequests, and a filled cache answers before the Worker runs at all. Deploy the serving Worker on a Custom Domain (e.g. `rendro.app`, `dev.rendro.app`) for the shared tier to fill; on a route the subrequest fails, the reader falls back to the per-colo path, and public reads stay correct but never reach the shared tier. With `REPO_SHARED_CACHE_DEBUG=1` (development only), a public frame response carries `X-Repo-Shared-Cache: cf=<CF-Cache-Status>; age=<Age>` from the request's last subrequest, so a shared-tier hit is provable in a deployed environment.
 
 ### Headers
 
@@ -2217,7 +2223,7 @@ The shell is `renderScopedDocumentShell` with the lazy tree, as for projects and
 - Private shells add the private viewer's parent script (ticket renewal) and its update notice.
 - The share button copies the viewer URL ("Copy link").
 
-The frame wraps the sanitized page in Rendro's markup: the comment widget (#254), the hashed `repo-doc` stylesheet (GitHub-style typography plus `HIGHLIGHT_CSS`, kept identical by a test), the navigation bridge and, for private repositories, the ticket base and renewal client. Ingest emits repository-internal links as `/<repo path>`; the frame rewrites each `href`/`src` to a path relative to the page (parse5, with dot segments dropped), so it resolves under the commit, branch or ticket base the frame was loaded from. External images that ingest wrote as signed image-proxy paths (`/img/<sig>/<url>`, see "Image proxy") stay absolute, but only when `verifyImageProxyPath` accepts them, so a repository folder named `img` still resolves inside the repository. The rewritten body depends only on the render key (which names the page's directory), so it is derived once per isolate and kept in memory. A page ingest could not render shows a notice instead.
+The frame wraps the sanitized page in Rendro's markup: the comment widget (#254), the hashed `repo-doc` stylesheet (GitHub-style typography plus `HIGHLIGHT_CSS`, kept identical by a test), the navigation bridge and, for private repositories, the ticket base and renewal client. Ingest emits repository-internal links and images relative to the document's own directory (see "Rendering and sanitizing"), so the frame resolves them under whatever commit, branch or ticket base it was loaded from without rewriting the HTML (#242). External images that ingest wrote as signed image-proxy paths (`/img/<sig>/<url>`, see "Image proxy") stay absolute, but only when `verifyImageProxyPath` accepts them, so a repository folder named `img` still resolves inside the repository. The derived body depends only on the render key, so it is derived once per isolate and kept in memory (a variant key prefixes `legacy-` for a version-2 render, which the read path still rewrites to the old `/<repo path>` form until the rebuild finishes). A page ingest could not render shows a notice instead.
 
 ### Bindings and configuration
 
@@ -2247,7 +2253,6 @@ An earlier pair of runs at load about 9 (before the rewritten body was memoized)
 
 ### Open points
 
-- A tiered `fetch()` path for public repositories, so Tiered Cache and Cache Reserve back the per-colo Cache API.
 - The repository shell has no account menu: the capability cookie carries no display identity. P1's GitHub sign-in reworks the shell.
 - `Server-Timing` phases and real-user monitoring (P0) for these routes.
 

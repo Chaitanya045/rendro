@@ -25,6 +25,12 @@ export function repoPrefix(repoId: number): string {
   return `${ROOT_PREFIX}repo/${repoId}/`;
 }
 
+/** The repository a canonical storage key belongs to, or null for anything else. */
+export function storageKeyRepoId(storageKey: string): number | null {
+  const match = /^gh\/v1\/repo\/([1-9]\d*)\/./.exec(storageKey);
+  return match ? Number(match[1]) : null;
+}
+
 /** Raw blob bytes, content-addressed: shared by every commit that contains the blob. */
 export function blobKey(repoId: number, blobSha: string): string {
   requireObjectId(blobSha);

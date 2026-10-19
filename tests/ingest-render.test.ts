@@ -116,16 +116,16 @@ describe("headings and anchors", () => {
 });
 
 describe("links and images", () => {
-  it("rewrites relative links and images to repo paths and prefixes fragments", async () => {
+  it("rewrites relative links and images to doc-relative references and prefixes fragments", async () => {
     const { html } = await md("[a](../api/README.md#Usage) [b](./setup.md) [c](/LICENSE) [d](#install) [e](sub/) [f](https://x.example/) [g](mailto:a@b.example)\n\n![logo](img/logo.png)");
-    expect(html).toContain('<a href="/docs/api/README.md#user-content-Usage">a</a>');
-    expect(html).toContain('<a href="/docs/guide/setup.md">b</a>');
-    expect(html).toContain('<a href="/LICENSE">c</a>');
+    expect(html).toContain('<a href="../api/README.md#user-content-Usage">a</a>');
+    expect(html).toContain('<a href="setup.md">b</a>');
+    expect(html).toContain('<a href="../../LICENSE">c</a>');
     expect(html).toContain('<a href="#user-content-install">d</a>');
-    expect(html).toContain('<a href="/docs/guide/sub/">e</a>');
+    expect(html).toContain('<a href="sub/">e</a>');
     expect(html).toContain('<a href="https://x.example/" rel="nofollow noopener noreferrer">f</a>');
     expect(html).toContain('<a href="mailto:a@b.example">g</a>');
-    expect(html).toContain('<img src="/docs/guide/img/logo.png" alt="logo" loading="lazy" decoding="async" referrerpolicy="no-referrer">');
+    expect(html).toContain('<img src="img/logo.png" alt="logo" loading="lazy" decoding="async" referrerpolicy="no-referrer">');
   });
 
   it("routes external images through the signed same-origin proxy", async () => {
@@ -140,7 +140,7 @@ describe("links and images", () => {
     const decoded = await Promise.all(sources.map((src) => (src?.startsWith("/img/") ? verifyImageProxyPath(TEST_IMAGE_PROXY_SECRET, src) : Promise.resolve(src))));
     expect(decoded).toEqual([
       "https://img.example/a.png", "https://img.example/a.png", "https://cdn.example/b.gif",
-      "http://img.example/c%20d.png?x=1#f", null, "/docs/guide/pic.png",
+      "http://img.example/c%20d.png?x=1#f", null, "pic.png",
       // Blocked targets and overlong URLs lose their src rather than reaching the reader.
       null, null, null,
     ]);
@@ -148,7 +148,8 @@ describe("links and images", () => {
     expect(sources[0]).toBe(sources[1]);
     // Links are navigations the reader chooses, not automatic requests: they stay as they are.
     expect(html).toContain('<a href="https://img.example/a.png" rel="nofollow noopener noreferrer">external image link</a>');
-    expect(html).not.toMatch(/src="(?!\/(?![/\\]))/);
+    // Every surviving source is same-origin: a root-relative or doc-relative path, never a scheme or `//host`.
+    expect(html).not.toMatch(/src="(?:\/\/|[a-z][a-z0-9+.-]*:)/i);
     expect(outputViolations(html)).toEqual([]);
     expect(serializeVerified(parseHtmlFragment(html))).toBe(html);
   });

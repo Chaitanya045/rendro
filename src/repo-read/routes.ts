@@ -22,18 +22,20 @@ import { treePageCursor } from "@/routes/tree-pages";
 import { unavailableResponse, viewerErrorCache, viewerErrorResponse } from "@/routes/viewer-unavailable";
 import { validTreeDirectory } from "@/deployment-index";
 import { isCanonicalStorageKey } from "@/storage-boundary";
+import { storageKeyRepoId } from "@/ingest/orchestrator/keys";
 import { ViewerBackendError } from "@/viewer-backend";
 import { viewerScript, viewerUpdateNotice } from "@/viewer/markup";
-import { kvRevocationEpochs, serviceRepoPermissions, type Fetcher, type KvReader } from "./access";
+import { kvRevocationEpochs, kvVisibilityEpochs, serviceRepoPermissions, type Fetcher, type KvReader } from "./access";
 import { authorizeRepo, authorizeTicket, mintTicket, type Authorization, type AuthorizeDependencies } from "./authorize";
 import { COMMENT_GRANT_MIN_MS, commentAccess, commentorScript, convexCommentGrants, type CommentGrants } from "./comments";
 import { durableFirstView, interpretOutcome, prepareRepo, PREPARE_WINDOW_MS, repoIngestTarget, type RepoFirstView } from "./first-view";
-import { FRAME_TEMPLATE_TAG, FRAME_VERSION, failureBody, frameBody, frameContentSecurityPolicy, renderFrameDocument } from "./frame";
+import { FRAME_TEMPLATE_TAG, FRAME_VERSION, failureBody, frameBody, frameContentSecurityPolicy, needsRelativeRewrite, renderFrameDocument } from "./frame";
 import type { RepoGrant } from "./grant";
 import { encodeRepoPath, parseRepoPath, repoBase, type RepoRefSpec, type RepoRequestPath } from "./paths";
 import { READINESS_HEADER, renderPreparingPage, type PreparingState } from "./preparing";
 import { searchManifest } from "./search";
 import { isPagePath, manifestFile, readDeadline, RepoSnapshots, type EdgeCache } from "./snapshot";
+import { SHARED_CACHE_PATH, SHARED_CACHE_TTL_SECONDS, sharedCacheReader, verifySharedCachePath, type SharedCacheProbe } from "./shared-cache";
 import { REPO_SPECULATION_RULES_PATH, repoSpeculationRules } from "./speculation";
 import { treePage } from "./tree";
 import { requireCookieWrite } from "../../shared/request-admission";
@@ -63,6 +65,10 @@ interface Services {
   comments: CommentGrants;
   /** Set only where the repository search index is bound (#251); the search URL is otherwise the plain 404. */
   search: SearchIndex | null;
+  /** The visibility epoch a repository is at now: the shared-cache route re-checks every signed URL against it (#242). */
+  visibilityEpoch: (repoId: number) => Promise<number>;
+  /** Dev-only (REPO_SHARED_CACHE_DEBUG): what the platform's cache said about the request's last shared-cache subrequest. */
+  sharedProbe: { last: string | null } | null;
 }
 
 /** The preparing/retry page a first-view outcome leaves the reader on (#242). */
@@ -91,6 +97,12 @@ function services(c: Context): Services | null {
   };
   const edge = (globalThis as { caches?: { default?: EdgeCache } }).caches?.default ?? null;
   const now = () => Date.now();
+  const origin = new URL(c.req.url).origin;
+  const visibility = kvVisibilityEpochs(epochs as KvReader);
+  const visibilityEpoch = (repoId: number) => visibility.visibilityEpoch(repoId);
+  // A dev-only diagnostic: surface the subrequest's CF-Cache-Status/Age so a shared-tier hit is provable.
+  const sharedProbe = process.env.REPO_SHARED_CACHE_DEBUG === "1" ? { last: null as string | null } : null;
+  const probe = sharedProbe && ((info: SharedCacheProbe) => { sharedProbe.last = `cf=${info.cacheStatus ?? "-"}; age=${info.age ?? "-"}`; });
   return {
     authorize: {
       secret: REPO_CAPABILITY_SECRET, permissions: serviceRepoPermissions(access as Fetcher), epochs: kvRevocationEpochs(epochs as KvReader),
@@ -98,13 +110,15 @@ function services(c: Context): Services | null {
     },
     snapshots: new RepoSnapshots({
       store: readDeadline(r2Store(bucket as R2BucketLike), READ_TIMEOUT_MS), sealer: plaintextSealer, edge,
-      origin: new URL(c.req.url).origin, waitUntil, now,
+      origin, shared: sharedCacheReader(REPO_CAPABILITY_SECRET, origin, visibilityEpoch, fetch, probe ?? undefined), waitUntil, now,
     }),
     waitUntil,
     firstView: durableFirstView(env.REPO_INGEST),
     comments: convexCommentGrants,
     // The search index is optional: without a D1 binding the search URL is the plain 404.
     search: hasMethods(search, ["prepare", "batch", "exec"]) ? d1SearchIndex(search as SearchD1) : null,
+    visibilityEpoch,
+    sharedProbe,
   };
 }
 
@@ -142,6 +156,14 @@ async function resolveSnapshot(
   const manifest = await snapshots.manifest(grant, pointer.commit, pointer.rendererVersion);
   if (!manifest) throw new ViewerBackendError();
   return manifest;
+}
+
+/** Dev-only (REPO_SHARED_CACHE_DEBUG): a diagnostic header on an otherwise final response. */
+function withDebugHeader(response: Response, name: string, value: string): Response {
+  const headers = new Headers(response.headers);
+  headers.set(name, value);
+  headers.delete("Content-Length");
+  return new Response(response.body, { status: response.status, headers });
 }
 
 function isPage(manifest: SnapshotManifest) {
@@ -205,10 +227,17 @@ async function frame(c: Context, manifest: SnapshotManifest, { grant, request, f
   const origin = new URL(c.req.url).origin;
   const base = repoBase(request.owner, request.name, request.ref);
   const pinned = repoBase(request.owner, request.name, { kind: "commit", commit: manifest.commit });
-  // The rewritten body depends only on the render key (which names the page's directory), so it is derived once per isolate.
+  // Version-3 renders already carry document-relative URLs (#242); only older
+  // snapshots need the rewrite, and the variant key keeps both derived forms
+  // apart in memory. The body depends only on the render key (which names the
+  // page's directory), so it is derived once per isolate.
+  const variant = `${needsRelativeRewrite(manifest.rendererVersion) ? "legacy-" : ""}frame-v${FRAME_VERSION}`;
   const page = file.render === undefined ? { title: null, body: failureBody(file.error ?? "missing") }
-    : await services.snapshots.page(grant, file, `frame-v${FRAME_VERSION}`, async rendered => ("html" in rendered
-      ? { title: rendered.title, body: await frameBody(rendered.html, path, isProxiedImage) }
+    : await services.snapshots.page(grant, file, variant, async rendered => ("html" in rendered
+      ? {
+        title: rendered.title,
+        body: needsRelativeRewrite(manifest.rendererVersion) ? await frameBody(rendered.html, path, isProxiedImage) : rendered.html,
+      }
       : { title: null, body: failureBody(rendered.error) }));
   // Every reader gets the same frame (it may be cached publicly); the shell decides what the widget may do.
   const widget = file.render === undefined ? "" : commentorScript(origin, grant.repo.id, path, file);
@@ -292,6 +321,40 @@ app.get(REPO_SPECULATION_RULES_PATH, (c) => c.body(repoSpeculationRules(), 200, 
 // Storage faults and broken snapshots surface here; tree pages and renewals are read by scripts and get JSON.
 app.onError((error, c) => viewerErrorResponse(error, c, representation(parseRepoPath(new URL(c.req.url).pathname)?.target.kind) === "json"));
 
+// The cacheable read path for public immutable objects (#242), reached only by this Worker's own
+// subrequest (see shared-cache.ts). The path is signed over `public\n<epoch>\n<storage key>`, so it
+// can only ever hold objects the Worker decided are public, and a private key has no valid signature.
+// Before serving, the repository's visibility epoch is re-read: a URL minted before the repository
+// was privatized (or left by its installation) no longer matches and is the plain 404 — never a
+// stale allow. An epoch store that cannot answer is a retryable 503, also never an allow. Reads
+// straight from R2: this route *is* the fill, so it must not recurse into the layered reader.
+app.get(`${SHARED_CACHE_PATH}*`, async (c) => {
+  const noStore = { "Cache-Control": "private, no-store" };
+  const configured = services(c);
+  if (!configured) return c.body(null, 404, noStore);
+  const verified = await verifySharedCachePath(REPO_CAPABILITY_SECRET, c.req.path);
+  if (verified === null) return c.body(null, 404, noStore);
+  const repoId = storageKeyRepoId(verified.storageKey);
+  if (repoId === null) return c.body(null, 404, noStore);
+  let epoch: number;
+  try {
+    epoch = await configured.visibilityEpoch(repoId);
+  } catch {
+    return c.body(null, 503, { ...noStore, "Retry-After": String(PREPARING_RETRY_SECONDS) });
+  }
+  if (epoch !== verified.epoch) return c.body(null, 404, noStore);
+  const bytes = await configured.snapshots.raw(verified.storageKey);
+  if (!bytes) return c.body(null, 404, noStore);
+  return new Response(bytes as Uint8Array<ArrayBuffer>, {
+    headers: {
+      "Content-Type": "application/octet-stream",
+      // Immutable and content-addressed: let the colo cache and every tier above it keep it.
+      "Cache-Control": `public, max-age=${SHARED_CACHE_TTL_SECONDS}, immutable`,
+      "X-Content-Type-Options": "nosniff",
+    },
+  });
+});
+
 app.get("/r/*", async (c) => {
   c.header("Referrer-Policy", "no-referrer");
   const request = parseRepoPath(new URL(c.req.url).pathname);
@@ -358,7 +421,10 @@ app.get("/r/*", async (c) => {
     }
     if (!manifest) return readinessResponse(c, "preparing");
   }
-  return respond(target, manifest);
+  const response = await respond(target, manifest);
+  // The subrequest ran inside this request; only a dev-flagged deployment names it (REPO_SHARED_CACHE_DEBUG).
+  const diagnostic = scope.sharedProbe?.last;
+  return diagnostic && response.status === 200 ? withDebugHeader(response, "X-Repo-Shared-Cache", diagnostic) : response;
 });
 
 app.post("/r/*", async (c) => {

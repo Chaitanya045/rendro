@@ -50,6 +50,19 @@ export interface RevocationEpochs {
   currentEpoch(userId: string): Promise<number>;
 }
 
+/** KV keys `epoch:repo:<id>`: when a repository last became invisible (private, removed, uninstalled). */
+export const VISIBILITY_EPOCH_KEY_PREFIX = "epoch:repo:";
+
+export interface RepoVisibilityEpochs {
+  /**
+   * The repository's visibility epoch: 0 while it has always been public,
+   * higher after the control plane marked it invisible. A URL minted at an
+   * older epoch no longer serves. Throws `RepoAccessUnavailable` when the
+   * store cannot answer.
+   */
+  visibilityEpoch(repoId: number): Promise<number>;
+}
+
 /** Same repository as `owner/name`, compared the way GitHub does (case-insensitively). */
 export function repoKey(owner: string, name: string): string {
   return `${owner}/${name}`.toLowerCase();
@@ -153,6 +166,28 @@ export function kvRevocationEpochs(kv: KvReader): RevocationEpochs {
       }
       if (value === null) return 0;
       // Fifteen digits stay a safe integer; anything else is a broken writer, not a revocation.
+      if (!/^\d{1,15}$/.test(value)) throw new RepoAccessUnavailable();
+      return Number(value);
+    },
+  };
+}
+
+/**
+ * Visibility epochs in KV under `epoch:repo:<id>`, written by the control
+ * plane's directory when a repository stops being public. `cacheTtl` keeps hot
+ * keys in the colo for 60 s, the floor KV Classic allows: that is the
+ * revocation bound of an outstanding shared-cache URL (#242).
+ */
+export function kvVisibilityEpochs(kv: KvReader): RepoVisibilityEpochs {
+  return {
+    async visibilityEpoch(repoId) {
+      let value: string | null;
+      try {
+        value = await kv.get(`${VISIBILITY_EPOCH_KEY_PREFIX}${repoId}`, { cacheTtl: 60 });
+      } catch {
+        throw new RepoAccessUnavailable();
+      }
+      if (value === null) return 0;
       if (!/^\d{1,15}$/.test(value)) throw new RepoAccessUnavailable();
       return Number(value);
     },

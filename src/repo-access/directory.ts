@@ -27,7 +27,7 @@ import { DeliveryDedupe } from "@/ingest/github/delivery-dedupe";
 import { GitHubError } from "@/ingest/github/source";
 import type { InstallationTokenProvider } from "@/ingest/github/token";
 import type { DurableStorageLike } from "@/ingest/orchestrator/coordinator";
-import { RepoAccessUnavailable, repoKey, type RepoRecord } from "@/repo-read/access";
+import { RepoAccessUnavailable, repoKey, VISIBILITY_EPOCH_KEY_PREFIX, type RepoRecord } from "@/repo-read/access";
 import type { EventPlan, RepoHint } from "./events";
 import type { GitHubAccessClient, ListedInstallation, ListedRepo, Page } from "./github";
 import { confirmRemoval } from "./removal";
@@ -43,7 +43,7 @@ export interface DirectoryState {
 
 /** The write half of the `REPO_EPOCHS` KV binding. */
 export interface EpochStore {
-  put(key: string, value: string, options: { expirationTtl: number }): Promise<void>;
+  put(key: string, value: string, options: { expirationTtl?: number }): Promise<void>;
 }
 
 /** Convex's answer to a purge: the repositories whose own retention window has not ended yet, and when it does. */
@@ -352,6 +352,8 @@ export class AccessDirectory {
     // An event landed while GitHub answered: its state wins.
     if (current.seq !== entry.seq) return;
     await this.storage.put(`inst:${entry.id}`, { ...current, state: active ? "active" : "suspended", check: false } satisfies InstallationEntry);
+    // Confirmed suspended: its repositories stop being publicly served, even without a webhook (#242).
+    if (!active && current.state === "active") await this.enqueueInstallationVisibilityEpochs(entry.id);
   }
 
   private async checkRepo(entry: RepoEntry): Promise<void> {
@@ -551,6 +553,11 @@ export class AccessDirectory {
 
   private async putRepo(entry: RepoEntry, previous: RepoEntry | undefined): Promise<void> {
     await this.storage.put(`repo:${entry.id}`, entry);
+    // A repository that just became invisible stops being publicly served (#242): the serving
+    // Worker re-checks the visibility epoch in every signed shared-cache URL against this one.
+    if ((entry.private || entry.removed) && !(previous && (previous.private || previous.removed))) {
+      await this.enqueueVisibilityEpoch(entry.id);
+    }
     // A tombstone never takes a name: a stale removal must not shadow the repository that owns the name now.
     if (entry.removed) return;
     const [before, after] = [previous ? repoKey(previous.owner, previous.name) : null, repoKey(entry.owner, entry.name)];
@@ -600,6 +607,8 @@ export class AccessDirectory {
       const { id, account, state } = plan.installation;
       const existing = await this.storage.get<InstallationEntry>(`inst:${id}`);
       await this.storage.put(`inst:${id}`, { id, account: account ?? existing?.account ?? null, state, check: state === "active", seq } satisfies InstallationEntry);
+      // Suspended or deleted: its repositories stop being publicly served (#242).
+      if (state !== "active") await this.enqueueInstallationVisibilityEpochs(id);
     }
     if (plan.repos) for (const hint of plan.repos.hints) await this.applyRepoChange(plan.repos.change, hint, plan.repos.installation, seq);
     if (plan.renameOwner) await this.renameOwner(plan.renameOwner.from, plan.renameOwner.to, seq);
@@ -649,6 +658,19 @@ export class AccessDirectory {
   }
 
   // ---- Epochs --------------------------------------------------------------
+
+  /** Repositories that just became invisible: one outbox entry per repository, flushed like the user epochs. */
+  private async enqueueVisibilityEpoch(repoId: number): Promise<void> {
+    await this.storage.put(`pending-repo:${repoId}`, 1);
+    await this.arm(this.deps.now());
+  }
+
+  /** Every repository of an installation that stopped being active stops being publicly served (#242). */
+  private async enqueueInstallationVisibilityEpochs(installationId: number): Promise<void> {
+    for (const entry of (await this.storage.list<RepoEntry>({ prefix: "repo:" })).values()) {
+      if (entry.installation === installationId) await this.enqueueVisibilityEpoch(entry.id);
+    }
+  }
 
   /** Repositories that left the app with this delivery: removed ones, and every one of a deleted installation. */
   private async enqueueRemovals(plan: EventPlan): Promise<void> {
@@ -713,13 +735,34 @@ export class AccessDirectory {
         failed += 1;
       }
     });
+    const [repoFailed, repoFull] = await this.flushRepoEpochs();
     const [notified, notifyFull] = await this.flushComments();
-    if (failed || notified) {
-      if (failed) this.deps.log("access.epochs-failed", { failed });
+    if (failed || notified || repoFailed) {
+      if (failed || repoFailed) this.deps.log("access.epochs-failed", { failed: failed + repoFailed });
       await this.arm(this.deps.now() + EPOCH_RETRY_MS);
-    } else if (pending.length === EPOCH_BATCH || notifyFull) {
+    } else if (pending.length === EPOCH_BATCH || repoFull || notifyFull) {
       await this.arm(this.deps.now());
     }
+  }
+
+  /**
+   * Write pending visibility epochs. Unlike a user's epoch, the entry never expires: it must
+   * outlive every signed shared-cache URL (a year), and reverting to 0 would revive old URLs.
+   */
+  private async flushRepoEpochs(): Promise<[number, boolean]> {
+    const pending = [...(await this.storage.list<number>({ prefix: "pending-repo:", limit: EPOCH_BATCH })).entries()];
+    let failed = 0;
+    await eachLimit(pending, EPOCH_CONCURRENCY, async ([key, marker]) => {
+      const repoId = Number(key.slice("pending-repo:".length));
+      try {
+        await this.deps.epochs.put(`${VISIBILITY_EPOCH_KEY_PREFIX}${repoId}`, String(this.deps.now()), {});
+        // Re-queued meanwhile: leave it for the next pass.
+        if (await this.storage.get(key) === marker) await this.storage.delete([key]);
+      } catch {
+        failed += 1;
+      }
+    });
+    return [failed, pending.length === EPOCH_BATCH];
   }
 
   /** Tell Convex about written epochs, removed and restored repositories. Returns the failures and whether a batch was full. */
