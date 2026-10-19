@@ -2,7 +2,7 @@ import AxeBuilder from "@axe-core/playwright";
 import type { Page } from "@playwright/test";
 import { test, expect } from "./shell-fixtures";
 import type { Pool } from "./shell-fixtures";
-import { api, desktop, heading, holdFirst, mobile, provision, settleFrames, shellReady, signInSeeded } from "./shell-helpers";
+import { api, desktop, heading, holdFirst, mobile, pageSettled, provision, settleFrames, shellReady, signInSeeded } from "./shell-helpers";
 
 const hostileName = `Zed <b>bold</b> & "co"`;
 const poolNames = ["Alpha", "Beta", "Gamma", "Gadget", hostileName];
@@ -340,7 +340,7 @@ test.describe("organization switcher", () => {
     await page.setViewportSize(desktop);
     const [alpha, beta] = switcherPool.organizations;
     await page.goto(`/organizations/${alpha.id}/people`);
-    await shellReady(page);
+    await pageSettled(page);
     const trigger = page.locator("button#cp-org-switcher");
     const menu = page.locator("#cp-org-menu");
     const focusedText = () => page.evaluate(() => document.activeElement?.textContent?.replace(/\s+/g, " ").trim() ?? "");
@@ -383,6 +383,8 @@ test.describe("organization switcher", () => {
     await expect(menu).toBeVisible();
     await page.locator(".cp-nav").getByRole("link", { name: "Teams", exact: true }).evaluate((link: HTMLElement) => link.click());
     await expect(page).toHaveURL(new RegExp(`${alpha.id}/teams$`));
+    // The URL changes before the Teams page has its data: keys pressed in that gap are swallowed by the swap.
+    await pageSettled(page);
     await expect(menu).toBeHidden();
     await expect(trigger).toHaveAttribute("aria-expanded", "false");
 

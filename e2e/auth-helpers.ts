@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import type { Page, Route } from "@playwright/test";
+import type { BrowserContext, Page, Route } from "@playwright/test";
 import { expect } from "./fixtures";
 import { assertLoopback, localHttp } from "./backend";
 import { password } from "./seed";
@@ -67,6 +67,12 @@ export async function session(page: Page) {
       verified: result.user.emailVerified, sessionId: result.session.id,
       createdAt: result.session.createdAt, expiresAt: result.session.expiresAt } : null;
   });
+}
+/** Expiry of the browser's live session cookie (-1 for a session-only one), or undefined while there is none. Firefox
+ * keeps listing a cookie that sign-out just expired, so an entry whose expiry has passed is not the session. Poll it. */
+export async function sessionCookieExpiry(context: BrowserContext) {
+  const live = (await context.cookies()).find(cookie => cookie.name.endsWith(".session_token") && (cookie.expires === -1 || cookie.expires > Date.now() / 1000));
+  return live?.expires;
 }
 /** The security page is interactive once its document has fully parsed (the
  * lifecycle listeners are inline scripts at the end of the body) and the

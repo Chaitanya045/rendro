@@ -21,7 +21,9 @@ const site = {
 
 type Reply = { status: number; headers: Record<string, string>; text: string };
 async function get(request: APIRequestContext, url: string, accept: string): Promise<Reply> {
-  const response = await request.fetch(url, { headers: { Accept: accept }, maxRedirects: 0, failOnStatusCode: false });
+  // The harness's HTTP front end (workerd) closes an idle keep-alive socket after five seconds and has no setting for
+  // it. A request that reuses the socket at that moment gets ECONNRESET before any byte is sent, so use a fresh socket.
+  const response = await request.fetch(url, { headers: { Accept: accept, Connection: "close" }, maxRedirects: 0, failOnStatusCode: false });
   return { status: response.status(), headers: response.headers(), text: await response.text() };
 }
 const IMAGE = "image/avif,image/webp,image/svg+xml,*/*;q=0.8";
