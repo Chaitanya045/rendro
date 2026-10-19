@@ -211,6 +211,11 @@ function repoRecord(entry: RepoEntry): RepoRecord {
   return { id: entry.id, owner: entry.owner, name: entry.name, private: entry.private, defaultBranch: entry.defaultBranch as string };
 }
 
+/** True when an access token expires soon enough that it must be renewed before use. */
+function expiring(tokens: UserTokens, now: number): boolean {
+  return tokens.accessTokenExpiresAt !== null && tokens.accessTokenExpiresAt - now < TOKEN_EARLY_REFRESH_MS;
+}
+
 /** GitHub refused the user's tokens for good: they must sign in again. */
 class TokensRejected extends Error {}
 
@@ -462,7 +467,8 @@ export class AccessDirectory {
         // Refused once: renew and retry. Refused again with a fresh token: the authorization is gone.
         if (renewed) throw new TokensRejected();
         renewed = true;
-        token = await this.renewAccessToken(userId);
+        // GitHub refused the token outright: a current one must come from a real renewal.
+        token = await this.renewAccessToken(userId, true);
         try {
           return await request();
         } catch (retryError) {
@@ -503,24 +509,27 @@ export class AccessDirectory {
   /** The user's access token, renewed first when it is about to expire. */
   private async accessToken(userId: string, user: UserEntry): Promise<string> {
     const tokens = await openTokens(this.deps.tokenKey, userId, user.tokens as string);
-    if (tokens.accessTokenExpiresAt !== null && tokens.accessTokenExpiresAt - this.deps.now() < TOKEN_EARLY_REFRESH_MS) return this.renewAccessToken(userId);
+    if (expiring(tokens, this.deps.now())) return this.renewAccessToken(userId);
     return tokens.accessToken;
   }
 
   /** One renewal per user at a time: GitHub rotates the refresh token, so a second concurrent use would look revoked. */
-  private renewAccessToken(userId: string): Promise<string> {
+  private renewAccessToken(userId: string, force = false): Promise<string> {
     let renewal = this.renewing.get(userId);
     if (!renewal) {
-      renewal = this.renew(userId).finally(() => this.renewing.delete(userId));
+      renewal = this.renew(userId, force).finally(() => this.renewing.delete(userId));
       this.renewing.set(userId, renewal);
     }
     return renewal;
   }
 
-  private async renew(userId: string): Promise<string> {
+  private async renew(userId: string, force: boolean): Promise<string> {
     const user = await this.user(userId);
     if (!user?.tokens) throw new TokensRejected();
     const tokens = await openTokens(this.deps.tokenKey, userId, user.tokens);
+    // A renewal that just completed already rotated the tokens: the snapshot that sent us here was
+    // stale. The current access token is served without spending a second OAuth renewal on it.
+    if (!force && !expiring(tokens, this.deps.now())) return tokens.accessToken;
     if (!tokens.refreshToken || (tokens.refreshTokenExpiresAt !== null && tokens.refreshTokenExpiresAt <= this.deps.now())) throw new TokensRejected();
     const result = await this.deps.refresher.refresh(tokens.refreshToken);
     const current = await this.user(userId);
