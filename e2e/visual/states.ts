@@ -53,7 +53,19 @@ export async function fixClock(page: Page, epoch: number) {
   await page.clock.setFixedTime(epoch);
 }
 
-/** The baseline and axe runs always emulate reduced motion; every theme is an explicit color scheme. */
+/**
+ * The baseline and axe runs always emulate reduced motion; every theme is an explicit color scheme.
+ * Firefox's automation drops emulated media when a navigation enters a new browsing context group, which the first
+ * trusted page of a fresh page does (COOP same-origin, #89), so a "dark" cell would render light. A fresh page enters
+ * the group first; the emulation then holds for the navigations of the state.
+ */
 export async function applyTheme(page: Page, theme: Theme) {
+  if (page.url() === "about:blank") await page.goto("/");
   await page.emulateMedia({ colorScheme: theme, reducedMotion: "reduce" });
+}
+
+/** Fails a cell whose page is not in the appearance it asked for, so a dropped emulation cannot make a scan or baseline vacuous. */
+export async function expectTheme(page: Page, theme: Theme) {
+  const dark = await page.evaluate(() => matchMedia("(prefers-color-scheme: dark)").matches);
+  if (dark !== (theme === "dark")) throw new Error(`The page renders ${dark ? "dark" : "light"} but the cell asked for ${theme}`);
 }

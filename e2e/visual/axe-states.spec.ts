@@ -1,7 +1,7 @@
 import { AxeBuilder } from "@axe-core/playwright";
 import { expect } from "../fixtures";
 import { testVisual } from "./state";
-import { applyTheme, fixClock, settleVisual, sizeFor, type Width, type Theme } from "./states";
+import { applyTheme, expectTheme, fixClock, settleVisual, sizeFor, type Width, type Theme } from "./states";
 import { openState, type Cell } from "./render-states";
 
 /**
@@ -15,9 +15,6 @@ import { openState, type Cell } from "./render-states";
 type Scanned = Cell & { width: Width; themes: Theme[]; };
 const both: Theme[] = ["light", "dark"];
 const at = (family: string, state: string, ...sizes: Width[]): Scanned[] => sizes.map(width => ({ family, state, width, themes: both }));
-// The comment states of #268 show #267's two light-appearance contrast findings (`.quote-text`, `.reply > .when`), which are not
-// listed again: until #267 lands they are scanned in dark only, and its pull request switches them to `at(...)`.
-const darkUntil267 = (family: string, state: string, ...sizes: Width[]): Scanned[] => sizes.map(width => ({ family, state, width, themes: ["dark"] }));
 // Every state is scanned in both appearances (#268): a contrast or focus failure can belong to the dark theme alone.
 const scanned: Scanned[] = [
   ...at("landing", "default", 1440),
@@ -36,11 +33,11 @@ const scanned: Scanned[] = [
   ...at("viewer", "tree", 1440),
   ...at("viewer", "menu", 375),
   ...at("comments", "drawer", 1440, 375),
-  ...darkUntil267("comments", "resolved", 1440),
-  ...darkUntil267("comments", "reply", 1440),
-  ...darkUntil267("comments", "deleted", 1440),
-  ...darkUntil267("comments", "offline", 375),
-  ...darkUntil267("comments", "refused", 1440, 375),
+  ...at("comments", "resolved", 1440),
+  ...at("comments", "reply", 1440),
+  ...at("comments", "deleted", 1440),
+  ...at("comments", "offline", 375),
+  ...at("comments", "refused", 1440, 375),
   ...at("repo", "home", 1440),
   ...at("repo", "search", 1440, 375),
   ...at("repo", "search-empty", 1440),
@@ -70,15 +67,6 @@ const cells: Array<Scanned & { theme: Theme }> = scanned.flatMap(cell => cell.th
 type Engine = "chromium" | "firefox" | "webkit";
 type Known = { family: string; state: string; rule: string; target: string; issue: string; reason: string; /** The appearance the entry belongs to: light unless stated, or "both". */ theme?: Theme | "both"; /** Only this viewport width; every width unless stated. */ width?: Width; /** Only this engine; every engine unless stated. */ engines?: Engine[] };
 const known: Known[] = [
-  { family: "comments", state: "drawer", rule: "color-contrast", target: ".quote-text", issue: "#267", reason: "the quoted text of a thread is too light on the drawer background" },
-  { family: "comments", state: "drawer", rule: "color-contrast", target: ".reply > .when", issue: "#267", reason: "the reply timestamp is too light on the drawer background" },
-  { family: "repo", state: "search", rule: "color-contrast", target: ".repo-search-item-path", issue: "#267", reason: "#71717a on the #f4f4f5 active row is below 4.5:1" },
-  // Dark appearance, Firefox only. Chromium and WebKit pass these cells, and on Chromium axe does not list the elements as
-  // "incomplete" either (checked on the reply, search and markdown cells), so Firefox renders or resolves their dark colours
-  // differently. An entry without `engines` would be stale on the other two. The contrast fixes of #267 and #270 delete these.
-  ...[["drawer", ".quote-text"], ["drawer", ".reply > .when"], ["resolved", ".quote-text"], ...["reply", "offline", "refused"].flatMap(state => [[state, ".quote-text"], [state, ".reply > .when"]])].map(([state, target]): Known => ({ family: "comments", state, rule: "color-contrast", target, issue: "#267", theme: "dark", engines: ["firefox"], reason: "Firefox only: the quote and reply timestamp of a thread are reported too light on the dark drawer background" })),
-  { family: "repo", state: "search", rule: "color-contrast", target: ".repo-search-item-path", issue: "#267", theme: "dark", engines: ["firefox"], reason: "Firefox only: the result path is too light on the dark active row" },
-  { family: "repo", state: "markdown", rule: "color-contrast", target: ".hljs-keyword", issue: "#270", theme: "dark", engines: ["firefox"], reason: "Firefox only: the dark highlight theme's keyword colour is below 4.5:1 on the code background" },
   // #270, found by the #268 states.
   ...["search-empty", "search-error", "search-limited"].map((state): Known => ({ family: "repo", state, rule: "aria-required-children", target: "#repo-search-results", issue: "#270", theme: "both", reason: "the panel keeps role=listbox while it holds a single message instead of options" })),
   { family: "repo", state: "markdown", rule: "label", target: ".task-list-item", issue: "#270", theme: "both", reason: "the checkboxes of a rendered task list have no accessible name" },
@@ -101,6 +89,7 @@ for (const cell of cells) {
       // The state must still be on screen after settling (a lost dialog would make the scan vacuous).
       if (cell.state === "dialog") await expect(page.locator("#project-dialog")).toBeVisible();
       await open.verify?.();
+      await expectTheme(page, cell.theme);
       const scan = await new AxeBuilder({ page }).withTags(tags).analyze();
       const entries = known.filter(entry => entry.family === cell.family && entry.state === cell.state && (entry.theme === "both" || (entry.theme ?? "light") === cell.theme) && (entry.width === undefined || entry.width === cell.width) && (entry.engines === undefined || entry.engines.includes(browserName)));
       const matched = new Set<Known>();

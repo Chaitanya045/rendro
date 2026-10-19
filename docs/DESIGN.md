@@ -48,7 +48,7 @@ Use semantic intent, not arbitrary color picking. If a color appears in app chro
 | Menu | `#ffffff` | `#09090b` | Share/avatar dropdowns |
 | Text primary | `#09090b` | `#fafafa` | Topbar, headings, active foreground |
 | Text muted | `#71717a` | `#a1a1aa` | Secondary labels, placeholders, file metadata on white/near-black surfaces |
-| Text muted strong | `#52525b` | `#a1a1aa` | Small secondary text and neutral badges on container or hovered surfaces (`--cp-muted-strong`) |
+| Text muted strong | `#52525b` | `#a1a1aa` | Small secondary text and neutral badges on container or hovered surfaces (`--cp-muted-strong`); also the comments widget's `--fg-muted` in light (quote, timestamps) and the `/r/` search result path (#267) |
 | Border | `#e4e4e7` | `#27272a` | Topbar/sidebar dividers, dropdown borders |
 | Focus ring | `#c2410c` | `#fb923c` | Search focus and future focus states |
 | Error | `#b42318` | `#fca5a5` | Document-load timeout tint, tree load errors |
