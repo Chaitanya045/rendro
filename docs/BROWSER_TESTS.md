@@ -470,6 +470,76 @@ Expected failure (its broken assertion gets no `e2e` credit; an unexpected pass 
   page shows the success screen and "Continue to sign in" while the account stays unverified. Fix: when the `error`
   query parameter is present, render the unverified page with a "link invalid or expired" message and the resend form.
 
+## Visual baselines and accessibility scans (#120)
+
+`e2e/visual.config.ts` owns two independent checks over the same seeded states (`e2e/visual/render-states.ts`):
+
+| Check | Command | Engines | What it asserts |
+|---|---|---|---|
+| Visual baselines | `pnpm visual` | Chromium, in the pinned container | `toHaveScreenshot` with zero tolerated pixels, per state, at 375/768/1440px, light and dark |
+| Accessibility | `pnpm a11y` | Chromium, Firefox, WebKit | axe (WCAG 2.1 A/AA) finds no violation in the interactive states |
+
+Both run the real Worker and local Convex backend of the functional E2E layer, with a separate global provisioning
+(`e2e/visual/seed-visual.ts`, only when `RENDRO_E2E_VISUAL=1`) so the functional shards never pay for it. The functional
+`e2e/playwright.config.ts` ignores `e2e/visual/`.
+
+**One pinned environment.** A screenshot depends on the Chromium build, system libraries and fonts that rasterise it, so
+no baseline is ever produced by a host browser. `scripts/visual-baselines.sh` starts the official Playwright image, pinned
+by digest at the repo's Playwright version (`mcr.microsoft.com/playwright@sha256:06a9939e…`, v1.64.0-noble, linux/amd64),
+as a `run-server` browser with the host network; the Worker, backend and test client keep running on the host and
+connect to that browser (`RENDRO_VISUAL_WS`). The same script runs in CI. The spec and the script refuse a run
+whose Playwright version does not match the image, and the spec throws without the container's endpoint. Bump
+`@playwright/test` and the digest together (`docker buildx imagetools inspect mcr.microsoft.com/playwright:v<version>-noble`).
+Docker is required (the E2E harness already needs it).
+
+**Determinism.** Each cell emulates the theme and reduced motion, fixes the page clock (`page.clock.setFixedTime`) to five
+minutes past the seeded comments so every relative age is identical, and settles through `settleVisual` before the shot:
+`document.fonts.ready`, every finite animation awaited through `getAnimations()` (#262), two painted frames, then the
+remaining (looping) animations paused. Data is seeded with fixed text. Text that is run-specific by nature is handled per element, never per region:
+values whose length changes the layout (the deployment source path or commit, which depend on where the runner checks out
+the repository) are rewritten to a fixed string before the shot (`pinVolatileText`); the deployment time and id, the CLI
+panel with local ids and port, and the API key prefix are masked. The functional specs assert the real values by name. A baseline run is repeatable: the whole suite is run twice in a row
+without a pixel of difference before baselines are committed.
+
+**Baseline families (first slice).** Landing, sign-in, sign-up, organization overview, projects (list, empty, loading, error,
+create dialog), project deployments (list and loading), teams, API keys, account menu, viewer (tree, document loading,
+menu), comments drawer, and `/r/` (home, search, not found) at the widths and themes above. Below the desktop breakpoint
+the cell opens the tree drawer first (the `/r/` search panel and the viewer's document tree live in it).
+
+### Updating a baseline
+
+```sh
+pnpm visual:update            # rewrites only baselines that changed (or are new), in the pinned container
+pnpm visual:update -g "projects — list"   # extra arguments go to `playwright test`
+```
+
+1. Make the intended UI change first. `pnpm visual` (check mode) fails and writes expected, actual and diff images
+   under `test-results/e2e-visual/`; open the diff before deciding anything.
+2. Run `pnpm visual:update` only after you have confirmed that every difference is intended. A baseline is never
+   regenerated to get a failing check green, and never from a host browser or a different image.
+3. Commit the changed PNGs in the same pull request as the UI change, and list the affected states in its description.
+4. Reviewers **inspect the images**: GitHub's image diff (2-up, swipe, onion skin) on every changed
+   `e2e/visual/__screenshots__/*.png`. A baseline change that nobody looked at is not approved. There is no bot or
+   workflow that accepts new baselines, and `--update-snapshots` appears nowhere in CI.
+5. On a CI failure, the `visual-diffs` artifact (7 days) carries the expected, actual and diff image of every failing cell
+   and the traces. Download it, decide whether it is a regression (fix the code) or an intended change (step 2).
+
+An axe violation fails the run; there is no threshold to adjust. A known violation can only be listed in
+`e2e/visual/axe-states.spec.ts` with a written reason and an open issue, scoped to one rule, one state and one element,
+reviewed like any baseline change. An entry that no longer matches fails the run, so fixing the issue deletes the entry.
+Today's entries are the contrast findings of #267.
+
+CI jobs: `visual (chromium baselines)` and `a11y (chromium|firefox|webkit)` in `quality.yml`, each with a 20 minute
+timeout (the suites take a few minutes). Both upload their diffs and traces on failure.
+
+### Not yet covered
+
+Follow-ups are tracked in #268: the remaining viewer shell states (error, forbidden, link-confirmation
+dialog, dropdowns), the `/r/` repo states beyond home/search/not-found (private repo, markdown and large docs), comment
+thread states (resolved, reply composer, error), search results empty/error, and the remaining auth states (verify,
+reset, errors). The org/project management families belong to the pre-pivot product and are expected to be replaced when
+the GitHub-only pivot lands; remove their baselines together with their pages.
+
 ## Vitest Chromium project
 
 Run `pnpm exec playwright install chromium`, then `CI=true pnpm test:browser`.

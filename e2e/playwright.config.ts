@@ -3,6 +3,9 @@ import { defineConfig, devices } from "@playwright/test";
 export default defineConfig({
   testDir: ".",
   testMatch: "**/*.spec.ts",
+  // Visual screenshots (#120) and the associated axe scans run through visual.config.ts;
+  // the functional suites here must not re-render them on other engines or in shards.
+  testIgnore: /e2e[\\/]visual[\\/]/,
   globalSetup: "./global-setup.ts",
   globalTeardown: "./global-teardown.ts",
   // Tests are independent (fresh contexts, per-test ingress, no serial groups), so each is its own
