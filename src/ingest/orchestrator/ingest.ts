@@ -1,4 +1,5 @@
 import type { CachedRef, GitHubSource, RepoRef } from "../github/source";
+import type { SearchIndex } from "../../search/index";
 import { IngestError, toIngestError } from "./errors";
 import { manifestKey, refKey } from "./keys";
 import type { ContentPipeline } from "./pipeline";
@@ -30,6 +31,8 @@ export interface IngestDependencies {
   pipeline: ContentPipeline;
   now: () => number;
   snapshot?: SnapshotOptions;
+  /** Repository search index (#251); absent where no D1 binding is configured. */
+  search?: SearchIndex;
 }
 
 export type IngestResult =
@@ -71,7 +74,7 @@ export async function ingestBranch(
   try {
     if (!await store.has(manifestKey(repo.id, head.sha, pipeline.rendererVersion))) {
       const previous = pointer ? await content.getJson<SnapshotManifest>(manifestKey(repo.id, pointer.commit, pointer.rendererVersion)) : null;
-      stats = (await buildSnapshot({ source, content, repo, pipeline, now: deps.now, options: deps.snapshot }, head.sha, previous)).stats;
+      stats = (await buildSnapshot({ source, content, repo, pipeline, now: deps.now, options: deps.snapshot, search: deps.search }, head.sha, previous)).stats;
       snapshot = "built";
     }
   } catch (error) {

@@ -9,8 +9,9 @@ export const controlWorker = { name: "rendro-control-dev", epochs: "rendro-repo-
 
 /**
  * Adds the repository read path's bindings to a Worker configuration: snapshots in R2, revocation
- * epochs in KV and a control Worker as the permission source (the #234 fixture unless `service` names
- * another). Production configures none of them yet, so there every /r/ URL is a 404.
+ * epochs in KV, the repository search index in D1 and a control Worker as the permission source
+ * (the #234 fixture unless `service` names another). Production configures none of them yet, so
+ * there every /r/ URL is a 404.
  */
 export function withRepoReadBindings(config: string, service = repoReadWorker.access): string {
   return `${config}
@@ -21,6 +22,11 @@ bucket_name = "rendro-repo-content-test"
 [[kv_namespaces]]
 binding = "REPO_EPOCHS"
 id = "${controlWorker.epochs}"
+
+[[d1_databases]]
+binding = "REPO_SEARCH"
+database_name = "rendro-repo-search-test"
+database_id = "rendro-repo-search-test"
 
 [[services]]
 binding = "REPO_ACCESS"

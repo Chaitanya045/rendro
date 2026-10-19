@@ -173,6 +173,8 @@ describe("URL grammar", () => {
   it("parses shells, frames, trees, tickets and renewals", () => {
     expect(parseRepoPath("/r/octo/docs")).toEqual({ owner: "octo", name: "docs", ref: { kind: "default" }, target: { kind: "shell" } });
     expect(parseRepoPath("/r/octo/docs/~feature%2Fx/tree")).toMatchObject({ ref: { kind: "branch", branch: "feature/x" }, target: { kind: "tree" } });
+    expect(parseRepoPath("/r/octo/docs/search")).toMatchObject({ ref: { kind: "default" }, target: { kind: "search" } });
+    expect(parseRepoPath(`/r/octo/docs/@${commit}/search`)).toMatchObject({ ref: { kind: "commit", commit }, target: { kind: "search" } });
     expect(parseRepoPath(`/r/octo/docs/@${commit}/files/a%20b/c.md`)).toMatchObject({ ref: { kind: "commit", commit }, target: { kind: "files", path: "a b/c.md" } });
     expect(parseRepoPath(`/r/octo/docs/@${commit}/view/v1.a-b_c/files/x.png`)).toMatchObject({ target: { kind: "ticket-files", ticket: "v1.a-b_c", path: "x.png" } });
     expect(parseRepoPath(`/r/octo/docs/@${commit}/viewer-ticket`)).toMatchObject({ target: { kind: "viewer-ticket" } });

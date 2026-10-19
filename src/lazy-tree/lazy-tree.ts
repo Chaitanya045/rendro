@@ -751,8 +751,224 @@ function documentPathFromHistory(value: unknown): string {
     : "";
 }
 
+// ── repository search (#251) ──
+
+const SEARCH_LIMIT = 20;
+const SEARCH_MIN_TERMS = 3;
+const SEARCH_DEBOUNCE_MS = 200;
+// FTS5 snippet() wraps each matched run in these control characters; the body
+// text is stripped of them, so they are unambiguous and split to build <mark>.
+// eslint-disable-next-line no-control-regex -- these two code points are snippet markers by construction.
+const SNIPPET_MARKER = /[\u0002\u0003]/;
+
+interface SearchItem { path: string; slug: string; title: string; snippet: string }
+
+function isSearchItem(value: unknown): value is SearchItem {
+  if (!value || typeof value !== "object") return false;
+  const item = value as Record<string, unknown>;
+  return typeof item.path === "string" && typeof item.slug === "string"
+    && typeof item.title === "string" && typeof item.snippet === "string";
+}
+
+function searchItems(payload: unknown): SearchItem[] {
+  if (!payload || typeof payload !== "object") return [];
+  const results = (payload as { results?: unknown }).results;
+  return Array.isArray(results) ? results.filter(isSearchItem) : [];
+}
+
+/** Wires the in-sidebar search control to the pinned `/search` endpoint. */
+function initSearch(root: HTMLElement): void {
+  const formEl = root.querySelector<HTMLFormElement>(".repo-search-field");
+  const inputEl = root.querySelector<HTMLInputElement>(".repo-search-input");
+  const clear = root.querySelector<HTMLButtonElement>(".repo-search-clear");
+  const panelEl = root.querySelector<HTMLElement>(".repo-search-results");
+  const statusEl = root.querySelector<HTMLElement>(".repo-search-status");
+  if (!formEl || !inputEl || !panelEl || !statusEl || !ORG || !FRAME_BASE) return;
+  const form: HTMLFormElement = formEl;
+  const input: HTMLInputElement = inputEl;
+  const panel: HTMLElement = panelEl;
+  const status: HTMLElement = statusEl;
+  root.hidden = false;
+
+  let items: SearchItem[] = [];
+  let active = -1;
+  let timer: number | undefined;
+  let controller: AbortController | null = null;
+  let requestId = 0;
+
+  const announce = (message: string) => { status.textContent = message; };
+  const setExpanded = (open: boolean) => input.setAttribute("aria-expanded", String(open));
+
+  function closePanel() {
+    panel.hidden = true;
+    panel.replaceChildren();
+    setExpanded(false);
+    input.removeAttribute("aria-activedescendant");
+    items = [];
+    active = -1;
+  }
+
+  function message(text: string, retry?: () => void) {
+    const node = document.createElement("div");
+    node.className = "repo-search-message";
+    node.textContent = text;
+    if (retry) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.textContent = "Retry";
+      button.addEventListener("click", retry);
+      node.append(button);
+    }
+    panel.replaceChildren(node);
+    panel.hidden = false;
+    setExpanded(true);
+  }
+
+  function snippetNode(snippet: string): HTMLElement {
+    const span = document.createElement("span");
+    span.className = "repo-search-item-snippet";
+    // Even segments are plain text; odd segments were wrapped by snippet().
+    snippet.split(SNIPPET_MARKER).forEach((segment, index) => {
+      if (segment === "") return;
+      if (index % 2 === 1) {
+        const mark = document.createElement("mark");
+        mark.textContent = segment;
+        span.append(mark);
+      } else {
+        span.append(document.createTextNode(segment));
+      }
+    });
+    return span;
+  }
+
+  function option(item: SearchItem, index: number): HTMLButtonElement {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "repo-search-item";
+    button.id = `repo-search-option-${index}`;
+    button.setAttribute("role", "option");
+    button.setAttribute("aria-selected", "false");
+    button.dataset.index = String(index);
+    const path = document.createElement("span");
+    path.className = "repo-search-item-path";
+    path.textContent = item.slug ? `${item.path}#${item.slug}` : item.path;
+    const title = document.createElement("span");
+    title.className = "repo-search-item-title";
+    title.textContent = item.title || item.path.slice(item.path.lastIndexOf("/") + 1);
+    button.append(path, title, snippetNode(item.snippet));
+    button.addEventListener("click", () => activate(index));
+    return button;
+  }
+
+  function setActive(index: number) {
+    active = index;
+    const buttons = Array.from(panel.querySelectorAll<HTMLButtonElement>(".repo-search-item"));
+    buttons.forEach((button, at) => {
+      const on = at === index;
+      button.dataset.active = String(on);
+      button.setAttribute("aria-selected", String(on));
+    });
+    input.setAttribute("aria-activedescendant", `repo-search-option-${index}`);
+    buttons[index]?.scrollIntoView({ block: "nearest" });
+  }
+
+  function activate(index: number) {
+    const item = items[index];
+    closePanel();
+    input.value = "";
+    if (clear) clear.hidden = true;
+    announce("");
+    // Same in-shell navigation a tree click performs: the shell owns history.
+    loadDoc(`${ORG}/${item.path}`, "push", item.slug ? `#${item.slug}` : "");
+  }
+
+  async function run(query: string) {
+    const trimmed = query.trim();
+    if (trimmed.length < SEARCH_MIN_TERMS) {
+      closePanel();
+      announce(trimmed ? `Enter at least ${SEARCH_MIN_TERMS} characters to search` : "");
+      return;
+    }
+    const id = ++requestId;
+    controller?.abort();
+    controller = new AbortController();
+    announce("Searching…");
+    // One measure per request, so the query budget stays observable.
+    performance.mark("rendro:repo-search-request");
+    try {
+      const url = `${FRAME_BASE}/search?q=${encodeURIComponent(trimmed)}&limit=${SEARCH_LIMIT}`;
+      const response = await fetch(url, { signal: controller.signal });
+      if (!response.ok) throw new Error(`${response.status}`);
+      const found = searchItems(await response.json());
+      items = found;
+      if (!found.length) {
+        message(`No results for “${trimmed}”`);
+        announce(`No results for ${trimmed}`);
+        return;
+      }
+      panel.replaceChildren(...found.map(option));
+      panel.hidden = false;
+      setExpanded(true);
+      setActive(0);
+      announce(`${found.length} result${found.length === 1 ? "" : "s"}`);
+    } catch {
+      // A request a newer query aborted, or that answered after it, never shows an error.
+      if (id !== requestId) return;
+      message("Search failed.", () => void run(trimmed));
+      announce("Search failed");
+    }
+  }
+
+  input.addEventListener("input", () => {
+    if (clear) clear.hidden = input.value === "";
+    if (timer !== undefined) window.clearTimeout(timer);
+    const value = input.value;
+    timer = window.setTimeout(() => void run(value), SEARCH_DEBOUNCE_MS);
+  });
+  input.addEventListener("keydown", (event) => {
+    if (event.key === "ArrowDown" && items.length) {
+      event.preventDefault();
+      setActive(active + 1 >= items.length ? 0 : active + 1);
+    } else if (event.key === "ArrowUp" && items.length) {
+      event.preventDefault();
+      setActive(active - 1 < 0 ? items.length - 1 : active - 1);
+    } else if (event.key === "Escape" && !panel.hidden) {
+      event.preventDefault();
+      closePanel();
+    }
+    // Enter is left to the form's submit handler, which prevents the default
+    // navigation and activates the selected option when any results are shown.
+  });
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    // Options are rendered with the first active; the panel only shows them when results exist.
+    if (items.length) activate(active);
+  });
+  clear?.addEventListener("click", () => {
+    if (timer !== undefined) window.clearTimeout(timer);
+    input.value = "";
+    clear.hidden = true;
+    closePanel();
+    announce("");
+    input.focus();
+  });
+  document.addEventListener("click", (event) => {
+    if (event.target instanceof Node && !root.contains(event.target)) closePanel();
+  });
+  window.addEventListener("keydown", (event) => {
+    if (event.key !== "/" || event.metaKey || event.ctrlKey || event.altKey) return;
+    const target = event.target;
+    if (target instanceof HTMLElement && (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName))) return;
+    event.preventDefault();
+    input.focus();
+    input.select();
+  });
+}
+
 function init() {
   if (!TREE) return;
+  const search = document.querySelector<HTMLElement>("[data-repo-search]");
+  if (search) initSearch(search);
   void loadRootTree();
   TREE.addEventListener("click", handleClick);
   TREE.addEventListener("keydown", handleKeydown);

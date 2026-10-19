@@ -26210,6 +26210,193 @@
           ]
         }
       ]
+    },
+    {
+      "id": "UI-164",
+      "title": "Repository docs viewer: sidebar document search",
+      "area": "Repository docs (GitHub pivot)",
+      "routes": [
+        "GET /r/*"
+      ],
+      "sources": [
+        "src/lazy-tree/lazy-tree.ts",
+        "src/routes/app.ts",
+        "src/repo-read/routes.ts",
+        "src/repo-read/search.ts"
+      ],
+      "roles": [
+        "anonymous",
+        "owner"
+      ],
+      "viewports": [
+        1440
+      ],
+      "engines": [
+        "chromium"
+      ],
+      "status": "browser",
+      "auditEvidence": "NOT_IN_AUDIT",
+      "auditNote": "New surface from epic #214 phase P7 (#251): the in-shell search box over the D1 FTS5 index, keyboard accessible with loading, empty and error states.",
+      "edges": [
+        {
+          "id": "UI-164-E01",
+          "from": "A repository shell without focus in the search box",
+          "trigger": "The reader presses / anywhere outside a typing context",
+          "expected": "The search box (hidden until the shell hydrates) receives focus and selects its text; / is never stolen from text inputs or modifier combinations",
+          "inventoryRefs": [
+            "UI-163"
+          ],
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/lazy-tree-browser.test.ts",
+              "name": "opens with /, requires three characters and announces the hint without a request",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/lazy-tree-browser.test.ts",
+              "name": "does not steal / from typing contexts or modifier combinations",
+              "kind": "browser"
+            }
+          ]
+        },
+        {
+          "id": "UI-164-E02",
+          "from": "The reader types a query",
+          "trigger": "Keystrokes in the search box (debounced 200 ms)",
+          "expected": "One bounded request goes to the pinned commit's /search; under three characters a hint is announced and no request is made",
+          "inventoryRefs": [
+            "UI-163"
+          ],
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/lazy-tree-browser.test.ts",
+              "name": "debounces typing into one bounded request and announces the count",
+              "kind": "browser"
+            }
+          ]
+        },
+        {
+          "id": "UI-164-E03",
+          "from": "A query returns results",
+          "trigger": "The response arrives (a newer response replaces an older one)",
+          "expected": "Options carry path#slug, a highlighted snippet built from text nodes (never HTML), aria-selected and aria-activedescendant track the active option, and the count is announced",
+          "inventoryRefs": [
+            "UI-163"
+          ],
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/lazy-tree-browser.test.ts",
+              "name": "highlights matches, moves with the arrow keys and activates with Enter in-shell",
+              "kind": "browser"
+            }
+          ]
+        },
+        {
+          "id": "UI-164-E04",
+          "from": "Results are shown",
+          "trigger": "ArrowDown or ArrowUp",
+          "expected": "The selection wraps at the ends, the active option scrolls into view and aria-activedescendant follows",
+          "inventoryRefs": [
+            "UI-163"
+          ],
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/lazy-tree-browser.test.ts",
+              "name": "highlights matches, moves with the arrow keys and activates with Enter in-shell",
+              "kind": "browser"
+            }
+          ]
+        },
+        {
+          "id": "UI-164-E05",
+          "from": "An option is selected",
+          "trigger": "Enter (or clicking the option)",
+          "expected": "The panel closes, the field clears and the shell navigates in-shell to the document's path#fragment with a history entry",
+          "inventoryRefs": [
+            "UI-163"
+          ],
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/lazy-tree-browser.test.ts",
+              "name": "highlights matches, moves with the arrow keys and activates with Enter in-shell",
+              "kind": "browser"
+            }
+          ]
+        },
+        {
+          "id": "UI-164-E06",
+          "from": "A query returns nothing",
+          "trigger": "The response has no results",
+          "expected": "An accessible empty message is shown and announced",
+          "inventoryRefs": [
+            "UI-163"
+          ],
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/lazy-tree-browser.test.ts",
+              "name": "shows an empty state, an error state with retry, and closes on Escape, outside clicks and clear",
+              "kind": "browser"
+            }
+          ]
+        },
+        {
+          "id": "UI-164-E07",
+          "from": "A request fails or answers an error status",
+          "trigger": "The fetch is aborted by the network, or the endpoint answers non-200",
+          "expected": "An accessible error message with a Retry control is shown; activating Retry repeats the query",
+          "inventoryRefs": [
+            "UI-163"
+          ],
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/lazy-tree-browser.test.ts",
+              "name": "shows an empty state, an error state with retry, and closes on Escape, outside clicks and clear",
+              "kind": "browser"
+            }
+          ]
+        },
+        {
+          "id": "UI-164-E08",
+          "from": "The panel is open",
+          "trigger": "Escape, an outside click, or the clear button",
+          "expected": "The panel closes, aria-expanded returns to false, and clear empties the field and refocuses it",
+          "inventoryRefs": [
+            "UI-163"
+          ],
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/lazy-tree-browser.test.ts",
+              "name": "shows an empty state, an error state with retry, and closes on Escape, outside clicks and clear",
+              "kind": "browser"
+            }
+          ]
+        },
+        {
+          "id": "UI-164-E09",
+          "from": "A slower earlier response arrives after a newer query",
+          "trigger": "The reader extends the query while a request is in flight",
+          "expected": "The newer request supersedes it: the stale response is ignored (aborted) and only its results are shown",
+          "inventoryRefs": [
+            "UI-163"
+          ],
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/lazy-tree-browser.test.ts",
+              "name": "ignores a stale response after a newer query",
+              "kind": "browser"
+            }
+          ]
+        }
+      ]
     }
   ]
 }

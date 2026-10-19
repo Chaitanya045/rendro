@@ -46,7 +46,7 @@ export function contentPipeline(options: ContentPipelineOptions = {}): ContentPi
       const engineWasDown = markdownEngineFailed();
       try {
         const rendered = await renderDocument(source, path, renderOptions);
-        return { html: rendered.html, title: rendered.title, headings: rendered.headings };
+        return { html: rendered.html, title: rendered.title, headings: rendered.headings, sections: rendered.sections };
       } catch (error) {
         if (!(error instanceof RenderError)) throw error;
         if (error.reason === "engine" && engineWasDown) {
