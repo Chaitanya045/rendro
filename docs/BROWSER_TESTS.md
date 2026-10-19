@@ -549,8 +549,10 @@ pnpm visual:update -g "projects — list"   # extra arguments go to `playwright 
 An axe violation fails the run; there is no threshold to adjust. A known violation can only be listed in
 `e2e/visual/axe-states.spec.ts` with a written reason and an open issue, scoped to one rule, one state and one element,
 reviewed like any baseline change. An entry that no longer matches fails the run, so fixing the issue deletes the entry.
-Today's entries are the contrast findings of #267 and the dark-appearance findings listed in the table of `known` in
-`e2e/visual/axe-states.spec.ts`. Every axe state is scanned in light and in dark.
+Today's entries are the findings of #270 listed in `known` in `e2e/visual/axe-states.spec.ts`. Every axe state is
+scanned in light and in dark. Firefox's automation drops emulated media when the first navigation of a fresh page enters
+a trusted page's browsing context group (COOP, #89), which once made every Firefox "dark" scan render light: `applyTheme`
+enters the group first, and each scan asserts that the page really is in the appearance of its cell (`expectTheme`).
 
 CI jobs: `visual (chromium baselines)` and `a11y (chromium|firefox|webkit)` in `quality.yml`, each with a 20 minute
 timeout (the suites take a few minutes). Both upload their diffs and traces on failure.

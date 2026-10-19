@@ -304,9 +304,10 @@ async function openRepo(page: Page, visual: VisualState, state: string, closers:
       const preparing = state === "preparing";
       const body = renderPreparingPage(preparing ? "preparing" : "failed", 5);
       const glob = `**${base}`;
+      // The real response carries the trusted-page COOP (#89); without it Firefox leaves the browsing context group and drops the emulated theme.
       const handler = (route: Route) => route.fulfill({
         status: preparing ? 200 : 503, contentType: "text/html; charset=utf-8", body,
-        headers: { [READINESS_HEADER]: preparing ? "preparing" : "failed", "Cache-Control": "private, no-store", "Retry-After": "5" },
+        headers: { [READINESS_HEADER]: preparing ? "preparing" : "failed", "Cache-Control": "private, no-store", "Retry-After": "5", "Cross-Origin-Opener-Policy": "same-origin" },
       });
       await page.route(glob, handler);
       closers.push(() => page.unroute(glob, handler));
