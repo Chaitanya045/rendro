@@ -4,7 +4,7 @@ import { blobKey, manifestKey, refKey, sidebarKey } from "@/ingest/orchestrator/
 import { plaintextSealer, r2Store, type ContentSealer, type ObjectStore } from "@/ingest/orchestrator/store";
 import type { SidebarIndex } from "@/ingest/sidebar";
 import {
-  kvRevocationEpochs, parseRepoRecord, repoAccessHandler, RepoAccessUnavailable, serviceRepoPermissions, type RepoRecord,
+  kvRevocationEpochs, kvVisibilityEpochs, parseRepoRecord, repoAccessHandler, RepoAccessUnavailable, serviceRepoPermissions, type RepoRecord,
 } from "@/repo-read/access";
 import { authorizeRepo, authorizeTicket, clearAuthorizationMemory, mintTicket, type AuthorizeDependencies, type Viewer } from "@/repo-read/authorize";
 import { mintCapability, peekCapability, sessionBinding, verifyCapability, type CapabilityClaims } from "@/repo-read/capability";
@@ -168,6 +168,18 @@ describe("repository access protocol", () => {
     await expect(epochs.currentEpoch("c")).rejects.toBeInstanceOf(RepoAccessUnavailable);
     await expect(kvRevocationEpochs({ get: () => Promise.reject(new Error("KV down")) }).currentEpoch("a")).rejects.toBeInstanceOf(RepoAccessUnavailable);
   });
+
+  it("reads visibility epochs from KV under epoch:repo:<id>, with the same doubt rules", async () => {
+    const values = new Map<string, string>([["epoch:repo:7", "1792000000000"], ["epoch:repo:8", "x"], ["epoch:repo:9", "1".repeat(16)]]);
+    const get = vi.fn((key: string, _options: { cacheTtl: number }) => Promise.resolve(values.get(key) ?? null));
+    const epochs = kvVisibilityEpochs({ get });
+    expect(await epochs.visibilityEpoch(7)).toBe(1792000000000);
+    expect(await epochs.visibilityEpoch(10)).toBe(0);
+    expect(get).toHaveBeenCalledWith("epoch:repo:7", { cacheTtl: 60 });
+    await expect(epochs.visibilityEpoch(8)).rejects.toBeInstanceOf(RepoAccessUnavailable);
+    await expect(epochs.visibilityEpoch(9)).rejects.toBeInstanceOf(RepoAccessUnavailable);
+    await expect(kvVisibilityEpochs({ get: () => Promise.reject(new Error("KV down")) }).visibilityEpoch(7)).rejects.toBeInstanceOf(RepoAccessUnavailable);
+  });
 });
 
 describe("URL grammar", () => {
@@ -315,9 +327,11 @@ describe("shared cache", () => {
     expect(await verifySharedCachePath(secret, `${SHARED_CACHE_PATH}${signature}/!!!!/${encoded}`)).toBeNull();
     expect(await verifySharedCachePath(secret, `${SHARED_CACHE_PATH}${signature}/05/${encoded}`)).toBeNull();
     expect(await verifySharedCachePath(secret, otherEpoch)).toBeNull();
-    // A canonical key whose signature is for the wrong secret, and one whose bytes are not canonical.
+    // A canonical key whose signature is for the wrong secret, one whose bytes are not canonical,
+    // and one whose key does not decode at all.
     expect(await verifySharedCachePath(secret, `${SHARED_CACHE_PATH}${"A".repeat(43)}/${epoch}/${encoded}`)).toBeNull();
     expect(await verifySharedCachePath(secret, `${SHARED_CACHE_PATH}${signature}/${epoch}/ab`)).toBeNull();
+    expect(await verifySharedCachePath(secret, `${SHARED_CACHE_PATH}${signature}/${epoch}/a`)).toBeNull();
   });
 
   it("reads through a cacheable subrequest and reports a miss or an outage as null", async () => {

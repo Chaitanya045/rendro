@@ -253,6 +253,17 @@ describe("webhooks update the mirror, then the epoch", () => {
     world.kv.failPut = null;
     await world.directory.alarm();
     expect(world.kv.visibilityEpoch(807)).toBeGreaterThan(0);
+    // An enqueue that lands again while the write is in flight stays queued for the next pass.
+    world.kv.beforePut = async (key) => {
+      if (key === "epoch:repo:808") await world.storage.put("pending-repo:808", 2);
+    };
+    world.clock.time += 1_000;
+    await world.apply({ repos: { change: "remove", hints: [{ id: 808, owner: "octo", name: "gone-docs", private: false }], installation: world.installation.id }, revoke: false });
+    expect(await world.storage.get("pending-repo:808")).toBe(2);
+    world.kv.beforePut = null;
+    await world.directory.alarm();
+    expect(await world.storage.get("pending-repo:808")).toBeUndefined();
+    expect(world.kv.visibilityEpoch(808)).toBeGreaterThan(0);
   });
 
   it("treats a replayed 'publicized' body under a fresh delivery ID as a hint GitHub refutes", async () => {    const world = accessFixture();

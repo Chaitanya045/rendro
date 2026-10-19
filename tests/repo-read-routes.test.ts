@@ -837,6 +837,34 @@ describe("the shared cache route", () => {
     expectPlainNotFound(await app.request(await sharedCacheUrl(secret, "https://rendro.test", blobKey(publicRepo.id, "a".repeat(40)), 0), {}, {}, fixture.ctx));
   });
 
+  it("names the shared-cache subrequest on a public frame only for a dev-flagged deployment", async () => {
+    process.env.REPO_SHARED_CACHE_DEBUG = "1";
+    try {
+      const sessions = globalThis.fetch;
+      // Answer the Worker's own subrequest out of the fixture bucket, as the platform's cache would.
+      globalThis.fetch = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+        const url = new URL(input instanceof Request ? input.url : String(input));
+        if (!url.pathname.startsWith(SHARED_CACHE_PATH)) return sessions(input as never, init);
+        const encoded = url.pathname.split("/").pop() as string;
+        const storageKey = new TextDecoder().decode(Uint8Array.from(atob(encoded.replaceAll("-", "+").replaceAll("_", "/")), char => char.charCodeAt(0)));
+        const object = fixture.bucket.objects.get(storageKey);
+        // A manifest miss carries no cache headers, as the platform answers an uncached fill.
+        if (!object || storageKey.endsWith("manifest.json")) return Promise.resolve(new Response(null, { status: 404 }));
+        return Promise.resolve(new Response(object.bytes as Uint8Array<ArrayBuffer>, { headers: { "CF-Cache-Status": "HIT", "Age": "9" } }));
+      }) as typeof fetch;
+      const path = `${pub}/@${fixture.commits.public}/files/docs/index.md`;
+      const frame = await get(path);
+      expect(frame.status).toBe(200);
+      expect(frame.headers.get("X-Repo-Shared-Cache")).toBe("cf=HIT; age=9");
+      // A warm isolate reads nothing through the tier, so the response names nothing.
+      const warm = await get(path);
+      expect(warm.status).toBe(200);
+      expect(warm.headers.get("X-Repo-Shared-Cache")).toBeNull();
+    } finally {
+      delete process.env.REPO_SHARED_CACHE_DEBUG;
+    }
+  });
+
   it("is a retryable 503, never an allow, when the epoch store cannot answer", async () => {
     const key = blobKey(publicRepo.id, "a".repeat(40));
     await fixture.bucket.put(key, encode("hello"));
