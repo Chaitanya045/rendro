@@ -2,11 +2,13 @@
  * Reading ingested snapshots (#229's key schema) on the hot path (#234).
  *
  * Read order for every immutable object (manifest, sidebar, rendered page,
- * asset blob): this isolate's memory, then the colo's `caches.default`, then
- * R2. Every key names immutable bytes (commit, render key or blob SHA), so
- * nothing is ever invalidated. The ref pointer is the one mutable object: it
- * is served from memory for five seconds, then stale-while-revalidate for a
- * minute, and read from R2 otherwise.
+ * asset blob): this isolate's memory, then — for public repositories — the
+ * cacheable signed subrequest (#242, which feeds the colo cache and every tier
+ * above it) — then the colo's `caches.default`, then R2. Every key names
+ * immutable bytes (commit, render key or blob SHA), so nothing is ever
+ * invalidated. The ref pointer is the one mutable object: it is served from
+ * memory for five seconds, then stale-while-revalidate for a minute, and read
+ * from R2 otherwise.
  *
  * Every read takes a `RepoGrant`: authorization has already happened. Edge
  * cache keys sit under a reserved path of the Worker's own origin that no
@@ -23,6 +25,7 @@ import type { SidebarIndex } from "@/ingest/sidebar";
 import { ImmutableMetadataCache } from "@/immutable-cache";
 import { ViewerBackendError } from "@/viewer-backend";
 import type { RepoGrant } from "./grant";
+import type { SharedCacheReader } from "./shared-cache";
 
 /** The Workers Cache API surface used here. */
 export interface EdgeCache {
@@ -37,6 +40,11 @@ export interface SnapshotDependencies {
   edge: EdgeCache | null;
   /** The Worker's own origin: edge cache keys live under it. */
   origin: string;
+  /**
+   * Cacheable subrequests for public repository objects, or null where there is
+   * none (Node, tests without one). Never consulted for private repositories.
+   */
+  shared: SharedCacheReader | null;
   waitUntil(promise: Promise<unknown>): void;
   now(): number;
 }
@@ -96,9 +104,18 @@ export class RepoSnapshots {
     return grant.repo.private ? this.deps.sealer.open({ repoId: grant.repo.id, key }, stored) : stored;
   }
 
-  /** Stored bytes from the edge cache, else R2 (filling the edge cache in the background). */
-  private async stored(key: string): Promise<Uint8Array | null> {
-    const { edge } = this.deps;
+  /**
+   * Stored bytes for a public repository through the cacheable subrequest, else
+   * the per-colo edge cache, else R2 (filling the edge cache in the background).
+   * The subrequest is skipped for private repositories: their objects are sealed
+   * and must not enter a shared cache.
+   */
+  private async stored(grant: RepoGrant, key: string): Promise<Uint8Array | null> {
+    const { edge, shared } = this.deps;
+    if (!grant.repo.private && shared) {
+      const bytes = await shared(key);
+      if (bytes) return bytes;
+    }
     const cacheKey = `${this.deps.origin}${EDGE_PREFIX}${key}`;
     const hit = edge ? await edge.match(cacheKey) : undefined;
     if (hit) return new Uint8Array(await hit.arrayBuffer());
@@ -112,9 +129,19 @@ export class RepoSnapshots {
     return object.bytes;
   }
 
+  /**
+   * The bytes behind an immutable key straight from R2, with no cache layer and
+   * no parse, for the shared-cache route (#242). That route is itself a cache
+   * fill, so it must not call back into `stored`. The key was signed by this
+   * Worker, which only signs public objects.
+   */
+  async raw(key: string): Promise<Uint8Array | null> {
+    return (await this.deps.store.get(key))?.bytes ?? null;
+  }
+
   private immutable<T>(grant: RepoGrant, key: string, parse: (bytes: Uint8Array) => T): Promise<T | null> {
     return snapshotMemory.get<T | null>(key, async () => {
-      const stored = await this.stored(key);
+      const stored = await this.stored(grant, key);
       if (!stored) return { value: null, weight: null };
       const bytes = await this.open(grant, key, stored);
       return { value: parse(bytes), weight: bytes.byteLength };
@@ -181,7 +208,7 @@ export class RepoSnapshots {
   async page<T>(grant: RepoGrant, file: ManifestFile, variant: string, derive: (rendered: RenderedObject) => Promise<T>): Promise<T> {
     const key = renderObjectKey(grant.repo.id, file.render as string);
     const page = await snapshotMemory.get<T | null>(`${key}#${variant}`, async () => {
-      const stored = await this.stored(key);
+      const stored = await this.stored(grant, key);
       if (!stored) return { value: null, weight: null };
       const bytes = await this.open(grant, key, stored);
       const value = parseJson(bytes) as { html?: unknown; error?: unknown } | null;

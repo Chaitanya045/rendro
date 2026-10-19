@@ -4,6 +4,7 @@ import { RENDERER_VERSION } from "@/ingest/limits";
 import { blobKey, manifestKey, refKey, sidebarKey } from "@/ingest/orchestrator/keys";
 import { mintCapability, sessionBinding } from "@/repo-read/capability";
 import { clearSnapshotMemory } from "@/repo-read/snapshot";
+import { SHARED_CACHE_PATH, SHARED_CACHE_TTL_SECONDS, sharedCacheUrl } from "@/repo-read/shared-cache";
 import { ingestBranch } from "@/ingest/orchestrator/ingest";
 import { PREPARE_WINDOW_MS } from "@/repo-read/first-view";
 import { READINESS_HEADER } from "@/repo-read/preparing";
@@ -779,5 +780,30 @@ describe("the read order", () => {
     clearSnapshotMemory();
     expect((await get(`${pub}/@${fixture.commits.public}/files/docs/index.md`)).status).toBe(200);
     await fixture.settle();
+  });
+});
+
+describe("the shared cache route", () => {
+  const encode = (value: string) => new TextEncoder().encode(value);
+
+  it("serves a signed public object from R2, cacheable and immutable", async () => {
+    const key = blobKey(publicRepo.id, "a".repeat(40));
+    await fixture.bucket.put(key, encode("hello"));
+    const signed = await sharedCacheUrl(secret, "https://rendro.test", key);
+    const response = await get(new URL(signed).pathname);
+    expect(response.status).toBe(200);
+    expect(response.headers.get("Cache-Control")).toBe(`public, max-age=${SHARED_CACHE_TTL_SECONDS}, immutable`);
+    expect(response.headers.get("Content-Type")).toBe("application/octet-stream");
+    expect(response.headers.get("X-Content-Type-Options")).toBe("nosniff");
+    expect(await response.text()).toBe("hello");
+  });
+
+  it("is a plain 404 for a bad signature, a missing object or an unconfigured worker", async () => {
+    const path = new URL(await sharedCacheUrl(secret, "https://rendro.test", blobKey(publicRepo.id, "a".repeat(40)))).pathname;
+    const encoded = path.split("/").pop() as string;
+    expectPlainNotFound(await get(`${SHARED_CACHE_PATH}${"A".repeat(43)}/${encoded}`));
+    expectPlainNotFound(await get(`${SHARED_CACHE_PATH}${path.slice(SHARED_CACHE_PATH.length)}`)); // object not in R2
+    expectPlainNotFound(await get(SHARED_CACHE_PATH));
+    expectPlainNotFound(await app.request(await sharedCacheUrl(secret, "https://rendro.test", blobKey(publicRepo.id, "a".repeat(40))), {}, {}, fixture.ctx));
   });
 });

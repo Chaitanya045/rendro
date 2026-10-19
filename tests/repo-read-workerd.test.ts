@@ -98,10 +98,14 @@ beforeAll(async () => {
       `# Page ${index}\n\nThe zebra${index % 10} section explains installation. ${"Prose follows here. ".repeat(40)}\n`;
   }
   searchRepo.commit(bigFiles);
-  // Wrangler's harness hands every outbound Worker fetch to globalThis.fetch: only the session lookup leaves the Worker.
+  // Wrangler's harness hands every outbound Worker fetch to globalThis.fetch: the session lookup
+  // leaves the Worker, and the public objects' cacheable subrequest (#242) loops back to the Worker.
   globalThis.fetch = (input, init) => {
     const request = new Request(input, init);
     if (request.url.startsWith(`${convexSite}/api/auth/get-session`)) return Promise.resolve(sessionResponse(request));
+    if (server && origin && request.url.startsWith(origin) && new URL(request.url).pathname.startsWith("/__repo-cache/tiered/")) {
+      return server.fetch(request as never) as unknown as Promise<Response>;
+    }
     return Promise.reject(new Error(`Blocked outbound fetch to ${new URL(request.url).origin}`));
   };
   process.env.WRANGLER_SEND_METRICS = "false";

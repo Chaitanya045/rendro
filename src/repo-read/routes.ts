@@ -34,6 +34,7 @@ import { encodeRepoPath, parseRepoPath, repoBase, type RepoRefSpec, type RepoReq
 import { READINESS_HEADER, renderPreparingPage, type PreparingState } from "./preparing";
 import { searchManifest } from "./search";
 import { isPagePath, manifestFile, readDeadline, RepoSnapshots, type EdgeCache } from "./snapshot";
+import { SHARED_CACHE_PATH, SHARED_CACHE_TTL_SECONDS, sharedCacheReader, verifySharedCachePath } from "./shared-cache";
 import { REPO_SPECULATION_RULES_PATH, repoSpeculationRules } from "./speculation";
 import { treePage } from "./tree";
 import { requireCookieWrite } from "../../shared/request-admission";
@@ -91,6 +92,7 @@ function services(c: Context): Services | null {
   };
   const edge = (globalThis as { caches?: { default?: EdgeCache } }).caches?.default ?? null;
   const now = () => Date.now();
+  const origin = new URL(c.req.url).origin;
   return {
     authorize: {
       secret: REPO_CAPABILITY_SECRET, permissions: serviceRepoPermissions(access as Fetcher), epochs: kvRevocationEpochs(epochs as KvReader),
@@ -98,7 +100,7 @@ function services(c: Context): Services | null {
     },
     snapshots: new RepoSnapshots({
       store: readDeadline(r2Store(bucket as R2BucketLike), READ_TIMEOUT_MS), sealer: plaintextSealer, edge,
-      origin: new URL(c.req.url).origin, waitUntil, now,
+      origin, shared: sharedCacheReader(REPO_CAPABILITY_SECRET, origin), waitUntil, now,
     }),
     waitUntil,
     firstView: durableFirstView(env.REPO_INGEST),
@@ -298,6 +300,28 @@ app.get(REPO_SPECULATION_RULES_PATH, (c) => c.body(repoSpeculationRules(), 200, 
 }));
 // Storage faults and broken snapshots surface here; tree pages and renewals are read by scripts and get JSON.
 app.onError((error, c) => viewerErrorResponse(error, c, representation(parseRepoPath(new URL(c.req.url).pathname)?.target.kind) === "json"));
+
+// The cacheable read path for public immutable objects (#242), reached only by this Worker's own
+// subrequest (see shared-cache.ts). The path is signed over `public\n<storage key>`, so it can only
+// ever hold objects the Worker decided are public, and a private key has no valid signature. Reads
+// straight from R2: this route *is* the fill, so it must not recurse into the layered reader.
+app.get(`${SHARED_CACHE_PATH}*`, async (c) => {
+  const noStore = { "Cache-Control": "private, no-store" };
+  const configured = services(c);
+  if (!configured) return c.body(null, 404, noStore);
+  const key = await verifySharedCachePath(REPO_CAPABILITY_SECRET, c.req.path);
+  if (key === null) return c.body(null, 404, noStore);
+  const bytes = await configured.snapshots.raw(key);
+  if (!bytes) return c.body(null, 404, noStore);
+  return new Response(bytes as Uint8Array<ArrayBuffer>, {
+    headers: {
+      "Content-Type": "application/octet-stream",
+      // Immutable and content-addressed: let the colo cache and every tier above it keep it.
+      "Cache-Control": `public, max-age=${SHARED_CACHE_TTL_SECONDS}, immutable`,
+      "X-Content-Type-Options": "nosniff",
+    },
+  });
+});
 
 app.get("/r/*", async (c) => {
   c.header("Referrer-Policy", "no-referrer");

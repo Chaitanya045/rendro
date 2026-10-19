@@ -47,6 +47,8 @@ describe("rewriteUrl", () => {
     ["/LICENSE", "href", "../../LICENSE"],
     ["/", "href", "../../"],
     ["sub/", "href", "sub/"],
+    [".", "href", "./"],
+    ["./", "href", "./"],
     ["./a%20b.md", "href", "a%20b.md"],
     ["%2e%2e/x.md", "href", "../x.md"],
     ["bad%zz.md", "href", "bad%25zz.md"],
