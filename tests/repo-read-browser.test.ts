@@ -3,9 +3,11 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { RENDERER_VERSION } from "@/ingest/limits";
 import { blobKey, manifestKey } from "@/ingest/orchestrator/keys";
 import { gitBlobId } from "@/ingest/github/git-objects";
+import { r2Store, RepoContent } from "@/ingest/orchestrator/store";
 import { imageProxyPath } from "@/image-proxy";
 import worker from "@/worker";
 import { browserStep, createBrowserHarness } from "./helpers/browser";
+import { TEST_CONTENT_SEALER } from "./helpers/ingest-fixture";
 import { privateRepo, publicRepo, repoReadFixture, users } from "./helpers/repo-read-fixture";
 
 /*
@@ -29,22 +31,22 @@ async function send(response: ServerResponse, reply: Response) {
   response.end(Buffer.from(await reply.arrayBuffer()));
 }
 
-/** Adds `docs/images.md` with the three images to a repository's served snapshot. */
-async function addImagesPage(repoId: number, commit: string) {
-  const encoder = new TextEncoder();
+/** Adds `docs/images.md` with the three images to a repository's served snapshot, sealed as ingest seals a private one (#263). */
+async function addImagesPage(repo: typeof publicRepo, commit: string) {
+  const content = new RepoContent(r2Store(fixture.bucket), { ...repo, installationId: null }, TEST_CONTENT_SEALER);
   const pixel = await gitBlobId(new Uint8Array(PNG));
   const render = `render/v${RENDERER_VERSION}/markdown/${"a".repeat(40)}/${"b".repeat(32)}`;
   const proxied = await imageProxyPath(process.env.IMAGE_PROXY_SECRET as string, "https://images.example.com/badge.png") as string;
-  await fixture.bucket.put(blobKey(repoId, pixel), new Uint8Array(PNG));
-  await fixture.bucket.put(`gh/v1/repo/${repoId}/${render}`, encoder.encode(JSON.stringify({
+  await content.putBytes(blobKey(repo.id, pixel), new Uint8Array(PNG));
+  await content.putJson(`gh/v1/repo/${repo.id}/${render}`, {
     title: "Images", headings: [],
     html: `<p><img id="proxied" src="${proxied}" alt="proxied"> <img id="repository" src="img/pixel.png" alt="repository"> <img id="external" src="${EXTERNAL}" alt="external"></p>`,
-  })));
-  const key = manifestKey(repoId, commit, RENDERER_VERSION);
-  const manifest = fixture.bucket.json<{ files: Record<string, unknown> }>(key) as { files: Record<string, unknown> };
+  });
+  const key = manifestKey(repo.id, commit, RENDERER_VERSION);
+  const manifest = await content.getJson<{ files: Record<string, unknown> }>(key) as { files: Record<string, unknown> };
   manifest.files["docs/images.md"] = { sha: "a".repeat(40), size: 1, render, title: "Images" };
   manifest.files["docs/img/pixel.png"] = { sha: pixel, size: PNG.length };
-  await fixture.bucket.put(key, encoder.encode(JSON.stringify(manifest)));
+  await content.putJson(key, manifest);
 }
 
 beforeAll(async () => {
@@ -64,8 +66,8 @@ beforeAll(async () => {
 beforeEach(async () => {
   requests.length = 0;
   fixture = await repoReadFixture();
-  await addImagesPage(publicRepo.id, fixture.commits.public);
-  await addImagesPage(privateRepo.id, fixture.commits.private);
+  await addImagesPage(publicRepo, fixture.commits.public);
+  await addImagesPage(privateRepo, fixture.commits.private);
   // The session backend knows the reader; the image proxy's upstream answers with a PNG. Nothing else is reachable.
   vi.mocked(fetch).mockImplementation((input, init) => {
     const url = input instanceof Request ? input.url : String(input);

@@ -91,7 +91,9 @@ beforeAll(async () => {
   const files = { ...repoFiles() };
   for (let index = 0; index < pages; index += 1) files[`docs/pages/page-${index}.md`] = `# Page ${index}\n\n${"Some text. ".repeat(300)}\n`;
   publicCommit = publicRepo.commit(files);
-  privateCommit = privateRepo.commit(repoFiles("Closed home"));
+  const closedFiles = { ...repoFiles("Closed home") };
+  for (let index = 0; index < pages; index += 1) closedFiles[`docs/pages/page-${index}.md`] = `# Page ${index}\n\n${"Some text. ".repeat(300)}\n`;
+  privateCommit = privateRepo.commit(closedFiles);
   const bigFiles: Record<string, string> = {};
   for (let index = 0; index < searchPages; index += 1) {
     bigFiles[`docs/pages/page-${index}.md`] =
@@ -116,6 +118,7 @@ beforeAll(async () => {
     NODE_ENV: "production", LOG_LEVEL: "error", CONVEX_URL: "http://convex.test:3210", CONVEX_SITE_URL: convexSite,
     CONVEX_INTERNAL_SECRET: "workerd-convex-internal-secret-0123456789", AUTH_SECRET: "workerd-auth-secret-0123456789",
     REPO_CAPABILITY_SECRET: "workerd-repo-capability-secret-0123456789", IMAGE_PROXY_SECRET: "workerd-image-proxy-secret-0123456789",
+    REPO_CONTENT_KEY: process.env.REPO_CONTENT_KEY as string,
   };
   server = createTestHarness({ root, workers: [{ configPath, vars, secrets: vars }, { configPath: repoReadWorker.accessConfig }] });
   origin = (await server.listen()).url.origin;
@@ -205,6 +208,8 @@ describe("repository read path on workerd", () => {
       "cached private shell, branch URL": await sample(samples, () => "/r/octo/closed-docs", { cookie }),
       // Each page is new to the isolate and to the colo cache: one R2 read of its rendered object.
       "R2 miss (render object)": await sample(pages, index => `/r/octo/open-docs/@${publicCommit}/files/docs/pages/page-${index}.md`),
+      // The same for a private repository (#263): the render object is sealed in R2 and opened after authorization.
+      "R2 miss, private (sealed render object)": await sample(pages, index => `/r/octo/closed-docs/@${privateCommit}/files/docs/pages/page-${index}.md`, { cookie }),
       // No capability cookie: session lookup (answered in-process here), KV epoch, control Worker, a new cookie.
       "capability-cookie miss (private frame)": await sample(samples, () => privateFrame, { cookie: reader }),
     };

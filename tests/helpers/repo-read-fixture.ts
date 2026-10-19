@@ -2,6 +2,7 @@ import { vi } from "vitest";
 import { repoAccessHandler, repoKey, RepoAccessUnavailable, type RepoPermissionSource, type RepoRecord, type RevocationEpochs } from "../../src/repo-read/access";
 import { clearAuthorizationMemory } from "../../src/repo-read/authorize";
 import { clearSnapshotMemory, type EdgeCache } from "../../src/repo-read/snapshot";
+import { clearTouches } from "../../src/repo-read/first-view";
 import { ingestBranch, type RefEtagCache } from "../../src/ingest/orchestrator/ingest";
 import type { CachedRef } from "../../src/ingest/github/source";
 import { ingestFixture } from "./ingest-fixture";
@@ -128,6 +129,7 @@ export function repoFiles(title = "Home"): Record<string, string | Uint8Array> {
 export async function repoReadFixture() {
   clearAuthorizationMemory();
   clearSnapshotMemory();
+  clearTouches();
   sessionCache.clear();
   const ingest = ingestFixture();
   const access = new InMemoryRepoAccess().addRepo(publicRepo).addRepo(privateRepo, [users.reader]);
@@ -159,12 +161,20 @@ export class FakeIngestCoordinator {
   transportError: string | null = null;
   /** When set, every ensure call answers immediately with this outcome. */
   autoAnswer: unknown = null;
+  /** Views reported for idle expiry (#263). */
+  readonly touches: Array<{ id: number; private: boolean }> = [];
+  /** When set, touches fail like an unreachable coordinator. */
+  failTouches = false;
   private pending: Array<{ resolve: (outcome: unknown) => void; reject: (error: Error) => void }> = [];
 
   readonly namespace = {
     idFromName: (name: string) => ({ name }),
     get: () => ({
       fetch: async (url: string, init?: RequestInit) => {
+        if (new URL(url).pathname === "/touch") {
+          this.touches.push(JSON.parse(String(init?.body as string)) as { id: number; private: boolean });
+          return this.failTouches ? new Response("down", { status: 502 }) : Response.json({ status: "ok" });
+        }
         if (new URL(url).pathname !== "/ensure") return new Response("Bad request", { status: 400 });
         const { repo, branch } = JSON.parse(String(init?.body as string)) as { repo: unknown; branch: string };
         this.calls.push({ repo: repo as typeof this.calls[number]["repo"], branch });

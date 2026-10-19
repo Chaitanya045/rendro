@@ -3,10 +3,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { acceptPushWebhook, MAX_WEBHOOK_BYTES, parsePush, verifyWebhookSignature } from "../src/ingest/github/webhook";
 import { HttpGitHubSource } from "../src/ingest/github/http-source";
 import { RENDERER_VERSION } from "../src/ingest/limits";
-import type { DurableObjectNamespaceLike } from "../src/ingest/orchestrator/coordinator-client";
-import { refKey } from "../src/ingest/orchestrator/keys";
+import { IDLE_EXPIRY_MS } from "../src/ingest/orchestrator/coordinator";
+import { coordinatorClient, type DurableObjectNamespaceLike } from "../src/ingest/orchestrator/coordinator-client";
+import { manifestKey, refKey } from "../src/ingest/orchestrator/keys";
+import { envelopeSealer, isSealed } from "../src/ingest/orchestrator/sealing";
 import type { IngestMessage } from "../src/ingest/orchestrator/messages";
-import worker, { ingestDependencies, log, RepoIngestCoordinator, type IngestWorkerEnv } from "../src/ingest/orchestrator/worker";
+import worker, { idleWindowMs, ingestDependencies, log, RepoIngestCoordinator, type IngestWorkerEnv } from "../src/ingest/orchestrator/worker";
 import { FakeGitHub } from "./helpers/fake-github";
 import { FakeDurableStorage, FakeR2Bucket } from "./helpers/fake-storage";
 import { rejectWith } from "./helpers/ingest-fixture";
@@ -125,6 +127,7 @@ describe("ingest Worker entry", () => {
       GITHUB_ARCHIVE_ORIGINS: ` ${github.archiveOrigin} ,`,
       GITHUB_DEV_TOKEN: github.token,
       IMAGE_PROXY_SECRET: process.env.IMAGE_PROXY_SECRET as string,
+      REPO_CONTENT_KEY: process.env.REPO_CONTENT_KEY,
       ...overrides,
     };
     env.INGEST_COORDINATOR = {
@@ -156,6 +159,37 @@ describe("ingest Worker entry", () => {
 
   it("serves no routes", () => {
     expect(worker.fetch().status).toBe(404);
+  });
+
+  it("reads the idle window from the environment, in seconds, defaulting to 30 days", () => {
+    expect(idleWindowMs({ REPO_IDLE_EXPIRY_SECONDS: "60" } as IngestWorkerEnv)).toBe(60_000);
+    for (const value of [undefined, "", "0", "-5", "soon"]) expect(idleWindowMs({ REPO_IDLE_EXPIRY_SECONDS: value } as IngestWorkerEnv)).toBe(IDLE_EXPIRY_MS);
+  });
+
+  it("seals private content with REPO_CONTENT_KEY, and touches, expires and purges through the coordinator's client and alarm", async () => {
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    const { github, bucket, env } = environment({ REPO_IDLE_EXPIRY_SECONDS: "0.001" });
+    vi.spyOn(globalThis, "fetch").mockImplementation(github.fetch);
+    const repo = github.repo("octo", "docs", { id: 9, private: true });
+    const head = repo.commit({ "docs/index.md": "# Private home\n" });
+    const client = coordinatorClient(env.INGEST_COORDINATOR, 9);
+    expect(await client.ensure(repo.ref, "main")).toMatchObject({ status: "flipped", commit: head });
+    const key = manifestKey(9, head, RENDERER_VERSION);
+    const stored = bucket.objects.get(key)?.bytes as Uint8Array;
+    expect(isSealed(stored)).toBe(true);
+    expect(JSON.parse(new TextDecoder().decode(await envelopeSealer(process.env.REPO_CONTENT_KEY as string).open({ repoId: 9, key }, stored)))).toMatchObject({ commit: head });
+    expect(await client.touch({ id: 9, private: true })).toEqual({ status: "ok" });
+    expect(await client.purge(9)).toEqual({ status: "done" });
+    expect(bucket.keys("gh/v1/repo/9/")).toEqual([]);
+    // The Durable Object's alarm expires content once the (configured, tiny) idle window has passed.
+    const storage = new FakeDurableStorage();
+    const object = new RepoIngestCoordinator({ storage }, env);
+    await object.fetch(new Request("https://coordinator/ensure", { method: "POST", body: JSON.stringify({ repo: repo.ref, branch: "main" }) }));
+    expect(bucket.keys("gh/v1/repo/9/").length).toBeGreaterThan(0);
+    await new Promise(resolve => setTimeout(resolve, 5));
+    await object.alarm();
+    expect(bucket.keys("gh/v1/repo/9/")).toEqual([]);
+    expect(storage.data.get("expired")).toBe(true);
   });
 
   it("consumes queue batches through the per-repository coordinator", async () => {

@@ -16,7 +16,8 @@
  * - The purge ledger (#258): a removed repository's comments are hidden at
  *   once, but purged only once its window has ended and GitHub confirms the
  *   removal (`confirmRemoval`). A replayed removal is caught there: the
- *   repository is restored and nothing is deleted.
+ *   repository is restored and nothing is deleted. The same confirmation
+ *   purges the repository's cached R2 content and search rows (#263).
  *
  * A Durable Object runs one instance, so registry and mirrors change
  * consistently. Its input gates open while it awaits GitHub, so a refresh or
@@ -66,6 +67,15 @@ export interface CommentAccessSink {
   restoreRepos(repoIds: number[]): Promise<void>;
 }
 
+/**
+ * A removed repository's cached content in R2 and its search rows (#263),
+ * deleted only after GitHub confirmed the removal, like its comments. Throws
+ * unless every purge was accepted, so the ledger confirms with GitHub again.
+ */
+export interface ContentPurgeSink {
+  purge(repoIds: number[]): Promise<void>;
+}
+
 export type DirectoryLog = (event: string, fields: Record<string, string | number | boolean>) => void;
 
 export interface DirectoryDependencies {
@@ -77,6 +87,8 @@ export interface DirectoryDependencies {
   epochs: EpochStore;
   /** Optional: without it, comment grants end with their own lifetime (at most the five-minute capability). */
   comments?: CommentAccessSink;
+  /** Optional: without it, a removed repository's content stays until idle expiry deletes it (nobody can view it). */
+  content?: ContentPurgeSink;
   now(): number;
   log: DirectoryLog;
 }
@@ -612,7 +624,7 @@ export class AccessDirectory {
     }
     if (plan.repos) for (const hint of plan.repos.hints) await this.applyRepoChange(plan.repos.change, hint, plan.repos.installation, seq);
     if (plan.renameOwner) await this.renameOwner(plan.renameOwner.from, plan.renameOwner.to, seq);
-    if (this.deps.comments) await this.enqueueRemovals(plan);
+    if (this.deps.comments || this.deps.content) await this.enqueueRemovals(plan);
 
     const affected = new Set<string>();
     for (const githubId of [...plan.users ?? [], ...plan.unauthorize === undefined ? [] : [plan.unauthorize]]) {
@@ -682,8 +694,11 @@ export class AccessDirectory {
     }
     const dueAt = this.deps.now() + REMOVAL_PURGE_DELAY_MS;
     for (const repoId of removed) {
-      await this.storage.put(`removed:${repoId}`, 1);
-      await this.storage.delete([`restore:${repoId}`]);
+      // Convex hides the comments at once (its outbox); content waits for the purge like comments do.
+      if (this.deps.comments) {
+        await this.storage.put(`removed:${repoId}`, 1);
+        await this.storage.delete([`restore:${repoId}`]);
+      }
       // A purge already pending keeps its time: a repeated removal never extends the window.
       if (await this.storage.get(`purging:${repoId}`) === undefined) await this.schedulePurge(repoId, dueAt, 0);
     }
@@ -815,8 +830,10 @@ export class AccessDirectory {
   private async restoreRemoved(repoId: number): Promise<void> {
     if (await this.storage.get(`purging:${repoId}`) === undefined) return;
     await this.cancelPurge(repoId);
-    await this.storage.delete([`removed:${repoId}`]);
-    await this.storage.put(`restore:${repoId}`, 1);
+    if (this.deps.comments) {
+      await this.storage.delete([`removed:${repoId}`]);
+      await this.storage.put(`restore:${repoId}`, 1);
+    }
     this.deps.log("access.removal-reverted", { restored: 1 });
     await this.arm(this.deps.now());
   }
@@ -826,8 +843,8 @@ export class AccessDirectory {
    * purges on doubt, and a decision an event overtook is taken again later. Returns when the next is due.
    */
   private async purgeDue(): Promise<number | null> {
-    const sink = this.deps.comments;
-    if (!sink) return null;
+    const { comments: sink, content } = this.deps;
+    if (!sink && !content) return null;
     const now = this.deps.now();
     const confirmed: PurgeEntry[] = [];
     let [restored, postponed] = [0, 0];
@@ -843,7 +860,7 @@ export class AccessDirectory {
       if (await this.storage.get(`purging:${item.repoId}`) !== key) continue;
       const current = await this.storage.get<RepoEntry>(`repo:${item.repoId}`) as RepoEntry;
       // Unknown, overtaken by an event, or Convex has not heard of the removal yet: ask again later.
-      if (verdict.kind === "unknown" || current.seq !== entry.seq || await this.storage.get(`removed:${item.repoId}`) !== undefined) {
+      if (verdict.kind === "unknown" || current.seq !== entry.seq || (sink && await this.storage.get(`removed:${item.repoId}`) !== undefined)) {
         await postpone(item);
       } else if (verdict.kind === "accessible") {
         const { repo } = verdict;
@@ -857,23 +874,34 @@ export class AccessDirectory {
         confirmed.push(item);
       }
     }
+    let contentPurged = 0;
     if (confirmed.length) {
+      const repoIds = confirmed.map(item => item.repoId);
+      // Both purges are idempotent, so a failure of either confirms with GitHub again and repeats both.
+      let contentDone = !content;
       let answer: PurgeAnswer | null = null;
       try {
-        answer = await sink.purgeRepos(confirmed.map(item => item.repoId));
+        if (content) await content.purge(repoIds);
+        contentDone = true;
+        contentPurged = content ? repoIds.length : 0;
       } catch {
         // Confirmed again on the next attempt: GitHub's answer is never reused across a delay.
+      }
+      try {
+        if (sink) answer = await sink.purgeRepos(repoIds);
+      } catch {
+        // As above.
       }
       for (const item of confirmed) {
         if (await this.storage.get(`purging:${item.repoId}`) !== purgeKey(item.dueAt, item.repoId)) continue;
         const notDue = answer?.notDue.find(late => late.repoId === item.repoId);
-        if (!answer) await postpone(item);
+        if (!contentDone || (sink && !answer)) await postpone(item);
         // Convex heard of the removal later than this ledger: its own window ends later.
         else if (notDue) await this.schedulePurge(item.repoId, notDue.dueAt, 0);
         else await this.cancelPurge(item.repoId);
       }
     }
-    if (confirmed.length || restored || postponed) this.deps.log("access.purge", { confirmed: confirmed.length, restored, postponed });
+    if (confirmed.length || restored || postponed) this.deps.log("access.purge", { confirmed: confirmed.length, content: contentPurged, restored, postponed });
     const [first] = (await this.storage.list<PurgeEntry>({ prefix: "purge:", limit: 1 })).values();
     return first ? first.dueAt : null;
   }

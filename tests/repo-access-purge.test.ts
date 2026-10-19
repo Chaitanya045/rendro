@@ -100,7 +100,7 @@ describe("a removal is confirmed with GitHub before anything is purged (#258)", 
     // GitHub still shows the repository to the installation: restored, with an audit event, and nothing deleted.
     expect(await world.comments()).toEqual({ threads: 1, replies: 1, hidden: false });
     expect(await world.audits()).toEqual([["repository.removal_reverted", String(world.open.id)]]);
-    expect(world.logs.filter(entry => entry.event === "access.purge").map(entry => entry.fields)).toEqual([{ confirmed: 0, restored: 1, postponed: 0 }]);
+    expect(world.logs.filter(entry => entry.event === "access.purge").map(entry => entry.fields)).toEqual([{ confirmed: 0, content: 0, restored: 1, postponed: 0 }]);
     expect(await world.read(null, world.open)).toMatchObject({ id: world.open.id });
     expect(await ledger(world)).toEqual([]);
     await world.advance(REMOVED_REPO_RETENTION_MS * 2);
@@ -142,7 +142,7 @@ describe("a removal is confirmed with GitHub before anything is purged (#258)", 
     await world.deliver("installation", { action: "deleted" });
     await world.advance(REMOVAL_PURGE_DELAY_MS);
     expect((await world.comments()).threads).toBe(0);
-    expect(world.logs.filter(entry => entry.event === "access.purge").map(entry => entry.fields)).toEqual([{ confirmed: 3, restored: 0, postponed: 0 }]);
+    expect(world.logs.filter(entry => entry.event === "access.purge").map(entry => entry.fields)).toEqual([{ confirmed: 3, content: 0, restored: 0, postponed: 0 }]);
   });
 
   it("postpones the purge while GitHub cannot answer, backing off, and purges once it can", async () => {

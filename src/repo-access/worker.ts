@@ -19,6 +19,7 @@ import type { DurableObjectNamespaceLike } from "@/ingest/orchestrator/coordinat
 import { isOwnerLogin } from "@/ingest/orchestrator/messages";
 import { parseRepoRecord, repoAccessHandler, RepoAccessUnavailable, type RepoPermissionSource } from "@/repo-read/access";
 import { convexCommentSink } from "./comments";
+import { coordinatorContentPurge } from "./content";
 import { AccessDirectory, type DirectoryLog, type DirectoryState, type EpochStore } from "./directory";
 import { planEvent } from "./events";
 import { GitHubAccessClient } from "./github";
@@ -43,6 +44,11 @@ export interface ControlWorkerEnv {
   /** Comments on repository docs (#254): Convex, told about every epoch and removed repository. Optional. */
   CONVEX_URL?: string;
   CONVEX_INTERNAL_SECRET?: string;
+  /**
+   * Optional (#263): the ingest Worker's per-repository coordinators. A removal GitHub confirmed then
+   * deletes the repository's cached R2 content and search rows too.
+   */
+  REPO_INGEST?: DurableObjectNamespaceLike;
 }
 
 export const INTERNAL_HOST = "repo-access.internal";
@@ -145,6 +151,7 @@ export class RepoAccessDirectory {
         tokenKey, epochs: env.REPO_EPOCHS, now: () => Date.now(), log,
         // Without both, comment grants end with their own lifetime (at most five minutes) instead of with the epoch.
         comments: env.CONVEX_URL && validSecret(env.CONVEX_INTERNAL_SECRET) ? convexCommentSink(env.CONVEX_URL, env.CONVEX_INTERNAL_SECRET) : undefined,
+        content: env.REPO_INGEST ? coordinatorContentPurge(env.REPO_INGEST) : undefined,
       })
       : null;
   }

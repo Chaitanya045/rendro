@@ -8,6 +8,7 @@ import type { IngestMessage } from "../src/ingest/orchestrator/messages";
 import { FakeGitHub } from "./helpers/fake-github";
 import { docsRepoFiles } from "./helpers/ingest-fixture";
 import { verifyImageProxyPath } from "../src/image-proxy";
+import { envelopeSealer, isSealed } from "../src/ingest/orchestrator/sealing";
 
 /**
  * The ingest Worker on real workerd (wrangler's test harness): Queue consumer,
@@ -16,7 +17,7 @@ import { verifyImageProxyPath } from "../src/image-proxy";
  */
 
 interface R2Like {
-  get(key: string): Promise<{ text(): Promise<string> } | null>;
+  get(key: string): Promise<{ text(): Promise<string>; arrayBuffer(): Promise<ArrayBuffer> } | null>;
   list(options: { prefix: string }): Promise<{ objects: Array<{ key: string }> }>;
 }
 interface Env {
@@ -46,6 +47,14 @@ async function waitFor<T>(probe: () => Promise<T | null>, timeoutMs = 30_000): P
   }
 }
 
+/** A private repository's object as the serving Worker opens it: sealed in R2 by workerd, opened here with the same key (#263). */
+async function sealedJson<T>(repoId: number, key: string): Promise<T> {
+  const stored = new Uint8Array(await (await env.INGEST_BUCKET.get(key))?.arrayBuffer() as ArrayBuffer);
+  expect(isSealed(stored)).toBe(true);
+  const opened = await envelopeSealer(process.env.REPO_CONTENT_KEY as string).open({ repoId, key }, stored);
+  return JSON.parse(new TextDecoder().decode(opened)) as T;
+}
+
 function ensure(repo: ReturnType<typeof github.repo>): Promise<{ status: string; commit?: string }> {
   const stub = env.INGEST_COORDINATOR.get(env.INGEST_COORDINATOR.idFromName(coordinatorName(repo.id)));
   return stub.fetch("https://coordinator/ensure", { method: "POST", body: JSON.stringify({ repo: repo.ref, branch: "main" }) })
@@ -66,7 +75,7 @@ beforeAll(async () => {
     workers: [{
       configPath: "wrangler.ingest.toml",
       vars: { GITHUB_API_ORIGIN: github.origin, GITHUB_ARCHIVE_ORIGINS: github.archiveOrigin },
-      secrets: { GITHUB_DEV_TOKEN: github.token, IMAGE_PROXY_SECRET: process.env.IMAGE_PROXY_SECRET as string },
+      secrets: { GITHUB_DEV_TOKEN: github.token, IMAGE_PROXY_SECRET: process.env.IMAGE_PROXY_SECRET as string, REPO_CONTENT_KEY: process.env.REPO_CONTENT_KEY as string },
     }],
   });
   await server.listen();
@@ -94,9 +103,12 @@ describe("ingest Worker on workerd", () => {
     const firstRequests = github.billable();
     expect(github.count("tarball")).toBe(1);
     expect(github.count("blob")).toBe(0);
-    const manifest = JSON.parse(await (await env.INGEST_BUCKET.get(manifestKey(101, first, RENDERER_VERSION)))?.text() as string) as { files: Record<string, { render?: string }> };
+    // A private repository: everything but the pointer is sealed, and nothing of the page is readable in R2.
+    const manifest = await sealedJson<{ files: Record<string, { render?: string }> }>(101, manifestKey(101, first, RENDERER_VERSION));
+    const pageKey = `gh/v1/repo/101/${manifest.files["docs/page-0.md"].render as string}`;
+    expect(await (await env.INGEST_BUCKET.get(pageKey))?.text()).not.toContain("Page 0");
     // comrak (bundled WASM) rendered the page, and the sanitizer added GitHub-style heading ids.
-    const page = JSON.parse(await (await env.INGEST_BUCKET.get(`gh/v1/repo/101/${manifest.files["docs/page-0.md"].render as string}`))?.text() as string) as { html: string; title: string };
+    const page = await sealedJson<{ html: string; title: string }>(101, pageKey);
     expect(page.title).toBe("Page 0");
     expect(page.html).toContain('<h1 id="user-content-page-0">Page 0</h1>');
 
@@ -109,8 +121,8 @@ describe("ingest Worker on workerd", () => {
     expect(github.count("tarball")).toBe(0);
     expect(github.count("blob")).toBe(2);
     // The external image was rewritten in workerd to a same-origin proxy URL signed with the Worker's secret (#224).
-    const secondManifest = JSON.parse(await (await env.INGEST_BUCKET.get(manifestKey(101, second, RENDERER_VERSION)))?.text() as string) as { files: Record<string, { render?: string }> };
-    const changed = JSON.parse(await (await env.INGEST_BUCKET.get(`gh/v1/repo/101/${secondManifest.files["docs/page-1.md"].render as string}`))?.text() as string) as { html: string };
+    const secondManifest = await sealedJson<{ files: Record<string, { render?: string }> }>(101, manifestKey(101, second, RENDERER_VERSION));
+    const changed = await sealedJson<{ html: string }>(101, `gh/v1/repo/101/${secondManifest.files["docs/page-1.md"].render as string}`);
     const src = /<img src="([^"]+)" alt="Badge"/.exec(changed.html)?.[1] as string;
     expect(await verifyImageProxyPath(process.env.IMAGE_PROXY_SECRET as string, src)).toBe("https://img.shields.io/badge/docs-ok-green.svg");
     expect(changed.html).not.toContain("shields.io");

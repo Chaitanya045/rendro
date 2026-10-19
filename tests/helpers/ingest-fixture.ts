@@ -5,13 +5,17 @@ import { IngestCoordinator } from "../../src/ingest/orchestrator/coordinator";
 import type { IngestDependencies } from "../../src/ingest/orchestrator/ingest";
 import { contentPipeline } from "../../src/ingest/orchestrator/content-pipeline";
 import type { ContentPipeline } from "../../src/ingest/orchestrator/pipeline";
-import { plaintextSealer, r2Store, type ContentSealer } from "../../src/ingest/orchestrator/store";
+import { envelopeSealer } from "../../src/ingest/orchestrator/sealing";
+import { r2Store, type ContentSealer } from "../../src/ingest/orchestrator/store";
 import { FakeGitHub } from "./fake-github";
 import { FakeDurableStorage, FakeR2Bucket } from "./fake-storage";
 import { initNodeMarkdownEngine } from "./markdown-engine";
 import { TEST_RENDER_OPTIONS } from "./ingest-render";
 
 initNodeMarkdownEngine();
+
+/** The serving Worker's sealer in tests (tests/setup.ts sets REPO_CONTENT_KEY): private content is sealed as in production. */
+export const TEST_CONTENT_SEALER = envelopeSealer(process.env.REPO_CONTENT_KEY as string);
 
 /** Reject with a value that is not an Error, as some runtimes and libraries do. */
 export function rejectWith(value: unknown): Promise<never> {
@@ -55,7 +59,7 @@ export function ingestFixture(options: FixtureOptions = {}) {
     governor: new RateGovernor({ clock, ...options.governor }),
   });
   const deps: IngestDependencies = {
-    source, store, sealer: options.sealer ?? plaintextSealer, pipeline: options.pipeline ?? contentPipeline(TEST_RENDER_OPTIONS), now: clock.now,
+    source, store, sealer: options.sealer ?? TEST_CONTENT_SEALER, pipeline: options.pipeline ?? contentPipeline(TEST_RENDER_OPTIONS), now: clock.now,
     ...(options.snapshot ? { snapshot: options.snapshot } : {}),
   };
   const storage = new FakeDurableStorage();

@@ -7,7 +7,7 @@
 import { unconfiguredDeliveries } from "../github/deliveries";
 import { HttpGitHubSource } from "../github/http-source";
 import { staticTokenProvider } from "../github/token";
-import { IngestCoordinator, type DurableStateLike } from "./coordinator";
+import { IngestCoordinator, IDLE_EXPIRY_MS, type DurableStateLike } from "./coordinator";
 import { coordinatorClient, type DurableObjectNamespaceLike } from "./coordinator-client";
 import { consumeIngestBatch, type IngestLog, type MessageBatchLike } from "./consumer";
 import type { IngestDependencies } from "./ingest";
@@ -16,7 +16,8 @@ import { contentPipeline } from "./content-pipeline";
 import { imageProxyRewriter } from "../../image-proxy";
 import { d1SearchIndex, type SearchD1 } from "../../search/d1";
 import { reconcileHeads, redeliverFailedDeliveries } from "./reconcile";
-import { plaintextSealer, r2Store, type R2BucketLike } from "./store";
+import { contentSealer } from "./sealing";
+import { r2Store, type R2BucketLike } from "./store";
 
 export interface IngestWorkerEnv {
   INGEST_BUCKET: R2BucketLike;
@@ -32,6 +33,18 @@ export interface IngestWorkerEnv {
   IMAGE_PROXY_SECRET: string;
   /** Repository search index (#251). Development and tests only; P-deploy provisions it. */
   REPO_SEARCH?: SearchD1;
+  /** Seals private-repository content (#263); the serving Worker's value. Without a valid one, private repositories are not ingested. */
+  REPO_CONTENT_KEY?: string;
+  /** During a key rotation: the previous key, which still opens content sealed before it. */
+  REPO_CONTENT_KEY_PREVIOUS?: string;
+  /** Tests only: the idle window in seconds (default 30 days). */
+  REPO_IDLE_EXPIRY_SECONDS?: string;
+}
+
+/** The idle window: 30 days unless a test configures a positive number of seconds. */
+export function idleWindowMs(env: IngestWorkerEnv): number {
+  const seconds = Number(env.REPO_IDLE_EXPIRY_SECONDS);
+  return Number.isFinite(seconds) && seconds > 0 ? seconds * 1000 : IDLE_EXPIRY_MS;
 }
 
 export function ingestDependencies(env: IngestWorkerEnv): IngestDependencies {
@@ -43,7 +56,7 @@ export function ingestDependencies(env: IngestWorkerEnv): IngestDependencies {
       archiveOrigins: archiveOrigins?.length ? archiveOrigins : undefined,
     }),
     store: r2Store(env.INGEST_BUCKET),
-    sealer: plaintextSealer,
+    sealer: contentSealer(env.REPO_CONTENT_KEY, env.REPO_CONTENT_KEY_PREVIOUS),
     pipeline: contentPipeline({ rewriteImageUrl: imageProxyRewriter(env.IMAGE_PROXY_SECRET) }),
     now: () => Date.now(),
     ...(env.REPO_SEARCH ? { search: d1SearchIndex(env.REPO_SEARCH) } : {}),
@@ -55,11 +68,15 @@ export class RepoIngestCoordinator {
   private readonly coordinator: IngestCoordinator;
 
   constructor(state: DurableStateLike, env: IngestWorkerEnv) {
-    this.coordinator = new IngestCoordinator(state, ingestDependencies(env));
+    this.coordinator = new IngestCoordinator(state, ingestDependencies(env), { idleMs: idleWindowMs(env), log });
   }
 
   fetch(request: Request): Promise<Response> {
     return this.coordinator.fetch(request);
+  }
+
+  alarm(): Promise<void> {
+    return this.coordinator.alarm();
   }
 }
 

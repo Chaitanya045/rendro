@@ -7,6 +7,7 @@ process.env.CONVEX_URL = "http://127.0.0.1:3210";
 process.env.CONVEX_INTERNAL_SECRET = "test-convex-internal-secret-32-chars";
 process.env.IMAGE_PROXY_SECRET = "test-image-proxy-secret-32-chars!";
 process.env.REPO_CAPABILITY_SECRET = "test-repo-capability-secret-32-chars";
+process.env.REPO_CONTENT_KEY = "test-repo-content-key-0123456789abcdef";
 
 // Convex auth tests still need these; the Worker config tests explicitly unset them.
 process.env.GOOGLE_CLIENT_ID = "test-google-client-id";

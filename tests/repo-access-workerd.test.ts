@@ -98,6 +98,7 @@ beforeAll(async () => {
     NODE_ENV: "production", LOG_LEVEL: "error", CONVEX_URL: "http://convex.test:3210", CONVEX_SITE_URL: convexSite,
     CONVEX_INTERNAL_SECRET: "workerd-convex-internal-secret-0123456789", AUTH_SECRET: "workerd-auth-secret-0123456789",
     REPO_CONTENT_SECRET: "unused", REPO_CAPABILITY_SECRET: "workerd-repo-capability-secret-0123456789", IMAGE_PROXY_SECRET: "workerd-image-proxy-secret-0123456789",
+    REPO_CONTENT_KEY: process.env.REPO_CONTENT_KEY as string,
   };
   const controlVars = { GITHUB_API_ORIGIN: github.origin, GITHUB_WEB_ORIGIN: github.webOrigin, GITHUB_APP_CLIENT_ID: github.clientId };
   const controlSecrets = { GITHUB_WEBHOOK_SECRET: WEBHOOK_SECRET, GITHUB_TOKEN_KEY: "workerd-github-token-key-0123456789abcdef", GITHUB_APP_CLIENT_SECRET: github.clientSecret, GITHUB_DEV_TOKEN: github.token };

@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { GitHubError } from "../../src/ingest/github/source";
 import { staticTokenProvider, type InstallationTokenProvider } from "../../src/ingest/github/token";
 import { RateGovernor } from "../../src/ingest/github/rate-governor";
-import { AccessDirectory, type CommentAccessSink, type DirectoryStorage, type EpochStore } from "../../src/repo-access/directory";
+import { AccessDirectory, type CommentAccessSink, type ContentPurgeSink, type DirectoryStorage, type EpochStore } from "../../src/repo-access/directory";
 import { planEvent, type EventPlan } from "../../src/repo-access/events";
 import { GitHubAccessClient } from "../../src/repo-access/github";
 import { httpTokenRefresher, type TokenRefresher } from "../../src/repo-access/tokens";
@@ -14,16 +14,7 @@ import { FakeClock } from "./ingest-fixture";
 export const TOKEN_KEY = "test-github-token-key-0123456789abcdef";
 
 /** Durable Object storage with the alarm API the directory uses. */
-export class FakeDirectoryStorage extends FakeDurableStorage implements DirectoryStorage {
-  alarm: number | null = null;
-  readonly alarms: number[] = [];
-
-  setAlarm(scheduledTime: number): Promise<void> {
-    this.alarm = scheduledTime;
-    this.alarms.push(scheduledTime);
-    return Promise.resolve();
-  }
-}
+export class FakeDirectoryStorage extends FakeDurableStorage implements DirectoryStorage {}
 
 /** The REPO_EPOCHS namespace, shared by the control Worker (writes) and the serving Worker (reads). */
 export class FakeEpochKv implements EpochStore, KvReader {
@@ -90,6 +81,8 @@ export interface AccessFixtureOptions {
   refresher?: TokenRefresher;
   /** Convex's comment grants (#254). */
   comments?: CommentAccessSink;
+  /** The cached R2 content of removed repositories (#263). */
+  content?: ContentPurgeSink;
 }
 
 /**
@@ -112,7 +105,7 @@ export function accessFixture(options: AccessFixtureOptions = {}) {
     github: client,
     installationTokens: tokens,
     refresher: options.refresher ?? httpTokenRefresher({ clientId: github.clientId, clientSecret: github.clientSecret, webOrigin: github.webOrigin, fetch: github.fetch, now: clock.now }),
-    tokenKey: TOKEN_KEY, epochs: kv, comments: options.comments, now: clock.now, log: (event, fields) => logs.push({ event, fields }),
+    tokenKey: TOKEN_KEY, epochs: kv, comments: options.comments, content: options.content, now: clock.now, log: (event, fields) => logs.push({ event, fields }),
   });
   const installation = github.install("octo", { id: 71 });
   const open = github.repo("octo", "open-docs", { id: 801 });

@@ -25,6 +25,8 @@ async function consume(outcome: IngestOutcome | { reject: unknown }, attempts = 
     ingest: () => ("reject" in outcome ? rejectWith(outcome.reject) : Promise.resolve(outcome)),
     ensure: () => Promise.reject(new Error("unused")),
     reconcile: () => Promise.reject(new Error("unused")),
+    touch: () => Promise.reject(new Error("unused")),
+    purge: () => Promise.reject(new Error("unused")),
   };
   await consumeIngestBatch({ messages: [queued] }, { coordinator: () => client, now: () => now, log });
   return { calls, log };
@@ -110,6 +112,8 @@ describe("coordinator client", () => {
       ensure: () => { calls += 1; return new Promise((resolve) => setTimeout(() => resolve({ status: "current", commit: "c", staleHint: false }), 2)); },
       ingest: () => Promise.reject(new Error("unused")),
       reconcile: () => Promise.reject(new Error("unused")),
+      touch: () => Promise.reject(new Error("unused")),
+      purge: () => Promise.reject(new Error("unused")),
     };
     const ensure = firstViewEnsurer(() => client);
     const results = await Promise.all([ensure(repo, "main"), ensure(repo, "main"), ensure(repo, "dev")]);

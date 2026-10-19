@@ -1,6 +1,6 @@
 import type { RepoRef } from "../github/source";
 import { SingleFlight } from "./concurrency";
-import type { IngestOutcome, ReconcileOutcome } from "./coordinator";
+import type { IngestOutcome, PurgeOutcome, ReconcileOutcome, RepoTouch } from "./coordinator";
 import type { IngestMessage } from "./messages";
 
 /** The subset of a DurableObjectNamespace binding used here. */
@@ -13,6 +13,10 @@ export interface CoordinatorClient {
   ingest(message: IngestMessage): Promise<IngestOutcome>;
   ensure(repo: RepoRef, branch: string): Promise<IngestOutcome>;
   reconcile(repo: RepoRef): Promise<ReconcileOutcome>;
+  /** A view (#263): last access for idle expiry, and the visibility the reader was granted. */
+  touch(touch: RepoTouch): Promise<{ status: "ok" | "misrouted" }>;
+  /** GitHub confirmed the removal (#258): delete the repository's content. */
+  purge(repoId: number): Promise<PurgeOutcome>;
 }
 
 /** The Durable Object name for a repository: its GitHub ID, which survives renames and transfers. */
@@ -33,6 +37,8 @@ export function coordinatorClient(namespace: DurableObjectNamespaceLike, repoId:
     ingest: (message) => call("/ingest", message),
     ensure: (repo, branch) => call("/ensure", { repo, branch }),
     reconcile: (repo) => call("/reconcile", { repo }),
+    touch: (touch) => call("/touch", { id: touch.id, private: touch.private }),
+    purge: (repoId) => call("/purge", { repoId }),
   };
 }
 

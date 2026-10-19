@@ -33,6 +33,9 @@ class RecordingSearchIndex implements SearchIndex {
   query(): Promise<never[]> {
     return Promise.resolve([]);
   }
+  deleteRepo(): Promise<number> {
+    return Promise.resolve(0);
+  }
 }
 
 function setup() {

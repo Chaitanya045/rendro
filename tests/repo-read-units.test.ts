@@ -489,7 +489,7 @@ describe("snapshot reader", () => {
 
   it("opens private bytes through the sealer and public ones as stored", async () => {
     const open = vi.fn((_scope: unknown, stored: Uint8Array) => Promise.resolve(stored.map(byte => byte ^ 1)));
-    const sealer: ContentSealer = { seal: vi.fn(), open };
+    const sealer: ContentSealer = { seal: vi.fn(), open, currentKeyId: () => Promise.resolve(null) };
     await bucket.put(blobKey(7, "b".repeat(40)), new Uint8Array([2, 3]));
     await bucket.put(blobKey(6, "b".repeat(40)), new Uint8Array([2, 3]));
     const snapshots = reader({ sealer });
@@ -503,7 +503,8 @@ describe("snapshot reader", () => {
     const snapshots = reader({ edge });
     expect(await snapshots.asset(grant, { sha: "b".repeat(40), size: 2 })).toBeNull();
     expect(edge.ops.put).toEqual([]);
-    edge.entries.set(`https://rendro.test/__repo-cache/v1/${blobKey(7, "b".repeat(40))}`, new Uint8Array([9]));
+    // A private repository's entries sit under the sealer's current key ID (null: stored as is).
+    edge.entries.set(`https://rendro.test/__repo-cache/v1/sealed/null/${blobKey(7, "b".repeat(40))}`, new Uint8Array([9]));
     clearSnapshotMemory();
     expect(await snapshots.asset(grant, { sha: "b".repeat(40), size: 2 })).toEqual(new Uint8Array([9]));
   });
@@ -736,6 +737,8 @@ describe("first-view preparation", () => {
     expect(interpretOutcome({ status: "current", commit: "c", staleHint: false })).toBe("ready");
     expect(interpretOutcome({ status: "duplicate" })).toBe("preparing");
     expect(interpretOutcome({ status: "no-ref" })).toBe("absent");
+    // Never an answer to ensure (which clears expiry, #263); the reader would poll again.
+    expect(interpretOutcome({ status: "idle" })).toBe("preparing");
     expect(interpretOutcome({ status: "failed", reason: "render", permanent: true, retryAt: null, commit: null })).toBe("failed");
   });
 

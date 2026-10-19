@@ -48,6 +48,7 @@ describe("repository content and the encryption hook", () => {
   const marking: ContentSealer = {
     seal: (scope, bytes) => Promise.resolve(new Uint8Array([...encoder.encode(`sealed:${scope.repoId}:${scope.key}:`), ...bytes])),
     open: (scope, bytes) => Promise.resolve(bytes.slice(encoder.encode(`sealed:${scope.repoId}:${scope.key}:`).length)),
+    currentKeyId: () => Promise.resolve("marking"),
   };
 
   it("seals private-repository content both ways", async () => {
@@ -71,6 +72,10 @@ describe("repository content and the encryption hook", () => {
     await fallback.putBytes("p", encoder.encode("p"));
     expect(new TextDecoder().decode(await fallback.getBytes("p") as Uint8Array)).toBe("p");
     expect(await plaintextSealer.open({ repoId: 1, key: "x" }, encoder.encode("x"))).toEqual(encoder.encode("x"));
+    expect(await plaintextSealer.currentKeyId()).toBeNull();
+    // Deleting nothing makes no R2 call.
+    await r2Store(bucket).delete([]);
+    expect(bucket.ops.delete).toBe(0);
   });
 });
 

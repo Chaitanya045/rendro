@@ -114,5 +114,12 @@ export function d1SearchIndex(db: SearchD1): SearchIndex {
       const rows = await db.prepare(SELECT_HITS).bind(match, repoId, limit).all<SectionRow>();
       return rows.results.map((row): SearchHit => ({ blobSha: row.blob_sha, slug: row.slug, title: row.title, snippet: row.snippet }));
     },
+    async deleteRepo(repoId, limit) {
+      await migrate();
+      // Bounded: each statement is one round trip, and the delete trigger updates the FTS index per row.
+      const rows = await db.prepare("DELETE FROM sections WHERE rowid IN (SELECT rowid FROM sections WHERE repo_id = ? LIMIT ?) RETURNING rowid")
+        .bind(repoId, limit).all();
+      return rows.results.length;
+    },
   };
 }
