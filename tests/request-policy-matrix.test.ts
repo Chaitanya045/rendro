@@ -48,6 +48,8 @@ it("inventories public state-changing RPCs, whose authority is explicit JWT or i
     "threads:create": "session-jwt", "threads:resolve": "session-jwt", "threads:archive": "session-jwt", "threads:remove": "session-jwt",
     // Repository docs (#254): grants are written only by the read path and P5; comments need the reader's JWT and a grant.
     "repoCommentAccess:grant": "internal-secret", "repoCommentAccess:revokeUser": "internal-secret", "repoCommentAccess:removeRepos": "internal-secret",
+    // Purging waits for GitHub to confirm the removal (#258); a confirmation that GitHub still grants restores.
+    "repoCommentAccess:purgeRepos": "internal-secret", "repoCommentAccess:restoreRepos": "internal-secret",
     "repoComments:createThread": "session-jwt", "repoComments:resolve": "session-jwt", "repoComments:archive": "session-jwt",
     "repoComments:removeThread": "session-jwt", "repoComments:addReply": "session-jwt", "repoComments:removeReply": "session-jwt",
   };

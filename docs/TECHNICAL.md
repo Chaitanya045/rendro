@@ -2304,6 +2304,7 @@ This section covers who may read which repository (#243, part of epic #214): the
 | `src/repo-access/events.ts` | Webhook payload → plan (pure) |
 | `src/repo-access/github.ts` | The permission endpoints, paced by a `RateGovernor` per user and per installation |
 | `src/repo-access/tokens.ts` | User-to-server tokens: sealing at rest, refresh |
+| `src/repo-access/removal.ts` | `confirmRemoval`: asks GitHub whether the app has truly lost a repository before anything of it is purged (#258) |
 
 ### Control Worker
 
@@ -2326,7 +2327,8 @@ One Durable Object, `RepoAccessDirectory` (named `directory`, SQLite-backed), ho
 - **Mirror per user**: the repository IDs `GET /user/installations` and `GET /user/installations/{id}/repositories` list for the user's token, with each page's ETag. A mirror is used for `MIRROR_TTL_MS` (five minutes), then refreshed with conditional requests (a 304 costs no primary quota). A listing stops after 20 pages of 100; an installation listed only in part falls back to `GET /repos/{o}/{r}/collaborators/{login}/permission` (installation token) for the one repository asked about, cached like a mirror. GraphQL `viewerPermission` would only help batch many single checks, which the listing already avoids, so it is not used.
 - **Who holds what**: `holder:<repo>:<user>` and `member:<installation>:<user>`, written before the mirror they come from, so every user a mirror lets read a repository can be found when it must be revoked.
 - **Tokens**: sealed (below), with a version that changes whenever they are replaced or dropped.
-- **Delivery dedupe** (#229's, `DeliveryDedupe`) and the **epoch outbox**. Where comments are configured, the outbox also holds `notify:<user>` (an epoch Convex has not heard yet) and `removed:<repo>` (a repository that left the app), so comment grants end with page access ([Comments on Repository Docs](#comments-on-repository-docs-github-pivot-p6)).
+- **Delivery dedupe** (#229's, `DeliveryDedupe`) and the **epoch outbox**. Where comments are configured, the outbox also holds `notify:<user>` (an epoch Convex has not heard yet), `removed:<repo>` (a repository that left the app) and `restore:<repo>` (one GitHub says the app still has), so comment grants end with page access ([Comments on Repository Docs](#comments-on-repository-docs-github-pivot-p6)). Of a removal and a restore for one repository only the newer stays queued.
+- **Purge ledger** (#258): `purge:<due time>:<repo>`, earliest first, with `purging:<repo>` naming each repository's one entry ([below](#purging-removed-repositories)).
 
 `authorize(viewer, owner, name)`: resolve the name in the registry; a public repository is granted to anyone. Otherwise an anonymous reader, an unknown user or a user without tokens is denied. A linked user's mirror is refreshed if stale (single flight per user), the name is resolved again (a listing may have taught the registry a repository no webhook announced), and the repository is granted only if the mirror lists it, or the single-repository check says so.
 
@@ -2426,6 +2428,23 @@ Real GitHub adds its own latency to a refresh (typically 100–300 ms per reques
 
 What the owner configures later is in [SETUP.md](SETUP.md#github-repository-reads-not-configured-yet).
 
+### Purging removed repositories
+
+Hiding on a restrictive payload is safe, because a replay can only deny. Deleting is not: a replayed `installation_repositories` removal or `installation` deletion would otherwise hide a repository that is still installed, then purge its data if nobody read it in the meantime. So hiding stays immediate (the registry, the mirrors, the epochs and Convex's `removeRepos` exactly as above), and only the irreversible step waits for GitHub:
+
+1. A removal (a repository removed or deleted, or every repository of a deleted installation) puts the repository in the purge ledger, due `REMOVAL_PURGE_DELAY_MS` (30 days) later. A repeated removal keeps the first time.
+2. The Durable Object's alarm takes due entries, 20 at a time (`PURGE_BATCH`), and asks `confirmRemoval` with the repository's installation token (`InstallationTokenProvider`): `GET /repos/{o}/{r}`, and on a 404 `GET /installation/repositories?per_page=1`, so only a token GitHub accepts as the installation's can prove the repository gone. A provider that mints tokens (P1) reports a deleted installation as `GitHubError("not-found")`, which also confirms it.
+3. The answer decides:
+
+| GitHub says | What happens |
+|---|---|
+| Removed | Convex is asked to purge (`purgeRepos`). Convex keeps its own window and names any repository not due yet, which is rescheduled for then. A failed call is postponed and confirmed with GitHub again; an earlier answer is never reused |
+| Still accessible (same repository ID) | The registry record is restored from GitHub's answer, an installation marked deleted or suspended is re-checked on the next read, the entry is dropped and `restore:<repo>` tells Convex (`restoreRepos`, with an audit event). Nothing is deleted |
+| Unknown: no installation or no token, an outage, a rate limit, a suspended installation, another repository under the name | Postponed: 15 minutes (`PURGE_RETRY_MS`), doubling up to a day (`PURGE_RETRY_MAX_MS`). Never purged on doubt |
+| Anything decided while an event changed the record, or while Convex has not yet heard of the removal | Postponed the same way |
+
+A single-repository check that finds the repository accessible during the window (a reinstall: the `added` event marks it for a check, and the next read asks GitHub) cancels the purge and restores the comments at once; a later removal starts a new window. The alarm is re-armed for the earliest entry after every pass, never later than a retry the outbox needs sooner. Logs carry counts only (`access.purge`, `access.removal-reverted`); the audit trail is Convex's `auditEvents` (`repository.removal_reverted`, `repository.comments_purged`). P9's R2 purge on uninstall is to call `confirmRemoval` the same way before deleting anything.
+
 ### Open points
 
 - One GitHub App has one webhook URL, but push events go to the ingest Worker (#229) and permission events here. P1 decides on a single ingress; the recommendation is the control Worker verifying once and forwarding `push` to the ingest queue.
@@ -2443,6 +2462,7 @@ repo frame (widget, no network) ──postMessage──► repository shell ─�
                                                     │                                         ▲ checks
                                                     └─ POST /r/{owner}/{repo}/comment-access ─► serving Worker: authorizeRepo ─► repoCommentAccess.grant
 control Worker (P5) ── epoch / uninstall ──► repoCommentAccess.revokeUser / removeRepos ────────────────────┘ deletes grants
+                    ── after GitHub confirms (#258) ──► repoCommentAccess.purgeRepos / restoreRepos
 ```
 
 | Module | Role |
@@ -2450,7 +2470,7 @@ control Worker (P5) ── epoch / uninstall ──► repoCommentAccess.revokeU
 | `convex/repoCommentAccess.ts` | Grants, epochs, removed repositories, expiry and purge; `repoCommentReader` decides every read and write |
 | `convex/repoComments.ts` | Threads and replies: bounded, indexed pages and the writes |
 | `src/repo-read/comments.ts` | The serving Worker's half: records grants after `authorizeRepo`, and the frame's widget tag |
-| `src/repo-access/comments.ts` | The control Worker's Convex sink for the epoch outbox |
+| `src/repo-access/comments.ts` | The control Worker's Convex sink for the epoch outbox and the purge ledger |
 | `src/commentor/repo-anchor.ts` | Anchors: making them from a selection, finding them again |
 | `src/commentor/parent-host.ts` | The shell: repository scope, anonymous reads, access renewal, `ConvexRepoCommentBackend` |
 
@@ -2500,13 +2520,13 @@ Convex cannot reach the permission source or read KV, so it holds **grants** tha
 
 Pages are bounded like project comments: 20 threads (24 rows, 1 MB read) with the newest 10 replies each, and 20 replies per reply page. Creates and replies are deduplicated by `clientOperationId`; resolve and archive take an explicit target, so a retry is a no-op. Anyone who may write may resolve; archive and delete belong to the author. Deleting a thread leaves a scrubbed tombstone and scrubs its replies in batches of 100.
 
-**Uninstalled repositories.** When GitHub reports a repository removed from the installation or deleted, or the installation or organization deleted, the control Worker's outbox (`removed:<repo>`) calls `repoCommentAccess:removeRepos`. Its comments are **hidden at once** (`removedAt`; every grant deleted) and **purged after 30 days** (`REMOVED_REPO_RETENTION_MS`) in batches of 20 threads and 100 replies. A grant recorded more than a minute after the removal (`REMOVAL_SETTLE_MS`; anything sooner may have been decided before it) means the repository is back: `removedAt` clears and the pending purge does nothing. A suspended installation hides comments through access alone and purges nothing.
+**Uninstalled repositories.** When GitHub reports a repository removed from the installation or deleted, or the installation or organization deleted, the control Worker's outbox (`removed:<repo>`) calls `repoCommentAccess:removeRepos`. Its comments are **hidden at once** (`removedAt`; every grant deleted). Convex never purges on its own: after 30 days the control Worker confirms the removal with GitHub ([Purging removed repositories](#purging-removed-repositories)) and only then calls `repoCommentAccess:purgeRepos`, which checks the window again against its own `removedAt` (`REMOVED_REPO_RETENTION_MS`; one not due yet is named in the answer), records `purgeConfirmedAt` and an audit event, and deletes in batches of 20 threads and 100 replies. A batch job runs only for a confirmed purge. If GitHub still grants the repository (a replayed removal, a reinstall), `repoCommentAccess:restoreRepos` clears `removedAt` and any confirmation, with an audit event, and a running purge stops at its next batch. A grant recorded more than a minute after the removal (`REMOVAL_SETTLE_MS`; anything sooner may have been decided before it) also means the repository is back. A suspended installation hides comments through access alone and purges nothing.
 
 ### Commentor integration
 
 The frame adds `<script defer src="/commentor.js?v=…" data-commentor-config="…">`. Its policy allows exactly that script and the widget's one shadow-root stylesheet by hash (`COMMENTOR_STYLE_HASH`, checked against `src/commentor/styles.ts` by a test), never `'unsafe-inline'`, and still has no `connect-src`: the widget cannot open a connection, so the shell's client is the only one. The parent host derives the scope from the frame's URL (`parseRepoPath`, the shell's own repository at any ref) and the shell's repository ID, ignoring anything the frame claims. Click-to-comment anchors to the clicked element's text; an element without text asks for a selection. Sign-out in another tab ends comments like everywhere else; a reader who was never signed in stays an anonymous reader.
 
-Tests: `tests/repo-comments-convex.test.ts` (access, revocation, removal and purge, forged anchors, cross-repository IDs, oversized text, rate limits), `tests/repo-comments-routes.test.ts` (the access route and frame policy), `tests/repo-access-comments.test.ts` (the outbox), `tests/repo-anchor.test.ts`, `tests/repo-comments-host.test.ts`, `tests/repo-comments-browser.test.ts` (the real frame and widget in Chromium) and `e2e/repo-comments.spec.ts` (create, reply and resolve; an unrelated commit; an orphan; a revoked reader; an anonymous reader).
+Tests: `tests/repo-comments-convex.test.ts` (access, revocation, removal and purge, forged anchors, cross-repository IDs, oversized text, rate limits), `tests/repo-comments-routes.test.ts` (the access route and frame policy), `tests/repo-access-comments.test.ts` (the outbox), `tests/repo-access-purge.test.ts` (the purge ledger with the directory and Convex together: a replayed removal never purges, a real one purges after the window, an outage postpones, a reinstall restores), `tests/repo-access-removal.test.ts` (`confirmRemoval`), `tests/repo-anchor.test.ts`, `tests/repo-comments-host.test.ts`, `tests/repo-comments-browser.test.ts` (the real frame and widget in Chromium) and `e2e/repo-comments.spec.ts` (create, reply and resolve; an unrelated commit; an orphan; a revoked reader; an anonymous reader).
 
 ---
 

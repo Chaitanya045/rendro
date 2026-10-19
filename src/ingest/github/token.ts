@@ -5,7 +5,11 @@
  * (public repositories, unauthenticated limits).
  */
 export interface InstallationTokenProvider {
-  /** A bearer token for the installation, or null to send no Authorization header. */
+  /**
+   * A bearer token for the installation, or null to send no Authorization header. A provider
+   * that mints tokens throws `GitHubError("not-found")` when GitHub no longer has the
+   * installation: `confirmRemoval` (src/repo-access/removal.ts) takes that as proof of an uninstall.
+   */
   token(installationId: number | null): Promise<string | null>;
   /** Drop a token GitHub rejected (401), so the next call mints a fresh one. */
   invalidate(installationId: number | null): void;

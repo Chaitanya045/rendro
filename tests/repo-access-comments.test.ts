@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { convexCommentSink } from "../src/repo-access/comments";
-import type { CommentAccessSink } from "../src/repo-access/directory";
+import type { CommentAccessSink, PurgeAnswer } from "../src/repo-access/directory";
 import { accessFixture } from "./helpers/repo-access-fixture";
 
 /** Convex's comment grants as the directory sees them (#254): every call, in order, with a switch to fail. */
 class RecordingSink implements CommentAccessSink {
-  readonly calls: Array<["revoke", string, number] | ["remove", number[]]> = [];
+  readonly calls: Array<["revoke", string, number] | ["remove" | "restore" | "purge", number[]]> = [];
   fail = false;
   constructor(private readonly order: string[] = []) {}
 
@@ -20,6 +20,16 @@ class RecordingSink implements CommentAccessSink {
     if (this.fail) return Promise.reject(new Error("Convex down"));
     this.calls.push(["remove", [...repoIds].sort((a, b) => a - b)]);
     return Promise.resolve();
+  }
+
+  restoreRepos(repoIds: number[]): Promise<void> {
+    this.calls.push(["restore", repoIds]);
+    return Promise.resolve();
+  }
+
+  purgeRepos(repoIds: number[]): Promise<PurgeAnswer> {
+    this.calls.push(["purge", repoIds]);
+    return Promise.resolve({ notDue: [] });
   }
 }
 
@@ -133,6 +143,7 @@ describe("comment access follows the epoch outbox (#254)", () => {
     await fixture.deliver("installation", { action: "deleted" });
     expect((await fixture.storage.list({ prefix: "notify:" })).size).toBe(0);
     expect((await fixture.storage.list({ prefix: "removed:" })).size).toBe(0);
+    expect((await fixture.storage.list({ prefix: "purge:" })).size).toBe(0);
   });
 });
 
@@ -149,12 +160,26 @@ describe("convexCommentSink", () => {
 
   it("calls the internal-secret mutations", async () => {
     const { requests, sink: target } = sink(() => Response.json({ status: "success", value: null }));
-    await target.revoke("u", 7);
-    await target.removeRepos([1, 2]);
+    await expect(target.revoke("u", 7)).resolves.toBeUndefined();
+    await expect(target.removeRepos([1, 2])).resolves.toBeUndefined();
+    await expect(target.restoreRepos([3])).resolves.toBeUndefined();
     expect(requests).toEqual([
       { url: `${url}/api/mutation`, body: { path: "repoCommentAccess:revokeUser", args: [{ userId: "u", epoch: 7, internalSecret: "secret-value" }], format: "json" } },
       { url: `${url}/api/mutation`, body: { path: "repoCommentAccess:removeRepos", args: [{ repoIds: [1, 2], internalSecret: "secret-value" }], format: "json" } },
+      { url: `${url}/api/mutation`, body: { path: "repoCommentAccess:restoreRepos", args: [{ repoIds: [3], internalSecret: "secret-value" }], format: "json" } },
     ]);
+  });
+
+  it("returns Convex's purge answer, and refuses one it cannot read", async () => {
+    const notDue = [{ repoId: 4, dueAt: 1_000 }];
+    const { requests, sink: target } = sink(() => Response.json({ status: "success", value: { notDue } }));
+    expect(await target.purgeRepos([4, 5])).toEqual({ notDue });
+    expect(requests).toEqual([
+      { url: `${url}/api/mutation`, body: { path: "repoCommentAccess:purgeRepos", args: [{ repoIds: [4, 5], internalSecret: "secret-value" }], format: "json" } },
+    ]);
+    for (const value of [null, {}, { notDue: [null] }, { notDue: [{ repoId: 4 }] }, { notDue: [{ repoId: "4", dueAt: 1 }] }]) {
+      await expect(sink(() => Response.json({ status: "success", value })).sink.purgeRepos([4])).rejects.toThrow("answered unexpectedly");
+    }
   });
 
   it.each([
