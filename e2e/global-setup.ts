@@ -8,6 +8,7 @@ import { removeSmokeAsset, startFaults, startIdentityFixtures, startImageHost, s
 import { localEnvironment, startBackend } from "./backend";
 import { seedWorkspace } from "./seed";
 import { registerResources } from "./resource-journal";
+import { seedVisualWorkspace } from "./visual/seed-visual";
 import { controlWorker, controlWorkerConfig, withRepoReadBindings } from "./repo-read-config";
 import { repositoryWorld, seedRepositories } from "./repo-fixtures";
 import type { R2BucketLike } from "../src/ingest/orchestrator/store";
@@ -164,6 +165,15 @@ export default async function globalSetup() {
     process.env.RENDRO_E2E_IMAGES = images.control;
     process.env.RENDRO_E2E_IMAGE_PROXY_SECRET = vars.IMAGE_PROXY_SECRET;
     process.env.RENDRO_E2E_SEED = seedPath;
+    // The visual baselines and their axe scans (#120) render seeded data whose every
+    // user-visible string is fixed; provisioning is paid once here, and only for the visual
+    // runs (`pnpm visual`, `pnpm a11y` set the flag), never for the functional e2e shards.
+    if (process.env.RENDRO_E2E_VISUAL === "1") {
+      const visual = await seedVisualWorkspace({ site: convex.site, convex: convex.origin, worker: url.origin, secret: vars.CONVEX_INTERNAL_SECRET, mail: identity.mail, directory, fetch: originalFetch });
+      const visualPath = join(directory, "visual.json");
+      await writeFile(visualPath, JSON.stringify(visual), { mode: 0o600 });
+      process.env.RENDRO_E2E_VISUAL = visualPath;
+    }
     process.env.RENDRO_E2E_DIRECTORY = directory;
     console.log("E2E: real workerd ready; real local Convex, local R2 simulation, captured mail and OAuth, a fake image host, external fetch blocked.");
     return cleanup;
