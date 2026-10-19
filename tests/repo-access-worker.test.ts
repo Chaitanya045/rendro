@@ -175,6 +175,19 @@ describe("control Worker", () => {
     }
   });
 
+  it("puts removed repositories in the purge ledger only where a purge can run: REPO_INGEST bound (#263)", async () => {
+    for (const bound of [true, false]) {
+      const ingest: DurableObjectNamespaceLike = { idFromName: (name) => name, get: () => ({ fetch: () => Promise.resolve(Response.json({ status: "done" })) }) };
+      const { env, github, storage } = environment(bound ? { REPO_INGEST: ingest } : {});
+      globalThis.fetch = github.fetch;
+      github.install("octo", { id: 71 });
+      const repo = github.repo("octo", "docs", { id: 801 });
+      expect((await worker.fetch(webhook(github, "installation", { action: "created", installation: { id: 71, account: { login: "octo" } }, repositories: [github.repoJson(repo)] }), env)).status).toBe(202);
+      expect((await worker.fetch(webhook(github, "installation_repositories", { action: "removed", installation: { id: 71 }, repositories_removed: [github.repoJson(repo)] }), env)).status).toBe(202);
+      expect((await storage.list({ prefix: "purge:" })).size).toBe(bound ? 1 : 0);
+    }
+  });
+
   it("exposes only the handler and the directory class from its main module", () => {
     expect(Object.keys(entry).sort()).toEqual(["RepoAccessDirectory", "default"]);
     expect(entry.default).toBe(worker);

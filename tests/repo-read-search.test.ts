@@ -22,6 +22,7 @@ function fakeIndex(hits: SearchHit[], errors = false): SearchIndex & { calls: Ar
     migrate: () => Promise.resolve(),
     hasBlob: () => Promise.resolve(true),
     putBlob: () => Promise.resolve(),
+    deleteRepo: () => Promise.resolve(0),
     query: (repoId, match, limit) => {
       calls.push({ repoId, match, limit });
       if (errors) return Promise.reject(new Error("index down"));

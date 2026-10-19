@@ -7,9 +7,10 @@ main = "src/ingest/orchestrator/entry.ts"
 compatibility_date = "2025-07-06"
 workers_dev = false
 
-# Signs image proxy URLs in rendered pages (#224): the same value as the serving Worker's.
+# Signs image proxy URLs in rendered pages (#224); seals private-repository content (#263).
+# Both are the same values as the serving Worker's. REPO_CONTENT_KEY_PREVIOUS is optional (a key rotation).
 [secrets]
-required = ["IMAGE_PROXY_SECRET"]
+required = ["IMAGE_PROXY_SECRET", "REPO_CONTENT_KEY"]
 
 [observability.logs]
 enabled = true

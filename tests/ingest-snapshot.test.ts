@@ -181,6 +181,7 @@ describe("buildSnapshot: first import", () => {
     const sealer: ContentSealer = {
       seal: (_scope, bytes) => Promise.resolve(new Uint8Array([0xff, ...bytes])),
       open: (_scope, bytes) => Promise.resolve(bytes.slice(1)),
+      currentKeyId: () => Promise.resolve("marker"),
     };
     const fixture = setup({ private: true, sealer });
     const head = fixture.repo.commit({ "docs/index.md": "# Secret\n" });

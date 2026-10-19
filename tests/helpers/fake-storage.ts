@@ -11,7 +11,7 @@ interface StoredR2 {
 /** In-memory R2 bucket with the binding's semantics for the calls ingest makes. */
 export class FakeR2Bucket implements R2BucketLike {
   readonly objects = new Map<string, StoredR2>();
-  readonly ops = { get: 0, head: 0, put: 0, list: 0 };
+  readonly ops = { get: 0, head: 0, put: 0, list: 0, delete: 0 };
   /** Throw on put when this returns true (a crash or an R2 outage mid-ingest). */
   failPut: ((key: string) => boolean) | null = null;
   /** Called before a put lands (to race a concurrent writer). */
@@ -51,6 +51,17 @@ export class FakeR2Bucket implements R2BucketLike {
     return Promise.resolve({ objects: page.map((key) => ({ key })), truncated, ...(truncated ? { cursor: String(start + limit) } : {}) });
   }
 
+  /** Throw on delete when this returns true (an R2 outage mid-purge). */
+  failDelete: ((keys: string[]) => boolean) | null = null;
+
+  delete(keys: string[]) {
+    this.ops.delete += 1;
+    if (keys.length > 1000) return Promise.reject(new Error("R2 deletes at most 1000 keys at once"));
+    if (this.failDelete?.(keys)) return Promise.reject(new Error("R2 delete failed"));
+    for (const key of keys) this.objects.delete(key);
+    return Promise.resolve();
+  }
+
   json<T>(key: string): T | null {
     const object = this.objects.get(key);
     return object ? JSON.parse(new TextDecoder().decode(object.bytes)) as T : null;
@@ -61,9 +72,17 @@ export class FakeR2Bucket implements R2BucketLike {
   }
 }
 
-/** In-memory Durable Object storage (key-value API). Values are structured-cloned like the real one. */
+/** In-memory Durable Object storage (key-value API and alarm). Values are structured-cloned like the real one. */
 export class FakeDurableStorage implements DurableStorageLike {
   readonly data = new Map<string, unknown>();
+  alarm: number | null = null;
+  readonly alarms: number[] = [];
+
+  setAlarm(scheduledTime: number): Promise<void> {
+    this.alarm = scheduledTime;
+    this.alarms.push(scheduledTime);
+    return Promise.resolve();
+  }
 
   get<T>(key: string): Promise<T | undefined> {
     return Promise.resolve(this.data.has(key) ? structuredClone(this.data.get(key)) as T : undefined);
@@ -75,6 +94,8 @@ export class FakeDurableStorage implements DurableStorageLike {
   }
 
   delete(keys: string[]): Promise<number> {
+    // The real API refuses more than 128 keys per call.
+    if (keys.length > 128) return Promise.reject(new Error("At most 128 keys per delete"));
     let deleted = 0;
     for (const key of keys) if (this.data.delete(key)) deleted += 1;
     return Promise.resolve(deleted);

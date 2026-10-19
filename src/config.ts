@@ -23,9 +23,18 @@ const envSchema = z.object({
   REPO_CAPABILITY_SECRET: z
     .string()
     .min(32, "REPO_CAPABILITY_SECRET must be at least 32 characters"),
+  // Seals private-repository content in R2 (#263): per-repository AES-256-GCM keys are derived
+  // from it. Dedicated, and the same value on the ingest Worker. During a rotation the previous
+  // key stays as REPO_CONTENT_KEY_PREVIOUS until no content sealed under it remains.
+  REPO_CONTENT_KEY: z.string().min(32, "REPO_CONTENT_KEY must be at least 32 characters"),
+  REPO_CONTENT_KEY_PREVIOUS: z.string().min(32, "REPO_CONTENT_KEY_PREVIOUS must be at least 32 characters").optional(),
 }).refine(
   (value) => ![value.AUTH_SECRET, value.CONVEX_INTERNAL_SECRET, value.RETENTION_SECRET, value.IMAGE_PROXY_SECRET].includes(value.REPO_CAPABILITY_SECRET),
   { path: ["REPO_CAPABILITY_SECRET"], message: "REPO_CAPABILITY_SECRET must not reuse another secret" },
+).refine(
+  (value) => ![value.AUTH_SECRET, value.CONVEX_INTERNAL_SECRET, value.RETENTION_SECRET, value.IMAGE_PROXY_SECRET, value.REPO_CAPABILITY_SECRET, value.REPO_CONTENT_KEY_PREVIOUS]
+    .includes(value.REPO_CONTENT_KEY),
+  { path: ["REPO_CONTENT_KEY"], message: "REPO_CONTENT_KEY must not reuse another secret" },
 );
 
 type Env = z.infer<typeof envSchema>;
@@ -57,3 +66,5 @@ export const AUTH_SECRET = env.AUTH_SECRET;
 export const RETENTION_SECRET = env.RETENTION_SECRET;
 export const IMAGE_PROXY_SECRET = env.IMAGE_PROXY_SECRET;
 export const REPO_CAPABILITY_SECRET = env.REPO_CAPABILITY_SECRET;
+export const REPO_CONTENT_KEY = env.REPO_CONTENT_KEY;
+export const REPO_CONTENT_KEY_PREVIOUS = env.REPO_CONTENT_KEY_PREVIOUS;

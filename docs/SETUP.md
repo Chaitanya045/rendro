@@ -34,6 +34,8 @@ cp .env.example .env
 | `AUTH_SECRET` | Yes (≥16 chars; use 32+) | Signs legacy `/share/:token` links only. It does not need to match Convex |
 | `CONVEX_INTERNAL_SECRET` | Yes (≥32 chars) | Sent with legacy API-key and soft-delete Convex calls (`src/convex-internal.ts`); must equal the Convex value |
 | `IMAGE_PROXY_SECRET` | Yes (≥32 chars) | Signs same-origin image proxy URLs (`/img/<sig>/<url>`) written at ingest. Dedicated; reuse no other secret |
+| `REPO_CONTENT_KEY` | Yes (≥32 chars) | Seals private-repository content in R2 (per-repository AES-256-GCM). Dedicated; reuse no other secret. The ingest Worker needs the same value |
+| `REPO_CONTENT_KEY_PREVIOUS` | No (≥32 chars) | Only during a key rotation: the previous `REPO_CONTENT_KEY`, which still opens content sealed under it ([rotation](TECHNICAL.md#key-rotation)) |
 | `CONVEX_URL` | No at startup; needed for the full app | From `convex dev` (step 3); defaults to empty, disabling legacy Convex calls and comments |
 | `CONVEX_SITE_URL` | No | Derived from `CONVEX_URL` when unset |
 | `RETENTION_SECRET` | No (≥32 chars) | Bearer for Convex's retention endpoints; only the scheduled purge reads it. Same value as in Convex |
@@ -149,13 +151,14 @@ pnpm exec convex deploy
 
 Use two **private** R2 buckets, bound as `STORAGE` in `wrangler.toml`: `rendro-docs` for production (the top-level configuration) and `dev-rendro` for the `development` environment (`rendro-dev`). A new account creates them first; the names in the file are the single source of truth. Do not create an S3 API token, an `r2.dev` URL or a custom domain: the Worker reaches the bucket through its binding, so there is no credential to leak.
 
-`wrangler.toml` sets `NODE_ENV` as a var. Both production and `development` require exactly these four secrets at startup and in Wrangler: `CONVEX_INTERNAL_SECRET`, `AUTH_SECRET`, `IMAGE_PROXY_SECRET` and `REPO_CAPABILITY_SECRET`. `REPO_CAPABILITY_SECRET` signs repository capability cookies and asset tickets (`/r/…`, [TECHNICAL.md](TECHNICAL.md#repository-read-path-github-pivot-p4a)); it is Worker-only and must differ from every other secret. List secret names with `pnpm exec wrangler secret list` for production (`rendro`) and `pnpm exec wrangler secret list --env development` for development (`rendro-dev`). Production uses the top-level configuration; there is no named `--env production` environment.
+`wrangler.toml` sets `NODE_ENV` as a var. Both production and `development` require exactly these five secrets at startup and in Wrangler: `CONVEX_INTERNAL_SECRET`, `AUTH_SECRET`, `IMAGE_PROXY_SECRET`, `REPO_CAPABILITY_SECRET` and `REPO_CONTENT_KEY`. `REPO_CAPABILITY_SECRET` signs repository capability cookies and asset tickets (`/r/…`, [TECHNICAL.md](TECHNICAL.md#repository-read-path-github-pivot-p4a)); it is Worker-only and must differ from every other secret. `REPO_CONTENT_KEY` seals private-repository content ([TECHNICAL.md](TECHNICAL.md#repository-content-lifecycle-github-pivot-p9b)); it must differ from every other secret and is shared only with the ingest Worker. List secret names with `pnpm exec wrangler secret list` for production (`rendro`) and `pnpm exec wrangler secret list --env development` for development (`rendro-dev`). Production uses the top-level configuration; there is no named `--env production` environment.
 
 Configure the Worker settings below. `CONVEX_URL`, the optional `CONVEX_SITE_URL` override and `RETENTION_SECRET` remain outside `secrets.required`: startup and `/health` work without them, but auth and project routes need a Convex HTTP origin and the nightly purge needs `RETENTION_SECRET`. Google credentials are Convex-only; the Worker does not read `BASE_URL`.
 
 ```bash
 pnpm exec wrangler secret put AUTH_SECRET
 pnpm exec wrangler secret put REPO_CAPABILITY_SECRET  # openssl rand -hex 32; Worker only
+pnpm exec wrangler secret put REPO_CONTENT_KEY        # openssl rand -hex 32; same value on the ingest Worker
 pnpm exec wrangler secret put CONVEX_URL
 pnpm exec wrangler secret put CONVEX_SITE_URL         # optional
 pnpm exec wrangler secret put CONVEX_INTERNAL_SECRET
@@ -176,6 +179,7 @@ pnpm run deploy
 4. In `wrangler.toml`, add the `REPO_ACCESS` service binding to the control Worker and the `REPO_CONTENT` R2 binding to the ingest bucket. Deploy the control Worker before the serving Worker, since a service binding to a missing Worker fails the deploy.
 5. P1 replaces `GITHUB_DEV_TOKEN` with installation tokens minted per installation, and calls `/v1/accounts/link` at sign-in.
 6. For comments on repository docs (#254), give the control Worker the `CONVEX_URL` var and the `CONVEX_INTERNAL_SECRET` secret (the same values the serving Worker and Convex use). It then ends a revoked reader's comment access with the epoch, and hides an uninstalled repository's comments at once. Without them, comment access still ends, but only when its grant expires (at most five minutes).
+7. Give the ingest Worker the serving Worker's `REPO_CONTENT_KEY` (`wrangler secret put REPO_CONTENT_KEY --config wrangler.ingest.toml`); without it, private repositories are not ingested. Bind the ingest Worker's coordinators in the control Worker (`REPO_INGEST`: a Durable Object binding to `RepoIngestCoordinator` with `script_name` set to the ingest Worker), so a removal GitHub confirmed also purges the repository's cached content (#263), and in the serving Worker (`REPO_INGEST`, for first views and idle expiry). Deploy the ingest Worker before the Workers that bind it.
 
 #### Migrating from S3 access keys
 

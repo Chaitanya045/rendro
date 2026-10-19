@@ -1461,7 +1461,7 @@ The base stylesheet is 1,435 bytes (778 gzip), against a 419 KB CDN script (126 
 
 `src/config.ts` validates the Worker environment at startup. The table lists every named string setting read by Worker code; `ASSETS` (static assets) and `STORAGE` (the R2 bucket) are separate bindings in `wrangler.toml`; there is no storage endpoint, region or access key setting. Google OAuth credentials are read only by Convex, and `BASE_URL` is unused. The local Node entry reads `PORT` separately.
 
-Both production (top-level) and `development` declare the same required secrets: `CONVEX_INTERNAL_SECRET`, `AUTH_SECRET`, `IMAGE_PROXY_SECRET` and `REPO_CAPABILITY_SECRET`. Wrangler checks these at deploy time, and `src/config.ts` validates them at startup. Production commands use the top-level configuration without an `--env` flag; development commands use `--env development`.
+Both production (top-level) and `development` declare the same required secrets: `CONVEX_INTERNAL_SECRET`, `AUTH_SECRET`, `IMAGE_PROXY_SECRET`, `REPO_CAPABILITY_SECRET` and `REPO_CONTENT_KEY`. Wrangler checks these at deploy time, and `src/config.ts` validates them at startup. Production commands use the top-level configuration without an `--env` flag; development commands use `--env development`.
 
 | Variable | Storage | Purpose |
 |---|---|---|
@@ -1473,6 +1473,8 @@ Both production (top-level) and `development` declare the same required secrets:
 | `RETENTION_SECRET` | Secret (optional, ≥32 chars) | Bearer for Convex's retention endpoints, used by the scheduled purge; same value as in Convex. Without it the purge reports itself disabled and fails |
 | `IMAGE_PROXY_SECRET` | Secret (required, ≥32 chars) | HMAC key for same-origin image proxy URLs (see [Image proxy](#image-proxy)). Set the same value on the ingest Worker. Rotating it requires a `RENDERER_VERSION` bump, so stored renders are rebuilt with new signatures |
 | `REPO_CAPABILITY_SECRET` | Secret (required, ≥32 chars, Worker only) | Signs repository capability cookies, asset tickets and the public shared-cache subrequest URLs (see "Repository read path"). Must not equal `AUTH_SECRET`, `CONVEX_INTERNAL_SECRET`, `RETENTION_SECRET` or `IMAGE_PROXY_SECRET`; rotating it only sends readers back through the permission source |
+| `REPO_CONTENT_KEY` | Secret (required, ≥32 chars) | Seals private-repository content in R2 (see [Repository content lifecycle](#repository-content-lifecycle-github-pivot-p9b)); the ingest Worker holds the same value. Must not equal any other secret |
+| `REPO_CONTENT_KEY_PREVIOUS` | Secret (optional, ≥32 chars) | Only during a [key rotation](#key-rotation): the previous `REPO_CONTENT_KEY`, which still opens content sealed under it |
 | `REPO_CONTENT`, `REPO_EPOCHS`, `REPO_ACCESS` | Bindings (R2, KV, service), not configured yet | The repository read path's snapshot bucket, revocation and visibility epochs and permission source. Until P5 binds all three, every `/r/` URL is a 404 |
 | `REPO_SHARED_CACHE_DEBUG` | Var (optional, development only) | Set to `1` to surface the shared-cache subrequest's `CF-Cache-Status`/`Age` as `X-Repo-Shared-Cache` on public frame responses (see "Repository read path"). Never set in production: it reports cache internals on a public response |
 | `LOG_LEVEL` | Var (optional) | Pino log level; defaults to `debug` outside production, `info` in production |
@@ -2010,10 +2012,13 @@ This section covers how a GitHub commit becomes a ready-to-serve snapshot (#220,
 | `GITHUB_DEV_TOKEN` | Secret, optional | Development token until P1 mints installation tokens; without it requests are unauthenticated |
 | `IMAGE_PROXY_SECRET` | Secret, required | Signs image proxy URLs in rendered pages (#224); must equal the serving Worker's value |
 | `REPO_SEARCH` | D1, optional | The repository search index (#251); absent where no database is provisioned, and ingest then skips indexing |
+| `REPO_CONTENT_KEY` | Secret, required | Seals private-repository content (#263); must equal the serving Worker's value. Without a valid one, private repositories are not ingested (`content-unconfigured`, retried) |
+| `REPO_CONTENT_KEY_PREVIOUS` | Secret, optional | During a [key rotation](#key-rotation) only |
+| `REPO_IDLE_EXPIRY_SECONDS` | Var, tests only | Shortens the idle window (default 30 days) |
 
 ### Storage key schema
 
-Every key a repository owns sits under `gh/v1/repo/<repo id>/`. The prefix uses GitHub's numeric repository ID, so renames and transfers move nothing, and purging a repository (P9) is one prefix delete. The ref pointer is the only mutable object; every other key names immutable bytes.
+Every key a repository owns sits under `gh/v1/repo/<repo id>/`. The prefix uses GitHub's numeric repository ID, so renames and transfers move nothing, and purging a repository (#263) is one prefix delete. The ref pointer is the only mutable object; every other key names immutable bytes.
 
 ```text
 gh/v1/
@@ -2025,6 +2030,7 @@ gh/v1/
 │   ├── snapshot/{commitSha}/r{rv}/manifest.json        written last; its presence means the snapshot is complete
 │   └── ref/{encodeURIComponent(branch)}.json           the pointer: { commit, rendererVersion, sequence, flippedAt }
 ├── tracked/{repoId}.json                               reconciliation registry: { repo, branches }
+├── audit/purge/{repoId}/{startedAt}.json               a purged repository's audit record (#263): IDs, times, counts
 └── reconcile/redelivery.json                           redelivery checkpoint
 ```
 
@@ -2035,7 +2041,7 @@ gh/v1/
 - The exception is the engine itself. After comrak crashes, the isolate refuses all further Markdown. The page that crashed it is recorded as `engine`. Later Markdown pages fail the attempt with the transient `markdown-engine-unavailable`, which the queue retries, so good pages are never marked as broken. A Durable Object may keep its isolate across retries, so recovery waits for the isolate to be recycled; re-instantiating a fresh engine in a live isolate is not yet supported.
 - Pages are keyed by directory as well as blob, because relative links resolve against the directory. A page moved to another directory is rendered again, from the blob in R2 and without a GitHub request. Assets need nothing.
 - Assets are images (`png`, `jpg`, `gif`, `svg`, `webp`, `avif`, `ico`, `bmp`) under the docs root, outside vendored and hidden folders. The sanitizer removes stylesheets, scripts and media elements, so no other file types are ever referenced.
-- Private-repository content (blobs, renders, tree listings, sidebar and manifest) is written through the `ContentSealer` hook. Today the hook stores bytes as they are; P9 adds per-repo AES-GCM. The pointer, the registry and the checkpoint hold only IDs and names, and are not sealed.
+- Private-repository content (blobs, renders, tree listings, sidebar and manifest) is sealed through the `ContentSealer` hook: per-repository AES-256-GCM ([Repository content lifecycle](#repository-content-lifecycle-github-pivot-p9b)). The pointer, the registry, the audit records and the checkpoint hold only IDs and names, and are not sealed.
 
 ### Render-then-flip
 
@@ -2176,7 +2182,7 @@ P5 implements this contract (#243): see [Repository Permission Mirror](#reposito
 | Ref pointer (mutable) | Fresh 5 s, then served stale up to 60 s while one refresh runs | Never | Never | On a miss |
 | Manifest, sidebar, rendered page, image blob (immutable keys) | 16 MiB LRU, entries up to 1 MiB, parsed | `{origin}/__repo-cache/tiered/v1/{sig}/{storage key}`, `Cache-Control: public, max-age=31536000, immutable` | `{origin}/__repo-cache/v1/{storage key}`, filled in `waitUntil` | On a miss |
 
-Every immutable object is read in that order: memory, then — for a public repository — a signed cacheable subrequest, then the per-colo `caches.default`, then R2. `caches.default` is per colo and a `cache.put` never reaches Cloudflare's Tiered Cache or Cache Reserve, so a public miss is fetched from the Worker's own origin as a subrequest instead: the Worker reads R2 and answers with an immutable `Cache-Control`, and the colo cache and every tier above it keep the copy, which the next isolate (or colo) reuses. The subrequest path carries an HMAC over `public\n<visibility epoch>\n<storage key>` under `REPO_CAPABILITY_SECRET`, with the epoch in the path, so the route only serves keys this Worker decided are public at the epoch they were decided at: a private key has no valid signature, no two objects or repositories share a cache key, and a privatized repository's outstanding URLs die at the epoch. Before serving, the route re-reads the repository's visibility epoch from KV (`epoch:repo:<id>`, written by the access directory when a repository is made private, removed, or left by its installation; never expiring, since a revert to 0 would revive old URLs): a URL minted before the bump no longer matches and is the plain 404, an epoch store that cannot answer is a retryable 503, and the KV read's colo TTL (60 s) is the revocation bound. The subrequest is cacheable (`cf.cacheEverything` with per-status TTLs: a year for 200s, a minute for the revocation 404, never a 5xx — the signed URL is deterministic, so a cached faulting fill would poison every later read) and only GET/HEAD apply. Private repositories skip the subrequest entirely — their objects are sealed and must not enter a shared cache — and read through `caches.default` and R2 as before. The `caches.default` keys live under a path no route serves, so only this code can read them, and only with a `RepoGrant`; the tiered route is the one exception, and it serves only signed public keys straight from R2 (it must not recurse into the layered reader). Bytes are cached as stored and opened per read, so P9's per-repository encryption will apply to both caches. A commit-pinned URL without a snapshot at the current renderer version falls back to the previous version's while a rebuild runs.
+Every immutable object is read in that order: memory, then — for a public repository — a signed cacheable subrequest, then the per-colo `caches.default`, then R2. `caches.default` is per colo and a `cache.put` never reaches Cloudflare's Tiered Cache or Cache Reserve, so a public miss is fetched from the Worker's own origin as a subrequest instead: the Worker reads R2 and answers with an immutable `Cache-Control`, and the colo cache and every tier above it keep the copy, which the next isolate (or colo) reuses. The subrequest path carries an HMAC over `public\n<visibility epoch>\n<storage key>` under `REPO_CAPABILITY_SECRET`, with the epoch in the path, so the route only serves keys this Worker decided are public at the epoch they were decided at: a private key has no valid signature, no two objects or repositories share a cache key, and a privatized repository's outstanding URLs die at the epoch. Before serving, the route re-reads the repository's visibility epoch from KV (`epoch:repo:<id>`, written by the access directory when a repository is made private, removed, or left by its installation; never expiring, since a revert to 0 would revive old URLs): a URL minted before the bump no longer matches and is the plain 404, an epoch store that cannot answer is a retryable 503, and the KV read's colo TTL (60 s) is the revocation bound. The subrequest is cacheable (`cf.cacheEverything` with per-status TTLs: a year for 200s, a minute for the revocation 404, never a 5xx — the signed URL is deterministic, so a cached faulting fill would poison every later read) and only GET/HEAD apply. Private repositories skip the subrequest entirely — their objects are sealed and must not enter a shared cache — and read through `caches.default` and R2 as before. The `caches.default` keys live under a path no route serves, so only this code can read them, and only with a `RepoGrant`; the tiered route is the one exception, and it serves only signed public keys straight from R2 (it must not recurse into the layered reader). Bytes are cached as stored and opened per read, after authorization (#263): a private repository's `caches.default` entries are sealed, and only bytes that opened under the current key are cached, under that key's ID (`…/v1/sealed/{key id}/{storage key}`). The tiered route never serves sealed bytes (a repository made public keeps its sealed content): it answers them with the plain 404, and the reader opens them from R2. See [Repository content lifecycle](#repository-content-lifecycle-github-pivot-p9b). A commit-pinned URL without a snapshot at the current renderer version falls back to the previous version's while a rebuild runs.
 
 **Deployment requirement.** A same-zone `fetch()` re-invokes the Worker only when it runs on a Custom Domain (on a route or `workers.dev`, the platform refuses same-zone Worker-to-Worker fetches), and the Custom Domain makes the Worker its own origin, so there is no separate origin to configure and no loop: the subrequest re-enters the Worker once at the signed route, which answers from R2 without issuing further subrequests, and a filled cache answers before the Worker runs at all. Deploy the serving Worker on a Custom Domain (e.g. `rendro.app`, `dev.rendro.app`) for the shared tier to fill; on a route the subrequest fails, the reader falls back to the per-colo path, and public reads stay correct but never reach the shared tier. With `REPO_SHARED_CACHE_DEBUG=1` (development only), a public frame response carries `X-Repo-Shared-Cache: cf=<CF-Cache-Status>; age=<Age>` from the request's last subrequest, so a shared-tier hit is provable in a deployed environment.
 
@@ -2211,7 +2217,7 @@ The preparing page (`renderPreparingPage` in `src/repo-read/preparing.ts`) is `a
 
 Enqueueing happens strictly after authorization, so an unauthorized reader neither leaks the repository's existence into the coordinator nor triggers a build; commit-pinned URLs and every non-shell target (frames, trees, tickets, files) are plain 404s with no enqueue. Where the binding is absent (today: production and the E2E worker), every URL under `/r/` behaves exactly as before, 404 included; no migration to `wrangler.toml` is made until the ingest Worker ships.
 
-The binding is read per request through `services(c)`'s shape check (`durableFirstView`), shaped once per isolate per namespace (`WeakMap`). Tests: `tests/repo-read-routes.test.ts` (first-view dispatch, preparing/retry/404, single flight across requests, transport 503), `tests/repo-read-units.test.ts` (window race, outcomes, page rendering, backoff) and `tests/repo-read-first-view-workerd.test.ts` (real cross-script binding, gate on GitHub, preparing then docs).
+The same binding receives the read path's view reports for idle expiry (`touchRepo`, at most once an hour per isolate and repository; [Idle expiry](#idle-expiry)). The binding is read per request through `services(c)`'s shape check (`durableFirstView`), shaped once per isolate per namespace (`WeakMap`). Tests: `tests/repo-read-routes.test.ts` (first-view dispatch, preparing/retry/404, single flight across requests, transport 503), `tests/repo-read-units.test.ts` (window race, outcomes, page rendering, backoff) and `tests/repo-read-first-view-workerd.test.ts` (real cross-script binding, gate on GitHub, preparing then docs).
 
 ### Viewer integration
 
@@ -2294,7 +2300,7 @@ Measured with `tests/repo-read-workerd.test.ts` on 2026-10-19 (`search query (1,
 
 ### Open points
 
-- No index GC: rows of blobs a repository no longer contains stay until P9's purge removes the repository's D1 prefix wholesale (purging one repository is one D1 delete by `repo_id`).
+- No index GC: rows of blobs a repository no longer contains stay until a purge or an idle expiry (#263) deletes the repository's rows (`deleteRepo`, by `repo_id`, in bounded batches).
 - Backfill of pre-existing snapshots (above) is manual if ever needed.
 - The abuse-driven FTS settings (16 terms, 64 chars each, 200-char queries) are generous for humans and bounded for robots; tightening later is a constant change.
 
@@ -2430,6 +2436,7 @@ Real GitHub adds its own latency to a refresh (typically 100–300 ms per reques
 | `GITHUB_DEV_TOKEN` | Secret, optional | Installation token for checks until P1 mints installation tokens |
 | `GITHUB_API_ORIGIN`, `GITHUB_WEB_ORIGIN` | Vars, optional | Point at a fake GitHub; the defaults are `api.github.com` and `github.com` |
 | `CONVEX_URL`, `CONVEX_INTERNAL_SECRET` | Var and secret, optional | Comments (#254): Convex hears every epoch and removed repository. Both are needed; without them comment grants end with their own lifetime (at most five minutes) |
+| `REPO_INGEST` | Durable Object binding, optional | The ingest Worker's `RepoIngestCoordinator` (`script_name` the ingest Worker): a confirmed removal purges the repository's cached R2 content and search rows (#263) |
 
 What the owner configures later is in [SETUP.md](SETUP.md#github-repository-reads-not-configured-yet).
 
@@ -2448,7 +2455,7 @@ Hiding on a restrictive payload is safe, because a replay can only deny. Deletin
 | Unknown: no installation or no token, an outage, a rate limit, a suspended installation, another repository under the name | Postponed: 15 minutes (`PURGE_RETRY_MS`), doubling up to a day (`PURGE_RETRY_MAX_MS`). Never purged on doubt |
 | Anything decided while an event changed the record, or while Convex has not yet heard of the removal | Postponed the same way |
 
-A single-repository check that finds the repository accessible during the window (a reinstall: the `added` event marks it for a check, and the next read asks GitHub) cancels the purge and restores the comments at once; a later removal starts a new window. The alarm is re-armed for the earliest entry after every pass, never later than a retry the outbox needs sooner. Logs carry counts only (`access.purge`, `access.removal-reverted`); the audit trail is Convex's `auditEvents` (`repository.removal_reverted`, `repository.comments_purged`). P9's R2 purge on uninstall is to call `confirmRemoval` the same way before deleting anything.
+A single-repository check that finds the repository accessible during the window (a reinstall: the `added` event marks it for a check, and the next read asks GitHub) cancels the purge and restores the comments at once; a later removal starts a new window. The alarm is re-armed for the earliest entry after every pass, never later than a retry the outbox needs sooner. Logs carry counts only (`access.purge`, `access.removal-reverted`); the audit trail is Convex's `auditEvents` (`repository.removal_reverted`, `repository.comments_purged`). The same confirmation purges the repository's cached content in R2 and its search rows (#263): where the control Worker binds the ingest Worker's coordinators (`REPO_INGEST`), each confirmed repository's coordinator is asked to purge, and the entry is done only when every purge it asked for was accepted and Convex answered; a failure of either postpones the entry, which is confirmed with GitHub again (both purges are idempotent). Without `REPO_INGEST`, removed repositories' content stays until idle expiry deletes it, which nobody can stop, since a removed repository is never authorized. See [Purge of a confirmed removal](#purge-of-a-confirmed-removal).
 
 ### Open points
 
@@ -2457,6 +2464,92 @@ A single-repository check that finds the repository accessible during the window
 - Asset tickets live fifteen minutes and are only epoch-checked, so a missed webhook can leave frame resources of an open commit readable that long; five minutes would match the cookie.
 - With KV Instant, the serving Worker's `cacheTtl: 60` becomes the dominant term.
 - Commit-pinned frames of public repositories are cached `public, immutable`; a repository made private stays readable from browser caches that already hold a page.
+
+## Repository Content Lifecycle (GitHub pivot, P9b)
+
+R2 is a disposable cache of GitHub, but it holds copies of private docs (#263, part of epic #214). As defence in depth against a leaked bucket, cache entry or misrouted object, private-repository content is sealed per repository; content nobody reads expires; and a removal GitHub confirmed purges the repository's content, never on doubt.
+
+| Module | Role |
+|---|---|
+| `src/ingest/orchestrator/sealing.ts` | The envelope: per-repository AES-256-GCM keys from `REPO_CONTENT_KEY`, key IDs, `SealedContentError` |
+| `src/ingest/orchestrator/wipe.ts` | One bounded, idempotent step of deleting a repository's content and search rows |
+| `src/ingest/orchestrator/coordinator.ts` | Per repository: what the content is sealed with, last access and idle expiry, purges; all serialized with ingests |
+| `src/repo-read/snapshot.ts`, `first-view.ts` | Opening after authorization, what the edge cache may hold, and reporting views |
+| `src/repo-access/content.ts`, `directory.ts` | The control Worker's purge, after `confirmRemoval` |
+
+### Sealing
+
+- **Keys.** Each repository's data key is HKDF-SHA256 of `REPO_CONTENT_KEY` (salt `rendro-repo-content:v1`, info `repo:<GitHub repository ID>`), imported once per isolate as a non-extractable AES-256-GCM key (at most 1,024 kept; the rest are derived again, one HKDF). Nothing per repository is stored. The **key ID** is 8 bytes of HKDF from the same secret (info `key-id`): it names a key without revealing it.
+- **Envelope.** `00 52 43 53` (`\0RCS`), version `01`, the key ID (8 bytes), a fresh random IV (12 bytes), then the ciphertext with its 16-byte tag: 41 bytes over the plaintext. Anything else is not sealed content.
+- **Additional data.** The 13-byte header, then `\nrendro-repo-content:v1\n<repository ID>\n<storage key>`. The storage key names the object (the blob SHA, the render key with its directory, the commit and renderer version of a snapshot), so a blob copied to another repository or swapped for another object of the same repository does not open, and neither does a rewritten header. The sealer refuses a key outside the repository's own prefix.
+- **What is sealed.** Everything under a private repository's `gh/v1/repo/<id>/` prefix except its `ref/` pointers: blobs, renders, tree listings, sidebars and manifests. The pointers, the reconciliation registry, the audit records and the redelivery checkpoint hold only IDs, names and counts.
+- **Public repositories stay plaintext**, so a shared cache tier can hold their objects as they are (#242).
+- **Without a valid key** (`contentSealer`: missing, under 32 characters, or equal to the previous key) private content is neither written nor read: ingest fails with the transient `content-unconfigured`, and the read path answers 503. Public repositories are unaffected.
+
+### Opening after authorization, and what each tier holds
+
+Every snapshot read takes a `RepoGrant`, so content is opened strictly after authorization. A private repository's bytes must open; anything else (not an envelope, a tampered or truncated one, another repository's or another object's, a key this Worker does not hold) is logged with the repository ID and the reason only, and answered with #225's retryable 503. It is never served and never cached. A public repository's bytes are opened only when they are sealed (a repository once private stays sealed, below).
+
+| Tier | Private repository | Public repository |
+|---|---|---|
+| R2 | Sealed | As stored |
+| Colo cache (`caches.default`) | Sealed bytes only, and only those that opened under the current key, at `/__repo-cache/v1/sealed/{current key ID}/{storage key}`: an entry is never looked up under another key, so a retired key cannot leave unreadable entries behind | Plaintext at `/__repo-cache/v1/{storage key}`; sealed bytes (a repository made public) are not cached |
+| Shared tier (Tiered Cache and Cache Reserve, through the signed subrequest, #242) | Never: private repositories skip the subrequest | Plaintext; the route answers sealed bytes with the plain 404, and the reader opens them from R2 instead |
+| Isolate memory | Opened and parsed (16 MiB per isolate, never persisted): the process that serves the bytes holds them | Same |
+| Browser | `private` responses only (unchanged) | `public` (unchanged) |
+
+### Visibility, and content that does not open
+
+The coordinator records what the stored content is sealed with (`content`: a key ID, `plaintext`, `none` after a wipe, or `unreadable`) and whether the repository was ever private (`private`). Before every job, and when a view reports the visibility it granted, it compares them:
+
+- **Private once, sealed for good.** A message may carry a stale visibility (the reconciliation registry, a redelivered push from before the change), so a repository once private is always ingested sealed. Only a purge of a confirmed removal forgets it.
+- **Made private.** The first private signal (a view's touch carries the visibility the reader was granted, a push, a first view) finds content stored as plaintext: the coordinator wipes it (`reseal`), and the next view ingests it sealed through the first-view path. Until the wipe, private readers get the retryable 503, since unsealed bytes are refused.
+- **Made public.** The content stays sealed and is opened per read; it is not cached at the edge.
+- **Content that does not open during an ingest** (the previous snapshot's manifest tampered with, a key that was dropped too early) fails the attempt with `content-tampered`, `content-unsealed` or `content-unknown-key`, which the queue retries; the coordinator marks the content `unreadable`, so the retry wipes it and builds from GitHub.
+
+### Key rotation
+
+1. Generate a new key (`openssl rand -hex 32`). On the serving Worker, then on the ingest Worker, move the old value to `REPO_CONTENT_KEY_PREVIOUS` and set the new one as `REPO_CONTENT_KEY`. The serving Worker goes first, so it can open new-key content before anything writes it.
+2. New content is sealed under the new key; content sealed under the previous key keeps opening, but is not cached at the edge.
+3. Each private repository's coordinator finds its content sealed under another key on its next touch (within an hour of a view), push or first view, wipes it and ingests it again (a first import: about 3 GitHub requests). Repositories nobody views expire within the idle window anyway.
+4. After the idle window plus a margin, and once the logs show no `unknown-key`, remove `REPO_CONTENT_KEY_PREVIOUS` from both Workers.
+
+A lost key costs a re-ingest, not data: content under an unknown key is a 503 until its coordinator, holding the new key, wipes and rebuilds it the same way.
+
+### Idle expiry
+
+- **Last access, not a write per view.** After authorization and a resolved snapshot, the read path tells the repository's coordinator (`POST /touch`, `{ id, private }`, in `waitUntil`) at most once an hour per isolate, repository and visibility (`TOUCH_INTERVAL_MS`, at most 4,096 remembered). The coordinator keeps last access to a thirtieth of the idle window (a day): at most one storage write a day per repository. A first view records it too, once the reader's build is done.
+- **Expiry.** The coordinator's alarm is set for the end of the window, 30 days after last access (`IDLE_EXPIRY_MS`). When it fires with nothing newer recorded, the content is wiped (`idle`) and the repository is marked expired. Content nobody ever viewed expires 30 days after its first flip.
+- **While expired.** Pushes and reconciliation answer `idle` (acknowledged, the delivery remembered, no GitHub request), and the reconciliation entry is gone, so the cron no longer checks it. An installation event ingests it.
+- **The next view** finds no pointer, so the read path's first-view path (#249) asks the coordinator to `ensure` the branch: expiry is cleared and the branch is built. Commit-pinned URLs of older commits are plain 404s until something ingests them, as for any commit never ingested.
+
+### Purge of a confirmed removal
+
+The control Worker's purge ledger ([Purging removed repositories](#purging-removed-repositories)) asks each confirmed repository's coordinator to purge (`POST /purge`, `{ repoId }`, through `REPO_INGEST`). Only `confirmRemoval`'s `removed` reaches it: a replayed removal of a repository still installed is restored there, and nothing is deleted.
+
+1. The coordinator records the wipe durably (`wipe`: reason, start time, counts) before deleting anything, in the same serialized chain as ingests: a running ingest finishes first, and any job queued after a pending wipe finishes the wipe before it builds, so nothing is ever written into a half-deleted prefix.
+2. It deletes in bounded steps: the reconciliation entry and the pointers first (readers then see "never ingested", never a half-deleted snapshot, and the cron stops), then every object under the prefix (1,000 per call, at most 20,000 per step), then the search rows (500 per statement, at most 20 statements per step). Each step first moves the alarm a second ahead, so an evicted instance resumes. The answer is `done`, or `accepted` while steps continue from the alarm; anything else makes the ledger confirm with GitHub again later.
+3. When nothing is left it writes the audit record `gh/v1/audit/purge/{repoId}/{startedAt}.json` (`{ schema, event: "repository.content-purged", repoId, startedAt, finishedAt, objects, searchRows }`), logs `ingest.wipe` with the same counts, and forgets everything it knew about the repository. A repeated purge finds nothing more to delete.
+
+Idle expiry and resealing use the same steps; a removal outranks either while it runs.
+
+### Measurements
+
+Measured with `tests/repo-lifecycle-workerd.test.ts` on 2026-10-19: a benchmark Worker seals or opens one object `n` times inside local workerd, timed over HTTP and diffed against `n = 0` (workerd's clocks do not advance during computation), median of 7, on the shared i5-8300H; run 1 at load 5–7, run 2 at load 12–17. Target: microseconds per object.
+
+| Object | Seal (run 1 / run 2) | Open (run 1 / run 2) |
+|---|---|---|
+| 1 KiB | 19 µs / 23 µs | 27 µs / 30 µs |
+| 64 KiB | 47 µs / 70 µs | 64 µs / 81 µs |
+| 1 MiB | 0.76 ms / 1.27 ms | 0.69 ms / 1.41 ms |
+
+Rendered pages and manifests are a few KiB, so a sealed object costs tens of microseconds to open, once per isolate (memory then serves it). Through the whole read path (`tests/repo-read-workerd.test.ts`, the "Measurements" table of the read path), an R2 miss of a private page measured 9.4 ms p50 against 7.9 ms for a public one; the difference also includes the private frame's ticket and is within the run-to-run noise of that table.
+
+### Open points
+
+- The search index (#251) holds the section text of private repositories in plaintext in D1: full-text search needs it. Purges and expiry delete it with the content.
+- Cache API entries of a purged or expired repository are not deleted (there is no per-prefix purge); they are sealed, reachable only after authorization, and age out of the colo cache.
+- Production wiring of `REPO_INGEST` in the control and serving Workers ([SETUP.md](SETUP.md#github-repository-reads-not-configured-yet)).
 
 ## Comments on Repository Docs (GitHub pivot, P6)
 
@@ -2552,6 +2645,8 @@ Tests: `tests/repo-comments-convex.test.ts` (access, revocation, removal and pur
 | One Durable Object for the permission registry and mirrors; webhook payloads may only deny | Registry and mirrors change consistently and races with webhooks are detectable; a replayed body cannot grant, because permissive changes are confirmed with GitHub first |
 | Comment access as Convex grants written by the read path, deleted by expiry jobs and P5's epochs | Convex cannot ask GitHub or read KV; grants make every comment read and write follow the page view's decision, keep queries free of clock reads, and end with page access |
 | Repository comment anchors re-found in the frame, never re-anchored on the server | Heading slug plus quote with strict uniqueness rules cannot jump to other text, and an untrusted anchor stays data |
+| Private repository content sealed per repository (HKDF from one secret, AES-256-GCM, storage key in the additional data), opened only after authorization | A leaked bucket or cache entry reveals nothing, a blob moved between repositories or objects does not open, and no per-repository key needs storing; the key ID in each envelope lets a key rotate without downtime |
+| Repository content lifecycle owned by the per-repository ingest coordinator | Wipes (purge, idle expiry, reseal) run in the same serialized chain as ingests, so nothing is written into a half-deleted prefix; its alarm resumes them and expires idle content from a once-a-day last access |
 
 ## Known Limitations
 

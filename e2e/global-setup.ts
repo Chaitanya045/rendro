@@ -55,6 +55,7 @@ export default async function globalSetup() {
       AUTH_SECRET: randomBytes(32).toString("hex"),
       IMAGE_PROXY_SECRET: randomBytes(32).toString("hex"),
       REPO_CAPABILITY_SECRET: randomBytes(32).toString("hex"),
+      REPO_CONTENT_KEY: randomBytes(32).toString("hex"),
     };
     // Always rebuild: existence alone cannot detect stale ignored browser bundles.
     await run("pnpm", ["build:assets"], {
@@ -145,7 +146,7 @@ export default async function globalSetup() {
     const workerEnv = await server.getWorker<{ REPO_CONTENT: R2BucketLike; REPO_SEARCH: SearchD1 }>().getEnv();
     const controlHandle = server.getWorker(controlWorker.name);
     const repos = await seedRepositories({
-      bucket: workerEnv.REPO_CONTENT, world, webhookSecret: controlSecrets.GITHUB_WEBHOOK_SECRET, userIds: seed.userIds,
+      bucket: workerEnv.REPO_CONTENT, contentKey: vars.REPO_CONTENT_KEY, world, webhookSecret: controlSecrets.GITHUB_WEBHOOK_SECRET, userIds: seed.userIds,
       control: (url, init) => controlHandle.fetch(url, init) as unknown as Promise<Response>,
       search: d1SearchIndex(workerEnv.REPO_SEARCH),
     });

@@ -7,9 +7,10 @@
  * retryable 503. See docs/TECHNICAL.md, "Repository read path".
  */
 import { Hono, type Context } from "hono";
-import { r2Store, plaintextSealer, type R2BucketLike } from "@/ingest/orchestrator/store";
+import { contentSealer } from "@/ingest/orchestrator/sealing";
+import { r2Store, type R2BucketLike } from "@/ingest/orchestrator/store";
 import type { ManifestFile, SnapshotManifest } from "@/ingest/orchestrator/snapshot";
-import { CONVEX_URL, IMAGE_PROXY_SECRET, REPO_CAPABILITY_SECRET } from "@/config";
+import { CONVEX_URL, IMAGE_PROXY_SECRET, REPO_CAPABILITY_SECRET, REPO_CONTENT_KEY, REPO_CONTENT_KEY_PREVIOUS } from "@/config";
 import { verifyImageProxyPath } from "@/image-proxy";
 import { sessionViewer } from "@/middleware/session";
 import { renderScopedDocumentShell } from "@/routes/app";
@@ -28,7 +29,7 @@ import { viewerScript, viewerUpdateNotice } from "@/viewer/markup";
 import { kvRevocationEpochs, kvVisibilityEpochs, serviceRepoPermissions, type Fetcher, type KvReader } from "./access";
 import { authorizeRepo, authorizeTicket, mintTicket, type Authorization, type AuthorizeDependencies } from "./authorize";
 import { COMMENT_GRANT_MIN_MS, commentAccess, commentorScript, convexCommentGrants, type CommentGrants } from "./comments";
-import { durableFirstView, interpretOutcome, prepareRepo, PREPARE_WINDOW_MS, repoIngestTarget, type RepoFirstView } from "./first-view";
+import { durableFirstView, interpretOutcome, prepareRepo, PREPARE_WINDOW_MS, repoIngestTarget, touchRepo, type RepoFirstView } from "./first-view";
 import { FRAME_TEMPLATE_TAG, FRAME_VERSION, failureBody, frameBody, frameContentSecurityPolicy, needsRelativeRewrite, renderFrameDocument } from "./frame";
 import type { RepoGrant } from "./grant";
 import { encodeRepoPath, parseRepoPath, repoBase, type RepoRefSpec, type RepoRequestPath } from "./paths";
@@ -47,6 +48,9 @@ const PREPARING_RETRY_SECONDS = 5;
 const IMMUTABLE = "max-age=31536000, immutable";
 /** Branch URLs: a short freshness window, then revalidation by ETag; stale copies survive an outage. */
 const BRANCH = "max-age=10, stale-if-error=86400";
+
+/** Private-repository content is sealed (#263); opened per read, after authorization. */
+const sealer = contentSealer(REPO_CONTENT_KEY, REPO_CONTENT_KEY_PREVIOUS);
 
 const IMAGE_TYPES: Record<string, string> = {
   avif: "image/avif", bmp: "image/bmp", gif: "image/gif", ico: "image/x-icon", jpeg: "image/jpeg",
@@ -109,7 +113,7 @@ function services(c: Context): Services | null {
       identity: sessionViewer, now, waitUntil,
     },
     snapshots: new RepoSnapshots({
-      store: readDeadline(r2Store(bucket as R2BucketLike), READ_TIMEOUT_MS), sealer: plaintextSealer, edge,
+      store: readDeadline(r2Store(bucket as R2BucketLike), READ_TIMEOUT_MS), sealer, edge,
       origin, shared: sharedCacheReader(REPO_CAPABILITY_SECRET, origin, visibilityEpoch, fetch, probe ?? undefined), waitUntil, now,
     }),
     waitUntil,
@@ -421,6 +425,8 @@ app.get("/r/*", async (c) => {
     }
     if (!manifest) return readinessResponse(c, "preparing");
   }
+  // Idle expiry's last access (#263): unattended, at most once an hour per isolate.
+  touchRepo(configured.firstView, grant, configured.authorize.now(), configured.waitUntil);
   const response = await respond(target, manifest);
   // The subrequest ran inside this request; only a dev-flagged deployment names it (REPO_SHARED_CACHE_DEBUG).
   const diagnostic = scope.sharedProbe?.last;

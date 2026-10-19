@@ -14,6 +14,8 @@ export interface SearchIndex {
   putBlob(repoId: number, blobSha: string, sections: readonly PageSection[]): Promise<void>;
   /** Run a pre-neutralized FTS5 MATCH expression, at most `limit` rows. */
   query(repoId: number, match: string, limit: number): Promise<SearchHit[]>;
+  /** Delete at most `limit` of the repository's sections (a purge or an expiry, #263). Returns how many went; 0 means none are left. */
+  deleteRepo(repoId: number, limit: number): Promise<number>;
 }
 
 export interface SearchHit {

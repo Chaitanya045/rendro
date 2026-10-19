@@ -22,7 +22,10 @@ describe("reconcileHeads", () => {
         coordinators.set(repoId, coordinator);
       }
       const target = coordinator;
-      return { ingest: (message) => target.ingest(message), ensure: (repo, branch) => target.ensure(repo, branch), reconcile: (repo) => target.reconcile(repo) };
+      return {
+        ingest: (message) => target.ingest(message), ensure: (repo, branch) => target.ensure(repo, branch), reconcile: (repo) => target.reconcile(repo),
+        touch: (touch) => target.touch(touch), purge: (repoId) => target.purge(repoId),
+      };
     };
     const repos = [1, 2, 3].map((id) => fixture.github.repo("octo", `docs-${id}`, { id }));
     for (const repo of repos) {

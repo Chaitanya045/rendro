@@ -17,7 +17,7 @@ enabled = false
 
 [secrets]
 # Match the mandatory runtime settings validated in src/config.ts.
-required = ["CONVEX_INTERNAL_SECRET", "AUTH_SECRET", "IMAGE_PROXY_SECRET", "REPO_CAPABILITY_SECRET"]
+required = ["CONVEX_INTERNAL_SECRET", "AUTH_SECRET", "IMAGE_PROXY_SECRET", "REPO_CAPABILITY_SECRET", "REPO_CONTENT_KEY"]
 
 # Blob storage is the native R2 binding: the Worker holds no S3 access key, and the bucket must
 # stay private (no r2.dev URL, no public custom domain; `pnpm check:r2-public` verifies it).
@@ -46,7 +46,7 @@ name = "rendro-dev"
 
 [env.development.secrets]
 # Match the mandatory runtime settings validated in src/config.ts.
-required = ["CONVEX_INTERNAL_SECRET", "AUTH_SECRET", "IMAGE_PROXY_SECRET", "REPO_CAPABILITY_SECRET"]
+required = ["CONVEX_INTERNAL_SECRET", "AUTH_SECRET", "IMAGE_PROXY_SECRET", "REPO_CAPABILITY_SECRET", "REPO_CONTENT_KEY"]
 
 [[env.development.r2_buckets]]
 binding = "STORAGE"

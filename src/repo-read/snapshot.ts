@@ -13,16 +13,22 @@
  * Every read takes a `RepoGrant`: authorization has already happened. Edge
  * cache keys sit under a reserved path of the Worker's own origin that no
  * route serves, so the only way to reach an entry is this module, after a
- * grant. Bytes are cached as stored and opened (P9 decrypts) per read.
+ * grant. Bytes are cached as stored and opened per read, after authorization
+ * (#263): a private repository's edge entries are sealed, and only bytes that
+ * opened under the current key are cached (under that key's ID), so an entry
+ * never outlives the key that opens it. Content that does not open is a
+ * retryable 503, never served.
  */
 import { isGitObjectId } from "@/ingest/github/git-objects";
 import { RENDERER_VERSION } from "@/ingest/limits";
 import type { RefPointer } from "@/ingest/orchestrator/ingest";
 import { blobKey, manifestKey, refKey, renderObjectKey, repoPrefix } from "@/ingest/orchestrator/keys";
 import type { ManifestFile, RenderedObject, SnapshotManifest } from "@/ingest/orchestrator/snapshot";
+import { envelopeKeyId, isSealed, SealedContentError } from "@/ingest/orchestrator/sealing";
 import type { ContentSealer, ObjectStore } from "@/ingest/orchestrator/store";
 import type { SidebarIndex } from "@/ingest/sidebar";
 import { ImmutableMetadataCache } from "@/immutable-cache";
+import { logger } from "@/logger";
 import { ViewerBackendError } from "@/viewer-backend";
 import type { RepoGrant } from "./grant";
 import type { SharedCacheReader } from "./shared-cache";
@@ -102,33 +108,65 @@ function validManifest(value: unknown, repoId: number, commit: string): Snapshot
 export class RepoSnapshots {
   constructor(private readonly deps: SnapshotDependencies) {}
 
+  /**
+   * Stored bytes, opened. A private repository's bytes must open; a public
+   * one's are opened only when sealed (a repository made public keeps the
+   * sealed content it had). Anything that does not open is never served.
+   */
   private async open(grant: RepoGrant, key: string, stored: Uint8Array): Promise<Uint8Array> {
-    return grant.repo.private ? this.deps.sealer.open({ repoId: grant.repo.id, key }, stored) : stored;
+    if (!grant.repo.private && !isSealed(stored)) return stored;
+    try {
+      return await this.deps.sealer.open({ repoId: grant.repo.id, key }, stored);
+    } catch (error) {
+      if (!(error instanceof SealedContentError)) throw error;
+      logger.error({ category: "SealedContent", repoId: grant.repo.id, reason: error.reason }, "Repository content did not open");
+      throw new ViewerBackendError();
+    }
   }
 
   /**
-   * Stored bytes for a public repository through the cacheable subrequest, else
-   * the per-colo edge cache, else R2 (filling the edge cache in the background).
-   * The subrequest is skipped for private repositories: their objects are sealed
-   * and must not enter a shared cache.
+   * Where a grant's bytes sit in the edge cache: a public repository's under
+   * the storage key, a private one's under the current key's ID, so an entry
+   * sealed under a retired key is never looked up again.
    */
-  private async stored(grant: RepoGrant, key: string): Promise<Uint8Array | null> {
+  private async edgeKey(grant: RepoGrant, key: string): Promise<{ cacheKey: string; keyId: string | null }> {
+    if (!grant.repo.private) return { cacheKey: `${this.deps.origin}${EDGE_PREFIX}${key}`, keyId: null };
+    let keyId: string | null;
+    try {
+      keyId = await this.deps.sealer.currentKeyId();
+    } catch {
+      throw new ViewerBackendError();
+    }
+    return { cacheKey: `${this.deps.origin}${EDGE_PREFIX}sealed/${keyId}/${key}`, keyId };
+  }
+
+  /**
+   * Opened bytes: for a public repository first through the cacheable
+   * subrequest (#242), then from the edge cache, else R2. The shared tier is
+   * never consulted for a private repository, and sealed bytes (a repository
+   * made public keeps its sealed content) are never taken from it: they are
+   * read below and opened. The edge cache is filled in the background only
+   * after the bytes opened, and only with what it may hold: plaintext for a
+   * public repository, bytes sealed under the current key for a private one.
+   */
+  private async read(grant: RepoGrant, key: string): Promise<Uint8Array | null> {
     const { edge, shared } = this.deps;
     if (!grant.repo.private && shared) {
       const bytes = await shared(grant.repo.id, key);
-      if (bytes) return bytes;
+      if (bytes && !isSealed(bytes)) return bytes;
     }
-    const cacheKey = `${this.deps.origin}${EDGE_PREFIX}${key}`;
+    const { cacheKey, keyId } = await this.edgeKey(grant, key);
     const hit = edge ? await edge.match(cacheKey) : undefined;
-    if (hit) return new Uint8Array(await hit.arrayBuffer());
+    if (hit) return this.open(grant, key, new Uint8Array(await hit.arrayBuffer()));
     const object = await this.deps.store.get(key);
     if (!object) return null;
-    if (edge) {
+    const opened = await this.open(grant, key, object.bytes);
+    if (edge && (grant.repo.private ? envelopeKeyId(object.bytes) === keyId : !isSealed(object.bytes))) {
       const response = new Response(object.bytes as Uint8Array<ArrayBuffer>, { headers: { "Cache-Control": "public, max-age=31536000, immutable" } });
       // A failed fill only costs the next reader an R2 read.
       this.deps.waitUntil(edge.put(cacheKey, response).catch(() => {}));
     }
-    return object.bytes;
+    return opened;
   }
 
   /**
@@ -138,14 +176,15 @@ export class RepoSnapshots {
    * Worker, which only signs public objects.
    */
   async raw(key: string): Promise<Uint8Array | null> {
-    return (await this.deps.store.get(key))?.bytes ?? null;
+    const bytes = (await this.deps.store.get(key))?.bytes ?? null;
+    // Sealed content (a repository made public keeps it, #263) never enters a shared tier: the reader opens it from R2.
+    return bytes && !isSealed(bytes) ? bytes : null;
   }
 
   private immutable<T>(grant: RepoGrant, key: string, parse: (bytes: Uint8Array) => T): Promise<T | null> {
     return snapshotMemory.get<T | null>(key, async () => {
-      const stored = await this.stored(grant, key);
-      if (!stored) return { value: null, weight: null };
-      const bytes = await this.open(grant, key, stored);
+      const bytes = await this.read(grant, key);
+      if (!bytes) return { value: null, weight: null };
       return { value: parse(bytes), weight: bytes.byteLength };
     });
   }
@@ -210,9 +249,8 @@ export class RepoSnapshots {
   async page<T>(grant: RepoGrant, file: ManifestFile, variant: string, derive: (rendered: RenderedObject) => Promise<T>): Promise<T> {
     const key = renderObjectKey(grant.repo.id, file.render as string);
     const page = await snapshotMemory.get<T | null>(`${key}#${variant}`, async () => {
-      const stored = await this.stored(grant, key);
-      if (!stored) return { value: null, weight: null };
-      const bytes = await this.open(grant, key, stored);
+      const bytes = await this.read(grant, key);
+      if (!bytes) return { value: null, weight: null };
       const value = parseJson(bytes) as { html?: unknown; error?: unknown } | null;
       if (!value || (typeof value.html !== "string" && typeof value.error !== "string")) throw new ViewerBackendError();
       return { value: await derive(value as RenderedObject), weight: bytes.byteLength };

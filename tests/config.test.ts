@@ -6,9 +6,10 @@ const requiredSettings = {
   AUTH_SECRET: "test-share-signing-secret",
   IMAGE_PROXY_SECRET: "test-image-proxy-secret-at-least-32-chars",
   REPO_CAPABILITY_SECRET: "test-repo-capability-secret-at-least-32",
+  REPO_CONTENT_KEY: "test-repo-content-key-at-least-32-chars",
 };
 const optionalSettings = [
-  "NODE_ENV", "LOG_LEVEL", "CONVEX_URL", "CONVEX_SITE_URL", "RETENTION_SECRET",
+  "NODE_ENV", "LOG_LEVEL", "CONVEX_URL", "CONVEX_SITE_URL", "RETENTION_SECRET", "REPO_CONTENT_KEY_PREVIOUS",
 ];
 
 beforeEach(() => {
@@ -25,7 +26,7 @@ afterEach(() => {
 });
 
 describe("Worker environment validation", () => {
-  it("loads with only the four required settings, without Google credentials", async () => {
+  it("loads with only the five required settings, without Google credentials", async () => {
     const config = await import("../src/config");
     expect(config).toMatchObject({
       ...requiredSettings,
@@ -34,6 +35,7 @@ describe("Worker environment validation", () => {
       CONVEX_URL: "",
       CONVEX_SITE_URL: "",
       RETENTION_SECRET: undefined,
+      REPO_CONTENT_KEY_PREVIOUS: undefined,
     });
   });
 
@@ -58,6 +60,8 @@ describe("Worker environment validation", () => {
     ["CONVEX_INTERNAL_SECRET", 32],
     ["IMAGE_PROXY_SECRET", 32],
     ["REPO_CAPABILITY_SECRET", 32],
+    ["REPO_CONTENT_KEY", 32],
+    ["REPO_CONTENT_KEY_PREVIOUS", 32],
   ] as const)("enforces the minimum length of %s", async (key, minimum) => {
     vi.stubEnv(key, "x".repeat(minimum - 1));
     await expect(import("../src/config")).rejects.toThrow(`${key} must be at least ${minimum} characters`);
@@ -71,6 +75,20 @@ describe("Worker environment validation", () => {
     vi.stubEnv(key, shared);
     vi.stubEnv("REPO_CAPABILITY_SECRET", shared);
     await expect(import("../src/config")).rejects.toThrow("REPO_CAPABILITY_SECRET must not reuse another secret");
+  });
+
+  it.each(["AUTH_SECRET", "CONVEX_INTERNAL_SECRET", "RETENTION_SECRET", "IMAGE_PROXY_SECRET", "REPO_CAPABILITY_SECRET", "REPO_CONTENT_KEY_PREVIOUS"])(
+    "refuses a repository content key that reuses %s", async (key) => {
+      const shared = "a-content-key-shared-by-two-settings-0123456789";
+      vi.stubEnv(key, shared);
+      vi.stubEnv("REPO_CONTENT_KEY", shared);
+      await expect(import("../src/config")).rejects.toThrow("REPO_CONTENT_KEY must not reuse another secret");
+    },
+  );
+
+  it("accepts a previous content key during a rotation", async () => {
+    vi.stubEnv("REPO_CONTENT_KEY_PREVIOUS", "test-repo-content-key-previous-0123456789");
+    await expect(import("../src/config")).resolves.toMatchObject({ REPO_CONTENT_KEY_PREVIOUS: "test-repo-content-key-previous-0123456789" });
   });
 
   it("ignores unused Google/BASE_URL settings and the Node-only PORT", async () => {

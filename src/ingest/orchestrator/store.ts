@@ -12,6 +12,8 @@ export interface ObjectStore {
   /** Returns false only when `ifMatch` is set and the stored ETag differs. */
   put(key: string, bytes: Uint8Array, options?: { contentType?: string; ifMatch?: string }): Promise<boolean>;
   list(prefix: string, cursor?: string | null): Promise<{ keys: string[]; cursor: string | null }>;
+  /** Up to 1,000 keys at once (R2's limit); a missing key is not an error. */
+  delete(keys: string[]): Promise<void>;
 }
 
 /** The subset of the Workers R2Bucket binding used here. */
@@ -23,6 +25,7 @@ export interface R2BucketLike {
     onlyIf?: { etagMatches?: string };
   }): Promise<{ etag: string } | null>;
   list(options: { prefix: string; cursor?: string; limit?: number }): Promise<{ objects: Array<{ key: string }>; truncated: boolean; cursor?: string }>;
+  delete(keys: string[]): Promise<void>;
 }
 
 export function r2Store(bucket: R2BucketLike): ObjectStore {
@@ -45,6 +48,9 @@ export function r2Store(bucket: R2BucketLike): ObjectStore {
       const page = await bucket.list({ prefix, limit: 1000, ...(cursor ? { cursor } : {}) });
       return { keys: page.objects.map((object) => object.key), cursor: page.truncated && page.cursor ? page.cursor : null };
     },
+    async delete(keys) {
+      if (keys.length) await bucket.delete(keys);
+    },
   };
 }
 
@@ -54,17 +60,22 @@ export interface SealScope {
 }
 
 /**
- * Encryption hook for private-repository content. P9 supplies per-repo
- * envelope encryption (AES-GCM); until then content is stored as is.
+ * Encryption hook for private-repository content: `envelopeSealer` (sealing.ts,
+ * per-repository AES-256-GCM, #263) in the Workers; `plaintextSealer` stores
+ * bytes as they are, for tests that look at the stored bytes.
  */
 export interface ContentSealer {
   seal(scope: SealScope, plaintext: Uint8Array): Promise<Uint8Array>;
+  /** Throws `SealedContentError` for anything that does not open: such bytes are never served. */
   open(scope: SealScope, stored: Uint8Array): Promise<Uint8Array>;
+  /** The key ID new content is sealed with; null where content is stored as is. */
+  currentKeyId(): Promise<string | null>;
 }
 
 export const plaintextSealer: ContentSealer = {
   seal: (_scope, plaintext) => Promise.resolve(plaintext),
   open: (_scope, stored) => Promise.resolve(stored),
+  currentKeyId: () => Promise.resolve(null),
 };
 
 const encoder = new TextEncoder();
