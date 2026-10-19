@@ -45,6 +45,13 @@ const ANCESTORS: Schema["ancestors"] = Object.fromEntries(
 
 const LANGUAGE_CLASS = /^language-[\w#+.-]{1,64}$/;
 const prefixed = new RegExp(`^${USER_CONTENT_PREFIX}`);
+/**
+ * A same-origin image source: the signed image proxy's root-relative path, or a
+ * path relative to the document (no scheme, so no other host can be named).
+ * `//host` and `\host` are excluded; anything with a scheme fails the lookahead.
+ */
+// eslint-disable-next-line no-control-regex
+const IMAGE_SRC = /^(?:\/(?![/\\])[^\\\u0000-\u001f\u007f]*|(?![a-zA-Z][a-zA-Z0-9+.-]*:)(?![/\\])[^\\\u0000-\u001f\u007f]+)$/;
 
 type Attributes = NonNullable<Schema["attributes"]>;
 
@@ -93,8 +100,9 @@ export const outputSchema: Schema = {
     a: [...LINK_ATTRIBUTES, ["name", prefixed], ["ariaDescribedBy", prefixed], ["rel", "nofollow", "noopener", "noreferrer"]],
     code: [["className", LANGUAGE_CLASS, "hljs"]],
     div: [["className", "markdown-alert", /^markdown-alert-(?:note|tip|important|warning|caution)$/]],
-    // Only root-relative sources: repo files and the signed image proxy. No external host survives.
-    img: [["src", /^\/(?![/\\])/], "alt", "width", "height", ["loading", "lazy"], ["decoding", "async"], ["referrerPolicy", "no-referrer"]],
+    // Only same-origin sources: the document's own relative paths, repo files under `/` and the
+    // signed image proxy. No external host survives, with or without a scheme.
+    img: [["src", IMAGE_SRC], "alt", "width", "height", ["loading", "lazy"], ["decoding", "async"], ["referrerPolicy", "no-referrer"]],
     p: [["className", "markdown-alert-title"]],
     // highlight.js emits hljs-<scope> plus sub-scope classes such as "function_".
     span: [["className", /^hljs-[a-z][a-z0-9-]{0,40}$/, /^[a-z][a-z0-9]{0,40}_+$/]],

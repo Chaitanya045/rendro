@@ -28,7 +28,7 @@ import { kvRevocationEpochs, serviceRepoPermissions, type Fetcher, type KvReader
 import { authorizeRepo, authorizeTicket, mintTicket, type Authorization, type AuthorizeDependencies } from "./authorize";
 import { COMMENT_GRANT_MIN_MS, commentAccess, commentorScript, convexCommentGrants, type CommentGrants } from "./comments";
 import { durableFirstView, interpretOutcome, prepareRepo, PREPARE_WINDOW_MS, repoIngestTarget, type RepoFirstView } from "./first-view";
-import { FRAME_TEMPLATE_TAG, FRAME_VERSION, failureBody, frameBody, frameContentSecurityPolicy, renderFrameDocument } from "./frame";
+import { FRAME_TEMPLATE_TAG, FRAME_VERSION, failureBody, frameBody, frameContentSecurityPolicy, needsRelativeRewrite, renderFrameDocument } from "./frame";
 import type { RepoGrant } from "./grant";
 import { encodeRepoPath, parseRepoPath, repoBase, type RepoRefSpec, type RepoRequestPath } from "./paths";
 import { READINESS_HEADER, renderPreparingPage, type PreparingState } from "./preparing";
@@ -205,10 +205,17 @@ async function frame(c: Context, manifest: SnapshotManifest, { grant, request, f
   const origin = new URL(c.req.url).origin;
   const base = repoBase(request.owner, request.name, request.ref);
   const pinned = repoBase(request.owner, request.name, { kind: "commit", commit: manifest.commit });
-  // The rewritten body depends only on the render key (which names the page's directory), so it is derived once per isolate.
+  // Version-3 renders already carry document-relative URLs (#242); only older
+  // snapshots need the rewrite, and the variant key keeps both derived forms
+  // apart in memory. The body depends only on the render key (which names the
+  // page's directory), so it is derived once per isolate.
+  const variant = `${needsRelativeRewrite(manifest.rendererVersion) ? "legacy-" : ""}frame-v${FRAME_VERSION}`;
   const page = file.render === undefined ? { title: null, body: failureBody(file.error ?? "missing") }
-    : await services.snapshots.page(grant, file, `frame-v${FRAME_VERSION}`, async rendered => ("html" in rendered
-      ? { title: rendered.title, body: await frameBody(rendered.html, path, isProxiedImage) }
+    : await services.snapshots.page(grant, file, variant, async rendered => ("html" in rendered
+      ? {
+        title: rendered.title,
+        body: needsRelativeRewrite(manifest.rendererVersion) ? await frameBody(rendered.html, path, isProxiedImage) : rendered.html,
+      }
       : { title: null, body: failureBody(rendered.error) }));
   // Every reader gets the same frame (it may be cached publicly); the shell decides what the widget may do.
   const widget = file.render === undefined ? "" : commentorScript(origin, grant.repo.id, path, file);

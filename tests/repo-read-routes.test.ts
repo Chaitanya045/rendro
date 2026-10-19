@@ -135,8 +135,8 @@ describe("public repositories", () => {
     expect(etag).toMatch(/^"page-render\/v\d+\/markdown\/[0-9a-f]{40}\/[0-9a-f]{32}-f\d+\.v\d+\.c\d+\.[0-9a-f]{10}"$/);
     const html = await response.text();
     expect(html).toContain('<h1 id="user-content-home">Home</h1>');
-    expect(html).toContain('<a href="../docs/guide/start.md">guide</a>');
-    expect(html).toContain('<img src="../docs/img/logo.png" alt="Logo"');
+    expect(html).toContain('<a href="guide/start.md">guide</a>');
+    expect(html).toContain('<img src="img/logo.png" alt="Logo"');
     expect(html).toContain('class="markdown-alert markdown-alert-note"');
     expect(html).toContain('data-viewer="navigation"');
     // The comment widget, configured the same for every reader: repository, page and blob only (#254).
@@ -280,7 +280,7 @@ describe("private repositories", () => {
     expect(html).toContain(`<base data-rendro-viewer href="${prefix}docs/guide/start.md">`);
     expect(html).toContain('data-viewer="frame"');
     expect(html).toContain("<title>Getting started</title>");
-    expect(html).toContain('<a href="../../docs/index.md#user-content-home">home</a>');
+    expect(html).toContain('<a href="../index.md#user-content-home">home</a>');
     expect(html).toContain('<a href="#user-content-start-here">Top</a>');
   });
 
@@ -529,12 +529,12 @@ describe("the URL boundary", () => {
 describe("unusual snapshots", () => {
   const commit = "e".repeat(40);
   const base = `${pub}/@${commit}`;
-  async function snapshot(files: Record<string, unknown>, sidebar: unknown) {
+  async function snapshot(files: Record<string, unknown>, sidebar: unknown, rendererVersion = RENDERER_VERSION) {
     const write = (key: string, value: unknown) => fixture.bucket.put(key, new TextEncoder().encode(JSON.stringify(value)));
-    if (sidebar) await write(sidebarKey(publicRepo.id, commit, RENDERER_VERSION), sidebar);
-    await write(manifestKey(publicRepo.id, commit, RENDERER_VERSION), {
-      schema: 1, repoId: publicRepo.id, commit, tree: "t", rendererVersion: RENDERER_VERSION, createdAt: "", docSets: [],
-      docs: { entry: "index.md" }, files, sidebar: sidebar ? sidebarKey(publicRepo.id, commit, RENDERER_VERSION) : null, assetsTruncated: false,
+    if (sidebar) await write(sidebarKey(publicRepo.id, commit, rendererVersion), sidebar);
+    await write(manifestKey(publicRepo.id, commit, rendererVersion), {
+      schema: 1, repoId: publicRepo.id, commit, tree: "t", rendererVersion, createdAt: "", docSets: [],
+      docs: { entry: "index.md" }, files, sidebar: sidebar ? sidebarKey(publicRepo.id, commit, rendererVersion) : null, assetsTruncated: false,
     });
   }
 
@@ -577,11 +577,26 @@ describe("unusual snapshots", () => {
     const proxied = await imageProxyPath(process.env.IMAGE_PROXY_SECRET as string, "https://example.com/badge.svg") as string;
     const render = `render/v${RENDERER_VERSION}/markdown/${"f".repeat(40)}/${"0".repeat(32)}`;
     await fixture.bucket.put(`gh/v1/repo/${publicRepo.id}/${render}`, new TextEncoder().encode(JSON.stringify({
-      html: `<p><img src="${proxied}" alt="Badge"> <img src="/docs/img/logo.png" alt="Logo"></p>`, title: "Badges", headings: [],
+      html: `<p><img src="${proxied}" alt="Badge"> <img src="img/logo.png" alt="Logo"></p>`, title: "Badges", headings: [],
     })));
     await snapshot({ "docs/badges.md": { sha: "f".repeat(40), size: 1, render } }, null);
     const html = await (await get(`${base}/files/docs/badges.md`)).text();
+    // A version-3 render is served as ingested: the proxy path stays absolute, the repo image already points at the page.
     expect(html).toContain(`<img src="${proxied}" alt="Badge">`);
+    expect(html).toContain('<img src="img/logo.png" alt="Logo">');
+  });
+
+  it("rewrites a version-2 render's repo-path links and images on the way out", async () => {
+    const legacy = RENDERER_VERSION - 1;
+    const render = `render/v${legacy}/markdown/${"f".repeat(40)}/${"0".repeat(32)}`;
+    await fixture.bucket.put(`gh/v1/repo/${publicRepo.id}/${render}`, new TextEncoder().encode(JSON.stringify({
+      html: '<p><a href="/docs/guide/start.md">guide</a> <img src="/docs/img/logo.png" alt="Logo"></p>', title: "Legacy", headings: [],
+    })));
+    await snapshot({ "docs/badges.md": { sha: "f".repeat(40), size: 1, render } }, null, legacy);
+    clearSnapshotMemory();
+    const html = await (await get(`${base}/files/docs/badges.md`)).text();
+    // The pre-#242 shim still rewrites `/repo/path` for snapshots the old renderer wrote.
+    expect(html).toContain('<a href="../docs/guide/start.md">guide</a>');
     expect(html).toContain('<img src="../docs/img/logo.png" alt="Logo">');
   });
 

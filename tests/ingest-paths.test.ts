@@ -40,17 +40,17 @@ describe("rewriteUrl", () => {
     ["#user-content-x", "href", "#user-content-x"],
     ["#caf%C3%A9", "href", "#user-content-caf%C3%A9"],
     ["#", "href", "#"],
-    ["../api/README.md#usage", "href", "/docs/api/README.md#user-content-usage"],
-    ["setup.md?plain=1#x", "href", "/docs/guide/setup.md#user-content-x"],
-    ["setup.md#", "href", "/docs/guide/setup.md"],
-    ["img/logo.png#frag", "src", "/docs/guide/img/logo.png"],
-    ["/LICENSE", "href", "/LICENSE"],
-    ["/", "href", "/"],
-    ["sub/", "href", "/docs/guide/sub/"],
-    ["./a%20b.md", "href", "/docs/guide/a%20b.md"],
-    ["%2e%2e/x.md", "href", "/docs/x.md"],
-    ["bad%zz.md", "href", "/docs/guide/bad%25zz.md"],
-    ["  \t spaced.md \n", "href", "/docs/guide/spaced.md"],
+    ["../api/README.md#usage", "href", "../api/README.md#user-content-usage"],
+    ["setup.md?plain=1#x", "href", "setup.md#user-content-x"],
+    ["setup.md#", "href", "setup.md"],
+    ["img/logo.png#frag", "src", "img/logo.png"],
+    ["/LICENSE", "href", "../../LICENSE"],
+    ["/", "href", "../../"],
+    ["sub/", "href", "sub/"],
+    ["./a%20b.md", "href", "a%20b.md"],
+    ["%2e%2e/x.md", "href", "../x.md"],
+    ["bad%zz.md", "href", "bad%25zz.md"],
+    ["  \t spaced.md \n", "href", "spaced.md"],
     ["ja\tva\nscript:alert(1)", "href", null],
     ["JavaScript:alert(1)", "href", null],
     ["vbscript:x", "href", null],
@@ -74,7 +74,7 @@ describe("rewriteUrl", () => {
   });
 
   it("resolves against the repo root for root-level documents", () => {
-    expect(rewriteUrl("docs/a.md", "README.md", "href")).toBe("/docs/a.md");
+    expect(rewriteUrl("docs/a.md", "README.md", "href")).toBe("docs/a.md");
     expect(rewriteUrl("../a.md", "README.md", "href")).toBeNull();
   });
 

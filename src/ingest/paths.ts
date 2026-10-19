@@ -60,6 +60,13 @@ export function resolveRepoPath(baseDir: string, reference: string): string | nu
   return segments.join("/");
 }
 
+/** How many `..` steps and which remaining segments lead from `from` to `to` (both lists of literal segments). */
+function relativeParts(from: string[], to: string[]): { ups: number; rest: string[] } {
+  let common = 0;
+  while (common < from.length && common < to.length && from[common] === to[common]) common += 1;
+  return { ups: from.length - common, rest: to.slice(common) };
+}
+
 /** Config files name directories ("docs", "./src/", "docs/"); normalize or reject. */
 export function resolveConfigDir(configDir: string, value: string): string | null {
   const trimmed = value.trim();
@@ -80,8 +87,10 @@ export type UrlContext = "href" | "src";
  * - `mailto:` is kept for links. Every other scheme is dropped.
  * - Fragments gain the `user-content-` prefix that sanitized ids carry.
  * - Relative and root-relative references are resolved against the document
- *   and emitted as `/<repo path>`. The serving layer maps that namespace to
- *   the commit being viewed. A reference that leaves the repo is dropped.
+ *   and emitted relative to the document's own directory, so the frame the
+ *   serving layer builds resolves them under whatever commit, branch or ticket
+ *   base it was loaded from without rewriting the HTML (#242). A reference
+ *   that leaves the repo is dropped.
  */
 export function rewriteUrl(raw: string, docPath: string, context: UrlContext): string | null {
   // WHATWG URL parsing strips leading/trailing C0 controls and spaces, and
@@ -119,13 +128,19 @@ export function rewriteUrl(raw: string, docPath: string, context: UrlContext): s
   // "?q" alone points at the document itself. Dropping it keeps the output
   // dependent on the document's directory only, not on its file name.
   if (pathPart === "") return null;
+  const from = dirnameOf(docPath) ? dirnameOf(docPath).split("/") : [];
   const target = resolveRepoPath(pathPart.startsWith("/") ? "" : dirnameOf(docPath), decoded.join("/"));
   if (target === null) return null;
-  const directory = target !== "" && pathPart.endsWith("/");
-  const encoded = target ? encode(target.split("/")) : "";
+  const directory = pathPart.endsWith("/");
   const hash = fragment === null || context === "src" ? "" : prefixFragment(fragment);
-  if (encoded === null || hash === null) return null;
-  return `/${encoded}${directory ? "/" : ""}${hash ? `#${hash}` : ""}`;
+  if (hash === null) return null;
+  const to = target === "" ? [] : target.split("/");
+  const { ups, rest } = relativeParts(from, to);
+  const remainder = encode(rest);
+  if (remainder === null) return null;
+  const base = [...Array.from({ length: ups }, () => ".."), remainder].filter(Boolean).join("/");
+  const path = base === "" ? "./" : `${base}${directory ? "/" : ""}`;
+  return `${path}${hash ? `#${hash}` : ""}`;
 }
 
 function parseAbsolute(value: string): string | null {

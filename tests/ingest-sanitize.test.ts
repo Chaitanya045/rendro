@@ -23,7 +23,7 @@ describe("hostile corpus", () => {
     expect(attributeUrls(html, "href|src").filter((url) => /^\s*(?:javascript|vbscript|data|file|blob|intent|feed):/i.test(url))).toEqual([]);
     // A reader's browser fetches nothing from the attacker's host: every image is same-origin (a repo
     // file or the signed proxy), and only the protocol-relative case may keep the host as a plain link.
-    expect(attributeUrls(html, "src").filter((url) => !/^\/(?![/\\])/.test(url))).toEqual([]);
+    expect(attributeUrls(html, "src").filter((url) => /^\/\/|[a-z][a-z0-9+.-]*:/i.test(url))).toEqual([]);
     if (entry.name !== "protocol-relative and backslash hosts") expect(attributeUrls(html, "href").filter((url) => url.includes("evil.invalid"))).toEqual([]);
     if (entry.keeps) expect(textContent(html)).toContain(entry.keeps);
     // The output is its own fixed point: parse, sanitize and serialize again changes nothing.
@@ -64,7 +64,7 @@ describe("allowlist details", () => {
       '<ol start="3" reversed><li>three</li></ol><dl><dt>t</dt><dd>d</dd></dl><ruby>漢<rp>(</rp><rt>kan</rt><rp>)</rp></ruby>',
       '<p dir="rtl" lang="ar" title="t">x<sub>2</sub><sup>3</sup><mark>m</mark><del>d</del><ins>i</ins><abbr title="a">A</abbr></p>',
     ].join(""));
-    expect(html).toContain('<p align="center"><img src="/docs/logo.png" alt="Logo" width="120" height="40"');
+    expect(html).toContain('<p align="center"><img src="logo.png" alt="Logo" width="120" height="40"');
     expect(html).toContain("<details open><summary>More</summary><kbd>Ctrl</kbd>+<kbd>C</kbd></details>");
     expect(html).toContain('<th scope="col" colspan="2">h</th>');
     expect(html).toContain('<ol start="3" reversed>');
@@ -75,8 +75,8 @@ describe("allowlist details", () => {
 
   it("lets only same-origin image sources through the output schema", () => {
     // A transform that forgot to proxy an external image cannot leak it: the output pass drops the src.
-    const tree = parseHtmlFragment('<img src="https://img.example/a.png" alt="a"><img src="//img.example/b.png"><img src="/img/sig/url" alt="c"><img src="/docs/d.png">');
-    expect(serializeVerified(tree)).toBe('<img alt="a"><img><img src="/img/sig/url" alt="c"><img src="/docs/d.png">');
+    const tree = parseHtmlFragment('<img src="https://img.example/a.png" alt="a"><img src="//img.example/b.png"><img src="/img/sig/url" alt="c"><img src="/docs/d.png" alt="d"><img src="docs/e.png" alt="e"><img src="\\evil\\f.png" alt="f">');
+    expect(serializeVerified(tree)).toBe('<img alt="a"><img><img src="/img/sig/url" alt="c"><img src="/docs/d.png" alt="d"><img src="docs/e.png" alt="e"><img alt="f">');
   });
 
   it("prefixes author ids and names so they cannot clobber globals", async () => {

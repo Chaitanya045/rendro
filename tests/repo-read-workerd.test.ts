@@ -157,7 +157,7 @@ describe("repository read path on workerd", () => {
     expect(await shell.text()).toContain(`data-frame-base="/r/octo/open-docs/@${publicCommit}"`);
     const frame = await get(`/r/octo/open-docs/@${publicCommit}/files/docs/index.md`);
     expect(frame.headers.get("Cache-Control")).toBe("public, max-age=31536000, immutable");
-    expect(await frame.text()).toContain('<a href="../docs/guide/start.md">guide</a>');
+    expect(await frame.text()).toContain('<a href="guide/start.md">guide</a>');
     const image = await get(`/r/octo/open-docs/@${publicCommit}/files/docs/img/logo.png`);
     expect(image.headers.get("Content-Type")).toBe("image/png");
     expect((await image.arrayBuffer()).byteLength).toBe(12);
