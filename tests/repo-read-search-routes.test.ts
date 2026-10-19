@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 
+import { RENDERER_VERSION } from "@/ingest/limits";
 import { manifestKey } from "@/ingest/orchestrator/keys";
 import type { SnapshotManifest } from "@/ingest/orchestrator/snapshot";
 import { MAX_SEARCH_QUERY_LENGTH } from "@/repo-read/search";
@@ -17,7 +18,7 @@ async function searchFixture() {
   const database = new SqliteSearchD1();
   const index = d1SearchIndex(database);
   await index.migrate();
-  const snapshot = fixture.bucket.json<SnapshotManifest>(manifestKey(publicRepo.id, fixture.commits.public, 2));
+  const snapshot = fixture.bucket.json<SnapshotManifest>(manifestKey(publicRepo.id, fixture.commits.public, RENDERER_VERSION));
   expect(snapshot).toBeTruthy();
   const pages = Object.entries(snapshot!.files).filter(([, file]) => file.render !== undefined && file.error === undefined);
   expect(pages.length).toBeGreaterThan(2);

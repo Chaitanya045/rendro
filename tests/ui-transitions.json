@@ -365,6 +365,10 @@
       "reason": "Signed same-origin image proxy (#224): image bytes or an empty error, never an HTML page."
     },
     {
+      "route": "GET /__repo-cache/tiered/v1/*",
+      "reason": "Signed cacheable subrequest for a public immutable snapshot object (#242): raw bytes or an empty 404, consumed only by the Worker's own read path, never an HTML page."
+    },
+    {
       "route": "GET /p/:slug/tree",
       "reason": "JSON tree data consumed by the registered viewer; no standalone HTML page."
     },
