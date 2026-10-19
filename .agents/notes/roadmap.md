@@ -108,7 +108,7 @@ ship as soon as they are reviewed.
 The suite is 2,188 tests passing, 12 skipped (`convex-public-rpc` needs `CONVEX_TEST_BACKEND`).
 A full run takes about 6.5 minutes with 2 workers. `viewer-fragments-browser` alone takes about 290 s.
 
-UI transitions: **0 untested** after #217 (2026-10-18): all 892 edges asserted (605 e2e, 187 browser, 100 unit). Enforced by #228.
+UI transitions: **0 untested** (enforced by #228); 915+ edges after the pivot phases P4–P7 (2026-10-19).
 
 Why the numbers understate risk:
 - Node V8 coverage cannot see code running in Chromium.
