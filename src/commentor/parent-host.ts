@@ -7,6 +7,8 @@ import { whenVisible } from "./visibility";
 import { normalizeMutationArgs, record, validAnchor } from "./mutation-args";
 import { CommentOperationState, mutationKey } from "./operation-state";
 import { ConvexClient } from "convex/browser";
+import { parseRepoPath } from "../repo-read/paths";
+import { CONTENT_FRAME_EVENT } from "../viewer/content-frame";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import {
@@ -35,13 +37,18 @@ export type ProjectCommentScope = {
 };
 
 export type LegacyCommentScope = { orgSlug: string; filePath: string; documentPath: string };
-export type DocumentCommentScope = ProjectCommentScope | LegacyCommentScope;
+/** A repository doc (#254): the shell's repository and the page its frame shows. */
+export type RepoCommentScope = { repoId: number; documentPath: string };
+export type DocumentCommentScope = ProjectCommentScope | LegacyCommentScope | RepoCommentScope;
+
+/** The repository shell's comments (#254): where it asks the read path for comment access. */
+export type RepoCommentParentConfig = { repoId: number; accessUrl: string; convexUrl: string };
 
 export type CommentorParentConfig = {
   organizationId: string;
   projectId: Id<"projects">;
   convexUrl: string;
-} | { orgSlug: string; convexUrl: string };
+} | { orgSlug: string; convexUrl: string } | RepoCommentParentConfig;
 
 export interface DocumentCommentBackend {
   subscribe(
@@ -84,7 +91,7 @@ function safeRelativePath(encodedPath: string): string | null {
 export function documentCommentScopeFromFrame(
   frameUrl: string,
   pageOrigin: string,
-  config: { organizationId: string; projectId: Id<"projects"> } | { orgSlug: string },
+  config: { organizationId: string; projectId: Id<"projects"> } | { orgSlug: string } | { repoId: number; accessUrl: string },
 ): DocumentCommentScope | null {
   let url: URL;
   try {
@@ -93,6 +100,14 @@ export function documentCommentScopeFromFrame(
     return null;
   }
   if (url.origin !== pageOrigin) return null;
+  if ("repoId" in config) {
+    // The frame must show a page of the shell's own repository, at any ref; the read path parses it the same way.
+    const frame = parseRepoPath(url.pathname);
+    const shell = parseRepoPath(config.accessUrl);
+    if (!frame || !shell || frame.target.kind !== "files"
+      || `${frame.owner}/${frame.name}`.toLowerCase() !== `${shell.owner}/${shell.name}`.toLowerCase()) return null;
+    return { repoId: config.repoId, documentPath: frame.target.path };
+  }
   if ("orgSlug" in config) {
     const prefix = `/legacy-view/${encodeURIComponent(config.orgSlug)}/files/`;
     if (!url.pathname.startsWith(prefix)) return null;
@@ -110,9 +125,10 @@ export function documentCommentScopeFromFrame(
 }
 
 export function sameScope(left: DocumentCommentScope | null, right: DocumentCommentScope | null): boolean {
-  return Boolean(left && right && left.documentPath === right.documentPath
-    && ("orgSlug" in left ? "orgSlug" in right && left.orgSlug === right.orgSlug
-      : "organizationId" in right && left.organizationId === right.organizationId && left.projectId === right.projectId));
+  if (!left || !right || left.documentPath !== right.documentPath) return false;
+  if ("repoId" in left) return "repoId" in right && left.repoId === right.repoId;
+  if ("orgSlug" in left) return "orgSlug" in right && left.orgSlug === right.orgSlug;
+  return "organizationId" in right && left.organizationId === right.organizationId && left.projectId === right.projectId;
 }
 
 export class CommentorParentHost {
@@ -129,6 +145,8 @@ export class CommentorParentHost {
   private requestTokens = 20;
   private requestBudgetAt = performance.now();
   private mutationsInFlight = 0;
+  // Repository docs (#254): may this reader write, as the read path last said? Anyone may read a public repository.
+  private writable: boolean;
 
   private allowBackendRequest(): boolean {
     const now = performance.now();
@@ -140,13 +158,21 @@ export class CommentorParentHost {
   }
 
   constructor(
-    private readonly frame: HTMLIFrameElement,
+    private frame: HTMLIFrameElement,
     private readonly pageOrigin: string,
     private readonly config: CommentorParentConfig,
     private readonly backend: DocumentCommentBackend,
     private userId: string | null,
   ) {
+    this.writable = !("repoId" in config);
     syncCommentRecoveryUser(window.sessionStorage, userId);
+  }
+
+  /** The read path's latest answer on comment access (repository docs): tell the widget when it changes. */
+  setWritable(writable: boolean): void {
+    if (this.writable === writable) return;
+    this.writable = writable;
+    this.announce();
   }
 
   setUserId(userId: string | null): void {
@@ -154,6 +180,15 @@ export class CommentorParentHost {
     syncCommentRecoveryUser(window.sessionStorage, userId);
     this.userId = userId;
     this.parentGeneration = crypto.randomUUID();
+    this.onFrameLoad();
+  }
+
+  /** The shell made another, already loaded iframe the content frame (an adopted preload): talk to that one now. */
+  replaceFrame(frame: HTMLIFrameElement): void {
+    if (frame === this.frame) return;
+    this.frame.removeEventListener("load", this.onFrameLoad);
+    this.frame = frame;
+    frame.addEventListener("load", this.onFrameLoad);
     this.onFrameLoad();
   }
 
@@ -196,13 +231,22 @@ export class CommentorParentHost {
     this.connectionGeneration += 1;
     this.reset();
     this.loadedScope = this.currentScope();
+    this.announce();
+  };
+
+  private announce(): void {
     const source = this.frame.contentWindow;
     if (this.loadedScope && source) {
       try {
-        source.postMessage({ type: COMMENTOR_PARENT_READY, protocolVersion: COMMENTOR_PROTOCOL_VERSION, canReloadViewer: true, parentGeneration: this.parentGeneration, userId: this.userId, recoveryState: this.userId ? this.recovery(this.loadedScope).value : { operations: {}, drafts: {} } }, "*");
+        source.postMessage({
+          type: COMMENTOR_PARENT_READY, protocolVersion: COMMENTOR_PROTOCOL_VERSION, canReloadViewer: true, parentGeneration: this.parentGeneration,
+          userId: this.userId, recoveryState: this.userId ? this.recovery(this.loadedScope).value : { operations: {}, drafts: {} },
+          // A repository frame is the same for every reader, so the widget learns here whether this one may write.
+          ...("repoId" in this.config ? { canWrite: this.userId !== null && this.writable } : {}),
+        }, "*");
       } catch { this.subscriptionError(source); }
     }
-  };
+  }
 
   private owns(generation: number, source: MessageEventSource, scope: DocumentCommentScope): boolean {
     return generation === this.generation && this.ownsConnection(this.connectionGeneration, source, scope);
@@ -340,7 +384,10 @@ export class CommentorParentHost {
     }
     if (!isCommentorParentRequest(event.data)) return;
     const scope = this.currentScope();
-    if (!this.userId || !scope || !sameScope(scope, this.loadedScope) || !event.source) {
+    // Anyone may read a public repository's comments; every write (and draft) still needs the signed-in reader.
+    const reading = event.data.method === "subscribe" || event.data.method === "threads.more" || event.data.method === "replies.more";
+    const anonymous = !this.userId && !(reading && "repoId" in this.config);
+    if (anonymous || !scope || !sameScope(scope, this.loadedScope) || !event.source) {
       if (event.source) this.respond(event.source, event.data.requestId, false, "Comment scope is unavailable");
       return;
     }
@@ -431,9 +478,9 @@ export class CommentorParentHost {
 }
 
 export class ConvexDocumentCommentBackend implements DocumentCommentBackend {
-  constructor(private readonly client: ConvexClient) {}
+  constructor(protected readonly client: ConvexClient) {}
 
-  private subscribePaginated(
+  protected subscribePaginated(
     query: unknown,
     args: unknown,
     reverse: boolean,
@@ -472,7 +519,7 @@ export class ConvexDocumentCommentBackend implements DocumentCommentBackend {
     onUpdate: (threads: unknown[], state: CommentPaginationState) => void,
     onError: (error: Error) => void,
   ): CommentPaginationSubscription {
-    if ("orgSlug" in scope) throw new Error("Invalid project scope");
+    if (!("organizationId" in scope)) throw new Error("Invalid project scope");
     return this.subscribePaginated(api.documentThreads.list, scope, false, onUpdate, onError);
   }
 
@@ -482,12 +529,12 @@ export class ConvexDocumentCommentBackend implements DocumentCommentBackend {
     onUpdate: (replies: unknown[], state: CommentPaginationState) => void,
     onError: (error: Error) => void,
   ): CommentPaginationSubscription {
-    if ("orgSlug" in scope) throw new Error("Invalid project scope");
+    if (!("organizationId" in scope)) throw new Error("Invalid project scope");
     return this.subscribePaginated(api.documentReplies.list, { ...scope, threadId }, true, onUpdate, onError);
   }
 
   mutate(method: CommentorParentMutationMethod, scope: DocumentCommentScope, value: unknown): Promise<unknown> {
-    if ("orgSlug" in scope) throw new Error("Invalid project scope");
+    if (!("organizationId" in scope)) throw new Error("Invalid project scope");
     const args = value as { body?: string; anchor?: never; threadId?: string; replyId?: string; clientOperationId?: string; expectedAuthorId?: string; resolved?: boolean; archived?: boolean };
     const operation = { clientOperationId: args.clientOperationId, expectedAuthorId: args.expectedAuthorId };
     if (method === "thread.create") {
@@ -506,6 +553,47 @@ export class ConvexDocumentCommentBackend implements DocumentCommentBackend {
       return this.client.mutation(api.documentReplies.remove, { ...scope, ...operation, threadId, replyId: args.replyId as Id<"documentReplies"> });
     }
     return this.client.mutation(api.documentReplies.add, { ...scope, ...operation, threadId, body: args.body! });
+  }
+}
+
+/** Repository docs (#254): `repoComments`, scoped by repository and page; the reader's access is Convex's to decide. */
+export class ConvexRepoCommentBackend extends ConvexDocumentCommentBackend {
+  override subscribe(
+    scope: DocumentCommentScope,
+    onUpdate: (threads: unknown[], state: CommentPaginationState) => void,
+    onError: (error: Error) => void,
+  ): CommentPaginationSubscription {
+    if (!("repoId" in scope)) throw new Error("Invalid repository scope");
+    return this.subscribePaginated(api.repoComments.listThreads, { repoId: scope.repoId, path: scope.documentPath }, false, onUpdate, onError);
+  }
+
+  override subscribeReplies(
+    scope: DocumentCommentScope,
+    threadId: Id<"documentThreads">,
+    onUpdate: (replies: unknown[], state: CommentPaginationState) => void,
+    onError: (error: Error) => void,
+  ): CommentPaginationSubscription {
+    if (!("repoId" in scope)) throw new Error("Invalid repository scope");
+    return this.subscribePaginated(api.repoComments.listReplies, { repoId: scope.repoId, path: scope.documentPath, threadId }, true, onUpdate, onError);
+  }
+
+  override mutate(method: CommentorParentMutationMethod, scope: DocumentCommentScope, value: unknown): Promise<unknown> {
+    if (!("repoId" in scope)) throw new Error("Invalid repository scope");
+    const args = value as { body?: string; anchor?: never; threadId?: string; replyId?: string; clientOperationId?: string; expectedAuthorId?: string; resolved?: boolean; archived?: boolean };
+    const common = { repoId: scope.repoId, path: scope.documentPath, clientOperationId: args.clientOperationId, expectedAuthorId: args.expectedAuthorId };
+    if (method === "thread.create") return this.client.mutation(api.repoComments.createThread, { ...common, body: args.body!, anchor: args.anchor! });
+    const threadId = args.threadId!;
+    // Status writes always name their target here: there are no old widgets to toggle for.
+    if (method === "thread.resolve" || method === "thread.archive") {
+      const target = method === "thread.resolve" ? args.resolved : args.archived;
+      if (typeof target !== "boolean") return Promise.reject(new ConvexError({ code: "invalid_input", message: "Invalid input" }));
+      return method === "thread.resolve"
+        ? this.client.mutation(api.repoComments.resolve, { ...common, threadId, resolved: target })
+        : this.client.mutation(api.repoComments.archive, { ...common, threadId, archived: target });
+    }
+    if (method === "thread.remove") return this.client.mutation(api.repoComments.removeThread, { ...common, threadId });
+    if (method === "reply.remove") return this.client.mutation(api.repoComments.removeReply, { ...common, threadId, replyId: args.replyId! });
+    return this.client.mutation(api.repoComments.addReply, { ...common, threadId, body: args.body! });
   }
 }
 
@@ -550,20 +638,76 @@ async function requestAuthToken(onAccessLost: () => void): Promise<string | null
   return null;
 }
 
+/** Renewal pacing for repository comment access (#254). */
+export const REPO_ACCESS_MIN_RENEW_MS = 15_000;
+export const REPO_ACCESS_DENIED_RETRY_MS = 60_000;
+export const REPO_ACCESS_MAX_RETRY_MS = 60_000;
+
+/**
+ * Keep the reader's comment access recorded in Convex while the shell is open
+ * (#254): ask the read path at once, then again halfway through each grant.
+ * The read path decides exactly as for a page view; a denial is a 404 and a
+ * failure to check is retried with backoff. A hidden tab holds its renewal
+ * until it is shown again (the grant lapses meanwhile, and comments with it).
+ */
+export function keepRepoCommentAccess(accessUrl: string, onChange: (writable: boolean) => void): () => void {
+  let disposed = false;
+  let timer: number | undefined;
+  let retry = REPO_ACCESS_MIN_RENEW_MS / 3;
+  const schedule = (delay: number) => {
+    if (!disposed) timer = window.setTimeout(() => { void renew(); }, delay);
+  };
+  const backoff = () => {
+    const delay = retry;
+    retry = Math.min(retry * 2, REPO_ACCESS_MAX_RETRY_MS);
+    schedule(delay);
+  };
+  const renew = async () => {
+    await whenVisible();
+    if (disposed) return;
+    let response: Response;
+    try {
+      response = await fetch(accessUrl, { method: "POST", credentials: "same-origin", cache: "no-store", headers: { Accept: "application/json" } });
+    } catch {
+      backoff();
+      return;
+    }
+    const body = response.ok ? await response.json().catch(() => null) as { expiresAt?: unknown } | null : null;
+    if (disposed) return;
+    if (body && typeof body.expiresAt === "number") {
+      retry = REPO_ACCESS_MIN_RENEW_MS / 3;
+      onChange(true);
+      schedule(Math.max(REPO_ACCESS_MIN_RENEW_MS, (body.expiresAt - Date.now()) / 2));
+    } else if (response.status === 404) {
+      onChange(false);
+      schedule(REPO_ACCESS_DENIED_RETRY_MS);
+    } else backoff();
+  };
+  void renew();
+  return () => {
+    disposed = true;
+    window.clearTimeout(timer);
+  };
+}
+
 export function bootCommentorParentHost(frameAlreadyLoaded = false): (() => void) | null {
   if (document.documentElement.dataset.rendroSignedOut === "true") return null;
-  const globals = window as Window & { RENDRO_SHARE_CONFIG?: CommentorParentConfig; RENDRO_LEGACY_COMMENT_CONFIG?: CommentorParentConfig };
-  const config = globals.RENDRO_LEGACY_COMMENT_CONFIG ?? globals.RENDRO_SHARE_CONFIG;
+  const globals = window as Window & { RENDRO_SHARE_CONFIG?: CommentorParentConfig; RENDRO_LEGACY_COMMENT_CONFIG?: CommentorParentConfig; RENDRO_REPO_COMMENT_CONFIG?: CommentorParentConfig };
+  const config = globals.RENDRO_REPO_COMMENT_CONFIG ?? globals.RENDRO_LEGACY_COMMENT_CONFIG ?? globals.RENDRO_SHARE_CONFIG;
   const frame = document.getElementById("content-frame");
   if (!config?.convexUrl || !(frame instanceof HTMLIFrameElement)) return null;
+  // Repository docs (#254) are readable without signing in when public; a reader who signs out mid-session is still signed out.
+  const repo = "repoId" in config ? config : null;
   let disposed = false;
   let signedOut = false;
+  let signedIn = false;
   let frameLoaded = frameAlreadyLoaded;
   const rememberLoad = () => { frameLoaded = true; };
   frame.addEventListener("load", rememberLoad);
   let host: CommentorParentHost | null = null;
   let unsubscribeDeployment: (() => void) | undefined;
   let deploymentStopped = false;
+  let stopAccess: (() => void) | undefined;
   const stopDeployment = () => {
     deploymentStopped = true;
     const unsubscribe = unsubscribeDeployment;
@@ -583,7 +727,9 @@ export function bootCommentorParentHost(frameAlreadyLoaded = false): (() => void
       const session = denied ? null : await response.json() as { user?: { id?: unknown } } | null;
       const userId = typeof session?.user?.id === "string" && session.user.id ? session.user.id : null;
       if (!disposed && !signedOut) {
-        if (!userId) { signOut(); return null; }
+        // An anonymous reader of a repository stays one; anyone else without a session has signed out.
+        if (!userId) { if (!repo || signedIn) signOut(); return null; }
+        signedIn = true;
         syncCommentRecoveryUser(window.sessionStorage, userId);
         host?.setUserId(userId);
       }
@@ -594,11 +740,16 @@ export function bootCommentorParentHost(frameAlreadyLoaded = false): (() => void
   // BFCache and full reloads must check the live session before hydrating drafts.
   void checkIdentity().then((userId) => {
     if (disposed || signedOut) return;
-    host = new CommentorParentHost(frame, location.origin, config, "orgSlug" in config ? new ConvexLegacyCommentBackend(client) : new ConvexDocumentCommentBackend(client), userId);
+    const backend = repo ? new ConvexRepoCommentBackend(client) : "orgSlug" in config ? new ConvexLegacyCommentBackend(client) : new ConvexDocumentCommentBackend(client);
+    // A preload may have become the content frame meanwhile (#245); it has loaded by then.
+    const current = document.getElementById("content-frame");
+    const adopted = current instanceof HTMLIFrameElement && current !== frame ? current : null;
+    host = new CommentorParentHost(adopted ?? frame, location.origin, config, backend, userId);
     // The iframe may have loaded while checking the session.
-    host.start(frameLoaded || document.readyState === "complete");
+    host.start(Boolean(adopted) || frameLoaded || document.readyState === "complete");
     frame.removeEventListener("load", rememberLoad);
-    client.setAuth(async args => {
+    // Anonymous repository readers use the client unauthenticated.
+    if (userId || !repo) client.setAuth(async args => {
       // Convex refreshes before expiry (and after a rejection) with forceRefreshToken. A hidden tab
       // has nobody to serve: hold the refresh, and settle it the moment the tab is visible again.
       if (args?.forceRefreshToken) await whenVisible();
@@ -606,7 +757,12 @@ export function bootCommentorParentHost(frameAlreadyLoaded = false): (() => void
       const token = await requestAuthToken(() => { if (!disposed && !signedOut) stopDeployment(); });
       return disposed || signedOut ? null : token;
     });
-    if (!("orgSlug" in config) && userId && !deploymentStopped) {
+    if (repo) {
+      const current = host;
+      stopAccess = keepRepoCommentAccess(repo.accessUrl, writable => current.setWritable(writable));
+      return;
+    }
+    if ("organizationId" in config && userId && !deploymentStopped) {
       const unsubscribe = client.onUpdate(api.projects.activeDeployment,
         { organizationId: config.organizationId, projectId: config.projectId },
         deploymentId => { if (!deploymentStopped) updateViewerActiveDeployment(deploymentId); },
@@ -625,18 +781,26 @@ export function bootCommentorParentHost(frameAlreadyLoaded = false): (() => void
     if (signedOut || disposed) return;
     signedOut = true;
     stopDeployment();
+    stopAccess?.();
     host?.setUserId(null);
     void client.close();
     window.dispatchEvent(new Event("commentor-sign-out"));
   };
   const focus = () => { void checkIdentity().catch(() => {}); };
+  const follow = (event: Event) => {
+    const next = (event as CustomEvent<unknown>).detail;
+    if (next instanceof HTMLIFrameElement) host?.replaceFrame(next);
+  };
   window.addEventListener("commentor-sign-out", signOut);
   window.addEventListener("focus", focus);
+  window.addEventListener(CONTENT_FRAME_EVENT, follow);
   return () => {
     disposed = true;
     frame.removeEventListener("load", rememberLoad);
     window.removeEventListener("commentor-sign-out", signOut);
     window.removeEventListener("focus", focus);
+    window.removeEventListener(CONTENT_FRAME_EVENT, follow);
+    stopAccess?.();
     host?.dispose();
     stopDeployment();
     void client.close();

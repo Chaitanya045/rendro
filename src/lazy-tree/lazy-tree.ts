@@ -4,6 +4,7 @@
  */
 import { coalesceMessage, createDocumentNavigationGate } from "../viewer/message-limits";
 import { createNavigationNotice } from "../viewer/navigation-notice";
+import { CONTENT_FRAME_EVENT } from "../viewer/content-frame";
 import { replaceViewerFragment, sendDocumentFragment, validFragment } from "../viewer/fragments";
 import {
   externalLinkHref,
@@ -591,6 +592,8 @@ function adoptPreloadedFrame(preloaded: HTMLIFrameElement, current: HTMLIFrameEl
     preloaded.tabIndex = 0;
     preloaded.setAttribute("aria-busy", "true");
     preloaded.style.cssText = ACTIVE_FRAME_STYLE;
+    // Shell scripts holding the frame element (the comment host, #254) follow the reader's new frame.
+    window.dispatchEvent(new CustomEvent(CONTENT_FRAME_EVENT, { detail: preloaded }));
   };
   // The document is already rendered, so settling waits only for the reveal.
   const settle = () => {

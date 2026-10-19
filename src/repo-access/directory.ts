@@ -10,7 +10,9 @@
  *   app's installations, at most `MIRROR_TTL_MS` old (conditional requests;
  *   a 304 is free).
  * - The epoch outbox: users whose capabilities must be re-decided. Epochs are
- *   written to KV only after the registry and the mirror already deny.
+ *   written to KV only after the registry and the mirror already deny. Where
+ *   comments are configured (#254), each epoch, and every repository GitHub
+ *   reports uninstalled or deleted, then goes to Convex too.
  *
  * A Durable Object runs one instance, so registry and mirrors change
  * consistently. Its input gates open while it awaits GitHub, so a refresh or
@@ -39,6 +41,16 @@ export interface EpochStore {
   put(key: string, value: string, options: { expirationTtl: number }): Promise<void>;
 }
 
+/**
+ * Comments on repository docs (#254) keep their own grants in Convex, which
+ * cannot read KV. It hears every epoch after KV does (the same value), and
+ * every repository that left the app, so comment access ends with page access.
+ */
+export interface CommentAccessSink {
+  revoke(userId: string, epoch: number): Promise<void>;
+  removeRepos(repoIds: number[]): Promise<void>;
+}
+
 export type DirectoryLog = (event: string, fields: Record<string, string | number | boolean>) => void;
 
 export interface DirectoryDependencies {
@@ -48,6 +60,8 @@ export interface DirectoryDependencies {
   /** The dedicated `GITHUB_TOKEN_KEY` secret. */
   tokenKey: string;
   epochs: EpochStore;
+  /** Optional: without it, comment grants end with their own lifetime (at most the five-minute capability). */
+  comments?: CommentAccessSink;
   now(): number;
   log: DirectoryLog;
 }
@@ -72,6 +86,8 @@ const TOKEN_EARLY_REFRESH_MS = 60_000;
 const EPOCH_BATCH = 64;
 const EPOCH_CONCURRENCY = 8;
 const EPOCH_RETRY_MS = 10_000;
+/** Repositories per removal call to Convex. */
+const REMOVAL_BATCH = 100;
 /** Decisions per authorize: each GitHub step (installation, repository, mirror, single check) takes one. */
 const MAX_ROUNDS = 6;
 
@@ -550,6 +566,7 @@ export class AccessDirectory {
     }
     if (plan.repos) for (const hint of plan.repos.hints) await this.applyRepoChange(plan.repos.change, hint, plan.repos.installation, seq);
     if (plan.renameOwner) await this.renameOwner(plan.renameOwner.from, plan.renameOwner.to, seq);
+    if (this.deps.comments) await this.enqueueRemovals(plan);
 
     const affected = new Set<string>();
     for (const githubId of [...plan.users ?? [], ...plan.unauthorize === undefined ? [] : [plan.unauthorize]]) {
@@ -596,6 +613,18 @@ export class AccessDirectory {
 
   // ---- Epochs --------------------------------------------------------------
 
+  /** Repositories that left the app with this delivery: removed ones, and every one of a deleted installation. */
+  private async enqueueRemovals(plan: EventPlan): Promise<void> {
+    const removed = new Set(plan.repos?.change === "remove" ? plan.repos.hints.map(hint => hint.id) : []);
+    if (plan.installation?.state === "deleted") {
+      for (const entry of (await this.storage.list<RepoEntry>({ prefix: "repo:" })).values()) {
+        if (entry.installation === plan.installation.id) removed.add(entry.id);
+      }
+    }
+    for (const repoId of removed) await this.storage.put(`removed:${repoId}`, 1);
+    if (removed.size) await this.storage.setAlarm(this.deps.now());
+  }
+
   private async enqueueRevocations(userIds: Iterable<string>): Promise<void> {
     const marker = crypto.randomUUID();
     for (const userId of userIds) await this.storage.put(`pending:${userId}`, marker);
@@ -624,17 +653,48 @@ export class AccessDirectory {
         const epoch = Math.max(this.deps.now(), (await this.storage.get<number>(`epoch:${userId}`) ?? 0) + 1);
         await this.deps.epochs.put(`epoch:${userId}`, String(epoch), { expirationTtl: EPOCH_TTL_SECONDS });
         await this.storage.put(`epoch:${userId}`, epoch);
+        // Pages are revoked; comments follow from their own outbox entry, so a Convex outage never rewrites KV.
+        if (this.deps.comments) await this.storage.put(`notify:${userId}`, epoch);
         // Re-queued meanwhile: leave it for the next pass.
         if (await this.storage.get(key) === marker) await this.storage.delete([key]);
       } catch {
         failed += 1;
       }
     });
-    if (failed) {
-      this.deps.log("access.epochs-failed", { failed });
+    const [notified, notifyFull] = await this.flushComments();
+    if (failed || notified) {
+      if (failed) this.deps.log("access.epochs-failed", { failed });
       await this.storage.setAlarm(this.deps.now() + EPOCH_RETRY_MS);
-    } else if (pending.length === EPOCH_BATCH) {
+    } else if (pending.length === EPOCH_BATCH || notifyFull) {
       await this.storage.setAlarm(this.deps.now());
     }
+  }
+
+  /** Tell Convex about written epochs and removed repositories. Returns the failures and whether a batch was full. */
+  private async flushComments(): Promise<[number, boolean]> {
+    const sink = this.deps.comments;
+    if (!sink) return [0, false];
+    let failed = 0;
+    const notify = [...(await this.storage.list<number>({ prefix: "notify:", limit: EPOCH_BATCH })).entries()];
+    await eachLimit(notify, EPOCH_CONCURRENCY, async ([key, epoch]) => {
+      try {
+        await sink.revoke(key.slice("notify:".length), epoch);
+        // A newer epoch written meanwhile stays for the next pass.
+        if (await this.storage.get(key) === epoch) await this.storage.delete([key]);
+      } catch {
+        failed += 1;
+      }
+    });
+    const removals = [...(await this.storage.list<number>({ prefix: "removed:", limit: REMOVAL_BATCH })).keys()];
+    if (removals.length) {
+      try {
+        await sink.removeRepos(removals.map(key => Number(key.slice("removed:".length))));
+        await this.storage.delete(removals);
+      } catch {
+        failed += 1;
+      }
+    }
+    if (failed) this.deps.log("access.comments-failed", { failed });
+    return [failed, notify.length === EPOCH_BATCH || removals.length === REMOVAL_BATCH];
   }
 }

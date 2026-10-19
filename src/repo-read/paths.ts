@@ -7,6 +7,7 @@
  *   /r/{owner}/{repo}[/{ref}]/tree                  one sidebar directory page (JSON)
  *   /r/{owner}/{repo}/@{commit}/view/{ticket}/files/{path}   private assets, authorized by an asset ticket
  *   /r/{owner}/{repo}/@{commit}/viewer-ticket       ticket renewal for the trusted shell (JSON)
+ *   POST /r/{owner}/{repo}/comment-access           comment access for the trusted shell (#254, JSON)
  *
  * `{ref}` is one segment: `~{branch}` (a `/` in the branch is written `%2F`) or
  * `@{commit}` (immutable). Without it the default branch is served. Owner and
@@ -27,7 +28,8 @@ export type RepoTarget =
   | { kind: "files"; path: string }
   | { kind: "tree" }
   | { kind: "ticket-files"; ticket: string; path: string }
-  | { kind: "viewer-ticket" };
+  | { kind: "viewer-ticket" }
+  | { kind: "comment-access" };
 
 export interface RepoRequestPath {
   owner: string;
@@ -55,6 +57,8 @@ function parseRef(segment: string): RepoRefSpec | null {
 function parseTarget(rest: string[], ref: RepoRefSpec): RepoTarget | null {
   if (rest.length === 0) return { kind: "shell" };
   if (rest.length === 1 && rest[0] === "tree") return { kind: "tree" };
+  // Comment access belongs to the repository, not to a ref.
+  if (rest.length === 1 && rest[0] === "comment-access") return ref.kind === "default" ? { kind: "comment-access" } : null;
   if (rest[0] === "files" && rest.length > 1) {
     const path = decodeStoragePath(rest.slice(1).join("/"));
     return path ? { kind: "files", path } : null;

@@ -30,7 +30,7 @@ describe("document UI regressions", () => {
   });
 
   it("bounds the notification stack itself without shrinking independent Undo controls", () => {
-    const source = readFileSync(new URL("../src/commentor/commentor.ts", import.meta.url), "utf8");
+    const source = ["commentor.ts", "styles.ts"].map(file => readFileSync(new URL(`../src/commentor/${file}`, import.meta.url), "utf8")).join("\n");
     const region = source.match(/\.toast-region \{([^}]+)\}/)?.[1];
     expect(region).toContain("max-height: max(44px, calc(100vh - 120px))");
     expect(region).toContain("overflow-y: auto");

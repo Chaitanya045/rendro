@@ -45,6 +45,8 @@ import type * as qaPermissionFixtures from "../qaPermissionFixtures.js";
 import type * as qaWorkspaceFixtures from "../qaWorkspaceFixtures.js";
 import type * as rendroHttp from "../rendroHttp.js";
 import type * as replies from "../replies.js";
+import type * as repoCommentAccess from "../repoCommentAccess.js";
+import type * as repoComments from "../repoComments.js";
 import type * as retention from "../retention.js";
 import type * as retentionHttp from "../retentionHttp.js";
 import type * as retentionPolicy from "../retentionPolicy.js";
@@ -100,6 +102,8 @@ declare const fullApi: ApiFromModules<{
   qaWorkspaceFixtures: typeof qaWorkspaceFixtures;
   rendroHttp: typeof rendroHttp;
   replies: typeof replies;
+  repoCommentAccess: typeof repoCommentAccess;
+  repoComments: typeof repoComments;
   retention: typeof retention;
   retentionHttp: typeof retentionHttp;
   retentionPolicy: typeof retentionPolicy;

@@ -13,9 +13,12 @@ export interface RepoGrant {
   readonly viewer: string | null;
   /** The reader's revocation epoch the grant rests on (0 for public reads). */
   readonly epoch: number;
+  /** Until when (ms) the authorization behind this grant holds without being decided again: the
+   * capability's expiry, or the isolate's public-repository memory. Comment access (#254) never outlives it. */
+  readonly until: number;
   readonly [issued]: true;
 }
 
-export function issueGrant(repo: RepoRecord, viewer: string | null, epoch: number): RepoGrant {
-  return { repo, viewer, epoch } as RepoGrant;
+export function issueGrant(repo: RepoRecord, viewer: string | null, epoch: number, until = 0): RepoGrant {
+  return { repo, viewer, epoch, until } as RepoGrant;
 }

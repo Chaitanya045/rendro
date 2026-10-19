@@ -18,6 +18,7 @@ import { staticTokenProvider } from "@/ingest/github/token";
 import type { DurableObjectNamespaceLike } from "@/ingest/orchestrator/coordinator-client";
 import { isOwnerLogin } from "@/ingest/orchestrator/messages";
 import { parseRepoRecord, repoAccessHandler, RepoAccessUnavailable, type RepoPermissionSource } from "@/repo-read/access";
+import { convexCommentSink } from "./comments";
 import { AccessDirectory, type DirectoryLog, type DirectoryState, type EpochStore } from "./directory";
 import { planEvent } from "./events";
 import { GitHubAccessClient } from "./github";
@@ -39,6 +40,9 @@ export interface ControlWorkerEnv {
   GITHUB_WEB_ORIGIN?: string;
   /** Development and tests only, until P1 mints installation tokens. */
   GITHUB_DEV_TOKEN?: string;
+  /** Comments on repository docs (#254): Convex, told about every epoch and removed repository. Optional. */
+  CONVEX_URL?: string;
+  CONVEX_INTERNAL_SECRET?: string;
 }
 
 export const INTERNAL_HOST = "repo-access.internal";
@@ -139,6 +143,8 @@ export class RepoAccessDirectory {
           ? httpTokenRefresher({ clientId: env.GITHUB_APP_CLIENT_ID, clientSecret: env.GITHUB_APP_CLIENT_SECRET, webOrigin: env.GITHUB_WEB_ORIGIN || undefined, now: () => Date.now() })
           : unconfiguredRefresher,
         tokenKey, epochs: env.REPO_EPOCHS, now: () => Date.now(), log,
+        // Without both, comment grants end with their own lifetime (at most five minutes) instead of with the epoch.
+        comments: env.CONVEX_URL && validSecret(env.CONVEX_INTERNAL_SECRET) ? convexCommentSink(env.CONVEX_URL, env.CONVEX_INTERNAL_SECRET) : undefined,
       })
       : null;
   }

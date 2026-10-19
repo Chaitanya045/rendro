@@ -51,7 +51,7 @@ export class ParentCommentTransport {
   private refreshHandler: (() => void) | null = null;
   private compatible = false;
   private canReloadViewer = false;
-  private compatibilityHandler: ((compatible: boolean, canReloadViewer: boolean) => void) | null = null;
+  private compatibilityHandler: ((compatible: boolean, canReloadViewer: boolean, parentCanWrite?: boolean) => void) | null = null;
   private sequence = 0;
   private userId: string | null | undefined;
   private identityChangeHandler: (() => void) | null = null;
@@ -73,7 +73,7 @@ export class ParentCommentTransport {
     onSlowMutation?: SlowHandler,
     onRefresh?: () => void,
     onIdentityChange?: () => void,
-    onCompatibility?: (compatible: boolean, canReloadViewer: boolean) => void,
+    onCompatibility?: (compatible: boolean, canReloadViewer: boolean, parentCanWrite?: boolean) => void,
   ): void {
     this.updateHandler = onUpdate;
     this.repliesUpdateHandler = onRepliesUpdate;
@@ -216,7 +216,7 @@ export class ParentCommentTransport {
     if (isCommentorParentReadySignal(event.data)) {
       this.compatible = isCommentorParentReady(event.data);
       this.canReloadViewer = event.data.canReloadViewer === true;
-      this.compatibilityHandler?.(this.compatible, this.canReloadViewer);
+      this.compatibilityHandler?.(this.compatible, this.canReloadViewer, (event.data as { canWrite?: unknown }).canWrite === true);
       if (!isCommentorParentReady(event.data)) {
         this.retirePending(new CommentMutationOutcomeUnknownError());
         return;

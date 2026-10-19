@@ -10,6 +10,8 @@ import { publicErrorMessages, type PublicErrorCode } from "../src/shared/public-
 
 const anchor = { kind: "element" as const, path: ["main"] };
 const paginationOpts = { cursor: null, numItems: 10 };
+const repoPage = { repoId: 9001, path: "docs/guide.md" };
+const repoAnchor = { kind: "repo-text" as const, blobSha: "a".repeat(40), headingSlug: "", prefix: "", exact: "Test", suffix: "", offset: 0 };
 async function fixture() {
   const f = await projectFixture();
   vi.stubEnv("LEGACY_ORGANIZATION_MAP", JSON.stringify({ example: f.data.organizationId }));
@@ -43,6 +45,19 @@ const endpoints: Endpoint[] = [
   { name: "deletedFiles:mark", kind: "mutation", args: () => ({ orgSlug: "example", fileKey: "key", internalSecret: "wrong" }), ids: [] },
   ...["isDeleted"].map(name => ({ name: `deletedFiles:${name}`, kind: name === "isDeleted" ? "query" as const : "mutation" as const, args: () => ({ fileKey: "key", internalSecret: "wrong" }), ids: [] })),
   { name: "deletedFiles:filterFn", kind: "query", args: () => ({ keys: [], internalSecret: "wrong" }), ids: [] },
+  // Repository docs (#254): the read path's internal grant calls, then the comments themselves. Their own
+  // cross-repository ID, anchor and access matrix is in tests/repo-comments-convex.test.ts.
+  { name: "repoCommentAccess:grant", kind: "mutation", args: () => ({ internalSecret: "wrong", repoId: 1, userId: null, epoch: 0, expiresAt: Date.now() + 1_000 }), ids: [] },
+  { name: "repoCommentAccess:revokeUser", kind: "mutation", args: () => ({ internalSecret: "wrong", userId: "user", epoch: 1 }), ids: [] },
+  { name: "repoCommentAccess:removeRepos", kind: "mutation", args: () => ({ internalSecret: "wrong", repoIds: [1] }), ids: [] },
+  { name: "repoComments:listThreads", kind: "query", args: () => ({ ...repoPage, paginationOpts }), ids: [] },
+  { name: "repoComments:listReplies", kind: "query", args: f => ({ ...repoPage, threadId: f.threadId, paginationOpts }), ids: [] },
+  { name: "repoComments:createThread", kind: "mutation", args: () => ({ ...repoPage, body: "Test", anchor: repoAnchor }), ids: [] },
+  { name: "repoComments:resolve", kind: "mutation", args: f => ({ ...repoPage, threadId: f.threadId, resolved: true }), ids: [] },
+  { name: "repoComments:archive", kind: "mutation", args: f => ({ ...repoPage, threadId: f.threadId, archived: true }), ids: [] },
+  { name: "repoComments:removeThread", kind: "mutation", args: f => ({ ...repoPage, threadId: f.threadId }), ids: [] },
+  { name: "repoComments:addReply", kind: "mutation", args: f => ({ ...repoPage, threadId: f.threadId, body: "Test" }), ids: [] },
+  { name: "repoComments:removeReply", kind: "mutation", args: f => ({ ...repoPage, threadId: f.threadId, replyId: f.replyId }), ids: [] },
 ];
 
 function call(backend: Pick<Fixture["backend"], "query" | "mutation">, endpoint: Endpoint, args: Record<string, unknown>) {
@@ -89,9 +104,16 @@ describe("public Convex application error contract", () => {
   it.each(endpoints)("$name safely rejects unauthenticated callers", async endpoint => {
     const f = await fixture();
     vi.stubEnv("CONVEX_INTERNAL_SECRET", "correct-secret");
-    const service = endpoint.name.startsWith("legacyAccess:") || endpoint.name.startsWith("deletedFiles:");
+    const service = /^(legacyAccess|deletedFiles|repoCommentAccess):/.test(endpoint.name);
     const args = { ...endpoint.args(f) };
     if (!/^(document|projects:)/.test(endpoint.name) && endpoint.ids.length) args.threadId = "malformed";
+    if (endpoint.name.startsWith("repoComments:")) {
+      // Access to repository comments is decided before anything else, and reveals nothing: no grant reads as
+      // an empty page and writes as "not found", exactly like a repository nobody has commented on.
+      if (endpoint.kind === "query") expect(await call(f.backend, endpoint, args)).toEqual({ page: [], isDone: true, continueCursor: "" });
+      else await failure(call(f.backend, endpoint, args), "not_found");
+      return;
+    }
     await failure(call(f.backend, endpoint, args), service ? "forbidden" : endpoint.name === "projects:activeDeployment" ? "not_found" : "unauthenticated");
   });
 

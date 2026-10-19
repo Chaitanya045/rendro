@@ -99,12 +99,20 @@ interface OrgTreePageOptions {
   backHref?: string;
   backLabel?: string;
   legacyCommentConfig?: { orgSlug: string; convexUrl: string };
+  repoCommentConfig?: RepoCommentConfig;
   publicDocument?: boolean;
   shareConfig?: {
     organizationId: string;
     projectId: string;
     convexUrl?: string;
   };
+}
+
+/** Comments on repository docs (#254): the trusted shell's repository, where it asks for access, and Convex. */
+export interface RepoCommentConfig {
+  repoId: number;
+  accessUrl: string;
+  convexUrl: string;
 }
 
 export interface ScopedDocumentShellOptions {
@@ -118,6 +126,7 @@ export interface ScopedDocumentShellOptions {
   publicDocument?: boolean;
   frameBase?: string;
   copyLink?: boolean;
+  repoCommentConfig?: RepoCommentConfig;
   shareConfig?: {
     organizationId: string;
     projectId: string;
@@ -147,6 +156,7 @@ export function renderScopedDocumentShell(options: ScopedDocumentShellOptions): 
     shareConfig: options.shareConfig,
     frameBase: options.frameBase,
     copyLink: options.copyLink,
+    repoCommentConfig: options.repoCommentConfig,
   });
 }
 
@@ -969,9 +979,9 @@ ${renderStylesheet("viewer-base")}
   window.addEventListener("message",function(e){var frame=document.getElementById("content-frame");if(frame&&frame.contentWindow&&e.source===frame.contentWindow&&e.data&&e.data.type==="doc-retry")frame.contentWindow.location.replace(frame.src);});
 })();
 </script>
-<script${nonceAttribute()}>window.RENDRO_INITIAL_DOC=${inlineJson(selectedDoc)};window.RENDRO_ORG=${inlineJson(org)};window.RENDRO_DOCUMENT_BASE=${inlineJson(documentBase)};window.RENDRO_PUBLICATION_BASE=${inlineJson(isPublicDocument ? documentBase : "")};window.RENDRO_SHARE_CONFIG=${inlineJson(options.shareConfig ?? null)};window.RENDRO_LEGACY_COMMENT_CONFIG=${inlineJson(options.legacyCommentConfig ?? null)};</script>
+<script${nonceAttribute()}>window.RENDRO_INITIAL_DOC=${inlineJson(selectedDoc)};window.RENDRO_ORG=${inlineJson(org)};window.RENDRO_DOCUMENT_BASE=${inlineJson(documentBase)};window.RENDRO_PUBLICATION_BASE=${inlineJson(isPublicDocument ? documentBase : "")};window.RENDRO_SHARE_CONFIG=${inlineJson(options.shareConfig ?? null)};window.RENDRO_LEGACY_COMMENT_CONFIG=${inlineJson(options.legacyCommentConfig ?? null)};window.RENDRO_REPO_COMMENT_CONFIG=${inlineJson(options.repoCommentConfig ?? null)};</script>
 ${renderCommentRecoveryLifecycle(user?.id ?? null, nonceAttribute())}
-${options.shareConfig?.convexUrl || options.legacyCommentConfig?.convexUrl ? `<script${nonceAttribute()} src="/commentor-parent.js?v=${COMMENTOR_PARENT_VERSION}"></script>` : ""}
+${options.shareConfig?.convexUrl || options.legacyCommentConfig?.convexUrl || options.repoCommentConfig?.convexUrl ? `<script${nonceAttribute()} src="/commentor-parent.js?v=${COMMENTOR_PARENT_VERSION}"></script>` : ""}
 <script${nonceAttribute()} src="/lazy-tree.js?v=${LAZY_TREE_VERSION}"></script>
 </body>
 </html>`;

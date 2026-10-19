@@ -78,7 +78,7 @@ describe("auth, landing, 404 and viewer polish", () => {
   });
 
   it("does not reference undefined commentor font variables", () => {
-    const source = readFileSync(new URL("../src/commentor/commentor.ts", import.meta.url), "utf8");
+    const source = ["commentor.ts", "styles.ts"].map(file => readFileSync(new URL(`../src/commentor/${file}`, import.meta.url), "utf8")).join("\n");
     expect(source).not.toContain("var(--font-ui)");
   });
 });

@@ -1,4 +1,5 @@
 import type { CommentorParentMutationMethod } from "./parent-protocol";
+import { validRepoAnchor } from "./repo-anchor";
 
 export function record(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -12,6 +13,8 @@ function validBody(value: unknown): value is string {
 
 export function validAnchor(value: unknown): boolean {
   const anchor = record(value);
+  // Repository docs (#254) anchor by heading and quote, not by element path.
+  if (anchor?.kind === "repo-text") return validRepoAnchor(anchor);
   if (
     !anchor
     || !Array.isArray(anchor.path)

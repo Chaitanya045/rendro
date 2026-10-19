@@ -11,6 +11,8 @@ workers_dev = false
 
 # GITHUB_TOKEN_KEY seals stored user tokens (AES-GCM); GITHUB_WEBHOOK_SECRET verifies deliveries.
 # GITHUB_APP_CLIENT_ID/GITHUB_APP_CLIENT_SECRET (token refresh) and GITHUB_DEV_TOKEN are optional until P1.
+# CONVEX_URL (var) with CONVEX_INTERNAL_SECRET (secret) is optional: comments on repository docs (#254) then end
+# with the reader's epoch and an uninstall, not only when their grant expires.
 [secrets]
 required = ["GITHUB_TOKEN_KEY", "GITHUB_WEBHOOK_SECRET"]
 

@@ -3,18 +3,21 @@
  * sanitized at ingest (#215); the frame adds Rendro's stylesheet, the viewer's
  * navigation bridge and, for private repositories, the asset ticket base.
  * The response's own policy is stricter than the publisher frames': the only
- * script is Rendro's viewer bundle, and nothing may load except same-origin
- * resources (external images arrive through the signed image proxy).
+ * scripts are Rendro's viewer and comment bundles, the only inline style is the
+ * comment widget's stylesheet (by hash), and nothing may load except same-origin
+ * resources (external images arrive through the signed image proxy). The widget
+ * never connects anywhere: it talks to the trusted shell (#254).
  */
 import { parseFragment, serialize, type DefaultTreeAdapterMap } from "parse5";
 import { IMAGE_PROXY_PREFIX } from "@/image-proxy";
 import { escapeHtml } from "@/routes/html";
 import { styleManifest } from "@/routes/style-manifest";
-import { PRIVATE_VIEWER_VERSION } from "@/viewer/asset-versions";
+import { COMMENTOR_VERSION, PRIVATE_VIEWER_VERSION } from "@/viewer/asset-versions";
+import { COMMENTOR_SCRIPT_PATH, COMMENTOR_STYLE_SOURCE } from "./comments";
 
 /** Bump when the frame markup changes: it is part of every frame validator. */
-export const FRAME_VERSION = 1;
-export const FRAME_TEMPLATE_TAG = `f${FRAME_VERSION}.v${PRIVATE_VIEWER_VERSION}.${styleManifest["repo-doc"].split(".")[1]}`;
+export const FRAME_VERSION = 2;
+export const FRAME_TEMPLATE_TAG = `f${FRAME_VERSION}.v${PRIVATE_VIEWER_VERSION}.c${COMMENTOR_VERSION}.${styleManifest["repo-doc"].split(".")[1]}`;
 
 type Node = DefaultTreeAdapterMap["childNode"] | DefaultTreeAdapterMap["documentFragment"];
 
@@ -85,8 +88,8 @@ export function frameContentSecurityPolicy(origin: string): string {
   return [
     "sandbox allow-scripts allow-popups",
     "default-src 'none'",
-    `script-src ${origin}/private-viewer.js`,
-    `style-src ${origin}/styles/`,
+    `script-src ${origin}/private-viewer.js ${origin}${COMMENTOR_SCRIPT_PATH}`,
+    `style-src ${origin}/styles/ ${COMMENTOR_STYLE_SOURCE}`,
     // Same-origin only: since #224 ingest writes every external image as a signed /img/ proxy path or drops it,
     // so an external URL reaching a frame is a bug, and the policy keeps it from the reader (as RENDERED_DOCUMENT_POLICY).
     `img-src ${origin}`,

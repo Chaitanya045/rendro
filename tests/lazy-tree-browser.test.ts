@@ -1231,6 +1231,13 @@ describe("lazy tree instant navigation (#245)", () => {
         holder.vt.push(typeof update);
         return original(update);
       };
+      // Scripts holding the frame element (the comment host, #254) are told which element is the reader's frame now.
+      const adopted = window as unknown as { adopted: boolean[] };
+      adopted.adopted = [];
+      addEventListener("rendro:content-frame", event => {
+        const frame = (event as CustomEvent<HTMLIFrameElement>).detail;
+        adopted.adopted.push(frame === document.getElementById("content-frame") && frame.dataset.preload === undefined);
+      });
     });
     await link(tab, indexHref).hover();
     await waitForPreloaded(tab, indexHref);
@@ -1242,6 +1249,7 @@ describe("lazy tree instant navigation (#245)", () => {
     // Adoption revealed the same browsing context: the document is not fetched again.
     expect(frameHrefCount(indexHref)).toBe(1);
     expect(await tab.evaluate(() => (window as unknown as { vt: string[] }).vt)).toEqual(["function"]);
+    expect(await tab.evaluate(() => (window as unknown as { adopted: boolean[] }).adopted)).toEqual([true]);
     const duration = await tab.evaluate(() => performance.getEntriesByName("rendro:frame-switch").at(-1)!.duration);
     expect(duration).toBeLessThan(200);
     // The preload slot is empty: the reader's frame is the preloaded element.

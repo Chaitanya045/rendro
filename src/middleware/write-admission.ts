@@ -22,6 +22,8 @@ export const workerMutationPolicies = {
   "PATCH /api/rendro/*": "convex",
   "DELETE /api/rendro/*": "convex",
   "DELETE /api/legacy/content": "cookie-bodyless",
+  // Comment access for repository docs (#254); mounted before this middleware, so the route applies the same rule itself.
+  "POST /r/*": "cookie-bodyless",
   "POST /api/orgs": "retired",
   "POST /api/publications": "mixed-json",
   "DELETE /api/publications/:slug": "mixed-bodyless",
