@@ -269,8 +269,10 @@ describe("comments in a repository document frame", () => {
     await expect.poll(() => opened.frame.locator('.toast[role="alert"]').last().innerText()).toBe("This comment’s anchor is no longer available.");
     // A blank quote is never shown as one.
     await publish([thread("blank", { ...second, exact: "   " })]);
-    await expect.poll(() => opened.frame.locator(".drawer-thread").count()).toBe(1);
-    expect(await opened.frame.locator('.drawer-thread [aria-label="Locate commented text on page"]').count()).toBe(0);
+    // Wait for the blank thread itself: the drawer briefly still shows the previous (ambiguous) thread, which has a
+    // Locate control, and a count of one would match it too.
+    await expect.poll(() => opened.frame.locator('.drawer-thread[data-thread-id="blank"]').count()).toBe(1);
+    await expect.poll(() => opened.frame.locator('.drawer-thread [aria-label="Locate commented text on page"]').count()).toBe(0);
     // A found anchor is located on the page.
     await publish([thread("found", second)]);
     const alerts = await opened.frame.locator('.toast[role="alert"]').count();
