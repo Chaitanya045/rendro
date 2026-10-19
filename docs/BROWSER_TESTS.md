@@ -610,6 +610,32 @@ assumptions, not product defects. The suites now follow these rules:
 - **Do not depend on pointer delivery right after a navigation** when the click is
   incidental to the test: Firefox can drop it under load. Submit with the keyboard
   and wait for the visible confirmation (`requestPasswordReset`).
+- **A URL change is not a settled page (#277).** A client-routed navigation updates
+  the URL before the destination has its data, and the swap from skeleton to content
+  swallows keys and popups from that gap. Keyboard specs wait on `pageSettled`
+  (not only `shellReady`) after every navigation they continue from.
+- **Collect network evidence by polling, not by one read (#277).** A list built from
+  `page.on("response")` is complete only once each response arrived: the viewer's
+  `defer` scripts are requested after the heading renders. Assert with
+  `expect.poll(() => paths).toContain(path)` per bundle (`static-assets.spec.ts`).
+- **Await the host's own first renewal before changing the fixture (#277).** The
+  comment host renews its token on load (identity check, then token), and a renewal
+  asked for while one is in flight joins it. A test that flips the identity must
+  wait for that first `/api/auth/convex/token` response, or the join returns the
+  token the earlier check was granted (`sign-out-browser.test.ts`). Making the
+  window deterministic is a one-line route that fetches `get-session` and delays
+  its delivery.
+- **A browser's cookie list can include a cookie that was just expired (#277).**
+  Firefox lists the entry a sign-out expired for a moment, so `sessionCookieExpiry`
+  ignores cookies whose expiry has passed and is polled until the live one shows.
+- **Keep-alive resets are transport, not behavior (#277).** The Worker is served by
+  workerd, which closes an idle keep-alive socket after five seconds and has no
+  setting for it (`workerd.capnp` has no HTTP timeout; a Node client reusing the
+  socket at exactly 5000 ms idle reproduces `ECONNRESET` against
+  `createTestHarness`). An `APIRequestContext` call that reuses it at that moment
+  fails before any byte is sent, so a spec that issues such calls with long pauses
+  between them sends `Connection: close` (`get()` in `backend-unavailable.spec.ts`)
+  instead of retrying.
 - **Measure CPU, not wall time, and reduce noise structurally.** The share-budget
   matrix reports process CPU time, takes the median of three identical samples for
   the scaling comparison, and keeps the absolute ceiling on the slowest sample.

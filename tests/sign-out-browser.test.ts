@@ -507,7 +507,11 @@ it("keeps following deployments through a transient deployment subscription fail
 
 it("ends the comment session when the identity check at token renewal finds the account gone", async () => {
   const page = await harness.newPage();
+  // The host's own first renewal (identity check, then token) must finish first: a renewal asked for while it is in
+  // flight joins it and returns its token, so the account would not look gone yet.
+  const initialToken = page.waitForResponse(response => new URL(response.url()).pathname === "/api/auth/convex/token");
   await openViewerWithDraft(page);
+  await initialToken;
   identity = "signed-out";
   expect(await refresh(page)).toBeNull();
   await overlay(page).waitFor();

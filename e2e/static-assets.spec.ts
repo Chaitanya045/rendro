@@ -33,8 +33,10 @@ test.describe("public static assets", () => {
     await tab.goto(`${site.docs}?doc=index.html`);
     await expect(content(tab).getByRole("heading", { name: "Viewer home" })).toBeVisible();
 
-    const loaded = [...bundles.keys()].map(key => key.replace(/\?.*/, ""));
-    for (const path of bundlePaths) expect(loaded, `${path} was not loaded by any page`).toContain(path);
+    // The viewer document and its comment frame load their `defer` scripts after the heading renders, so the list
+    // is complete only once every bundle's response arrived: poll the real condition instead of reading it once.
+    const loadedPaths = () => [...bundles.keys()].map(key => key.replace(/\?.*/, ""));
+    for (const path of bundlePaths) await expect.poll(loadedPaths, { message: `${path} was not loaded by any page` }).toContain(path);
     for (const [key, response] of bundles) {
       const path = key.replace(/\?.*/, "");
       expect(key, "pages reference only the current version").toBe(path + currentSearch(path));

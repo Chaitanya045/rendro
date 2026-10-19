@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { chromium } from "playwright";
 import { test, expect } from "./fixtures";
 import { password } from "./seed";
-import { ageRecord, authRecord, fontsSettled, holdRequest, login, mailFor, mailLink, oauthFixture, requestPasswordReset, securityReady, session, signout, signup, tamperedToken, verifiedUser } from "./auth-helpers";
+import { ageRecord, authRecord, fontsSettled, holdRequest, login, mailFor, mailLink, oauthFixture, requestPasswordReset, securityReady, session, sessionCookieExpiry, signout, signup, tamperedToken, verifiedUser } from "./auth-helpers";
 import { localHttp } from "./backend";
 import type { RepoFixtures } from "./repo-fixtures";
 
@@ -96,7 +96,8 @@ test("an invalid or expired verification link never reports success and offers a
   // The resend form stays neutral and keeps the destination.
   const before = (await mailFor(email)).length;
   await page.getByLabel("Work email", { exact: true }).fill(email);
-  await page.getByRole("button", { name: "Resend verification email" }).click();
+  // Keyboard submission, like requestPasswordReset: Firefox can lose a pointer click right after a navigation under load.
+  await page.getByLabel("Work email", { exact: true }).press("Enter");
   await expect(page.getByRole("status")).toContainText("If the address is eligible");
   await expect.poll(async () => (await mailFor(email)).length).toBeGreaterThan(before);
 
@@ -185,9 +186,8 @@ test("remember-me controls cookie persistence and survives reload", async ({ pag
     expect(identity?.email).toBe("owner@example.test");
     if (!identity) throw new Error("Missing session");
     // Compare cookie metadata only; never include values in assertion output.
-    const cookieExpiry = (await context.cookies()).find(cookie => cookie.name.endsWith(".session_token"))?.expires;
-    if (remember) expect(cookieExpiry).toBeGreaterThan(Date.now() / 1000);
-    else expect(cookieExpiry).toBe(-1);
+    if (remember) await expect.poll(() => sessionCookieExpiry(context)).toBeGreaterThan(Date.now() / 1000);
+    else await expect.poll(() => sessionCookieExpiry(context)).toBe(-1);
     await page.reload();
     expect((await session(page))?.sessionId).toBe(identity.sessionId);
     await signout(page);
@@ -709,9 +709,8 @@ for (const remember of [false, true]) {
     const duration = (remember ? 7 : 1) * 86400_000;
     expect(stored.expiresAt - stored.createdAt).toBeGreaterThan(duration - 1000);
     expect(stored.expiresAt - stored.createdAt).toBeLessThanOrEqual(duration);
-    const cookieExpiry = (await context.cookies()).find(cookie => cookie.name.endsWith(".session_token"))?.expires;
-    if (remember) expect(cookieExpiry).toBeGreaterThan(Date.now() / 1000);
-    else expect(cookieExpiry).toBe(-1);
+    if (remember) await expect.poll(() => sessionCookieExpiry(context)).toBeGreaterThan(Date.now() / 1000);
+    else await expect.poll(() => sessionCookieExpiry(context)).toBe(-1);
     expect(await authRecord("findOne", { model: "session", where: [{ field: "_id", value: original?.sessionId }], select: ["_id"] })).toBeNull();
   });
 }
