@@ -2395,7 +2395,7 @@ A signature covers the body, not the delivery ID, and payloads carry no timestam
 |---|---|
 | GitHub error, timeout or rate limit while a mirror is fresh | The mirror answers (within `MIRROR_TTL_MS`) |
 | The same once the mirror is stale | 503; for 5 s (`FAILURE_COOLDOWN_MS`) the same work answers 503 without calling GitHub again |
-| Token near expiry | Renewed first (one renewal per user at a time: GitHub rotates the refresh token on use) |
+| Token near expiry | Renewed first (one renewal per user at a time: GitHub rotates the refresh token on use; a renewal decided from a stale token snapshot serves the tokens a just-finished renewal stored instead of renewing again) |
 | Renewal fails (network, 5xx, no OAuth client configured) | 503 |
 | GitHub refuses the refresh token, or refuses a freshly renewed access token | The user is forgotten (tokens and mirror dropped, epoch bumped): private repositories are denied until they sign in again |
 | Stored tokens cannot be opened (another key) | 503 |

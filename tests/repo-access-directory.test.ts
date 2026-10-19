@@ -730,6 +730,44 @@ describe("token renewal races", () => {
     expect(world.github.count("oauth")).toBe(1);
   });
 
+  it("does not renew again when a refresh's stale decision outlives the renewal it would have joined", async () => {
+    const world = accessFixture();
+    await world.setup();
+    world.clock.time += 8 * 60 * 60 * 1000;
+    let release!: () => void;
+    world.github.gate = new Promise<void>((resolve) => { release = resolve; });
+    world.github.gateFilter = (endpoint) => endpoint === "oauth";
+    const first = world.read("member", world.teamDocs);
+    await vi.waitFor(() => expect(world.github.held).toBe(1));
+    await world.deliver("membership", { action: "added", member: world.userPayload(world.people.member) });
+    // Park the second read inside its refresh, after it decided from the tokens the first renewal is
+    // about to replace, so its renewal is attempted only once the first one has fully completed.
+    let resume!: () => void;
+    const parked = new Promise<void>((resolve) => { resume = resolve; });
+    const storage = world.storage as unknown as { get: (key: string) => Promise<unknown> };
+    const originalGet = storage.get;
+    let parkNextSeqRead = true;
+    storage.get = async (key: string) => {
+      if (parkNextSeqRead && key === "seq") { parkNextSeqRead = false; await parked; }
+      return originalGet.call(world.storage, key);
+    };
+    const second = world.read("member", world.teamDocs);
+    await vi.waitFor(() => expect(parkNextSeqRead).toBe(false));
+    // The first renewal finishes: rotated tokens land in storage, and no renewal is left to join.
+    const userBefore = await originalGet.call(world.storage, `user:${world.userIds.member}`) as { tokens: string };
+    world.github.gate = null;
+    release();
+    await vi.waitFor(async () => {
+      const user = await originalGet.call(world.storage, `user:${world.userIds.member}`) as { tokens: string };
+      expect(user.tokens).not.toBe(userBefore.tokens);
+    });
+    resume();
+    // Both views are answered, and the second read's stale decision costs no second OAuth renewal.
+    expect(await first).toEqual(record(world.teamDocs));
+    expect(await second).toEqual(record(world.teamDocs));
+    expect(world.github.count("oauth")).toBe(1);
+  });
+
   it("stops at a renewal for a user whose tokens were dropped meanwhile", async () => {
     const world = accessFixture();
     await world.setup();
