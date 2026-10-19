@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { GitHubError } from "../../src/ingest/github/source";
 import { staticTokenProvider, type InstallationTokenProvider } from "../../src/ingest/github/token";
 import { RateGovernor } from "../../src/ingest/github/rate-governor";
 import { AccessDirectory, type CommentAccessSink, type DirectoryStorage, type EpochStore } from "../../src/repo-access/directory";
@@ -48,8 +49,40 @@ export class FakeEpochKv implements EpochStore, KvReader {
   }
 }
 
+/**
+ * Installation tokens as P1 will mint them with the app JWT: scoped to one
+ * installation and cached until invalidated. Minting for an installation
+ * GitHub no longer has fails with not-found, as `POST /app/installations/{id}/access_tokens` does.
+ */
+export function mintedInstallationTokens(github: FakeGitHub): InstallationTokenProvider & { minted: number[]; fail: Error | null } {
+  const cache = new Map<number, string>();
+  const provider = {
+    minted: [] as number[],
+    /** Minting fails with this (an outage) while set. */
+    fail: null as Error | null,
+    token(installationId: number | null): Promise<string | null> {
+      if (installationId === null) return Promise.resolve(null);
+      if (provider.fail) return Promise.reject(provider.fail);
+      let token = cache.get(installationId);
+      if (!token) {
+        const installation = github.installations.get(installationId);
+        if (!installation) return Promise.reject(new GitHubError("not-found", "Installation not found", 404));
+        token = github.installationToken(installation);
+        cache.set(installationId, token);
+        provider.minted.push(installationId);
+      }
+      return Promise.resolve(token);
+    },
+    invalidate(installationId: number | null): void {
+      if (installationId !== null) cache.delete(installationId);
+    },
+  };
+  return provider;
+}
+
 export interface AccessFixtureOptions {
-  installationTokens?: InstallationTokenProvider;
+  /** The shared token by default; a function receives the fixture's GitHub (for `mintedInstallationTokens`). */
+  installationTokens?: InstallationTokenProvider | ((github: FakeGitHub) => InstallationTokenProvider);
   refresher?: TokenRefresher;
   /** Convex's comment grants (#254). */
   comments?: CommentAccessSink;
@@ -70,9 +103,10 @@ export function accessFixture(options: AccessFixtureOptions = {}) {
   const kv = new FakeEpochKv();
   const logs: Array<{ event: string; fields: Record<string, unknown> }> = [];
   const client = new GitHubAccessClient({ apiOrigin: github.origin, fetch: github.fetch, clock, governor: () => new RateGovernor({ clock }) });
+  const tokens = typeof options.installationTokens === "function" ? options.installationTokens(github) : options.installationTokens ?? staticTokenProvider(github.token);
   const directory = new AccessDirectory({ storage }, {
     github: client,
-    installationTokens: options.installationTokens ?? staticTokenProvider(github.token),
+    installationTokens: tokens,
     refresher: options.refresher ?? httpTokenRefresher({ clientId: github.clientId, clientSecret: github.clientSecret, webOrigin: github.webOrigin, fetch: github.fetch, now: clock.now }),
     tokenKey: TOKEN_KEY, epochs: kv, comments: options.comments, now: clock.now, log: (event, fields) => logs.push({ event, fields }),
   });
@@ -114,5 +148,5 @@ export function accessFixture(options: AccessFixtureOptions = {}) {
   const repoPayload = (repo: FakeRepo) => ({ repository: github.repoJson(repo) });
   const userPayload = (user: FakeUser) => ({ id: user.id, login: user.login });
 
-  return { clock, github, storage, kv, logs, client, directory, installation, open, closed, teamDocs, people, team, userIds, deliver, apply, link, setup, read, repoPayload, userPayload };
+  return { clock, github, storage, kv, logs, client, tokens, directory, installation, open, closed, teamDocs, people, team, userIds, deliver, apply, link, setup, read, repoPayload, userPayload };
 }

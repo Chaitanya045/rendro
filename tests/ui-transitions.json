@@ -26169,7 +26169,7 @@
           "id": "UI-163-E10",
           "from": "A repository with comments",
           "trigger": "GitHub reports it uninstalled or deleted",
-          "expected": "Its comments are hidden at once and purged after 30 days unless it is reinstalled",
+          "expected": "Its comments are hidden at once, and purged after 30 days only once GitHub confirms the app lost the repository; a reinstall or a replayed removal restores them",
           "inventoryRefs": [
             "UI-163"
           ],
@@ -26182,7 +26182,22 @@
             },
             {
               "file": "tests/repo-comments-convex.test.ts",
-              "name": "hides an uninstalled repository's comments at once and purges them after the retention window",
+              "name": "hides an uninstalled repository's comments at once and purges them only when asked after the retention window",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/repo-access-purge.test.ts",
+              "name": "never purges a still-installed repository after a replayed removal, and shows it again",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/repo-access-purge.test.ts",
+              "name": "purges a real removal once its window has ended, and not before",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/repo-access-purge.test.ts",
+              "name": "restores a repository reinstalled within the window as soon as GitHub confirms it, and a later removal starts a new window",
               "kind": "unit"
             },
             {

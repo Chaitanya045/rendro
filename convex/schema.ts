@@ -238,8 +238,10 @@ export default defineSchema({
 
   repoCommentRepos: defineTable({
     repoId: v.number(),
-    // Set when GitHub reports the repository uninstalled or deleted: comments are hidden, then purged.
+    // Set when GitHub reports the repository uninstalled or deleted: comments are hidden at once.
     removedAt: v.optional(v.number()),
+    // Set when the control Worker confirmed the removal with GitHub after the retention window (#258): the purge runs.
+    purgeConfirmedAt: v.optional(v.number()),
   }).index("by_repo", ["repoId"]),
 
   repoThreads: defineTable({

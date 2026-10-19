@@ -322,7 +322,7 @@ describe("repository comment access (Convex boundary)", () => {
     await expect(as("reader").mutation(api.repoComments.createThread, { ...scope(PUBLIC), body: "late", anchor: anchor() })).rejects.toThrow("Comment not found");
   });
 
-  it("hides an uninstalled repository's comments at once and purges them after the retention window", async () => {
+  it("hides an uninstalled repository's comments at once and purges them only when asked after the retention window", async () => {
     vi.useFakeTimers();
     const { backend, users, anonymous, as, grant } = await world();
     await grant(PUBLIC, null);
@@ -337,13 +337,78 @@ describe("repository comment access (Convex boundary)", () => {
     expect(await backend.run(ctx => ctx.db.query("repoCommentGrants").collect())).toEqual([]);
     // A grant decided just before the removal does not bring the comments back...
     expect(await grant(PUBLIC, null)).toEqual({ granted: false });
-    // ...and removing again keeps the first removal time (one purge job).
+    // ...and removing again keeps the first removal time.
+    const removedAt = (await backend.run(ctx => ctx.db.query("repoCommentRepos").first()))!.removedAt!;
+    vi.advanceTimersByTime(1_000);
     await backend.mutation(api.repoCommentAccess.removeRepos, { internalSecret, repoIds: [PUBLIC] });
+    expect((await backend.run(ctx => ctx.db.query("repoCommentRepos").first()))!.removedAt).toBe(removedAt);
+    // Convex never purges on its own (#258): no job waits for the window, and nothing goes when it ends.
+    expect(await backend.run(ctx => ctx.db.system.query("_scheduled_functions").filter(q => q.eq(q.field("name"), "repoCommentAccess:purgeRepo")).collect())).toEqual([]);
     vi.advanceTimersByTime(REMOVED_REPO_RETENTION_MS + 1);
+    await backend.finishAllScheduledFunctions(() => vi.runAllTimers());
+    expect(await backend.run(ctx => ctx.db.query("repoThreads").collect())).toHaveLength(1);
+    // A purge job scheduled any other way than a confirmed purge does nothing.
+    await backend.mutation(internal.repoCommentAccess.purgeRepo, { repoId: PUBLIC, removedAt });
+    expect(await backend.run(ctx => ctx.db.query("repoThreads").collect())).toHaveLength(1);
+    // The control Worker confirmed the removal with GitHub: now it goes, with an audit event.
+    expect(await backend.mutation(api.repoCommentAccess.purgeRepos, { internalSecret, repoIds: [PUBLIC, PUBLIC, OTHER] })).toEqual({ notDue: [] });
     await backend.finishAllScheduledFunctions(() => vi.runAllTimers());
     expect(await backend.run(ctx => ctx.db.query("repoThreads").collect())).toEqual([]);
     expect(await backend.run(ctx => ctx.db.query("repoReplies").collect())).toEqual([]);
     expect(await backend.run(ctx => ctx.db.query("repoCommentRepos").collect())).toEqual([]);
+    expect(await backend.run(ctx => ctx.db.query("auditEvents").withIndex("by_resource", q => q.eq("resourceType", "repository").eq("resourceId", String(PUBLIC))).collect()))
+      .toMatchObject([{ action: "repository.comments_purged", actorId: "repo-access", metadata: { removedAt } }]);
+  });
+
+  it("purges only through the internal secret, and names what Convex's own window still keeps", async () => {
+    vi.useFakeTimers();
+    const { backend, as, grant } = await world();
+    await grant(PUBLIC, null);
+    await grant(OTHER, null);
+    await as("reader").mutation(api.repoComments.createThread, { ...scope(PUBLIC), body: "Early", anchor: anchor() });
+    for (const name of ["purgeRepos", "restoreRepos"] as const) {
+      await expect(backend.mutation(api.repoCommentAccess[name], { internalSecret: "wrong", repoIds: [PUBLIC] })).rejects.toThrow("Forbidden");
+      await expect(backend.mutation(api.repoCommentAccess[name], { internalSecret, repoIds: [1.5] })).rejects.toThrow("Invalid input");
+    }
+    await backend.mutation(api.repoCommentAccess.removeRepos, { internalSecret, repoIds: [PUBLIC] });
+    const removedAt = Date.now();
+    // Asked too early (the removal reached Convex later than the control Worker heard it): nothing goes, and the answer says when.
+    vi.advanceTimersByTime(REMOVED_REPO_RETENTION_MS - 1_000);
+    expect(await backend.mutation(api.repoCommentAccess.purgeRepos, { internalSecret, repoIds: [PUBLIC, OTHER, PRIVATE] }))
+      .toEqual({ notDue: [{ repoId: PUBLIC, dueAt: removedAt + REMOVED_REPO_RETENTION_MS }] });
+    await backend.finishAllScheduledFunctions(() => vi.runAllTimers());
+    expect(await backend.run(ctx => ctx.db.query("repoThreads").collect())).toHaveLength(1);
+    vi.advanceTimersByTime(1_000);
+    expect(await backend.mutation(api.repoCommentAccess.purgeRepos, { internalSecret, repoIds: [PUBLIC] })).toEqual({ notDue: [] });
+    // Asked again while it runs: one purge.
+    expect(await backend.mutation(api.repoCommentAccess.purgeRepos, { internalSecret, repoIds: [PUBLIC] })).toEqual({ notDue: [] });
+    expect(await backend.run(ctx => ctx.db.system.query("_scheduled_functions").filter(q => q.eq(q.field("name"), "repoCommentAccess:purgeRepo")).collect())).toHaveLength(1);
+  });
+
+  it("restores a repository GitHub still grants: its comments show again and a running purge stops", async () => {
+    vi.useFakeTimers();
+    const { backend, anonymous, as, grant } = await world();
+    await grant(PUBLIC, null);
+    await as("reader").mutation(api.repoComments.createThread, { ...scope(PUBLIC), body: "Replayed", anchor: anchor() });
+    await backend.mutation(api.repoCommentAccess.removeRepos, { internalSecret, repoIds: [PUBLIC] });
+    const removedAt = Date.now();
+    vi.advanceTimersByTime(REMOVED_REPO_RETENTION_MS);
+    await backend.mutation(api.repoCommentAccess.purgeRepos, { internalSecret, repoIds: [PUBLIC] });
+    // Restored before the scheduled batch ran: the batch finds the repository back and deletes nothing.
+    await backend.mutation(api.repoCommentAccess.restoreRepos, { internalSecret, repoIds: [PUBLIC, OTHER] });
+    await backend.finishAllScheduledFunctions(() => vi.runAllTimers());
+    expect(await backend.run(ctx => ctx.db.query("repoThreads").collect())).toHaveLength(1);
+    expect(await backend.run(async ctx => {
+      const row = await ctx.db.query("repoCommentRepos").first();
+      return [row?.removedAt ?? null, row?.purgeConfirmedAt ?? null];
+    })).toEqual([null, null]);
+    expect((await backend.run(ctx => ctx.db.query("auditEvents").collect())).map(event => [event.action, event.resourceId, event.metadata as unknown]))
+      .toEqual([["repository.comments_purged", String(PUBLIC), { removedAt }], ["repository.removal_reverted", String(PUBLIC), { removedAt }]]);
+    // Readers come back through grants as before; restoring a visible repository again records nothing.
+    expect((await grant(PUBLIC, null)).granted).toBe(true);
+    expect((await anonymous.query(api.repoComments.listThreads, { ...scope(PUBLIC), paginationOpts: pageOpts })).page).toHaveLength(1);
+    await backend.mutation(api.repoCommentAccess.restoreRepos, { internalSecret, repoIds: [PUBLIC] });
+    expect(await backend.run(ctx => ctx.db.query("auditEvents").collect())).toHaveLength(2);
   });
 
   it("keeps a reinstalled repository's comments: a later grant cancels the purge", async () => {
@@ -356,8 +421,24 @@ describe("repository comment access (Convex boundary)", () => {
     expect((await grant(PUBLIC, null)).granted).toBe(true);
     expect((await anonymous.query(api.repoComments.listThreads, { ...scope(PUBLIC), paginationOpts: pageOpts })).page).toHaveLength(1);
     vi.advanceTimersByTime(REMOVED_REPO_RETENTION_MS);
+    // Nothing hidden: a confirmed purge has nothing to do.
+    expect(await backend.mutation(api.repoCommentAccess.purgeRepos, { internalSecret, repoIds: [PUBLIC] })).toEqual({ notDue: [] });
     await backend.finishAllScheduledFunctions(() => vi.runAllTimers());
     expect(await backend.run(ctx => ctx.db.query("repoThreads").collect())).toHaveLength(1);
+  });
+
+  it("clears a confirmed purge when a later grant brings the repository back", async () => {
+    vi.useFakeTimers();
+    const { backend, grant } = await world();
+    await grant(PUBLIC, null);
+    await backend.mutation(api.repoCommentAccess.removeRepos, { internalSecret, repoIds: [PUBLIC] });
+    vi.advanceTimersByTime(REMOVED_REPO_RETENTION_MS);
+    await backend.mutation(api.repoCommentAccess.purgeRepos, { internalSecret, repoIds: [PUBLIC] });
+    expect((await grant(PUBLIC, null)).granted).toBe(true);
+    expect(await backend.run(async ctx => {
+      const row = await ctx.db.query("repoCommentRepos").first();
+      return [row?.removedAt ?? null, row?.purgeConfirmedAt ?? null];
+    })).toEqual([null, null]);
   });
 
   it("purges a large repository in bounded batches", async () => {
@@ -376,6 +457,7 @@ describe("repository comment access (Convex boundary)", () => {
     });
     await backend.mutation(api.repoCommentAccess.removeRepos, { internalSecret, repoIds: [PUBLIC] });
     vi.advanceTimersByTime(REMOVED_REPO_RETENTION_MS + 1);
+    await backend.mutation(api.repoCommentAccess.purgeRepos, { internalSecret, repoIds: [PUBLIC] });
     await backend.finishAllScheduledFunctions(() => vi.runAllTimers());
     expect(await backend.run(ctx => ctx.db.query("repoThreads").collect())).toEqual([]);
     expect(await backend.run(ctx => ctx.db.query("repoReplies").collect())).toEqual([]);

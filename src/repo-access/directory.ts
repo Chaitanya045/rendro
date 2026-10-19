@@ -13,6 +13,10 @@
  *   written to KV only after the registry and the mirror already deny. Where
  *   comments are configured (#254), each epoch, and every repository GitHub
  *   reports uninstalled or deleted, then goes to Convex too.
+ * - The purge ledger (#258): a removed repository's comments are hidden at
+ *   once, but purged only once its window has ended and GitHub confirms the
+ *   removal (`confirmRemoval`). A replayed removal is caught there: the
+ *   repository is restored and nothing is deleted.
  *
  * A Durable Object runs one instance, so registry and mirrors change
  * consistently. Its input gates open while it awaits GitHub, so a refresh or
@@ -26,6 +30,7 @@ import type { DurableStorageLike } from "@/ingest/orchestrator/coordinator";
 import { RepoAccessUnavailable, repoKey, type RepoRecord } from "@/repo-read/access";
 import type { EventPlan, RepoHint } from "./events";
 import type { GitHubAccessClient, ListedInstallation, ListedRepo, Page } from "./github";
+import { confirmRemoval } from "./removal";
 import { openTokens, sealTokens, type TokenRefresher, type UserTokens } from "./tokens";
 
 export interface DirectoryStorage extends DurableStorageLike {
@@ -41,14 +46,24 @@ export interface EpochStore {
   put(key: string, value: string, options: { expirationTtl: number }): Promise<void>;
 }
 
+/** Convex's answer to a purge: the repositories whose own retention window has not ended yet, and when it does. */
+export interface PurgeAnswer {
+  notDue: Array<{ repoId: number; dueAt: number }>;
+}
+
 /**
  * Comments on repository docs (#254) keep their own grants in Convex, which
  * cannot read KV. It hears every epoch after KV does (the same value), and
  * every repository that left the app, so comment access ends with page access.
+ * Convex never purges on its own: only after GitHub confirmed the removal (#258).
  */
 export interface CommentAccessSink {
   revoke(userId: string, epoch: number): Promise<void>;
   removeRepos(repoIds: number[]): Promise<void>;
+  /** GitHub just confirmed these removed: purge the comments of every one whose window has ended. */
+  purgeRepos(repoIds: number[]): Promise<PurgeAnswer>;
+  /** GitHub still grants these: show their comments again and cancel any purge. */
+  restoreRepos(repoIds: number[]): Promise<void>;
 }
 
 export type DirectoryLog = (event: string, fields: Record<string, string | number | boolean>) => void;
@@ -90,6 +105,13 @@ const EPOCH_RETRY_MS = 10_000;
 const REMOVAL_BATCH = 100;
 /** Decisions per authorize: each GitHub step (installation, repository, mirror, single check) takes one. */
 const MAX_ROUNDS = 6;
+/** A removed repository's data is purged this long after the removal, once GitHub confirms it. Convex keeps the same window for comments. */
+export const REMOVAL_PURGE_DELAY_MS = 30 * 24 * 60 * 60_000;
+/** A removal GitHub could not confirm is asked again after this, doubling up to `PURGE_RETRY_MAX_MS`. */
+export const PURGE_RETRY_MS = 15 * 60_000;
+export const PURGE_RETRY_MAX_MS = 24 * 60 * 60_000;
+/** Confirmations per alarm. */
+export const PURGE_BATCH = 20;
 
 interface RepoEntry {
   id: number;
@@ -147,6 +169,18 @@ interface Listing {
   repos: Array<ListedRepo & { installation: number }>;
 }
 
+/** `purge:<due time, 16 digits>:<repo>`, so a listing returns the earliest first; `purging:<repo>` names it. */
+interface PurgeEntry {
+  repoId: number;
+  dueAt: number;
+  /** Confirmations GitHub could not give so far. */
+  attempts: number;
+}
+
+function purgeKey(dueAt: number, repoId: number): string {
+  return `purge:${String(dueAt).padStart(16, "0")}:${repoId}`;
+}
+
 interface ReaderCheck {
   allowed: boolean;
   at: number;
@@ -194,6 +228,8 @@ export class AccessDirectory {
   private readonly renewing = new Map<string, Promise<string>>();
   private readonly failures = new Map<string, number>();
   private epochChain: Promise<void> = Promise.resolve();
+  /** The alarm this instance set since the last one fired (null: none), so the purge ledger never postpones a sooner one. */
+  private armed: number | null = null;
 
   constructor(private readonly state: DirectoryState, private readonly deps: DirectoryDependencies) {
     this.deliveries = new DeliveryDedupe(state.storage);
@@ -324,9 +360,10 @@ export class AccessDirectory {
     const current = await this.storage.get<RepoEntry>(`repo:${entry.id}`) as RepoEntry;
     if (current.seq !== entry.seq) return;
     // Not visible to the installation (or now another repository under that name): nobody reads it through the app.
-    await this.putRepo(repo && repo.id === entry.id
-      ? { ...current, owner: repo.owner, name: repo.name, private: repo.private, defaultBranch: repo.defaultBranch, removed: false, check: false }
-      : { ...current, removed: true, check: false }, current);
+    if (!repo || repo.id !== entry.id) return this.putRepo({ ...current, removed: true, check: false }, current);
+    await this.putRepo({ ...current, owner: repo.owner, name: repo.name, private: repo.private, defaultBranch: repo.defaultBranch, removed: false, check: false }, current);
+    // GitHub answered for this very repository: a purge pending from an earlier removal (a reinstall since, or a replay) is cancelled.
+    await this.restoreRemoved(entry.id);
   }
 
   private async asInstallation<T>(installation: number, call: (token: string | null) => Promise<T>): Promise<T> {
@@ -621,15 +658,26 @@ export class AccessDirectory {
         if (entry.installation === plan.installation.id) removed.add(entry.id);
       }
     }
-    for (const repoId of removed) await this.storage.put(`removed:${repoId}`, 1);
-    if (removed.size) await this.storage.setAlarm(this.deps.now());
+    const dueAt = this.deps.now() + REMOVAL_PURGE_DELAY_MS;
+    for (const repoId of removed) {
+      await this.storage.put(`removed:${repoId}`, 1);
+      await this.storage.delete([`restore:${repoId}`]);
+      // A purge already pending keeps its time: a repeated removal never extends the window.
+      if (await this.storage.get(`purging:${repoId}`) === undefined) await this.schedulePurge(repoId, dueAt, 0);
+    }
+    if (removed.size) await this.arm(this.deps.now());
   }
 
   private async enqueueRevocations(userIds: Iterable<string>): Promise<void> {
     const marker = crypto.randomUUID();
     for (const userId of userIds) await this.storage.put(`pending:${userId}`, marker);
     // The alarm writes them even if this request never gets to.
-    await this.storage.setAlarm(this.deps.now());
+    await this.arm(this.deps.now());
+  }
+
+  private arm(at: number): Promise<void> {
+    this.armed = at;
+    return this.storage.setAlarm(at);
   }
 
   /** Write pending epochs, one pass at a time, so a user's epochs only ever grow. */
@@ -639,8 +687,12 @@ export class AccessDirectory {
     return pass;
   }
 
-  alarm(): Promise<void> {
-    return this.flushEpochs();
+  async alarm(): Promise<void> {
+    // The alarm that woke us is spent: anything armed from here on is newer.
+    this.armed = null;
+    await this.flushEpochs();
+    const next = await this.purgeDue();
+    if (next !== null && (this.armed === null || next < this.armed)) await this.arm(next);
   }
 
   private async flushOnce(): Promise<void> {
@@ -664,13 +716,13 @@ export class AccessDirectory {
     const [notified, notifyFull] = await this.flushComments();
     if (failed || notified) {
       if (failed) this.deps.log("access.epochs-failed", { failed });
-      await this.storage.setAlarm(this.deps.now() + EPOCH_RETRY_MS);
+      await this.arm(this.deps.now() + EPOCH_RETRY_MS);
     } else if (pending.length === EPOCH_BATCH || notifyFull) {
-      await this.storage.setAlarm(this.deps.now());
+      await this.arm(this.deps.now());
     }
   }
 
-  /** Tell Convex about written epochs and removed repositories. Returns the failures and whether a batch was full. */
+  /** Tell Convex about written epochs, removed and restored repositories. Returns the failures and whether a batch was full. */
   private async flushComments(): Promise<[number, boolean]> {
     const sink = this.deps.comments;
     if (!sink) return [0, false];
@@ -685,16 +737,101 @@ export class AccessDirectory {
         failed += 1;
       }
     });
-    const removals = [...(await this.storage.list<number>({ prefix: "removed:", limit: REMOVAL_BATCH })).keys()];
-    if (removals.length) {
+    let full = notify.length === EPOCH_BATCH;
+    const outboxes: Array<[string, (repoIds: number[]) => Promise<void>]> = [["removed:", (ids) => sink.removeRepos(ids)], ["restore:", (ids) => sink.restoreRepos(ids)]];
+    for (const [prefix, send] of outboxes) {
+      const keys = [...(await this.storage.list<number>({ prefix, limit: REMOVAL_BATCH })).keys()];
+      if (!keys.length) continue;
+      full ||= keys.length === REMOVAL_BATCH;
       try {
-        await sink.removeRepos(removals.map(key => Number(key.slice("removed:".length))));
-        await this.storage.delete(removals);
+        await send(keys.map(key => Number(key.slice(prefix.length))));
+        await this.storage.delete(keys);
       } catch {
         failed += 1;
       }
     }
     if (failed) this.deps.log("access.comments-failed", { failed });
-    return [failed, notify.length === EPOCH_BATCH || removals.length === REMOVAL_BATCH];
+    return [failed, full];
+  }
+
+  // ---- The purge ledger (#258) ---------------------------------------------
+
+  private async schedulePurge(repoId: number, dueAt: number, attempts: number): Promise<void> {
+    await this.cancelPurge(repoId);
+    const key = purgeKey(dueAt, repoId);
+    await this.storage.put(key, { repoId, dueAt, attempts } satisfies PurgeEntry);
+    await this.storage.put(`purging:${repoId}`, key);
+  }
+
+  private async cancelPurge(repoId: number): Promise<void> {
+    const key = await this.storage.get<string>(`purging:${repoId}`);
+    if (key !== undefined) await this.storage.delete([key, `purging:${repoId}`]);
+  }
+
+  /** GitHub still grants the app this repository: cancel its pending purge and show its comments again. */
+  private async restoreRemoved(repoId: number): Promise<void> {
+    if (await this.storage.get(`purging:${repoId}`) === undefined) return;
+    await this.cancelPurge(repoId);
+    await this.storage.delete([`removed:${repoId}`]);
+    await this.storage.put(`restore:${repoId}`, 1);
+    this.deps.log("access.removal-reverted", { restored: 1 });
+    await this.arm(this.deps.now());
+  }
+
+  /**
+   * Removed repositories whose window has ended: ask GitHub, then purge, restore or postpone. Never
+   * purges on doubt, and a decision an event overtook is taken again later. Returns when the next is due.
+   */
+  private async purgeDue(): Promise<number | null> {
+    const sink = this.deps.comments;
+    if (!sink) return null;
+    const now = this.deps.now();
+    const confirmed: PurgeEntry[] = [];
+    let [restored, postponed] = [0, 0];
+    const postpone = async (item: PurgeEntry) => {
+      postponed += 1;
+      await this.schedulePurge(item.repoId, now + Math.min(PURGE_RETRY_MS * 2 ** item.attempts, PURGE_RETRY_MAX_MS), item.attempts + 1);
+    };
+    for (const [key, item] of await this.storage.list<PurgeEntry>({ prefix: "purge:", limit: PURGE_BATCH })) {
+      if (item.dueAt > now) break;
+      const entry = await this.storage.get<RepoEntry>(`repo:${item.repoId}`) as RepoEntry;
+      const verdict = await confirmRemoval(this.deps, entry);
+      // Cancelled or moved while GitHub answered (the repository came back meanwhile): that decision stands.
+      if (await this.storage.get(`purging:${item.repoId}`) !== key) continue;
+      const current = await this.storage.get<RepoEntry>(`repo:${item.repoId}`) as RepoEntry;
+      // Unknown, overtaken by an event, or Convex has not heard of the removal yet: ask again later.
+      if (verdict.kind === "unknown" || current.seq !== entry.seq || await this.storage.get(`removed:${item.repoId}`) !== undefined) {
+        await postpone(item);
+      } else if (verdict.kind === "accessible") {
+        const { repo } = verdict;
+        await this.putRepo({ ...current, owner: repo.owner, name: repo.name, private: repo.private, defaultBranch: repo.defaultBranch, removed: false, check: false }, current);
+        // A replayed uninstall also marked the installation deleted: GitHub decides it again on the next read.
+        const installation = await this.storage.get<InstallationEntry>(`inst:${current.installation}`);
+        if (installation && installation.state !== "active") await this.storage.put(`inst:${installation.id}`, { ...installation, check: true } satisfies InstallationEntry);
+        await this.restoreRemoved(item.repoId);
+        restored += 1;
+      } else {
+        confirmed.push(item);
+      }
+    }
+    if (confirmed.length) {
+      let answer: PurgeAnswer | null = null;
+      try {
+        answer = await sink.purgeRepos(confirmed.map(item => item.repoId));
+      } catch {
+        // Confirmed again on the next attempt: GitHub's answer is never reused across a delay.
+      }
+      for (const item of confirmed) {
+        if (await this.storage.get(`purging:${item.repoId}`) !== purgeKey(item.dueAt, item.repoId)) continue;
+        const notDue = answer?.notDue.find(late => late.repoId === item.repoId);
+        if (!answer) await postpone(item);
+        // Convex heard of the removal later than this ledger: its own window ends later.
+        else if (notDue) await this.schedulePurge(item.repoId, notDue.dueAt, 0);
+        else await this.cancelPurge(item.repoId);
+      }
+    }
+    if (confirmed.length || restored || postponed) this.deps.log("access.purge", { confirmed: confirmed.length, restored, postponed });
+    const [first] = (await this.storage.list<PurgeEntry>({ prefix: "purge:", limit: 1 })).values();
+    return first ? first.dueAt : null;
   }
 }
