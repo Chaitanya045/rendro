@@ -14931,6 +14931,21 @@
               "file": "e2e/viewer-chrome.spec.ts",
               "name": "a slow document shows progress and says so; once it arrives the content is shown at once and the progress ends after its minimum",
               "kind": "e2e"
+            },
+            {
+              "file": "tests/lazy-tree-browser.test.ts",
+              "name": "shows and marks the newest of three rapid navigations while their shared folder expansion is held",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/lazy-tree-browser.test.ts",
+              "name": "marks the newest document, not the earlier one, once a folder they share has loaded",
+              "kind": "browser"
+            },
+            {
+              "file": "e2e/deployment-tree.spec.ts",
+              "name": "a newer navigation during a held folder expansion shows and marks the newest document",
+              "kind": "e2e"
             }
           ]
         },
@@ -15310,6 +15325,16 @@
               "file": "e2e/deployment-tree.spec.ts",
               "name": "a CLI-pushed multi-folder deployment browses by directory page, deep link and keyboard",
               "kind": "e2e"
+            },
+            {
+              "file": "tests/lazy-tree-browser.test.ts",
+              "name": "stops paging for a superseded reveal and leaves the newest document selected and shown",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/lazy-tree-browser.test.ts",
+              "name": "gives up paging a folder when a newer navigation supersedes the reveal",
+              "kind": "browser"
             }
           ]
         },

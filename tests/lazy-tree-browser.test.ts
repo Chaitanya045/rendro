@@ -37,7 +37,7 @@ const scopedTree: Record<string, Record<string, ScopedPage[]>> = {
   },
   [pagedBase]: {
     "": [{ children: [dir("a")], cursor: "1" }, { children: [dir("b"), doc("later.html")], cursor: null }],
-    "a/": [{ children: [doc("first.html")], cursor: null }],
+    "a/": [{ children: [doc("first.html")], cursor: "1" }, { children: [doc("second.html")], cursor: "2" }, { children: [doc("third.html")], cursor: null }],
     "b/": [{ children: [doc("inner.html")], cursor: null }],
   },
 };
@@ -1175,12 +1175,62 @@ describe("lazy tree races and malformed shells", () => {
     await hold.seen;
     await tab.evaluate(() => window.dispatchEvent(new PopStateEvent("popstate", { state: { docPath: "org/guide/b.html" } })));
     await hold.release();
-    // The earlier reveal still finishes loading its own folder, but leaves the selection alone.
-    await item(tab, "org/guide/deep/c.html").waitFor();
     await expect.poll(() => activePath(tab)).toBe("org/guide/b.html");
     expect(await tab.locator(".tree-item.active").count()).toBe(1);
     expect(await frameSrc(tab)).toBe("/legacy-view/org/files/guide/b.html");
     await indicatorAt(tab, "org/guide/b.html");
+    // The earlier reveal stopped with the expansion it was waiting on (#169): it never opens its own folder.
+    expect(requests.filter(path => path.includes("prefix=org%2Fguide%2Fdeep%2F"))).toEqual([]);
+    expect(pageErrors(tab)).toEqual([]);
+  });
+
+  it("shows and marks the newest of three rapid navigations while their shared folder expansion is held", async () => {
+    let hold!: Awaited<ReturnType<typeof held>>;
+    const tab = await open("/docs/org/guide/deep/c.html", { routes: async page => { hold = await held(page, "**/api/tree/org?prefix=org%2Fguide%2F&*"); } });
+    await hold.seen;
+    // Two re-navigations arrive while the first reveal is still expanding org/guide/ (rapid navigation, #169).
+    await tab.evaluate(() => window.dispatchEvent(new PopStateEvent("popstate", { state: { docPath: "org/guide/extra/d.html" } })));
+    await tab.evaluate(() => window.dispatchEvent(new PopStateEvent("popstate", { state: { docPath: "org/guide/b.html" } })));
+    await hold.release();
+    await expect.poll(() => activePath(tab)).toBe("org/guide/b.html");
+    expect(await tab.locator(".tree-item.active").count()).toBe(1);
+    expect(await frameSrc(tab)).toBe("/legacy-view/org/files/guide/b.html");
+    await indicatorAt(tab, "org/guide/b.html");
+    // The superseded reveals stopped at the shared expansion: neither opened its own folder afterwards.
+    expect(requests.filter(path => path.includes("prefix=org%2Fguide%2Fdeep%2F") || path.includes("prefix=org%2Fguide%2Fextra%2F"))).toEqual([]);
+    expect(pageErrors(tab)).toEqual([]);
+  });
+
+  it("stops paging for a superseded reveal and leaves the newest document selected and shown", async () => {
+    let hold!: Awaited<ReturnType<typeof held>>;
+    const tab = await open(`${pagedBase}?doc=a/first.html`, { routes: async page => { hold = await held(page, `**${pagedBase}/tree?dir=&cursor=1`); } });
+    await tab.waitForFunction(() => document.querySelector(".tree-item.active")?.getAttribute("data-path") === "org/a/first.html");
+    // The second reveal pages the root for org/b/; the third supersedes it while that page is held.
+    await tab.evaluate(() => window.dispatchEvent(new PopStateEvent("popstate", { state: { docPath: "org/b/inner.html" } })));
+    await hold.seen;
+    await tab.evaluate(() => window.dispatchEvent(new PopStateEvent("popstate", { state: { docPath: "org/a/first.html" } })));
+    await hold.release();
+    await expect.poll(() => activePath(tab)).toBe("org/a/first.html");
+    expect(await frameSrc(tab)).toBe(`${pagedBase}/files/a/first.html`);
+    // The superseded reveal gave up once its page returned: org/b/ stays unloaded.
+    expect(requests.filter(path => path.includes("dir=b%2F"))).toEqual([]);
+    expect(pageErrors(tab)).toEqual([]);
+  });
+
+  it("gives up paging a folder when a newer navigation supersedes the reveal", async () => {
+    let hold!: Awaited<ReturnType<typeof held>>;
+    const tab = await open(`${pagedBase}?doc=a/first.html`, { routes: async page => { hold = await held(page, `**${pagedBase}/tree?dir=a%2F&cursor=1`); } });
+    await tab.waitForFunction(() => document.querySelector(".tree-item.active")?.getAttribute("data-path") === "org/a/first.html");
+    // The second reveal pages folder a/ for a row beyond the held page; the third supersedes it first.
+    await tab.evaluate(() => window.dispatchEvent(new PopStateEvent("popstate", { state: { docPath: "org/a/third.html" } })));
+    await hold.seen;
+    await tab.evaluate(() => window.dispatchEvent(new PopStateEvent("popstate", { state: { docPath: "org/a/first.html" } })));
+    await hold.release();
+    await expect.poll(() => activePath(tab)).toBe("org/a/first.html");
+    expect(await frameSrc(tab)).toBe(`${pagedBase}/files/a/first.html`);
+    // The superseded reveal stopped with the held page: the folder is never paged further.
+    await tab.evaluate(() => new Promise(resolve => setTimeout(resolve, 250)));
+    expect(requests.filter(path => path.includes("cursor=2"))).toEqual([]);
     expect(pageErrors(tab)).toEqual([]);
   });
 

@@ -345,6 +345,39 @@ test.describe("deployment index browsing", () => {
     expect(frameFile(tab)).toBe("guide/intro.html");
   });
 
+  test("a newer navigation during a held folder expansion shows and marks the newest document", async ({ owner: tab, tree }) => {
+    test.slow();
+    const requested = treeRequests(tab);
+    // The deep link's first ancestor expansion is held: the reveal for guide/deep/topic.html cannot proceed.
+    const hold = await holdFirst(tab, "**/docs/tree?dir=guide%2F");
+    await tab.goto(`${tree.docs}?doc=guide/deep/topic.html`);
+    await expect.poll(() => hold.held()).toBe(1);
+    // Synthetic Back/Forward entries use the shell's own history state shape: read the namespaced
+    // docPath prefix the shell itself stored, so the restored documents are scoped correctly.
+    const prefix = await tab.evaluate(() => {
+      const docPath = (history.state as { docPath?: string } | null)?.docPath ?? "";
+      return docPath.slice(0, docPath.length - "guide/deep/topic.html".length);
+    });
+    expect(prefix).not.toBe("");
+    // Two rapid re-navigations while that expansion is still pending; the last one must win (#169).
+    await tab.evaluate(
+      ({ prefix }) => window.dispatchEvent(new PopStateEvent("popstate", { state: { docPath: `${prefix}guide/intro.html` } })),
+      { prefix },
+    );
+    await tab.evaluate(
+      ({ prefix }) => window.dispatchEvent(new PopStateEvent("popstate", { state: { docPath: `${prefix}index.html` } })),
+      { prefix },
+    );
+    hold.release();
+    await expect(heading(tab, tree.amended)).toBeVisible({ timeout: 15_000 });
+    expect(frameFile(tab)).toBe("index.html");
+    await expect(active(tab)).toHaveAttribute("data-path", /\/index\.html$/, { timeout: 15_000 });
+    await expect(tab.locator("#tree-container .tree-item.active")).toHaveCount(1);
+    // The superseded reveals stopped with the shared expansion: neither opened its own folder afterwards.
+    await hold.close();
+    expect(requested).not.toContain("guide/deep/|");
+  });
+
   test("a closed folder's rows are skipped by Tab and hidden from assistive technology", async ({ owner: tab, tree }) => {
     // A closed folder's rows are inert: not focusable, and out of the accessibility tree, until the folder opens again.
     await tab.goto(`${tree.docs}?doc=index.html`);

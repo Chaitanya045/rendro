@@ -1152,7 +1152,8 @@ Client (lazy-tree.js, ~25KB IIFE built from src/lazy-tree/)
   │
   ├─ Scoped viewers: GET …/tree?dir=…&cursor=… per folder (root first), with "Load more" pagination
   │   └─ A deep link expands its ancestors and loads later pages of only those folders to reveal its row
-  │       (overlapping reveals share a folder that is still loading; only the newest marks its row)
+  │       (overlapping reveals share a folder that is still loading; a superseded reveal stops at
+  │       each awaited step — newest-wins — and only the newest marks its row)
   ├─ Legacy viewer: GET /api/tree/:org?prefix=… per folder, with "Load more" pagination
   ├─ File click → loadDoc(path, pushState)
   │   ├─ Optimistically select row + updateIndicator
@@ -1169,6 +1170,17 @@ Client (lazy-tree.js, ~25KB IIFE built from src/lazy-tree/)
 ```
 
 The script URLs carry `?v=` versions from the asset-version ledger (see "Public static assets"); read the current values in `src/routes/versioned-bundles.ts` rather than copying them.
+
+Reveals are newest-wins (#169): a reveal captures a token when it starts and
+bails out after every awaited step once a newer navigation has begun, so a
+superseded reveal neither issues further folder or page requests, opens
+folders the reader left behind, nor marks a row. Only the newest navigation
+selects its row, once its ancestors are ready. Back/Forward to a history entry
+that names no document (`docPath` absent from the state and the URL) changes
+the URL only: the last document stays showing with its selection, because
+nothing tells the viewer what to show. This is the settled behavior, pinned by
+`e2e/deployment-tree.spec.ts` ("an entry that names no document keeps the last
+one showing").
 
 ### Document navigation authorization
 

@@ -682,6 +682,7 @@ let latestReveal = 0;
 
 async function navigateToDoc(org: string, relPath: string) {
   const reveal = ++latestReveal;
+  const live = () => reveal === latestReveal;
   const fullPath = `${org}/${relPath}`;
   const parts = relPath.split("/");
   let currentPath = org;
@@ -689,16 +690,20 @@ async function navigateToDoc(org: string, relPath: string) {
 
   for (let i = 0; i < parts.length - 1; i++) {
     currentPath += "/" + parts[i];
-    const folder = await pagedRow<HTMLElement>(parent, `.tree-folder[data-path="${CSS.escape(currentPath)}/"]`);
+    const folder = await pagedRow<HTMLElement>(parent, `.tree-folder[data-path="${CSS.escape(currentPath)}/"]`, live);
+    // Newest-wins (#169): a superseded reveal stops at once, leaving the
+    // folders, pages and selection to the navigation the reader asked for last.
+    if (reveal !== latestReveal) return;
     if (!folder) break;
     if (!folder.classList.contains("open")) {
       await expand(folder);
+      if (reveal !== latestReveal) return;
       if (!folder.classList.contains("open")) return;
     }
     parent = folder;
   }
 
-  const item = await pagedRow<HTMLElement>(parent, `.tree-item[data-path="${CSS.escape(fullPath)}"]`);
+  const item = await pagedRow<HTMLElement>(parent, `.tree-item[data-path="${CSS.escape(fullPath)}"]`, live);
   if (!item || reveal !== latestReveal) return;
   document.querySelectorAll(".tree-item.active").forEach((element) => element.classList.remove("active"));
   item.classList.add("active");
@@ -706,8 +711,9 @@ async function navigateToDoc(org: string, relPath: string) {
 }
 
 /** Find a row, loading later pages of only its parent folder while the row is
- * beyond the pages shown so far. A failed page leaves the row unrevealed. */
-async function pagedRow<T extends HTMLElement>(parent: HTMLElement, selector: string): Promise<T | null> {
+ * beyond the pages shown so far. A failed page leaves the row unrevealed, and
+ * so does a `live` check that stops holding after an awaited page returns. */
+async function pagedRow<T extends HTMLElement>(parent: HTMLElement, selector: string, live: () => boolean): Promise<T | null> {
   let row = document.querySelector<T>(selector);
   for (let next = parent.dataset.nextStartAfter; !row && next; ) {
     try {
@@ -715,6 +721,7 @@ async function pagedRow<T extends HTMLElement>(parent: HTMLElement, selector: st
     } catch {
       return null;
     }
+    if (!live()) return null;
     row = document.querySelector<T>(selector);
     // A repeated cursor would never reach the row.
     next = parent.dataset.nextStartAfter === next ? undefined : parent.dataset.nextStartAfter;
