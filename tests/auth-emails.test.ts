@@ -92,10 +92,38 @@ describe("authentication email delivery", () => {
     const failure = await sendAuthLinkEmail("verification", { email: "a@example.test" }, "https://rendro.test/v").catch((error: Error) => error);
     expect(failure).toBeInstanceOf(Error);
     expect((failure as Error).message).toBe("Authentication email delivery failed with status 422");
+    // Validation rejections are permanent: no retry, and the body is never echoed.
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  it("propagates transport errors", async () => {
+  it("retries a throttled or transient provider failure and delivers once it succeeds", async () => {
+    fetchMock.mockResolvedValueOnce(new Response("{}", { status: 429 }));
+    await sendExistingAccountNotice({ email: "a@example.test" });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("retries a transient transport failure and delivers once it succeeds", async () => {
     fetchMock.mockRejectedValueOnce(new TypeError("network down"));
+    await sendAuthLinkEmail("verification", { email: "a@example.test" }, "https://rendro.test/v");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("gives up after the bounded retries when the transport keeps failing", async () => {
+    const recorded = vi.spyOn(console, "error").mockImplementation(() => {});
+    fetchMock.mockRejectedValue(new TypeError("network down"));
     await expect(sendExistingAccountNotice({ email: "a@example.test" })).rejects.toThrow("network down");
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(recorded).toHaveBeenCalledWith("Authentication email delivery failed", { attempts: 3 });
+    recorded.mockRestore();
+  });
+
+  it("gives up after the bounded retries when the provider keeps failing", async () => {
+    const recorded = vi.spyOn(console, "error").mockImplementation(() => {});
+    fetchMock.mockResolvedValue(new Response("{}", { status: 503 }));
+    await expect(sendAuthLinkEmail("password-reset", { email: "a@example.test" }, "https://rendro.test/v"))
+      .rejects.toThrow("Authentication email delivery failed with status 503");
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(recorded).toHaveBeenCalledWith("Authentication email delivery failed", { attempts: 3 });
+    recorded.mockRestore();
   });
 });

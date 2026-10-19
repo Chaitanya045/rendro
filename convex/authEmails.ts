@@ -5,6 +5,16 @@ type AuthEmailUser = {
 
 type AuthEmailKind = "verification" | "password-reset";
 
+// Transport errors and provider outages (5xx, throttling) are usually momentary;
+// Better Auth swallows send failures, so a single lost attempt would otherwise
+// silently leave the user with nothing to verify. Convex functions have no
+// timers, so the bounded retries are immediate.
+const DELIVERY_ATTEMPTS = 3;
+
+function retryableDeliveryStatus(status: number): boolean {
+  return status === 429 || status >= 500;
+}
+
 function requiredEmailEnv(name: "RESEND_API_KEY" | "AUTH_EMAIL_FROM"): string {
   const value = process.env[name]?.trim();
   if (!value) throw new Error(`${name} is required for authentication email delivery`);
@@ -26,20 +36,33 @@ async function deliverEmail(message: {
   text: string;
   html: string;
 }): Promise<void> {
-  const response = await fetch("https://api.resend.com/emails", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${requiredEmailEnv("RESEND_API_KEY")}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      from: requiredEmailEnv("AUTH_EMAIL_FROM"),
-      ...message,
-    }),
-  });
-  if (!response.ok) {
-    throw new Error(`Authentication email delivery failed with status ${response.status}`);
+  const authorization = `Bearer ${requiredEmailEnv("RESEND_API_KEY")}`;
+  const from = requiredEmailEnv("AUTH_EMAIL_FROM");
+  let lastError: unknown = null;
+  for (let attempt = 1; attempt <= DELIVERY_ATTEMPTS; attempt++) {
+    try {
+      const response = await fetch("https://api.resend.com/emails", {
+        method: "POST",
+        headers: {
+          Authorization: authorization,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          from,
+          ...message,
+        }),
+      });
+      if (response.ok) return;
+      lastError = new Error(`Authentication email delivery failed with status ${response.status}`);
+      // Non-retryable provider rejections (validation, authentication) are permanent.
+      if (!retryableDeliveryStatus(response.status)) break;
+    } catch (error) {
+      lastError = error;
+    }
   }
+  // Better Auth discards send errors without recording them; keep the failure diagnosable.
+  console.error("Authentication email delivery failed", { attempts: DELIVERY_ATTEMPTS });
+  throw lastError;
 }
 
 export async function sendAuthLinkEmail(

@@ -71,7 +71,7 @@ Better Auth runs inside Convex HTTP actions (`convex/auth.ts`). The Worker proxi
 | Password recovery | `/forgot-password` and `/reset-password`; reset tokens expire after one hour and revoke existing sessions |
 | Initial password | `POST /api/auth/set-initial-password` (custom Convex route) lets a signed-in account without a password add one from `/account/security` |
 
-Account linking trusts Google only when the local email is verified and the emails match. Sign-up responses do not reveal whether an address is already registered. Better Auth rate limits are stored in the database; sign-in and sign-up endpoints have tighter per-route limits. Verification, reset, invitation, and existing-account notices are sent through Resend (`RESEND_API_KEY`, `AUTH_EMAIL_FROM`).
+Account linking trusts Google only when the local email is verified and the emails match. Sign-up responses do not reveal whether an address is already registered. Better Auth rate limits are stored in the database; sign-in and sign-up endpoints have tighter per-route limits. Verification, reset, invitation, and existing-account notices are sent through Resend (`RESEND_API_KEY`, `AUTH_EMAIL_FROM`). Delivery retries transient transport failures and provider 5xx/429 with bounded immediate attempts, and logs the outcome when it still fails; the sign-up response stays neutral either way, and users retry through the resend form.
 
 The local authentication regression suite (`e2e/auth.spec.ts`) exercises these
 flows against workerd and the disposable Convex backend, with captured mail and
