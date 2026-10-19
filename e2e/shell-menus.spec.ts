@@ -228,6 +228,21 @@ async function open(page: Page) {
   return trigger;
 }
 
+/** Axe color/contrast scan of the open menu, after its entry animations finished. */
+async function menuContrastViolations(page: Page) {
+  // The menu fades in for 150ms (@keyframes rdSelectIn): a scan that overlaps the
+  // animation composites the text color over the backdrop while it is still
+  // translucent. Slower WebKit runners reached the scan mid-fade and read the
+  // heading at 4.49:1 although the settled color (#71717a on white) is 4.79:1
+  // (issue #256). A finished animation is the real signal — no sleeps.
+  await page.evaluate(() => {
+    const menu = document.getElementById("cp-org-menu");
+    const animations = menu && typeof menu.getAnimations === "function" ? menu.getAnimations() : [];
+    return Promise.all(animations.map(animation => animation.finished)).catch(() => undefined);
+  });
+  return new AxeBuilder({ page }).options({ preload: false }).include("#cp-org-menu").analyze();
+}
+
 async function switcherMenu(page: Page, pool: Pool, viewport: { width: number; height: number }) {
   await page.setViewportSize(viewport);
   const alpha = pool.organizations[0];
@@ -289,7 +304,7 @@ async function switcherMenu(page: Page, pool: Pool, viewport: { width: number; h
   expect(box.x).toBeGreaterThanOrEqual(0);
   expect(box.x + box.width).toBeLessThanOrEqual(viewport.width);
   expect(box.y + box.height).toBeLessThanOrEqual(viewport.height);
-  const axe = await new AxeBuilder({ page }).options({ preload: false }).include("#cp-org-menu").analyze();
+  const axe = await menuContrastViolations(page);
   expect(axe.violations).toEqual([]);
 
   // Closing and reopening rebuilds the menu from the cache without a second read.
@@ -302,6 +317,17 @@ async function switcherMenu(page: Page, pool: Pool, viewport: { width: number; h
 }
 
 test.describe("organization switcher", () => {
+  test("contrast measurement of the menu waits out the entry animation", async ({ page, switcherPool }) => {
+    await page.setViewportSize(desktop);
+    await page.goto(`/organizations/${switcherPool.organizations[0].id}`);
+    await shellReady(page);
+    // Stretch the fade far past the scan's injection time: measuring before the
+    // fade finishes would flag the blended heading, as WebKit CI did in #256.
+    await page.addStyleTag({ content: "#cp-org-menu{animation-duration:2000ms !important}" });
+    await open(page);
+    expect((await menuContrastViolations(page)).violations).toEqual([]);
+  });
+
   test("switcher upgrades to a lazily loaded menu, marks the current organization and reopens from cache at 1440", async ({ page, switcherPool }) => {
     await switcherMenu(page, switcherPool, desktop);
   });
