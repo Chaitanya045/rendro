@@ -139,21 +139,25 @@ function scheduleRefresh(deps: AuthorizeDependencies, request: Request, claims: 
 }
 
 function grantFromClaims(claims: CapabilityClaims, owner: string, name: string): RepoGrant {
-  return issueGrant({ id: claims.r, owner, name, private: true, defaultBranch: claims.b }, claims.u, claims.e);
+  return issueGrant({ id: claims.r, owner, name, private: true, defaultBranch: claims.b }, claims.u, claims.e, claims.x * 1000);
 }
 
-/** Decide whether this request may read `owner/name`. Nothing private is touched before this returns `granted`. */
-export async function authorizeRepo(deps: AuthorizeDependencies, request: Request, owner: string, name: string): Promise<Authorization> {
+/**
+ * Decide whether this request may read `owner/name`. Nothing private is touched before this returns `granted`.
+ * `minRemainingMs` asks for a grant that holds at least that long (comment access, #254): a memory or cookie
+ * closer to its end is decided again, exactly as if it had lapsed.
+ */
+export async function authorizeRepo(deps: AuthorizeDependencies, request: Request, owner: string, name: string, minRemainingMs = 0): Promise<Authorization> {
   const key = repoKey(owner, name);
   const secure = secureRequest(request);
   const known = publicRepos.get(key);
-  if (known && known.until > deps.now()) return { kind: "granted", grant: issueGrant(known.repo, null, 0), cookies: [] };
+  if (known && known.until > deps.now() + minRemainingMs) return { kind: "granted", grant: issueGrant(known.repo, null, 0, known.until), cookies: [] };
 
   const session = sessionTokenCookie(request.headers.get("cookie") ?? "");
   const { claims, stale } = await capabilityCookies(deps, request, key, session);
   const cookies = stale.map(repoId => clearCookie(secure, repoId));
   try {
-    if (claims && claims.e >= await deps.epochs.currentEpoch(claims.u)) {
+    if (claims && claims.x * 1000 - deps.now() >= minRemainingMs && claims.e >= await deps.epochs.currentEpoch(claims.u)) {
       const nowSeconds = Math.floor(deps.now() / 1000);
       if (nowSeconds - claims.i < CAPABILITY_TTL_SECONDS / 2) return { kind: "granted", grant: grantFromClaims(claims, owner, name), cookies };
       const refreshed = refreshes.get(refreshId(claims));
@@ -164,7 +168,8 @@ export async function authorizeRepo(deps: AuthorizeDependencies, request: Reques
       if (!refreshed.repo) return { kind: "denied", cookies: [...cookies, clearCookie(secure, claims.r)] };
       if (refreshed.repo.id === claims.r && refreshed.repo.private) {
         const renewed = await mintCookie(deps, request, refreshed.repo, claims.u, refreshed.epoch, session);
-        return { kind: "granted", grant: issueGrant(refreshed.repo, claims.u, refreshed.epoch), cookies: [...cookies, renewed] };
+        const until = deps.now() + CAPABILITY_TTL_SECONDS * 1000;
+        return { kind: "granted", grant: issueGrant(refreshed.repo, claims.u, refreshed.epoch, until), cookies: [...cookies, renewed] };
       }
       // Renamed onto another repository, or made public: decide afresh below.
     }
@@ -183,12 +188,14 @@ export async function authorizeRepo(deps: AuthorizeDependencies, request: Reques
       return { kind: "denied", cookies };
     }
     if (!repo.private) {
-      remember(publicRepos, key, { repo, until: deps.now() + PUBLIC_TTL_MS });
-      return { kind: "granted", grant: issueGrant(repo, null, 0), cookies };
+      const until = deps.now() + PUBLIC_TTL_MS;
+      remember(publicRepos, key, { repo, until });
+      return { kind: "granted", grant: issueGrant(repo, null, 0, until), cookies };
     }
     // A source that grants a private repository to nobody in particular is wrong; never serve it.
     if (!userId) return { kind: "denied", cookies };
-    return { kind: "granted", grant: issueGrant(repo, userId, epoch), cookies: [...cookies, await mintCookie(deps, request, repo, userId, epoch, session)] };
+    const cookie = await mintCookie(deps, request, repo, userId, epoch, session);
+    return { kind: "granted", grant: issueGrant(repo, userId, epoch, deps.now() + CAPABILITY_TTL_SECONDS * 1000), cookies: [...cookies, cookie] };
   } catch {
     // RepoAccessUnavailable, or a failing epoch store: unknown, so retryable.
     return { kind: "unavailable", retryAfter: "1" };

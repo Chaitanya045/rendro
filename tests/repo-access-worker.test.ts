@@ -157,6 +157,24 @@ describe("control Worker", () => {
     expect((await new RepoAccessDirectory({ storage: bare.storage }, bare.env).fetch(new Request("https://directory/nowhere", { method: "POST", body: "{}" }))).status).toBe(404);
   });
 
+  it("tells Convex about epochs only where comments are configured (#254)", async () => {
+    for (const configured of [true, false]) {
+      const convexUrl = "https://convex.rendro.test";
+      const { env, github, kv, storage } = environment({ CONVEX_URL: convexUrl, CONVEX_INTERNAL_SECRET: configured ? "convex-internal-secret-0123456789abcdef" : "short" });
+      const calls: Array<{ path: string; args: Record<string, unknown> }> = [];
+      globalThis.fetch = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+        if (input !== `${convexUrl}/api/mutation`) return github.fetch(input, init);
+        const { path, args: [args] } = JSON.parse(init?.body as string) as { path: string; args: [Record<string, unknown>] };
+        calls.push({ path, args });
+        return Promise.resolve(Response.json({ status: "success", value: null }));
+      }) as typeof fetch;
+      const reader = github.user("reader", 5001);
+      expect((await worker.fetch(internal("/v1/accounts/link", { userId: "u", githubId: reader.id, login: "reader", tokens: github.signIn(reader) }), env)).status).toBe(204);
+      await new RepoAccessDirectory({ storage }, env).alarm();
+      expect(calls).toEqual(configured ? [{ path: "repoCommentAccess:revokeUser", args: { userId: "u", epoch: kv.epoch("u"), internalSecret: "convex-internal-secret-0123456789abcdef" } }] : []);
+    }
+  });
+
   it("exposes only the handler and the directory class from its main module", () => {
     expect(Object.keys(entry).sort()).toEqual(["RepoAccessDirectory", "default"]);
     expect(entry.default).toBe(worker);

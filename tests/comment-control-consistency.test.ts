@@ -1,10 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 
-const source = readFileSync(
-  new URL("../src/commentor/commentor.ts", import.meta.url),
-  "utf8",
-);
+// The widget's stylesheet lives in its own module (repository frames allow it by hash, #254).
+const source = ["../src/commentor/commentor.ts", "../src/commentor/styles.ts"]
+  .map(path => readFileSync(new URL(path, import.meta.url), "utf8")).join("\n");
 
 function cssRule(selector: string): string {
   const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");

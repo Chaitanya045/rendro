@@ -497,7 +497,7 @@ describe("old widget through new parent and Convex", () => {
     runtime.backend.mutate.mockImplementation((_method, scope, args) => {
       expect(args).not.toHaveProperty(field);
       expect((args as { clientOperationId?: string }).clientOperationId).toBeUndefined();
-      if ("orgSlug" in scope) throw new Error("Expected project fixture scope");
+      if (!("organizationId" in scope)) throw new Error("Expected project fixture scope");
       const result = viewers.author.mutation(fn, { ...scope, threadId, ...args as object });
       results.push(result);
       return result;

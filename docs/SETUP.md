@@ -175,6 +175,7 @@ pnpm run deploy
 3. Deploy the control Worker (`pnpm exec wrangler deploy --config wrangler.control.toml`), with Smart Placement or a location hint near Convex. Route only `/v1/github/webhook` to it publicly and set that URL as the App's webhook URL; its other endpoints answer service bindings only.
 4. In `wrangler.toml`, add the `REPO_ACCESS` service binding to the control Worker and the `REPO_CONTENT` R2 binding to the ingest bucket. Deploy the control Worker before the serving Worker, since a service binding to a missing Worker fails the deploy.
 5. P1 replaces `GITHUB_DEV_TOKEN` with installation tokens minted per installation, and calls `/v1/accounts/link` at sign-in.
+6. For comments on repository docs (#254), give the control Worker the `CONVEX_URL` var and the `CONVEX_INTERNAL_SECRET` secret (the same values the serving Worker and Convex use). It then ends a revoked reader's comment access with the epoch, and hides an uninstalled repository's comments at once. Without them, comment access still ends, but only when its grant expires (at most five minutes).
 
 #### Migrating from S3 access keys
 

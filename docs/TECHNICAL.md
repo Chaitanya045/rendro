@@ -1330,7 +1330,7 @@ A folder's rows sit in `.tree-folder-content` inside `.tree-folder-collapse`. Th
 
 ## Inline Comments
 
-Project documentation uses an opaque, publisher-controlled sandboxed iframe. The trusted parent shell (`public/commentor-parent.js`, built from `src/commentor/parent-entry.ts`) fetches a short-lived Convex JWT from `/api/auth/convex/token`, owns the authenticated Convex client, and holds the real-time subscription.
+Project documentation uses an opaque, publisher-controlled sandboxed iframe. (Repository docs reuse the same widget and protocol with their own anchors and authorization: [Comments on Repository Docs](#comments-on-repository-docs-github-pivot-p6).) The trusted parent shell (`public/commentor-parent.js`, built from `src/commentor/parent-entry.ts`) fetches a short-lived Convex JWT from `/api/auth/convex/token`, owns the authenticated Convex client, and holds the real-time subscription.
 
 ```text
 publisher iframe -> scoped messages -> trusted parent shell -> authenticated Convex
@@ -1611,6 +1611,8 @@ The operator-only `GET /retention/candidates` is a non-cacheable claim operation
 Claims insert a `deploymentPurges` record and token before any storage deletion. Publication/share mutations read that record and legacy purge fields in their transaction; Convex conflict handling ensures that either the reference protects the bytes or the claim blocks the reference. Public resolvers also reject purging and purged rows. Claim worker ownership expires after 30 minutes, but **purging never reverts to readable/pinnable**: another scan can issue a replacement token and retry the immutable prefix. A lost claim response, interrupted deletion, per-object error, or failed finalization is therefore recoverable. Finalization requires the current token and is idempotent, emitting one `deployment.purged` audit event. Its object count describes the successful attempt, not previously deleted objects from interrupted attempts.
 
 The purge drains up to 100 metadata pages, stopping early at ten minutes or after 900 subrequests (candidate, list, delete and finalize calls; the next run resumes whatever is left). Each Convex call has a 30-second deadline. It re-lists a prefix from the beginning after each successful delete (`list` then `delete` of up to 1,000 keys through the binding; a failing delete throws, and deleting a missing key is not an error), then verifies the prefix is empty before finalization. Errors keep claims retryable, allow other candidates to proceed, and fail the scheduled run so it shows in Cloudflare's cron history; only the error's type and the deployment ID are logged. It needs the Worker secret `RETENTION_SECRET` (the value Convex checks) and a Convex origin; without them it logs `RetentionDisabled` and fails. The purge runs inside the Worker, so no storage credential exists in GitHub Actions. To run it by hand, trigger the cron from the Cloudflare dashboard or `wrangler dev --test-scheduled`.
+
+Comments on repository docs have their own retention: an uninstalled or deleted repository's comments are hidden at once and purged 30 days later by Convex itself ([Comments on Repository Docs](#comments-on-repository-docs-github-pivot-p6)).
 
 Rollout: release the separate claim table, optional compatibility fields/indexes and claim-aware Convex endpoints, then the lease-aware Worker, then the scheduled purge. Keep cleanup disabled during mixed-version rollout. The retired GitHub Actions script (S3 keys, `pnpm cleanup:retention`) must be deleted from the repository secrets (`R2_*`) and never run alongside the new purge. All old deployment rows remain readable without backfill. To roll back, remove the cron trigger and preserve purging claims/tombstones until outstanding deletions have been reconciled; never clear a purging flag to restore a potentially partially deleted deployment.
 
@@ -2110,6 +2112,7 @@ This section covers how a reader gets an ingested snapshot (#234, part of epic #
 | `…[/{ref}]/tree?dir=&cursor=` | One sidebar directory page (JSON), as the viewer's lazy tree reads it |
 | `/r/{owner}/{repo}/@{commit}/view/{ticket}/files/{path}` | Private repositories: the same, authorized by the asset ticket alone |
 | `/r/{owner}/{repo}/@{commit}/viewer-ticket?manifestKey={commit}` | Ticket renewal for the trusted shell (cookie-authorized, JSON) |
+| `POST /r/{owner}/{repo}/comment-access` | Comment access for the trusted shell: authorized like a page view, then recorded in Convex (same-origin, JSON; see [Comments on Repository Docs](#comments-on-repository-docs-github-pivot-p6)) |
 
 Owner and repository names must be literal GitHub names and match case-insensitively. A `{path}` is decoded once per segment; an empty, `.` or `..` segment, an encoded `/`, a backslash or a control character is a 404 before authorization. A path is only a lookup key into the manifest's `files` map (own properties only), never part of a storage key: every key comes from the manifest (render key, blob SHA) and from #229's key functions, so traversal has nothing to reach. Anything else under `/r/` is a 404.
 
@@ -2212,7 +2215,7 @@ The shell is `renderScopedDocumentShell` with the lazy tree, as for projects and
 - Private shells add the private viewer's parent script (ticket renewal) and its update notice.
 - The share button copies the viewer URL ("Copy link").
 
-The frame wraps the sanitized page in Rendro's markup: the hashed `repo-doc` stylesheet (GitHub-style typography plus `HIGHLIGHT_CSS`, kept identical by a test), the navigation bridge and, for private repositories, the ticket base and renewal client. Ingest emits repository-internal links as `/<repo path>`; the frame rewrites each `href`/`src` to a path relative to the page (parse5, with dot segments dropped), so it resolves under the commit, branch or ticket base the frame was loaded from. External images that ingest wrote as signed image-proxy paths (`/img/<sig>/<url>`, see "Image proxy") stay absolute, but only when `verifyImageProxyPath` accepts them, so a repository folder named `img` still resolves inside the repository. The rewritten body depends only on the render key (which names the page's directory), so it is derived once per isolate and kept in memory. A page ingest could not render shows a notice instead.
+The frame wraps the sanitized page in Rendro's markup: the comment widget (#254), the hashed `repo-doc` stylesheet (GitHub-style typography plus `HIGHLIGHT_CSS`, kept identical by a test), the navigation bridge and, for private repositories, the ticket base and renewal client. Ingest emits repository-internal links as `/<repo path>`; the frame rewrites each `href`/`src` to a path relative to the page (parse5, with dot segments dropped), so it resolves under the commit, branch or ticket base the frame was loaded from. External images that ingest wrote as signed image-proxy paths (`/img/<sig>/<url>`, see "Image proxy") stay absolute, but only when `verifyImageProxyPath` accepts them, so a repository folder named `img` still resolves inside the repository. The rewritten body depends only on the render key (which names the page's directory), so it is derived once per isolate and kept in memory. A page ingest could not render shows a notice instead.
 
 ### Bindings and configuration
 
@@ -2278,7 +2281,7 @@ One Durable Object, `RepoAccessDirectory` (named `directory`, SQLite-backed), ho
 - **Mirror per user**: the repository IDs `GET /user/installations` and `GET /user/installations/{id}/repositories` list for the user's token, with each page's ETag. A mirror is used for `MIRROR_TTL_MS` (five minutes), then refreshed with conditional requests (a 304 costs no primary quota). A listing stops after 20 pages of 100; an installation listed only in part falls back to `GET /repos/{o}/{r}/collaborators/{login}/permission` (installation token) for the one repository asked about, cached like a mirror. GraphQL `viewerPermission` would only help batch many single checks, which the listing already avoids, so it is not used.
 - **Who holds what**: `holder:<repo>:<user>` and `member:<installation>:<user>`, written before the mirror they come from, so every user a mirror lets read a repository can be found when it must be revoked.
 - **Tokens**: sealed (below), with a version that changes whenever they are replaced or dropped.
-- **Delivery dedupe** (#229's, `DeliveryDedupe`) and the **epoch outbox**.
+- **Delivery dedupe** (#229's, `DeliveryDedupe`) and the **epoch outbox**. Where comments are configured, the outbox also holds `notify:<user>` (an epoch Convex has not heard yet) and `removed:<repo>` (a repository that left the app), so comment grants end with page access ([Comments on Repository Docs](#comments-on-repository-docs-github-pivot-p6)).
 
 `authorize(viewer, owner, name)`: resolve the name in the registry; a public repository is granted to anyone. Otherwise an anonymous reader, an unknown user or a user without tokens is denied. A linked user's mirror is refreshed if stale (single flight per user), the name is resolved again (a listing may have taught the registry a repository no webhook announced), and the repository is granted only if the mirror lists it, or the single-repository check says so.
 
@@ -2374,6 +2377,7 @@ Real GitHub adds its own latency to a refresh (typically 100–300 ms per reques
 | `GITHUB_APP_CLIENT_ID`, `GITHUB_APP_CLIENT_SECRET` | Var and secret, optional until P1 | Token refresh; without them an expired user token is a 503 |
 | `GITHUB_DEV_TOKEN` | Secret, optional | Installation token for checks until P1 mints installation tokens |
 | `GITHUB_API_ORIGIN`, `GITHUB_WEB_ORIGIN` | Vars, optional | Point at a fake GitHub; the defaults are `api.github.com` and `github.com` |
+| `CONVEX_URL`, `CONVEX_INTERNAL_SECRET` | Var and secret, optional | Comments (#254): Convex hears every epoch and removed repository. Both are needed; without them comment grants end with their own lifetime (at most five minutes) |
 
 What the owner configures later is in [SETUP.md](SETUP.md#github-repository-reads-not-configured-yet).
 
@@ -2384,6 +2388,80 @@ What the owner configures later is in [SETUP.md](SETUP.md#github-repository-read
 - Asset tickets live fifteen minutes and are only epoch-checked, so a missed webhook can leave frame resources of an open commit readable that long; five minutes would match the cookie.
 - With KV Instant, the serving Worker's `cacheTtl: 60` becomes the dominant term.
 - Commit-pinned frames of public repositories are cached `public, immutable`; a repository made private stays readable from browser caches that already hold a page.
+
+## Comments on Repository Docs (GitHub pivot, P6)
+
+This section covers inline comments on pages the read path serves (#254, part of epic #214). Who may read or write a repository's comments is exactly who may read the repository: the read path decides, Convex enforces, and P5's revocations end both together. The widget and the parent protocol are the ones project documents use ([Inline Comments](#inline-comments)); only the anchor, the scope and the authorization are new.
+
+```text
+repo frame (widget, no network) ──postMessage──► repository shell ──one Convex client──► repoComments (queries, mutations)
+                                                    │                                         ▲ checks
+                                                    └─ POST /r/{owner}/{repo}/comment-access ─► serving Worker: authorizeRepo ─► repoCommentAccess.grant
+control Worker (P5) ── epoch / uninstall ──► repoCommentAccess.revokeUser / removeRepos ────────────────────┘ deletes grants
+```
+
+| Module | Role |
+|---|---|
+| `convex/repoCommentAccess.ts` | Grants, epochs, removed repositories, expiry and purge; `repoCommentReader` decides every read and write |
+| `convex/repoComments.ts` | Threads and replies: bounded, indexed pages and the writes |
+| `src/repo-read/comments.ts` | The serving Worker's half: records grants after `authorizeRepo`, and the frame's widget tag |
+| `src/repo-access/comments.ts` | The control Worker's Convex sink for the epoch outbox |
+| `src/commentor/repo-anchor.ts` | Anchors: making them from a selection, finding them again |
+| `src/commentor/parent-host.ts` | The shell: repository scope, anonymous reads, access renewal, `ConvexRepoCommentBackend` |
+
+### Anchors that survive commits
+
+A thread anchors to `(repoId, path, blobSha, headingSlug, textQuote{prefix, exact, suffix})` plus the quote's offset in its section. A page's sections run from one heading to the next, named by ingest's heading ids (`user-content-<slug>`, #215); text before the first heading is the section `""`, and a heading without an id (emoji-only) stays in the section before it. A selection must lie in one section; the context is up to 32 characters each side, the quote at most 4,096.
+
+Finding the anchor in the page a reader is shown, in the frame:
+
+1. The section must exist, else the thread is **orphaned**.
+2. On the blob the comment was made on, the quote must sit exactly at its offset (this also tells two identical quotes in one section apart).
+3. Otherwise (a new commit changed the page, or the offset is wrong) the quote is searched in that section: exactly one occurrence with its full prefix and suffix wins; failing that, the only occurrence of the quote at all; anything else is orphaned.
+
+An orphan is listed in the drawer as "Anchor no longer found" and never pinned. There is no fuzzy matching, so a comment never jumps to other text. Nothing is re-anchored on the server: the stored anchor is untrusted client data that only ever selects text by these checks, so a forged anchor can at worst find nothing. An unchanged blob therefore keeps its anchors exactly, whatever else the commit changed. Convex lists a page's threads by `(repoId, path)`; `(repoId, blobSha)` indexes them by blob (the purge walks it).
+
+### Authorization at the Convex boundary
+
+Convex cannot reach the permission source or read KV, so it holds **grants** that only the read path writes:
+
+- The repository shell (`RENDRO_REPO_COMMENT_CONFIG`) calls `POST /r/{owner}/{repo}/comment-access`, same-origin only. The route runs `authorizeRepo`, the same order as a page view (public-repository memory, capability cookie and epoch, then session, epoch and permission source), and a denial is the read path's plain 404.
+- A granted request records `repoCommentAccess:grant` with `CONVEX_INTERNAL_SECRET`: `{ repoId, userId, epoch, expiresAt }`, where `userId` is null for a public repository and `expiresAt` is the authorization's own bound (`RepoGrant.until`: the capability cookie's expiry, at most five minutes, or the isolate's one-minute public-repository memory). The route asks `authorizeRepo` for at least 30 s of that (`COMMENT_GRANT_MIN_MS`): a memory or cookie closer to its end is decided again, as if it had lapsed, so a grant always outlives the shell's renewal halfway through it and comments never flicker out between renewals. Convex caps it at five minutes and schedules one `expireGrant` per grant. Each isolate reuses a grant still more than half fresh, so many readers of one public repository make one write, and Convex extends a grant only when it moves by more than 10 s (`GRANT_EXTEND_SLACK_MS`), because every write to it re-runs the comment queries that read it.
+- Every query and mutation calls `repoCommentReader` first: the repository must not be removed, and a grant must exist for it, either public (anyone reads; signed-in users write) or for the signed-in user. Queries read only these rows, never the clock (#159), so a cached result changes exactly when a grant is written or deleted. Mutations also compare the grant's expiry with the clock.
+- A denial reveals nothing: reads return an empty page (`{ page: [], isDone: true }`, the same as a repository nobody has commented on), writes fail with "not found", like a missing thread. Thread and reply IDs are checked against the repository and page only after that, so an ID from another repository is "not found" too. Anonymous writes are "unauthenticated".
+- The shell renews its grant halfway through (at least every 15 s, at most a minute apart while failing; a denial is retried after a minute), holds renewals while the tab is hidden, and tells the widget whether this reader may write (`canWrite` in the ready message): repository frames are the same for everyone and cached publicly, so their widget configuration (`data-commentor-config`: repository, page, blob) says nothing about the reader.
+
+**Revocation.** P5's epoch outbox writes each epoch to KV, then sends the same value to `repoCommentAccess:revokeUser` (an outbox entry of its own, `notify:<user>`, so a Convex outage never rewrites KV). Convex records it, deletes the user's grants, and refuses any grant decided before it (a lower epoch), so a revoked reader's open subscription empties at once. The bounds are therefore those of page views, or tighter:
+
+| Change | Comments end |
+|---|---|
+| Covered by a webhook | When the control Worker applies it (before KV propagates) |
+| The Convex call fails | Retried by the outbox alarm every 10 s; the grant's own expiry (at most five minutes) bounds it meanwhile |
+| No webhook | Mirror TTL + the cookie the grant rests on: at most ten minutes, as for pages |
+| Repository made private, anonymous readers | The public grant's one minute, as the isolate memory for pages |
+| Comments not configured on the control Worker | The grant's expiry: at most five minutes |
+
+**Public repositories.** Anyone may read. Writing needs a signed-in session (the shell's Convex JWT) and the public grant, and is rate limited like project comments: 30 writes a minute per user and 300 per repository (`consumeWriteQuota(ctx, "comments", user, "repo:<id>")`). Author names are shown, email addresses never (a public repository's comments are public).
+
+### Data model and retention
+
+| Table | Indexes | Holds |
+|---|---|---|
+| `repoCommentGrants` | `by_repo_user`, `by_user` | Live grants |
+| `repoCommentEpochs` | `by_user` | The latest epoch P5 reported per user |
+| `repoCommentRepos` | `by_repo` | A repository readers have seen, and `removedAt` once GitHub reported it gone |
+| `repoThreads` | `by_repo_path` (with `deletedAt`, `createdAt`), `by_repo_blob`, `by_operation` | Threads: anchor, body, author, resolved, archived |
+| `repoReplies` | `by_thread` (with `deletedAt`, `createdAt`), `by_operation` | Replies |
+
+Pages are bounded like project comments: 20 threads (24 rows, 1 MB read) with the newest 10 replies each, and 20 replies per reply page. Creates and replies are deduplicated by `clientOperationId`; resolve and archive take an explicit target, so a retry is a no-op. Anyone who may write may resolve; archive and delete belong to the author. Deleting a thread leaves a scrubbed tombstone and scrubs its replies in batches of 100.
+
+**Uninstalled repositories.** When GitHub reports a repository removed from the installation or deleted, or the installation or organization deleted, the control Worker's outbox (`removed:<repo>`) calls `repoCommentAccess:removeRepos`. Its comments are **hidden at once** (`removedAt`; every grant deleted) and **purged after 30 days** (`REMOVED_REPO_RETENTION_MS`) in batches of 20 threads and 100 replies. A grant recorded more than a minute after the removal (`REMOVAL_SETTLE_MS`; anything sooner may have been decided before it) means the repository is back: `removedAt` clears and the pending purge does nothing. A suspended installation hides comments through access alone and purges nothing.
+
+### Commentor integration
+
+The frame adds `<script defer src="/commentor.js?v=…" data-commentor-config="…">`. Its policy allows exactly that script and the widget's one shadow-root stylesheet by hash (`COMMENTOR_STYLE_HASH`, checked against `src/commentor/styles.ts` by a test), never `'unsafe-inline'`, and still has no `connect-src`: the widget cannot open a connection, so the shell's client is the only one. The parent host derives the scope from the frame's URL (`parseRepoPath`, the shell's own repository at any ref) and the shell's repository ID, ignoring anything the frame claims. Click-to-comment anchors to the clicked element's text; an element without text asks for a selection. Sign-out in another tab ends comments like everywhere else; a reader who was never signed in stays an anonymous reader.
+
+Tests: `tests/repo-comments-convex.test.ts` (access, revocation, removal and purge, forged anchors, cross-repository IDs, oversized text, rate limits), `tests/repo-comments-routes.test.ts` (the access route and frame policy), `tests/repo-access-comments.test.ts` (the outbox), `tests/repo-anchor.test.ts`, `tests/repo-comments-host.test.ts`, `tests/repo-comments-browser.test.ts` (the real frame and widget in Chromium) and `e2e/repo-comments.spec.ts` (create, reply and resolve; an unrelated commit; an orphan; a revoked reader; an anonymous reader).
 
 ---
 
@@ -2402,6 +2480,8 @@ What the owner configures later is in [SETUP.md](SETUP.md#github-repository-read
 | Repo docs rendered and sanitized once at ingest | comrak (cmark-gfm lineage) is linear on hostile Markdown; a parse5 allowlist with a fixed-point re-parse check is the XSS boundary, and readers never pay render cost |
 | Stateless repository capability cookie plus revocation epoch | A cached repository page view verifies one HMAC and reads one epoch; GitHub and the database are reached only on a cookie miss, and revocation reaches every colo with the epoch store |
 | One Durable Object for the permission registry and mirrors; webhook payloads may only deny | Registry and mirrors change consistently and races with webhooks are detectable; a replayed body cannot grant, because permissive changes are confirmed with GitHub first |
+| Comment access as Convex grants written by the read path, deleted by expiry jobs and P5's epochs | Convex cannot ask GitHub or read KV; grants make every comment read and write follow the page view's decision, keep queries free of clock reads, and end with page access |
+| Repository comment anchors re-found in the frame, never re-anchored on the server | Heading slug plus quote with strict uniqueness rules cannot jump to other text, and an untrusted anchor stays data |
 
 ## Known Limitations
 

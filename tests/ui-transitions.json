@@ -25924,6 +25924,292 @@
           ]
         }
       ]
+    },
+    {
+      "id": "UI-163",
+      "title": "Repository docs viewer: comments on repository documents",
+      "area": "Repository docs (GitHub pivot)",
+      "routes": [
+        "GET /r/*",
+        "POST /r/*"
+      ],
+      "sources": [
+        "src/commentor/commentor.ts",
+        "src/commentor/parent-host.ts",
+        "src/commentor/repo-anchor.ts",
+        "src/repo-access/directory.ts",
+        "src/repo-read/comments.ts",
+        "src/repo-read/routes.ts"
+      ],
+      "roles": [
+        "anonymous",
+        "owner"
+      ],
+      "viewports": [
+        1440
+      ],
+      "engines": [
+        "chromium",
+        "firefox",
+        "webkit"
+      ],
+      "status": "e2e",
+      "auditEvidence": "NOT_IN_AUDIT",
+      "auditNote": "New surface from epic #214 phase P6 (#254): commit-surviving anchors and comment access that mirrors repository read access.",
+      "edges": [
+        {
+          "id": "UI-163-E01",
+          "from": "A signed-in reader with access, a repository document open",
+          "trigger": "Select text and press the Comment chip, write and post",
+          "expected": "The thread is created with a heading/quote/blob anchor and its pin appears on the selected text",
+          "inventoryRefs": [
+            "UI-163"
+          ],
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "tests/repo-comments-browser.test.ts",
+              "name": "anchors a selection by heading, quote, context, offset and blob",
+              "kind": "browser"
+            },
+            {
+              "file": "e2e/repo-comments.spec.ts",
+              "name": "a reader creates, replies to and resolves a comment on a repository doc",
+              "kind": "e2e"
+            }
+          ]
+        },
+        {
+          "id": "UI-163-E02",
+          "from": "A thread bubble open on a repository document",
+          "trigger": "Write a reply and send it",
+          "expected": "The reply appears in the bubble and is stored for the thread",
+          "inventoryRefs": [
+            "UI-163"
+          ],
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "tests/repo-comments-convex.test.ts",
+              "name": "creates, replies, resolves, archives and deletes, deduplicating retried operations",
+              "kind": "unit"
+            },
+            {
+              "file": "e2e/repo-comments.spec.ts",
+              "name": "a reader creates, replies to and resolves a comment on a repository doc",
+              "kind": "e2e"
+            }
+          ]
+        },
+        {
+          "id": "UI-163-E03",
+          "from": "A thread bubble open on a repository document",
+          "trigger": "Press Resolve",
+          "expected": "The thread is resolved for every reader of the repository",
+          "inventoryRefs": [
+            "UI-163"
+          ],
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "tests/repo-comments-convex.test.ts",
+              "name": "creates, replies, resolves, archives and deletes, deduplicating retried operations",
+              "kind": "unit"
+            },
+            {
+              "file": "e2e/repo-comments.spec.ts",
+              "name": "a reader creates, replies to and resolves a comment on a repository doc",
+              "kind": "e2e"
+            }
+          ]
+        },
+        {
+          "id": "UI-163-E04",
+          "from": "A comment on a repository document",
+          "trigger": "A commit changes other files; the reader opens the new commit",
+          "expected": "The page's blob is unchanged, so the pin stays on exactly the same text",
+          "inventoryRefs": [
+            "UI-163"
+          ],
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "tests/repo-comments-browser.test.ts",
+              "name": "pins each anchor on its own text: exact on the same blob, re-found on a changed one, never moved to other text",
+              "kind": "browser"
+            },
+            {
+              "file": "e2e/repo-comments.spec.ts",
+              "name": "a comment keeps its anchor across an unrelated commit and a nearby edit",
+              "kind": "e2e"
+            }
+          ]
+        },
+        {
+          "id": "UI-163-E05",
+          "from": "A comment on a repository document",
+          "trigger": "A commit edits the page around the quoted passage; the reader opens it",
+          "expected": "The quote is found again under its heading by its context and the pin follows it",
+          "inventoryRefs": [
+            "UI-163"
+          ],
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "tests/repo-comments-browser.test.ts",
+              "name": "pins each anchor on its own text: exact on the same blob, re-found on a changed one, never moved to other text",
+              "kind": "browser"
+            },
+            {
+              "file": "e2e/repo-comments.spec.ts",
+              "name": "a comment keeps its anchor across an unrelated commit and a nearby edit",
+              "kind": "e2e"
+            }
+          ]
+        },
+        {
+          "id": "UI-163-E06",
+          "from": "A comment on a repository document",
+          "trigger": "A commit deletes the quoted text (or makes it ambiguous, or removes its heading)",
+          "expected": "The thread is listed in the drawer as “Anchor no longer found” and is never pinned on other text",
+          "inventoryRefs": [
+            "UI-163"
+          ],
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "tests/repo-comments-browser.test.ts",
+              "name": "pins each anchor on its own text: exact on the same blob, re-found on a changed one, never moved to other text",
+              "kind": "browser"
+            },
+            {
+              "file": "e2e/repo-comments.spec.ts",
+              "name": "a comment whose text was deleted becomes an orphan in the drawer, never pinned elsewhere",
+              "kind": "e2e"
+            }
+          ]
+        },
+        {
+          "id": "UI-163-E07",
+          "from": "A reader viewing a private repository's comments",
+          "trigger": "GitHub removes their access and delivers the webhook",
+          "expected": "The open comment subscription empties at once; comment access and the page answer a plain 404",
+          "inventoryRefs": [
+            "UI-163"
+          ],
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "tests/repo-comments-convex.test.ts",
+              "name": "revokes a user's grants at P5's epoch, and refuses a grant decided before it",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/repo-access-comments.test.ts",
+              "name": "tells Convex the very epoch KV holds, after KV, when a reader loses access",
+              "kind": "unit"
+            },
+            {
+              "file": "e2e/repo-comments.spec.ts",
+              "name": "a reader who loses repository access loses its comments at once",
+              "kind": "e2e"
+            }
+          ]
+        },
+        {
+          "id": "UI-163-E08",
+          "from": "An anonymous reader of a public repository document",
+          "trigger": "Open the page, select text",
+          "expected": "Pins and threads show; the Comment button is disabled and no chip opens; Convex refuses an anonymous write",
+          "inventoryRefs": [
+            "UI-163"
+          ],
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "tests/repo-comments-browser.test.ts",
+              "name": "runs the widget under the frame's own policy, read-only until the parent grants writing",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/repo-comments-host.test.ts",
+              "name": "lets an anonymous reader read, and never write or keep drafts",
+              "kind": "unit"
+            },
+            {
+              "file": "e2e/repo-comments.spec.ts",
+              "name": "an anonymous reader of a public repository sees its comments but cannot post",
+              "kind": "e2e"
+            }
+          ]
+        },
+        {
+          "id": "UI-163-E09",
+          "from": "A reader without access to a private repository (anonymous or signed in)",
+          "trigger": "The shell asks for comment access, or a client queries or writes the repository's comments",
+          "expected": "A plain 404 and an empty thread set, exactly like a repository nobody has commented on",
+          "inventoryRefs": [
+            "UI-163"
+          ],
+          "status": "unit",
+          "tests": [
+            {
+              "file": "tests/repo-comments-routes.test.ts",
+              "name": "grants a private repository's comments to its reader only, at the epoch the read path checked",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/repo-comments-convex.test.ts",
+              "name": "denies a private repository's comments to everyone but the granted reader, revealing nothing",
+              "kind": "unit"
+            }
+          ]
+        },
+        {
+          "id": "UI-163-E10",
+          "from": "A repository with comments",
+          "trigger": "GitHub reports it uninstalled or deleted",
+          "expected": "Its comments are hidden at once and purged after 30 days unless it is reinstalled",
+          "inventoryRefs": [
+            "UI-163"
+          ],
+          "status": "unit",
+          "tests": [
+            {
+              "file": "tests/repo-access-comments.test.ts",
+              "name": "removes every repository of an uninstalled or deleted installation",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/repo-comments-convex.test.ts",
+              "name": "hides an uninstalled repository's comments at once and purges them after the retention window",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/repo-comments-convex.test.ts",
+              "name": "keeps a reinstalled repository's comments: a later grant cancels the purge",
+              "kind": "unit"
+            }
+          ]
+        },
+        {
+          "id": "UI-163-E11",
+          "from": "A signed-in reader in comment mode on a repository document",
+          "trigger": "Click an element",
+          "expected": "The element's text is the anchor; an element without text asks the reader to select some text",
+          "inventoryRefs": [
+            "UI-163"
+          ],
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/repo-comments-browser.test.ts",
+              "name": "anchors a clicked element by its text, and refuses one without text",
+              "kind": "browser"
+            }
+          ]
+        }
+      ]
     }
   ]
 }

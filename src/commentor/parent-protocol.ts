@@ -73,6 +73,8 @@ export type CommentorParentReady = {
   canReloadViewer?: boolean;
   recoveryState?: CommentRecoveryState;
   userId?: string | null;
+  // Repository frames (#254) are the same for every reader, so the parent says who may write.
+  canWrite?: boolean;
 };
 
 const METHODS = new Set<CommentorParentMethod>([

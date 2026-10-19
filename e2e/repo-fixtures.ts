@@ -11,10 +11,24 @@ import { initNodeMarkdownEngine } from "../tests/helpers/markdown-engine";
  * The repositories the E2E suite reads through /r/ (#234), in a fake GitHub the real control
  * Worker (#243) reads: snapshots built by the P3b pipeline, the installation announced by a
  * signed webhook, and three seeded users linked to GitHub accounts. `control` is a fixture
- * endpoint a spec calls to change team membership; it delivers the webhook GitHub would send.
+ * endpoint a spec calls to change team membership or a collaborator, or to push a commit; it
+ * delivers the webhook GitHub would send (or ingests the commit, as the push webhook would).
  */
 export type RepoFixture = { owner: string; name: string; commit: string };
-export type RepoFixtures = { open: RepoFixture; closed: RepoFixture; team: RepoFixture; control: string };
+export type RepoFixtures = { open: RepoFixture; closed: RepoFixture; team: RepoFixture; comments: RepoFixture; commentsPrivate: RepoFixture; control: string };
+
+/** Comments on repository docs (#254): pages with headings, one per spec, so each can push its own commits. */
+export function commentDocs(): Record<string, string> {
+  return {
+    "README.md": "# Comments\n",
+    "docs/index.md": "# Comment home\n\nPages for the comment journeys.\n",
+    "docs/guide.md": "# Guide\n\n## Install\n\nRun pnpm install before anything else.\n\n## Usage\n\nCall the API when ready.\n",
+    "docs/survive.md": "# Survive\n\n## Notes\n\nThis sentence survives unrelated commits.\n",
+    "docs/orphan.md": "# Orphan\n\n## Notes\n\nThis sentence will be deleted.\n\nAnother paragraph stays.\n",
+    "docs/other.md": "# Other\n\nVersion 1.\n",
+    "docs/private.md": "# Private\n\n## Notes\n\nOnly collaborators read this.\n",
+  };
+}
 
 /** Dispatches to the control Worker (the harness's `getWorker(name).fetch`). */
 export type ControlFetch = (url: string, init: { method: "POST"; body: string; headers?: Record<string, string> }) => Promise<Response>;
@@ -39,9 +53,12 @@ export function repositoryWorld() {
     open: github.repo("e2e-org", "open-docs", { id: 9001 }),
     closed: github.repo("e2e-org", "closed-docs", { id: 9002, private: true }),
     team: github.repo("e2e-org", "team-docs", { id: 9003, private: true }),
+    comments: github.repo("e2e-org", "comment-docs", { id: 9004 }),
+    commentsPrivate: github.repo("e2e-org", "comment-private", { id: 9005, private: true }),
   };
   const people = { owner: github.user("e2e-reader", 9501), outsider: github.user("e2e-outsider", 9502), member: github.user("e2e-member", 9503) };
   repos.closed.collaborators.add(people.owner.id);
+  repos.commentsPrivate.collaborators.add(people.owner.id);
   const team = github.team("e2e-org", "docs-readers", [people.member], [repos.team]);
   return { github, installation, repos, people, team };
 }
@@ -53,7 +70,10 @@ export async function seedRepositories(input: {
 }): Promise<{ fixtures: RepoFixtures; close(): Promise<void> }> {
   initNodeMarkdownEngine();
   const { github, installation, repos, people, team } = input.world;
-  const commits = { open: repos.open.commit(docs("Open home")), closed: repos.closed.commit(docs("Closed home")), team: repos.team.commit(docs("Team home")) };
+  const commits = {
+    open: repos.open.commit(docs("Open home")), closed: repos.closed.commit(docs("Closed home")), team: repos.team.commit(docs("Team home")),
+    comments: repos.comments.commit(commentDocs()), commentsPrivate: repos.commentsPrivate.commit(commentDocs()),
+  };
   const deps = {
     source: new HttpGitHubSource({ tokens: staticTokenProvider(github.token), fetch: github.fetch, apiOrigin: github.origin, archiveOrigins: [github.archiveOrigin] }),
     store: r2Store(input.bucket), sealer: plaintextSealer, pipeline: contentPipeline(), now: () => Date.now(),
@@ -79,23 +99,44 @@ export async function seedRepositories(input: {
     if (linked.status !== 204) throw new Error(`Linking ${role} answered ${linked.status}`);
   }
   // POST /membership/added|removed: the member joins or leaves the team, and GitHub's webhook follows.
+  // POST /collaborator/added|removed: the owner gains or loses comment-private, and GitHub's webhook follows.
+  // POST /commit/comments with { changes }: a commit to comment-docs (null deletes a file), ingested as a push would be.
   const control = await listen((request, response) => {
     void (async () => {
-      const action = /^\/membership\/(added|removed)$/.exec(request.url ?? "")?.[1];
-      if (request.method !== "POST" || !action) {
+      const reply = (value: unknown) => {
+        response.setHeader("Content-Type", "application/json");
+        response.end(JSON.stringify(value));
+      };
+      const url = request.url ?? "";
+      const membership = /^\/membership\/(added|removed)$/.exec(url)?.[1];
+      const collaborator = /^\/collaborator\/(added|removed)$/.exec(url)?.[1];
+      if (request.method === "POST" && membership) {
+        if (membership === "added") team.members.add(people.member.id);
+        else team.members.delete(people.member.id);
+        reply({ status: await deliver("membership", { action: membership, member: { id: people.member.id, login: people.member.login }, team: { slug: "docs-readers" } }) });
+      } else if (request.method === "POST" && collaborator) {
+        if (collaborator === "added") repos.commentsPrivate.collaborators.add(people.owner.id);
+        else repos.commentsPrivate.collaborators.delete(people.owner.id);
+        reply({ status: await deliver("member", { action: collaborator, member: { id: people.owner.id, login: people.owner.login }, repository: github.repoJson(repos.commentsPrivate) }) });
+      } else if (request.method === "POST" && url === "/commit/comments") {
+        const chunks: Buffer[] = [];
+        for await (const chunk of request) chunks.push(chunk as Buffer);
+        const { changes } = JSON.parse(Buffer.concat(chunks).toString("utf8")) as { changes: Record<string, string | null> };
+        const commit = repos.comments.change(changes);
+        const result = await ingestBranch(deps, etags, repos.comments.ref, "main");
+        if (result.status !== "flipped" && result.status !== "current") throw new Error(`Commit was not ingested (${result.status})`);
+        reply({ commit });
+      } else {
         response.writeHead(404).end();
-        return;
       }
-      if (action === "added") team.members.add(people.member.id);
-      else team.members.delete(people.member.id);
-      const status = await deliver("membership", { action, member: { id: people.member.id, login: people.member.login }, team: { slug: "docs-readers" } });
-      response.setHeader("Content-Type", "application/json");
-      response.end(JSON.stringify({ status }));
     })().catch((error: unknown) => response.writeHead(500).end(String(error)));
   });
   const fixture = (repo: { owner: string; name: string }, commit: string): RepoFixture => ({ owner: repo.owner, name: repo.name, commit });
   return {
-    fixtures: { open: fixture(repos.open, commits.open), closed: fixture(repos.closed, commits.closed), team: fixture(repos.team, commits.team), control: control.origin },
+    fixtures: {
+      open: fixture(repos.open, commits.open), closed: fixture(repos.closed, commits.closed), team: fixture(repos.team, commits.team),
+      comments: fixture(repos.comments, commits.comments), commentsPrivate: fixture(repos.commentsPrivate, commits.commentsPrivate), control: control.origin,
+    },
     close: () => control.close(),
   };
 }

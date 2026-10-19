@@ -9,7 +9,7 @@
 import { Hono, type Context } from "hono";
 import { r2Store, plaintextSealer, type R2BucketLike } from "@/ingest/orchestrator/store";
 import type { ManifestFile, SnapshotManifest } from "@/ingest/orchestrator/snapshot";
-import { IMAGE_PROXY_SECRET, REPO_CAPABILITY_SECRET } from "@/config";
+import { CONVEX_URL, IMAGE_PROXY_SECRET, REPO_CAPABILITY_SECRET } from "@/config";
 import { verifyImageProxyPath } from "@/image-proxy";
 import { sessionViewer } from "@/middleware/session";
 import { renderScopedDocumentShell } from "@/routes/app";
@@ -24,6 +24,7 @@ import { ViewerBackendError } from "@/viewer-backend";
 import { viewerScript, viewerUpdateNotice } from "@/viewer/markup";
 import { kvRevocationEpochs, serviceRepoPermissions, type Fetcher, type KvReader } from "./access";
 import { authorizeRepo, authorizeTicket, mintTicket, type Authorization, type AuthorizeDependencies } from "./authorize";
+import { COMMENT_GRANT_MIN_MS, commentAccess, commentorScript, convexCommentGrants, type CommentGrants } from "./comments";
 import { durableFirstView, interpretOutcome, prepareRepo, PREPARE_WINDOW_MS, repoIngestTarget, type RepoFirstView } from "./first-view";
 import { FRAME_TEMPLATE_TAG, FRAME_VERSION, failureBody, frameBody, frameContentSecurityPolicy, renderFrameDocument } from "./frame";
 import type { RepoGrant } from "./grant";
@@ -32,6 +33,7 @@ import { READINESS_HEADER, renderPreparingPage, type PreparingState } from "./pr
 import { isPagePath, manifestFile, readDeadline, RepoSnapshots, type EdgeCache } from "./snapshot";
 import { REPO_SPECULATION_RULES_PATH, repoSpeculationRules } from "./speculation";
 import { treePage } from "./tree";
+import { requireCookieWrite } from "../../shared/request-admission";
 
 /** As on the other delivery routes: a stalled store becomes a retryable 503. */
 const READ_TIMEOUT_MS = 10_000;
@@ -54,6 +56,8 @@ interface Services {
   waitUntil: (promise: Promise<unknown>) => void;
   /** Set only where the ingest coordinator Durable Object is configured; first views enqueue there. */
   firstView: RepoFirstView | null;
+  /** Where comment grants are recorded (#254). */
+  comments: CommentGrants;
 }
 
 /** The preparing/retry page a first-view outcome leaves the reader on (#242). */
@@ -93,6 +97,7 @@ function services(c: Context): Services | null {
     }),
     waitUntil,
     firstView: durableFirstView(env.REPO_INGEST),
+    comments: convexCommentGrants,
   };
 }
 
@@ -104,7 +109,7 @@ async function isProxiedImage(src: string): Promise<boolean> {
 /** Unparsed URLs are answered like files: a page for navigations, an empty body for subresources. */
 function representation(target: RepoRequestPath["target"]["kind"] | undefined): Representation {
   if (target === "shell") return "html";
-  return target === "tree" || target === "viewer-ticket" ? "json" : "asset";
+  return target === "tree" || target === "viewer-ticket" || target === "comment-access" ? "json" : "asset";
 }
 
 /** Plain 404: no validators, no retry hint, never cached; capability URLs are never echoed. */
@@ -140,9 +145,11 @@ function shell(c: Context, grant: RepoGrant, request: RepoRequestPath, manifest:
   const selected = c.req.query("doc") ?? manifest.docs?.entry;
   if (!selected || !isCanonicalStorageKey(selected) || !isPage(manifest)(selected)) return notFound(c, "html");
   const pinned = repoBase(request.owner, request.name, { kind: "commit", commit: manifest.commit });
+  // The shell holds the one comments connection (#254); frames only talk to it. Without a Convex URL the shell loads no client.
+  const repoCommentConfig = { repoId: grant.repo.id, accessUrl: `${repoBase(request.owner, request.name, { kind: "default" })}/comment-access`, convexUrl: CONVEX_URL };
   const html = renderScopedDocumentShell({
     user: null, namespace: request.name, title: `${request.owner}/${request.name}`,
-    basePath: repoBase(request.owner, request.name, request.ref), frameBase: pinned, selectedPath: selected, copyLink: true,
+    basePath: repoBase(request.owner, request.name, request.ref), frameBase: pinned, selectedPath: selected, copyLink: true, repoCommentConfig,
   });
   // Private frames load their images through tickets, which only the trusted shell may renew.
   const body = grant.repo.private ? html.replace("</body>", viewerUpdateNotice() + viewerScript("parent", { base: pinned }) + "</body>") : html;
@@ -186,6 +193,8 @@ async function frame(c: Context, manifest: SnapshotManifest, { grant, request, f
     : await services.snapshots.page(grant, file, `frame-v${FRAME_VERSION}`, async rendered => ("html" in rendered
       ? { title: rendered.title, body: await frameBody(rendered.html, path, isProxiedImage) }
       : { title: null, body: failureBody(rendered.error) }));
+  // Every reader gets the same frame (it may be cached publicly); the shell decides what the widget may do.
+  const widget = file.render === undefined ? "" : commentorScript(origin, grant.repo.id, path, file);
   let head = viewerScript("navigation", { prefix: `${base}/files/`, documentPath: path }, c.req.url);
   if (grant.repo.private) {
     // Requests from the opaque frame carry no cookies: images inherit the ticket through the base URL.
@@ -195,7 +204,7 @@ async function frame(c: Context, manifest: SnapshotManifest, { grant, request, f
       + viewerScript("navigation", { prefix: `${base}/files/`, ticketBase: `${pinned}/view/`, documentPath: path }, c.req.url);
   }
   const title = page.title ?? path.slice(path.lastIndexOf("/") + 1);
-  const bytes = new TextEncoder().encode(renderFrameDocument({ title, body: page.body, origin, head: `${head}\n` }));
+  const bytes = new TextEncoder().encode(renderFrameDocument({ title, body: page.body, origin, head: `${head}\n${widget}` }));
   return serveObject({
     request: c.req.raw,
     headers: {
@@ -239,6 +248,21 @@ async function renewal(c: Context, grant: RepoGrant, request: RepoRequestPath, m
   return c.json({ prefix: `${pinned}/view/${await mintTicket(services.authorize, grant, manifest.commit)}/files/` });
 }
 
+/** Record the reader's comment access in Convex (#254). Only the trusted shell asks: a same-origin POST. */
+async function commentAccessResponse(c: Context, grant: RepoGrant, services: Services): Promise<Response> {
+  c.header("Cache-Control", "private, no-store");
+  const access = await commentAccess(services.comments, grant, services.authorize.now());
+  if (!access) return notFound(c, "json");
+  return c.json({ repoId: grant.repo.id, private: grant.repo.private, expiresAt: access.expiresAt });
+}
+
+function setAuthorizationCookies(c: Context, authorization: Authorization): void {
+  // Cookie changes ride on denials and private responses only: a public response may be cached by anyone.
+  if (authorization.kind === "denied" || (authorization.kind === "granted" && authorization.grant.repo.private)) {
+    for (const cookie of authorization.cookies) c.header("Set-Cookie", cookie, { append: true });
+  }
+}
+
 const app = new Hono();
 app.use("/r/*", viewerErrorCache);
 // Chromium reads this from the shell's `Speculation-Rules` header. Same-origin JSON, never under /r/
@@ -256,23 +280,22 @@ app.get("/r/*", async (c) => {
   const request = parseRepoPath(new URL(c.req.url).pathname);
   const configured = services(c);
   const kind = representation(request?.target.kind);
+  // Comment access changes state, so it is POST only (below).
   if (!request || !configured) return notFound(c, kind);
   const { target } = request;
+  if (target.kind === "comment-access") return notFound(c, kind);
 
   const authorization: Authorization = target.kind === "ticket-files"
     ? await authorizeTicket(configured.authorize, target.ticket, request.owner, request.name, (request.ref as { commit: string }).commit)
     : await authorizeRepo(configured.authorize, c.req.raw, request.owner, request.name);
-  // Cookie changes ride on denials and private responses only: a public response may be cached by anyone.
-  if (authorization.kind === "denied" || (authorization.kind === "granted" && authorization.grant.repo.private)) {
-    for (const cookie of authorization.cookies) c.header("Set-Cookie", cookie, { append: true });
-  }
+  setAuthorizationCookies(c, authorization);
   if (authorization.kind === "unavailable") return unavailableResponse(c, { unavailable: true, retryAfter: authorization.retryAfter }, kind);
   if (authorization.kind === "denied") return notFound(c, kind);
   const { grant } = authorization;
   const scope = configured;
   const path = request;
 
-  async function respond(target: RepoRequestPath["target"], manifest: SnapshotManifest): Promise<Response> {
+  async function respond(target: Exclude<RepoRequestPath["target"], { kind: "comment-access" }>, manifest: SnapshotManifest): Promise<Response> {
     if (target.kind === "shell") return shell(c, grant, path, manifest);
     if (target.kind === "tree") return tree(c, grant, path, manifest, scope);
     if (target.kind === "viewer-ticket") return renewal(c, grant, path, manifest, scope);
@@ -318,6 +341,25 @@ app.get("/r/*", async (c) => {
     if (!manifest) return readinessResponse(c, "preparing");
   }
   return respond(target, manifest);
+});
+
+app.post("/r/*", async (c) => {
+  c.header("Referrer-Policy", "no-referrer");
+  const request = parseRepoPath(new URL(c.req.url).pathname);
+  const configured = services(c);
+  if (!request || !configured || request.target.kind !== "comment-access") return notFound(c, "json");
+  // Same-origin only, by the rule every cookie write follows (this route mounts before writeAdmission).
+  try {
+    requireCookieWrite(c.req.raw, process.env.SITE_URL ?? new URL(c.req.url).origin, false);
+  } catch {
+    return notFound(c, "json");
+  }
+  // A grant must outlive the shell's renewal halfway through it, so access never lapses between renewals.
+  const authorization = await authorizeRepo(configured.authorize, c.req.raw, request.owner, request.name, COMMENT_GRANT_MIN_MS);
+  setAuthorizationCookies(c, authorization);
+  if (authorization.kind === "unavailable") return unavailableResponse(c, { unavailable: true, retryAfter: authorization.retryAfter }, "json");
+  if (authorization.kind === "denied") return notFound(c, "json");
+  return commentAccessResponse(c, authorization.grant, configured);
 });
 
 export default app;
