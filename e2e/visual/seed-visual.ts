@@ -107,7 +107,7 @@ export async function seedVisualWorkspace(input: {
         body: JSON.stringify({ path, args, format: "json" }) });
       const body = await response.json() as { status: string; value?: T; errorMessage?: string };
       if (response.ok && body.status === "success" && body.value !== undefined) return body.value;
-      if (attempt >= 3 || !/timed out|Request failed|fetch failed|ECONN/i.test(body.errorMessage ?? "")) {
+      if (attempt >= 5 || !/timed out|Request failed|fetch failed|ECONN/i.test(body.errorMessage ?? "")) {
         throw new Error(`Visual seed ${kind} ${path} failed: ${JSON.stringify(body)}`);
       }
       await new Promise(resolve => setTimeout(resolve, 2_000));
@@ -120,6 +120,20 @@ export async function seedVisualWorkspace(input: {
   const threads = list.page ?? [];
   const created = threads.map(thread => thread._creationTime).filter((value): value is number => typeof value === "number");
   if (created.length !== threads.length || created.length === 0) throw new Error("Visual seed threads arrived without timestamps");
+
+  // The thread states of #268 live on their own page so the baselines above keep exactly their threads: an active
+  // thread with a reply, one to resolve and one to delete. Created right away, they round to the same "5m" age.
+  const advanced = { ...scope, documentPath: "guide/advanced.html" };
+  const advancedHeading = { kind: "element", path: ["main", "h1"] } as const;
+  const advancedIntro = { kind: "text-range", quote: "the API", path: ["main", "p:nth-of-type(1)"], startOffset: 5, endOffset: 12 } as const;
+  const retry = await api<string>("mutation", "documentThreads:create", { ...advanced, body: "Confirm the retry budget before release", anchor: { ...advancedHeading }, clientOperationId: "visual-thread-retry" });
+  await api<string>("mutation", "documentReplies:add", { ...advanced, threadId: retry, body: "The budget is three attempts", clientOperationId: "visual-reply-retry" });
+  const rename = await api<string>("mutation", "documentThreads:create", { ...advanced, body: "Rename the endpoint section", anchor: { ...advancedIntro }, clientOperationId: "visual-thread-rename" });
+  await api<string>("mutation", "documentThreads:resolve", { ...advanced, threadId: rename, resolved: true, clientOperationId: "visual-resolve-rename" });
+  const more = await api<{ page?: Array<{ _creationTime?: number }> }>("query", "documentThreads:list", { ...advanced, paginationOpts: { numItems: 20, cursor: null } });
+  const moreCreated = (more.page ?? []).map(thread => thread._creationTime).filter((value): value is number => typeof value === "number");
+  // A thread older than 30 seconds past the first would render "4m" or "5m" depending on the run.
+  if (moreCreated.length === 0 || Math.max(...moreCreated) - Math.min(...created) > 25_000) throw new Error("Visual seed threads were created too far apart for a stable age");
 
   return {
     clockEpoch: Math.min(...created) + 300_000,

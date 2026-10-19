@@ -8,6 +8,7 @@ import { r2Store, type R2BucketLike } from "../src/ingest/orchestrator/store";
 import type { SearchIndex } from "../src/search/index";
 import { FakeGitHub } from "../tests/helpers/fake-github";
 import { initNodeMarkdownEngine } from "../tests/helpers/markdown-engine";
+import { visualDocs } from "./visual/visual-repo-docs";
 
 /**
  * The repositories the E2E suite reads through /r/ (#234), in a fake GitHub the real control
@@ -17,7 +18,11 @@ import { initNodeMarkdownEngine } from "../tests/helpers/markdown-engine";
  * delivers the webhook GitHub would send (or ingests the commit, as the push webhook would).
  */
 export type RepoFixture = { owner: string; name: string; commit: string };
-export type RepoFixtures = { open: RepoFixture; closed: RepoFixture; team: RepoFixture; comments: RepoFixture; commentsPrivate: RepoFixture; control: string };
+export type RepoFixtures = {
+  open: RepoFixture; closed: RepoFixture; team: RepoFixture; comments: RepoFixture; commentsPrivate: RepoFixture; control: string;
+  /** Only in the visual runs (#268): a public repository of fixed Markdown for the baselines. */
+  visual?: RepoFixture;
+};
 
 /** Comments on repository docs (#254): pages with headings, one per spec, so each can push its own commits. */
 export function commentDocs(): Record<string, string> {
@@ -48,7 +53,7 @@ function docs(home: string): Record<string, string> {
 }
 
 /** e2e-org with the app installed; the owner is a collaborator on closed-docs, the member reads team-docs through a team. */
-export function repositoryWorld() {
+export function repositoryWorld(options: { visual?: boolean } = {}) {
   const github = new FakeGitHub();
   const installation = github.install("e2e-org", { id: 9100 });
   const repos = {
@@ -57,6 +62,7 @@ export function repositoryWorld() {
     team: github.repo("e2e-org", "team-docs", { id: 9003, private: true }),
     comments: github.repo("e2e-org", "comment-docs", { id: 9004 }),
     commentsPrivate: github.repo("e2e-org", "comment-private", { id: 9005, private: true }),
+    ...(options.visual ? { visual: github.repo("e2e-org", "visual-docs", { id: 9006 }) } : {}),
   };
   const people = { owner: github.user("e2e-reader", 9501), outsider: github.user("e2e-outsider", 9502), member: github.user("e2e-member", 9503) };
   repos.closed.collaborators.add(people.owner.id);
@@ -78,6 +84,7 @@ export async function seedRepositories(input: {
   const commits = {
     open: repos.open.commit(docs("Open home")), closed: repos.closed.commit(docs("Closed home")), team: repos.team.commit(docs("Team home")),
     comments: repos.comments.commit(commentDocs()), commentsPrivate: repos.commentsPrivate.commit(commentDocs()),
+    visual: repos.visual?.commit(visualDocs()),
   };
   const deps = {
     source: new HttpGitHubSource({ tokens: staticTokenProvider(github.token), fetch: github.fetch, apiOrigin: github.origin, archiveOrigins: [github.archiveOrigin] }),
@@ -142,6 +149,7 @@ export async function seedRepositories(input: {
     fixtures: {
       open: fixture(repos.open, commits.open), closed: fixture(repos.closed, commits.closed), team: fixture(repos.team, commits.team),
       comments: fixture(repos.comments, commits.comments), commentsPrivate: fixture(repos.commentsPrivate, commits.commentsPrivate), control: control.origin,
+      ...(repos.visual && commits.visual ? { visual: fixture(repos.visual, commits.visual) } : {}),
     },
     close: () => control.close(),
   };
