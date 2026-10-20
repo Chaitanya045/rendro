@@ -3,7 +3,7 @@ import { assertLoopback, localHttp } from "./backend";
 import type { FaultRule } from "./services";
 
 /**
- * Make the Worker's storage or Convex requests fail for one spec's own data (see `startFaults`). Returns the function that
+ * Make the Worker's Convex requests fail for one spec's own data (see `startFaults`). Returns the function that
  * ends the outage; call it in `finally`, or use `during`, so a failing assertion cannot leave a rule behind.
  */
 export async function injectFault(rule: FaultRule): Promise<() => Promise<void>> {

@@ -6,8 +6,6 @@ import apiKeyPageRoutes from "@/routes/api-key-pages";
 import authPageRoutes from "@/routes/auth-pages";
 import organizationPageRoutes, { organizationSectionDataPaths } from "@/routes/organization-pages";
 import projectPageRoutes from "@/routes/project-pages";
-import publicationPageRoutes from "@/routes/publication-pages";
-import sharePageRoutes from "@/routes/share-pages";
 
 const user: User = {
   id: "user-a",
@@ -29,8 +27,6 @@ function authenticatedPages(): Hono<{ Variables: { user?: User } }> {
   app.route("/", organizationPageRoutes);
   app.route("/", projectPageRoutes);
   app.route("/", apiKeyPageRoutes);
-  app.route("/", publicationPageRoutes);
-  app.route("/", sharePageRoutes);
   return app;
 }
 
@@ -44,25 +40,21 @@ describe("control-plane UI", () => {
     }
   });
 
-  it("renders deployment onboarding after project creation with completed earlier steps", async () => {
-    const response = await authenticatedPages().request("/organizations/org-a/onboarding?projectId=project-a");
+  it("renders project onboarding with the organization step completed", async () => {
+    const response = await authenticatedPages().request("/organizations/org-a/onboarding");
     expect(response.status).toBe(200);
     const html = await response.text();
-    expect(html).toContain("Loading deployment setup");
-    expect(html).toContain('"projectId":"project-a"');
-    expect(html).toContain('step active" aria-current="step"><span class="step-dot" aria-hidden="true">3</span>');
+    expect(html).toContain("Loading project setup");
+    expect(html).toContain('step active" aria-current="step"><span class="step-dot" aria-hidden="true">2</span>');
   });
-  it("names workspace and complementary panels on overview and deployment templates", async () => {
+  it("names workspace and complementary panels on overview and project templates", async () => {
     const app = authenticatedPages();
-    for (const suffix of ["", "/projects/project-a", "/projects/project-a/deployments"]) {
+    for (const suffix of ["", "/projects/project-a"]) {
       const html = await (await app.request("/organizations/org-a" + suffix)).text();
       expect(html).toContain('<div class="cp-sidebar" id="cp-navigation" role="complementary" aria-label="Workspace navigation">');
       if (!suffix) {
         expect(html).toContain('aria-labelledby="workspace-status-title"');
         expect(html).toContain('<h2 id="workspace-status-title">Workspace status</h2>');
-      } else {
-        expect(html).toContain('panel.setAttribute("aria-labelledby","publish-cli-title")');
-        expect(html).toContain('<h2 id="publish-cli-title">Publish from the CLI</h2>');
       }
       expect(html).not.toContain('<aside class="panel skeleton-card');
     }
@@ -94,8 +86,6 @@ describe("control-plane UI", () => {
     const app = authenticatedPages();
     for (const route of [
       "/organizations/org-a/api-keys",
-      "/organizations/org-a/projects/project-a/publications",
-      "/organizations/org-a/projects/project-a/shares",
     ]) {
       const html = await (await app.request(route)).text();
       const mobile = html.slice(html.indexOf("@media(max-width:760px){"));
@@ -172,9 +162,7 @@ describe("control-plane UI", () => {
       ["/organizations/org-a/teams", 'id="organization-content"', "Loading teams", "skeleton-card"],
       ["/organizations/org-a/settings", 'id="organization-content"', "Loading organization settings", "skeleton-field"],
       ["/organizations/org-a/projects", 'id="project-content"', "Loading projects", "project-list"],
-      ["/organizations/org-a/projects/project-a", 'id="project-content"', "Loading project overview", "deployments-panel"],
-      ["/organizations/org-a/projects/project-a/publications", 'id="publication-list"', "Loading publications", "skeleton-table-row"],
-      ["/organizations/org-a/projects/project-a/shares", 'id="share-list"', "Loading private shares", "skeleton-table-row"],
+      ["/organizations/org-a/projects/project-a", 'id="project-content"', "Loading project overview", "project-overview"],
       ["/organizations/org-a/api-keys", 'id="key-list"', "Loading API keys", "skeleton-table-row"],
       ["/accept-invitation/invitation-a", 'id="invitation-state"', "Loading invitation", "invitation-mark"],
       ["/account/security", 'id="method-list"', "Loading sign-in methods", "method-skeleton"],
@@ -207,28 +195,22 @@ describe("control-plane UI", () => {
     }
   });
 
-  it("renders the activation path and deployment-backed project tabs", async () => {
+  it("renders the activation path and the project overview", async () => {
     const app = authenticatedPages();
     const onboarding = await (await app.request("/organizations/org-a/onboarding")).text();
     expect(onboarding).toContain("Organization");
     expect(onboarding).toContain("Project");
-    expect(onboarding).toContain("First deployment</span>");
-    expect(onboarding).toContain("Waiting for your first deployment");
     expect(onboarding).toContain('class="stepper" aria-label="Setup progress"');
     expect(onboarding).toContain('aria-current="step"');
     expect(onboarding).toContain('class="step-dot material-symbols-outlined" aria-hidden="true">check');
     expect(onboarding).toContain('<span class="sr-only"> completed</span>');
     expect(onboarding).not.toContain('<span class="step-dot">Done</span>');
-    expect(onboarding).toContain('if(!scopes.length){error.textContent="Choose at least one permission.";return;}');
-    expect(onboarding).toContain('ui.busy(button,false);showCredential(result.rawKey)');
-    expect(onboarding).toContain('success.setAttribute("role","status")');
 
     const project = await (await app.request("/organizations/org-a/projects/project-a")).text();
     expect(project).toContain('<h1 class="cp-page-heading">Project</h1>');
     expect(project).toContain("Project overview");
-    expect(project).toContain("Deployment history");
-    expect(project).toContain("Publications");
-    expect(project).toContain("Private shares");
+    expect(project).toContain("Stable identifiers of this documentation product.");
+    expect(project).not.toContain("Deployment history");
   });
 
   it("protects one-time API key reveal and exposes scoped key metadata", async () => {
@@ -243,53 +225,26 @@ describe("control-plane UI", () => {
     expect(html).toContain("revocation is immediate");
   });
 
-  it("keeps publication and private-share controls inside project navigation", async () => {
-    const app = authenticatedPages();
-    const base = "/organizations/org-a/projects/project-a";
-    const publication = await (await app.request(`${base}/publications`)).text();
-    const share = await (await app.request(`${base}/shares`)).text();
-
-    expect(publication).toContain('class="project-tabs"');
-    expect(publication).toContain("Create publication");
-    expect(publication).toContain("Track active deployment");
-    expect(share).toContain('class="project-tabs"');
-    expect(share).toContain("Revocable links pinned to immutable deployments");
-    expect(share).toContain("Browse documentation");
-  });
-
   it("keeps management mutations synchronized and retry-safe", async () => {
     const app = authenticatedPages();
-    const base = "/organizations/org-a/projects/project-a";
-    const publication = await (await app.request(`${base}/publications`)).text();
     const apiKeys = await (await app.request("/organizations/org-a/api-keys")).text();
     const people = await (await app.request("/organizations/org-a/people")).text();
 
-    expect(publication).toContain("publications=publications.filter");
-    expect(publication).toContain('render(publications);ui.toast("Publication removed.")');
-    expect(publication).not.toContain('ui.toast("Publication removed.");await load()');
-    expect(publication).toContain("publications=publications.concat([result.publication])");
-    expect(publication).toContain("Unable to copy. Select the URL and copy it manually.");
-    expect(publication).toContain("@media(max-width:620px){.row-actions .button{min-height:44px}}");
     expect(apiKeys).toContain("projectSelect.value=results[1].projects[0]._id");
     expect(apiKeys).toContain("dialog.oncancel=function(event)");
     expect(people).toContain("entry.remove();}catch");
     expect(people).toContain("retry the highlighted rows");
 
     const teams = await (await app.request("/organizations/org-a/teams")).text();
-    const shares = await (await app.request(`${base}/shares`)).text();
     expect(teams).toContain("@media(max-width:620px){.invite-entry");
     expect(teams).toContain(".team-footer .button{min-height:44px}");
-    expect(shares).toContain("@media(max-width:620px){.share-table .button{min-height:44px}}");
-    expect(publication).not.toContain("}(max-width:620px)");
-    expect(shares).not.toContain("}(max-width:620px)");
+    expect(teams).not.toContain("}(max-width:620px)");
   });
 
   it("uses accessible Material Symbols for collection empty states", async () => {
     const app = authenticatedPages();
     for (const [route, icon] of [
       ["/organizations/org-a/projects", "folder"],
-      ["/organizations/org-a/projects/project-a/publications", "public"],
-      ["/organizations/org-a/projects/project-a/shares", "link"],
       ["/organizations/org-a/api-keys", "key"],
     ]) {
       const html = await (await app.request(route)).text();

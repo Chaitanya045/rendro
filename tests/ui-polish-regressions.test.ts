@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import authPages from "@/routes/auth-pages";
 import { renderLandingPage } from "@/routes/landing";
 import { renderNotFoundPage } from "@/routes/not-found";
-import { renderScopedDocumentShell } from "@/routes/app";
+import { repoShell } from "./helpers/repo-shell";
 import { sharedThemeStyles } from "@/routes/theme";
 
 const user = { id: "u1", name: "Priya Sharma", email: "priya@example.test" } as User;
@@ -65,10 +65,9 @@ describe("auth, landing, 404 and viewer polish", () => {
     expect(html.match(/fetch\("\/api\/auth\/sign-in\/social"/g)).toHaveLength(1);
   });
 
-  it("gives the viewer an h1 and the management shell's avatar initial", () => {
-    const html = renderScopedDocumentShell({ user, namespace: "p1", title: "Platform API", basePath: "/organizations/o/projects/p1/docs", selectedPath: "index.html" });
-    expect(html).toContain('<h1 class="topbar-logo">Platform API</h1>');
-    expect(html).toMatch(/id="avatar-btn"[^>]*>P<\/button>/);
+  it("gives the viewer an h1 naming the repository", () => {
+    const html = repoShell({ title: "acme/platform-api" });
+    expect(html).toContain('<h1 class="topbar-logo">acme/platform-api</h1>');
   });
 
   it("styles the viewer mobile-menu theme row like its sibling rows", () => {

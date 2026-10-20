@@ -9,7 +9,6 @@ import schema from "../convex/schema";
 import { apiKeyRateLimiter } from "../convex/apiKeyHttp";
 import { sha256 } from "../convex/credentialHash";
 import { analyzeQueryClockReads, enforceAllowlist } from "./helpers/convex-query-clock";
-import { commitWithProof, shareWithProof } from "./helpers/storage-proof";
 
 const modules = import.meta.glob("../convex/**/*.ts");
 const start = Date.UTC(2026, 0, 1);
@@ -63,7 +62,7 @@ describe("Convex queries never read the clock", () => {
         }
       }
     }
-    expect(registered.length).toBeGreaterThan(15);
+    expect(registered.length).toBeGreaterThan(5);
     expect(analyzeQueryClockReads(loadSources()).queries).toEqual(registered.sort());
   }, 30_000);
 
@@ -159,71 +158,19 @@ const forbidClock = (clock: MockInstance<() => number>) => {
   return [clock, vi.spyOn(performance, "now").mockImplementation(fail)];
 };
 
-async function fixture() {
+function fixture() {
   const clock = vi.spyOn(Date, "now").mockReturnValue(start);
   const t = convexTest(schema, modules);
   rateLimiterTest.register(t);
-  const project = (await t.mutation(internal.projects.createInternal, { organizationId: "org-test", name: "Docs", slug: "docs", actorId: "owner" }))!;
-  const scope = { organizationId: "org-test", projectId: project._id };
-  const deployment = await t.mutation(internal.deployments.startInternal, { ...scope, manifestSha256: "a".repeat(64), fileCount: 1, byteCount: 1, provenance: { source: { kind: "local" }, execution: { kind: "local" }, cliVersion: "test", manifestSha256: "a".repeat(64) }, actorId: "owner" });
-  await commitWithProof(t, { ...scope, deploymentId: deployment.deploymentId, actorId: "owner" });
-  return { t, clock, scope };
+  return { t, clock };
 }
 
 beforeAll(async () => { await import("../convex/http"); }, 30_000);
 afterEach(() => vi.restoreAllMocks());
 
-describe("share expiry is decided by the httpAction, not the cached query", () => {
-  async function shareFixture() {
-    const f = await fixture();
-    const token = "expiring-share-token";
-    const expiresAt = start + 600_000;
-    const grant = (await shareWithProof(f.t, { ...f.scope, tokenHash: await sha256(token), documentPath: "index.html", expiresAt, actorId: "owner" }))!;
-    const resolve = (name = token) => f.t.fetch(`/api/rendro/shares/public?token=${name}`);
-    return { ...f, token, expiresAt, grant, resolve, snapshot: () => f.t.run(ctx => ctx.db.get(grant._id)) };
-  }
-
-  it("serves the share at expiresAt-1 and returns the exact not-found response at expiresAt", async () => {
-    const f = await shareFixture();
-    const before = await f.snapshot();
-    f.clock.mockReturnValue(f.expiresAt - 1);
-    const live = await f.resolve();
-    expect(live.status).toBe(200);
-    expect((await live.json()).grant).toEqual({ documentPath: "index.html", expiresAt: f.expiresAt });
-    // Same arguments, same documents: only the clock moves, so a cached query result is replayed.
-    f.clock.mockReturnValue(f.expiresAt);
-    const expired = await f.resolve();
-    const missing = await f.resolve("never-issued");
-    expect(expired.status).toBe(404);
-    expect(missing.status).toBe(404);
-    expect(await expired.text()).toBe(await missing.text());
-    expect([...expired.headers].sort()).toEqual([...missing.headers].sort());
-    f.clock.mockReturnValue(f.expiresAt + 86_400_000);
-    expect((await f.resolve()).status).toBe(404);
-    expect(await f.snapshot()).toEqual(before);
-  });
-
-  it("keeps the query a pure function of the stored documents", async () => {
-    const f = await shareFixture();
-    const tokenHash = await sha256(f.token);
-    f.clock.mockReturnValue(f.expiresAt - 1);
-    const live = await f.t.query(internal.shareGrants.resolveInternal, { tokenHash });
-    const spies = forbidClock(f.clock);
-    // Past its deadline the query reports the same stored result; the caller denies.
-    expect(await f.t.query(internal.shareGrants.resolveInternal, { tokenHash })).toEqual(live);
-    expect(live?.grant.expiresAt).toBe(f.expiresAt);
-    for (const spy of spies) expect(spy).not.toHaveBeenCalled();
-    // Revocation changes the document, so it still takes effect immediately.
-    spies[1].mockRestore();
-    f.clock.mockReturnValue(f.expiresAt - 1);
-    await f.t.mutation(internal.shareGrants.revokeInternal, { organizationId: "org-test", grantId: f.grant._id, actorId: "owner" });
-    expect((await f.resolve()).status).toBe(404);
-  });
-});
-
 describe("API-key rate-limit identity is decided by the caller, not the cached query", () => {
   async function keyFixture() {
-    const f = await fixture();
+    const f = fixture();
     const secret = "expiring-api-key";
     const expiresAt = start + 5_000;
     const secretHash = await sha256(secret);

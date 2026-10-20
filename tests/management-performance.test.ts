@@ -1,7 +1,7 @@
 import "./fixtures/management-page-presentation";
 /* Async mocks model network completion and rejection without real I/O. */
 /* eslint-disable @typescript-eslint/require-await */
-import { Window, type HTMLButtonElement, type HTMLInputElement, type HTMLSelectElement, type HTMLElement } from "happy-dom";
+import { Window, type HTMLButtonElement, type HTMLInputElement, type HTMLElement } from "happy-dom";
 import { Hono } from "hono";
 import type { User } from "better-auth/types";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -9,7 +9,7 @@ import projectPages from "@/routes/project-pages";
 import { renderManagementNavigationRuntime } from "@/routes/management-navigation";
 import { createManagementQueryCache } from "@/management-query/cache";
 import { managementPagesSource } from "../scripts/management-pages-source";
-import { organizationPageStyles, projectPageStyles } from "@/routes/management-loading";
+import { organizationPageStyles } from "@/routes/management-loading";
 import { organizationSwitcherRuntime } from "@/routes/organization-switcher";
 import { managementUiRuntime } from "@/ui/management-ui";
 
@@ -24,11 +24,7 @@ function response(path: string): unknown {
   if (path.includes("list-invitations")) return [];
   if (path.includes("projects/get")) return { project };
   if (path.includes("projects?")) return { projects: [project] };
-  if (path.includes("deployments?")) return { deployments: [] };
-  if (path.includes("publications?")) return { publications: [] };
-  if (path.includes("shares?")) return { shares: [] };
   if (path.includes("credentials?")) return { credentials: [] };
-  if (path.includes("recent-deployment")) return { deployment: null };
   throw new Error(`Unexpected request: ${path}`);
 }
 async function setup(respond: (path: string) => Promise<unknown> = async (path) => response(path)) {
@@ -59,134 +55,21 @@ async function answerConfirm(win: Window, accept: boolean) {
 afterEach(async () => { for (const win of windows.splice(0)) { win.dispatchEvent(new win.Event("pagehide")); await win.happyDOM.close(); } });
 
 describe("management critical-path optimization", () => {
-  it("shares column sizing across every deployment row and uses the existing mobile table layout", () => {
-    expect(projectPageStyles).toContain(".deployment-table{table-layout:fixed}");
-    expect(projectPageStyles).toContain(".deployment-table .deployment-files-column{width:100px}");
-    expect(projectPageStyles).toContain(".deployment-table .deployment-status-column{width:120px}");
-    expect(projectPageStyles).toContain(".deployment-table td{vertical-align:top;overflow-wrap:anywhere}");
-    expect(projectPageStyles).toContain("@media(max-width:760px){.deployment-table colgroup{display:none}");
-    expect(projectPageStyles).not.toContain(".deployment-row{display:grid");
-  });
-  it("opens a dedicated history screen from desktop and mobile controls and reuses TanStack data", async () => {
-    const { win, navigate, request, html, fetch } = await setup();
-    // Exercise the same picker factory/change handler used by the shell.
-    win.eval(html.slice(html.indexOf("function enhanceProjectNavigation()"), html.indexOf("  normalizeEmptyMarks(document);enhanceDialogs(document);new MutationObserver")));
-    await navigate("/projects/project-a"); await flush();
-    expect(request.mock.calls.some(([path]) => path.includes("deployments?"))).toBe(false);
-    win.document.querySelector<HTMLElement>('.project-tabs a[href$="/deployments"]')!.click(); await flush();
-    expect(win.location.pathname).toBe("/organizations/org-a/projects/project-a/deployments");
-    expect(win.location.hash).toBe("");
-    expect(win.document.querySelector(".cp-page-heading")?.textContent).toBe("Deployments");
-    expect(win.document.querySelector("#project-id")).toBeNull();
-    expect(win.document.querySelector("#deployment-list")?.textContent).toContain("No deployments yet");
-    expect(win.document.querySelector("#deployment-list td")?.getAttribute("colspan")).toBe("4");
-    expect(win.document.querySelector(".deployment-table-wrap")?.getAttribute("aria-busy")).toBe("false");
-    expect(win.document.querySelector('.project-tabs a[aria-current="page"]')?.textContent).toBe("Deployments");
-    await navigate("/projects/project-a/publications"); await flush();
-    win.eval("enhanceProjectNavigation()");
-    const picker = win.document.querySelector<HTMLSelectElement>(".project-section-picker select")!;
-    picker.value = "https://rendro.test/organizations/org-a/projects/project-a/deployments";
-    picker.dispatchEvent(new win.Event("change")); await flush();
-    expect(win.location.pathname).toContain("/project-a/deployments");
-    expect(win.document.querySelector("#deployment-list")?.textContent).toContain("No deployments yet");
-    win.history.back(); await flush(); await new Promise(resolve => setTimeout(resolve, 10));
-    expect(win.location.pathname).toContain("/project-a/publications");
-    win.history.forward(); await flush(); await new Promise(resolve => setTimeout(resolve, 10));
-    expect(win.location.pathname).toContain("/project-a/deployments");
-    expect(win.document.querySelector("#deployment-list")?.textContent).toContain("No deployments yet");
-    expect(request.mock.calls.filter(([path]) => path.includes("deployments?"))).toHaveLength(1);
-    expect(fetch).not.toHaveBeenCalled();
-  });
-  it("shows actual deployment records and renders untrusted source and failure labels as text", async () => {
-    const deployments = ["failed", "staging", "active", "superseded"].map((status, index) => ({
-      _id: `deployment-${index}`, status, createdAt: 1000 - index, fileCount: 3, byteCount: 2048,
-      provenance: { source: index === 0 ? { localPathLabel: '<img src=x onerror="alert(1)">', dirty: true } : { commit: "abcdef1234567890" } },
-      ...(index === 0 ? { failureReason: "<script>bad()</script>" } : {}),
-    }));
-    const { win, navigate } = await setup(async path => path.includes("deployments?") ? { deployments } : response(path));
-    await navigate("/projects/project-a/deployments"); await flush();
-    const rows = [...win.document.querySelectorAll("#deployment-list .deployment-row")];
-    expect(rows).toHaveLength(4);
-    expect(win.document.querySelector("#deployment-list")?.tagName).toBe("TBODY");
-    expect([...win.document.querySelectorAll(".deployment-table th")].map(cell => cell.textContent)).toEqual(["Deployment", "Source", "Files", "Status"]);
-    for (const row of rows) {
-      expect(row.tagName).toBe("TR");
-      expect([...row.children].map(cell => cell.tagName)).toEqual(["TD", "TD", "TD", "TD"]);
-      expect([...row.children].map(cell => cell.getAttribute("data-label"))).toEqual(["Deployment", "Source", "Files", "Status"]);
-    }
-    // Rows lead with the release date; the ID is secondary, monospace and complete in its title.
-    expect(rows.map(row => row.querySelector("strong")?.textContent)).toEqual(deployments.map(item => new Date(item.createdAt).toLocaleString()));
-    expect(rows.map(row => row.querySelector(".cp-id")?.textContent)).toEqual(deployments.map(item => item._id));
-    expect(rows.map(row => row.querySelector(".cp-id")?.getAttribute("title"))).toEqual(deployments.map(item => item._id));
-    expect(rows.map(row => row.querySelector(".badge")?.textContent)).toEqual(["Failed", "Staging", "Active", "Superseded"]);
-    expect(rows[2].querySelector(".badge")?.classList.contains("success")).toBe(true);
-    expect(rows[0].textContent).toContain("3 files");
-    expect(rows[0].textContent).toContain("2 KB");
-    expect(rows[0].textContent).toContain("Uncommitted source changes");
-    expect(rows[1].textContent).toContain("abcdef123456");
-    expect(rows[0].querySelector(".deployment-failure")?.textContent).toBe("<script>bad()</script>");
-    expect(rows[0].querySelector(".deployment-failure")?.closest("td")?.getAttribute("data-label")).toBe("Source");
-    expect(win.document.querySelector("#deployment-list img,#deployment-list script")).toBeNull();
-    expect(win.document.querySelector("#deployment-count")?.textContent).toBe("4 shown");
-  });
-  it("retains one route-specific skeleton and its selected tab until project access resolves", async () => {
+  it("retains one route-specific skeleton until project access resolves", async () => {
     const gate = deferred<unknown>();
     const { win, navigate } = await setup(async path => path.includes("management/access") ? gate.promise : response(path));
-    await navigate("/projects/project-a/deployments"); await flush();
-    expect(win.document.querySelectorAll('#project-content [aria-label="Loading deployment history"]')).toHaveLength(1);
-    expect(win.document.querySelector(".project-overview")).toBeNull();
-    expect(win.document.querySelector('.project-tabs a[aria-current="page"]')?.textContent).toBe("Deployments");
-    expect(win.document.querySelector("#deployment-list .deployment-row")).toBeNull();
-    expect(win.document.querySelectorAll("#deployment-list .skeleton-table-row")).toHaveLength(4);
-    expect([...win.document.querySelectorAll("#deployment-list .skeleton-table-row")].every(row => row.children.length === 4)).toBe(true);
+    await navigate("/projects/project-a"); await flush();
+    expect(win.document.querySelectorAll('#project-content [aria-label="Loading project overview"]')).toHaveLength(1);
+    expect(win.document.querySelector("#project-id")).toBeNull();
     gate.resolve(access); await flush();
-    expect(win.document.querySelector("#deployment-list")?.textContent).toContain("No deployments yet");
+    expect(win.document.querySelector("#project-content .loading-view")).toBeNull();
+    expect(win.document.querySelector("#project-id .cp-id")?.textContent).toBe("project-a");
   });
-  it("retries a failed history read without refetching project details", async () => {
-    let attempts = 0;
-    const { win, navigate, request } = await setup(async path => {
-      if (path.includes("deployments?")) { if (++attempts === 1) throw new Error("Temporary failure"); return { deployments: [] }; }
-      return response(path);
-    });
-    await navigate("/projects/project-a/deployments"); await flush();
-    win.document.querySelector<HTMLButtonElement>("#deployment-list button")!.click(); await flush();
-    expect(win.document.querySelector("#deployment-list")?.textContent).toContain("No deployments yet");
-    expect(attempts).toBe(2);
-    expect(request.mock.calls.filter(([path]) => path.includes("projects/get"))).toHaveLength(1);
-  });
-  it("never mixes deployment history between projects", async () => {
-    const { win, navigate, request } = await setup(async path => path.includes("deployments?") ? {
-      deployments: [{ _id: path.includes("projectId=project-b") ? "release-b" : "release-a", status: "active", createdAt: 1, fileCount: 1, byteCount: 1 }],
-    } : response(path));
-    await navigate("/projects/project-a/deployments"); await flush();
-    expect(win.document.querySelector("#deployment-list")?.textContent).toContain("release-a");
-    await navigate("/projects/project-b/deployments"); await flush();
-    expect(win.document.querySelector("#deployment-list")?.textContent).toContain("release-b");
-    expect(win.document.querySelector("#deployment-list")?.textContent).not.toContain("release-a");
-    await navigate("/projects/project-a/deployments"); await flush();
-    expect(win.document.querySelector("#deployment-list")?.textContent).toContain("release-a");
-    expect(request.mock.calls.filter(([path]) => path.includes("deployments?"))).toHaveLength(2);
-  });
-  it("does not display cached deployment history when membership is revoked", async () => {
-    let revoked = false;
-    const { win, navigate } = await setup(async path => {
-      if (revoked && path.includes("management/access")) throw Object.assign(new Error("Access revoked"), { status: 403 });
-      return path.includes("deployments?") ? { deployments: [{ _id: "private-release", status: "active", createdAt: 1, fileCount: 1, byteCount: 1 }] } : response(path);
-    });
-    await navigate("/projects/project-a/deployments"); await flush();
-    expect(win.document.querySelector("#deployment-list")?.textContent).toContain("private-release");
-    await navigate("/projects"); await flush();
-    revoked = true;
-    await navigate("/projects/project-a/deployments"); await flush();
-    expect(win.document.querySelector("main")?.textContent).toContain("Access revoked");
-    expect(win.document.querySelector("main")?.textContent).not.toContain("private-release");
-  });
-  it("allows members to read history without enabling owner-only project controls", async () => {
+  it("lets members read a project without enabling owner-only project controls", async () => {
     const { win, navigate } = await setup(async path => path.includes("management/access")
       ? { ...access, member: { ...access.member, role: "member" } } : response(path));
-    await navigate("/projects/project-a/deployments"); await flush();
-    expect(win.document.querySelector("#deployment-list")?.textContent).toContain("No deployments yet");
-    expect(win.document.querySelector(".access-note")?.textContent).toContain("read-only project access");
+    await navigate("/projects/project-a"); await flush();
+    expect(win.document.querySelector("#project-id .cp-id")?.textContent).toBe("project-a");
     expect(win.document.querySelector<HTMLButtonElement>('#project-form button[type="submit"]')?.disabled).toBe(true);
   });
   it.each([
@@ -292,10 +175,10 @@ describe("management critical-path optimization", () => {
     expect(organizationPageStyles).toContain(".overview-row .cell-secondary{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}");
     expect(organizationPageStyles).toContain(".overview-row>.badge{flex:none}");
   });
-  it("mounts all ten routes without an HTML fetch and preserves the shell", async () => {
+  it("mounts all seven routes without an HTML fetch and preserves the shell", async () => {
     const { win, navigate, fetch } = await setup();
     const header = win.document.querySelector(".cp-topbar");
-    for (const path of ["", "/people", "/teams", "/settings", "/api-keys", "/projects", "/projects/project-a", "/projects/project-a/deployments", "/projects/project-a/publications", "/projects/project-a/shares"]) {
+    for (const path of ["", "/people", "/teams", "/settings", "/api-keys", "/projects", "/projects/project-a"]) {
       expect(await navigate(path), path).toBe(true); await flush();
       expect(win.document.querySelector(".cp-topbar"), path).toBe(header);
       expect(win.document.querySelector("main")?.textContent, path).not.toContain("Unable to load");
@@ -303,33 +186,6 @@ describe("management critical-path optimization", () => {
       expect(win.document.querySelector(".loading-view,.skeleton-table-row"), path).toBeNull();
     }
     expect(fetch).not.toHaveBeenCalled();
-  });
-  it("renders deployment navigation and CLI instructions before history and ignores late history after navigation", async () => {
-    const history = deferred<unknown>();
-    const { win, navigate } = await setup(async (path) => path.includes("deployments?") ? history.promise : response(path));
-    await navigate("/projects/project-a/deployments"); await flush();
-    expect(win.document.querySelector(".cp-page-heading")?.textContent).toBe("Deployments");
-    expect(win.document.querySelector(".command code")?.textContent).toContain("--project 'project-a'");
-    expect(win.document.querySelector("#deployments .loading-view")).not.toBeNull();
-    await navigate("/projects"); await flush();
-    history.resolve({ deployments: [] }); await flush();
-    expect(win.document.querySelector("#project-list")?.textContent).toContain(project.name);
-    expect(win.document.querySelector("#deployment-list")).toBeNull();
-  });
-  it("keeps primary content when deployment history fails", async () => {
-    const { win, navigate } = await setup(async (path) => { if (path.includes("deployments?")) throw new Error("History unavailable"); return response(path); });
-    await navigate("/projects/project-a/deployments"); await flush();
-    expect(win.document.querySelector(".cp-page-heading")?.textContent).toBe("Deployments");
-    expect(win.document.querySelector("#deployment-list")?.textContent).toContain("Try again");
-  });
-  it("does not fetch deployment choices until pinned publication mode is selected", async () => {
-    const { win, navigate, request } = await setup();
-    await navigate("/projects/project-a/publications"); await flush();
-    expect(request.mock.calls.some(([path]) => path.includes("deployments?"))).toBe(false);
-    const mode = win.document.querySelector('select[name="trackingMode"]')!;
-    (mode as unknown as HTMLSelectElement).value = "pinned"; mode.dispatchEvent(new win.Event("change")); await flush();
-    expect(request.mock.calls.filter(([path]) => path.includes("deployments?"))).toHaveLength(1);
-    expect(win.document.getElementById("publication-error")?.textContent).toContain("Deploy this project");
   });
   it("does not release retained data after access is revoked", async () => {
     let revoked = false;
@@ -375,6 +231,14 @@ describe("management critical-path optimization", () => {
     win.document.querySelector("#settings-form")!.dispatchEvent(new win.Event("submit", { bubbles: true, cancelable: true })); await flush();
     expect(name.value).toBe("Renamed");
     expect(unload()).toBe(false);
+  });
+  it("shows project, member and team counts and the setup checklist on the overview", async () => {
+    const { win, navigate } = await setup();
+    await navigate(""); await flush();
+    const metrics = [...win.document.querySelectorAll(".overview-metrics .metric")].map(card => [card.querySelector("strong")?.textContent, card.querySelector("span")?.textContent]);
+    expect(metrics).toEqual([["1", "Projects"], ["1", "Members"], ["0", "Teams"]]);
+    const checklist = [...win.document.querySelectorAll("#workspace-checklist .checklist-row")].map(row => [row.textContent, row.classList.contains("complete")]);
+    expect(checklist).toEqual([["DoneOrganization created", true], ["DoneCreate a project", true], ["Invite a teammate (optional)", false]]);
   });
   it("shows only the first five projects on the overview and links to the full list", async () => {
     const projects = Array.from({ length: 7 }, (_, index) => ({ ...project, _id: `project-${index}`, name: `Project ${index}`, slug: `project-${index}` }));

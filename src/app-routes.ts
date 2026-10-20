@@ -1,4 +1,3 @@
-import { anonymousAdmission } from "./middleware/anonymous-admission";
 import { bodyAdmission } from "./middleware/body-admission";
 import { writeAdmission } from "./middleware/write-admission";
 import type { Hono } from "hono";
@@ -9,20 +8,7 @@ import appRoutes from "@/routes/app";
 import authPageRoutes from "@/routes/auth-pages";
 import organizationPageRoutes from "@/routes/organization-pages";
 import projectPageRoutes from "@/routes/project-pages";
-import deploymentRoutes from "@/routes/deployments";
-import migrationRoutes from "@/routes/migration";
-import publicationPageRoutes from "@/routes/publication-pages";
-import publicationApiRoutes from "@/routes/publication-api";
-import projectDocsRoutes from "@/routes/project-docs";
-import shareApiRoutes from "@/routes/share-api";
-import sharePageRoutes from "@/routes/share-pages";
 import apiKeyPageRoutes from "@/routes/api-key-pages";
-import docsRoutes from "@/routes/docs";
-import shareRoutes from "@/routes/share";
-import shareV2Routes from "@/routes/share-v2";
-import publicV2Routes from "@/routes/public-v2";
-import publicRoutes from "@/routes/public";
-import publicationRoutes from "@/routes/publications";
 import imageProxyRoutes from "@/routes/image-proxy";
 import repoReadRoutes from "@/repo-read/routes";
 import rumRoutes from "@/rum/route";
@@ -32,20 +18,14 @@ import rumRoutes from "@/rum/route";
 // and error handling.
 type AppEnv = { Variables: { user?: User } };
 
-/** Public signed share and publication routes. Mount before session middleware. */
+/** Routes that authorize without the session middleware (signed image URLs, repository capabilities). Mount before it. */
 export function mountPublicRoutes<E extends AppEnv>(app: Hono<E>): void {
-  app.use("/public/*", anonymousAdmission);
-  app.use("/share/*", anonymousAdmission);
   // Signed URLs only; every response is cacheable, so no per-request admission call.
   app.route("/", imageProxyRoutes);
-  app.route("/", publicV2Routes);
-  app.route("/", shareV2Routes);
   // Repository docs authorize with their own capability cookie and look the session up only on a miss.
   app.route("/", repoReadRoutes);
   // Real-user monitoring beacons (#282): same-origin posts only, no cookie read or set.
   app.route("/", rumRoutes);
-  app.route("/", shareRoutes);
-  app.route("/", publicRoutes);
 }
 
 /** Auth proxy, Convex API proxy, and application routes. Mount after session middleware. */
@@ -67,10 +47,6 @@ export function mountSessionRoutes<E extends AppEnv>(app: Hono<E>): void {
       return c.json({ error: "Auth unavailable" }, 502);
     }
   });
-  app.route("/", deploymentRoutes);
-  app.route("/", migrationRoutes);
-  app.route("/", publicationApiRoutes);
-  app.route("/", shareApiRoutes);
 
   app.on(["POST", "GET", "PATCH", "DELETE"], "/api/rendro/*", async (c) => {
     try {
@@ -86,13 +62,8 @@ export function mountSessionRoutes<E extends AppEnv>(app: Hono<E>): void {
   app.route("/", authPageRoutes);
   app.route("/", organizationPageRoutes);
   app.route("/", projectPageRoutes);
-  app.route("/", publicationPageRoutes);
-  app.route("/", projectDocsRoutes);
-  app.route("/", sharePageRoutes);
   app.route("/", apiKeyPageRoutes);
 
   app.route("/", appRoutes);
-  app.route("/", publicationRoutes);
-  app.route("/", docsRoutes);
   app.get("/health", (c) => c.text("ok"));
 }

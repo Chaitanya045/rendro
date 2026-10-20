@@ -1,8 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Hono, type Context } from "hono";
-import { boundedRequest, BodyTooLargeError, readBoundedBody, readExactBody } from "../src/bounded-body";
+import { boundedRequest, BodyTooLargeError, MAX_HTTP_BODY_BYTES, readBoundedBody } from "../src/bounded-body";
 import { bodyAdmission } from "../src/middleware/body-admission";
-import { MAX_FILE_BYTES, MAX_HTTP_BODY_BYTES, MAX_MANIFEST_BODY_BYTES } from "../shared/deployment-limits";
 import { authClientIpHeaders, registerAuthClientIp } from "../src/auth-client-ip";
 import { AUTH_CLIENT_IP_HEADER, verifiedAuthRequest } from "../shared/auth-client-ip";
 import { httpAction } from "../convex/httpErrors";
@@ -62,15 +61,9 @@ describe("streaming request caps", () => {
     await expect(readBoundedBody(new Request(get, { method: "POST", body: broken, duplex: "half" } as RequestInit))).rejects.toThrow("broken");
     expect(broken.locked).toBe(false);
   });
-  it("caps uploads independently of client manifest sizes", async () => {
-    for (const size of [MAX_FILE_BYTES - 1, MAX_FILE_BYTES]) expect((await readExactBody(request(size).req.body, size))!.byteLength).toBe(size);
-    const { req } = request(MAX_FILE_BYTES + 1);
-    expect(await readExactBody(req.body, MAX_FILE_BYTES + 1)).toBeNull();
-    expect(req.bodyUsed).toBe(false);
-  });
 });
 
-it("admits all Worker JSON/forms before parsing, preserves trusted ingress, and gives start its larger cap", async () => {
+it("admits all Worker JSON/forms and other bodies before parsing, and preserves trusted ingress", async () => {
   const app = new Hono();
   app.use("*", bodyAdmission);
   app.all("*", async c => {
@@ -81,18 +74,15 @@ it("admits all Worker JSON/forms before parsing, preserves trusted ingress, and 
   const source = request(MAX_HTTP_BODY_BYTES, "1").req;
   registerAuthClientIp(source, "192.0.2.1");
   expect(await (await app.request(source)).json()).toEqual({ bytes: MAX_HTTP_BODY_BYTES, ip: "192.0.2.1" });
-  for (const path of ["/api/auth/sign-in/email", "/api/auth/sign-out", "/api/rendro/projects", "/api/rendro/migration/project", "/api/rendro/deployments/id/copy", "/api/rendro/deployments/fail", "/api/publications"]) {
+  for (const path of ["/api/auth/sign-in/email", "/api/auth/sign-out", "/api/rendro/projects", "/r/acme/docs/comment-access"]) {
     for (const length of [undefined, "1", String(MAX_HTTP_BODY_BYTES + 1)]) {
       const { req } = request(MAX_HTTP_BODY_BYTES + 1, length, "POST", path);
       req.headers.set("content-type", "application/x-www-form-urlencoded");
       expect((await app.request(req)).status).toBe(413);
     }
   }
-  for (const size of [MAX_MANIFEST_BODY_BYTES - 1, MAX_MANIFEST_BODY_BYTES, MAX_MANIFEST_BODY_BYTES + 1]) {
-    expect((await app.request(request(size, undefined, "POST", "/api/rendro/deployments/start").req)).status).toBe(size > MAX_MANIFEST_BODY_BYTES ? 413 : 200);
-  }
-  expect((await app.request(request(0, String(MAX_FILE_BYTES + 1), "PUT", "/api/rendro/deployments/id/files/index.html").req)).status).toBe(413);
-  expect((await app.request(request(1, undefined, "PUT", "/api/rendro/deployments/id/files/index.html").req)).status).toBe(200);
+  // Uploads no longer exist: a PUT is capped like every other body.
+  expect((await app.request(request(MAX_HTTP_BODY_BYTES + 1, undefined, "PUT", "/api/rendro/deployments/id/files/index.html").req)).status).toBe(413);
 });
 
 it("bounds every registered Convex write, including Better Auth and operator actions, before invoking handlers", async () => {
@@ -108,11 +98,6 @@ it("bounds every registered Convex write, including Better Auth and operator act
   const invoke = (action as unknown as { _handler: (ctx: unknown, req: Request) => Promise<Response> })._handler;
   for (const size of [MAX_HTTP_BODY_BYTES - 1, MAX_HTTP_BODY_BYTES]) expect(await (await invoke({}, request(size).req)).json()).toEqual({ bytes: size });
   expect(handler).toHaveBeenCalledTimes(2);
-});
-
-it("rejects exact-body overflow even when transport cancellation fails", async () => {
-  const body = new ReadableStream<Uint8Array>({ start(c) { c.enqueue(new Uint8Array(2)); }, cancel: () => Promise.reject(new Error("closed")) });
-  expect(await readExactBody(body, 1)).toBeNull();
 });
 
 it("propagates transport failures through Worker body admission without invoking expensive work", async () => {

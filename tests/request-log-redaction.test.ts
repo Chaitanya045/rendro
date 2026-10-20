@@ -23,9 +23,7 @@ import worker from "../src/worker";
 import { app as node } from "../src/index";
 import { logger } from "../src/logger";
 import { requestLogPath } from "../src/request-log";
-import { createShareToken } from "../src/share-links";
-import * as blobs from "../src/storage";
-import { mockSecurityBackend, docsBase, testUser } from "./fixtures/security-headers";
+import { mockSecurityBackend, testUser } from "./fixtures/security-headers";
 
 const secret = "SYNTHETIC_PRIVATE_CAPABILITY_88";
 const encoded = [...secret].map(char => `%${char.charCodeAt(0).toString(16)}`).join("");
@@ -64,37 +62,17 @@ describe("request logs derived from all Worker route registrations", () => {
   });
 });
 
-it("captures successful share/ticket responses and storage/proxy errors without capabilities", async () => {
-  const share = createShareToken("example/index.html");
-  for (const path of [`/share/${share}`, `/s/${secret}`, `/s/${secret}/files/index.html`]) {
-    expect((await worker.request(`https://test${path}${query}`)).status).toBe(200);
-  }
-  const ticketResponse = await worker.request(`https://test${docsBase}/viewer-ticket?manifestKey=tenants/org-a/projects/project-a/deployments/deploy-a/manifest.json`, { headers: { cookie: "better-auth.session_token=test-session" } });
-  expect(ticketResponse.status).toBe(200);
-  const ticket = await ticketResponse.json() as { prefix: string };
-  // Obtain the actual ticket URL from canonical HTML, exercising the live route.
-  const document = await worker.request(`https://test${docsBase}/files/index.html`, { headers: { cookie: "better-auth.session_token=test-session" } });
-  const html = await document.text();
-  const url = html.match(/<base data-rendro-viewer href="([^"]+)"/)![1];
-  expect((await worker.request(`https://test${url}${query}`)).status).toBe(200);
-  expect(capture.lines.join("")).not.toContain(share);
-  expect(capture.lines.join("")).not.toContain(url);
-  expect(ticket).toBeTruthy();
-  noSecrets();
-
-  vi.mocked(blobs.getObjectStream).mockRejectedValue(faulty());
-  expect((await worker.request(`https://test/share/${share}${query}`)).status).toBe(503);
-  expect((await worker.request(`https://test/public/example/product/files/index.html${query}`)).status).toBe(503);
+it("captures asset and proxy errors without capabilities", async () => {
   const failure = await worker.request(`https://test/select.js${query}`, {}, { ASSETS: { fetch: () => { throw faulty(); } } });
   expect(failure.status).toBe(500);
   vi.mocked(fetch).mockRejectedValue(faulty());
   expect((await worker.request(`https://test/api/auth/verify-email${query}`)).status).toBe(502);
-  expect((await worker.request(`https://test/api/rendro/shares/public${query}`)).status).toBe(502);
+  expect((await worker.request(`https://test/api/rendro/projects${query}`)).status).toBe(502);
   noSecrets();
 });
 
 it("uses the same safe logging for Node, including errors and unmatched methods", async () => {
-  for (const path of [`/s/${secret}`, `/share/${secret}`, `/reset-password`, `/verify-email`, `/accept-invitation/${secret}`]) {
+  for (const path of [`/r/${secret}/${secret}`, `/reset-password`, `/verify-email`, `/accept-invitation/${secret}`]) {
     await node.request(`https://test${path}${query}`, {}, { incoming: { socket: { remoteAddress: "127.0.0.1" } } });
   }
   expect((await node.request(`https://test/synthetic-error/${secret}${query}`, {}, { incoming: { socket: {} } })).status).toBe(500);

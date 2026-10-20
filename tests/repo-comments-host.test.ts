@@ -2,7 +2,7 @@
 import { getFunctionName } from "convex/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
-  bootCommentorParentHost, CommentorParentHost, ConvexDocumentCommentBackend, ConvexRepoCommentBackend, documentCommentScopeFromFrame, keepRepoCommentAccess,
+  bootCommentorParentHost, CommentorParentHost, ConvexRepoCommentBackend, documentCommentScopeFromFrame, keepRepoCommentAccess,
   REPO_ACCESS_DENIED_RETRY_MS, REPO_ACCESS_MAX_RETRY_MS, REPO_ACCESS_MIN_RENEW_MS, sameScope, type DocumentCommentBackend, type DocumentCommentScope,
 } from "../src/commentor/parent-host";
 import { COMMENTOR_PARENT_READY, COMMENTOR_PARENT_REQUEST, COMMENTOR_PARENT_RESPONSE, COMMENTOR_PARENT_UPDATE } from "../src/commentor/parent-protocol";
@@ -49,14 +49,17 @@ describe("repository comment scopes", () => {
       `https://elsewhere.test/r/octo/docs/files/docs/guide.md`, `${ORIGIN}/organizations/o/projects/p/docs/files/guide.md`,
     ]) expect(documentCommentScopeFromFrame(url, ORIGIN, config), url).toBeNull();
     expect(documentCommentScopeFromFrame(frameUrl, ORIGIN, { ...config, accessUrl: "/nowhere" })).toBeNull();
+    // A frame address that is no URL at all names no page.
+    expect(documentCommentScopeFromFrame("http://[", ORIGIN, config)).toBeNull();
   });
 
   it("matches repository scopes by repository and page only", () => {
     const scope: DocumentCommentScope = { repoId: 1, documentPath: "a.md" };
     expect(sameScope(scope, { repoId: 1, documentPath: "a.md" })).toBe(true);
     expect(sameScope(scope, { repoId: 2, documentPath: "a.md" })).toBe(false);
-    expect(sameScope(scope, { organizationId: "o", projectId: "p" as never, documentPath: "a.md" })).toBe(false);
-    expect(sameScope({ organizationId: "o", projectId: "p" as never, documentPath: "a.md" }, scope)).toBe(false);
+    expect(sameScope(scope, { repoId: 1, documentPath: "b.md" })).toBe(false);
+    expect(sameScope(null, scope)).toBe(false);
+    expect(sameScope(scope, null)).toBe(false);
   });
 });
 
@@ -228,11 +231,7 @@ describe("the first comments before the live subscription (#284)", () => {
     expect(marks("rendro:comments")[1].start).toBeGreaterThan(0);
   });
 
-  it("marks nothing outside repository docs, and keeps working where measures are unavailable", () => {
-    performance.clearMeasures();
-    const project = setup("user-a", { organizationId: "o", projectId: "p" as never, convexUrl: "https://convex.test" });
-    project.request("sub", "subscribe", { documentPath: "docs/guide.md" });
-    expect(performance.getEntriesByName("rendro:comments")).toEqual([]);
+  it("keeps working where measures are unavailable", () => {
     vi.spyOn(performance, "measure").mockImplementation(() => { throw new TypeError("no options"); });
     const { host, request, updates } = setup("user-a");
     host.accessAnswered(snapshot());
@@ -254,7 +253,7 @@ describe("the first comments before the live subscription (#284)", () => {
     expect(mutate).not.toHaveBeenCalled();
   });
 
-  it("starts nothing for a frame that was replaced while it waited, and ignores snapshots outside repository docs", () => {
+  it("starts nothing for a frame that was replaced while it waited", () => {
     const { host, subscribe, request, updates, load } = setup("user-a");
     host.holdLive();
     subscribeNow(request);
@@ -262,10 +261,6 @@ describe("the first comments before the live subscription (#284)", () => {
     host.accessAnswered(snapshot());
     expect(subscribe).not.toHaveBeenCalled();
     expect(updates()).toEqual([]);
-
-    const project = setup("user-a", { organizationId: "o", projectId: "p" as never, convexUrl: "https://convex.test" });
-    project.host.accessAnswered(snapshot());
-    expect(project.updates()).toEqual([]);
   });
 });
 
@@ -279,7 +274,6 @@ describe("the repository Convex backend", () => {
     return { calls, value, backend: new ConvexRepoCommentBackend(value as never) };
   }
   const scope = { repoId: 9001, documentPath: "docs/guide.md" };
-  const project = { organizationId: "o", projectId: "p" as never, documentPath: "a.html" };
 
   it("reads threads and replies of one repository page", () => {
     const { calls, backend } = client();
@@ -309,18 +303,9 @@ describe("the repository Convex backend", () => {
       ["repoComments:addReply", { ...common, threadId: "t1", body: "Reply" }],
       ["repoComments:removeReply", { ...common, threadId: "t1", replyId: "r1" }],
     ]);
-    // Old widgets' toggles have no target; nothing here toggles.
+    // A status write without a target is refused here as well as in the frame.
     await expect(backend.mutate("thread.resolve", scope, { threadId: "t1" })).rejects.toThrow("Invalid input");
     await expect(backend.mutate("thread.archive", scope, { threadId: "t1" })).rejects.toThrow("Invalid input");
-  });
-
-  it("never mixes repository and project scopes", () => {
-    const { backend } = client();
-    expect(() => backend.subscribe(project, vi.fn(), vi.fn())).toThrow("Invalid repository scope");
-    expect(() => backend.subscribeReplies(project, "t" as never, vi.fn(), vi.fn())).toThrow("Invalid repository scope");
-    expect(() => backend.mutate("thread.remove", project, {})).toThrow("Invalid repository scope");
-    const projects = new ConvexDocumentCommentBackend(client().value as never);
-    expect(() => projects.subscribe(scope, vi.fn(), vi.fn())).toThrow("Invalid project scope");
   });
 });
 

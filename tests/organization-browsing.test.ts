@@ -6,14 +6,13 @@ import { afterEach, beforeAll, expect, it, vi } from "vitest";
 import organizations from "@/routes/organization-pages";
 import projects from "@/routes/project-pages";
 import keys from "@/routes/api-key-pages";
-import shares from "@/routes/share-pages";
 import { managementPagesSource } from "../scripts/management-pages-source";
 
 const user = { id: "user-a", name: "Reader", email: "reader@example.test" } as User;
 const organization = { id: "org-a", name: "Workspace", slug: "workspace", members: [{ id: "m-a", userId: user.id, role: "owner", user }], teams: [] };
 const access = { id: organization.id, name: organization.name, slug: organization.slug, userId: user.id, member: organization.members[0] };
 const project = { _id: "project-a", organizationId: organization.id, name: "Docs", slug: "docs", createdAt: 1 };
-const routes = ["", "/projects", "/projects/project-a", "/people", "/api-keys", "/projects/project-a/shares", "/teams", "/projects/project-a/deployments"];
+const routes = ["", "/projects", "/projects/project-a", "/people", "/api-keys", "/teams"];
 const windows: Window[] = [];
 let bundle: string;
 beforeAll(async () => { bundle = (await build({ entryPoints: ["src/management-query/browser.ts"], bundle: true, write: false, format: "iife", platform: "browser" })).outputFiles[0].text; });
@@ -26,10 +25,7 @@ function data(path: string) {
     case "/api/auth/organization/list-invitations": return [];
     case "/api/rendro/projects": return { projects: [project] };
     case "/api/rendro/projects/get": return { project };
-    case "/api/rendro/deployments": return { deployments: [] };
     case "/api/rendro/credentials": return { credentials: [] };
-    case "/api/rendro/shares": return { shares: [] };
-    case "/api/rendro/management/recent-deployment": return { deployment: null };
     default: throw new Error(`Unexpected request: ${path}`);
   }
 }
@@ -39,7 +35,7 @@ async function fixture(route: string) {
   vi.stubGlobal("fetch", vi.fn((url: string) => { serverCalls.push(new URL(url).pathname); return Promise.resolve(Response.json(data(url))); }));
   const app = new Hono<{ Variables: { user?: User } }>();
   app.use("*", async (c, next) => { c.set("user", user); await next(); });
-  for (const pages of [organizations, projects, keys, shares]) app.route("/", pages);
+  for (const pages of [organizations, projects, keys]) app.route("/", pages);
   const path = "/organizations/org-a" + route;
   const response = await app.request(path); expect(response.status).toBe(200);
   const win = new Window({ url: "http://localhost:3000" + path, settings: { enableJavaScriptEvaluation: false, suppressInsecureJavaScriptEnvironmentWarning: true, disableCSSFileLoading: true, disableJavaScriptFileLoading: true } }); windows.push(win);
@@ -58,7 +54,7 @@ async function fixture(route: string) {
   ready();
   return { win, calls, serverCalls, fetch, ready };
 }
-const expected = [[4, 4, 2], [1, 1, 0], [1, 1, 0], [2, 3, 2], [2, 2, 0], [2, 2, 0], [2, 3, 2], [2, 1, 0]];  // /teams: one extra session read for the active team
+const expected = [[3, 3, 2], [1, 1, 0], [1, 1, 0], [2, 3, 2], [2, 2, 0], [2, 3, 2]];  // /teams: one extra session read for the active team
 it.each(routes)("bounds initial and client navigation requests for %s", async route => {
   const f = await fixture(route);
   const initial = [...f.calls];
@@ -103,10 +99,10 @@ it.each(failing.flatMap(([route, lookup]) => [429, 503].map(status => [route, lo
   });
 
 it.each(routes)("bounds first client navigation with a cold data cache for %s", async route => {
-  // People loads no cacheable project/deployment data, so the target starts cold.
+  // People loads no cacheable project data, so the target starts cold.
   const f = await fixture("/people"); f.calls.length = 0;
   await f.win.eval(`window.RendroUI.navigate(${JSON.stringify("/organizations/org-a" + route)})`);
   await flush(); f.ready();
-  expect(f.calls).toHaveLength([5, 2, 2, 3, 3, 3, 3, 3][routes.indexOf(route)]);
+  expect(f.calls).toHaveLength([4, 2, 2, 3, 3, 3][routes.indexOf(route)]);
   expect(f.calls.filter(path => path === "/api/rendro/management/access")).toHaveLength(1);
 });

@@ -1,13 +1,13 @@
 import { beforeAll, describe, expect, it } from "vitest";
 import { waitForSettled } from "./helpers/browser";
-import { useCommentLab, type Lab } from "./helpers/comment-lab";
+import { anchorOn, useCommentLab, type Lab } from "./helpers/comment-lab";
 
 const commentLab = useCommentLab();
 beforeAll(() => commentLab.start());
 
-const heading = { kind: "element", path: ["main", "h1"] };
-const intro = { kind: "text-range", quote: "lazy dog", path: ["main", "p:nth-of-type(1)"], startOffset: 0, endOffset: 8 };
-const footer = { kind: "element", path: ["main", "#footer"] };
+const heading = anchorOn("Quarterly report");
+const intro = anchorOn("lazy dog");
+const footer = anchorOn("Footer text far below");
 const dock = (lab: Lab) => lab.tid("commentor-dock");
 const dockBox = (lab: Lab) => dock(lab).evaluate(el => ({ left: parseFloat((el as HTMLElement).style.left), top: parseFloat((el as HTMLElement).style.top), className: (el as HTMLElement).className }));
 const scrollY = (lab: Lab) => lab.doc(() => Math.round(window.scrollY));
@@ -44,7 +44,7 @@ describe("comments drawer", () => {
     expect(await tabs.first().getAttribute("aria-selected")).toBe("true");
     await lab.page.keyboard.press("ArrowDown");
     expect(await tabs.first().getAttribute("aria-selected")).toBe("true");
-    await lab.host(l => l.seed([{ _id: "only", anchor: { kind: "element", path: ["main", "h1"] }, resolved: true }]));
+    await lab.host(l => l.seed([{ _id: "only", anchor: l.anchorOn("Quarterly report"), resolved: true }]));
     await expect.poll(() => lab.ui.locator(".count").getAttribute("aria-label")).toBe("0 active comments");
     expect(await lab.ui.locator(".empty strong").innerText()).toBe("No active comments");
     await lab.ui.getByRole("tab", { name: /Resolved/ }).click();
@@ -123,7 +123,7 @@ describe("comments drawer", () => {
     await lab.host(l => {
       l.olderThreads = [l.thread({ _id: "old", body: "Older thread", _creationTime: 1 })];
       l.pagination = { canLoadMore: true, loading: false };
-      l.seed([{ _id: "t1", anchor: { kind: "element", path: ["main", "h1"] }, repliesHasMore: true, replies: [l.reply({ _id: "newest", body: "Newest reply" })] }]);
+      l.seed([{ _id: "t1", anchor: l.anchorOn("Quarterly report"), repliesHasMore: true, replies: [l.reply({ _id: "newest", body: "Newest reply" })] }]);
       l.olderReplies = { t1: [l.reply({ _id: "oldest", body: "Oldest reply" })] };
     });
     await lab.openDrawer();
@@ -162,7 +162,7 @@ describe("comments drawer", () => {
     expect(await older.innerText()).toBe("Loading older comments…");
     expect(await older.isDisabled()).toBe(true);
     expect(await older.getAttribute("aria-busy")).toBe("true");
-    await lab.host(l => { l.pagination = { canLoadMore: false, loading: false }; l.threads = [l.thread({ _id: "t1", anchor: { kind: "element", path: ["main", "h1"] } })]; l.publish(); });
+    await lab.host(l => { l.pagination = { canLoadMore: false, loading: false }; l.threads = [l.thread({ _id: "t1", anchor: l.anchorOn("Quarterly report") })]; l.publish(); });
     await expect.poll(() => older.count()).toBe(0);
   });
 
@@ -268,11 +268,13 @@ describe("drawer details", () => {
 
   it("opens a thread even when the page cannot be scrolled or measured the usual way", async () => {
     const lab = await commentLab.open();
-    await lab.ready([{ _id: "far", anchor: { kind: "element", path: ["main", "#footer"] } }, { _id: "tall", anchor: { kind: "element", path: ["main", "div"] } }]);
+    // A quote taller than the viewport: from the introduction, across the tall spacer, to the footer.
+    const tall = await lab.doc(() => { const text = document.querySelector("main")!.textContent!; return text.slice(text.indexOf("The quick"), text.indexOf("far below") + "far below".length); });
+    await lab.ready([{ _id: "far", anchor: anchorOn("Footer text far below") }, { _id: "tall", anchor: anchorOn(tall) }]);
     await lab.openDrawer();
     const cards = lab.ui.locator(".drawer-thread");
-    // The tall spacer is centred already: nothing to scroll even though it is partly off screen.
-    await lab.doc(() => { const spacer = document.querySelector("main > div")!.getBoundingClientRect(); window.scrollTo(0, window.scrollY + spacer.top + spacer.height / 2 - 400); });
+    // The tall quote is centred already: nothing to scroll even though it is partly off screen.
+    await lab.doc(() => { const range = document.createRange(); range.setStartBefore(document.getElementById("intro")!); range.setEndAfter(document.getElementById("footer")!); const box = range.getBoundingClientRect(); window.scrollTo(0, window.scrollY + box.top + box.height / 2 - 400); });
     const before = await scrollY(lab);
     await cards.nth(1).locator(".body").click();
     await expect.poll(() => lab.tid("commentor-thread-bubble").getAttribute("data-thread-id")).toBe("tall");

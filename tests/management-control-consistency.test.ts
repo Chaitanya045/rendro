@@ -4,11 +4,8 @@ import vm from "node:vm";
 import type { User } from "better-auth/types";
 import { describe, expect, it } from "vitest";
 import apiKeyPageRoutes from "@/routes/api-key-pages";
-import { renderProjectNavigation } from "@/routes/control-plane";
 import organizationPageRoutes from "@/routes/organization-pages";
 import projectPageRoutes from "@/routes/project-pages";
-import publicationPageRoutes from "@/routes/publication-pages";
-import sharePageRoutes from "@/routes/share-pages";
 
 const user: User = {
   id: "user-a",
@@ -29,8 +26,6 @@ function managementPages(): Hono<{ Variables: { user?: User } }> {
   app.route("/", organizationPageRoutes);
   app.route("/", projectPageRoutes);
   app.route("/", apiKeyPageRoutes);
-  app.route("/", publicationPageRoutes);
-  app.route("/", sharePageRoutes);
   return app;
 }
 
@@ -41,8 +36,6 @@ describe("management control consistency", () => {
       "/organizations/org-a/people",
       "/organizations/org-a/projects/project-a",
       "/organizations/org-a/api-keys",
-      "/organizations/org-a/projects/project-a/publications",
-      "/organizations/org-a/projects/project-a/shares",
     ]) {
       const html = await (await app.request(route)).text();
       expect(html, route).toContain(".button:hover:not(:disabled):not([aria-disabled=true])");
@@ -77,22 +70,11 @@ describe("management control consistency", () => {
     expect(html).toContain(".cp-nav-link,.cp-account-menu :is(a,button){min-height:44px}");
   });
 
-  it("renders every project section from one canonical navigation helper", () => {
-    const base = "/organizations/org-a/projects/project-a";
-    const publication = renderProjectNavigation("org-a", "project-a", "publications");
-    expect(publication).toContain(`<a href="${base}">Overview</a>`);
-    expect(publication).toContain(`<a href="${base}/deployments">Deployments</a>`);
-    expect(publication).toContain(`<a class="active" aria-current="page" href="${base}/publications">Publications</a>`);
-    expect(publication).toContain(`<a href="${base}/shares">Private shares</a>`);
-    expect((publication.match(/aria-current="page"/g) ?? [])).toHaveLength(1);
-  });
-
   it("does not duplicate project-tab and access-note component CSS in subpages", async () => {
     const app = managementPages();
     for (const route of [
       "/organizations/org-a/projects/project-a",
-      "/organizations/org-a/projects/project-a/publications",
-      "/organizations/org-a/projects/project-a/shares",
+      "/organizations/org-a/api-keys",
     ]) {
       const html = await (await app.request(route)).text();
       expect(html.match(/\.project-tabs\{display:flex/g), route).toHaveLength(1);
@@ -116,15 +98,13 @@ describe("management control consistency", () => {
   it("uses one pending and confirmation path for management copy buttons", async () => {
     const app = managementPages();
     const project = await (await app.request("/organizations/org-a/projects/project-a")).text();
-    const publications = await (await app.request("/organizations/org-a/projects/project-a/publications")).text();
     const keys = await (await app.request("/organizations/org-a/api-keys")).text();
-    for (const html of [project, publications, keys]) {
+    for (const html of [project, keys]) {
       expect(html).toContain("async function copyText(button,value,idleLabel)");
       expect(html).toContain("busy(button,true)");
       expect(html).toContain('button.textContent="Copied"');
     }
-    expect(project).toContain('ui.copyText(this,command,"Copy")');
-    expect(publications).toContain('ui.copyText(copyButton,location.origin+url,"Copy URL")');
+    expect(project).toContain('RUI.idValue(project._id,{copy:true,label:"project ID"})');
     expect(keys).toContain("ui.copyText(button,value,label)");
   });
 

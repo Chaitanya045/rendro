@@ -1,7 +1,13 @@
+import { readFileSync } from "node:fs";
 import type { Page } from "@playwright/test";
 import { test, expect } from "./fixtures";
-import { publicationSlug } from "./services";
 import { api, desktop, heading, mobile, provision, shellReady, signInSeeded } from "./shell-helpers";
+import type { RepoFixtures } from "./repo-fixtures";
+
+/** The public repository the read path serves (#234), pinned to the commit its frames are served at. */
+const open = () => (JSON.parse(readFileSync(process.env.RENDRO_E2E_REPOS as string, "utf8")) as RepoFixtures).open;
+const repo = () => `/r/${open().owner}/${open().name}`;
+const pinned = () => `${repo()}/@${open().commit}`;
 
 async function notFound(page: Page, cspViolations: string[], viewport: { width: number; height: number }) {
   await page.setViewportSize(viewport);
@@ -33,7 +39,7 @@ async function notFound(page: Page, cspViolations: string[], viewport: { width: 
 test.describe("direct entry", () => {
   test.use({ viewport: desktop });
 
-  test("authenticated root, chooser, project and docs URLs load without a server error", async ({ page, context, baseURL, seed }) => {
+  test("authenticated root, chooser, project and repository URLs load without a server error", async ({ page, context, baseURL, seed }) => {
     await signInSeeded(context, baseURL, seed, "owner");
     const statuses: number[] = [];
     page.on("response", response => { if (response.request().resourceType() === "document" && response.request().frame() === page.mainFrame()) statuses.push(response.status()); });
@@ -52,8 +58,8 @@ test.describe("direct entry", () => {
     await expect(heading(page)).toHaveText("Projects");
     await page.goto(`${base}/projects/${seed.projectId}`);
     await expect(heading(page)).toHaveText("Worker publication");
-    await page.goto(`${base}/projects/${seed.projectId}/docs`);
-    await expect(page.frameLocator("#content-frame").getByRole("heading", { name: "Publication from local storage" })).toBeVisible();
+    await page.goto(repo());
+    await expect(page.frameLocator("#content-frame").getByRole("heading", { name: "Open home", level: 1 })).toBeVisible();
     expect(statuses.every(status => status < 400 || [301, 302, 303, 307].includes(status)), JSON.stringify(statuses)).toBe(true);
     expect(statuses).not.toContain(503);
   });
@@ -116,7 +122,7 @@ test.describe("error surfaces", () => {
       const frame = document.createElement("iframe");
       frame.id = "error-frame"; frame.src = path; frame.style.cssText = "width:800px;height:600px";
       document.body.append(frame);
-    }, `/p/${publicationSlug}/files/missing.html`);
+    }, `${pinned()}/files/docs/missing.md`);
     const frame = page.frameLocator("#error-frame");
     await expect(frame.getByRole("heading", { name: "Page not found" })).toBeVisible();
     await expect(frame.locator("html")).toHaveClass(/framed/);
@@ -130,7 +136,7 @@ test.describe("error surfaces", () => {
 
   test("asset errors stay plain and error pages are never cached", async ({ page, baseURL }) => {
     await page.goto("/sign-in");
-    for (const path of ["/missing-image.png", `/p/${publicationSlug}/files/nothing.svg`, "/p/unknown-publication/files/a.css"]) {
+    for (const path of ["/missing-image.png", `${pinned()}/files/docs/img/nothing.svg`, "/r/nobody/nothing/files/a.css"]) {
       const result = await page.evaluate(async url => {
         const response = await fetch(url);
         return { status: response.status, type: response.headers.get("content-type"), cache: response.headers.get("cache-control"), body: await response.text() };
@@ -140,7 +146,7 @@ test.describe("error surfaces", () => {
       expect(result.body, path).toBe("");
       expect(result.cache ?? "", path).toMatch(/no-store/);
     }
-    const document = await page.request.get(`/p/${publicationSlug}/files/missing.html`);
+    const document = await page.request.get(`${pinned()}/files/docs/missing.md`, { headers: { Accept: "text/html" } });
     expect(document.status()).toBe(404);
     expect(document.headers()["cache-control"]).toMatch(/no-store/);
     expect(document.headers()["content-type"]).toContain("text/html");

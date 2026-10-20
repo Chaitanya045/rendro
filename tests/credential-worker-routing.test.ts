@@ -57,7 +57,6 @@ describe("API-key requests through the production Worker router", () => {
     expect(await response.json()).toEqual({ principal: {
       keyId: f.keyId, organizationId: "org-test", projectId: f.project._id, scopes: ["docs:read"],
     } });
-    expect((await f.request("/api/rendro/deployments/check")).status).toBe(200);
     const lastUsedAt = (await f.backend.run(ctx => ctx.db.get(f.credentialId)))?.lastUsedAt;
     expect(lastUsedAt).toEqual(expect.any(Number));
     await f.backend.mutation(internal.apiKeyCredentials.revokeInternal, {
@@ -66,7 +65,6 @@ describe("API-key requests through the production Worker router", () => {
     const rejected = await f.request();
     expect(rejected.status).toBe(401);
     expect(await rejected.json()).toEqual({ error: "Invalid or insufficient API key" });
-    expect((await f.request("/api/rendro/deployments/check")).status).toBe(403);
     expect((await f.backend.run(ctx => ctx.db.get(f.credentialId)))?.lastUsedAt).toBe(lastUsedAt);
     expect(inspect(Object.values(logs).map(log => log.mock.calls), { depth: null })).not.toContain(f.key);
   });
@@ -106,27 +104,6 @@ describe("API-key requests through the production Worker router", () => {
     expect(await response.json()).toEqual({ error: "organizationId and scope are required" });
   });
 
-  it.each(["/api/rendro/deployments/active", "/api/rendro/deployments", "/api/rendro/deployments/staging"])(
-    "accepts the scoped key on %s and rejects revoked keys", async route => {
-      const f = await fixture(["docs:read", "docs:write"]);
-      const deployment = await f.backend.mutation(internal.deployments.startInternal, {
-        organizationId: "org-test", projectId: f.project._id, manifestSha256: "a".repeat(64),
-        fileCount: 0, byteCount: 0, actorId: "owner",
-        provenance: { source: { kind: "local" }, execution: { kind: "local" }, cliVersion: "test", manifestSha256: "a".repeat(64) },
-      });
-      f.query.set("deploymentId", deployment.deploymentId);
-      const response = await f.request(route);
-      expect(response.status).toBe(200);
-      const result = await response.json();
-      if (route.endsWith("staging")) expect(result.deployment).toEqual({ manifestKey: deployment.manifestKey, treeIndexKey: deployment.treeIndexKey, stagingExpiresAt: deployment.stagingExpiresAt });
-      else if (route.endsWith("active")) expect(result.principal).toEqual({ kind: "api-key", keyId: f.keyId });
-      else expect(result.deployments).toHaveLength(1);
-      await f.backend.mutation(internal.apiKeyCredentials.revokeInternal, {
-        organizationId: "org-test", keyId: f.keyId, actorId: "owner",
-      });
-      expect((await f.request(route)).status).toBe(route.endsWith("staging") ? 401 : 403);
-    },
-  );
 
   it("retains signed ingress IP forwarding and discards spoofed forwarding headers", async () => {
     const f = await fixture();

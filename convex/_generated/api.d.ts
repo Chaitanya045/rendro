@@ -9,7 +9,6 @@
  */
 
 import type * as admissionBuckets from "../admissionBuckets.js";
-import type * as anonymousAdmission from "../anonymousAdmission.js";
 import type * as apiKeyCredentials from "../apiKeyCredentials.js";
 import type * as apiKeyHttp from "../apiKeyHttp.js";
 import type * as apiKeyRateLimitBuckets from "../apiKeyRateLimitBuckets.js";
@@ -22,40 +21,23 @@ import type * as commentOperations from "../commentOperations.js";
 import type * as credentialHash from "../credentialHash.js";
 import type * as credentialHttp from "../credentialHttp.js";
 import type * as crons from "../crons.js";
-import type * as deletedFiles from "../deletedFiles.js";
-import type * as deploymentHttp from "../deploymentHttp.js";
-import type * as deployments from "../deployments.js";
-import type * as documentReplies from "../documentReplies.js";
-import type * as documentThreads from "../documentThreads.js";
 import type * as http from "../http.js";
 import type * as httpErrors from "../httpErrors.js";
 import type * as ids from "../ids.js";
-import type * as legacyAccess from "../legacyAccess.js";
-import type * as legacyComments from "../legacyComments.js";
-import type * as migrationHttp from "../migrationHttp.js";
 import type * as organizationLifecycle from "../organizationLifecycle.js";
 import type * as organizationPolicy from "../organizationPolicy.js";
 import type * as projects from "../projects.js";
 import type * as publicErrors from "../publicErrors.js";
 import type * as publicFunctions from "../publicFunctions.js";
 import type * as publicPagination from "../publicPagination.js";
-import type * as publicationHttp from "../publicationHttp.js";
-import type * as publicationsV2 from "../publicationsV2.js";
 import type * as qaPermissionFixtures from "../qaPermissionFixtures.js";
 import type * as qaWorkspaceFixtures from "../qaWorkspaceFixtures.js";
 import type * as rendroHttp from "../rendroHttp.js";
-import type * as replies from "../replies.js";
 import type * as repoCommentAccess from "../repoCommentAccess.js";
 import type * as repoComments from "../repoComments.js";
-import type * as retention from "../retention.js";
-import type * as retentionHttp from "../retentionHttp.js";
-import type * as retentionPolicy from "../retentionPolicy.js";
 import type * as security from "../security.js";
 import type * as sessionLifetime from "../sessionLifetime.js";
 import type * as sessionReadLimit from "../sessionReadLimit.js";
-import type * as shareGrantHttp from "../shareGrantHttp.js";
-import type * as shareGrants from "../shareGrants.js";
-import type * as threads from "../threads.js";
 import type * as writeQuotas from "../writeQuotas.js";
 
 import type {
@@ -66,7 +48,6 @@ import type {
 
 declare const fullApi: ApiFromModules<{
   admissionBuckets: typeof admissionBuckets;
-  anonymousAdmission: typeof anonymousAdmission;
   apiKeyCredentials: typeof apiKeyCredentials;
   apiKeyHttp: typeof apiKeyHttp;
   apiKeyRateLimitBuckets: typeof apiKeyRateLimitBuckets;
@@ -79,40 +60,23 @@ declare const fullApi: ApiFromModules<{
   credentialHash: typeof credentialHash;
   credentialHttp: typeof credentialHttp;
   crons: typeof crons;
-  deletedFiles: typeof deletedFiles;
-  deploymentHttp: typeof deploymentHttp;
-  deployments: typeof deployments;
-  documentReplies: typeof documentReplies;
-  documentThreads: typeof documentThreads;
   http: typeof http;
   httpErrors: typeof httpErrors;
   ids: typeof ids;
-  legacyAccess: typeof legacyAccess;
-  legacyComments: typeof legacyComments;
-  migrationHttp: typeof migrationHttp;
   organizationLifecycle: typeof organizationLifecycle;
   organizationPolicy: typeof organizationPolicy;
   projects: typeof projects;
   publicErrors: typeof publicErrors;
   publicFunctions: typeof publicFunctions;
   publicPagination: typeof publicPagination;
-  publicationHttp: typeof publicationHttp;
-  publicationsV2: typeof publicationsV2;
   qaPermissionFixtures: typeof qaPermissionFixtures;
   qaWorkspaceFixtures: typeof qaWorkspaceFixtures;
   rendroHttp: typeof rendroHttp;
-  replies: typeof replies;
   repoCommentAccess: typeof repoCommentAccess;
   repoComments: typeof repoComments;
-  retention: typeof retention;
-  retentionHttp: typeof retentionHttp;
-  retentionPolicy: typeof retentionPolicy;
   security: typeof security;
   sessionLifetime: typeof sessionLifetime;
   sessionReadLimit: typeof sessionReadLimit;
-  shareGrantHttp: typeof shareGrantHttp;
-  shareGrants: typeof shareGrants;
-  threads: typeof threads;
   writeQuotas: typeof writeQuotas;
 }>;
 

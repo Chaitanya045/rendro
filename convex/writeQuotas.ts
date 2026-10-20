@@ -5,7 +5,6 @@ import type { MutationCtx } from "./_generated/server";
 
 export const writeQuotaLimits = {
   comments: { kind: "token bucket", rate: 30, period: MINUTE, capacity: 30 },
-  shares: { kind: "token bucket", rate: 20, period: MINUTE, capacity: 20 },
   projects: { kind: "token bucket", rate: 20, period: HOUR, capacity: 20 },
   credentials: { kind: "token bucket", rate: 20, period: HOUR, capacity: 20 },
 } as const;

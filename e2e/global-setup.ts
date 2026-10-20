@@ -4,7 +4,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { createTestHarness } from "wrangler";
-import { removeSmokeAsset, startFaults, startIdentityFixtures, startImageHost, storageProbeOrigin } from "./services";
+import { startFaults, startIdentityFixtures, startImageHost } from "./services";
 import { localEnvironment, startBackend } from "./backend";
 import { seedWorkspace } from "./seed";
 import { registerResources } from "./resource-journal";
@@ -53,11 +53,12 @@ export default async function globalSetup() {
       CONVEX_URL: convex.origin,
       CONVEX_SITE_URL: convex.site,
       CONVEX_INTERNAL_SECRET: randomBytes(32).toString("hex"),
-      AUTH_SECRET: randomBytes(32).toString("hex"),
       IMAGE_PROXY_SECRET: randomBytes(32).toString("hex"),
       REPO_CAPABILITY_SECRET: randomBytes(32).toString("hex"),
       REPO_CONTENT_KEY: randomBytes(32).toString("hex"),
     };
+    // Better Auth's signing secret belongs to Convex alone; the Worker never reads it.
+    const authSecret = randomBytes(32).toString("hex");
     // Always rebuild: existence alone cannot detect stale ignored browser bundles.
     await run("pnpm", ["build:assets"], {
       cwd: root, env: { ...localEnvironment(), ...vars, VITEST_MAX_WORKERS: "2" }, timeout: 120_000,
@@ -68,15 +69,9 @@ export default async function globalSetup() {
     // real control Worker (wrangler.control.toml), which reads a fake GitHub in this process.
     const productionConfig = await readFile(join(root, "wrangler.toml"), "utf8");
     const configPath = join(directory, "wrangler.toml");
-    const compatibilityDate = /^compatibility_date = "([^"]+)"/m.exec(productionConfig)?.[1];
-    const bucketName = /^\[\[r2_buckets\]\]\nbinding = "STORAGE"\nbucket_name = "([^"]+)"/m.exec(productionConfig)?.[1];
-    if (!compatibilityDate || !bucketName) throw new Error("wrangler.toml must declare compatibility_date and the STORAGE bucket");
-    // The one deliberate difference: STORAGE becomes a service that wraps the local R2 bucket, so a spec can fail storage.
-    const bucketBinding = /^\[\[r2_buckets\]\]\nbinding = "STORAGE"\nbucket_name = "[^"]+"\n/m;
     await writeFile(configPath, withRepoReadBindings(productionConfig
       .replace('main = "src/worker.ts"', `main = ${JSON.stringify(join(root, "src/worker.ts"))}`)
-      .replace('directory = "./public"', `directory = ${JSON.stringify(join(root, "public"))}`)
-      .replace(bucketBinding, '[[services]]\nbinding = "STORAGE"\nservice = "storage-faults"\n'), controlWorker.name));
+      .replace('directory = "./public"', `directory = ${JSON.stringify(join(root, "public"))}`), controlWorker.name));
     const controlPath = join(directory, "wrangler.control.toml");
     await writeFile(controlPath, await controlWorkerConfig(root));
     const world = repositoryWorld({ visual: process.env.RENDRO_E2E_VISUAL === "1" });
@@ -91,9 +86,8 @@ export default async function globalSetup() {
     process.env.CLOUDFLARE_LOAD_DEV_VARS_FROM_DOT_ENV = "false";
     process.env.WRANGLER_SEND_METRICS = "false";
 
-    await run("pnpm", ["cli:build"], { cwd: root, env: localEnvironment(), timeout: 120_000 });
-    const allowedOrigins = new Set([convex.origin, convex.site, storageProbeOrigin]);
-    const faults = await startFaults({ storage: storageProbeOrigin, convex: [convex.origin, convex.site] });
+    const allowedOrigins = new Set([convex.origin, convex.site]);
+    const faults = await startFaults([convex.origin, convex.site]);
     closers.push(() => faults.close());
     const images = await startImageHost();
     closers.push(() => images.close());
@@ -112,8 +106,6 @@ export default async function globalSetup() {
         blockedOrigins.add(url.origin);
         throw new Error(`Blocked external Worker origin: ${url.origin}`);
       }
-      // The storage probe is answered here (see e2e/storage-faults-worker.mjs); it never leaves the machine.
-      if (url.origin === storageProbeOrigin) return faults.intercept(request) ?? new Response(null, { status: 204 });
       return faults.intercept(request) ?? originalFetch(request, { redirect: "manual" });
     };
     resources.assertActive();
@@ -121,11 +113,6 @@ export default async function globalSetup() {
       root,
       workers: [
         { configPath, vars, secrets: vars },
-        { config: {
-          name: "storage-faults", main: join(root, "e2e/storage-faults-worker.mjs"),
-          compatibility_date: compatibilityDate, compatibility_flags: ["nodejs_compat"],
-          r2_buckets: [{ binding: "BUCKET", bucket_name: bucketName }],
-        } },
         { configPath: controlPath, vars: controlVars, secrets: controlSecrets },
       ],
     });
@@ -135,19 +122,16 @@ export default async function globalSetup() {
     const health = await fetch(new URL("/health", url), { signal: AbortSignal.timeout(10_000) });
     if (health.status !== 200 || await health.text() !== "ok") throw new Error("Worker HTTP health check failed");
     identity.allowedOrigins.add(url.origin);
-    await convex.environment({ SITE_URL: url.origin, AUTH_SECRET: vars.AUTH_SECRET, CONVEX_INTERNAL_SECRET: vars.CONVEX_INTERNAL_SECRET,
+    await convex.environment({ SITE_URL: url.origin, AUTH_SECRET: authSecret, CONVEX_INTERNAL_SECRET: vars.CONVEX_INTERNAL_SECRET,
       GOOGLE_CLIENT_ID: "e2e-google", GOOGLE_CLIENT_SECRET: randomBytes(32).toString("hex"),
       RESEND_API_KEY: randomBytes(32).toString("hex"), AUTH_EMAIL_FROM: "Rendro <fixture@example.test>" });
     await convex.push();
-    const seed = await seedWorkspace({ site: convex.site, worker: url.origin, secret: vars.CONVEX_INTERNAL_SECRET, mail: identity.mail, directory, fetch: originalFetch });
-    // Storage is the Worker's own R2 binding on Miniflare's local simulation: no service, endpoint or key.
-    const { BUCKET } = await server.getWorker<{ BUCKET: Parameters<typeof removeSmokeAsset>[0] }>("storage-faults").getEnv();
-    await removeSmokeAsset(BUCKET, seed.organizationId, seed.projectId);
+    const seed = await seedWorkspace({ site: convex.site, worker: url.origin, secret: vars.CONVEX_INTERNAL_SECRET, mail: identity.mail, fetch: originalFetch });
     await writeFile(join(directory, "backend-admin.json"), JSON.stringify({ origin: convex.origin, adminKey: convex.adminKey }), { mode: 0o600 });
     const workerEnv = await server.getWorker<{ REPO_CONTENT: R2BucketLike; REPO_SEARCH: SearchD1; REPO_ACCESS: { fetch(url: string, init?: RequestInit): Promise<unknown> } }>().getEnv();
     const controlHandle = server.getWorker(controlWorker.name);
     const repos = await seedRepositories({
-      bucket: workerEnv.REPO_CONTENT, contentKey: vars.REPO_CONTENT_KEY, world, webhookSecret: controlSecrets.GITHUB_WEBHOOK_SECRET, userIds: seed.userIds,
+      bucket: workerEnv.REPO_CONTENT, contentKey: vars.REPO_CONTENT_KEY, imageProxySecret: vars.IMAGE_PROXY_SECRET, world, webhookSecret: controlSecrets.GITHUB_WEBHOOK_SECRET, userIds: seed.userIds,
       control: (url, init) => controlHandle.fetch(url, init) as unknown as Promise<Response>,
       // Account hand-overs reach the control Worker's internal entrypoint only through the serving Worker's binding.
       service: (url, init) => workerEnv.REPO_ACCESS.fetch(url, init) as Promise<Response>,
@@ -171,7 +155,10 @@ export default async function globalSetup() {
     // user-visible string is fixed; provisioning is paid once here, and only for the visual
     // runs (`pnpm visual`, `pnpm a11y` set the flag), never for the functional e2e shards.
     if (process.env.RENDRO_E2E_VISUAL === "1") {
-      const visual = await seedVisualWorkspace({ site: convex.site, convex: convex.origin, worker: url.origin, secret: vars.CONVEX_INTERNAL_SECRET, mail: identity.mail, directory, fetch: originalFetch });
+      const visualRepo = repos.fixtures.visual;
+      if (!visualRepo || !world.repos.visual) throw new Error("The visual repository was not ingested");
+      const visual = await seedVisualWorkspace({ site: convex.site, convex: convex.origin, worker: url.origin, secret: vars.CONVEX_INTERNAL_SECRET, mail: identity.mail,
+        repo: { ...visualRepo, id: world.repos.visual.id }, fetch: originalFetch });
       const visualPath = join(directory, "visual.json");
       await writeFile(visualPath, JSON.stringify(visual), { mode: 0o600 });
       process.env.RENDRO_E2E_VISUAL = visualPath;

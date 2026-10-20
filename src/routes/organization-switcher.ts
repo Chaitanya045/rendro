@@ -46,7 +46,7 @@ export const organizationSwitcherRuntime = String.raw`
   var list=menu.querySelector("[data-org-options]"),status=menu.querySelector("[role=status]"),controller=null,version=0,open=false,switching=false,rollbackSwitch=null,focusWhenReady="",typeBuffer="",lastType=0;
   function items(){return Array.from(menu.querySelectorAll('[role="menuitem"]'));}
   function destination(organizationId){
-    var match=location.pathname.match(/^\/organizations\/[^/]+(?:\/(projects)(?:\/[^/]+(?:\/(?:deployments|publications|shares))?)?|\/(people|teams|settings|api-keys))?\/?$/),section=match&&(match[2]||match[1]);
+    var match=location.pathname.match(/^\/organizations\/[^/]+(?:\/(projects)(?:\/[^/]+)?|\/(people|teams|settings|api-keys))?\/?$/),section=match&&(match[2]||match[1]);
     return "/organizations/"+encodeURIComponent(organizationId)+(section?"/"+section:"");
   }
   function position(){

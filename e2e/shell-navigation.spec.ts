@@ -15,7 +15,7 @@ function trackDocuments(page: Page) {
 test.describe("management shell and same-organization navigation", () => {
   test.use({ viewport: desktop });
 
-  test("management shell keeps its chrome while ten routes mount through the client router", async ({ page, context, baseURL, seed, cspViolations }) => {
+  test("management shell keeps its chrome while seven routes mount through the client router", async ({ page, context, baseURL, seed, cspViolations }) => {
     await signInSeeded(context, baseURL, seed, "owner");
     const base = `/organizations/${seed.organizationId}`;
     const projectBase = `${base}/projects/${seed.projectId}`;
@@ -35,8 +35,8 @@ test.describe("management shell and same-organization navigation", () => {
     expect(envelope).toMatchObject({ organization: seed.organizationId, project: "" });
     expect(envelope.user).toBeTruthy();
     expect(await page.locator('script[src^="/management-pages.js?v="]').getAttribute("src")).toBe(`/management-pages.js?v=${envelope.version}`);
-    // The documentation link is hidden outside an authorized, deployed project.
-    await expect(page.locator(".cp-topbar [data-cp-open-docs]")).toBeHidden();
+    // Uploaded project documentation is gone (#286): the shell offers no documentation link.
+    await expect(page.locator("[data-cp-open-docs]")).toHaveCount(0);
     // The account menu carries the identity, Account security and sign-out.
     await page.locator("#cp-avatar").click();
     await expect(page.locator(".cp-account-email")).toHaveText("owner@example.test");
@@ -64,15 +64,7 @@ test.describe("management shell and same-organization navigation", () => {
     await expect(heading(page)).toHaveText("Worker publication");
     // The client router replaces the page state; the initial document's envelope is not rewritten.
     expect(await page.evaluate(() => (window as unknown as { __RENDRO_PAGE_STATE__: { projectId: string } }).__RENDRO_PAGE_STATE__.projectId)).toBe(seed.projectId);
-    // Docs entry appears once the active project is observed as deployed, and only for this project.
-    await expect(page.locator(".cp-topbar [data-cp-open-docs]")).toBeVisible();
-    await expect(page.locator(".cp-topbar [data-cp-open-docs]")).toHaveAttribute("href", `${projectBase}/docs`);
-    for (const [tab, suffix] of [["Deployments", "/deployments"], ["Publications", "/publications"], ["Private shares", "/shares"], ["Overview", ""]] as const) {
-      await page.locator(".project-tabs").getByRole("link", { name: tab, exact: true }).click();
-      await expect(page).toHaveURL(new RegExp(`${projectBase}${suffix}$`));
-      await shellReady(page);
-      await expect(page.locator(".project-tabs a[aria-current=page]")).toHaveText(tab);
-    }
+    await expect(page.locator("#project-id .cp-id")).toHaveText(seed.projectId);
     await visit("People", `${base}/people`, "People");
     await expect(heading(page)).toHaveText("People");
     await visit("Teams", `${base}/teams`, "Teams");
@@ -82,10 +74,8 @@ test.describe("management shell and same-organization navigation", () => {
     await visit("API keys", `${base}/api-keys`, "API keys");
     await expect(heading(page)).toHaveText("API keys");
     await visit("Overview", base, "Overview");
-    // The project docs entry belongs to the project route only.
-    await expect(page.locator(".cp-topbar [data-cp-open-docs]")).toBeHidden();
 
-    expect(documents, "no document request for any of the ten client-routed destinations").toEqual([]);
+    expect(documents, "no document request for any of the seven client-routed destinations").toEqual([]);
     expect(await page.evaluate(() => (document.querySelector(".cp-topbar") as HTMLElement & { shellMarker?: string }).shellMarker)).toBe("kept");
     expect(await page.evaluate(() => (window as unknown as { documentMarker: number }).documentMarker)).toBe(1);
     // Every scripted swap ran under the current document nonce.

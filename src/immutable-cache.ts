@@ -72,6 +72,3 @@ export class ImmutableMetadataCache {
     }
   }
 }
-
-/** Shared by every route in this isolate; see docs/TECHNICAL.md. */
-export const deploymentMetadataCache = new ImmutableMetadataCache(4 * 1024 * 1024, 2 * 1024 * 1024);

@@ -99,8 +99,6 @@ describe("header organization switcher", () => {
     ["/organizations/org-a", "/organizations/org-b"],
     ["/organizations/org-a/projects", "/organizations/org-b/projects"],
     ["/organizations/org-a/projects/project-a", "/organizations/org-b/projects"],
-    ["/organizations/org-a/projects/project-a/publications", "/organizations/org-b/projects"],
-    ["/organizations/org-a/projects/project-a/deployments", "/organizations/org-b/projects"],
     ["/organizations/org-a/people", "/organizations/org-b/people"],
     ["/organizations/org-a/teams", "/organizations/org-b/teams"],
     ["/organizations/org-a/settings", "/organizations/org-b/settings"],

@@ -10,7 +10,6 @@ describe("isolated Convex RPC envelopes", () => {
   let backend: Awaited<ReturnType<typeof startBackend>> | undefined;
   let directory: string;
   let url: string;
-  let legacy: { threadId: string; foreignThreadId: string; missingThreadId: string; foreignReplyId: string; missingReplyId: string };
   const localRequest = (path: string, body?: unknown) => localHttp(`${url}${path}`, body);
   async function post(path: string, body: unknown): Promise<Record<string, unknown>> {
     return JSON.parse((await localRequest(`/api/${path}`, body)).body) as Record<string, unknown>;
@@ -41,9 +40,7 @@ describe("isolated Convex RPC envelopes", () => {
         sourceMap: bundle.outputFiles.find(file => file.path.endsWith(".map"))!.text }],
     });
     expect(pushed).toEqual({});
-    const seeded = await rpc("mutation", "seed", {});
-    expect(seeded).toMatchObject({ status: "success" });
-    legacy = seeded.value as typeof legacy;
+    expect(await rpc("mutation", "seed", {})).toMatchObject({ status: "success" });
   }, 180_000);
 
   afterAll(async () => {
@@ -62,25 +59,6 @@ describe("isolated Convex RPC envelopes", () => {
   });
 
 
-  it.each(["threads:list", "threads:create", "threads:resolve", "threads:archive", "threads:remove", "replies:add", "replies:remove"])("%s actual legacy envelopes hide missing versus inaccessible records and server frames", async method => {
-    const envelopes = [];
-    for (const missing of [true, false]) {
-      // List/create compare denied scopes. Unmapped legacy scopes use the same
-      // opaque not_found contract as inaccessible records.
-      const orgSlug = missing ? "missing-org" : "other";
-      const result = method === "threads:list"
-        ? await rpc("query", "legacyList", { orgSlug })
-        : await rpc("mutation", "legacyMutation", {
-          method, orgSlug,
-          threadId: method === "replies:remove" ? legacy.threadId : missing ? legacy.missingThreadId : legacy.foreignThreadId,
-          replyId: missing ? legacy.missingReplyId : legacy.foreignReplyId,
-        });
-      safeFailure(result, "not_found");
-      envelopes.push(normalized(result));
-    }
-    expect(envelopes[0]).toBe(envelopes[1]);
-  });
-
   it("retains diagnostic frames for unexpected errors after an expected error", async () => {
     const result = await rpc("query", "diagnostics", {});
     expect(result.errorMessage).toContain("Unexpected failure still has frames");
@@ -88,8 +66,8 @@ describe("isolated Convex RPC envelopes", () => {
     expect(result).not.toHaveProperty("errorData");
   });
 
-  it.each(["documentThreads", "documentReplies"])("%s rejects malformed and foreign cursor/endCursor values", async table => {
-    const foreign = table === "documentThreads" ? "documentReplies" : "documentThreads";
+  it.each(["repoThreads", "repoReplies"])("%s rejects malformed and foreign cursor/endCursor values", async table => {
+    const foreign = table === "repoThreads" ? "repoReplies" : "repoThreads";
     const first = await rpc("query", "page", { table, cursor: null });
     const other = await rpc("query", "page", { table: foreign, cursor: null });
     const validCursor = (first.value as { continueCursor: string }).continueCursor;

@@ -4,9 +4,8 @@ import { managementLabel } from "@/ui/management-ui";
 import { externalLinkHref, isContentFrameSource, normalizeLoadedDocumentPath, validDocumentSearch } from "@/lazy-tree/messages";
 import { replaceViewerFragment, sendDocumentFragment } from "@/viewer/fragments";
 import { createMessageRateLimit } from "@/viewer/message-limits";
-import { createStylesheetRenewer } from "@/viewer/stylesheets";
 import { installViewerFrame, installViewerParent, showViewerUpdateNotice } from "@/viewer/client";
-import { classifyDocumentLink, installDocumentNavigation, installShareFragments } from "@/viewer/navigation";
+import { classifyDocumentLink, installDocumentNavigation } from "@/viewer/navigation";
 
 const origin = "https://rendro.test";
 const base = "/organizations/org/projects/project/docs";
@@ -86,45 +85,6 @@ describe("shared labels and message validators", () => {
   });
 });
 
-describe("stylesheet renewal teardown", () => {
-  const style = (win: DOMWindow, css: string) => {
-    const element = win.document.createElement("style");
-    element.textContent = css; win.document.head.append(element);
-    return element as unknown as HTMLStyleElement;
-  };
-  const importing = ".a{background:url(old.png)}@import url(base.css);";
-  const replace = (css: string) => css.replaceAll("old.png", "new.png");
-
-  it.each(["removed", "retargeted"])("never resurrects a sheet %s by publisher script while its replacement loads", action => {
-    vi.useFakeTimers();
-    const win = createWindow(origin);
-    const sheet = style(win, importing);
-    const renew = createStylesheetRenewer();
-    renew(sheet, replace);
-    const pending = win.document.head.querySelectorAll("style");
-    expect(pending).toHaveLength(2);
-    if (action === "removed") sheet.remove(); else sheet.textContent = ".publisher{color:red}";
-    vi.advanceTimersByTime(30_000);
-    expect(win.document.head.querySelectorAll("style")).toHaveLength(action === "removed" ? 0 : 1);
-    if (action === "retargeted") expect(win.document.head.querySelector("style")!.textContent).toBe(".publisher{color:red}");
-    // The abandoned sheet starts from its current value, not stale retry state.
-    if (action === "retargeted") {
-      renew(sheet, css => css + "/*x*/");
-      expect(sheet.textContent).toBe(".publisher{color:red}/*x*/");
-    }
-  });
-
-  it("ignores a link without an href", () => {
-    const win = createWindow(origin);
-    const link = win.document.createElement("link");
-    link.rel = "stylesheet"; win.document.head.append(link);
-    const rewrite = vi.fn(() => "never");
-    createStylesheetRenewer()(link as unknown as HTMLLinkElement, rewrite);
-    expect(rewrite).not.toHaveBeenCalled();
-    expect(win.document.head.querySelectorAll("link")).toHaveLength(1);
-  });
-});
-
 describe("viewer parent shell edge cases", () => {
   const frameSrc = `${origin}${base}/files/guide/index.html`;
   function parentFixture(options: { notice?: boolean; src?: string } = {}) {
@@ -142,9 +102,9 @@ describe("viewer parent shell edge cases", () => {
 
   it("shows an update notice that has no status region", () => {
     const win = createWindow(origin, '<aside id="viewer-update-notice" hidden></aside>');
-    showViewerUpdateNotice(win as unknown as Window);
+    showViewerUpdateNotice(win as unknown as Window, "Reload this document to continue.");
     expect((win.document.getElementById("viewer-update-notice") as unknown as HTMLElement).hidden).toBe(false);
-    showViewerUpdateNotice(createWindow(origin) as unknown as Window);
+    showViewerUpdateNotice(createWindow(origin) as unknown as Window, "Reload this document to continue.");
   });
 
   it("does not reload from a hidden or already-activated notice", () => {
@@ -163,11 +123,13 @@ describe("viewer parent shell edge cases", () => {
 
   it("tolerates shells without a notice and ignores loads from other elements", () => {
     const f = parentFixture({ notice: false });
-    f.frame.dataset.loadedDeployment = "old";
-    f.bus.emit("load", { target: {} });
-    expect(f.frame.dataset.loadedDeployment).toBe("old");
-    f.bus.emit("load", { target: f.frame });
-    expect(f.frame.dataset.loadedDeployment).toBeUndefined();
+    expect(() => { f.bus.emit("load", { target: {} }); f.bus.emit("load", { target: f.frame }); }).not.toThrow();
+    const shown = parentFixture();
+    shown.notice.hidden = false;
+    shown.bus.emit("load", { target: {} });
+    expect(shown.notice.hidden).toBe(false);
+    shown.bus.emit("load", { target: shown.frame });
+    expect(shown.notice.hidden).toBe(true);
   });
 
   it("does not run when the shell has no content frame", () => {
@@ -176,47 +138,80 @@ describe("viewer parent shell edge cases", () => {
     const host = { ...bus, document: win.document, location: { href: origin, origin } } as unknown as Window;
     installViewerParent({ base }, host);
     bus.emit("load", { target: {} });
-    bus.emit("message", { source: {}, origin: "null", data: { type: "viewer-loaded", deploymentId: "x" } });
+    bus.emit("message", { source: {}, origin: "null", data: { type: "viewer-renew", requestId: "r", manifestKey: "m" } });
+  });
+
+  describe("renewing a frame's ticket", () => {
+    const ask = (f: ReturnType<typeof parentFixture>) => f.bus.emit("message", { source: f.source, origin: "null", data: { type: "viewer-renew", requestId: "r", manifestKey: "m" } });
+    const settled = () => new Promise(resolve => setTimeout(resolve, 0));
+
+    it("hands the frame a fresh prefix of its own repository", async () => {
+      const f = parentFixture();
+      f.fetch.mockResolvedValue(Response.json({ prefix: `${base}/view/fresh/files/` }));
+      ask(f);
+      await vi.waitFor(() => expect(f.source.postMessage).toHaveBeenCalledWith({ type: "viewer-renewed", requestId: "r", prefix: `${base}/view/fresh/files/` }, "*"));
+      expect(f.fetch).toHaveBeenCalledWith(`${base}/viewer-ticket?manifestKey=m`, expect.objectContaining({ credentials: "same-origin", cache: "no-store" }));
+    });
+
+    it.each([
+      ["a refused renewal", () => new Response(null, { status: 404 }), () => {}],
+      ["a prefix outside the repository", () => Response.json({ prefix: "/r/other/repo/view/x/files/" }), () => {}],
+      ["an answer for a frame that has moved on", () => Response.json({ prefix: `${base}/view/fresh/files/` }), (f: ReturnType<typeof parentFixture>) => { f.frame.src = `${origin}${base}/files/guide/other.html`; }],
+      ["an answer after the frame reloaded", () => Response.json({ prefix: `${base}/view/fresh/files/` }), (f: ReturnType<typeof parentFixture>) => { f.bus.emit("load", { target: f.frame }); }],
+    ])("gives the frame nothing for %s", async (_name, answer, meanwhile) => {
+      const f = parentFixture();
+      let reply!: (response: Response) => void;
+      f.fetch.mockReturnValue(new Promise<Response>(resolve => { reply = resolve; }));
+      ask(f);
+      meanwhile(f);
+      reply(answer());
+      await settled(); await settled();
+      expect(f.source.postMessage).not.toHaveBeenCalled();
+    });
   });
 
   it.each([["another origin", "https://publisher.test/organizations/org/projects/project/docs/files/a.html"],
     ["another path", `${origin}/elsewhere/files/a.html`]])("ignores bridge messages while the frame shows %s", (_name, src) => {
     const f = parentFixture({ src });
-    f.bus.emit("message", { source: f.source, origin: "null", data: { type: "viewer-loaded", deploymentId: "x" } });
     f.bus.emit("message", { source: f.source, origin: "null", data: { type: "viewer-renew", requestId: "r", manifestKey: "m" } });
-    expect(f.frame.dataset.loadedDeployment).toBeUndefined();
     expect(f.fetch).not.toHaveBeenCalled(); expect(f.source.postMessage).not.toHaveBeenCalled();
   });
 });
 
 describe("viewer frame edge cases", () => {
-  const config = { base, prefix, manifestKey: "release/manifest.json", deploymentId: "release" };
-  function frameFixture(html: string) {
+  function frameFixture(html: string, ticket: { issuedAt: number; renewAfter: number } | null = { issuedAt: Date.now(), renewAfter: 150_000 }) {
     const win = new DOMWindow({ url: `${origin}${base}/files/guide/index.html`, settings: { disableCSSFileLoading: true } });
     windows.push(win);
-    win.document.write(`<html><head><base data-rendro-viewer href="${origin}${prefix}guide/index.html"></head><body>${html}</body></html>`);
+    win.document.write(`<html><head></head><body>${html}</body></html>`);
     const bus = events();
     const parent = { postMessage: vi.fn() };
-    const host = { ...bus, location: win.location, document: win.document, parent, setInterval: globalThis.setInterval, clearInterval: globalThis.clearInterval } as unknown as Window;
-    installViewerFrame(config, host);
+    const host = { ...bus, location: win.location, document: win.document, parent, setInterval: vi.fn(globalThis.setInterval), clearInterval: globalThis.clearInterval } as unknown as Window;
+    installViewerFrame({ base, prefix, manifestKey: "release/manifest.json", ...(ticket ? { ticket } : {}) }, host);
     const renew = (next: string) => bus.emit("message", { source: parent, origin,
       data: { type: "viewer-renewed", requestId: parent.postMessage.mock.lastCall![0].requestId, prefix: next } });
     return { win, bus, parent, renew };
   }
 
-  it("keeps fragment-only and out-of-scope resource URLs, and renews the rest", () => {
+  it("keeps fragment-only and out-of-scope image sources, and renews the ticketed ones", () => {
     vi.useFakeTimers();
-    const f = frameFixture(`<img id="sprite" src="#sprite"><img id="outside" src="/outside/a.png">
-      <div id="styled" style="background:url(/outside/b.png),url(assets/c.png)"></div>`);
+    const f = frameFixture(`<img id="sprite" src="#sprite"><img id="outside" src="/outside/a.png"><img id="other" src="https://other.test${prefix}a.png">
+      <img id="ticketed" src="${prefix}guide/assets/c.png">`);
     vi.setSystemTime(Date.now() + 16 * 60_000);
     f.bus.emit("focus");
     const next = `${base}/view/fresh/files/`;
     f.renew(next);
     expect(f.win.document.getElementById("sprite")!.getAttribute("src")).toBe("#sprite");
     expect(f.win.document.getElementById("outside")!.getAttribute("src")).toBe("/outside/a.png");
-    const style = f.win.document.getElementById("styled")!.getAttribute("style")!;
-    expect(style).toContain("url(/outside/b.png)");
-    expect(style).toContain(`${next}guide/assets/c.png`);
+    expect(f.win.document.getElementById("other")!.getAttribute("src")).toBe(`https://other.test${prefix}a.png`);
+    expect(f.win.document.getElementById("ticketed")!.getAttribute("src")).toBe(`${origin}${next}guide/assets/c.png`);
+  });
+
+  it("installs nothing in a frame that names no ticket (a public repository's)", () => {
+    vi.useFakeTimers();
+    const f = frameFixture(`<img src="${prefix}a.png">`, null);
+    f.bus.emit("focus");
+    f.win.document.dispatchEvent(new f.win.Event("error"));
+    expect(f.parent.postMessage).not.toHaveBeenCalled();
   });
 
   it("does not ask for renewal while the tab is hidden", () => {
@@ -235,7 +230,7 @@ describe("viewer frame edge cases", () => {
 describe("document navigation edge cases", () => {
   const config = { prefix: `${base}/files/`, ticketBase: `${base}/view/`, documentPath: "guide/page.html" };
   const documentURL = origin + config.prefix + config.documentPath;
-  function fixture(html: string, options: { standalone?: boolean; singleDocument?: boolean; readyState?: DocumentReadyState } = {}) {
+  function fixture(html: string, options: { standalone?: boolean; readyState?: DocumentReadyState } = {}) {
     const win = createWindow(documentURL, html);
     const bus = events();
     const parent = { postMessage: vi.fn() };
@@ -243,7 +238,7 @@ describe("document navigation edge cases", () => {
     const host: Record<string, unknown> = { ...bus, document: win.document, location };
     host.parent = options.standalone ? host : parent;
     if (options.readyState) Object.defineProperty(win.document, "readyState", { configurable: true, value: options.readyState });
-    installDocumentNavigation({ ...config, singleDocument: options.singleDocument }, host as unknown as Window);
+    installDocumentNavigation(config, host as unknown as Window);
     return { win, bus, parent, location };
   }
   const click = (win: DOMWindow, selector: string) => {
@@ -272,7 +267,6 @@ describe("document navigation edge cases", () => {
     ["a link", '<a id="l" href="https://external.test/page.html?q=1#top">x</a>', "https://external.test/page.html?q=1#top", {}],
     ["a protocol-relative link", '<a id="l" href="//external.test/a b">x</a>', "https://external.test/a%20b", {}],
     ["a link that targets the frame", '<a id="l" target="_self" href="http://external.test:8080/">x</a>', "http://external.test:8080/", {}],
-    ["a link in a share", '<a id="l" href="https://external.test/page.html">x</a>', "https://external.test/page.html", { singleDocument: true }],
   ])("hands %s to another site to the shell instead of loading it in the frame", (_name, html, href, options) => {
     const f = fixture(html, options);
     expect(click(f.win, "#l").defaultPrevented).toBe(true);
@@ -315,43 +309,32 @@ describe("document navigation edge cases", () => {
     expect(f.parent.postMessage).not.toHaveBeenCalled();
   });
 
+  it("swallows a link whose query is unbounded without messaging the shell", () => {
+    const f = fixture(`<a id="l" href="other.html?${"q".repeat(4096)}">x</a>`);
+    f.parent.postMessage.mockClear();
+    expect(click(f.win, "#l").defaultPrevented).toBe(true);
+    expect(f.parent.postMessage).not.toHaveBeenCalled();
+  });
+
+  it("keeps a standalone document's own fragment link in its native hash history", () => {
+    const f = fixture('<a id="l" href="#later">x</a><h2 id="later">Later</h2>', { standalone: true });
+    expect(click(f.win, "#l").defaultPrevented).toBe(true);
+    expect(f.location.hash).toBe("#later");
+    expect(f.parent.postMessage).not.toHaveBeenCalled();
+  });
+
   it("navigates a standalone document itself instead of messaging a shell", () => {
     const f = fixture('<a id="l" href="other.html#top">x</a>', { standalone: true });
     expect(click(f.win, "#l").defaultPrevented).toBe(true);
     expect(f.location.href).toBe(`${origin}${config.prefix}guide/other.html#top`);
   });
 
-  it("reports a single-document destination immediately when loading already finished and after history restores", () => {
-    const f = fixture("", { singleDocument: true, readyState: "complete" });
-    expect(f.parent.postMessage).toHaveBeenCalledOnce();
-    expect(f.parent.postMessage).toHaveBeenCalledWith({ type: "doc-loaded", path: "guide/page.html", search: "", fragment: "" }, origin);
-    f.bus.emit("pageshow", { persisted: false });
-    expect(f.parent.postMessage).toHaveBeenCalledOnce();
-    f.bus.emit("pageshow", { persisted: true });
-    expect(f.parent.postMessage).toHaveBeenCalledTimes(2);
-    f.bus.emit("popstate");
-    expect(f.parent.postMessage).toHaveBeenCalledTimes(3);
-  });
-
-  it("does nothing when a share shell has no content frame", () => {
-    const win = createWindow(`${origin}/s/fixture`);
-    const bus = events();
-    installShareFragments({ ...config, singleDocument: true }, { ...bus, document: win.document, location: win.location } as unknown as Window);
-    expect(bus.addEventListener).not.toHaveBeenCalled();
-  });
-
-  it("lets the shell's own hash override the first reported fragment and then own it", async () => {
-    const win = createWindow(`${origin}/s/fixture#old`, '<iframe id="content-frame"></iframe>');
-    const frame = win.document.querySelector("iframe")!;
-    const send = vi.spyOn(frame.contentWindow as DOMWindow, "postMessage");
-    installShareFragments({ ...config, singleDocument: true }, win as unknown as Window);
-    win.location.hash = "#new";
-    await win.happyDOM.whenAsyncComplete();
-    expect(send).toHaveBeenCalledWith({ type: "doc-fragment", path: config.documentPath, fragment: "#new" }, "*");
-    win.dispatchEvent(new win.MessageEvent("message", {
-      data: { type: "doc-loaded", path: config.documentPath, search: "", fragment: "#reported" },
-      source: frame.contentWindow as DOMWindow, origin: "null",
-    }));
-    expect(win.location.hash).toBe("#new");
+  it("reports its destination to the shell once parsed, or at once when parsing already finished", () => {
+    const parsing = fixture("", { readyState: "loading" });
+    expect(parsing.parent.postMessage).not.toHaveBeenCalled();
+    parsing.win.document.dispatchEvent(new parsing.win.Event("DOMContentLoaded"));
+    expect(parsing.parent.postMessage).toHaveBeenCalledWith({ type: "doc-loaded", path: "guide/page.html", search: "", fragment: "" }, origin);
+    const parsed = fixture("", { readyState: "complete" });
+    expect(parsed.parent.postMessage).toHaveBeenCalledOnce();
   });
 });

@@ -1,20 +1,13 @@
-import type * as LegacyAccessModule from "@/legacy-access";
 import { memoryAdapter } from "@better-auth/memory-adapter";
 import { betterAuth } from "better-auth/minimal";
 import type { User } from "better-auth/types";
 import type { Context, Next } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createShareToken } from "@/share-links";
 import { CONVEX_SITE_URL } from "@/config";
 import { renderNotFoundPage } from "@/routes/not-found";
 
 const fixtures = vi.hoisted(() => ({
   user: undefined as User | undefined,
-  member: false,
-  deleted: vi.fn(),
-  stream: vi.fn(),
-  list: vi.fn(),
-  head: vi.fn(),
 }));
 vi.mock("@/middleware/session", () => ({
   sessionMiddleware: async (c: Context, next: Next) => {
@@ -22,24 +15,11 @@ vi.mock("@/middleware/session", () => ({
     await next();
   },
 }));
-vi.mock("@/legacy-access", async importOriginal => ({
-  ...await importOriginal<typeof LegacyAccessModule>(),
-  legacyRequestMember: () => Promise.resolve(fixtures.member),
-  legacyOrganization: () => Promise.resolve("mapped-org"),
-}));
-vi.mock("@/soft-delete", () => ({ isDeleted: fixtures.deleted }));
-vi.mock("@/storage", () => ({ getObjectStream: fixtures.stream, listObjects: fixtures.list, headObject: fixtures.head }));
 import worker from "@/worker";
 
 beforeEach(() => {
-  vi.stubGlobal("fetch", vi.fn((input) => Promise.resolve(String(input).endsWith("/api/rendro/admission/public")
-    ? Response.json({ admitted: true }) : new Response(null, { status: 404 }))));
+  vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(new Response(null, { status: 404 }))));
   fixtures.user = undefined;
-  fixtures.member = false;
-  fixtures.deleted.mockReset().mockResolvedValue(false);
-  fixtures.stream.mockReset().mockResolvedValue(null);
-  fixtures.list.mockReset().mockResolvedValue([]);
-  fixtures.head.mockReset().mockResolvedValue(null);
 });
 afterEach(() => vi.unstubAllGlobals());
 
@@ -60,137 +40,17 @@ function normalizeNonces(response: Response, html: string): string {
   return html.replaceAll(`nonce="${nonce}"`, 'nonce="NORMALIZED"');
 }
 
-async function expectShareError(token: string, status: number) {
-  const response = await worker.request(`/share/${token}`);
-  const html = await response.text();
-  expect(response.status).toBe(status);
-  expect(response.headers.get("content-type")).toContain("text/html");
-  expect(html).toContain(`Error ${status}`);
-  expect(html).toContain("Share link unavailable");
-  expect(html).toContain("Ask the sender for a new link.");
-  expect(html).toContain('href="/" target="_top">Go to Rendro</a>');
-  expect(html).not.toContain(token);
-  // Reuse the exact 404 CSS, including both themes and mobile breakpoints.
-  expect(styles(html)).toEqual(styles(renderNotFoundPage()));
-  expect(html).toContain('name="viewport" content="width=device-width, initial-scale=1"');
-  return normalizeNonces(response, html);
-}
-
-describe("unavailable share pages", () => {
-  it("returns a styled 404 for unknown and tampered tokens without looking up documents", async () => {
-    await expectShareError("unknown-token", 404);
-    await expectShareError(`${createShareToken("private/index.html")}tampered`, 404);
-    expect(fixtures.deleted).not.toHaveBeenCalled();
-    expect(fixtures.stream).not.toHaveBeenCalled();
-  });
-
-  it("returns a styled 410 only for an authenticated expired token", async () => {
-    const token = createShareToken("private/index.html", 100);
-    await expectShareError(token, 410);
-    await expectShareError(`${token}tampered`, 404);
-    expect(fixtures.deleted).not.toHaveBeenCalled();
-    expect(fixtures.stream).not.toHaveBeenCalled();
-  });
-
-  it("does not distinguish withdrawn or missing documents from unknown links", async () => {
-    const unknown = await expectShareError("unknown-token", 404);
-    const token = createShareToken("private/index.html");
-    fixtures.deleted.mockResolvedValue(true);
-    expect(await expectShareError(token, 404)).toBe(unknown);
-    expect(fixtures.stream).not.toHaveBeenCalled();
-    fixtures.deleted.mockResolvedValue(false);
-    expect(await expectShareError(token, 404)).toBe(unknown);
-  });
-
-  it.each(["unknown", "expired", "revoked"])("keeps opaque %s share grants indistinguishable", async (token) => {
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(null, { status: 404 })));
-    const response = await worker.request(`/s/${token}`);
-    expect(response.status).toBe(404);
-    expect(await response.text()).toContain('<h1 id="not-found-title">Page not found</h1>');
-  });
-});
-
-describe("protected docs error routes", () => {
-  const user = { id: "user", email: "user@acme.test", name: "User", emailVerified: true, createdAt: new Date(), updatedAt: new Date() };
-  const paths = ["/docs/acme", "/docs/acme/guide.html"];
-
-  async function expectDocsNotFound(path: string) {
-    const response = await worker.request(path);
+describe("removed upload-era routes", () => {
+  // Shares, publications, the legacy viewer and the upload API are gone (#286): each is the plain not-found page, with no lookup.
+  it.each(["/share/token", "/s/token", "/s/token/files/index.html", "/p/product", "/p/product/files/index.html", "/public/acme/product/files/index.html", "/docs/acme", "/docs/acme/guide.html"])("answers %s with the plain not-found page", async path => {
+    fixtures.user = { id: "user", email: "user@acme.test", name: "User", emailVerified: true, createdAt: new Date(), updatedAt: new Date() };
+    const response = await worker.request(path, { headers: { accept: "text/html" } });
     const html = await response.text();
     expect(response.status).toBe(404);
-    expect(response.headers.get("content-type")).toContain("text/html");
     expect(html).toContain('<h1 id="not-found-title">Page not found</h1>');
-    expect(html).toContain('<main class="page" aria-labelledby="not-found-title">');
-    expect(html).toContain('<link rel="icon" href="/favicon.ico" sizes="16x16 32x32" type="image/x-icon">');
-    expect(html).toContain('<link rel="icon" href="/favicon.svg" sizes="any" type="image/svg+xml">');
-    expect(html).toContain('href="/organizations?choose=1" target="_top">Manage organizations</a>');
-    expect(html).toContain(path);
-    expect(html).not.toContain("Create your org");
-    expect(html).not.toContain('action="/api/orgs"');
     expect(styles(html)).toEqual(styles(renderNotFoundPage()));
-    expect(fixtures.head).not.toHaveBeenCalled();
-    expect(fixtures.deleted).not.toHaveBeenCalled();
-    return normalizeNonces(response, html);
-  }
-
-  it.each(paths)("redirects signed-out %s to sign-in without looking up the org", async (path) => {
-    const response = await worker.request(path);
-    expect(response.status).toBe(302);
-    expect(response.headers.get("location")).toBe(`/sign-in?returnTo=${encodeURIComponent(path)}`);
-    expect(fixtures.list).not.toHaveBeenCalled();
-    expect(fixtures.head).not.toHaveBeenCalled();
-    const signIn = await worker.request(response.headers.get("location")!);
-    expect(signIn.status).toBe(200);
-    expect(await signIn.text()).toContain("Sign in to Rendro");
-  });
-
-  it.each(paths)("returns 404 for unknown %s without a domain match", async (path) => {
-    fixtures.user = { ...user, email: "user@other.test" };
-    await expectDocsNotFound(path);
-    expect(fixtures.list).not.toHaveBeenCalled();
-  });
-
-  it.each(paths)("returns 404 for unknown %s even with a domain match", async (path) => {
-    fixtures.user = user;
-    const matchingDomain = await expectDocsNotFound(path);
-    expect(fixtures.list).not.toHaveBeenCalled();
-    fixtures.user = { ...user, email: "user@other.test" };
-    expect(await expectDocsNotFound(path)).toBe(matchingDomain);
-  });
-
-  // Explicit mapped membership gates legacy routes.
-  it.each(paths)("preserves existing legacy-org member access to %s", async (path) => {
-    fixtures.user = user;
-    fixtures.member = true;
-    fixtures.list.mockResolvedValue([{ key: "acme/guide.html" }]);
-    fixtures.head.mockResolvedValue({ contentType: "text/html" });
-    const response = await worker.request(path);
-    const html = await response.text();
-    expect(response.status).toBe(200);
-    expect(html).toContain('id="content-frame"');
-    expect(html).toContain('id="tree-container"');
-    expect(html).not.toContain("Page not found");
-    expect(html).not.toContain("Create your org");
-    expect(fixtures.list).not.toHaveBeenCalled();
-    if (path.endsWith("guide.html")) {
-      expect(fixtures.head).toHaveBeenCalledExactlyOnceWith("acme/guide.html");
-      expect(html).toContain('window.RENDRO_INITIAL_DOC="acme/guide.html"');
-    }
-  });
-
-  it.each(paths)("denies existing legacy-org non-members at %s without disclosing existence", async (path) => {
-    fixtures.user = { ...user, email: "user@other.test" };
-    fixtures.list.mockResolvedValue([{ key: "acme/guide.html" }]);
-    const existing = await expectDocsNotFound(path);
-    fixtures.list.mockResolvedValue([]);
-    expect(await expectDocsNotFound(path)).toBe(existing);
-    expect(fixtures.list).not.toHaveBeenCalled();
-  });
-
-  it.each(paths)("returns 404 at %s without mapped membership regardless of email", async (path) => {
-    fixtures.user = { ...user, email: "user@sub.acme.test" };
-    await expectDocsNotFound(path);
-    expect(fixtures.list).not.toHaveBeenCalled();
+    normalizeNonces(response, html);
+    expect(fetch).not.toHaveBeenCalled();
   });
 });
 

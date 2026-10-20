@@ -181,9 +181,6 @@ export const run = internalAction({
           record(`management:access:${role}:minimal`, 1, access.id === primaryOrgId && access.userId === access.member?.userId && access.member?.role === role && !access.members && !access.teams && response.headers.get("cache-control")?.includes("no-store") ? 1 : 0);
         }
       }
-      for (const role of ["member", "outsider", "anonymous"] as const) {
-        record(`management:recent:${role}`, role === "member" ? 200 : 403, (await call(role, `/api/rendro/management/recent-deployment?organizationId=${encodeURIComponent(primaryOrgId)}`)).status);
-      }
 
       for (const role of ["owner", "admin", "member", "outsider", "anonymous"] as const) {
         const response = await call(role, `/api/rendro/management/members?organizationId=${primaryOrgId}`);

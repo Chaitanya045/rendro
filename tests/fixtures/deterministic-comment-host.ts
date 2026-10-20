@@ -1,5 +1,4 @@
 import { CommentorParentHost, type DocumentCommentBackend } from "../../src/commentor/parent-host";
-import { updateViewerActiveDeployment } from "../../src/viewer/client";
 
 const updates: Array<Parameters<DocumentCommentBackend["subscribe"]>[1]> = [];
 const backend: DocumentCommentBackend = {
@@ -11,13 +10,12 @@ const backend: DocumentCommentBackend = {
   mutate: () => Promise.resolve(null),
 };
 const frame = document.querySelector<HTMLIFrameElement>("#content-frame")!;
-const host = new CommentorParentHost(frame, location.origin, { orgSlug: "fixture", convexUrl: "http://localhost" }, backend, "reader");
+const host = new CommentorParentHost(frame, location.origin, { repoId: 9101, accessUrl: "/r/acme/docs/comment-access", convexUrl: "http://localhost" }, backend, "reader");
+host.setWritable(true);
 function publishThreads() {
   updates.at(-1)!(Array.from({ length: 12 }, (_, index) => ({
-    _id: `thread-${index}`, _creationTime: Date.now(), authorName: "Reader", authorEmail: "reader@example.test",
-    body: `Comment ${index}`, anchor: { kind: "element", path: ["#target"] }, resolved: false, replies: [],
+    _id: `thread-${index}`, _creationTime: Date.now(), authorName: "Reader", authorEmail: "reader@example.test", body: `Comment ${index}`,
+    anchor: { kind: "repo-text", blobSha: "b".repeat(40), headingSlug: "title", prefix: "", exact: "Document", suffix: "", offset: 0 }, resolved: false, replies: [],
   })), { canLoadMore: true, loading: false });
 }
-Object.assign(window, { fixtureHost: host, fixtureUpdates: updates, publishThreads,
-  clearDeployment: () => updateViewerActiveDeployment(null),
-});
+Object.assign(window, { fixtureHost: host, fixtureUpdates: updates, publishThreads });

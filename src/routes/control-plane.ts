@@ -12,7 +12,7 @@ import { MANAGEMENT_SHELL_VERSION, renderManagementNavigationRuntime } from "./m
 import { selectStyles } from "../ui/select-styles";
 import { managementUiRuntime, managementUiStyles } from "../ui/management-ui";
 import { organizationSwitcherRuntime, organizationSwitcherStyles, renderOrganizationLabelBootstrap } from "./organization-switcher";
-export { renderLoadingState, renderProjectNavigation, renderTableLoading } from "./management-loading";
+export { renderLoadingState, renderTableLoading } from "./management-loading";
 
 type ControlPlaneSection =
   | "overview"
@@ -236,7 +236,7 @@ select.select[multiple]{appearance:auto;background-image:none;padding-inline-end
 .textarea{min-height:92px;resize:vertical}
 .input:hover,.select:hover,.textarea:hover{border-color:var(--cp-muted)}
 .input:disabled,.select:disabled,.textarea:disabled{cursor:not-allowed;border-color:var(--cp-border);background:var(--cp-container);color:var(--cp-muted);opacity:.7}
-#deployments{scroll-margin-top:76px}
+
 .input:focus,.select:focus,.textarea:focus{border-color:var(--cp-accent);box-shadow:0 0 0 3px var(--cp-focus)}
 .input[aria-invalid=true],.select[aria-invalid=true],.textarea[aria-invalid=true]{border-color:var(--cp-danger);box-shadow:0 0 0 3px var(--cp-danger-soft)}
 .form-grid{display:grid;gap:15px}
@@ -524,18 +524,10 @@ export function renderControlPlanePage(options: ControlPlanePageOptions): string
   const initial = userLabel.trim().charAt(0).toUpperCase() || "R";
   const state = jsonState(options.state ?? {});
   const pageClass = options.pageClass ? ` ${escapeHtml(options.pageClass)}` : "";
-  // Documentation exists only after a project's first deployment. Pages that
-  // know the project's release state reveal these links via RendroUI.setDocsLink.
-  const docsHref = organizationId
-    ? `/organizations/${encodeURIComponent(organizationId)}/projects${options.projectId ? `/${encodeURIComponent(options.projectId)}/docs` : ""}`
-    : "";
-  const openDocs = organizationId
-    ? `<a class="cp-top-action" data-cp-open-docs href="${docsHref}" hidden><span class="material-symbols-outlined" aria-hidden="true">description</span><span>Open docs</span></a>`
-    : "";
   const organizationSwitcher = organizationId
     ? `<a class="cp-org-switcher" id="cp-org-switcher" href="/organizations?choose=1"><span class="cp-org-mark" data-org-mark aria-hidden="true">R</span><span class="cp-org-name" data-org-name>Organization</span><span class="sr-only">, switch organization</span><span class="material-symbols-outlined cp-org-caret" aria-hidden="true">unfold_more</span></a>`
     : "";
-  const drawerContext = `<div class="cp-drawer-context"><a class="cp-drawer-org" href="/organizations?choose=1"><span class="cp-org-mark" data-org-mark aria-hidden="true">R</span><span class="cp-drawer-org-copy"><span class="cp-drawer-org-name" data-org-name>Organization</span><small>Switch organization</small></span><span class="material-symbols-outlined" aria-hidden="true">unfold_more</span></a><a class="button" data-cp-open-docs href="${docsHref}" hidden><span class="material-symbols-outlined" aria-hidden="true">description</span><span>Open docs</span></a></div>`;
+  const drawerContext = `<div class="cp-drawer-context"><a class="cp-drawer-org" href="/organizations?choose=1"><span class="cp-org-mark" data-org-mark aria-hidden="true">R</span><span class="cp-drawer-org-copy"><span class="cp-drawer-org-name" data-org-name>Organization</span><small>Switch organization</small></span><span class="material-symbols-outlined" aria-hidden="true">unfold_more</span></a></div>`;
   return `<!DOCTYPE html>
 <html lang="en"><head>${renderFaviconLinks()}<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <link rel="preload" href="/select.js?v=${SELECT_VERSION}" as="script"${nonceAttribute()}>
@@ -548,7 +540,7 @@ ${hasSidebar ? `<script${nonceAttribute()} defer src="/management-pages.js?v=${M
   <a class="cp-brand" href="${organizationId ? `/organizations/${encodeURIComponent(organizationId)}` : "/organizations"}">Rendro<i>.</i></a>
   ${organizationSwitcher}
   <script${nonceAttribute()} data-cp-org-label>${renderOrganizationLabelBootstrap(options.user.id, organizationId)}</script>
-  <span class="cp-top-spacer"></span>${openDocs}
+  <span class="cp-top-spacer"></span>
   ${renderThemeButton("cp-theme")}
   <div class="cp-account" id="cp-account"><button class="cp-avatar" id="cp-avatar" type="button" aria-label="Open account menu" aria-expanded="false" aria-controls="cp-account-menu">${escapeHtml(initial)}</button><div class="cp-account-menu" id="cp-account-menu"><span class="cp-account-email">${escapeHtml(options.user.email)}</span><a href="/account/security"><span class="material-symbols-outlined" aria-hidden="true">shield</span><span>Account security</span></a><form method="post" action="/api/auth/sign-out"><button type="submit"><span class="material-symbols-outlined" aria-hidden="true">logout</span><span>Sign out</span></button></form></div></div>
 </div>

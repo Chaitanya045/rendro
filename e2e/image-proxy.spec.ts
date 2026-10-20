@@ -1,21 +1,19 @@
 import { randomBytes } from "node:crypto";
-import { imageProxyPath, imageProxyRewriter } from "../src/image-proxy";
-import { renderDocument } from "../src/ingest/render";
-import { initNodeMarkdownEngine } from "../tests/helpers/markdown-engine";
-import { test, expect } from "./org-fixtures";
+import { readFileSync } from "node:fs";
+import { imageProxyPath } from "../src/image-proxy";
+import { test, expect } from "./fixtures";
 import { assertLoopback, localHttp } from "./backend";
-import { createKey, html, pushSite } from "./project-helpers";
 import { imageHostOrigin, type ImageHostRequest } from "./services";
+import type { RepoFixtures } from "./repo-fixtures";
 
 /**
- * #224 on the real Worker: a rendered repo document with external images makes the reader's browser request only our
- * origin. Its images arrive through the signed same-origin proxy, which the Worker fetches from the (fake, in-process)
+ * #224 on the real Worker: a repository document with external images makes the reader's browser request only our
+ * origin. Ingest rewrote them to the signed same-origin proxy, which the Worker fetches from the (fake, in-process)
  * third-party host with a fixed user agent and nothing of the reader's. The network guard fails the test if the browser
- * contacts any other origin, and the harness fails teardown if the Worker contacts one it should have refused.
- *
- * Ingest is not wired to serving yet (epic #214), so the spec renders the Markdown with the ingest pipeline itself and
- * publishes the result through today's upload path.
+ * contacts any other origin, and the harness fails teardown if the Worker contacts one it should have refused. The page
+ * is committed to the public comment-docs repository by the spec itself, and ingested before it is read.
  */
+const repos = (): RepoFixtures => JSON.parse(readFileSync(process.env.RENDRO_E2E_REPOS as string, "utf8")) as RepoFixtures;
 const secret = () => {
   const value = process.env.RENDRO_E2E_IMAGE_PROXY_SECRET;
   if (!value) throw new Error("Missing local image proxy secret");
@@ -32,22 +30,18 @@ async function imageHostRequests(): Promise<ImageHostRequest[]> {
 }
 
 test.describe("image proxy", () => {
-  test("a rendered document's external images load only through our origin", async ({ actor, baseURL }) => {
+  test("a rendered document's external images load only through our origin", async ({ page, baseURL }) => {
     test.setTimeout(90_000);
-    const owner = await actor("images", { organizations: ["Image Proxy Org"], project: true });
-    const { page } = owner;
-    const [organization] = owner.organizations;
-    const [project] = owner.projects.map(entry => entry.id);
     // A unique query per run keeps the Worker's cache from answering for an earlier run or engine.
     const run = randomBytes(6).toString("hex");
     const pixel = `${imageHostOrigin}/pixel.png?run=${run}`;
     const svg = `${imageHostOrigin}/scripted.svg?run=${run}`;
 
-    initNodeMarkdownEngine();
-    const rendered = await renderDocument(`# Proxied images\n\n![Pixel](${pixel})\n\n<img src="${svg}" alt="Vector" width="8" height="8">\n`, "README.md", { rewriteImageUrl: imageProxyRewriter(secret()) });
-    expect(rendered.html).not.toContain(imageHostOrigin);
-    const { rawKey } = await createKey(page, organization.id, project);
-    await pushSite(baseURL, organization.id, project, rawKey, { "index.html": html("Proxied images", rendered.html) }, "images");
+    const { comments, control } = repos();
+    const docPath = `docs/images-${run}.md`;
+    const committed = await fetch(`${control}/commit/comments`, { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ changes: { [docPath]: `# Proxied images\n\n![Pixel](${pixel})\n\n<img src="${svg}" alt="Vector" width="8" height="8">\n` } }) });
+    expect(committed.status).toBe(200);
 
     const imageRequests: string[] = [];
     page.on("request", request => { if (request.resourceType() === "image") imageRequests.push(request.url()); });
@@ -61,9 +55,11 @@ test.describe("image proxy", () => {
     });
 
     await test.step("the viewer shows both images, requested from our origin only", async () => {
-      await page.goto(`/organizations/${organization.id}/projects/${project}/docs?doc=index.html`);
+      await page.goto(`/r/${comments.owner}/${comments.name}?doc=${encodeURIComponent(docPath)}`);
       const frame = page.frameLocator("#content-frame");
       await expect(frame.getByRole("heading", { name: "Proxied images" }).first()).toBeVisible();
+      // Ingest rewrote them: the document names no third-party image at all.
+      expect(await frame.locator("article").innerHTML()).not.toContain(imageHostOrigin);
       for (const name of ["Pixel", "Vector"]) {
         await expect.poll(() => frame.getByRole("img", { name }).evaluate((image: HTMLImageElement) => image.complete && image.naturalWidth > 0), name).toBe(true);
       }

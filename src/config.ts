@@ -11,11 +11,6 @@ const envSchema = z.object({
   CONVEX_INTERNAL_SECRET: z
     .string()
     .min(32, "CONVEX_INTERNAL_SECRET must be at least 32 characters"),
-  // Signs legacy /share/:token links; independent of Convex Better Auth.
-  AUTH_SECRET: z.string().min(16, "AUTH_SECRET must be at least 16 characters"),
-  // Bearer for Convex's retention endpoints, used only by the scheduled purge. Optional so a
-  // deployment without it still serves traffic; the purge then reports itself disabled.
-  RETENTION_SECRET: z.string().min(32, "RETENTION_SECRET must be at least 32 characters").optional(),
   // Signs same-origin image proxy URLs (/img/<sig>/<url>) at ingest; dedicated, never reused.
   IMAGE_PROXY_SECRET: z.string().min(32, "IMAGE_PROXY_SECRET must be at least 32 characters"),
   // Signs repository capability cookies and asset tickets (#234). Its own secret: rotating it
@@ -29,10 +24,10 @@ const envSchema = z.object({
   REPO_CONTENT_KEY: z.string().min(32, "REPO_CONTENT_KEY must be at least 32 characters"),
   REPO_CONTENT_KEY_PREVIOUS: z.string().min(32, "REPO_CONTENT_KEY_PREVIOUS must be at least 32 characters").optional(),
 }).refine(
-  (value) => ![value.AUTH_SECRET, value.CONVEX_INTERNAL_SECRET, value.RETENTION_SECRET, value.IMAGE_PROXY_SECRET].includes(value.REPO_CAPABILITY_SECRET),
+  (value) => ![value.CONVEX_INTERNAL_SECRET, value.IMAGE_PROXY_SECRET].includes(value.REPO_CAPABILITY_SECRET),
   { path: ["REPO_CAPABILITY_SECRET"], message: "REPO_CAPABILITY_SECRET must not reuse another secret" },
 ).refine(
-  (value) => ![value.AUTH_SECRET, value.CONVEX_INTERNAL_SECRET, value.RETENTION_SECRET, value.IMAGE_PROXY_SECRET, value.REPO_CAPABILITY_SECRET, value.REPO_CONTENT_KEY_PREVIOUS]
+  (value) => ![value.CONVEX_INTERNAL_SECRET, value.IMAGE_PROXY_SECRET, value.REPO_CAPABILITY_SECRET, value.REPO_CONTENT_KEY_PREVIOUS]
     .includes(value.REPO_CONTENT_KEY),
   { path: ["REPO_CONTENT_KEY"], message: "REPO_CONTENT_KEY must not reuse another secret" },
 );
@@ -62,8 +57,6 @@ export const CONVEX_SITE_URL = env.CONVEX_SITE_URL
     ? CONVEX_URL.replace(/:3210$/, ":3211")
     : CONVEX_URL.replace(/\.cloud$/, ".site"));
 
-export const AUTH_SECRET = env.AUTH_SECRET;
-export const RETENTION_SECRET = env.RETENTION_SECRET;
 export const IMAGE_PROXY_SECRET = env.IMAGE_PROXY_SECRET;
 export const REPO_CAPABILITY_SECRET = env.REPO_CAPABILITY_SECRET;
 export const REPO_CONTENT_KEY = env.REPO_CONTENT_KEY;

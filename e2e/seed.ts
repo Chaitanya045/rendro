@@ -1,19 +1,12 @@
-import { mkdir, writeFile } from "node:fs/promises";
-import { join } from "node:path";
 import { signAuthClientIp } from "../shared/auth-client-ip";
-import { assertLoopback, localEnvironment, root, run, ready } from "./backend";
-import { publicationSlug, type Mail } from "./services";
+import { ready } from "./backend";
+import type { Mail } from "./services";
 
 export const roles = ["owner", "admin", "member", "outsider"] as const;
 export type Role = typeof roles[number];
 export type Seed = { organizationId: string; otherOrganizationId: string; projectId: string; cookies: Record<Role, string>; userIds: Record<Role, string> };
 export const password = "Local fixture password 109!";
-export async function pushDocuments(source: string, endpoint: string, organizationId: string, projectId: string, token: string, concurrency = 1, timeout = 60_000) {
-  assertLoopback(endpoint);
-  await run(process.execPath, [join(root, "bin/rendro.mjs"), "push", "--source", source, "--organization", organizationId,
-    "--project", projectId, "--endpoint", endpoint, "--concurrency", String(concurrency)], { cwd: source, env: { ...localEnvironment(), RENDRO_API_KEY: token }, timeout });
-}
-export async function seedWorkspace(input: { site: string; worker: string; secret: string; mail: Mail[]; directory: string; fetch: typeof fetch }): Promise<Seed> {
+export async function seedWorkspace(input: { site: string; worker: string; secret: string; mail: Mail[]; fetch: typeof fetch }): Promise<Seed> {
   const cookies = {} as Record<Role, string>;
   const userIds = {} as Record<Role, string>;
   async function call<T>(role: Role, path: string, data?: unknown): Promise<T> {
@@ -49,17 +42,5 @@ export async function seedWorkspace(input: { site: string; worker: string; secre
     await call(role, "/api/auth/organization/accept-invitation", { invitationId: invitation.id });
   }
   const { project } = await call<{ project: { _id: string } }>("owner", "/api/rendro/projects", { organizationId: organization.id, name: "Worker publication", slug: "smoke" });
-  const { rawKey } = await call<{ rawKey: string }>("owner", "/api/rendro/credentials", { organizationId: organization.id, projectId: project._id,
-    name: "Smoke publisher", scopes: ["docs:read", "docs:write", "publications:read", "publications:write"] });
-  const source = join(input.directory, "smoke-docs");
-  await mkdir(source);
-  await writeFile(join(source, "index.html"), '<!doctype html><html><head><title>Worker publication</title></head><body><h1>Publication from local storage</h1><img src="diagram.svg" alt="Local diagram"><script>document.body.dataset.publisherReady="yes"</script></body></html>');
-  await writeFile(join(source, "diagram.svg"), '<svg xmlns="http://www.w3.org/2000/svg" width="80" height="40"><title>Local diagram</title><rect width="80" height="40" fill="green"/></svg>');
-  await writeFile(join(source, "deleted.svg"), '<svg xmlns="http://www.w3.org/2000/svg"/>');
-  await pushDocuments(source, input.worker, organization.id, project._id, rawKey);
-  const response = await input.fetch(`${input.worker}/api/rendro/publications`, { method: "POST",
-    headers: { Authorization: `Bearer ${rawKey}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ organizationId: organization.id, projectId: project._id, slug: publicationSlug, pathPrefix: "", entryFile: "index.html", trackingMode: "track_active", title: "Worker publication" }) });
-  if (!response.ok) throw new Error(`Seed publication failed (${response.status}): ${await response.text()}`);
   return { organizationId: organization.id, otherOrganizationId: other.id, projectId: project._id, cookies, userIds };
 }

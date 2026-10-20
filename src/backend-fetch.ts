@@ -2,7 +2,7 @@ import { evictRejectedSession } from "@/session-cache";
 import { logger } from "@/logger";
 
 // Static caller names only: URLs, paths, and request data can contain secrets.
-type BackendOperation = "proxyConvexRequest" | "deploymentRequest" | "publicationRequest" | "shareRequest";
+type BackendOperation = "proxyConvexRequest";
 
 /** Never forward or log a backend's diagnostic response. */
 export async function backendFetch(

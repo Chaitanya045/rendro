@@ -4,7 +4,7 @@ type Requester = (path: string, options?: RequestInit) => Promise<unknown>;
 export interface CacheIdentity { userId: string; organizationId: string; origin: string }
 export const MANAGEMENT_STALE_TIME = 30_000;
 export const MANAGEMENT_GC_TIME = 5 * 60_000;
-export interface MutationImpact { organizationId: string; resource: "all" | "projects" | "publications" | "none"; projectId?: string }
+export interface MutationImpact { organizationId: string; resource: "all" | "projects" | "none" }
 
 export function mutationImpact(path: string, options: RequestInit, identity: CacheIdentity): MutationImpact {
   const impact: MutationImpact = { organizationId: identity.organizationId, resource: "all" };
@@ -14,12 +14,8 @@ export function mutationImpact(path: string, options: RequestInit, identity: Cac
     const body: unknown = typeof options.body === "string" ? JSON.parse(options.body) : null;
     const data = body && typeof body === "object" ? body as Record<string, unknown> : {};
     if (data.organizationId && data.organizationId !== identity.organizationId) return impact;
-    if (["/api/rendro/credentials", "/api/rendro/credentials/revoke", "/api/rendro/shares/revoke"].includes(url.pathname)) impact.resource = "none";
+    if (["/api/rendro/credentials", "/api/rendro/credentials/revoke"].includes(url.pathname)) impact.resource = "none";
     else if (url.pathname === "/api/rendro/projects") impact.resource = "projects";
-    else if (["/api/rendro/publications", "/api/rendro/publications/remove"].includes(url.pathname)) {
-      impact.resource = "publications";
-      if (typeof data.projectId === "string" && data.projectId) impact.projectId = data.projectId;
-    }
   } catch { /* Unknown writes invalidate conservatively, never skip them. */ }
   return impact;
 }
@@ -29,8 +25,6 @@ export function mutationImpact(path: string, options: RequestInit, identity: Cac
 const endpoints = new Map([
   ["/api/rendro/projects", false],
   ["/api/rendro/projects/get", true],
-  ["/api/rendro/deployments", true],
-  ["/api/rendro/publications", true],
 ]);
 
 export function managementQueryKey(path: string, identity: CacheIdentity) {
@@ -93,15 +87,13 @@ export function createManagementQueryCache(identity: CacheIdentity, rawRequest: 
   // data stale, but leave an already-running server read and its UI intact.
   function invalidate() { void client.invalidateQueries({ refetchType: "none" }); }
   function applyImpact(impact: MutationImpact) {
-    if (!impact || impact.organizationId !== identity.organizationId || !["all", "projects", "publications", "none"].includes(impact.resource)) return;
+    if (!impact || impact.organizationId !== identity.organizationId || !["all", "projects", "none"].includes(impact.resource)) return;
     if (impact.resource === "none") return;
     // Remove only affected native queries, canceling pre-write reads as well.
     // No custom cache storage, timestamps, eviction loop or generation counter.
     client.removeQueries({ predicate: (query) => {
       const key = query.queryKey;
-      if (impact.resource === "all") return true;
-      if (impact.resource === "projects") return key[3] === "/api/rendro/projects";
-      return key[3] === "/api/rendro/publications" && (!impact.projectId || key[4] === impact.projectId);
+      return impact.resource === "all" || key[3] === "/api/rendro/projects";
     } });
   }
   function invalidateMutation(path: string, options: RequestInit) { const impact = mutationImpact(path, options, identity); applyImpact(impact); return impact; }

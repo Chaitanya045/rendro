@@ -3,26 +3,28 @@ import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { browserStep, bundleBrowserAsset, createBrowserHarness } from "./helpers/browser";
 
 const harness = createBrowserHarness();
-const base = "/organizations/o/projects/p/docs";
-type Node = { name: string; path: string; type: "file" | "folder" };
-const file = (path: string): Node => ({ name: path.split("/").pop()!, path: `org/${path}`, type: "file" });
-const folder = (path: string, slash = true): Node => ({ name: path.replace(/\/$/, "").split("/").pop()!, path: `org/${path}${slash ? "/" : ""}`.replace(/\/\/$/, "/"), type: "folder" });
-const legacyTree: Record<string, Node[]> = {
-  "org/": [folder("guide", false), folder("big"), folder("empty"), file("top.html")],
-  "org/guide/": [folder("guide/deep"), folder("guide/extra", false), file("guide/a.html"), file("guide/b.html")],
-  "org/guide/extra/": [file("guide/extra/d.html")],
-  "org/guide/deep/": [file("guide/deep/c.html")],
-  "org/empty/": [],
-};
-// Scoped viewers read directory pages (`?dir=&cursor=`) from the deployment index.
+// Repository docs (#234): the shell keeps the branch URL; frames and tree pages come from the pinned commit. The tree
+// reads directory pages (`?dir=&cursor=`) from the frame base, which may also be the shell's own URL.
+const base = "/r/acme/handbook";
+// The repository most tests browse, with org/ as its tree root; its pin is opaque to the tree.
+const site = "/r/acme/site";
+const sitePin = "/r/acme/site/@pin";
 type ScopedPage = { children: Array<{ name: string; type: "file" | "folder"; title?: unknown }>; cursor: string | null };
-const pagedBase = "/organizations/o/projects/r/docs";
-// Repository docs (#234): the shell keeps the branch URL; frames and tree pages come from the pinned commit.
+const pagedBase = "/r/acme/paged";
 const repoBase = "/r/octo/docs";
 const pinnedBase = `${repoBase}/@${"c".repeat(40)}`;
 const doc = (name: string) => ({ name, type: "file" as const });
 const dir = (name: string) => ({ name, type: "folder" as const });
 const scopedTree: Record<string, Record<string, ScopedPage[]>> = {
+  [sitePin]: {
+    "": [{ children: [dir("guide"), dir("big"), dir("empty"), doc("top.html")], cursor: null }],
+    "guide/": [{ children: [dir("deep"), dir("extra"), doc("a.html"), doc("b.html")], cursor: null }],
+    "guide/extra/": [{ children: [doc("d.html")], cursor: null }],
+    "guide/deep/": [{ children: [doc("c.html")], cursor: null }],
+    "empty/": [{ children: [], cursor: null }],
+    // The repeated f2 row is dropped.
+    "big/": [{ children: [doc("f1.html"), doc("f2.html")], cursor: "1" }, { children: [doc("f2.html"), doc("f3.html")], cursor: null }],
+  },
   [base]: {
     "": [{ children: [dir("guide"), dir("wide"), dir("zeta"), doc("top.html")], cursor: null }],
     "guide/": [{ children: [dir("deep"), doc("a.html"), doc("b.html")], cursor: null }],
@@ -63,18 +65,19 @@ ${options.frame === false ? "" : `<div class="doc-frames" style="position:relati
 ${options.late ? '<script>addEventListener("load",()=>{const s=document.createElement("script");s.src="/lazy-tree.js";document.body.append(s)})</script>' : '<script src="/lazy-tree.js"></script>'}
 </body></html>`;
 }
+const siteShell: Shell = { base: site, frameBase: sitePin };
 const variants: Record<string, Shell> = {
-  legacy: {}, "legacy-initial": { initial: "org/guide/a.html" }, "legacy-late": { late: true }, "legacy-open": { sandbox: false },
-  "legacy-no-frame": { frame: false }, "legacy-no-matchmedia": { noMatchMedia: true, initial: "org/guide/a.html" },
-  "empty-org": { org: "" }, "empty-org-base": { org: "", base }, "empty-org-initial": { org: "", initial: "x/y.html" }, "no-org-attr": { orgAttr: false, initial: "x/y.html" }, "legacy-empty": { org: "void" }, "no-tree": { tree: false }, "no-host": { host: false },
-  base: { base }, "base-paged": { base: pagedBase }, repo: { org: "docs", base: repoBase, frameBase: pinnedBase }, "base-empty-project": { base: "/organizations/o/projects/q/docs" }, "base-empty-other": { base: "/other/docs" },
+  site: siteShell, "site-initial": { ...siteShell, initial: "org/guide/a.html" }, "site-late": { ...siteShell, late: true }, "site-open": { ...siteShell, sandbox: false },
+  "site-no-frame": { ...siteShell, frame: false }, "site-no-matchmedia": { ...siteShell, noMatchMedia: true, initial: "org/guide/a.html" },
+  "empty-org": { ...siteShell, org: "" }, "empty-org-initial": { ...siteShell, org: "", initial: "x/y.html" }, "no-org-attr": { ...siteShell, orgAttr: false, initial: "x/y.html" }, "no-tree": { ...siteShell, tree: false }, "no-host": { host: false },
+  base: { base, frameBase: base }, "base-paged": { base: pagedBase, frameBase: pagedBase }, repo: { org: "docs", base: repoBase, frameBase: pinnedBase }, "base-empty": { base: "/r/acme/empty", frameBase: "/r/acme/empty" },
   "repo-search": { org: "docs", base: repoBase, frameBase: pinnedBase, search: true },
   "search-no-form": { org: "docs", base: repoBase, frameBase: pinnedBase, search: "form" },
   "search-no-input": { org: "docs", base: repoBase, frameBase: pinnedBase, search: "input" },
   "search-no-results": { org: "docs", base: repoBase, frameBase: pinnedBase, search: "results" },
   "search-no-status": { org: "docs", base: repoBase, frameBase: pinnedBase, search: "status" },
   "search-no-clear": { org: "docs", base: repoBase, frameBase: pinnedBase, search: "clear" },
-  "search-no-contexts": { search: true }, "search-no-tree": { org: "docs", base: repoBase, frameBase: pinnedBase, search: true, tree: false },
+  "search-no-contexts": { ...siteShell, org: "", search: true }, "search-no-tree": { org: "docs", base: repoBase, frameBase: pinnedBase, search: true, tree: false },
 };
 /** The repository search control, mirroring renderRepoSearch()'s markup (src/routes/app.ts); `omit` removes one element. */
 function searchField(omit: string | null = null): string {
@@ -110,15 +113,6 @@ beforeAll(async () => {
     const url = new URL(request.url!, harness.origin);
     requests.push(url.pathname + url.search);
     const json = (body: unknown, status = 200) => { response.writeHead(status, { "Content-Type": "application/json" }); response.end(JSON.stringify(body)); };
-    if (url.pathname === "/api/tree/org") {
-      const prefix = url.searchParams.get("prefix")!, after = url.searchParams.get("startAfter");
-      if (prefix === "org/big/") {
-        return json(after ? { children: [file("big/f2.html"), file("big/f3.html")], isTruncated: false }
-          : { children: [file("big/f1.html"), file("big/f2.html")], isTruncated: true, nextStartAfter: "org/big/f2.html" });
-      }
-      return json({ children: legacyTree[prefix] ?? [], isTruncated: false });
-    }
-    if (url.pathname === "/api/tree/void") return json({ children: [], isTruncated: false });
     if (url.pathname === `${pinnedBase}/search`) {
       const q = url.searchParams.get("q") ?? "";
       if (q === "boom") { response.writeHead(500, { "Content-Type": "application/json" }); return void response.end("{}"); }
@@ -157,7 +151,7 @@ beforeAll(async () => {
     }
     if (url.pathname.includes("/files/")) { response.setHeader("Content-Type", "text/html"); return void response.end(docPage(url.pathname.endsWith(".md"))); }
     response.setHeader("Content-Type", "text/html");
-    const name = url.pathname.startsWith("/lt/") ? url.pathname.slice(4) : url.pathname.startsWith("/docs") ? "legacy" : url.pathname === base ? "base" : url.pathname === pagedBase ? "base-paged" : url.pathname === repoBase ? "repo" : "";
+    const name = url.pathname.startsWith("/lt/") ? url.pathname.slice(4) : url.pathname === site ? "site" : url.pathname === base ? "base" : url.pathname === pagedBase ? "base-paged" : url.pathname === repoBase ? "repo" : "";
     response.end(shell(variants[name] ?? {}));
   }, assets);
 });
@@ -197,9 +191,9 @@ async function indicatorAt(tab: Page, path: string) {
   }, path)).toBe(true);
 }
 
-describe("lazy tree folders (legacy API)", () => {
+describe("lazy tree folders", () => {
   it("renders folders first, expands them lazily and keeps their state on collapse and re-expand", async () => {
-    const tab = await open("/lt/legacy");
+    const tab = await open("/lt/site");
     await item(tab, "org/top.html").waitFor();
     expect(await tab.locator("#tree-container > .tree-folder > .tree-item .tree-label, #tree-container > .tree-item .tree-label").allTextContents()).toEqual(["guide", "big", "empty", "top"]);
     expect(await tab.locator("#tree-container").getAttribute("aria-busy")).toBeNull();
@@ -221,11 +215,11 @@ describe("lazy tree folders (legacy API)", () => {
     expect(await collapseOf(tab, "org/guide/").getAttribute("inert")).toBe("");
     expect(await collapseOf(tab, "org/guide/deep/").getAttribute("inert")).toBeNull();
     expect(await guide.locator(".folder-icon").textContent()).toBe("folder");
-    const before = requests.filter(path => path.startsWith("/api/tree/")).length;
+    const before = requests.filter(path => path.startsWith(`${sitePin}/tree`)).length;
     await guide.click();
     expect(await guide.getAttribute("aria-expanded")).toBe("true");
     expect(await collapseOf(tab, "org/guide/").getAttribute("inert")).toBeNull();
-    expect(requests.filter(path => path.startsWith("/api/tree/")).length).toBe(before);
+    expect(requests.filter(path => path.startsWith(`${sitePin}/tree`)).length).toBe(before);
     // A folder with no children still opens, instead of staying busy.
     await folderItem(tab, "org/empty/").click();
     await tab.waitForFunction(() => document.querySelector('.tree-folder[data-path="org/empty/"]')!.classList.contains("loaded"));
@@ -233,25 +227,25 @@ describe("lazy tree folders (legacy API)", () => {
   });
 
   it("ignores repeated clicks while a folder is loading", async () => {
-    const tab = await open("/lt/legacy");
+    const tab = await open("/lt/site");
     await item(tab, "org/top.html").waitFor();
-    const hold = await held(tab, "**/api/tree/org?prefix=org%2Fguide%2F*");
+    const hold = await held(tab, `**${sitePin}/tree?dir=guide%2F`);
     await folderItem(tab, "org/guide/").click();
     await hold.seen;
     expect(await tab.locator('.tree-folder[data-path="org/guide/"]').getAttribute("aria-busy")).toBe("true");
     await folderItem(tab, "org/guide/").click();
     await hold.release();
     await item(tab, "org/guide/a.html").waitFor();
-    expect(requests.filter(path => path.includes("prefix=org%2Fguide%2F&"))).toHaveLength(1);
+    expect(requests.filter(path => path.endsWith("?dir=guide%2F"))).toHaveLength(1);
     // Only the first click's expansion remains: the second was ignored rather than collapsing it.
     expect(await tab.locator('.tree-folder[data-path="org/guide/"]').getAttribute("class")).toContain("open");
   });
 
   it("shows a retryable folder error and loads the folder after retry", async () => {
-    const tab = await open("/lt/legacy");
+    const tab = await open("/lt/site");
     await item(tab, "org/top.html").waitFor();
     let fail = true;
-    await tab.route("**/api/tree/org?prefix=org%2Fguide%2F*", route => fail ? route.fulfill({ status: 500, body: "{}" }) : route.continue());
+    await tab.route(`**${sitePin}/tree?dir=guide%2F`, route => fail ? route.fulfill({ status: 500, body: "{}" }) : route.continue());
     await folderItem(tab, "org/guide/").click();
     const error = tab.locator('.tree-folder[data-path="org/guide/"] .tree-error');
     await error.waitFor();
@@ -268,14 +262,14 @@ describe("lazy tree folders (legacy API)", () => {
   });
 
   it("pages a folder, drops duplicate rows and retries a failed page", async () => {
-    const tab = await open("/lt/legacy");
+    const tab = await open("/lt/site");
     await item(tab, "org/top.html").waitFor();
     await folderItem(tab, "org/big/").click();
     const more = tab.locator('.tree-folder[data-path="org/big/"] .load-more-btn');
     await more.waitFor();
     expect(await more.textContent()).toBe("Load more...");
     let fail = true;
-    await tab.route("**/api/tree/org?prefix=org%2Fbig%2F&limit=50&startAfter=*", route => fail ? route.fulfill({ status: 503, body: "{}" }) : route.continue());
+    await tab.route(`**${sitePin}/tree?dir=big%2F&cursor=*`, route => fail ? route.fulfill({ status: 503, body: "{}" }) : route.continue());
     await more.click();
     await tab.waitForFunction(() => document.querySelector('.tree-folder[data-path="org/big/"] .load-more-btn')!.textContent === "Retry");
     expect(await more.isDisabled()).toBe(false);
@@ -285,16 +279,16 @@ describe("lazy tree folders (legacy API)", () => {
     await item(tab, "org/big/f3.html").waitFor();
     expect(await tab.locator('.tree-folder[data-path="org/big/"] .tree-link').allTextContents()).toEqual(["f1", "f2", "f3"]);
     expect(await tab.locator('.tree-folder[data-path="org/big/"] .tree-load-more').count()).toBe(0);
-    expect(requests.some(path => path.includes("startAfter=org%2Fbig%2Ff2.html"))).toBe(true);
+    expect(requests.some(path => path.endsWith("?dir=big%2F&cursor=1"))).toBe(true);
   });
 
   it("leaves the tree alone when a pending page's button was replaced", async () => {
-    const tab = await open("/lt/legacy");
+    const tab = await open("/lt/site");
     await item(tab, "org/top.html").waitFor();
     await folderItem(tab, "org/big/").click();
     const more = tab.locator('.tree-folder[data-path="org/big/"] .load-more-btn');
     await more.waitFor();
-    const hold = await held(tab, "**/api/tree/org?prefix=org%2Fbig%2F&limit=50&startAfter=*", 500);
+    const hold = await held(tab, `**${sitePin}/tree?dir=big%2F&cursor=*`, 500);
     await more.click();
     await hold.seen;
     expect(await more.textContent()).toBe("Loading…");
@@ -307,7 +301,7 @@ describe("lazy tree folders (legacy API)", () => {
   });
 
   it("opens and closes folders from the keyboard and ignores other keys", async () => {
-    const tab = await open("/lt/legacy");
+    const tab = await open("/lt/site");
     await item(tab, "org/top.html").waitFor();
     const guide = folderItem(tab, "org/guide/");
     await guide.focus();
@@ -330,7 +324,7 @@ describe("lazy tree folders (legacy API)", () => {
   });
 
   it("ignores clicks that are not on folder or document rows", async () => {
-    const tab = await open("/lt/legacy");
+    const tab = await open("/lt/site");
     await item(tab, "org/top.html").waitFor();
     await tab.evaluate(() => {
       const tree = document.getElementById("tree-container")!;
@@ -355,7 +349,7 @@ describe("lazy tree folders (legacy API)", () => {
     expect(await tab.locator("#more").isDisabled()).toBe(false);
     expect(await tab.locator("#orphan-item").evaluate(el => el.parentElement!.classList.contains("open"))).toBe(false);
     expect(await pushes(tab)).toEqual([]);
-    expect(requests.filter(path => path.startsWith("/api/tree/"))).toHaveLength(1);
+    expect(requests.filter(path => path.startsWith(`${sitePin}/tree`))).toHaveLength(1);
   });
 });
 
@@ -366,12 +360,12 @@ const activePath = (tab: Page) => tab.evaluate(() => document.querySelector(".tr
 
 describe("lazy tree document loading", () => {
   it("selects a document, announces loading, then settles after the minimum display time", async () => {
-    const tab = await open("/lt/legacy", { clock: true });
+    const tab = await open("/lt/site", { clock: true });
     await item(tab, "org/top.html").waitFor();
     await folderItem(tab, "org/guide/").click();
     await item(tab, "org/guide/a.html").waitFor();
-    const hold = await held(tab, "**/legacy-view/org/files/guide/a.html");
-    await tab.locator('a.tree-link[href="/legacy-view/org/files/guide/a.html"]').click();
+    const hold = await held(tab, "**/r/acme/site/@pin/files/guide/a.html");
+    await tab.locator('a.tree-link[href="/r/acme/site/@pin/files/guide/a.html"]').click();
     await hold.seen;
     expect(await tab.locator("html").getAttribute("class")).toContain("doc-loading");
     expect(await status(tab).textContent()).toBe("Loading document");
@@ -381,7 +375,7 @@ describe("lazy tree document loading", () => {
     expect(await tab.locator("#main-placeholder").isHidden()).toBe(true);
     expect(await activePath(tab)).toBe("org/guide/a.html");
     await indicatorAt(tab, "org/guide/a.html");
-    expect(await location(tab)).toBe("/docs/org/guide/a.html");
+    expect(await location(tab)).toBe("/r/acme/site?doc=guide%2Fa.html");
     expect(await tab.evaluate((): unknown => history.state)).toEqual({ docPath: "org/guide/a.html" });
     await hold.release();
     await tab.waitForFunction(() => !document.getElementById("content-frame")!.hasAttribute("aria-busy"));
@@ -395,28 +389,28 @@ describe("lazy tree document loading", () => {
   });
 
   it("clears the loader immediately when a slow load has already outlasted the minimum display time", async () => {
-    const tab = await open("/lt/legacy", { clock: true });
+    const tab = await open("/lt/site", { clock: true });
     await item(tab, "org/top.html").waitFor();
     await folderItem(tab, "org/guide/").click();
     await item(tab, "org/guide/a.html").waitFor();
-    const slow = await held(tab, "**/legacy-view/org/files/guide/b.html");
-    await tab.locator('a.tree-link[href="/legacy-view/org/files/guide/b.html"]').click();
+    const slow = await held(tab, "**/r/acme/site/@pin/files/guide/b.html");
+    await tab.locator('a.tree-link[href="/r/acme/site/@pin/files/guide/b.html"]').click();
     await slow.seen;
     await tab.clock.runFor(600);
     await slow.release();
     await tab.waitForFunction(() => !document.documentElement.classList.contains("doc-loading"));
     expect(await activePath(tab)).toBe("org/guide/b.html");
-    expect(await location(tab)).toBe("/docs/org/guide/b.html");
+    expect(await location(tab)).toBe("/r/acme/site?doc=guide%2Fb.html");
     expect(pageErrors(tab)).toEqual([]);
   });
 
   it.each(["timeout", "error event"])("reports a failed document load after a %s and recovers when it is selected again", async failure => {
-    const tab = await open("/lt/legacy", { clock: true });
+    const tab = await open("/lt/site", { clock: true });
     await item(tab, "org/top.html").waitFor();
     await folderItem(tab, "org/guide/").click();
     await item(tab, "org/guide/a.html").waitFor();
-    const hold = await held(tab, "**/legacy-view/org/files/guide/a.html");
-    await tab.locator('a.tree-link[href="/legacy-view/org/files/guide/a.html"]').click();
+    const hold = await held(tab, "**/r/acme/site/@pin/files/guide/a.html");
+    await tab.locator('a.tree-link[href="/r/acme/site/@pin/files/guide/a.html"]').click();
     await hold.seen;
     if (failure === "timeout") await tab.clock.runFor(15_000);
     else await tab.evaluate(() => document.getElementById("content-frame")!.dispatchEvent(new Event("error")));
@@ -428,8 +422,8 @@ describe("lazy tree document loading", () => {
     expect(await tab.locator("#content-frame").getAttribute("aria-busy")).toBeNull();
     // The failed document's request stays held until the retry is asserted: releasing it
     // earlier lets its late load event race the retry's handlers and clear the announcement.
-    const next = await held(tab, "**/legacy-view/org/files/guide/b.html");
-    await tab.locator('a.tree-link[href="/legacy-view/org/files/guide/b.html"]').click();
+    const next = await held(tab, "**/r/acme/site/@pin/files/guide/b.html");
+    await tab.locator('a.tree-link[href="/r/acme/site/@pin/files/guide/b.html"]').click();
     await next.seen;
     expect(await tab.locator("html").getAttribute("class")).not.toContain("doc-loading-error");
     expect(await status(tab).getAttribute("aria-live")).toBe("polite");
@@ -440,9 +434,9 @@ describe("lazy tree document loading", () => {
   });
 
   it("lets a late load error replace the pending loader and keeps it from being cleared", async () => {
-    const tab = await open("/lt/legacy", { clock: true });
+    const tab = await open("/lt/site", { clock: true });
     await item(tab, "org/top.html").waitFor();
-    await tab.locator('a.tree-link[href="/legacy-view/org/files/top.html"]').click();
+    await tab.locator('a.tree-link[href="/r/acme/site/@pin/files/top.html"]').click();
     await tab.waitForFunction(() => !document.getElementById("content-frame")!.hasAttribute("aria-busy") && !!document.getElementById("content-frame")!.getAttribute("src"));
     expect(await tab.locator("html").getAttribute("class")).toContain("doc-loading");
     await tab.evaluate(() => document.getElementById("content-frame")!.dispatchEvent(new Event("error")));
@@ -453,10 +447,10 @@ describe("lazy tree document loading", () => {
   });
 
   it("keeps modified-click links native and takes over plain clicks", async () => {
-    const tab = await open("/lt/legacy");
+    const tab = await open("/lt/site");
     await item(tab, "org/top.html").waitFor();
     const outcome = await tab.evaluate(() => {
-      const link = document.querySelector<HTMLAnchorElement>('a.tree-link[href="/legacy-view/org/files/top.html"]')!;
+      const link = document.querySelector<HTMLAnchorElement>('a.tree-link[href="/r/acme/site/@pin/files/top.html"]')!;
       const seen: boolean[] = [];
       document.addEventListener("click", event => { seen.push(event.defaultPrevented); event.preventDefault(); }, { once: false });
       link.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, ctrlKey: true }));
@@ -465,44 +459,44 @@ describe("lazy tree document loading", () => {
       return seen;
     });
     expect(outcome).toEqual([false, false, true]);
-    expect(await frameSrc(tab)).toBe("/legacy-view/org/files/top.html");
+    expect(await frameSrc(tab)).toBe("/r/acme/site/@pin/files/top.html");
   });
 
   it("selects documents without a content frame", async () => {
-    const tab = await open("/lt/legacy-no-frame");
+    const tab = await open("/lt/site-no-frame");
     await item(tab, "org/top.html").waitFor();
-    await tab.locator('a.tree-link[href="/legacy-view/org/files/top.html"]').click();
-    expect(await location(tab)).toBe("/docs/org/top.html");
+    await tab.locator('a.tree-link[href="/r/acme/site/@pin/files/top.html"]').click();
+    expect(await location(tab)).toBe("/r/acme/site?doc=top.html");
     expect(await activePath(tab)).toBe("org/top.html");
     expect(await tab.locator("#main-placeholder").isHidden()).toBe(true);
     await tab.evaluate(() => { window.location.hash = "#nowhere"; });
     await tab.waitForFunction(() => window.location.hash === "#nowhere");
     await tab.evaluate(() => window.postMessage({ type: "doc-fragment", path: "top.html", fragment: "#late" }, "*"));
     await tab.evaluate(() => new Promise<void>(resolve => setTimeout(resolve, 0)));
-    expect(await location(tab)).toBe("/docs/org/top.html#nowhere");
+    expect(await location(tab)).toBe("/r/acme/site?doc=top.html#nowhere");
     expect(pageErrors(tab)).toEqual([]);
   });
 });
 
 describe("lazy tree deep links and history", () => {
   it("opens a deep link with its query and fragment, revealing and marking the document", async () => {
-    const tab = await open("/docs/org/guide/a.html?docQuery=%3Fv%3D1#details");
+    const tab = await open("/r/acme/site?doc=guide%2Fa.html&docQuery=%3Fv%3D1#details");
     await item(tab, "org/guide/a.html").waitFor();
     await tab.waitForFunction(() => document.querySelector('.tree-item[data-path="org/guide/a.html"]')!.classList.contains("active"));
-    expect(await frameSrc(tab)).toBe("/legacy-view/org/files/guide/a.html?v=1");
+    expect(await frameSrc(tab)).toBe("/r/acme/site/@pin/files/guide/a.html?v=1");
     expect(await folderItem(tab, "org/guide/").getAttribute("aria-expanded")).toBe("true");
     await indicatorAt(tab, "org/guide/a.html");
     expect(await tab.evaluate((): unknown => history.state)).toEqual({ docPath: "org/guide/a.html" });
-    expect(await location(tab)).toBe("/docs/org/guide/a.html?docQuery=%3Fv%3D1#details");
+    expect(await location(tab)).toBe("/r/acme/site?doc=guide%2Fa.html&docQuery=%3Fv%3D1#details");
     await tab.waitForFunction(() => !document.getElementById("content-frame")!.hasAttribute("aria-busy"));
     expect(await receivedByFrame(tab)).toContainEqual({ type: "doc-fragment", path: "guide/a.html", fragment: "#details" });
   });
 
   it.each([
-    ["/docs/org/gu%20ide/a%20b.html", "/legacy-view/org/files/gu%20ide/a%20b.html"],
-    ["/docs/org/guide/a.html?docQuery=nonsense", "/legacy-view/org/files/guide/a.html"],
-    ["/docs/org/guide/a.html?docQuery=%3Fx%23y", "/legacy-view/org/files/guide/a.html"],
-    ["/lt/legacy-initial", "/legacy-view/org/files/guide/a.html"],
+    ["/r/acme/site?doc=gu+ide%2Fa+b.html", "/r/acme/site/@pin/files/gu%20ide/a%20b.html"],
+    ["/r/acme/site?doc=guide%2Fa.html&docQuery=nonsense", "/r/acme/site/@pin/files/guide/a.html"],
+    ["/r/acme/site?doc=guide%2Fa.html&docQuery=%3Fx%23y", "/r/acme/site/@pin/files/guide/a.html"],
+    ["/lt/site-initial", "/r/acme/site/@pin/files/guide/a.html"],
   ])("loads %s into the right frame URL", async (path, expected) => {
     const tab = await open(path);
     await tab.waitForFunction(() => !!document.getElementById("content-frame")!.getAttribute("src"));
@@ -510,7 +504,7 @@ describe("lazy tree deep links and history", () => {
     expect(await tab.locator("#main-placeholder").isHidden()).toBe(true);
   });
 
-  it.each(["/docs/org", "/docs/other/x.html", "/lt/legacy"])("shows no document for %s", async path => {
+  it.each(["/r/acme/site", "/lt/site"])("shows no document for %s", async path => {
     const tab = await open(path);
     await item(tab, "org/top.html").waitFor();
     expect(await frameSrc(tab)).toBeNull();
@@ -518,69 +512,52 @@ describe("lazy tree deep links and history", () => {
     expect(await activePath(tab)).toBeNull();
   });
 
-  it("converts a legacy ?doc parameter into a canonical document URL and drops dev parameters", async () => {
-    const tab = await open("/lt/legacy?doc=org/guide/b.html&dev_user=someone");
-    await tab.waitForFunction(() => !!document.getElementById("content-frame")!.getAttribute("src"));
-    expect(await location(tab)).toBe("/docs/org/guide/b.html");
-    expect(await frameSrc(tab)).toBe("/legacy-view/org/files/guide/b.html");
-    expect(await tab.evaluate((): unknown => history.state)).toEqual({ docPath: "org/guide/b.html" });
-    const plain = await open("/lt/legacy?dev_user=someone&keep=1");
-    await item(plain, "org/top.html").waitFor();
-    expect(await location(plain)).toBe("/lt/legacy?keep=1");
-    expect(await frameSrc(plain)).toBeNull();
-  });
-
   it("restores documents on Back/Forward and keeps the last document for an entry without one", async () => {
-    const tab = await open("/docs/org/guide/a.html");
+    const tab = await open("/r/acme/site?doc=guide%2Fa.html");
     await tab.waitForFunction(() => document.querySelector(".tree-item.active")?.getAttribute("data-path") === "org/guide/a.html");
-    await tab.locator('a.tree-link[href="/legacy-view/org/files/guide/b.html"]').click();
-    expect(await location(tab)).toBe("/docs/org/guide/b.html");
-    expect(await frameSrc(tab)).toBe("/legacy-view/org/files/guide/b.html");
+    await tab.locator('a.tree-link[href="/r/acme/site/@pin/files/guide/b.html"]').click();
+    expect(await location(tab)).toBe("/r/acme/site?doc=guide%2Fb.html");
+    expect(await frameSrc(tab)).toBe("/r/acme/site/@pin/files/guide/b.html");
     await tab.goBack();
     await tab.waitForFunction(() => document.getElementById("content-frame")!.getAttribute("src")!.endsWith("guide/a.html"));
-    expect(await location(tab)).toBe("/docs/org/guide/a.html");
+    expect(await location(tab)).toBe("/r/acme/site?doc=guide%2Fa.html");
     expect(await activePath(tab)).toBe("org/guide/a.html");
     await indicatorAt(tab, "org/guide/a.html");
     await tab.goForward();
     await tab.waitForFunction(() => document.getElementById("content-frame")!.getAttribute("src")!.endsWith("guide/b.html"));
     expect(await activePath(tab)).toBe("org/guide/b.html");
     // An entry without a document does not change what is displayed.
-    await tab.evaluate(() => history.pushState({}, "", "/lt/legacy?plain=1"));
+    await tab.evaluate(() => history.pushState({}, "", "/lt/site?plain=1"));
     await tab.goBack();
     await tab.goForward();
     await tab.waitForFunction(() => window.location.search === "?plain=1");
-    expect(await frameSrc(tab)).toBe("/legacy-view/org/files/guide/b.html");
+    expect(await frameSrc(tab)).toBe("/r/acme/site/@pin/files/guide/b.html");
     expect(await activePath(tab)).toBe("org/guide/b.html");
   });
 
-  it("never points the frame outside the organization for a foreign history entry", async () => {
-    const tab = await open("/lt/legacy");
+  it("never points the frame outside the repository for a foreign history entry", async () => {
+    const tab = await open("/lt/site");
     await item(tab, "org/top.html").waitFor();
     await tab.evaluate(() => {
-      history.pushState({ docPath: "foreign/secret.html" }, "", "/lt/legacy?entry=1");
-      history.pushState({}, "", "/lt/legacy?entry=2");
+      history.pushState({ docPath: "foreign/secret.html" }, "", "/lt/site?entry=1");
+      history.pushState({}, "", "/lt/site?entry=2");
     });
     await tab.goBack();
-    await tab.waitForFunction(() => document.getElementById("content-frame")!.getAttribute("src") === "/legacy-view/org/files/");
+    await tab.waitForFunction(() => document.getElementById("content-frame")!.getAttribute("src") === "/r/acme/site/@pin/files/");
     expect(requests.some(path => path.includes("foreign"))).toBe(false);
     expect(await activePath(tab)).toBeNull();
   });
 
-  it("is inert when the shell names no organization", async () => {
-    const tab = await open("/lt/empty-org");
+  it("is inert when the shell names no tree root", async () => {
+    const tab = await open("/lt/empty-org?doc=x/y.html");
     await tab.waitForFunction(() => document.querySelector("#tree-container")!.getAttribute("aria-busy") === null);
-    expect(requests.filter(path => path.startsWith("/api/tree/"))).toEqual([]);
-    expect(await tab.locator("#tree-container").innerHTML()).toBe("");
-    const scoped = await open("/lt/empty-org-base?doc=x/y.html");
-    await scoped.waitForFunction(() => window.location.search !== "?doc=x/y.html");
     expect(requests.filter(path => path.includes("/tree"))).toEqual([]);
-    expect(await scoped.locator("#tree-container").innerHTML()).toBe("");
+    expect(await tab.locator("#tree-container").innerHTML()).toBe("");
     expect(pageErrors(tab)).toEqual([]);
-    expect(pageErrors(scoped)).toEqual([]);
   });
 
   it("starts after load, and does nothing without a tree container or host", async () => {
-    const late = await open("/lt/legacy-late");
+    const late = await open("/lt/site-late");
     await item(late, "org/top.html").waitFor();
     for (const name of ["no-tree", "no-host"]) {
       requests.length = 0;
@@ -600,7 +577,7 @@ const nextNavigation = (tab: Page, payload: unknown) => docFrame(tab).evaluate(m
 
 describe("lazy tree messages from the document frame", () => {
   it("applies valid fragment reports and ignores forged, stale and malformed ones", async () => {
-    const tab = await open("/docs/org/guide/a.html");
+    const tab = await open("/r/acme/site?doc=guide%2Fa.html");
     await settled(tab);
     const initial = (await pushes(tab)).length;
     for (const payload of [
@@ -613,12 +590,12 @@ describe("lazy tree messages from the document frame", () => {
     await tab.evaluate(() => window.postMessage({ type: "doc-fragment", path: "guide/a.html", fragment: "#self" }, "*"));
     await post(tab, { type: "doc-fragment", path: "guide/a.html", fragment: "#details" });
     await tab.waitForFunction(() => window.location.hash === "#details");
-    expect((await pushes(tab)).slice(initial)).toEqual(["replaceState /docs/org/guide/a.html#details"]);
-    expect(await location(tab)).toBe("/docs/org/guide/a.html#details");
+    expect((await pushes(tab)).slice(initial)).toEqual(["replaceState /r/acme/site?doc=guide%2Fa.html#details"]);
+    expect(await location(tab)).toBe("/r/acme/site?doc=guide%2Fa.html#details");
   });
 
   it("forwards the shell's own fragment changes to the frame", async () => {
-    const tab = await open("/docs/org/guide/a.html");
+    const tab = await open("/r/acme/site?doc=guide%2Fa.html");
     await settled(tab);
     await tab.evaluate(() => { window.location.hash = "#shell"; });
     await tab.waitForFunction(() => (document.querySelector("#content-frame") as HTMLIFrameElement).src.length > 0);
@@ -626,7 +603,7 @@ describe("lazy tree messages from the document frame", () => {
   });
 
   it("does not forward a fragment change when no document is open", async () => {
-    const tab = await open("/lt/legacy");
+    const tab = await open("/lt/site");
     await item(tab, "org/top.html").waitFor();
     const reads = await tab.evaluate(() => new Promise<number>(resolve => {
       const frame = document.getElementById("content-frame") as HTMLIFrameElement;
@@ -639,7 +616,7 @@ describe("lazy tree messages from the document frame", () => {
   });
 
   it("acknowledges loaded documents without navigating or fetching", async () => {
-    const tab = await open("/docs/org/guide/a.html");
+    const tab = await open("/r/acme/site?doc=guide%2Fa.html");
     await settled(tab);
     const before = requests.length;
     for (const path of ["guide/a.html", "org/guide/a.html", "org/guide/b.html", "../escape.html", "guide//x.html", "other.html"]) {
@@ -648,38 +625,38 @@ describe("lazy tree messages from the document frame", () => {
     await post(tab, { type: "doc-fragment", path: "guide/a.html", fragment: "#after" });
     await tab.waitForFunction(() => window.location.hash === "#after");
     expect(requests.length).toBe(before);
-    expect(await frameSrc(tab)).toBe("/legacy-view/org/files/guide/a.html");
-    expect(await location(tab)).toBe("/docs/org/guide/a.html#after");
+    expect(await frameSrc(tab)).toBe("/r/acme/site/@pin/files/guide/a.html");
+    expect(await location(tab)).toBe("/r/acme/site?doc=guide%2Fa.html#after");
   });
 
   it("follows a link the reader clicks inside the document and keeps its query and fragment", async () => {
-    const tab = await open("/docs/org/guide/a.html");
+    const tab = await open("/r/acme/site?doc=guide%2Fa.html");
     await settled(tab);
     const length = await tab.evaluate(() => history.length);
     await frameLink(tab).click();
-    await tab.waitForFunction(() => window.location.pathname === "/docs/org/guide/b.html");
-    expect(await location(tab)).toBe("/docs/org/guide/b.html?docQuery=%3Fv%3D2#sec");
-    expect(await frameSrc(tab)).toBe("/legacy-view/org/files/guide/b.html?v=2");
+    await tab.waitForFunction(() => new URLSearchParams(window.location.search).get("doc") === "guide/b.html");
+    expect(await location(tab)).toBe("/r/acme/site?doc=guide%2Fb.html&docQuery=%3Fv%3D2#sec");
+    expect(await frameSrc(tab)).toBe("/r/acme/site/@pin/files/guide/b.html?v=2");
     expect(await activePath(tab)).toBe("org/guide/b.html");
     expect(await tab.evaluate(() => history.length)).toBe(length + 1);
     expect(await tab.locator("#document-navigation-notice").count()).toBe(0);
   });
 
   it("ignores navigation to the current document, and defaults missing optional fields otherwise", async () => {
-    const tab = await open("/docs/org/guide/a.html");
+    const tab = await open("/r/acme/site?doc=guide%2Fa.html");
     await settled(tab);
     const initial = (await pushes(tab)).length;
     await nextNavigation(tab, { type: "doc-navigate", path: "guide/a.html" });
     await frameLink(tab).click();
     await post(tab, { type: "doc-fragment", path: "guide/a.html", fragment: "#sentinel" });
     await tab.waitForFunction(() => window.location.hash === "#sentinel");
-    expect((await pushes(tab)).slice(initial)).toEqual(["replaceState /docs/org/guide/a.html#sentinel"]);
+    expect((await pushes(tab)).slice(initial)).toEqual(["replaceState /r/acme/site?doc=guide%2Fa.html#sentinel"]);
     expect(await tab.locator("#document-navigation-notice").count()).toBe(0);
     await nextNavigation(tab, { type: "doc-navigate", path: "guide/deep/c.html" });
     await frameLink(tab).click();
-    await tab.waitForFunction(() => window.location.pathname === "/docs/org/guide/deep/c.html");
-    expect(await location(tab)).toBe("/docs/org/guide/deep/c.html");
-    expect(await frameSrc(tab)).toBe("/legacy-view/org/files/guide/deep/c.html");
+    await tab.waitForFunction(() => new URLSearchParams(window.location.search).get("doc") === "guide/deep/c.html");
+    expect(await location(tab)).toBe("/r/acme/site?doc=guide%2Fdeep%2Fc.html");
+    expect(await frameSrc(tab)).toBe("/r/acme/site/@pin/files/guide/deep/c.html");
   });
 
   it.each([
@@ -691,20 +668,20 @@ describe("lazy tree messages from the document frame", () => {
     ["a query containing a fragment", { path: "guide/b.html", search: "?a#b" }],
     ["a query without ?", { path: "guide/b.html", search: "a=1" }],
   ])("drops navigation with %s", async (_name, fields) => {
-    const tab = await open("/docs/org/guide/a.html");
+    const tab = await open("/r/acme/site?doc=guide%2Fa.html");
     await settled(tab);
     const initial = (await pushes(tab)).length;
     await nextNavigation(tab, { type: "doc-navigate", ...fields });
     await frameLink(tab).click();
     await post(tab, { type: "doc-fragment", path: "guide/a.html", fragment: "#sentinel" });
     await tab.waitForFunction(() => window.location.hash === "#sentinel");
-    expect((await pushes(tab)).slice(initial)).toEqual(["replaceState /docs/org/guide/a.html#sentinel"]);
+    expect((await pushes(tab)).slice(initial)).toEqual(["replaceState /r/acme/site?doc=guide%2Fa.html#sentinel"]);
     expect(await tab.locator("#document-navigation-notice").count()).toBe(0);
-    expect(await frameSrc(tab)).toBe("/legacy-view/org/files/guide/a.html");
+    expect(await frameSrc(tab)).toBe("/r/acme/site/@pin/files/guide/a.html");
   });
 
   it("ignores messages when the content frame stops being sandboxed", async () => {
-    const tab = await open("/docs/org/guide/a.html");
+    const tab = await open("/r/acme/site?doc=guide%2Fa.html");
     await settled(tab);
     await tab.evaluate(() => document.getElementById("content-frame")!.removeAttribute("sandbox"));
     const initial = (await pushes(tab)).length;
@@ -712,14 +689,14 @@ describe("lazy tree messages from the document frame", () => {
     await post(tab, { type: "doc-fragment", path: "guide/a.html", fragment: "#ignored" });
     await tab.evaluate(() => new Promise<void>(resolve => setTimeout(resolve, 150)));
     expect((await pushes(tab)).length).toBe(initial);
-    expect(await location(tab)).toBe("/docs/org/guide/a.html");
+    expect(await location(tab)).toBe("/r/acme/site?doc=guide%2Fa.html");
     expect(await tab.locator("#document-navigation-notice").count()).toBe(0);
   });
 
   it("accepts same-origin messages from a frame that is not sandboxed", async () => {
-    const tab = await open("/lt/legacy-open?x=1");
+    const tab = await open("/lt/site-open?x=1");
     await item(tab, "org/top.html").waitFor();
-    await tab.locator('a.tree-link[href="/legacy-view/org/files/top.html"]').click();
+    await tab.locator('a.tree-link[href="/r/acme/site/@pin/files/top.html"]').click();
     await settled(tab);
     await post(tab, { type: "doc-fragment", path: "top.html", fragment: "#from-open-frame" });
     await tab.waitForFunction(() => window.location.hash === "#from-open-frame");
@@ -733,7 +710,7 @@ describe("lazy tree navigation confirmation", () => {
   const reserve = (tab: Page) => tab.locator(".sidebar").click({ position: { x: 200, y: 300 } });
 
   it("asks before opening a link no click authorized, keeps one pending target and lets the reader review it", async () => {
-    const tab = await open("/docs/org/guide/a.html");
+    const tab = await open("/r/acme/site?doc=guide%2Fa.html");
     await settled(tab);
     await reserve(tab);
     await post(tab, request);
@@ -742,7 +719,7 @@ describe("lazy tree navigation confirmation", () => {
     expect(await label.textContent()).toBe("Open linked document guide/b.html?v=1#sec?");
     expect(await label.getAttribute("role")).toBe("status");
     expect(await notice(tab).getByRole("button", { name: "Open linked document" }).getAttribute("aria-describedby")).toBe("document-navigation-destination");
-    expect(await frameSrc(tab)).toBe("/legacy-view/org/files/guide/a.html");
+    expect(await frameSrc(tab)).toBe("/r/acme/site/@pin/files/guide/a.html");
     // A visible prompt keeps its destination; so does a repeat of the same one.
     await post(tab, { ...request, path: "guide/deep/c.html" });
     await post(tab, request);
@@ -762,22 +739,22 @@ describe("lazy tree navigation confirmation", () => {
     expect(await tab.evaluate(() => document.activeElement?.textContent)).toBe("Open linked document");
     expect(await tab.locator("#document-navigation-review").count()).toBe(0);
     await notice(tab).getByRole("button", { name: "Open linked document" }).click();
-    await tab.waitForFunction(() => window.location.pathname === "/docs/org/guide/deep/c.html");
-    expect(await frameSrc(tab)).toBe("/legacy-view/org/files/guide/deep/c.html");
+    await tab.waitForFunction(() => new URLSearchParams(window.location.search).get("doc") === "guide/deep/c.html");
+    expect(await frameSrc(tab)).toBe("/r/acme/site/@pin/files/guide/deep/c.html");
     // The row is marked once its folder, guide/deep/, has loaded.
     await expect.poll(() => activePath(tab)).toBe("org/guide/deep/c.html");
     expect(await notice(tab).count()).toBe(0);
   });
 
   it("opens the offered target with its query and fragment", async () => {
-    const tab = await open("/docs/org/guide/a.html");
+    const tab = await open("/r/acme/site?doc=guide%2Fa.html");
     await settled(tab);
     await reserve(tab);
     await post(tab, request);
     await notice(tab).getByRole("button", { name: "Open linked document" }).click();
     await tab.waitForFunction(() => window.location.hash === "#sec");
-    expect(await location(tab)).toBe("/docs/org/guide/b.html?docQuery=%3Fv%3D1#sec");
-    expect(await frameSrc(tab)).toBe("/legacy-view/org/files/guide/b.html?v=1");
+    expect(await location(tab)).toBe("/r/acme/site?doc=guide%2Fb.html&docQuery=%3Fv%3D1#sec");
+    expect(await frameSrc(tab)).toBe("/r/acme/site/@pin/files/guide/b.html?v=1");
   });
 
   describe("a link to another site", () => {
@@ -791,7 +768,7 @@ describe("lazy tree navigation confirmation", () => {
     const opened = (tab: Page) => tab.evaluate(() => (window as unknown as { opened: unknown[][] }).opened);
 
     it("asks first, then opens a new tab that has no handle back to the viewer, leaving the document where it is", async () => {
-      const tab = await open("/docs/org/guide/a.html");
+      const tab = await open("/r/acme/site?doc=guide%2Fa.html");
       await settled(tab);
       await spyOpen(tab);
       await post(tab, external);
@@ -808,8 +785,8 @@ describe("lazy tree navigation confirmation", () => {
       await notice(tab).getByRole("button", { name: "Open external link" }).click();
       expect(await opened(tab)).toEqual([["https://outside.test/page?q=1#top", "_blank", "noopener,noreferrer"]]);
       expect(await notice(tab).count()).toBe(0);
-      expect(await location(tab)).toBe("/docs/org/guide/a.html");
-      expect(await frameSrc(tab)).toBe("/legacy-view/org/files/guide/a.html");
+      expect(await location(tab)).toBe("/r/acme/site?doc=guide%2Fa.html");
+      expect(await frameSrc(tab)).toBe("/r/acme/site/@pin/files/guide/a.html");
       expect((await pushes(tab)).length).toBe(history);
       // The prompt is free for the next link.
       await post(tab, external);
@@ -817,7 +794,7 @@ describe("lazy tree navigation confirmation", () => {
     });
 
     it("can be dismissed and reviewed, keeping only the latest address, and opens nothing until confirmed", async () => {
-      const tab = await open("/docs/org/guide/a.html");
+      const tab = await open("/r/acme/site?doc=guide%2Fa.html");
       await settled(tab);
       await spyOpen(tab);
       await post(tab, external);
@@ -836,12 +813,12 @@ describe("lazy tree navigation confirmation", () => {
     });
 
     it("is replaced by a document the reader picks", async () => {
-      const tab = await open("/docs/org/guide/a.html");
+      const tab = await open("/r/acme/site?doc=guide%2Fa.html");
       await settled(tab);
       await post(tab, external);
       await notice(tab).waitFor();
-      await tab.locator('a.tree-link[href="/legacy-view/org/files/top.html"]').click();
-      await tab.waitForFunction(() => window.location.pathname === "/docs/org/top.html");
+      await tab.locator('a.tree-link[href="/r/acme/site/@pin/files/top.html"]').click();
+      await tab.waitForFunction(() => new URLSearchParams(window.location.search).get("doc") === "top.html");
       expect(await notice(tab).count()).toBe(0);
     });
 
@@ -854,7 +831,7 @@ describe("lazy tree navigation confirmation", () => {
       ["a non-string address", { href: 5 }],
       ["an oversized address", { href: `https://outside.test/${"x".repeat(2100)}` }],
     ])("drops %s", async (_name, fields) => {
-      const tab = await open("/docs/org/guide/a.html");
+      const tab = await open("/r/acme/site?doc=guide%2Fa.html");
       await settled(tab);
       await spyOpen(tab);
       const message = JSON.parse(JSON.stringify({ ...external, ...fields }).replace("PAGE_ORIGIN", harness.origin)) as Record<string, unknown>;
@@ -868,7 +845,7 @@ describe("lazy tree navigation confirmation", () => {
   });
 
   it("drops a prompt, and its stale buttons, when the reader picks another document", async () => {
-    const tab = await open("/docs/org/guide/a.html");
+    const tab = await open("/r/acme/site?doc=guide%2Fa.html");
     await settled(tab);
     await reserve(tab);
     await post(tab, request);
@@ -882,8 +859,8 @@ describe("lazy tree navigation confirmation", () => {
     await tab.evaluate(() => {
       (window as unknown as { staleReview: HTMLElement }).staleReview = document.querySelector<HTMLElement>("#document-navigation-review button")!;
     });
-    await tab.locator('a.tree-link[href="/legacy-view/org/files/top.html"]').click();
-    await tab.waitForFunction(() => window.location.pathname === "/docs/org/top.html");
+    await tab.locator('a.tree-link[href="/r/acme/site/@pin/files/top.html"]').click();
+    await tab.waitForFunction(() => new URLSearchParams(window.location.search).get("doc") === "top.html");
     expect(await tab.locator("#document-navigation-review").count()).toBe(0);
     await tab.evaluate(() => {
       const holder = window as unknown as { staleDismiss: HTMLElement; staleReview: HTMLElement };
@@ -891,7 +868,7 @@ describe("lazy tree navigation confirmation", () => {
     });
     expect(await notice(tab).count()).toBe(0);
     expect(await tab.locator("#document-navigation-review").count()).toBe(0);
-    expect(await location(tab)).toBe("/docs/org/top.html");
+    expect(await location(tab)).toBe("/r/acme/site?doc=top.html");
   });
 });
 
@@ -1007,7 +984,7 @@ describe("lazy tree with scoped documents", () => {
   it.each([
     ["an HTTP failure", { status: 500, body: "{}" }],
     ["a non-array page", { status: 200, body: JSON.stringify({ children: "nope" }) }],
-    ["a legacy document list", { status: 200, body: JSON.stringify({ documents: ["top.html"], cursor: null }) }],
+    ["a flat document list", { status: 200, body: JSON.stringify({ documents: ["top.html"], cursor: null }) }],
     ["a null child", { status: 200, body: JSON.stringify({ children: [null] }) }],
     ["a nested child name", { status: 200, body: JSON.stringify({ children: [{ name: "a/b.html", type: "file" }] }) }],
     ["a dot-segment child", { status: 200, body: JSON.stringify({ children: [{ name: "..", type: "folder" }] }) }],
@@ -1035,31 +1012,12 @@ describe("lazy tree with scoped documents", () => {
     expect(await single.locator(".load-more-btn").count()).toBe(0);
   });
 
-  it.each([
-    ["/lt/base-empty-project", "No documents deployed yet.", "/organizations/o/projects/q"],
-    ["/lt/base-empty-other", "No documents available.", null],
-    ["/lt/legacy-empty", "No documents yet.", null],
-  ])("explains an empty tree at %s", async (path, message, returnTo) => {
-    const tab = await open(path);
+  it("explains an empty tree", async () => {
+    const tab = await open("/lt/base-empty");
     await tab.locator("#tree-container .tree-empty").waitFor();
-    expect(await tab.locator("#tree-container .tree-empty").textContent()).toBe(message);
-    const link = tab.locator("#tree-container .tree-empty-create a");
-    expect(await link.count()).toBe(returnTo ? 1 : 0);
-    if (returnTo) {
-      expect(await link.getAttribute("href")).toBe(returnTo);
-      expect(await link.textContent()).toBe("Return to project");
-    }
+    expect(await tab.locator("#tree-container .tree-empty").textContent()).toBe("No documents available.");
+    expect(await tab.locator("#tree-container a").count()).toBe(0);
     expect(await tab.locator("#active-indicator").count()).toBe(1);
-    if (returnTo) {
-      // The tree must leave the link's navigation alone. Stay on the page so
-      // its browser coverage is kept: observe the click after the tree saw it.
-      await tab.evaluate(() => document.addEventListener("click", event => {
-        (window as unknown as { linkFollowed: boolean }).linkFollowed = !event.defaultPrevented;
-        event.preventDefault();
-      }));
-      await link.click();
-      expect(await tab.evaluate(() => (window as unknown as { linkFollowed?: boolean }).linkFollowed)).toBe(true);
-    }
   });
 
   it("falls back to an empty tree when a folder lies outside the scoped organization", async () => {
@@ -1089,7 +1047,7 @@ describe("lazy tree active indicator", () => {
   };
 
   it.each(Object.keys(dispatch))("re-aligns the indicator after a %s", async name => {
-    const tab = await open("/docs/org/guide/a.html");
+    const tab = await open("/r/acme/site?doc=guide%2Fa.html");
     await tab.waitForFunction(() => document.querySelector(".tree-item.active") !== null);
     await indicatorAt(tab, "org/guide/a.html");
     await misplace(tab);
@@ -1099,7 +1057,7 @@ describe("lazy tree active indicator", () => {
   });
 
   it("re-aligns immediately when a folder's own transition ends, and ignores unrelated transitions", async () => {
-    const tab = await open("/docs/org/guide/a.html");
+    const tab = await open("/r/acme/site?doc=guide%2Fa.html");
     await tab.waitForFunction(() => document.querySelector(".tree-item.active") !== null);
     await misplace(tab);
     await tab.evaluate(() => {
@@ -1124,7 +1082,7 @@ describe("lazy tree active indicator", () => {
   });
 
   it("hides the indicator while the active document's folder is collapsed and restores it on re-expansion", async () => {
-    const tab = await open("/docs/org/guide/a.html");
+    const tab = await open("/r/acme/site?doc=guide%2Fa.html");
     await tab.waitForFunction(() => document.querySelector(".tree-item.active") !== null);
     await indicatorAt(tab, "org/guide/a.html");
     await folderItem(tab, "org/guide/").click();
@@ -1134,20 +1092,20 @@ describe("lazy tree active indicator", () => {
   });
 
   it("animates the indicator unless motion is reduced, even when the browser cannot report the preference", async () => {
-    const reduced = await open("/docs/org/guide/a.html");
+    const reduced = await open("/r/acme/site?doc=guide%2Fa.html");
     await reduced.waitForFunction(() => document.querySelector(".tree-item.active") !== null);
     expect(await reduced.evaluate(() => document.getElementById("active-indicator")!.style.transition)).toBe("none");
-    const unknown = await open("/lt/legacy-no-matchmedia");
+    const unknown = await open("/lt/site-no-matchmedia");
     await unknown.waitForFunction(() => document.querySelector(".tree-item.active") !== null);
     expect(await unknown.evaluate(() => document.getElementById("active-indicator")!.style.transition)).toContain("transform 0.3s");
     expect(await unknown.evaluate(() => typeof window.matchMedia)).toBe("undefined");
   });
 
   it("keeps selecting documents when the indicator element is gone", async () => {
-    const tab = await open("/docs/org/guide/a.html");
+    const tab = await open("/r/acme/site?doc=guide%2Fa.html");
     await tab.waitForFunction(() => document.querySelector(".tree-item.active") !== null);
     await tab.evaluate(() => document.getElementById("active-indicator")!.remove());
-    await tab.locator('a.tree-link[href="/legacy-view/org/files/guide/b.html"]').click();
+    await tab.locator('a.tree-link[href="/r/acme/site/@pin/files/guide/b.html"]').click();
     expect(await activePath(tab)).toBe("org/guide/b.html");
     expect(await tab.locator("#active-indicator").count()).toBe(0);
     expect(pageErrors(tab)).toEqual([]);
@@ -1156,7 +1114,7 @@ describe("lazy tree active indicator", () => {
 
 describe("lazy tree races and malformed shells", () => {
   it("drops a fragment report that was queued before the reader opened another document", async () => {
-    const tab = await open("/docs/org/guide/a.html", { clock: true });
+    const tab = await open("/r/acme/site?doc=guide%2Fa.html", { clock: true });
     await settled(tab);
     const initial = (await pushes(tab)).length;
     await post(tab, { type: "doc-fragment", path: "guide/a.html", fragment: "#one" });
@@ -1164,38 +1122,38 @@ describe("lazy tree races and malformed shells", () => {
     await post(tab, { type: "doc-fragment", path: "guide/a.html", fragment: "#two" });
     // Wait until the second report is accepted, then navigate before its trailing flush.
     await tab.waitForFunction(() => true);
-    await tab.locator('a.tree-link[href="/legacy-view/org/files/guide/b.html"]').click();
+    await tab.locator('a.tree-link[href="/r/acme/site/@pin/files/guide/b.html"]').click();
     await tab.clock.runFor(150);
-    expect(await location(tab)).toBe("/docs/org/guide/b.html");
+    expect(await location(tab)).toBe("/r/acme/site?doc=guide%2Fb.html");
     expect((await pushes(tab)).some(entry => entry.endsWith("#two"))).toBe(false);
   });
 
   it("shows the newest document when its folder is still loading for an earlier navigation", async () => {
-    const tab = await open("/docs/org/guide/deep/c.html", { routes: async page => { await page.route("**/api/tree/org?prefix=org%2Fguide%2F&*", () => new Promise(() => {})); } });
+    const tab = await open("/r/acme/site?doc=guide%2Fdeep%2Fc.html", { routes: async page => { await page.route(`**${sitePin}/tree?dir=guide%2F`, () => new Promise(() => {})); } });
     await tab.waitForFunction(() => document.querySelector('.tree-folder[data-path="org/guide/"]')?.classList.contains("loading"));
     await tab.evaluate(() => window.dispatchEvent(new PopStateEvent("popstate", { state: { docPath: "org/guide/b.html" } })));
-    expect(await frameSrc(tab)).toBe("/legacy-view/org/files/guide/b.html");
+    expect(await frameSrc(tab)).toBe("/r/acme/site/@pin/files/guide/b.html");
     expect(pageErrors(tab)).toEqual([]);
   });
 
   it("marks the newest document, not the earlier one, once a folder they share has loaded", async () => {
     let hold!: Awaited<ReturnType<typeof held>>;
-    const tab = await open("/docs/org/guide/deep/c.html", { routes: async page => { hold = await held(page, "**/api/tree/org?prefix=org%2Fguide%2F&*"); } });
+    const tab = await open("/r/acme/site?doc=guide%2Fdeep%2Fc.html", { routes: async page => { hold = await held(page, `**${sitePin}/tree?dir=guide%2F`); } });
     await hold.seen;
     await tab.evaluate(() => window.dispatchEvent(new PopStateEvent("popstate", { state: { docPath: "org/guide/b.html" } })));
     await hold.release();
     await expect.poll(() => activePath(tab)).toBe("org/guide/b.html");
     expect(await tab.locator(".tree-item.active").count()).toBe(1);
-    expect(await frameSrc(tab)).toBe("/legacy-view/org/files/guide/b.html");
+    expect(await frameSrc(tab)).toBe("/r/acme/site/@pin/files/guide/b.html");
     await indicatorAt(tab, "org/guide/b.html");
     // The earlier reveal stopped with the expansion it was waiting on (#169): it never opens its own folder.
-    expect(requests.filter(path => path.includes("prefix=org%2Fguide%2Fdeep%2F"))).toEqual([]);
+    expect(requests.filter(path => path.includes("dir=guide%2Fdeep%2F"))).toEqual([]);
     expect(pageErrors(tab)).toEqual([]);
   });
 
   it("shows and marks the newest of three rapid navigations while their shared folder expansion is held", async () => {
     let hold!: Awaited<ReturnType<typeof held>>;
-    const tab = await open("/docs/org/guide/deep/c.html", { routes: async page => { hold = await held(page, "**/api/tree/org?prefix=org%2Fguide%2F&*"); } });
+    const tab = await open("/r/acme/site?doc=guide%2Fdeep%2Fc.html", { routes: async page => { hold = await held(page, `**${sitePin}/tree?dir=guide%2F`); } });
     await hold.seen;
     // Two re-navigations arrive while the first reveal is still expanding org/guide/ (rapid navigation, #169).
     await tab.evaluate(() => window.dispatchEvent(new PopStateEvent("popstate", { state: { docPath: "org/guide/extra/d.html" } })));
@@ -1203,10 +1161,10 @@ describe("lazy tree races and malformed shells", () => {
     await hold.release();
     await expect.poll(() => activePath(tab)).toBe("org/guide/b.html");
     expect(await tab.locator(".tree-item.active").count()).toBe(1);
-    expect(await frameSrc(tab)).toBe("/legacy-view/org/files/guide/b.html");
+    expect(await frameSrc(tab)).toBe("/r/acme/site/@pin/files/guide/b.html");
     await indicatorAt(tab, "org/guide/b.html");
     // The superseded reveals stopped at the shared expansion: neither opened its own folder afterwards.
-    expect(requests.filter(path => path.includes("prefix=org%2Fguide%2Fdeep%2F") || path.includes("prefix=org%2Fguide%2Fextra%2F"))).toEqual([]);
+    expect(requests.filter(path => path.includes("dir=guide%2Fdeep%2F") || path.includes("dir=guide%2Fextra%2F"))).toEqual([]);
     expect(pageErrors(tab)).toEqual([]);
   });
 
@@ -1244,7 +1202,7 @@ describe("lazy tree races and malformed shells", () => {
   });
 
   it("keeps working when folder rows are missing their icon, content or depth", async () => {
-    const tab = await open("/lt/legacy");
+    const tab = await open("/lt/site");
     await item(tab, "org/top.html").waitFor();
     await tab.evaluate(() => {
       const tree = document.getElementById("tree-container")!;
@@ -1275,7 +1233,7 @@ describe("lazy tree races and malformed shells", () => {
       document.getElementById("tree-container")!.append(shut);
       window.dispatchEvent(new PopStateEvent("popstate", { state: { docPath: "org/shut/x.html" } }));
     });
-    expect(await frameSrc(tab)).toBe("/legacy-view/org/files/shut/x.html");
+    expect(await frameSrc(tab)).toBe("/r/acme/site/@pin/files/shut/x.html");
     expect(await tab.locator('.tree-folder[data-path="org/shut/"]').getAttribute("class")).not.toContain("open");
     expect(await activePath(tab)).toBeNull();
     expect(pageErrors(tab)).toEqual([]);
@@ -1283,7 +1241,7 @@ describe("lazy tree races and malformed shells", () => {
 
   it("ignores clicks on the root error text and reloads the list from its Retry button", async () => {
     let fail = true;
-    const tab = await open("/lt/legacy", { routes: async page => { await page.route("**/api/tree/org?prefix=org%2F&limit=1000", route => fail ? route.fulfill({ status: 500, body: "{}" }) : route.continue()); } });
+    const tab = await open("/lt/site", { routes: async page => { await page.route(`**${sitePin}/tree?dir=`, route => fail ? route.fulfill({ status: 500, body: "{}" }) : route.continue()); } });
     const error = tab.locator("#tree-container .tree-error");
     await error.waitFor();
     expect(await error.textContent()).toContain("Failed to load documents.");
@@ -1297,7 +1255,8 @@ describe("lazy tree races and malformed shells", () => {
     expect(await tab.locator("#tree-container").getAttribute("aria-busy")).toBeNull();
   });
 
-  it.each(["empty-org-initial", "no-org-attr"])("ignores every frame message and still shows the frame in %s", async name => {
+  // Without a tree host the shell names no frame base either.
+  it.each([["empty-org-initial", "/r/acme/site/@pin/files/"], ["no-org-attr", "/files/"]])("ignores every frame message and still shows the frame in %s", async (name, frame) => {
     const tab = await open(`/lt/${name}`);
     await tab.waitForFunction(() => !!document.getElementById("content-frame")!.getAttribute("src"));
     await settled(tab);
@@ -1309,7 +1268,7 @@ describe("lazy tree races and malformed shells", () => {
     ]) await post(tab, payload);
     await tab.evaluate(() => new Promise<void>(resolve => setTimeout(resolve, 150)));
     expect((await pushes(tab)).length).toBe(initial);
-    expect(await frameSrc(tab)).toBe("/legacy-view//files/");
+    expect(await frameSrc(tab)).toBe(frame);
     expect(await tab.locator("#document-navigation-notice").count()).toBe(0);
     expect(pageErrors(tab)).toEqual([]);
   });
@@ -1868,9 +1827,8 @@ describe("repository sidebar search robustness (#251)", () => {
 
   const openSearch = (options: Options = {}) => open("/lt/repo-search", options);
 
-  it("mounts nothing where the shell has no repository context", async () => {
+  it("mounts nothing where the shell names no tree root", async () => {
     const tab = await open("/lt/search-no-contexts", { clock: true });
-    await item(tab, "org/top.html").waitFor();
     expect(await tab.locator("#repo-search").isHidden()).toBe(true);
     await tab.keyboard.press("/");
     // The / shortcut never hijacks the page when search is not mounted.

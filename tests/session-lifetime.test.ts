@@ -14,13 +14,12 @@ import { createAuthOptions } from "../convex/auth";
 import { boundSessionLifetime, sessionCookieHeaders, sessionLifetime, sessionlessAuthPaths, withLifetimeMarker } from "../convex/sessionLifetime";
 import { proxyAuthRequest } from "@/auth-proxy";
 import { sessionCache, sessionMiddleware } from "@/middleware/session";
-import { createViewerTicket, readViewerTicket } from "@/viewer-ticket";
+import { viewerSessionCookie } from "@/viewer-ticket";
 import rateLimiterTest from "./convex-rate-limiter";
 
 const origin = "http://localhost:3000";
 const day = 86400_000;
 const password = "Local session lifetime password!";
-const scope = { organizationId: "org", projectId: "project", manifestKey: "tenants/org/projects/project/deployments/deploy/manifest.json" };
 
 afterEach(() => { sessionCache.clear(); vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers(); });
 
@@ -80,9 +79,8 @@ it.each([false, true])("preserves cookie attributes and backend lifetime through
   const expiry = remember ? Date.now() + 7 * day : initial.expiresAt;
   expect((await f.stored()).expiresAt).toBe(expiry);
 
-  // Ticket-backed authorization also preserves the preference, even without
-  // browser cookies on an opaque iframe's asset request.
-  const ticket = await readViewerTicket(await createViewerTicket({ ...scope, cookie: f.cookie }), scope);
+  // The filtered session cookie the Worker forwards for session reads preserves the preference.
+  const ticket = { cookie: viewerSessionCookie(f.cookie) };
   expect(ticket).not.toBeNull();
   expect(await f.auth.api.getSession({ headers: new Headers({ cookie: ticket!.cookie }) })).not.toBeNull();
   expect((await f.stored()).expiresAt).toBe(expiry);
@@ -129,7 +127,7 @@ for (const remember of [false, true]) {
         }
       }
     }
-    const ticket = await readViewerTicket(await createViewerTicket({ ...scope, cookie }), scope);
+    const ticket = { cookie: viewerSessionCookie(cookie) };
     expect(await f.auth.api.getSession({ headers: new Headers({ cookie: ticket!.cookie }) })).not.toBeNull();
     expect((await f.stored()).expiresAt).toBe(expiry);
     if (!remember) {
@@ -420,7 +418,7 @@ it("never treats bearer tokens as sessions or persists a non-remembered cookie o
       [`worker ${path}`, (headers: Record<string, string>) => f.app.request(`${origin}/api/auth${path}`, { headers })],
     ])),
     "convex management access": headers => f.backend.fetch(management, { headers }),
-    "convex deployments": headers => f.backend.fetch(`/api/rendro/deployments?organizationId=${organization.id}&projectId=project`, { headers }),
+    "convex projects": headers => f.backend.fetch(`/api/rendro/projects?organizationId=${organization.id}`, { headers }),
     "convex set-initial-password": headers => f.backend.fetch("/api/auth/set-initial-password", {
       method: "POST", headers: { ...headers, origin, "content-type": "application/json" }, body: JSON.stringify({ newPassword: `${password} initial` }),
     }),
@@ -438,7 +436,7 @@ it("never treats bearer tokens as sessions or persists a non-remembered cookie o
       const sessionAuthority = name === "cookie" || (name.includes("cookie") && label.includes("/"));
       if (label.includes("set-initial-password")) expect(await response.json(), `${label} with ${name}`).toEqual({ error: sessionAuthority
         ? "Unable to set password. Sign in again and retry." : "Sign in again before setting a password" });
-      else if (label.includes("deployments")) expect(await response.json(), `${label} with ${name}`).toEqual({ error: sessionAuthority ? "Project not found" : "Authentication required" });
+      else if (label.includes("projects")) expect(response.status, `${label} with ${name}`).toBe(sessionAuthority ? 200 : 403);
       else expect(await authenticated(response), `${label} with ${name}`).toBe(sessionAuthority);
     }
   }

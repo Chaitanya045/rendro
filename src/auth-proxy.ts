@@ -8,14 +8,10 @@ import { backendFetch } from "@/backend-fetch";
 import { authClientIpHeaders } from "@/auth-client-ip";
 import { AUTH_COOKIE_NAMES } from "../shared/auth-cookies";
 
-// Only these pass-through API-key reads accept bearer credentials. Keep auth
-// and management routes cookie-only; deployment writes use dedicated Worker
-// handlers (including storage validation before commit).
+// Only this pass-through API-key read accepts bearer credentials. Keep auth
+// and management routes cookie-only.
 const API_KEY_GET_PATHS = new Set([
   "/api/rendro/credentials/validate",
-  "/api/rendro/deployments/active",
-  "/api/rendro/deployments/staging",
-  "/api/rendro/deployments",
 ]);
 
 const SESSION_REVOCATION_PATHS = new Set([

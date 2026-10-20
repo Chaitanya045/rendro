@@ -7,7 +7,7 @@ import { buildStyles, diffStyleBuild, runStyleBuild, styleDirectory, styleSource
 import worker from "@/worker";
 import { renderStylesheet, styleCacheControl, styleResponseHeaders } from "@/routes/styles";
 import { styleManifest } from "@/routes/style-manifest";
-import { renderScopedDocumentShell } from "@/routes/app";
+import { repoShell } from "./helpers/repo-shell";
 import { securityHeaders } from "@/middleware/security-headers";
 
 vi.mock("@hono/node-server", () => ({ serve: vi.fn() }));
@@ -143,7 +143,7 @@ describe("self-hosted stylesheet responses", () => {
 });
 
 describe("viewer shell without the Tailwind runtime", () => {
-  const html = renderScopedDocumentShell({ user: null, namespace: "org", title: "Docs", basePath: "/p/docs", selectedPath: "" });
+  const html = repoShell();
   const shellCss = [...html.matchAll(/<style[^>]*>([\s\S]*?)<\/style>/g)].map(match => match[1]).join("\n")
     + readFileSync(join(repo, styleSources["viewer-base"]), "utf8");
 

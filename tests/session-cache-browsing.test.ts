@@ -1,5 +1,4 @@
 import rateLimiterTest from "./convex-rate-limiter";
-import { commitWithProof } from "./helpers/storage-proof";
 import { createHmac } from "node:crypto";
 import { convexTest } from "convex-test";
 import { betterAuth } from "better-auth/minimal";
@@ -15,7 +14,6 @@ import { httpOrganizationAccess } from "../convex/authorization";
 import { sessionCache, sessionMiddleware } from "@/middleware/session";
 import { registerAuthClientIp } from "@/auth-client-ip";
 import { mountSessionRoutes } from "@/app-routes";
-import * as blobs from "@/storage";
 
 vi.mock("@/logger", () => ({ logger: { debug() {}, warn() {}, error() {} } }));
 // Vitest timeouts do not cancel async bodies. Stop the round loop and drain
@@ -65,19 +63,14 @@ async function fixture() {
   }
   const project = await backend.mutation(internal.projects.createInternal, { organizationId, name: "Docs", slug: "docs", actorId: readers[0].user.id });
   const projectId = project!._id;
-  const deployment = await backend.mutation(internal.deployments.startInternal, {
-    organizationId, projectId, actorId: readers[0].user.id, manifestSha256: "a".repeat(64), fileCount: 8, byteCount: 800,
-    provenance: { source: { kind: "local" }, execution: { kind: "local" }, cliVersion: "test", manifestSha256: "a".repeat(64) },
-  });
-  await commitWithProof(backend, { organizationId, projectId, deploymentId: deployment.deploymentId, actorId: readers[0].user.id });
-  const pages = ["index.html", "guide/next.html", "space name.html", "日本語.html", "100%.html", "hash#name.html", "no-head.html", "base.html"];
-  vi.spyOn(blobs, "getObjectText").mockResolvedValue(JSON.stringify({ version: 1, files: pages.map(path => ({ path, contentType: "text/html", sha256: "b".repeat(64), size: 100 })) }));
-  vi.spyOn(blobs, "getObjectStream").mockImplementation(() => Promise.resolve(new Response("<html><head></head><body><h1>Docs</h1></body></html>").body));
+  const base = `/organizations/${organizationId}/projects/${projectId}`;
+  // Every management page authorizes afresh with exactly one access lookup.
+  const pages = [base, `/organizations/${organizationId}`, `/organizations/${organizationId}/projects`, `/organizations/${organizationId}/api-keys`];
   const counts = { session: 0, authorization: 0, errors: [] as number[] };
   vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
     const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url);
     if (url.pathname === "/api/auth/get-session") counts.session++;
-    if (url.pathname === "/api/rendro/deployments/active") counts.authorization++;
+    if (["/api/rendro/management/access", "/api/rendro/projects/get"].includes(url.pathname)) counts.authorization++;
     const response = await backend.fetch(url.pathname + url.search, init);
     if ([429, 503].includes(response.status)) counts.errors.push(response.status);
     return response;
@@ -93,9 +86,7 @@ async function fixture() {
   app.get("/organizations/cache-probe", c => c.json({ id: c.get("user")?.id ?? null }));
   app.get("/organizations/browsing-probe", async c => {
     // Retain fresh production session + membership authorization, but omit
-    // project/manifest reads, HTML rendering, streams and ticket encryption.
-    // This is the production navigation guard used by document authorization;
-    // getSession already reads the user, so omit its extra getAnyUserById read.
+    // page rendering and the management data reads.
     const authorized = await httpOrganizationAccess(
       { runQuery: backend.query, runMutation: backend.mutation } as never,
       c.req.raw.headers, organizationId,
@@ -104,7 +95,7 @@ async function fixture() {
     return c.json({ id: c.get("user")?.id, authorizedId: authorized.userId });
   });
   mountSessionRoutes(app);
-  return { reuseAuth: () => vi.spyOn(authModule, "createAuth").mockReturnValue(auth), app, organizationId, context, readers, backend, counts, pages, base: `/organizations/${organizationId}/projects/${projectId}/docs`, manifestKey: deployment.manifestKey };
+  return { reuseAuth: () => vi.spyOn(authModule, "createAuth").mockReturnValue(auth), app, organizationId, context, readers, backend, counts, pages, base };
 }
 
 for (const [label, rounds, interval, expectedReads, timeout] of [
@@ -120,11 +111,11 @@ for (const [label, rounds, interval, expectedReads, timeout] of [
     const start = Date.now();
     // Keep every cadence timestamp: ceil(15_000 / interval) rounds per cache
     // refresh yields 2 * ceil(rounds / ceil(15_000 / interval)) = 62 / 78 reads.
-    // Hits never extend TTL. The first >=15s (and all eight document paths) use
-    // real shell/tree/file/ticket fan-out, including a cold and refreshed cache.
-    // Remaining requests still run real Worker middleware and fresh production
-    // authorization; only session-irrelevant document work is omitted.
-    const fullRounds = Math.max(8, Math.ceil(15_000 / interval) + 1);
+    // Hits never extend TTL. The first >=15s use the real management pages,
+    // including a cold and refreshed cache. Remaining requests still run real
+    // Worker middleware and fresh production authorization; only
+    // session-irrelevant rendering is omitted.
+    const fullRounds = Math.max(f.pages.length, Math.ceil(15_000 / interval) + 1);
     for (let i = 0; i < rounds && !state.stopped; i++) {
       vi.setSystemTime(start + i * interval);
       const fullFanout = i < fullRounds;
@@ -134,13 +125,8 @@ for (const [label, rounds, interval, expectedReads, timeout] of [
       // organization/user rows afresh; neither results nor limiter are mocked.
       if (i === fullRounds) f.reuseAuth();
       const results = await Promise.allSettled(f.readers.flatMap(reader => {
-        const path = f.pages[i % 8];
         const headers = { cookie: reader.cookie };
-        const paths = fullFanout ? [
-          `${f.base}?${new URLSearchParams({ doc: path })}`, `${f.base}/tree`,
-          `${f.base}/files/${path.split("/").map(encodeURIComponent).join("/")}`,
-          `${f.base}/viewer-ticket?${new URLSearchParams({ manifestKey: f.manifestKey })}`,
-        ] : Array<string>(4).fill("/organizations/browsing-probe");
+        const paths = fullFanout ? f.pages : Array<string>(4).fill("/organizations/browsing-probe");
         return paths.map(async path => {
           const response = await f.app.request(path, { headers });
           expect(response.status).toBe(200);
@@ -161,7 +147,7 @@ for (const [label, rounds, interval, expectedReads, timeout] of [
   }), timeout);
 }
 
-it.each([false, true])("recognizes real Convex revocation by 15s while document authorization denies immediately (reused auth: %s)", reuseAuth => runCase(async () => {
+it.each([false, true])("recognizes real Convex revocation by 15s while page authorization denies immediately (reused auth: %s)", reuseAuth => runCase(async () => {
   const f = await fixture();
   if (reuseAuth) f.reuseAuth();
   vi.useFakeTimers({ toFake: ["Date"] });
@@ -172,7 +158,7 @@ it.each([false, true])("recognizes real Convex revocation by 15s while document 
   vi.setSystemTime(start + 14_999);
   expect(await (await f.app.request("/organizations/cache-probe", { headers })).json()).toEqual({ id: f.readers[0].user.id });
   expect((await f.app.request(f.base, { headers })).status).toBe(404);
-  // The authoritative document denial evicts immediately, before TTL expiry.
+  // The authoritative page denial evicts immediately, before TTL expiry.
   expect(await (await f.app.request("/organizations/cache-probe", { headers })).json()).toEqual({ id: null });
   expect(f.counts.session).toBe(2);
 }));
@@ -197,7 +183,7 @@ it.each([false, true])("ends the revoked-session redirect chain at sign-in (anot
   expect(await signIn.text()).toContain("Sign in");
 }));
 
-it.each([false, true])("evicts after membership removal and denies both management and document access (reused auth: %s)", reuseAuth => runCase(async () => {
+it.each([false, true])("evicts after membership removal and denies organization and project pages (reused auth: %s)", reuseAuth => runCase(async () => {
   const f = await fixture();
   if (reuseAuth) f.reuseAuth();
   const reader = f.readers[1];

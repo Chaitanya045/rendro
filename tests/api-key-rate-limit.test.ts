@@ -1,5 +1,3 @@
-import { commitProof } from "./helpers/storage-proof";
-import { STORAGE_ATTESTATION_HEADER } from "../shared/storage-attestation";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { convexTest } from "convex-test";
 import rateLimiterTest from "./convex-rate-limiter";
@@ -8,19 +6,13 @@ import schema from "../convex/schema";
 import { apiKeyRateLimiter, apiKeyRateLimits } from "../convex/apiKeyHttp";
 import { sha256 } from "../convex/credentialHash";
 import { signAuthClientIp } from "../shared/auth-client-ip";
-import { MAX_REUSED_FILES_PER_REQUEST } from "../shared/deployment-limits";
 
 const modules = import.meta.glob("../convex/**/*.ts");
 const secret = "test-credential-never-log";
 const validatePath = "/api/rendro/credentials/validate?organizationId=org&scope=docs:read";
 const headers = { authorization: `Bearer ${secret}` };
-const apiRoutes = [
-  ["GET", "credentials/validate"], ["POST", "deployments/start"],
-  ["GET", "deployments/active"], ["GET", "deployments/staging"],
-  ["POST", "deployments/commit"],
-  ["GET", "deployments"], ["GET", "publications"],
-  ["POST", "publications"], ["POST", "publications/remove"],
-];
+// The one route API keys still authorize (#286 removed the upload and publication routes).
+const apiRoutes = [["GET", "credentials/validate"]];
 
 async function fixture() {
   const t = convexTest(schema, modules);
@@ -83,7 +75,7 @@ describe("authoritative API-key rate limits", () => {
     for (let i = 0; i < apiKeyRateLimits.failedIp.capacity; i++) {
       expect((await signed("192.0.2.1", `wrong-${i}`)).status).toBe(401);
     }
-    await expectLimited(await signed("192.0.2.1", "new-wrong-key", "/api/rendro/deployments/staging"));
+    await expectLimited(await signed("192.0.2.1", "new-wrong-key", "/api/rendro/credentials/validate?organizationId=other&scope=docs:write"));
     expect((await signed("192.0.2.2", "wrong")).status).toBe(401);
     expect((await signed("192.0.2.1", secret)).status).toBe(200);
     vi.mocked(Date.now).mockReturnValue(Date.now() + 60_000);
@@ -137,43 +129,10 @@ describe("authoritative API-key rate limits", () => {
     expect(JSON.stringify(log.mock.calls)).not.toContain(secret);
   });
 
-  it("keeps failure cleanup available after upload exhaustion, with its own abuse cap", async () => {
+  it("handles 20 parallel authorizations and enforces the aggregate sharded budget", async () => {
     vi.spyOn(Date, "now").mockReturnValue(Date.now());
     const { t, credentialId } = await fixture();
-    const project = await t.mutation(internal.projects.createInternal, {
-      organizationId: "org", name: "Docs", slug: "docs", actorId: "owner",
-    });
-    const identity = { organizationId: "org", projectId: project!._id };
-    const deployment = await t.mutation(internal.deployments.startInternal, {
-      ...identity, manifestSha256: "a".repeat(64), fileCount: 1, byteCount: 1, actorId: "owner",
-      provenance: { source: { kind: "local" }, execution: { kind: "local" }, cliVersion: "test", manifestSha256: "a".repeat(64) },
-    });
-    const deploymentIdentity = { ...identity, deploymentId: deployment.deploymentId };
-    await exhaustCredential(t, credentialId);
-    await expectLimited(await t.fetch(`/api/rendro/deployments/staging?${new URLSearchParams(deploymentIdentity)}`, { headers }));
-    const fail = () => t.fetch("/api/rendro/deployments/fail", {
-      method: "POST", headers, body: JSON.stringify({ ...deploymentIdentity, reason: "Upload rate limited" }),
-    });
-    for (let i = 0; i < apiKeyRateLimits.cleanup.capacity; i++) expect((await fail()).status).toBe(200);
-    expect((await t.query(internal.deployments.getInternal, deploymentIdentity))?.status).toBe("failed");
-    await expectLimited(await fail());
-    vi.mocked(Date.now).mockReturnValue(Date.now() + 1_000);
-    expect((await fail()).status).toBe(200);
-  });
-
-  it("handles 20 parallel staging authorizations and enforces the aggregate sharded budget", async () => {
-    vi.spyOn(Date, "now").mockReturnValue(Date.now());
-    const { t, credentialId } = await fixture();
-    const project = await t.mutation(internal.projects.createInternal, {
-      organizationId: "org", name: "Docs", slug: "docs", actorId: "owner",
-    });
-    const identity = { organizationId: "org", projectId: project!._id };
-    const deployment = await t.mutation(internal.deployments.startInternal, {
-      ...identity, manifestSha256: "a".repeat(64), fileCount: 20, byteCount: 20, actorId: "owner",
-      provenance: { source: { kind: "local" }, execution: { kind: "local" }, cliVersion: "test", manifestSha256: "a".repeat(64) },
-    });
-    const path = `/api/rendro/deployments/staging?${new URLSearchParams({ ...identity, deploymentId: deployment.deploymentId })}`;
-    const batch = () => Promise.all(Array.from({ length: 20 }, () => t.fetch(path, { headers })));
+    const batch = () => Promise.all(Array.from({ length: 20 }, () => t.fetch(validatePath, { headers })));
     expect((await batch()).map(r => r.status)).toEqual(Array(20).fill(200));
     // Reset only in the test, then leave exactly one token on each shard.
     await t.run(ctx => apiKeyRateLimiter.reset(ctx, "credential", { key: credentialId }));
@@ -200,40 +159,4 @@ describe("authoritative API-key rate limits", () => {
     // Exactly 100 tokens/sec in aggregate, plus any unused burst tokens.
     expect(allowedAfterRefill).toBeLessThanOrEqual(100 + 50 - allowed);
   });
-
-  it("allows the CLI pattern for a 1,000-file cold deploy plus a large incremental deploy without refill", async () => {
-    vi.spyOn(Date, "now").mockReturnValue(Date.now());
-    const { t } = await fixture();
-    const project = await t.mutation(internal.projects.createInternal, {
-      organizationId: "org", name: "Docs", slug: "docs", actorId: "owner",
-    });
-    const identity = { organizationId: "org", projectId: project!._id };
-    const query = new URLSearchParams(identity);
-    for (const [changed, reused] of [[1_000, 0], [50, 950]]) {
-      expect((await t.fetch(`/api/rendro/deployments/active?${query}`, { headers })).status).toBe(200);
-      const start = await t.fetch("/api/rendro/deployments/start", {
-        method: "POST", headers, body: JSON.stringify({ ...identity,
-          manifestSha256: "a".repeat(64), fileCount: changed + reused, byteCount: 1,
-          provenance: { source: { kind: "local" }, execution: { kind: "local" }, cliVersion: "test", manifestSha256: "a".repeat(64) },
-        }),
-      });
-      expect(start.status).toBe(201);
-      const { deployment } = await start.json() as { deployment: { deploymentId: string } };
-      const deploymentIdentity = { ...identity, deploymentId: deployment.deploymentId };
-      const stagingPath = `/api/rendro/deployments/staging?${new URLSearchParams(deploymentIdentity)}`;
-      // One staging authorization per upload/copy batch, plus one at commit.
-      // Match the CLI's default concurrency instead of serializing every
-      // independent HTTP/crypto operation. Every authorization still executes.
-      const authorizations = changed + Math.ceil(reused / MAX_REUSED_FILES_PER_REQUEST) + 1;
-      const concurrency = 8;
-      for (let offset = 0; offset < authorizations; offset += concurrency) {
-        const count = Math.min(concurrency, authorizations - offset);
-        const responses = await Promise.all(Array.from({ length: count }, () => t.fetch(stagingPath, { headers })));
-        expect(responses.map(response => response.status)).toEqual(Array(count).fill(200));
-      }
-      expect((await t.fetch("/api/rendro/deployments/commit", {
-        method: "POST", headers: { ...headers, [STORAGE_ATTESTATION_HEADER]: (await commitProof(t, deploymentIdentity))! }, body: JSON.stringify(deploymentIdentity),
-      })).status).toBe(200);
-    }
-  }, 120_000);
 });

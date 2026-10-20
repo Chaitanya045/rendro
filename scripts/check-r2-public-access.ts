@@ -5,7 +5,8 @@
  *   CLOUDFLARE_ACCOUNT_ID=... CLOUDFLARE_API_TOKEN=... pnpm check:r2-public [--bucket <name>]... [--dry-run]
  *
  * The token needs only read access to R2 on that account (Account > Workers R2 Storage > Read). Buckets
- * default to every `bucket_name` in wrangler.toml. `--dry-run` prints the requests it would make and
+ * default to every `bucket_name` in the Worker configurations (wrangler.toml, wrangler.ingest.toml,
+ * wrangler.control.toml). `--dry-run` prints the requests it would make and
  * needs no credentials. Exit status: 0 private, 1 public access found or a bucket could not be checked,
  * 2 not configured.
  */
@@ -13,11 +14,11 @@ import { readFile } from "node:fs/promises";
 import { pathToFileURL } from "node:url";
 
 type Fetch = typeof fetch;
-type Settings = { env: NodeJS.ProcessEnv; fetch: Fetch; log(line: string): void; wrangler: string };
+type Settings = { env: NodeJS.ProcessEnv; fetch: Fetch; log(line: string): void; wrangler: string[] };
 
 const API = "https://api.cloudflare.com/client/v4";
 
-/** Bucket names bound by wrangler.toml, in file order, without duplicates. */
+/** Bucket names bound by a wrangler configuration, in file order, without duplicates. */
 export function wranglerBuckets(toml: string): string[] {
   const names = [...toml.replace(/#.*$/gm, "").matchAll(/^bucket_name\s*=\s*"([^"]+)"/gm)].map(match => match[1]!);
   return [...new Set(names)];
@@ -47,10 +48,11 @@ async function exposure(settings: Settings, account: string, bucket: string): Pr
 }
 
 export async function main(argv: string[], settings: Partial<Settings> = {}): Promise<number> {
-  const resolved: Settings = { env: process.env, fetch, log: line => console.log(line), wrangler: "wrangler.toml", ...settings };
+  const resolved: Settings = { env: process.env, fetch, log: line => console.log(line), wrangler: ["wrangler.toml", "wrangler.ingest.toml", "wrangler.control.toml"], ...settings };
   const dryRun = argv.includes("--dry-run");
   const named = argv.flatMap((arg, index) => arg === "--bucket" && argv[index + 1] ? [argv[index + 1]!] : []);
-  const buckets = named.length ? named : wranglerBuckets(await readFile(resolved.wrangler, "utf8"));
+  const configs = await Promise.all(resolved.wrangler.map(path => readFile(path, "utf8")));
+  const buckets = named.length ? named : [...new Set(configs.flatMap(wranglerBuckets))];
   if (!buckets.length) { resolved.log("No R2 bucket to check."); return 2; }
 
   const account = resolved.env.CLOUDFLARE_ACCOUNT_ID;

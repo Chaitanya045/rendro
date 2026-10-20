@@ -1,11 +1,11 @@
 import { beforeAll, describe, expect, it } from "vitest";
-import { useCommentLab, type Lab } from "./helpers/comment-lab";
+import { anchorOn, useCommentLab, type Lab } from "./helpers/comment-lab";
 
 /** Handshake, composer, rendering, pagination and dock edges of the comment widget that the other browser suites do not assert. */
 const commentLab = useCommentLab();
 beforeAll(() => commentLab.start());
 
-const heading = { kind: "element", path: ["main", "h1"] };
+const heading = anchorOn("Quarterly report");
 const parentReady = (lab: Lab, ready: Record<string, unknown>) => lab.host((_lab, ready) => {
   (document.getElementById("content-frame") as HTMLIFrameElement).contentWindow!.postMessage({ type: "commentor-parent-ready", ...ready }, "*");
 }, ready);
@@ -15,11 +15,11 @@ describe("parent handshake and scope", () => {
   it("subscribes with the scope of the document the frame shows, and again for the next document", async () => {
     const lab = await commentLab.open();
     await lab.ready();
-    const scope = (documentPath: string) => ({ organizationId: "org-a", projectId: "project-a", documentPath });
+    const scope = (documentPath: string) => ({ repoId: 9101, documentPath });
     const first = await lab.host(l => l.scopes);
     expect(first.length).toBeGreaterThan(0);
     for (const opened of first) expect(opened).toEqual(scope("index.html"));
-    await lab.host(() => { (document.getElementById("content-frame") as HTMLIFrameElement).src = "/organizations/org-a/projects/project-a/docs/files/guide/next.html"; });
+    await lab.host(() => { (document.getElementById("content-frame") as HTMLIFrameElement).src = "/r/acme/docs/files/guide/next.html"; });
     await expect.poll(() => lab.host(l => l.scopes.at(-1))).toEqual(scope("guide/next.html"));
     // Nothing was subscribed with a scope the frame never showed.
     const all = await lab.host(l => l.scopes);
@@ -116,7 +116,7 @@ describe("rendering", () => {
   it("shows a reply's author and body as text beside the thread's author and age", async () => {
     const lab = await commentLab.open();
     await lab.ready();
-    await lab.host(l => l.seed([{ _id: "t1", anchor: { kind: "element", path: ["main", "h1"] }, authorName: "Ada", body: "First thought",
+    await lab.host(l => l.seed([{ _id: "t1", anchor: l.anchorOn("Quarterly report"), authorName: "Ada", body: "First thought",
       replies: [l.reply({ authorName: "Grace", body: "Second thought" }), l.reply({ authorName: "Linus", body: "Third thought" })] }]));
     await lab.pins().first().click();
     const bubble = lab.tid("commentor-thread-bubble");
@@ -136,7 +136,7 @@ describe("rendering", () => {
     await lab.ready();
     await lab.pauseClock();
     const now = await lab.page.evaluate(() => Date.now());
-    await lab.host((l, now) => l.seed([{ _id: "t1", anchor: { kind: "element", path: ["main", "h1"] }, _creationTime: now - 3 * 3_600_000, replies: [
+    await lab.host((l, now) => l.seed([{ _id: "t1", anchor: l.anchorOn("Quarterly report"), _creationTime: now - 3 * 3_600_000, replies: [
       l.reply({ authorName: "Grace", body: "Second thought", _creationTime: now - 5 * 60_000 }),
       l.reply({ authorName: "Linus", body: "Third thought", _creationTime: now - 2 * 86_400_000 }),
     ] }]), now);
@@ -158,10 +158,10 @@ describe("rendering", () => {
     await lab.ready();
     const hostile = '<img src=x onerror="window.top.__ran = 1"><script>window.top.__ran = 2</script><b>bold</b>';
     await lab.host((l, hostile) => l.seed([{
-      _id: "t1", authorName: hostile, body: hostile, anchor: { kind: "text-range", quote: "lazy dog", path: ["main", "p:nth-of-type(1)"], startOffset: 0, endOffset: 8 },
+      _id: "t1", authorName: hostile, body: hostile, anchor: l.anchorOn("lazy dog"),
       replies: [l.reply({ authorName: hostile, body: hostile })],
     }, {
-      _id: "t2", body: "Quoted", anchor: { kind: "text-range", quote: hostile, path: ["main", "p:nth-of-type(2)"], startOffset: 0, endOffset: 1 },
+      _id: "t2", body: "Quoted", anchor: l.anchorOn(hostile),
     }]), hostile);
     await lab.openDrawer();
     await lab.ui.locator(".drawer-thread").first().locator(".body").click();
@@ -293,7 +293,7 @@ describe("drawer list", () => {
     const draft = lab.ui.locator('.drawer-thread[data-thread-id="t05"] [data-testid="commentor-reply-input"]');
     await draft.fill("Half-written reply");
     await lab.host(l => {
-      l.olderThreads = [l.thread({ _id: "a-old", body: "Older comment", _creationTime: 1, anchor: { kind: "element", path: ["main", "h1"] } })];
+      l.olderThreads = [l.thread({ _id: "a-old", body: "Older comment", _creationTime: 1, anchor: l.anchorOn("Quarterly report") })];
       l.pagination = { canLoadMore: true, loading: false };
       l.publish();
     });
@@ -304,7 +304,7 @@ describe("drawer list", () => {
 
     // A comment arriving while the reader is away from the end only offers a prompt.
     const banner = lab.ui.locator(".new-comments");
-    await lab.host(l => { l.threads.push(l.thread({ _id: "z-new", body: "Newest comment", anchor: { kind: "element", path: ["main", "h1"] } })); l.publish(); });
+    await lab.host(l => { l.threads.push(l.thread({ _id: "z-new", body: "Newest comment", anchor: l.anchorOn("Quarterly report") })); l.publish(); });
     await expect.poll(() => banner.innerText()).toBe("1 new comment");
     expect(await draft.inputValue()).toBe("Half-written reply");
     expect(await lab.ui.locator(".drawer-thread").count()).toBe(16);
@@ -315,7 +315,7 @@ describe("drawer list", () => {
   });
 
   const arrive = (lab: Lab, id: string) =>
-    lab.host((l, id) => { l.threads.push(l.thread({ _id: id, body: "Newest comment", anchor: { kind: "element", path: ["main", "h1"] } })); l.publish(); }, id);
+    lab.host((l, id) => { l.threads.push(l.thread({ _id: id, body: "Newest comment", anchor: l.anchorOn("Quarterly report") })); l.publish(); }, id);
 
   it("keeps the same card where the reader left it when a new comment arrives below", async () => {
     const lab = await commentLab.open({ height: 600 });
@@ -361,8 +361,8 @@ describe("drawer list", () => {
     await list.evaluate(el => { el.scrollTop = 220; });
     const place = await listTop(lab, "t05");
     await lab.host(l => {
-      l.olderThreads = [l.thread({ _id: "a-old", body: "Older comment", _creationTime: 1, anchor: { kind: "element", path: ["main", "h1"] } }),
-        l.thread({ _id: "a-older", body: "Even older comment", _creationTime: 0, anchor: { kind: "element", path: ["main", "h1"] } })];
+      l.olderThreads = [l.thread({ _id: "a-old", body: "Older comment", _creationTime: 1, anchor: l.anchorOn("Quarterly report") }),
+        l.thread({ _id: "a-older", body: "Even older comment", _creationTime: 0, anchor: l.anchorOn("Quarterly report") })];
       l.pagination = { canLoadMore: true, loading: false };
       l.publish();
     });
@@ -371,6 +371,19 @@ describe("drawer list", () => {
     expect(await listTop(lab, "t05")).toBe(place);
     // The older cards are above the reader, not under them.
     expect(await listTop(lab, "a-old")).toBeLessThan(0);
+  });
+
+  it("keeps rendering live pages while no card of the open list is laid out", async () => {
+    const lab = await commentLab.open({ height: 600 });
+    await lab.ready(many(14));
+    await lab.openDrawer();
+    const list = lab.tid("commentor-drawer-list");
+    // No card is in view: the place falls back to the first card instead of failing the update.
+    await list.evaluate(el => { el.style.display = "none"; });
+    await arrive(lab, "z-new");
+    await expect.poll(() => lab.ui.locator(".drawer-thread").count()).toBe(15);
+    await list.evaluate(el => { el.style.display = ""; });
+    expect(await lab.ui.locator('.drawer-thread[data-thread-id="z-new"]').count()).toBe(1);
   });
 
   it("follows the newest comment when the reader is already at the end, and offers no prompt", async () => {
@@ -425,8 +438,8 @@ describe("drawer list", () => {
     const lab = await commentLab.open({ motion: "no-preference" });
     await lab.ready();
     await lab.host((l) => l.seed([
-      { _id: "t1", anchor: { kind: "element", path: ["main", "h1"] }, replies: [l.reply({ _id: "r1", body: "Old reply" })] },
-      { _id: "t2", anchor: { kind: "element", path: ["main", "#second"] } },
+      { _id: "t1", anchor: l.anchorOn("Quarterly report"), replies: [l.reply({ _id: "r1", body: "Old reply" })] },
+      { _id: "t2", anchor: l.anchorOn("Second bold paragraph") },
     ]));
     await lab.openDrawer();
     await expect.poll(() => lab.ui.locator(".drawer-thread").count()).toBe(2);
@@ -438,7 +451,7 @@ describe("drawer list", () => {
     // One new comment and one new reply: only they animate, and they stop being "new" at the next update.
     await lab.host((l) => {
       l.threads[0].replies = [...l.threads[0].replies, l.reply({ _id: "r2", body: "New reply" })];
-      l.threads.push(l.thread({ _id: "t3", anchor: { kind: "element", path: ["main", "#list"] } }));
+      l.threads.push(l.thread({ _id: "t3", anchor: l.anchorOn("AlphaBeta") }));
       l.publish();
     });
     await expect.poll(() => lab.ui.locator(".drawer-thread").count()).toBe(3);
@@ -456,7 +469,7 @@ describe("drawer list", () => {
 describe("locating and the dock", () => {
   it("scrolls only the publisher's document when a thread is located, never the page around the frame", async () => {
     const lab = await commentLab.open({ motion: "no-preference" });
-    await lab.ready([{ _id: "far", anchor: { kind: "element", path: ["main", "#footer"] }, body: "Far" }]);
+    await lab.ready([{ _id: "far", anchor: anchorOn("Footer text far below"), body: "Far" }]);
     // Put the frame inside a scrollable page, fully in view, so an ancestor scroll would be possible and visible.
     await lab.host(() => {
       const frame = document.getElementById("content-frame") as HTMLElement;

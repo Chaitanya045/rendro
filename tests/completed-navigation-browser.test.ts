@@ -8,6 +8,7 @@ import { afterAll, afterEach, beforeAll, expect, it, vi } from 'vitest';
 import type * as ControlPlane from '@/routes/control-plane';
 import { securityHeaders } from '@/middleware/security-headers';
 import organizationPages from '@/routes/organization-pages';
+import projectPages from '@/routes/project-pages';
 import { managementAccessFixture } from './fixtures/management-access';
 import { browserStep, bundleBrowserAsset } from './helpers/browser';
 import { collectBrowserContext } from './helpers/browser-coverage';
@@ -30,7 +31,7 @@ const base = '/organizations/org-a';
 const forms = [
   { name: 'first organization', path: '/organizations', form: 'organization', endpoint: '/api/auth/organization/create', result: { id: 'org-a' }, destination: `${base}/onboarding`, message: 'Created. Continue to project setup.' },
   { name: 'another organization', path: '/organizations?choose=1', form: 'organization', endpoint: '/api/auth/organization/create', result: { id: 'org-a' }, destination: base, message: 'Created. Continue to your organization.' },
-  { name: 'first project', path: `${base}/onboarding`, form: 'project', endpoint: '/api/rendro/projects', result: { project: { _id: 'project-a' } }, destination: `${base}/onboarding?projectId=project-a`, message: 'Created. Continue to deployment setup.' },
+  { name: 'first project', path: `${base}/onboarding`, form: 'project', endpoint: '/api/rendro/projects', result: { project: { _id: 'project-a' } }, destination: `${base}/projects/project-a`, message: 'Created. Continue to your project.' },
   { name: 'accept invitation', path: '/accept-invitation/invitation-a', action: 'accept', endpoint: '/api/auth/organization/accept-invitation', result: { member: { organizationId: 'org-a' } }, destination: base, message: 'Invitation accepted. Continue to your organization.' },
   { name: 'decline invitation', path: '/accept-invitation/invitation-a', action: 'reject', endpoint: '/api/auth/organization/reject-invitation', result: {}, destination: '/organizations', message: 'Invitation declined. Continue to your organizations.' },
 ];
@@ -84,6 +85,7 @@ beforeAll(async () => {
   app.get('/api/auth/organization/get-full-organization', c => c.json(organization));
   app.get('/api/auth/organization/get-invitation', c => c.json(invitation));
   app.route('/', organizationPages);
+  app.route('/', projectPages);
   const listener = getRequestListener(request => app.fetch(request));
   server = createServer((request, response) => { void listener(request, response).catch(error => response.destroy(error as Error)); });
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));

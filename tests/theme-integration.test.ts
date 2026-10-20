@@ -6,9 +6,7 @@ import authPages from "@/routes/auth-pages";
 import organizationPages from "@/routes/organization-pages";
 import projectPages from "@/routes/project-pages";
 import apiKeyPages from "@/routes/api-key-pages";
-import publicationPages from "@/routes/publication-pages";
-import sharePages from "@/routes/share-pages";
-import { renderScopedDocumentShell } from "@/routes/app";
+import { repoShell } from "./helpers/repo-shell";
 import { renderNotFoundPage } from "@/routes/not-found";
 import { sharedThemeRuntime, renderThemeButton, sharedThemeStyles } from "@/routes/theme";
 import { mobileViewportStyles } from "@/routes/viewport";
@@ -45,10 +43,10 @@ describe("shared theme integration", () => {
   });
 
   it("gives document toolbar controls the same strong hover and Ember focus treatment", () => {
-    const html = renderScopedDocumentShell({ user: null, namespace: "qa", title: "QA", basePath: "/p/qa", selectedPath: "index.html", publicDocument: true });
+    const html = repoShell();
     expect(html).toContain(".topbar-btn-icon:hover:not(:disabled){background:#f4f4f5;color:#09090b}");
-    expect(html).toContain(".topbar-btn-icon:focus-visible,.topbar-avatar:focus-visible{outline:2px solid #c2410c;outline-offset:2px}");
-    expect(html).toContain("html.dark .topbar-avatar:focus-visible{outline-color:#fb923c}");
+    expect(html).toContain(".topbar-btn-icon:focus-visible{outline:2px solid #c2410c;outline-offset:2px}");
+    expect(html).toContain("html.dark .topbar-btn-share:focus-visible,html.dark .topbar-btn-icon:focus-visible{outline-color:#fb923c}");
     expect(html).not.toContain(".topbar-btn-share:focus-visible{outline:2px solid #71717a");
     expect(html).not.toContain(".mobile-more-menu #theme-toggle:hover");
   });
@@ -79,23 +77,21 @@ describe("shared theme integration", () => {
       c.set("user", { id: "qa", name: "QA", email: "qa@example.test" } as User);
       await next();
     });
-    for (const routes of [authPages, organizationPages, projectPages, apiKeyPages, publicationPages, sharePages]) app.route("/", routes);
-    for (const path of ["/organizations", "/organizations/org", "/organizations/org/people", "/organizations/org/teams", "/organizations/org/settings", "/organizations/org/api-keys", "/organizations/org/onboarding", "/organizations/org/projects", "/organizations/org/projects/project", "/organizations/org/projects/project/publications", "/organizations/org/projects/project/shares", "/account/security"]) {
+    for (const routes of [authPages, organizationPages, projectPages, apiKeyPages]) app.route("/", routes);
+    for (const path of ["/organizations", "/organizations/org", "/organizations/org/people", "/organizations/org/teams", "/organizations/org/settings", "/organizations/org/api-keys", "/organizations/org/onboarding", "/organizations/org/projects", "/organizations/org/projects/project", "/account/security"]) {
       const response = await app.request(path);
       expect(response.status, path).toBe(200);
       assertSharedTheme(await response.text(), path === "/account/security" ? "theme-toggle" : "cp-theme");
     }
   });
 
-  it("keeps private/public viewers on the same controller and preserves iframe theme messaging", () => {
-    for (const publicDocument of [false, true]) {
-      const html = renderScopedDocumentShell({ user: null, namespace: "qa", title: "QA", basePath: publicDocument ? "/p/qa" : "/organizations/org/projects/project/docs", selectedPath: "index.html", publicDocument });
-      assertSharedTheme(html, "theme-toggle");
-      const main = html.slice(html.indexOf('<main class="main">'), html.indexOf("</main>"));
-      expect(main).toContain('id="sidebar-resizer" role="separator"');
-      expect(html).toContain('RendroTheme.mount(document.getElementById("theme-toggle"),notifyTheme)');
-      expect(html).toContain('e.source!==themeFrame.contentWindow');
-    }
+  it("keeps the repository viewer on the same controller and preserves iframe theme messaging", () => {
+    const html = repoShell();
+    assertSharedTheme(html, "theme-toggle");
+    const main = html.slice(html.indexOf('<main class="main">'), html.indexOf("</main>"));
+    expect(main).toContain('id="sidebar-resizer" role="separator"');
+    expect(html).toContain('RendroTheme.mount(document.getElementById("theme-toggle"),notifyTheme)');
+    expect(html).toContain('e.source!==themeFrame.contentWindow');
   });
 
   it("keeps passive error pages in sync without adding a second theme toggle inside documents", () => {

@@ -41,31 +41,28 @@ describe("protocol message guards", () => {
 });
 
 describe("mutation argument validation", () => {
-  const anchor = { kind: "element", path: ["main"] };
-  const text = { kind: "text-range", quote: "quote", path: ["main", "p"], startOffset: 0, endOffset: 5 };
+  const anchor = { kind: "repo-text", blobSha: "b".repeat(40), headingSlug: "install", prefix: "Run ", exact: "pnpm install", suffix: " first", offset: 4 };
   it("treats only plain objects as records", () => {
     expect(record({ a: 1 })).toEqual({ a: 1 });
     for (const value of [null, undefined, [], "x", 3]) expect(record(value)).toBeNull();
   });
-  const anchors: Array<[unknown, boolean]> = [
-    [anchor, true], [text, true], [{ ...text, startOffset: 1_000_000, endOffset: 0 }, true],
-    [null, false], [{ kind: "element" }, false], [{ kind: "element", path: [] }, false], [{ kind: "element", path: Array(65).fill("p") }, false],
-    [{ kind: "element", path: ["   "] }, false], [{ kind: "element", path: [3] }, false], [{ kind: "element", path: ["x".repeat(257)] }, false], [{ kind: "area", path: ["main"] }, false],
-    [{ ...text, quote: 4 }, false], [{ ...text, quote: "  " }, false], [{ ...text, quote: "q".repeat(4097) }, false],
-    [{ ...text, startOffset: 1.5 }, false], [{ ...text, startOffset: -1 }, false], [{ ...text, startOffset: 1_000_001 }, false],
-    [{ ...text, endOffset: 0.5 }, false], [{ ...text, endOffset: -1 }, false], [{ ...text, endOffset: 1_000_001 }, false],
+  // Element and text-range anchors belonged to uploaded HTML; repository docs anchor by heading and quote only (#254).
+  const anchors: Array<[string, unknown, boolean]> = [
+    ["a repository anchor", anchor, true], ["no anchor", null, false], ["an array", [anchor], false], ["a blank quote", { ...anchor, exact: " " }, false],
+    ["an element anchor", { kind: "element", path: ["main"] }, false],
+    ["a text-range anchor", { kind: "text-range", quote: "quote", path: ["main", "p"], startOffset: 0, endOffset: 5 }, false],
   ];
-  it.each(anchors)("validAnchor(%j) is %s", (value, expected) => expect(validAnchor(value)).toBe(expected));
+  it.each(anchors)("validAnchor accepts %s: %s", (_name, value, expected) => expect(validAnchor(value)).toBe(expected));
   it.each([
     ["thread.create", { body: "  hello  ", anchor }, { body: "hello", anchor }],
     ["thread.create", { body: "hi", anchor, clientOperationId: "op" }, { clientOperationId: "op", body: "hi", anchor }],
     ["thread.create", { body: "   ", anchor }, null], ["thread.create", { body: "x".repeat(10_001), anchor }, null], ["thread.create", { body: 4, anchor }, null],
-    ["thread.create", { body: "hi", anchor: { kind: "element", path: [] } }, null],
+    ["thread.create", { body: "hi", anchor: { kind: "element", path: ["main"] } }, null],
     ["reply.add", { threadId: "t", body: " hi " }, { threadId: "t", body: "hi" }], ["reply.add", { threadId: "t", body: " " }, null], ["reply.add", { body: "hi" }, null], ["reply.add", { threadId: "", body: "hi" }, null],
     ["reply.remove", { threadId: "t", replyId: "r" }, { threadId: "t", replyId: "r" }], ["reply.remove", { threadId: "t" }, null], ["reply.remove", { threadId: "t", replyId: "" }, null],
-    ["thread.resolve", { threadId: "t" }, { threadId: "t" }], ["thread.resolve", { threadId: "t", resolved: true }, { threadId: "t", resolved: true }],
+    ["thread.resolve", { threadId: "t" }, null], ["thread.resolve", { threadId: "t", resolved: true }, { threadId: "t", resolved: true }],
     ["thread.resolve", { threadId: "t", resolved: "yes" }, null], ["thread.resolve", { threadId: "t", clientOperationId: "op" }, null],
-    ["thread.archive", { threadId: "t", archived: false, clientOperationId: "op" }, { clientOperationId: "op", threadId: "t", archived: false }], ["thread.archive", { threadId: "t" }, { threadId: "t" }],
+    ["thread.archive", { threadId: "t", archived: false, clientOperationId: "op" }, { clientOperationId: "op", threadId: "t", archived: false }], ["thread.archive", { threadId: "t" }, null],
     ["thread.remove", { threadId: "t", clientOperationId: "op" }, { clientOperationId: "op", threadId: "t" }],
     ["thread.remove", { threadId: "t", clientOperationId: " " }, null], ["thread.remove", { threadId: "t", clientOperationId: 4 }, null], ["thread.remove", { threadId: "t", clientOperationId: "x".repeat(129) }, null],
     ["thread.remove", "not an object", null], ["thread.remove", [], null],

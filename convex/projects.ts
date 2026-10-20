@@ -1,10 +1,5 @@
 import { consumeWriteQuota } from "./writeQuotas";
 import { isOrganizationDeleted, requireActiveOrganization } from "./organizationLifecycle";
-import { isPublicErrorData } from "../src/shared/public-errors";
-import { requireId } from "./ids";
-import { requireOrganizationMember } from "./authorization";
-import { query } from "./publicFunctions";
-import { publicError } from "./publicErrors";
 import { ConvexError, v } from "convex/values";
 import { internalMutation, internalQuery } from "./_generated/server";
 
@@ -80,28 +75,5 @@ export const createInternal = internalMutation({
       createdAt,
     });
     return await ctx.db.get(projectId);
-  },
-});
-
-/** Small reactive signal for an authorized, already-open private viewer. */
-export const activeDeployment = query({
-  args: { organizationId: v.string(), projectId: v.string() },
-  handler: async (ctx, args) => {
-    try {
-      await requireOrganizationMember(ctx, args.organizationId);
-    } catch (error) {
-      // This background signal has no sign-in UX: hide all access denials alike.
-      if (error instanceof ConvexError && isPublicErrorData(error.data)
-        && ["unauthenticated", "forbidden", "not_found"].includes(error.data.code)) publicError("not_found");
-      throw error;
-    }
-    const projectId = requireId(ctx, "projects", args.projectId);
-    const project = await ctx.db.get(projectId);
-    if (!project || project.organizationId !== args.organizationId) publicError("not_found");
-    if (!project.activeDeploymentId) return null;
-    const deployment = await ctx.db.get(project.activeDeploymentId);
-    if (!deployment || deployment.organizationId !== args.organizationId
-      || deployment.projectId !== project._id || deployment.status !== "active") return null;
-    return deployment._id;
   },
 });

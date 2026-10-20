@@ -2,8 +2,10 @@ import type { ServerResponse } from "node:http";
 import { beforeAll, beforeEach, expect, it, vi } from "vitest";
 
 import { imageProxyPath } from "../src/image-proxy";
-import { RENDERED_DOCUMENT_POLICY } from "../src/routes/asset-headers";
 import worker from "../src/worker";
+
+/** The image rule of a repository frame's policy (src/repo-read/frame.ts), with scripts allowed so the probe can report. */
+const FRAME_IMAGE_POLICY = "sandbox allow-scripts allow-forms allow-popups allow-downloads; img-src 'self'; frame-ancestors 'self'";
 import { browserStep, createBrowserHarness } from "./helpers/browser";
 
 /*
@@ -41,7 +43,7 @@ beforeAll(async () => {
       response.writeHead(200, { "Content-Type": "image/svg+xml" }).end(SCRIPTED_SVG);
     } else if (url.pathname === "/frame") {
       // An ingest-rendered document: its images are proxy paths, plus one external image the policy must stop.
-      response.writeHead(200, { "Content-Type": "text/html", "Content-Security-Policy": RENDERED_DOCUMENT_POLICY });
+      response.writeHead(200, { "Content-Type": "text/html", "Content-Security-Policy": FRAME_IMAGE_POLICY });
       response.end(frame(`<img id="png" src="${paths.png}"><img id="svg" src="${paths.svg}"><img id="external" src="http://127.0.0.2:9/track.png"><img id="corp" src="/control/same-origin.png">`));
     } else {
       response.writeHead(200, { "Content-Type": "text/html" });

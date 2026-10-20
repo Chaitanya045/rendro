@@ -8,17 +8,17 @@ import { workerMutationPolicies } from "../src/middleware/write-admission";
 
 it("declares admission policy for every registered Convex HTTP route", () => {
   const routes = http.getRoutes();
-  expect(routes.length).toBeGreaterThan(25);
+  expect(routes.length).toBeGreaterThan(10);
   for (const [path, method, handler] of routes) {
     const policy = httpActionPolicies.get(handler);
     expect(policy, `${method} ${path}`).toBeDefined();
     if (!["GET", "HEAD", "OPTIONS"].includes(method)) {
-      expect(["cookie-json", "bearer", "mixed", "better-auth"], `${method} ${path}`).toContain(policy);
+      expect(["cookie-json", "bearer", "better-auth"], `${method} ${path}`).toContain(policy);
     }
   }
   // Pin security-sensitive assignments, rather than only testing membership.
   for (const [path, method, handler] of routes) {
-    if (method === "POST" && /set-initial-password|projects$|credentials|shares/.test(path)) {
+    if (method === "POST" && /set-initial-password|projects$|credentials/.test(path)) {
       expect(httpActionPolicies.get(handler), path).toBe("cookie-json");
     }
   }
@@ -33,7 +33,7 @@ it("enumerates every registered Worker mutation, including dedicated and wildcar
   // Exact equality makes both new routes and stale policy entries visible.
   const policies = new Set(Object.keys(workerMutationPolicies));
   // These custom paths are handled by the registered Convex wildcard proxy.
-  for (const path of ["/api/auth/set-initial-password", "/api/rendro/projects", "/api/rendro/credentials", "/api/rendro/credentials/revoke", "/api/rendro/shares/revoke"]) {
+  for (const path of ["/api/auth/set-initial-password", "/api/rendro/projects", "/api/rendro/credentials", "/api/rendro/credentials/revoke"]) {
     policies.delete(`POST ${path}`);
   }
   expect([...registered].sort()).toEqual([...policies].sort());
@@ -41,11 +41,6 @@ it("enumerates every registered Worker mutation, including dedicated and wildcar
 
 it("inventories public state-changing RPCs, whose authority is explicit JWT or internal secret", async () => {
   const declared = {
-    "deletedFiles:mark": "internal-secret",
-    "documentReplies:add": "session-jwt", "documentReplies:remove": "session-jwt",
-    "documentThreads:create": "session-jwt", "documentThreads:resolve": "session-jwt", "documentThreads:archive": "session-jwt", "documentThreads:remove": "session-jwt",
-    "replies:add": "session-jwt", "replies:remove": "session-jwt",
-    "threads:create": "session-jwt", "threads:resolve": "session-jwt", "threads:archive": "session-jwt", "threads:remove": "session-jwt",
     // Repository docs (#254): grants are written only by the read path and P5; comments need the reader's JWT and a grant.
     "repoCommentAccess:grant": "internal-secret", "repoCommentAccess:revokeUser": "internal-secret", "repoCommentAccess:removeRepos": "internal-secret",
     // Purging waits for GitHub to confirm the removal (#258); a confirmation that GitHub still grants restores.

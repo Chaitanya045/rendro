@@ -16,25 +16,11 @@ export default defineConfig({
         test: {
           name: "unit",
           include: ["tests/**/*.test.ts"],
-          exclude: ["tests/**/*-browser.test.ts", "tests/share-budget.test.ts"],
+          exclude: ["tests/**/*-browser.test.ts"],
           sequence: { groupOrder: 0 },
           // In-process Convex emulation under V8 coverage on a shared 2-vCPU runner
           // runs several times slower than the 5s default assumes (seen: 5.1-7s).
           // Budgets here only catch hangs; assertions never depend on elapsed time.
-          testTimeout: 30_000,
-          hookTimeout: 30_000,
-        },
-      },
-      {
-        extends: true,
-        test: {
-          // Asserts CPU-time ratios of a child process. Parallel unit workers (esbuild
-          // builds, tsx children, coverage collection) inflate CPU time through shared
-          // caches and SMT, so this file gets the machine to itself, after everything else.
-          name: "timing",
-          include: ["tests/share-budget.test.ts"],
-          sequence: { groupOrder: 2 },
-          fileParallelism: false,
           testTimeout: 30_000,
           hookTimeout: 30_000,
         },

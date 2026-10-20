@@ -3,8 +3,15 @@ import { expect } from "vitest";
 import type { CommentLab } from "../fixtures/comment-lab-browser";
 import { bundleBrowserAsset, createBrowserHarness } from "./browser";
 
-export const docsBase = "/organizations/org-a/projects/project-a/docs";
+/** A repository's docs (#254): the shell at the repository base, its frames below `files/`. */
+export const docsBase = "/r/acme/docs";
 export const docPath = `${docsBase}/files/index.html`;
+export const LAB_REPO_ID = 9101;
+export const LAB_BLOB = "b".repeat(40);
+/** A repository anchor on unique text of the lab document: found by its quote (the offset is left to the search). */
+export function anchorOn(exact: string, headingSlug = "title") {
+  return { kind: "repo-text", blobSha: LAB_BLOB, headingSlug, prefix: "", exact, suffix: "", offset: 0 };
+}
 export const defaultDocument = `<!doctype html><html><head><meta charset="utf-8"><style>
 body{margin:0;font:16px/24px sans-serif}main{padding:24px;width:520px}p{margin:0 0 16px}
 </style></head><body><main><h1 id="title">Quarterly report</h1>
@@ -50,14 +57,17 @@ export function useCommentLab() {
         response.setHeader("Cache-Control", "no-store");
         if (url.pathname.startsWith(`${docsBase}/files/`)) {
           response.setHeader("Content-Type", "text/html; charset=utf-8");
+          // As the read path embeds it (#254): the configuration rides on the widget's own script element.
           const value = config === undefined
-            ? { transport: "parent", organizationId: "org-a", projectId: "project-a", documentPath: url.pathname.slice(docsBase.length + "/files/".length), canWrite }
+            ? { transport: "parent", repoId: LAB_REPO_ID, blobSha: LAB_BLOB, documentPath: url.pathname.slice(docsBase.length + "/files/".length) }
             : config;
-          response.end(document.replace("</body>", `${value ? `<script>window.COMMENTOR=${JSON.stringify(value)}</script>` : ""}<script ${deferred ? "defer " : ""}src="/commentor.js"></script></body>`));
+          const attribute = value ? ` data-commentor-config="${JSON.stringify(value).replace(/&/g, "&amp;").replace(/"/g, "&quot;")}"` : "";
+          response.end(document.replace("</body>", `<script ${deferred ? "defer " : ""}src="/commentor.js"${attribute}></script></body>`));
         } else if (url.pathname === docsBase) {
           response.setHeader("Content-Type", "text/html; charset=utf-8");
           const sandbox = url.searchParams.has("sandbox") ? ' sandbox="allow-scripts allow-forms allow-popups allow-downloads"' : "";
-          response.end(`<!doctype html><html><body style="margin:0"><iframe id="content-frame"${sandbox} src="${docPath}" style="position:fixed;inset:0;width:100%;height:100%;border:0"></iframe><div id="viewer-update-notice" hidden style="position:fixed;z-index:100;top:12px;right:12px;background:#fff"><span role="status"></span><button type="button">Reload</button></div><script src="/lab.js"></script></body></html>`);
+          // The read path says who may write; the lab's shell passes the test's choice to the host.
+          response.end(`<!doctype html><html><body style="margin:0"><iframe id="content-frame"${sandbox} src="${docPath}" style="position:fixed;inset:0;width:100%;height:100%;border:0"></iframe><div id="viewer-update-notice" hidden style="position:fixed;z-index:100;top:12px;right:12px;background:#fff"><span role="status"></span><button type="button">Reload</button></div><script src="/lab.js${canWrite ? "" : "?readonly"}"></script></body></html>`);
         } else {
           response.writeHead(404).end();
         }

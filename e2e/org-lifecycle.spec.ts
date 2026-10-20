@@ -17,7 +17,7 @@ test.describe("organization chooser", () => {
     await expect(page.getByRole("heading", { name: "Create your organization" })).toBeVisible();
     expect(new URL(page.url()).pathname).toBe("/organizations");
     const steps = page.getByLabel("Setup progress").locator(".step");
-    await expect(steps).toHaveText(["1Organization", "2Project", "3First deployment"]);
+    await expect(steps).toHaveText(["1Organization", "2Project"]);
     await expect(steps.nth(0)).toHaveAttribute("aria-current", "step");
     await expect(page.locator(".step[aria-current=step]")).toHaveCount(1);
 

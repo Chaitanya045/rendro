@@ -1,8 +1,6 @@
 import type { User } from "better-auth/types";
 import { renderOrganizationSection } from "../src/routes/organization-pages";
 import { renderProjectPage } from "../src/routes/project-pages";
-import { renderPublicationPage } from "../src/routes/publication-pages";
-import { renderSharePage } from "../src/routes/share-pages";
 import { renderApiKeyPage } from "../src/routes/api-key-pages";
 import { MANAGEMENT_SHELL_VERSION } from "../src/routes/management-navigation";
 
@@ -19,9 +17,6 @@ export function managementPagesSource() {
     settings: () => renderOrganizationSection(user, org, "settings"),
     "api-keys": () => renderApiKeyPage(user, org),
     project: () => renderProjectPage(user, org, project),
-    deployments: () => renderProjectPage(user, org, project, "deployments"),
-    publications: () => renderPublicationPage(user, org, project),
-    shares: () => renderSharePage(user, org, project),
   };
   const entries = [];
   for (const [section, render] of Object.entries(templates)) {

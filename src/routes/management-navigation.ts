@@ -1,21 +1,20 @@
 import { MANAGEMENT_PROJECT_PLACEHOLDER, managementLoadingPages } from "./management-loading-pages";
 
-export const MANAGEMENT_SHELL_VERSION = "29";
+export const MANAGEMENT_SHELL_VERSION = "30";
 
 export interface ManagementRouteIdentity {
   organizationId: string;
   projectId?: string;
-  section: "overview" | "projects" | "people" | "teams" | "settings" | "api-keys" | "project" | "deployments" | "publications" | "shares";
+  section: "overview" | "projects" | "people" | "teams" | "settings" | "api-keys" | "project";
 }
 
 export function managementRouteIdentity(pathname: string): ManagementRouteIdentity | null {
-  const match = pathname.match(/^\/organizations\/([^/]+)(?:\/(projects)(?:\/([^/]+)(?:\/(deployments|publications|shares))?)?|\/(people|teams|settings|api-keys))?\/?$/);
+  const match = pathname.match(/^\/organizations\/([^/]+)(?:\/(projects)(?:\/([^/]+))?|\/(people|teams|settings|api-keys))?\/?$/);
   if (!match) return null;
   try {
     const organizationId = decodeURIComponent(match[1]);
     const projectId = match[3] ? decodeURIComponent(match[3]) : undefined;
-    const section = match[5]
-      ?? (projectId ? (match[4] ?? "project") : (match[2] ?? "overview"));
+    const section = match[4] ?? (projectId ? "project" : (match[2] ?? "overview"));
     return { organizationId, projectId, section } as ManagementRouteIdentity;
   } catch {
     return null;
@@ -36,9 +35,9 @@ function managementNavigationRuntime(loadingPagesJson: string): string {
   var signedOut=Boolean(document.documentElement&&document.documentElement.dataset.rendroSignedOut);
 
   function routeIdentity(url){
-    var match=url.pathname.match(/^\/organizations\/([^/]+)(?:\/(projects)(?:\/([^/]+)(?:\/(deployments|publications|shares))?)?|\/(people|teams|settings|api-keys))?\/?$/);
+    var match=url.pathname.match(/^\/organizations\/([^/]+)(?:\/(projects)(?:\/([^/]+))?|\/(people|teams|settings|api-keys))?\/?$/);
     if(!match)return null;
-    try{return {organizationId:decodeURIComponent(match[1]),projectId:match[3]?decodeURIComponent(match[3]):"",section:match[5]||(match[3]?(match[4]||"project"):(match[2]||"overview"))};}catch(_error){return null;}
+    try{return {organizationId:decodeURIComponent(match[1]),projectId:match[3]?decodeURIComponent(match[3]):"",section:match[4]||(match[3]?"project":(match[2]||"overview"))};}catch(_error){return null;}
   }
   function supported(url){var route=routeIdentity(url);return url.origin===location.origin&&route&&route.organizationId===shellOrganization?route:null;}
   var queryCache=!signedOut&&supported(new URL(location.href))&&window.RendroQueryCore&&shellUser?window.RendroQueryCore.create({userId:shellUser,organizationId:shellOrganization,origin:location.origin},function(path,options){return ui.request(path,options);}):null,cacheChannel=null;
@@ -158,9 +157,6 @@ function managementNavigationRuntime(loadingPagesJson: string): string {
     if(mode!=="pop"){var heading=content.querySelector("h1");if(heading){heading.tabIndex=-1;heading.focus({preventScroll:true});}}
     return content;
   }
-  // Documentation links are revealed by project pages only after an active
-  // deployment is observed; keep them only while staying within that project.
-  function syncDocsLinks(route){document.querySelectorAll("[data-cp-open-docs]").forEach(function(link){if(!route.projectId||link.getAttribute("data-cp-docs-project")!==route.projectId){link.hidden=true;link.removeAttribute("data-cp-docs-project");}});}
   function syncChrome(url){
     if(typeof ui.syncActiveNav==="function")ui.syncActiveNav();
     if(typeof ui.setNav==="function")ui.setNav(false,false);
@@ -206,7 +202,7 @@ function managementNavigationRuntime(loadingPagesJson: string): string {
     if(url.pathname===location.pathname&&url.search===location.search&&url.hash!==location.hash){if(mode!=="pop")location.assign(url.href);else syncChrome(url);return true;}
     if(!(options&&options.checked)&&!canLeave(leaveDetail))return false;
     if(navigationController)navigationController.abort();navigationController=new AbortController();var version=++navigationVersion,departingScroll=window.scrollY||0;scrollRestore=mode==="pop"&&Number.isFinite(options&&options.scrollY)&&options.scrollY>0?options.scrollY:null;
-    disposePage();if(typeof ui.setNav==="function")ui.setNav(false,false);syncDocsLinks(route);var pendingContent=showDestinationSkeleton(route,mode,options&&options.scrollY);setHistory(url,mode,departingScroll);syncChrome(url);
+    disposePage();if(typeof ui.setNav==="function")ui.setNav(false,false);var pendingContent=showDestinationSkeleton(route,mode,options&&options.scrollY);setHistory(url,mode,departingScroll);syncChrome(url);
     var timedOut=false,timeoutId=setTimeout(function(){if(version!==navigationVersion)return;timedOut=true;navigationController.abort();hardNavigate(url,true);},15000);
     try{
       var bundle=window.RendroManagementPages,page=bundle&&bundle.version===SHELL_VERSION&&bundle.pages[route.section];

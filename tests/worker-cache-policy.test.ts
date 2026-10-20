@@ -1,8 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import worker from "../src/worker";
-import { createShareToken } from "../src/share-links";
 import { MANAGEMENT_QUERY_VERSION } from "../src/routes/management-asset-versions";
-import { mockSecurityBackend, docsBase } from "./fixtures/security-headers";
+import { mockSecurityBackend } from "./fixtures/security-headers";
 
 const routes = worker.routes.filter(route => route.method !== "ALL");
 const pathFor = (path: string) => path.replace(/:[\w]+(?:\{[^}]+\})?/g, "synthetic-token").replaceAll("*", "synthetic-token");
@@ -25,33 +24,21 @@ describe("Worker cache policy from all actual route registrations", () => {
   });
 });
 
-it("covers successful one-time/capability delivery, legacy denials, malformed paths and proxy failures", async () => {
-  const token = createShareToken("example/index.html");
-  for (const path of [`/share/${token}`, "/s/test", "/s/test/files/index.html", `${docsBase}/files/index.html`, `${docsBase}/viewer-ticket?manifestKey=tenants/org-a/projects/project-a/deployments/deploy-a/manifest.json`]) {
-    const response = await worker.request(`https://test${path}`, { headers: { cookie: "better-auth.session_token=test-session" } });
-    expect(response.status, path).toBe(200);
-    expect(response.headers.get("cache-control")).toBe("private, no-store");
-    expect(response.headers.get("referrer-policy")).toBe("no-referrer");
-  }
-  for (const path of ["/share/invalid", "/share/%ZZ", "/share/invalid/extra", "/s/test/extra", "/s/%ZZ/files/%ZZ", "/accept-invitation/invalid", "/reset-password?token=invalid", "/verify-email?token=invalid"]) {
+it("covers one-time capability pages, malformed paths and proxy failures", async () => {
+  for (const path of ["/accept-invitation/invalid", "/accept-invitation/%ZZ", "/reset-password?token=invalid", "/verify-email?token=invalid"]) {
     const response = await worker.request(`https://test${path}`);
     expect(response.headers.get("cache-control"), path).toBe("private, no-store");
     expect(response.headers.get("referrer-policy"), path).toBe("no-referrer");
   }
   vi.mocked(fetch).mockRejectedValue(new Error("synthetic transport fault"));
-  for (const path of ["/api/auth/get-session", "/api/rendro/shares", "/api/rendro/credentials"]) {
+  for (const path of ["/api/auth/get-session", "/api/rendro/projects", "/api/rendro/credentials"]) {
     const response = await worker.request(`https://test${path}`);
     expect(response.status).toBe(502);
     expect(response.headers.get("cache-control")).toBe("private, no-store");
   }
 });
 
-it("preserves the reviewed JWKS, static asset and public publication exceptions", async () => {
-  for (const path of ["/p/product/files/index.html", "/p/docs/files/index.html", "/public/example/product/files/index.html", "/p/product/tree"]) {
-    const response = await worker.request(`https://test${path}`);
-    expect(response.status).toBe(200);
-    expect(response.headers.get("cache-control")).toBe("public, max-age=0, must-revalidate");
-  }
+it("preserves the reviewed JWKS and static asset exceptions", async () => {
   const response = await worker.request(`/management-query.js?v=${MANAGEMENT_QUERY_VERSION}`, {}, { ASSETS: { fetch: () => new Response("asset", { headers: { "Cache-Control": "public, max-age=0, must-revalidate" } }) } });
   expect(response.headers.get("cache-control")).toBe("public, max-age=31536000, immutable");
   for (const [status, cookies, expected] of [

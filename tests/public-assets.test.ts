@@ -1,13 +1,13 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import worker from "@/worker";
-import * as deletion from "@/soft-delete";
 import { fontResponseHeaders } from "@/routes/fonts";
 import { styleResponseHeaders } from "@/routes/styles";
 import { faviconAssets, faviconCacheControl } from "@/routes/favicon";
 import { bundleCacheControl, publicAssetHeaders, publicAssetPaths } from "@/routes/public-assets";
 import { versionedBundles } from "@/routes/versioned-bundles";
-import { docsBase, mockSecurityBackend } from "./fixtures/security-headers";
+import { docsBase, mockSecurityBackend, testUser } from "./fixtures/security-headers";
+import { privateRepo, repoReadFixture } from "./helpers/repo-read-fixture";
 
 vi.mock("@hono/node-server", () => ({ serve: vi.fn() }));
 import { app as local } from "@/index";
@@ -22,7 +22,7 @@ const assetsFor = (init: ResponseInit = {}) => ({
 });
 const nodeContext = { incoming: { socket: { remoteAddress: "127.0.0.1" } } };
 
-beforeEach(() => { mockSecurityBackend(); vi.spyOn(deletion, "isDeleted").mockResolvedValue(false); });
+beforeEach(() => { mockSecurityBackend(); });
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 describe("public asset inventory", () => {
@@ -225,16 +225,23 @@ describe("Worker and Node serve public assets without a session lookup", () => {
 });
 
 describe("rendered pages reference only served bundle versions", () => {
-  const references = (html: string) => [...html.matchAll(/(?:src|href)="(\/[a-z-]+\.js)\?v=([^"]+)"/g)].map(([, path, version]) => [path, version] as const);
+  // Repository frames name same-origin bundles by absolute URL (their base may differ).
+  const references = (html: string) => [...html.matchAll(/(?:src|href)="(?:https?:\/\/[^/"]+)?(\/[a-z-]+\.js)\?v=([^"]+)"/g)].map(([, path, version]) => [path, version] as const);
 
   it("keeps every versioned URL in Rendro-authored HTML on an immutable URL", async () => {
     const seen = new Set<string>();
+    // A private repository (#234) the signed-in user reads: its shell and its document frame.
+    const fixture = await repoReadFixture();
+    fixture.access.grant(testUser.id, privateRepo.id);
+    const env = { ...fixture.env, ASSETS: assetsFor() };
+    const shell = `/r/${privateRepo.owner}/${privateRepo.name}`;
+    const frameBase = /data-frame-base="([^"]+)"/.exec(await (await worker.request(`https://rendro.test${shell}`, { headers: { cookie } }, env, fixture.ctx)).text())![1];
     const pages = [
       "/organizations/org-a", "/organizations/org-a/projects", "/organizations/org-a/people", "/account/security",
-      "/docs/example/index.html", "/legacy-view/example/files/index.html", `${docsBase}/files/index.html`, `${docsBase}`,
+      shell, `${frameBase}/files/docs/index.md`,
     ];
     for (const page of pages) {
-      const response = await worker.request(`https://rendro.test${page}`, { headers: { cookie } }, { ASSETS: assetsFor() });
+      const response = await worker.request(`https://rendro.test${page}`, { headers: { cookie } }, env, fixture.ctx);
       for (const [path, version] of references(await response.text())) {
         seen.add(path);
         expect(publicAssetHeaders(path, `?v=${version}`)?.["Cache-Control"], `${page} references ${path}?v=${version}`).toBe(immutable);

@@ -1,4 +1,3 @@
-import { version as cliVersion } from "../../package.json";
 
 /**
  * Shared management vocabulary and small browser helpers.
@@ -9,21 +8,13 @@ import { version as cliVersion } from "../../package.json";
  * `window.RendroUI` for client-rendered rows.
  */
 export const MANAGEMENT_LABELS = {
-  /** Deployment and record lifecycle states. */
+  /** Record lifecycle states. */
   status: {
-    staging: "Staging",
     active: "Active",
-    superseded: "Superseded",
-    failed: "Failed",
     pending: "Pending",
     expiring: "Expiring",
     expired: "Expired",
     revoked: "Revoked",
-  },
-  /** Whether a project has an active deployment. */
-  release: {
-    deployed: "Deployed",
-    undeployed: "Not deployed",
   },
   role: {
     owner: "Owner",
@@ -43,7 +34,7 @@ export type ManagementLabelKind = keyof typeof MANAGEMENT_LABELS;
 export type ApiKeyScope = keyof typeof MANAGEMENT_LABELS.scope;
 
 export const API_KEY_SCOPES = Object.keys(MANAGEMENT_LABELS.scope) as ApiKeyScope[];
-/** Minimum permissions for a first CLI deployment. */
+/** The permissions a new key starts with. */
 export const RECOMMENDED_API_KEY_SCOPES: ApiKeyScope[] = ["docs:read", "docs:write"];
 
 function titleCase(value: string): string {
@@ -62,22 +53,18 @@ export function renderScopeFieldset(scopes: readonly ApiKeyScope[] = API_KEY_SCO
   return `<fieldset class="scope-fieldset"><legend class="field-label">Permissions</legend><div class="checks">${options}</div></fieldset>`;
 }
 
-export const CLI_PACKAGE = `rendro@${cliVersion}`;
-
 /**
  * Browser helpers mounted on `window.RendroUI` by the control-plane shell:
- * `label`, `cliPushCommand`, `idValue`, `setDocsLink` and the promise-based
+ * `label`, `idValue` and the promise-based
  * `confirm` dialog used for every destructive action.
  */
 export const managementUiRuntime = String.raw`
 (function(){
   "use strict";
   var ui=window.RendroUI;if(!ui)return;
-  var LABELS=${JSON.stringify(MANAGEMENT_LABELS)},CLI_PACKAGE=${JSON.stringify(CLI_PACKAGE)};
+  var LABELS=${JSON.stringify(MANAGEMENT_LABELS)};
   function titleCase(value){return String(value).replace(/[_-]+/g," ").replace(/\b\w/g,function(character){return character.toUpperCase();});}
   function label(kind,value){var map=LABELS[kind]||{},key=String(value==null?"":value);return Object.prototype.hasOwnProperty.call(map,key)?map[key]:titleCase(key);}
-  function shellQuote(value){return "'"+String(value).replace(/'/g,"'\\''")+"'";}
-  function cliPushCommand(options){var lines=[options.apiKey?"export RENDRO_API_KEY="+shellQuote(options.apiKey):"# Set RENDRO_API_KEY securely in your environment; never commit it."];lines.push("npx --yes "+CLI_PACKAGE+" push --source ./docs \\","  --organization "+shellQuote(options.organizationId)+" --project "+shellQuote(options.projectId)+" \\","  --endpoint "+shellQuote(options.endpoint||location.origin));return lines.join("\n");}
   var copyTimers=new WeakMap();
   function idValue(value,options){
     options=options||{};var wrap=document.createElement("span"),code=document.createElement("code");
@@ -91,7 +78,6 @@ export const managementUiRuntime = String.raw`
     }
     return wrap;
   }
-  function setDocsLink(href,projectId){document.querySelectorAll("[data-cp-open-docs]").forEach(function(link){if(href){link.setAttribute("href",href);link.setAttribute("data-cp-docs-project",projectId||"");link.hidden=false;}else{link.hidden=true;link.removeAttribute("data-cp-docs-project");}});}
   // The organization name and mark sit in the switcher the reader may be pressing while this page hydrates. WebKit drops a
   // click whose pressed text node is removed before release, so a changed label is rewritten in place, never replaced.
   function setText(node,value){var kids=node.childNodes;if(kids&&kids.length===1&&kids[0].nodeType===3){if(kids[0].data!==value)kids[0].data=value;}else if(node.textContent!==value)node.textContent=value;}
@@ -122,7 +108,7 @@ export const managementUiRuntime = String.raw`
     returnFocus=document.activeElement;
     return new Promise(function(resolve){resolver=resolve;node.showModal();node.querySelector("[data-confirm-cancel]").focus();});
   }
-  Object.assign(ui,{label:label,cliPushCommand:cliPushCommand,idValue:idValue,setDocsLink:setDocsLink,setOrganizationChrome:setOrganizationChrome,confirm:confirmAction});
+  Object.assign(ui,{label:label,idValue:idValue,setOrganizationChrome:setOrganizationChrome,confirm:confirmAction});
 })();
 `;
 

@@ -1,5 +1,5 @@
 import { beforeAll, describe, expect, it } from "vitest";
-import { defaultDocument, useCommentLab, type Lab } from "./helpers/comment-lab";
+import { anchorOn, defaultDocument, useCommentLab, type Lab } from "./helpers/comment-lab";
 
 const commentLab = useCommentLab();
 beforeAll(() => commentLab.start());
@@ -9,9 +9,11 @@ const footerBlock = /<div style="height:1600px"><\/div><p id="footer">Footer tex
 const rowsDocument = (count: number, rowHeight: number) => defaultDocument.replace(footerBlock,
   Array.from({ length: count }, (_, index) => `<p class="row" style="margin:0;height:${rowHeight}px;overflow:hidden;font-size:${Math.min(rowHeight, 12)}px;line-height:${rowHeight}px">Row ${index} text</p>`).join("")
   + '<div style="height:3000px"></div>');
-/** Row `index` is the (index + 3)th paragraph: the two before it belong to the default document. */
-const rowAnchor = (index: number) => ({ kind: "element", path: ["main", `p:nth-of-type(${index + 3})`] });
-const rowQuote = (index: number) => ({ kind: "text-range", quote: `Row ${index} text`, path: ["main", "missing"], startOffset: 0, endOffset: 0 });
+/** Row `index`'s text, found by its quote alone or (rowQuote) by its quote and the text after it. */
+const rowAnchor = (index: number) => anchorOn(`Row ${index} text`);
+const rowQuote = (index: number) => ({ ...anchorOn(`Row ${index} text`), suffix: `Row ${index + 1}` });
+/** A row's quote under a heading the page does not have: orphaned. */
+const goneAnchor = (index: number) => anchorOn(`Row ${index} text`, `gone-${index}`);
 
 /** Layouts the browser ran while `action` ran: a read that follows a write adds one to the frame's own. */
 async function layoutsDuring(lab: Lab, action: () => Promise<void>) {
@@ -56,18 +58,20 @@ const pinBoxes = (lab: Lab) => lab.pins().evaluateAll(pins => pins.map(pin => ({
   id: pin.getAttribute("data-thread-id"), display: (pin as HTMLElement).style.display, orphan: pin.classList.contains("orphan"),
   left: parseFloat((pin as HTMLElement).style.left), top: parseFloat((pin as HTMLElement).style.top),
 })));
-/** Where the pin of a row anchor belongs, from the row itself (or from its text, for a quote). */
-const expectedPin = (lab: Lab, index: number, quoted = false) => lab.doc(({ index, quoted }) => {
+/** Where the pin of a row anchor belongs: at the start of the row's text. */
+const expectedPin = (lab: Lab, index: number) => lab.doc(index => {
   const row = document.querySelectorAll("main > p")[index + 2];
-  const rect = quoted ? (() => { const range = document.createRange(); range.selectNodeContents(row); return range.getClientRects()[0]; })() : row.getBoundingClientRect();
+  const range = document.createRange();
+  range.selectNodeContents(row);
+  const rect = range.getClientRects()[0];
   return { left: Math.max(8, Math.min(innerWidth - 30, rect.left - 10)), top: Math.max(8, Math.min(innerHeight - 30, rect.top - 26)), visible: rect.top >= 0 && rect.top <= innerHeight };
-}, { index, quoted });
+}, index);
 
 describe("batched pin layout", () => {
   it.each([10, 100, 500])("runs one layout per frame with %i pins on screen, however they are anchored", async count => {
     // 1px rows put every anchor in the viewport, the worst case for a read after each write.
     const lab = await commentLab.open({ document: rowsDocument(count, 1) });
-    await lab.ready(Array.from({ length: count }, (_, index) => ({ _id: `t${index}`, anchor: index % 10 === 9 ? { kind: "element", path: ["main", `#gone-${index}`] } : index % 5 === 4 ? rowQuote(index) : rowAnchor(index) })));
+    await lab.ready(Array.from({ length: count }, (_, index) => ({ _id: `t${index}`, anchor: index % 10 === 9 ? goneAnchor(index) : index % 5 === 4 ? rowQuote(index) : rowAnchor(index) })));
     await expect.poll(() => lab.pins().count()).toBe(count);
     const frames = 8;
     // Scrolling does not dirty layout; only the pin writes do, so a frame costs exactly its own layout.
@@ -116,7 +120,7 @@ describe("batched pin layout", () => {
 
   it("leaves an open bubble where it is when its anchor disappears or its thread has no pin", async () => {
     const lab = await commentLab.open({ document: rowsDocument(20, 48), height: 700 });
-    await lab.ready([{ _id: "title", anchor: { kind: "element", path: ["main", "h1"] } }, { _id: "row", anchor: rowAnchor(2) }]);
+    await lab.ready([{ _id: "title", anchor: anchorOn("Quarterly report") }, { _id: "row", anchor: rowAnchor(2) }]);
     await expect.poll(() => lab.pins().count()).toBe(2);
     await lab.pins().first().click();
     const bubble = lab.tid("commentor-thread-bubble");
@@ -135,14 +139,14 @@ describe("batched pin layout", () => {
     expect(await lab.pins().first().getAttribute("data-thread-id")).toBe("row");
   });
 
-  it("places element, quoted and missing anchors after a scroll, a resize and an update", async () => {
+  it("places quoted, contextual and missing anchors after a scroll, a resize and an update", async () => {
     const lab = await commentLab.open({ document: rowsDocument(60, 48), height: 600 });
-    await lab.ready([{ _id: "row", anchor: rowAnchor(3) }, { _id: "quote", anchor: rowQuote(5) }, { _id: "missing", anchor: { kind: "element", path: ["main", "#gone"] } }, { _id: "far", anchor: rowAnchor(50) }]);
+    await lab.ready([{ _id: "row", anchor: rowAnchor(3) }, { _id: "quote", anchor: rowQuote(5) }, { _id: "missing", anchor: anchorOn("Quarterly report", "gone") }, { _id: "far", anchor: rowAnchor(50) }]);
     await expect.poll(() => lab.pins().count()).toBe(4);
     const check = async (label: string) => {
       const boxes = await pinBoxes(lab);
-      for (const [pin, row, quoted] of [[boxes[0], 3, false], [boxes[1], 5, true], [boxes[3], 50, false]] as const) {
-        const expected = await expectedPin(lab, row, quoted);
+      for (const [pin, row] of [[boxes[0], 3], [boxes[1], 5], [boxes[3], 50]] as const) {
+        const expected = await expectedPin(lab, row);
         if (expected.visible) expect({ display: pin.display, left: pin.left, top: pin.top }, `${label} row ${row}`).toEqual({ display: "", left: expected.left, top: expected.top });
         else expect(pin.display, `${label} row ${row}`).toBe("none");
       }
@@ -157,7 +161,7 @@ describe("batched pin layout", () => {
     await expect.poll(async () => (await pinBoxes(lab)).map(box => box.display)).toEqual(["none", "none", "none", ""]);
     await check("resized");
     // A thread update rebuilds the pins, each placed in the same pass.
-    await lab.host(l => { l.threads.push(l.thread({ _id: "fresh", anchor: { kind: "element", path: ["main", "p:nth-of-type(52)"] } })); l.publish(); });
+    await lab.host(l => { l.threads.push(l.thread({ _id: "fresh", anchor: l.anchorOn("Row 49 text") })); l.publish(); });
     await expect.poll(() => lab.pins().count()).toBe(5);
     const fresh = (await pinBoxes(lab)).at(-1)!;
     const expected = await expectedPin(lab, 49);
@@ -201,11 +205,11 @@ describe("batched pin layout", () => {
     for (const edge of ["bottom", "top", "left", "right"]) {
       await lab.page.evaluate(edge => { localStorage.setItem("commentor-dock", edge); localStorage.setItem("commentor-dock-offset", "100"); }, edge);
       await lab.page.reload();
-      await lab.ready([{ _id: "row", anchor: rowAnchor(4) }, { _id: "gone", anchor: { kind: "element", path: ["main", "#gone"] } }, { _id: "quote", anchor: rowQuote(8) }]);
+      await lab.ready([{ _id: "row", anchor: rowAnchor(4) }, { _id: "gone", anchor: anchorOn("Quarterly report", "gone") }, { _id: "quote", anchor: rowQuote(8) }]);
       await expect.poll(() => lab.pins().count()).toBe(3);
       const settled = async () => {
         const boxes = await pinBoxes(lab);
-        const [row, quote] = [await expectedPin(lab, 4), await expectedPin(lab, 8, true)];
+        const [row, quote] = [await expectedPin(lab, 4), await expectedPin(lab, 8)];
         expect(boxes.map(box => [box.display, box.orphan]), edge).toEqual([[row.visible ? "" : "none", false], ["none", true], [quote.visible ? "" : "none", false]]);
         if (row.visible) expect([boxes[0].left, boxes[0].top], edge).toEqual([row.left, row.top]);
         if (quote.visible) expect([boxes[2].left, boxes[2].top], edge).toEqual([quote.left, quote.top]);

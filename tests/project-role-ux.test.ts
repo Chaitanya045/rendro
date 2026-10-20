@@ -3,10 +3,7 @@ import { Hono } from "hono";
 import type { User } from "better-auth/types";
 import vm from "node:vm";
 import { describe, expect, it } from "vitest";
-import { renderProjectNavigation } from "@/routes/control-plane";
 import projectPageRoutes from "@/routes/project-pages";
-import publicationPageRoutes from "@/routes/publication-pages";
-import sharePageRoutes from "@/routes/share-pages";
 import { managementUiRuntime } from "@/ui/management-ui";
 
 const user: User = {
@@ -26,13 +23,11 @@ function authenticatedPages(): Hono<{ Variables: { user?: User } }> {
     await next();
   });
   app.route("/", projectPageRoutes);
-  app.route("/", publicationPageRoutes);
-  app.route("/", sharePageRoutes);
   return app;
 }
 
 type Role = "owner" | "admin" | "member" | "missing";
-type Page = "projects" | "publications" | "shares";
+type Page = "projects";
 type Listener = (event: Record<string, unknown>) => unknown;
 
 class ElementMock {
@@ -164,10 +159,8 @@ function matches(node: ElementMock, selector: string): boolean {
   return !tag || node.tagName === tag.toLowerCase();
 }
 
-function routeFor(page: Page): string {
-  const base = "/organizations/org-a/projects";
-  if (page === "projects") return base;
-  return `${base}/project-a/${page}`;
+function routeFor(_page: Page): string {
+  return "/organizations/org-a/projects";
 }
 
 function managementMember(role: Role) {
@@ -193,9 +186,6 @@ async function roleRuntime(page: Page, initialRole: Role) {
     if (path.startsWith("/api/rendro/management/access")) return organization();
     if (path.startsWith("/api/rendro/projects/get")) return { project: { _id: "project-a", name: "Docs", slug: "docs", createdAt: Date.now() } };
     if (path.startsWith("/api/rendro/projects")) return { projects: [] };
-    if (path.startsWith("/api/rendro/deployments")) return { deployments: [] };
-    if (path.startsWith("/api/rendro/publications")) return { publications: [{ _id: "publication-a", slug: "docs", title: "Docs", pathPrefix: "", trackingMode: "track_active" }] };
-    if (path.startsWith("/api/rendro/shares")) return { shares: [{ _id: "share-a", documentPath: "index.html", deploymentId: "deployment-a", expiresAt: Date.now() + 86_400_000 }] };
     throw new Error(`Unexpected request: ${path}`);
   };
   const context: Record<string, unknown> = {
@@ -236,25 +226,6 @@ function expectProjectAccess(document: DocumentMock, allowed: boolean) {
   expect(document.getElementById("project-list")!.querySelector("button") !== null).toBe(allowed);
 }
 
-function expectPublicationAccess(document: DocumentMock, allowed: boolean) {
-  const trigger = document.getElementById("publication-create")!;
-  expect(trigger.hidden).toBe(!allowed);
-  expect(trigger.disabled).toBe(!allowed);
-  expect(document.getElementById("publication-access-note")!.hidden).toBe(allowed);
-  for (const control of document.getElementById("publication-form")!.querySelectorAll("input,select,button[type=submit]")) {
-    expect(control.disabled).toBe(!allowed);
-  }
-  const labels = document.getElementById("publication-list")!.querySelectorAll("button").map((button) => button.textContent);
-  expect(labels).toEqual(allowed ? ["Copy URL", "Remove"] : ["Copy URL"]);
-}
-
-function expectShareAccess(document: DocumentMock, allowed: boolean) {
-  expect(document.getElementById("share-access-note")!.hidden).toBe(allowed);
-  const action = document.getElementById("share-list")!.querySelectorAll("td").at(-1)!;
-  expect(action.querySelector("button") !== null).toBe(allowed);
-  expect(action.querySelector("span")?.textContent ?? "").toBe(allowed ? "" : "Owner/admin only");
-}
-
 describe("project role-aware UX", () => {
   it.each(["owner", "admin", "member", "missing"] as const)(
     "executes project access resolution for %s membership",
@@ -264,38 +235,11 @@ describe("project role-aware UX", () => {
     },
   );
 
-  it.each(["owner", "admin", "member", "missing"] as const)(
-    "executes publication access resolution for %s membership",
-    async (role) => {
-      const runtime = await roleRuntime("publications", role);
-      expectPublicationAccess(runtime.document, role === "owner" || role === "admin");
-    },
-  );
-
-  it.each(["owner", "admin", "member", "missing"] as const)(
-    "executes private-share access resolution for %s membership",
-    async (role) => {
-      const runtime = await roleRuntime("shares", role);
-      expectShareAccess(runtime.document, role === "owner" || role === "admin");
-    },
-  );
-
-  it("fails all three management surfaces closed after an admin becomes a member", async () => {
+  it("fails project management closed after an admin becomes a member", async () => {
     const projects = await roleRuntime("projects", "admin");
-    const publications = await roleRuntime("publications", "admin");
-    const shares = await roleRuntime("shares", "admin");
-
     expectProjectAccess(projects.document, true);
-    expectPublicationAccess(publications.document, true);
-    expectShareAccess(shares.document, true);
-
     await projects.transition("member");
-    await publications.transition("member");
-    await shares.transition("member");
-
     expectProjectAccess(projects.document, false);
-    expectPublicationAccess(publications.document, false);
-    expectShareAccess(shares.document, false);
   });
 
   it("keeps project creation fail-closed until organization role data resolves", async () => {
@@ -316,14 +260,7 @@ describe("project role-aware UX", () => {
     expect(html).toContain('return role==="owner"||role==="admin";');
     expect(html).toContain('trigger.hidden=!canManage;trigger.disabled=!canManage;');
     expect(html).toContain('control.disabled=!canManage;');
-
-    const projectNavigation = renderProjectNavigation("org-a", "project-a", "overview");
-    expect(html).toContain(`"projectNavigation":${JSON.stringify(projectNavigation).replace(/</g, "\\u003c")}`);
-    expect(html).toContain("function tabs(){return state.projectNavigation;}");
-    expect(html).toContain("Deployment history");
-    expect(html).toContain("Open documentation");
-    expect(html).toContain("You have read-only project access. Owners and admins manage publications and revoke private shares.");
-    expect(html).toContain("canManage?'Manage publications':'View publications'");
+    expect(html).toContain("Project overview");
   });
 
   it("reuses the organization lookup that supplies canonical chrome for permission resolution", async () => {
@@ -338,40 +275,5 @@ describe("project role-aware UX", () => {
     expect(html).toContain('applyOrganization(results[1])');
     expect(html).toContain("if(inFlight.get(key)===entry)inFlight.delete(key)");
     expect(html).not.toContain('.then(setChrome)');
-  });
-
-  it("gates publication writes while preserving publication links and copy access", async () => {
-    const html = await (await authenticatedPages().request(
-      "/organizations/org-a/projects/project-a/publications",
-    )).text();
-
-    expect(html).toContain('id="publication-create" type="button" data-dialog-open="publication-dialog" disabled hidden');
-    expect(html).toContain('"userId":"member-user"');
-    expect(html).toContain('var member=organization.member');
-    expect(html).toContain('trigger.hidden=!canManage;trigger.disabled=!canManage;note.hidden=canManage;');
-    expect(html).toContain('form.querySelectorAll("input,select,button[type=submit]")');
-    expect(html).toContain('if(!canManage){error.textContent="Only organization owners and admins can create publications.";return;}');
-    expect(html).toContain("if(canManage){var remove=");
-    expect(html).toContain('var link=h("a","cell-secondary",location.origin+url)');
-    expect(html).toContain('copyButton=h("button","button small","Copy URL")');
-    expect(html).toContain("You have read-only publication access. Owners and admins create and remove publications.");
-    expect(html).toContain("canManage?'<button class=\"button primary\" type=\"button\">Create publication</button>':''");
-  });
-
-  it("gates private-share revocation while retaining history and member share creation access", async () => {
-    const html = await (await authenticatedPages().request(
-      "/organizations/org-a/projects/project-a/shares",
-    )).text();
-
-    expect(html).toContain('"userId":"member-user"');
-    expect(html).toContain('var member=organization.member');
-    expect(html).toContain('document.getElementById("share-access-note").hidden=canManage;');
-    expect(html).toContain('if(canManage&&!item.revokedAt&&item.expiresAt>Date.now()){var revoke=');
-    expect(html).toContain('else if(!canManage)action.append(h("span","cell-secondary","Owner/admin only"))');
-    expect(html).toContain("item.documentPath");
-    expect(html).toContain("RUI.idValue(item.deploymentId)");
-    expect(html).toContain("statusFor(item)");
-    expect(html).toContain("Browse documentation");
-    expect(html).toContain("You can view private-share history and create links from documentation. Only owners and admins can revoke links.");
   });
 });

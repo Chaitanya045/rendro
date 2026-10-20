@@ -4,7 +4,7 @@ import { holdRequest } from "./auth-helpers";
 import { api, heading } from "./shell-helpers";
 import { barrier, openManagement, watch } from "./project-helpers";
 
-type Project = { _id: string; name: string; slug: string; organizationId: string; activeDeploymentId?: string; createdAt: number };
+type Project = { _id: string; name: string; slug: string; organizationId: string; createdAt: number };
 const listProjects = async (page: Page, organizationId: string) => (await api<{ projects: Project[] }>(page, `/api/rendro/projects?organizationId=${organizationId}`)).body.projects;
 const dialog = (page: Page) => page.locator("#project-dialog");
 const insideDialog = (page: Page) => page.evaluate(() => document.querySelector("#project-dialog")!.contains(document.activeElement));
@@ -62,34 +62,23 @@ test.describe("projects", () => {
     await expect(page).toHaveURL(new RegExp(`${base}/[a-z0-9]+$`));
     const [alpha] = await listProjects(page, organization.id);
     expect(alpha).toMatchObject({ name: "Alpha Docs", slug: "alpha-docs", organizationId: organization.id });
-    expect(alpha.activeDeploymentId).toBeUndefined();
     await expect(page).toHaveURL(`${base}/${alpha._id}`);
     await expect(heading(page)).toHaveText("Alpha Docs");
-    await expect(page.locator(".cp-page-description")).toHaveText("Immutable deployments and publication controls for alpha-docs.");
-    await expect(page.locator(".project-overview .badge")).toHaveText("Not deployed");
+    await expect(page.locator(".cp-page-description")).toHaveText("Stable identifiers for alpha-docs.");
     expect(await page.evaluate(() => (window as unknown as { __sameShell?: string }).__sameShell)).toBe("yes");
     await expect(page.locator("#project-slug")).toHaveText("alpha-docs");
     await expect(page.locator("#project-created")).toHaveText(await page.evaluate(time => new Date(time).toLocaleDateString(), alpha.createdAt));
-    await expect(page.locator("#active-deployment")).toHaveText("None yet");
-    await expect(page.getByText("Waiting for first deployment")).toBeVisible();
-    await expect(page.locator(".project-actions").getByRole("link", { name: "View deployments", exact: true })).toHaveAttribute("href", `${base}/${alpha._id}/deployments`);
-    await expect(page.locator(".project-actions").getByRole("link", { name: "Manage publications", exact: true })).toHaveAttribute("href", `${base}/${alpha._id}/publications`);
-    const tabs = page.getByRole("navigation", { name: "Project sections" });
-    await expect(tabs.getByRole("link")).toHaveText(["Overview", "Deployments", "Publications", "Private shares"]);
-    await expect(tabs.getByRole("link", { name: "Overview", exact: true })).toHaveAttribute("aria-current", "page");
-    for (const [label, suffix] of [["Deployments", "/deployments"], ["Publications", "/publications"], ["Private shares", "/shares"]]) {
-      await expect(tabs.getByRole("link", { name: label, exact: true })).toHaveAttribute("href", `${base}/${alpha._id}${suffix}`);
-    }
-    // Nothing offers a documentation entry before the first deployment.
+    await expect(page.locator("#project-id .cp-id")).toHaveText(alpha._id);
+    // Uploaded documentation is gone (#286): the project has no deployments, publications or shares, and no docs entry.
+    await expect(page.getByRole("navigation", { name: "Project sections" })).toHaveCount(0);
     await expect(page.getByRole("link", { name: "Open documentation" })).toHaveCount(0);
 
-    // The list shows the project as a link with its release state; a second create with the same slug is refused and keeps the draft.
+    // The list shows the project as a link; a second create with the same slug is refused and keeps the draft.
     await page.getByRole("link", { name: "All projects", exact: true }).click();
     await expect(page).toHaveURL(base);
     const row = page.locator(".project-row", { hasText: "Alpha Docs" });
     await expect(row).toHaveAttribute("href", `${base}/${alpha._id}`);
     await expect(row.locator(".cell-secondary")).toHaveText("alpha-docs");
-    await expect(row.locator(".badge")).toHaveText("Not deployed");
     await headerCreate.click();
     await name.fill("Alpha Again");
     await slug.fill("alpha-docs");
@@ -220,8 +209,6 @@ test.describe("projects", () => {
     const mixed = await api(page, `/api/rendro/projects/get?organizationId=${one.id}&projectId=${projectTwo.id}`);
     expect(mixed.status).toBe(404);
     expect((await api<{ project: Project }>(page, `/api/rendro/projects/get?organizationId=${two.id}&projectId=${projectTwo.id}`)).status).toBe(200);
-    // The deployments of a project are only listed under its own organization.
-    expect((await api(page, `/api/rendro/deployments?organizationId=${one.id}&projectId=${projectTwo.id}`)).status).toBeGreaterThanOrEqual(400);
   });
 
   test("owner, admin, member and outsider get the controls and API access of their role", async ({ actor }) => {
@@ -260,25 +247,20 @@ test.describe("projects", () => {
     for (const control of await dialog(member.page).locator("input, button[type=submit]").all()) await expect(control).toBeDisabled();
     await member.page.locator(".project-row", { hasText: "Roles Org docs" }).click();
     await expect(member.page).toHaveURL(new RegExp(`${base}/[a-z0-9]+$`));
-    await expect(member.page.locator(".project-actions").getByRole("link", { name: "View publications", exact: true })).toBeVisible();
-    await expect(member.page.locator(".project-actions").getByRole("link", { name: "Manage publications" })).toHaveCount(0);
-    await openManagement(owner.page, `${base}/${project.id}`);
-    await expect(owner.page.locator(".project-actions").getByRole("link", { name: "Manage publications", exact: true })).toBeVisible();
-    await expect(member.page.locator(".access-note")).toHaveText("You have read-only project access. Owners and admins manage publications and revoke private shares.");
+    await expect(heading(member.page)).toHaveText("Roles Org docs");
+    await expect(member.page.locator("#project-id .cp-id")).toHaveText(project.id);
     expect(memberWrites.filter(entry => entry.startsWith("POST"))).toEqual([]);
     const denied = await api(member.page, "/api/rendro/projects", { organizationId: organization.id, name: "Member Docs", slug: "member-docs" });
     expect(denied.status).toBe(403);
     expect((await listProjects(owner.page, organization.id)).map(entry => entry.slug).sort()).toEqual(["admin-docs", "docs"]);
 
     // An outsider has no page, no list, no project and no write; the other organization's own pages still work for them.
-    for (const path of [base, `${base}/${project.id}`, `${base}/${project.id}/deployments`, `${base}/${project.id}/publications`, `${base}/${project.id}/shares`, `/organizations/${organization.id}/api-keys`]) {
+    for (const path of [base, `${base}/${project.id}`, `/organizations/${organization.id}/api-keys`]) {
       const response = await outsider.page.goto(path);
       expect(response!.status(), path).toBe(404);
       await expect(outsider.page.getByText("Page not found")).toBeVisible();
     }
-    for (const path of [`/api/rendro/projects?organizationId=${organization.id}`, `/api/rendro/projects/get?organizationId=${organization.id}&projectId=${project.id}`,
-      `/api/rendro/deployments?organizationId=${organization.id}&projectId=${project.id}`, `/api/rendro/shares?organizationId=${organization.id}&projectId=${project.id}`,
-      `/api/rendro/publications?organizationId=${organization.id}&projectId=${project.id}`]) {
+    for (const path of [`/api/rendro/projects?organizationId=${organization.id}`, `/api/rendro/projects/get?organizationId=${organization.id}&projectId=${project.id}`]) {
       expect((await api(outsider.page, path)).status, path).toBe(403);
     }
     expect((await api(outsider.page, "/api/rendro/projects", { organizationId: organization.id, name: "Outsider", slug: "outsider" })).status).toBe(403);
@@ -292,8 +274,8 @@ test.describe("projects", () => {
     const [organization] = owner.organizations;
     const [project] = owner.projects;
     const visitor = await secondContext.newPage();
-    for (const section of ["", "/deployments", "/publications", "/shares"]) {
-      const path = `/organizations/${organization.id}/projects/${project.id}${section}`;
+    {
+      const path = `/organizations/${organization.id}/projects/${project.id}`;
       await visitor.goto(path);
       await expect(visitor).toHaveURL(`/sign-in?returnTo=${encodeURIComponent(path)}`);
       await expect(visitor.getByRole("heading", { name: /sign in/i })).toBeVisible();

@@ -23,17 +23,20 @@ async function run(argv: string[], fetchMock: typeof fetch, settings: Record<str
 afterEach(() => vi.restoreAllMocks());
 
 describe("R2 bucket exposure check", () => {
-  it("reads every bucket bound in wrangler.toml, once", () => {
-    expect(wranglerBuckets(readFileSync("wrangler.toml", "utf8"))).toEqual(["rendro-docs", "dev-rendro"]);
+  it("reads every bucket bound in the Worker configurations, once", () => {
+    // The serving Worker binds no bucket since uploads were removed (#286); the ingest Worker writes snapshots to its own.
+    expect(wranglerBuckets(readFileSync("wrangler.toml", "utf8"))).toEqual([]);
+    expect(wranglerBuckets(readFileSync("wrangler.ingest.toml", "utf8"))).toEqual(["rendro-ingest-dev"]);
+    expect(wranglerBuckets(readFileSync("wrangler.control.toml", "utf8"))).toEqual([]);
     expect(wranglerBuckets('# bucket_name = "commented"\n[[r2_buckets]]\nbucket_name = "a"\n[[x]]\nbucket_name = "a"\nbucket_name = "b"')).toEqual(["a", "b"]);
   });
 
   it("passes private buckets, with no r2.dev URL and no custom domain", async () => {
-    const fetchMock = api({ "rendro-docs": { managed: { enabled: false, domain: "pub-x.r2.dev" }, custom: { domains: [] } }, "dev-rendro": { managed: { enabled: false }, custom: { domains: [] } } });
+    const fetchMock = api({ "rendro-ingest-dev": { managed: { enabled: false, domain: "pub-x.r2.dev" }, custom: { domains: [] } } });
     const { code, lines } = await run([], fetchMock);
     expect(code).toBe(0);
-    expect(lines).toEqual(["ok   rendro-docs: no r2.dev URL and no custom domain", "ok   dev-rendro: no r2.dev URL and no custom domain"]);
-    expect(fetchMock.mock.calls.map(([input]) => (input as string))).toContain("https://api.cloudflare.com/client/v4/accounts/acct/r2/buckets/rendro-docs/domains/managed");
+    expect(lines).toEqual(["ok   rendro-ingest-dev: no r2.dev URL and no custom domain"]);
+    expect(fetchMock.mock.calls.map(([input]) => (input as string))).toContain("https://api.cloudflare.com/client/v4/accounts/acct/r2/buckets/rendro-ingest-dev/domains/managed");
     expect(fetchMock.mock.calls[0]![1]).toMatchObject({ headers: { Authorization: "Bearer token-never-printed" } });
   });
 
@@ -94,10 +97,8 @@ describe("R2 bucket exposure check", () => {
     expect(code).toBe(0);
     expect(fetchMock).not.toHaveBeenCalled();
     expect(lines).toEqual([
-      "GET https://api.cloudflare.com/client/v4/accounts/<CLOUDFLARE_ACCOUNT_ID>/r2/buckets/rendro-docs/domains/managed",
-      "GET https://api.cloudflare.com/client/v4/accounts/<CLOUDFLARE_ACCOUNT_ID>/r2/buckets/rendro-docs/domains/custom",
-      "GET https://api.cloudflare.com/client/v4/accounts/<CLOUDFLARE_ACCOUNT_ID>/r2/buckets/dev-rendro/domains/managed",
-      "GET https://api.cloudflare.com/client/v4/accounts/<CLOUDFLARE_ACCOUNT_ID>/r2/buckets/dev-rendro/domains/custom",
+      "GET https://api.cloudflare.com/client/v4/accounts/<CLOUDFLARE_ACCOUNT_ID>/r2/buckets/rendro-ingest-dev/domains/managed",
+      "GET https://api.cloudflare.com/client/v4/accounts/<CLOUDFLARE_ACCOUNT_ID>/r2/buckets/rendro-ingest-dev/domains/custom",
       "Dry run: no request was made.",
     ]);
     const named = await run(["--dry-run", "--bucket", "only"], fetchMock, { env });
@@ -105,7 +106,7 @@ describe("R2 bucket exposure check", () => {
   });
 
   it("has nothing to check without a bucket", async () => {
-    const settings = { wrangler: new URL("fixtures/empty-wrangler.toml", import.meta.url).pathname };
+    const settings = { wrangler: [new URL("fixtures/empty-wrangler.toml", import.meta.url).pathname] };
     const { code, text } = await run([], api({}), settings);
     expect(code).toBe(2);
     expect(text).toBe("No R2 bucket to check.");

@@ -5,6 +5,7 @@ import { CommentMutationOutcomeUnknownError } from "../src/commentor/parent-tran
 import { COMMENTOR_PARENT_READY, COMMENTOR_PARENT_RESPONSE, COMMENTOR_PARENT_UPDATE, COMMENTOR_PROTOCOL_VERSION, type CommentorParentRequest } from "../src/commentor/parent-protocol";
 
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); document.body.replaceChildren(); });
+const anchor = { kind: "repo-text" as const, blobSha: "b".repeat(40), headingSlug: "", prefix: "", exact: "Comment target", suffix: "", offset: 0 };
 const flush = async () => { for (let i = 0; i < 16; i++) await Promise.resolve(); };
 
 it("renders a quota through the transport and preserves create/reply drafts until an explicit retry", async () => {
@@ -17,17 +18,20 @@ it("renders a quota through the transport and preserves create/reply drafts unti
     }
   } };
   Object.defineProperty(window, "parent", { configurable: true, value: parent });
-  Object.assign(window, { COMMENTOR: { transport: "parent", organizationId: "org", projectId: "project", documentPath: "index.html", canWrite: true } });
+  const script = document.createElement("script");
+  script.setAttribute("data-commentor-config", JSON.stringify({ transport: "parent", repoId: 9101, blobSha: anchor.blobSha, documentPath: "index.md" }));
+  Object.defineProperty(document, "currentScript", { configurable: true, get: () => script });
   const send = (data: unknown) => window.dispatchEvent(new MessageEvent("message", { source: parent as never, data }));
   document.body.innerHTML = '<main>Comment target</main>';
   await import("../src/commentor/commentor");
+  Reflect.deleteProperty(document, "currentScript");
   document.dispatchEvent(new Event("DOMContentLoaded"));
-  send({ type: COMMENTOR_PARENT_READY, protocolVersion: COMMENTOR_PROTOCOL_VERSION, parentGeneration: "host", userId: "user-a" });
+  send({ type: COMMENTOR_PARENT_READY, protocolVersion: COMMENTOR_PROTOCOL_VERSION, parentGeneration: "host", userId: "user-a", canWrite: true });
   await flush();
   const root = document.querySelector("#commentor-host")!.shadowRoot!;
   const button = (name: string) => root.querySelector<HTMLButtonElement>(`[data-testid="${name}"]`)!;
   const publish = () => send({ type: COMMENTOR_PARENT_UPDATE, canLoadMore: false, loading: false, threads: [{
-    _id: "thread", _creationTime: Date.now(), authorName: "Author", body: "Saved", anchor: { kind: "element", path: ["main"] }, replies: [],
+    _id: "thread", _creationTime: Date.now(), authorName: "Author", body: "Saved", anchor, replies: [],
   }] });
   const mutations = () => requests.filter(request => ["thread.create", "reply.add"].includes(request.method));
   for (const action of ["create", "reply"]) {
@@ -61,7 +65,7 @@ it("renders a quota through the transport and preserves create/reply drafts unti
     expect(mutations()).toHaveLength(sent);
     expect(toast()).toContain(new CommentOperationConflictError().message);
     await attempt("Draft");
-    send({ type: COMMENTOR_PARENT_READY, protocolVersion: COMMENTOR_PROTOCOL_VERSION, parentGeneration: `${action}-replacement`, userId: "user-a" });
+    send({ type: COMMENTOR_PARENT_READY, protocolVersion: COMMENTOR_PROTOCOL_VERSION, parentGeneration: `${action}-replacement`, userId: "user-a", canWrite: true });
     await flush();
     expect(toast()).toContain(new CommentMutationOutcomeUnknownError().message);
     await attempt("Draft");

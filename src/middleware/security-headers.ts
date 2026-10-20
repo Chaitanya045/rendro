@@ -28,9 +28,9 @@ function connectionSources(): string {
 function appPolicy(nonce: string, path: string, embeddedError = false): string {
   // Management navigation inserts each page's CSS at runtime, so only those
   // shells allow inline style elements. Every other trusted page, including
-  // the document viewers (which no longer load a runtime CSS generator),
-  // accepts only nonced <style> elements and same-origin stylesheets.
-  const dynamicStyles = /^\/organizations(?:\/|$)/.test(path) && !/\/docs$/.test(path);
+  // the repository docs shell, accepts only nonced <style> elements and
+  // same-origin stylesheets.
+  const dynamicStyles = /^\/organizations(?:\/|$)/.test(path);
   return [
     "default-src 'self'",
     // Nonced scripts and the scripts they load. 'self' is the fallback for
@@ -55,12 +55,7 @@ function appPolicy(nonce: string, path: string, embeddedError = false): string {
 const repoDocument = /^\/r\/[^/]+\/[^/]+(?:\/[~@][^/]+)?\/(?:files\/|view\/[^/]+\/files\/)/;
 
 function documentRoute(path: string): boolean {
-  return repoDocument.test(path)
-    || /^\/organizations\/[^/]+\/projects\/[^/]+\/docs\/(?:files\/|view\/[^/]+\/files\/)/.test(path)
-    || /^\/(?:p|s)\/[^/]+\/files\//.test(path)
-    || /^\/public\/[^/]+\/[^/]+\/files\//.test(path)
-    || /^\/legacy-view\/[^/]+\/(?:files\/|view\/[^/]+\/files\/)/.test(path)
-    || /^\/(?:files\/|share\/[^/]+$)/.test(path);
+  return repoDocument.test(path);
 }
 
 /** Outermost middleware in both runtimes, including assets, errors and preflights. */
@@ -69,8 +64,7 @@ export const securityHeaders: MiddlewareHandler = async (c, next) => {
   await nonceContext.run(nonce, next);
   // Apply after downstream handlers (including Hono's error handler), so local
   // denials, proxy failures and malformed/unmatched capability paths inherit it.
-  const capability = /^\/(?:s|share|accept-invitation|reset-password|verify-email)(?:\/|$)/.test(c.req.path)
-    || /^\/(?:docs|legacy-view)(?:\/|$)|^\/organizations\/[^/]+\/projects\/[^/]+\/docs(?:\/|$)/.test(c.req.path);
+  const capability = /^\/(?:accept-invitation|reset-password|verify-email)(?:\/|$)/.test(c.req.path);
   if (/^\/api(?:\/|$)/.test(c.req.path)) {
     c.header("Cache-Control", apiCacheControl(c.req.raw, c.res));
     // API data is never a cross-origin subresource: refuse no-cors embedding
@@ -88,13 +82,13 @@ export const securityHeaders: MiddlewareHandler = async (c, next) => {
   if (new URL(c.req.url).protocol === "https:") {
     c.header("Strict-Transport-Security", "max-age=15552000");
   }
-  // In particular, never downgrade the private viewer/share no-referrer policy.
+  // In particular, never downgrade a route's own no-referrer policy.
   if (!c.res.headers.has("Referrer-Policy")) c.header("Referrer-Policy", "strict-origin-when-cross-origin");
   c.header("Permissions-Policy", permissionsPolicy);
   if (!/^text\/html(?:;|$)/i.test(c.res.headers.get("Content-Type") ?? "")) return;
 
   const document = documentRoute(c.req.path);
-  // Document routes serve publisher HTML only on success. Their HTML errors
+  // Document routes serve rendered repository HTML only on success. Their HTML errors
   // are server-authored pages and need the same nonce policy as other app HTML.
   if (document && c.res.status < 400) {
     if (!c.res.headers.has("Content-Security-Policy")) {
@@ -108,10 +102,8 @@ export const securityHeaders: MiddlewareHandler = async (c, next) => {
     // navigation gets a fresh nonce, yet not no-store, so the back/forward cache still works.
     const cacheControl = String(c.res.headers.get("Cache-Control"));
     const revalidatedShell = /^\/r\//.test(c.req.path) && c.res.status < 400 && cacheControl === "private, no-cache";
-    if (!revalidatedShell) {
-      c.header("Cache-Control", /(?:^|,)\s*private\s*(?:,|$)/i.test(cacheControl)
-        ? "private, no-store" : "no-store");
-    }
+    // No route serves trusted HTML for shared caches any more (#286): even one that asked would get no-store.
+    if (!revalidatedShell) c.header("Cache-Control", "private, no-store");
     c.header("Content-Security-Policy", appPolicy(nonce, c.res.status >= 400 ? "" : c.req.path, document));
     // Styled document errors must remain visible inside the owning viewer.
     c.header("X-Frame-Options", document ? "SAMEORIGIN" : "DENY");

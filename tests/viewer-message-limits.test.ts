@@ -154,6 +154,26 @@ describe("parent-owned message limits", () => {
     } finally { vi.useRealTimers(); }
   });
 
+  it("drops a pending trailing fragment when cancelled, and cancelling with nothing pending is harmless", () => {
+    vi.useFakeTimers();
+    try {
+      const apply = vi.fn();
+      const host = { performance: { now: () => Date.now() }, setTimeout, clearTimeout } as unknown as Window;
+      const update = coalesceMessage(apply, host);
+      update.cancel();
+      update("#first");
+      update("#stale");
+      expect(vi.getTimerCount()).toBe(1);
+      update.cancel();
+      expect(vi.getTimerCount()).toBe(0);
+      vi.advanceTimersByTime(100);
+      expect(apply.mock.calls).toEqual([["#first"]]);
+      // The next report starts afresh rather than waiting on the cancelled timer.
+      update("#next");
+      expect(apply.mock.calls).toEqual([["#first"], ["#next"]]);
+    } finally { vi.useRealTimers(); }
+  });
+
   it("rate limits completed as well as in-flight work", () => {
     let now = 0;
     const allow = createMessageRateLimit(30_000, () => now);

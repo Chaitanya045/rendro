@@ -1,8 +1,7 @@
 import { cookieWriteFixture as fixture, admissionHeaders as headers } from "./helpers/cookie-write-fixture";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Hono } from "hono";
-import { components, internal } from "../convex/_generated/api";
-import { sha256 } from "../convex/credentialHash";
+import { components } from "../convex/_generated/api";
 import { requireCookieWrite } from "../shared/request-admission";
 import { writeAdmission } from "../src/middleware/write-admission";
 
@@ -41,27 +40,8 @@ describe("cookie write admission", () => {
     }
   }, 15_000);
 
-  it.each(["invalid-key", "read-only-key"])("checks session fallback for %s without treating Authorization as authority", async key => {
+  it("never treats a bearer header as authority for a session write", async () => {
     const f = await fixture();
-    await f.backend.mutation(internal.apiKeyCredentials.createInternal, {
-      organizationId: f.organizationId, keyId: "read", keyPrefix: "read", name: "Read", secretHash: await sha256("read-only-key"), actorId: f.user._id, scopes: ["publications:read"],
-    });
-    for (const path of ["/api/rendro/publications", "/api/rendro/publications/remove"]) {
-      for (const bad of badHeaders) expect((await f.post(path, { ...bad, authorization: `Bearer ${key}` })).status).toBe("content-type" in bad ? 415 : 403);
-      const response = await f.post(path, { authorization: `Bearer ${key}` });
-      expect(response.status).toBe(403);
-      expect(await response.json()).toEqual({ error: "Invalid or insufficient principal" });
-      expect((await f.post(path)).ok).toBe(true);
-    }
-  });
-
-  it("exempts actual bearer authority even with unrelated cookies and hostile browser headers", async () => {
-    const f = await fixture();
-    for (const path of ["/api/rendro/publications", "/api/rendro/publications/remove"]) {
-      expect((await f.post(path, { cookie: "", authorization: "Bearer valid-key", origin: "", "content-type": "text/plain" })).ok).toBe(true);
-    }
-    f.bodies["/api/rendro/publications"] = { ...f.bodies["/api/rendro/publications"], slug: "another" };
-    expect((await f.post("/api/rendro/publications", { authorization: "Bearer valid-key", origin: "null", "sec-fetch-site": "cross-site" })).status).toBe(201);
     expect((await f.post("/api/rendro/projects", { authorization: "Bearer valid-key", origin: "" })).status).toBe(403);
   });
 
@@ -77,21 +57,21 @@ describe("cookie write admission", () => {
     expect(accounts.page).toEqual([]);
   });
 
-  it("enforces Worker admission before writes, including bodyless deletes, without blocking bearer routes", async () => {
+  it("enforces Worker admission before session writes and leaves other routes to their own policy", async () => {
     const app = new Hono();
     const write = vi.fn(() => new Response(null, { status: 204 }));
     app.use("*", writeAdmission);
     app.all("*", write);
-    for (const [method, path] of [["DELETE", "/api/legacy/content"], ["POST", "/api/publications"], ["DELETE", "/api/publications/docs"], ["POST", "/api/rendro/publications"], ["POST", "/api/auth/set-initial-password"]]) {
+    for (const path of ["/api/rendro/projects", "/api/rendro/credentials", "/api/rendro/credentials/revoke", "/api/auth/set-initial-password"]) {
       for (const bad of badHeaders) {
-        if (method === "DELETE" && "content-type" in bad) continue;
         const count = write.mock.calls.length;
-        expect((await app.request(origin + path, { method, headers: headers(bad) })).status).toBe("content-type" in bad ? 415 : 403);
+        expect((await app.request(origin + path, { method: "POST", headers: headers(bad) })).status).toBe("content-type" in bad ? 415 : 403);
         expect(write).toHaveBeenCalledTimes(count);
       }
-      expect((await app.request(origin + path, { method, headers: headers(method === "DELETE" ? { "content-type": "" } : {}) })).status).toBe(204);
+      expect((await app.request(origin + path, { method: "POST", headers: headers() })).status).toBe(204);
     }
-    for (const path of ["/api/publications", "/api/rendro/publications", "/api/rendro/deployments/start", "/api/sync/upload"]) {
+    // Better Auth, the Convex proxy, comment access and beacons decide for themselves.
+    for (const path of ["/api/auth/sign-in/email", "/api/rendro/projects/other", "/r/acme/docs/comment-access", "/rum"]) {
       expect((await app.request(origin + path, { method: "POST", headers: { authorization: "Bearer valid-key" } })).status).toBe(204);
     }
     expect((await app.request(origin + "/health")).status).toBe(204);

@@ -1,7 +1,11 @@
+import { readFileSync } from "node:fs";
 import { test, expect } from "./fixtures";
-import { publicationSlug } from "./services";
+import type { RepoFixtures } from "./repo-fixtures";
 
-const publication = `/p/${publicationSlug}`;
+/** The public repository the read path serves (#234); its frames are opaque documents like any publisher page. */
+const open = () => (JSON.parse(readFileSync(process.env.RENDRO_E2E_REPOS as string, "utf8")) as RepoFixtures).open;
+const repo = () => `/r/${open().owner}/${open().name}`;
+const pinned = () => `${repo()}/@${open().commit}`;
 
 test("landing uses a fresh CSP nonce and renders without CSP violations", async ({ page, cspViolations }) => {
   const response = await page.goto("/");
@@ -32,11 +36,11 @@ test("sign-in renders through the Worker", async ({ page, cspViolations }) => {
   expect(cspViolations).toEqual([]);
 });
 
-test("publication loads local S3 HTML and SVG inside an opaque document", async ({ page }) => {
+test("a repository document loads inside an opaque frame with its SVG", async ({ page }) => {
   const [document, asset, shell] = await Promise.all([
-    page.waitForResponse(response => response.url().endsWith(`${publication}/files/index.html`)),
-    page.waitForResponse(response => response.url().endsWith(`${publication}/files/diagram.svg`)),
-    page.goto(publication),
+    page.waitForResponse(response => response.url().endsWith(`${pinned()}/files/docs/index.md`)),
+    page.waitForResponse(response => response.url().endsWith("/files/docs/img/logo.svg")),
+    page.goto(repo()),
   ]);
   expect(shell?.status()).toBe(200);
   expect(document.status()).toBe(200);
@@ -45,37 +49,35 @@ test("publication loads local S3 HTML and SVG inside an opaque document", async 
   expect(document.headers()["content-security-policy"]).not.toContain("allow-same-origin");
   expect(document.headers()["content-security-policy"]).toContain("frame-ancestors 'self'");
   const frame = page.frameLocator("#content-frame");
-  await expect(frame.getByRole("heading", { name: "Publication from local storage" })).toBeVisible();
-  await expect(frame.locator("body")).toHaveAttribute("data-publisher-ready", "yes");
+  await expect(frame.getByRole("heading", { name: "Open home", level: 1 })).toBeVisible();
   expect(await frame.locator("body").evaluate(() => window.origin)).toBe("null");
   expect(asset.status()).toBe(200);
   expect(asset.headers()["content-type"]).toBe("image/svg+xml");
   expect(asset.headers()["x-content-type-options"]).toBe("nosniff");
-  await expect(frame.getByAltText("Local diagram")).toHaveJSProperty("naturalWidth", 80);
+  await expect(frame.getByAltText("Logo")).toHaveJSProperty("naturalWidth", 64);
 });
 
-test("direct SVG navigation retains publisher isolation", async ({ page }) => {
-  const response = await page.goto(`${publication}/files/diagram.svg`);
+test("direct SVG navigation retains document isolation", async ({ page }) => {
+  const response = await page.goto(`${pinned()}/files/docs/img/logo.svg`);
   expect(response?.status()).toBe(200);
   expect(response?.headers()["content-type"]).toBe("image/svg+xml");
   const policy = response?.headers()["content-security-policy"] ?? "";
   expect(policy).toContain("sandbox");
   expect(policy).not.toContain("allow-same-origin");
-  expect(policy).toContain("frame-ancestors 'self'");
   expect(await page.evaluate(() => window.origin)).toBe("null");
 });
 
 test("missing assets are empty and untyped; missing documents remain HTML", async ({ page, baseURL }) => {
   await page.goto("/");
   // Browser fetch, so even failures go through the context origin guard.
-  for (const path of ["/missing.svg", `${publication}/files/missing.svg`, `${publication}/files/deleted.svg`, "/p/unknown/files/diagram.svg"]) {
+  for (const path of ["/missing.svg", `${pinned()}/files/docs/img/missing.svg`, "/r/nobody/nothing/files/docs/img/logo.svg"]) {
     const result = await page.evaluate(async url => {
       const response = await fetch(url);
       return { status: response.status, type: response.headers.get("content-type"), body: await response.text() };
     }, `${baseURL}${path}`);
     expect(result, path).toEqual({ status: 404, type: null, body: "" });
   }
-  const document = await page.goto(`${publication}/files/missing.html`);
+  const document = await page.goto(`${pinned()}/files/docs/missing.md`);
   expect(document?.status()).toBe(404);
   expect(document?.headers()["content-type"]).toContain("text/html");
   await expect(page.getByRole("heading", { name: "Page not found" })).toBeVisible();

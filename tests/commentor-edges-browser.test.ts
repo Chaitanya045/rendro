@@ -1,58 +1,60 @@
 import { beforeAll, describe, expect, it } from "vitest";
-import { defaultDocument, docPath, useCommentLab } from "./helpers/comment-lab";
+import { anchorOn, defaultDocument, docPath, LAB_BLOB, useCommentLab } from "./helpers/comment-lab";
 
 const commentLab = useCommentLab();
 beforeAll(() => commentLab.start());
 
-const heading = { kind: "element", path: ["main", "h1"] };
+const heading = anchorOn("Quarterly report");
 const richDocument = defaultDocument.replace('<ul id="list">', `<div id="box" style="width:120px;height:40px;background:#ddd"></div>
 <span id="ghost" style="font-size:0">ghost</span><p id="invisible" style="visibility:hidden">Hidden words</p>
 <svg width="120" height="30"><text id="svgtext" x="0" y="20">Chart label</text></svg><ul id="list">`)
   .replace("</body>", '<script>const second=document.getElementById("second");second.insertBefore(document.createTextNode(""),second.lastChild)</script></body>');
 
 describe("anchor shapes", () => {
-  it("labels, orders and highlights anchors of every shape without inventing rectangles", async () => {
+  it("labels, orders and highlights quotes of every shape without inventing rectangles", async () => {
     const lab = await commentLab.open({ document: richDocument });
     const now = Date.now();
     await lab.ready([
-      { _id: "box", anchor: { kind: "element", path: ["main", "#box"] }, _creationTime: now - 5_000 },
-      { _id: "svg", anchor: { kind: "element", path: ["main", "svg", "text"] }, _creationTime: now - 90_000 },
-      { _id: "hidden", anchor: { kind: "element", path: ["main", "#invisible"] }, _creationTime: now - 3 * 3_600_000 },
-      { _id: "ghost", anchor: { kind: "text-range", quote: "ghost", path: ["main", "#ghost"], startOffset: 0, endOffset: 5 }, _creationTime: now - 2 * 86_400_000 },
-      { _id: "partial", anchor: { kind: "text-range", quote: "bold paragraph", path: ["main", "#second"], startOffset: 0, endOffset: 0 } },
-      { _id: "nopath", anchor: { kind: "element", path: [] } },
+      { _id: "list", anchor: anchorOn("AlphaBeta"), _creationTime: now - 5_000 },
+      { _id: "svg", anchor: anchorOn("Chart label"), _creationTime: now - 90_000 },
+      { _id: "hidden", anchor: anchorOn("Hidden words"), _creationTime: now - 3 * 3_600_000 },
+      { _id: "ghost", anchor: anchorOn("ghost"), _creationTime: now - 2 * 86_400_000 },
+      { _id: "partial", anchor: anchorOn("bold paragraph") },
+      { _id: "elsewhere", anchor: anchorOn("Quarterly report", "no-such-heading") },
     ]);
     await lab.openDrawer();
     const card = (id: string) => lab.ui.locator(`.drawer-thread[data-thread-id="${id}"]`);
     await expect.poll(() => lab.ui.locator(".drawer-thread").count()).toBe(6);
     // Oldest first, each with a compact age.
-    expect(await lab.ui.locator(".drawer-thread").evaluateAll(cards => cards.map(item => item.getAttribute("data-thread-id")))).toEqual(["ghost", "hidden", "svg", "partial", "nopath", "box"]);
+    expect(await lab.ui.locator(".drawer-thread").evaluateAll(cards => cards.map(item => item.getAttribute("data-thread-id")))).toEqual(["ghost", "hidden", "svg", "partial", "elsewhere", "list"]);
     const ages = await lab.ui.locator(".drawer-thread .when").allInnerTexts();
     // Seconds drift with a loaded host; the coarser units have wide margins.
     expect(ages.slice(0, 5)).toEqual(["2d", "3h", "2m", "1m", "1m"]);
     expect(ages[5]).toMatch(/^([5-9]|[1-3]\d)s$/);
-    expect(await card("box").locator(".locate-link").innerText()).toBe("Locate element");
-    expect(await card("hidden").locator(".locate-link").count()).toBe(1);
     expect(await card("svg").locator(".quote-text").innerText()).toBe("Chart label");
     expect(await card("partial").locator(".quote-text").innerText()).toBe("bold paragraph");
-    expect(await card("ghost").evaluate(item => item.classList.contains("is-orphan"))).toBe(true);
-    expect(await card("nopath").evaluate(item => item.classList.contains("is-orphan"))).toBe(true);
-    // A text anchor with a zero-size layout box and an element with no text still highlight sensibly.
+    expect(await card("hidden").locator(".quote-text").innerText()).toBe("Hidden words");
+    // A quote under a heading the page no longer has is orphaned, never pinned to other text.
+    expect(await card("elsewhere").evaluate(item => item.classList.contains("is-orphan"))).toBe(true);
+    expect(await card("partial").evaluate(item => item.classList.contains("is-orphan"))).toBe(false);
+    // A quote across an element boundary, inside an SVG, or with a zero-size layout box still highlights sensibly.
     const segments = (id: string) => card(id).hover().then(() => lab.ui.locator(".anchor-highlight-segment").evaluateAll(all => all.map(segment => [(segment as HTMLElement).style.width, (segment as HTMLElement).style.height])));
-    expect(await segments("box")).toEqual([["126px", "46px"]]);
     expect((await segments("partial")).length).toBe(1);
     expect(await segments("ghost")).toEqual([]);
     expect(await segments("svg")).toHaveLength(1);
-    // Composer labels mirror the same shapes.
+    // The composer labels a clicked element by its text; an element without text has nothing to quote.
     await lab.tid("commentor-panel-btn").click();
     await lab.tid("commentor-comment-btn").click();
     await lab.doc(() => document.getElementById("box")!.click());
-    expect(await lab.tid("commentor-composer").locator(".anchor-label").innerText()).toBe("On: element");
+    await expect.poll(() => lab.ui.locator('.toast[role="status"]').last().innerText()).toBe("Select some text to comment on.");
+    await lab.tid("commentor-comment-btn").click();
+    await lab.doc(() => document.getElementById("svgtext")!.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+    expect(await lab.tid("commentor-composer").locator(".anchor-label").innerText()).toBe("On: “Chart label”");
   });
 
-  it("finds a commented quote even when its path is stale, falling back to the whole page", async () => {
-    const lab = await commentLab.open({ document: defaultDocument.replace(/<main>|<\/main>/g, "\n  ") });
-    await lab.ready([{ _id: "stale", anchor: { kind: "text-range", quote: "Footer\ntext", path: ["main", "gone"], startOffset: 0, endOffset: 11 } }]);
+  it("finds a commented quote by its text when its offset no longer matches", async () => {
+    const lab = await commentLab.open();
+    await lab.ready([{ _id: "stale", anchor: { ...anchorOn("Footer text"), blobSha: LAB_BLOB, offset: 3 } }]);
     await lab.openDrawer();
     await lab.ui.locator(".drawer-thread .quote").click();
     await expect.poll(() => lab.tid("commentor-thread-bubble").getAttribute("data-thread-id")).toBe("stale");
@@ -62,7 +64,7 @@ describe("anchor shapes", () => {
   it("keeps tall bubbles on screen when there is room neither above nor below", async () => {
     const lab = await commentLab.open({ height: 320 });
     const replies = Array.from({ length: 3 }, (_, index) => ({ _id: `r${index}`, _creationTime: Date.now(), authorName: "Grace", authorEmail: "g@example.test", body: `Reply ${index}`, canDelete: false }));
-    await lab.ready([{ _id: "tall", anchor: { kind: "element", path: ["main", "#second"] }, body: "A tall thread", replies }]);
+    await lab.ready([{ _id: "tall", anchor: anchorOn("Second bold paragraph"), body: "A tall thread", replies }]);
     await expect.poll(() => lab.pins().count()).toBe(1);
     await lab.pins().first().click();
     const box = await lab.tid("commentor-thread-bubble").boundingBox();
@@ -73,7 +75,7 @@ describe("anchor shapes", () => {
 
   it("opens above the anchor when only the space above fits", async () => {
     const lab = await commentLab.open({ height: 700 });
-    await lab.ready([{ _id: "low", anchor: { kind: "element", path: ["main", "#footer"] } }]);
+    await lab.ready([{ _id: "low", anchor: anchorOn("Footer text far below") }]);
     await lab.doc(() => { const footer = document.getElementById("footer")!; footer.scrollIntoView(); window.scrollBy(0, 560); });
     await expect.poll(() => lab.pins().first().evaluate(pin => (pin as HTMLElement).style.display)).toBe("");
     await lab.pins().first().click();
@@ -123,12 +125,11 @@ describe("authoring edge cases", () => {
     await lab.doc(() => document.getElementById("title")!.click());
     await lab.tid("commentor-composer-textarea").fill("Saved while writable");
     await expect.poll(() => lab.page.evaluate(() => Object.keys(sessionStorage).filter(key => key.startsWith("commentor-operations:")).length)).toBe(1);
-    commentLab.setCanWrite(false);
-    await lab.host(() => { (document.getElementById("content-frame") as HTMLIFrameElement).contentWindow!.location.reload(); });
+    // The read path withdraws write access, then the document reloads.
+    await lab.host(l => { l.host!.setWritable(false); (document.getElementById("content-frame") as HTMLIFrameElement).contentWindow!.location.reload(); });
     await expect.poll(() => lab.tid("commentor-comment-btn").isDisabled()).toBe(true);
     await expect.poll(() => lab.host(l => l.subscriptions)).toBeGreaterThanOrEqual(2);
     expect(await lab.tid("commentor-composer").count()).toBe(0);
-    commentLab.setCanWrite(true);
   });
 
   it("offers selection comments only for real, visible text outside the widget", async () => {
@@ -199,7 +200,7 @@ describe("live updates", () => {
     await lab.host(l => {
       l.replyLoading = true;
       l.pagination = { canLoadMore: true, loading: true };
-      l.threads = [l.thread({ _id: "t1", anchor: { kind: "element", path: ["main", "h1"] }, repliesHasMore: true })];
+      l.threads = [l.thread({ _id: "t1", anchor: l.anchorOn("Quarterly report"), repliesHasMore: true })];
       l.olderReplies = { t1: [l.reply({ _id: "old", body: "Older reply" })] };
       (document.getElementById("content-frame") as HTMLIFrameElement).contentWindow!.location.reload();
     });
@@ -221,7 +222,7 @@ describe("live updates", () => {
 
   it("repositions pins and an open bubble on bursts of scroll events", async () => {
     const lab = await commentLab.open();
-    await lab.ready([{ _id: "t1", anchor: { kind: "element", path: ["main", "#second"] } }]);
+    await lab.ready([{ _id: "t1", anchor: anchorOn("Second bold paragraph") }]);
     await lab.pins().first().click();
     await lab.tid("commentor-thread-bubble").locator('[data-testid="commentor-resolve-btn"]').click();
     await expect.poll(() => lab.pins().count()).toBe(0);
@@ -292,7 +293,7 @@ describe("starting up", () => {
   it.each([
     { name: "no configuration", config: null },
     { name: "no document scope", config: { documentPath: "index.html", transport: "parent" } },
-    { name: "no file for a direct legacy client", config: { convexUrl: "http://unused.test", orgSlug: "example" } },
+    { name: "a configuration of a removed surface", config: { convexUrl: "http://unused.test", orgSlug: "example" } },
   ])("reports $name instead of starting", async ({ config }) => {
     commentLab.setConfig(config);
     try {
@@ -300,7 +301,7 @@ describe("starting up", () => {
       const page = await commentLab.harness.newPage({ viewport: { width: 800, height: 600 } });
       page.on("console", message => { if (message.type() === "error") messages.push(message.text()); });
       await page.goto(`${commentLab.harness.origin}${docPath}`);
-      await expect.poll(() => messages).toEqual(["[commentor] not started — configure a legacy organization/file or project document scope"]);
+      await expect.poll(() => messages).toEqual(["[commentor] not started — configure a repository document scope"]);
       expect(await page.locator("#commentor-host").count()).toBe(0);
     } finally {
       commentLab.setConfig(undefined);
@@ -344,7 +345,7 @@ describe("ordering of acknowledgements and snapshots", () => {
   it("opens a located thread once when the scroll end and the fallback timer both fire", async () => {
     const lab = await commentLab.open({ motion: "no-preference" });
     await lab.page.clock.install();
-    await lab.ready([{ _id: "far", anchor: { kind: "element", path: ["main", "#footer"] } }]);
+    await lab.ready([{ _id: "far", anchor: anchorOn("Footer text far below") }]);
     await lab.openDrawer();
     // The scroll end must come first; the 450ms fallback fires only when the clock is advanced.
     await lab.pauseClock();

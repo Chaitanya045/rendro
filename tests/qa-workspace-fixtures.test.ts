@@ -120,38 +120,18 @@ describe("large QA workspace lifecycle", () => {
     for (const model of ["organization", "user", "account", "session", "member", "team", "teamMember", "invitation"]) expect(await f.rows(model), model).toEqual([]);
   });
 
-  it("refuses cleanup while other resource types or deployments still reference the workspace", async () => {
+  it("refuses cleanup while API keys still reference the workspace", async () => {
     const f = lifecycleBackend();
     const org = await fixtureOrganization(f);
     const now = Date.now();
     const projectId = await f.backend.run(ctx => ctx.db.insert("projects", { organizationId: org._id, name: "P", slug: "p", createdBy: "qa", createdAt: now }));
     const run = () => f.backend.action(cleanupRef, { confirmDeployment: confirm, organizationId: org._id, runId });
-    const deploymentId = await f.backend.run(ctx => ctx.db.insert("deployments", {
-      organizationId: org._id, projectId, status: "active", manifestKey: "m", manifestSha256: "s", fileCount: 1, byteCount: 1,
-      provenance: { source: { kind: "local" }, execution: { kind: "local" }, cliVersion: "1", manifestSha256: "s" }, createdBy: "qa", createdAt: now,
-    }));
-    await expect(run()).rejects.toThrow("Workspace has deployments; explicit storage cleanup required");
-    await f.backend.run(ctx => ctx.db.delete(deploymentId));
-
-    const extras = {
-      apiKeyCredentials: (ctx: { db: { insert: (table: "apiKeyCredentials", value: never) => Promise<unknown> } }) => ctx.db.insert("apiKeyCredentials", { organizationId: org._id, keyId: "k", keyPrefix: "p", name: "n", secretHash: "h", scopes: [], createdBy: "qa", createdAt: now } as never),
-      publications: (ctx: { db: { insert: (table: "publications", value: never) => Promise<unknown> } }) => ctx.db.insert("publications", { organizationId: org._id, projectId, slug: "s", pathPrefix: "/", entryFile: "index.html", trackingMode: "track_active", createdBy: "qa", createdAt: now, updatedAt: now } as never),
-    };
-    for (const table of ["apiKeyCredentials", "publications"] as const) {
-      const id = await f.backend.run(ctx => extras[table](ctx as never)) as never;
-      await expect(run(), table).rejects.toThrow("Workspace has additional resources; explicit cleanup required");
-      await f.backend.run(ctx => ctx.db.delete(id));
-    }
-    const deploymentForShare = await f.backend.run(ctx => ctx.db.insert("deployments", {
-      organizationId: org._id, projectId, status: "superseded", manifestKey: "m", manifestSha256: "s", fileCount: 1, byteCount: 1,
-      provenance: { source: { kind: "local" }, execution: { kind: "local" }, cliVersion: "1", manifestSha256: "s" }, createdBy: "qa", createdAt: now,
-    }));
-    const shareId = await f.backend.run(ctx => ctx.db.insert("shareGrants", { organizationId: org._id, projectId, deploymentId: deploymentForShare, documentPath: "index.html", tokenHash: "t", expiresAt: now + 1, createdBy: "qa", createdAt: now }));
+    const keyId = await f.backend.run(ctx => ctx.db.insert("apiKeyCredentials", { organizationId: org._id, keyId: "k", keyPrefix: "p", name: "n", secretHash: "h", scopes: [], createdBy: "qa", createdAt: now }));
     await expect(run()).rejects.toThrow("Workspace has additional resources; explicit cleanup required");
     // Nothing was removed by the refused attempts.
     expect(await f.rows("organization")).toHaveLength(1);
     expect(await f.backend.run(ctx => ctx.db.get(projectId))).not.toBeNull();
-    expect(await f.backend.run(ctx => ctx.db.get(shareId))).not.toBeNull();
+    expect(await f.backend.run(ctx => ctx.db.get(keyId))).not.toBeNull();
   });
 
   it("rejects absent or malformed organization identifiers before changing anything", async () => {
