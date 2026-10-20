@@ -2334,7 +2334,7 @@ Mounted before the session middleware; it reads no cookie and sets none, and eve
 
 ### Dataset schema
 
-Dataset `rendro_rum_dev` (binding `RUM_ANALYTICS`, with the `RUM_LIMIT` limiter, namespace `2820`; `[env.development]` in `wrangler.toml` only; tests fake both). One row per event:
+Dataset `rendro_rum_dev` (binding `RUM_ANALYTICS`, with the `RUM_LIMIT` limiter, namespace `2820`; `[env.development]` in `wrangler.toml` only; tests fake both). The dataset binding stays commented out until Analytics Engine is enabled on the Cloudflare account; until then dev drops beacons, as production does. One row per event:
 
 | Column | Holds |
 |---|---|
