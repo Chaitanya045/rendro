@@ -153,6 +153,26 @@ gives shard 1 about 43% of the tests (the second shard also spends about two min
 shards' wall times in the job summaries and move a few points of weight toward the
 faster shard; the weights must have one entry per shard. Open a trace with
 `pnpm exec playwright show-trace test-results/e2e/<test>/trace.zip`.
+
+The local Convex backend's own log is never uploaded: it sits next to the run's
+admin key. A failed shard instead uploads redacted timings (#328),
+`test-results/e2e-timings/shard-<i>-of-2.jsonl`, in the same artifact, and its job log
+prints the 10 slowest Worker calls to the backend (the "Slowest backend calls" step;
+locally, `pnpm exec tsx scripts/e2e-timings.ts`). The file holds three kinds of line:
+each call the Worker makes to the backend (path, `module:function` name, method, start, duration, status
+or abort/timeout, injected faults marked), the backend's own access log (started with
+`RUST_LOG=info`, which adds it), and about one sample per second of the backend's
+queue gauges from its loopback `/metrics` endpoint (in-flight HTTP and site-proxy requests
+against the site proxy's limit of 4, the codel and commit queues, scheduler backlog,
+and cumulative function-queue, commit-queue and permit waits). A Worker call that is slow
+while the backend's access log shows the same request as fast points at the client or
+workerd. A slow request on both sides with empty queues points at the function itself or
+host CPU. Full queues point at backend contention. Every line passes the allowlist
+in `scripts/e2e-timings.ts`: fields are rebuilt from known keys, query strings are dropped, and a path segment
+that is not a plain route word becomes `:param`. Of a request body only the
+function call's `path` field is read, and it is kept only if it is a `module:function`
+name. Nothing from a header, cookie or log message is copied, and `tests/e2e-timings.test.ts` checks this
+with a fake admin key, cookie, email and token.
 `pnpm verify` continues to run the existing Vitest layers independently.
 `e2e/` is typechecked/linted test infrastructure, outside the production
 coverage denominator. The loopback/environment guards have a separate 100% coverage

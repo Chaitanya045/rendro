@@ -197,7 +197,7 @@ The Worker checks its own cookie writes with the same rules (`src/middleware/wri
 1. **Header allowlist**: only `accept`, `content-type`, `cookie`, `origin`, `sec-fetch-site`, and `user-agent` are forwarded, plus the signed client-IP headers. `Host`, `Authorization` and `cf-*` headers are excluded.
 2. **Domain stripping**: Convex sets `Domain=convex.site` on cookies. The Worker strips the Domain attribute so cookies bind to the Worker origin.
 3. **Redirect control**: `redirect: "manual"` leaves redirects to the browser; a redirect to Better Auth's error page becomes `/sign-in?error=<code>`.
-4. **Sign-out**: `GET /api/auth/sign-out` shows confirmation; a same-origin `POST` calls Convex sign-out, then expires every known auth cookie under the current, legacy and local names (host-only and parent domain; `__Host-` names host-only) and sends `Clear-Site-Data: "cache"` (#242). `"cookies"` is deliberately absent: it clears cookies for the whole registrable domain, not just this origin, and the expirations are already exact per name.
+4. **Sign-out**: `GET /api/auth/sign-out` shows confirmation; a same-origin `POST` calls Convex sign-out (5 s upstream timeout; on a timeout or upstream error the cookies are kept and the page offers to try again, with no automatic retry, see #328), then expires every known auth cookie under the current, legacy and local names (host-only and parent domain; `__Host-` names host-only) and sends `Clear-Site-Data: "cache"` (#242). `"cookies"` is deliberately absent: it clears cookies for the whole registrable domain, not just this origin, and the expirations are already exact per name.
 
 ---
 
