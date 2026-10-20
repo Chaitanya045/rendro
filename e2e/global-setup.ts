@@ -4,6 +4,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { createTestHarness } from "wrangler";
+import type { FullConfig } from "@playwright/test";
 import { startFaults, startIdentityFixtures, startImageHost } from "./services";
 import { localEnvironment, startBackend } from "./backend";
 import { seedWorkspace } from "./seed";
@@ -13,12 +14,15 @@ import { controlWorker, controlWorkerConfig, withRepoReadBindings } from "./repo
 import { repositoryWorld, seedRepositories } from "./repo-fixtures";
 import type { R2BucketLike } from "../src/ingest/orchestrator/store";
 import { d1SearchIndex, type SearchD1 } from "../src/search/d1";
+import { createTimingRecorder, timeUpstream, timingFile } from "./timings";
 
 const run = promisify(execFile);
 const root = resolve(import.meta.dirname, "..");
 
-export default async function globalSetup() {
+export default async function globalSetup(config?: FullConfig) {
   const resources = registerResources();
+  // Redacted per-call timings for a failed shard's artifacts (#328): tells a backend stall from a client race.
+  const timings = createTimingRecorder(timingFile(root, config?.shard));
   const directory = resources.directory;
   const closers: Array<() => Promise<void>> = [];
   const originalFetch = globalThis.fetch;
@@ -43,7 +47,7 @@ export default async function globalSetup() {
   try {
     const identity = await startIdentityFixtures(directory);
     closers.push(() => identity.close());
-    const convex = await startBackend(directory, identity, resources);
+    const convex = await startBackend(directory, identity, resources, timings);
     identity.allowedOrigins.add(convex.site);
     identity.allowedOrigins.add(convex.origin);
     closers.push(() => convex.close());
@@ -106,7 +110,10 @@ export default async function globalSetup() {
         blockedOrigins.add(url.origin);
         throw new Error(`Blocked external Worker origin: ${url.origin}`);
       }
-      return faults.intercept(request) ?? originalFetch(request, { redirect: "manual" });
+      const target = url.origin === convex.origin ? "convex" : url.origin === convex.site ? "convex-site" : undefined;
+      const injected = faults.intercept(request);
+      const send = () => injected ?? originalFetch(request, { redirect: "manual" });
+      return target ? timeUpstream(timings, request, target, send, injected !== undefined) : send();
     };
     resources.assertActive();
     const server = createTestHarness({

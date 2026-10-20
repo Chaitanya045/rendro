@@ -10,6 +10,7 @@ import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { verifiedArchive } from "./verified-cache";
 import type { ResourceJournal } from "./resource-journal";
+import { recordBackendLog, sampleBackendQueue, type TimingRecorder } from "./timings";
 
 export const run = promisify(execFile);
 export const root = resolve(import.meta.dirname, "..");
@@ -82,7 +83,8 @@ export async function ready(probe: () => boolean | Promise<boolean>, label: stri
   throw new Error(`${label} readiness timed out`);
 }
 
-export async function startBackend(directory: string, proxy?: { origin: string; certificate: string }, resources?: ResourceJournal) {
+/** With `timings`, the backend's access log and queue gauges are recorded there, redacted (#328). */
+export async function startBackend(directory: string, proxy?: { origin: string; certificate: string }, resources?: ResourceJournal, timings?: TimingRecorder) {
   const binary = await backendBinary(directory, resources);
   resources?.assertActive();
   const port = await freePort();
@@ -92,20 +94,24 @@ export async function startBackend(directory: string, proxy?: { origin: string; 
   const site = `http://127.0.0.1:${sitePort}`;
   const secret = randomBytes(32).toString("hex");
   const instance = `e2e-${randomBytes(6).toString("hex")}`;
-  const environment = { ...localEnvironment(), DISABLE_BEACON: "true", ...(proxy ? { SSL_CERT_FILE: proxy.certificate } : {}) };
+  // An explicit `info` filter adds the per-request access log (convex-cloud-http), which the default leaves out.
+  const environment = { ...localEnvironment(), DISABLE_BEACON: "true", ...(proxy ? { SSL_CERT_FILE: proxy.certificate } : {}), ...(timings ? { RUST_LOG: "info" } : {}) };
   resources?.assertActive();
   const generating = run(binary, ["keygen", "admin-key", "--instance-name", instance, "--instance-secret", secret], { env: environment });
   resources?.child(generating.child);
   const { stdout } = await generating;
   const adminKey = stdout.trim();
-  const log = await open(join(directory, "backend.log"), "w", 0o600);
+  const logPath = join(directory, "backend.log");
+  const log = await open(logPath, "w", 0o600);
   resources?.assertActive();
   const child = spawn(binary, ["--interface", "127.0.0.1", "--port", String(port), "--site-proxy-port", String(sitePort),
     "--instance-name", instance, "--instance-secret", secret, "--disable-beacon",
     "--local-storage", join(directory, "storage"), ...(proxy ? ["--convex-http-proxy", proxy.origin] : []), join(directory, "db.sqlite3")],
   { env: environment, stdio: ["ignore", log.fd, log.fd] });
   resources?.child(child);
+  let stopSampling: (() => Promise<void>) | undefined;
   const close = async () => {
+    await stopSampling?.();
     if (child.exitCode === null && child.signalCode === null) {
       const stopped = once(child, "exit");
       child.kill("SIGTERM");
@@ -113,10 +119,13 @@ export async function startBackend(directory: string, proxy?: { origin: string; 
       await stopped.finally(() => clearTimeout(timer));
     }
     await log.close();
+    // The raw log stays in the private run directory; only parsed timings leave it.
+    if (timings) await recordBackendLog(timings, logPath).catch(() => console.warn("E2E: could not record backend timings"));
   };
   try {
     await ready(async () => (await localHttp(`${origin}/version`)).status === 200, "Convex");
   } catch (error) { await close(); throw error; }
+  if (timings) stopSampling = sampleBackendQueue(timings, () => localHttp(`${origin}/metrics`));
   return {
     origin, site, adminKey, close,
     async environment(values: Record<string, string>) {
