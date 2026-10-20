@@ -74,9 +74,14 @@ async function signedInHome(page: Page, cspViolations: string[], viewport: { wid
   await expect(open).toContainText("/r/acme/handbook");
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 
-  await page.getByRole("link", { name: "Account security" }).click();
+  // Each click waits for its navigation. Account security then loads its sign-in methods and only afterwards shows the
+  // password section, which moves the footer down: a click on Back to home before that can land on the form (Firefox
+  // at 375, #311), so the page is settled first.
+  await Promise.all([page.waitForURL(/\/account\/security$/), page.getByRole("link", { name: "Account security" }).click()]);
   await expect(page).toHaveURL(/\/account\/security$/);
-  await page.getByRole("link", { name: "Back to home" }).click();
+  await expect(page.locator("#method-list")).toHaveAttribute("aria-busy", "false");
+  await expect(page.getByRole("heading", { name: "Change password" })).toBeVisible();
+  await Promise.all([page.waitForURL(/\/home$/), page.getByRole("link", { name: "Back to home" }).click()]);
   await expect(page).toHaveURL(/\/home$/);
 
   // The page's own sign-out tears the session down in place.

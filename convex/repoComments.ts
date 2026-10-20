@@ -100,6 +100,20 @@ const operationArgs = { clientOperationId: v.optional(v.string()), expectedAutho
 
 type PageOptions = { numItems: number; cursor: string | null };
 
+/** What a page carries of the edit (#287): when it was, and its operation, so the editor's live echo is recognised. */
+function edit(row: { editedAt?: number; editOperationId?: string }) {
+  return { editedAt: row.editedAt, editOperationId: row.editOperationId };
+}
+
+/** A reply as `userId` (null: anonymous) sees it: only its author may delete or edit it. */
+async function replyRow(reply: Doc<"repoReplies">, userId: string | null, author: ReturnType<typeof authors>) {
+  const own = reply.authorId === userId;
+  return {
+    _id: reply._id, _creationTime: reply._creationTime, clientOperationId: reply.clientOperationId, body: reply.body, ...edit(reply),
+    canDelete: own, canEdit: own, ...authorDisplay(await author(reply.authorId)),
+  };
+}
+
 /** One page of a document's live threads, newest first, each with its newest replies, as `userId` (null: anonymous) sees it. */
 async function threadPage(ctx: QueryCtx, repoId: number, path: string, userId: string | null, paginationOpts: PageOptions) {
   const threads = await publicPaginate(ctx.db.query("repoThreads")
@@ -112,14 +126,12 @@ async function threadPage(ctx: QueryCtx, repoId: number, path: string, userId: s
       ctx.db.query("repoReplies").withIndex("by_thread", q => q.eq("threadId", thread._id).eq("deletedAt", undefined))
         .order("desc").take(REPO_REPLY_PREVIEW_SIZE + 1),
     ]);
-    const replies = await Promise.all(newest.slice(0, REPO_REPLY_PREVIEW_SIZE).reverse().map(async reply => ({
-      _id: reply._id, _creationTime: reply._creationTime, clientOperationId: reply.clientOperationId, body: reply.body,
-      canDelete: reply.authorId === userId, ...authorDisplay(await author(reply.authorId)),
-    })));
+    const replies = await Promise.all(newest.slice(0, REPO_REPLY_PREVIEW_SIZE).reverse().map(reply => replyRow(reply, userId, author)));
+    const own = thread.authorId === userId;
     return {
       _id: thread._id, _creationTime: thread._creationTime, clientOperationId: thread.clientOperationId,
-      repoId: thread.repoId, path: thread.path, blobSha: thread.blobSha, anchor: thread.anchor, body: thread.body,
-      resolved: thread.resolved, archived: thread.archived, canDelete: thread.authorId === userId,
+      repoId: thread.repoId, path: thread.path, blobSha: thread.blobSha, anchor: thread.anchor, body: thread.body, ...edit(thread),
+      resolved: thread.resolved, archived: thread.archived, canDelete: own, canEdit: own,
       ...authorDisplay(threadAuthor), replies, repliesHasMore: newest.length > REPO_REPLY_PREVIEW_SIZE,
     };
   }));
@@ -143,7 +155,7 @@ export const listThreads = query({
  * page is the one `listThreads` gives the same reader; what `grant` would refuse is an empty page here too.
  *
  * `userId` is whom the grant names (null: anyone, for a public repository) and decides access, exactly as `grant`
- * does. A public page is the same for every reader except which threads and replies the reader may delete, so the
+ * does. A public page is the same for every reader except which threads and replies the reader may delete or edit, so the
  * Worker names its signed-in reader as `viewerId` (#303), and the page is read for them. A private page is always
  * read for the grant's own reader.
  */
@@ -171,10 +183,7 @@ export const listReplies = query({
       .order("desc"), { ...args.paginationOpts, maximumRowsRead: MAX_REACTIVE_PAGE_ROWS, maximumBytesRead: MAX_PAGE_BYTES_READ });
     const author = authors(ctx);
     const userId = reader.user?._id ?? null;
-    const page = await Promise.all(replies.page.map(async reply => ({
-      _id: reply._id, _creationTime: reply._creationTime, clientOperationId: reply.clientOperationId, body: reply.body,
-      canDelete: reply.authorId === userId, ...authorDisplay(await author(reply.authorId)),
-    })));
+    const page = await Promise.all(replies.page.map(reply => replyRow(reply, userId, author)));
     return { ...replies, page };
   },
 });
@@ -285,6 +294,49 @@ export const addReply = mutation({
     return ctx.db.insert("repoReplies", {
       repoId: args.repoId, threadId: thread._id, authorId: user._id, body, clientOperationId: args.clientOperationId, createdAt: Date.now(),
     });
+  },
+});
+
+/**
+ * The author's text only, after the fact (#287). Whether the edit is still needed: not for a retry of the operation that
+ * made the last edit, nor for a body that changes nothing. Only an edit that writes spends the writer's quota.
+ */
+async function editDue(ctx: MutationCtx, row: { body: string; editOperationId?: string }, userId: string, repoId: number, body: string, clientOperationId?: string) {
+  if ((clientOperationId !== undefined && row.editOperationId === clientOperationId) || row.body === body) return false;
+  await consumeWriteQuota(ctx, "comments", userId, `repo:${repoId}`);
+  return true;
+}
+
+/**
+ * Editing a thread is its author's alone, like archive and delete. Status does not matter, as for replies and resolving:
+ * an author may correct a resolved or archived thread too. A deleted one is "not found".
+ */
+export const editThread = mutation({
+  args: { ...scopeArgs, ...operationArgs, threadId: v.string(), body: v.string() },
+  handler: async (ctx, args): Promise<null> => {
+    const { user, thread } = await writableThread(ctx, args);
+    if (thread.authorId !== user._id) publicError("forbidden");
+    const body = commentBody(args.body);
+    if (!await editDue(ctx, thread, user._id, args.repoId, body, args.clientOperationId)) return null;
+    const now = Date.now();
+    await ctx.db.patch(thread._id, { body, editedAt: now, editOperationId: args.clientOperationId, updatedAt: now });
+    return null;
+  },
+});
+
+/** A reply is edited by its author alone, on a live thread of this document. */
+export const editReply = mutation({
+  args: { ...scopeArgs, ...operationArgs, threadId: v.string(), replyId: v.string(), body: v.string() },
+  handler: async (ctx, args): Promise<null> => {
+    const { user, thread } = await writableThread(ctx, args);
+    const replyId = normalizeId(ctx, "repoReplies", args.replyId);
+    const reply = replyId ? await ctx.db.get(replyId) : null;
+    if (!reply || reply.threadId !== thread._id || reply.deletedAt !== undefined) publicError("not_found");
+    if (reply.authorId !== user._id) publicError("forbidden");
+    const body = commentBody(args.body);
+    if (!await editDue(ctx, reply, user._id, args.repoId, body, args.clientOperationId)) return null;
+    await ctx.db.patch(reply._id, { body, editedAt: Date.now(), editOperationId: args.clientOperationId });
+    return null;
   },
 });
 

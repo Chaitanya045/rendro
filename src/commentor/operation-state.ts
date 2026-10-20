@@ -11,7 +11,22 @@ export type CommentOperation = { method: CommentorParentMutationMethod; args: Ar
 export type CommentRecoveryState = { operations: Record<string, CommentOperation>; drafts: Record<string, Args> };
 
 export function mutationKey(method: CommentorParentMutationMethod, args: Args = {}): string {
-  return JSON.stringify([method, method === "thread.create" ? null : args.threadId ?? null, method === "reply.remove" ? args.replyId ?? null : null]);
+  const reply = method === "reply.remove" || method === "reply.edit";
+  return JSON.stringify([method, method === "thread.create" ? null : args.threadId ?? null, reply ? args.replyId ?? null : null]);
+}
+
+/** Where an edit's unsaved text is kept (#287): one draft per thread or reply, apart from the reply box's. */
+export function editDraftKey(threadId: string, replyId?: string): string {
+  return replyId === undefined ? `edit:${threadId}` : `edit:${threadId}:${replyId}`;
+}
+
+/** The draft a write was typed in, if it carries text: the composer's, a reply box's or an edit's. */
+function draftKey(method: CommentorParentMutationMethod, args: Args): string | null {
+  if (method === "thread.create") return "create";
+  if (method === "reply.add") return String(args.threadId);
+  if (method === "thread.edit") return editDraftKey(String(args.threadId));
+  if (method === "reply.edit") return editDraftKey(String(args.threadId), String(args.replyId));
+  return null;
 }
 
 // The parent owns durable storage: document frames have an opaque origin.
@@ -38,23 +53,23 @@ export class CommentOperationState {
     const existing = this.value.operations[key];
     if (existing) {
       // Keep the submitted payload as well as its ID across uncertain outcomes.
-      if ((method === "thread.create" || method === "reply.add") && args.body !== existing.args.body) {
+      if (draftKey(method, args) !== null && args.body !== existing.args.body) {
         throw new CommentOperationConflictError();
       }
       return existing;
     }
     const operation = { method, args, clientOperationId: typeof args.clientOperationId === "string" ? args.clientOperationId : crypto.randomUUID() };
     this.value.operations[key] = operation;
-    if (method === "thread.create") this.value.drafts.create = args;
-    if (method === "reply.add") this.value.drafts[String(args.threadId)] = args;
+    const draft = draftKey(method, args);
+    if (draft !== null) this.value.drafts[draft] = args;
     this.save();
     return operation;
   }
   complete(key: string, clientOperationId: string): void {
     const op = this.value.operations[key];
     if (!op || op.clientOperationId !== clientOperationId) return;
-    const draftKey = op.method === "thread.create" ? "create" : op.method === "reply.add" ? String(op.args.threadId) : null;
-    if (draftKey && this.value.drafts[draftKey]?.body === op.args.body) delete this.value.drafts[draftKey];
+    const draft = draftKey(op.method, op.args);
+    if (draft !== null && this.value.drafts[draft]?.body === op.args.body) delete this.value.drafts[draft];
     delete this.value.operations[key];
     this.save();
   }

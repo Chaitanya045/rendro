@@ -28,9 +28,10 @@ export function normalizeMutationArgs(method: CommentorParentMutationMethod, val
     ? { ...operation, body: args.body.trim(), anchor: args.anchor } : null;
   const threadId = args.threadId;
   if (typeof threadId !== "string" || !threadId) return null;
-  if (method === "reply.add") return validBody(args.body) ? { ...operation, threadId, body: args.body.trim() } : null;
-  if (method === "reply.remove") return typeof args.replyId === "string" && args.replyId
-    ? { ...operation, threadId, replyId: args.replyId } : null;
+  if (method === "reply.add" || method === "thread.edit") return validBody(args.body) ? { ...operation, threadId, body: args.body.trim() } : null;
+  const replyId = typeof args.replyId === "string" && args.replyId ? args.replyId : null;
+  if (method === "reply.remove") return replyId ? { ...operation, threadId, replyId } : null;
+  if (method === "reply.edit") return replyId && validBody(args.body) ? { ...operation, threadId, replyId, body: args.body.trim() } : null;
   if (method === "thread.resolve" || method === "thread.archive") {
     // Status writes always name their target, so a retry is idempotent.
     const field = method === "thread.resolve" ? "resolved" : "archived";

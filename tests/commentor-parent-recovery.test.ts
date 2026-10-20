@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { CommentorParentHost, type DocumentCommentBackend } from "../src/commentor/parent-host";
 import { COMMENTOR_VIEWER_RELOAD, COMMENTOR_PARENT_READY, COMMENTOR_PARENT_RESPONSE, COMMENTOR_PARENT_REQUEST } from "../src/commentor/parent-protocol";
 import { CommentMutationOutcomeUnknownError, ParentCommentTransport } from "../src/commentor/parent-transport";
+import { editDraftKey } from "../src/commentor/operation-state";
 
 function recoveryRuntime(scope = { repoId: 9101, documentPath: "docs/guide.md" }, principal = "user-a") {
   vi.useFakeTimers();
@@ -81,7 +82,7 @@ async function flushMessages() {
   for (let i = 0; i < 12; i++) await Promise.resolve();
 }
 
-const methods = ["thread.create", "thread.resolve", "thread.archive", "thread.remove", "reply.add", "reply.remove"] as const;
+const methods = ["thread.create", "thread.resolve", "thread.archive", "thread.remove", "thread.edit", "reply.add", "reply.edit", "reply.remove"] as const;
 const args = { resolved: true, archived: true, threadId: "thread-1", replyId: "reply-1", body: "Pending write", anchor: repoAnchor() };
 
 afterEach(() => {
@@ -209,6 +210,7 @@ describe("durable retries through the parent bridge and real Convex mutations", 
         "thread.create": api.repoComments.createThread, "thread.resolve": api.repoComments.resolve,
         "thread.archive": api.repoComments.archive, "thread.remove": api.repoComments.removeThread,
         "reply.add": api.repoComments.addReply, "reply.remove": api.repoComments.removeReply,
+        "thread.edit": api.repoComments.editThread, "reply.edit": api.repoComments.editReply,
       };
       runtime.backend.mutate.mockImplementation((method, scope, args) => {
         const gate = new Promise<void>((resolve) => gates.push(resolve));
@@ -234,6 +236,9 @@ describe("durable retries through the parent bridge and real Convex mutations", 
       expect(runtime.backend.mutate).toHaveBeenCalledTimes(1);
       if (method === "thread.create") expect(transport.recovery.value.drafts.create.body).toBe(action.body);
       if (method === "reply.add") expect(transport.recovery.value.drafts[threadId].body).toBe(action.body);
+      // An edit's text is kept too (#287), under its own draft.
+      if (method === "thread.edit") expect(transport.recovery.value.drafts[editDraftKey(threadId)].body).toBe(action.body);
+      if (method === "reply.edit") expect(transport.recovery.value.drafts[editDraftKey(threadId, replyId)].body).toBe(action.body);
       const retry = transport.mutate(method, action);
       await flushMessages();
       expect(runtime.backend.mutate).toHaveBeenCalledTimes(2);
@@ -255,6 +260,9 @@ describe("durable retries through the parent bridge and real Convex mutations", 
       if (method === "thread.archive") expect(threads.find((row) => row._id === threadId)?.archived).toBe(true);
       if (method === "thread.remove") expect(threads.find((row) => row._id === threadId)?.deletedAt).toEqual(expect.any(Number));
       if (method === "reply.remove") expect(replies.find((row) => row._id === replyId)?.deletedAt).toEqual(expect.any(Number));
+      // The retried edit wrote once; the abandoned original, arriving last, is recognised by its operation and writes nothing.
+      if (method === "thread.edit") expect(threads.find((row) => row._id === threadId)).toMatchObject({ body: action.body, editOperationId: firstId });
+      if (method === "reply.edit") expect(replies.find((row) => row._id === replyId)).toMatchObject({ body: action.body, editOperationId: firstId });
       expect(Object.keys(transport.recovery.value.operations)).toHaveLength(0);
       if (method === "thread.remove") await convex.finishAllScheduledFunctions(() => vi.runAllTimers());
       transport.dispose();

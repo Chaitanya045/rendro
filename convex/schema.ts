@@ -52,6 +52,9 @@ export default defineSchema({
     resolved: v.boolean(),
     archived: v.boolean(),
     clientOperationId: v.optional(v.string()),
+    // The author's last edit (#287): when, and the operation that made it, so the editor's live echo is recognised.
+    editedAt: v.optional(v.number()),
+    editOperationId: v.optional(v.string()),
     deletedAt: v.optional(v.number()),
     createdAt: v.number(),
     updatedAt: v.number(),
@@ -66,6 +69,8 @@ export default defineSchema({
     authorId: v.string(),
     body: v.string(),
     clientOperationId: v.optional(v.string()),
+    editedAt: v.optional(v.number()),
+    editOperationId: v.optional(v.string()),
     deletedAt: v.optional(v.number()),
     createdAt: v.number(),
   })

@@ -101,6 +101,36 @@ describe("the repository comment host", () => {
     expect(mutate).not.toHaveBeenCalled();
   });
 
+  it("carries edits (#287): says so, keeps an edit's draft only for a thread on the page, and sends the author's edit", async () => {
+    const { host, mutate, request, responses, readies, live } = setup("user-a");
+    host.setWritable(true);
+    expect(readies().at(-1)).toMatchObject({ edits: true });
+    request("sub", "subscribe", { documentPath: "docs/guide.md" });
+    live([{ _id: "t1", replies: [{ _id: "r1" }] }]);
+    const draft = (requestId: string, key: string) => request(requestId, "draft.save", { key, draft: { body: "Unsaved edit" } });
+    draft("thread", "edit:t1");
+    draft("reply", "edit:t1:r1");
+    draft("other-thread", "edit:t2");
+    draft("empty-reply", "edit:t1:");
+    draft("extra", "edit:t1:r1:x");
+    draft("no-thread", "edit:");
+    draft("kind", "note:t1");
+    request("edit", "thread.edit", { threadId: "t1", body: " Edited " });
+    request("edit-reply", "reply.edit", { threadId: "t1", replyId: "r1", body: "Edited reply" });
+    request("edit-other", "thread.edit", { threadId: "t2", body: "Edited" });
+    request("edit-empty", "reply.edit", { threadId: "t1", replyId: "r1", body: "  " });
+    request("edit-no-reply", "reply.edit", { threadId: "t1", body: "Edited" });
+    await vi.waitFor(() => expect(responses()).toHaveLength(13));
+    const answer = (requestId: string) => responses().find(response => response.requestId === requestId);
+    for (const id of ["thread", "reply", "edit", "edit-reply"]) expect(answer(id), id).toMatchObject({ ok: true });
+    for (const id of ["other-thread", "empty-reply", "extra", "no-thread", "kind"]) expect(answer(id), id).toMatchObject({ ok: false, error: "Comment recovery state could not be saved" });
+    for (const id of ["edit-other", "edit-empty", "edit-no-reply"]) expect(answer(id), id).toMatchObject({ ok: false, error: "Comment operation is outside this document" });
+    expect(mutate.mock.calls.map(([method, , args]) => [method, args])).toEqual([
+      ["thread.edit", expect.objectContaining({ threadId: "t1", body: "Edited", expectedAuthorId: "user-a", clientOperationId: expect.any(String) })],
+      ["reply.edit", expect.objectContaining({ threadId: "t1", replyId: "r1", body: "Edited reply" })],
+    ]);
+  });
+
   it("tells the widget it may write only once the read path granted access to a signed-in reader", async () => {
     const { host, mutate, request, responses, readies } = setup("user-a");
     expect(readies().at(-1)).toMatchObject({ userId: "user-a", canWrite: false });
@@ -298,6 +328,8 @@ describe("the repository Convex backend", () => {
     await backend.mutate("thread.remove", scope, { ...operation, threadId: "t1" });
     await backend.mutate("reply.add", scope, { ...operation, threadId: "t1", body: "Reply" });
     await backend.mutate("reply.remove", scope, { ...operation, threadId: "t1", replyId: "r1" });
+    await backend.mutate("thread.edit", scope, { ...operation, threadId: "t1", body: "Edited" });
+    await backend.mutate("reply.edit", scope, { ...operation, threadId: "t1", replyId: "r1", body: "Edited reply" });
     const common = { repoId: 9001, path: "docs/guide.md", ...operation };
     expect(value.mutation.mock.calls.map(([fn, args]) => [getFunctionName(fn as never), args])).toEqual([
       ["repoComments:createThread", { ...common, body: "Hi", anchor }],
@@ -306,6 +338,8 @@ describe("the repository Convex backend", () => {
       ["repoComments:removeThread", { ...common, threadId: "t1" }],
       ["repoComments:addReply", { ...common, threadId: "t1", body: "Reply" }],
       ["repoComments:removeReply", { ...common, threadId: "t1", replyId: "r1" }],
+      ["repoComments:editThread", { ...common, threadId: "t1", body: "Edited" }],
+      ["repoComments:editReply", { ...common, threadId: "t1", replyId: "r1", body: "Edited reply" }],
     ]);
     // A status write without a target is refused here as well as in the frame.
     await expect(backend.mutate("thread.resolve", scope, { threadId: "t1" })).rejects.toThrow("Invalid input");

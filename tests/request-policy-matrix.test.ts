@@ -46,6 +46,7 @@ it("inventories public state-changing RPCs, whose authority is explicit JWT or i
     "repoCommentAccess:purgeRepos": "internal-secret", "repoCommentAccess:restoreRepos": "internal-secret",
     "repoComments:createThread": "session-jwt", "repoComments:resolve": "session-jwt", "repoComments:archive": "session-jwt",
     "repoComments:removeThread": "session-jwt", "repoComments:addReply": "session-jwt", "repoComments:removeReply": "session-jwt",
+    "repoComments:editThread": "session-jwt", "repoComments:editReply": "session-jwt",
   };
   const registered: string[] = [];
   for (const [path, load] of Object.entries(import.meta.glob("../convex/**/*.ts"))) {

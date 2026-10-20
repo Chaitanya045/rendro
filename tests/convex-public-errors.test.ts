@@ -31,6 +31,9 @@ const endpoints: Endpoint[] = [
   { name: "repoComments:removeThread", kind: "mutation", args: thread, ids: ["threadId"] },
   { name: "repoComments:addReply", kind: "mutation", args: f => ({ ...thread(f), body: "Test" }), ids: ["threadId"] },
   { name: "repoComments:removeReply", kind: "mutation", args: f => ({ ...thread(f), replyId: f.replyId }), ids: ["threadId", "replyId"] },
+  // Edits (#287): the author's alone.
+  { name: "repoComments:editThread", kind: "mutation", args: f => ({ ...thread(f), body: "Edited" }), ids: ["threadId"] },
+  { name: "repoComments:editReply", kind: "mutation", args: f => ({ ...thread(f), replyId: f.replyId, body: "Edited" }), ids: ["threadId", "replyId"] },
 ];
 
 function call(backend: Pick<Fixture["backend"], "query" | "mutation">, endpoint: Endpoint, args: Record<string, unknown>) {
@@ -155,6 +158,10 @@ describe("public Convex application error contract", () => {
     await failure(f.viewers.member.mutation(api.repoComments.archive, { ...thread(f), archived: true }), "forbidden");
     await failure(f.viewers.member.mutation(api.repoComments.removeThread, thread(f)), "forbidden");
     await failure(f.viewers.member.mutation(api.repoComments.removeReply, { ...thread(f), replyId: f.replyId }), "forbidden");
+    await failure(f.viewers.member.mutation(api.repoComments.editThread, { ...thread(f), body: "Edited" }), "forbidden");
+    await failure(f.viewers.member.mutation(api.repoComments.editReply, { ...thread(f), replyId: f.replyId, body: "Edited" }), "forbidden");
+    await failure(f.viewers.author.mutation(api.repoComments.editThread, { ...thread(f), body: " " }), "invalid_input");
+    await failure(f.viewers.author.mutation(api.repoComments.editReply, { ...thread(f), replyId: f.replyId, body: " " }), "invalid_input");
     await failure(f.viewers.author.mutation(api.repoComments.createThread, { ...f.scope, body: " ", anchor: repoAnchor() }), "invalid_input");
     await failure(f.viewers.author.mutation(api.repoComments.addReply, { ...thread(f), body: " " }), "invalid_input");
     await failure(f.viewers.author.mutation(api.repoComments.resolve, { ...thread(f), resolved: true, expectedAuthorId: "another-user" }), "forbidden");

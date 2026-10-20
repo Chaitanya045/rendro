@@ -21,7 +21,9 @@ export type CommentorParentMethod =
   | "thread.resolve"
   | "thread.archive"
   | "thread.remove"
+  | "thread.edit"
   | "reply.add"
+  | "reply.edit"
   | "reply.remove";
 
 export type CommentorParentMutationMethod = Exclude<
@@ -75,6 +77,8 @@ export type CommentorParentReady = {
   userId?: string | null;
   // Repository frames (#254) are the same for every reader, so the parent says who may write.
   canWrite?: boolean;
+  // The parent carries edits (#287). A shell loaded before them does not, so the widget then offers none.
+  edits?: boolean;
 };
 
 const METHODS = new Set<CommentorParentMethod>([
@@ -87,7 +91,9 @@ const METHODS = new Set<CommentorParentMethod>([
   "thread.resolve",
   "thread.archive",
   "thread.remove",
+  "thread.edit",
   "reply.add",
+  "reply.edit",
   "reply.remove",
 ]);
 
