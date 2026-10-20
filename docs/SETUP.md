@@ -78,14 +78,56 @@ The app starts at `http://localhost:3000`. Sign up with an email address, follow
 
 ## Deployment
 
-### Convex
+Everything production needs is listed once, in [`scripts/production-manifest.ts`](../scripts/production-manifest.ts): for the serving, ingest and control Workers, every binding (with its type, a service's entrypoint, Durable Object classes and their migrations, queue producers and consumers), required secret and var, custom domain and route. For Convex, every env var. Each item is marked required, optional or forbidden (development and tests only), with its purpose and its documentation section. `pnpm preflight:prod` checks production against the manifest. Follow its output rather than a list copied here.
+
+### Production readiness checklist
+
+Run it before every production deploy and after any change to a binding:
 
 ```bash
-pnpm exec convex env set --prod SITE_URL https://rendro.app
-pnpm exec convex env set --prod AUTH_SECRET <random-32-plus-characters>
-pnpm exec convex env set --prod CONVEX_INTERNAL_SECRET <same-value-as-the-Workers>
-pnpm exec convex env set --prod RESEND_API_KEY <value>
-pnpm exec convex env set --prod AUTH_EMAIL_FROM "Rendro <auth@rendro.app>"
+pnpm preflight:prod            # offline: the manifest against each Worker's production wrangler section; exit 1 if anything required is missing
+pnpm preflight:prod --report   # the same checklist; always exit 0
+pnpm preflight:prod --online   # owner only, with production credentials: also the secret names set on each production Worker and the Convex production env var names
+```
+
+| Deployable | Production configuration | Deploy |
+|---|---|---|
+| Serving Worker `rendro` | `wrangler.toml`, top level | `pnpm run deploy` |
+| Ingest Worker `rendro-ingest` | `wrangler.ingest.toml`, top level | `pnpm exec wrangler deploy --config wrangler.ingest.toml` |
+| Control Worker `rendro-control` | `wrangler.control.toml`, top level | `pnpm exec wrangler deploy --config wrangler.control.toml` |
+| Convex | the production deployment (`--prod`) | `pnpm exec convex deploy` |
+
+Production is the top level of each wrangler file, as `pnpm run deploy` deploys it. The top levels of `wrangler.ingest.toml` and `wrangler.control.toml` are still the development Workers (`rendro-ingest-dev`, `rendro-control-dev`) that the tests run, so until their production configurations exist, the preflight reports them under "Worker name".
+
+Each line has a status:
+
+| Status | Meaning |
+|---|---|
+| `ok` | Present and as the manifest expects |
+| `MISSING` | Required and absent, a placeholder ID, pointing at the wrong resource, or a development-only setting found in production. The next line (`->`) says what to create and where. Offline runs fail on any of these unless `--report` is passed |
+| `VERIFY` | Cannot be confirmed offline: a secret that may be set outside the file, a custom domain attached in the dashboard, or a Convex variable. `--online` settles the first and the last |
+| `optional` | Read by the code, but production works without it (for example the previous key during a rotation) |
+| `unused` | Online only: a name set in production that the code does not read. Delete it once no deployed code needs it |
+
+Wire production in this order. The preflight prints the exact command for each missing item:
+
+1. **Create the resources** once: the ingest R2 bucket, the D1 search database, the revocation-epoch KV namespace (KV Instant, when available to the account, shortens revocation from about a minute to about a second), the ingest queue and its dead-letter queue. Enable Analytics Engine on the account (`wrangler deploy` fails with code 10089 while it is off). Every ID goes into the production section; a placeholder ID is reported as missing.
+2. **Ingest Worker.** Give it the serving Worker's `REPO_CONTENT_KEY` and `IMAGE_PROXY_SECRET` (`wrangler secret put <NAME> --config wrangler.ingest.toml`). Without the content key, private repositories are not ingested. Deploy it first: the other two Workers bind its `RepoIngestCoordinator`, and a binding to a missing Worker fails their deploy.
+3. **Control Worker.** Set its secrets: `GITHUB_TOKEN_KEY` (`openssl rand -hex 32`; dedicated, never reused), the GitHub App's webhook secret and OAuth client, and the Convex URL and internal secret the serving Worker and Convex use. Deploy it with Smart Placement or a location hint near Convex. Route only `/v1/github/webhook` to it publicly and set that URL as the App's webhook URL. Its other endpoints are served only by its `RepoAccessService` entrypoint, which only a service binding can reach. Deploy it before the serving Worker.
+4. **Serving Worker.** Bind the ingest bucket (`REPO_CONTENT`), the shared epoch namespace (`REPO_EPOCHS`), the control Worker (`REPO_ACCESS` with `entrypoint = "RepoAccessService"`; without the entrypoint every permission check is a 503), the search database, the ingest coordinators, the RUM dataset and the three rate limiters. Give each rate limiter a `namespace_id` unique in the account: the preflight refuses one that another configuration uses. Then `pnpm run deploy`.
+5. **Convex.** Set every variable the manifest lists (`pnpm exec convex env set --prod <NAME> <value>`), then `pnpm exec convex deploy`.
+6. **Confirm** with `pnpm preflight:prod --online`: no `MISSING` line.
+
+P1 replaces `GITHUB_DEV_TOKEN` (optional in the manifest) with installation tokens minted per installation, and calls `/v1/accounts/link` through `REPO_ACCESS` at sign-in.
+
+The preflight never prints a value. Offline it reads only the wrangler files. Online it asks the CLIs for names (`wrangler secret list --format json`, `convex env list --prod --names-only`), keeps only the names, discards stderr and reports output it cannot parse by its line count. `tests/production-manifest.test.ts` keeps the manifest honest. It fails when a Worker or Convex reads a binding, secret or env var that the manifest does not list (found statically in each deployable's module graph), or when the manifest lists one the code no longer reads. A new read therefore lands with its manifest entry, and the checklist picks it up.
+
+### Convex
+
+Set the variables the manifest lists for Convex (`SITE_URL` is `https://rendro.app`; `CONVEX_INTERNAL_SECRET` equals the Workers' value), then deploy:
+
+```bash
+pnpm exec convex env set --prod <NAME> <value>
 pnpm exec convex deploy
 ```
 
@@ -96,37 +138,23 @@ Rendro runs as three Workers ([TECHNICAL.md](TECHNICAL.md#architecture)):
 | Worker | Configuration | Role |
 |---|---|---|
 | Serving Worker (`rendro`, `rendro-dev`) | `wrangler.toml` | Pages, auth proxy, the `/r/` read path, image proxy, static assets |
-| Ingest Worker (`rendro-ingest-dev`) | `wrangler.ingest.toml` | Renders repository Markdown into R2 and the D1 search index |
-| Control Worker (`rendro-control-dev`) | `wrangler.control.toml` | Mirrors GitHub permissions and receives the GitHub App's webhooks |
+| Ingest Worker (`rendro-ingest`; `rendro-ingest-dev` today) | `wrangler.ingest.toml` | Renders repository Markdown into R2 and the D1 search index |
+| Control Worker (`rendro-control`; `rendro-control-dev` today) | `wrangler.control.toml` | Mirrors GitHub permissions and receives the GitHub App's webhooks |
 
-`wrangler.toml` sets `NODE_ENV` as a var. Both production and `development` require exactly these four secrets at startup and in Wrangler: `CONVEX_INTERNAL_SECRET`, `IMAGE_PROXY_SECRET`, `REPO_CAPABILITY_SECRET` and `REPO_CONTENT_KEY`. No two may share a value. List secret names with `pnpm exec wrangler secret list` for production (`rendro`) and `pnpm exec wrangler secret list --env development` for development (`rendro-dev`). Production uses the top-level configuration; there is no named `--env production` environment.
+The secrets and vars each Worker needs are in the manifest. `[secrets] required` in each wrangler section makes Wrangler refuse a deploy while one is unset, and `src/config.ts` validates the serving Worker's at startup. No two secrets may share a value; generate each with `openssl rand -hex 32`. List secret names with `pnpm exec wrangler secret list` for production (`rendro`) and `pnpm exec wrangler secret list --env development` for development (`rendro-dev`). Production uses the top-level configuration; there is no named `--env production` environment.
 
 `CONVEX_URL` and the optional `CONVEX_SITE_URL` override remain outside `secrets.required`: startup and `/health` work without them, but sign-in and comments need a Convex origin.
 
 ```bash
-pnpm exec wrangler secret put CONVEX_INTERNAL_SECRET
-pnpm exec wrangler secret put IMAGE_PROXY_SECRET      # openssl rand -hex 32; same value on the ingest Worker
-pnpm exec wrangler secret put REPO_CAPABILITY_SECRET  # openssl rand -hex 32; serving Worker only
-pnpm exec wrangler secret put REPO_CONTENT_KEY        # openssl rand -hex 32; same value on the ingest Worker
-pnpm exec wrangler secret put CONVEX_URL
-pnpm exec wrangler secret put CONVEX_SITE_URL         # optional
+pnpm exec wrangler secret put <NAME>                                  # serving Worker
+pnpm exec wrangler secret put <NAME> --config wrangler.ingest.toml    # ingest Worker
+pnpm exec wrangler secret put <NAME> --config wrangler.control.toml   # control Worker
 pnpm run deploy
 ```
 
 `pnpm run deploy` runs `pnpm build:assets` before `wrangler deploy`; a bare `wrangler deploy` from a fresh checkout ships without the git-ignored bundles. For the `rendro-dev` Worker (`dev.rendro.app`), add `--env development` to each `wrangler secret put` and run `pnpm run deploy --env development`. Use the explicit `run`: `pnpm deploy` is an unrelated pnpm command. See [Deploy Commands](TECHNICAL.md#deploy-commands) and [Environment Variables (Workers)](TECHNICAL.md#environment-variables-workers).
 
-#### GitHub repository reads (not configured yet)
-
-`/r/` stays a 404 until these exist. The pieces are in the repository ([TECHNICAL.md](TECHNICAL.md#repository-permission-mirror-github-pivot-p5)); the owner provides the accounts, secrets and bindings once the GitHub App exists (P1):
-
-1. Create a KV namespace for revocation epochs per environment (`pnpm exec wrangler kv namespace create rendro-repo-epochs`). Put its ID in `wrangler.control.toml` (`REPO_EPOCHS`) and bind the same namespace as `REPO_EPOCHS` in the serving Worker's `wrangler.toml`. KV Instant, when available to the account, shortens revocation from about a minute to about a second.
-2. Set the control Worker's secrets: `GITHUB_TOKEN_KEY` (`openssl rand -hex 32`; dedicated, never reused), `GITHUB_WEBHOOK_SECRET` (the GitHub App's webhook secret), and `GITHUB_APP_CLIENT_SECRET` with the `GITHUB_APP_CLIENT_ID` var (the App's OAuth client, for token refresh). Use `wrangler secret put <NAME> --config wrangler.control.toml`.
-3. Deploy the control Worker (`pnpm exec wrangler deploy --config wrangler.control.toml`), with Smart Placement or a location hint near Convex. Route only `/v1/github/webhook` to it publicly and set that URL as the App's webhook URL; its other endpoints are served only by its `RepoAccessService` entrypoint, which only a service binding can reach.
-4. In `wrangler.toml`, add the `REPO_ACCESS` service binding to the control Worker's internal entrypoint (`service = "<control Worker>"`, `entrypoint = "RepoAccessService"`; without the entrypoint every permission check is a 503) and the `REPO_CONTENT` R2 binding to the ingest bucket. Deploy the control Worker before the serving Worker, since a service binding to a missing Worker fails the deploy.
-5. P1 replaces `GITHUB_DEV_TOKEN` with installation tokens minted per installation, and calls `/v1/accounts/link` through `REPO_ACCESS` at sign-in.
-6. For comments on repository docs (#254), give the control Worker the `CONVEX_URL` var and the `CONVEX_INTERNAL_SECRET` secret (the same values the serving Worker and Convex use). It then ends a revoked reader's comment access with the epoch, and hides an uninstalled repository's comments at once. Without them, comment access still ends, but only when its grant expires (at most five minutes).
-7. Give the ingest Worker the serving Worker's `REPO_CONTENT_KEY` and `IMAGE_PROXY_SECRET` (`wrangler secret put <NAME> --config wrangler.ingest.toml`); without the content key, private repositories are not ingested. Bind the ingest Worker's coordinators in the control Worker (`REPO_INGEST`: a Durable Object binding to `RepoIngestCoordinator` with `script_name` set to the ingest Worker), so a removal GitHub confirmed also purges the repository's cached content (#263), and in the serving Worker (`REPO_INGEST`, for first views and idle expiry). Deploy the ingest Worker before the Workers that bind it.
-8. In the serving Worker, add the `FIRST_VIEW_LIMIT` and `SEARCH_LIMIT` rate-limit bindings (`[[ratelimits]]`, as `[env.development]` in `wrangler.toml` has them, each with a `namespace_id` unique in the account) (#294). Without `FIRST_VIEW_LIMIT`, first views of branches other than the default are refused until a push builds them; without `SEARCH_LIMIT`, searches are not limited per client. Bind `REPO_SEARCH` to the ingest Worker's D1 database for search.
+`/r/` stays a 404 in production until the [checklist](#production-readiness-checklist) passes: the read path's bindings are not wired there yet.
 
 #### Keep the buckets private
 
@@ -161,6 +189,7 @@ The bundles are git-ignored and versioned in `scripts/asset-versions.json`: bump
 | `pnpm visual`, `pnpm visual:update`, `pnpm visual:repeat` | Visual baselines in the pinned Playwright container: compare, rewrite changed cells, check determinism |
 | `pnpm a11y` | axe scans of the visual states on Chromium, Firefox and WebKit |
 | `pnpm coverage` | Merged Node, browser and subprocess coverage with the 100%-per-file gate |
+| `pnpm preflight:prod` | Check production's wrangler sections (and, with `--online`, its secret and Convex env var names) against the manifest ([Production readiness checklist](#production-readiness-checklist)) |
 | `pnpm check:r2-public` | Verify no R2 bucket has an `r2.dev` URL or custom domain ([Keep the buckets private](#keep-the-buckets-private)) |
 | `pnpm bench:hostile` | Time the renderer on hostile Markdown inputs |
 
@@ -202,7 +231,7 @@ rendro/
 │   ├── repoCommentAccess.ts, repoComments.ts, commentOperations.ts  # Repository comments
 │   └── writeQuotas.ts, admissionBuckets.ts, security.ts, httpErrors.ts
 ├── shared/                   # Code shared by the Workers and Convex
-├── scripts/                  # Asset, font, style and wasm builds; ledger; R2 exposure check; coverage gate
+├── scripts/                  # Asset, font, style and wasm builds; ledger; R2 exposure check; coverage gate; production manifest and preflight
 ├── public/                   # Static assets (bundles are built, not committed)
 ├── tests/                    # Vitest suites and fixtures; ui-transitions.json registry
 ├── e2e/                      # Playwright suites, local backend harness, visual and axe specs
