@@ -1,10 +1,8 @@
 import { randomBytes } from "node:crypto";
-import { readFileSync } from "node:fs";
-import type { FrameLocator, Page } from "@playwright/test";
 import { test, expect } from "./fixtures";
-import { convexCallWith } from "./comment-helpers";
+import { card, collaborator, comment, commit, convexCallWith, open, openDrawer, pin, publicThreads, repos, select, ui, unique } from "./comment-helpers";
 import { desktop, signInSeeded } from "./shell-helpers";
-import { commentDocs, type RepoFixtures } from "./repo-fixtures";
+import { commentDocs } from "./repo-fixtures";
 
 /**
  * Comments on repository docs (#254), end to end: the repository shell holds the one Convex connection, the document
@@ -13,75 +11,6 @@ import { commentDocs, type RepoFixtures } from "./repo-fixtures";
  * writes comments with a body of its own, so tests stay independent across retries and shards.
  */
 test.use({ viewport: desktop });
-
-const repos = (): RepoFixtures => JSON.parse(readFileSync(process.env.RENDRO_E2E_REPOS as string, "utf8")) as RepoFixtures;
-const ui = (page: Page): FrameLocator => page.frameLocator("#content-frame");
-const unique = (label: string) => `${label} ${randomBytes(4).toString("hex")}`;
-
-async function control<T>(path: string, body?: unknown): Promise<T> {
-  const response = await fetch(`${repos().control}${path}`, { method: "POST", ...(body ? { body: JSON.stringify(body), headers: { "Content-Type": "application/json" } } : {}) });
-  expect(response.status, path).toBe(200);
-  return await response.json() as T;
-}
-
-/** Push a commit to comment-docs (null deletes a file); it is ingested before this returns. */
-const commit = async (changes: Record<string, string | null>) => (await control<{ commit: string }>("/commit/comments", { changes })).commit;
-const collaborator = async (action: "added" | "removed") => (await control<{ status: number }>(`/collaborator/${action}`)).status;
-
-/** The page at one commit, once the widget has its first snapshot. */
-async function open(page: Page, repo: { owner: string; name: string }, doc: string, commitSha?: string) {
-  const response = await page.goto(`/r/${repo.owner}/${repo.name}${commitSha ? `/@${commitSha}` : ""}?doc=${encodeURIComponent(doc)}`);
-  expect(response?.status()).toBe(200);
-  await expect(ui(page).getByTestId("commentor-dock")).toBeAttached();
-  await expect(ui(page).locator('[data-testid="commentor-load-older-threads"][aria-busy="true"]')).toHaveCount(0);
-}
-
-/** Select `text` inside the rendered page, as a reader dragging over it would. */
-async function select(page: Page, text: string) {
-  await ui(page).locator("article").evaluate((article, needle) => {
-    const walker = document.createTreeWalker(article, NodeFilter.SHOW_TEXT);
-    for (let node = walker.nextNode() as Text | null; node; node = walker.nextNode() as Text | null) {
-      const index = node.data.indexOf(needle);
-      if (index === -1) continue;
-      const range = document.createRange();
-      range.setStart(node, index);
-      range.setEnd(node, index + needle.length);
-      getSelection()!.removeAllRanges();
-      getSelection()!.addRange(range);
-      document.dispatchEvent(new Event("selectionchange"));
-      return;
-    }
-    throw new Error(`No ${needle} on the page`);
-  }, text);
-}
-
-// Saved pins only: the reader's own thread shows at once as sending (#284), before it is saved.
-const pin = (page: Page, body: string) => ui(page).locator(`[data-testid="commentor-pin"]:not(.is-sending)[data-tip*="${body}"]`);
-const card = (page: Page, body: string) => ui(page).locator(".drawer-thread", { hasText: body });
-
-async function comment(page: Page, quote: string, body: string) {
-  await select(page, quote);
-  const chip = ui(page).getByTestId("commentor-selection-action");
-  await expect(chip).toHaveAttribute("data-state", "open");
-  await chip.click();
-  await ui(page).getByTestId("commentor-composer-textarea").fill(body);
-  await ui(page).getByTestId("commentor-composer-post").click();
-  await expect(pin(page, body)).toBeVisible();
-}
-
-async function openDrawer(page: Page) {
-  const panel = ui(page).getByTestId("commentor-panel-btn");
-  if (await panel.getAttribute("aria-expanded") !== "true") await panel.click();
-  await expect(ui(page).getByTestId("commentor-drawer")).toHaveAttribute("aria-hidden", "false");
-}
-
-type Listed = { _id: string; body: string; resolved: boolean; replies: Array<{ body: string }> };
-/** What anyone may read of a public repository's page, straight from Convex (no session). */
-async function publicThreads(path: string): Promise<Listed[]> {
-  const result = await convexCallWith<{ page: Listed[] }>(undefined, "query", "repoComments:listThreads", { repoId: 9004, path, paginationOpts: { numItems: 20, cursor: null } });
-  expect(result.ok, JSON.stringify(result)).toBe(true);
-  return result.value!.page;
-}
 
 test.beforeEach(({ cspViolations }) => { void cspViolations; });
 test.afterEach(({ cspViolations }) => {
