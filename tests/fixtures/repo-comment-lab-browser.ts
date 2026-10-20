@@ -126,6 +126,9 @@ addEventListener("message", event => {
 });
 
 const frame = document.querySelector<HTMLIFrameElement>("#content-frame")!;
+// The lab's shell names the frame's document in its own HTML: that document is the shell's (#296). Its later loads are
+// not tracked, as the lab's tests reload and move the frame themselves.
+Object.assign(frame.dataset, { navigation: "1", document: "1" });
 frame.addEventListener("load", () => { lab.frameLoadedAt = Date.now(); }, { once: true });
 const config = { repoId: 9001, accessUrl, convexUrl: "http://unused.test", documentPath: "guide.md" };
 

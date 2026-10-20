@@ -7,7 +7,7 @@ import { normalizeMutationArgs, record, validAnchor } from "./mutation-args";
 import { CommentOperationState, mutationKey } from "./operation-state";
 import { ConvexClient } from "convex/browser";
 import { parseRepoPath } from "../repo-read/paths";
-import { CONTENT_FRAME_EVENT } from "../viewer/content-frame";
+import { CONTENT_FRAME_EVENT, shellFrameNavigation } from "../viewer/content-frame";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import {
@@ -211,6 +211,8 @@ export class CommentorParentHost {
   }
 
   private currentScope(): DocumentCommentScope | null {
+    // A document the frame loaded by itself has no comment session (#296): it is not the page `src` names.
+    if (shellFrameNavigation(this.frame) === null) return null;
     return documentCommentScopeFromFrame(this.frame.src, this.pageOrigin, this.config);
   }
 
@@ -404,7 +406,8 @@ export class CommentorParentHost {
   }
 
   private readonly onMessage = (event: MessageEvent): void => {
-    if (event.source !== this.frame.contentWindow) return;
+    // Nothing is answered to a document the shell did not load (#296), not even a refusal.
+    if (event.source !== this.frame.contentWindow || shellFrameNavigation(this.frame) === null) return;
     if (record(event.data)?.type === COMMENTOR_VIEWER_RELOAD) {
       // Publisher code shares this opaque frame with the widget. Neither the
       // source check nor a claimed gesture can authorize navigation. Only the

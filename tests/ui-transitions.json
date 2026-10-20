@@ -12530,7 +12530,8 @@
         "src/lazy-tree/lazy-tree.ts",
         "src/viewer/navigation.ts",
         "src/viewer/client.ts",
-        "src/repo-read/routes.ts"
+        "src/repo-read/routes.ts",
+        "src/viewer/content-frame.ts"
       ],
       "roles": [
         "anonymous",
@@ -12621,6 +12622,28 @@
               "kind": "unit"
             }
           ]
+        },
+        {
+          "id": "UI-104-E11",
+          "from": "A private frame whose document the shell did not load",
+          "trigger": "The document asks the shell to renew its ticket (#296)",
+          "expected": "The shell asks the read path for nothing and sends no ticket; an answer for a document the frame has since replaced, by itself or by the shell, is dropped",
+          "inventoryRefs": [
+            "UI-104"
+          ],
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/shell-frame-trust-browser.test.ts",
+              "name": "gets no comment announcement, ticket or answer to a write, until the shell loads a page again",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/viewer-coverage-gaps.test.ts",
+              "name": "asks no ticket for, and answers nothing to, a document %s (#296)",
+              "kind": "unit"
+            }
+          ]
         }
       ]
     },
@@ -12635,7 +12658,8 @@
         "src/routes/app.ts",
         "src/lazy-tree/lazy-tree.ts",
         "src/viewer/navigation.ts",
-        "src/repo-read/routes.ts"
+        "src/repo-read/routes.ts",
+        "src/viewer/content-frame.ts"
       ],
       "roles": [
         "anonymous",
@@ -12797,6 +12821,28 @@
               "kind": "browser"
             }
           ]
+        },
+        {
+          "id": "UI-107-E08",
+          "from": "The frame shows a document the shell did not load (it navigated or reloaded by itself)",
+          "trigger": "The document sends navigation, link, fragment or load messages (#296)",
+          "expected": "None is acted on until the reader opens a page and the shell's own navigation loads; a Try again reload the shell performs keeps the frame listened to",
+          "inventoryRefs": [
+            "UI-107"
+          ],
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/lazy-tree-browser.test.ts",
+              "name": "acts on nothing a document says once the frame loaded it by itself, until the shell loads one again (#296)",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/viewer-fragments-browser.test.ts",
+              "name": "keeps listening to a document the shell reloads at its own request, as the Try again page asks (#296)",
+              "kind": "browser"
+            }
+          ]
         }
       ]
     },
@@ -12810,7 +12856,8 @@
       "sources": [
         "src/viewer/navigation-confirmation.ts",
         "src/lazy-tree/lazy-tree.ts",
-        "src/repo-read/routes.ts"
+        "src/repo-read/routes.ts",
+        "src/viewer/navigation.ts"
       ],
       "roles": [
         "anonymous",
@@ -12889,6 +12936,28 @@
             {
               "file": "tests/lazy-tree-browser.test.ts",
               "name": "can be dismissed and reviewed, keeping only the latest address, and opens nothing until confirmed",
+              "kind": "browser"
+            }
+          ]
+        },
+        {
+          "id": "UI-108-E03",
+          "from": "A repository document shows a link to a page of this site that is not a repository document",
+          "trigger": "Click the link (#296)",
+          "expected": "The frame keeps its document; the shell asks “Open … in a new tab?” and only the reader’s Open in new tab opens it, with no handle back",
+          "inventoryRefs": [
+            "UI-108"
+          ],
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/viewer-fragments-browser.test.ts",
+              "name": "asks before opening a page of this site that is not a document, which never loads in the frame (#296)",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/lazy-tree-browser.test.ts",
+              "name": "asks first for a page of this site that is not a document, then opens it in a new tab (#296)",
               "kind": "browser"
             }
           ]
@@ -21069,7 +21138,8 @@
         "src/commentor/repo-anchor.ts",
         "src/repo-access/directory.ts",
         "src/repo-read/comments.ts",
-        "src/repo-read/routes.ts"
+        "src/repo-read/routes.ts",
+        "src/viewer/content-frame.ts"
       ],
       "roles": [
         "anonymous",
@@ -21501,6 +21571,28 @@
             {
               "file": "tests/repo-comments-host.test.ts",
               "name": "answers nothing to a read from a page the shell has already left, and still refuses a write from it",
+              "kind": "unit"
+            }
+          ]
+        },
+        {
+          "id": "UI-163-E20",
+          "from": "A repository document open with its comments; its frame then loads a document the shell did not load",
+          "trigger": "The new document waits for the comment announcement, subscribes and writes (#296)",
+          "expected": "The comment session is dropped: no announcement, no answer to a read or write, and no backend write, until the shell loads a page again",
+          "inventoryRefs": [
+            "UI-163"
+          ],
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/shell-frame-trust-browser.test.ts",
+              "name": "gets no comment announcement, ticket or answer to a write, until the shell loads a page again",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/commentor-host-units.test.ts",
+              "name": "drops the session of a frame that loaded a document by itself, and answers it nothing until the shell loads one (#296)",
               "kind": "unit"
             }
           ]

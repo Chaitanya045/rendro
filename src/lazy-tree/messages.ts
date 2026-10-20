@@ -25,12 +25,16 @@ export function validDocumentSearch(value: unknown): value is string {
     && (value === "" || (value.startsWith("?") && !/[#\r\n]/.test(value)));
 }
 
-/** The absolute address of a link to another site: http(s) on an origin other than the viewer's, bounded. */
-export function externalLinkHref(value: unknown, baseURI: string, ownOrigin: string): string | null {
+/**
+ * The absolute address of a link the shell opens in a new tab once the reader confirms it: any bounded http(s) URL
+ * that is not a repository document of the frame. Another site cannot load in the frame, and a page of this site
+ * that is not a document must not load there either (#296).
+ */
+export function newTabLinkHref(value: unknown, baseURI: string): string | null {
   if (typeof value !== "string" || value.length > 2048) return null;
   try {
     const url = new URL(value, baseURI);
-    if ((url.protocol !== "http:" && url.protocol !== "https:") || url.origin === ownOrigin) return null;
+    if (url.protocol !== "http:" && url.protocol !== "https:") return null;
     return url.href.length <= 2048 ? url.href : null;
   } catch { return null; }
 }

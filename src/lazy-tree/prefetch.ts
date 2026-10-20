@@ -20,6 +20,7 @@
  * is adopted only once its document has spoken to the shell. See docs/TECHNICAL.md,
  * "In-shell navigation and prefetch".
  */
+import { startShellNavigation } from "../viewer/content-frame";
 
 /** The subset of `navigator.connection` this module reads. */
 export interface NetworkInformation {
@@ -152,6 +153,8 @@ export function createFramePreloader(options: FramePreloaderOptions): FramePrelo
       // indistinguishable from one the shell navigated itself.
       element.dataset.preload = href;
       entries.push({ href, element, ready: false });
+      // A preload is the shell's navigation too: once adopted, the comment host may answer it (#296).
+      startShellNavigation(element);
       element.setAttribute("src", href);
     },
     take(href) {

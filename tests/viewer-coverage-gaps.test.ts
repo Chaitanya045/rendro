@@ -1,7 +1,7 @@
 import { Window as DOMWindow } from "happy-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { managementLabel } from "@/ui/management-ui";
-import { externalLinkHref, isContentFrameSource, normalizeLoadedDocumentPath, validDocumentSearch } from "@/lazy-tree/messages";
+import { isContentFrameSource, newTabLinkHref, normalizeLoadedDocumentPath, validDocumentSearch } from "@/lazy-tree/messages";
 import { replaceViewerFragment, sendDocumentFragment } from "@/viewer/fragments";
 import { createMessageRateLimit } from "@/viewer/message-limits";
 import { installViewerFrame, installViewerParent, showViewerUpdateNotice } from "@/viewer/client";
@@ -46,19 +46,23 @@ describe("shared labels and message validators", () => {
     for (const value of ["?a#b", "?a\nb", "a=1", 1, "?" + "x".repeat(4096)]) expect(validDocumentSearch(value)).toBe(false);
   });
 
-  it("accepts only an absolute http(s) address on another origin as an external link", () => {
+  it("accepts only a bounded absolute http(s) address, on this site or another, as a new-tab link", () => {
     const own = "https://rendro.test";
     const base = `${own}/organizations/o/projects/p/docs/files/index.html`;
-    expect(externalLinkHref("https://other.test/a?b=1#c", base, own)).toBe("https://other.test/a?b=1#c");
-    expect(externalLinkHref("http://other.test", base, own)).toBe("http://other.test/");
-    expect(externalLinkHref("//other.test/x", base, own)).toBe("https://other.test/x");
-    expect(externalLinkHref("https://rendro.test:8443/x", base, own)).toBe("https://rendro.test:8443/x");
-    for (const value of ["/organizations", "files/other.html", "https://rendro.test/x", "mailto:a@other.test", "javascript:alert(1)",
+    expect(newTabLinkHref("https://other.test/a?b=1#c", base)).toBe("https://other.test/a?b=1#c");
+    expect(newTabLinkHref("http://other.test", base)).toBe("http://other.test/");
+    expect(newTabLinkHref("//other.test/x", base)).toBe("https://other.test/x");
+    expect(newTabLinkHref("https://rendro.test:8443/x", base)).toBe("https://rendro.test:8443/x");
+    // A page of this site that is not a document never loads in the frame either (#296).
+    expect(newTabLinkHref("https://rendro.test/x", base)).toBe("https://rendro.test/x");
+    expect(newTabLinkHref("/organizations", base)).toBe("https://rendro.test/organizations");
+    expect(newTabLinkHref("files/other.html", base)).toBe("https://rendro.test/organizations/o/projects/p/docs/files/files/other.html");
+    for (const value of ["mailto:a@other.test", "javascript:alert(1)",
       "data:text/html,x", "ftp://other.test/", "https://", "http://[", 1, null, undefined, `https://other.test/${"x".repeat(2048)}`]) {
-      expect(externalLinkHref(value, base, own), String(value)).toBeNull();
+      expect(newTabLinkHref(value, base), String(value)).toBeNull();
     }
     // Short as written, long once resolved: the bound applies to what would be shown.
-    expect(externalLinkHref("//other.test/\u00e9".padEnd(700, "\u00e9"), base, own)).toBeNull();
+    expect(newTabLinkHref("//other.test/\u00e9".padEnd(700, "\u00e9"), base)).toBeNull();
   });
 
   it("rate-limits with the page clock by default", () => {
@@ -90,10 +94,11 @@ describe("viewer parent shell edge cases", () => {
   function parentFixture(options: { notice?: boolean; src?: string } = {}) {
     const win = createWindow(origin, options.notice === false ? "" : '<aside id="viewer-update-notice" hidden><span role="status"></span><button type="button">Reload</button></aside>');
     const source = { postMessage: vi.fn() };
-    const frame = { dataset: {} as Record<string, string>, src: options.src ?? frameSrc, contentWindow: source };
+    // A document the shell loaded (#296).
+    const frame = { dataset: { navigation: "1", document: "1" } as Record<string, string>, src: options.src ?? frameSrc, contentWindow: source };
     const bus = events();
     const fetch = vi.fn(), reload = vi.fn();
-    const host = { ...bus, document: { getElementById: (id: string) => id === "content-frame" ? frame : win.document.getElementById(id) },
+    const host = { ...bus, document: { addEventListener: bus.addEventListener, getElementById: (id: string) => id === "content-frame" ? frame : win.document.getElementById(id) },
       location: { href: origin, origin, reload }, fetch } as unknown as Window;
     installViewerParent({ base }, host);
     source.postMessage.mockClear();
@@ -135,7 +140,7 @@ describe("viewer parent shell edge cases", () => {
   it("does not run when the shell has no content frame", () => {
     const bus = events();
     const win = createWindow(origin);
-    const host = { ...bus, document: win.document, location: { href: origin, origin } } as unknown as Window;
+    const host = { ...bus, document: Object.assign(win.document, { addEventListener: bus.addEventListener }), location: { href: origin, origin } } as unknown as Window;
     installViewerParent({ base }, host);
     bus.emit("load", { target: {} });
     bus.emit("message", { source: {}, origin: "null", data: { type: "viewer-renew", requestId: "r", manifestKey: "m" } });
@@ -157,7 +162,11 @@ describe("viewer parent shell edge cases", () => {
       ["a refused renewal", () => new Response(null, { status: 404 }), () => {}],
       ["a prefix outside the repository", () => Response.json({ prefix: "/r/other/repo/view/x/files/" }), () => {}],
       ["an answer for a frame that has moved on", () => Response.json({ prefix: `${base}/view/fresh/files/` }), (f: ReturnType<typeof parentFixture>) => { f.frame.src = `${origin}${base}/files/guide/other.html`; }],
-      ["an answer after the frame reloaded", () => Response.json({ prefix: `${base}/view/fresh/files/` }), (f: ReturnType<typeof parentFixture>) => { f.bus.emit("load", { target: f.frame }); }],
+      // As the shell's frame tracking leaves the frame (src/viewer/content-frame.ts).
+      ["an answer after the frame reloaded by itself", () => Response.json({ prefix: `${base}/view/fresh/files/` }), (f: ReturnType<typeof parentFixture>) => { delete f.frame.dataset.document; }],
+      ["an answer after the shell navigated the frame again", () => Response.json({ prefix: `${base}/view/fresh/files/` }), (f: ReturnType<typeof parentFixture>) => {
+        Object.assign(f.frame.dataset, { navigation: "2", document: "2" });
+      }],
     ])("gives the frame nothing for %s", async (_name, answer, meanwhile) => {
       const f = parentFixture();
       let reply!: (response: Response) => void;
@@ -168,6 +177,17 @@ describe("viewer parent shell edge cases", () => {
       await settled(); await settled();
       expect(f.source.postMessage).not.toHaveBeenCalled();
     });
+  });
+
+  it.each([
+    ["it loaded by itself", (f: ReturnType<typeof parentFixture>) => { delete f.frame.dataset.document; }],
+    ["the shell never navigated", (f: ReturnType<typeof parentFixture>) => { f.frame.dataset = {}; }],
+  ])("asks no ticket for, and answers nothing to, a document %s (#296)", async (_name, untrust) => {
+    const f = parentFixture();
+    untrust(f);
+    f.bus.emit("message", { source: f.source, origin: "null", data: { type: "viewer-renew", requestId: "r", manifestKey: "m" } });
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(f.fetch).not.toHaveBeenCalled(); expect(f.source.postMessage).not.toHaveBeenCalled();
   });
 
   it.each([["another origin", "https://publisher.test/organizations/org/projects/project/docs/files/a.html"],
@@ -267,7 +287,10 @@ describe("document navigation edge cases", () => {
     ["a link", '<a id="l" href="https://external.test/page.html?q=1#top">x</a>', "https://external.test/page.html?q=1#top", {}],
     ["a protocol-relative link", '<a id="l" href="//external.test/a b">x</a>', "https://external.test/a%20b", {}],
     ["a link that targets the frame", '<a id="l" target="_self" href="http://external.test:8080/">x</a>', "http://external.test:8080/", {}],
-  ])("hands %s to another site to the shell instead of loading it in the frame", (_name, html, href, options) => {
+    // A page of this site that is not a repository document never loads in the frame either (#296).
+    ["a link on the viewer origin outside the document scope", `<a id="l" href="${origin}/organizations">x</a>`, `${origin}/organizations`, {}],
+    ["a relative link outside the document scope", '<a id="l" href="/r/other/repo">x</a>', `${origin}/r/other/repo`, {}],
+  ])("hands %s to the shell instead of loading it in the frame", (_name, html, href, options) => {
     const f = fixture(html, options);
     expect(click(f.win, "#l").defaultPrevented).toBe(true);
     expect(f.parent.postMessage).toHaveBeenCalledWith({ type: "doc-external", path: config.documentPath, href }, origin);
@@ -277,13 +300,21 @@ describe("document navigation edge cases", () => {
   it.each([
     ["a mail link", '<a id="l" href="mailto:someone@external.test">x</a>', {}],
     ["a script URL", '<a id="l" href="javascript:void(0)">x</a>', {}],
-    ["a link on the viewer origin outside the document scope", `<a id="l" href="${origin}/organizations">x</a>`, {}],
-    ["a link too long to confirm", `<a id="l" href="https://external.test/${"x".repeat(2100)}">x</a>`, {}],
     ["a link in a standalone document", '<a id="l" href="https://external.test/page.html">x</a>', { standalone: true }],
   ])("leaves %s to the browser", (_name, html, options) => {
     const f = fixture(html, options);
     expect(click(f.win, "#l").defaultPrevented).toBe(false);
     expect(f.parent.postMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "doc-external" }), origin);
+  });
+
+  it.each([
+    ["on another site", `https://external.test/${"x".repeat(2100)}`],
+    ["on the viewer origin", `${origin}/${"x".repeat(2100)}`],
+  ])("drops a link %s too long to confirm, without loading it in the frame", (_name, href) => {
+    const f = fixture(`<a id="l" href="${href}">x</a>`);
+    f.parent.postMessage.mockClear();
+    expect(click(f.win, "#l").defaultPrevented).toBe(true);
+    expect(f.parent.postMessage).not.toHaveBeenCalled();
   });
 
   it("tells the shell about a press inside the document, and a standalone document has no shell to tell", () => {

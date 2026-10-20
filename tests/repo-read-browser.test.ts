@@ -65,9 +65,10 @@ beforeAll(async () => {
     requests.push(url.pathname);
     if (url.pathname === "/viewer") {
       response.writeHead(200, { "Content-Type": "text/html" });
-      // `?shell=<pinned base>` adds the private shell's ticket renewal, as a private repository's shell carries it.
+      // `?shell=<pinned base>` adds the private shell's ticket renewal, as a private repository's shell carries it. The
+      // frame's document is the one this shell names (#296).
       const shell = url.searchParams.get("shell");
-      response.end(`<!doctype html><iframe id="content-frame" name="content-frame" sandbox="allow-scripts allow-popups" src="${url.searchParams.get("frame") ?? ""}" width="600" height="400"></iframe>`
+      response.end(`<!doctype html><iframe id="content-frame" name="content-frame" sandbox="allow-scripts allow-popups" data-navigation="1" data-document="1" src="${url.searchParams.get("frame") ?? ""}" width="600" height="400"></iframe>`
         + (shell ? viewerScript("parent", { base: shell }) : ""));
       return;
     }
