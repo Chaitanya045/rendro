@@ -740,6 +740,8 @@ describe("first-view preparation", () => {
     // Never an answer to ensure (which clears expiry, #263); the reader would poll again.
     expect(interpretOutcome({ status: "idle" })).toBe("preparing");
     expect(interpretOutcome({ status: "failed", reason: "render", permanent: true, retryAt: null, commit: null })).toBe("failed");
+    // A spent first-view budget (#294) is retryable, never "not found".
+    expect(interpretOutcome({ status: "throttled", retryAt: 1 })).toBe("limited");
   });
 
   it("hands an answered build to waitUntil and keeps unattended work running", async () => {

@@ -33,7 +33,8 @@ import { authorizeRepo, authorizeTicket, mintTicket, type Authorization, type Au
 import {
   COMMENT_GRANT_MIN_MS, commentAccess, commentorScript, commentSnapshot, convexCommentGrants, convexCommentSnapshots, type CommentGrants, type CommentSnapshots,
 } from "./comments";
-import { durableFirstView, interpretOutcome, prepareRepo, PREPARE_WINDOW_MS, repoIngestTarget, touchRepo, type RepoFirstView } from "./first-view";
+import { rateLimiter, takeToken, type RateLimiter } from "./admission";
+import { admitFirstView, durableFirstView, interpretOutcome, prepareRepo, PREPARE_WINDOW_MS, repoIngestTarget, touchRepo, type RepoFirstView } from "./first-view";
 import { FRAME_TEMPLATE_TAG, FRAME_VERSION, failureBody, frameBody, frameContentSecurityPolicy, needsRelativeRewrite, renderFrameDocument } from "./frame";
 import type { RepoGrant } from "./grant";
 import { encodeRepoPath, parseRepoPath, repoBase, type RepoRefSpec, type RepoRequestPath } from "./paths";
@@ -50,6 +51,8 @@ import { requireCookieWrite } from "../../shared/request-admission";
 const READ_TIMEOUT_MS = 10_000;
 /** How long a first-view request waits for the ingest before it renders the preparing page (#242). */
 const PREPARING_RETRY_SECONDS = 5;
+/** A client the per-client limiter refused (#294) retries after its window: the limiters count per minute. */
+const LIMITED_RETRY_SECONDS = 60;
 const IMMUTABLE = "max-age=31536000, immutable";
 /** Branch URLs: a short freshness window, then revalidation by ETag; stale copies survive an outage. */
 const BRANCH = "max-age=10, stale-if-error=86400";
@@ -70,6 +73,9 @@ interface Services {
   waitUntil: (promise: Promise<unknown>) => void;
   /** Set only where the ingest coordinator Durable Object is configured; first views enqueue there. */
   firstView: RepoFirstView | null;
+  /** Per-client admission (#294): first views of a branch other than the default, and searches. */
+  firstViewLimit: RateLimiter | null;
+  searchLimit: RateLimiter | null;
   /** Where comment grants are recorded (#254). */
   comments: CommentGrants;
   /** Where the shell's first page of a document's threads comes from (#284). */
@@ -135,6 +141,8 @@ function services(c: Context, timing = new ReadTiming()): Services | null {
     }),
     waitUntil,
     firstView: durableFirstView(env.REPO_INGEST),
+    firstViewLimit: rateLimiter(env, "FIRST_VIEW_LIMIT"),
+    searchLimit: rateLimiter(env, "SEARCH_LIMIT"),
     comments: convexCommentGrants,
     commentSnapshots: convexCommentSnapshots,
     // The search index is optional: without a D1 binding the search URL is the plain 404.
@@ -235,9 +243,14 @@ async function search(c: Context, manifest: SnapshotManifest, services: Services
   c.header("Cache-Control", "private, no-store");
   // No index bound (production, until P-deploy provisions one): the URL does not exist.
   if (!services.search) return notFound(c, "json");
+  services.timing.coarsen();
+  // One token per search and client (#294). Without the binding, or if it cannot answer, the search runs:
+  // the index is scoped to the repository, so one client's searches cost only that repository's rows.
+  if (services.searchLimit && await takeToken(services.searchLimit, c.req.raw) === false) {
+    return unavailableResponse(c, { unavailable: true, retryAfter: String(LIMITED_RETRY_SECONDS), status: 429 }, "json");
+  }
   const limit = c.req.query("limit") === undefined ? undefined : Number(c.req.query("limit"));
-  const index = services.search;
-  const outcome = await services.timing.time("search", () => searchManifest(index, manifest, c.req.query("q") ?? "", limit));
+  const outcome = await searchManifest(services.search, manifest, c.req.query("q") ?? "", limit);
   if (outcome.status === "invalid") return c.json({ error: "Invalid search query" }, 400);
   return c.json(outcome);
 }
@@ -454,14 +467,24 @@ app.get("/r/*", async (c) => {
     // visit above. The outcome may land inside this request's window.
     if (configured.firstView === null || target.kind !== "shell" || request.ref.kind === "commit") return notFound(c, kind);
     const branch = request.ref.kind === "branch" ? request.ref.branch : grant.repo.defaultBranch;
+    const defaultBranch = branch === grant.repo.defaultBranch;
+    // Per-client admission (#294): refused is retryable, and enqueues nothing.
+    if (!await admitFirstView(configured.firstViewLimit, c.req.raw, defaultBranch)) {
+      return unavailableResponse(c, { unavailable: true, retryAfter: String(LIMITED_RETRY_SECONDS) }, kind);
+    }
     const { repo } = repoIngestTarget(grant, branch);
     let attempt;
     try {
       const firstView = configured.firstView;
-      attempt = await configured.timing.time("first-view", () => prepareRepo(firstView, repo, branch, PREPARE_WINDOW_MS, configured.waitUntil));
+      attempt = await configured.timing.time("first-view", () => prepareRepo(firstView, repo, branch, PREPARE_WINDOW_MS, configured.waitUntil, defaultBranch));
     } catch {
       // Only the ensurer's transport raises here: could-not-check is #225's retryable 503.
       return unavailableResponse(c, { unavailable: true, retryAfter: String(PREPARING_RETRY_SECONDS) }, kind);
+    }
+    if (attempt.outcome?.status === "throttled") {
+      // The repository's first-view budget is spent (#294): retry once its window ends.
+      const seconds = Math.ceil((attempt.outcome.retryAt - configured.authorize.now()) / 1000);
+      return unavailableResponse(c, { unavailable: true, retryAfter: String(Math.max(1, seconds)) }, kind);
     }
     if (attempt.outcome) {
       const state = interpretOutcome(attempt.outcome);

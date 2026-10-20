@@ -6,7 +6,7 @@ import type { SnapshotManifest } from "@/ingest/orchestrator/snapshot";
 import { MAX_SEARCH_QUERY_LENGTH } from "@/repo-read/search";
 import app from "@/worker";
 import { d1SearchIndex } from "@/search/d1";
-import { privateRepo, publicRepo, repoReadFixture, sessionCookies, stubSessions } from "./helpers/repo-read-fixture";
+import { FakeRateLimiter, privateRepo, publicRepo, repoReadFixture, sessionCookies, stubSessions } from "./helpers/repo-read-fixture";
 import { SqliteSearchD1 } from "./helpers/search-sqlite";
 
 afterEach(() => Reflect.deleteProperty(globalThis, "caches"));
@@ -90,6 +90,33 @@ describe("repository search endpoint (GET /r/:owner/:repo/search)", () => {
     expect(signedIn.status).toBe(200);
     const payload = await signedIn.json() as { results: unknown[] };
     expect(Array.isArray(payload.results)).toBe(true);
+  });
+
+  it("rate-limits searches per client, keyed on the verified address, with the 429 the shell shows as a wait", async () => {
+    const fixture = await searchFixture();
+    const limiter = new FakeRateLimiter(1);
+    const env = { ...fixture.env, SEARCH_LIMIT: limiter };
+    const client = { "CF-Connecting-IP": "198.51.100.4" };
+    expect((await get("/r/octo/public-docs/search?q=welcome", env, fixture.ctx, client)).status).toBe(200);
+    const refused = await get("/r/octo/public-docs/search?q=welcome", env, fixture.ctx, client);
+    expect(refused.status).toBe(429);
+    expect(refused.headers.get("Retry-After")).toBe("60");
+    expect(refused.headers.get("Cache-Control")).toBe("private, no-store");
+    expect(await refused.json()).toEqual({ error: "Too many requests. Please retry later.", code: "rate_limited" });
+    expect(limiter.keys).toEqual(["198.51.100.4", "198.51.100.4"]);
+    // A denied reader spends nothing: authorization runs first.
+    expectPlainNotFound(await get("/r/octo/secret-docs/search?q=welcome", env, fixture.ctx, client));
+    expect(limiter.keys).toHaveLength(2);
+  });
+
+  it("searches without the limiter binding, and when the limiter cannot answer", async () => {
+    const fixture = await searchFixture();
+    const limiter = new FakeRateLimiter();
+    limiter.fail = true;
+    const failing = await get("/r/octo/public-docs/search?q=welcome", { ...fixture.env, SEARCH_LIMIT: limiter }, fixture.ctx);
+    expect(failing.status).toBe(200);
+    expect(limiter.keys).toEqual(["unverified"]);
+    expect((await get("/r/octo/public-docs/search?q=welcome", fixture.env, fixture.ctx)).status).toBe(200);
   });
 
   it("renders the search box in the shell only where the shell mounts it", async () => {

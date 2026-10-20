@@ -7,7 +7,8 @@
  */
 import type { RepoRef } from "@/ingest/github/source";
 import { coordinatorClient, firstViewEnsurer, type DurableObjectNamespaceLike } from "@/ingest/orchestrator/coordinator-client";
-import type { IngestOutcome, RepoTouch } from "@/ingest/orchestrator/coordinator";
+import type { EnsureOutcome, RepoTouch } from "@/ingest/orchestrator/coordinator";
+import { takeToken, type RateLimiter } from "./admission";
 import type { RepoGrant } from "./grant";
 
 /** The same shape check the read path uses for its bindings. */
@@ -17,7 +18,7 @@ function hasMethods(value: unknown, names: string[]): boolean {
 
 /** What the read path needs: enqueue one ingest for this repository's branch, and report views (#263). */
 export interface RepoFirstView {
-  ensure(repo: RepoRef, branch: string): Promise<IngestOutcome>;
+  ensure(repo: RepoRef, branch: string, defaultBranch?: boolean): Promise<EnsureOutcome>;
   touch(touch: RepoTouch): Promise<unknown>;
 }
 
@@ -65,6 +66,20 @@ export function clearTouches(): void {
   touched.clear();
 }
 
+/**
+ * Whether this reader may start a first view of a branch (#294). The default
+ * branch always may: the coordinator builds it once, single flight, and keeps
+ * the answer. Any other branch costs a token from the per-client limiter
+ * (`FIRST_VIEW_LIMIT`). Without that binding, or when it cannot answer, such
+ * first views are refused: nothing else bounds how many branch names one
+ * client can make the coordinator ask GitHub about. Pushes still build every
+ * branch, so this only delays branches nobody has pushed to since install.
+ */
+export async function admitFirstView(limiter: RateLimiter | null, request: Request, defaultBranch: boolean): Promise<boolean> {
+  if (defaultBranch) return true;
+  return limiter !== null && await takeToken(limiter, request) === true;
+}
+
 /** The ingest the pointer refers to: the repository's id and admission state, the branch the URL asks for. */
 export function repoIngestTarget(grant: RepoGrant, branch: string): { repo: RepoRef; branch: string } {
   return {
@@ -80,7 +95,7 @@ export const PREPARE_WINDOW_MS = 5_000;
 
 export interface PrepareAttempt {
   /** null when the window expired before the outcome arrived. */
-  outcome: IngestOutcome | null;
+  outcome: EnsureOutcome | null;
 }
 
 /** Ask the coordinator for one ingest at most this window; hand the build to
@@ -88,11 +103,11 @@ export interface PrepareAttempt {
  * failure still throws: could-not-check is retryable 503 (#225), never 404. */
 export async function prepareRepo(
   firstView: Pick<RepoFirstView, "ensure">, repo: RepoRef, branch: string, windowMs: number,
-  waitUntil: (promise: Promise<unknown>) => void,
+  waitUntil: (promise: Promise<unknown>) => void, defaultBranch = false,
 ): Promise<PrepareAttempt> {
-  const flight = firstView.ensure(repo, branch);
+  const flight = firstView.ensure(repo, branch, defaultBranch);
   let fulfilled = false;
-  let outcome: IngestOutcome | null = null;
+  let outcome: EnsureOutcome | null = null;
   flight.then(value => { outcome = value; fulfilled = true; }, () => {});
   const inWindow = await Promise.race([
     flight.then(() => true, () => false),
@@ -106,7 +121,7 @@ export async function prepareRepo(
 }
 
 /** What the sole ingest answer means for the reader. */
-export function interpretOutcome(outcome: IngestOutcome): "ready" | "preparing" | "failed" | "absent" {
+export function interpretOutcome(outcome: EnsureOutcome): "ready" | "preparing" | "failed" | "absent" | "limited" {
   switch (outcome.status) {
     case "flipped":
     case "current":
@@ -120,5 +135,8 @@ export function interpretOutcome(outcome: IngestOutcome): "ready" | "preparing" 
       return "preparing";
     case "failed":
       return "failed";
+    case "throttled":
+      // The repository's first-view budget is spent (#294): retryable, never "not found".
+      return "limited";
   }
 }

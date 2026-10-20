@@ -5,7 +5,7 @@ import { manifestKey } from "@/ingest/orchestrator/keys";
 import type { SnapshotManifest } from "@/ingest/orchestrator/snapshot";
 import { clearSnapshotMemory } from "@/repo-read/snapshot";
 import { SHARED_CACHE_PATH } from "@/repo-read/shared-cache";
-import { ReadTiming } from "@/repo-read/timing";
+import { COARSE_TOTAL_MS, ReadTiming } from "@/repo-read/timing";
 import { d1SearchIndex } from "@/search/d1";
 import {
   FakeIngestCoordinator, freshRepo, MemoryEdgeCache, privateRepo, publicRepo, repoReadFixture, sessionCookies, stubSessions,
@@ -65,9 +65,21 @@ describe("the Server-Timing builder", () => {
     let clock = 0;
     const timing = new ReadTiming(() => clock);
     expect(timing.header()).toBe("cache;desc=memory, total;dur=0.0");
-    for (const phase of ["search", "first-view", "r2", "colo", "shared"] as const) await timing.time(phase, () => { clock += 1; return Promise.resolve(); });
+    for (const phase of ["first-view", "r2", "colo", "shared"] as const) await timing.time(phase, () => { clock += 1; return Promise.resolve(); });
     timing.served("shared");
-    expect(timing.header()).toBe("cache;desc=shared, shared;dur=1.0, colo;dur=1.0, r2;dur=1.0, first-view;dur=1.0, search;dur=1.0, total;dur=5.0");
+    expect(timing.header()).toBe("cache;desc=shared, shared;dur=1.0, colo;dur=1.0, r2;dur=1.0, first-view;dur=1.0, total;dur=4.0");
+  });
+
+  it("reports a coarsened total only to the next 10 ms step", () => {
+    let clock = 0;
+    const timing = new ReadTiming(() => clock);
+    timing.coarsen();
+    clock = 0.4;
+    expect(timing.header()).toBe("cache;desc=memory, total;dur=10.0");
+    clock = 10;
+    expect(timing.header()).toBe("cache;desc=memory, total;dur=10.0");
+    clock = 23.7;
+    expect(timing.header()).toBe("cache;desc=memory, total;dur=30.0");
   });
 
   it("defaults to the high-resolution clock", () => {
@@ -129,7 +141,7 @@ describe("Server-Timing on /r/ responses", () => {
     expect(phases(await get(`${prefix}docs/img/logo.png`))?.total).toBeDefined();
   });
 
-  it("times the search index on search responses", async () => {
+  it("leaves the search index out of search responses, and reports their total only to a 10 ms step", async () => {
     const database = new SqliteSearchD1();
     await d1SearchIndex(database).migrate();
     const manifest = fixture.bucket.json<SnapshotManifest>(manifestKey(publicRepo.id, fixture.commits.public, RENDERER_VERSION)) as SnapshotManifest;
@@ -137,7 +149,11 @@ describe("Server-Timing on /r/ responses", () => {
     await d1SearchIndex(database).putBlob(publicRepo.id, page.sha, [{ slug: "intro", title: "Intro", text: "searchable prose" }]);
     const response = await get(`${pub}/search?q=searchable`, {}, { ...fixture.env, REPO_SEARCH: database });
     expect(response.status).toBe(200);
-    expect(phases(response)?.search.dur).toMatch(/^\d+\.\d$/);
+    const timing = phases(response);
+    expect(timing?.search).toBeUndefined();
+    expect(response.headers.get("Server-Timing")).not.toContain("search");
+    expect(Number(timing?.total.dur) % COARSE_TOTAL_MS).toBe(0);
+    expect(Number(timing?.total.dur)).toBeGreaterThan(0);
   });
 
   it("does not count a background pointer refresh against the request", async () => {

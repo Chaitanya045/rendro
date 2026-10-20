@@ -67,6 +67,22 @@ name = "RUM_LIMIT"
 namespace_id = "2820"
 simple = { limit = 60, period = 60 }
 
+# Per-client admission on the repository read path (#294), keyed on the verified client address like RUM_LIMIT.
+# First views of a branch other than the default (each may make the ingest coordinator ask GitHub about the
+# branch): 20 a minute per address, which a reader's preparing-page polls never approach. Without this binding
+# such first views are refused (the default branch still prepares). Development only, like RUM_LIMIT.
+[[env.development.ratelimits]]
+name = "FIRST_VIEW_LIMIT"
+namespace_id = "2940"
+simple = { limit = 20, period = 60 }
+
+# Repository searches: 60 a minute per address, against the shell's one request per 200 ms typing pause.
+# Without this binding searches are not limited per client (the index is scoped per repository either way).
+[[env.development.ratelimits]]
+name = "SEARCH_LIMIT"
+namespace_id = "2941"
+simple = { limit = 60, period = 60 }
+
 [env.development.triggers]
 crons = ["23 3 * * *"]
 
