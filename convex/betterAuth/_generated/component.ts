@@ -95,6 +95,10 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
             | {
                 data: { count: number; key: string; lastRequest: number };
                 model: "rateLimit";
+              }
+            | {
+                data: { count: number; expiresAt: number; key: string };
+                model: "sessionReadWindow";
               };
           onCreateHandle?: string;
           select?: Array<string>;
@@ -290,6 +294,33 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
                 where?: Array<{
                   connector?: "AND" | "OR";
                   field: "key" | "count" | "lastRequest" | "_id";
+                  mode?: "sensitive" | "insensitive";
+                  operator?:
+                    | "lt"
+                    | "lte"
+                    | "gt"
+                    | "gte"
+                    | "eq"
+                    | "in"
+                    | "not_in"
+                    | "ne"
+                    | "contains"
+                    | "starts_with"
+                    | "ends_with";
+                  value:
+                    | string
+                    | number
+                    | boolean
+                    | Array<string>
+                    | Array<number>
+                    | null;
+                }>;
+              }
+            | {
+                model: "sessionReadWindow";
+                where?: Array<{
+                  connector?: "AND" | "OR";
+                  field: "key" | "count" | "expiresAt" | "_id";
                   mode?: "sensitive" | "insensitive";
                   operator?:
                     | "lt"
@@ -534,6 +565,33 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
                     | Array<number>
                     | null;
                 }>;
+              }
+            | {
+                model: "sessionReadWindow";
+                where?: Array<{
+                  connector?: "AND" | "OR";
+                  field: "key" | "count" | "expiresAt" | "_id";
+                  mode?: "sensitive" | "insensitive";
+                  operator?:
+                    | "lt"
+                    | "lte"
+                    | "gt"
+                    | "gte"
+                    | "eq"
+                    | "in"
+                    | "not_in"
+                    | "ne"
+                    | "contains"
+                    | "starts_with"
+                    | "ends_with";
+                  value:
+                    | string
+                    | number
+                    | boolean
+                    | Array<string>
+                    | Array<number>
+                    | null;
+                }>;
               };
           onDeleteHandle?: string;
         },
@@ -552,7 +610,8 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
             | "account"
             | "verification"
             | "jwks"
-            | "rateLimit";
+            | "rateLimit"
+            | "sessionReadWindow";
           offset?: number;
           paginationOpts: {
             cursor: string | null;
@@ -598,7 +657,8 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
             | "account"
             | "verification"
             | "jwks"
-            | "rateLimit";
+            | "rateLimit"
+            | "sessionReadWindow";
           select?: Array<string>;
           where?: Array<{
             connector?: "AND" | "OR";
@@ -881,6 +941,34 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
                     | Array<number>
                     | null;
                 }>;
+              }
+            | {
+                model: "sessionReadWindow";
+                update: { count?: number; expiresAt?: number; key?: string };
+                where?: Array<{
+                  connector?: "AND" | "OR";
+                  field: "key" | "count" | "expiresAt" | "_id";
+                  mode?: "sensitive" | "insensitive";
+                  operator?:
+                    | "lt"
+                    | "lte"
+                    | "gt"
+                    | "gte"
+                    | "eq"
+                    | "in"
+                    | "not_in"
+                    | "ne"
+                    | "contains"
+                    | "starts_with"
+                    | "ends_with";
+                  value:
+                    | string
+                    | number
+                    | boolean
+                    | Array<string>
+                    | Array<number>
+                    | null;
+                }>;
               };
           onUpdateHandle?: string;
           paginationOpts: {
@@ -1132,6 +1220,34 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
                 where?: Array<{
                   connector?: "AND" | "OR";
                   field: "key" | "count" | "lastRequest" | "_id";
+                  mode?: "sensitive" | "insensitive";
+                  operator?:
+                    | "lt"
+                    | "lte"
+                    | "gt"
+                    | "gte"
+                    | "eq"
+                    | "in"
+                    | "not_in"
+                    | "ne"
+                    | "contains"
+                    | "starts_with"
+                    | "ends_with";
+                  value:
+                    | string
+                    | number
+                    | boolean
+                    | Array<string>
+                    | Array<number>
+                    | null;
+                }>;
+              }
+            | {
+                model: "sessionReadWindow";
+                update: { count?: number; expiresAt?: number; key?: string };
+                where?: Array<{
+                  connector?: "AND" | "OR";
+                  field: "key" | "count" | "expiresAt" | "_id";
                   mode?: "sensitive" | "insensitive";
                   operator?:
                     | "lt"

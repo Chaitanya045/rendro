@@ -11,6 +11,7 @@ import { testUtils } from "better-auth/plugins";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createAuthOptions } from "../convex/auth";
 import { cacheJwksResponse } from "../convex/authHttp";
+import { ipShards } from "../convex/betterAuth/sessionReadLimit";
 import { AUTH_CLIENT_IP_HEADER, signAuthClientIp, verifiedAuthRequest } from "../shared/auth-client-ip";
 
 // Keep the long simulated-traffic regression from emitting thousands of logs.
@@ -67,18 +68,37 @@ async function runtime() {
     return cacheJwksResponse(req, response);
   }
   const buckets = async () => (await backend.query(components.betterAuth.adapter.findMany, {
-    model: "rateLimit", paginationOpts: { numItems: 20, cursor: null },
-  })).page as Array<{ key: string; count: number; lastRequest: number }>;
+    model: "sessionReadWindow", paginationOpts: { numItems: 100, cursor: null },
+  })).page as Array<{ key: string; count: number; expiresAt: number }>;
   // Skip repetitive setup traffic, not the limiter: change only an existing
   // bucket's count, preserving its key/window. HTTP still exercises the real
   // atomic mutation at the production limit and on both sides of window reset.
   async function seedCount(key: string, count: number) {
     expect((await buckets()).find(row => row.key === key)).toBeDefined();
     await backend.mutation(components.betterAuth.adapter.updateOne, { input: {
-      model: "rateLimit", where: [{ field: "key", value: key }], update: { count },
+      model: "sessionReadWindow", where: [{ field: "key", value: key }], update: { count },
     } });
   }
-  return { request, database, context, backend, buckets, seedCount };
+  // The shared-IP backstop's shards: fill them to `total` within the window the
+  // IP's first read opened, whichever shard that read landed on.
+  async function seedIp(ip: string, total: number) {
+    const open = (await buckets()).filter(row => row.key.startsWith(`session-read-ip:${ip}#`));
+    expect(open).toHaveLength(1);
+    for (let shard = 0; shard < ipShards; shard++) {
+      const key = `session-read-ip:${ip}#${shard}`;
+      const count = Math.floor(total / ipShards) + (shard < total % ipShards ? 1 : 0);
+      if (key === open[0].key) await seedCount(key, count);
+      else await backend.mutation(components.betterAuth.adapter.create, { input: {
+        model: "sessionReadWindow", data: { key, count, expiresAt: open[0].expiresAt },
+      } });
+    }
+  }
+  const ipWindow = async (ip: string) => {
+    const shards = (await buckets()).filter(row => row.key.startsWith(`session-read-ip:${ip}#`));
+    return { shards: shards.length, count: shards.reduce((sum, row) => sum + row.count, 0), expiresAt: [...new Set(shards.map(row => row.expiresAt))] };
+  };
+  const bucketNames = async () => [...new Set((await buckets()).map(row => row.key.replace(/#[0-7]$/, "")))].sort();
+  return { request, database, context, backend, buckets, seedCount, seedIp, ipWindow, bucketNames };
 }
 
 describe("auth rate limits", () => {
@@ -205,11 +225,11 @@ describe("auth rate limits", () => {
     vi.setSystemTime(start + 60_000);
     expect((await request("/get-session", "192.0.2.38", sessions[0].headers)).status).toBe(200);
     expect((await buckets()).find(row => row.key === sessionBucket(sessions[0].session.token)))
-      .toMatchObject({ count: 1, lastRequest: start + 60_000 });
+      .toMatchObject({ count: 1, expiresAt: start + 120_000 });
   });
 
   it("does not let unsigned cookies or caller-supplied identifiers split the fallback bucket", async () => {
-    const { request, buckets, seedCount } = await runtime();
+    const { request, seedCount, bucketNames } = await runtime();
     vi.useFakeTimers({ toFake: ["Date"] });
     for (let i = 0; i < 4; i++) {
       const response = await request("/get-session", "192.0.2.5", {
@@ -221,7 +241,7 @@ describe("auth rate limits", () => {
       else expect(response.headers.get("retry-after")).toBe("60");
       if (i === 0) await seedCount("session-read-unverified:192.0.2.5", 119);
     }
-    expect((await buckets()).map(row => row.key).sort()).toEqual([
+    expect(await bucketNames()).toEqual([
       "session-read-ip:192.0.2.5", "session-read-unverified:192.0.2.5",
     ]);
   });
@@ -255,7 +275,7 @@ describe("auth rate limits", () => {
           expect((await app.request("/r/cache-probe", { headers: login.headers })).status,
             `minute ${minute + 1}, session ${index}, read ${read + 1}`).toBe(200);
           const key = sessionBucket(login.session.token);
-          expect((await buckets()).find(row => row.key === key)).toMatchObject({ count: read + 1, lastRequest: windowStart });
+          expect((await buckets()).find(row => row.key === key)).toMatchObject({ count: read + 1, expiresAt: windowStart + 60_000 });
           if (read === 0) await seedCount(key, 74);
         }
       }
@@ -268,20 +288,19 @@ describe("auth rate limits", () => {
   }, 30_000);
 
   it("limits the shared-IP backstop before session resolution and recovers without an idle gap", async () => {
-    const { request, context, buckets, seedCount } = await runtime();
+    const { request, context, seedIp, ipWindow } = await runtime();
     const user = context.test!.createUser({ emailVerified: true });
     await context.test!.saveUser(user);
     const login = await context.test!.login({ userId: user.id });
     vi.useFakeTimers({ toFake: ["Date"] });
     const start = Date.now();
     expect((await request("/get-session", "192.0.2.6", login.headers)).status).toBe(200);
-    await seedCount("session-read-ip:192.0.2.6", 5_999);
-    // Accept the 6,000th request late in the window. Moving lastRequest on
-    // accepted or rejected traffic must not postpone replenishment.
+    await seedIp("192.0.2.6", 5_999);
+    // Accept the 6,000th request late in the window. Accepted or rejected
+    // traffic must not postpone replenishment.
     vi.setSystemTime(start + 53_991);
     expect((await request("/get-session", "192.0.2.6", login.headers)).status).toBe(200);
-    expect((await buckets()).find(row => row.key === "session-read-ip:192.0.2.6"))
-      .toMatchObject({ count: 6_000, lastRequest: start });
+    expect(await ipWindow("192.0.2.6")).toEqual({ shards: ipShards, count: 6_000, expiresAt: [start + 60_000] });
     const findSession = vi.spyOn(context.internalAdapter, "findSession");
     const limited = await request("/get-session", "192.0.2.6", login.headers);
     expect(limited.status).toBe(429);
@@ -294,8 +313,43 @@ describe("auth rate limits", () => {
     expect((await request("/get-session", "192.0.2.6", login.headers)).status).toBe(200);
   });
 
+  it("keeps exact limits and Retry-After for concurrent reads on the session, unverified and IP paths", async () => {
+    const { request, context, backend, buckets, seedCount, seedIp, ipWindow } = await runtime();
+    const user = context.test!.createUser({ emailVerified: true });
+    await context.test!.saveUser(user);
+    const logins = await Promise.all([0, 1].map(() => context.test!.login({ userId: user.id })));
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const start = Date.now();
+    const burst = async (count: number, ip: string, headers?: HeadersInit) => {
+      const responses = await Promise.all(Array.from({ length: count }, () => request("/get-session", ip, headers)));
+      return responses.map(response => response.status === 429 ? `429 ${response.headers.get("retry-after")}` : String(response.status)).sort();
+    };
+    expect((await request("/get-session", "192.0.2.40", logins[0].headers)).status).toBe(200);
+    expect((await request("/get-session", "192.0.2.41")).status).toBe(200);
+    expect((await request("/get-session", "192.0.2.42", logins[1].headers)).status).toBe(200);
+    await seedCount(sessionBucket(logins[0].session.token), 595);
+    await seedCount("session-read-unverified:192.0.2.41", 115);
+    await seedIp("192.0.2.42", 5_995);
+    vi.setSystemTime(start + 20_100);
+    const accepted = (count: number) => [...Array<string>(count).fill("200"), ...Array<string>(10 - count).fill("429 40")];
+    expect(await burst(10, "192.0.2.40", logins[0].headers)).toEqual(accepted(5));
+    expect(await burst(10, "192.0.2.41")).toEqual(accepted(5));
+    expect(await burst(10, "192.0.2.42", logins[1].headers)).toEqual(accepted(5));
+    const rows = await buckets();
+    expect(rows.find(row => row.key === sessionBucket(logins[0].session.token))).toMatchObject({ count: 600, expiresAt: start + 60_000 });
+    expect(rows.find(row => row.key === "session-read-unverified:192.0.2.41")).toMatchObject({ count: 120, expiresAt: start + 60_000 });
+    expect(await ipWindow("192.0.2.42")).toEqual({ shards: ipShards, count: 6_000, expiresAt: [start + 60_000] });
+    // Rejected at the IP backstop: the session's own window saw only the accepted reads.
+    expect(rows.find(row => row.key === sessionBucket(logins[1].session.token))).toMatchObject({ count: 6 });
+    // Tokens are stored only as hashes; Better Auth's own table stays empty.
+    for (const login of logins) expect(JSON.stringify(rows)).not.toContain(login.session.token);
+    expect((await backend.query(components.betterAuth.adapter.findMany, {
+      model: "rateLimit", paginationOpts: { numItems: 20, cursor: null },
+    })).page).toEqual([]);
+  });
+
   it("keeps signed non-session values, unrelated cookies and expired sessions in the unauthenticated IP bucket", async () => {
-    const { request, context, backend, seedCount } = await runtime();
+    const { request, context, seedCount, bucketNames } = await runtime();
     // Better Auth signs other cookies (OAuth state among them) with the same secret: a valid signature is not a session.
     const cookies = ["signed-but-not-a-session", "another-signed-value"].map(value =>
       `better-auth.session_token=${encodeURIComponent(`${value}.${createHmac("sha256", process.env.AUTH_SECRET!).update(value).digest("base64")}`)}`);
@@ -321,9 +375,7 @@ describe("auth rate limits", () => {
     for (const cookie of cookies) {
       expect((await request("/get-session", "192.0.2.8", { cookie })).status).toBe(429);
     }
-    const rows = await backend.run(ctx => ctx.runQuery(components.betterAuth.adapter.findMany,
-      { model: "rateLimit", paginationOpts: { numItems: 20, cursor: null } }));
-    expect(rows.page.map((row: { key: string }) => row.key).sort()).toEqual([
+    expect(await bucketNames()).toEqual([
       "session-read-ip:192.0.2.8", "session-read-unverified:192.0.2.8",
     ]);
     vi.setSystemTime(Date.now() + 60_000);
