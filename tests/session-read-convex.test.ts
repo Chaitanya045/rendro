@@ -9,7 +9,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import schema from "../convex/schema";
 import authSchema from "../convex/betterAuth/schema";
 import { components } from "../convex/_generated/api";
-import { internal as authInternal } from "../convex/betterAuth/_generated/api";
 import { createAuthOptions } from "../convex/auth";
 import { sessionExpiryMs } from "../convex/sessionReadLimit";
 import { sessionMiddleware } from "@/middleware/session";
@@ -33,7 +32,7 @@ async function fixture(extra: BetterAuthPlugin[] = []) {
   const cookie = (token: string) => `better-auth.session_token=${encodeURIComponent(`${token}.${createHmac("sha256", process.env.AUTH_SECRET!).update(token).digest("base64")}`)}`;
   const request = (token = session.token) => auth.handler(new Request(`${baseURL}/api/auth/get-session`, { headers: { cookie: cookie(token) } }));
   const stored = () => backend.query(components.betterAuth.adapter.findOne, { model: "session", where: [{ field: "token", value: session.token }] });
-  const buckets = () => backend.query(components.betterAuth.adapter.findMany, { model: "rateLimit", paginationOpts: { numItems: 100, cursor: null } });
+  const buckets = () => backend.query(components.betterAuth.adapter.findMany, { model: "sessionReadWindow", paginationOpts: { numItems: 100, cursor: null } });
   return { backend, context, user, session, cookie, request, stored, buckets };
 }
 
@@ -60,6 +59,11 @@ describe("production Convex session adapter", () => {
     await f.context.internalAdapter.deleteSession(f.session.token);
     expect(await (await f.request()).json()).toBeNull();
     expect(find).toHaveBeenCalledTimes(3);
+    // Windows live in the application-owned table, never in Better Auth's rateLimit table.
+    const namespaces = ((await f.buckets()).page as Array<{ key: string }>).map(row => row.key.replace(/:.*/, ""));
+    expect([...new Set(namespaces)].sort())
+      .toEqual(["session-read", "session-read-ip", "session-read-unverified"]);
+    expect((await f.backend.query(components.betterAuth.adapter.findMany, { model: "rateLimit", paginationOpts: { numItems: 10, cursor: null } })).page).toEqual([]);
   });
 
   it("expires numeric sessions, reuses null lookups, and never allocates their hash bucket", async () => {
@@ -136,28 +140,5 @@ describe("production Convex session adapter", () => {
     const revoked = Proxy.revocable({}, {});
     revoked.revoke();
     for (const value of [Object.create(Date.prototype), revoked.proxy]) expect(sessionExpiryMs(value)).toBe(0);
-  });
-
-  it("cleans expired custom windows in bounded indexed batches and preserves credential buckets", async () => {
-    vi.useFakeTimers();
-    // Run within the component, just like its own cron and continuations.
-    const backend = convexTest(authSchema, import.meta.glob("../convex/betterAuth/**/*.ts"));
-    const now = Date.now();
-    for (let i = 0; i < 240; i++) {
-      await backend.run(ctx => ctx.db.insert("rateLimit", {
-        key: i < 110 ? `192.0.2.${i}|/sign-in/email` : `${["session-read:", "session-read-ip:", "session-read-unverified:"][i % 3]}${i}`,
-        count: 5, lastRequest: now - 60_000,
-      }));
-    }
-    for (const key of ["session-read:current", "session-read-ip:current", "session-read-unverified:current", "192.0.2.1|/request-password-reset", "192.0.2.1|/send-verification-email"]) {
-      await backend.run(ctx => ctx.db.insert("rateLimit", { key, count: 5, lastRequest: now - 59_999 }));
-    }
-    await backend.mutation(authInternal.sessionReadLimit.cleanup, {});
-    // First page contains only built-in buckets: continuation must still run.
-    await backend.finishAllScheduledFunctions(vi.runAllTimers);
-    const rows = await backend.run(ctx => ctx.db.query("rateLimit").collect());
-    expect(rows).toHaveLength(115);
-    expect(rows.filter(row => row.key.startsWith("session-read"))).toHaveLength(3);
-    expect(rows.every(row => row.count === 5)).toBe(true);
   });
 });
