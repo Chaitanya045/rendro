@@ -521,6 +521,31 @@
               "file": "e2e/shell-entry.spec.ts",
               "name": "a missing document inside the viewer frame hides the wordmark and recovers in the top window",
               "kind": "e2e"
+            },
+            {
+              "file": "e2e/visual/snapshot-baselines.spec.ts",
+              "name": "not-found — default",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/visual/axe-states.spec.ts",
+              "name": "axe — not-found — default — 1440 — light",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/visual/axe-states.spec.ts",
+              "name": "axe — not-found — default — 1440 — dark",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/visual/axe-states.spec.ts",
+              "name": "axe — not-found — default — 375 — light",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/visual/axe-states.spec.ts",
+              "name": "axe — not-found — default — 375 — dark",
+              "kind": "e2e"
             }
           ]
         },
@@ -6768,6 +6793,31 @@
               "file": "e2e/auth.spec.ts",
               "name": "wrong password and the real sign-in limiter restore the form with an alert",
               "kind": "e2e"
+            },
+            {
+              "file": "e2e/visual/snapshot-baselines.spec.ts",
+              "name": "sign-in — validation",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/visual/axe-states.spec.ts",
+              "name": "axe — sign-in — validation — 1440 — light",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/visual/axe-states.spec.ts",
+              "name": "axe — sign-in — validation — 1440 — dark",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/visual/axe-states.spec.ts",
+              "name": "axe — sign-in — validation — 375 — light",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/visual/axe-states.spec.ts",
+              "name": "axe — sign-in — validation — 375 — dark",
+              "kind": "e2e"
             }
           ]
         },
@@ -6845,6 +6895,36 @@
             {
               "file": "e2e/auth.spec.ts",
               "name": "auth validation, reveal, pending exclusion and transport recovery preserve inputs",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/visual/snapshot-baselines.spec.ts",
+              "name": "sign-in — invalid-credentials",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/visual/axe-states.spec.ts",
+              "name": "axe — sign-in — invalid-credentials — 1440 — light",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/visual/axe-states.spec.ts",
+              "name": "axe — sign-in — invalid-credentials — 1440 — dark",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/visual/snapshot-baselines.spec.ts",
+              "name": "sign-in — rate-limited",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/visual/axe-states.spec.ts",
+              "name": "axe — sign-in — rate-limited — 1440 — light",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/visual/axe-states.spec.ts",
+              "name": "axe — sign-in — rate-limited — 1440 — dark",
               "kind": "e2e"
             }
           ]
@@ -7122,6 +7202,31 @@
               "file": "e2e/auth.spec.ts",
               "name": "auth validation, reveal, pending exclusion and transport recovery preserve inputs",
               "kind": "e2e"
+            },
+            {
+              "file": "e2e/visual/snapshot-baselines.spec.ts",
+              "name": "sign-up — validation",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/visual/axe-states.spec.ts",
+              "name": "axe — sign-up — validation — 1440 — light",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/visual/axe-states.spec.ts",
+              "name": "axe — sign-up — validation — 1440 — dark",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/visual/axe-states.spec.ts",
+              "name": "axe — sign-up — validation — 375 — light",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/visual/axe-states.spec.ts",
+              "name": "axe — sign-up — validation — 375 — dark",
+              "kind": "e2e"
             }
           ]
         },
@@ -7312,6 +7417,21 @@
               "file": "e2e/auth.spec.ts",
               "name": "signup verifies the original mail and retains the destination",
               "kind": "e2e"
+            },
+            {
+              "file": "e2e/visual/snapshot-baselines.spec.ts",
+              "name": "sign-up — rate-limited",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/visual/axe-states.spec.ts",
+              "name": "axe — sign-up — rate-limited — 1440 — light",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/visual/axe-states.spec.ts",
+              "name": "axe — sign-up — rate-limited — 1440 — dark",
+              "kind": "e2e"
             }
           ]
         },
@@ -7399,6 +7519,21 @@
             {
               "file": "e2e/auth.spec.ts",
               "name": "signup verifies the original mail and retains the destination",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/visual/snapshot-baselines.spec.ts",
+              "name": "verify-email — verified",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/visual/axe-states.spec.ts",
+              "name": "axe — verify-email — verified — 1440 — light",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/visual/axe-states.spec.ts",
+              "name": "axe — verify-email — verified — 1440 — dark",
               "kind": "e2e"
             }
           ]
@@ -7615,6 +7750,21 @@
               "file": "tests/auth-hidden-browser.test.ts",
               "name": "an invalid verification link (%s) focuses its heading, announces the problem and keeps the resend form working",
               "kind": "browser"
+            },
+            {
+              "file": "e2e/visual/snapshot-baselines.spec.ts",
+              "name": "verify-email — invalid",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/visual/axe-states.spec.ts",
+              "name": "axe — verify-email — invalid — 1440 — light",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/visual/axe-states.spec.ts",
+              "name": "axe — verify-email — invalid — 1440 — dark",
+              "kind": "e2e"
             }
           ]
         }
@@ -7671,6 +7821,61 @@
               "file": "tests/auth-ui-regressions.test.ts",
               "name": "keeps recovery non-enumerating but reports server failures for retry",
               "kind": "unit"
+            },
+            {
+              "file": "e2e/visual/snapshot-baselines.spec.ts",
+              "name": "forgot-password — default",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/visual/axe-states.spec.ts",
+              "name": "axe — forgot-password — default — 1440 — light",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/visual/axe-states.spec.ts",
+              "name": "axe — forgot-password — default — 1440 — dark",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/visual/axe-states.spec.ts",
+              "name": "axe — forgot-password — default — 375 — light",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/visual/axe-states.spec.ts",
+              "name": "axe — forgot-password — default — 375 — dark",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/visual/snapshot-baselines.spec.ts",
+              "name": "forgot-password — sent",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/visual/axe-states.spec.ts",
+              "name": "axe — forgot-password — sent — 1440 — light",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/visual/axe-states.spec.ts",
+              "name": "axe — forgot-password — sent — 1440 — dark",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/visual/snapshot-baselines.spec.ts",
+              "name": "forgot-password — error",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/visual/axe-states.spec.ts",
+              "name": "axe — forgot-password — error — 1440 — light",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/visual/axe-states.spec.ts",
+              "name": "axe — forgot-password — error — 1440 — dark",
+              "kind": "e2e"
             }
           ]
         },
@@ -7792,6 +7997,21 @@
             {
               "file": "e2e/auth.spec.ts",
               "name": "missing, invalid and expired reset tokens recover without changing credentials",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/visual/snapshot-baselines.spec.ts",
+              "name": "reset-password — invalid",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/visual/axe-states.spec.ts",
+              "name": "axe — reset-password — invalid — 1440 — light",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/visual/axe-states.spec.ts",
+              "name": "axe — reset-password — invalid — 1440 — dark",
               "kind": "e2e"
             }
           ]
@@ -7956,6 +8176,43 @@
               "kind": "browser"
             }
           ]
+        },
+        {
+          "id": "UI-136-E14",
+          "from": "Reset link with a token",
+          "trigger": "Open the reset page with a token",
+          "expected": "The new-password form renders: both password fields with Show, the 15-character hint and Update password",
+          "inventoryRefs": [
+            "UI-136"
+          ],
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/visual/snapshot-baselines.spec.ts",
+              "name": "reset-password — form",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/visual/axe-states.spec.ts",
+              "name": "axe — reset-password — form — 1440 — light",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/visual/axe-states.spec.ts",
+              "name": "axe — reset-password — form — 1440 — dark",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/visual/axe-states.spec.ts",
+              "name": "axe — reset-password — form — 375 — light",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/visual/axe-states.spec.ts",
+              "name": "axe — reset-password — form — 375 — dark",
+              "kind": "e2e"
+            }
+          ]
         }
       ]
     },
@@ -8073,12 +8330,72 @@
           "inventoryRefs": [
             "A05"
           ],
-          "status": "browser",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/auth-pages-browser.test.ts",
               "name": "explains each OAuth callback failure with fixed recovery copy and keeps the email form usable",
               "kind": "browser"
+            },
+            {
+              "file": "e2e/visual/snapshot-baselines.spec.ts",
+              "name": "sign-in — oauth-access-denied",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/visual/axe-states.spec.ts",
+              "name": "axe — sign-in — oauth-access-denied — 1440 — light",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/visual/axe-states.spec.ts",
+              "name": "axe — sign-in — oauth-access-denied — 1440 — dark",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/visual/snapshot-baselines.spec.ts",
+              "name": "sign-in — oauth-state-mismatch",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/visual/axe-states.spec.ts",
+              "name": "axe — sign-in — oauth-state-mismatch — 1440 — light",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/visual/axe-states.spec.ts",
+              "name": "axe — sign-in — oauth-state-mismatch — 1440 — dark",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/visual/snapshot-baselines.spec.ts",
+              "name": "sign-in — oauth-account-not-linked",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/visual/axe-states.spec.ts",
+              "name": "axe — sign-in — oauth-account-not-linked — 1440 — light",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/visual/axe-states.spec.ts",
+              "name": "axe — sign-in — oauth-account-not-linked — 1440 — dark",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/visual/snapshot-baselines.spec.ts",
+              "name": "sign-in — oauth-unknown",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/visual/axe-states.spec.ts",
+              "name": "axe — sign-in — oauth-unknown — 1440 — light",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/visual/axe-states.spec.ts",
+              "name": "axe — sign-in — oauth-unknown — 1440 — dark",
+              "kind": "e2e"
             }
           ]
         },
@@ -8186,6 +8503,46 @@
               "file": "e2e/auth.spec.ts",
               "name": "security methods expose loading, failure and a real retry",
               "kind": "e2e"
+            },
+            {
+              "file": "e2e/visual/snapshot-baselines.spec.ts",
+              "name": "security — loading",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/visual/axe-states.spec.ts",
+              "name": "axe — security — loading — 1440 — light",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/visual/axe-states.spec.ts",
+              "name": "axe — security — loading — 1440 — dark",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/visual/snapshot-baselines.spec.ts",
+              "name": "security — credential",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/visual/axe-states.spec.ts",
+              "name": "axe — security — credential — 1440 — light",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/visual/axe-states.spec.ts",
+              "name": "axe — security — credential — 1440 — dark",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/visual/axe-states.spec.ts",
+              "name": "axe — security — credential — 375 — light",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/visual/axe-states.spec.ts",
+              "name": "axe — security — credential — 375 — dark",
+              "kind": "e2e"
             }
           ]
         },
@@ -8202,6 +8559,21 @@
             {
               "file": "e2e/auth.spec.ts",
               "name": "security methods expose loading, failure and a real retry",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/visual/snapshot-baselines.spec.ts",
+              "name": "security — failure",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/visual/axe-states.spec.ts",
+              "name": "axe — security — failure — 1440 — light",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/visual/axe-states.spec.ts",
+              "name": "axe — security — failure — 1440 — dark",
               "kind": "e2e"
             }
           ]
@@ -8224,6 +8596,56 @@
             {
               "file": "e2e/auth.spec.ts",
               "name": "a legacy Google-only account adds an initial password, which requires a fresh session",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/visual/snapshot-baselines.spec.ts",
+              "name": "security — credential",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/visual/axe-states.spec.ts",
+              "name": "axe — security — credential — 1440 — light",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/visual/axe-states.spec.ts",
+              "name": "axe — security — credential — 1440 — dark",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/visual/axe-states.spec.ts",
+              "name": "axe — security — credential — 375 — light",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/visual/axe-states.spec.ts",
+              "name": "axe — security — credential — 375 — dark",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/visual/snapshot-baselines.spec.ts",
+              "name": "security — no-password",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/visual/axe-states.spec.ts",
+              "name": "axe — security — no-password — 1440 — light",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/visual/axe-states.spec.ts",
+              "name": "axe — security — no-password — 1440 — dark",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/visual/axe-states.spec.ts",
+              "name": "axe — security — no-password — 375 — light",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/visual/axe-states.spec.ts",
+              "name": "axe — security — no-password — 375 — dark",
               "kind": "e2e"
             }
           ]
@@ -8319,6 +8741,21 @@
             {
               "file": "e2e/auth.spec.ts",
               "name": "a legacy Google-only account adds an initial password, which requires a fresh session",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/visual/snapshot-baselines.spec.ts",
+              "name": "security — add-mismatch",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/visual/axe-states.spec.ts",
+              "name": "axe — security — add-mismatch — 1440 — light",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/visual/axe-states.spec.ts",
+              "name": "axe — security — add-mismatch — 1440 — dark",
               "kind": "e2e"
             }
           ]
@@ -8431,6 +8868,21 @@
             {
               "file": "e2e/auth.spec.ts",
               "name": "a legacy Google-only account adds an initial password, which requires a fresh session",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/visual/snapshot-baselines.spec.ts",
+              "name": "security — change-error",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/visual/axe-states.spec.ts",
+              "name": "axe — security — change-error — 1440 — light",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/visual/axe-states.spec.ts",
+              "name": "axe — security — change-error — 1440 — dark",
               "kind": "e2e"
             }
           ]

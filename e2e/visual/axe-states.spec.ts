@@ -2,7 +2,8 @@ import { AxeBuilder } from "@axe-core/playwright";
 import { expect } from "../fixtures";
 import { testVisual } from "./state";
 import { applyTheme, expectTheme, fixClock, settleVisual, sizeFor, type Width, type Theme } from "./states";
-import { openState, type Cell } from "./render-states";
+import { openState } from "./render-states";
+import { axeCells, axeTitle } from "./cells";
 
 /**
  * Accessibility scans (#120): axe over the interactive states the baselines render, on
@@ -11,44 +12,6 @@ import { openState, type Cell } from "./render-states";
  * auto-accept: a violation fails the engine spec, and a whitelist entry below needs a written
  * reason and a removal plan, exactly like the documented approval process in docs.
  */
-
-type Scanned = Cell & { width: Width; themes: Theme[]; };
-const both: Theme[] = ["light", "dark"];
-const at = (family: string, state: string, ...sizes: Width[]): Scanned[] => sizes.map(width => ({ family, state, width, themes: both }));
-// Every state is scanned in both appearances (#268): a contrast or focus failure can belong to the dark theme alone.
-const scanned: Scanned[] = [
-  ...at("landing", "default", 1440),
-  ...at("landing", "security", 375),
-  ...at("sign-in", "default", 1440),
-  ...at("sign-up", "default", 1440),
-  ...at("home", "default", 1440, 375),
-  ...at("viewer", "tree", 1440),
-  ...at("viewer", "menu", 375),
-  ...at("comments", "drawer", 1440, 375),
-  ...at("comments", "resolved", 1440),
-  ...at("comments", "reply", 1440),
-  ...at("comments", "deleted", 1440),
-  ...at("comments", "offline", 375),
-  ...at("comments", "refused", 1440, 375),
-  ...at("repo", "home", 1440),
-  ...at("repo", "search", 1440, 375),
-  ...at("repo", "search-empty", 1440),
-  ...at("repo", "search-error", 1440, 375),
-  ...at("repo", "search-limited", 375),
-  ...at("repo", "not-found", 1440),
-  ...at("repo", "denied", 1440),
-  ...at("repo", "unavailable", 1440),
-  ...at("repo", "preparing", 1440),
-  ...at("repo", "prepare-failed", 1440),
-  ...at("repo", "private", 1440),
-  ...at("repo", "markdown", 1440, 320),
-  ...at("repo", "long-title", 320),
-  ...at("repo", "large", 1440),
-  ...at("repo", "tree-expanded", 1440, 320),
-  ...at("repo", "doc-error", 1440),
-  ...at("repo", "link-confirm", 1440, 375),
-];
-const cells: Array<Scanned & { theme: Theme }> = scanned.flatMap(cell => cell.themes.map(theme => ({ ...cell, theme })));
 
 /**
  * Known violations, each tied to an open issue. An entry matches a rule on nodes whose target
@@ -62,8 +25,8 @@ const known: Known[] = [];
 /** WCAG 2.1 A/AA rules; anything outside these tags is out of scope for this suite. */
 const tags = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"];
 
-for (const cell of cells) {
-  testVisual(`axe — ${cell.family} — ${cell.state} — ${cell.width} — ${cell.theme}`, async ({ page, visual, browserName }) => {
+for (const cell of axeCells) {
+  testVisual(axeTitle(cell), async ({ page, visual, browserName }) => {
     await page.setViewportSize(sizeFor(cell.width));
     await applyTheme(page, cell.theme);
     await fixClock(page, visual.clockEpoch);

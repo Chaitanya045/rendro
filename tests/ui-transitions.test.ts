@@ -10,6 +10,7 @@ import { app as nodeApp } from "@/index";
 // Inspect Node registrations without binding a port or making any requests.
 vi.mock("@hono/node-server", () => ({ serve: vi.fn() }));
 import registry from "./ui-transitions.json";
+import { axeCells, axeTitle, baselineCells, baselineTitle } from "../e2e/visual/cells";
 
 const text = z.string().trim().min(1);
 const status = z.enum(["untested", "unit", "browser", "e2e"]);
@@ -95,6 +96,32 @@ function declarations(source: string) {
   return found;
 }
 
+// The visual suites declare one test per cell of e2e/visual/cells.ts in a loop (#319): a cell's title comes from that
+// list, and is credited only while the spec still declares `testVisual(<title>(cell), ...)` for each `cell of <list>`.
+const loops: Record<string, { list: string; title: string; titles: string[] }> = {
+  "e2e/visual/snapshot-baselines.spec.ts": { list: "baselineCells", title: "baselineTitle", titles: baselineCells.map(baselineTitle) },
+  "e2e/visual/axe-states.spec.ts": { list: "axeCells", title: "axeTitle", titles: axeCells.map(axeTitle) },
+};
+
+function declaresEach(source: string, list: string, title: string) {
+  const file = ts.createSourceFile("test.ts", source, ts.ScriptTarget.Latest, true);
+  let found = false;
+  function visit(node: ts.Node) {
+    if (ts.isForOfStatement(node) && node.expression.getText(file) === list && ts.isVariableDeclarationList(node.initializer)) {
+      const cell = node.initializer.declarations[0]?.name.getText(file);
+      const declare = (inner: ts.Node) => {
+        const name = ts.isCallExpression(inner) && inner.expression.getText(file) === "testVisual" ? inner.arguments[0] : undefined;
+        if (name && ts.isCallExpression(name) && name.expression.getText(file) === title && name.arguments[0]?.getText(file) === cell) found = true;
+        ts.forEachChild(inner, declare);
+      };
+      declare(node.statement);
+    }
+    ts.forEachChild(node, visit);
+  }
+  visit(file);
+  return found;
+}
+
 function unique(values: string[]) {
   expect(new Set(values).size, `Duplicate IDs/values: ${values.filter((value, i) => values.indexOf(value) !== i).join(", ")}`).toBe(values.length);
 }
@@ -169,7 +196,13 @@ describe("UI transition registry", () => {
   const testFiles = [...new Set(registry.families.flatMap(family => family.edges.flatMap(edge => edge.tests.map(test => test.file))))];
   it.each(testFiles)("resolves enabled test declarations in %s", file => {
     expect(existsSync(resolve(file)), file).toBe(true);
-    const names = declarations(readFileSync(file, "utf8"));
+    const source = readFileSync(file, "utf8");
+    const names = declarations(source);
+    const loop = loops[file];
+    if (loop) {
+      expect(declaresEach(source, loop.list, loop.title), file).toBe(true);
+      names.push(...loop.titles);
+    }
     for (const family of registry.families) for (const edge of family.edges) for (const test of edge.tests) {
       if (test.file === file) expect(names, `${edge.id}: ${file}`).toContain(test.name);
     }
@@ -191,6 +224,16 @@ describe("UI transition registry", () => {
       describe("enabled", () => { it("nested", function() {}); });`;
     expect(declarations(source)).toEqual(["exact name", "case %s", "nested"]);
     expect(declarations(source)).not.toContain("exact");
+  });
+
+  it("credits a visual cell only while its spec declares a test for each cell of the list", () => {
+    const loop = (body: string) => `for (const cell of baselineCells) {\n  ${body}\n}`;
+    expect(declaresEach(loop("testVisual(baselineTitle(cell), async () => {});"), "baselineCells", "baselineTitle")).toBe(true);
+    expect(declaresEach(loop("testVisual.skip(baselineTitle(cell), async () => {});"), "baselineCells", "baselineTitle")).toBe(false);
+    expect(declaresEach(loop("testVisual(baselineTitle(other), async () => {});"), "baselineCells", "baselineTitle")).toBe(false);
+    expect(declaresEach(loop("testVisual(axeTitle(cell), async () => {});"), "baselineCells", "baselineTitle")).toBe(false);
+    expect(declaresEach(loop("testVisual(baselineTitle(cell), async () => {});"), "axeCells", "baselineTitle")).toBe(false);
+    expect(declaresEach(`// for (const cell of baselineCells) testVisual(baselineTitle(cell), async () => {});`, "baselineCells", "baselineTitle")).toBe(false);
   });
 
   it("classifies every actual Hono registration, including HTML POST and frame routes", () => {
