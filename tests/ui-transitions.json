@@ -5738,6 +5738,7 @@
         320,
         375,
         430,
+        768,
         1440
       ],
       "engines": [
@@ -6002,6 +6003,28 @@
               "file": "e2e/repo-comment-journeys.spec.ts",
               "name": "the Active, Resolved and History views follow each comment's status, from the drawer and from the server",
               "kind": "e2e"
+            }
+          ]
+        },
+        {
+          "id": "UI-122-E14",
+          "from": "Comment drawer open, a notification or the comment-mode hint showing",
+          "trigger": "A notification or the hint appears, the drawer resizes to its content, or the drawer closes",
+          "expected": "The notification region and the hint never cover the open drawer's controls (above it, below a top-docked drawer, or in place where they already clear it) at 320/375/768/1440; their live regions and order are unchanged; closing the drawer returns them to their place (#329)",
+          "inventoryRefs": [
+            "C02"
+          ],
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/commentor-drawer-browser.test.ts",
+              "name": "keep off the drawer's controls at %ipx, on a short drawer, a capped one and one resizing under them",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/commentor-drawer-browser.test.ts",
+              "name": "stay put beside a drawer that does not reach them, and go below one docked at the top that does",
+              "kind": "browser"
             }
           ]
         }

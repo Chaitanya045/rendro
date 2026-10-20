@@ -621,3 +621,114 @@ describe("tooltips, selection and appearance", () => {
     await expect.poll(() => alert.count()).toBe(0);
   });
 });
+
+describe("notifications and the comment-mode hint over the open drawer (#329)", () => {
+  // The drawer's size and place, its transitions finished.
+  const settled = async (lab: Lab) => {
+    await expect.poll(() => lab.tid("commentor-drawer").getAttribute("data-layout")).toBe("settled");
+    await expect.poll(() => lab.doc(() => document.getElementById("commentor-host")!.shadowRoot!.getAnimations().length)).toBe(0);
+  };
+  // Each notification region and hint: whether it is on screen, and which of the dock's controls it covers. A control
+  // scrolled out of the list is clipped to the part of it that shows.
+  const covered = (lab: Lab) => lab.doc(() => {
+    const root = document.getElementById("commentor-host")!.shadowRoot!;
+    const dock = root.querySelector<HTMLElement>('[data-testid="commentor-dock"]')!;
+    const list = root.querySelector<HTMLElement>('[data-testid="commentor-drawer-list"]')!;
+    const controls = Array.from(dock.querySelectorAll<HTMLElement>("button, textarea, input, select, a[href], [tabindex]"), el => {
+      const r = el.getBoundingClientRect();
+      const clip = (list.contains(el) ? list : dock).getBoundingClientRect();
+      return {
+        name: el.getAttribute("aria-label") || el.getAttribute("data-testid") || el.textContent!.trim(),
+        left: Math.max(r.left, clip.left), top: Math.max(r.top, clip.top), right: Math.min(r.right, clip.right), bottom: Math.min(r.bottom, clip.bottom),
+      };
+    }).filter(c => c.right > c.left && c.bottom > c.top);
+    if (!controls.length) throw new Error("no drawer controls on screen");
+    return Array.from(root.querySelectorAll<HTMLElement>(".toast-region, .hint"), overlay => {
+      const o = overlay.getBoundingClientRect();
+      return {
+        overlay: overlay.className,
+        onScreen: o.top >= 0 && o.left >= 0 && o.bottom <= innerHeight && o.right <= innerWidth,
+        covers: controls.filter(c => c.left < o.right && o.left < c.right && c.top < o.bottom && o.top < c.bottom).map(c => c.name),
+      };
+    });
+  });
+  const clear = (overlay: string) => ({ overlay, onScreen: true, covers: [] });
+  // Undo windows and notification lifetimes outlast the test, as in the visual cells.
+  const keepNotifications = (lab: Lab) => lab.doc(() => {
+    const timeout = window.setTimeout.bind(window);
+    window.setTimeout = ((handler: TimerHandler, delay?: number, ...args: unknown[]) => timeout(handler, delay !== undefined && delay >= 3000 ? 2_147_483_647 : delay, ...args)) as typeof window.setTimeout;
+  });
+  const many = (lab: Lab, count: number) => lab.host((l, count) => l.seed(Array.from({ length: count }, (_, i) => ({ _id: `c${i}`, anchor: l.anchorOn("Quarterly report"), body: `Comment ${i}` }))), count);
+
+  it.each([[320, 568], [375, 667], [768, 1024], [1440, 900]])("keep off the drawer's controls at %ipx, on a short drawer, a capped one and one resizing under them", async (width, height) => {
+    const lab = await commentLab.open({ width, height });
+    await lab.ready([{ _id: "t1", anchor: heading, body: "First" }]);
+    await keepNotifications(lab);
+    await lab.openDrawer();
+    await settled(lab);
+    // Short: deleting the only thread leaves the empty state, its Start a comment button where the undo toast was.
+    await lab.ui.locator('.drawer-thread[data-thread-id="t1"]').getByTestId("commentor-delete-btn").click();
+    await expect.poll(() => lab.toasts()).toEqual([expect.stringContaining("Comment deleted.")]);
+    await expect.poll(() => lab.ui.locator(".empty button").count()).toBe(1);
+    await settled(lab);
+    expect(await covered(lab)).toEqual([clear("toast-region")]);
+    await lab.tid("commentor-comment-btn").click();
+    expect(await covered(lab)).toEqual([clear("toast-region"), clear("hint")]);
+    // Resizing: threads arrive under both, and the drawer grows to its cap.
+    await many(lab, 12);
+    await expect.poll(() => lab.ui.locator(".drawer-thread").count()).toBe(12);
+    await settled(lab);
+    expect(await lab.tid("commentor-drawer-list").evaluate(list => list.scrollHeight > list.clientHeight)).toBe(true);
+    expect(await covered(lab)).toEqual([clear("toast-region"), clear("hint")]);
+    // Capped: another notification joins the first on the full drawer.
+    await lab.ui.locator('.drawer-thread[data-thread-id="c0"]').getByTestId("commentor-delete-btn").click();
+    await expect.poll(() => lab.ui.locator(".toast").count()).toBe(2);
+    expect(await covered(lab)).toEqual([clear("toast-region"), clear("hint")]);
+    // And shrinking back to a single card (c0 is still being deleted).
+    await many(lab, 2);
+    await expect.poll(() => lab.ui.locator(".drawer-thread").count()).toBe(1);
+    await settled(lab);
+    expect(await covered(lab)).toEqual([clear("toast-region"), clear("hint")]);
+    // Announcements and focus order are unchanged: the region and the hint follow the dock, and still speak.
+    expect(await lab.ui.locator(".toast").evaluateAll(all => all.map(toast => [toast.getAttribute("role"), toast.getAttribute("aria-live")]))).toEqual([["status", "polite"], ["status", "polite"]]);
+    expect(await lab.tid("commentor-comment-hint").getAttribute("role")).toBe("status");
+    expect(await lab.doc(() => Array.from(document.getElementById("commentor-host")!.shadowRoot!.children, el => el.className).slice(-2))).toEqual(["toast-region", "hint"]);
+    // Closed, the drawer leaves both where the stylesheet puts them.
+    await lab.tid("commentor-panel-btn").click();
+    await expect.poll(() => lab.tid("commentor-drawer").getAttribute("aria-hidden")).toBe("true");
+    for (const overlay of [lab.ui.locator(".toast-region"), lab.tid("commentor-comment-hint")]) {
+      expect(await overlay.evaluate(el => [(el as HTMLElement).style.top, (el as HTMLElement).style.bottom, (el as HTMLElement).style.maxHeight])).toEqual(["", "", ""]);
+      expect(await overlay.evaluate(el => innerHeight - el.getBoundingClientRect().bottom)).toBe(96);
+    }
+  });
+
+  it("stay put beside a drawer that does not reach them, and go below one docked at the top that does", async () => {
+    const lab = await commentLab.open({ width: 768, height: 900, init: () => localStorage.setItem("commentor-dock", "top") });
+    await lab.ready();
+    await keepNotifications(lab);
+    await lab.openDrawer();
+    await settled(lab);
+    expect(await dockBox(lab)).toMatchObject({ top: 16, className: "dock dock-top" });
+    await lab.tid("commentor-comment-btn").click();
+    const hint = lab.tid("commentor-comment-hint");
+    const inPlace = () => hint.evaluate(el => [(el as HTMLElement).style.bottom, innerHeight - el.getBoundingClientRect().bottom]);
+    // On a tall screen even the capped drawer ends well above the hint: it keeps its place.
+    expect(await inPlace()).toEqual(["", 96]);
+    await many(lab, 12);
+    await expect.poll(() => lab.ui.locator(".drawer-thread").count()).toBe(12);
+    await settled(lab);
+    expect(await inPlace()).toEqual(["", 96]);
+    expect(await covered(lab)).toEqual([clear("hint")]);
+    // A shorter window brings the capped drawer down past it; there is no room above a top drawer, so it goes below.
+    await lab.page.setViewportSize({ width: 768, height: 440 });
+    await expect.poll(() => hint.evaluate(el => (el as HTMLElement).style.bottom)).toBe("auto");
+    await settled(lab);
+    const dockBottom = await dock(lab).evaluate(el => el.getBoundingClientRect().bottom);
+    expect(await hint.evaluate(el => el.getBoundingClientRect().top)).toBe(dockBottom + 8);
+    expect(await covered(lab)).toEqual([clear("hint")]);
+    // A notification arriving there is placed before it is painted, below the drawer too.
+    await lab.ui.locator('.drawer-thread[data-thread-id="c0"]').getByTestId("commentor-delete-btn").click();
+    expect(await lab.ui.locator(".toast-region").evaluate(el => el.getBoundingClientRect().top)).toBe(dockBottom + 8);
+    expect(await covered(lab)).toEqual([clear("hint"), clear("toast-region")]);
+  });
+});
