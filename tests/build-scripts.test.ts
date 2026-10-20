@@ -57,4 +57,23 @@ describe("asset build scripts", () => {
     expect(code.startsWith("\n// Auto-injected by Rendro — do not edit manually.\n(function() {")).toBe(true);
     expect(code.trimEnd().endsWith("})();")).toBe(true);
   }, 60_000);
+
+  // The frame only receives errors the parent already serialized (#315). The parent, which talks to Convex,
+  // is the control: it must still bundle convex/values, so the same check would catch a regression.
+  it("keeps every convex/ module out of the document frame's commentor.js, but not the parent's", async () => {
+    const directory = workspace("src", "shared", "convex");
+    const convexInputs = async (script: string, output: string) => {
+      const metafile = join(directory, `${output}.meta.json`);
+      expect((await run(directory, script, [`--metafile=${metafile}`])).code).toBe(0);
+      const inputs = Object.keys((JSON.parse(readFileSync(metafile, "utf8")) as { inputs: Record<string, unknown> }).inputs);
+      expect(inputs).toContain("src/commentor/error-mapping.ts");
+      return { inputs: inputs.filter(input => /(^|\/)convex\//.test(input)), code: readFileSync(join(directory, "public", output), "utf8") };
+    };
+    const frame = await convexInputs("build-commentor.ts", "commentor.js");
+    expect(frame.inputs).toEqual([]);
+    expect(frame.code).not.toContain("ConvexError");
+    const parent = await convexInputs("build-commentor-parent.ts", "commentor-parent.js");
+    expect(parent.inputs).toContainEqual(expect.stringMatching(/node_modules\/convex\/dist\/esm\/values\/errors\.js$/));
+    expect(parent.code).toContain("ConvexError");
+  }, 90_000);
 });

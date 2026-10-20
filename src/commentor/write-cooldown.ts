@@ -1,4 +1,4 @@
-import { commentQuotaMessage } from "./errors";
+import { commentQuotaMessage } from "./error-mapping";
 
 const submissions = '[data-testid="commentor-composer-post"], [data-testid="commentor-reply-send"], [data-testid="commentor-edit-save"]';
 

@@ -4010,6 +4010,8 @@
         "src/commentor/commentor.ts",
         "src/commentor/parent-host.ts",
         "src/commentor/errors.ts",
+        "src/commentor/error-mapping.ts",
+        "src/commentor/frame-errors.ts",
         "src/commentor/parent-transport.ts",
         "src/commentor/write-cooldown.ts",
         "src/repo-read/routes.ts"
@@ -5369,7 +5371,7 @@
           "tests": [
             {
               "file": "tests/commentor-error-messages.test.ts",
-              "name": "maps %s without displaying backend diagnostics",
+              "name": "maps $kind without displaying backend diagnostics",
               "kind": "unit"
             },
             {

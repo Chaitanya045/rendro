@@ -5,7 +5,9 @@ import { Window as StorageWindow } from "happy-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CommentorParentHost, type DocumentCommentBackend } from "../src/commentor/parent-host";
 import { COMMENTOR_VIEWER_RELOAD, COMMENTOR_PARENT_READY, COMMENTOR_PARENT_RESPONSE, COMMENTOR_PARENT_REQUEST } from "../src/commentor/parent-protocol";
-import { CommentMutationOutcomeUnknownError, ParentCommentTransport } from "../src/commentor/parent-transport";
+import { CommentMutationOutcomeUnknownError, CommentMutationRejectedError, ParentCommentTransport } from "../src/commentor/parent-transport";
+import * as parentErrors from "../src/commentor/errors";
+import * as frameErrors from "../src/commentor/frame-errors";
 import { editDraftKey } from "../src/commentor/operation-state";
 
 function recoveryRuntime(scope = { repoId: 9101, documentPath: "docs/guide.md" }, principal = "user-a") {
@@ -492,6 +494,56 @@ describe("round-three recovery regressions", () => {
   });
 });
 
+
+// #315: the frame no longer bundles convex/values. Every error kind the parent maps from a real ConvexError
+// must reach the reader unchanged after crossing postMessage into the frame's Convex-free classifier.
+describe("one error mapping across the parent and the frame", () => {
+  const fallback = "Could not post comment. Try again.";
+  // What the widget shows for a failed write (commentor.ts writeErrorMessage).
+  const shown = (error: unknown) => error instanceof CommentMutationRejectedError || error instanceof CommentMutationOutcomeUnknownError
+    ? error.message : frameErrors.commentErrorMessage(error, fallback);
+  it.each([
+    { kind: "RateLimited", error: () => new ConvexError({ kind: "RateLimited", name: "comments", retryAfter: 2100 }) },
+    { kind: "RateLimited (organization)", error: () => new ConvexError({ kind: "RateLimited", name: "comments:organization", retryAfter: 900 }) },
+    ...["unauthenticated", "forbidden", "not_found", "invalid_id", "invalid_input", "conflict"].map(code => ({
+      kind: code, error: () => new ConvexError({ code, message: "private diagnostic must not reach the widget" }),
+    })),
+    { kind: "outcome-unknown (unknown code)", error: () => new ConvexError({ code: "unknown_code", message: "Safe failure" }) },
+    { kind: "outcome-unknown (transient)", error: () => new Error("private diagnostic must not reach the widget") },
+  ])("$kind: the frame shows, waits and retires exactly what the parent decided", async ({ error }) => {
+    const runtime = recoveryRuntime();
+    await flushMessages();
+    const failure = error();
+    runtime.backend.mutate.mockRejectedValueOnce(failure);
+    const received: unknown = await runtime.transport.mutate("thread.create", args).catch((caught: unknown) => caught);
+    const definitive = parentErrors.isDefinitiveCommentRejection(failure);
+    expect(frameErrors.commentRetryAfter(received)).toBe(parentErrors.commentRetryAfter(failure));
+    expect(shown(received)).toBe(parentErrors.commentErrorMessage(failure, definitive ? "Comment operation failed" : fallback));
+    expect(Object.keys(runtime.transport.recovery.value.operations)).toHaveLength(definitive ? 0 : 1);
+    expect(shown(received)).not.toContain("private diagnostic");
+    runtime.transport.dispose();
+    runtime.host.dispose();
+  });
+
+  it("outcome-unknown (parent replaced): the frame settles honestly and keeps the identity", async () => {
+    const runtime = recoveryRuntime();
+    await flushMessages();
+    const pending = runtime.transport.mutate("thread.create", args).catch((caught: unknown) => caught);
+    await flushMessages();
+    runtime.host.dispose();
+    const replacement = runtime.createHost();
+    replacement.start(true);
+    await flushMessages();
+    const received = await pending;
+    expect(received).toBeInstanceOf(CommentMutationOutcomeUnknownError);
+    expect(shown(received)).toBe(new CommentMutationOutcomeUnknownError().message);
+    expect(frameErrors.commentRetryAfter(received)).toBeNull();
+    expect(received).not.toBeInstanceOf(CommentMutationRejectedError);
+    expect(Object.keys(runtime.transport.recovery.value.operations)).toHaveLength(1);
+    runtime.transport.dispose();
+    replacement.dispose();
+  });
+});
 
 describe("viewer reload bridge", () => {
   it("only offers one notice for the current scoped document", async () => {
