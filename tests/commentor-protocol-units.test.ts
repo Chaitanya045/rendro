@@ -60,6 +60,10 @@ describe("mutation argument validation", () => {
     ["thread.create", { body: "hi", anchor: { kind: "element", path: ["main"] } }, null],
     ["reply.add", { threadId: "t", body: " hi " }, { threadId: "t", body: "hi" }], ["reply.add", { threadId: "t", body: " " }, null], ["reply.add", { body: "hi" }, null], ["reply.add", { threadId: "", body: "hi" }, null],
     ["reply.remove", { threadId: "t", replyId: "r" }, { threadId: "t", replyId: "r" }], ["reply.remove", { threadId: "t" }, null], ["reply.remove", { threadId: "t", replyId: "" }, null],
+    // Edits (#287) carry a body validated as a create's, and a reply edit names its reply.
+    ["thread.edit", { threadId: "t", body: " fixed " }, { threadId: "t", body: "fixed" }], ["thread.edit", { threadId: "t", body: " " }, null], ["thread.edit", { body: "fixed" }, null],
+    ["reply.edit", { threadId: "t", replyId: "r", body: " fixed ", clientOperationId: "op" }, { clientOperationId: "op", threadId: "t", replyId: "r", body: "fixed" }],
+    ["reply.edit", { threadId: "t", body: "fixed" }, null], ["reply.edit", { threadId: "t", replyId: "r", body: "x".repeat(10_001) }, null],
     ["thread.resolve", { threadId: "t" }, null], ["thread.resolve", { threadId: "t", resolved: true }, { threadId: "t", resolved: true }],
     ["thread.resolve", { threadId: "t", resolved: "yes" }, null], ["thread.resolve", { threadId: "t", clientOperationId: "op" }, null],
     ["thread.archive", { threadId: "t", archived: false, clientOperationId: "op" }, { clientOperationId: "op", threadId: "t", archived: false }], ["thread.archive", { threadId: "t" }, null],
@@ -117,6 +121,9 @@ describe("recovery state", () => {
   it("keys removals by thread and reply, tolerating missing identifiers", () => {
     expect(mutationKey("reply.remove", { threadId: "t" })).toBe(JSON.stringify(["reply.remove", "t", null]));
     expect(mutationKey("reply.remove", { threadId: "t", replyId: "r" })).toBe(JSON.stringify(["reply.remove", "t", "r"]));
+    // One edit per thread or reply at a time (#287).
+    expect(mutationKey("reply.edit", { threadId: "t", replyId: "r", body: "ignored" })).toBe(JSON.stringify(["reply.edit", "t", "r"]));
+    expect(mutationKey("thread.edit", { threadId: "t", replyId: "ignored" })).toBe(JSON.stringify(["thread.edit", "t", null]));
     expect(mutationKey("thread.remove")).toBe(JSON.stringify(["thread.remove", null, null]));
     expect(mutationKey("thread.create", { threadId: "ignored" })).toBe(JSON.stringify(["thread.create", null, null]));
   });

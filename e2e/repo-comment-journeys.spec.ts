@@ -1,6 +1,6 @@
 import type { Page } from "@playwright/test";
 import { test, expect } from "./actor-fixtures";
-import { addReply, anchorOn, card, createThread, journeyDoc, open, openDrawer, pauseClock, pin, repoIds, repos, sessionToken, threadsAs, ui, writeThread } from "./comment-helpers";
+import { addReply, anchorOn, card, convexCallWith, createThread, journeyDoc, open, openDrawer, pauseClock, pin, repoIds, repos, sessionToken, threadsAs, ui, writeThread } from "./comment-helpers";
 import { desktop } from "./shell-helpers";
 
 /**
@@ -213,4 +213,92 @@ test("older threads and replies load on demand, and a comment arriving while scr
   await expect(banner).toBeHidden();
   await expect.poll(() => list.evaluate(element => element.scrollTop + element.clientHeight >= element.scrollHeight - 48)).toBe(true);
   await expect(card(author.page, "Late arrival")).toBeVisible();
+});
+
+test("an author edits their thread and reply in place, another reader's page follows, and nobody else may edit them", async ({ actor, secondContext }) => {
+  test.setTimeout(180_000);
+  const { comments } = repos();
+  const doc = await journeyDoc("edit");
+  const scope = { repoId: repoIds.comments, path: doc.path };
+  const author = await actor("editor");
+  const other = await actor("bystander");
+  await open(author.page, comments, doc.path, doc.commit);
+  const token = await sessionToken(author.page);
+  const otherToken = await sessionToken(other.page);
+  const threadId = await createThread(token, scope, "Frist take", await anchorOn(author.page, "quick brown"));
+  const theirReply = await addReply(otherToken, scope, threadId, "Their reply");
+  await open(other.page, comments, doc.path, doc.commit);
+  const anonymous = await secondContext.newPage();
+  await open(anonymous, comments, doc.path, doc.commit);
+  // A reply posted after both readers opened reaches them only through their live subscriptions (the first comments
+  // came with the page): once they show it, every later change does too.
+  const myReply = await addReply(token, scope, threadId, "My reply");
+  for (const reader of [other.page, anonymous]) {
+    await openDrawer(reader);
+    await expect(card(reader, "Their reply").locator(".reply", { hasText: "My reply" })).toBeVisible({ timeout: 30_000 });
+  }
+  type Edited = { _id: string; body: string; editedAt?: number; canEdit?: boolean; replies: Array<{ _id: string; body: string; editedAt?: number; canEdit?: boolean }> };
+  const server = async () => (await threadsAs(token, scope))[0] as unknown as Edited;
+  const me = ui(author.page);
+  await openDrawer(author.page);
+  const mine = card(author.page, "Their reply");
+  await expect(mine.getByTestId("commentor-edit-btn")).toHaveCount(1);
+  await expect(mine.getByTestId("commentor-edit-reply-btn")).toHaveCount(1);
+
+  // Edit opens the text in place with focus in it; Escape leaves it as it was, with focus back on Edit.
+  await mine.getByTestId("commentor-edit-btn").click();
+  const input = mine.getByTestId("commentor-edit-input");
+  await expect(input).toBeFocused();
+  await expect(input).toHaveValue("Frist take");
+  await input.fill("Not this");
+  await input.press("Escape");
+  await expect(input).toHaveCount(0);
+  await expect(mine.getByTestId("commentor-edit-btn")).toBeFocused();
+  await expect(mine.locator(".thread-view > .body")).toHaveText("Frist take");
+
+  // Saved with Enter: shown at once, then marked edited once the server has it, for the author and for other readers live.
+  await mine.getByTestId("commentor-edit-btn").click();
+  await input.fill("First take");
+  await input.press("Enter");
+  await expect(mine.locator(".thread-view > .body")).toHaveText("First take");
+  await expect(mine.locator(".thread-view > .head").getByTestId("commentor-edited")).toHaveAttribute("aria-label", /^Edited /);
+  await expect(mine.getByTestId("commentor-saving")).toHaveCount(0);
+  await expect(mine.getByTestId("commentor-edit-btn")).toBeFocused();
+  await expect(me.getByTestId("commentor-live")).toHaveText("Edit saved.");
+  expect(await server()).toMatchObject({ body: "First take", editedAt: expect.any(Number), canEdit: true });
+  for (const reader of [other.page, anonymous]) {
+    await expect(card(reader, "Their reply").locator(".thread-view > .body")).toHaveText("First take");
+    await expect(card(reader, "Their reply").locator(".thread-view > .head").getByTestId("commentor-edited")).toBeVisible();
+  }
+
+  // The author's reply, with Ctrl+Enter.
+  const replyEdit = mine.getByTestId("commentor-edit-reply-btn");
+  await replyEdit.click();
+  await expect(input).toHaveValue("My reply");
+  await input.fill("My reply, corrected");
+  await input.press("Control+Enter");
+  await expect(mine.locator(".reply", { hasText: "My reply, corrected" }).getByTestId("commentor-edited")).toBeVisible();
+  await expect(replyEdit).toBeFocused();
+  await expect.poll(async () => (await server()).replies.find(reply => reply._id === myReply)?.body).toBe("My reply, corrected");
+  await expect(card(other.page, "Their reply").locator(".reply", { hasText: "My reply, corrected" }).getByTestId("commentor-edited")).toBeVisible();
+
+  // Another signed-in reader may edit only their own reply; an anonymous reader nothing.
+  const theirs = card(other.page, "Their reply");
+  await expect(theirs.getByTestId("commentor-edit-btn")).toHaveCount(0);
+  await expect(theirs.getByTestId("commentor-edit-reply-btn")).toHaveCount(1);
+  await expect(theirs.locator(".reply", { hasText: "Their reply" }).getByTestId("commentor-edit-reply-btn")).toHaveCount(1);
+  await expect(card(anonymous, "Their reply").locator('[data-testid="commentor-edit-btn"], [data-testid="commentor-edit-reply-btn"]')).toHaveCount(0);
+
+  // The same edits forged against Convex are refused as the other writes are; nothing changes.
+  const forged = [
+    ["thread by another reader", await convexCallWith(otherToken, "mutation", "repoComments:editThread", { ...scope, threadId, body: "Hijacked" }), "forbidden"],
+    ["reply by another reader", await convexCallWith(otherToken, "mutation", "repoComments:editReply", { ...scope, threadId, replyId: myReply, body: "Hijacked" }), "forbidden"],
+    ["their reply by the author", await convexCallWith(token, "mutation", "repoComments:editReply", { ...scope, threadId, replyId: theirReply, body: "Hijacked" }), "forbidden"],
+    ["thread anonymously", await convexCallWith(undefined, "mutation", "repoComments:editThread", { ...scope, threadId, body: "Hijacked" }), "unauthenticated"],
+    ["another page's thread", await convexCallWith(token, "mutation", "repoComments:editThread", { ...scope, path: "docs/guide.md", threadId, body: "Hijacked" }), "not_found"],
+  ] as const;
+  for (const [label, result, code] of forged) expect(result, label).toMatchObject({ ok: false, code });
+  const after = await server();
+  expect([after.body, ...after.replies.map(reply => reply.body)]).toEqual(["First take", "Their reply", "My reply, corrected"]);
+  expect(after.replies.find(reply => reply._id === theirReply)?.editedAt).toBeUndefined();
 });

@@ -548,3 +548,139 @@ describe("repository comment access (Convex boundary)", () => {
     expect(await backend.run(ctx => ctx.db.query("repoCommentGrants").collect())).toEqual([]);
   });
 });
+
+describe("editing repository comments (#287)", () => {
+  type Viewer = Pick<ReturnType<Awaited<ReturnType<typeof world>>["as"]>, "mutation">;
+  const edit = (viewer: Viewer, args: Record<string, unknown>) => viewer.mutation(api.repoComments.editThread, args as never);
+  const editReply = (viewer: Viewer, args: Record<string, unknown>) => viewer.mutation(api.repoComments.editReply, args as never);
+
+  it("lets only the author edit a thread or a reply, whatever its status, and shows every reader the edit", async () => {
+    const { backend, users, anonymous, as, grant } = await world();
+    await grant(PUBLIC, null);
+    const threadId = await as("reader").mutation(api.repoComments.createThread, { ...scope(PUBLIC), body: "Frist", anchor: anchor() });
+    const theirs = await as("other").mutation(api.repoComments.addReply, { ...scope(PUBLIC), threadId, body: "Theirs" });
+    const mine = await as("reader").mutation(api.repoComments.addReply, { ...scope(PUBLIC), threadId, body: "Mine" });
+    const before = (await anonymous.query(api.repoComments.listThreads, { ...scope(PUBLIC), paginationOpts: pageOpts })).page[0];
+    expect(before).toMatchObject({ canEdit: false, canDelete: false });
+    expect(before.editedAt).toBeUndefined();
+    expect(await edit(as("reader"), { ...scope(PUBLIC), threadId, body: " First ", clientOperationId: "edit-1" })).toBeNull();
+    expect(await editReply(as("reader"), { ...scope(PUBLIC), threadId, replyId: mine, body: "Mine, edited" })).toBeNull();
+    // Every reader sees the new text and when it changed; only its author may edit it again.
+    const page = async (viewer: Pick<typeof anonymous, "query">) => (await viewer.query(api.repoComments.listThreads, { ...scope(PUBLIC), paginationOpts: pageOpts })).page[0];
+    const read = await page(anonymous);
+    expect(read).toMatchObject({ body: "First", editedAt: expect.any(Number), editOperationId: "edit-1", canEdit: false });
+    expect(read.replies.map(reply => [reply.body, Boolean(reply.editedAt), reply.canEdit])).toEqual([["Theirs", false, false], ["Mine, edited", true, false]]);
+    expect(read.replies[1].editOperationId).toBeUndefined();
+    const author = await page(as("reader"));
+    expect([author.canEdit, ...author.replies.map(reply => reply.canEdit)]).toEqual([true, false, true]);
+    const other = await page(as("other"));
+    expect([other.canEdit, ...other.replies.map(reply => reply.canEdit)]).toEqual([false, true, false]);
+    expect((await as("other").query(api.repoComments.listReplies, { ...scope(PUBLIC), threadId, paginationOpts: pageOpts })).page
+      .map(reply => [reply.body, reply.canEdit, typeof reply.editedAt])).toEqual([["Mine, edited", false, "number"], ["Theirs", true, "undefined"]]);
+    // The Worker's first page (#284, #303) is the same page, read for the reader it names.
+    const snapshot = await backend.query(api.repoComments.threadSnapshot, { internalSecret, ...scope(PUBLIC), userId: null, epoch: 0, viewerId: users.reader.userId });
+    expect(snapshot.page).toEqual((await as("reader").query(api.repoComments.listThreads, { ...scope(PUBLIC), paginationOpts: pageOpts })).page);
+    // A forged edit of someone else's comment is refused as archive and delete are; an anonymous one asks to sign in.
+    await expect(edit(as("other"), { ...scope(PUBLIC), threadId, body: "Hijacked" })).rejects.toThrow("Forbidden");
+    await expect(editReply(as("reader"), { ...scope(PUBLIC), threadId, replyId: theirs, body: "Hijacked" })).rejects.toThrow("Forbidden");
+    await expect(anonymous.mutation(api.repoComments.editThread, { ...scope(PUBLIC), threadId, body: "Drive-by" })).rejects.toThrow("Unauthenticated");
+    await expect(anonymous.mutation(api.repoComments.editReply, { ...scope(PUBLIC), threadId, replyId: mine, body: "Drive-by" })).rejects.toThrow("Unauthenticated");
+    // Resolved or archived, like replies and resolving: the author may still correct it.
+    await as("other").mutation(api.repoComments.resolve, { ...scope(PUBLIC), threadId, resolved: true });
+    await edit(as("reader"), { ...scope(PUBLIC), threadId, body: "Resolved, edited" });
+    await as("reader").mutation(api.repoComments.archive, { ...scope(PUBLIC), threadId, archived: true });
+    await edit(as("reader"), { ...scope(PUBLIC), threadId, body: "Archived, edited" });
+    await editReply(as("reader"), { ...scope(PUBLIC), threadId, replyId: mine, body: "Archived reply, edited" });
+    const archived = await page(anonymous);
+    expect([archived.body, archived.resolved, archived.archived, archived.replies[1].body]).toEqual(["Archived, edited", true, true, "Archived reply, edited"]);
+    // An edit without an operation clears the last one's, so no later echo is mistaken for it.
+    expect(archived.editOperationId).toBeUndefined();
+    const stored = await backend.run(ctx => ctx.db.get(threadId));
+    expect(stored!.updatedAt).toBe(stored!.editedAt);
+  });
+
+  it("validates an edit's text as a create does, and its target as every other write does", async () => {
+    const { backend, users, as, grant } = await world();
+    await grant(PUBLIC, null);
+    await grant(PRIVATE, users.reader.userId);
+    const threadId = await as("reader").mutation(api.repoComments.createThread, { ...scope(PUBLIC), body: "Thread", anchor: anchor() });
+    const replyId = await as("reader").mutation(api.repoComments.addReply, { ...scope(PUBLIC), threadId, body: "Reply" });
+    const otherThread = await as("reader").mutation(api.repoComments.createThread, { ...scope(PUBLIC), body: "Other", anchor: anchor() });
+    const privateThread = await as("reader").mutation(api.repoComments.createThread, { ...scope(PRIVATE), body: "Private", anchor: anchor() });
+    for (const bad of [
+      { body: "   " }, { body: "" }, { body: "x".repeat(MAX_COMMENT_LENGTH + 1) }, { clientOperationId: " " }, { clientOperationId: "x".repeat(129) },
+    ]) {
+      await expect(edit(as("reader"), { ...scope(PUBLIC), threadId, body: "x", ...bad })).rejects.toThrow("Invalid input");
+      await expect(editReply(as("reader"), { ...scope(PUBLIC), threadId, replyId, body: "x", ...bad })).rejects.toThrow("Invalid input");
+    }
+    await expect(edit(as("reader"), { ...scope(PUBLIC), threadId, body: "x", expectedAuthorId: users.other.userId })).rejects.toThrow("Forbidden");
+    // The longest body a create accepts is an edit's longest too.
+    await edit(as("reader"), { ...scope(PUBLIC), threadId, body: "x".repeat(MAX_COMMENT_LENGTH) });
+    for (const call of [
+      () => edit(as("reader"), { ...scope(PUBLIC), threadId: "not-an-id", body: "x" }),
+      () => edit(as("reader"), { ...scope(PUBLIC), threadId: replyId, body: "x" }),
+      () => edit(as("reader"), { ...scope(PUBLIC, "docs/other.md"), threadId, body: "x" }),
+      () => edit(as("reader"), { ...scope(PUBLIC), threadId: privateThread, body: "x" }),
+      () => editReply(as("reader"), { ...scope(PUBLIC), threadId, replyId: "not-an-id", body: "x" }),
+      () => editReply(as("reader"), { ...scope(PUBLIC), threadId, replyId: threadId, body: "x" }),
+      () => editReply(as("reader"), { ...scope(PUBLIC), threadId: otherThread, replyId, body: "x" }),
+    ]) await expect(call()).rejects.toThrow("Comment not found");
+    // Deleted comments are gone for edits too, and a deleted reply stays deleted.
+    await as("reader").mutation(api.repoComments.removeReply, { ...scope(PUBLIC), threadId, replyId });
+    await expect(editReply(as("reader"), { ...scope(PUBLIC), threadId, replyId, body: "Back?" })).rejects.toThrow("Comment not found");
+    await as("reader").mutation(api.repoComments.removeThread, { ...scope(PUBLIC), threadId });
+    await expect(edit(as("reader"), { ...scope(PUBLIC), threadId, body: "Back?" })).rejects.toThrow("Comment not found");
+    expect(await backend.run(ctx => ctx.db.get(threadId))).toMatchObject({ body: "" });
+  });
+
+  it("deduplicates a retried edit, and spends the write quota only on an edit that writes", async () => {
+    const { backend, as, grant } = await world();
+    await grant(PUBLIC, null);
+    const threadId = await as("reader").mutation(api.repoComments.createThread, { ...scope(PUBLIC), body: "v0", anchor: anchor() });
+    const replyId = await as("reader").mutation(api.repoComments.addReply, { ...scope(PUBLIC), threadId, body: "r0" });
+    await edit(as("reader"), { ...scope(PUBLIC), threadId, body: "v1", clientOperationId: "op-1" });
+    const first = await backend.run(ctx => ctx.db.get(threadId));
+    // The same operation again (a retry after an unknown outcome) writes nothing, even with other text.
+    await edit(as("reader"), { ...scope(PUBLIC), threadId, body: "v1", clientOperationId: "op-1" });
+    await edit(as("reader"), { ...scope(PUBLIC), threadId, body: "changed meanwhile", clientOperationId: "op-1" });
+    expect(await backend.run(ctx => ctx.db.get(threadId))).toEqual(first);
+    // Unchanged text is no edit at all: no marker, no write.
+    await editReply(as("reader"), { ...scope(PUBLIC), threadId, replyId, body: " r0 ", clientOperationId: "op-r" });
+    expect((await backend.run(ctx => ctx.db.get(replyId)))!.editedAt).toBeUndefined();
+    // Two creates and one edit have written so far: 27 more edits reach the 30-a-minute limit, and the next is refused.
+    for (let index = 0; index < 27; index += 1) {
+      await editReply(as("reader"), { ...scope(PUBLIC), threadId, replyId, body: `r${index + 1}`, clientOperationId: `reply-${index}` });
+    }
+    await expect(edit(as("reader"), { ...scope(PUBLIC), threadId, body: "one too many", clientOperationId: "op-2" })).rejects.toThrow(/rate/i);
+    expect((await backend.run(ctx => ctx.db.get(threadId)))!.body).toBe("v1");
+    // Retries and no-op edits still answer while the quota is spent.
+    await edit(as("reader"), { ...scope(PUBLIC), threadId, body: "v1", clientOperationId: "op-1" });
+    await edit(as("reader"), { ...scope(PUBLIC), threadId, body: "v1", clientOperationId: "op-3" });
+    await editReply(as("reader"), { ...scope(PUBLIC), threadId, replyId, body: "r27", clientOperationId: "reply-26" });
+    // Another reader keeps their own budget, and still may not edit the author's text.
+    await expect(edit(as("other"), { ...scope(PUBLIC), threadId, body: "v2" })).rejects.toThrow("Forbidden");
+  });
+
+  it("refuses an edit after revocation, repository removal or grant expiry, as every other write", async () => {
+    vi.useFakeTimers();
+    const { backend, users, as, grant } = await world();
+    await grant(PRIVATE, users.reader.userId, { epoch: 1 });
+    const threadId = await as("reader").mutation(api.repoComments.createThread, { ...scope(PRIVATE), body: "Note", anchor: anchor() });
+    const replyId = await as("reader").mutation(api.repoComments.addReply, { ...scope(PRIVATE), threadId, body: "Reply" });
+    // Someone without a grant learns nothing: "not found", as for a thread that does not exist.
+    await expect(edit(as("other"), { ...scope(PRIVATE), threadId, body: "x" })).rejects.toThrow("Comment not found");
+    await expect(editReply(as("other"), { ...scope(PRIVATE), threadId, replyId, body: "x" })).rejects.toThrow("Comment not found");
+    await backend.mutation(api.repoCommentAccess.revokeUser, { internalSecret, userId: users.reader.userId, epoch: 2 });
+    await expect(edit(as("reader"), { ...scope(PRIVATE), threadId, body: "After revocation" })).rejects.toThrow("Comment not found");
+    await expect(editReply(as("reader"), { ...scope(PRIVATE), threadId, replyId, body: "After revocation" })).rejects.toThrow("Comment not found");
+    await grant(PRIVATE, users.reader.userId, { epoch: 2, ttl: 1_000 });
+    vi.advanceTimersByTime(2_000);
+    await expect(edit(as("reader"), { ...scope(PRIVATE), threadId, body: "After expiry" })).rejects.toThrow("Comment not found");
+    await grant(PRIVATE, users.reader.userId, { epoch: 2 });
+    await backend.mutation(api.repoCommentAccess.removeRepos, { internalSecret, repoIds: [PRIVATE] });
+    await expect(edit(as("reader"), { ...scope(PRIVATE), threadId, body: "After removal" })).rejects.toThrow("Comment not found");
+    await expect(editReply(as("reader"), { ...scope(PRIVATE), threadId, replyId, body: "After removal" })).rejects.toThrow("Comment not found");
+    expect((await backend.run(ctx => ctx.db.get(threadId)))!.body).toBe("Note");
+    expect((await backend.run(ctx => ctx.db.get(replyId)))!.body).toBe("Reply");
+  });
+});

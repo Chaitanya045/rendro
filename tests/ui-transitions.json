@@ -10801,7 +10801,10 @@
         "src/repo-access/directory.ts",
         "src/repo-read/comments.ts",
         "src/repo-read/routes.ts",
-        "src/viewer/content-frame.ts"
+        "src/viewer/content-frame.ts",
+        "src/commentor/operation-state.ts",
+        "src/commentor/parent-transport.ts",
+        "src/commentor/mutation-args.ts"
       ],
       "roles": [
         "anonymous",
@@ -11283,6 +11286,234 @@
               "file": "tests/repo-comments-routes.test.ts",
               "name": "hands a public repository's first page to anyone, read for the signed-in reader, never cacheable (#303)",
               "kind": "unit"
+            }
+          ]
+        },
+        {
+          "id": "UI-163-E22",
+          "from": "The author's own thread or reply on a repository document (#287)",
+          "trigger": "Edit, then Escape or Cancel",
+          "expected": "The text becomes an editor in place with focus and the caret at its end, announced politely; Escape or Cancel ends only the edit (the bubble stays open), keeps the comment's text, discards the draft and returns focus to Edit",
+          "inventoryRefs": [
+            "UI-163"
+          ],
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/repo-comment-journeys.spec.ts",
+              "name": "an author edits their thread and reply in place, another reader's page follows, and nobody else may edit them",
+              "kind": "e2e"
+            },
+            {
+              "file": "tests/commentor-edit-browser.test.ts",
+              "name": "cancels with Escape or Cancel, keeping the open bubble and the comment's text, and saves nothing unchanged",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/commentor-edit-browser.test.ts",
+              "name": "edits inline with focus in and out, shows the text at once as saving, and the echo brings the edited marker",
+              "kind": "browser"
+            }
+          ]
+        },
+        {
+          "id": "UI-163-E23",
+          "from": "An open editor with changed text (#287)",
+          "trigger": "Enter, Ctrl/Cmd+Enter or Save",
+          "expected": "The editor closes with focus on Edit (aria-disabled while saving), the new text shows at once marked \"Saving…\" (aria-busy), and the live row naming the operation replaces it with an \"edited\" marker named with the edit time; Shift+Enter adds a line",
+          "inventoryRefs": [
+            "UI-163"
+          ],
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/repo-comment-journeys.spec.ts",
+              "name": "an author edits their thread and reply in place, another reader's page follows, and nobody else may edit them",
+              "kind": "e2e"
+            },
+            {
+              "file": "tests/commentor-edit-browser.test.ts",
+              "name": "edits inline with focus in and out, shows the text at once as saving, and the echo brings the edited marker",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/commentor-edit-browser.test.ts",
+              "name": "saves a double submit once, and Ctrl+Enter saves while Shift+Enter adds a line",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/commentor-edit-browser.test.ts",
+              "name": "edits the author's own reply optimistically, and offers Edit on nothing else",
+              "kind": "browser"
+            }
+          ]
+        },
+        {
+          "id": "UI-163-E24",
+          "from": "An edit is saving (#287)",
+          "trigger": "The write is refused, fails, or its outcome is unknown",
+          "expected": "The new text is taken back and the editor reopens with the reader's text and focus, with the error toast; an unknown outcome is retried as the same operation, and changed text is refused until it is resubmitted unchanged",
+          "inventoryRefs": [
+            "UI-163"
+          ],
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/commentor-edit-browser.test.ts",
+              "name": "rolls a failed edit back, reopens the editor with the reader's text, and retries an unknown outcome as the same operation",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/commentor-edit-browser.test.ts",
+              "name": "edits the author's own reply optimistically, and offers Edit on nothing else",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/commentor-parent-recovery.test.ts",
+              "name": "$method: $recovery before commit, then resubmit, has one backend effect",
+              "kind": "unit"
+            }
+          ]
+        },
+        {
+          "id": "UI-163-E25",
+          "from": "An open editor (#287)",
+          "trigger": "A double submit, or a save during the shared write quota",
+          "expected": "A double submit writes once; a rate limit shows the quota countdown, keeps the text, disables Save until it ends and refocuses the editor when dismissed",
+          "inventoryRefs": [
+            "UI-163"
+          ],
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/commentor-edit-browser.test.ts",
+              "name": "saves a double submit once, and Ctrl+Enter saves while Shift+Enter adds a line",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/commentor-edit-browser.test.ts",
+              "name": "explains a rate limit with a countdown and keeps the edit text, then saves",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/repo-comments-convex.test.ts",
+              "name": "deduplicates a retried edit, and spends the write quota only on an edit that writes",
+              "kind": "unit"
+            }
+          ]
+        },
+        {
+          "id": "UI-163-E26",
+          "from": "An edit is saving (#287)",
+          "trigger": "Other live pages arrive, or the acknowledgement comes before the echo",
+          "expected": "The saving text stays shown across unrelated live pages; acknowledged first, it stops saving and stays until the echo brings the marker",
+          "inventoryRefs": [
+            "UI-163"
+          ],
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/commentor-edit-browser.test.ts",
+              "name": "keeps a saving edit across other live pages, and shows it saved when the acknowledgement comes before the echo",
+              "kind": "browser"
+            }
+          ]
+        },
+        {
+          "id": "UI-163-E27",
+          "from": "A reader has a repository document open (#287)",
+          "trigger": "The author edits a thread or reply elsewhere",
+          "expected": "The open page shows the new text and the \"edited\" marker from the live subscription, without disturbing what the reader is typing",
+          "inventoryRefs": [
+            "UI-163"
+          ],
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/repo-comment-journeys.spec.ts",
+              "name": "an author edits their thread and reply in place, another reader's page follows, and nobody else may edit them",
+              "kind": "e2e"
+            },
+            {
+              "file": "tests/commentor-edit-browser.test.ts",
+              "name": "shows another reader's edit live, without disturbing what this reader is typing",
+              "kind": "browser"
+            }
+          ]
+        },
+        {
+          "id": "UI-163-E28",
+          "from": "A reader who is not the author, cannot write, or runs under a shell without edits (#287)",
+          "trigger": "Looks for Edit, or forges an edit",
+          "expected": "No Edit is offered (an open editor is dropped when the shell says nothing of edits); a forged edit is refused as the other writes are: forbidden for a non-author, unauthenticated anonymously, not found after revocation, expiry or removal",
+          "inventoryRefs": [
+            "UI-163"
+          ],
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/repo-comment-journeys.spec.ts",
+              "name": "an author edits their thread and reply in place, another reader's page follows, and nobody else may edit them",
+              "kind": "e2e"
+            },
+            {
+              "file": "tests/commentor-edit-browser.test.ts",
+              "name": "offers no Edit to a reader who may not write, or under a shell that does not carry edits",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/repo-comments-convex.test.ts",
+              "name": "lets only the author edit a thread or a reply, whatever its status, and shows every reader the edit",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/repo-comments-convex.test.ts",
+              "name": "refuses an edit after revocation, repository removal or grant expiry, as every other write",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/repo-comments-convex.test.ts",
+              "name": "validates an edit's text as a create does, and its target as every other write does",
+              "kind": "unit"
+            }
+          ]
+        },
+        {
+          "id": "UI-163-E29",
+          "from": "An open editor with unsaved text (#287)",
+          "trigger": "Live pages rebuild the list, the document reloads, or the comment is deleted",
+          "expected": "The editor keeps its text, focus and caret across rebuilds; after a reload the next Edit opens with the kept draft; a deleted comment takes its editor with it",
+          "inventoryRefs": [
+            "UI-163"
+          ],
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/commentor-edit-browser.test.ts",
+              "name": "keeps an unsaved edit across live pages and a reload of the document, then discards it with the edit",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/repo-comments-host.test.ts",
+              "name": "carries edits (#287): says so, keeps an edit's draft only for a thread on the page, and sends the author's edit",
+              "kind": "unit"
+            }
+          ]
+        },
+        {
+          "id": "UI-163-E30",
+          "from": "An edit is saving (#287)",
+          "trigger": "The reader changes (another account)",
+          "expected": "Nothing of the old reader's edit is taken back on screen or reopened",
+          "inventoryRefs": [
+            "UI-163"
+          ],
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/commentor-edit-browser.test.ts",
+              "name": "takes nothing back on screen when the reader changes while an edit is saving",
+              "kind": "browser"
             }
           ]
         }

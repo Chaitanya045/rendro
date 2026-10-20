@@ -94,6 +94,12 @@ export function documentCommentScopeFromFrame(
   return { repoId: config.repoId, documentPath: frame.target.path };
 }
 
+/** The thread a draft belongs to: a reply box's is keyed by its thread, an edit's (#287) by `editDraftKey`. */
+function draftThread(key: string): string {
+  const [kind, threadId, replyId, ...rest] = key.split(":");
+  return kind === "edit" && threadId && replyId !== "" && rest.length === 0 ? threadId : key;
+}
+
 export function sameScope(left: DocumentCommentScope | null, right: DocumentCommentScope | null): boolean {
   return Boolean(left && right && left.documentPath === right.documentPath && left.repoId === right.repoId);
 }
@@ -254,7 +260,7 @@ export class CommentorParentHost {
           type: COMMENTOR_PARENT_READY, protocolVersion: COMMENTOR_PROTOCOL_VERSION, canReloadViewer: true, parentGeneration: this.parentGeneration,
           userId: this.userId, recoveryState: this.userId ? this.recovery(this.loadedScope).value : { operations: {}, drafts: {} },
           // A repository frame is the same for every reader, so the widget learns here whether this one may write.
-          canWrite: this.userId !== null && this.writable,
+          canWrite: this.userId !== null && this.writable, edits: true,
         }, "*");
       } catch { this.subscriptionError(source); }
     }
@@ -466,7 +472,7 @@ export class CommentorParentHost {
         if (event.data.method === "draft.save") {
           const draft = record(args.draft);
           if (!draft || typeof draft.body !== "string" || draft.body.length > 10_000
-            || (args.key !== "create" && !this.threadIds.has(args.key))
+            || (args.key !== "create" && !this.threadIds.has(draftThread(args.key)))
             || (args.key === "create" && !validAnchor(draft.anchor))) throw new Error("Invalid draft");
           state.draft(args.key, draft);
         } else if (typeof args.clientOperationId === "string") state.complete(args.key, args.clientOperationId);
@@ -585,6 +591,8 @@ export class ConvexRepoCommentBackend implements DocumentCommentBackend {
     }
     if (method === "thread.remove") return this.client.mutation(api.repoComments.removeThread, { ...common, threadId });
     if (method === "reply.remove") return this.client.mutation(api.repoComments.removeReply, { ...common, threadId, replyId: args.replyId! });
+    if (method === "thread.edit") return this.client.mutation(api.repoComments.editThread, { ...common, threadId, body: args.body! });
+    if (method === "reply.edit") return this.client.mutation(api.repoComments.editReply, { ...common, threadId, replyId: args.replyId!, body: args.body! });
     return this.client.mutation(api.repoComments.addReply, { ...common, threadId, body: args.body! });
   }
 }

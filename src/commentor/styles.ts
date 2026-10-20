@@ -3,7 +3,7 @@
 export const COMMENTOR_STYLES = /* css */ `
 .toast.comment-quota{position:fixed;bottom:16px;left:16px;right:16px;z-index:2147483647;max-width:440px;margin:auto;box-sizing:border-box}
 .comment-quota[hidden]{display:none}
-.quota-live{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0 0 0 0);clip-path:inset(50%);white-space:nowrap;border:0}
+.quota-live,.live-region{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0 0 0 0);clip-path:inset(50%);white-space:nowrap;border:0}
 :host {
   --bg: #ffffff;
   --bg-elev: #ffffff;
@@ -725,6 +725,9 @@ textarea:disabled {
 .reply.is-new { animation: reply-in var(--duration-base) var(--ease-standard); }
 .reply-who { font-weight: 650; }
 .reply .when { font-size: 11px; }
+.edited { color: var(--fg-muted); font-size: 11px; }
+.edit-row { margin: 6px 0; }
+.reply .edit-row { margin-bottom: 0; }
 .actions {
   display: flex;
   gap: 6px;

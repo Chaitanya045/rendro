@@ -4,11 +4,13 @@ import { CommentorParentHost, type CommentPaginationSubscription, type DocumentC
 
 // A scriptable in-memory comment backend behind the real parent host, so Chromium
 // tests exercise the real widget, transport and host with only Convex replaced.
-type Reply = { _id: string; _creationTime: number; authorName: string; authorEmail: string; body: string; canDelete?: boolean; clientOperationId?: string };
+// Edits (#287): `canEdit` is opt-in, so a seed without it offers no Edit.
+type Edited = { canEdit?: boolean; editedAt?: number; editOperationId?: string };
+type Reply = { _id: string; _creationTime: number; authorName: string; authorEmail: string; body: string; canDelete?: boolean; clientOperationId?: string } & Edited;
 type Thread = {
   _id: string; _creationTime: number; authorName: string; authorEmail: string; body: string; anchor: unknown;
   resolved: boolean; archived?: boolean; canDelete?: boolean; replies: Reply[]; repliesHasMore?: boolean; clientOperationId?: string;
-};
+} & Edited;
 type Failure = { kind: "plain" } | { kind: "convex"; code: string } | { kind: "quota"; retryAfter: number } | { kind: "unknown-convex" };
 type Held = { method: string; args: Record<string, unknown>; settle: (failure?: Failure) => void };
 
@@ -83,6 +85,9 @@ const lab = {
       else if (thread && method === "thread.archive") thread.archived = typeof args.archived === "boolean" ? args.archived : !thread.archived;
       else if (thread && method === "reply.add") thread.replies = [...thread.replies, lab.reply({ body: args.body as string, authorName: "Me", clientOperationId })];
       else if (thread && method === "reply.remove") thread.replies = thread.replies.filter(reply => reply._id !== args.replyId);
+      else if (thread && method === "thread.edit") Object.assign(thread, { body: args.body, editedAt: Date.now(), editOperationId: clientOperationId });
+      else if (thread && method === "reply.edit") thread.replies = thread.replies.map(reply => reply._id === args.replyId
+        ? { ...reply, body: args.body as string, editedAt: Date.now(), editOperationId: clientOperationId } : reply);
       if (lab.publishOnMutate) lab.publish();
     };
     if (lab.holds.includes(method)) {

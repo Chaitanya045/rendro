@@ -1,6 +1,6 @@
 import { CommentWriteCooldown } from "./write-cooldown";
 import { commentErrorMessage, commentRetryAfter } from "./errors";
-import { CommentOperationConflictError } from "./operation-state";
+import { CommentOperationConflictError, editDraftKey } from "./operation-state";
 // commentor.ts — a drop-in commenting widget for any HTML file.
 //
 //   <script>window.COMMENTOR = { ... };</script>
@@ -78,6 +78,12 @@ interface Reply {
   _id: ReplyId;
   _creationTime: number;
   canDelete?: boolean;
+  /** Only the author may edit (#287); `editedAt` is the last edit, `editOperationId` the write that made it. */
+  canEdit?: boolean;
+  editedAt?: number;
+  editOperationId?: string;
+  /** The reader's own edit, shown before the live page carries it (#287). */
+  saving?: SendingState;
   authorEmail: string;
   authorName: string;
   body: string;
@@ -89,6 +95,10 @@ interface Thread {
   _id: ThreadId;
   _creationTime: number;
   canDelete?: boolean;
+  canEdit?: boolean;
+  editedAt?: number;
+  editOperationId?: string;
+  saving?: SendingState;
   authorEmail: string;
   authorName: string;
   body: string;
@@ -103,6 +113,10 @@ interface Thread {
 }
 /** An optimistic write (#284): "sending" until acknowledged, then "sent" until the live page carries it. */
 type SendingState = "sending" | "sent";
+/** The comment being edited (#287), and where: the drawer card or the open thread bubble. */
+interface EditTarget { key: string; threadId: ThreadId; replyId?: ReplyId; inBubble: boolean }
+/** An edit on its way (#287), laid over the live page until the live row names its operation. */
+interface SavingEdit { threadId: ThreadId; replyId?: ReplyId; body: string; clientOperationId: string; sending: SendingState }
 type Edge = "bottom" | "top" | "left" | "right";
 type ThreadFilter = "active" | "resolved" | "history";
 const THREAD_FILTERS: readonly ThreadFilter[] = [
@@ -161,6 +175,7 @@ const ICONS = {
   x: "M18 6L6 18M6 6l12 12",
   archive: "M21 8v13H3V8M1 3h22v5H1zM10 12h4",
   trash: "M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M10 11v6M14 11v6",
+  edit: "M12 20h9M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z",
 };
 
 function clamp(lo: number, hi: number, v: number): number {
@@ -367,6 +382,14 @@ class Commentor {
   private liveThreads: Thread[] = [];
   private sendingThreads: Thread[] = [];
   private sendingReplies = new Map<ThreadId, Reply>();
+  // Edits (#287): whether the parent carries them, the one comment being edited, the unsaved texts (kept in the
+  // recovery state like reply drafts, by `editDraftKey`), and saves on their way laid over the live page.
+  private canEdits = false;
+  private editing: EditTarget | null = null;
+  private editDrafts = new Map<string, string>();
+  private savingEdits = new Map<string, SavingEdit>();
+  // Polite announcements of the editor's outcomes; present (and empty) from the start so assistive technology registers it.
+  private live: HTMLElement;
   private threadFilter: ThreadFilter = "active";
   private seenThreadIds = new Set<ThreadId>();
   private seenReplyIds = new Set<ReplyId>();
@@ -411,6 +434,8 @@ class Commentor {
     this.root = host.attachShadow({ mode: "open" });
     this.writeCooldown = new CommentWriteCooldown(this.root);
     this.root.append(h("style", undefined, COMMENTOR_STYLES));
+    this.live = h("div", { class: "live-region", role: "status", "aria-live": "polite", "aria-atomic": "true", "data-testid": "commentor-live" });
+    this.root.append(this.live);
 
     this.markersLayer = h("div", { class: "markers" });
     this.bubbleLayer = h("div", { class: "bubbles" });
@@ -620,6 +645,8 @@ class Commentor {
       });
       this.settleSending(threads);
       this.liveThreads = threads;
+      // A comment deleted while it was being edited takes its editor with it.
+      if (this.editing && !this.editedItem(threads, this.editing)) this.editing = null;
       suppressNew ||= wasLoadingMore || pagination?.loading === true;
       const activeReply = this.root.activeElement instanceof HTMLTextAreaElement
         && this.root.activeElement.matches('[data-testid="commentor-reply-input"]')
@@ -757,14 +784,18 @@ class Commentor {
         // Another reader's writes are not this one's to show.
         this.sendingThreads = [];
         this.sendingReplies.clear();
+        this.savingEdits.clear();
+        this.editing = null;
         update([], { canLoadMore: false, loading: false });
       },
-      (compatible, canReloadViewer, parentCanWrite) => {
+      (compatible, canReloadViewer, parentCanWrite, parentEdits) => {
         this.parentUpgradeRequired = !compatible;
         this.canReloadViewer = canReloadViewer;
         const wasWritable = this.canWrite;
         // A repository frame is the same for every reader: the parent says whether this one may write.
         this.canWrite = compatible && parentCanWrite === true;
+        this.canEdits = this.canWrite && parentEdits === true;
+        if (!this.canEdits) this.editing = null;
         this.commentButton.disabled = !this.canWrite;
         if (!compatible) {
           this.closeBubbles(false, true);
@@ -772,6 +803,7 @@ class Commentor {
           this.liveThreads = [];
           this.sendingThreads = [];
           this.sendingReplies.clear();
+          this.savingEdits.clear();
           this.markersLayer.replaceChildren();
         }
         this.renderDrawerList();
@@ -1303,9 +1335,16 @@ class Commentor {
   private withSending(live: Thread[]): Thread[] {
     const threads = live.map((thread) => {
       const reply = this.sendingReplies.get(thread._id);
-      return reply ? { ...thread, replies: [...thread.replies, reply] } : thread;
+      const replies = (reply ? [...thread.replies, reply] : thread.replies).map((item) => this.withSavingEdit(item, thread._id, item._id));
+      return { ...this.withSavingEdit(thread, thread._id), replies };
     });
     return [...threads, ...this.sendingThreads];
+  }
+
+  /** A comment with the reader's edit on its way (#287) shows the new text at once. */
+  private withSavingEdit<T extends Thread | Reply>(item: T, threadId: ThreadId, replyId?: ReplyId): T {
+    const edit = this.savingEdits.get(editDraftKey(threadId, replyId));
+    return edit ? { ...item, body: edit.body, saving: edit.sending } : item;
   }
 
   /**
@@ -1329,6 +1368,17 @@ class Commentor {
       const thread = live.find((candidate) => candidate._id === threadId);
       if (reply.sending === "sent" || (thread && echoOf(reply, thread.replies))) this.sendingReplies.delete(threadId);
     }
+    // An edit's echo is the live row naming its operation (#287).
+    for (const [key, edit] of this.savingEdits) {
+      const row = this.editedItem(live, edit);
+      if (edit.sending === "sent" || row?.editOperationId === edit.clientOperationId) this.savingEdits.delete(key);
+    }
+  }
+
+  /** The thread or reply an edit is for, on this page. */
+  private editedItem(threads: Thread[], edit: { threadId: ThreadId; replyId?: ReplyId }): Thread | Reply | undefined {
+    const thread = threads.find((candidate) => candidate._id === edit.threadId);
+    return edit.replyId === undefined ? thread : thread?.replies.find((reply) => reply._id === edit.replyId);
   }
 
   /** Show the optimistic writes as they now stand, over the last live page. */
@@ -1403,8 +1453,10 @@ class Commentor {
     const state = this.parentTransport.recovery.value;
     if (!state) return;
     this.replyDrafts.clear();
+    this.editDrafts.clear();
     for (const [key, draft] of Object.entries(state.drafts)) {
-      if (key !== "create") this.replyDrafts.set(key as ThreadId, String(draft.body));
+      if (key.startsWith("edit:")) this.editDrafts.set(key, String(draft.body));
+      else if (key !== "create") this.replyDrafts.set(key as ThreadId, String(draft.body));
     }
     const composer = this.bubbleLayer.querySelector('.composer[data-state="open"]');
     if (composer && this.composerHasSubmitted && !state.drafts.create) this.closeBubbles(true, true);
@@ -1613,7 +1665,9 @@ class Commentor {
       this.closeBubbles(true);
       return;
     }
+    const editor = this.focusedEditor(bubble);
     bubble.replaceChildren(this.threadView(t, true));
+    this.refocusEditor(bubble, editor);
     const pin = this.markersLayer.querySelector<HTMLElement>(
       `[data-thread-id="${t._id}"]`,
     );
@@ -1738,6 +1792,7 @@ class Commentor {
       h("span", { class: "who", title: t.authorEmail }, t.authorName),
       // A thread on its way (#284) has no server time yet.
       t.sending ? null : h("span", { class: "when" }, timeAgo(t._creationTime)),
+      t.editedAt === undefined ? null : editedMarker(t.editedAt),
       t.resolved
         ? h("span", { class: "resolved" }, svg(ICONS.check), "Resolved")
         : null,
@@ -1751,6 +1806,9 @@ class Commentor {
         : null,
       t.sending === "sending"
         ? h("span", { class: "sending-state", "data-testid": "commentor-sending" }, "Sending…")
+        : null,
+      t.saving === "sending"
+        ? h("span", { class: "sending-state", "data-testid": "commentor-saving" }, "Saving…")
         : null,
     );
     // The reader's own thread on its way (#284) has no ID to act on until the live page carries it.
@@ -1818,6 +1876,7 @@ class Commentor {
         svg(ICONS.trash),
       );
       actions.append(resolveButton);
+      if (this.canEdits && t.canEdit === true) actions.append(this.editButton({ key: editDraftKey(t._id), threadId: t._id, inBubble }, t, "Edit comment"));
       if (t.canDelete === true) {
         actions.append(archiveButton, deleteButton);
       }
@@ -1860,29 +1919,42 @@ class Commentor {
           },
           "Locate element",
         );
+    const threadKey = editDraftKey(t._id);
     const view = h(
       "div",
-      { class: "thread-view", "data-thread-id": t._id },
+      { class: "thread-view", "data-thread-id": t._id, ...(t.saving === "sending" ? { "aria-busy": "true" } : {}) },
       head,
       locate,
-      h("div", { class: "body" }, t.body),
+      this.isEditing(threadKey, inBubble)
+        ? this.editor({ key: threadKey, threadId: t._id, inBubble }, t.body, `Edit comment by ${t.authorName}`)
+        : h("div", { class: "body" }, t.body),
     );
     const replies = h("div", { class: "replies" });
-    for (const r of t.replies)
+    for (const r of t.replies) {
+      const replyKey = editDraftKey(t._id, r._id);
+      const replyTarget: EditTarget = { key: replyKey, threadId: t._id, replyId: r._id, inBubble };
+      const editingReply = this.isEditing(replyKey, inBubble);
+      const busy = r.sending === "sending" || r.saving === "sending";
       replies.append(
         h(
           "div",
           {
-            class: `reply${this.newReplyIds.has(r._id) ? " is-new" : ""}${r.sending ? " is-sending" : ""}`,
-            ...(r.sending === "sending" ? { "aria-busy": "true" } : {}),
+            class: `reply${this.newReplyIds.has(r._id) ? " is-new" : ""}${r.sending || r.saving === "sending" ? " is-sending" : ""}`,
+            ...(busy ? { "aria-busy": "true" } : {}),
           },
           h("span", { class: "reply-who" }, r.authorName),
           " ",
           ...(r.sending ? [] : [h("span", { class: "when" }, timeAgo(r._creationTime)), " "]),
-          r.body,
+          ...(r.editedAt === undefined ? [] : [editedMarker(r.editedAt), " "]),
+          editingReply ? this.editor(replyTarget, r.body, `Edit reply by ${r.authorName}`) : r.body,
           ...(r.sending === "sending"
             ? [" ", h("span", { class: "sending-state", "data-testid": "commentor-sending" }, "Sending…")]
             : []),
+          ...(r.saving === "sending"
+            ? [" ", h("span", { class: "sending-state", "data-testid": "commentor-saving" }, "Saving…")]
+            : []),
+          // A reply on its way (#284) has no ID to edit yet.
+          this.canEdits && r.canEdit === true && !r.sending ? this.editButton(replyTarget, r, "Edit reply") : null,
           this.canWrite && r.canDelete === true
             ? h("button", {
                 class: "card-action danger",
@@ -1906,6 +1978,7 @@ class Commentor {
             : null,
         ),
       );
+    }
     const replyState = this.replyPagination.get(t._id) ?? {
       canLoadMore: Boolean(t.repliesHasMore),
       loading: false,
@@ -2029,6 +2102,210 @@ class Commentor {
       );
     }
     return view;
+  }
+
+  // ── edits (#287) ──
+  private isEditing(key: string, inBubble: boolean): boolean {
+    return this.editing?.key === key && this.editing.inBubble === inBubble;
+  }
+
+  private editMethod(target: EditTarget): { method: "thread.edit" | "reply.edit"; args: Record<string, unknown> } {
+    return target.replyId === undefined
+      ? { method: "thread.edit", args: { threadId: target.threadId } }
+      : { method: "reply.edit", args: { threadId: target.threadId, replyId: target.replyId } };
+  }
+
+  /** The author's Edit action. While its save is on its way it stays focusable (aria-disabled), so focus can return to it. */
+  private editButton(target: EditTarget, item: Thread | Reply, label: string): HTMLButtonElement {
+    const { method, args } = this.editMethod(target);
+    const saving = item.saving === "sending" || this.parentTransport.isMutationPending(method, args);
+    return h(
+      "button",
+      {
+        class: "card-action",
+        type: "button",
+        "data-tip": target.replyId === undefined ? "Edit" : "Edit reply",
+        "aria-label": `${label} by ${item.authorName}`,
+        "data-testid": target.replyId === undefined ? "commentor-edit-btn" : "commentor-edit-reply-btn",
+        "data-edit-key": target.key,
+        ...(saving ? { "aria-disabled": "true" } : {}),
+        onclick: (event: Event) => {
+          event.stopPropagation();
+          this.startEdit(target);
+        },
+      },
+      svg(ICONS.edit),
+    ) as HTMLButtonElement;
+  }
+
+  /** The inline editor (#287): the reply box's input, its text kept as a draft; Enter or Ctrl/Cmd+Enter saves, Escape cancels. */
+  private editor(target: EditTarget, current: string, label: string): HTMLElement {
+    const helpId = `commentor-edit-help-${target.key}`;
+    const input = h("textarea", {
+      class: "reply-input edit-input",
+      "data-testid": "commentor-edit-input",
+      "data-edit-key": target.key,
+      "aria-label": label,
+      "aria-describedby": helpId,
+      rows: "2",
+    }) as HTMLTextAreaElement;
+    input.value = this.editDrafts.get(target.key) ?? current;
+    input.addEventListener("input", () => {
+      this.editDrafts.set(target.key, input.value);
+      this.parentTransport.saveDraft(target.key, { body: input.value });
+    });
+    const save = h("button", { class: "primary", type: "button", "data-testid": "commentor-edit-save" }, "Save") as HTMLButtonElement;
+    const cancel = h("button", {
+      class: "ghost",
+      type: "button",
+      "data-testid": "commentor-edit-cancel",
+      onclick: (event: Event) => {
+        event.stopPropagation();
+        this.cancelEdit();
+      },
+    }, "Cancel");
+    const submit = () => void this.saveEdit(target, input, save, current);
+    save.addEventListener("click", (event) => {
+      event.stopPropagation();
+      submit();
+    });
+    input.addEventListener("keydown", (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        // Only the edit ends: the bubble it is in stays open.
+        event.preventDefault();
+        event.stopPropagation();
+        this.cancelEdit();
+      } else if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
+        event.preventDefault();
+        submit();
+      }
+    });
+    this.writeCooldown.updateButton(save);
+    return h(
+      "div",
+      { class: "edit-row" },
+      input,
+      h(
+        "div",
+        { class: "composer-footer" },
+        h("span", { class: "composer-help", id: helpId }, "Enter or Ctrl+Enter to save · Shift+Enter for a new line · Esc to cancel"),
+        h("div", { class: "actions" }, cancel, save),
+      ),
+    );
+  }
+
+  private editorScope(target: EditTarget): HTMLElement {
+    return target.inBubble ? this.bubbleLayer : this.drawerList;
+  }
+
+  private editControl(target: EditTarget, testIds: string): HTMLElement | undefined {
+    return Array.from(this.editorScope(target).querySelectorAll<HTMLElement>(testIds))
+      .find((element) => element.dataset.editKey === target.key);
+  }
+
+  /** Show the comments again after the editor opened or closed, and put focus where the reader is now. */
+  private showEdit(target: EditTarget, focusEditor: boolean): void {
+    this.applySending();
+    if (focusEditor) {
+      const input = this.editControl(target, '[data-testid="commentor-edit-input"]') as HTMLTextAreaElement | undefined;
+      input?.focus();
+      input?.setSelectionRange(input.value.length, input.value.length);
+    } else {
+      this.editControl(target, '[data-testid="commentor-edit-btn"], [data-testid="commentor-edit-reply-btn"]')?.focus();
+    }
+  }
+
+  /** Open the editor with the comment's text, or with the reader's unsaved edit of it when one is kept. */
+  private startEdit(target: EditTarget): void {
+    const { method, args } = this.editMethod(target);
+    if (this.savingEdits.get(target.key)?.sending === "sending" || this.parentTransport.isMutationPending(method, args)) return;
+    this.editing = target;
+    this.showEdit(target, true);
+    this.announce(target.replyId === undefined ? "Editing your comment." : "Editing your reply.");
+  }
+
+  private endEdit(message: string): void {
+    const target = this.editing!;
+    this.editing = null;
+    this.editDrafts.delete(target.key);
+    this.parentTransport.saveDraft(target.key, { body: "" });
+    this.showEdit(target, false);
+    this.announce(message);
+  }
+
+  private cancelEdit(): void {
+    this.endEdit("Edit cancelled.");
+  }
+
+  /**
+   * Save an edit optimistically (#287): the new text shows at once, marked "Saving…", and the editor closes with focus
+   * on the comment's Edit. The live row naming the operation replaces it. A failure takes the text back and reopens the
+   * editor with what the reader wrote, with the error, quota countdown or unknown-outcome notice.
+   */
+  private async saveEdit(target: EditTarget, input: HTMLTextAreaElement, save: HTMLButtonElement, current: string): Promise<void> {
+    const submitted = input.value;
+    const body = submitted.trim();
+    if (!body) return;
+    if (this.writeCooldown.active) { this.writeCooldown.reveal(); return; }
+    if (save.disabled) return;
+    // Unchanged text is no edit: nothing to write, and no "edited" marker.
+    if (body === current) { this.endEdit("No changes to save."); return; }
+    this.writeCooldown.reset();
+    save.disabled = true;
+    input.disabled = true;
+    const { method, args } = this.editMethod(target);
+    const sending = this.parentTransport.mutate(method, { ...args, body });
+    const clientOperationId = this.parentTransport.inFlightOperationId(method, args);
+    const item: SavingEdit | null = clientOperationId
+      ? { threadId: target.threadId, replyId: target.replyId, body, clientOperationId, sending: "sending" }
+      : null;
+    if (item) this.savingEdits.set(target.key, item);
+    this.editing = null;
+    this.showEdit(target, false);
+    try {
+      await sending;
+      // A write that succeeds was dispatched, so it has its optimistic copy.
+      this.editDrafts.delete(target.key);
+      if (this.savingEdits.get(target.key) === item) item!.sending = "sent";
+      // Edit is offered again now that nothing is on its way.
+      this.applySending();
+      this.announce("Edit saved.");
+    } catch (err) {
+      console.error("[commentor] edit failed", err);
+      // The reader changed meanwhile: nothing of it is on screen to take back.
+      if (item && this.savingEdits.get(target.key) !== item) return;
+      this.savingEdits.delete(target.key);
+      this.editDrafts.set(target.key, submitted);
+      this.editing = target;
+      // The reopened editor's Save follows a cooldown another write may have started meanwhile.
+      this.showEdit(target, true);
+      const retryAfter = commentRetryAfter(err);
+      if (retryAfter !== null) this.writeCooldown.start(retryAfter, () => this.editControl(target, '[data-testid="commentor-edit-input"]'));
+      else this.toast(this.writeErrorMessage(err, "Could not save your edit."), { kind: "error" });
+    }
+  }
+
+  /** The edit control (an Edit action or the editor) focused in `scope`, and where the editor's caret is. */
+  private focusedEditor(scope: HTMLElement): { key: string; testId: string; caret: [number, number] | null } | null {
+    const active = this.root.activeElement as HTMLElement | null;
+    if (!active?.dataset.editKey || !scope.contains(active)) return null;
+    return {
+      key: active.dataset.editKey,
+      testId: active.dataset.testid!,
+      caret: active instanceof HTMLTextAreaElement ? [active.selectionStart, active.selectionEnd] : null,
+    };
+  }
+
+  private refocusEditor(scope: HTMLElement, editor: ReturnType<Commentor["focusedEditor"]>): void {
+    if (!editor) return;
+    const control = Array.from(scope.querySelectorAll<HTMLElement>(`[data-testid="${editor.testId}"]`))
+      .find((candidate) => candidate.dataset.editKey === editor.key);
+    control?.focus({ preventScroll: true });
+    if (control instanceof HTMLTextAreaElement && editor.caret) control.setSelectionRange(...editor.caret);
+  }
+
+  private announce(text: string): void {
+    this.live.textContent = text;
   }
 
   private replyInputs(threadId: ThreadId): HTMLTextAreaElement[] {
@@ -2210,6 +2487,13 @@ class Commentor {
 
   // `keepPlace` is false when the list starts afresh (the drawer opening, another tab), so no layout is read for it.
   private renderDrawerList(keepPlace = true): void {
+    // The list is rebuilt: an editor the reader is typing in (#287) keeps its focus and caret.
+    const editor = this.focusedEditor(this.drawerList);
+    this.buildDrawerList(keepPlace);
+    this.refocusEditor(this.drawerList, editor);
+  }
+
+  private buildDrawerList(keepPlace: boolean): void {
     const counts: Record<ThreadFilter, number> = {
       active: this.filteredThreads("active").length,
       resolved: this.filteredThreads("resolved").length,
@@ -2299,9 +2583,9 @@ class Commentor {
         {
           class: `drawer-thread${
             this.newThreadIds.has(t._id) ? " is-new" : ""
-          }${t.sending ? " is-sending" : ""}`,
+          }${t.sending || t.saving === "sending" ? " is-sending" : ""}`,
           "data-thread-id": t._id,
-          ...(t.sending === "sending" ? { "aria-busy": "true" } : {}),
+          ...(t.sending === "sending" || t.saving === "sending" ? { "aria-busy": "true" } : {}),
           role: "group",
           tabindex: "0",
           "aria-label": `Comment by ${t.authorName}`,
@@ -2696,6 +2980,12 @@ class Commentor {
       close(el);
     };
   }
+}
+
+/** "edited", named with when (#287): the time is the reader's local one. */
+function editedMarker(editedAt: number): HTMLElement {
+  const when = new Date(editedAt).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+  return h("span", { class: "edited", "data-testid": "commentor-edited", role: "note", "aria-label": `Edited ${when}`, title: `Edited ${when}` }, "edited");
 }
 
 /** A new comment's anchor always quotes text: the reader selected it, or a kept draft (validated) did. */

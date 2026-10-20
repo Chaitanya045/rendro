@@ -291,7 +291,7 @@ describe("slow comment mutations", () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
-  it.each(["thread.create", "thread.resolve", "thread.archive", "thread.remove", "reply.add", "reply.remove"] as const)(
+  it.each(["thread.create", "thread.resolve", "thread.archive", "thread.remove", "thread.edit", "reply.add", "reply.edit", "reply.remove"] as const)(
     "keeps %s pending after the soft deadline, offers recovery, and accepts a late result without retrying",
     async (method) => {
       const { transport, slow, dismissSlow, postMessage, respond, publish, update } = transportRuntime();
@@ -372,7 +372,7 @@ describe("comment protocol compatibility gate", () => {
     };
     vi.stubGlobal("window", { setTimeout, clearTimeout });
     const transport = new ParentCommentTransport(parent, events as never, "guide.html");
-    const methods = ["thread.create", "reply.add", "thread.resolve", "thread.archive", "thread.remove", "reply.remove"] as const;
+    const methods = ["thread.create", "reply.add", "thread.resolve", "thread.archive", "thread.remove", "reply.remove", "thread.edit", "reply.edit"] as const;
     const checkBlocked = async () => {
       for (const method of methods) await expect(transport.mutate(method, {})).rejects.toThrow("Comments were updated");
       transport.saveDraft("create", { body: "Draft" });

@@ -384,8 +384,8 @@ describe("comment widget asset skew", () => {
   ])("shows an accessible upgrade notice for incompatible READY %j", async (ready) => {
     const { root, button, requests, publish } = await widget({ ready });
     button("commentor-panel-btn").click();
-    expect(root.querySelector('[role="status"]:not(.quota-live)')?.textContent).toContain(COMMENTOR_UPGRADE_NOTICE);
-    expect(root.querySelector('[role="status"]:not(.quota-live)')?.textContent).toContain("browser’s Reload button");
+    expect(root.querySelector('[role="status"]:not(.quota-live):not(.live-region)')?.textContent).toContain(COMMENTOR_UPGRADE_NOTICE);
+    expect(root.querySelector('[role="status"]:not(.quota-live):not(.live-region)')?.textContent).toContain("browser’s Reload button");
     expect(root.querySelector('a[target="_top"]')).toBeNull();
     expect(button("commentor-comment-btn").disabled).toBe(true);
     button("commentor-comment-btn").click();
@@ -393,7 +393,7 @@ describe("comment widget asset skew", () => {
     await flush();
     expect(requests).toEqual([]);
     expect(root.querySelector('[data-testid="commentor-resolve-btn"]')).toBeNull();
-    expect(root.querySelector('[role="status"]:not(.quota-live)')?.textContent).toContain(COMMENTOR_UPGRADE_NOTICE);
+    expect(root.querySelector('[role="status"]:not(.quota-live):not(.live-region)')?.textContent).toContain(COMMENTOR_UPGRADE_NOTICE);
   });
 
   it("uses the advertised parent reload capability for an incompatible version", async () => {
@@ -401,7 +401,7 @@ describe("comment widget asset skew", () => {
       parentGeneration: "future", protocolVersion: COMMENTOR_PROTOCOL_VERSION + 1, canReloadViewer: true,
     } });
     button("commentor-panel-btn").click();
-    const reload = root.querySelector<HTMLButtonElement>('[role="status"]:not(.quota-live) button')!;
+    const reload = root.querySelector<HTMLButtonElement>('[role="status"]:not(.quota-live):not(.live-region) button')!;
     expect(reload.textContent).toBe("Show reload notice");
     reload.click();
     expect(reloadViewer).toHaveBeenCalledOnce();
@@ -415,7 +415,7 @@ describe("comment widget asset skew", () => {
     send({ type: COMMENTOR_PARENT_READY });
     send({ type: COMMENTOR_PARENT_READY, protocolVersion: COMMENTOR_PROTOCOL_VERSION, parentGeneration: "new", userId: "user-a", canWrite: true });
     await flush();
-    expect(root.querySelector('[role="status"]:not(.quota-live)')).toBeNull();
+    expect(root.querySelector('[role="status"]:not(.quota-live):not(.live-region)')).toBeNull();
     expect(button("commentor-comment-btn").disabled).toBe(false);
     button("commentor-resolve-btn").click();
     expect(mutations()).toHaveLength(1);

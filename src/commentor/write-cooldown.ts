@@ -1,8 +1,8 @@
 import { commentQuotaMessage } from "./errors";
 
-const submissions = '[data-testid="commentor-composer-post"], [data-testid="commentor-reply-send"]';
+const submissions = '[data-testid="commentor-composer-post"], [data-testid="commentor-reply-send"], [data-testid="commentor-edit-save"]';
 
-/** One quota covers both threads and replies, including controls recreated by live updates. */
+/** One quota covers threads, replies and edits, including controls recreated by live updates. */
 export class CommentWriteCooldown {
   private until = 0;
   private timer: number | undefined;

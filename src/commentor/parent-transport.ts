@@ -51,7 +51,7 @@ export class ParentCommentTransport {
   private refreshHandler: (() => void) | null = null;
   private compatible = false;
   private canReloadViewer = false;
-  private compatibilityHandler: ((compatible: boolean, canReloadViewer: boolean, parentCanWrite?: boolean) => void) | null = null;
+  private compatibilityHandler: ((compatible: boolean, canReloadViewer: boolean, parentCanWrite?: boolean, parentEdits?: boolean) => void) | null = null;
   private sequence = 0;
   private userId: string | null | undefined;
   private identityChangeHandler: (() => void) | null = null;
@@ -73,7 +73,7 @@ export class ParentCommentTransport {
     onSlowMutation?: SlowHandler,
     onRefresh?: () => void,
     onIdentityChange?: () => void,
-    onCompatibility?: (compatible: boolean, canReloadViewer: boolean, parentCanWrite?: boolean) => void,
+    onCompatibility?: (compatible: boolean, canReloadViewer: boolean, parentCanWrite?: boolean, parentEdits?: boolean) => void,
   ): void {
     this.updateHandler = onUpdate;
     this.repliesUpdateHandler = onRepliesUpdate;
@@ -134,11 +134,13 @@ export class ParentCommentTransport {
     const records = rows as Array<Record<string, unknown>>;
     const all = records.flatMap((row) => [row, ...(Array.isArray(row.replies) ? row.replies : [])]) as Array<Record<string, unknown>>;
     for (const [key, op] of Object.entries(this.recovery.value.operations)) {
-      const found = all.some((row) => row.clientOperationId === op.clientOperationId);
+      const created = (op.method === "thread.create" || op.method === "reply.add") && all.some((row) => row.clientOperationId === op.clientOperationId);
+      // An edit (#287) names its operation on the row it changed.
+      const edited = (op.method === "thread.edit" || op.method === "reply.edit") && all.some((row) => row.editOperationId === op.clientOperationId);
       // A matching status boolean does not identify who applied it. Status
       // operations settle only on their own mutation acknowledgement/receipt.
       // Absence from a paginated subscription is never proof of deletion.
-      if (found && (op.method === "thread.create" || op.method === "reply.add")) this.complete(key, op.clientOperationId);
+      if (created || edited) this.complete(key, op.clientOperationId);
     }
   }
 
@@ -222,7 +224,8 @@ export class ParentCommentTransport {
     if (isCommentorParentReadySignal(event.data)) {
       this.compatible = isCommentorParentReady(event.data);
       this.canReloadViewer = event.data.canReloadViewer === true;
-      this.compatibilityHandler?.(this.compatible, this.canReloadViewer, (event.data as { canWrite?: unknown }).canWrite === true);
+      const ready = event.data as { canWrite?: unknown; edits?: unknown };
+      this.compatibilityHandler?.(this.compatible, this.canReloadViewer, ready.canWrite === true, ready.edits === true);
       if (!isCommentorParentReady(event.data)) {
         this.retirePending(new CommentMutationOutcomeUnknownError());
         return;
