@@ -1,13 +1,13 @@
 import { ConvexError } from "convex/values";
 import { api } from "../convex/_generated/api";
-import { fixture } from "./helpers/comment-fixture";
+import { fixture, repoAnchor } from "./helpers/comment-fixture";
 import { Window as StorageWindow } from "happy-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CommentorParentHost, type DocumentCommentBackend } from "../src/commentor/parent-host";
 import { COMMENTOR_VIEWER_RELOAD, COMMENTOR_PARENT_READY, COMMENTOR_PARENT_RESPONSE, COMMENTOR_PARENT_REQUEST } from "../src/commentor/parent-protocol";
 import { CommentMutationOutcomeUnknownError, ParentCommentTransport } from "../src/commentor/parent-transport";
 
-function recoveryRuntime(scope = { organizationId: "org-a", projectId: "project-a" as string, documentPath: "guide.html" }, principal = "user-a", legacy = false) {
+function recoveryRuntime(scope = { repoId: 9101, documentPath: "docs/guide.md" }, principal = "user-a") {
   vi.useFakeTimers();
   const hostListeners = new Set<EventListener>();
   const childListeners = new Set<EventListener>();
@@ -25,7 +25,7 @@ function recoveryRuntime(scope = { organizationId: "org-a", projectId: "project-
   const child = { postMessage: vi.fn((data: unknown) => deliver(childListeners, parent, data)) };
   let frameLoad!: () => void;
   const frame = {
-    src: legacy ? `https://rendro.test/legacy-view/example/files/${scope.documentPath}` : `https://rendro.test/organizations/${scope.organizationId}/projects/${scope.projectId}/docs/files/${scope.documentPath}`,
+    src: `https://rendro.test/r/acme/docs/@${"c".repeat(40)}/files/${scope.documentPath}`,
     contentWindow: child,
     addEventListener: (_type: string, listener: () => void) => { frameLoad = listener; },
     removeEventListener: vi.fn(),
@@ -48,10 +48,10 @@ function recoveryRuntime(scope = { organizationId: "org-a", projectId: "project-
       fail = () => reject(new Error("backend rejected"));
     })),
   } satisfies DocumentCommentBackend;
-  const createHost = (userId = principal) => new CommentorParentHost(frame, "https://rendro.test", legacy ? { orgSlug: "example", convexUrl: "https://convex.test" } : {
-    organizationId: scope.organizationId, projectId: scope.projectId as never, convexUrl: "https://convex.test",
+  const createHost = (userId = principal) => new CommentorParentHost(frame, "https://rendro.test", {
+    repoId: scope.repoId, accessUrl: "/r/acme/docs/comment-access", convexUrl: "https://convex.test",
   }, backend, userId);
-  const transport = new ParentCommentTransport(parent, events(childListeners) as never, "guide.html");
+  const transport = new ParentCommentTransport(parent, events(childListeners) as never, scope.documentPath);
   const dismissSlow = vi.fn();
   const slow = vi.fn(() => dismissSlow);
   const update = vi.fn();
@@ -80,7 +80,7 @@ async function flushMessages() {
 }
 
 const methods = ["thread.create", "thread.resolve", "thread.archive", "thread.remove", "reply.add", "reply.remove"] as const;
-const args = { resolved: true, archived: true, threadId: "thread-1", replyId: "reply-1", body: "Pending write", anchor: { kind: "element", path: ["main"] } };
+const args = { resolved: true, archived: true, threadId: "thread-1", replyId: "reply-1", body: "Pending write", anchor: repoAnchor() };
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -92,11 +92,11 @@ describe("comment recovery across parent subscriptions and generations", () => {
     const runtime = recoveryRuntime();
     await flushMessages();
     for (let i = 0; i < 100; i++) runtime.parent.postMessage({
-      type: COMMENTOR_PARENT_REQUEST, requestId: `flood-${i}`, method: "subscribe", args: { documentPath: "guide.html" },
+      type: COMMENTOR_PARENT_REQUEST, requestId: `flood-${i}`, method: "subscribe", args: { documentPath: "docs/guide.md" },
     });
     await flushMessages();
     expect(runtime.backend.subscribe).toHaveBeenCalledTimes(20);
-    runtime.transport.saveDraft("create", { body: "Still recoverable", anchor: { kind: "element", path: ["main"] } });
+    runtime.transport.saveDraft("create", { body: "Still recoverable", anchor: repoAnchor() });
     await flushMessages();
     expect(Object.values(window.sessionStorage).some(value => String(value).includes("Still recoverable"))).toBe(true);
     await vi.advanceTimersByTimeAsync(1000);
@@ -192,11 +192,11 @@ describe("durable retries through the parent bridge and real Convex mutations", 
     "$method: $recovery before commit, then resubmit, has one backend effect",
     async ({ method, recovery }) => {
       const { backend: convex, viewers, scope, data } = await fixture();
-      const threadId = await viewers.author.mutation(api.documentThreads.create, {
-        ...scope, body: "Original", anchor: { kind: "element", path: ["main"] }, clientOperationId: "original-thread",
+      const threadId = await viewers.author.mutation(api.repoComments.createThread, {
+        ...scope, body: "Original", anchor: repoAnchor(), clientOperationId: "original-thread",
       });
-      const replyId = await viewers.author.mutation(api.documentReplies.add, { ...scope, threadId, body: "Original reply", clientOperationId: "original-reply" });
-      const runtime = recoveryRuntime(scope, String(data.users.find((user) => user.name === "author")!.userId));
+      const replyId = await viewers.author.mutation(api.repoComments.addReply, { ...scope, threadId, body: "Original reply", clientOperationId: "original-reply" });
+      const runtime = recoveryRuntime({ repoId: scope.repoId, documentPath: scope.path }, String(data.users.find((user) => user.name === "author")!.userId));
       runtime.backend.subscribe.mockImplementation((_scope, onUpdate) => {
         onUpdate([{ _id: threadId, resolved: false, archived: false }], { canLoadMore: false, loading: false });
         return { unsubscribe: vi.fn(), loadMore: () => false };
@@ -204,19 +204,19 @@ describe("durable retries through the parent bridge and real Convex mutations", 
       const gates: Array<() => void> = [];
       const completed: Promise<unknown>[] = [];
       const functions = {
-        "thread.create": api.documentThreads.create, "thread.resolve": api.documentThreads.resolve,
-        "thread.archive": api.documentThreads.archive, "thread.remove": api.documentThreads.remove,
-        "reply.add": api.documentReplies.add, "reply.remove": api.documentReplies.remove,
+        "thread.create": api.repoComments.createThread, "thread.resolve": api.repoComments.resolve,
+        "thread.archive": api.repoComments.archive, "thread.remove": api.repoComments.removeThread,
+        "reply.add": api.repoComments.addReply, "reply.remove": api.repoComments.removeReply,
       };
       runtime.backend.mutate.mockImplementation((method, scope, args) => {
         const gate = new Promise<void>((resolve) => gates.push(resolve));
-        const result = gate.then(() => viewers.author.mutation(functions[method], { ...scope, ...args as object } as never));
+        const result = gate.then(() => viewers.author.mutation(functions[method], { repoId: scope.repoId, path: scope.documentPath, ...args as object } as never));
         completed.push(result);
         return result;
       });
       await flushMessages();
       let transport = runtime.transport;
-      const action = { threadId, replyId, body: "Pending write", anchor: { kind: "element", path: ["main"] }, resolved: true, archived: true };
+      const action = { threadId, replyId, body: "Pending write", anchor: repoAnchor(), resolved: true, archived: true };
       const first = transport.mutate(method, action).catch((error: Error) => error);
       await flushMessages();
       const firstId = (runtime.backend.mutate.mock.calls[0][2] as { clientOperationId: string }).clientOperationId;
@@ -241,17 +241,16 @@ describe("durable retries through the parent bridge and real Convex mutations", 
       await completed[1];
       await flushMessages();
       await retry;
-      if (method === "thread.resolve") await viewers.member.mutation(api.documentThreads.resolve, { ...scope, threadId, resolved: false, clientOperationId: "newer-reopen" });
-      if (method === "thread.archive") await viewers.admin.mutation(api.documentThreads.archive, { ...scope, threadId, archived: false, clientOperationId: "newer-unarchive" });
       gates[0]();
       await completed[0];
       await flushMessages();
-      const threads = await convex.run((ctx) => ctx.db.query("documentThreads").collect());
-      const replies = await convex.run((ctx) => ctx.db.query("documentReplies").collect());
+      const threads = await convex.run((ctx) => ctx.db.query("repoThreads").collect());
+      const replies = await convex.run((ctx) => ctx.db.query("repoReplies").collect());
       if (method === "thread.create") expect(threads.filter((row) => row.clientOperationId === firstId)).toHaveLength(1);
       if (method === "reply.add") expect(replies.filter((row) => row.clientOperationId === firstId)).toHaveLength(1);
-      if (method === "thread.resolve") expect(threads.find((row) => row._id === threadId)?.resolved).toBe(false);
-      if (method === "thread.archive") expect(threads.find((row) => row._id === threadId)?.archived).toBe(false);
+      // Status targets are explicit, so the abandoned original and its retry set the same state.
+      if (method === "thread.resolve") expect(threads.find((row) => row._id === threadId)?.resolved).toBe(true);
+      if (method === "thread.archive") expect(threads.find((row) => row._id === threadId)?.archived).toBe(true);
       if (method === "thread.remove") expect(threads.find((row) => row._id === threadId)?.deletedAt).toEqual(expect.any(Number));
       if (method === "reply.remove") expect(replies.find((row) => row._id === replyId)?.deletedAt).toEqual(expect.any(Number));
       expect(Object.keys(transport.recovery.value.operations)).toHaveLength(0);
@@ -407,7 +406,7 @@ describe("round-three recovery regressions", () => {
     runtime.host.dispose();
   });
 
-  describe.each([false, true])("legacy=%s error recovery", legacy => {
+  describe("error recovery", () => {
     it.each((["thread.create", "reply.add"] as const).flatMap(method => [
       { method, data: { kind: "RateLimited", name: "comments", retryAfter: 2100 }, message: "RateLimited" },
       ...[
@@ -419,7 +418,7 @@ describe("round-three recovery regressions", () => {
         ["conflict", "This comment operation changed"],
       ].map(([code, message]) => ({ method, data: { code, message: "private diagnostic must not reach the widget" }, message })),
     ]))("retires a definitively rejected $method identity for $data but keeps its editable draft", async ({ method, data, message }) => {
-      const runtime = recoveryRuntime(undefined, undefined, legacy);
+      const runtime = recoveryRuntime();
       await flushMessages();
       runtime.backend.mutate.mockRejectedValueOnce(new ConvexError(data));
       await expect(runtime.transport.mutate(method, args)).rejects.toThrow(message);
@@ -439,12 +438,12 @@ describe("round-three recovery regressions", () => {
     });
 
     it.each((["thread.create", "reply.add"] as const).flatMap(method => [
-      "unknown_code", "transient", "rate_limited", "legacy",
+      "unknown_code", "transient", "rate_limited", "plain",
     ].map(code => ({ method, code }))))("preserves $method identity across reload and retry for $code", async ({ method, code }) => {
-      const runtime = recoveryRuntime(undefined, undefined, legacy);
+      const runtime = recoveryRuntime();
       await flushMessages();
       runtime.backend.mutate.mockRejectedValueOnce(new ConvexError(
-        code === "legacy" ? "Permission denied" : { code, message: "Safe failure" },
+        code === "plain" ? "Permission denied" : { code, message: "Safe failure" },
       ));
       await expect(runtime.transport.mutate(method, args)).rejects.toThrow("Comment operation failed");
       const original = runtime.backend.mutate.mock.calls[0][2];
@@ -484,41 +483,9 @@ describe("round-three recovery regressions", () => {
 });
 
 
-describe("old widget through new parent and Convex", () => {
-  it.each(["resolved", "archived"] as const)("preserves the absent-target %s toggle", async (field) => {
-    const { viewers, scope, threadId, data } = await fixture();
-    const runtime = recoveryRuntime(scope, String(data.users.find((user) => user.name === "author")!.userId));
-    const fn = field === "resolved" ? api.documentThreads.resolve : api.documentThreads.archive;
-    runtime.backend.subscribe.mockImplementation((_scope, update) => {
-      update([{ _id: threadId, resolved: true, archived: true }], { canLoadMore: false, loading: false });
-      return { unsubscribe: vi.fn(), loadMore: () => false };
-    });
-    const results: Promise<unknown>[] = [];
-    runtime.backend.mutate.mockImplementation((_method, scope, args) => {
-      expect(args).not.toHaveProperty(field);
-      expect((args as { clientOperationId?: string }).clientOperationId).toBeUndefined();
-      if (!("organizationId" in scope)) throw new Error("Expected project fixture scope");
-      const result = viewers.author.mutation(fn, { ...scope, threadId, ...args as object });
-      results.push(result);
-      return result;
-    });
-    await viewers.author.mutation(fn, { ...scope, threadId, [field]: true });
-    await flushMessages();
-    for (const target of [false, true]) {
-      runtime.parent.postMessage({ type: COMMENTOR_PARENT_REQUEST, requestId: String(target), method: field === "resolved" ? "thread.resolve" : "thread.archive", args: { threadId } });
-      await flushMessages();
-      expect(await results.at(-1)).toBe(target);
-      await flushMessages();
-    }
-    runtime.transport.dispose();
-    runtime.host.dispose();
-  });
-});
-
-
 describe("viewer reload bridge", () => {
-  it.each([false, true])("only offers one notice for the current scoped document (legacy=%s)", async legacy => {
-    const runtime = recoveryRuntime(undefined, undefined, legacy);
+  it("only offers one notice for the current scoped document", async () => {
+    const runtime = recoveryRuntime();
     const reload = vi.fn();
     const dom = new StorageWindow();
     dom.document.body.innerHTML = '<aside id="viewer-update-notice" hidden><span role="status" aria-live="polite"></span><button>Reload</button></aside>';
@@ -538,7 +505,7 @@ describe("viewer reload bridge", () => {
     expect(dom.document.querySelectorAll("#viewer-update-notice")).toHaveLength(1);
     expect(reload).not.toHaveBeenCalled();
     notice.hidden = true;
-    runtime.frame.src = "https://rendro.test/organizations/org-a/projects/other/docs/files/guide.html";
+    runtime.frame.src = "https://rendro.test/r/acme/other/files/docs/guide.md";
     runtime.parent.postMessage({ type: COMMENTOR_VIEWER_RELOAD });
     await flushMessages();
     expect(notice.hidden).toBe(true);

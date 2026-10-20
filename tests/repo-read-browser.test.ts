@@ -177,7 +177,8 @@ describe("repository document frames in Chromium", () => {
       const opened = page.context().waitForEvent("page");
       await browserStep(`${name}-click the link`, () => link.click(options));
       const tab = await browserStep(`wait for the ${name}-click tab`, () => opened);
-      await browserStep(`load the ${name}-click tab`, () => tab.waitForLoadState("load"));
+      // A new tab starts at about:blank, whose own load can come first: wait for the link's address itself.
+      await browserStep(`load the ${name}-click tab`, () => tab.waitForURL(expected, { waitUntil: "load" }));
       expect(tab.url(), name).toBe(expected);
       expect(new URL(tab.url()).pathname, name).not.toContain("/view/");
       // The reader's own cookie opens it.

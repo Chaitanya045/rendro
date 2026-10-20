@@ -14,7 +14,7 @@ import {
   validDocumentSearch,
 } from "./messages";
 import { documentLoadAccessibility } from "./load-state";
-import { emptyTreeAction, shouldUseNativeLinkNavigation } from "./navigation";
+import { shouldUseNativeLinkNavigation } from "./navigation";
 import { folderTransitionOverride, indicatorTransition } from "./motion";
 import { createFramePreloader, framePrefetchUrl, prefetchPermitted, ACTIVE_FRAME_STYLE, BUFFER_FRAME_STYLE, type NetworkInformation } from "./prefetch";
 import { retryAfterMs } from "../../shared/retry-after";
@@ -23,12 +23,9 @@ type RendroWindow = Window & { RENDRO_INITIAL_DOC?: string; RENDRO_CURRENT_DOC?:
 const RENDRO_WINDOW = window as RendroWindow;
 const TREE_HOST = document.querySelector<HTMLElement>("[data-tree-org]");
 const ORG = TREE_HOST?.dataset.treeOrg;
+// The reader's URL (a branch view keeps its branch); frames and tree pages load from a pinned base (its commit).
 const DOCUMENT_BASE = TREE_HOST?.dataset.documentBase ?? "";
-// Frames and tree pages may load from a pinned base (a repository branch view pins its commit).
-const FRAME_BASE = TREE_HOST?.dataset.frameBase || DOCUMENT_BASE;
-// Instant in-shell prefetch is opt-in for the repository read path, the only shell that pins frames
-// to a commit base. Every other viewer keeps the plain single-request navigation and its history.
-const PREFETCH_OPT_IN = TREE_HOST?.dataset.frameBase !== undefined;
+const FRAME_BASE = TREE_HOST?.dataset.frameBase ?? "";
 interface TreeNode { name: string; path: string; type: "file" | "folder"; title?: string; size?: number; }
 interface TreePageResponse { children: TreeNode[]; isTruncated: boolean; nextStartAfter?: string; }
 
@@ -47,32 +44,13 @@ function relativeDocumentPath(fullPath: string): string {
   return fullPath.slice(ORG.length + 1);
 }
 
-function docUrl(fullPath: string): string {
-  if (DOCUMENT_BASE) {
-    const url = new URL(DOCUMENT_BASE, location.origin);
-    url.searchParams.set("doc", relativeDocumentPath(fullPath));
-    return `${url.pathname}${url.search}`;
-  }
-  return `/docs/${encodePath(fullPath)}`;
-}
-
 function documentFrameUrl(fullPath: string): string {
-  return DOCUMENT_BASE
-    ? `${FRAME_BASE}/files/${encodePath(relativeDocumentPath(fullPath))}`
-    : `/legacy-view/${encodeURIComponent(ORG ?? "")}/files/${encodePath(relativeDocumentPath(fullPath))}`;
+  return `${FRAME_BASE}/files/${encodePath(relativeDocumentPath(fullPath))}`;
 }
 
 function docFromPathname(): string {
-  if (!ORG) return "";
-  if (DOCUMENT_BASE) {
-    const documentPath = new URLSearchParams(location.search).get("doc");
-    return documentPath ? `${ORG}/${documentPath}` : "";
-  }
-  if (!location.pathname.startsWith("/docs/")) return "";
-  const rawPath = location.pathname.slice("/docs/".length);
-  const key = rawPath.split("/").map(decodeURIComponent).join("/");
-  if (key === ORG) return "";
-  return key.startsWith(`${ORG}/`) ? key : "";
+  const documentPath = new URLSearchParams(location.search).get("doc");
+  return documentPath ? `${ORG}/${documentPath}` : "";
 }
 
 let activeEl: HTMLElement | null = null;
@@ -119,11 +97,10 @@ function startNavigationTiming(kind: NavigationKind, loadId: number, url: string
 
 /**
  * Written once the frame has had a paint (call it from an animation frame
- * callback: the next task runs after that frame's rendering), and only on the
- * repository read path, where the RUM bundle reads it.
+ * callback: the next task runs after that frame's rendering); the RUM bundle
+ * reads it.
  */
 function measureNavigation(timing: NavigationTiming) {
-  if (!PREFETCH_OPT_IN) return;
   window.setTimeout(() => {
     const { kind, url, activation, swap, load, preloaded } = timing;
     performance.measure(NAVIGATION_MEASURE, {
@@ -148,7 +125,7 @@ const framePreloader = createFramePreloader({ host: frameHost });
 /** Begin loading the frame document a tree link points at, when the reader's
  * connection allows it and the shell is a repository read path. */
 function prefetchFrameLink(href: unknown) {
-  if (!PREFETCH_OPT_IN || typeof href !== "string") return;
+  if (typeof href !== "string") return;
   const connection = (navigator as Navigator & { connection?: NetworkInformation }).connection;
   if (!prefetchPermitted(connection)) return;
   if (!framePrefetchUrl(href, location.href, location.origin)) return;
@@ -225,7 +202,6 @@ function indexChildItems(content: HTMLElement) {
 
 // ── expand / collapse ──
 
-const PAGE_SIZE = 50;
 // A folder's first page in flight, so a second expand (a newer reveal) can wait for it.
 const folderLoads = new WeakMap<HTMLElement, Promise<void>>();
 
@@ -266,7 +242,7 @@ async function expand(folder: HTMLElement) {
   return load;
 }
 
-/** One directory page of a scoped deployment tree (#90). Folders are fetched
+/** One directory page of the repository's sidebar (#90). Folders are fetched
  * only when expanded, and only page by page. */
 async function scopedPage(path: string, cursor?: string): Promise<TreePageResponse> {
   const root = `${ORG}/`;
@@ -290,15 +266,7 @@ async function scopedPage(path: string, cursor?: string): Promise<TreePageRespon
 }
 
 async function loadPage(folder: HTMLElement, path: string, content: HTMLElement, startAfter?: string) {
-  let data: TreePageResponse;
-  if (DOCUMENT_BASE) {
-    data = await scopedPage(path, startAfter);
-  } else {
-    const url = `/api/tree/${ORG}?prefix=${encodeURIComponent(path)}&limit=${PAGE_SIZE}${startAfter ? `&startAfter=${encodeURIComponent(startAfter)}` : ""}`;
-    const res = await fetch(url);
-    if (!res.ok) throw new Error(`${res.status}`);
-    data = await res.json() as TreePageResponse;
-  }
+  const data = await scopedPage(path, startAfter);
   // The tree container itself holds the root's later pages.
   const childDepth = folder === TREE ? 0 : parseInt(folder.dataset.depth || "0") + 1;
   const children = data.children;
@@ -307,10 +275,8 @@ async function loadPage(folder: HTMLElement, path: string, content: HTMLElement,
       .map((el) => el.dataset.path)
       .filter((value): value is string => Boolean(value)),
   );
-  const freshChildren = children.filter((child) => {
-    const childPath = child.type === "folder" && !child.path.endsWith("/") ? `${child.path}/` : child.path;
-    return !existingPaths.has(childPath);
-  });
+  // Directory pages name folders with their trailing slash, as the rows' data-path does.
+  const freshChildren = children.filter((child) => !existingPaths.has(child.path));
   const existingTreeItems = new Set(content.querySelectorAll<HTMLElement>(".tree-item"));
   content.querySelector(":scope > .tree-load-more")?.remove();
   const rows = renderRows(freshChildren, childDepth);
@@ -362,10 +328,7 @@ function renderActiveIndicator(): string {
 }
 
 function renderEmptyTree(): string {
-  const state = emptyTreeAction(DOCUMENT_BASE);
-  return `<div class="tree-empty">${esc(state.message)}</div>${state.href && state.label
-    ? `<div class="tree-empty-create"><a class="load-more-btn" href="${esc(state.href)}">${esc(state.label)}</a></div>`
-    : ""}`;
+  return `<div class="tree-empty">No documents available.</div>`;
 }
 
 function startTreeEntrance(items: Iterable<HTMLElement>) {
@@ -389,14 +352,7 @@ async function loadRootTree() {
   TREE.dataset.loadingRoot = "true";
   TREE.setAttribute("aria-busy", "true");
   try {
-    let data: TreePageResponse;
-    if (DOCUMENT_BASE) {
-      data = await scopedPage(`${ORG}/`);
-    } else {
-      const res = await fetch(`/api/tree/${ORG}?prefix=${encodeURIComponent(`${ORG}/`)}&limit=1000`);
-      if (!res.ok) throw new Error(`${res.status}`);
-      data = await res.json() as TreePageResponse;
-    }
+    const data = await scopedPage(`${ORG}/`);
     const children = data.children;
     TREE.dataset.path = `${ORG}/`;
     TREE.innerHTML = renderActiveIndicator() + (children.length ? renderRows(children, 0) : renderEmptyTree());
@@ -414,7 +370,7 @@ async function loadRootTree() {
 }
 
 function renderFolder(node: TreeNode, depth: number): string {
-  const path = node.path.endsWith("/") ? node.path : `${node.path}/`;
+  const path = node.path;
   return `<div class="tree-folder" data-path="${esc(path)}" data-depth="${depth}">
     <div class="tree-item" role="button" tabindex="0" aria-expanded="false">
       <span class="material-symbols-outlined tree-icon caret-icon" aria-hidden="true">chevron_right</span>
@@ -455,7 +411,6 @@ function handleClick(e: Event) {
     return;
   }
 
-  // The empty tree's "Return to project" link shares the button style only.
   const loadMoreBtn = target.closest<HTMLButtonElement>("button.load-more-btn");
   if (loadMoreBtn) {
     e.preventDefault();
@@ -669,9 +624,6 @@ function adoptPreloadedFrame(preloaded: HTMLIFrameElement, current: HTMLIFrameEl
     const transition = startViewTransition.call(document, reveal);
     void transition.updateCallbackDone.then(() => requestAnimationFrame(settle), () => requestAnimationFrame(settle));
   }
-  // The private viewer announced itself to the frame while it was hidden; ask
-  // this browsing context to repeat its deployment now that it is the reader's frame.
-  preloaded.contentWindow?.postMessage({ type: "viewer-identify" }, "*");
 }
 
 function loadDoc(fullPath: string, pushState: false | "push" | "replace", fragment = "", search = "", kind: NavigationKind = "switch") {
@@ -692,7 +644,7 @@ function loadDoc(fullPath: string, pushState: false | "push" | "replace", fragme
   const frameUrl = documentFrameUrl(fullPath) + search;
   performance.mark(FRAME_SWITCH_START);
   const timing = startNavigationTiming(kind, loadId, frameUrl);
-  const preloaded = PREFETCH_OPT_IN && frame ? framePreloader.take(frameUrl) : null;
+  const preloaded = frame ? framePreloader.take(frameUrl) : null;
 
   if (frame && preloaded) {
     adoptPreloadedFrame(preloaded, frame, timing, fullPath);
@@ -719,15 +671,9 @@ function loadDoc(fullPath: string, pushState: false | "push" | "replace", fragme
 
   if (pushState) {
     const url = new URL(location.href);
-    if (DOCUMENT_BASE) {
-      url.pathname = DOCUMENT_BASE;
-      url.search = "";
-      url.searchParams.set("doc", relativeDocumentPath(fullPath));
-    } else {
-      url.pathname = docUrl(fullPath);
-      url.searchParams.delete("doc");
-      url.searchParams.delete("dev_user");
-    }
+    url.pathname = DOCUMENT_BASE;
+    url.search = "";
+    url.searchParams.set("doc", relativeDocumentPath(fullPath));
     if (search) url.searchParams.set("docQuery", search);
     else url.searchParams.delete("docQuery");
     url.hash = fragment;
@@ -1181,27 +1127,11 @@ function init() {
     if (frame && current) sendDocumentFragment(frame, relativeDocumentPath(current), location.hash);
   });
 
+  // The shell always names the document it opens with (the entry page by default).
   const initialDoc = RENDRO_WINDOW.RENDRO_INITIAL_DOC || docFromPathname();
   if (initialDoc) {
     history.replaceState({ ...history.state, docPath: initialDoc }, "", location.href);
     loadDoc(initialDoc, false, location.hash, documentSearchFromLocation(), "cold");
-    return;
-  }
-  const params = new URLSearchParams(location.search);
-  const urlDoc = params.get("doc");
-  if (urlDoc) {
-    const url = new URL(location.href);
-    url.pathname = docUrl(urlDoc);
-    url.searchParams.delete("doc");
-    url.searchParams.delete("dev_user");
-    history.replaceState({ docPath: urlDoc }, "", url);
-    loadDoc(urlDoc, false);
-    return;
-  }
-  if (params.has("dev_user")) {
-    const url = new URL(location.href);
-    url.searchParams.delete("dev_user");
-    history.replaceState(history.state, "", url);
   }
 }
 

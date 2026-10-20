@@ -6,8 +6,8 @@ import { describe, expect, it } from "vitest";
 const root = fileURLToPath(new URL("..", import.meta.url));
 const directory = join(root, ".github/workflows");
 const workflows = readdirSync(directory).filter(name => /\.ya?ml$/.test(name)).sort();
-// The only job allowed to hold write permissions: it publishes the release and its attestation.
-const writers: Record<string, string[]> = { "release.yml": ["publish"] };
+// No job may hold a write permission: the CLI release workflow was the only writer and left with the CLI (#286).
+const writers: Record<string, string[]> = {};
 
 const indentOf = (line: string) => line.length - line.trimStart().length;
 
@@ -69,7 +69,7 @@ export function permissionProblems(text: string, allowedWriters: string[] = []):
 
 describe("workflow supply chain policy", () => {
   it("covers every workflow file", () => {
-    expect(workflows).toEqual(["quality.yml", "r2-public-access.yml", "release.yml", "stability.yml"]);
+    expect(workflows).toEqual(["quality.yml", "r2-public-access.yml", "stability.yml"]);
   });
 
   it.each(workflows)("%s pins every external action to a commit SHA with a version comment", name => {
@@ -150,36 +150,8 @@ describe("workflow supply chain policy", () => {
   });
 });
 
-describe("release workflow", () => {
-  const release = readFileSync(join(directory, "release.yml"), "utf8");
+describe("quality workflow", () => {
   const quality = readFileSync(join(directory, "quality.yml"), "utf8");
-
-  it("runs the full quality gate before building and publishing", () => {
-    expect(quality).toMatch(/\n {2}workflow_call:/);
-    for (const check of ["verify", "e2e", "coverage"]) expect(quality).toMatch(new RegExp(`\\n {2}${check}:\\n`));
-    const { jobs } = split(release);
-    expect([...jobs.keys()]).toEqual(["gate", "build", "publish"]);
-    expect(jobs.get("gate")).toContain("uses: ./.github/workflows/quality.yml");
-    expect(jobs.get("build")).toContain("needs: gate");
-    expect(jobs.get("publish")).toContain("needs: build");
-  });
-
-  it("publishes only from a tag push, with checksums and a pinned provenance attestation", () => {
-    const { jobs } = split(release);
-    const publish = jobs.get("publish")!;
-    expect(release).toMatch(/push:\n {4}tags: \["v\*"\]/);
-    expect(publish).toContain("if: ${{ github.event_name == 'push' }}");
-    expect(publish).toMatch(/id-token: write/);
-    expect(publish).toMatch(/attestations: write/);
-    expect(publish).toMatch(/uses: actions\/attest-build-provenance@[0-9a-f]{40} # v\d/);
-    expect(publish).toContain("subject-path: dist/rendro.mjs");
-    expect(publish).toContain("sha256sum --check SHA256SUMS");
-    expect(publish).toMatch(/files: \|\n\s+dist\/rendro.mjs\n\s+dist\/SHA256SUMS/);
-    expect(jobs.get("build")).toContain("sha256sum rendro.mjs | tee SHA256SUMS");
-    // Building never holds a write token.
-    expect(jobs.get("build")).not.toMatch(/write/);
-    expect(jobs.get("gate")).not.toMatch(/write/);
-  });
 
   it("keeps the required check names of the quality workflow", () => {
     const { jobs } = split(quality);

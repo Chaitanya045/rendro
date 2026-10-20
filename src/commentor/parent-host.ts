@@ -1,6 +1,5 @@
 import { ConvexError } from "convex/values";
-import { isPublicErrorData } from "../shared/public-errors";
-import { showViewerUpdateNotice, updateViewerActiveDeployment } from "../viewer/client";
+import { showViewerUpdateNotice } from "../viewer/client";
 import { commentErrorMessage, commentRetryAfter, isDefinitiveCommentRejection } from "./errors";
 import { COMMENT_RECOVERY_PREFIX, syncCommentRecoveryUser } from "./recovery-session";
 import { whenVisible } from "./visibility";
@@ -42,28 +41,14 @@ type CommentPaginationState = {
   loading: boolean;
 };
 
-export type ProjectCommentScope = {
-  organizationId: string;
-  projectId: Id<"projects">;
-  documentPath: string;
-};
-
-export type LegacyCommentScope = { orgSlug: string; filePath: string; documentPath: string };
 /** A repository doc (#254): the shell's repository and the page its frame shows. */
-export type RepoCommentScope = { repoId: number; documentPath: string };
-export type DocumentCommentScope = ProjectCommentScope | LegacyCommentScope | RepoCommentScope;
+export type DocumentCommentScope = { repoId: number; documentPath: string };
 
 /** The repository shell's comments (#254): where it asks the read path for comment access, and the document it opens with (#284). */
-export type RepoCommentParentConfig = { repoId: number; accessUrl: string; convexUrl: string; documentPath?: string };
+export type CommentorParentConfig = { repoId: number; accessUrl: string; convexUrl: string; documentPath?: string };
 
 /** The first page of one document's threads, from the first comment-access answer (#284). */
 export type RepoCommentSnapshot = { documentPath: string; threads: unknown[]; canLoadMore: boolean };
-
-export type CommentorParentConfig = {
-  organizationId: string;
-  projectId: Id<"projects">;
-  convexUrl: string;
-} | { orgSlug: string; convexUrl: string } | RepoCommentParentConfig;
 
 export interface DocumentCommentBackend {
   subscribe(
@@ -73,7 +58,7 @@ export interface DocumentCommentBackend {
   ): CommentPaginationSubscription;
   subscribeReplies(
     scope: DocumentCommentScope,
-    threadId: Id<"documentThreads">,
+    threadId: Id<"repoThreads">,
     onUpdate: (replies: unknown[], state: CommentPaginationState) => void,
     onError: (error: Error) => void,
   ): CommentPaginationSubscription;
@@ -89,24 +74,10 @@ export interface CommentPaginationSubscription {
   loadMore(): boolean;
 }
 
-function safeRelativePath(encodedPath: string): string | null {
-  let path: string;
-  try {
-    path = encodedPath.split("/").map(decodeURIComponent).join("/");
-  } catch {
-    return null;
-  }
-  return path
-    && !path.includes("\\")
-    && path.split("/").every((part) => Boolean(part) && part !== "." && part !== "..")
-    ? path
-    : null;
-}
-
 export function documentCommentScopeFromFrame(
   frameUrl: string,
   pageOrigin: string,
-  config: { organizationId: string; projectId: Id<"projects"> } | { orgSlug: string } | { repoId: number; accessUrl: string },
+  config: { repoId: number; accessUrl: string },
 ): DocumentCommentScope | null {
   let url: URL;
   try {
@@ -115,35 +86,16 @@ export function documentCommentScopeFromFrame(
     return null;
   }
   if (url.origin !== pageOrigin) return null;
-  if ("repoId" in config) {
-    // The frame must show a page of the shell's own repository, at any ref; the read path parses it the same way.
-    const frame = parseRepoPath(url.pathname);
-    const shell = parseRepoPath(config.accessUrl);
-    if (!frame || !shell || frame.target.kind !== "files"
-      || `${frame.owner}/${frame.name}`.toLowerCase() !== `${shell.owner}/${shell.name}`.toLowerCase()) return null;
-    return { repoId: config.repoId, documentPath: frame.target.path };
-  }
-  if ("orgSlug" in config) {
-    const prefix = `/legacy-view/${encodeURIComponent(config.orgSlug)}/files/`;
-    if (!url.pathname.startsWith(prefix)) return null;
-    const documentPath = safeRelativePath(url.pathname.slice(prefix.length));
-    return documentPath ? { orgSlug: config.orgSlug, documentPath, filePath: `${config.orgSlug}/${documentPath}` } : null;
-  }
-  const prefix = `/organizations/${encodeURIComponent(config.organizationId)}/projects/${encodeURIComponent(config.projectId)}/docs/files/`;
-  if (!url.pathname.startsWith(prefix)) return null;
-  const documentPath = safeRelativePath(url.pathname.slice(prefix.length));
-  return documentPath ? {
-    organizationId: config.organizationId,
-    projectId: config.projectId,
-    documentPath,
-  } : null;
+  // The frame must show a page of the shell's own repository, at any ref; the read path parses it the same way.
+  const frame = parseRepoPath(url.pathname);
+  const shell = parseRepoPath(config.accessUrl);
+  if (!frame || !shell || frame.target.kind !== "files"
+    || `${frame.owner}/${frame.name}`.toLowerCase() !== `${shell.owner}/${shell.name}`.toLowerCase()) return null;
+  return { repoId: config.repoId, documentPath: frame.target.path };
 }
 
 export function sameScope(left: DocumentCommentScope | null, right: DocumentCommentScope | null): boolean {
-  if (!left || !right || left.documentPath !== right.documentPath) return false;
-  if ("repoId" in left) return "repoId" in right && left.repoId === right.repoId;
-  if ("orgSlug" in left) return "orgSlug" in right && left.orgSlug === right.orgSlug;
-  return "organizationId" in right && left.organizationId === right.organizationId && left.projectId === right.projectId;
+  return Boolean(left && right && left.documentPath === right.documentPath && left.repoId === right.repoId);
 }
 
 export class CommentorParentHost {
@@ -191,7 +143,7 @@ export class CommentorParentHost {
     private readonly backend: DocumentCommentBackend,
     private userId: string | null,
   ) {
-    this.writable = !("repoId" in config);
+    this.writable = false;
     syncCommentRecoveryUser(window.sessionStorage, userId);
   }
 
@@ -212,7 +164,7 @@ export class CommentorParentHost {
    * path served one. A subscription waiting for it shows that page and starts live; the live page then replaces it.
    */
   accessAnswered(snapshot: RepoCommentSnapshot | null): void {
-    if (snapshot && "repoId" in this.config) {
+    if (snapshot) {
       this.snapshot = { scope: { repoId: this.config.repoId, documentPath: snapshot.documentPath }, threads: snapshot.threads, canLoadMore: snapshot.canLoadMore };
     }
     this.liveHeld = false;
@@ -275,11 +227,9 @@ export class CommentorParentHost {
   }
 
   private readonly onFrameLoad = (): void => {
-    if ("repoId" in this.config) {
-      this.documents += 1;
-      this.documentStart = this.documents === 1 ? 0 : performance.now();
-      this.readyMeasured = false;
-    }
+    this.documents += 1;
+    this.documentStart = this.documents === 1 ? 0 : performance.now();
+    this.readyMeasured = false;
     this.reload();
   };
 
@@ -302,7 +252,7 @@ export class CommentorParentHost {
           type: COMMENTOR_PARENT_READY, protocolVersion: COMMENTOR_PROTOCOL_VERSION, canReloadViewer: true, parentGeneration: this.parentGeneration,
           userId: this.userId, recoveryState: this.userId ? this.recovery(this.loadedScope).value : { operations: {}, drafts: {} },
           // A repository frame is the same for every reader, so the widget learns here whether this one may write.
-          ...("repoId" in this.config ? { canWrite: this.userId !== null && this.writable } : {}),
+          canWrite: this.userId !== null && this.writable,
         }, "*");
       } catch { this.subscriptionError(source); }
     }
@@ -433,7 +383,7 @@ export class CommentorParentHost {
     const generation = this.generation;
     const subscription = this.backend.subscribeReplies(
       scope,
-      threadId as Id<"documentThreads">,
+      threadId as Id<"repoThreads">,
       (replies, state) => {
         if (!this.owns(generation, source, scope) || !this.threadIds.has(threadId)) return;
         if ("postMessage" in source && typeof source.postMessage === "function") {
@@ -470,7 +420,7 @@ export class CommentorParentHost {
     // The shell has already sent this frame to another page (#284): a read from the page it is leaving is for a
     // document that is no longer current. It is dropped without an answer, so the leaving page shows no error.
     if (reading && this.loadedScope && !sameScope(scope, this.loadedScope)) return;
-    const anonymous = !this.userId && !(reading && "repoId" in this.config);
+    const anonymous = !this.userId && !reading;
     if (anonymous || !scope || !sameScope(scope, this.loadedScope) || !event.source) {
       if (event.source) this.respond(event.source, event.data.requestId, false, "Comment scope is unavailable");
       return;
@@ -529,10 +479,7 @@ export class CommentorParentHost {
     let operation;
     try {
       const state = this.recovery(scope);
-      const values = args as Record<string, unknown>;
-      const legacyToggle = (event.data.method === "thread.resolve" && values.resolved === undefined)
-        || (event.data.method === "thread.archive" && values.archived === undefined);
-      operation = legacyToggle ? { method: event.data.method, args: values, clientOperationId: undefined } : state.prepare(event.data.method, values);
+      operation = state.prepare(event.data.method, args as Record<string, unknown>);
       // Ensure writes cannot escape if durable storage is unavailable.
       state.save();
     } catch {
@@ -543,21 +490,21 @@ export class CommentorParentHost {
     const key = mutationKey(operation.method, operation.args);
     // The reader's own thread or reply shows at once (#284); this is how long it takes to be saved.
     const sentAt = performance.now();
-    const echo = "repoId" in this.config && (operation.method === "thread.create" || operation.method === "reply.add");
+    const echo = (operation.method === "thread.create" || operation.method === "reply.add");
     this.mutationsInFlight++;
     void this.backend.mutate(operation.method, scope, { ...operation.args, clientOperationId: operation.clientOperationId, expectedAuthorId: this.userId }).then(() => {
       // An abandoned acknowledgement cannot retire the durable identity: the
       // replacement widget may still hold (or save) the unconfirmed draft.
       if (this.ownsConnection(generation, event.source!, scope)) {
         if (echo) measure(COMMENT_ECHO_MEASURE, sentAt, this.pageKind());
-        if (operation.clientOperationId) this.recovery(scope).complete(key, operation.clientOperationId);
+        this.recovery(scope).complete(key, operation.clientOperationId);
         this.respond(event.source!, event.data.requestId, true);
       }
     }).catch((error: unknown) => {
       if (this.ownsConnection(generation, event.source!, scope)) {
         // Only known definitive rejections release the durable operation identity.
         const rejected = isDefinitiveCommentRejection(error);
-        if (rejected && operation.clientOperationId) this.recovery(scope).reject(key, operation.clientOperationId);
+        if (rejected) this.recovery(scope).reject(key, operation.clientOperationId);
         const message = commentErrorMessage(error, "Comment operation failed");
         this.respond(event.source!, event.data.requestId, false, message, rejected, commentRetryAfter(error) ?? undefined);
       }
@@ -565,10 +512,11 @@ export class CommentorParentHost {
   };
 }
 
-export class ConvexDocumentCommentBackend implements DocumentCommentBackend {
-  constructor(protected readonly client: ConvexClient) {}
+/** Repository docs (#254): `repoComments`, scoped by repository and page; the reader's access is Convex's to decide. */
+export class ConvexRepoCommentBackend implements DocumentCommentBackend {
+  constructor(private readonly client: ConvexClient) {}
 
-  protected subscribePaginated(
+  private subscribePaginated(
     query: unknown,
     args: unknown,
     reverse: boolean,
@@ -607,66 +555,19 @@ export class ConvexDocumentCommentBackend implements DocumentCommentBackend {
     onUpdate: (threads: unknown[], state: CommentPaginationState) => void,
     onError: (error: Error) => void,
   ): CommentPaginationSubscription {
-    if (!("organizationId" in scope)) throw new Error("Invalid project scope");
-    return this.subscribePaginated(api.documentThreads.list, scope, false, onUpdate, onError);
+    return this.subscribePaginated(api.repoComments.listThreads, { repoId: scope.repoId, path: scope.documentPath }, false, onUpdate, onError);
   }
 
   subscribeReplies(
     scope: DocumentCommentScope,
-    threadId: Id<"documentThreads">,
+    threadId: Id<"repoThreads">,
     onUpdate: (replies: unknown[], state: CommentPaginationState) => void,
     onError: (error: Error) => void,
   ): CommentPaginationSubscription {
-    if (!("organizationId" in scope)) throw new Error("Invalid project scope");
-    return this.subscribePaginated(api.documentReplies.list, { ...scope, threadId }, true, onUpdate, onError);
-  }
-
-  mutate(method: CommentorParentMutationMethod, scope: DocumentCommentScope, value: unknown): Promise<unknown> {
-    if (!("organizationId" in scope)) throw new Error("Invalid project scope");
-    const args = value as { body?: string; anchor?: never; threadId?: string; replyId?: string; clientOperationId?: string; expectedAuthorId?: string; resolved?: boolean; archived?: boolean };
-    const operation = { clientOperationId: args.clientOperationId, expectedAuthorId: args.expectedAuthorId };
-    if (method === "thread.create") {
-      return this.client.mutation(api.documentThreads.create, {
-        ...scope,
-        ...operation,
-        body: args.body!,
-        anchor: args.anchor!,
-      });
-    }
-    const threadId = args.threadId as Id<"documentThreads">;
-    if (method === "thread.resolve") return this.client.mutation(api.documentThreads.resolve, { ...scope, ...operation, threadId, resolved: args.resolved });
-    if (method === "thread.archive") return this.client.mutation(api.documentThreads.archive, { ...scope, ...operation, threadId, archived: args.archived });
-    if (method === "thread.remove") return this.client.mutation(api.documentThreads.remove, { ...scope, ...operation, threadId });
-    if (method === "reply.remove") {
-      return this.client.mutation(api.documentReplies.remove, { ...scope, ...operation, threadId, replyId: args.replyId as Id<"documentReplies"> });
-    }
-    return this.client.mutation(api.documentReplies.add, { ...scope, ...operation, threadId, body: args.body! });
-  }
-}
-
-/** Repository docs (#254): `repoComments`, scoped by repository and page; the reader's access is Convex's to decide. */
-export class ConvexRepoCommentBackend extends ConvexDocumentCommentBackend {
-  override subscribe(
-    scope: DocumentCommentScope,
-    onUpdate: (threads: unknown[], state: CommentPaginationState) => void,
-    onError: (error: Error) => void,
-  ): CommentPaginationSubscription {
-    if (!("repoId" in scope)) throw new Error("Invalid repository scope");
-    return this.subscribePaginated(api.repoComments.listThreads, { repoId: scope.repoId, path: scope.documentPath }, false, onUpdate, onError);
-  }
-
-  override subscribeReplies(
-    scope: DocumentCommentScope,
-    threadId: Id<"documentThreads">,
-    onUpdate: (replies: unknown[], state: CommentPaginationState) => void,
-    onError: (error: Error) => void,
-  ): CommentPaginationSubscription {
-    if (!("repoId" in scope)) throw new Error("Invalid repository scope");
     return this.subscribePaginated(api.repoComments.listReplies, { repoId: scope.repoId, path: scope.documentPath, threadId }, true, onUpdate, onError);
   }
 
-  override mutate(method: CommentorParentMutationMethod, scope: DocumentCommentScope, value: unknown): Promise<unknown> {
-    if (!("repoId" in scope)) throw new Error("Invalid repository scope");
+  mutate(method: CommentorParentMutationMethod, scope: DocumentCommentScope, value: unknown): Promise<unknown> {
     const args = value as { body?: string; anchor?: never; threadId?: string; replyId?: string; clientOperationId?: string; expectedAuthorId?: string; resolved?: boolean; archived?: boolean };
     const common = { repoId: scope.repoId, path: scope.documentPath, clientOperationId: args.clientOperationId, expectedAuthorId: args.expectedAuthorId };
     if (method === "thread.create") return this.client.mutation(api.repoComments.createThread, { ...common, body: args.body!, anchor: args.anchor! });
@@ -685,45 +586,14 @@ export class ConvexRepoCommentBackend extends ConvexDocumentCommentBackend {
   }
 }
 
-export class ConvexLegacyCommentBackend implements DocumentCommentBackend {
-  constructor(private readonly client: ConvexClient) {}
-  subscribe(scope: DocumentCommentScope, update: (threads: unknown[], state: CommentPaginationState) => void, error: (error: Error) => void): CommentPaginationSubscription {
-    if (!("orgSlug" in scope)) throw new Error("Invalid legacy scope");
-    const unsubscribe = this.client.onUpdate(api.threads.list, { orgSlug: scope.orgSlug, filePath: scope.filePath },
-      threads => update(threads, { canLoadMore: false, loading: false }), error);
-    // v1 returns all replies inline; retain that behavior without dropping any.
-    return { unsubscribe, loadMore: () => false };
-  }
-  subscribeReplies(): CommentPaginationSubscription {
-    return { unsubscribe() {}, loadMore: () => false };
-  }
-  mutate(method: CommentorParentMutationMethod, scope: DocumentCommentScope, value: unknown): Promise<unknown> {
-    if (!("orgSlug" in scope)) throw new Error("Invalid legacy scope");
-    const args = value as { body?: string; anchor?: never; threadId?: string; replyId?: string; clientOperationId?: string; expectedAuthorId?: string; resolved?: boolean; archived?: boolean };
-    const common = { orgSlug: scope.orgSlug, filePath: scope.filePath, clientOperationId: args.clientOperationId, expectedAuthorId: args.expectedAuthorId };
-    if (method === "thread.create") return this.client.mutation(api.threads.create, { ...common, body: args.body!, anchor: args.anchor! });
-    const threadId = args.threadId!;
-    if (method === "thread.resolve") return this.client.mutation(api.threads.resolve, { ...common, threadId, resolved: args.resolved });
-    if (method === "thread.archive") return this.client.mutation(api.threads.archive, { ...common, threadId, archived: args.archived });
-    if (method === "thread.remove") return this.client.mutation(api.threads.remove, { ...common, threadId });
-    if (method === "reply.remove") return this.client.mutation(api.replies.remove, { ...common, threadId, replyId: args.replyId! });
-    return this.client.mutation(api.replies.add, { ...common, threadId, body: args.body! });
-  }
-}
-
-async function requestAuthToken(onAccessLost: () => void): Promise<string | null> {
+async function requestAuthToken(): Promise<string | null> {
   const response = await fetch("/api/auth/convex/token", {
     credentials: "same-origin",
     headers: { Accept: "application/json" },
   });
-  if (!response.ok) {
-    if (response.status === 401 || response.status === 403) onAccessLost();
-    return null;
-  }
+  if (!response.ok) return null;
   const payload = await response.json() as { token?: unknown };
-  if (typeof payload.token === "string" && payload.token) return payload.token;
-  onAccessLost();
-  return null;
+  return typeof payload.token === "string" && payload.token ? payload.token : null;
 }
 
 /** Renewal pacing for repository comment access (#254). */
@@ -805,12 +675,9 @@ export function keepRepoCommentAccess(accessUrl: string, onChange: (writable: bo
 
 export function bootCommentorParentHost(frameAlreadyLoaded = false): (() => void) | null {
   if (document.documentElement.dataset.rendroSignedOut === "true") return null;
-  const globals = window as Window & { RENDRO_SHARE_CONFIG?: CommentorParentConfig; RENDRO_LEGACY_COMMENT_CONFIG?: CommentorParentConfig; RENDRO_REPO_COMMENT_CONFIG?: CommentorParentConfig };
-  const config = globals.RENDRO_REPO_COMMENT_CONFIG ?? globals.RENDRO_LEGACY_COMMENT_CONFIG ?? globals.RENDRO_SHARE_CONFIG;
+  const config = (window as Window & { RENDRO_REPO_COMMENT_CONFIG?: CommentorParentConfig }).RENDRO_REPO_COMMENT_CONFIG;
   const frame = document.getElementById("content-frame");
   if (!config?.convexUrl || !(frame instanceof HTMLIFrameElement)) return null;
-  // Repository docs (#254) are readable without signing in when public; a reader who signs out mid-session is still signed out.
-  const repo = "repoId" in config ? config : null;
   let disposed = false;
   // Repository docs (#284): comment access is cookie-authorized, so it is asked at once, in parallel with the
   // frame and the session check, and its first answer brings the opening document's first comments.
@@ -822,29 +689,17 @@ export function bootCommentorParentHost(frameAlreadyLoaded = false): (() => void
   const rememberLoad = () => { frameLoaded = true; };
   frame.addEventListener("load", rememberLoad);
   let host: CommentorParentHost | null = null;
-  let unsubscribeDeployment: (() => void) | undefined;
-  let deploymentStopped = false;
-  let stopAccess: (() => void) | undefined;
-  if (repo) {
-    stopAccess = keepRepoCommentAccess(repo.accessUrl, (value) => {
-      writable = value;
-      host?.setWritable(value);
-    }, {
-      // A page restored from the back/forward cache shows whatever page the reader had moved to.
-      documentPath: documentCommentScopeFromFrame(frame.src, location.origin, repo)?.documentPath ?? repo.documentPath ?? null,
-      onAnswer: (snapshot) => {
-        firstAnswer = { snapshot };
-        host?.accessAnswered(snapshot);
-      },
-    });
-  }
-  const stopDeployment = () => {
-    deploymentStopped = true;
-    const unsubscribe = unsubscribeDeployment;
-    unsubscribeDeployment = undefined;
-    unsubscribe?.();
-    updateViewerActiveDeployment(null);
-  };
+  const stopAccess = keepRepoCommentAccess(config.accessUrl, (value) => {
+    writable = value;
+    host?.setWritable(value);
+  }, {
+    // A page restored from the back/forward cache shows whatever page the reader had moved to.
+    documentPath: documentCommentScopeFromFrame(frame.src, location.origin, config)?.documentPath ?? config.documentPath ?? null,
+    onAnswer: (snapshot) => {
+      firstAnswer = { snapshot };
+      host?.accessAnswered(snapshot);
+    },
+  });
   const client = new ConvexClient(config.convexUrl);
   let checking: Promise<string | null> | null = null;
   const checkIdentity = (): Promise<string | null> => {
@@ -857,8 +712,9 @@ export function bootCommentorParentHost(frameAlreadyLoaded = false): (() => void
       const session = denied ? null : await response.json() as { user?: { id?: unknown } } | null;
       const userId = typeof session?.user?.id === "string" && session.user.id ? session.user.id : null;
       if (!disposed && !signedOut) {
-        // An anonymous reader of a repository stays one; anyone else without a session has signed out.
-        if (!userId) { if (!repo || signedIn) signOut(); return null; }
+        // Repository docs (#254) are readable without signing in when public: an anonymous reader stays one,
+        // while a reader who loses the session mid-visit has signed out.
+        if (!userId) { if (signedIn) signOut(); return null; }
         signedIn = true;
         syncCommentRecoveryUser(window.sessionStorage, userId);
         host?.setUserId(userId);
@@ -870,49 +726,30 @@ export function bootCommentorParentHost(frameAlreadyLoaded = false): (() => void
   // BFCache and full reloads must check the live session before hydrating drafts.
   void checkIdentity().then((userId) => {
     if (disposed || signedOut) return;
-    const backend = repo ? new ConvexRepoCommentBackend(client) : "orgSlug" in config ? new ConvexLegacyCommentBackend(client) : new ConvexDocumentCommentBackend(client);
     // A preload may have become the content frame meanwhile (#245); it has loaded by then.
     const current = document.getElementById("content-frame");
     const adopted = current instanceof HTMLIFrameElement && current !== frame ? current : null;
-    host = new CommentorParentHost(adopted ?? frame, location.origin, config, backend, userId);
-    if (repo) {
-      if (writable !== null) host.setWritable(writable);
-      if (firstAnswer) host.accessAnswered(firstAnswer.snapshot);
-      else host.holdLive();
-    }
+    host = new CommentorParentHost(adopted ?? frame, location.origin, config, new ConvexRepoCommentBackend(client), userId);
+    if (writable !== null) host.setWritable(writable);
+    if (firstAnswer) host.accessAnswered(firstAnswer.snapshot);
+    else host.holdLive();
     // The iframe may have loaded while checking the session.
     host.start(Boolean(adopted) || frameLoaded || document.readyState === "complete");
     frame.removeEventListener("load", rememberLoad);
-    // Anonymous repository readers use the client unauthenticated.
-    if (userId || !repo) client.setAuth(async args => {
+    // Anonymous readers use the client unauthenticated.
+    if (userId) client.setAuth(async args => {
       // Convex refreshes before expiry (and after a rejection) with forceRefreshToken. A hidden tab
       // has nobody to serve: hold the refresh, and settle it the moment the tab is visible again.
       if (args?.forceRefreshToken) await whenVisible();
       if (!await checkIdentity() || disposed || signedOut) return null;
-      const token = await requestAuthToken(() => { if (!disposed && !signedOut) stopDeployment(); });
+      const token = await requestAuthToken();
       return disposed || signedOut ? null : token;
     });
-    if (repo) return;
-    if ("organizationId" in config && userId && !deploymentStopped) {
-      const unsubscribe = client.onUpdate(api.projects.activeDeployment,
-        { organizationId: config.organizationId, projectId: config.projectId },
-        deploymentId => { if (!deploymentStopped) updateViewerActiveDeployment(deploymentId); },
-        error => {
-          if (deploymentStopped) return;
-          if (error instanceof ConvexError && isPublicErrorData(error.data)
-            && ["unauthenticated", "forbidden", "not_found"].includes(error.data.code)) stopDeployment();
-          else updateViewerActiveDeployment(null); // Transient failures retain renewal fallback.
-        });
-      // Also handle a cached denial delivered synchronously by the client.
-      if (deploymentStopped) unsubscribe();
-      else unsubscribeDeployment = unsubscribe;
-    }
   }).catch(() => {});
   const signOut = () => {
     if (signedOut || disposed) return;
     signedOut = true;
-    stopDeployment();
-    stopAccess?.();
+    stopAccess();
     host?.setUserId(null);
     void client.close();
     window.dispatchEvent(new Event("commentor-sign-out"));
@@ -931,9 +768,8 @@ export function bootCommentorParentHost(frameAlreadyLoaded = false): (() => void
     window.removeEventListener("commentor-sign-out", signOut);
     window.removeEventListener("focus", focus);
     window.removeEventListener(CONTENT_FRAME_EVENT, follow);
-    stopAccess?.();
+    stopAccess();
     host?.dispose();
-    stopDeployment();
     void client.close();
   };
 }

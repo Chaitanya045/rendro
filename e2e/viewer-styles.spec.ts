@@ -1,12 +1,15 @@
+import { readFileSync } from "node:fs";
 import type { Page } from "@playwright/test";
 import { test, expect } from "./fixtures";
 import { signInSeeded } from "./shell-helpers";
-import { publicationSlug } from "./services";
+import type { RepoFixtures } from "./repo-fixtures";
 
 /**
- * #89: the document viewer shells render from a self-hosted, hashed base stylesheet instead of the Tailwind runtime
- * CDN, under a strict nonce CSP. The fixture's network guard already fails the test on any third-party request.
+ * #89: the repository viewer shell renders from a self-hosted, hashed base stylesheet instead of the Tailwind runtime
+ * CDN, under a strict nonce CSP, for a public repository and for a private one a signed-in reader may read. The
+ * fixture's network guard already fails the test on any third-party request.
  */
+const repos = () => JSON.parse(readFileSync(process.env.RENDRO_E2E_REPOS as string, "utf8")) as RepoFixtures;
 async function violations(page: Page) {
   await page.addInitScript(() => {
     const seen: string[] = [];
@@ -15,7 +18,7 @@ async function violations(page: Page) {
   });
 }
 
-for (const shell of ["private", "publication"] as const) {
+for (const shell of ["private", "public"] as const) {
   test(`the ${shell} viewer renders without a CSS runtime under a strict CSP [VIEWER-89-01]`, async ({ page, context, baseURL, seed }) => {
     await violations(page);
     const stylesheets: { url: string; status: number; type?: string; cache?: string }[] = [];
@@ -25,9 +28,10 @@ for (const shell of ["private", "publication"] as const) {
       }
     });
     if (shell === "private") await signInSeeded(context, baseURL, seed, "owner");
-    const response = await page.goto(shell === "private" ? `/organizations/${seed.organizationId}/projects/${seed.projectId}/docs` : `/p/${publicationSlug}`);
+    const repo = shell === "private" ? repos().closed : repos().open;
+    const response = await page.goto(`/r/${repo.owner}/${repo.name}`);
     expect(response?.status()).toBe(200);
-    await expect(page.frameLocator("#content-frame").getByRole("heading", { name: "Publication from local storage" })).toBeVisible();
+    await expect(page.frameLocator("#content-frame").getByRole("heading", { name: shell === "private" ? "Closed home" : "Open home", level: 1 })).toBeVisible();
     await expect(page.locator(".tree-item.active")).toHaveCount(1);
 
     const headers = response!.headers();
@@ -39,8 +43,9 @@ for (const shell of ["private", "publication"] as const) {
     expect(headers["cross-origin-opener-policy"]).toBe("same-origin");
     expect(headers["cross-origin-resource-policy"]).toBe("same-origin");
 
-    expect(stylesheets).toEqual([{ url: expect.stringMatching(/\/styles\/viewer-base\.[0-9a-f]{10}\.css$/), status: 200,
-      type: "text/css; charset=utf-8", cache: "public, max-age=31536000, immutable" }]);
+    // The shell's base stylesheet, and the rendered document's own in its frame: both hashed, immutable and same-origin.
+    expect(stylesheets.map(sheet => new URL(sheet.url).pathname.replace(/\.[0-9a-f]{10}\.css$/, ".css")).sort()).toEqual(["/styles/repo-doc.css", "/styles/viewer-base.css"]);
+    for (const sheet of stylesheets) expect(sheet).toMatchObject({ status: 200, type: "text/css; charset=utf-8", cache: "public, max-age=31536000, immutable" });
     // The rules that used to come from the runtime are applied: base reset, [hidden], tree rows and icons.
     const styles = await page.evaluate(() => {
       const css = (selector: string) => getComputedStyle(document.querySelector(selector)!);

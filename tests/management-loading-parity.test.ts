@@ -17,8 +17,6 @@ import {
 import { renderManagementNavigationRuntime } from "@/routes/management-navigation";
 import organizationPages from "@/routes/organization-pages";
 import projectPages from "@/routes/project-pages";
-import publicationPages from "@/routes/publication-pages";
-import sharePages from "@/routes/share-pages";
 
 const organizationId = "org-a";
 const projectId = "project-a";
@@ -31,7 +29,6 @@ interface RouteCase {
   projectId?: string;
   snippets: string[];
   tableHeaders?: string[];
-  projectTabs?: boolean;
 }
 
 const routes: RouteCase[] = [
@@ -64,36 +61,13 @@ const routes: RouteCase[] = [
     kind: "project",
     path: `/organizations/${organizationId}/projects/${projectId}`,
     projectId,
-    snippets: ['id="project-content"', 'aria-label="Loading project overview"', 'class="skeleton-tabs"', 'class="project-overview"'],
-  },
-  {
-    kind: "deployments",
-    path: `/organizations/${organizationId}/projects/${projectId}/deployments`,
-    projectId,
-    snippets: ['id="project-content"', 'aria-label="Loading deployment history"', 'id="deployment-list"', 'class="panel panel-pad deployments-panel"'],
-    projectTabs: true,
+    snippets: ['id="project-content"', 'aria-label="Loading project overview"', 'class="project-overview"'],
   },
   {
     kind: "api-keys",
     path: `/organizations/${organizationId}/api-keys`,
     snippets: ['id="key-list"', '>Loading API keys</span>', 'class="data-table key-table"'],
     tableHeaders: ["Name", "Project scope", "Permissions", "Last used", "Expires", "Status", "Action"],
-  },
-  {
-    kind: "publications",
-    path: `/organizations/${organizationId}/projects/${projectId}/publications`,
-    projectId,
-    snippets: ['id="publication-list"', '>Loading publications</span>', 'class="data-table publication-table"'],
-    tableHeaders: ["Publication", "Path", "Release mode", "Actions"],
-    projectTabs: true,
-  },
-  {
-    kind: "shares",
-    path: `/organizations/${organizationId}/projects/${projectId}/shares`,
-    projectId,
-    snippets: ['id="share-list"', '>Loading private shares</span>', 'class="data-table share-table"'],
-    tableHeaders: ["Document", "Deployment", "Expires", "Status", "Action"],
-    projectTabs: true,
   },
 ];
 
@@ -106,8 +80,6 @@ function authenticatedPages(): Hono<{ Variables: { user?: User } }> {
   app.route("/", organizationPages);
   app.route("/", projectPages);
   app.route("/", apiKeyPages);
-  app.route("/", publicationPages);
-  app.route("/", sharePages);
   return app;
 }
 
@@ -150,12 +122,6 @@ describe("canonical management loading parity", () => {
       expect(tableHeaders(descriptor.content)).toEqual(route.tableHeaders);
       expect(tableHeaders(html)).toEqual(route.tableHeaders);
     }
-    if (route.projectTabs) {
-      for (const label of ["Overview", "Deployments", "Publications", "Private shares"]) {
-        expect(descriptor.content).toContain(`>${label}</a>`);
-      }
-      expect(descriptor.content).toContain(`/projects/${encodeURIComponent(projectId)}`);
-    }
   });
 
   it("uses the same canonical style sources as organization and project SSR", async () => {
@@ -179,24 +145,22 @@ describe("canonical management loading parity", () => {
     const context = vm.createContext({
       PROJECT_PLACEHOLDER: MANAGEMENT_PROJECT_PLACEHOLDER,
       route: { projectId: routeProjectId },
-      value: `/organizations/${organizationId}/projects/${MANAGEMENT_PROJECT_PLACEHOLDER}/publications`,
+      value: `/organizations/${organizationId}/projects/${MANAGEMENT_PROJECT_PLACEHOLDER}`,
     });
     vm.runInContext(`${runtime.slice(start, end)}result=materialize(value,route);`, context);
 
-    expect(context.result).toBe(`/organizations/${organizationId}/projects/${encodeURIComponent(routeProjectId)}/publications`);
+    expect(context.result).toBe(`/organizations/${organizationId}/projects/${encodeURIComponent(routeProjectId)}`);
     expect(String(context.result)).not.toContain(MANAGEMENT_PROJECT_PLACEHOLDER);
   });
 
   it("suppresses the second whole-page loading animation while retaining retry loaders", async () => {
     const app = authenticatedPages();
     const apiKeys = await (await app.request(`/organizations/${organizationId}/api-keys`)).text();
-    const publications = await (await app.request(`/organizations/${organizationId}/projects/${projectId}/publications`)).text();
-    const shares = await (await app.request(`/organizations/${organizationId}/projects/${projectId}/shares`)).text();
     const organization = await (await app.request(`/organizations/${organizationId}/people`)).text();
     const project = await (await app.request(`/organizations/${organizationId}/projects/${projectId}`)).text();
     const runtime = renderManagementNavigationRuntime(organizationId);
 
-    for (const html of [apiKeys, publications, shares]) {
+    for (const html of [apiKeys]) {
       expect(html).toContain("load(false);");
       expect(html).toMatch(/if\(showLoading!==false\)[a-zA-Z]+\.innerHTML=loading/);
     }

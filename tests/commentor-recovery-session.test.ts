@@ -90,10 +90,10 @@ describe("comment recovery session ownership", () => {
     storage.setItem("commentor-operations:legacy", "private");
     win.document.body.innerHTML = '<iframe id="content-frame"></iframe>';
     const frame = win.document.getElementById("content-frame")!;
-    frame.setAttribute("src", "https://rendro.test/organizations/org/projects/project/docs/files/guide.html");
+    frame.setAttribute("src", "https://rendro.test/r/acme/docs/files/guide.md");
     const source = { postMessage: vi.fn() };
     Object.defineProperty(frame, "contentWindow", { value: source });
-    Object.assign(win, { RENDRO_SHARE_CONFIG: { organizationId: "org", projectId: "project", convexUrl: "https://convex.test" } });
+    Object.assign(win, { RENDRO_REPO_COMMENT_CONFIG: { repoId: 9101, accessUrl: "/r/acme/docs/comment-access", convexUrl: "https://convex.test" } });
     vi.stubGlobal("window", win);
     vi.stubGlobal("document", win.document);
     vi.stubGlobal("HTMLIFrameElement", win.HTMLIFrameElement);

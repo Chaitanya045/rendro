@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { ImmutableMetadataCache, deploymentMetadataCache } from "../src/immutable-cache";
+import { ImmutableMetadataCache } from "../src/immutable-cache";
 
 const load = <T>(value: T, weight: number | null) => vi.fn(() => Promise.resolve({ value, weight }));
 
@@ -69,10 +69,5 @@ describe("immutable metadata cache", () => {
     expect(await replacement).toBe("replacement");
     expect(cache.size).toBe(1);
     expect(await cache.get("failing", load("unused", 10))).toBe("replacement");
-  });
-
-  it("bounds the shared deployment cache below the Worker memory budget", () => {
-    expect(deploymentMetadataCache.maxWeight).toBe(4 * 1024 * 1024);
-    expect(deploymentMetadataCache.maxEntryWeight).toBe(2 * 1024 * 1024);
   });
 });

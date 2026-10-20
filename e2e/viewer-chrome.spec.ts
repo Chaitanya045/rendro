@@ -1,12 +1,12 @@
 import type { Locator, Page, Route } from "@playwright/test";
-import { test, expect, content, documentFrame } from "./viewer-fixtures";
+import { test, expect, content, documentFrame, doc } from "./viewer-fixtures";
 import { clipboard, desktop, fakeClipboard, mobile } from "./shell-helpers";
 
 /**
- * The private viewer's own chrome around the opaque document: theme, reading mode, sidebar resize, the avatar menu, the
- * mobile tree drawer and More menu, and the document's loading and failure states. Selection, folders and links have
- * their own specs (`deployment-tree`, `viewer-links`). Everything here is the shell page; the document only supplies a
- * heading to wait for and, for the theme, a page that reports what the shell tells it.
+ * The repository viewer's own chrome around the opaque document (/r/, the public `viewer-docs` fixture): theme, reading
+ * mode, sidebar resize, the mobile tree drawer and More menu, copying the link, and the document's loading and failure
+ * states. Links have their own spec (`viewer-links`). Everything here is the shell page; the document only supplies a
+ * heading to wait for and, for the theme, the comment widget that follows what the shell tells it.
  */
 const heading = (tab: Page, name: string) => content(tab).getByRole("heading", { name });
 const active = (tab: Page) => tab.locator("#tree-container .tree-item.active");
@@ -17,8 +17,8 @@ const fileLink = (tab: Page, path: string) => tab.locator(`.tree-item[data-path$
 const themeButton = (tab: Page) => tab.locator(".rendro-theme-control");
 const inert = (locator: Locator) => locator.evaluate(element => (element as HTMLElement & { inert: boolean }).inert);
 
-async function open(tab: Page, docs: string, doc = "index.html", title = "Viewer home") {
-  await tab.goto(`${docs}?doc=${encodeURIComponent(doc)}`);
+async function open(tab: Page, docs: string, path = "index.md", title = "Viewer home") {
+  await tab.goto(`${docs}?doc=${encodeURIComponent(doc(path))}`);
   await expect(heading(tab, title)).toBeVisible();
   await expect(active(tab)).toHaveCount(1);
 }
@@ -30,10 +30,11 @@ const themeState = (tab: Page) => tab.evaluate(() => {
     rippling: root.classList.contains("rendro-theme-rippling") };
 });
 const topbarBackground = (tab: Page) => tab.locator(".topbar").evaluate(element => getComputedStyle(element).backgroundColor);
-const documentTheme = (tab: Page) => documentFrame(tab).evaluate(() => ({
-  message: document.documentElement.dataset.themeMessage ?? null, count: Number(document.documentElement.dataset.themeMessages ?? 0),
-  background: getComputedStyle(document.body).backgroundColor, color: getComputedStyle(document.body).color,
-}));
+/** The theme the document's comment widget was told: its host carries `dark` or `light`, or neither for the system default. */
+const documentTheme = (tab: Page) => documentFrame(tab).evaluate(() => {
+  const host = document.getElementById("commentor-host");
+  return host ? host.classList.contains("dark") ? "dark" : host.classList.contains("light") ? "light" : "system" : null;
+});
 
 // #89: the strict nonce CSP must allow everything the shell and the document do here. Requesting the recorder before
 // the test starts it with the page; the check runs after every test.
@@ -45,17 +46,15 @@ test.afterEach(({ cspViolations }) => {
 test.describe("desktop chrome", () => {
   test.use({ viewport: desktop });
 
-  test("the theme control cycles system, dark and light, persists, and tells the document without restyling it", async ({ asOwner: tab, site }) => {
+  test("the theme control cycles system, dark and light, persists, and tells the document", async ({ page: tab, site }) => {
     test.slow();
     await tab.emulateMedia({ colorScheme: "light" });
-    await open(tab, site.docs, "probe.html", "Theme probe");
+    await open(tab, site.docs);
     await expect(tab.locator("#theme-toggle .rendro-theme-control, .topbar .rendro-theme-control")).toHaveCount(1);
     expect(await themeState(tab)).toMatchObject({ dark: false, mode: "system", resolved: "light", stored: null, label: "Switch to dark theme", title: "Theme: system" });
     const lightBar = await topbarBackground(tab);
-    // The document announced itself and was told the resolved intent; its own colors are the publisher's.
-    await expect.poll(async () => (await documentTheme(tab)).message).toBe("system");
-    const publisher = { background: "rgb(250, 240, 230)", color: "rgb(20, 30, 40)" };
-    expect(await documentTheme(tab)).toMatchObject(publisher);
+    // The document announced itself and was told the resolved intent.
+    await expect.poll(() => documentTheme(tab)).toBe("system");
 
     const steps = [
       { mode: "dark", dark: true, label: "Switch to light theme", title: "Theme: dark" },
@@ -67,9 +66,7 @@ test.describe("desktop chrome", () => {
       await expect.poll(async () => (await themeState(tab)).mode).toBe(step.mode);
       await expect.poll(async () => (await themeState(tab)).rippling).toBe(false);
       expect(await themeState(tab)).toMatchObject({ ...step, stored: step.mode });
-      await expect.poll(async () => (await documentTheme(tab)).message).toBe(step.mode);
-      // Dark chrome around an untouched publisher page.
-      expect(await documentTheme(tab)).toMatchObject(publisher);
+      await expect.poll(() => documentTheme(tab)).toBe(step.mode);
       expect(await topbarBackground(tab) === lightBar).toBe(!step.dark);
     }
 
@@ -87,52 +84,12 @@ test.describe("desktop chrome", () => {
     await themeButton(tab).click();
     await expect.poll(async () => (await themeState(tab)).mode).toBe("dark");
     await tab.reload();
-    await expect(heading(tab, "Theme probe")).toBeVisible();
+    await expect(heading(tab, "Viewer home")).toBeVisible();
     expect(await themeState(tab)).toMatchObject({ dark: true, mode: "dark", stored: "dark" });
-    await expect.poll(async () => (await documentTheme(tab)).message).toBe("dark");
-    expect(await documentTheme(tab)).toMatchObject(publisher);
+    await expect.poll(() => documentTheme(tab)).toBe("dark");
   });
 
-  test("the avatar menu opens and closes by click, outside click and Escape, and leads to the account", async ({ asOwner: tab, site }) => {
-    await open(tab, site.docs);
-    const avatar = tab.locator("#avatar-btn");
-    const menu = tab.locator("#avatar-menu");
-    await expect(avatar).toHaveAttribute("aria-label", "Open account menu");
-    await expect(avatar).toHaveAttribute("aria-expanded", "false");
-    await expect(menu).toBeHidden();
-
-    await avatar.click();
-    await expect(avatar).toHaveAttribute("aria-expanded", "true");
-    await expect(menu).toBeVisible();
-    await expect(menu.locator(".avatar-menu-email")).toHaveText(await avatar.getAttribute("title") ?? "");
-    await expect(menu.getByRole("link", { name: "Account security" })).toHaveAttribute("href", "/account/security");
-    await expect(menu.getByRole("button", { name: "Sign out" })).toBeVisible();
-
-    // The button toggles, and a click anywhere else in the shell closes it.
-    await avatar.click();
-    await expect(menu).toBeHidden();
-    await expect(avatar).toHaveAttribute("aria-expanded", "false");
-    await avatar.click();
-    await expect(menu).toBeVisible();
-    await tab.locator("#doc-sidebar-title").click();
-    await expect(menu).toBeHidden();
-    await expect(avatar).toHaveAttribute("aria-expanded", "false");
-
-    // Escape closes it from the keyboard; the reader keeps their place.
-    await avatar.focus();
-    await tab.keyboard.press("Enter");
-    await expect(menu).toBeVisible();
-    await tab.keyboard.press("Escape");
-    await expect(menu).toBeHidden();
-    await expect(avatar).toHaveAttribute("aria-expanded", "false");
-    await expect(avatar).toBeFocused();
-
-    await avatar.click();
-    await menu.getByRole("link", { name: "Account security" }).click();
-    await expect(tab).toHaveURL(/\/account\/security$/);
-  });
-
-  test("reading mode hides the shell, is remembered, and the hot zones, Escape and the shortcut bring it back", async ({ asOwner: tab, site }) => {
+  test("reading mode hides the shell, is remembered, and the hot zones, Escape and the shortcut bring it back", async ({ page: tab, site }) => {
     test.slow();
     await open(tab, site.docs);
     const toggle = tab.locator("#shell-toggle");
@@ -189,27 +146,15 @@ test.describe("desktop chrome", () => {
     expect(await stored(tab, "rendro-shell-hidden")).toBe("0");
     await expect(topbar).toHaveCSS("opacity", "1");
 
-    // The shortcut works from the shell, and from inside the document too (no field focused).
+    // The shortcut works from the shell.
     await tab.keyboard.press("Control+Shift+H");
     expect(await classes(tab)).toContain("shell-hidden");
     await tab.keyboard.press("Control+Shift+H");
     expect(await classes(tab)).not.toContain("shell-hidden");
     await expect(toggle).toBeFocused();
-    await content(tab).locator("body").click({ position: { x: 600, y: 600 } });
-    await tab.keyboard.press("Control+Shift+H");
-    await expect.poll(async () => classes(tab)).toContain("shell-hidden");
-    await tab.keyboard.press("Escape");
-    // Escape reaches the shell only from the shell; from the document it is the document's key. Use the control again.
-    await tab.mouse.move(700, 4);
-    await toggle.click();
-    expect(await classes(tab)).not.toContain("shell-hidden");
-    // The shortcut is the reader's own: typing it into a field of the document is typing, not a command.
-    await content(tab).getByLabel("Draft").focus();
-    await tab.keyboard.press("Control+Shift+H");
-    expect(await classes(tab)).not.toContain("shell-hidden");
   });
 
-  test("the sidebar resizes by keyboard and by dragging within its limits, remembers the width, and never collapses the tree", async ({ asOwner: tab, site }) => {
+  test("the sidebar resizes by keyboard and by dragging within its limits, remembers the width, and never collapses the tree", async ({ page: tab, site }) => {
     test.slow();
     await open(tab, site.docs);
     const resizer = tab.locator("#sidebar-resizer");
@@ -311,29 +256,29 @@ test.describe("desktop chrome", () => {
 });
 
 test.describe("menus and the document", () => {
-  test("the account menu closes when the reader clicks in the document, and stays open for the keyboard", async ({ asOwner: tab, site }) => {
-    // The document is another frame: a click inside it never reaches the shell's own click handler, but it moves focus
+  test("the More menu closes when the reader taps in the document, and stays open for the keyboard", async ({ page: tab, site }) => {
+    // The document is another frame: a tap inside it never reaches the shell's own click handler, but it moves focus
     // into the frame, which the shell sees as its window losing focus.
-    await tab.setViewportSize(desktop);
+    await tab.setViewportSize(mobile);
     await open(tab, site.docs);
-    await tab.locator("#avatar-btn").click();
-    await expect(tab.locator("#avatar-menu")).toBeVisible();
+    await tab.locator("#mobile-more-btn").click();
+    await expect(tab.locator("#mobile-more-menu")).toBeVisible();
     // Keyboard use keeps focus in the shell: moving through the menu leaves it open.
     await tab.keyboard.press("Tab");
-    await expect(tab.locator("#avatar-menu")).toBeVisible();
-    await content(tab).locator("body").click({ position: { x: 600, y: 600 } });
-    await expect(tab.locator("#avatar-menu")).toBeHidden();
-    await expect(tab.locator("#avatar-btn")).toHaveAttribute("aria-expanded", "false");
+    await expect(tab.locator("#mobile-more-menu")).toBeVisible();
+    await content(tab).locator("body").click({ position: { x: 200, y: 500 } });
+    await expect(tab.locator("#mobile-more-menu")).toBeHidden();
+    await expect(tab.locator("#mobile-more-btn")).toHaveAttribute("aria-expanded", "false");
     // It opens again afterwards.
-    await tab.locator("#avatar-btn").click();
-    await expect(tab.locator("#avatar-menu")).toBeVisible();
+    await tab.locator("#mobile-more-btn").click();
+    await expect(tab.locator("#mobile-more-menu")).toBeVisible();
   });
 });
 
 test.describe("mobile chrome", () => {
   test.use({ viewport: mobile });
 
-  test("the tree is a drawer: it opens and closes by button, backdrop and Escape, and choosing a document closes it", async ({ asOwner: tab, site }) => {
+  test("the tree is a drawer: it opens and closes by button, backdrop and Escape, and choosing a document closes it", async ({ page: tab, site }) => {
     await open(tab, site.docs);
     const toggle = tab.locator("#mobile-tree-toggle");
     const sidebar = tab.locator("#doc-sidebar");
@@ -381,15 +326,15 @@ test.describe("mobile chrome", () => {
     await folderRow(tab, "guide").click();
     await expect(folderRow(tab, "guide")).toHaveAttribute("aria-expanded", "true");
     await expect(toggle).toHaveAttribute("aria-expanded", "true");
-    await fileLink(tab, "guide/intro.html").click();
+    await fileLink(tab, "guide/intro.md").click();
     await expect(heading(tab, "Guide intro")).toBeVisible();
     await expect(toggle).toHaveAttribute("aria-expanded", "false");
     await expect(sidebar).not.toBeInViewport();
-    await expect(tab).toHaveURL(/\?doc=guide%2Fintro\.html$/);
-    await expect(active(tab)).toHaveAttribute("data-path", /\/guide\/intro\.html$/);
+    await expect(tab).toHaveURL(/\?doc=docs%2Fguide%2Fintro\.md$/);
+    await expect(active(tab)).toHaveAttribute("data-path", /\/guide\/intro\.md$/);
   });
 
-  test("More holds the secondary actions: it opens and closes, moves focus, runs each action once, and gives them back on desktop", async ({ asOwner: tab, site }) => {
+  test("More holds the secondary actions: it opens and closes, moves focus, runs each action once, and gives them back on desktop", async ({ page: tab, site }) => {
     test.slow();
     await open(tab, site.docs);
     const more = tab.locator("#mobile-more-btn");
@@ -402,11 +347,10 @@ test.describe("mobile chrome", () => {
     await expect(menu).toBeHidden();
     await expect(menu).toHaveAttribute("role", "dialog");
     // The share and tree actions stay on the bar; the rest moved into the menu, once each.
-    for (const selector of [".topbar-btn-back", "#shell-toggle", ".rendro-theme-control", "#avatar-btn"]) {
+    for (const selector of ["#shell-toggle", ".rendro-theme-control"]) {
       await expect(menu.locator(selector)).toHaveCount(1);
       await expect(tab.locator(selector)).toHaveCount(1);
     }
-    await expect(menu.locator(".topbar-btn-back")).toHaveAttribute("href", `/organizations/${site.organizationId}/projects/${site.projectId}`);
     await expect(tab.locator("#share-btn")).toBeVisible();
     await expect(tab.locator("#mobile-tree-toggle")).toBeVisible();
 
@@ -454,23 +398,12 @@ test.describe("mobile chrome", () => {
     await expect(more).toBeFocused();
     await expect(tab.locator("#shell-toggle")).toHaveAttribute("aria-label", /^Enter reading mode, keyboard shortcut/);
 
-    // The account menu opens inside More; Escape closes both and returns focus to More.
-    await more.click();
-    await menu.locator("#avatar-btn").click();
-    await expect(tab.locator("#avatar-menu")).toBeVisible();
-    await expect(menu).toBeVisible();
-    await expect(menu.getByRole("link", { name: "Account security" })).toBeVisible();
-    await tab.keyboard.press("Escape");
-    await expect(tab.locator("#avatar-menu")).toBeHidden();
-    await expect(menu).toBeHidden();
-    await expect(more).toBeFocused();
-
     // Landscape is a desktop layout: the actions go back to the bar, the drawer button and More disappear, and the
     // tree is a sidebar again, readable and out of the way of the document.
     await tab.setViewportSize({ width: 812, height: 375 });
     await expect(more).toBeHidden();
     await expect(tab.locator("#mobile-tree-toggle")).toBeHidden();
-    for (const selector of [".topbar-btn-back", "#shell-toggle", ".rendro-theme-control", "#avatar-btn"]) {
+    for (const selector of ["#shell-toggle", ".rendro-theme-control"]) {
       await expect(menu.locator(selector)).toHaveCount(0);
       await expect(tab.locator(selector)).toBeVisible();
     }
@@ -482,7 +415,7 @@ test.describe("mobile chrome", () => {
     // And back to portrait: moved into More again, still one of each and still one step per tap.
     await tab.setViewportSize(mobile);
     await expect(more).toBeVisible();
-    for (const selector of [".topbar-btn-back", "#shell-toggle", ".rendro-theme-control", "#avatar-btn"]) await expect(menu.locator(selector)).toHaveCount(1);
+    for (const selector of ["#shell-toggle", ".rendro-theme-control"]) await expect(menu.locator(selector)).toHaveCount(1);
     await expect(tab.locator("#doc-sidebar")).toHaveAttribute("aria-hidden", "true");
     await expect(tab.locator("#sidebar-resizer")).toHaveAttribute("tabindex", "-1");
     await more.click();
@@ -490,7 +423,7 @@ test.describe("mobile chrome", () => {
     await expect.poll(async () => (await themeState(tab)).mode).toBe("system");
   });
 
-  test("the bar, the drawer and the menu stay inside 320, 375 and 430px screens", async ({ asOwner: tab, site }) => {
+  test("the bar, the drawer and the menu stay inside 320, 375 and 430px screens", async ({ page: tab, site }) => {
     test.slow();
     for (const width of [320, 375, 430]) {
       await tab.setViewportSize({ width, height: 800 });
@@ -534,7 +467,7 @@ test.describe("mobile chrome", () => {
  * that were held when the test ends are released so nothing is left waiting.
  */
 async function holdDocument(tab: Page, file: string) {
-  const glob = `**/files/${file}`;
+  const glob = `**/files/${doc(file)}`;
   const pending: Route[] = [];
   let holding = true;
   const handler = async (route: Route) => {
@@ -564,21 +497,21 @@ async function pauseClock(tab: Page) {
 test.describe("document loading", () => {
   test.use({ viewport: desktop });
 
-  test("a slow document shows progress and says so; once it arrives the content is shown at once and the progress ends after its minimum", async ({ asOwner: tab, site }) => {
+  test("a slow document shows progress and says so; once it arrives the content is shown at once and the progress ends after its minimum", async ({ page: tab, site }) => {
     await tab.clock.install();
     await open(tab, site.docs);
     await pauseClock(tab);
     await folderRow(tab, "guide").click();
     await expect(folderRow(tab, "guide")).toHaveAttribute("aria-expanded", "true");
-    const hold = await holdDocument(tab, "guide/intro.html");
+    const hold = await holdDocument(tab, "guide/intro.md");
     try {
-      await fileLink(tab, "guide/intro.html").click();
+      await fileLink(tab, "guide/intro.md").click();
       await expect.poll(() => hold.held()).toBeGreaterThan(0);
       // The row is selected and the URL names the document before it has arrived; the old document stays fully opaque.
       expect(await classes(tab)).toContain("doc-loading");
       expect(await classes(tab)).not.toContain("doc-loading-error");
-      await expect(active(tab)).toHaveAttribute("data-path", /\/guide\/intro\.html$/);
-      await expect(tab).toHaveURL(/\?doc=guide%2Fintro\.html$/);
+      await expect(active(tab)).toHaveAttribute("data-path", /\/guide\/intro\.md$/);
+      await expect(tab).toHaveURL(/\?doc=docs%2Fguide%2Fintro\.md$/);
       await expect(loadStatus(tab)).toHaveText("Loading document");
       await expect(loadStatus(tab)).toHaveAttribute("role", "status");
       await expect(loadStatus(tab)).toHaveAttribute("aria-live", "polite");
@@ -602,15 +535,15 @@ test.describe("document loading", () => {
     }
   });
 
-  test("a document that never arrives fails after fifteen seconds with an assertive announcement, and selecting it again recovers", async ({ asOwner: tab, site }) => {
+  test("a document that never arrives fails after fifteen seconds with an assertive announcement, and selecting it again recovers", async ({ page: tab, site }) => {
     await tab.clock.install();
     await open(tab, site.docs);
     await pauseClock(tab);
     await folderRow(tab, "guide").click();
     await expect(folderRow(tab, "guide")).toHaveAttribute("aria-expanded", "true");
-    const hold = await holdDocument(tab, "guide/intro.html");
+    const hold = await holdDocument(tab, "guide/intro.md");
     try {
-      await fileLink(tab, "guide/intro.html").click();
+      await fileLink(tab, "guide/intro.md").click();
       await expect.poll(() => hold.held()).toBeGreaterThan(0);
       await expect(loadStatus(tab)).toHaveText("Loading document");
       await tab.clock.runFor(14_999);
@@ -624,14 +557,14 @@ test.describe("document loading", () => {
       await expect(loadStatus(tab)).toHaveText("Document failed to load. Select it again to retry.");
       await expect(loadStatus(tab)).toHaveAttribute("aria-live", "assertive");
       await expect(tab.locator("#content-frame")).not.toHaveAttribute("aria-busy", /.*/);
-      await expect(active(tab)).toHaveAttribute("data-path", /\/guide\/intro\.html$/);
-      await expect(tab).toHaveURL(/\?doc=guide%2Fintro\.html$/);
+      await expect(active(tab)).toHaveAttribute("data-path", /\/guide\/intro\.md$/);
+      await expect(tab).toHaveURL(/\?doc=docs%2Fguide%2Fintro\.md$/);
       const tint = await active(tab).evaluate(row => getComputedStyle(row, "::before").backgroundColor);
       expect(tint).toBe("rgba(180, 35, 24, 0.1)");
 
       // The same row selected again asks again, and this time it arrives.
       await hold.release();
-      await fileLink(tab, "guide/intro.html").click();
+      await fileLink(tab, "guide/intro.md").click();
       await expect(heading(tab, "Guide intro")).toBeVisible();
       await expect(loadStatus(tab)).toHaveText("");
       expect(await classes(tab)).not.toContain("doc-loading-error");
@@ -646,7 +579,7 @@ test.describe("document loading", () => {
     }
   });
 
-  test("a load that was replaced cannot fail or finish the one that replaced it", async ({ asOwner: tab, site }) => {
+  test("a load that was replaced cannot fail or finish the one that replaced it", async ({ page: tab, site }) => {
     await tab.clock.install();
     await open(tab, site.docs);
     await pauseClock(tab);
@@ -654,15 +587,15 @@ test.describe("document loading", () => {
     await expect(folderRow(tab, "guide")).toHaveAttribute("aria-expanded", "true");
     await folderRow(tab, "guide/deep").click();
     await expect(folderRow(tab, "guide/deep")).toHaveAttribute("aria-expanded", "true");
-    const first = await holdDocument(tab, "guide/intro.html");
-    const second = await holdDocument(tab, "guide/deep/topic.html");
+    const first = await holdDocument(tab, "guide/intro.md");
+    const second = await holdDocument(tab, "guide/deep/topic.md");
     try {
-      await fileLink(tab, "guide/intro.html").click();
+      await fileLink(tab, "guide/intro.md").click();
       await expect.poll(() => first.held()).toBeGreaterThan(0);
       await tab.clock.runFor(10_000);
-      await fileLink(tab, "guide/deep/topic.html").click();
+      await fileLink(tab, "guide/deep/topic.md").click();
       await expect.poll(() => second.held()).toBeGreaterThan(0);
-      await expect(active(tab)).toHaveAttribute("data-path", /\/guide\/deep\/topic\.html$/);
+      await expect(active(tab)).toHaveAttribute("data-path", /\/guide\/deep\/topic\.md$/);
       // Fifteen seconds after the first request, the first one's deadline passes. It no longer applies; only the newer
       // one's would, five seconds later.
       await tab.clock.runFor(5_000);
@@ -673,10 +606,10 @@ test.describe("document loading", () => {
       expect(await classes(tab)).toContain("doc-loading-error");
       // The replaced request arriving late changes nothing about the selected document.
       await first.release();
-      await expect(active(tab)).toHaveAttribute("data-path", /\/guide\/deep\/topic\.html$/);
-      await expect(tab).toHaveURL(/\?doc=guide%2Fdeep%2Ftopic\.html$/);
+      await expect(active(tab)).toHaveAttribute("data-path", /\/guide\/deep\/topic\.md$/);
+      await expect(tab).toHaveURL(/\?doc=docs%2Fguide%2Fdeep%2Ftopic\.md$/);
       await second.release();
-      await fileLink(tab, "guide/deep/topic.html").click();
+      await fileLink(tab, "guide/deep/topic.md").click();
       await expect(heading(tab, "Deep topic")).toBeVisible();
       await expect(loadStatus(tab)).toHaveText("");
     } finally {
@@ -685,17 +618,17 @@ test.describe("document loading", () => {
     }
   });
 
-  test("with reduced motion the loading row is static", async ({ asOwner: tab, site }) => {
+  test("with reduced motion the loading row is static", async ({ page: tab, site }) => {
     await open(tab, site.docs);
     await folderRow(tab, "guide").click();
     await expect(folderRow(tab, "guide")).toHaveAttribute("aria-expanded", "true");
     const animation = () => active(tab).evaluate(row => ({ row: getComputedStyle(row).animationName, shimmer: getComputedStyle(row, "::before").animationName }));
     for (const [motion, moving] of [["no-preference", true], ["reduce", false]] as const) {
       await tab.emulateMedia({ reducedMotion: motion });
-      const hold = await holdDocument(tab, motion === "reduce" ? "guide/intro.html" : "guide/deep/topic.html");
+      const hold = await holdDocument(tab, motion === "reduce" ? "guide/intro.md" : "guide/deep/topic.md");
       try {
         await folderRow(tab, "guide/deep").click().catch(() => undefined);
-        const target = motion === "reduce" ? "guide/intro.html" : "guide/deep/topic.html";
+        const target = motion === "reduce" ? "guide/intro.md" : "guide/deep/topic.md";
         await fileLink(tab, target).click();
         await expect.poll(() => hold.held()).toBeGreaterThan(0);
         expect(await classes(tab)).toContain("doc-loading");
@@ -710,10 +643,10 @@ test.describe("document loading", () => {
   });
 });
 
-test.describe("sharing from the viewer", () => {
+test.describe("copying the link", () => {
   test.use({ viewport: desktop });
 
-  test("a failed share says so in the live region, offers Retry and Dismiss, and returns focus to the button", async ({ asOwner: tab, site }) => {
+  test("copies the reader's link to the document; a refused copy says so, offers Retry and Dismiss, and returns focus", async ({ page: tab, site, baseURL }) => {
     await fakeClipboard(tab);
     await open(tab, site.docs);
     const share = tab.locator("#share-btn");
@@ -723,17 +656,25 @@ test.describe("sharing from the viewer", () => {
     await expect(live).toHaveAttribute("aria-live", "polite");
     await expect(live).toHaveText("");
     await expect(alert).toBeHidden();
-    let respond = (route: Route) => route.fulfill({ status: 400, contentType: "application/json", body: JSON.stringify({ code: "share_busy" }) });
-    await tab.route("**/api/rendro/shares", route => respond(route));
 
+    // The branch view's URL, never the pinned frame.
+    await share.click();
+    await expect.poll(async () => clipboard(tab)).toEqual([`${baseURL}${site.docs}?doc=${encodeURIComponent(doc("index.md"))}`]);
+    await expect(alert).toBeHidden();
+
+    // Neither the clipboard nor the fallback copies.
+    await tab.evaluate(() => {
+      (window as unknown as { clipboardState: { mode: string } }).clipboardState.mode = "reject";
+      document.execCommand = () => false;
+    });
     await share.click();
     await expect(alert).toBeVisible();
-    await expect(alert.locator("#share-error-text")).toHaveText("Sharing is taking longer than expected right now. Please try again.");
-    await expect(live).toHaveText(/^Sharing is taking longer than expected right now\. Please try again\./);
+    await expect(alert.locator("#share-error-text")).toHaveText("The link could not be copied. Please try again.");
+    await expect(live).toHaveText(/^The link could not be copied\. Please try again\./);
     await expect(alert.getByRole("button", { name: "Retry" })).toBeVisible();
     await expect(share).not.toHaveAttribute("aria-busy", /.*/);
 
-    // Dismiss hides the notice and gives focus back to the share button.
+    // Dismiss hides the notice and gives focus back to the button.
     await alert.getByRole("button", { name: "Dismiss" }).click();
     await expect(alert).toBeHidden();
     await expect(share).toBeFocused();
@@ -746,19 +687,12 @@ test.describe("sharing from the viewer", () => {
     await expect(alert).toBeHidden();
     await expect(share).toBeFocused();
 
-    // A permanent refusal offers no Retry; a retryable one that then succeeds clears the notice.
-    respond = route => route.fulfill({ status: 400, contentType: "application/json", body: JSON.stringify({ code: "share_unavailable" }) });
-    await share.click();
-    await expect(alert.locator("#share-error-text")).toHaveText("This document cannot be shared because it, or a file it needs, is unavailable.");
-    await expect(alert.getByRole("button", { name: "Retry" })).toBeHidden();
-    await alert.getByRole("button", { name: "Dismiss" }).click();
-    respond = route => route.fulfill({ status: 400, contentType: "application/json", body: JSON.stringify({ code: "share_busy" }) });
+    // A retry that copies clears the notice.
     await share.click();
     await expect(alert.getByRole("button", { name: "Retry" })).toBeVisible();
-    await tab.unroute("**/api/rendro/shares");
+    await tab.evaluate(() => { (window as unknown as { clipboardState: { mode: string } }).clipboardState.mode = "ok"; });
     await alert.getByRole("button", { name: "Retry" }).click();
-    // The "copied" label is a short-lived confirmation a poll can miss; what stays is the link on the clipboard and no notice.
-    await expect.poll(async () => (await clipboard(tab)).length).toBe(1);
+    await expect.poll(async () => (await clipboard(tab)).length).toBe(2);
     await expect(alert).toBeHidden();
     await expect(share).not.toHaveAttribute("aria-busy", /.*/);
   });

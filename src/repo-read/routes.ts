@@ -22,7 +22,6 @@ import { d1SearchIndex, type SearchD1 } from "@/search/d1";
 import type { SearchIndex } from "@/search/index";
 import { treePageCursor } from "@/routes/tree-pages";
 import { unavailableResponse, viewerErrorCache, viewerErrorResponse } from "@/routes/viewer-unavailable";
-import { validTreeDirectory } from "@/deployment-index";
 import { isCanonicalStorageKey } from "@/storage-boundary";
 import { storageKeyRepoId } from "@/ingest/orchestrator/keys";
 import { ViewerBackendError } from "@/viewer-backend";
@@ -48,7 +47,7 @@ import { manifestFile, readDeadline, RepoSnapshots, type EdgeCache } from "./sna
 import { SHARED_CACHE_PATH, SHARED_CACHE_TTL_SECONDS, sharedCacheReader, verifySharedCachePath, type SharedCacheProbe } from "./shared-cache";
 import { REPO_SPECULATION_RULES_PATH, repoSpeculationRules } from "./speculation";
 import { ReadTiming } from "./timing";
-import { treePage } from "./tree";
+import { treePage, validTreeDirectory } from "./tree";
 import { requireCookieWrite } from "../../shared/request-admission";
 
 /** As on the other delivery routes: a stalled store becomes a retryable 503. */
@@ -222,8 +221,8 @@ function shell(c: Context, grant: RepoGrant, request: RepoRequestPath, manifest:
     repoId: grant.repo.id, accessUrl: `${repoBase(request.owner, request.name, { kind: "default" })}/comment-access`, convexUrl: CONVEX_URL, documentPath: selected,
   };
   const html = renderScopedDocumentShell({
-    user: null, namespace: request.name, title: `${request.owner}/${request.name}`,
-    basePath: repoBase(request.owner, request.name, request.ref), frameBase: pinned, selectedPath: selected, copyLink: true, repoCommentConfig, repoSearch: true,
+    namespace: request.name, title: `${request.owner}/${request.name}`,
+    basePath: repoBase(request.owner, request.name, request.ref), frameBase: pinned, selectedPath: selected, repoCommentConfig,
   });
   // Private frames load their images through tickets, which only the trusted shell may renew.
   const ticketRenewal = grant.repo.private ? viewerUpdateNotice() + viewerScript("parent", { base: pinned }) : "";
@@ -305,7 +304,7 @@ async function frame(c: Context, manifest: SnapshotManifest, { grant, request, f
     const issuedAt = services.authorize.now();
     prefix = `${pinned}/view/${await mintTicket(services.authorize, grant, manifest.commit)}/files/`;
     const ticket = { issuedAt, renewAfter: TICKET_TTL_SECONDS * 1000 / 2 };
-    head = viewerScript("frame", { base: pinned, prefix, manifestKey: manifest.commit, deploymentId: manifest.commit, ticket }, c.req.url) + head;
+    head = viewerScript("frame", { base: pinned, prefix, manifestKey: manifest.commit, ticket }, c.req.url) + head;
   }
   const title = page.title ?? path.slice(path.lastIndexOf("/") + 1);
   const bytes = new TextEncoder().encode(renderFrameDocument({ title, body: page.parts.join(prefix), origin, head: `${head}\n${widget}` }));

@@ -314,22 +314,22 @@ async function flushNavigation(): Promise<void> {
 describe("management navigation regressions", () => {
   it("cancels rapid navigation and ignores an older response that arrives last", async () => {
     const runtime = navigationRuntime();
-    const publications = `${new URL(runtime.initialUrl).origin}/organizations/org-a/projects/project-a/publications`;
-    const shares = `${new URL(runtime.initialUrl).origin}/organizations/org-a/projects/project-a/shares`;
+    const project = `${new URL(runtime.initialUrl).origin}/organizations/org-a/projects/project-a`;
+    const projects = `${new URL(runtime.initialUrl).origin}/organizations/org-a/projects`;
 
-    const older = runtime.ui.navigate(publications);
+    const older = runtime.ui.navigate(project);
     const olderSignal = runtime.fetchOptions[0].signal as AbortSignal;
-    const newer = runtime.ui.navigate(shares);
-    const pendingShares = runtime.main.current;
+    const newer = runtime.ui.navigate(projects);
+    const pendingProjects = runtime.main.current;
     expect(olderSignal.aborted).toBe(true);
 
-    runtime.resolveFetch(1, { label: "shares", projectId: "project-a" }, shares);
+    runtime.resolveFetch(1, { label: "projects" }, projects);
     await expect(newer).resolves.toBe(true);
-    runtime.resolveFetch(0, { label: "publications", projectId: "project-a" }, publications);
+    runtime.resolveFetch(0, { label: "project", projectId: "project-a" }, project);
     await expect(older).resolves.toBe(false);
 
-    expect(runtime.main.current).toBe(pendingShares);
-    expect(runtime.appendedScripts.map((script) => script.textContent)).toEqual(["page:shares"]);
+    expect(runtime.main.current).toBe(pendingProjects);
+    expect(runtime.appendedScripts.map((script) => script.textContent)).toEqual(["page:projects"]);
     expect(runtime.replaceLocation).not.toHaveBeenCalled();
   });
 

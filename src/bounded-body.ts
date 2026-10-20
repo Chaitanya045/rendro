@@ -1,39 +1,5 @@
-import { MAX_FILE_BYTES, MAX_HTTP_BODY_BYTES } from "../shared/deployment-limits";
-
-export async function readExactBody(
-  body: ReadableStream<Uint8Array> | null,
-  expectedSize: number,
-  signal?: AbortSignal,
-): Promise<Uint8Array | null> {
-  if (!Number.isSafeInteger(expectedSize) || expectedSize < 0 || expectedSize > MAX_FILE_BYTES) return null;
-  if (!body) return expectedSize === 0 ? new Uint8Array() : null;
-
-  signal?.throwIfAborted();
-  const reader = body.getReader();
-  const cancel = (event: Event) => { void reader.cancel((event.target as AbortSignal).reason).catch(() => {}); };
-  signal?.addEventListener("abort", cancel, { once: true });
-  const bytes = new Uint8Array(expectedSize);
-  let total = 0;
-  try {
-    while (true) {
-      const result = await reader.read();
-      signal?.throwIfAborted();
-      if (result.done) break;
-      if (!result.value) continue;
-      total += result.value.byteLength;
-      if (total > expectedSize) {
-        void reader.cancel("Request body exceeds manifest size").catch(() => {});
-        return null;
-      }
-      bytes.set(result.value, total - result.value.byteLength);
-    }
-  } finally {
-    signal?.removeEventListener("abort", cancel);
-    reader.releaseLock();
-  }
-  if (total !== expectedSize) return null;
-  return bytes;
-}
+/** Every JSON or form body the Worker and Convex accept is at most 64 KiB. */
+export const MAX_HTTP_BODY_BYTES = 64 * 1024;
 
 export class BodyTooLargeError extends Error {
   constructor(readonly limit: number) { super(`Request body exceeds the ${limit}-byte limit`); }

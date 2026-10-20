@@ -2,10 +2,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { ConvexError } from "convex/values";
 import { api, internal } from "../convex/_generated/api";
 import { writeQuotaLimiter, writeQuotaLimits, consumeWriteQuota } from "../convex/writeQuotas";
-import { anonymousLimiter, anonymousLimits } from "../convex/anonymousAdmission";
 import { cookieWriteFixture, admissionHeaders } from "./helpers/cookie-write-fixture";
-import { fixture as commentFixture } from "./helpers/comment-fixture";
-import { signAuthClientIp } from "../shared/auth-client-ip";
+import { fixture as commentFixture, repoAnchor } from "./helpers/comment-fixture";
 import { failure } from "../convex/httpErrors";
 
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllEnvs(); });
@@ -30,7 +28,6 @@ describe("transactional write quotas", () => {
   it.each([
     ["projects", "/api/rendro/projects", "projects"],
     ["credentials", "/api/rendro/credentials", "apiKeyCredentials"],
-    ["shares", "/api/rendro/shares", "shareGrants"],
   ] as const)("returns actionable HTTP 429 for %s before any persistent write", async (resource, path, table) => {
     vi.spyOn(Date, "now").mockReturnValue(Date.now());
     const f = await cookieWriteFixture();
@@ -49,7 +46,7 @@ describe("transactional write quotas", () => {
     expect(await response.json()).toEqual({ error: `Too many writes. Please try again in ${seconds} seconds.`, code: "rate_limited" });
     expect(await f.backend.run(ctx => ctx.db.query(table).collect())).toEqual(before);
     // Revocation remains available when creation is exhausted.
-    if (resource !== "projects") expect((await f.post(resource === "shares" ? "/api/rendro/shares/revoke" : "/api/rendro/credentials/revoke")).status).toBe(200);
+    if (resource !== "projects") expect((await f.post("/api/rendro/credentials/revoke")).status).toBe(200);
   });
 
   it("limits direct comment RPCs by authenticated author across threads/replies and preserves retry deduplication", async () => {
@@ -61,31 +58,14 @@ describe("transactional write quotas", () => {
       await writeQuotaLimiter.reset(ctx, "comments", { key });
       await writeQuotaLimiter.limit(ctx, "comments", { key, count: writeQuotaLimits.comments.capacity - 1 });
     });
-    const args = { ...f.scope, body: "new", anchor: { kind: "element" as const, path: ["main"] }, clientOperationId: "operation-limit-123" };
-    const id = await f.viewers.author.mutation(api.documentThreads.create, args);
-    expect(await f.viewers.author.mutation(api.documentThreads.create, args)).toBe(id);
-    await expect(f.viewers.author.mutation(api.documentThreads.create, { ...args, clientOperationId: undefined })).rejects.toMatchObject({ data: { kind: "RateLimited" } });
-    await expect(f.viewers.author.mutation(api.documentReplies.add, { ...f.scope, threadId: id, body: "denied" })).rejects.toMatchObject({ data: { kind: "RateLimited" } });
-    await f.viewers.member.mutation(api.documentReplies.add, { ...f.scope, threadId: id, body: "allowed" });
-    expect((await f.backend.run(ctx => ctx.db.query("documentThreads").collect())).length).toBe(2);
-    expect((await f.backend.run(ctx => ctx.db.query("documentReplies").collect())).length).toBe(3);
-  });
-
-  it("applies the same author/tenant comment budget to legacy RPCs", async () => {
-    const f = await commentFixture();
-    vi.stubEnv("LEGACY_ORGANIZATION_MAP", JSON.stringify({ legacy: f.data.organizationId }));
-    const identity = f.data.users[0];
-    for (const user of f.data.users) f.viewers[user.name] = f.backend.withIdentity({ subject: user.userId, sessionId: user.sessionId, email: `${user.name}@example.test` });
-    const thread = await f.viewers.author.mutation(api.threads.create, { orgSlug: "legacy", filePath: "index.html", body: "Legacy", anchor: { kind: "element", path: ["main"] } });
-    await f.backend.run(async ctx => {
-      await writeQuotaLimiter.reset(ctx, "comments", { key: `user:${identity.userId}` });
-      await writeQuotaLimiter.limit(ctx, "comments", { key: `user:${identity.userId}`, count: writeQuotaLimits.comments.capacity });
-    });
-    for (const call of [
-      () => f.viewers.author.mutation(api.threads.create, { orgSlug: "legacy", filePath: "index.html", body: "Legacy", anchor: { kind: "element", path: ["main"] } }),
-      () => f.viewers.author.mutation(api.replies.add, { threadId: thread, body: "Reply" }),
-    ]) await expect(call()).rejects.toMatchObject({ data: { kind: "RateLimited" } });
-    await f.viewers.member.mutation(api.replies.add, { threadId: thread, body: "Control" });
+    const args = { ...f.scope, body: "new", anchor: repoAnchor(), clientOperationId: "operation-limit-123" };
+    const id = await f.viewers.author.mutation(api.repoComments.createThread, args);
+    expect(await f.viewers.author.mutation(api.repoComments.createThread, args)).toBe(id);
+    await expect(f.viewers.author.mutation(api.repoComments.createThread, { ...args, clientOperationId: undefined })).rejects.toMatchObject({ data: { kind: "RateLimited" } });
+    await expect(f.viewers.author.mutation(api.repoComments.addReply, { ...f.scope, threadId: id, body: "denied" })).rejects.toMatchObject({ data: { kind: "RateLimited" } });
+    await f.viewers.member.mutation(api.repoComments.addReply, { ...f.scope, threadId: id, body: "allowed" });
+    expect((await f.backend.run(ctx => ctx.db.query("repoThreads").collect())).length).toBe(2);
+    expect((await f.backend.run(ctx => ctx.db.query("repoReplies").collect())).length).toBe(3);
   });
 
   it("rolls back quotas along with invalid project writes", async () => {
@@ -94,29 +74,6 @@ describe("transactional write quotas", () => {
     for (let i = 0; i < writeQuotaLimits.projects.capacity + 1; i++) await expect(backend.mutation(internal.projects.createInternal, args)).rejects.toThrow("Project slug");
     expect(await backend.mutation(internal.projects.createInternal, { ...args, slug: "valid" })).toBeTruthy();
   });
-});
-
-it("budgets anonymous resolution by verified IP before queries, shares budgets across routes, and ignores forged IPs", async () => {
-  vi.spyOn(Date, "now").mockReturnValue(Date.now());
-  const f = await cookieWriteFixture();
-  expect((await f.backend.fetch("/api/rendro/admission/public")).status).toBe(200);
-  const publication = "/api/rendro/publications/public?slug=existing";
-  const share = "/api/rendro/shares/public?token=missing";
-  const signed = async (path: string, ip: string) => f.backend.fetch(path, { headers: await signAuthClientIp(new Request(`https://test.convex.site${path}`), ip, process.env.CONVEX_INTERNAL_SECRET!) });
-  await exhaustAnonymous(f.backend, "resolution", "192.0.2.1", 0.5);
-  vi.spyOn(Math, "random").mockReturnValue(0);
-  expect((await signed(publication, "192.0.2.1")).status).toBe(200);
-  const denied = await signed(share, "192.0.2.1");
-  expect(denied.status).toBe(429);
-  expect(denied.headers.get("retry-after")).toBe("1");
-  expect((await signed(publication, "192.0.2.2")).status).toBe(200);
-  await exhaustAnonymous(f.backend, "unverifiedResolution", "unverified");
-  vi.spyOn(Math, "random").mockReturnValue(0);
-  for (const path of [publication, share]) {
-    expect((await f.backend.fetch(path, { headers: { "x-rendro-verified-client-ip": "192.0.2.2", "x-forwarded-for": "192.0.2.3" } })).status).toBe(429);
-  }
-  vi.mocked(Date.now).mockReturnValue(Date.now() + 5000);
-  expect((await signed(publication, "192.0.2.1")).status).toBe(200);
 });
 
 it("sanitizes limiter errors and rejects unauthenticated management writes without consuming another actor's quota", async () => {
@@ -128,15 +85,3 @@ it("sanitizes limiter errors and rejects unauthenticated management writes witho
   expect(limited.headers.get("retry-after")).toBe("1");
   expect(await limited.text()).not.toContain("private-name");
 });
-
-async function exhaustAnonymous(backend: Awaited<ReturnType<typeof cookieWriteFixture>>["backend"], name: keyof typeof anonymousLimits, key: string, remaining = 0) {
-  const { shards, capacity } = anonymousLimits[name];
-  await backend.run(ctx => anonymousLimiter.reset(ctx, name, { key }));
-  const random = vi.spyOn(Math, "random");
-  try {
-    for (let shard = 0; shard < shards; shard++) {
-      random.mockReturnValue((shard + 0.1) / shards);
-      expect((await backend.run(ctx => anonymousLimiter.limit(ctx, name, { key, count: capacity / shards - remaining }))).ok).toBe(true);
-    }
-  } finally { random.mockRestore(); }
-}

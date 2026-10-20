@@ -1,4 +1,3 @@
-import { unavailableResponse } from "@/routes/viewer-unavailable";
 import type { Context, Next } from "hono";
 import type { User } from "better-auth/types";
 import { CONVEX_SITE_URL } from "@/config";
@@ -182,11 +181,6 @@ export async function sessionMiddleware(
   if (
     path.startsWith("/api/auth/")
     || path.startsWith("/api/rendro/")
-    || path.startsWith("/api/sync/")
-    // These routes authorize exclusively through the encrypted ticket, then
-    // freshly revalidate its session and membership in Convex on every request.
-    || /^\/legacy-view\/[^/]+\/view\/[^/]+\/files\//.test(path)
-    || /^\/organizations\/[^/]+\/projects\/[^/]+\/docs\/view\/[^/]+\/files\//.test(path)
   ) {
     await finish();
     return;
@@ -196,9 +190,9 @@ export async function sessionMiddleware(
   // `cookie` holds only session-token and preference pairs (see viewerSessionCookie).
   if (sessionTokenCookie(cookie)) {
     const sessionStartedAt = performance.now();
-    // Only modern scoped pages/documents redundantly validate the live session
-    // and membership downstream. All other routes (including landing, sign-in,
-    // sign-up/Get started, account pages and legacy storage) need fresh identity.
+    // Only scoped management pages redundantly validate the live session and
+    // membership downstream. All other routes (including landing, sign-in,
+    // sign-up/Get started and account pages) need fresh identity.
     const cached = c.req.method === "GET" && /^(?:\/organizations\/[^/]+(?:\/|$)|\/accept-invitation\/[^/]+$)/.test(path);
     if (!cached) await sessionCache.evict(cookie);
     const result = await lookupWithRetry(c.req.raw, cookie, cached);
@@ -210,11 +204,7 @@ export async function sessionMiddleware(
       c.header("Retry-After", retryAfter);
       appendTiming(c, "session", sessionDuration);
       const wantsHtml = !path.startsWith("/api/") && c.req.header("accept")?.includes("text/html");
-      // Cookie-authenticated document and asset reads get the plain asset error, so an
-      // image or stylesheet in a viewer frame is never answered with a JSON body.
-      c.res = /^(?:\/legacy-view\/[^/]+|\/organizations\/[^/]+\/projects\/[^/]+\/docs)\/files\//.test(path)
-        ? unavailableResponse(c, { unavailable: true, retryAfter, subject: "session" }, "asset")
-        : wantsHtml
+      c.res = wantsHtml
         ? c.html(renderSessionUnavailablePage(), 503)
         : c.json({ error: "Session temporarily unavailable", retryable: true }, 503);
       return;

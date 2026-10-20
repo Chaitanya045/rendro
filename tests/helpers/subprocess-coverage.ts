@@ -36,15 +36,15 @@ export function subprocessArgs() {
 }
 
 /**
- * Build the CLI bundle exactly like scripts/build-cli.mjs. While collecting, the
- * test build keeps unused branches and inline source maps, and registers its code
- * so the merger can map the (deleted) scratch bundle back to cli/ sources.
+ * Build a self-contained Node bundle of an authored entry point. While collecting,
+ * the build keeps unused branches and inline source maps, and registers its code
+ * so the merger can map the (deleted) scratch bundle back to its sources.
  */
-export async function buildCliBundle(outfile: string) {
+export async function buildRegisteredBundle(entry: string, outfile: string) {
   const directory = process.env[SUBPROCESS_COVERAGE_DIR];
   const collecting = Boolean(directory);
   const result = await build({
-    entryPoints: ["cli/src/index.ts"], bundle: true, platform: "node", target: "node22", format: "esm", write: false, outfile,
+    entryPoints: [entry], bundle: true, platform: "node", target: "node22", format: "esm", write: false, outfile,
     ...collecting && { sourcemap: "inline", sourcesContent: true, treeShaking: false },
   });
   const { text } = result.outputFiles![0];

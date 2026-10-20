@@ -5,28 +5,23 @@ const harness = createBrowserHarness();
 beforeAll(async () => {
   const assets = new Map([
     ["/tree.js", await bundleBrowserAsset("src/lazy-tree/lazy-tree.ts")],
-    ["/navigation.js", await bundleBrowserAsset("tests/fixtures/deterministic-navigation.ts")],
     ["/select.js", await bundleBrowserAsset("src/ui/select-browser.ts")],
     ["/commentor.js", await bundleBrowserAsset("src/commentor/commentor.ts")],
     ["/host.js", await bundleBrowserAsset("tests/fixtures/deterministic-comment-host.ts")],
   ]);
   await harness.start((request, response) => {
     response.setHeader("Content-Type", "text/html");
-    if (request.url?.startsWith("/api/tree/")) {
+    if (request.url?.startsWith("/r/acme/docs/tree?")) {
       response.setHeader("Content-Type", "application/json");
-      response.end(JSON.stringify({ children: [{ name: "page.html", path: "fixture/page.html", type: "file" }], isTruncated: false }));
+      response.end(JSON.stringify({ children: [{ name: "page.html", type: "file" }] }));
     } else if (request.url === "/tree") {
-      response.end('<!doctype html><div class="sidebar-tree" data-tree-org="fixture"><div id="tree-container"></div></div><iframe id="content-frame" name="content-frame"></iframe><script src="/tree.js"></script>');
-    } else if (request.url === "/navigation") {
-      response.end('<!doctype html><script>addEventListener("message",event=>{if(event.data.type==="doc-navigate")document.body.dataset.destination=event.data.path})</script><iframe src="/navigation-frame"></iframe>');
-    } else if (request.url === "/navigation-frame") {
-      response.end('<!doctype html><a href="/files/fixture/next.html">Legacy link</a><script src="/navigation.js"></script>');
+      response.end('<!doctype html><div class="sidebar-tree" data-tree-org="fixture" data-document-base="/r/acme/docs" data-frame-base="/r/acme/docs"><div id="tree-container"></div></div><iframe id="content-frame" name="content-frame"></iframe><script src="/tree.js"></script>');
     } else if (request.url === "/select") {
       response.end('<!doctype html><div id="container"><select class="select" aria-label="Choice"><option>A</option><option>B</option></select></div><script src="/select.js"></script>');
     } else if (request.url === "/comments") {
-      response.end('<!doctype html><iframe style="width:800px;height:600px" id="content-frame" sandbox="allow-scripts" src="/legacy-view/fixture/files/page.html?comments"></iframe><script src="/host.js"></script>');
+      response.end('<!doctype html><iframe style="width:800px;height:600px" id="content-frame" sandbox="allow-scripts" src="/r/acme/docs/files/page.html?comments"></iframe><script src="/host.js"></script>');
     } else if (request.url?.endsWith("?comments")) {
-      response.end('<!doctype html><p id="target">Document</p><script>window.COMMENTOR={transport:"parent",orgSlug:"fixture",filePath:"fixture/page.html",documentPath:"page.html",canWrite:true}</script><script src="/commentor.js"></script>');
+      response.end(`<!doctype html><h1 id="title">Fixture</h1><p id="target">Document</p><script src="/commentor.js" data-commentor-config='{"transport":"parent","repoId":9101,"blobSha":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","documentPath":"page.html"}'></script>`);
     } else response.end('<!doctype html><p>Loaded document</p>');
   }, assets);
 });
@@ -37,7 +32,7 @@ it.each([0, 600])("settles the document loader after %i ms and handles explicit 
   await page.clock.pauseAt(new Date("2026-01-01T00:00:01Z"));
   let releaseTree!: () => void;
   const treeHeld = new Promise<void>(resolve => { releaseTree = resolve; });
-  await page.route("**/api/tree/**", async route => { await treeHeld; await route.continue(); });
+  await page.route("**/r/acme/docs/tree?*", async route => { await treeHeld; await route.continue(); });
   await page.goto(`${harness.origin}/tree`);
   await page.evaluate(() => window.dispatchEvent(new Event("resize")));
   releaseTree();
@@ -45,7 +40,7 @@ it.each([0, 600])("settles the document loader after %i ms and handles explicit 
   let release!: () => void;
   const held = new Promise<void>(resolve => { release = resolve; });
   let arrived = false;
-  await page.route("**/legacy-view/fixture/files/page.html", async route => {
+  await page.route("**/r/acme/docs/files/page.html", async route => {
     arrived = true;
     await held;
     await route.fulfill({ contentType: "text/html", body: "<p>Loaded document</p>" });
@@ -160,16 +155,4 @@ it("delivers loading, stale subscription, drawer scroll and compatibility states
   await page.clock.runFor(500);
   expect(await frame.getByRole("button", { name: "Show reload notice" }).isVisible()).toBe(true);
   await harness.flushCoverage(page);
-  await page.locator("iframe").evaluate(frame => frame.remove());
-  await page.evaluate("clearDeployment()");
-  expect(await page.locator("#content-frame").count()).toBe(0);
-});
-
-// A restored iframe can still be replacing its document when the shell URL has
-// changed. Own this compatibility outcome without relying on Back/load timing.
-it("classifies a legacy absolute link after the document navigation handler is ready", async () => {
-  const page = await harness.newPage();
-  await page.goto(`${harness.origin}/navigation`);
-  await page.frameLocator("iframe").getByRole("link", { name: "Legacy link" }).click();
-  await expect.poll(() => page.locator("body").getAttribute("data-destination")).toBe("next.html");
 });

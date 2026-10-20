@@ -2,7 +2,6 @@ import {
   type ManagementLoadingPage,
   renderOrganizationLoadingPage,
   renderProjectLoadingPage,
-  renderProjectNavigation,
   renderTableLoading,
 } from "./management-loading";
 
@@ -21,27 +20,6 @@ export function apiKeyLoadingPage(): ManagementLoadingPage {
   };
 }
 
-export function publicationLoadingPage(organizationId: string, projectId: string): ManagementLoadingPage {
-  return {
-    eyebrow: "Public access",
-    heading: "Publications",
-    description: "Expose an explicit project path through a stable anonymous URL.",
-    actions: '<button class="button primary" id="publication-create" type="button" data-dialog-open="publication-dialog" disabled hidden>Create publication</button>',
-    content: `${renderProjectNavigation(organizationId, projectId, "publications")}<p class="access-note" id="publication-access-note" role="status" hidden>You have read-only publication access. Owners and admins create and remove publications.</p><section class="panel"><div class="table-wrap"><table class="data-table publication-table"><thead><tr><th>Publication</th><th>Path</th><th>Release mode</th><th>Actions</th></tr></thead><tbody id="publication-list">${renderTableLoading("Loading publications", 4)}</tbody></table></div></section><style>.publication-table{min-width:680px}.row-actions{display:flex;gap:6px}@media(max-width:620px){.row-actions .button{min-height:44px}}</style>`,
-  };
-}
-
-export function shareLoadingPage(organizationId: string, projectId: string): ManagementLoadingPage {
-  const base = `/organizations/${encodeURIComponent(organizationId)}/projects/${encodeURIComponent(projectId)}`;
-  return {
-    eyebrow: "Private access",
-    heading: "Private shares",
-    description: "Revocable links pinned to immutable deployments, with explicit expiry.",
-    actions: `<a class="button primary" id="share-browse-docs" href="${base}/docs" hidden>Browse documentation</a>`,
-    content: `${renderProjectNavigation(organizationId, projectId, "shares")}<p class="access-note" id="share-access-note" role="status" hidden>You can view private-share history and create links from documentation. Only owners and admins can revoke links.</p><section class="panel"><div class="table-wrap"><table class="data-table share-table"><thead><tr><th>Document</th><th>Deployment</th><th>Expires</th><th>Status</th><th>Action</th></tr></thead><tbody id="share-list">${renderTableLoading("Loading private shares", 5)}</tbody></table></div></section><style>.share-table{min-width:720px}@media(max-width:620px){.share-table .button{min-height:44px}}</style>`,
-  };
-}
-
 /** Public presentation only: no records, roles, tokens, or private response cache. */
 export function managementLoadingPages(organizationId: string): Record<string, ManagementLoadingPage> {
   const projectId = MANAGEMENT_PROJECT_PLACEHOLDER;
@@ -52,9 +30,6 @@ export function managementLoadingPages(organizationId: string): Record<string, M
     settings: renderOrganizationLoadingPage(organizationId, "settings"),
     projects: renderProjectLoadingPage(organizationId),
     project: renderProjectLoadingPage(organizationId, projectId),
-    deployments: renderProjectLoadingPage(organizationId, projectId, "deployments"),
     "api-keys": apiKeyLoadingPage(),
-    publications: publicationLoadingPage(organizationId, projectId),
-    shares: shareLoadingPage(organizationId, projectId),
   };
 }

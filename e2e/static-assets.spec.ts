@@ -1,7 +1,8 @@
 import { readFileSync } from "node:fs";
 import type { Page } from "@playwright/test";
 import { versionedBundles } from "../src/routes/versioned-bundles";
-import { test, expect, content } from "./viewer-fixtures";
+import { test, expect } from "./fixtures";
+import { signInSeeded } from "./shell-helpers";
 import type { RepoFixtures } from "./repo-fixtures";
 
 /**
@@ -24,22 +25,23 @@ function trackBundles(page: Page) {
 }
 
 test.describe("public static assets", () => {
-  test("every bundle a signed-in page loads is immutable and bypasses the session stack", async ({ asOwner: tab, site, cspViolations }) => {
+  test("every bundle a signed-in page loads is immutable and bypasses the session stack", async ({ page: tab, context, baseURL, seed, cspViolations }) => {
     test.slow();
+    await signInSeeded(context, baseURL, seed, "owner");
     const bundles = trackBundles(tab);
     // Management pages: shell navigation, query client and shared select. The document itself is private and no-store.
-    const management = await tab.goto(`/organizations/${site.organizationId}/projects`);
+    const management = await tab.goto(`/organizations/${seed.organizationId}/projects`);
     expect(management?.headers()["cache-control"]).toBe("private, no-store");
     expect(management?.headers()["server-timing"]).toContain("session");
     await expect(tab.locator("script[src^='/management-pages.js']")).toHaveCount(1);
-    await tab.goto(`${site.docs}?doc=index.html`);
-    await expect(content(tab).getByRole("heading", { name: "Viewer home" })).toBeVisible();
-    // The repository shell loads the real-user monitoring bundle (#282); its document is a frame like the viewer's.
-    const { open } = JSON.parse(readFileSync(process.env.RENDRO_E2E_REPOS as string, "utf8")) as RepoFixtures;
-    await tab.goto(`/r/${open.owner}/${open.name}`);
+    // A private repository's shell adds the ticket renewal (private viewer) to the tree, comments and real-user
+    // monitoring (#282) every repository shell loads; its document is a frame with the comment widget.
+    const { closed } = JSON.parse(readFileSync(process.env.RENDRO_E2E_REPOS as string, "utf8")) as RepoFixtures;
+    await tab.goto(`/r/${closed.owner}/${closed.name}`);
+    await expect(tab.frameLocator("#content-frame").getByRole("heading", { name: "Closed home", level: 1 })).toBeVisible();
     await expect(tab.locator("script[src^='/rum.js']")).toHaveCount(1);
 
-    // The viewer document and its comment frame load their `defer` scripts after the heading renders, so the list
+    // The repository document and its comment frame load their `defer` scripts after the heading renders, so the list
     // is complete only once every bundle's response arrived: poll the real condition instead of reading it once.
     const loadedPaths = () => [...bundles.keys()].map(key => key.replace(/\?.*/, ""));
     for (const path of bundlePaths) await expect.poll(loadedPaths, { message: `${path} was not loaded by any page` }).toContain(path);
@@ -67,7 +69,7 @@ test.describe("public static assets", () => {
     }
   });
 
-  test("a stale, foreign or missing version serves the current bytes uncached, and unlisted paths are 404", async ({ asOwner: tab }) => {
+  test("a stale, foreign or missing version serves the current bytes uncached, and unlisted paths are 404", async ({ page: tab }) => {
     for (const path of bundlePaths) {
       const current = await tab.request.get(path + currentSearch(path));
       expect(current.status(), path).toBe(200);

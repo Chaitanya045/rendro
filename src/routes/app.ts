@@ -1,6 +1,3 @@
-import { decodeStoragePath, isLegacyStorageKey, legacyStoragePrefix } from "@/storage-boundary";
-import { CONVEX_URL } from "@/config";
-import { viewerScript, viewerUpdateNotice } from "@/viewer/markup";
 import { COMMENTOR_PARENT_VERSION, LAZY_TREE_VERSION } from "@/viewer/asset-versions";
 import { renderCommentRecoveryLifecycle } from "../commentor/recovery-session";
 import { nonceAttribute } from "@/middleware/html-nonce";
@@ -8,19 +5,12 @@ import { renderFaviconLinks } from "./favicon";
 import { renderFontHead } from "./fonts";
 import { renderStylesheet } from "./styles";
 import { Hono } from "hono";
-import { headObject } from "@/storage";
-import { logOrgAccess } from "@/orgs";
 import type { User } from "better-auth/types";
-import { legacyRequestMember, legacyUnavailable, retiredLegacy } from "@/legacy-access";
-import { isDeleted } from "@/soft-delete";
-import { renderNotFoundPage } from "@/routes/not-found";
 import { renderLandingPage } from "@/routes/landing";
 import { renderThemeAssets, renderThemeButton } from "./theme";
 import { menuSurfaceStyles } from "../ui/menu-styles";
-import { RETRY_AFTER_SOURCE } from "../../shared/retry-after";
 
 const app = new Hono<{ Variables: { user?: User } }>();
-app.onError(legacyUnavailable);
 
 /**
  * The public root is the product landing page. Authenticated users enter
@@ -36,79 +26,7 @@ app.get("/", (c) => {
   return c.redirect("/organizations");
 });
 
-app.get("/docs/:org", async (c) => {
-  const user = c.get("user");
-  if (!user) return c.redirect(`/sign-in?returnTo=${encodeURIComponent(c.req.path)}`);
-  const org = c.req.param("org");
-  if (!org || !legacyStoragePrefix(org) || c.req.param("org") !== org || !(await legacyRequestMember(c, org))) {
-    return c.html(renderLegacyOrgNotFound(c.req.path), 404);
-  }
-  return c.html(renderOrgDocs(user, org));
-});
-
-app.get("/docs/:key{.+}", async (c) => {
-  const user = c.get("user");
-  if (!user) return c.redirect(`/sign-in?returnTo=${encodeURIComponent(c.req.path)}`);
-  const selectedDoc = decodeStoragePath(c.req.path.slice("/docs/".length));
-  if (!selectedDoc) return c.html(renderLegacyOrgNotFound(c.req.path), 404);
-  const org = selectedDoc.split("/")[0];
-  if (!isLegacyStorageKey(org, selectedDoc) || !await legacyRequestMember(c, org)) {
-    return c.html(renderLegacyOrgNotFound(c.req.path), 404);
-  }
-  if (await isDeleted(selectedDoc) || !(await headObject(selectedDoc))) {
-    return c.html(renderNotFoundPage({
-      path: c.req.path,
-      homeHref: `/docs/${encodeURIComponent(org)}`,
-      homeLabel: "Open docs tree",
-      message: "That document is not in the current docs tree. It may have moved, been deleted, or never existed.",
-    }), 404);
-  }
-  return c.html(renderOrgDocs(user, org, selectedDoc));
-});
-
-app.post("/api/orgs", retiredLegacy);
-
 // ----- HTML renderers -----
-
-
-// Legacy docs remain readable during migration; new organizations use v2 onboarding.
-function renderLegacyOrgNotFound(path: string): string {
-  return renderNotFoundPage({
-    path,
-    homeHref: "/organizations?choose=1",
-    homeLabel: "Manage organizations",
-  });
-}
-
-
-export interface PublicShellPublication {
-  orgSlug: string;
-  slug: string;
-  title: string;
-  entryFile: string;
-}
-
-interface OrgTreePageOptions {
-  publication?: PublicShellPublication;
-  documentBase?: string;
-  /** Frames and tree pages load from here instead of `documentBase` (a branch view pins its commit). */
-  frameBase?: string;
-  /** Copy the viewer URL under neutral labels (repository docs, public or private). */
-  copyLink?: boolean;
-  /** Repository shell: render the in-sidebar document search (#251). */
-  repoSearch?: boolean;
-  displayName?: string;
-  backHref?: string;
-  backLabel?: string;
-  legacyCommentConfig?: { orgSlug: string; convexUrl: string };
-  repoCommentConfig?: RepoCommentConfig;
-  publicDocument?: boolean;
-  shareConfig?: {
-    organizationId: string;
-    projectId: string;
-    convexUrl?: string;
-  };
-}
 
 /** Comments on repository docs (#254): the trusted shell's repository, where it asks for access, and Convex. */
 export interface RepoCommentConfig {
@@ -119,83 +37,26 @@ export interface RepoCommentConfig {
   documentPath?: string;
 }
 
+/** The repository docs shell (`/r/{owner}/{repo}`): sidebar tree and search, the sandboxed document frame, comments. */
 export interface ScopedDocumentShellOptions {
-  user: User | null;
   namespace: string;
   title: string;
+  /** The URL readers share and the tree's links name (a branch view keeps its branch). */
   basePath: string;
+  /** Frames and tree pages load from here (a branch view pins its commit). */
+  frameBase: string;
   selectedPath: string;
-  backHref?: string;
-  backLabel?: string;
-  publicDocument?: boolean;
-  frameBase?: string;
-  copyLink?: boolean;
-  repoCommentConfig?: RepoCommentConfig;
-  repoSearch?: boolean;
-  shareConfig?: {
-    organizationId: string;
-    projectId: string;
-    convexUrl?: string;
-  };
-}
-
-function renderOrgDocs(user: User, org: string, selectedDoc = ""): string {
-  logOrgAccess(org, user.email, "view");
-  return renderOrgTreePage(user, org, selectedDoc, { legacyCommentConfig: { orgSlug: org, convexUrl: CONVEX_URL } })
-    .replace("</body>", viewerUpdateNotice() + viewerScript("parent", { base: `/legacy-view/${encodeURIComponent(org)}` }) + "</body>");
-}
-
-export function renderPublicOrgDocs(publication: PublicShellPublication, selectedPath: string): string {
-  const selectedDoc = `${publication.orgSlug}/${selectedPath}`;
-  return renderOrgTreePage(null, publication.orgSlug, selectedDoc, { publication });
+  repoCommentConfig: RepoCommentConfig;
 }
 
 export function renderScopedDocumentShell(options: ScopedDocumentShellOptions): string {
-  const selectedDoc = options.selectedPath ? `${options.namespace}/${options.selectedPath}` : "";
-  return renderOrgTreePage(options.user, options.namespace, selectedDoc, {
-    documentBase: options.basePath,
-    displayName: options.title,
-    backHref: options.backHref,
-    backLabel: options.backLabel,
-    publicDocument: options.publicDocument,
-    shareConfig: options.shareConfig,
-    frameBase: options.frameBase,
-    copyLink: options.copyLink,
-    repoCommentConfig: options.repoCommentConfig,
-    repoSearch: options.repoSearch,
-  });
-}
-
-function renderOrgTreePage(user: User | null, org: string, selectedDoc = "", options: OrgTreePageOptions = {}): string {
-  const publication = options.publication;
-  const isPublicDocument = Boolean(publication || options.publicDocument || options.copyLink);
-  const documentBase = options.documentBase ?? (publication
-    ? `/public/${encodeURIComponent(publication.orgSlug)}/${encodeURIComponent(publication.slug)}`
-    : "");
-  const displayName = options.displayName ?? publication?.title ?? org;
-  const email = user ? escapeHtml(user.email) : "Public documentation";
+  const org = options.namespace;
+  const selectedDoc = `${org}/${options.selectedPath}`;
+  const documentBase = options.basePath;
   const orgEsc = escapeHtml(org);
-  const displayNameEsc = escapeHtml(displayName);
-  // Match the management shell's account avatar: first character of the
-  // display name (or email), so one account reads the same everywhere.
-  const initials = user ? escapeHtml((user.name || user.email).trim().charAt(0).toUpperCase() || "R") : "";
-  const shareLabel = options.copyLink ? "Copy link" : isPublicDocument ? "Copy public URL" : options.shareConfig ? "Share document" : "Copy signed URL";
-  const sharePendingLabel = options.copyLink ? "Copying link…" : isPublicDocument ? "Copying public URL…" : options.shareConfig ? "Creating share…" : "Creating signed URL…";
-  const shareDoneLabel = options.copyLink ? "Link copied!" : isPublicDocument ? "Public URL copied!" : options.shareConfig ? "Share link copied!" : "Signed URL copied!";
+  const displayNameEsc = escapeHtml(options.title);
+  const shareLabel = "Copy link";
   const sandboxAttribute = ' sandbox="allow-scripts allow-forms allow-popups allow-downloads"';
-  const backMarkup = options.backHref
-    ? `<a class="topbar-btn topbar-btn-back" href="${escapeHtml(options.backHref)}" aria-label="${escapeHtml(options.backLabel ?? "Back")}"><span class="material-symbols-outlined" aria-hidden="true">arrow_back</span><span class="topbar-back-label">${escapeHtml(options.backLabel ?? "Back")}</span></a>`
-    : "";
-  const avatarMarkup = user
-    ? `<div class="avatar-wrap">
-      <button class="topbar-avatar" id="avatar-btn" type="button" title="${escapeHtml(email)}" aria-label="Open account menu" aria-expanded="false">${initials}</button>
-      <div class="avatar-menu" id="avatar-menu" hidden>
-        <div class="avatar-menu-email">${escapeHtml(email)}</div>
-        <a href="/account/security" class="avatar-menu-item"><span class="material-symbols-outlined" aria-hidden="true">shield</span> Account security</a>
-        <form method="post" action="/api/auth/sign-out"><button type="submit" class="avatar-menu-item"><span class="material-symbols-outlined" aria-hidden="true">logout</span> Sign out</button></form>
-      </div>
-    </div>`
-    : "";
   return `<!DOCTYPE html>
 <html lang="en">
 <head>${renderFaviconLinks()}
@@ -211,14 +72,11 @@ ${renderThemeAssets()}
   .material-symbols-outlined{font-variation-settings:'FILL'0,'wght'400,'GRAD'0,'opsz'24;vertical-align:middle;font-size:20px}
   ::-webkit-scrollbar{width:6px} ::-webkit-scrollbar-track{background:transparent} ::-webkit-scrollbar-thumb{background:#e4e4e7;border-radius:10px}
 
-  .topbar-btn.topbar-btn-back{color:#52525b;background:transparent;border:1px solid #e4e4e7;text-decoration:none}
-  .topbar-btn-back:hover{background:#f4f4f5;color:#09090b;border-color:#d4d4d8}
   .topbar-btn-icon.mobile-tree-toggle{display:none}
   .mobile-tree-backdrop{display:none}
   .topbar{position:fixed;top:0;z-index:50;width:100%;height:56px;background:#fff;border-bottom:1px solid #e4e4e7;display:flex;align-items:center;justify-content:space-between;padding:0 24px;transition:transform .3s cubic-bezier(.4,0,.2,1),opacity .2s cubic-bezier(.4,0,.2,1);will-change:transform,opacity}
   .topbar-left{display:flex;align-items:center;gap:10px;min-width:0;flex:1;margin-right:16px}
   .topbar-logo{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:24px;font-weight:700;color:#c2410c;line-height:32px}
-  .topbar-left>.topbar-btn-back{flex-shrink:0}
   .topbar-search{display:flex;align-items:center;gap:8px;background:#f4f4f5;padding:6px 12px;border-radius:4px;border:1px solid #e4e4e7;width:256px;transition:border-color .15s}
   .topbar-search:focus-within{border-color:#c2410c}
   .topbar-search input{border:0;outline:0;background:transparent;font-size:14px;color:#09090b;width:100%;font-family:Inter}
@@ -229,8 +87,7 @@ ${renderThemeAssets()}
   .mobile-more-menu[hidden]{display:none}
   .mobile-action-label{display:none}
   .topbar-btn{min-height:36px;padding:6px 12px;font-size:12px;font-weight:600;border-radius:6px;cursor:pointer;border:0;font-family:Inter;display:flex;align-items:center;gap:6px;transition:background-color 150ms cubic-bezier(.4,0,.2,1),color 150ms cubic-bezier(.4,0,.2,1),border-color 150ms cubic-bezier(.4,0,.2,1),transform 150ms cubic-bezier(.4,0,.2,1)}
-  .topbar-btn:focus-visible,.avatar-menu-item:focus-visible,.load-more-btn:focus-visible{outline:2px solid var(--viewer-focus);outline-offset:2px}
-  .topbar-btn-back:active,.avatar-menu-item:active{transform:scale(.98)}
+  .topbar-btn:focus-visible,.load-more-btn:focus-visible{outline:2px solid var(--viewer-focus);outline-offset:2px}
   .topbar-btn-share{color:#52525b;background:transparent;border:1px solid #e4e4e7;min-width:172px;justify-content:center;overflow:hidden}
   .topbar-btn-share:hover:not(:disabled){background:#f4f4f5;color:#09090b;border-color:#d4d4d8}
   .topbar-btn-share:active:not(:disabled){transform:scale(.98);background:#e4e4e7}
@@ -268,9 +125,6 @@ ${renderThemeAssets()}
   html.dark .shortcut-key{background:#e4e4e7;color:#09090b;box-shadow:inset 0 -1px 0 rgba(9,9,11,.12)}
   .topbar-btn-create{background:#c2410c;color:#fff}
   .topbar-btn-create:hover{background:#9a3412;opacity:1}
-  .topbar-avatar{width:36px;height:36px;flex:none;border-radius:50%;background:#ffedd5;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700;color:#c2410c;cursor:pointer;border:1px solid rgba(194,65,12,.24);transition:background-color 150ms cubic-bezier(.4,0,.2,1),border-color 150ms cubic-bezier(.4,0,.2,1),color 150ms cubic-bezier(.4,0,.2,1),transform 150ms cubic-bezier(.4,0,.2,1)}
-  .topbar-avatar:hover:not(:disabled){background:#f4f4f5;color:#09090b;border-color:#d4d4d8}
-  .topbar-avatar:active:not(:disabled){transform:scale(.98)}
 
   .sidebar{position:fixed;top:56px;left:0;bottom:0;z-index:40;width:var(--sidebar-width);background:#fff;border-right:1px solid #e4e4e7;display:flex;flex-direction:column;overflow:hidden;padding:16px 0;transition:top .3s cubic-bezier(.4,0,.2,1),width .3s cubic-bezier(.4,0,.2,1),opacity .2s cubic-bezier(.4,0,.2,1),transform .3s cubic-bezier(.4,0,.2,1);will-change:top,width,transform,opacity}
   .sidebar-org{padding:0 24px;margin-bottom:16px}
@@ -422,23 +276,16 @@ ${renderThemeAssets()}
   @media (prefers-reduced-motion: reduce){.topbar,.sidebar,.main,.sidebar-resizer,.share-label-track,.shortcut-tooltip,.sidebar-resizer::before{transition:none}.sidebar-resizer::before{transform:scaleY(1)}.resizer-sparks{display:none}}
   @media (prefers-reduced-motion: reduce){.share-icon-track{transition:none}.share-loader{animation:none!important}}
   @media (prefers-reduced-motion: reduce){.tree-folder-collapse,.active-indicator{transition:none!important}}
-  .avatar-wrap{position:relative}
   @keyframes viewerMenuIn{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}
-  .avatar-menu{position:absolute;top:44px;right:0;background:#fff;border:1px solid #e4e4e7;border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,.12);padding:4px;width:230px;max-width:calc(100vw - 20px);z-index:100}
-  .avatar-menu:not([hidden]),.mobile-more-menu:not([hidden]){animation:viewerMenuIn 200ms cubic-bezier(.4,0,.2,1)}
-  .avatar-menu-email{padding:8px 12px;font-size:12px;color:#71717a;border-bottom:1px solid #e4e4e7;margin-bottom:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .avatar-menu-item{display:flex;align-items:center;gap:8px;padding:9px 10px;font-size:14px;line-height:20px;color:#09090b;text-decoration:none;border-radius:4px;cursor:pointer;border:0;background:transparent;width:100%;font-family:Inter;transition:background-color 150ms cubic-bezier(.4,0,.2,1),color 150ms cubic-bezier(.4,0,.2,1),transform 150ms cubic-bezier(.4,0,.2,1)}
-  .avatar-menu-item:hover{background:#f4f4f5}
-  .avatar-menu-item:active{background:#f4f4f5}
+  .mobile-more-menu:not([hidden]){animation:viewerMenuIn 200ms cubic-bezier(.4,0,.2,1)}
 
   .topbar-btn-icon{width:36px;height:36px;flex:none;border-radius:6px;border:0;background:transparent;cursor:pointer;display:flex;align-items:center;justify-content:center;color:#71717a;transition:background-color 150ms cubic-bezier(.4,0,.2,1),color 150ms cubic-bezier(.4,0,.2,1),transform 150ms cubic-bezier(.4,0,.2,1)}
   .topbar-btn-icon:hover:not(:disabled){background:#f4f4f5;color:#09090b}
   .topbar-btn-icon:active:not(:disabled){transform:scale(.98)}
-  .topbar-btn:disabled,.topbar-btn-icon:disabled,.topbar-avatar:disabled{opacity:.5;cursor:not-allowed;transform:none}
-  .topbar-btn-icon:focus-visible,.topbar-avatar:focus-visible{outline:2px solid #c2410c;outline-offset:2px}
-  .topbar-avatar:focus-visible{border-color:#d4d4d8}
-  @media(prefers-reduced-motion:reduce){.topbar-btn-icon,.topbar-avatar{transition:none}.topbar-btn-icon:active,.topbar-avatar:active{transform:none!important}}
-  @media(prefers-reduced-motion:reduce){.topbar-btn,.avatar-menu-item,.load-more-btn{transition:none}.topbar-btn:active,.avatar-menu-item:active,.load-more-btn:active{transform:none!important}.avatar-menu,.mobile-more-menu{animation:none!important}.topbar-btn-share.is-feedback #share-feedback-icon{transform:none}#share-feedback-icon,.mobile-tree-backdrop{transition:none!important}}
+  .topbar-btn:disabled,.topbar-btn-icon:disabled{opacity:.5;cursor:not-allowed;transform:none}
+  .topbar-btn-icon:focus-visible{outline:2px solid #c2410c;outline-offset:2px}
+  @media(prefers-reduced-motion:reduce){.topbar-btn-icon{transition:none}.topbar-btn-icon:active{transform:none!important}}
+  @media(prefers-reduced-motion:reduce){.topbar-btn,.load-more-btn{transition:none}.topbar-btn:active,.load-more-btn:active{transform:none!important}.mobile-more-menu{animation:none!important}.topbar-btn-share.is-feedback #share-feedback-icon{transform:none}#share-feedback-icon,.mobile-tree-backdrop{transition:none!important}}
   @media (prefers-reduced-motion: reduce){.tree-item.tree-item-entering{animation:none!important;animation-delay:0s!important;opacity:1!important;transform:none!important}.tree-folder.loading>.tree-item .folder-icon,.tree-folder.loading>.tree-item .tree-folder-name{animation:none!important;background:none!important;color:#c2410c!important;-webkit-text-fill-color:currentColor!important}html.doc-loading .tree-item.active{animation:none!important;transform:none!important}html.doc-loading .tree-item.active::before{animation:none!important}html.dark .tree-folder.loading>.tree-item .folder-icon,html.dark .tree-folder.loading>.tree-item .tree-folder-name{color:#fb923c!important}}
   @media (prefers-reduced-motion: reduce){.tree-item[data-path],.tree-item[data-path]>.material-symbols-outlined{transition-property:background-color,color!important}.tree-item[data-path]:hover,.tree-item[data-path]:focus-within{translate:none!important}.tree-item[data-path]:hover>.material-symbols-outlined,.tree-item[data-path]:focus-within>.material-symbols-outlined{transform:none!important}}
   @media (prefers-reduced-motion: reduce){.tree-folder>.tree-item .caret-icon,.tree-folder>.tree-item .folder-icon{transition-property:color!important}.tree-folder>.tree-item:hover .caret-icon,.tree-folder>.tree-item:focus-within .caret-icon{translate:none!important}}
@@ -460,8 +307,7 @@ ${renderThemeAssets()}
   html.dark .topbar-btn-share{color:#a1a1aa;border-color:#27272a}
   html.dark .topbar-btn-share:hover:not(:disabled){background:#18181b;color:#fafafa;border-color:#3f3f46}
   html.dark .topbar-btn-share:active:not(:disabled),html.dark .topbar-btn-share.is-feedback{background:#18181b;color:#fafafa;border-color:#3f3f46}
-  html.dark .topbar-btn-share:focus-visible,html.dark .topbar-btn-icon:focus-visible,html.dark .topbar-avatar:focus-visible{outline-color:#fb923c}
-  html.dark .topbar-avatar:focus-visible{border-color:#3f3f46}
+  html.dark .topbar-btn-share:focus-visible,html.dark .topbar-btn-icon:focus-visible{outline-color:#fb923c}
   html.dark .topbar-btn-icon:hover:not(:disabled){background:#18181b;color:#fafafa}
   html.dark .topbar-btn-create{background:#fb923c;color:#09090b}
   html.dark .topbar-btn-create:hover{background:#fdba74;opacity:1}
@@ -481,8 +327,6 @@ ${renderThemeAssets()}
   html.dark .repo-search-item mark{background:rgba(251,146,60,.35)}
   html.dark .sidebar-tree::-webkit-scrollbar-thumb{background:#3f3f46}
   html.dark .sidebar-tree::-webkit-scrollbar-thumb:hover{background:#52525b}
-  html.dark .topbar-avatar{background:rgba(251,146,60,.16);color:#fb923c;border-color:rgba(251,146,60,.35)}
-  html.dark .topbar-avatar:hover:not(:disabled){background:#18181b;color:#fafafa;border-color:#3f3f46}
   html.dark .sidebar{background:#09090b;border-right-color:#27272a}
   html.dark .sidebar-org-name{color:#fafafa}
   html.dark .sidebar-org-meta{color:#a1a1aa}
@@ -511,24 +355,15 @@ ${renderThemeAssets()}
   html.dark .main-placeholder p{color:#a1a1aa}
   html.dark .ph-icon{background:#18181b}
   html.dark .ph-icon .material-symbols-outlined{color:#a1a1aa!important}
-  html.dark .avatar-menu-item{color:#fafafa}
-  html.dark .avatar-menu-item:hover{background:#18181b}
-  html.dark .avatar-menu-item:active{background:#18181b}
   html.dark .load-more-btn{color:#fb923c;border-color:#27272a}
   html.dark .load-more-btn:hover:not(:disabled){background:#18181b;border-color:#3f3f46}
   html.dark .load-more-btn:disabled{color:#a1a1aa}
-  html.dark .avatar-menu{background:#09090b;border-color:#27272a;box-shadow:0 8px 24px rgba(0,0,0,.48)}
-  html.dark .avatar-menu-email{color:#a1a1aa;border-bottom-color:#27272a}
-  html.dark .avatar-menu-item{color:#fafafa}
-  html.dark .avatar-menu-item:hover{background:#18181b}
-  html.dark .topbar-btn.topbar-btn-back{color:#a1a1aa;border-color:#27272a}
-  html.dark .topbar-btn-back:hover{background:#18181b;color:#fafafa;border-color:#3f3f46}
   html.dark .mobile-more-menu{background:#09090b;border-color:#27272a;box-shadow:0 16px 40px rgba(0,0,0,.5)}
   @media(max-width:760px){
     :root{--tree-row-height:44px}
     .tree-item{min-height:44px}
     .tree-item .tree-link{min-height:32px;line-height:32px}
-    .avatar-menu-item,.load-more-btn{min-height:44px}
+    .load-more-btn{min-height:44px}
     .sidebar-tree{scrollbar-width:none}
     .sidebar-tree::-webkit-scrollbar{display:none}
     .topbar{padding:0 10px}
@@ -536,25 +371,17 @@ ${renderThemeAssets()}
     .topbar-logo{min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:18px}
     .topbar-actions{gap:4px}
     .mobile-more{display:block}
-    .mobile-more-menu .topbar-btn-back,.mobile-more-menu .shortcut-tooltip-wrap,.mobile-more-menu .avatar-wrap{display:flex;width:100%}
-    .mobile-more-menu .topbar-btn-back,.mobile-more-menu #shell-toggle,.mobile-more-menu #avatar-btn{height:44px;width:100%;padding:0 12px;border:0;border-radius:6px;justify-content:flex-start;gap:10px;background:transparent;color:#52525b;font-size:14px;font-weight:600;text-decoration:none}
-    .mobile-more-menu .topbar-btn-back:hover,.mobile-more-menu #shell-toggle:hover:not(:disabled),.mobile-more-menu #avatar-btn:hover:not(:disabled){background:#f4f4f5;color:#09090b}
-    .mobile-more-menu .topbar-btn-back .topbar-back-label{display:inline}
+    .mobile-more-menu .shortcut-tooltip-wrap{display:flex;width:100%}
+    .mobile-more-menu #shell-toggle{height:44px;width:100%;padding:0 12px;border:0;border-radius:6px;justify-content:flex-start;gap:10px;background:transparent;color:#52525b;font-size:14px;font-weight:600;text-decoration:none}
+    .mobile-more-menu #shell-toggle:hover:not(:disabled){background:#f4f4f5;color:#09090b}
     .mobile-more-menu .mobile-action-label{display:inline}
-    .mobile-more-menu #avatar-btn::after{content:"Account"}
-    .mobile-more-menu #avatar-btn{border-radius:6px}
     .mobile-more-menu .shortcut-tooltip{display:none}
-    .mobile-more-menu .avatar-wrap{display:block}
-    .mobile-more-menu .avatar-menu{position:static;width:100%;min-width:0;margin-top:2px;box-shadow:none;border-radius:6px}
-    html.dark .mobile-more-menu .topbar-btn-back,html.dark .mobile-more-menu #shell-toggle,html.dark .mobile-more-menu #avatar-btn{color:#d4d4d8}
-    html.dark .mobile-more-menu .topbar-btn-back:hover,html.dark .mobile-more-menu #shell-toggle:hover:not(:disabled),html.dark .mobile-more-menu #avatar-btn:hover:not(:disabled){background:#18181b;color:#fafafa}
+    html.dark .mobile-more-menu #shell-toggle{color:#d4d4d8}
+    html.dark .mobile-more-menu #shell-toggle:hover:not(:disabled){background:#18181b;color:#fafafa}
     .topbar-btn-icon.mobile-tree-toggle{width:44px;height:44px;display:flex;flex:0 0 44px}
-    .topbar-btn-back{width:44px;height:44px;flex:0 0 44px;padding:0;justify-content:center}
-    .topbar-btn-back .topbar-back-label{display:none}
     .topbar-btn-share{width:44px;min-width:44px;height:44px;padding:0}
     .topbar-btn-share .share-label-window{display:none}
     .topbar-btn-icon{width:44px;height:44px}
-    .topbar-avatar{width:44px;height:44px}
     .sidebar{z-index:70;width:min(320px,86vw);transform:translateX(-102%);opacity:0;pointer-events:none;box-shadow:0 18px 48px rgba(24,24,27,.18)}
     .sidebar-resizer{display:none}
     .main{margin-left:0}
@@ -572,16 +399,14 @@ ${renderStylesheet("viewer-base")}
   <div class="topbar-left">
     <button class="topbar-btn-icon mobile-tree-toggle" id="mobile-tree-toggle" type="button" aria-label="Open document tree" aria-expanded="false"><span class="material-symbols-outlined" aria-hidden="true">menu</span></button>
     <h1 class="topbar-logo">${displayNameEsc}</h1>
-    ${backMarkup}
   </div>
   <div class="topbar-actions">
     <span class="shortcut-tooltip-wrap"><button class="topbar-btn-icon shell-toggle" id="shell-toggle" type="button" aria-label="Hide app shell, keyboard shortcut Ctrl Shift H" aria-describedby="shell-shortcut-tooltip" aria-pressed="false"><span class="material-symbols-outlined" aria-hidden="true">fullscreen</span><span class="mobile-action-label" id="shell-mobile-label">Enter reading mode</span></button><span class="shortcut-tooltip" id="shell-shortcut-tooltip" role="tooltip"><span class="shortcut-tooltip-label">Hide app shell</span><span class="shortcut-keys" id="shell-shortcut-keys" aria-hidden="true"><span class="shortcut-key">Ctrl</span><span class="shortcut-key">Shift</span><span class="shortcut-key">H</span></span></span></span>
     <button class="topbar-btn topbar-btn-share" id="share-btn" type="button" aria-label="${shareLabel}">
       <span class="share-icon-window" aria-hidden="true"><span class="share-icon-track"><span class="material-symbols-outlined share-icon-row">link</span><span class="share-icon-row"><span class="share-loader"></span></span><span class="material-symbols-outlined share-icon-row" id="share-feedback-icon">check</span></span></span>
-      <span class="share-label-window" aria-hidden="true"><span class="share-label-track"><span class="share-label">${shareLabel}</span><span class="share-label">${sharePendingLabel}</span><span class="share-label" id="share-feedback-label">${shareDoneLabel}</span></span></span>
+      <span class="share-label-window" aria-hidden="true"><span class="share-label-track"><span class="share-label">${shareLabel}</span><span class="share-label">Copying link…</span><span class="share-label" id="share-feedback-label">Link copied!</span></span></span>
     </button>
     ${renderThemeButton()}
-    ${avatarMarkup}
     <div class="mobile-more" id="mobile-more">
       <button class="topbar-btn-icon" id="mobile-more-btn" type="button" aria-label="More document actions" aria-haspopup="dialog" aria-controls="mobile-more-menu" aria-expanded="false"><span class="material-symbols-outlined" aria-hidden="true">more_vert</span></button>
       <div class="mobile-more-menu" id="mobile-more-menu" role="dialog" aria-label="More document actions" hidden></div>
@@ -590,7 +415,7 @@ ${renderStylesheet("viewer-base")}
 </header>
 <div class="share-live" id="share-live" role="status" aria-live="polite" aria-atomic="true"></div>
 <aside class="share-error" id="share-error" aria-label="Sharing feedback" hidden>
-  <div id="share-error-message" aria-hidden="true"><span id="share-error-text"></span><span id="share-quota" hidden>Too many shares right now; try again in <span id="share-count"></span><span id="share-unit"> seconds</span>.</span></div>
+  <div id="share-error-message" aria-hidden="true"><span id="share-error-text"></span></div>
   <div class="share-error-actions"><button type="button" class="topbar-btn" id="share-retry">Retry</button><button type="button" class="topbar-btn" id="share-dismiss">Dismiss</button></div>
 </aside>
 <div class="shell-hotzone shell-hotzone-top" id="shell-hotzone-top" aria-hidden="true"></div>
@@ -599,8 +424,8 @@ ${renderStylesheet("viewer-base")}
 
 <aside class="sidebar" id="doc-sidebar" aria-labelledby="doc-sidebar-title">
   <div class="sidebar-divider" id="doc-sidebar-title">Docs</div>
-  ${options.repoSearch ? renderRepoSearch() : ""}
-  <div class="sidebar-tree" data-tree-org="${orgEsc}"${documentBase ? ` data-document-base="${escapeHtml(documentBase)}"` : ""}${options.frameBase ? ` data-frame-base="${escapeHtml(options.frameBase)}"` : ""}>
+  ${renderRepoSearch()}
+  <div class="sidebar-tree" data-tree-org="${orgEsc}" data-document-base="${escapeHtml(documentBase)}" data-frame-base="${escapeHtml(options.frameBase)}">
     <div class="tree-stack" id="tree-container" style="position:relative">
       <div class="active-indicator" id="active-indicator" style="opacity:0;transition:none"></div>
       ${renderTreeSkeleton()}
@@ -862,31 +687,20 @@ ${renderStylesheet("viewer-base")}
       focusShellControl();
     }
   });
-  var lastFrameToggle=-Infinity,lastThemeReady=-Infinity;
+  var lastThemeReady=-Infinity;
   window.addEventListener("message",function(e){
     var allowedOrigin=e.origin===window.location.origin||(window.RENDRO_DOCUMENT_BASE&&e.origin==="null");
-    if(!allowedOrigin||!e.data)return;
-    if(e.data.type==="commentor-theme-ready"){
-      var themeFrame=document.getElementById("content-frame");
-      if(!themeFrame||e.source!==themeFrame.contentWindow)return;
-      if(performance.now()-lastThemeReady<100)return;
-      lastThemeReady=performance.now();
-      notifyTheme(root.dataset.theme||normalizedTheme());
-      return;
-    }
-    if(e.data.type!=="shell-toggle")return;
-    var shellFrame=document.getElementById("content-frame");
-    if(!shellFrame||e.source!==shellFrame.contentWindow)return;
-    if(!navigator.userActivation||navigator.userActivation.isActive!==true)return;
-    if(performance.now()-lastFrameToggle<1000)return;
-    lastFrameToggle=performance.now();
-    setShellHidden(!root.classList.contains("shell-hidden"));
-    if(!root.classList.contains("shell-hidden"))focusShellControl();
+    if(!allowedOrigin||!e.data||e.data.type!=="commentor-theme-ready")return;
+    var themeFrame=document.getElementById("content-frame");
+    if(!themeFrame||e.source!==themeFrame.contentWindow)return;
+    if(performance.now()-lastThemeReady<100)return;
+    lastThemeReady=performance.now();
+    notifyTheme(root.dataset.theme||normalizedTheme());
   });
 
   var mobileMoreButton=document.getElementById("mobile-more-btn"),mobileMoreMenu=document.getElementById("mobile-more-menu");
   var mobileMoreMedia=window.matchMedia("(max-width:760px)");
-  var mobileMoreItems=[document.querySelector(".topbar-btn-back"),document.querySelector(".shortcut-tooltip-wrap"),document.getElementById("theme-toggle"),document.querySelector(".avatar-wrap")].filter(Boolean);
+  var mobileMoreItems=[document.querySelector(".shortcut-tooltip-wrap"),document.getElementById("theme-toggle")];
   var mobileMoreSlots=mobileMoreItems.map(function(item){var slot=document.createComment("mobile-more-slot");item.parentNode.insertBefore(slot,item);return {item:item,slot:slot};});
   var mobileMoreSyncedMode=null;
   function setMobileMore(open,restoreFocus){
@@ -914,43 +728,25 @@ ${renderStylesheet("viewer-base")}
   else mobileMoreMedia.addListener(syncMobileMore);
   window.addEventListener("resize",function(){if(mobileMoreMedia.matches!==mobileMoreSyncedMode)syncMobileMore();});
   if(mobileMoreButton)mobileMoreButton.addEventListener("click",function(e){e.stopPropagation();setMobileMore(mobileMoreMenu.hidden,false);});
-  mobileMoreItems.slice(0,3).forEach(function(item){item.addEventListener("click",function(){setMobileMore(false,false);});});
+  mobileMoreItems.forEach(function(item){item.addEventListener("click",function(){setMobileMore(false,false);});});
 
-  var avatarButton=document.getElementById("avatar-btn"),avatarMenu=document.getElementById("avatar-menu");
-  function setAvatarMenu(open){if(!avatarButton||!avatarMenu)return;avatarMenu.hidden=!open;avatarButton.setAttribute("aria-expanded",String(open));}
-  if(avatarButton)avatarButton.addEventListener("click",function(e){e.stopPropagation();setAvatarMenu(avatarMenu.hidden);});
-  document.addEventListener("keydown",function(e){if(e.key==="Escape"){var restore=Boolean(mobileMoreMenu&&!mobileMoreMenu.hidden);setAvatarMenu(false);setMobileMore(false,restore);}});
+  document.addEventListener("keydown",function(e){if(e.key==="Escape"){var restore=Boolean(mobileMoreMenu&&!mobileMoreMenu.hidden);setMobileMore(false,restore);}});
   var shareBtn=document.getElementById("share-btn");
   var shareFeedbackLabel=document.getElementById("share-feedback-label");
   var shareFeedbackIcon=document.getElementById("share-feedback-icon");
-  var shareFeedbackTimer,shareRetryTimer,shareRetryUntil=0,shareAnnouncements=0;
-  var shareError=document.getElementById("share-error"),shareErrorText=document.getElementById("share-error-text"),shareQuota=document.getElementById("share-quota"),shareCount=document.getElementById("share-count"),shareUnit=document.getElementById("share-unit"),shareLive=document.getElementById("share-live"),shareRetry=document.getElementById("share-retry"),shareDismiss=document.getElementById("share-dismiss");
-  ${RETRY_AFTER_SOURCE}
-  // The live region exists, empty, from page load. It is written only when a notice appears and when a delay ends; the visible per-second countdown is aria-hidden.
+  var shareFeedbackTimer,shareAnnouncements=0;
+  var shareError=document.getElementById("share-error"),shareErrorText=document.getElementById("share-error-text"),shareLive=document.getElementById("share-live"),shareRetry=document.getElementById("share-retry"),shareDismiss=document.getElementById("share-dismiss");
+  // The live region exists, empty, from page load. It is written only when a notice appears.
   function announceShare(text){shareLive.textContent=text+(shareAnnouncements++%2?"\u00a0":"");}
-  function clearShareError(){clearTimeout(shareRetryTimer);shareRetryUntil=0;shareError.hidden=true;shareErrorText.textContent="";shareQuota.hidden=true;shareLive.textContent="";shareBtn.removeAttribute("aria-disabled");}
+  function clearShareError(){shareError.hidden=true;shareErrorText.textContent="";shareLive.textContent="";}
   function resetShareButton(){clearTimeout(shareFeedbackTimer);shareBtn.classList.remove("is-loading","is-feedback");shareBtn.removeAttribute("aria-busy");shareBtn.setAttribute("aria-label",${JSON.stringify(shareLabel)});}
-  function quotaText(seconds){return "Too many shares right now; try again in "+seconds+(seconds===1?" second.":" seconds.");}
-  function updateShareQuota(initial){
-    var seconds=Math.max(0,Math.ceil((shareRetryUntil-Date.now())/1000));
-    shareRetry.disabled=seconds>0;
-    if(seconds){
-      shareQuota.hidden=false;shareErrorText.textContent="";shareCount.textContent=String(seconds);shareUnit.textContent=seconds===1?" second":" seconds";
-      if(initial)announceShare(quotaText(seconds));
-      shareBtn.setAttribute("aria-disabled","true");shareRetryTimer=setTimeout(updateShareQuota,Math.min(1000,shareRetryUntil-Date.now()));
-    }else{
-      shareQuota.hidden=true;shareErrorText.textContent="You can share again now.";announceShare("You can share again now.");
-      shareBtn.removeAttribute("aria-disabled");
-    }
-  }
-  function showShareError(message,retry,delay,accountWide){
+  function showShareError(message,retry){
     if(signedOut)return;
-    // A failure for a document the reader has already left must not label the new one. Quota applies to the whole account.
-    if(!accountWide&&shareDoc!==(window.RENDRO_CURRENT_DOC||"")){resetShareButton();return;}
+    // A failure for a document the reader has already left must not label the new one.
+    if(shareDoc!==(window.RENDRO_CURRENT_DOC||"")){resetShareButton();return;}
     clearShareError();resetShareButton();
-    shareError.hidden=false;shareRetry.hidden=!retry;shareRetry.disabled=false;
-    if(delay>0){shareRetryUntil=Date.now()+delay;updateShareQuota(true);}
-    else{shareErrorText.textContent=message;announceShare(message);}
+    shareError.hidden=false;shareRetry.hidden=!retry;
+    shareErrorText.textContent=message;announceShare(message);
   }
   function dismissShareError(){shareError.hidden=true;shareBtn.focus();}
   shareDismiss.addEventListener("click",dismissShareError);
@@ -961,69 +757,41 @@ ${renderStylesheet("viewer-base")}
   // The lazy tree assigns the current document on every navigation; assignment announces the change.
   var currentDocument=window.RENDRO_CURRENT_DOC;
   Object.defineProperty(window,"RENDRO_CURRENT_DOC",{configurable:true,enumerable:true,get:function(){return currentDocument;},set:function(value){var changed=value!==currentDocument;currentDocument=value;if(changed)window.dispatchEvent(new Event("rendro:document-change"));}});
-  // Quota is account-wide and keeps counting; every other notice describes one document.
-  addEventListener("rendro:document-change",function(){if(Date.now()>=shareRetryUntil)clearShareError();});
-  var shareLimitMessages={assets:"This document references too many assets to share. Reduce its assets before trying again."};
-  var shareLimitDefault="This document is too large or complex to share. Simplify it or reduce its size before trying again.";
-  // Only the stable code and a known sub-reason select wording; server text is never displayed.
-  function shareFailure(status,data){
-    if(status!==400||!data||typeof data!=="object")return null;
-    if(data.code==="share_busy")return {message:"Sharing is taking longer than expected right now. Please try again.",retry:true};
-    if(data.code==="share_unavailable")return {message:"This document cannot be shared because it, or a file it needs, is unavailable.",retry:false};
-    // Workers deployed before the stable code existed reported only this text.
-    if(data.code==="share_limit"||data.error==="document too complex to share")return {message:shareLimitMessages[data.reason]||shareLimitDefault,retry:false};
-    return null;
-  }
-  var sharePending=false,shareController=new AbortController(),signedOut=false,shareDoc="";
-  addEventListener("commentor-sign-out",function(){signedOut=true;shareController.abort();clearShareError();clearTimeout(shareFeedbackTimer);setAvatarMenu(false);setMobileMore(false,false);});
-  function setShareLoading(){if(!shareBtn)return;if(shareFeedbackTimer!==undefined)window.clearTimeout(shareFeedbackTimer);shareBtn.classList.remove("is-feedback");shareBtn.classList.add("is-loading");shareBtn.setAttribute("aria-busy","true");shareBtn.setAttribute("aria-label",${JSON.stringify(sharePendingLabel)});}
-  function setShareFeedback(message){if(signedOut||!shareBtn||!shareFeedbackLabel)return;shareBtn.classList.remove("is-loading");shareBtn.removeAttribute("aria-busy");shareFeedbackLabel.textContent=message;if(shareFeedbackIcon)shareFeedbackIcon.textContent=message.endsWith("copied!")?"check":"error";shareBtn.classList.add("is-feedback");shareBtn.setAttribute("aria-label",message);if(shareFeedbackTimer!==undefined)window.clearTimeout(shareFeedbackTimer);shareFeedbackTimer=window.setTimeout(function(){shareBtn.classList.remove("is-feedback");shareBtn.setAttribute("aria-label",${JSON.stringify(shareLabel)});if(shareFeedbackIcon)shareFeedbackIcon.textContent="check";},1800);}
+  // Every notice describes one document.
+  addEventListener("rendro:document-change",clearShareError);
+  var sharePending=false,signedOut=false,shareDoc="";
+  addEventListener("commentor-sign-out",function(){signedOut=true;clearShareError();clearTimeout(shareFeedbackTimer);setMobileMore(false,false);});
+  function setShareLoading(){clearTimeout(shareFeedbackTimer);shareBtn.classList.remove("is-feedback");shareBtn.classList.add("is-loading");shareBtn.setAttribute("aria-busy","true");shareBtn.setAttribute("aria-label","Copying link…");}
+  function setShareFeedback(message){if(signedOut)return;shareBtn.classList.remove("is-loading");shareBtn.removeAttribute("aria-busy");shareFeedbackLabel.textContent=message;shareFeedbackIcon.textContent="check";shareBtn.classList.add("is-feedback");shareBtn.setAttribute("aria-label",message);clearTimeout(shareFeedbackTimer);shareFeedbackTimer=window.setTimeout(function(){shareBtn.classList.remove("is-feedback");shareBtn.setAttribute("aria-label",${JSON.stringify(shareLabel)});},1800);}
   async function copyText(text){if(signedOut)return;try{if(navigator.clipboard&&window.isSecureContext){await navigator.clipboard.writeText(text);return;}}catch(_){}if(signedOut)return;var ta=document.createElement("textarea");ta.value=text;ta.setAttribute("readonly","");ta.style.position="fixed";ta.style.top="-999px";ta.style.left="-999px";document.body.appendChild(ta);ta.select();ta.setSelectionRange(0,text.length);try{if(!document.execCommand("copy"))throw new Error("copy failed");}finally{ta.remove();}}
-  if(shareBtn)shareBtn.addEventListener("click",async function(e){
+  // Copies the reader's URL for the current document: the branch view for a branch, never a ticket or the pinned frame.
+  shareBtn.addEventListener("click",async function(e){
     e.stopPropagation();if(signedOut||sharePending)return;
-    if(Date.now()<shareRetryUntil){shareError.hidden=false;return;}
     var doc=window.RENDRO_CURRENT_DOC||"";
     shareDoc=doc;
-    if(!doc){showShareError("Select a document first.",false,0);return;}
-    clearShareError();sharePending=true;setShareLoading();var copying=false;
+    if(!doc){showShareError("Select a document first.",false);return;}
+    clearShareError();sharePending=true;setShareLoading();
     try{
       var relativeDoc=doc.indexOf(window.RENDRO_ORG+"/")===0?doc.slice(window.RENDRO_ORG.length+1):doc;
-      var publicBase=window.RENDRO_PUBLICATION_BASE||"",shareConfig=window.RENDRO_SHARE_CONFIG;
-      if(publicBase){
-        var publicUrl=new URL(publicBase,window.location.origin);publicUrl.searchParams.set("doc",relativeDoc);
-        copying=true;await copyText(publicUrl.href);setShareFeedback(${JSON.stringify(shareDoneLabel)});
-      }else if(shareConfig){
-        var res=await fetch("/api/rendro/shares",{signal:shareController.signal,method:"POST",headers:{"Content-Type":"application/json",accept:"application/json"},body:JSON.stringify({organizationId:shareConfig.organizationId,projectId:shareConfig.projectId,documentPath:relativeDoc,expiresInSeconds:604800})});
-        if(signedOut)return;
-        if(res.status===429){showShareError("Too many shares right now; please try again later.",true,parseRetryAfterMs(res.headers.get("Retry-After"),Date.now()),true);return;}
-        var data=await res.json();
-        if(signedOut)return;
-        var failure=shareFailure(res.status,data);
-        if(failure){showShareError(failure.message,failure.retry,0);return;}
-        if(!res.ok||!data||!data.url)throw new Error("share failed");
-        copying=true;await copyText(new URL(data.url,window.location.origin).href);setShareFeedback("Share link copied!");
-      }else{
-        var legacyRes=await fetch("/api/share/create?key="+encodeURIComponent(doc),{signal:shareController.signal,headers:{accept:"application/json"}});
-        if(!legacyRes.ok)throw new Error("share failed");var legacyData=await legacyRes.json();if(signedOut)return;
-        copying=true;await copyText(legacyData.url);setShareFeedback("Signed URL copied!");
-      }
-    }catch(_){showShareError(copying?"The link could not be copied. Please try again.":"The share link could not be created. Please try again.",true,0);}
+      var url=new URL(window.RENDRO_DOCUMENT_BASE,window.location.origin);url.searchParams.set("doc",relativeDoc);
+      await copyText(url.href);setShareFeedback("Link copied!");
+    }catch(_){showShareError("The link could not be copied. Please try again.",true);}
     finally{sharePending=false;}
   });
-  document.addEventListener("click",function(){setAvatarMenu(false);setMobileMore(false,false);});
+  document.addEventListener("click",function(){setMobileMore(false,false);});
   // The document is another frame: a click inside it never reaches this page's click handler, but it moves focus into the
   // frame and blurs this window. Keyboard use of the menus keeps focus in this page, so nothing closes then.
-  window.addEventListener("blur",function(){if(document.activeElement===document.getElementById("content-frame")){setAvatarMenu(false);setMobileMore(false,false);}});
+  window.addEventListener("blur",function(){if(document.activeElement===document.getElementById("content-frame"))setMobileMore(false,false);});
   // Engines that do not report that blur are told by the document itself: it posts a bare message on a press inside it.
-  window.addEventListener("message",function(e){var frame=document.getElementById("content-frame");if(frame&&e.source===frame.contentWindow&&e.data&&e.data.type==="doc-pointer"){setAvatarMenu(false);setMobileMore(false,false);}});
+  window.addEventListener("message",function(e){var frame=document.getElementById("content-frame");if(frame&&e.source===frame.contentWindow&&e.data&&e.data.type==="doc-pointer")setMobileMore(false,false);});
   // The document's "Try again" page (a 503 while a backend was unreachable) cannot reload itself with the session cookie from
   // inside the sandbox, so it asks this page to: src is the document the shell chose, and replace keeps the history entry.
   window.addEventListener("message",function(e){var frame=document.getElementById("content-frame");if(frame&&frame.contentWindow&&e.source===frame.contentWindow&&e.data&&e.data.type==="doc-retry")frame.contentWindow.location.replace(frame.src);});
 })();
 </script>
-<script${nonceAttribute()}>window.RENDRO_INITIAL_DOC=${inlineJson(selectedDoc)};window.RENDRO_ORG=${inlineJson(org)};window.RENDRO_DOCUMENT_BASE=${inlineJson(documentBase)};window.RENDRO_PUBLICATION_BASE=${inlineJson(isPublicDocument ? documentBase : "")};window.RENDRO_SHARE_CONFIG=${inlineJson(options.shareConfig ?? null)};window.RENDRO_LEGACY_COMMENT_CONFIG=${inlineJson(options.legacyCommentConfig ?? null)};window.RENDRO_REPO_COMMENT_CONFIG=${inlineJson(options.repoCommentConfig ?? null)};</script>
-${renderCommentRecoveryLifecycle(user?.id ?? null, nonceAttribute())}
-${options.shareConfig?.convexUrl || options.legacyCommentConfig?.convexUrl || options.repoCommentConfig?.convexUrl ? `<script${nonceAttribute()} src="/commentor-parent.js?v=${COMMENTOR_PARENT_VERSION}"></script>` : ""}
+<script${nonceAttribute()}>window.RENDRO_INITIAL_DOC=${inlineJson(selectedDoc)};window.RENDRO_ORG=${inlineJson(org)};window.RENDRO_DOCUMENT_BASE=${inlineJson(documentBase)};window.RENDRO_REPO_COMMENT_CONFIG=${inlineJson(options.repoCommentConfig)};</script>
+${renderCommentRecoveryLifecycle(null, nonceAttribute())}
+${options.repoCommentConfig.convexUrl ? `<script${nonceAttribute()} src="/commentor-parent.js?v=${COMMENTOR_PARENT_VERSION}"></script>` : ""}
 <script${nonceAttribute()} src="/lazy-tree.js?v=${LAZY_TREE_VERSION}"></script>
 </body>
 </html>`;

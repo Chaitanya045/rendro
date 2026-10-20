@@ -1,10 +1,10 @@
 import { beforeAll, describe, expect, it } from "vitest";
-import { useCommentLab, type Lab } from "./helpers/comment-lab";
+import { anchorOn, useCommentLab, type Lab } from "./helpers/comment-lab";
 
 const commentLab = useCommentLab();
 beforeAll(() => commentLab.start());
 
-const heading = { kind: "element", path: ["main", "h1"] };
+const heading = anchorOn("Quarterly report");
 const alert = (lab: Lab) => lab.ui.locator('.toast[role="alert"]').first();
 const parentReady = (lab: Lab, ready: Record<string, unknown>) => lab.host((_lab, ready) => {
   (document.getElementById("content-frame") as HTMLIFrameElement).contentWindow!.postMessage({ type: "commentor-parent-ready", ...ready }, "*");
@@ -38,11 +38,11 @@ describe("parent compatibility and recovery", () => {
     await expect.poll(() => lab.page.locator("#viewer-update-notice").isVisible()).toBe(true);
     expect(await lab.page.locator("#viewer-update-notice [role=status]").innerText()).toBe("Reload this document to continue.");
     // The parent never navigates on a publisher-controlled request.
-    expect(await lab.page.evaluate(() => location.pathname)).toBe("/organizations/org-a/projects/project-a/docs");
+    expect(await lab.page.evaluate(() => location.pathname)).toBe("/r/acme/docs");
     await parentReady(lab, { protocolVersion: 1, canReloadViewer: false });
     await expect.poll(() => notice.locator("p").last().innerText()).toBe("Use your browser’s Reload button to reload the full page.");
     expect(await notice.getByRole("button").count()).toBe(0);
-    await parentReady(lab, { protocolVersion: 2, parentGeneration: "compatible-again", canReloadViewer: true, userId: "user-a" });
+    await parentReady(lab, { protocolVersion: 2, parentGeneration: "compatible-again", canReloadViewer: true, userId: "user-a", canWrite: true });
     await expect.poll(() => lab.pins().count()).toBe(1);
     expect(await lab.tid("commentor-comment-btn").isDisabled()).toBe(false);
   });
@@ -57,7 +57,7 @@ describe("parent compatibility and recovery", () => {
     await bubble.locator('[data-testid="commentor-reply-input"]').fill("In flight");
     await bubble.locator('[data-testid="commentor-reply-send"]').click();
     await expect.poll(() => lab.host(l => l.held.length)).toBe(1);
-    await parentReady(lab, { protocolVersion: 2, parentGeneration: "replacement-1", userId: "user-a" });
+    await parentReady(lab, { protocolVersion: 2, parentGeneration: "replacement-1", userId: "user-a", canWrite: true });
     await expect.poll(() => alert(lab).innerText()).toContain("The outcome is unknown; your change may still be saved.");
     expect(await bubble.locator('[data-testid="commentor-reply-input"]').inputValue()).toBe("In flight");
     expect(await bubble.locator('[data-testid="commentor-reply-send"]').isDisabled()).toBe(false);
@@ -67,7 +67,7 @@ describe("parent compatibility and recovery", () => {
     await lab.tid("commentor-composer-textarea").fill("New thread in flight");
     await lab.tid("commentor-composer-post").click();
     await expect.poll(() => lab.host(l => l.held.length)).toBe(2);
-    await parentReady(lab, { protocolVersion: 2, parentGeneration: "replacement-2", userId: "user-a" });
+    await parentReady(lab, { protocolVersion: 2, parentGeneration: "replacement-2", userId: "user-a", canWrite: true });
     await expect.poll(() => lab.ui.locator('.toast[role="alert"]').last().innerText()).toContain("The outcome is unknown");
     expect(await lab.tid("commentor-composer-textarea").inputValue()).toBe("New thread in flight");
     expect((await lab.calls).filter(call => call.method === "thread.create")).toHaveLength(1);
@@ -86,7 +86,7 @@ describe("parent compatibility and recovery", () => {
     await expect.poll(() => chip.getAttribute("data-state")).toBe("closed");
     // …and access arriving later re-reads the still-held selection without a new selectionchange,
     // even though scheduleSelectionAction had dropped that selection while unwritable.
-    await parentReady(lab, { protocolVersion: 2, parentGeneration: "compatible-again", canReloadViewer: true, userId: "user-a" });
+    await parentReady(lab, { protocolVersion: 2, parentGeneration: "compatible-again", canReloadViewer: true, userId: "user-a", canWrite: true });
     await lab.selectionSettled();
     await expect.poll(() => chip.getAttribute("data-state")).toBe("open");
     expect(await chip.evaluate(el => (el as HTMLElement).hidden)).toBe(false);
@@ -96,7 +96,7 @@ describe("parent compatibility and recovery", () => {
     await lab.selectionSettled();
     await expect.poll(() => chip.getAttribute("data-state")).toBe("closed");
     // …and is again picked up when access returns; the chip stays usable.
-    await parentReady(lab, { protocolVersion: 2, parentGeneration: "compatible-twice", canReloadViewer: true, userId: "user-a" });
+    await parentReady(lab, { protocolVersion: 2, parentGeneration: "compatible-twice", canReloadViewer: true, userId: "user-a", canWrite: true });
     await lab.selectionSettled();
     await expect.poll(() => chip.getAttribute("data-state")).toBe("open");
     await chip.click();
@@ -113,7 +113,7 @@ describe("parent compatibility and recovery", () => {
     await lab.doc(() => window.dispatchEvent(new Event("scroll")));
     await lab.tick();
     // A repeat of an already-known access level must not resurrect the retracted chip.
-    await parentReady(lab, { protocolVersion: 2, parentGeneration: "same-access-again", canReloadViewer: true, userId: "user-a" });
+    await parentReady(lab, { protocolVersion: 2, parentGeneration: "same-access-again", canReloadViewer: true, userId: "user-a", canWrite: true });
     await lab.tick();
     expect(await chip.getAttribute("data-state")).toBe("closed");
   });
@@ -192,12 +192,15 @@ describe("parent compatibility and recovery", () => {
     expect(await lab.page.evaluate(() => Object.keys(sessionStorage).filter(key => key.startsWith("commentor-operations:")))).toEqual([]);
   });
 
-  it("explains that comments are unavailable when nobody is signed in", async () => {
+  it("lets a reader who is not signed in read a repository's comments, but never write", async () => {
     const lab = await commentLab.open({ user: "" });
-    await lab.tid("commentor-dock").waitFor({ state: "attached" });
-    await expect.poll(() => alert(lab).innerText()).toBe("Comment scope is unavailable");
-    expect(await lab.pins().count()).toBe(0);
-    expect(await lab.host(l => l.subscriptions)).toBe(0);
+    await lab.ready([{ _id: "t1", anchor: heading }]);
+    await expect.poll(() => lab.pins().count()).toBe(1);
+    expect(await lab.tid("commentor-comment-btn").isDisabled()).toBe(true);
+    await lab.select("#intro", 4, 15);
+    await lab.selectionSettled();
+    expect(await lab.tid("commentor-selection-action").getAttribute("data-state")).toBe("closed");
+    expect(await lab.calls).toEqual([]);
   });
 });
 
@@ -213,8 +216,8 @@ describe("parent hardening", () => {
       { type: "commentor-parent-request", requestId: 7, method: "subscribe", args: {} },
       request("other-doc", "subscribe", { documentPath: "other.html" }),
       request("foreign-thread", "thread.resolve", { threadId: "someone-elses-thread", resolved: true }),
-      request("bad-body", "thread.create", { body: "x".repeat(10_001), anchor: { kind: "element", path: ["main"] } }),
-      request("bad-anchor", "thread.create", { body: "ok", anchor: { kind: "element", path: [] } }),
+      request("bad-body", "thread.create", { body: "x".repeat(10_001), anchor: heading }),
+      request("bad-anchor", "thread.create", { body: "ok", anchor: { kind: "element", path: ["main"] } }),
       request("bad-reply", "reply.add", { threadId: "t1", body: "   " }),
       request("bad-draft", "draft.save", { key: "not-a-thread", draft: { body: "x" } }),
       request("bad-key", "operation.complete", { key: "k".repeat(300), clientOperationId: "id" }),
@@ -271,7 +274,7 @@ describe("parent hardening", () => {
     await lab.pins().first().click();
     await lab.tid("commentor-thread-bubble").locator('[data-testid="commentor-resolve-btn"]').click();
     await expect.poll(() => lab.host(l => l.held.length)).toBe(1);
-    await lab.host(() => { (document.getElementById("content-frame") as HTMLIFrameElement).src = "/organizations/org-a/projects/project-a/docs/files/other.html"; });
+    await lab.host(() => { (document.getElementById("content-frame") as HTMLIFrameElement).src = "/r/acme/docs/files/other.html"; });
     await expect.poll(() => lab.doc(() => location.pathname)).toMatch(/other\.html$/);
     await lab.host(l => l.settle(0));
     // The operation stays recorded for a safe retry instead of being retired by a stale acknowledgement.

@@ -7,9 +7,6 @@ import { join } from "node:path";
 import { SignJWT, generateKeyPair, exportJWK } from "jose";
 import { run } from "./backend";
 
-export const publicationSlug = "workerd-smoke";
-/** Where the storage wrapper asks whether a bucket operation should fail; answered inside the E2E harness, never on a network. */
-export const storageProbeOrigin = "http://r2-faults.invalid";
 export async function listen(handler: RequestListener) {
   const server = createServer(handler);
   await new Promise<void>((resolve, reject) => {
@@ -35,16 +32,16 @@ async function body(request: IncomingMessage) {
 }
 export type Mail = { to: string; subject: string; text: string };
 
-/** Outage the Worker's own storage or Convex requests meet; see `startFaults`. */
-export type FaultRule = { origin: "storage" | "convex"; includes: string[]; status: number };
+/** Outage the Worker's Convex requests meet; see `startFaults`. */
+export type FaultRule = { origin: "convex"; includes: string[]; status: number };
 
 /**
- * Backend outage injection for the Worker's outbound requests. A rule answers every request to the storage or Convex
- * fixture whose URL contains all of `includes` with `status`, for as long as the rule exists, and nothing else.
- * Specs scope a rule to their own organization/project ids so parallel specs never see it, and delete it when done
+ * Backend outage injection for the Worker's outbound requests. A rule answers every request to the Convex fixture
+ * whose URL contains all of `includes` with `status`, for as long as the rule exists, and nothing else.
+ * Specs scope a rule to their own data so parallel specs never see it, and delete it when done
  * (`e2e/faults.ts`). The control server listens on loopback only.
  */
-export async function startFaults(origins: { storage: string; convex: string[] }) {
+export async function startFaults(convex: string[]) {
   const rules = new Map<string, FaultRule>();
   const control = await listen((req, res) => {
     void (async () => {
@@ -69,8 +66,7 @@ export async function startFaults(origins: { storage: string; convex: string[] }
       const target = request.url;
       const origin = new URL(target).origin;
       for (const rule of rules.values()) {
-        const matches = rule.origin === "storage" ? origin === origins.storage : origins.convex.includes(origin);
-        if (matches && rule.includes.every(part => target.includes(part))) {
+        if (convex.includes(origin) && rule.includes.every(part => target.includes(part))) {
           return new Response("Injected backend outage", { status: rule.status });
         }
       }
@@ -217,16 +213,3 @@ export async function startIdentityFixtures(directory: string) {
   };
 }
 
-/** The slice of the Worker's R2 binding (Miniflare's simulation) that seeding needs. */
-type Bucket = {
-  list(options: { prefix: string }): Promise<{ objects: Array<{ key: string }> }>;
-  delete(key: string): Promise<void>;
-};
-
-/** Deletes one already-uploaded object, leaving its manifest intact, as the missing-object control. */
-export async function removeSmokeAsset(bucket: Bucket, organizationId: string, projectId: string) {
-  const objects = await bucket.list({ prefix: `tenants/${organizationId}/projects/${projectId}/` });
-  const key = objects.objects.find(object => object.key.endsWith("/files/deleted.svg"))?.key;
-  if (!key) throw new Error("Seed missing-object control was not uploaded");
-  await bucket.delete(key);
-}

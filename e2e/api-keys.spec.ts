@@ -2,13 +2,12 @@ import type { Page } from "@playwright/test";
 import { test, expect, choose, confirmDialog, failOnce, join, toasts } from "./org-fixtures";
 import { holdRequest } from "./auth-helpers";
 import { clipboard, fakeClipboard, api } from "./shell-helpers";
-import {
-  createKey, deploymentsOf, deploymentsPath, failStaged, html, openManagement, publisherScopes, pushRefused, pushSite, startDeployment, watch, withKey, type Credential,
-} from "./project-helpers";
+import { createKey, openManagement, publisherScopes, watch, withKey, type Credential } from "./project-helpers";
 
-/** A refused credential is a 401 from the credential check, or a 403 where the route then falls back to a session. */
-const refusedStatus = [401, 403];
-const refusedPush = /401|403|Invalid or insufficient API key|Authentication required/i;
+/**
+ * Keys no longer push or read anything since uploads left (#286); what each one may do is the credential check's answer,
+ * which is also what records its use.
+ */
 const keyPattern = /^rnd_live_[0-9a-f]{16}_[0-9a-f]{64}$/;
 const rowOf = (page: Page, name: string) => page.locator("#key-list tr", { hasText: name });
 const secret = (key: string) => key.split("_")[3];
@@ -23,7 +22,7 @@ async function openKeys(page: Page, organizationId: string) {
 }
 
 test.describe("API keys", () => {
-  test("an owner creates a scoped key with a one-time secret, uses it, and revoking it stops the very next request", async ({ actor, baseURL }) => {
+  test("an owner creates a scoped key with a one-time secret, uses it, and revoking it stops the very next request", async ({ actor }) => {
     test.setTimeout(150_000);
     const owner = await actor("keys", { organizations: ["Keys Org"], project: true });
     const { page } = owner;
@@ -148,12 +147,10 @@ test.describe("API keys", () => {
     await expect(row.locator("td[data-label=Status] .badge")).toHaveClass(/success/);
     expect(await page.locator("#key-list").textContent()).not.toContain(secret(rawKey));
 
-    // The key does real work through the CLI: a push by it deploys, and the use is recorded.
-    await pushSite(baseURL, organization.id, first, rawKey, { "index.html": html("Pushed by the new key") }, "keys-push");
+    // A key that authenticates has its use recorded; one that was never presented has none.
     const keyWithRead = await createKey(page, organization.id, first, ["docs:read"], { name: "Reader" });
     await createKey(page, organization.id, first, ["docs:read"], { name: "Unused" });
-    const deployed = await withKey<{ deployments: Array<{ status: string }> }>(keyWithRead.rawKey, deploymentsPath(organization.id, first));
-    expect(deployed.body.deployments.map(entry => entry.status)).toEqual(["active"]);
+    expect((await validate(keyWithRead.rawKey, organization.id, first, "docs:read")).status).toBe(200);
     await expect.poll(async () => (await listKeys(page, organization.id)).find(entry => entry.keyId === created.keyId)?.lastUsedAt).toBeGreaterThan(0);
     await openKeys(page, organization.id);
     await expect(rowOf(page, "CI deploy").locator("td[data-label='Last used']")).not.toHaveText("Never");
@@ -197,19 +194,15 @@ test.describe("API keys", () => {
     await expect(rowOf(page, "Reader").locator("td[data-label=Status] .badge")).toHaveText("Active");
     expect((await validate(rawKey, organization.id, first, "docs:write")).status).toBe(401);
     expect((await listKeys(page, organization.id)).find(entry => entry.keyId === created.keyId)?.revokedAt).toBeGreaterThan(0);
-    // Both the CLI and the API now fail, while the other key is unaffected.
-    const refusal = await pushRefused(baseURL, organization.id, first, rawKey);
-    expect(refusal).toMatch(refusedPush);
-    expect(refusal).not.toContain(rawKey);
-    expect(refusedStatus).toContain((await withKey(rawKey, deploymentsPath(organization.id, first))).status);
-    expect((await deploymentsOf(keyWithRead.rawKey, organization.id, first)).body.deployments).toHaveLength(1);
+    // The other key is unaffected.
+    expect((await validate(keyWithRead.rawKey, organization.id, first, "docs:read")).status).toBe(200);
     // Revoking again is harmless and the key stays revoked.
     expect((await api(page, "/api/rendro/credentials/revoke", { organizationId: organization.id, keyId: created.keyId })).status).toBe(200);
     await page.reload();
     await expect(rowOf(page, "CI deploy").locator("td[data-label=Status] .badge")).toHaveText("Revoked");
   });
 
-  test("scopes and project binding decide what each key can do", async ({ actor, baseURL }) => {
+  test("scopes and project binding decide what each key can do", async ({ actor }) => {
     test.setTimeout(150_000);
     const owner = await actor("scopes", { organizations: ["Scopes Org", "Scopes Other"], project: true });
     const { page } = owner;
@@ -222,68 +215,42 @@ test.describe("API keys", () => {
     const pusherA = await createKey(page, organization.id, projectA, ["docs:read", "docs:write"], { name: "Pusher A" });
     const publishA = await createKey(page, organization.id, projectA, ["docs:read", "publications:read", "publications:write"], { name: "Publish A" });
     const pubOnly = await createKey(page, organization.id, projectA, ["publications:read", "publications:write"], { name: "Publications only" });
-    await pushSite(baseURL, organization.id, projectA, wide.rawKey, { "index.html": html("Scoped A") }, "scopes-a");
-    await pushSite(baseURL, organization.id, projectB, wide.rawKey, { "index.html": html("Scoped B") }, "scopes-b");
 
-    const reads = (key: string, project: string, org = organization.id) => withKey(key, deploymentsPath(org, project));
-    // A read key lists its own project and nothing else; it cannot push.
-    expect((await reads(readA.rawKey, projectA)).status).toBe(200);
-    expect(refusedStatus).toContain((await reads(readA.rawKey, projectB)).status);
-    expect(await pushRefused(baseURL, organization.id, projectA, readA.rawKey)).toMatch(refusedPush);
-    // The CLI needs to read the active deployment as well as write: a write-only key cannot complete a push,
-    // although it may start (and clean up) a staging deployment, and reading is not implied by writing.
-    expect(await pushRefused(baseURL, organization.id, projectA, writeA.rawKey)).toMatch(refusedPush);
-    expect(refusedStatus).toContain((await reads(writeA.rawKey, projectA)).status);
-    const staged = await startDeployment(writeA.rawKey, organization.id, projectA, { "index.html": html("Staged by Write A") });
-    expect((await failStaged(writeA.rawKey, organization.id, projectA, staged, "write-only cleanup")).status).toBe(200);
-    // A key with both document scopes pushes to its own project only.
-    await pushSite(baseURL, organization.id, projectA, pusherA.rawKey, { "index.html": html("Pushed by Pusher A") }, "scopes-pusher");
-    expect(await pushRefused(baseURL, organization.id, projectB, pusherA.rawKey)).toMatch(refusedPush);
-    expect((await deploymentsOf(wide.rawKey, organization.id, projectA)).body.deployments.map(entry => entry.status)).toEqual(["active", "failed", "superseded"]);
-    expect((await deploymentsOf(wide.rawKey, organization.id, projectB)).body.deployments.map(entry => entry.status)).toEqual(["active"]);
+    // A project key answers for its own project and its own scopes only; reading is not implied by writing.
+    expect((await validate(readA.rawKey, organization.id, projectA, "docs:read")).status).toBe(200);
+    expect((await validate(readA.rawKey, organization.id, projectB, "docs:read")).status).toBe(401);
+    expect((await validate(readA.rawKey, organization.id, projectA, "docs:write")).status).toBe(401);
+    expect((await validate(writeA.rawKey, organization.id, projectA, "docs:write")).status).toBe(200);
+    expect((await validate(writeA.rawKey, organization.id, projectA, "docs:read")).status).toBe(401);
+    expect((await validate(pusherA.rawKey, organization.id, projectA, "docs:write")).status).toBe(200);
+    expect((await validate(pusherA.rawKey, organization.id, projectB, "docs:write")).status).toBe(401);
     // The organization-wide key reaches every project of its own organization, and none of another one.
-    expect((await reads(wide.rawKey, projectA)).status).toBe(200);
-    expect((await reads(wide.rawKey, projectB)).status).toBe(200);
-    expect(refusedStatus).toContain((await reads(wide.rawKey, otherProject, other.id)).status);
-    expect((await validate(wide.rawKey, organization.id, undefined, "docs:read")).status).toBe(200);
+    for (const project of [projectA, projectB, undefined]) expect((await validate(wide.rawKey, organization.id, project, "docs:read")).status).toBe(200);
+    expect((await validate(wide.rawKey, other.id, otherProject, "docs:read")).status).toBe(401);
     expect((await validate(readA.rawKey, organization.id, undefined, "docs:read")).status).toBe(401);
     expect((await validate(readA.rawKey, organization.id, "not-an-id", "docs:read")).status).toBe(401);
-
     // Publication scopes are independent of document scopes.
-    const publication = (key: string, slug: string) => withKey<{ error?: string; publication?: { _id: string } }>(key, "/api/rendro/publications", {
-      organizationId: organization.id, projectId: projectA, slug, pathPrefix: "", entryFile: "index.html", trackingMode: "track_active", title: slug });
-    expect(refusedStatus).toContain((await publication(readA.rawKey, "denied-read")).status);
-    expect(refusedStatus).toContain((await publication(writeA.rawKey, "denied-write")).status);
-    // Creating a publication also reads the active deployment, so publication scopes alone are not enough.
-    expect(refusedStatus).toContain((await publication(pubOnly.rawKey, "denied-publications-only")).status);
-    const published = await publication(publishA.rawKey, `scopes-${organization.id.slice(-6)}`.toLowerCase());
-    expect(published.status).toBe(201);
-    const listed = await withKey<{ publications: Array<{ slug: string }> }>(publishA.rawKey, `/api/rendro/publications?organizationId=${organization.id}&projectId=${projectA}`);
-    expect(listed.body.publications).toHaveLength(1);
-    expect(refusedStatus).toContain((await withKey(readA.rawKey, `/api/rendro/publications?organizationId=${organization.id}&projectId=${projectA}`)).status);
-    expect((await withKey(pubOnly.rawKey, `/api/rendro/publications?organizationId=${organization.id}&projectId=${projectA}`)).status).toBe(200);
-    expect(refusedStatus).toContain((await withKey(pubOnly.rawKey, deploymentsPath(organization.id, projectA))).status);
-    expect(refusedStatus).toContain((await withKey(readA.rawKey, "/api/rendro/publications/remove", { organizationId: organization.id, projectId: projectA, publicationId: published.body.publication!._id })).status);
-    expect((await withKey(pubOnly.rawKey, "/api/rendro/publications/remove", { organizationId: organization.id, projectId: projectA, publicationId: published.body.publication!._id })).status).toBe(200);
+    expect((await validate(publishA.rawKey, organization.id, projectA, "publications:write")).status).toBe(200);
+    expect((await validate(pubOnly.rawKey, organization.id, projectA, "publications:write")).status).toBe(200);
+    expect((await validate(pubOnly.rawKey, organization.id, projectA, "docs:read")).status).toBe(401);
+    expect((await validate(readA.rawKey, organization.id, projectA, "publications:write")).status).toBe(401);
 
     // Keys manage nothing about keys or people: credentials need an owner/admin session, whatever the key's scopes.
     for (const key of [wide.rawKey, publishA.rawKey]) {
       expect([401, 403]).toContain((await withKey(key, `/api/rendro/credentials?organizationId=${organization.id}`)).status);
       expect([401, 403]).toContain((await withKey(key, "/api/rendro/credentials", { organizationId: organization.id, name: "Escalate", scopes: ["docs:read"] })).status);
       expect([401, 403]).toContain((await withKey(key, "/api/rendro/credentials/revoke", { organizationId: organization.id, keyId: readA.credential.keyId })).status);
-      expect([401, 403]).toContain((await withKey(key, "/api/rendro/shares", { organizationId: organization.id, projectId: projectA, documentPath: "index.html", expiresInSeconds: 3600 })).status);
     }
     expect((await listKeys(page, organization.id)).map(entry => entry.name).sort()).toEqual(["Organization-wide", "Publications only", "Publish A", "Pusher A", "Read A", "Write A"]);
     expect((await validate(readA.rawKey, organization.id, projectA, "docs:read")).status).toBe(200);
 
     // Unknown, malformed and absent credentials are all refused alike.
     for (const key of [undefined, "", "rnd_live_nothing", `rnd_live_${"0".repeat(16)}_${"0".repeat(64)}`, wide.rawKey.slice(0, -1) + (wide.rawKey.endsWith("0") ? "1" : "0")]) {
-      const response = await reads(key as string, projectA);
-      expect([401, 403], String(key)).toContain(response.status);
+      expect((await validate(key, organization.id, projectA, "docs:read")).status, String(key)).toBe(401);
     }
   });
 
-  test("expiry: a short-lived key works until it expires, then the next request is refused; bad creation fields are rejected", async ({ actor, baseURL }) => {
+  test("expiry: a short-lived key works until it expires, then the next request is refused; bad creation fields are rejected", async ({ actor }) => {
     test.setTimeout(120_000);
     const owner = await actor("expiry", { organizations: ["Expiry Org"], project: true });
     const { page } = owner;
@@ -308,20 +275,15 @@ test.describe("API keys", () => {
     expect((await api(page, "/api/rendro/credentials", body({ projectId: "k".repeat(32) }))).status).toBe(404);
     expect(await listKeys(page, organization.id)).toEqual([]);
 
-    // The setup that takes time (a CLI push) uses a key without an expiry; the short-lived key is created last and used
-    // only for requests that take milliseconds, so the test never races its own deadline.
-    const pusher = await createKey(page, organization.id, project, publisherScopes, { name: "Pusher" });
+    // The short-lived key is created last and used only for requests that take milliseconds, so the test never races its
+    // own deadline.
     const expiring = await createKey(page, organization.id, project, ["docs:read"], { name: "Two days", expiresAt: Date.now() + 2 * 86_400_000 });
     const forever = await createKey(page, organization.id, undefined, ["docs:read"], { name: "Forever" });
-    await pushSite(baseURL, organization.id, project, pusher.rawKey, { "index.html": html("Before expiry") }, "expiry-push");
-    // It works now, and is refused on the first request after its time has passed (API, then the CLI).
+    // It works now, and is refused on the first request after its time has passed.
     const shortLived = await createKey(page, organization.id, project, publisherScopes, { name: "Short lived", expiresAt: Date.now() + 10_000 });
     expect((await validate(shortLived.rawKey, organization.id, project, "docs:write")).status).toBe(200);
-    expect((await deploymentsOf(shortLived.rawKey, organization.id, project)).status).toBe(200);
     await expect.poll(async () => (await validate(shortLived.rawKey, organization.id, project, "docs:write")).status, { timeout: 30_000, intervals: [500, 1000] }).toBe(401);
-    expect(refusedStatus).toContain((await withKey(shortLived.rawKey, deploymentsPath(organization.id, project))).status);
-    expect(await pushRefused(baseURL, organization.id, project, shortLived.rawKey)).toMatch(refusedPush);
-    expect((await deploymentsOf(forever.rawKey, organization.id, project)).body.deployments).toHaveLength(1);
+    expect((await validate(forever.rawKey, organization.id, project, "docs:read")).status).toBe(200);
 
     // The page tells expired, expiring and never-expiring keys apart, and an expired key can still be revoked.
     await openKeys(page, organization.id);

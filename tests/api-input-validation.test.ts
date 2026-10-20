@@ -91,15 +91,13 @@ describe("well-formed text helpers", () => {
 });
 
 describe("ill-formed text at the API boundary", () => {
-  it.each(transports)("is a 400 validation error, not a backend outage, for project names, keys, publications and auth (%s)", async (transport) => {
+  it.each(transports)("is a 400 validation error, not a backend outage, for project names, keys and auth (%s)", async (transport) => {
     const f = await fixture();
     const expected = { error: INVALID_TEXT_MESSAGE };
     const bodies: Array<[string, unknown]> = [
       ["/api/rendro/projects", { organizationId: f.organizationId, name: lone, slug: "unicode" }],
       ["/api/rendro/projects", { organizationId: f.organizationId, name: "Fine", slug: "a\udc00" }],
       ["/api/rendro/credentials", { organizationId: f.organizationId, name: lone, scopes: ["docs:read"] }],
-      ["/api/rendro/publications", { organizationId: f.organizationId, projectId: "p", slug: "s", pathPrefix: "", entryFile: "index.html", trackingMode: "track_active", title: lone }],
-      ["/api/rendro/shares", { organizationId: f.organizationId, projectId: "p", documentPath: lone, expiresInSeconds: 600 }],
       ["/api/auth/organization/create", { name: lone, slug: "unicode" }],
       ["/api/auth/organization/create-team", { organizationId: f.organizationId, name: `Team ${lone}` }],
       ["/api/auth/organization/update", { organizationId: f.organizationId, data: { name: "x", metadata: { note: [lone] } } }],
@@ -170,6 +168,24 @@ describe("API key expiry", () => {
     const query = new URLSearchParams({ organizationId: f.organizationId, projectId: project._id, scope: "docs:read" });
     const response = await f.t.fetch(`/api/rendro/credentials/validate?${query}`, { headers: { authorization: "Bearer far-future-key" } });
     expect(response.status).toBe(200);
+  });
+});
+
+describe("API key project scope", () => {
+  it("refuses a key for a malformed or wrong-table project ID and stores nothing", async () => {
+    const f = await fixture();
+    const project = (await f.t.mutation(internal.projects.createInternal, { organizationId: f.organizationId, name: "Docs", slug: "docs", actorId: "owner" }))!;
+    const secretHash = await sha256("scoped-key");
+    for (const projectId of ["not-an-id", f.organizationId]) {
+      await expect(f.t.mutation(internal.apiKeyCredentials.createInternal, {
+        organizationId: f.organizationId, projectId, keyId: "scoped", keyPrefix: "scoped", name: "Scoped", secretHash, scopes: ["docs:read"], actorId: "owner",
+      })).rejects.toMatchObject({ data: { code: "invalid_id" } });
+    }
+    expect(await f.t.query(internal.apiKeyCredentials.listInternal, { organizationId: f.organizationId })).toEqual([]);
+    await f.t.mutation(internal.apiKeyCredentials.createInternal, {
+      organizationId: f.organizationId, projectId: project._id, keyId: "scoped", keyPrefix: "scoped", name: "Scoped", secretHash, scopes: ["docs:read"], actorId: "owner",
+    });
+    expect((await f.t.query(internal.apiKeyCredentials.listInternal, { organizationId: f.organizationId })).map(key => key.projectId)).toEqual([project._id]);
   });
 });
 

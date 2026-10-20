@@ -15,6 +15,13 @@ export interface TreeChild {
 }
 
 export const TREE_PAGE_SIZE = 200;
+
+/** A directory query: the root (`""`) or a canonical path of at most 1,024 characters ending in `/`. */
+export function validTreeDirectory(directory: string): boolean {
+  if (directory === "") return true;
+  const path = directory.slice(0, -1);
+  return directory.endsWith("/") && path.length <= 1024 && isCanonicalStorageKey(path);
+}
 const indexes = new WeakMap<SidebarIndex, Map<string, TreeChild[]>>();
 
 function buildIndex(sidebar: SidebarIndex, isPage: (path: string) => boolean): Map<string, TreeChild[]> {

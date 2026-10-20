@@ -597,12 +597,14 @@ test("nonpersistent session retains its short backend lifetime [AUTH-111-02]", a
   expect(initial.expiresAt - initial.createdAt).toBeGreaterThan(86400_000 - 1000);
   expect(initial.expiresAt - initial.createdAt).toBeLessThanOrEqual(86400_000);
   const org = `/organizations/${seed.organizationId}`;
-  for (const path of [org, `${org}/projects`, `${org}/projects/${seed.projectId}/docs`, "/account/security"]) {
+  // A private repository the owner may read (#234) looks the session up as every signed-in page does.
+  const { closed } = JSON.parse(readFileSync(process.env.RENDRO_E2E_REPOS as string, "utf8")) as RepoFixtures;
+  const docs = `/r/${closed.owner}/${closed.name}`;
+  const docsHeading = () => page.frameLocator("#content-frame").getByRole("heading", { name: "Closed home", level: 1 });
+  for (const path of [org, `${org}/projects`, docs, "/account/security"]) {
     expect((await page.goto(path))?.status()).toBe(200);
     await page.reload();
-    if (path.endsWith("/docs")) {
-      await expect(page.frameLocator("#content-frame").getByRole("heading", { name: "Publication from local storage" })).toBeVisible();
-    }
+    if (path === docs) await expect(docsHeading()).toBeVisible();
     expect((await stored()).expiresAt).toBe(initial.expiresAt);
   }
   // The client preference is not authoritative, even when removed or forged.
@@ -610,9 +612,9 @@ test("nonpersistent session retains its short backend lifetime [AUTH-111-02]", a
     await context.clearCookies({ name: "better-auth.dont_remember" });
     if (marker !== null) await context.addCookies([{ name: "better-auth.dont_remember", value: marker, url: page.url() }]);
     // End on a fresh-identity page; the reloads below must not use cached identity.
-    for (const path of [org, `${org}/projects/${seed.projectId}/docs`, "/account/security"]) {
+    for (const path of [org, docs, "/account/security"]) {
       expect((await page.goto(path))?.status()).toBe(200);
-      if (path.endsWith("/docs")) await expect(page.frameLocator("#content-frame").getByRole("heading", { name: "Publication from local storage" })).toBeVisible();
+      if (path === docs) await expect(docsHeading()).toBeVisible();
       expect((await session(page))?.sessionId).toBe(identity.sessionId);
       expect((await stored()).expiresAt).toBe(initial.expiresAt);
       expect((await context.cookies()).find(cookie => cookie.name.endsWith(".session_token"))?.expires).toBe(-1);

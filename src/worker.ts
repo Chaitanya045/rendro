@@ -1,15 +1,12 @@
 // Cloudflare Workers entry point
 // Auth is proxied to Convex HTTP actions. Database tables are in Convex component.
 import { securityHeaders } from "./middleware/security-headers";
-import { bindStorage, STORAGE_BINDING } from "./storage-binding";
-import { purgeExpiredDeployments } from "./retention";
 import { fontResponseHeaders } from "./routes/fonts";
 import { publicAssetHeaders, publicAssetPaths } from "./routes/public-assets";
 import { styleResponseHeaders } from "./routes/styles";
 import { Hono } from "hono";
 import { requestLogPath } from "./request-log";
 import type { Context } from "hono";
-import { cors } from "hono/cors";
 import { sessionMiddleware } from "./middleware/session";
 import { logger } from "./logger";
 import { registerAuthClientIp } from "./auth-client-ip";
@@ -18,7 +15,6 @@ import { mountPublicRoutes, mountSessionRoutes } from "./app-routes";
 import type { User } from "better-auth/types";
 
 type AssetsBinding = { fetch(request: Request): Response | Promise<Response> };
-// The R2 bucket arrives as the STORAGE binding (see src/storage.ts); no storage credential exists.
 type WorkerBindings = Record<string, unknown> & { ASSETS?: AssetsBinding };
 type WorkerEnv = { Bindings: WorkerBindings; Variables: { user?: User } };
 
@@ -35,7 +31,6 @@ app.use("*", async (c, next) => {
   // Cloudflare overwrites this header at ingress. Node never trusts it.
   registerAuthClientIp(c.req.raw, c.req.header("CF-Connecting-IP"));
   const env = c.env;
-  bindStorage(env?.[STORAGE_BINDING]);
   if (env && typeof process !== "undefined") {
     for (const key of Object.keys(env)) {
       const value = env[key];
@@ -45,9 +40,8 @@ app.use("*", async (c, next) => {
   await next();
 });
 
-app.use("/api/sync/*", cors());
 app.use("*", async (c, next) => { const start = Date.now(); await next(); logger.debug({ method: c.req.method, route: requestLogPath(c), status: c.res.status, ms: Date.now() - start }, "request"); });
-// Public signed share routes intentionally bypass session middleware.
+// Signed image URLs and repository capabilities bypass session middleware.
 mountPublicRoutes(app);
 
 // Public static assets never trigger a session lookup. Everything is an explicit allowlist (see
@@ -84,10 +78,4 @@ app.onError((_err, c) => {
   return c.json({ error: "Internal server error" }, 500);
 });
 
-// Cron trigger (wrangler.toml): purge deployments whose retention has lapsed, in storage and then in Convex.
-async function scheduled(_controller: unknown, env: WorkerBindings): Promise<void> {
-  bindStorage(env[STORAGE_BINDING]);
-  await purgeExpiredDeployments();
-}
-
-export default Object.assign(app, { scheduled });
+export default app;

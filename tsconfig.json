@@ -18,6 +18,6 @@
       "@/*": ["./src/*"]
     }
   },
-  "include": ["src/**/*.ts", "cli/src/**/*.ts", "tests/**/*.ts", "e2e/**/*.ts", "vitest.config.ts"],
+  "include": ["src/**/*.ts", "tests/**/*.ts", "e2e/**/*.ts", "vitest.config.ts"],
   "exclude": ["scripts/**"]
 }

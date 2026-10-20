@@ -1,7 +1,9 @@
+import { readFileSync } from "node:fs";
 import type { BrowserContext, Page } from "@playwright/test";
 import { test, expect } from "./fixtures";
 import type { Seed } from "./seed";
 import { desktop, mobile, settleFrames, shellReady, signInSeeded } from "./shell-helpers";
+import type { RepoFixtures } from "./repo-fixtures";
 
 const snapshot = (page: Page) => page.evaluate(() => {
   const root = document.documentElement;
@@ -70,9 +72,10 @@ async function themeCycle(page: Page, context: BrowserContext, baseURL: string |
   expect(await snapshot(page)).toMatchObject({ dark: true, mode: "dark", label: "Switch to light theme" });
   await page.goto("/account/security");
   expect(await snapshot(page), "account shell").toMatchObject({ dark: true, mode: "dark", stored: "dark" });
-  // The document viewer shell reads the same preference key.
-  await page.goto(`/organizations/${seed.organizationId}/projects/${seed.projectId}/docs`);
-  await expect(page.frameLocator("#content-frame").getByRole("heading", { name: "Publication from local storage" })).toBeVisible();
+  // The repository viewer shell reads the same preference key.
+  const { open } = JSON.parse(readFileSync(process.env.RENDRO_E2E_REPOS as string, "utf8")) as RepoFixtures;
+  await page.goto(`/r/${open.owner}/${open.name}`);
+  await expect(page.frameLocator("#content-frame").getByRole("heading", { name: "Open home", level: 1 })).toBeVisible();
   expect(await snapshot(page), "viewer shell").toMatchObject({ dark: true, mode: "dark" });
   await context.clearCookies();
   for (const path of ["/sign-in", "/"]) {

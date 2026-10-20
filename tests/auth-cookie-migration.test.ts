@@ -12,14 +12,13 @@ import { legacyCookieMigration, promoteLegacyCookies, sessionCookieHeaders } fro
 import { AUTH_COOKIE_NAMES, authCookiePair, authCookiePrefix } from "../shared/auth-cookies";
 import { proxyAuthRequest } from "@/auth-proxy";
 import { sessionCache, sessionMiddleware } from "@/middleware/session";
-import { createViewerTicket, readViewerTicket } from "@/viewer-ticket";
+import { viewerSessionCookie } from "@/viewer-ticket";
 import rateLimiterTest from "./convex-rate-limiter";
 
 const secureOrigin = "https://rendro.test";
 const localOrigin = "http://localhost:3000";
 const day = 86_400_000;
 const password = "Cookie migration password!!";
-const scope = { organizationId: "org", projectId: "project", manifestKey: "tenants/org/projects/project/deployments/deploy/manifest.json" };
 const legacy = (name: string) => `__Secure-better-auth.${name}`;
 const current = (name: string) => `__Host-better-auth.${name}`;
 
@@ -246,9 +245,9 @@ describe("legacy __Secure- cookie migration", () => {
     for (const value of setCookies.filter(value => value.startsWith("__Host-"))) expect(value).not.toMatch(/Domain=/i);
   });
 
-  it("authorizes viewer tickets minted from legacy cookies", async () => {
+  it("authorizes the filtered session cookie of legacy cookie names", async () => {
     const f = await fixture(false);
-    const ticket = await readViewerTicket(await createViewerTicket({ ...scope, cookie: legacyHeader(f.cookies) }), scope);
+    const ticket = { cookie: viewerSessionCookie(legacyHeader(f.cookies)) };
     expect(ticket!.cookie).toMatch(/^__Secure-better-auth\.session_token=[^;]+; __Secure-better-auth\.dont_remember=/);
     expect(await f.auth.api.getSession({ headers: sessionCookieHeaders(new Headers({ cookie: ticket!.cookie })) })).not.toBeNull();
   });

@@ -3,7 +3,6 @@ import { Window as StorageWindow } from "happy-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   CommentorParentHost,
-  documentCommentScopeFromFrame,
   type DocumentCommentBackend,
 } from "../src/commentor/parent-host";
 import {
@@ -19,29 +18,7 @@ import { ParentCommentTransport } from "../src/commentor/parent-transport";
 
 afterEach(() => vi.unstubAllGlobals());
 
-describe("project comment parent transport", () => {
-  it("derives legacy scope from the owning frame and rejects cross-origin, cross-org and ticket claims", () => {
-    const config = { orgSlug: "example" };
-    expect(documentCommentScopeFromFrame("/legacy-view/example/files/guide/hello%20world.html", "https://rendro.test", config))
-      .toEqual({ orgSlug: "example", filePath: "example/guide/hello world.html", documentPath: "guide/hello world.html" });
-    for (const url of ["https://other.test/legacy-view/example/files/index.html", "/legacy-view/other/files/index.html", "/legacy-view/example/view/ticket/files/index.html", "/legacy-view/example/files/%2e%2e%2Fother.html", "/files/example/index.html"])
-      expect(documentCommentScopeFromFrame(url, "https://rendro.test", config)).toBeNull();
-  });
-  it("derives its scope only from the trusted project frame URL", () => {
-    const config = { organizationId: "org/a", projectId: "project-1" as never };
-    expect(documentCommentScopeFromFrame(
-      "https://rendro.test/organizations/org%2Fa/projects/project-1/docs/files/guide%2Fintro.html",
-      "https://rendro.test",
-      config,
-    )).toEqual({ ...config, documentPath: "guide/intro.html" });
-    expect(documentCommentScopeFromFrame("https://evil.test/files/guide.html", "https://rendro.test", config)).toBeNull();
-    expect(documentCommentScopeFromFrame(
-      "https://rendro.test/organizations/org%2Fa/projects/other/docs/files/guide.html",
-      "https://rendro.test",
-      config,
-    )).toBeNull();
-  });
-
+describe("repository comment parent transport", () => {
   it("allowlists document operations and rejects stale or cross-document thread IDs", async () => {
     let messageHandler!: (event: MessageEvent) => void;
     let loadHandler!: () => void;
@@ -54,7 +31,7 @@ describe("project comment parent transport", () => {
     const postMessage = vi.fn();
     const source = { postMessage } as unknown as WindowProxy;
     const frame = {
-      src: "https://rendro.test/organizations/org-a/projects/project-a/docs/files/guide.html",
+      src: "https://rendro.test/r/acme/docs/files/guide.html",
       contentWindow: source,
       addEventListener: (type: string, listener: () => void) => { if (type === "load") loadHandler = listener; },
       removeEventListener: vi.fn(),
@@ -81,7 +58,7 @@ describe("project comment parent transport", () => {
       subscribeReplies,
       mutate,
     };
-    const config = { organizationId: "org-a", projectId: "project-a" as never, convexUrl: "https://convex.test" };
+    const config = { repoId: 9101, accessUrl: "/r/acme/docs/comment-access", convexUrl: "https://convex.test" };
     const host = new CommentorParentHost(frame, "https://rendro.test", config, backend, "user-a");
     host.start();
 
@@ -99,10 +76,10 @@ describe("project comment parent transport", () => {
     expect(postMessage).toHaveBeenCalledWith(expect.objectContaining({ type: COMMENTOR_PARENT_READY, protocolVersion: COMMENTOR_PROTOCOL_VERSION, parentGeneration: expect.any(String) }), "*");
     messageHandler({
       source,
-      data: { type: COMMENTOR_PARENT_REQUEST, requestId: "sub", method: "subscribe", args: { documentPath: "guide.html", organizationId: "other" } },
+      data: { type: COMMENTOR_PARENT_REQUEST, requestId: "sub", method: "subscribe", args: { documentPath: "guide.html", repoId: 1 } },
     } as MessageEvent);
     expect(subscribe).toHaveBeenCalledWith(
-      { organizationId: "org-a", projectId: "project-a", documentPath: "guide.html" },
+      { repoId: 9101, documentPath: "guide.html" },
       expect.any(Function),
       expect.any(Function),
     );
@@ -134,7 +111,7 @@ describe("project comment parent transport", () => {
       data: { type: COMMENTOR_PARENT_REQUEST, requestId: "replies-more", method: "replies.more", args: { threadId: "current-thread" } },
     } as MessageEvent);
     expect(subscribeReplies).toHaveBeenCalledWith(
-      { organizationId: "org-a", projectId: "project-a", documentPath: "guide.html" },
+      { repoId: 9101, documentPath: "guide.html" },
       "current-thread",
       expect.any(Function),
       expect.any(Function),
@@ -162,19 +139,18 @@ describe("project comment parent transport", () => {
         requestId: "create",
         method: "thread.create",
         args: {
-          organizationId: "other",
-          projectId: "other",
+          repoId: 1,
           documentPath: "other.html",
           body: "Scoped comment",
-          anchor: { kind: "element", path: ["main"] },
+          anchor: { kind: "repo-text", blobSha: "b".repeat(40), headingSlug: "install", prefix: "", exact: "pnpm install", suffix: "", offset: 0 },
         },
       },
     } as MessageEvent);
     await Promise.resolve();
     expect(mutate).toHaveBeenCalledWith(
       "thread.create",
-      { organizationId: "org-a", projectId: "project-a", documentPath: "guide.html" },
-      { body: "Scoped comment", anchor: { kind: "element", path: ["main"] }, clientOperationId: expect.any(String), expectedAuthorId: "user-a" },
+      { repoId: 9101, documentPath: "guide.html" },
+      { body: "Scoped comment", anchor: { kind: "repo-text", blobSha: "b".repeat(40), headingSlug: "install", prefix: "", exact: "pnpm install", suffix: "", offset: 0 }, clientOperationId: expect.any(String), expectedAuthorId: "user-a" },
     );
 
     for (const args of [{ threadId: 42, replyId: "reply" }, { threadId: "current-thread" }]) {
@@ -189,13 +165,13 @@ describe("project comment parent transport", () => {
       source,
       data: {
         type: COMMENTOR_PARENT_REQUEST, requestId: "delete-reply", method: "reply.remove",
-        args: { threadId: "current-thread", replyId: "older-reply", organizationId: "other", documentPath: "other.html" },
+        args: { threadId: "current-thread", replyId: "older-reply", repoId: 1, documentPath: "other.html" },
       },
     } as MessageEvent);
     await Promise.resolve();
     expect(mutate).toHaveBeenLastCalledWith(
       "reply.remove",
-      { organizationId: "org-a", projectId: "project-a", documentPath: "guide.html" },
+      { repoId: 9101, documentPath: "guide.html" },
       { threadId: "current-thread", replyId: "older-reply", clientOperationId: expect.any(String), expectedAuthorId: "user-a" },
     );
 
@@ -217,7 +193,7 @@ describe("project comment parent transport", () => {
       "*",
     );
 
-    frame.src = "https://rendro.test/organizations/org-a/projects/project-a/docs/files/next.html";
+    frame.src = "https://rendro.test/r/acme/docs/files/next.html";
     messageHandler({
       source,
       data: { type: COMMENTOR_PARENT_REQUEST, requestId: "transition", method: "subscribe", args: {} },
@@ -318,7 +294,7 @@ describe("slow comment mutations", () => {
     async (method) => {
       const { transport, slow, dismissSlow, postMessage, respond, publish, update } = transportRuntime();
       const settled = vi.fn();
-      const operation = transport.mutate(method, { threadId: "thread-1", replyId: "reply-1", resolved: true, archived: true, body: "Valid", anchor: { kind: "element", path: ["main"] } }).then(settled);
+      const operation = transport.mutate(method, { threadId: "thread-1", replyId: "reply-1", resolved: true, archived: true, body: "Valid", anchor: { kind: "repo-text", blobSha: "b".repeat(40), headingSlug: "install", prefix: "", exact: "pnpm install", suffix: "", offset: 0 } }).then(settled);
       await vi.advanceTimersByTimeAsync(120_000);
       expect(slow).toHaveBeenCalledTimes(1);
       expect(settled).not.toHaveBeenCalled();

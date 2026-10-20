@@ -18,8 +18,7 @@ export const managementPageAccess: MiddlewareHandler<{ Variables: { user?: User 
   c.header("Cache-Control", "private, no-store");
   const invitationId = c.req.param("invitationId");
   const organizationId = c.req.param("organizationId") ?? "";
-  const projectId = c.req.param("projectId")
-    ?? (c.req.path.endsWith("/onboarding") ? c.req.query("projectId") : undefined);
+  const projectId = c.req.param("projectId");
   const query = new URLSearchParams({ organizationId });
   if (projectId !== undefined) query.set("projectId", projectId);
   const path = invitationId !== undefined

@@ -64,18 +64,16 @@ describe("mobile document toolbar layout", () => {
   it("uses resize as a breakpoint-only fallback when the media-query change callback is missed", () => {
     const source = readFileSync(new URL("../src/routes/app.ts", import.meta.url), "utf8");
     const start = source.indexOf('  var mobileMoreButton=document.getElementById("mobile-more-btn")');
-    const end = source.indexOf("\n\n  var avatarButton=", start);
+    const end = source.indexOf('\n\n  document.addEventListener("keydown"', start);
     expect(start).toBeGreaterThan(-1);
     expect(end).toBeGreaterThan(start);
 
     const toolbar = new ParentMock("div");
     const menu = new ParentMock("div");
     const moreButton = new NodeMock("button");
-    const back = new NodeMock("a");
     const shortcut = new NodeMock("span");
     const theme = new NodeMock("button");
-    const avatar = new NodeMock("span");
-    for (const item of [back, shortcut, theme, avatar]) toolbar.appendChild(item);
+    for (const item of [shortcut, theme]) toolbar.appendChild(item);
 
     const media = {
       matches: false,
@@ -93,9 +91,7 @@ describe("mobile document toolbar layout", () => {
         return null;
       },
       querySelector(selector: string) {
-        if (selector === ".topbar-btn-back") return back;
         if (selector === ".shortcut-tooltip-wrap") return shortcut;
-        if (selector === ".avatar-wrap") return avatar;
         return null;
       },
       createComment() { return new NodeMock("#comment"); },
@@ -116,13 +112,13 @@ describe("mobile document toolbar layout", () => {
 
     media.matches = true;
     windowListeners.get("resize")?.();
-    expect(menu.children).toEqual([back, shortcut, theme, avatar]);
-    expect(menu.appendCount).toBe(4);
+    expect(menu.children).toEqual([shortcut, theme]);
+    expect(menu.appendCount).toBe(2);
     expect(shellSync).toHaveBeenCalledTimes(2);
 
     windowListeners.get("resize")?.();
     media.changeListener?.();
-    expect(menu.appendCount).toBe(4);
+    expect(menu.appendCount).toBe(2);
     expect(shellSync).toHaveBeenCalledTimes(2);
     expect(moreButton.focus).not.toHaveBeenCalled();
 
@@ -130,7 +126,7 @@ describe("mobile document toolbar layout", () => {
     windowListeners.get("resize")?.();
     expect(menu.children).toHaveLength(0);
     expect(toolbar.children.filter((node) => node !== moreButton && node.tagName !== "#comment"))
-      .toEqual([back, shortcut, theme, avatar]);
+      .toEqual([shortcut, theme]);
     expect(shellSync).toHaveBeenCalledTimes(3);
   });
 });

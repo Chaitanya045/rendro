@@ -19,14 +19,7 @@ export const application = internalMutation({
     if (org?.slug !== `qa-regression-${input.runId}`) throw new Error("Fixture organization mismatch");
     const projects = await ctx.db.query("projects").withIndex("by_organization", q => q.eq("organizationId", input.organizationId)).collect();
     if (input.cleanup) {
-      for (const table of ["apiKeyCredentials", "publications", "shareGrants"] as const) {
-        if (await ctx.db.query(table).withIndex("by_organization", q => q.eq("organizationId", input.organizationId)).first()) throw new Error("Workspace has additional resources; explicit cleanup required");
-      }
-      // This workspace is disposable, but do not silently remove document data.
-      for (const project of projects) {
-        const deployments = await ctx.db.query("deployments").withIndex("by_project_created", q => q.eq("projectId", project._id)).first();
-        if (deployments) throw new Error("Workspace has deployments; explicit storage cleanup required");
-      }
+      if (await ctx.db.query("apiKeyCredentials").withIndex("by_organization", q => q.eq("organizationId", input.organizationId)).first()) throw new Error("Workspace has additional resources; explicit cleanup required");
       for (const project of projects) await ctx.db.delete(project._id);
       const audits = await ctx.db.query("auditEvents").withIndex("by_organization_created", q => q.eq("organizationId", input.organizationId)).collect();
       for (const audit of audits) await ctx.db.delete(audit._id);

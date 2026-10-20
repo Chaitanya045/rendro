@@ -17,19 +17,7 @@ enabled = false
 
 [secrets]
 # Match the mandatory runtime settings validated in src/config.ts.
-required = ["CONVEX_INTERNAL_SECRET", "AUTH_SECRET", "IMAGE_PROXY_SECRET", "REPO_CAPABILITY_SECRET", "REPO_CONTENT_KEY"]
-
-# Blob storage is the native R2 binding: the Worker holds no S3 access key, and the bucket must
-# stay private (no r2.dev URL, no public custom domain; `pnpm check:r2-public` verifies it).
-# RETENTION_SECRET is also a Worker secret, kept optional so a deployment without it still serves
-# traffic. Without it the nightly purge reports itself disabled.
-[[r2_buckets]]
-binding = "STORAGE"
-bucket_name = "rendro-docs"
-
-# Nightly purge of expired deployments (src/retention.ts), at 03:23 UTC.
-[triggers]
-crons = ["23 3 * * *"]
+required = ["CONVEX_INTERNAL_SECRET", "IMAGE_PROXY_SECRET", "REPO_CAPABILITY_SECRET", "REPO_CONTENT_KEY"]
 
 [assets]
 directory = "./public"
@@ -46,11 +34,7 @@ name = "rendro-dev"
 
 [env.development.secrets]
 # Match the mandatory runtime settings validated in src/config.ts.
-required = ["CONVEX_INTERNAL_SECRET", "AUTH_SECRET", "IMAGE_PROXY_SECRET", "REPO_CAPABILITY_SECRET", "REPO_CONTENT_KEY"]
-
-[[env.development.r2_buckets]]
-binding = "STORAGE"
-bucket_name = "dev-rendro"
+required = ["CONVEX_INTERNAL_SECRET", "IMAGE_PROXY_SECRET", "REPO_CAPABILITY_SECRET", "REPO_CONTENT_KEY"]
 
 # Real-user monitoring beacons (POST /rum, #282). Development only: production gets its dataset and
 # limiter at its own deploy. Without either binding the endpoint accepts beacons and drops them.
@@ -82,9 +66,6 @@ simple = { limit = 20, period = 60 }
 name = "SEARCH_LIMIT"
 namespace_id = "2941"
 simple = { limit = 60, period = 60 }
-
-[env.development.triggers]
-crons = ["23 3 * * *"]
 
 [env.development.vars]
 NODE_ENV = "production"

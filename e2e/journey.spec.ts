@@ -1,9 +1,9 @@
-import { mkdir, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { readFileSync } from "node:fs";
 import { test, expect } from "./fixtures";
 import { localHttp } from "./backend";
-import { password, pushDocuments, roles } from "./seed";
+import { password, roles } from "./seed";
 import type { Mail } from "./services";
+import type { RepoFixtures } from "./repo-fixtures";
 
 for (const role of roles) {
   test(`seeded ${role} session enforces organization and credential boundaries`, async ({ page, context, baseURL, seed }, info) => {
@@ -43,7 +43,7 @@ test("Google OAuth uses local code exchange and rejects a changed state", async 
   expect(user.user).toMatchObject({ email: "oauth@example.test", emailVerified: true });
 });
 
-test("sign up → verify → organization → project → API key → CLI push → view → reactive comment", async ({ page, context, baseURL }, info) => {
+test("sign up → verify → organization → project → repository document → reactive comment", async ({ page, context, baseURL }, info) => {
   test.setTimeout(90_000);
   const email = `journey-${info.project.name}-${info.retry}@example.test`;
   await page.goto("/sign-up");
@@ -71,34 +71,26 @@ test("sign up → verify → organization → project → API key → CLI push �
   await page.getByRole("button", { name: "Create organization", exact: true }).click();
   await page.getByLabel("Project name", { exact: true }).fill("Journey documents");
   await page.getByRole("button", { name: "Create project", exact: true }).click();
-  await page.getByRole("button", { name: "Generate API key", exact: true }).click();
-  await expect(page.locator("#onboarding-key")).toHaveText(/^rnd_live_/);
-  const token = await page.locator("#onboarding-key").innerText();
-  await page.getByLabel("I have stored this key securely").check();
-  const organizationId = new URL(page.url()).pathname.split("/")[2];
-  const projectId = new URL(page.url()).searchParams.get("projectId");
-  if (!projectId || !baseURL || !process.env.RENDRO_E2E_DIRECTORY) throw new Error("Missing journey state");
-  const source = join(process.env.RENDRO_E2E_DIRECTORY, `journey-${info.project.name}-${info.retry}`);
-  await mkdir(source);
-  await writeFile(join(source, "index.html"), '<!doctype html><html><head><title>Journey document</title></head><body><h1>Documentation shipped locally</h1><p id="target">This paragraph accepts a real-time comment.</p></body></html>');
-  await pushDocuments(source, baseURL, organizationId, projectId, token);
-  await expect(page.getByText("First deployment received", { exact: true })).toBeVisible();
-  await page.getByRole("link", { name: "Open documentation", exact: true }).click();
+  await expect(page.locator(".cp-page-heading")).toHaveText("Journey documents");
+  // Anyone signed in may comment on a public repository: the new account reads one and writes there at once.
+  const { viewer } = JSON.parse(readFileSync(process.env.RENDRO_E2E_REPOS as string, "utf8")) as RepoFixtures;
+  await page.goto(`/r/${viewer.owner}/${viewer.name}?doc=${encodeURIComponent("docs/comment.md")}`);
   const frame = page.frameLocator("#content-frame");
-  await expect(frame.getByRole("heading", { name: "Documentation shipped locally" })).toBeVisible();
+  await expect(frame.getByRole("heading", { name: "Comment page", level: 1 })).toBeVisible();
   const observer = await context.newPage();
   await observer.goto(page.url());
   const otherFrame = observer.frameLocator("#content-frame");
   await expect(otherFrame.getByTestId("commentor-panel-btn")).toBeEnabled();
   await otherFrame.getByTestId("commentor-panel-btn").click();
-  await frame.getByTestId("commentor-comment-btn").click();
-  await frame.locator("#target").click();
-  await frame.getByTestId("commentor-composer-textarea").fill("Real Convex subscription delivered this comment");
+  const body = `Real Convex subscription delivered this comment (${info.project.name} ${info.retry})`;
+  await frame.getByText("The quick brown fox jumps over the lazy dog.").dblclick({ position: { x: 60, y: 8 } });
+  await frame.getByTestId("commentor-selection-action").click();
+  await frame.getByTestId("commentor-composer-textarea").fill(body);
   await frame.getByTestId("commentor-composer-post").click();
   await expect(frame.getByTestId("commentor-composer-textarea")).toBeHidden();
-  await expect(otherFrame.getByText("Real Convex subscription delivered this comment", { exact: true })).toBeVisible();
+  await expect(otherFrame.getByText(body, { exact: true })).toBeVisible();
   await observer.reload();
   await otherFrame.getByTestId("commentor-panel-btn").click();
-  await expect(otherFrame.getByText("Real Convex subscription delivered this comment", { exact: true })).toBeVisible();
+  await expect(otherFrame.getByText(body, { exact: true })).toBeVisible();
   await observer.close();
 });

@@ -1,12 +1,10 @@
 import { sessionCache } from "@/middleware/session";
 import { vi } from "vitest";
-import * as publications from "@/publications";
-import * as blobs from "@/storage";
 import { managementAccessFixture } from "./management-access";
 
-export const docsBase = "/organizations/org-a/projects/project-a/docs";
+/** A repository's docs (#234); unbound in tests, so its URLs answer with the styled 404. */
+export const docsBase = "/r/acme/docs";
 export const testUser = { id: "user-a", email: "viewer@example.com", name: "Viewer", emailVerified: true, createdAt: new Date(), updatedAt: new Date() };
-const manifestKey = "tenants/org-a/projects/project-a/deployments/deploy-a/manifest.json";
 export const publisherHtml = '<!doctype html><html><head><link rel="stylesheet" href="assets/site.css"></head><body><h1>Publisher document</h1><p>Selectable comment text</p><script>window.publisherLoaded=true</script></body></html>';
 
 /** Deterministic backend/storage boundaries; the actual HTTP routes and templates run. */
@@ -15,36 +13,12 @@ export function mockSecurityBackend() {
   const organization = { id: "org-a", name: "Test organization", slug: "test",
     members: [{ id: "member-a", userId: testUser.id, role: "owner", user: testUser }], invitations: [] };
   const access = managementAccessFixture(organization, testUser);
-  vi.spyOn(publications, "getPublication").mockResolvedValue({
-    orgSlug: "example", slug: "product", sourcePrefix: "example/",
-    title: "Product", entryFile: "index.html", createdAt: "2026-01-01", updatedAt: "2026-01-01",
-  });
-  vi.spyOn(publications, "listPublishedDocumentPaths").mockResolvedValue(["index.html"]);
-  const files = [
-    { path: "index.html", sha256: "a", size: 100, contentType: "text/html" },
-    { path: "assets/site.css", sha256: "b", size: 20, contentType: "text/css" },
-  ];
-  vi.spyOn(blobs, "headObject").mockImplementation(key => Promise.resolve({ contentType: key.endsWith(".css") ? "text/css" : "text/html" }));
-  vi.spyOn(blobs, "getObjectText").mockResolvedValue(JSON.stringify({ version: 1, files }));
-  vi.spyOn(blobs, "getObjectStream").mockImplementation(key => Promise.resolve(new Response(key.endsWith(".css") ? "body{color:rgb(1,2,3)}" : publisherHtml).body));
-  vi.stubGlobal("fetch", vi.fn((input: string | URL | Request, init?: RequestInit) => {
+  vi.stubGlobal("fetch", vi.fn((input: string | URL | Request) => {
     const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url);
-    if (url.pathname === "/api/rendro/admission/public") return Promise.resolve(Response.json({ admitted: true }));
-    if (url.pathname === "/api/query" && typeof init?.body === "string") {
-      const payload = JSON.parse(init.body);
-      if (payload.path === "legacyAccess:resolve") return Promise.resolve(Response.json({ status: "success", value: payload.args[0].orgSlug === "example" ? "org-a" : null }));
-    }
     const accessResponse = access(url);
     if (accessResponse) return Promise.resolve(accessResponse);
-    if (url.pathname === "/api/query" && typeof init?.body === "string"
-      && (JSON.parse(init.body) as { path?: string }).path === "deletedFiles:isDeleted") {
-      return Promise.resolve(Response.json({ status: "success", value: false }));
-    }
     let result: unknown = {};
     if (url.pathname.endsWith("/get-session")) result = { user: testUser, session: { id: "session-a", expiresAt: Date.now() + 60_000 } };
-    else if (url.pathname.endsWith("/deployments/active")) result = { project: { name: "Test project" }, deployment: { manifestKey } };
-    else if (url.pathname.endsWith("/publications/public")) result = { publication: { slug: "product", pathPrefix: "", entryFile: "index.html" }, project: { name: "Product" }, deployment: { manifestKey } };
-    else if (url.pathname.endsWith("/shares/public")) result = { grant: { documentPath: "index.html", assetPaths: ["assets/site.css"], expiresAt: Date.now() + 60_000 }, project: { name: "Product" }, deployment: { manifestKey } };
     else if (url.pathname.endsWith("/organization/list")) result = [{ id: "org-a", name: "Test organization", slug: "test" }];
     else if (url.pathname.endsWith("/organization/get-full-organization")) result = organization;
     else if (url.pathname.endsWith("/organization/get-invitation") && url.searchParams.get("id") === "test") result = {

@@ -1,10 +1,9 @@
 import { execFile } from "node:child_process";
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, existsSync, readdirSync } from "node:fs";
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { afterEach, describe, expect, it } from "vitest";
-import { version } from "../package.json";
 import { subprocessEnv } from "./helpers/subprocess-coverage";
 
 const fixtures: string[] = [];
@@ -63,30 +62,5 @@ describe("asset build scripts", () => {
     const code = readFileSync(join(directory, "public/commentor.js"), "utf8");
     expect(code.startsWith("\n// Auto-injected by Rendro — do not edit manually.\n(function() {")).toBe(true);
     expect(code.trimEnd().endsWith("})();")).toBe(true);
-  }, 60_000);
-});
-
-describe("CLI build script", () => {
-  it("bundles the CLI into an executable that runs without the source tree", async () => {
-    const directory = workspace("cli", "shared");
-    const result = await run(directory, "build-cli.mjs");
-    expect(result.code).toBe(0);
-    expect(result.stdout).toBe("CLI built: bin/rendro.mjs\n");
-    const bundle = join(directory, "bin/rendro.mjs");
-    expect(statSync(bundle).mode & 0o777).toBe(0o755);
-    expect(readFileSync(bundle, "utf8")).not.toContain("../../shared/");
-    // Delete the sources: the bundle must be self-contained.
-    rmSync(join(directory, "cli"), { recursive: true });
-    rmSync(join(directory, "shared"), { recursive: true });
-    // A production-style bundle has no source map: run it uninstrumented.
-    expect((await promisify(execFile)(process.execPath, [bundle, "--version"])).stdout.trim()).toBe(version);
-  }, 60_000);
-
-  it("fails without writing a bundle when the sources are missing", async () => {
-    const directory = workspace("shared");
-    const result = await run(directory, "build-cli.mjs");
-    expect(result.code).toBe(1);
-    expect(result.stderr).toContain("cli/src/index.ts");
-    expect(existsSync(join(directory, "bin"))).toBe(false);
   }, 60_000);
 });

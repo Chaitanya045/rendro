@@ -91,6 +91,23 @@ describe("serveObject", () => {
     expect(await response.text()).toBe("234");
   });
 
+  it("honours a range under If-Range only for the exact strong validator, and serves the whole object otherwise", async () => {
+    const ranged = base({ open: vi.fn(() => Promise.resolve(new Response("234").body)) }, { Range: "bytes=2-4", "If-Range": ' "sha256-x" ' });
+    expect((await serveObject(ranged)).status).toBe(206);
+    expect(ranged.open).toHaveBeenCalledWith({ start: 2, end: 4, size: 10 });
+    for (const validator of ['"sha256-y"', 'W/"sha256-x"', "Tue, 20 Oct 2026 00:00:00 GMT"]) {
+      const whole = base({}, { Range: "bytes=2-4", "If-Range": validator });
+      const response = await serveObject(whole);
+      expect(response.status, validator).toBe(200);
+      expect(whole.open).toHaveBeenCalledWith();
+      expect(await response.text()).toBe("0123456789");
+    }
+    // Without a validator of its own, the object never satisfies If-Range.
+    const untagged = base({ etag: undefined }, { Range: "bytes=2-4", "If-Range": '"sha256-x"' });
+    expect((await serveObject(untagged)).status).toBe(200);
+    expect(untagged.open).toHaveBeenCalledWith();
+  });
+
   it("reports a vanished object as missing for both full and ranged reads", async () => {
     for (const headers of [{}, { Range: "bytes=0-1" }] as Array<Record<string, string>>) {
       const response = await serveObject(base({ open: () => Promise.resolve(null) }, headers));

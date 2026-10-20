@@ -25,7 +25,7 @@ afterEach(() => {
 });
 
 describe("session middleware Server-Timing", () => {
-  it.each(["/api/auth/check", "/api/rendro/check", "/api/sync/check"])(
+  it.each(["/api/auth/check", "/api/rendro/check"])(
     "does not recursively inspect or instrument excluded API path %s",
     async (path) => {
       const fetchMock = vi.fn();

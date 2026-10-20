@@ -3,8 +3,7 @@ import { ConvexError } from "convex/values";
 import { getFunctionName } from "convex/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
-  bootCommentorParentHost, CommentorParentHost, ConvexDocumentCommentBackend, ConvexLegacyCommentBackend, documentCommentScopeFromFrame, sameScope,
-  type DocumentCommentBackend, type DocumentCommentScope,
+  bootCommentorParentHost, CommentorParentHost, ConvexRepoCommentBackend, type DocumentCommentBackend,
 } from "../src/commentor/parent-host";
 import {
   COMMENTOR_PARENT_ERROR, COMMENTOR_PARENT_READY, COMMENTOR_PARENT_REQUEST, COMMENTOR_PARENT_RESPONSE, COMMENTOR_PARENT_REPLIES_UPDATE,
@@ -22,33 +21,9 @@ vi.mock("convex/browser", () => ({
   },
 }));
 
-const project = { organizationId: "org-a", projectId: "project-a" as never };
-const documentUrl = "https://rendro.test/organizations/org-a/projects/project-a/docs/files/guide.html";
-afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); document.body.innerHTML = ""; document.documentElement.removeAttribute("data-rendro-signed-out"); sessionStorage.clear(); clients.length = 0; });
-
-describe("document scopes", () => {
-  it("accepts only paths below the configured document root", () => {
-    for (const url of ["/organizations/org-a/projects/project-a/docs/files/%E0%A4%A", "/organizations/org-a/projects/project-a/docs/files/a%5Cb.html",
-      "/organizations/org-a/projects/project-a/docs/files/a%2F..%2Fb.html", "/organizations/org-a/projects/project-a/docs/files/a//b.html", "/organizations/org-a/projects/project-a/docs/files/", "http://[bad"]) {
-      expect(documentCommentScopeFromFrame(url, "https://rendro.test", project), url).toBeNull();
-    }
-    expect(documentCommentScopeFromFrame("/legacy-view/example/files/%E0%A4%A", "https://rendro.test", { orgSlug: "example" })).toBeNull();
-    expect(documentCommentScopeFromFrame("/legacy-view/example/files/..%2Fx", "https://rendro.test", { orgSlug: "example" })).toBeNull();
-  });
-  it("matches scopes of the same kind exactly and never across kinds", () => {
-    const left: DocumentCommentScope = { ...project, documentPath: "a.html" };
-    const legacy: DocumentCommentScope = { orgSlug: "example", filePath: "example/a.html", documentPath: "a.html" };
-    expect(sameScope(left, { ...left })).toBe(true);
-    expect(sameScope(legacy, { ...legacy })).toBe(true);
-    expect(sameScope(left, legacy)).toBe(false);
-    expect(sameScope(legacy, left)).toBe(false);
-    expect(sameScope(left, { ...left, documentPath: "b.html" })).toBe(false);
-    expect(sameScope(left, { ...left, projectId: "other" as never })).toBe(false);
-    expect(sameScope(legacy, { ...legacy, orgSlug: "other" })).toBe(false);
-    expect(sameScope(null, left)).toBe(false);
-    expect(sameScope(left, null)).toBe(false);
-  });
-});
+const repo = { repoId: 9101, accessUrl: "/r/acme/docs/comment-access" };
+const documentUrl = "https://rendro.test/r/acme/docs/files/guide.html";
+afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals(); document.body.innerHTML = ""; document.documentElement.removeAttribute("data-rendro-signed-out"); sessionStorage.clear(); clients.length = 0; });
 
 describe("comment host protocol handling", () => {
   type Subscription = { unsubscribe: ReturnType<typeof vi.fn>; loadMore: ReturnType<typeof vi.fn> };
@@ -85,7 +60,7 @@ describe("comment host protocol handling", () => {
       },
       mutate,
     };
-    const host = new CommentorParentHost(frame as never, "https://rendro.test", { ...project, convexUrl: "https://convex.test" }, backend,
+    const host = new CommentorParentHost(frame as never, "https://rendro.test", { ...repo, convexUrl: "https://convex.test" }, backend,
       options.userId === undefined ? "user-a" : options.userId);
     host.start();
     const receive = (data: unknown, source: unknown = child) => window.dispatchEvent(new MessageEvent("message", { data, source: source as never }));
@@ -100,7 +75,7 @@ describe("comment host protocol handling", () => {
   const thread = (id: unknown) => ({ _id: id });
 
   it("announces itself only for the document it owns, and reports a failed announcement", () => {
-    const foreign = setup({ src: "https://elsewhere.test/organizations/org-a/projects/project-a/docs/files/guide.html" });
+    const foreign = setup({ src: "https://elsewhere.test/r/acme/docs/files/guide.html" });
     foreign.load();
     expect(foreign.posted).toEqual([]);
     const detached = setup({ contentWindow: null });
@@ -121,7 +96,7 @@ describe("comment host protocol handling", () => {
     unavailable.load();
     expect(unavailable.posted).toEqual([{ type: COMMENTOR_PARENT_ERROR, error: "Comments could not be loaded" }]);
     unavailable.request("write", "thread.resolve", { threadId: "t", resolved: true });
-    unavailable.request("draft", "draft.save", { key: "create", draft: { body: "x", anchor: { kind: "element", path: ["main"] } } });
+    unavailable.request("draft", "draft.save", { key: "create", draft: { body: "x", anchor: { kind: "repo-text", blobSha: "b".repeat(40), headingSlug: "install", prefix: "", exact: "pnpm install", suffix: "", offset: 0 } } });
     expect(unavailable.responses()).toEqual([
       expect.objectContaining({ requestId: "write", ok: false, error: "Comment scope is unavailable" }),
       expect.objectContaining({ requestId: "draft", ok: false, error: "Comment scope is unavailable" }),
@@ -228,7 +203,7 @@ describe("comment host protocol handling", () => {
 });
 
 describe("Convex backends", () => {
-  type Client = ConstructorParameters<typeof ConvexDocumentCommentBackend>[0];
+  type Client = ConstructorParameters<typeof ConvexRepoCommentBackend>[0];
   function fakeClient() {
     const calls: Array<{ query: unknown; args: unknown; options: unknown }> = [];
     let report!: (result: { results: unknown[]; status: string; loadMore: (count: number) => boolean }) => void;
@@ -240,15 +215,15 @@ describe("Convex backends", () => {
     };
     return { client: client as unknown as Client, calls, report: (result: Parameters<typeof report>[0]) => report(result), unsubscribe, raw: client };
   }
-  const scope = { ...project, documentPath: "guide.html" };
-  const legacy = { orgSlug: "example", filePath: "example/guide.html", documentPath: "guide.html" };
+  const scope = { repoId: 9101, documentPath: "guide.html" };
 
   it("pages thread and reply subscriptions, reversing replies and reporting pagination state", () => {
     const { client, calls, report, unsubscribe } = fakeClient();
-    const backend = new ConvexDocumentCommentBackend(client);
+    const backend = new ConvexRepoCommentBackend(client);
     const onUpdate = vi.fn();
     const threads = backend.subscribe(scope, onUpdate, vi.fn());
-    expect(getFunctionName(calls[0].query as never)).toBe("documentThreads:list");
+    expect(getFunctionName(calls[0].query as never)).toBe("repoComments:listThreads");
+    expect(calls[0].args).toEqual({ repoId: 9101, path: "guide.html" });
     expect(calls[0].options).toEqual({ initialNumItems: 20 });
     expect(threads.loadMore()).toBe(false);
     const loadMore = vi.fn(() => true);
@@ -263,70 +238,25 @@ describe("Convex backends", () => {
     expect(unsubscribe).toHaveBeenCalled();
     const replies = vi.fn();
     backend.subscribeReplies(scope, "t" as never, replies, vi.fn());
-    expect(getFunctionName(calls[1].query as never)).toBe("documentReplies:list");
-    expect(calls[1].args).toEqual({ ...scope, threadId: "t" });
+    expect(getFunctionName(calls[1].query as never)).toBe("repoComments:listReplies");
+    expect(calls[1].args).toEqual({ repoId: 9101, path: "guide.html", threadId: "t" });
     report({ results: [1, 2, 3], status: "Exhausted", loadMore });
     expect(replies).toHaveBeenCalledWith([3, 2, 1], { canLoadMore: false, loading: false });
-    expect(() => backend.subscribe(legacy, vi.fn(), vi.fn())).toThrow("Invalid project scope");
-    expect(() => backend.subscribeReplies(legacy, "t" as never, vi.fn(), vi.fn())).toThrow("Invalid project scope");
-    expect(() => backend.mutate("thread.remove", legacy, {})).toThrow("Invalid project scope");
-  });
-
-  it.each([
-    ["thread.create", { body: "b", anchor: { kind: "element", path: ["main"] }, clientOperationId: "op", expectedAuthorId: "u" }, "documentThreads:create"],
-    ["thread.resolve", { threadId: "t", resolved: true }, "documentThreads:resolve"],
-    ["thread.archive", { threadId: "t", archived: false }, "documentThreads:archive"],
-    ["thread.remove", { threadId: "t" }, "documentThreads:remove"],
-    ["reply.remove", { threadId: "t", replyId: "r" }, "documentReplies:remove"],
-    ["reply.add", { threadId: "t", body: "b" }, "documentReplies:add"],
-  ] as const)("sends %s to the project API with the document scope and operation identity", async (method, args, name) => {
-    const { client, raw } = fakeClient();
-    await new ConvexDocumentCommentBackend(client).mutate(method, scope, args);
-    const [reference, sent] = raw.mutation.mock.calls[0] as unknown as [never, Record<string, unknown>];
-    expect(getFunctionName(reference)).toBe(name);
-    expect(sent).toMatchObject({ ...scope, ...args });
-  });
-
-  it("serves legacy documents from the inline-reply API and keeps their identity fields", async () => {
-    const { client, raw } = fakeClient();
-    const backend = new ConvexLegacyCommentBackend(client);
-    const update = vi.fn();
-    const subscription = backend.subscribe(legacy, update, vi.fn());
-    const [reference, args, callback] = raw.onUpdate.mock.calls[0] as unknown as [never, unknown, (threads: unknown[]) => void];
-    expect(getFunctionName(reference)).toBe("threads:list");
-    expect(args).toEqual({ orgSlug: "example", filePath: "example/guide.html" });
-    callback([{ _id: "t" }]);
-    expect(update).toHaveBeenCalledWith([{ _id: "t" }], { canLoadMore: false, loading: false });
-    expect(subscription.loadMore()).toBe(false);
-    const replies = backend.subscribeReplies();
-    expect(replies.loadMore()).toBe(false);
-    replies.unsubscribe();
-    for (const [method, input, name] of [
-      ["thread.create", { body: "b", anchor: {}, clientOperationId: "op", expectedAuthorId: "u" }, "threads:create"], ["thread.resolve", { threadId: "t", resolved: true }, "threads:resolve"],
-      ["thread.archive", { threadId: "t", archived: true }, "threads:archive"], ["thread.remove", { threadId: "t" }, "threads:remove"],
-      ["reply.remove", { threadId: "t", replyId: "r" }, "replies:remove"], ["reply.add", { threadId: "t", body: "b" }, "replies:add"],
-    ] as const) {
-      raw.mutation.mockClear();
-      await backend.mutate(method, legacy, input);
-      const [fn, sent] = raw.mutation.mock.calls[0] as unknown as [never, Record<string, unknown>];
-      expect(getFunctionName(fn)).toBe(name);
-      expect(sent).toMatchObject({ orgSlug: "example", filePath: "example/guide.html", ...input });
-    }
-    expect(() => backend.subscribe(scope, vi.fn(), vi.fn())).toThrow("Invalid legacy scope");
-    expect(() => backend.mutate("thread.remove", scope, {})).toThrow("Invalid legacy scope");
   });
 });
 
 describe("booting the parent host", () => {
-  const shareConfig = { ...project, convexUrl: "https://convex.test" };
-  function page(config: Record<string, unknown> | null = shareConfig, key = "RENDRO_SHARE_CONFIG") {
+  const repoConfig = { ...repo, convexUrl: "https://convex.test" };
+  function page(config: Record<string, unknown> | null = repoConfig) {
     document.body.innerHTML = '<iframe id="content-frame"></iframe>';
-    Object.assign(window, { RENDRO_SHARE_CONFIG: undefined, RENDRO_LEGACY_COMMENT_CONFIG: undefined });
-    if (config) Object.assign(window, { [key]: config });
+    Reflect.deleteProperty(window, "RENDRO_REPO_COMMENT_CONFIG");
+    if (config) Object.assign(window, { RENDRO_REPO_COMMENT_CONFIG: config });
   }
+  // The read path's comment access answers "not granted" (404): this suite is about sessions and tokens.
   function session(user: unknown = { id: "user-a" }, token: unknown = { token: "jwt" }, status = 200, tokenStatus = 200) {
     const fetcher = vi.fn((url: string) => Promise.resolve(String(url).includes("get-session")
       ? new Response(JSON.stringify(user ? { user } : null), { status })
+      : String(url).includes("comment-access") ? new Response(null, { status: 404 })
       : new Response(JSON.stringify(token), { status: tokenStatus })));
     vi.stubGlobal("fetch", fetcher);
     return fetcher;
@@ -339,7 +269,7 @@ describe("booting the parent host", () => {
     document.documentElement.removeAttribute("data-rendro-signed-out");
     page(null);
     expect(bootCommentorParentHost()).toBeNull();
-    page({ ...project });
+    page({ ...repo });
     expect(bootCommentorParentHost()).toBeNull();
     page();
     document.body.innerHTML = "<div id='content-frame'></div>";
@@ -351,19 +281,15 @@ describe("booting the parent host", () => {
     const fetcher = session();
     const dispose = bootCommentorParentHost()!;
     await vi.waitFor(() => expect(clients[0].setAuth).toHaveBeenCalled());
-    expect(clients[0].onUpdate).toHaveBeenCalledTimes(1);
     const authenticate = clients[0].setAuth.mock.calls[0][0] as () => Promise<string | null>;
     fetcher.mockClear();
     window.dispatchEvent(new Event("focus"));
     const [first, second] = await Promise.all([authenticate(), authenticate()]);
     expect([first, second]).toEqual(["jwt", "jwt"]);
     expect(fetcher.mock.calls.filter(([url]) => String(url).includes("get-session"))).toHaveLength(1);
-    // A refused or empty token ends deployment tracking and gives the client nothing.
-    const frame = document.getElementById("content-frame")!;
-    frame.dataset.activeDeployment = "dep-1";
+    // A refused, empty or failed token gives the client nothing.
     fetcher.mockImplementation((url: string) => Promise.resolve(String(url).includes("get-session") ? new Response(JSON.stringify({ user: { id: "user-a" } })) : new Response("{}", { status: 403 })));
     expect(await authenticate()).toBeNull();
-    expect(frame.dataset.activeDeployment).toBeUndefined();
     fetcher.mockImplementation((url: string) => Promise.resolve(String(url).includes("get-session") ? new Response(JSON.stringify({ user: { id: "user-a" } })) : new Response(JSON.stringify({ token: "" }))));
     expect(await authenticate()).toBeNull();
     fetcher.mockImplementation((url: string) => Promise.resolve(String(url).includes("get-session") ? new Response(JSON.stringify({ user: { id: "user-a" } })) : new Response("{}", { status: 500 })));
@@ -433,30 +359,46 @@ describe("booting the parent host", () => {
     expect(await pending).toBeNull();
   });
 
-  it("serves legacy documents without tracking project deployments, and signs out when the session ends", async () => {
-    page({ orgSlug: "example", convexUrl: "https://convex.test" }, "RENDRO_LEGACY_COMMENT_CONFIG");
-    session();
-    const dispose = bootCommentorParentHost()!;
-    await vi.waitFor(() => expect(clients[0].setAuth).toHaveBeenCalled());
-    expect(clients[0].onUpdate).not.toHaveBeenCalled();
-    dispose();
-    page();
-    session(null, {}, 401);
+  it("signs out when a signed-in reader's session ends", async () => {
+    const fetcher = session();
     const signedOut = vi.fn();
     window.addEventListener("commentor-sign-out", signedOut);
-    bootCommentorParentHost();
+    const dispose = bootCommentorParentHost()!;
+    await vi.waitFor(() => expect(clients[0].setAuth).toHaveBeenCalled());
+    fetcher.mockImplementation((url: string) => Promise.resolve(String(url).includes("get-session") ? new Response("null", { status: 401 }) : new Response(null, { status: 404 })));
+    window.dispatchEvent(new Event("focus"));
     await vi.waitFor(() => expect(signedOut).toHaveBeenCalled());
-    expect(clients[1].close).toHaveBeenCalled();
-    expect(clients[1].setAuth).not.toHaveBeenCalled();
+    expect(clients[0].close).toHaveBeenCalled();
     window.removeEventListener("commentor-sign-out", signedOut);
+    dispose();
   });
 
-  it("stays quiet when the session cannot be checked", async () => {
+  it("stays quiet when the session cannot be checked, at boot and when the tab regains focus", async () => {
     const fetcher = session(null, {}, 500);
     const dispose = bootCommentorParentHost()!;
     await vi.waitFor(() => expect(fetcher).toHaveBeenCalled());
     await Promise.resolve();
     expect(clients[0].setAuth).not.toHaveBeenCalled();
+    const checks = () => fetcher.mock.calls.filter(([url]) => String(url).includes("get-session")).length;
+    const before = checks();
+    window.dispatchEvent(new Event("focus"));
+    await vi.waitFor(() => expect(checks()).toBe(before + 1));
+    expect(clients[0].setAuth).not.toHaveBeenCalled();
     dispose();
+  });
+
+  it.each(["closes", "signs out elsewhere"] as const)("starts nothing when the page %s before the first session check answers", async ending => {
+    let answer!: (response: Response) => void;
+    vi.stubGlobal("fetch", vi.fn((url: string) => String(url).includes("get-session")
+      ? new Promise<Response>(resolve => { answer = resolve; })
+      : Promise.resolve(new Response(null, { status: 404 }))));
+    const dispose = bootCommentorParentHost()!;
+    await vi.waitFor(() => expect(answer).toBeTypeOf("function"));
+    if (ending === "closes") dispose();
+    else window.dispatchEvent(new Event("commentor-sign-out"));
+    answer(new Response(JSON.stringify({ user: { id: "user-a" } })));
+    for (let turn = 0; turn < 10; turn++) await Promise.resolve();
+    expect(clients[0].setAuth).not.toHaveBeenCalled();
+    if (ending !== "closes") dispose();
   });
 });

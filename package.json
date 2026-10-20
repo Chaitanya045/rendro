@@ -1,7 +1,8 @@
 {
   "name": "rendro",
   "version": "2.0.0",
-  "description": "CLI to deploy and publish project-scoped HTML documentation to Rendro. Zero runtime dependencies.",
+  "private": true,
+  "description": "Rendro: documentation read from a GitHub repository, with comments.",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -12,8 +13,6 @@
   "keywords": [
     "docs",
     "documentation",
-    "sync",
-    "cli",
     "rendro"
   ],
   "type": "module",
@@ -21,14 +20,6 @@
     "node": ">=22"
   },
   "packageManager": "pnpm@10.18.3",
-  "bin": {
-    "rendro": "bin/rendro.mjs"
-  },
-  "files": [
-    "bin/rendro.mjs",
-    "README.md",
-    "LICENSE"
-  ],
   "scripts": {
     "dev": "tsx watch --env-file=.env src/index.ts",
     "start": "tsx --env-file=.env src/index.ts",
@@ -55,10 +46,6 @@
     "build:wasm": "tsx scripts/verify-comrak-wasm.ts --write",
     "bench:hostile": "tsx scripts/benchmark-hostile-input.ts",
     "build:assets": "tsx scripts/build-private-viewer.ts && tsx scripts/build-commentor.ts && tsx scripts/build-commentor-parent.ts && tsx scripts/build-lazy-tree.ts && tsx scripts/build-rum.ts && tsx scripts/build-management-query.ts && tsx scripts/build-select.ts && tsx scripts/build-management-pages.ts",
-    "cli": "tsx cli/src/index.ts",
-    "cli:build": "node scripts/build-cli.mjs",
-    "prepack": "node scripts/build-cli.mjs",
-    "migrate:legacy": "tsx --env-file-if-exists=.env scripts/migrate-legacy-tenancy.ts",
     "visual": "bash scripts/visual-baselines.sh check",
     "a11y": "RENDRO_E2E_VISUAL=1 playwright test --config e2e/visual.config.ts --project=a11y-chromium --project=a11y-firefox --project=a11y-webkit",
     "visual:update": "bash scripts/visual-baselines.sh update",
@@ -68,7 +55,6 @@
     "e2e": "playwright test --config e2e/playwright.config.ts"
   },
   "devDependencies": {
-    "@aws-sdk/client-s3": "^3.600.0",
     "@axe-core/playwright": "^4.13.0",
     "@bcoe/v8-coverage": "1.0.2",
     "@better-auth/memory-adapter": "^1.6.23",

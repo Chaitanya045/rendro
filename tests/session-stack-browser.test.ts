@@ -1,14 +1,9 @@
 import { managementPagesSource } from "../scripts/management-pages-source";
 import { buildBrowserBundle } from "./helpers/browser";
-import { commitWithProof } from "./helpers/storage-proof";
 import rateLimiterTest from "./convex-rate-limiter";
 import { spawn, type ChildProcess } from "node:child_process";
 import { createServer, get, request as httpRequest } from "node:http";
 import { once } from "node:events";
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { r2Simulation } from "./helpers/r2-simulation";
 import { getRequestListener } from "@hono/node-server";
 import { convexTest } from "convex-test";
 import { hashPassword } from "better-auth/crypto";
@@ -21,7 +16,7 @@ import { subprocessArgs, subprocessEnv } from "./helpers/subprocess-coverage";
 
 // Run the actual local server entry point, including the auth proxy,
 // session middleware and all routes. Only remote services are local substitutes:
-// Convex HTTP actions/component adapter run in convex-test; storage is a Miniflare R2 directory seeded with two objects.
+// Convex HTTP actions/component adapter run in convex-test.
 const harness = createBrowserHarness();
 let server: ChildProcess | undefined;
 let organizationId: string, projectId: string;
@@ -29,15 +24,10 @@ const password = "local-stack-fixture-password-only";
 const backend = convexTest(schema, import.meta.glob("../convex/**/*.ts"));
 rateLimiterTest.register(backend);
 backend.registerComponent("betterAuth", authSchema, import.meta.glob("../convex/betterAuth/**/*.ts"));
-let state: string;
 
 beforeAll(async () => {
   const assets = new Map<string, string>();
   for (const [path, entry] of [
-    ["/private-viewer.js", "src/viewer/entry.ts"],
-    ["/lazy-tree.js", "src/lazy-tree/lazy-tree.ts"],
-    ["/commentor.js", "src/commentor/commentor.ts"],
-    ["/commentor-parent.js", "src/commentor/parent-entry.ts"],
     ["/management-query.js", "src/management-query/browser.ts"],
     ["/select.js", "src/ui/select-browser.ts"],
   ]) {
@@ -90,21 +80,9 @@ beforeAll(async () => {
   } } });
   const project = await backend.mutation(internal.projects.createInternal, { organizationId, name: "Stack Docs", slug: "stack-docs", actorId: user._id });
   projectId = project!._id;
-  const deployment = await backend.mutation(internal.deployments.startInternal, {
-    organizationId, projectId, actorId: user._id, manifestSha256: "a".repeat(64), fileCount: 1, byteCount: 100, provenance: { source: { kind: "local" }, execution: { kind: "local" }, cliVersion: "test", manifestSha256: "a".repeat(64) },
-  });
-  await commitWithProof(backend, { organizationId, projectId, deploymentId: deployment.deploymentId, actorId: user._id });
-  const document = "<!doctype html><html><head><title>Stack guide</title></head><body><h1>Local stack document loaded</h1></body></html>";
-  state = await mkdtemp(join(tmpdir(), "rendro-stack-r2-"));
-  const seeding = await r2Simulation(state);
-  try {
-    await seeding.bucket.put(deployment.manifestKey, JSON.stringify({ version: 1, files: [{ path: "index.html", contentType: "text/html", sha256: "b".repeat(64), size: document.length }] }));
-    await seeding.bucket.put(`${deployment.objectRoot}/files/index.html`, document);
-  } finally { await seeding.dispose(); }
   server = spawn(process.execPath, [...subprocessArgs(), "--import", "tsx", "src/index.ts"], {
     cwd: process.cwd(), stdio: "ignore", env: subprocessEnv({
       ...process.env, PORT: String(port), LOG_LEVEL: "silent", CONVEX_SITE_URL: `${harness.origin}/mock-convex`,
-      RENDRO_LOCAL_STATE_DIR: state,
     }),
   });
   await vi.waitFor(async () => {
@@ -112,13 +90,12 @@ beforeAll(async () => {
     const probe = get(`http://127.0.0.1:${port}/health`, response => { response.resume(); resolve(response.statusCode ?? 0); });
     probe.on("error", () => resolve(0));
     })).toBe(200);
-  // The server first starts Miniflare's R2 simulation (seconds on a loaded runner, slower under coverage).
+  // Starting the server takes seconds on a loaded runner, longer under coverage.
   }, { timeout: 60_000, interval: 100 });
 });
 
 afterAll(async () => {
   vi.unstubAllEnvs();
-  await rm(state, { recursive: true, force: true });
   if (server && server.exitCode === null) {
     const stopped = once(server, "exit");
     server.kill("SIGTERM");
@@ -130,13 +107,10 @@ afterAll(async () => {
 // convex-test backend in this worker. On a 2-vCPU runner that serial chain is
 // several times slower than the 10s harness step; these budgets only bound hangs.
 const stackStep = 30_000;
-it("signs in and browses management and docs without a 503 on the real local server", { timeout: 120_000 }, async () => {
+it("signs in and browses management without a 503 on the real local server", { timeout: 120_000 }, async () => {
   const page = await harness.newPage();
   page.setDefaultTimeout(stackStep);
   page.setDefaultNavigationTimeout(stackStep);
-  // convex-test provides HTTP actions, not the realtime WebSocket protocol.
-  // Keep comment subscriptions offline; auth/session HTTP remains real.
-  await page.routeWebSocket(/.*/, socket => socket.close());
   const failures: string[] = [];
   page.on("response", response => {
     if (response.status() >= 500) failures.push(`${response.status()} ${new URL(response.url()).pathname}`);
@@ -162,18 +136,9 @@ it("signs in and browses management and docs without a 503 on the real local ser
     const project = await post("/api/rendro/projects", { organizationId, name: "Browser created", slug: "browser-created" });
     const credential = await post("/api/rendro/credentials", { ...scope, name: "Browser key", scopes: ["docs:read"] });
     await post("/api/rendro/credentials/revoke", { organizationId, keyId: (credential.credential as { keyId: string }).keyId });
-    const share = await post("/api/rendro/shares", { ...scope, documentPath: "index.html", expiresInSeconds: 600 });
-    await post("/api/rendro/shares/revoke", { organizationId, grantId: (share.grant as { _id: string })._id });
-    const publication = await post("/api/rendro/publications", { ...scope, slug: "browser-publication", pathPrefix: "", entryFile: "index.html", trackingMode: "track_active" });
-    await post("/api/rendro/publications/remove", { ...scope, publicationId: (publication.publication as { _id: string })._id });
-    return { createdProject: Boolean(project.project), createdKey: Boolean(credential.rawKey), createdShare: Boolean(share.token), createdPublication: Boolean(publication.publication) };
+    return { createdProject: Boolean(project.project), createdKey: Boolean(credential.rawKey) };
   }, { organizationId, projectId });
-  expect(writes).toEqual({ createdProject: true, createdKey: true, createdShare: true, createdPublication: true });
-  const docs = `${orgPath}/projects/${projectId}/docs`;
-  expect((await page.goto(harness.origin + docs))?.status()).toBe(200);
-  // The viewer iframe exercises the canonical route and a fresh persisted
-  // authorization read after the top-level session lookup.
-  await expect.poll(async () => Promise.all(page.frames().map(frame => frame.locator("body").textContent())).then(texts => texts.join(" ")), { timeout: stackStep }).toContain("Local stack document loaded");
+  expect(writes).toEqual({ createdProject: true, createdKey: true });
   expect(failures).toEqual([]);
   const sessions = await backend.query(components.betterAuth.adapter.findMany, { model: "session", paginationOpts: { cursor: null, numItems: 10 } });
   expect(sessions.page).toHaveLength(1);

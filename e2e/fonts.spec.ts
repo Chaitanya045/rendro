@@ -1,6 +1,8 @@
+import { readFileSync } from "node:fs";
 import type { Page } from "@playwright/test";
 import { test, expect } from "./fixtures";
 import { desktop, mobile, shellReady, signInSeeded } from "./shell-helpers";
+import type { RepoFixtures } from "./repo-fixtures";
 
 const fontCdn = /fonts\.(?:googleapis|gstatic)\.com/;
 const iconFont = "Material Symbols Outlined";
@@ -136,8 +138,9 @@ test.describe("self-hosted fonts", () => {
       expect(await overflows(page), path).toEqual([]);
       expect(await exposedIcons(page), path).toEqual([]);
     }
-    // The document shell (tree rows, share/theme controls) loads the same fonts with its own weights.
-    await page.goto(`/organizations/${seed.organizationId}/projects/${seed.projectId}/docs`);
+    // The repository shell (tree rows, share/theme controls) loads the same fonts with its own weights.
+    const { open } = JSON.parse(readFileSync(process.env.RENDRO_E2E_REPOS as string, "utf8")) as RepoFixtures;
+    await page.goto(`/r/${open.owner}/${open.name}`);
     await expect(page.locator(".tree-item").first()).toBeVisible();
     expect((await faces(page)).some(face => face.family === iconFont && face.status === "loaded")).toBe(true);
     expect(await exposedIcons(page)).toEqual([]);

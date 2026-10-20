@@ -152,17 +152,6 @@ describe("management query cache policy", () => {
     expect(raw).toHaveBeenCalledTimes(2);
   });
 
-  it("publication writes invalidate only that project's publications", async () => {
-    const { cache, raw, authorize } = setup();
-    const publicationA = "/api/rendro/publications?organizationId=org-a&projectId=project-a";
-    const publicationB = publicationA.replace("project-a", "project-b");
-    for (const url of [path, project, publicationA, publicationB]) await cache.request(url, {}, authorize);
-    cache.invalidateMutation("/api/rendro/publications/remove", { method: "POST", body: JSON.stringify({ organizationId: "org-a", projectId: "project-a" }) });
-    raw.mockClear();
-    for (const url of [path, project, publicationA, publicationB]) await cache.request(url, {}, authorize);
-    expect(raw).toHaveBeenCalledTimes(1); expect(raw.mock.calls[0][0]).toBe(publicationA);
-  });
-
   it("project creation invalidates the list but preserves existing project details", async () => {
     const { cache, raw, authorize } = setup();
     await cache.request(path, {}, authorize); await cache.request(project, {}, authorize);
@@ -171,10 +160,9 @@ describe("management query cache policy", () => {
     expect(raw).toHaveBeenCalledTimes(1); expect(raw.mock.calls[0][0]).toBe(path);
   });
 
-  it("credential and share writes don't invalidate unrelated cached data", async () => {
+  it("credential writes don't invalidate unrelated cached data", async () => {
     const { cache, raw, authorize } = setup(); await cache.request(path, {}, authorize);
     cache.invalidateMutation("/api/rendro/credentials/revoke", { method: "POST", body: JSON.stringify({ organizationId: "org-a" }) });
-    cache.invalidateMutation("/api/rendro/shares/revoke", { method: "POST", body: JSON.stringify({ organizationId: "org-a" }) });
     await cache.request(path, {}, authorize); expect(raw).toHaveBeenCalledTimes(1);
   });
 

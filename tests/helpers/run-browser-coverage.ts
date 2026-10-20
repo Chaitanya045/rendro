@@ -14,7 +14,7 @@ const notSubprocessSuites = new Set(["tests/subprocess-coverage.test.ts"]);
 /** Suites that spawn Node subprocesses through the collector; each must leave a receipt. */
 export async function subprocessSuites(root = process.cwd()) {
   const files = await glob("tests/*.test.ts", { cwd: root });
-  return files.filter(file => !notSubprocessSuites.has(file) && /\b(?:subprocessEnv|captureCliPush)\(/.test(readFileSync(resolve(root, file), "utf8")))
+  return files.filter(file => !notSubprocessSuites.has(file) && /\bsubprocessEnv\(/.test(readFileSync(resolve(root, file), "utf8")))
     .map(file => basename(file)).sort();
 }
 

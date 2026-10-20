@@ -75,16 +75,6 @@ export const listProjects = httpAction(async (ctx, request) => {
   }
 });
 
-export const managementRecentDeployment = httpAction(async (ctx, request) => {
-  const organizationId = organizationIdFrom(request);
-  if (!organizationId) return Response.json({ error: "organizationId is required" }, { status: 400 });
-  try {
-    await authorizeHttpOrganization(ctx, request.headers, organizationId);
-    const deployment = await ctx.runQuery(internal.deployments.latestForOrganization, { organizationId });
-    return Response.json({ deployment }, { headers: { "Cache-Control": "private, no-store" } });
-  } catch (error) { return jsonError(error); }
-});
-
 export const createProject = httpAction(async (ctx, request) => {
   let body: unknown;
   try {

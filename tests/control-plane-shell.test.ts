@@ -41,10 +41,11 @@ describe("control-plane shell", () => {
       expect(html).toContain('href="/organizations/org%20a/people" aria-current="page"');
       expect(html).toContain('href="/organizations/org%20a/api-keys"');
     }
-    expect(html.includes('data-cp-open-docs href="/organizations/org%20a/projects"')).toBe("organizationId" in options);
+    // Deployed project documentation is gone (#286): the shell no longer links to it.
+    expect(html).not.toContain("data-cp-open-docs");
   });
 
-  it("links documentation to the project when one is known", () => {
-    expect(page({}, { organizationId: "org-a", projectId: "p/1" })).toContain('data-cp-open-docs href="/organizations/org-a/projects/p%2F1/docs"');
+  it("records the project a page belongs to for the client router", () => {
+    expect(page({}, { organizationId: "org-a", projectId: "p/1" })).toContain('data-cp-project-id="p/1"');
   });
 });

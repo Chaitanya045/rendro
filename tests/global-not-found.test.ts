@@ -5,8 +5,7 @@ import { renderFaviconLinks } from "@/routes/favicon";
 vi.mock("@hono/node-server", () => ({ serve: vi.fn() }));
 import { app as local } from "@/index";
 
-beforeEach(() => vi.stubGlobal("fetch", vi.fn((input) => Promise.resolve(String(input).endsWith("/api/rendro/admission/public")
-  ? Response.json({ admitted: true }) : new Response(null, { status: 404 })))));
+beforeEach(() => vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(new Response(null, { status: 404 })))));
 afterEach(() => vi.unstubAllGlobals());
 
 const runtimes = [
@@ -52,7 +51,7 @@ describe.each(runtimes)("global not-found handler: $name", ({ request }) => {
   });
 
   it.each([
-    { path: "/share/unknown/missing.png", accept: "image/*" },
+    { path: "/unknown/missing.png", accept: "image/*" },
     { path: "/missing/font.woff2", accept: "*/*" },
     { path: "/missing/style.css", accept: undefined },
     { path: "/missing/script.js", accept: undefined },
@@ -79,10 +78,10 @@ describe.each(runtimes)("global not-found handler: $name", ({ request }) => {
   });
 
   it("preserves JSON errors from matched API routes", async () => {
-    const response = await request("/api/rendro/publications", { method: "POST", headers: { origin: process.env.SITE_URL!, "content-type": "application/json" }, body: "invalid JSON" });
-    expect(response.status).toBe(400);
+    const response = await request("/api/rendro/projects", { method: "POST", headers: { origin: "https://foreign.test", "content-type": "application/json" }, body: "{}" });
+    expect(response.status).toBe(403);
     expect(response.headers.get("Content-Type")).toContain("application/json");
-    expect(await response.json()).toEqual({ error: "Invalid JSON body" });
+    expect(await response.json()).toEqual({ error: "Same-origin request required" });
   });
 
   it.each([

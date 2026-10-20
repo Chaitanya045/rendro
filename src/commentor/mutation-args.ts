@@ -12,27 +12,9 @@ function validBody(value: unknown): value is string {
 }
 
 export function validAnchor(value: unknown): boolean {
-  const anchor = record(value);
   // Repository docs (#254) anchor by heading and quote, not by element path.
-  if (anchor?.kind === "repo-text") return validRepoAnchor(anchor);
-  if (
-    !anchor
-    || !Array.isArray(anchor.path)
-    || anchor.path.length === 0
-    || anchor.path.length > 64
-    || !anchor.path.every((part) => typeof part === "string" && Boolean(part.trim()) && part.length <= 256)
-  ) return false;
-  if (anchor.kind === "element") return true;
-  return anchor.kind === "text-range"
-    && typeof anchor.quote === "string"
-    && Boolean(anchor.quote.trim())
-    && anchor.quote.length <= 4_096
-    && Number.isSafeInteger(anchor.startOffset)
-    && (anchor.startOffset as number) >= 0
-    && (anchor.startOffset as number) <= 1_000_000
-    && Number.isSafeInteger(anchor.endOffset)
-    && (anchor.endOffset as number) >= 0
-    && (anchor.endOffset as number) <= 1_000_000;
+  const anchor = record(value);
+  return anchor?.kind === "repo-text" && validRepoAnchor(anchor);
 }
 
 // Validate before assigning an identity or persisting a submitted draft.
@@ -50,8 +32,8 @@ export function normalizeMutationArgs(method: CommentorParentMutationMethod, val
   if (method === "reply.remove") return typeof args.replyId === "string" && args.replyId
     ? { ...operation, threadId, replyId: args.replyId } : null;
   if (method === "thread.resolve" || method === "thread.archive") {
+    // Status writes always name their target, so a retry is idempotent.
     const field = method === "thread.resolve" ? "resolved" : "archived";
-    if (args[field] === undefined) return id === undefined ? { threadId } : null;
     return typeof args[field] === "boolean" ? { ...operation, threadId, [field]: args[field] } : null;
   }
   return { ...operation, threadId };

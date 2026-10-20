@@ -18,6 +18,6 @@ export function requireCookieWrite(request: Request, siteUrl: string | undefined
   }
 }
 
-export type HttpPolicy = "read" | "cookie-json" | "bearer" | "mixed" | "better-auth";
+export type HttpPolicy = "read" | "cookie-json" | "bearer" | "better-auth";
 // Registration metadata lets the inventory test inspect the actual router.
 export const httpActionPolicies = new WeakMap<object, HttpPolicy>();

@@ -43,6 +43,10 @@ const lab = {
   replySubscriptions: () => replyUpdates.size,
   unsubscribed: 0,
   host: null as CommentorParentHost | null,
+  /** The same repository anchor as tests/helpers/comment-lab.ts `anchorOn`, for callbacks that run in this page. */
+  anchorOn(exact: string, headingSlug = "title") {
+    return { kind: "repo-text", blobSha: "b".repeat(40), headingSlug, prefix: "", exact, suffix: "", offset: 0 };
+  },
   publish() {
     threadUpdate?.([...lab.threads].sort((a, b) => a._creationTime - b._creationTime), { ...lab.pagination });
   },
@@ -57,7 +61,8 @@ const lab = {
     const id = overrides._id ?? `thread-${++sequence}`;
     return {
       _id: id, _creationTime: Date.now() - 60_000 + sequence, authorName: "Ada", authorEmail: "ada@example.test",
-      body: `Body of ${id}`, anchor: { kind: "element", path: ["main", "h1"] }, resolved: false, canDelete: true, replies: [], ...overrides,
+      body: `Body of ${id}`, anchor: { kind: "repo-text", blobSha: "b".repeat(40), headingSlug: "title", prefix: "", exact: "Quarterly report", suffix: "", offset: 0 },
+      resolved: false, canDelete: true, replies: [], ...overrides,
     };
   },
   reply(overrides: Partial<Reply> = {}): Reply {
@@ -134,7 +139,9 @@ const backend: DocumentCommentBackend = {
 const query = new URLSearchParams(location.search);
 const frame = document.querySelector<HTMLIFrameElement>("#content-frame")!;
 lab.host = new CommentorParentHost(frame, location.origin,
-  { organizationId: "org-a", projectId: "project-a" as never, convexUrl: "http://unused.test" }, backend, query.get("user") === "" ? null : query.get("user") ?? "user-a");
+  { repoId: 9101, accessUrl: "/r/acme/docs/comment-access", convexUrl: "http://unused.test" }, backend, query.get("user") === "" ? null : query.get("user") ?? "user-a");
+// The read path's comment access decides who may write (#254); the lab grants it unless the test asked for a reader.
+lab.host.setWritable(!new URLSearchParams(document.currentScript ? new URL((document.currentScript as HTMLScriptElement).src).search : "").has("readonly"));
 lab.host.start(true);
 // The real shell's reload notice and Reload button, for the tests that press them.
 if (query.has("viewer")) installViewerParent({ base: location.pathname });

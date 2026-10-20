@@ -82,13 +82,6 @@ describe("unauthenticated landing", () => {
     expect(html).not.toContain("Sign in to read your team's docs.");
   });
 
-  it("redirects an unauthenticated private document route to sign-in", async () => {
-    process.env.NODE_ENV = "development";
-
-    const res = await workerApp.request("https://dev.rendro.app/docs/acme/reference/index.html");
-    expect(res.status).toBe(302);
-    expect(res.headers.get("location")).toBe("/sign-in?returnTo=%2Fdocs%2Facme%2Freference%2Findex.html");
-  });
 });
 
 // ────────────────────────────────────────────────────

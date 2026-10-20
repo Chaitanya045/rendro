@@ -2,6 +2,7 @@ import { listen } from "./services";
 import { HttpGitHubSource } from "../src/ingest/github/http-source";
 import { staticTokenProvider } from "../src/ingest/github/token";
 import { contentPipeline } from "../src/ingest/orchestrator/content-pipeline";
+import { imageProxyRewriter } from "../src/image-proxy";
 import { ingestBranch } from "../src/ingest/orchestrator/ingest";
 import { envelopeSealer } from "../src/ingest/orchestrator/sealing";
 import { r2Store, type R2BucketLike } from "../src/ingest/orchestrator/store";
@@ -20,6 +21,8 @@ import { visualDocs } from "./visual/visual-repo-docs";
 export type RepoFixture = { owner: string; name: string; commit: string };
 export type RepoFixtures = {
   open: RepoFixture; closed: RepoFixture; team: RepoFixture; comments: RepoFixture; commentsPrivate: RepoFixture; control: string;
+  /** The shell's own chrome and links (#286, formerly on a CLI-pushed project): long pages with sections, links and a nested folder. */
+  viewer: RepoFixture;
   /** Only in the visual runs (#268): a public repository of fixed Markdown for the baselines. */
   visual?: RepoFixture;
 };
@@ -34,6 +37,22 @@ export function commentDocs(): Record<string, string> {
     "docs/orphan.md": "# Orphan\n\n## Notes\n\nThis sentence will be deleted.\n\nAnother paragraph stays.\n",
     "docs/other.md": "# Other\n\nVersion 1.\n",
     "docs/private.md": "# Private\n\n## Notes\n\nOnly collaborators read this.\n",
+  };
+}
+
+/** Paragraphs that give a page enough height to scroll; each is its own line of plain text. */
+const filler = (label: string, count: number) => Array.from({ length: count }, (_, index) =>
+  `${label} paragraph ${index + 1}: the shell keeps its chrome while the document scrolls underneath it.`).join("\n\n");
+
+/** The viewer chrome and link specs: the same shapes the publisher site had, as Markdown the read path renders. */
+export function viewerDocs(): Record<string, string> {
+  return {
+    "README.md": "# Viewer\n",
+    "docs/index.md": `# Viewer home\n\n[Section two](#section-two) · [Café](#café) · [Missing target](#missing-target) · [Bare hash](#) · [Intro](guide/intro.md) · [Intro details](guide/intro.md#details) · [Deep topic](guide/deep/topic.md) · [External](https://docs.example.test/outside)\n\n${filler("Home", 40)}\n\n## Section two\n\n${filler("Second", 40)}\n\n## Café\n\n${filler("Café", 30)}\n`,
+    "docs/guide/intro.md": `# Guide intro\n\n[Home](../index.md) · [Home section two](../index.md#section-two) · [Deep topic](deep/topic.md) · [Details](#details)\n\n${filler("Intro", 50)}\n\n## Details\n\n${filler("Details", 30)}\n`,
+    "docs/guide/deep/topic.md": "# Deep topic\n\n[Home](../../index.md)\n",
+    "docs/other/elsewhere.md": "# Elsewhere\n",
+    "docs/comment.md": `# Comment page\n\nThe quick brown fox jumps over the lazy dog.\n\n[Jump to a later section](#later-section) · [Go](guide/intro.md#details) · [External](https://docs.example.test/outside)\n\n${filler("Comment", 40)}\n\n## Later section\n\n${filler("Later", 20)}\n`,
   };
 }
 
@@ -62,6 +81,7 @@ export function repositoryWorld(options: { visual?: boolean } = {}) {
     team: github.repo("e2e-org", "team-docs", { id: 9003, private: true }),
     comments: github.repo("e2e-org", "comment-docs", { id: 9004 }),
     commentsPrivate: github.repo("e2e-org", "comment-private", { id: 9005, private: true }),
+    viewer: github.repo("e2e-org", "viewer-docs", { id: 9007 }),
     ...(options.visual ? { visual: github.repo("e2e-org", "visual-docs", { id: 9006 }) } : {}),
   };
   const people = { owner: github.user("e2e-reader", 9501), outsider: github.user("e2e-outsider", 9502), member: github.user("e2e-member", 9503) };
@@ -78,6 +98,8 @@ export async function seedRepositories(input: {
   bucket: R2BucketLike; contentKey: string; world: RepositoryWorld; control: ControlFetch; webhookSecret: string; userIds: Record<"owner" | "outsider" | "member", string>;
   /** The serving Worker's REPO_ACCESS binding: the control Worker's internal endpoints answer only through it (#295). */
   service: ControlFetch;
+  /** The serving Worker's IMAGE_PROXY_SECRET: external images are rewritten to the signed proxy (#224), as the ingest Worker does. */
+  imageProxySecret: string;
   /** The repository search index (#251), when the harness binds one; sections are written at ingest. */
   search?: SearchIndex;
 }): Promise<{ fixtures: RepoFixtures; close(): Promise<void> }> {
@@ -85,12 +107,12 @@ export async function seedRepositories(input: {
   const { github, installation, repos, people, team } = input.world;
   const commits = {
     open: repos.open.commit(docs("Open home")), closed: repos.closed.commit(docs("Closed home")), team: repos.team.commit(docs("Team home")),
-    comments: repos.comments.commit(commentDocs()), commentsPrivate: repos.commentsPrivate.commit(commentDocs()),
+    comments: repos.comments.commit(commentDocs()), commentsPrivate: repos.commentsPrivate.commit(commentDocs()), viewer: repos.viewer.commit(viewerDocs()),
     visual: repos.visual?.commit(visualDocs()),
   };
   const deps = {
     source: new HttpGitHubSource({ tokens: staticTokenProvider(github.token), fetch: github.fetch, apiOrigin: github.origin, archiveOrigins: [github.archiveOrigin] }),
-    store: r2Store(input.bucket), sealer: envelopeSealer(input.contentKey), pipeline: contentPipeline(), now: () => Date.now(),
+    store: r2Store(input.bucket), sealer: envelopeSealer(input.contentKey), pipeline: contentPipeline({ rewriteImageUrl: imageProxyRewriter(input.imageProxySecret) }), now: () => Date.now(),
     ...(input.search ? { search: input.search } : {}),
   };
   const etags = { get: () => Promise.resolve(null), set: () => Promise.resolve() };
@@ -151,6 +173,7 @@ export async function seedRepositories(input: {
     fixtures: {
       open: fixture(repos.open, commits.open), closed: fixture(repos.closed, commits.closed), team: fixture(repos.team, commits.team),
       comments: fixture(repos.comments, commits.comments), commentsPrivate: fixture(repos.commentsPrivate, commits.commentsPrivate), control: control.origin,
+      viewer: fixture(repos.viewer, commits.viewer),
       ...(repos.visual && commits.visual ? { visual: fixture(repos.visual, commits.visual) } : {}),
     },
     close: () => control.close(),

@@ -49,6 +49,12 @@ const schema = z.strictObject({
   routeSkips: z.array(z.strictObject({ route, reason: text })),
   testSkips: z.array(z.strictObject({ file: text, reason: text })),
   families: z.array(familySchema).min(1),
+  // Ids of surfaces that were removed (#286) stay reserved here, with the reason, so an inventory number is never reused.
+  retired: z.strictObject({
+    families: z.array(z.strictObject({ id: z.string().regex(/^UI-\d{3}$/), title: text, reason: text })),
+    routeLedger: z.array(z.strictObject({ id: z.string().regex(/^R\d{2}$/), surface: text, reason: text })),
+    inventoryRefs: z.array(z.strictObject({ id: z.string().regex(/^[RGAMOPVC]\d{2}$/), reason: text })),
+  }),
 });
 const tiers = ["untested", "unit", "browser", "e2e"];
 const strongest = (values: string[]) => tiers[Math.max(0, ...values.map(value => tiers.indexOf(value)))];
@@ -99,6 +105,9 @@ describe("UI transition registry", () => {
     const invalid = structuredClone(registry);
     invalid.families[0].edges[0].trigger = "";
     expect(schema.safeParse(invalid).success).toBe(false);
+    const unexplained = structuredClone(registry);
+    unexplained.retired.families[0].reason = "";
+    expect(schema.safeParse(unexplained).success).toBe(false);
     expect(status.safeParse("covered").success).toBe(false);
     expect(pointer.safeParse({ file: "../missing.ts", name: "test", kind: "browser" }).success).toBe(false);
     expect(pointer.safeParse({ file: "e2e/auth.spec.ts", name: "auth", kind: "e2e" }).success).toBe(true);
@@ -106,18 +115,26 @@ describe("UI transition registry", () => {
     expect(pointer.safeParse({ file: "tests/auth.test.ts", name: "auth", kind: "e2e" }).success).toBe(false);
   });
 
-  it("keeps IDs unique and retains every family and route from both inventories", () => {
-    unique(registry.families.map(family => family.id));
+  it("keeps IDs unique and retains every family and route from both inventories, or retires it with a reason", () => {
+    const { retired } = registry;
+    unique([...registry.families.map(family => family.id), ...retired.families.map(family => family.id)]);
     unique(registry.families.flatMap(family => family.edges.map(edge => edge.id)));
-    unique(registry.routeLedger.map(entry => entry.id));
+    unique([...registry.routeLedger.map(entry => entry.id), ...retired.routeLedger.map(entry => entry.id)]);
     unique(registry.routeSkips.map(entry => entry.route));
-    const ids = new Set(registry.families.map(family => family.id));
+    unique(retired.inventoryRefs.map(entry => entry.id));
+    const ids = new Set([...registry.families, ...retired.families].map(family => family.id));
     for (let i = 1; i <= 152; i++) expect(ids.has(`UI-${String(i).padStart(3, "0")}`)).toBe(true);
     const refs = new Set(registry.families.flatMap(family => family.edges.flatMap(edge => edge.inventoryRefs)));
+    const retiredRefs = new Set(retired.inventoryRefs.map(entry => entry.id));
     for (const [prefix, count] of Object.entries({ G: 12, A: 10, M: 15, O: 17, P: 12, V: 18, C: 14 })) {
-      for (let i = 1; i <= count; i++) expect(refs.has(`${prefix}${String(i).padStart(2, "0")}`)).toBe(true);
+      for (let i = 1; i <= count; i++) {
+        const ref = `${prefix}${String(i).padStart(2, "0")}`;
+        expect(refs.has(ref) || retiredRefs.has(ref), ref).toBe(true);
+      }
     }
-    expect(registry.routeLedger.map(entry => entry.id)).toEqual(Array.from({ length: 35 }, (_, i) => `R${String(i + 1).padStart(2, "0")}`));
+    // A retirement is only for what nothing cites any more: a reference back in use must leave the retired list.
+    for (const ref of retiredRefs) expect(refs.has(ref), `Retired but cited: ${ref}`).toBe(false);
+    expect([...registry.routeLedger, ...retired.routeLedger].map(entry => entry.id).sort()).toEqual(Array.from({ length: 35 }, (_, i) => `R${String(i + 1).padStart(2, "0")}`));
     for (const entry of registry.routeLedger) {
       for (const route of entry.routes) expect(pageRoutes.has(route), `${entry.id}: ${route}`).toBe(true);
     }

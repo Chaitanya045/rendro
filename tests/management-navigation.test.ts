@@ -122,9 +122,8 @@ describe("persistent management navigation", () => {
     expect(managementRouteIdentity("/organizations/org-a/projects/project-a")).toEqual({ organizationId: "org-a", projectId: "project-a", section: "project" });
     expect(managementRouteIdentity("/organizations/org-a/people")).toEqual({ organizationId: "org-a", projectId: undefined, section: "people" });
     expect(managementRouteIdentity("/organizations/org-a")).toEqual({ organizationId: "org-a", projectId: undefined, section: "overview" });
-    expect(managementRouteIdentity("/organizations/org-a/projects/project-a/publications")).toEqual({ organizationId: "org-a", projectId: "project-a", section: "publications" });
-    expect(managementRouteIdentity("/organizations/org-a/projects/project-a/deployments")).toEqual({ organizationId: "org-a", projectId: "project-a", section: "deployments" });
-    expect(managementRouteIdentity("/organizations/org-a/projects/project-a/shares/")).toEqual({ organizationId: "org-a", projectId: "project-a", section: "shares" });
+    expect(managementRouteIdentity("/organizations/org-a/projects/project-a/")).toEqual({ organizationId: "org-a", projectId: "project-a", section: "project" });
+    for (const removed of ["deployments", "publications", "shares"]) expect(managementRouteIdentity(`/organizations/org-a/projects/project-a/${removed}`)).toBeNull();
     expect(managementRouteIdentity("/organizations/org-a/projects/project-a/docs")).toBeNull();
     expect(managementRouteIdentity("/organizations/org-a/onboarding")).toBeNull();
     expect(managementRouteIdentity("/organizations")).toBeNull();
@@ -305,8 +304,8 @@ describe("persistent management navigation", () => {
 
   it("loads Query Core before the route runtime and preloads it without adding React", () => {
     const html = renderedPage();
-    expect(html).toContain('<link rel="preload" href="/management-query.js?v=6" as="script">');
-    expect(html.indexOf('<script src="/management-query.js?v=6">')).toBeLessThan(html.indexOf('var SHELL_VERSION='));
+    expect(html).toContain('<link rel="preload" href="/management-query.js?v=7" as="script">');
+    expect(html.indexOf('<script src="/management-query.js?v=7">')).toBeLessThan(html.indexOf('var SHELL_VERSION='));
     expect(html).not.toContain("react-dom");
   });
 

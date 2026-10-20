@@ -1,11 +1,11 @@
 import { beforeAll, describe, expect, it } from "vitest";
-import { useCommentLab, type Lab } from "./helpers/comment-lab";
+import { anchorOn, useCommentLab, type Lab } from "./helpers/comment-lab";
 
 const commentLab = useCommentLab();
 beforeAll(() => commentLab.start());
 
-const heading = { kind: "element", path: ["main", "h1"] };
-const intro = { kind: "text-range", quote: "lazy dog and keeps running", path: ["main", "p:nth-of-type(1)"], startOffset: 0, endOffset: 5 };
+const heading = anchorOn("Quarterly report");
+const intro = anchorOn("lazy dog and keeps running");
 
 async function openBubble(lab: Lab, index = 0) {
   await lab.pins().nth(index).click();
@@ -21,7 +21,8 @@ describe("pins and anchors", () => {
     await lab.ready([{ _id: "t1", body: "First", anchor: heading }, { _id: "t2", body: "Second", anchor: intro, resolved: true }, { _id: "t3", body: "Third", anchor: intro }]);
     await expect.poll(() => lab.pins().count()).toBe(2);
     expect(await lab.pins().nth(1).getAttribute("aria-label")).toBe("Thread 2 by Ada");
-    const title = await lab.doc(() => { const rect = document.querySelector("h1")!.getBoundingClientRect(); return { left: rect.left, top: rect.top }; });
+    // A pin sits at the start of its quote: here the heading's text.
+    const title = await lab.doc(() => { const range = document.createRange(); range.selectNodeContents(document.querySelector("h1")!); const rect = range.getClientRects()[0]; return { left: rect.left, top: rect.top }; });
     const position = await lab.pins().first().evaluate(pin => ({ left: parseFloat((pin as HTMLElement).style.left), top: parseFloat((pin as HTMLElement).style.top) }));
     expect(position).toEqual({ left: title.left - 10, top: title.top - 26 });
     const bubble = await openBubble(lab);
@@ -45,15 +46,15 @@ describe("pins and anchors", () => {
     expect(await lab.focused()).toBe("commentor-pin");
   });
 
-  it("anchors by quote across element boundaries and whitespace, and hides pins whose anchor is gone or off screen", async () => {
+  it("anchors by quote across element boundaries, and hides pins whose anchor is gone or off screen", async () => {
     const lab = await commentLab.open();
     await lab.ready([
-      { _id: "wrapped", anchor: { kind: "text-range", quote: "Second bold paragraph with spaced text.", path: ["main", "missing"], startOffset: 0, endOffset: 0 } },
-      { _id: "separate", anchor: { kind: "text-range", quote: "Alpha Beta", path: ["main", "missing"], startOffset: 0, endOffset: 0 } },
-      { _id: "exact", anchor: { kind: "text-range", quote: "Footer text", path: ["main", "missing"], startOffset: 0, endOffset: 0 } },
-      { _id: "blank", anchor: { kind: "text-range", quote: "   ", path: ["main", "missing"], startOffset: 0, endOffset: 0 } },
-      { _id: "absent", anchor: { kind: "text-range", quote: "not in the document", path: ["main", "missing"], startOffset: 0, endOffset: 0 } },
-      { _id: "gone", anchor: { kind: "element", path: ["main", "#gone"] } },
+      { _id: "wrapped", anchor: anchorOn("Second bold paragraph") },
+      { _id: "separate", anchor: anchorOn("AlphaBeta") },
+      { _id: "exact", anchor: anchorOn("Footer text") },
+      { _id: "blank", anchor: anchorOn("   ") },
+      { _id: "absent", anchor: anchorOn("not in the document") },
+      { _id: "gone", anchor: anchorOn("Quarterly report", "gone") },
     ]);
     const shown = () => lab.pins().evaluateAll(pins => pins.map(pin => [pin.getAttribute("data-thread-id"), (pin as HTMLElement).style.display]));
     await expect.poll(shown).toEqual([["wrapped", ""], ["separate", ""], ["exact", "none"], ["blank", "none"], ["absent", "none"], ["gone", "none"]]);
@@ -63,7 +64,8 @@ describe("pins and anchors", () => {
     const cards = lab.ui.locator(".drawer-thread");
     expect(await cards.evaluateAll(all => all.map(card => card.classList.contains("is-orphan")))).toEqual([false, false, false, true, true, true]);
     expect(await cards.nth(5).innerText()).toContain("Anchor no longer found");
-    await cards.nth(5).locator(".locate-link").click();
+    // Without a quote to show, an orphan offers only a locate link.
+    await cards.nth(3).locator(".locate-link").click();
     await expect.poll(() => toastText(lab).innerText()).toBe("This comment’s anchor is no longer available.");
     await cards.nth(4).locator(".quote").click();
     await expect.poll(() => toastText(lab).count()).toBe(2);
@@ -71,7 +73,7 @@ describe("pins and anchors", () => {
 
   it("highlights each wrapped line of a hovered thread's anchor and clears it on leave", async () => {
     const lab = await commentLab.open();
-    await lab.ready([{ _id: "wrap", anchor: { kind: "text-range", quote: "quick brown fox jumps over the lazy dog and keeps running across the open field", path: ["main", "p:nth-of-type(1)"], startOffset: 0, endOffset: 0 } }, { _id: "head", anchor: heading }]);
+    await lab.ready([{ _id: "wrap", anchor: anchorOn("quick brown fox jumps over the lazy dog and keeps running across the open field") }, { _id: "head", anchor: heading }]);
     const highlight = lab.ui.locator(".anchor-highlight");
     await lab.pins().first().hover();
     await expect.poll(() => highlight.getAttribute("data-visible")).toBe("");
@@ -87,12 +89,12 @@ describe("pins and anchors", () => {
 
   it("follows the page on scroll and resize", async () => {
     const lab = await commentLab.open();
-    await lab.ready([{ _id: "footer", anchor: { kind: "element", path: ["main", "#footer"] } }]);
+    await lab.ready([{ _id: "footer", anchor: anchorOn("Footer text far below") }]);
     await lab.doc(() => document.getElementById("footer")!.scrollIntoView({ block: "center" }));
     await expect.poll(() => lab.pins().first().evaluate(pin => (pin as HTMLElement).style.display)).toBe("");
     const bubble = await openBubble(lab);
     await lab.doc(() => window.scrollBy(0, 40));
-    const footerTop = () => lab.doc(() => document.getElementById("footer")!.getBoundingClientRect().top);
+    const footerTop = () => lab.doc(() => { const range = document.createRange(); range.selectNodeContents(document.getElementById("footer")!); return range.getClientRects()[0].top; });
     await expect.poll(async () => await lab.pins().first().evaluate(pin => parseFloat((pin as HTMLElement).style.top))).toBe(await footerTop() - 26);
     expect(await bubble.isVisible()).toBe(true);
     await lab.page.setViewportSize({ width: 600, height: 700 });
@@ -124,13 +126,13 @@ describe("authoring", () => {
     await lab.tid("commentor-composer-textarea").fill("Needs a citation");
     await lab.page.keyboard.press("Enter");
     await expect.poll(() => lab.tid("commentor-composer").count()).toBe(0);
-    expect(await lastCall(lab)).toMatchObject({ method: "thread.create", args: { body: "Needs a citation", anchor: { kind: "text-range", quote: "quick brown" } } });
+    expect(await lastCall(lab)).toMatchObject({ method: "thread.create", args: { body: "Needs a citation", anchor: { kind: "repo-text", headingSlug: "title", exact: "quick brown" } } });
     await expect.poll(() => lab.pins().count()).toBe(1);
     expect(await lab.pins().first().getAttribute("aria-label")).toBe("Thread 1 by Me");
     await expect.poll(() => lab.focused()).toBe("commentor-comment-btn");
   });
 
-  it("comments on a clicked element, and clicking empty space or pressing Escape cancels", async () => {
+  it("comments on a clicked element's text, and clicking empty space or pressing Escape cancels", async () => {
     const lab = await commentLab.open();
     await lab.ready();
     const button = lab.tid("commentor-comment-btn");
@@ -152,8 +154,13 @@ describe("authoring", () => {
     await lab.tid("commentor-composer-post").click();
     // Saved, not just shown as sending (#284): only then has the write reached the backend.
     await expect.poll(() => lab.ui.locator('[data-testid="commentor-pin"]:not(.is-sending)').count()).toBe(1);
-    expect(await lastCall(lab)).toMatchObject({ method: "thread.create", args: { anchor: { kind: "element", path: ["main", "p:nth-of-type(2)"] } } });
-    // An element with no text is labelled generically.
+    expect(await lastCall(lab)).toMatchObject({ method: "thread.create", args: { anchor: { kind: "repo-text", headingSlug: "title", exact: "Second bold paragraph   with   spaced text." } } });
+    // An element without text has nothing to quote: the reader is asked to select text instead.
+    await button.click();
+    await lab.doc(() => (document.querySelector("main > div") as HTMLElement).click());
+    await expect.poll(() => lab.ui.locator('.toast[role="status"]').last().innerText()).toBe("Select some text to comment on.");
+    // No composer opens (the posted one may still be finishing its closing transition).
+    expect(await lab.ui.locator('[data-testid="commentor-composer"][data-state="open"]').count()).toBe(0);
     await button.click();
     await lab.doc(() => document.getElementById("publisher-button")!.click());
     await lab.tid("commentor-composer-cancel").click();

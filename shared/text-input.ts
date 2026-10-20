@@ -1,9 +1,7 @@
 /// <reference lib="es2024.string" />
 // Server-side text limits. Lengths count UTF-16 code units of the trimmed value, like the forms' maxlength attributes.
-// Project names and slugs, API key names and publication slugs are enforced where they are stored.
+// Project names and slugs and API key names are enforced where they are stored.
 export const DISPLAY_NAME_MAX_LENGTH = 80; // organization and team names
-export const PUBLICATION_TITLE_MAX_LENGTH = 100;
-export const PUBLICATION_DESCRIPTION_MAX_LENGTH = 500;
 
 // A JSON escape such as "\ud800" decodes to a lone UTF-16 surrogate. Such a string cannot be stored or encoded as
 // UTF-8, so the backend refuses it with an opaque failure. Rejecting it at the request boundary turns that outage

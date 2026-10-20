@@ -52,7 +52,6 @@ beforeAll(async () => {
   app.get("/api/auth/organization/list-invitations", c => c.json([]));
   app.get("/api/rendro/management/access", c => access(c.req.raw)!);
   app.get("/api/rendro/projects", c => c.json({ projects: [] }));
-  app.get("/api/rendro/management/recent-deployment", c => c.json({ deployment: null }));
   app.route("/", organizationPages);
   const listener = getRequestListener(request => app.fetch(request));
   await harness.start((request, response) => {
@@ -80,7 +79,7 @@ it.each([375, 768, 1440])("exposes the org name in accessibility snapshots and p
   const nonce = response!.headers()["content-security-policy"].match(/'nonce-([^']+)'/)![1];
   expect(await page.locator("script:not([src])").evaluateAll((elements, expected) => elements.every(element => (element as HTMLElement).nonce === expected), nonce)).toBe(true);
   expect(await page.locator("style").evaluateAll(elements => elements.find(element => element.textContent?.includes(".cp-org-name"))?.nonce)).toBe(nonce);
-  await browserStep("finish overview hydration", () => page.getByText("No deployment has been committed yet.", { exact: true }).waitFor()).catch(async error => { throw new Error(JSON.stringify({ pageErrors, cspViolations, snapshot: await page.locator("body").ariaSnapshot() }), { cause: error }); });
+  await browserStep("finish overview hydration", () => page.getByText("No projects yet. Create the first project to connect your documentation.", { exact: true }).waitFor()).catch(async error => { throw new Error(JSON.stringify({ pageErrors, cspViolations, snapshot: await page.locator("body").ariaSnapshot() }), { cause: error }); });
 
   const trigger = page.locator("#cp-org-switcher");
   const label = trigger.locator("[data-org-name]");

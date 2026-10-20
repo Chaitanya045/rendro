@@ -5,7 +5,7 @@ import { createAuth } from "../convex/auth";
 import { api, components } from "../convex/_generated/api";
 import { proxyAuthSignOut } from "@/auth-proxy";
 import { sessionCache } from "@/session-cache";
-import { fixture } from "./helpers/comment-fixture";
+import { fixture, repoAnchor } from "./helpers/comment-fixture";
 
 const origin = "http://localhost:3000";
 afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); sessionCache.clear(); });
@@ -107,20 +107,22 @@ describe("sign-out with the real Better Auth handler", () => {
     expect(claims.exp! - claims.iat!).toBe(900);
     expect(claims.sessionId).toBe(f.user.sessionId);
     const caller = f.backend.withIdentity({ ...claims, subject: claims.sub! });
-    vi.stubEnv("LEGACY_ORGANIZATION_MAP", JSON.stringify({ example: f.scope.organizationId }));
-    const legacyScope = { orgSlug: "example", filePath: "guide.html" };
-    const anchor = { kind: "element" as const, path: ["main"] };
-    await caller.mutation(api.threads.create, { ...legacyScope, body: "Before", anchor });
-    const read = () => caller.query(api.documentThreads.list, { ...f.scope, paginationOpts: { numItems: 10, cursor: null } });
+    // A private repository whose comments only this reader holds a grant to.
+    const privateScope = { repoId: 9102, path: "docs/private.md" };
+    await f.backend.mutation(api.repoCommentAccess.grant, {
+      internalSecret: process.env.CONVEX_INTERNAL_SECRET!, repoId: privateScope.repoId, userId: f.user.userId, epoch: 0, expiresAt: Date.now() + 60_000,
+    });
+    await caller.mutation(api.repoComments.createThread, { ...privateScope, body: "Before", anchor: repoAnchor() });
+    const read = () => caller.query(api.repoComments.listThreads, { ...privateScope, paginationOpts: { numItems: 10, cursor: null } });
     expect((await read()).page).toHaveLength(1);
     expect((await f.signOut()).status).toBe(200);
     expect(claims.exp! * 1000).toBeGreaterThan(Date.now());
     expect(await f.backend.query(components.betterAuth.adapter.findOne, { model: "session", where: [{ field: "_id", value: f.user.sessionId }] })).toBeNull();
-    await expect(caller.query(api.projects.activeDeployment, { organizationId: f.scope.organizationId, projectId: f.scope.projectId })).rejects.toMatchObject({ data: { code: "not_found" } });
-    for (const call of [read,
-      () => caller.mutation(api.documentReplies.add, { ...f.scope, threadId: f.threadId, body: "Denied" }),
-      () => caller.query(api.threads.list, legacyScope),
-      () => caller.mutation(api.threads.create, { ...legacyScope, body: "Denied", anchor }),
+    // The revoked session reads as anonymous: the private repository's comments are an empty page, and no write lands.
+    expect(await read()).toEqual({ page: [], isDone: true, continueCursor: "" });
+    for (const call of [
+      () => caller.mutation(api.repoComments.addReply, { ...f.scope, threadId: f.threadId, body: "Denied" }),
+      () => caller.mutation(api.repoComments.createThread, { ...f.scope, body: "Denied", anchor: repoAnchor() }),
     ]) await expect(call()).rejects.toMatchObject({ data: { code: "unauthenticated" } });
   });
 });

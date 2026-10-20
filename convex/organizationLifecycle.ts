@@ -42,23 +42,12 @@ export const deleteInternal = internalMutation({
   handler: async (ctx, { organizationId, actorId }) => {
     if (await isOrganizationDeleted(ctx, organizationId)) return;
     const keys = await ctx.db.query("apiKeyCredentials").withIndex("by_organization", q => q.eq("organizationId", organizationId)).take(deletionResourceLimit + 1);
-    const publications = await ctx.db.query("publications").withIndex("by_organization", q => q.eq("organizationId", organizationId)).take(deletionResourceLimit + 1);
-    const shares = await ctx.db.query("shareGrants").withIndex("by_organization", q => q.eq("organizationId", organizationId)).take(deletionResourceLimit + 1);
-    const projects = await ctx.db.query("projects").withIndex("by_organization", q => q.eq("organizationId", organizationId)).take(deletionResourceLimit + 1);
-    const deployments = await ctx.db.query("deployments").withIndex("by_organization_status", q => q.eq("organizationId", organizationId)).take(deletionResourceLimit + 1);
-    if (keys.length + publications.length + shares.length + projects.length + deployments.length > deletionResourceLimit) {
+    if (keys.length > deletionResourceLimit) {
       throw new ConvexError("Organization exceeds the atomic deletion resource limit");
     }
     const deletedAt = Date.now();
     await ctx.db.insert("organizationTombstones", { organizationId, deletedAt, deletedBy: actorId });
     for (const key of keys) if (key.revokedAt === undefined) await ctx.db.patch(key._id, { revokedAt: deletedAt });
-    for (const publication of publications) await ctx.db.delete(publication._id);
-    for (const share of shares) if (share.revokedAt === undefined) await ctx.db.patch(share._id, { revokedAt: deletedAt });
-    for (const project of projects) await ctx.db.patch(project._id, { activeDeploymentId: undefined });
-    for (const deployment of deployments) {
-      if (deployment.status === "active") await ctx.db.patch(deployment._id, { status: "superseded" });
-      if (deployment.status === "staging") await ctx.db.patch(deployment._id, { status: "failed", failureReason: "Organization deleted" });
-    }
     await ctx.db.insert("auditEvents", {
       organizationId, actorId, action: "organization.deleted", resourceType: "organization", resourceId: organizationId, createdAt: deletedAt,
     });

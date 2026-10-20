@@ -14,8 +14,6 @@ import { securityHeaders } from "@/middleware/security-headers";
 import organizationPages from "@/routes/organization-pages";
 import projectPages from "@/routes/project-pages";
 import apiKeyPages from "@/routes/api-key-pages";
-import publicationPages from "@/routes/publication-pages";
-import sharePages from "@/routes/share-pages";
 
 function requestUrl(input: string | URL | Request): string {
   return typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
@@ -70,7 +68,7 @@ async function fixture(realSession = false) {
     if (c.req.header("Cookie")) c.set("user", user);
     await next();
   });
-  app.route("/", organizationPages).route("/", projectPages).route("/", apiKeyPages).route("/", publicationPages).route("/", sharePages);
+  app.route("/", organizationPages).route("/", projectPages).route("/", apiKeyPages);
   const role = (value: string) => backend.run(ctx => ctx.runMutation(components.betterAuth.adapter.updateOne, {
     input: { model: "member", where: [{ field: "_id", value: records.memberId }], update: { role: value } },
   }));
@@ -86,11 +84,7 @@ const pages: Page[] = [
   { name: "settings", suffix: "/settings", content: "Loading organization settings" },
   { name: "keys", suffix: "/api-keys", content: 'id="key-list"' },
   { name: "onboarding", suffix: "/onboarding", content: "Loading project setup" },
-  { name: "onboarding project", suffix: "/onboarding?projectId=PROJECT", content: "Loading deployment setup", project: true },
   { name: "project detail", suffix: "/projects/PROJECT", content: "Loading project overview", project: true },
-  { name: "deployments", suffix: "/projects/PROJECT/deployments", content: "Loading deployment history", project: true },
-  { name: "publications", suffix: "/projects/PROJECT/publications", content: 'id="publication-list"', project: true },
-  { name: "shares", suffix: "/projects/PROJECT/shares", content: 'id="share-list"', project: true },
 ];
 function path(page: Page, org: string, project = "unused") {
   return `/organizations/${encodeURIComponent(org)}${page.suffix.replace("PROJECT", encodeURIComponent(project))}`;
@@ -189,9 +183,11 @@ it("rechecks membership after removal instead of caching successful access", asy
   await notFound(await f.app.request(url, { headers: { Cookie: f.cookie } }), url);
 });
 
-it("rejects an explicitly empty onboarding project ID", async () => {
-  const f = await fixture(), url = `/organizations/${f.organizationId}/onboarding?projectId=`;
-  await notFound(await f.app.request(url, { headers: { Cookie: f.cookie } }), url);
+it("authorizes onboarding by organization access alone, ignoring a project query", async () => {
+  const f = await fixture(), url = `/organizations/${f.organizationId}/onboarding?projectId=${f.foreignProjectId}`;
+  f.fetch.mockClear();
+  expect((await f.app.request(url, { headers: { Cookie: f.cookie } })).status).toBe(200);
+  expect(f.fetch.mock.calls.map(([input]) => new URL(requestUrl(input)).pathname)).toEqual(["/api/rendro/management/access"]);
 });
 
 it.each(["network", "redirect", "server", "invalid-json", "wrong-identity"])("fails closed without leaking %s errors", async failure => {
@@ -309,7 +305,7 @@ it.each([429, 500, 502, 503, 504])("preserves retryable recovery for upstream %s
   const f = await fixture(true), transport = f.fetch.getMockImplementation()!;
   f.fetch.mockImplementation((input, init) => requestUrl(input).includes("/get-session") ? transport(input, init)
     : Promise.resolve(new Response("private backend detail", { status, headers: { "Retry-After": "7" } })));
-  for (const url of [path(pages[0], f.organizationId), path(pages[8], f.organizationId, f.projectId), "/accept-invitation/unavailable"]) {
+  for (const url of [path(pages[0], f.organizationId), path(pages.find(page => page.name === "project detail")!, f.organizationId, f.projectId), "/accept-invitation/unavailable"]) {
     await unavailable(await f.app.request(url, { headers: { Cookie: f.cookie } }), "7");
   }
   expect(f.fetch.mock.calls.some(([input]) => requestUrl(input).includes("/get-session"))).toBe(true);

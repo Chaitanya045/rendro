@@ -573,6 +573,29 @@ describe("faults are retryable 503s, never 404s", () => {
   });
 });
 
+describe("storage failures by kind", () => {
+  it("answers a transient R2 service failure with the retryable 503", async () => {
+    vi.spyOn(fixture.bucket, "get").mockRejectedValue(new Error("get: We encountered an internal error. Please try again. (10001)"));
+    const page = await get(`${pub}/@${fixture.commits.public}/files/docs/index.md`, { Accept: "text/html" });
+    expect(page.status).toBe(503);
+    expect(page.headers.get("Retry-After")).toBe("1");
+    const tree = await get(`${pub}/@${fixture.commits.public}/tree?dir=`);
+    expect(tree.status).toBe(503);
+    expect(await tree.json()).toEqual({ error: "Document temporarily unavailable", retryable: true });
+  });
+
+  it("keeps a defect an internal error that names nothing, as JSON on JSON routes and the styled page elsewhere", async () => {
+    vi.spyOn(fixture.bucket, "get").mockRejectedValue(new Error("private defect detail"));
+    const page = await get(`${pub}/@${fixture.commits.public}/files/docs/index.md`, { Accept: "text/html" });
+    expect(page.status).toBe(500);
+    expect(page.headers.get("Cache-Control")).toBe("private, no-store");
+    expect(await page.text()).not.toContain("private defect detail");
+    const tree = await get(`${pub}/@${fixture.commits.public}/tree?dir=`);
+    expect(tree.status).toBe(500);
+    expect(await tree.json()).toEqual({ error: "Internal server error" });
+  });
+});
+
 describe("the URL boundary", () => {
   it.each([
     `${pub}/files/docs/%2e%2e/README.md`,

@@ -125,19 +125,26 @@ async function openCell(page: Page, visual: VisualState, family: string, state: 
         await page.context().addCookies(visual.crown.cookies);
         const path = `/organizations/${visual.crown.organizationId}/projects/${visual.crown.projectId}`;
         if (state === "loading") {
-          const hold = await holdFirst(page, "**/api/rendro/deployments?*");
+          // The server answers the page with its project; without that initial data, as after an in-shell navigation,
+          // the page reads the project itself, and that read is held.
+          await page.route(`**${path}`, async route => {
+            const response = await route.fetch();
+            const body = (await response.text()).replace(/<script[^>]*data-cp-initial-data[^>]*>[\s\S]*?<\/script>/, "");
+            await route.fulfill({ response, body });
+          }, { times: 1 });
+          const hold = await holdFirst(page, "**/api/rendro/projects/get?*");
           closers.push(() => hold.close());
-          await page.goto(`${path}/deployments`);
+          await page.goto(path);
           await expect(page.locator(".loading-view[aria-busy=true]").first()).toBeVisible();
-          // The organization's name and the project's description arrive on their own requests, which the held list does not
-          // wait for: a shot before them showed the placeholder mark and description on one run and not the next (#276).
+          // The organization's name arrives on its own request, which the held project read does not wait for: a shot before
+          // it showed the placeholder mark on one run and not the next (#276). The description waits for the held read.
           await expect(page.locator("#cp-org-switcher [data-org-name]")).toHaveText("Crown");
-          await expect(page.locator(".cp-page-description")).toContainText("Crown docs");
+          await expect(page.locator(".cp-page-description")).toHaveText("Stable identifiers for this documentation product.");
           return rendered();
         }
-        await page.goto(`${path}/deployments`);
+        await page.goto(path);
         await pageSettled(page);
-        await expect(page.locator("#deployment-list tr.deployment-row").first()).toBeVisible();
+        await expect(page.locator("#project-id .cp-id")).toBeVisible();
         return rendered();
       }
       case "teams": {
@@ -162,48 +169,41 @@ async function openCell(page: Page, visual: VisualState, family: string, state: 
         await page.context().addCookies(visual.crown.cookies);
         if (state === "loading") {
           // An in-shell load held at the browser boundary (the initial document cannot be held:
-          // the page's load event would wait for the opaque frame). The held index.html request
-          // leaves the shell in its deterministic loading state with the previous document shown.
-          await countCommentUpdates(page);
-          await page.goto(`${visual.crown.docs}?doc=${encodeURIComponent("guide/start.html")}`);
-          await viewerReady(page, "Getting started");
-          // This document has no threads, so the empty pin count above holds before its comment subscription answers.
-          // Left unanswered, the subscribe reached the shell after the switch, which refused it with a toast (#276).
-          await expect.poll(() => content(page).locator("body").evaluate(() => (window as { rendroVisualUpdates?: number }).rendroVisualUpdates ?? 0)).toBeGreaterThan(0);
-          const hold = await holdDocument(page, "index.html");
+          // the page's load event would wait for the opaque frame). The held page request leaves
+          // the shell in its deterministic loading state with the previous document shown.
+          await page.goto(`${visual.docs}?doc=${encodeURIComponent("docs/reference/config.md")}`);
+          await viewerReady(page, "Configuration", 1);
+          // config.md carries a seeded thread, so its pin shows the comment subscription has answered before the switch (#276).
+          const hold = await holdDocument(page, "docs/reference/errors.md");
           closers.push(() => hold.close());
           // Below the desktop breakpoint the tree is a drawer; choosing a document closes it.
           const drawer = page.locator("#mobile-tree-toggle");
           if (await drawer.isVisible()) await drawer.click();
-          await page.locator('.tree-item[data-path$="/index.html"] a.tree-link').click();
+          await page.locator('.tree-item[data-path$="/reference/errors.md"] a.tree-link').click();
           await expect.poll(async () => (await classes(page)).includes("doc-loading")).toBe(true);
           return rendered();
         }
-        await page.goto(`${visual.crown.docs}?doc=index.html`);
-        await viewerReady(page, "Crown platform overview", 2);
+        await page.goto(`${visual.docs}?doc=${encodeURIComponent("docs/reference/errors.md")}`);
+        await viewerReady(page, "Errors", 2);
         if (state === "menu") {
-          const more = page.locator("#mobile-more-btn");
-          if (await more.isVisible()) {
-            await more.click();
-            await expect(page.locator("#mobile-more-menu")).toBeVisible();
-          } else {
-            await page.locator("#avatar-btn").click();
-            await expect(page.locator("#avatar-menu")).toBeVisible();
-          }
+          // The secondary actions live in More on a phone; the cell is phone-only.
+          await page.locator("#mobile-more-btn").click();
+          await expect(page.locator("#mobile-more-menu")).toBeVisible();
         }
         return rendered();
       }
       case "comments": {
         await page.context().addCookies(visual.crown.cookies);
         if (state !== "drawer") return await openThreadState(page, visual, state, closers, rendered);
-        await page.goto(`${visual.crown.docs}?doc=index.html`);
-        await viewerReady(page, "Crown platform overview", 2);
+        await page.goto(`${visual.docs}?doc=${encodeURIComponent("docs/reference/errors.md")}`);
+        await viewerReady(page, "Errors", 2);
         await expect(widgetUi(page).getByTestId("commentor-dock")).toBeAttached();
-        await expect(widgetUi(page).locator('[data-testid="commentor-load-older-threads"][aria-busy="true"]')).toHaveCount(0);
         // Keyboard activation instead of a pointer click: the widget's hover tooltip must not
         // appear in the baseline (it would depend on capture timing, not on the page itself).
         await widgetUi(page).getByTestId("commentor-panel-btn").press("Enter");
         await expect(widgetUi(page).getByTestId("commentor-drawer")).toHaveAttribute("aria-hidden", "false");
+        await liveComments(page);
+        await remeasureDrawer(page);
         return rendered();
       }
       case "repo":
@@ -221,22 +221,39 @@ async function viewerReady(page: Page, title: string, pins = 0) {
   await expect(content(page).getByRole("heading", { level: 1, name: title })).toBeVisible();
   await expect(page.locator("#tree-container .tree-item.active")).toHaveCount(1);
   // The comment subscription is part of the render: the pins must have arrived, or a capture can
-  // race the subscription and alternate between pinned and unpinned documents. Only the indexed
-  // document carries threads; other pages of the site render none.
+  // race the subscription and alternate between pinned and unpinned documents. Only the two seeded
+  // reference pages carry threads; other pages of the repository render none.
   await expect(widgetUi(page).getByTestId("commentor-pin")).toHaveCount(pins);
 }
 
-/** Counts, in every document frame of the page, the comment updates the shell delivers to the widget. */
-const countingPages = new WeakSet<Page>();
-async function countCommentUpdates(page: Page) {
-  if (countingPages.has(page)) return;
-  countingPages.add(page);
-  await page.addInitScript(() => {
-    const counted = window as { rendroVisualUpdates?: number };
-    counted.rendroVisualUpdates = 0;
-    window.addEventListener("message", event => {
-      if ((event.data as { type?: unknown } | null)?.type === "commentor-parent-update") counted.rendroVisualUpdates = (counted.rendroVisualUpdates ?? 0) + 1;
-    });
+/**
+ * The first comments come from the read path's first-page snapshot (#284), which the live page then replaces. Only the live
+ * page carries the reader's Archive and Delete actions and settles the list's paging, so a shot taken before it arrived
+ * showed the snapshot on one run and the live page on the next (#276).
+ */
+async function liveComments(page: Page) {
+  const ui = widgetUi(page);
+  await expect(ui.locator('[data-testid="commentor-load-older-threads"][aria-busy="true"]')).toHaveCount(0);
+  await expect(ui.locator(".drawer-thread").first().getByTestId("commentor-delete-btn")).toBeVisible();
+}
+
+/**
+ * The open drawer sizes itself to its list when it opens and when a page re-renders it, not when the frame's own layout
+ * settles later; its tabs are taller below the widget's 760px breakpoint, and one run kept a drawer 8px taller than the next
+ * (#276). Once the frame's fonts are in, a resize makes it measure the list as it is, as the reader's next window resize
+ * would, until two measures agree.
+ */
+async function remeasureDrawer(page: Page) {
+  await content(page).locator("body").evaluate(async () => {
+    await document.fonts.ready;
+    const frames = () => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+    const drawer = () => document.getElementById("commentor-host")?.shadowRoot?.querySelector<HTMLElement>('[data-testid="commentor-drawer"]')?.style.height ?? "";
+    for (let attempt = 0, last = ""; attempt < 5; attempt++) {
+      window.dispatchEvent(new Event("resize"));
+      await frames();
+      if (drawer() === last) return;
+      last = drawer();
+    }
   });
 }
 
@@ -272,11 +289,9 @@ async function holdDocument(page: Page, file: string) {
  * functional e2e specs assert the real values. */
 export async function pinVolatileText(page: Page, family: string, state: string): Promise<void> {
   const pins: Array<[string, string]> = [];
-  if (family === "project" && state !== "loading") pins.push([".deployment-row td:nth-child(2) strong", "/workspace/docs-site"], [".deployment-row td:nth-child(2) .cell-secondary", "Source provenance"]);
-  if ((family === "org" || family === "account-menu") && state !== "loading") pins.push(["#recent-deployment .cell-secondary", "Commit 0123456789ab"]);
-  // A key's "Last used" is the server's real time of the seed's own push, not the page clock: it changed every day.
-  if (family === "keys") pins.push(['#key-list td[data-label="Last used"]', "10/19/2026"]);
-  // The recent-deployment card loads after the page settles: pin only once its row has rendered.
+  // A project's creation date is the server's real time of the seed, not the page clock: it changes every day.
+  if (family === "project" && state !== "loading") pins.push(["#project-created", "10/19/2026"]);
+  // Pin only once the text has rendered.
   for (const [selector] of pins) await page.locator(selector).first().waitFor({ state: "attached" });
   await page.evaluate(entries => {
     for (const [selector, text] of entries) for (const node of document.querySelectorAll(selector)) node.textContent = text;
@@ -287,12 +302,8 @@ export async function pinVolatileText(page: Page, family: string, state: string)
  * local loopback endpoint): masked in the baseline instead of pinned, asserted by name in the
  * functional e2e specs. */
 export function maskFor(family: string, state: string): string[] {
-  // The deployments row opens with the server's creation time (to the second) and the run's
-  // deployment id (its Source cell is pinned instead, see pinVolatileText); the
-  // CLI panel (also rendered while the history is loading) carries the run's organization/project
-  // ids and loopback port. All are asserted by the functional specs.
-  if (family === "project" && state === "loading") return [".command code"];
-  if (family === "project") return [".deployment-row td:nth-child(1)", ".command code"];
+  // The project's id is the run's own; the functional specs assert it.
+  if (family === "project" && state !== "loading") return ["#project-id .cp-id"];
   if (family === "keys") return ["#key-list code.cell-secondary"];
   return [];
 }
@@ -509,22 +520,25 @@ async function commentSocket(page: Page): Promise<CommentSocket> {
  * thread with a reply and a resolved one. Nothing is ever committed: the widget's long timers (a deletion's undo window,
  * the toast lifetime) are stretched so a state cannot lapse between the settle and the shot, and the close undoes the deletion.
  */
-async function openThreadState(page: Page, visual: VisualState, state: string, closers: Array<() => Promise<void>>, rendered: (verify?: () => Promise<void>) => Rendered): Promise<Rendered> {
+async function openThreadState(page: Page, visual: VisualState, state: string, closers: Array<() => Promise<void>>, done: (verify?: () => Promise<void>) => Rendered): Promise<Rendered> {
+  const rendered = async () => { await remeasureDrawer(page); return done(); };
   const socket = await commentSocket(page);
   closers.push(async () => { socket.rejectWrites(false); socket.blackhole(false); await page.evaluate(() => sessionStorage.clear()).catch(() => undefined); });
-  await page.goto(`${visual.crown.docs}?doc=guide%2Fadvanced.html`);
-  await expect(content(page).getByRole("heading", { level: 1, name: "Advanced" })).toBeVisible();
+  await page.goto(`${visual.docs}?doc=${encodeURIComponent("docs/reference/config.md")}`);
+  await expect(content(page).getByRole("heading", { level: 1, name: "Configuration" })).toBeVisible();
   await expect(page.locator("#tree-container .tree-item.active")).toHaveCount(1);
   const ui = widgetUi(page);
   await expect(ui.getByTestId("commentor-dock")).toBeAttached();
-  await expect(ui.locator('[data-testid="commentor-load-older-threads"][aria-busy="true"]')).toHaveCount(0);
   await expect(ui.getByTestId("commentor-comment-btn")).toBeEnabled();
   await ui.getByTestId("commentor-panel-btn").press("Enter");
   await expect(ui.getByTestId("commentor-drawer")).toHaveAttribute("aria-hidden", "false");
+  await liveComments(page);
   const retry = ui.locator(".drawer-thread", { hasText: "Confirm the retry budget before release" });
   if (state === "resolved") {
     await ui.getByRole("tab", { name: /Resolved/ }).click();
-    await expect(ui.locator(".drawer-thread", { hasText: "Rename the endpoint section" })).toBeVisible();
+    const resolved = ui.locator(".drawer-thread", { hasText: "Rename the branch setting" });
+    await expect(resolved).toBeVisible();
+    await expect(resolved.getByTestId("commentor-delete-btn")).toBeVisible();
     return rendered();
   }
   await expect(retry).toBeVisible();

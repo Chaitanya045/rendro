@@ -10,9 +10,14 @@ test.describe("copy feedback", () => {
     await fakeClipboard(page);
     await page.clock.install();
     await signInSeeded(context, baseURL, seed, "owner");
-    await page.goto(`/organizations/${seed.organizationId}/projects/${seed.projectId}`);
+    // A new key's one-time secret has the shared copy control.
+    await page.goto(`/organizations/${seed.organizationId}/api-keys`);
     await shellReady(page);
-    const copy = page.locator(".cp-main .command button");
+    await page.locator("#api-key-create").click();
+    await page.locator('#key-form [name="name"]').fill(`Copy control ${Date.now().toString(36)}`);
+    await page.locator('#key-form button[type="submit"]').click();
+    await page.locator("#secret-dialog[open]").waitFor();
+    const copy = page.locator("#copy-key");
     await expect(copy).toBeVisible();
     // From here the page clock only moves when the test advances it, so every window below is exact.
     await page.clock.pauseAt(new Date(Date.now() + 1000));
@@ -22,7 +27,7 @@ test.describe("copy feedback", () => {
     await page.clock.runFor(250);
     await expect(copy).toHaveText("Copied");
     await expect(copy).not.toHaveAttribute("aria-busy", "true");
-    expect((await clipboard(page)).at(-1)).toContain("--organization");
+    expect((await clipboard(page)).at(-1)).toMatch(/^rnd_live_/);
     // A repeated copy during feedback restarts the 1.5s window instead of racing the first timer.
     await page.clock.runFor(1000);
     await copy.click();
@@ -31,21 +36,25 @@ test.describe("copy feedback", () => {
     await page.clock.runFor(1200);
     await expect(copy).toHaveText("Copied");
     await page.clock.runFor(400);
-    await expect(copy).toHaveText("Copy");
+    await expect(copy).toHaveText("Copy key");
     expect(await clipboard(page)).toHaveLength(2);
 
     // Clipboard denial restores the label and explains the manual fallback in an announced toast.
     await page.evaluate(() => { (window as unknown as { clipboardState: { mode: string } }).clipboardState.mode = "reject"; });
     await copy.click();
     await page.clock.runFor(250);
-    await expect(page.locator("#cp-toasts .toast.error")).toHaveText("Unable to copy. Select the command and copy it manually.");
-    await expect(copy).toHaveText("Copy");
+    await expect(page.locator("#cp-toasts .toast.error")).toHaveText("Unable to copy. Select and copy the key manually.");
+    await expect(copy).toHaveText("Copy key");
     await expect(copy).not.toHaveAttribute("aria-busy", "true");
     await expect(copy).toBeEnabled();
     expect(await clipboard(page)).toHaveLength(2);
     await expect(page.locator("#cp-toasts")).toHaveAttribute("aria-live", "polite");
 
     // Identifier controls: truncation keeps the full value in title and copies the whole identifier.
+    await page.locator("#secret-confirmed").check();
+    await page.locator("#secret-done").click();
+    await page.goto(`/organizations/${seed.organizationId}/projects/${seed.projectId}`);
+    await shellReady(page);
     await page.evaluate(() => { (window as unknown as { clipboardState: { mode: string; delay: number } }).clipboardState.mode = "ok"; (window as unknown as { clipboardState: { delay: number } }).clipboardState.delay = 0; });
     const idCopy = page.locator(".cp-id-copy").first();
     const idleLabel = await idCopy.getAttribute("aria-label");

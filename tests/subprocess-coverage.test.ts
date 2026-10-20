@@ -10,7 +10,7 @@ import { sourceManifest } from "../scripts/coverage-gate";
 import { convertDumps, convertSubprocessCoverage, reproduceTsxModule, type NodeDump } from "./helpers/merge-subprocess-coverage";
 import { alignCoverage, canonicalCoverage, reprintedIdentities } from "./helpers/normalize-node-coverage";
 import { subprocessSuites } from "./helpers/run-browser-coverage";
-import { buildCliBundle, SUBPROCESS_COVERAGE_DIR, subprocessArgs, subprocessEnv } from "./helpers/subprocess-coverage";
+import { buildRegisteredBundle, SUBPROCESS_COVERAGE_DIR, subprocessArgs, subprocessEnv } from "./helpers/subprocess-coverage";
 
 const root = process.cwd();
 const directories: string[] = [];
@@ -33,6 +33,8 @@ const shardsOf = async (required: string[] = []) => convertSubprocessCoverage(ro
 // Shards are stored in the gate's location order, JSON-encoded (Infinity columns as null).
 const locations = (map: object) => Object.values(map).map(location => JSON.stringify(location)).sort();
 const readShard = (path: string) => JSON.parse(readFileSync(path, "utf8")) as CoverageMapData;
+// A script that runs as a bundle: its dry run makes no request and needs no credentials.
+const bundled = "scripts/check-r2-public-access.ts";
 
 describe("collector", () => {
   it("is a no-op without a collector directory", () => {
@@ -54,17 +56,17 @@ describe("collector", () => {
     expect(subprocessArgs()).toEqual(["--import", resolve("tests/helpers/exit-on-sigterm.mjs")]);
   });
 
-  it("builds the CLI bundle with source maps only while collecting, registering what it wrote", async () => {
+  it("builds a bundle with source maps only while collecting, registering what it wrote", async () => {
     const scratch = mkdtempSync(join(tmpdir(), "rendro-subprocess-bundle-"));
     directories.push(scratch);
-    await buildCliBundle(join(scratch, "collected.mjs"));
+    await buildRegisteredBundle(bundled, join(scratch, "collected.mjs"));
     const collected = readFileSync(join(scratch, "collected.mjs"), "utf8");
     expect(collected).toContain("//# sourceMappingURL=data:application/json;base64,");
     const [registered] = readdirSync(join(output, "bundles")).map(name => JSON.parse(readFileSync(join(output, "bundles", name), "utf8")) as { url: string; code: string });
     expect(registered).toEqual({ url: pathToFileURL(join(scratch, "collected.mjs")).href, code: collected });
 
     vi.stubEnv(SUBPROCESS_COVERAGE_DIR, "");
-    await buildCliBundle(join(scratch, "plain.mjs"));
+    await buildRegisteredBundle(bundled, join(scratch, "plain.mjs"));
     expect(readFileSync(join(scratch, "plain.mjs"), "utf8")).not.toContain("sourceMappingURL");
     expect(readdirSync(join(output, "bundles"))).toHaveLength(1);
   });
@@ -74,26 +76,25 @@ describe("collector", () => {
     directories.push(project);
     mkdirSync(join(project, "tests"));
     writeFileSync(join(project, "tests/spawns.test.ts"), "const env = subprocessEnv({});");
-    writeFileSync(join(project, "tests/pushes.test.ts"), "await captureCliPush(source);");
     writeFileSync(join(project, "tests/pure.test.ts"), "expect(1).toBe(1);");
     writeFileSync(join(project, "tests/subprocess-coverage.test.ts"), "subprocessEnv();");
-    expect(await subprocessSuites(project)).toEqual(["pushes.test.ts", "spawns.test.ts"]);
-    expect(await subprocessSuites()).toEqual(expect.arrayContaining(["cli-publications.test.ts", "build-scripts.test.ts", "qa-runners.test.ts"]));
+    expect(await subprocessSuites(project)).toEqual(["spawns.test.ts"]);
+    expect(await subprocessSuites()).toEqual(expect.arrayContaining(["build-scripts.test.ts", "qa-runners.test.ts"]));
   });
 });
 
 describe("conversion", () => {
   it("maps a tsx-run TypeScript module onto the gate's canonical identities with its hit counts", async () => {
-    runTs('const { cleanDeploymentPath } = await import("./shared/v2-paths.ts"); console.log(cleanDeploymentPath("a/b"));');
+    runTs('const { isCanonicalStorageKey } = await import("./src/storage-boundary.ts"); console.log(isCanonicalStorageKey("a/b"));');
     const [shard] = await shardsOf(["subprocess-coverage.test.ts"]);
     const report = readShard(shard);
-    const file = report["shared/v2-paths.ts"];
-    const { canonical } = await canonicalCoverage(resolve("shared/v2-paths.ts"));
+    const file = report["shared/storage-path.ts"];
+    const { canonical } = await canonicalCoverage(resolve("shared/storage-path.ts"));
     for (const map of ["statementMap", "fnMap", "branchMap"] as const) expect(locations(file[map])).toEqual(locations(canonical[map]));
     const hits = Object.fromEntries(Object.entries(file.fnMap).map(([id, fn]) => [fn.name, file.f[id]]));
-    expect(hits).toMatchObject({ cleanDeploymentPath: 1, cleanPublicationPath: 0 });
-    // The imported dependency is reported too, under its repository-relative name.
-    expect(Object.keys(report)).toContain("shared/storage-path.ts");
+    expect(hits).toMatchObject({ isCanonicalStorageKey: 1, decodeStoragePath: 0 });
+    // The module that re-exports it is reported too, under its repository-relative name.
+    expect(Object.keys(report)).toContain("src/storage-boundary.ts");
     expect(readdirSync(output)).not.toContain("raw");
   });
 
@@ -123,19 +124,19 @@ describe("conversion", () => {
     expect(code.slice(inserted[0][0] - 1, inserted[0][0])).toBe(")");
   });
 
-  it("maps the esbuild-bundled CLI back to cli/ and shared/ sources", async () => {
+  it("maps an esbuild bundle back to its authored sources", async () => {
     const scratch = mkdtempSync(join(tmpdir(), "rendro-subprocess-bundle-"));
     directories.push(scratch);
-    await buildCliBundle(join(scratch, "rendro.mjs"));
-    expect(run([join(scratch, "rendro.mjs"), "--version"]).trim()).toMatch(/^\d+\.\d+\.\d+/);
+    await buildRegisteredBundle(bundled, join(scratch, "check.mjs"));
+    expect(run([join(scratch, "check.mjs"), "--dry-run"])).toContain("Dry run: no request was made.");
     const [shard] = await shardsOf();
     const report = readShard(shard);
-    expect(Object.keys(report).sort()).toEqual(expect.arrayContaining(["cli/src/index.ts", "shared/provenance.ts"]));
-    const index = report["cli/src/index.ts"];
-    const { canonical } = await canonicalCoverage(resolve("cli/src/index.ts"));
-    expect(locations(index.statementMap)).toEqual(locations(canonical.statementMap));
-    expect(Object.values(index.s).some(count => count > 0)).toBe(true);
-    expect(Object.values(index.s).some(count => count === 0)).toBe(true);
+    expect(Object.keys(report)).toContain(bundled);
+    const script = report[bundled];
+    const { canonical } = await canonicalCoverage(resolve(bundled));
+    expect(locations(script.statementMap)).toEqual(locations(canonical.statementMap));
+    expect(Object.values(script.s).some(count => count > 0)).toBe(true);
+    expect(Object.values(script.s).some(count => count === 0)).toBe(true);
   }, 60_000);
 
   it("maps unmodified JavaScript scripts directly", async () => {
@@ -151,14 +152,14 @@ describe("conversion", () => {
     const receipt = subprocessEnv();
     run(["--import", "tsx", "-e", "0"], receipt);
     const bin = resolve("node_modules/.bin/tsx");
-    execFileSync(bin, ["-e", 'import("./shared/v2-paths.ts")'], { cwd: root, env: receipt, timeout: 60_000 });
+    execFileSync(bin, ["-e", 'import("./shared/storage-path.ts")'], { cwd: root, env: receipt, timeout: 60_000 });
     const [shard] = await shardsOf();
     expect(readdirSync(output)).not.toContain("raw");
-    expect(Object.keys(readShard(shard))).toContain("shared/v2-paths.ts");
+    expect(Object.keys(readShard(shard))).toContain("shared/storage-path.ts");
   });
 
   it("keeps the shards for a rerun without raw dumps", async () => {
-    runTs('await import("./shared/v2-paths.ts");');
+    runTs('await import("./shared/storage-path.ts");');
     const first = await shardsOf();
     expect(await shardsOf(["subprocess-coverage.test.ts"])).toEqual(first);
     await expect(shardsOf(["other.test.ts"])).rejects.toThrow("Missing subprocess coverage: other.test.ts");
@@ -167,7 +168,7 @@ describe("conversion", () => {
 
 describe("fail closed", () => {
   it("errors when a required suite left no receipt", async () => {
-    await expect(shardsOf(["cli-publications.test.ts"])).rejects.toThrow("Missing subprocess coverage: cli-publications.test.ts");
+    await expect(shardsOf(["qa-runners.test.ts"])).rejects.toThrow("Missing subprocess coverage: qa-runners.test.ts");
   });
 
   it("errors when a receipt stays empty, e.g. a child killed before exit", async () => {
@@ -184,14 +185,14 @@ describe("fail closed", () => {
   it("errors on a bundle that maps to authored files but was never registered", async () => {
     const scratch = mkdtempSync(join(tmpdir(), "rendro-subprocess-bundle-"));
     directories.push(scratch);
-    await build({ entryPoints: ["cli/src/index.ts"], bundle: true, platform: "node", format: "esm", outfile: join(scratch, "rogue.mjs"), sourcemap: "inline", sourcesContent: true });
-    run([join(scratch, "rogue.mjs"), "--version"]);
+    await build({ entryPoints: [bundled], bundle: true, platform: "node", format: "esm", outfile: join(scratch, "rogue.mjs"), sourcemap: "inline", sourcesContent: true });
+    run([join(scratch, "rogue.mjs"), "--dry-run"]);
     await expect(shardsOf()).rejects.toThrow(/Unregistered subprocess bundle: file:\/\/.*rogue\.mjs/);
   }, 60_000);
 
   it("errors on an authored script without a source map or a registered bundle without one", async () => {
     const included = new Set(await sourceManifest(root));
-    const url = pathToFileURL(resolve("shared/v2-paths.ts")).href;
+    const url = pathToFileURL(resolve("shared/storage-path.ts")).href;
     const dump = (scriptUrl: string): NodeDump => ({ result: [{ scriptId: "1", url: scriptUrl, functions: [] }] });
     await expect(convertDumps(root, [dump(url)], included, new Map())).rejects.toThrow(`Missing source map: ${url}`);
     const bundle = pathToFileURL(join(tmpdir(), "unmapped-bundle.mjs")).href;
@@ -203,10 +204,10 @@ describe("fail closed", () => {
 
   it("errors when a script's recorded source is stale or its tsx output cannot be reproduced", async () => {
     const included = new Set(await sourceManifest(root));
-    const path = resolve("shared/v2-paths.ts");
+    const path = resolve("shared/storage-path.ts");
     const url = pathToFileURL(path).href;
     // Capture the child's real source-map-cache entry.
-    runTs('await import("./shared/v2-paths.ts");');
+    runTs('await import("./shared/storage-path.ts");');
     const receipt = readdirSync(join(output, "raw"))[0];
     const dumps = readdirSync(join(output, "raw", receipt)).map(name => JSON.parse(readFileSync(join(output, "raw", receipt, name), "utf8")) as NodeDump);
     const entry = dumps.map(dump => dump["source-map-cache"]?.[url]).find(Boolean)!;
@@ -214,18 +215,18 @@ describe("fail closed", () => {
 
     const stale = structuredClone(entry);
     stale.data!.sourcesContent = ["export const stale = true;\n"];
-    await expect(convertDumps(root, [{ result: [script], "source-map-cache": { [url]: stale } }], included, new Map())).rejects.toThrow("Stale source: shared/v2-paths.ts");
+    await expect(convertDumps(root, [{ result: [script], "source-map-cache": { [url]: stale } }], included, new Map())).rejects.toThrow("Stale source: shared/storage-path.ts");
 
     const drifted = structuredClone(entry);
     drifted.lineLengths = [1];
     await expect(reproduceTsxModule(readFileSync(path, "utf8"), path, drifted as never)).rejects.toThrow(`Cannot reproduce the tsx transform of ${path}`);
-    await expect(reproduceTsxModule(readFileSync(path, "utf8"), path, entry as never)).resolves.toMatchObject({ code: expect.stringContaining("cleanDeploymentPath"), inserted: [] });
+    await expect(reproduceTsxModule(readFileSync(path, "utf8"), path, entry as never)).resolves.toMatchObject({ code: expect.stringContaining("isCanonicalStorageKey"), inserted: [] });
   });
 });
 
 describe("alignment", () => {
   async function pair() {
-    const { canonical } = await canonicalCoverage(resolve("shared/v2-paths.ts"));
+    const { canonical } = await canonicalCoverage(resolve("shared/storage-path.ts"));
     return { canonical, actual: structuredClone(canonical) };
   }
 

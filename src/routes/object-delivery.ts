@@ -15,7 +15,8 @@
  * (RFC 9110 §14.2 allows this and it bounds the work an attacker can request).
  * A valid but unsatisfiable range is 416. Range applies to GET only.
  */
-import type { ObjectRange } from "@/storage";
+/** The inclusive byte range of a partial read and the object's total size. */
+export type ObjectRange = { start: number; end: number; size: number };
 
 export type ByteRange = { start: number; end: number };
 

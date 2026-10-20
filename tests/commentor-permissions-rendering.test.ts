@@ -10,25 +10,31 @@ vi.mock("../src/commentor/parent-transport", () => ({
   ParentCommentTransport: class {
     subscribe(...args: Parameters<ParentCommentTransport["subscribe"]>) {
       transport.publish = args[0];
-      args[6]?.(true, true);
+      args[6]?.(true, true, true);
     }
     mutate = transport.mutate;
+    recovery = { value: null };
     isMutationPending() { return false; }
   },
 }));
 
+const anchor = { kind: "repo-text" as const, blobSha: "b".repeat(40), headingSlug: "", prefix: "", exact: "Comment target", suffix: "", offset: 0 };
+
 beforeAll(async () => {
-  Object.assign(window, { COMMENTOR: {
-    transport: "parent", organizationId: "org", projectId: "project", documentPath: "guide.html", canWrite: true,
-  } });
+  // The widget reads its repository scope from its own script tag, as a repository frame loads it.
+  const script = document.createElement("script");
+  script.setAttribute("data-commentor-config", JSON.stringify({ transport: "parent", repoId: 9101, blobSha: anchor.blobSha, documentPath: "guide.md" }));
+  Object.defineProperty(document, "currentScript", { configurable: true, get: () => script });
+  document.body.innerHTML = "<main>Comment target</main>";
   await import("../src/commentor/commentor");
+  Reflect.deleteProperty(document, "currentScript");
   document.dispatchEvent(new Event("DOMContentLoaded"));
 });
 
 function render(canDelete?: boolean, replyCanDelete?: boolean) {
   transport.publish([{
     _id: "thread", _creationTime: Date.now(), authorName: "Author", authorEmail: "author@example.test",
-    body: "Comment", anchor: { kind: "element", path: ["main"] }, resolved: false, canDelete,
+    body: "Comment", anchor, resolved: false, canDelete,
     replies: [{ _id: "reply", _creationTime: Date.now(), authorName: "Reply author", body: "Reply", canDelete: replyCanDelete }],
   }], false, false);
   return document.querySelector("#commentor-host")!.shadowRoot!;

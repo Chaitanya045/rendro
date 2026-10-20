@@ -54,7 +54,7 @@ describe("QA permission fixtures against the production HTTP router", () => {
     expect(result).toMatchObject({ executionError: null, cleanupFailed: false, remaining: 0, phase: "http-permission-matrix" });
     expect(failed(result)).toEqual([]);
     expect(result.passed).toBe(result.total);
-    expect(result.total).toBe(105);
+    expect(result.total).toBe(102);
     const expectations = Object.fromEntries(result.checks.map(check => [check.name, check.expected]));
     expect(expectations).toMatchObject({
       "management:access:owner": 200, "management:access:admin": 200, "management:access:member": 200,

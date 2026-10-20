@@ -1,10 +1,8 @@
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import worker from "@/worker";
-import * as blobs from "@/storage";
 import { securityHeaders } from "@/middleware/security-headers";
 import { nonceAttribute } from "@/middleware/html-nonce";
-import { createShareToken } from "@/share-links";
 import { MANAGEMENT_QUERY_VERSION } from "@/routes/management-asset-versions";
 import { docsBase, mockSecurityBackend } from "./fixtures/security-headers";
 
@@ -23,7 +21,7 @@ function sandbox(response: Response) {
   common(response);
   expect(response.headers.get("X-Frame-Options")).toBe("SAMEORIGIN");
   expect(response.headers.get("Content-Security-Policy")).toBe("sandbox allow-scripts allow-forms allow-popups allow-downloads; frame-ancestors 'self'");
-  // Opaque-origin publisher documents: COOP would refuse them in sandboxed
+  // Opaque-origin documents: COOP would refuse them in sandboxed
   // popups, and CORP would block their own no-cors subresource loads.
   expect(response.headers.has("Cross-Origin-Opener-Policy")).toBe(false);
   expect(response.headers.has("Cross-Origin-Resource-Policy")).toBe(false);
@@ -32,8 +30,8 @@ beforeEach(mockSecurityBackend);
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 describe("shared response security policy", () => {
-  it.each(["/", "/sign-in", "/sign-in?error=access_denied", "/verify-email", "/sign-up", "/forgot-password", "/reset-password", "/organizations/org-a", "/account/security", "/accept-invitation/test", docsBase, "/docs/example", "/p/product", "/public/example/product", "/s/test", "/docs/unknown", "/missing"])("protects trusted HTML: %s", async path => {
-    const response = await request(path, path.startsWith("/organizations") || path.startsWith("/docs") || path === "/account/security" || path.startsWith("/accept-invitation/"));
+  it.each(["/", "/sign-in", "/sign-in?error=access_denied", "/verify-email", "/sign-up", "/forgot-password", "/reset-password", "/organizations/org-a", "/account/security", "/accept-invitation/test", docsBase, "/docs/example", "/missing"])("protects trusted HTML: %s", async path => {
+    const response = await request(path, path.startsWith("/organizations") || path === "/account/security" || path.startsWith("/accept-invitation/"));
     if (path === "/organizations/org-a" || path === "/accept-invitation/test") {
       expect(response.status, "authorized management page must render, not a styled error").toBe(200);
     }
@@ -70,10 +68,8 @@ describe("shared response security policy", () => {
     // Management navigation inserts page CSS at runtime.
     ["/organizations/org-a", true, "'unsafe-inline'"],
     ["/organizations", true, "'unsafe-inline'"],
-    // Viewer shells no longer run a CSS generator: nonced styles only.
-    [docsBase, true, "nonce"], ["/docs/example", true, "nonce"], ["/p/product", false, "nonce"],
-    ["/public/example/product", false, "nonce"], ["/s/test", false, "nonce"],
-    ["/", false, "nonce"], ["/sign-in", false, "nonce"], ["/account/security", true, "nonce"],
+    // Every other trusted page, the repository shell's 404 among them: nonced styles only.
+    [docsBase, false, "nonce"], ["/", false, "nonce"], ["/sign-in", false, "nonce"], ["/account/security", true, "nonce"],
   ] as const)("uses the style policy for its route class: %s", async (path, signedIn, styles) => {
     const csp = (await request(path, signedIn)).headers.get("Content-Security-Policy")!;
     const nonce = csp.match(/'nonce-([^']+)'/)![1];
@@ -81,17 +77,24 @@ describe("shared response security policy", () => {
     expect(csp).toContain("style-src-attr 'unsafe-inline'");
   });
 
-  it("serves the viewer base stylesheet from this origin, not a CSS runtime", async () => {
-    const html = await (await request("/p/product")).text();
-    expect(html).toMatch(/<link rel="stylesheet" href="\/styles\/viewer-base\.[0-9a-f]{10}\.css">\n<body>/);
+  it("never lets trusted HTML be stored, whatever caching its route asked for", async () => {
+    const app = new Hono().use(securityHeaders)
+      .get("/public-page", c => c.html(`<!doctype html><style${nonceAttribute()}>p{}</style><p>Page</p>`, 200, { "Cache-Control": "public, max-age=3600" }))
+      .get("/private-page", c => c.html("<!doctype html><p>Page</p>", 200, { "Cache-Control": "private, max-age=60" }));
+    // A stored copy would replay its nonce: every such policy becomes private, no-store.
+    expect((await app.request("https://rendro.test/public-page")).headers.get("Cache-Control")).toBe("private, no-store");
+    expect((await app.request("https://rendro.test/private-page")).headers.get("Cache-Control")).toBe("private, no-store");
   });
 
-  it.each(["/share/unknown", "/p/product/files/missing.html", "/s/test/files/missing.html", `${docsBase}/view/invalid/files/index.html`])("uses nonces and no-store for styled document errors: %s", async path => {
-    const response = await request(path);
+  it("uses nonces and no-store for styled document errors inside the frame", async () => {
+    const path = `${docsBase}/files/missing.html`;
+    const app = new Hono().use(securityHeaders).get(path, c => c.html(`<!doctype html><style${nonceAttribute()}>p{}</style><p>Missing</p>`, 404));
+    const response = await app.request(`https://rendro.test${path}`);
     expect(response.status).toBe(404);
     // Framed inside the viewer: no opener policy, but never embeddable cross-origin.
     expect(response.headers.has("Cross-Origin-Opener-Policy")).toBe(false);
     expect(response.headers.get("Cross-Origin-Resource-Policy")).toBe("same-origin");
+    expect(response.headers.get("X-Frame-Options")).toBe("SAMEORIGIN");
     const csp = response.headers.get("Content-Security-Policy")!;
     expect(csp).toContain("default-src 'self'");
     expect(csp).toContain("frame-ancestors 'self'");
@@ -101,20 +104,13 @@ describe("shared response security policy", () => {
     expect(response.headers.get("Cache-Control")).toMatch(/(?:^|,\s*)no-store(?:,|$)/);
   });
 
-  it.each(["/p/product/files/index.html", "/public/example/product/files/index.html", "/p/product/tree", "/public/example/product/tree", "/public/example/product/sitemap.xml", "/p/product/files/assets/site.css"])("keeps cacheable responses nonce-free: %s", async path => {
-    const response = await request(path);
-    expect(response.status).toBe(200);
-    expect(response.headers.get("Cache-Control")).toContain("public, max-age=0, must-revalidate");
+  it("keeps cacheable document responses nonce-free and their cache policy", async () => {
+    const path = `${docsBase}/@${"a".repeat(40)}/files/index.html`;
+    const app = new Hono().use(securityHeaders).get(path, c => c.html("<h1>Document</h1>", 200, { "Cache-Control": "public, max-age=31536000, immutable" }));
+    const response = await app.request(`https://rendro.test${path}`);
+    expect(response.headers.get("Cache-Control")).toBe("public, max-age=31536000, immutable");
     expect(response.headers.get("Content-Security-Policy") ?? "").not.toContain("nonce-");
-    expect(await response.text()).not.toMatch(/\bnonce\s*=/i);
-  });
-
-  it("retires self-service namespace creation without writing starter HTML or keys", async () => {
-    const put = vi.spyOn(blobs, "putObject").mockResolvedValue(undefined);
-    const response = await worker.request("https://rendro.test/api/orgs", { method: "POST", headers: { Cookie: cookie } });
-    expect(response.status).toBe(410);
-    expect(await response.json()).toMatchObject({ error: expect.stringContaining("rendro@2") });
-    expect(put).not.toHaveBeenCalled();
+    expect(await response.text()).toBe("<h1>Document</h1>");
   });
 
   it("isolates nonces across concurrent requests and never stamps arbitrary scripts", async () => {
@@ -133,11 +129,12 @@ describe("shared response security policy", () => {
   });
 
   it("adds the fallback sandbox when a document response has no CSP", async () => {
-    const path = "/p/example/files/index.html";
-    const app = new Hono().use(securityHeaders).get(path, c => c.html("<h1>Publisher document</h1>"));
-    const response = await app.request(`https://rendro.test${path}`);
-    sandbox(response);
-    expect(await response.text()).toBe("<h1>Publisher document</h1>");
+    for (const path of [`${docsBase}/files/index.html`, `${docsBase}/~main/view/ticket/files/index.html`]) {
+      const app = new Hono().use(securityHeaders).get(path, c => c.html("<h1>Document</h1>"));
+      const response = await app.request(`https://rendro.test${path}`);
+      sandbox(response);
+      expect(await response.text()).toBe("<h1>Document</h1>");
+    }
   });
 
   it("skips HSTS on HTTP, even with a spoofed forwarded protocol", async () => {
@@ -146,45 +143,12 @@ describe("shared response security policy", () => {
     expect(response.headers.get("Referrer-Policy")).toBe("strict-origin-when-cross-origin");
   });
 
-  it("keeps the private sandbox, ticket base, CORS and sensitive caching policies", async () => {
-    const response = await request(`${docsBase}/files/index.html`, true);
-    sandbox(response);
-    expect(response.headers.get("Referrer-Policy")).toBe("no-referrer");
-    expect(response.headers.get("Cache-Control")).toBe("private, no-store");
-    const html = await response.text();
-    expect(html).toContain('<script>window.publisherLoaded=true</script>');
-    const url = html.match(/<base data-rendro-viewer href="([^"]+)"/)![1];
-    const asset = await request(url.replace(/index.html$/, "assets/site.css"));
-    common(asset);
-    expect(asset.headers.get("Access-Control-Allow-Origin")).toBe("null");
-    expect(asset.headers.get("Cache-Control")).toBe("private, no-store");
-    expect(asset.headers.get("Referrer-Policy")).toBe("no-referrer");
-    expect(asset.headers.get("Content-Security-Policy")).toBe("default-src 'none'; sandbox; frame-ancestors 'self'");
-    expect(asset.headers.has("X-Frame-Options")).toBe(false);
-  });
-
-  it.each(["/p/product/files/index.html", "/s/test/files/index.html"])("keeps publisher sandbox and bytes: %s", async path => {
-    const response = await request(path);
-    sandbox(response);
-    expect(await response.text()).toContain('<script>window.publisherLoaded=true</script>');
-  });
-
-  it("sandboxes legacy public shares and redirects private bookmarks into the isolated viewer", async () => {
-    const token = createShareToken("example/index.html");
-    sandbox(await request(`/share/${token}`));
-    const response = await request("/files/example/index.html", true);
-    common(response);
-    expect(response.status).toBe(302);
-    expect(response.headers.get("Location")).toBe("/docs/example/index.html");
-    sandbox(await request("/legacy-view/example/files/index.html", true));
-  });
-
-  it.each(["/health", "/api/auth/get-session", "/p/product/tree"])("adds baseline headers without an HTML CSP: %s", async path => {
+  it.each(["/health", "/api/auth/get-session"])("adds baseline headers without an HTML CSP: %s", async path => {
     const response = await request(path);
     common(response);
     expect(response.headers.has("Content-Security-Policy")).toBe(false);
     expect(response.headers.has("Cross-Origin-Opener-Policy")).toBe(false);
-    // Only API data refuses cross-origin no-cors embedding; trees and health stay as they were.
+    // Only API data refuses cross-origin no-cors embedding; health stays as it was.
     expect(response.headers.get("Cross-Origin-Resource-Policy")).toBe(path.startsWith("/api/") ? "same-origin" : null);
   });
 
@@ -217,9 +181,9 @@ describe("shared response security policy", () => {
   });
 
   it("covers CORS preflights, redirects, and error responses", async () => {
-    const preflight = await worker.request("https://rendro.test/api/sync/upload", { method: "OPTIONS", headers: { Origin: "https://other.test", "Access-Control-Request-Method": "POST" } });
+    // The one preflight route left is the Better Auth proxy, which answers through Convex.
+    const preflight = await worker.request("https://rendro.test/api/auth/sign-in/email", { method: "OPTIONS", headers: { Origin: "https://other.test", "Access-Control-Request-Method": "POST" } });
     common(preflight);
-    expect(preflight.headers.get("Access-Control-Allow-Origin")).toBe("*");
     common(await request("/organizations"));
     vi.mocked(fetch).mockRejectedValue(new Error("backend failed"));
     const error = await request("/api/auth/get-session");

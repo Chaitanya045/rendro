@@ -20,6 +20,7 @@ const bundle = buildSync({
   entryPoints: ["src/commentor/commentor.ts"], bundle: true, write: false, format: "iife", platform: "browser",
 }).outputFiles[0].text;
 const windows: Window[] = [];
+const anchor = { kind: "repo-text" as const, blobSha: "b".repeat(40), headingSlug: "", prefix: "", exact: "Document", suffix: "", offset: 0 };
 
 afterEach(async () => {
   vi.useRealTimers();
@@ -30,7 +31,7 @@ async function flush() {
   for (let i = 0; i < 12; i++) await Promise.resolve();
 }
 
-async function widget(options: { legacy?: boolean; canDelete?: boolean; replyCanDelete?: boolean; archived?: boolean; resolved?: boolean; recoveryState?: CommentRecoveryState; ready?: Record<string, unknown> | null } = { canDelete: true, replyCanDelete: true }) {
+async function widget(options: { canDelete?: boolean; replyCanDelete?: boolean; archived?: boolean; resolved?: boolean; recoveryState?: CommentRecoveryState; ready?: Record<string, unknown> | null } = { canDelete: true, replyCanDelete: true }) {
   vi.useFakeTimers();
   const win = new Window({ url: "https://rendro.test/guide.html", settings: { enableJavaScriptEvaluation: true } });
   windows.push(win);
@@ -55,7 +56,6 @@ async function widget(options: { legacy?: boolean; canDelete?: boolean; replyCan
     setTimeout, clearTimeout,
     requestAnimationFrame: () => 0,
     cancelAnimationFrame: () => {},
-    COMMENTOR: { transport: "parent", ...(options.legacy ? { orgSlug: "example", filePath: "example/guide.html" } : { organizationId: "org-a", projectId: "project-a" }), documentPath: "guide.html", canWrite: true },
   });
   win.document.body.innerHTML = "<main>Document</main>";
   const send = (data: unknown) => win.dispatchEvent(new win.MessageEvent("message", { source: parent as never, data }));
@@ -63,14 +63,18 @@ async function widget(options: { legacy?: boolean; canDelete?: boolean; replyCan
     type: COMMENTOR_PARENT_UPDATE, canLoadMore: false, loading: false,
     threads: [{
       _id: "thread-1", _creationTime: Date.now(), authorName: "Author", authorEmail: "author@test.com",
-      body: "Comment", anchor: { kind: "element", path: ["main"] }, resolved: options.resolved ?? false,
+      body: "Comment", anchor, resolved: options.resolved ?? false,
       archived: options.archived ?? false, canDelete: options.canDelete,
       replies: [{ _id: "reply-1", _creationTime: Date.now(), authorName: "Reply author", body: "Reply", canDelete: options.replyCanDelete }],
     }],
   });
-  win.eval(bundle);
+  // The widget reads its repository scope from its own script tag, as a repository frame loads it.
+  const script = win.document.createElement("script");
+  script.setAttribute("data-commentor-config", JSON.stringify({ transport: "parent", repoId: 9101, blobSha: anchor.blobSha, documentPath: "guide.md" }));
+  script.textContent = bundle;
+  win.document.body.append(script);
   win.document.dispatchEvent(new win.Event("DOMContentLoaded"));
-  if (options.ready !== null) send({ type: COMMENTOR_PARENT_READY, ...(options.ready ?? { protocolVersion: COMMENTOR_PROTOCOL_VERSION, parentGeneration: "host-1", recoveryState: options.recoveryState, userId: "user-a" }) });
+  if (options.ready !== null) send({ type: COMMENTOR_PARENT_READY, ...(options.ready ?? { protocolVersion: COMMENTOR_PROTOCOL_VERSION, parentGeneration: "host-1", recoveryState: options.recoveryState, userId: "user-a", canWrite: true }) });
   await flush();
   const root = win.document.getElementById("commentor-host")!.shadowRoot!;
   const button = (testId: string) => root.querySelector<HTMLButtonElement>(`[data-testid="${testId}"]`)!;
@@ -80,8 +84,8 @@ async function widget(options: { legacy?: boolean; canDelete?: boolean; replyCan
 }
 
 describe("comment widget recovery controls", () => {
-  it.each([false, true])("displays subscription failures for a legacy=%s parent and recovers", async legacy => {
-    const { root, send, publish, button } = await widget({ legacy });
+  it("displays subscription failures and recovers", async () => {
+    const { root, send, publish, button } = await widget();
     send({ type: COMMENTOR_PARENT_ERROR, error: "Sign in again to comment." });
     await flush();
     expect(root.querySelector('.toast[role="alert"]')?.textContent).toBe("Sign in again to comment.");
@@ -129,7 +133,7 @@ describe("comment widget recovery controls", () => {
       finish();
       send({ type: COMMENTOR_PARENT_UPDATE, threads: [], canLoadMore: false, loading: false });
     } else {
-      send({ type: COMMENTOR_PARENT_READY, protocolVersion: COMMENTOR_PROTOCOL_VERSION, parentGeneration: "host-2" });
+      send({ type: COMMENTOR_PARENT_READY, protocolVersion: COMMENTOR_PROTOCOL_VERSION, parentGeneration: "host-2", canWrite: true });
       await flush();
       expect(button("commentor-delete-btn")).not.toBeNull();
       expect(root.querySelector('.toast[role="alert"]')?.textContent).toContain("outcome is unknown");
@@ -156,7 +160,7 @@ describe("comment widget recovery controls", () => {
       permissions.canDelete = canDelete;
       permissions.replyCanDelete = replyCanDelete;
       if (recovery === "refresh") root.querySelector<HTMLButtonElement>(".toast button")!.click();
-      else send({ type: COMMENTOR_PARENT_READY, protocolVersion: COMMENTOR_PROTOCOL_VERSION, parentGeneration: "host-2" });
+      else send({ type: COMMENTOR_PARENT_READY, protocolVersion: COMMENTOR_PROTOCOL_VERSION, parentGeneration: "host-2", canWrite: true });
       await flush();
       const checkPermissions = () => {
         expect(Boolean(root.querySelector('[data-testid="commentor-delete-btn"]'))).toBe(canDelete === true);
@@ -202,7 +206,7 @@ describe("comment widget recovery controls", () => {
       expect(sending()?.getAttribute("aria-busy")).toBeNull();
       expect(sending()?.querySelector('[data-testid="commentor-sending"]')).toBeNull();
     } else {
-      send({ type: COMMENTOR_PARENT_READY, protocolVersion: COMMENTOR_PROTOCOL_VERSION, parentGeneration: "host-2" });
+      send({ type: COMMENTOR_PARENT_READY, protocolVersion: COMMENTOR_PROTOCOL_VERSION, parentGeneration: "host-2", canWrite: true });
       await flush();
       // The outcome is unknown: the optimistic thread goes, and the composer comes back with the draft.
       expect(sending()).toBeNull();
@@ -225,7 +229,7 @@ describe("comment widget recovery controls", () => {
     button("commentor-reply-send").click();
     await vi.advanceTimersByTimeAsync(60_001);
     expect(button("commentor-reply-send").disabled).toBe(true);
-    send({ type: COMMENTOR_PARENT_READY, protocolVersion: COMMENTOR_PROTOCOL_VERSION, parentGeneration: "host-2" });
+    send({ type: COMMENTOR_PARENT_READY, protocolVersion: COMMENTOR_PROTOCOL_VERSION, parentGeneration: "host-2", canWrite: true });
     await flush();
     expect(button("commentor-reply-send").disabled).toBe(false);
     const restored = root.querySelector<HTMLTextAreaElement>('[data-testid="commentor-reply-input"]')!;
@@ -261,7 +265,7 @@ describe("safe resubmission through rendered recovery controls", () => {
       expect(mutations()).toHaveLength(1);
       const original = mutations()[0].args as Record<string, unknown>;
       expect(original.clientOperationId).toMatch(/^[a-f0-9-]{36}$/);
-      send({ type: COMMENTOR_PARENT_READY, protocolVersion: COMMENTOR_PROTOCOL_VERSION, parentGeneration: "restored-host" });
+      send({ type: COMMENTOR_PARENT_READY, protocolVersion: COMMENTOR_PROTOCOL_VERSION, parentGeneration: "restored-host", canWrite: true });
       await flush();
       expect(button(testId).disabled).toBe(false);
       button(testId).click();
@@ -303,7 +307,7 @@ describe("safe resubmission through rendered recovery controls", () => {
 
   it.each(["create", "reply"])("clears the recovered %s draft when its operation appears in the subscription", async (action) => {
     const method = action === "create" ? "thread.create" : "reply.add";
-    const args = { body: "Confirmed draft", anchor: { kind: "element", path: ["main"] }, ...(action === "reply" ? { threadId: "thread-1" } : {}) };
+    const args = { body: "Confirmed draft", anchor, ...(action === "reply" ? { threadId: "thread-1" } : {}) };
     const recoveryState: CommentRecoveryState = {
       operations: { [mutationKey(method, args)]: { method, args, clientOperationId: "confirmed" } },
       drafts: { [action === "create" ? "create" : "thread-1"]: args },
@@ -362,7 +366,7 @@ describe("editable rejected drafts and identity changes", () => {
     const composer = root.querySelector<HTMLTextAreaElement>('[data-testid="commentor-composer-textarea"]')!;
     composer.value = "Private comment";
     composer.dispatchEvent(new win.Event("input"));
-    send({ type: COMMENTOR_PARENT_READY, protocolVersion: COMMENTOR_PROTOCOL_VERSION, parentGeneration: "other-account", userId, recoveryState: { operations: {}, drafts: {} } });
+    send({ type: COMMENTOR_PARENT_READY, protocolVersion: COMMENTOR_PROTOCOL_VERSION, parentGeneration: "other-account", userId, recoveryState: { operations: {}, drafts: {} }, canWrite: true });
     await flush();
     expect(root.querySelector('[data-testid="commentor-composer-textarea"]')).toBeNull();
     expect(root.querySelector<HTMLTextAreaElement>('[data-testid="commentor-reply-input"]')?.value ?? "").toBe("");
@@ -409,7 +413,7 @@ describe("comment widget asset skew", () => {
     expect(button("commentor-comment-btn").disabled).toBe(true);
     expect(requests).toEqual([]);
     send({ type: COMMENTOR_PARENT_READY });
-    send({ type: COMMENTOR_PARENT_READY, protocolVersion: COMMENTOR_PROTOCOL_VERSION, parentGeneration: "new", userId: "user-a" });
+    send({ type: COMMENTOR_PARENT_READY, protocolVersion: COMMENTOR_PROTOCOL_VERSION, parentGeneration: "new", userId: "user-a", canWrite: true });
     await flush();
     expect(root.querySelector('[role="status"]:not(.quota-live)')).toBeNull();
     expect(button("commentor-comment-btn").disabled).toBe(false);

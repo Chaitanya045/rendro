@@ -21,9 +21,8 @@ export const fontManifest = {
     ]
   },
   "icons": {
-    "file": "material-symbols-outlined.abbdea16b2.woff2",
+    "file": "material-symbols-outlined.97badd4fdf.woff2",
     "names": [
-      "arrow_back",
       "article",
       "check",
       "chevron_right",
@@ -31,7 +30,6 @@ export const fontManifest = {
       "content_copy",
       "contrast",
       "dark_mode",
-      "description",
       "domain",
       "edit_document",
       "error",
@@ -53,8 +51,6 @@ export const fontManifest = {
       "menu",
       "more_vert",
       "password",
-      "public",
-      "schedule",
       "search",
       "settings",
       "shield",

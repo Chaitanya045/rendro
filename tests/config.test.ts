@@ -3,18 +3,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const requiredSettings = {
   CONVEX_INTERNAL_SECRET: "test-internal-secret-at-least-32-characters",
-  AUTH_SECRET: "test-share-signing-secret",
   IMAGE_PROXY_SECRET: "test-image-proxy-secret-at-least-32-chars",
   REPO_CAPABILITY_SECRET: "test-repo-capability-secret-at-least-32",
   REPO_CONTENT_KEY: "test-repo-content-key-at-least-32-chars",
 };
 const optionalSettings = [
-  "NODE_ENV", "LOG_LEVEL", "CONVEX_URL", "CONVEX_SITE_URL", "RETENTION_SECRET", "REPO_CONTENT_KEY_PREVIOUS",
+  "NODE_ENV", "LOG_LEVEL", "CONVEX_URL", "CONVEX_SITE_URL", "REPO_CONTENT_KEY_PREVIOUS",
 ];
 
 beforeEach(() => {
   vi.resetModules();
-  for (const key of [...optionalSettings, "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "BASE_URL", "PORT"]) {
+  for (const key of [...optionalSettings, "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "BASE_URL", "PORT", "AUTH_SECRET", "RETENTION_SECRET"]) {
     vi.stubEnv(key, undefined);
   }
   for (const [key, value] of Object.entries(requiredSettings)) vi.stubEnv(key, value);
@@ -26,7 +25,7 @@ afterEach(() => {
 });
 
 describe("Worker environment validation", () => {
-  it("loads with only the five required settings, without Google credentials", async () => {
+  it("loads with only the four required settings, without Google credentials", async () => {
     const config = await import("../src/config");
     expect(config).toMatchObject({
       ...requiredSettings,
@@ -34,9 +33,15 @@ describe("Worker environment validation", () => {
       LOG_LEVEL: "debug",
       CONVEX_URL: "",
       CONVEX_SITE_URL: "",
-      RETENTION_SECRET: undefined,
       REPO_CONTENT_KEY_PREVIOUS: undefined,
     });
+  });
+
+  it("neither needs nor exports the share-signing and retention secrets that left with uploads (#286)", async () => {
+    vi.stubEnv("AUTH_SECRET", "x");
+    vi.stubEnv("RETENTION_SECRET", "x");
+    const config = await import("../src/config");
+    expect(Object.keys(config).filter(name => /AUTH_SECRET|RETENTION/.test(name))).toEqual([]);
   });
 
   it("starts the Worker and serves health without Google credentials or Convex URLs", async () => {
@@ -45,6 +50,17 @@ describe("Worker environment validation", () => {
     const response = await worker.request("http://localhost/health");
     expect(response.status).toBe(200);
     expect(await response.text()).toBe("ok");
+  });
+
+  it("copies the Worker's string bindings into an unset process environment, never over a set one or a non-string binding", async () => {
+    vi.stubEnv("RENDRO_TEST_BINDING", undefined);
+    vi.stubEnv("RENDRO_TEST_PRESET", "kept");
+    const { default: worker } = await import("../src/worker");
+    const response = await worker.request("http://localhost/health", {}, { RENDRO_TEST_BINDING: "bound", RENDRO_TEST_PRESET: "ignored", RENDRO_TEST_OBJECT: {} });
+    expect(response.status).toBe(200);
+    expect(process.env.RENDRO_TEST_BINDING).toBe("bound");
+    expect(process.env.RENDRO_TEST_PRESET).toBe("kept");
+    expect(process.env.RENDRO_TEST_OBJECT).toBeUndefined();
   });
 
   it.each(Object.keys(requiredSettings))("rejects missing and empty %s", async (key) => {
@@ -56,7 +72,6 @@ describe("Worker environment validation", () => {
   });
 
   it.each([
-    ["AUTH_SECRET", 16],
     ["CONVEX_INTERNAL_SECRET", 32],
     ["IMAGE_PROXY_SECRET", 32],
     ["REPO_CAPABILITY_SECRET", 32],
@@ -70,14 +85,14 @@ describe("Worker environment validation", () => {
     await expect(import("../src/config")).resolves.toHaveProperty(key, "x".repeat(minimum));
   });
 
-  it.each(["AUTH_SECRET", "CONVEX_INTERNAL_SECRET", "RETENTION_SECRET", "IMAGE_PROXY_SECRET"])("refuses a repository capability secret that reuses %s", async (key) => {
+  it.each(["CONVEX_INTERNAL_SECRET", "IMAGE_PROXY_SECRET"])("refuses a repository capability secret that reuses %s", async (key) => {
     const shared = "a-secret-shared-by-two-settings-0123456789";
     vi.stubEnv(key, shared);
     vi.stubEnv("REPO_CAPABILITY_SECRET", shared);
     await expect(import("../src/config")).rejects.toThrow("REPO_CAPABILITY_SECRET must not reuse another secret");
   });
 
-  it.each(["AUTH_SECRET", "CONVEX_INTERNAL_SECRET", "RETENTION_SECRET", "IMAGE_PROXY_SECRET", "REPO_CAPABILITY_SECRET", "REPO_CONTENT_KEY_PREVIOUS"])(
+  it.each(["CONVEX_INTERNAL_SECRET", "IMAGE_PROXY_SECRET", "REPO_CAPABILITY_SECRET", "REPO_CONTENT_KEY_PREVIOUS"])(
     "refuses a repository content key that reuses %s", async (key) => {
       const shared = "a-content-key-shared-by-two-settings-0123456789";
       vi.stubEnv(key, shared);
@@ -107,20 +122,14 @@ describe("Worker environment validation", () => {
     await expect(import("../src/config")).resolves.toHaveProperty("CONVEX_SITE_URL", siteUrl);
   });
 
-  it("honors optional backend, retention, and logging overrides", async () => {
+  it("honors optional backend and logging overrides", async () => {
     const overrides = {
       CONVEX_SITE_URL: "https://backend.example.com",
-      RETENTION_SECRET: "r".repeat(32),
       NODE_ENV: "production",
       LOG_LEVEL: "warn",
     };
     for (const [key, value] of Object.entries(overrides)) vi.stubEnv(key, value);
     await expect(import("../src/config")).resolves.toMatchObject(overrides);
-  });
-
-  it("enforces the minimum length of the optional RETENTION_SECRET", async () => {
-    vi.stubEnv("RETENTION_SECRET", "x".repeat(31));
-    await expect(import("../src/config")).rejects.toThrow("RETENTION_SECRET must be at least 32 characters");
   });
 
   it("exports no storage endpoint or credential setting, and ignores any left in the environment", async () => {
@@ -152,14 +161,11 @@ describe("Worker environment validation", () => {
     }
   });
 
-  it("binds a private R2 bucket and the retention cron in every Wrangler environment, with no storage keys", () => {
+  it("binds no upload bucket, no cron and no storage keys in any Wrangler environment", () => {
+    // Uploads and their nightly retention purge are gone (#286); repository snapshots belong to the ingest Worker.
     const wrangler = readFileSync(new URL("../wrangler.toml", import.meta.url), "utf8").replace(/#.*$/gm, "");
     expect(wrangler).not.toMatch(/MINIO|S3_|ACCESS_KEY|SECRET_KEY|r2\.cloudflarestorage|r2\.dev/);
-    const buckets = [...wrangler.matchAll(/^\[\[((?:env\.[\w-]+\.)?r2_buckets)\]\]\nbinding = "(\w+)"\nbucket_name = "([\w-]+)"/gm)];
-    expect(buckets.map(match => [match[1], match[2]])).toEqual([["r2_buckets", "STORAGE"], ["env.development.r2_buckets", "STORAGE"]]);
-    expect(new Set(buckets.map(match => match[3])).size).toBe(2);
-    // The E2E-only storage-faults service exists solely in the generated harness config (e2e/global-setup.ts), never in a deployable one.
+    expect(wrangler).not.toMatch(/r2_buckets|STORAGE|triggers|crons/);
     expect(wrangler).not.toMatch(/services|storage-faults|\[\[[^\]]*(?:service|durable)/i);
-    expect([...wrangler.matchAll(/^\[((?:env\.[\w-]+\.)?triggers)\]\ncrons = \["23 3 \* \* \*"\]/gm)].map(match => match[1])).toEqual(["triggers", "env.development.triggers"]);
   });
 });

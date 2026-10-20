@@ -74,11 +74,7 @@ describe("untrusted credential project IDs", () => {
     const headers = { authorization: `Bearer ${key}` };
     const validated = await backend.fetch(`/api/rendro/credentials/validate?${query}`, { headers });
     expect(validated.status).toBe(200);
-    const active = await backend.fetch(`/api/rendro/deployments/active?${query}`, { headers });
-    expect(active.status).toBe(200);
-    expect(await active.json()).toMatchObject({
-      project: { _id: project._id }, deployment: null, principal: { kind: "api-key", keyId: "test-key" },
-    });
+    expect(await validated.json()).toMatchObject({ principal: { keyId: "test-key", projectId: project._id } });
   });
 
   it.each(["invalid-key", "test-only-credential"])("returns controlled HTTP rejection for malformed IDs with %s", async (key) => {
@@ -89,8 +85,6 @@ describe("untrusted credential project IDs", () => {
       const response = await backend.fetch(`/api/rendro/credentials/validate?${query}`, { headers });
       expect(response.status).toBe(401);
       expect(await response.json()).toEqual({ error: "Invalid or insufficient API key" });
-      const deployment = await backend.fetch(`/api/rendro/deployments/active?${query}`, { headers });
-      expect(deployment.status).toBe(403);
     }
     const retained = await backend.run((ctx) => ctx.db.get(credentialId));
     expect(retained).not.toBeNull();

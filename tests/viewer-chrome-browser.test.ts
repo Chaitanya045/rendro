@@ -1,22 +1,20 @@
 import { getRequestListener } from "@hono/node-server";
 import { Hono } from "hono";
-import type { User } from "better-auth/types";
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import type { Page } from "playwright";
 import { securityHeaders } from "@/middleware/security-headers";
-import { renderScopedDocumentShell } from "../src/routes/app";
+import { repoShell } from "./helpers/repo-shell";
 import { bundleBrowserAsset, createBrowserHarness, waitForSettled } from "./helpers/browser";
 import { serveFonts } from "./helpers/fonts";
 import { serveStyles } from "./helpers/styles";
 
 /**
  * The real viewer shell (its CSS, base stylesheet, inline script and strict CSP) with the real tree script and a
- * stubbed deployment.
+ * stubbed repository snapshot.
  */
 const harness = createBrowserHarness();
 const violations: string[] = [];
-const base = "/organizations/org-a/projects/project-a/docs";
-const user = { id: "u", email: "reader@example.test", name: "Reader" } as User;
+const base = "/r/acme/docs";
 type Entry = { name: string; type: "file" | "folder" };
 const doc = (name: string): Entry => ({ name, type: "file" });
 // Names far longer than a tree row, in a script without spaces to break at.
@@ -43,10 +41,7 @@ beforeAll(async () => {
     return c.json({ children: entries[index] ?? [], cursor: index + 1 < entries.length ? String(index + 1) : null });
   });
   app.get(`${base}/files/*`, c => c.html(`<!doctype html><html><body style="margin:0;min-height:2000px"><h1>${decodeURIComponent(c.req.path.slice(`${base}/files/`.length))}</h1></body></html>`));
-  app.get(base, c => c.html(renderScopedDocumentShell({
-    user, namespace: "org-a", title: c.req.query("title") === "long" ? longTitle : "Docs", basePath: base, selectedPath: "index.html",
-    shareConfig: { organizationId: "org-a", projectId: "project-a" },
-  })));
+  app.get(base, c => c.html(repoShell({ namespace: "org-a", title: c.req.query("title") === "long" ? longTitle : "Docs", basePath: base, frameBase: base })));
   const listener = getRequestListener(request => app.fetch(request));
   await harness.start((req, res) => { void listener(req, res).catch(error => res.destroy(error as Error)); }, assets);
 });
@@ -266,34 +261,27 @@ describe("the document tree while it loads and with long names", () => {
 describe("menus and the document", () => {
   const frameBody = (page: Page) => page.frameLocator("#content-frame").locator("body");
 
-  it("closes the account menu when the reader clicks in the document, and leaves it alone for the keyboard", async () => {
-    const page = await open();
-    const button = page.locator("#avatar-btn");
-    const menu = page.locator("#avatar-menu");
-    await button.click();
+  it("leaves the phone More menu open for the keyboard and for another application", async () => {
+    const page = await open(390);
+    const more = page.locator("#mobile-more-btn");
+    const menu = page.locator("#mobile-more-menu");
+    await more.click();
     await menu.waitFor({ state: "visible" });
     // Moving through the menu with the keyboard keeps focus in the shell, so nothing closes.
-    await page.keyboard.press("Tab");
     await page.keyboard.press("Tab");
     expect(await menu.isVisible()).toBe(true);
     // The window losing focus to another application leaves it open as well.
     await page.evaluate(() => window.dispatchEvent(new Event("blur")));
     expect(await menu.isVisible()).toBe(true);
-    await frameBody(page).click({ position: { x: 300, y: 300 } });
-    await menu.waitFor({ state: "hidden" });
-    expect(await button.getAttribute("aria-expanded")).toBe("false");
-    // Escape and the button still work afterwards.
-    await button.click();
-    await menu.waitFor({ state: "visible" });
-    await page.keyboard.press("Escape");
+    await frameBody(page).click({ position: { x: 100, y: 300 } });
     await menu.waitFor({ state: "hidden" });
   });
 
   it("closes the menus when the document reports a press inside it, and ignores the same message from anywhere else", async () => {
     // Engines that do not report the shell losing focus rely on the document's own report.
-    const page = await open();
-    const menu = page.locator("#avatar-menu");
-    await page.locator("#avatar-btn").click();
+    const page = await open(390);
+    const menu = page.locator("#mobile-more-menu");
+    await page.locator("#mobile-more-btn").click();
     await menu.waitFor({ state: "visible" });
     await page.evaluate(() => window.postMessage({ type: "doc-pointer" }, "*"));
     await page.evaluate(() => new Promise(resolve => setTimeout(resolve, 100)));
@@ -305,19 +293,15 @@ describe("menus and the document", () => {
     await menu.waitFor({ state: "hidden" });
   });
 
-  it("closes the phone More menu, and the account menu inside it, when the reader clicks in the document", async () => {
+  it("closes the phone More menu when the reader clicks in the document", async () => {
     const page = await open(390);
     const more = page.locator("#mobile-more-btn");
     const menu = page.locator("#mobile-more-menu");
     await more.click();
     await menu.waitFor({ state: "visible" });
-    await page.locator("#avatar-btn").click();
-    await page.locator("#avatar-menu").waitFor({ state: "visible" });
-    expect(await page.locator("#avatar-menu").evaluate(element => element.closest("#mobile-more-menu") !== null)).toBe(true);
     await frameBody(page).click({ position: { x: 100, y: 300 } });
     await menu.waitFor({ state: "hidden" });
     expect(await more.getAttribute("aria-expanded")).toBe("false");
-    expect(await page.locator("#avatar-menu").isHidden()).toBe(true);
     // The menu still opens, and Escape still closes it and returns focus to its button.
     await more.click();
     await menu.waitFor({ state: "visible" });
@@ -359,7 +343,7 @@ describe("the bar on a phone and reading mode", () => {
     }
   });
 
-  it("keeps the revealed header while the account menu is under the pointer and while focus moves through it", async () => {
+  it("keeps the revealed header while the pointer is on it and focus moves through it", async () => {
     const page = await harness.newPage({ viewport: { width: 1280, height: 800 }, reducedMotion: "reduce" });
     await recordViolations(page);
     await page.clock.install();
@@ -373,28 +357,18 @@ describe("the bar on a phone and reading mode", () => {
     await page.locator("html.shell-hidden").waitFor();
     expect(await revealed()).toBe(false);
 
-    // The top edge reveals the header; opening the account menu from it puts focus in the header.
+    // The top edge reveals the header. With the pointer resting on one of its controls, moving focus through the bar
+    // with the keyboard keeps it shown past the grace period.
     await page.mouse.move(700, 400);
     await page.mouse.move(700, 4);
     await page.locator("html.shell-header-revealed").waitFor();
-    await page.locator("#avatar-btn").click();
-    await page.locator("#avatar-menu").waitFor({ state: "visible" });
-    // The menu hangs below the bar. The pointer moving into it leaves the bar's own box but not the bar, and the grace
-    // period passes with the header still shown.
-    const item = (await page.locator("#avatar-menu .avatar-menu-item").first().boundingBox())!;
-    expect(item.y).toBeGreaterThan(56);
-    await page.mouse.move(item.x + item.width / 2, item.y + item.height / 2);
-    await page.clock.runFor(500);
-    expect(await revealed()).toBe(true);
-    expect(await page.locator("#avatar-menu").isVisible()).toBe(true);
-    // Moving through the menu with the keyboard changes nothing either.
-    await page.keyboard.press("Tab");
+    const share = (await page.locator("#share-btn").boundingBox())!;
+    await page.mouse.move(share.x + share.width / 2, share.y + share.height / 2);
+    await page.locator("#share-btn").focus();
     await page.keyboard.press("Tab");
     await page.clock.runFor(500);
     expect(await revealed()).toBe(true);
-    expect(await page.locator("#avatar-menu").isVisible()).toBe(true);
-    expect(await page.evaluate(() => document.activeElement?.closest("#avatar-menu") !== null)).toBe(true);
-
+    expect(await page.evaluate(() => document.activeElement?.closest(".topbar") !== null)).toBe(true);
   });
 });
 

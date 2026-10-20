@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { installViewerFrame } from "@/viewer/client";
 
 const origin = "https://rendro.test";
-const base = "/organizations/org-a/projects/project-a/docs";
+const base = "/r/acme/docs/@" + "c".repeat(40);
 const prefix = `${base}/view/initial/files/`;
 const minute = 60_000;
 const windows: DOMWindow[] = [];
@@ -22,16 +22,15 @@ function events() {
 }
 
 /**
- * A renewal client in a document that is `visible` or hidden to begin with. A publisher frame carries its ticket in a
- * `<base>`; a repository frame (#293) has none, names the ticket in its images only and says when it was issued.
+ * A private repository frame's renewal client (#293), in a document that is `visible` or hidden to begin with. The frame
+ * names its ticket in its images only and says when it was issued and when to renew: by default five minutes on, or
+ * halfway through the ticket's five minutes when `repository` sets the issue time.
  */
 function viewer(initially: "visible" | "hidden" = "visible", standalone = false, repository?: { issuedAt: number }) {
   vi.useFakeTimers();
   const win = new DOMWindow({ url: `${origin}${base}/files/guide/index.html`, settings: { disableCSSFileLoading: true } });
   windows.push(win);
-  win.document.write(repository
-    ? `<html><head></head><body><a href="other.html">other</a><img src="${prefix}guide/assets/a.png"><img src="/img/sig/proxied"></body></html>`
-    : `<html><head><base data-rendro-viewer href="${origin}${prefix}guide/index.html"></head><body><img src="assets/a.png"></body></html>`);
+  win.document.write(`<html><head></head><body><a href="other.html">other</a><img src="${prefix}guide/assets/a.png"><img src="/img/sig/proxied"></body></html>`);
   const bus = events();
   const parent = { postMessage: vi.fn() };
   const setInterval = vi.fn(globalThis.setInterval);
@@ -44,8 +43,8 @@ function viewer(initially: "visible" | "hidden" = "visible", standalone = false,
     win.document.dispatchEvent(new win.Event("visibilitychange"));
   };
   Object.defineProperty(win.document, "visibilityState", { configurable: true, value: initially });
-  const ticket = repository && { issuedAt: repository.issuedAt, renewAfter: 2.5 * minute };
-  installViewerFrame({ base, prefix, manifestKey: "release/manifest.json", deploymentId: "release", ...(ticket ? { ticket } : {}) }, host);
+  const ticket = repository ? { issuedAt: repository.issuedAt, renewAfter: 2.5 * minute } : { issuedAt: Date.now(), renewAfter: 5 * minute };
+  installViewerFrame({ base, prefix, manifestKey: "release/manifest.json", ticket }, host);
   let tickets = 0;
   const requests = () => parent.postMessage.mock.calls.filter(([message]) => message.type === "viewer-renew").length;
   /** The trusted parent answers the latest request, so the next one is due five minutes after it. */
@@ -177,7 +176,7 @@ describe("viewer renewal in a hidden tab", () => {
   });
 });
 
-describe("repository frame renewal without a base (#293)", () => {
+describe("repository frame renewal (#293)", () => {
   it("renews the images' ticket halfway through its five minutes, and leaves links and other images alone", () => {
     vi.useFakeTimers();
     const f = viewer("visible", false, { issuedAt: Date.now() });
@@ -188,7 +187,6 @@ describe("repository frame renewal without a base (#293)", () => {
     const images = [...f.win.document.querySelectorAll("img")].map(image => image.getAttribute("src"));
     expect(images).toEqual([`${origin}${base}/view/t1/files/guide/assets/a.png`, "/img/sig/proxied"]);
     expect(f.win.document.querySelector("a")!.getAttribute("href")).toBe("other.html");
-    expect(f.win.document.querySelector("base")).toBeNull();
     // Every ticket is replaced well before it lapses: one renewal per three heartbeats, all hour.
     f.pass(57 * minute);
     expect(f.requests()).toBe(20);

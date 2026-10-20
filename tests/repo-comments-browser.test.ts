@@ -323,13 +323,4 @@ describe("the widget's configuration attribute", () => {
     expect(await comment(opened, "text", "Bare text")).toMatchObject({ kind: "repo-text", headingSlug: "", exact: "Bare text", offset: 0 });
   });
 
-  it("orphans a repository anchor that reaches a widget outside a repository frame", async () => {
-    const opened = await bare(JSON.stringify({ transport: "parent", organizationId: "org", projectId: "project", documentPath: PAGE }), true);
-    await opened.page.evaluate(value => (window as unknown as { publish: (threads: unknown[]) => void }).publish(value),
-      [thread("stray", { kind: "repo-text", blobSha: BLOB, headingSlug: "", prefix: "", exact: "Bare text", suffix: "", offset: 0 })]);
-    await opened.frame.getByTestId("commentor-panel-btn").click();
-    await expect.poll(() => opened.frame.locator(".is-orphan").count()).toBe(1);
-    await opened.frame.locator('.is-orphan [aria-label="Locate commented text on page"]').click();
-    await expect.poll(() => opened.frame.locator('.toast[role="alert"]').last().innerText()).toBe("This comment’s anchor is no longer available.");
-  });
 });

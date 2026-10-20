@@ -1,4 +1,3 @@
-import { admitLegacyResolution } from "./anonymousAdmission";
 import { httpRouter } from "convex/server";
 import { APIError } from "better-auth/api";
 import { httpAction, failure } from "./httpErrors";
@@ -13,7 +12,6 @@ import {
   managementAccess,
   managementTeamMembers,
   managementMembers,
-  managementRecentDeployment,
 } from "./rendroHttp";
 import {
   createCredential,
@@ -21,31 +19,8 @@ import {
   revokeCredential,
   validateCredential,
 } from "./credentialHttp";
-import {
-  commitDeployment,
-  failDeployment,
-  getActiveDeployment,
-  getStagingDeployment,
-  listDeployments,
-  startDeployment,
-} from "./deploymentHttp";
-import {
-  createPublication,
-  listPublications,
-  removePublication,
-  resolvePublicPublication,
-} from "./publicationHttp";
-import {
-  createShareGrant,
-  listShareGrants,
-  resolveShareGrant,
-  revokeShareGrant,
-} from "./shareGrantHttp";
-import { listRetentionCandidates, markRetentionPurged } from "./retentionHttp";
-import { ensureMigrationProject } from "./migrationHttp";
 
 const http = httpRouter();
-http.route({ path: "/api/rendro/admission/public", method: "GET", handler: admitLegacyResolution });
 const setInitialPasswordHandler = httpAction(async (ctx, request) => {
   let body: unknown;
   try {
@@ -93,35 +68,12 @@ http.route({ path: "/api/rendro/projects", method: "GET", handler: listProjects 
 http.route({ path: "/api/rendro/management/access", method: "GET", handler: managementAccess });
 http.route({ path: "/api/rendro/management/team-members", method: "GET", handler: managementTeamMembers });
 http.route({ path: "/api/rendro/management/members", method: "GET", handler: managementMembers });
-http.route({ path: "/api/rendro/management/recent-deployment", method: "GET", handler: managementRecentDeployment });
 http.route({ path: "/api/rendro/projects", method: "POST", handler: createProject });
 http.route({ path: "/api/rendro/projects/get", method: "GET", handler: getProject });
 http.route({ path: "/api/rendro/credentials", method: "GET", handler: listCredentials });
 http.route({ path: "/api/rendro/credentials", method: "POST", handler: createCredential });
 http.route({ path: "/api/rendro/credentials/revoke", method: "POST", handler: revokeCredential });
 http.route({ path: "/api/rendro/credentials/validate", method: "GET", handler: validateCredential });
-http.route({ path: "/api/rendro/deployments/start", method: "POST", handler: startDeployment });
-http.route({ path: "/api/rendro/deployments/active", method: "GET", handler: getActiveDeployment });
-http.route({ path: "/api/rendro/deployments/staging", method: "GET", handler: getStagingDeployment });
-http.route({ path: "/api/rendro/deployments/commit", method: "POST", handler: commitDeployment });
-http.route({ path: "/api/rendro/deployments/fail", method: "POST", handler: failDeployment });
-http.route({ path: "/api/rendro/deployments", method: "GET", handler: listDeployments });
-http.route({ path: "/api/rendro/publications", method: "GET", handler: listPublications });
-http.route({ path: "/api/rendro/publications", method: "POST", handler: createPublication });
-http.route({ path: "/api/rendro/publications/remove", method: "POST", handler: removePublication });
-http.route({ path: "/api/rendro/publications/public", method: "GET", handler: resolvePublicPublication });
-http.route({ path: "/api/rendro/shares", method: "GET", handler: listShareGrants });
-http.route({ path: "/api/rendro/shares", method: "POST", handler: createShareGrant });
-http.route({ path: "/api/rendro/shares/revoke", method: "POST", handler: revokeShareGrant });
-http.route({ path: "/api/rendro/shares/public", method: "GET", handler: resolveShareGrant });
-http.route({ path: "/api/rendro/retention/candidates", method: "GET", handler: listRetentionCandidates });
-http.route({ path: "/api/rendro/retention/purged", method: "POST", handler: markRetentionPurged });
-http.route({ path: "/api/rendro/migration/project", method: "POST", handler: ensureMigrationProject });
-
-
-
-
-
 
 const authHandler = httpAction(async (ctx, request) => {
   const auth = createAuth(ctx);

@@ -1,6 +1,5 @@
 import { managementPagesSource } from "../scripts/management-pages-source";
 import AxeBuilder from "@axe-core/playwright";
-import * as blobs from "@/storage";
 import { getRequestListener } from "@hono/node-server";
 import { readFile } from "node:fs/promises";
 import { buildBrowserBundle as build } from "./helpers/browser";
@@ -8,18 +7,29 @@ import type { Page } from "playwright";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import worker from "@/worker";
 import { COMMENTOR_PARENT_READY, COMMENTOR_PROTOCOL_VERSION } from "@/commentor/parent-protocol";
-import { createShareToken } from "@/share-links";
 import { COMMENTOR_PARENT_VERSION, COMMENTOR_VERSION } from "@/viewer/asset-versions";
-import { docsBase, mockSecurityBackend, publisherHtml, testUser } from "./fixtures/security-headers";
+import { mockSecurityBackend, testUser } from "./fixtures/security-headers";
+import { privateRepo, publicRepo, repoReadFixture } from "./helpers/repo-read-fixture";
 import { browserStep, bundleBrowserAsset, createBrowserHarness, waitForSettled } from "./helpers/browser";
 
 const harness = createBrowserHarness();
+/** Repository docs (#234) built by the real ingest pipeline; the signed-in test user may read the private one. */
+const publicPath = `/r/${publicRepo.owner}/${publicRepo.name}`;
+const privatePath = `/r/${privateRepo.owner}/${privateRepo.name}`;
+let fixture: Awaited<ReturnType<typeof repoReadFixture>>;
 const violations: string[] = [];
 const consoleCsp: string[] = [];
 
 beforeAll(async () => {
+  fixture = await repoReadFixture();
+  fixture.access.grant(testUser.id, privateRepo.id);
   mockSecurityBackend();
-  vi.spyOn(blobs, "listImmediate").mockResolvedValue({ entries: [], isTruncated: false });
+  // A public snapshot is first read through the Worker's own tiered cache path; nothing answers it here, so it falls back.
+  const backend = globalThis.fetch;
+  vi.stubGlobal("fetch", vi.fn((input: string | URL | Request, init?: RequestInit) => {
+    const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+    return url.includes("/__repo-cache/") ? Promise.resolve(new Response(null, { status: 404 })) : backend(input, init);
+  }));
   // verify runs tests before build:assets, so a clean CI checkout has none of
   // these ignored bundles. Build from source instead of reading stale local JS.
   const assets = new Map<string, string>();
@@ -39,23 +49,25 @@ beforeAll(async () => {
     import { CommentorParentHost } from "./src/commentor/parent-host";
     addEventListener("DOMContentLoaded", () => {
       const host = new CommentorParentHost(document.getElementById("content-frame"), location.origin,
-        window.RENDRO_SHARE_CONFIG ?? window.RENDRO_LEGACY_COMMENT_CONFIG, {
+        window.RENDRO_REPO_COMMENT_CONFIG, {
           subscribe(scope, update) { update([], { canLoadMore:false, loading:false }); return { unsubscribe(){}, loadMore(){return false;} }; },
           subscribeReplies(scope, id, update) { update([], { canLoadMore:false, loading:false }); return { unsubscribe(){}, loadMore(){return false;} }; },
           async mutate(){ return null; }
         }, ${JSON.stringify(testUser.id)});
+      host.setWritable(true);
       host.start();
     });`, resolveDir: process.cwd(), loader: "ts" }, bundle: true, write: false, platform: "browser" }));
   assets.set("/commentor-parent.js", parent.outputFiles[0].text);
   const requestListener = getRequestListener(request => worker.fetch(request, {
+    ...fixture.env,
     ASSETS: { fetch: async (assetRequest: Request) => {
       const path = new URL(assetRequest.url).pathname;
       if (assets.has(path)) return new Response(assets.get(path), { headers: { "Content-Type": "text/javascript; charset=utf-8" } });
       try {
-        return new Response(await readFile(`public${path}`), { headers: { "Content-Type": path.endsWith(".js") ? "text/javascript; charset=utf-8" : path.endsWith(".svg") ? "image/svg+xml" : "image/webp" } });
+        return new Response(await readFile(`public${path}`), { headers: { "Content-Type": path.endsWith(".js") ? "text/javascript; charset=utf-8" : path.endsWith(".css") ? "text/css" : path.endsWith(".svg") ? "image/svg+xml" : "image/webp" } });
       } catch { return new Response(null, { status: 404 }); }
     } },
-  }));
+  }, fixture.ctx));
   await harness.start((request, response) => {
     void requestListener(request, response).catch(error => response.destroy(error as Error));
   });
@@ -114,9 +126,7 @@ describe("Chromium security header smoke", () => {
     ["/verify-email?verified=1", false, 200, "Email verified"],
     ["/missing", false, 404, "Page not found"],
     ["/docs/unknown", true, 404, "Page not found"],
-    ["/share/unknown", false, 404, "Share link unavailable"],
-    [`/share/${createShareToken("example/index.html", 100)}`, false, 410, "Share link unavailable"],
-    ["/s/test/files/missing.html", false, 404, "Page not found"],
+    [`${publicPath}/files/docs/missing.md`, false, 404, "Page not found"],
   ] as const)("loads styled auth/error HTML under CSP: %s", async (path, signedIn, status, heading) => {
     const page = await pageFor(signedIn);
     try {
@@ -144,7 +154,7 @@ describe("Chromium security header smoke", () => {
         iframe.sandbox.add("allow-scripts");
         iframe.src = path;
         document.body.append(iframe);
-      }, `${docsBase}/view/invalid/files/index.html`);
+      }, `${privatePath}/view/invalid/files/docs/index.md`);
       const frame = page.frameLocator("iframe");
       await browserStep("render opaque document error", () => frame.locator(".panel").waitFor({ state: "visible" }));
       expect(await frame.locator("h1").textContent()).toBe("Page not found");
@@ -186,7 +196,7 @@ describe("Chromium security header smoke", () => {
           }
         });
       });
-      await browserStep("load viewer shell", () => page.goto(harness.origin + docsBase));
+      await browserStep("load viewer shell", () => page.goto(harness.origin + privatePath));
       // The base stylesheet is same-origin and applied; no CSS runtime script exists.
       expect(await page.evaluate(() => typeof (window as unknown as { tailwind?: unknown }).tailwind)).toBe("undefined");
       expect(await page.evaluate(() => [...document.styleSheets].some(sheet => /\/styles\/viewer-base\.[0-9a-f]{10}\.css$/.test(sheet.href ?? "") && sheet.cssRules.length > 0))).toBe(true);
@@ -196,13 +206,14 @@ describe("Chromium security header smoke", () => {
       await expect.poll(() => messages.includes("commentor-parent-update"), {
         message: "commentor-parent-update must arrive after the READY handshake",
       }).toBe(true);
-      await expect.poll(() => frame.locator("body").evaluate(body => getComputedStyle(body).color), {
-        message: "ticket CSS must set the document body color",
-      }).toBe("rgb(1, 2, 3)");
+      // The frame's own stylesheet is same-origin and applied, even in the opaque private frame.
+      await expect.poll(() => frame.locator("body").evaluate(() => [...document.styleSheets].some(sheet => /\/styles\//.test(sheet.href ?? "")) && getComputedStyle(document.body).margin === "0px"), {
+        message: "the document stylesheet must apply",
+      }).toBe(true);
       expect(await frame.locator("body").evaluate(() => { try { void parent.document; return false; } catch { return true; } })).toBe(true);
       await settled(page);
       expect(await page.locator(`script[src="/commentor-parent.js?v=${COMMENTOR_PARENT_VERSION}"]`).count()).toBe(1);
-      expect(await frame.locator(`script[src="/commentor.js?v=${COMMENTOR_VERSION}"]`).count()).toBe(1);
+      expect(await frame.locator(`script[src="${harness.origin}/commentor.js?v=${COMMENTOR_VERSION}"]`).count()).toBe(1);
       const originalNonce = await page.locator(`script[src="/commentor-parent.js?v=${COMMENTOR_PARENT_VERSION}"]`).evaluate(script => (script as HTMLScriptElement).nonce);
       expect(originalNonce).not.toBe("");
 
@@ -231,67 +242,45 @@ describe("Chromium security header smoke", () => {
 
 describe("untrusted reload requests across viewer shells", () => {
   it.each([
-    ["share", "/s/test", false, false],
-    ["public", "/p/product", false, false],
-    ["legacy public", "/public/example/product", false, false],
-    ["legacy private", "/docs/example/index.html", true, true],
-    ["private", `${docsBase}?doc=index.html`, true, true],
+    ["public", publicPath, false, false],
+    ["private", privatePath, true, true],
   ] as const)("never navigates the %s shell without a parent gesture", async (_name, path, signedIn, offersNotice) => {
-    const stream = vi.mocked(blobs.getObjectStream);
-    const original = stream.getMockImplementation()!;
-    stream.mockImplementation(key => key.endsWith(".css") ? original(key) : Promise.resolve(new Response(
-      publisherHtml.replace("</body>", `<script>
-        function requestReload() {
-          document.body.dataset.reloadRequests = String(Number(document.body.dataset.reloadRequests || 0) + 1);
-          if (!navigator.userActivation.hasBeenActive) {
-            document.body.dataset.unactivatedRequests = String(Number(document.body.dataset.unactivatedRequests || 0) + 1);
-          }
-          parent.postMessage({ type: 'commentor-viewer-reload', userActivation: true }, '*');
-        }
-        addEventListener('load', () => {
-          // Send an initial burst before automation can confer user activation.
-          for (let i = 0; i < 100; i++) requestReload();
-          setInterval(requestReload, 10);
-        });
-      </script></body>`),
-    ).body));
-    try {
-      const page = await pageFor(signedIn);
-      let navigations = 0;
-      page.on("request", request => {
-        if (request.isNavigationRequest() && request.frame() === page.mainFrame()) navigations++;
-      });
-      await page.goto(harness.origin + path);
-      let frame = (await (await page.locator("#content-frame").elementHandle())!.contentFrame())!;
-      await frame.waitForFunction(() => Number(document.body.dataset.reloadRequests) >= 125);
-      expect(Number(await frame.locator("body").getAttribute("data-unactivated-requests"))).toBeGreaterThanOrEqual(100);
-      expect(navigations).toBe(1);
-      const notice = page.getByRole("complementary", { name: "Document update" });
-      expect(await notice.count()).toBe(offersNotice ? 1 : 0);
-      if (offersNotice) {
-        expect(await notice.getByRole("status").getAttribute("aria-live")).toBe("polite");
-        const url = page.url();
-        const reload = notice.getByRole("button", { name: "Reload", exact: true });
-        await reload.focus();
-        await Promise.all([page.waitForEvent("load"), page.keyboard.press("Enter")]);
-        frame = (await (await page.locator("#content-frame").elementHandle())!.contentFrame())!;
-        await frame.waitForFunction(() => Number(document.body.dataset.reloadRequests) >= 125);
-        expect(page.url()).toBe(url);
-        expect(navigations).toBe(2);
-        expect(await notice.count()).toBe(1);
-      }
-      await settled(page);
-    } finally { stream.mockImplementation(original); }
+    const page = await pageFor(signedIn);
+    let navigations = 0;
+    page.on("request", request => {
+      if (request.isNavigationRequest() && request.frame() === page.mainFrame()) navigations++;
+    });
+    // Repository frames run no inline script, so the hostile document's requests come from the test, without a gesture.
+    const flood = async () => {
+      const frame = (await (await page.locator("#content-frame").elementHandle())!.contentFrame())!;
+      await frame.locator("h1").waitFor();
+      await frame.evaluate(() => { for (let i = 0; i < 125; i++) parent.postMessage({ type: "commentor-viewer-reload", userActivation: true }, "*"); });
+      await page.evaluate(() => new Promise(resolve => setTimeout(resolve, 200)));
+    };
+    await page.goto(harness.origin + path);
+    await flood();
+    expect(navigations).toBe(1);
+    const notice = page.getByRole("complementary", { name: "Document update" });
+    expect(await notice.count()).toBe(offersNotice ? 1 : 0);
+    if (offersNotice) {
+      expect(await notice.getByRole("status").getAttribute("aria-live")).toBe("polite");
+      const url = page.url();
+      const reload = notice.getByRole("button", { name: "Reload", exact: true });
+      await reload.focus();
+      await Promise.all([page.waitForEvent("load"), page.keyboard.press("Enter")]);
+      await flood();
+      expect(page.url()).toBe(url);
+      expect(navigations).toBe(2);
+      expect(await notice.count()).toBe(1);
+    }
+    await settled(page);
   });
 });
 
 describe("viewer accessibility under CSP", () => {
   it.each([
-    ["share", "/s/test", false],
-    ["public", "/p/product", false],
-    ["legacy public", "/public/example/product", false],
-    ["legacy private", "/docs/example/index.html", true],
-    ["private", `${docsBase}?doc=index.html`, true],
+    ["public", publicPath, false],
+    ["private", privatePath, true],
   ] as const)("exposes one main document landmark in the %s shell", async (_name, path, signedIn) => {
     const page = await pageFor(signedIn);
     const response = await browserStep("load viewer shell", () => page.goto(harness.origin + path));
@@ -300,11 +289,7 @@ describe("viewer accessibility under CSP", () => {
     await waitForSettled(page);
     expect(await page.getByRole("main").count()).toBe(1);
     expect(await page.locator("main #content-frame").count()).toBe(1);
-    if (_name === "share") {
-      const viewport = page.viewportSize()!;
-      expect(await page.locator("#content-frame").boundingBox()).toEqual({ x: 0, y: 48, width: viewport.width, height: viewport.height - 48 });
-    }
-    // Publisher HTML has its own semantics; audit the Rendro shell only.
+    // The document has its own semantics; audit the Rendro shell only.
     const result = await browserStep("axe viewer landmarks", () => new AxeBuilder({ page })
       .options({ preload: false, iframes: false })
       .withRules(["landmark-one-main", "landmark-no-duplicate-main", "landmark-main-is-top-level"])
@@ -317,7 +302,7 @@ describe("viewer accessibility under CSP", () => {
 
   it("labels a drafted composer and exposes only named, open tooltips", async () => {
     const page = await pageFor(true);
-    await browserStep("open private document", () => page.goto(`${harness.origin}${docsBase}?doc=index.html`));
+    await browserStep("open private document", () => page.goto(`${harness.origin}${privatePath}`));
     const content = page.frameLocator("#content-frame");
     const comment = content.getByTestId("commentor-comment-btn");
     await expect.poll(() => comment.isEnabled()).toBe(true);
@@ -326,7 +311,7 @@ describe("viewer accessibility under CSP", () => {
     expect(await tip.textContent()).toBe("");
     expect(await content.getByRole("tooltip").count()).toBe(0);
     await comment.click();
-    await content.locator("p").click();
+    await content.locator("p").first().click();
     const textarea = content.getByRole("textbox", { name: "Comment", exact: true });
     await textarea.fill("Unsent accessibility regression draft");
     await page.mouse.move(0, 0);

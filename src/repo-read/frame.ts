@@ -143,7 +143,7 @@ export function frameContentSecurityPolicy(origin: string): string {
     `script-src ${origin}/private-viewer.js ${origin}${COMMENTOR_SCRIPT_PATH}`,
     `style-src ${origin}/styles/ ${COMMENTOR_STYLE_SOURCE}`,
     // Same-origin only: since #224 ingest writes every external image as a signed /img/ proxy path or drops it,
-    // so an external URL reaching a frame is a bug, and the policy keeps it from the reader (as RENDERED_DOCUMENT_POLICY).
+    // so an external URL reaching a frame is a bug, and the policy keeps it from the reader.
     `img-src ${origin}`,
     // No frame has a <base> (#293): a document's links always resolve against its own URL.
     "base-uri 'none'",

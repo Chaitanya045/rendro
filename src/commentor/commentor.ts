@@ -1,27 +1,21 @@
 import { CommentWriteCooldown } from "./write-cooldown";
 import { commentErrorMessage, commentRetryAfter } from "./errors";
 import { CommentOperationConflictError } from "./operation-state";
-import { whenVisible } from "./visibility";
 // commentor.ts — a drop-in commenting widget for any HTML file.
 //
 //   <script>window.COMMENTOR = { ... };</script>
 //   <script src="/commentor.js"></script>
 //
-// Config is either a project document scope served through the parent frame
-// ({ organizationId, projectId, documentPath, transport: "parent", canWrite }),
-// a legacy parent scope ({ orgSlug, filePath, documentPath, transport: "parent", canWrite }),
-// or a repository doc ({ repoId, documentPath, blobSha, transport: "parent" }, #254), read from the
-// script's data-commentor-config because repository frames allow no inline script. There the parent
-// says who may write, and anchors are heading slug plus quote (repo-anchor.ts).
-// The direct-Convex legacy configuration remains accepted for older integrations.
+// Config is a repository doc ({ repoId, documentPath, blobSha, transport: "parent" }, #254), read from
+// the script's data-commentor-config because repository frames allow no inline script. Every comment
+// call goes through the trusted parent shell, which also says who may write; anchors are heading slug
+// plus quote (repo-anchor.ts).
 //
 // Figma-style pins + inline bubbles. The widget is a single surface that
 // DOCKS to a screen edge (magnetic, springy snap; stays where you dropped it
 // ALONG the edge — never force-centered) and EXPANDS smoothly into the
 // comments list (the dock grows; the toolbar is its handle). Open shadow root.
 
-import { ConvexClient } from "convex/browser";
-import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { draftAfterSuccessfulReply } from "./reply-state";
 import { PendingDeletionCoordinator } from "./delete-state";
@@ -34,48 +28,14 @@ import { CommentMutationRejectedError, CommentMutationOutcomeUnknownError, Paren
 
 // ─────────────────────────────── types ───────────────────────────────
 
-interface Author {
-  name: string;
-  email: string;
-}
 interface Config {
-  convexUrl?: string;
-  orgSlug?: string;
-  filePath?: string;
-  organizationId?: string;
-  projectId?: Id<"projects">;
-  documentPath?: string;
-  repoId?: number;
-  blobSha?: string;
-  transport?: "parent";
-  canWrite?: boolean;
-  author?: Author;
-}
-type ThreadId = Id<"threads"> | Id<"documentThreads">;
-type ReplyId = Id<"replies"> | Id<"documentReplies">;
-
-function isParentConfig(config: Config): config is Config & {
   documentPath: string;
-} {
-  return Boolean(
-    config.transport === "parent"
-    && ((config.organizationId && config.projectId) || (config.orgSlug && config.filePath)
-      || (typeof config.repoId === "number" && typeof config.blobSha === "string"))
-    && config.documentPath,
-  );
+  repoId: number;
+  blobSha: string;
+  transport: "parent";
 }
-
-async function requestAuthToken(args?: { forceRefreshToken?: boolean }): Promise<string | null> {
-  // Scheduled refreshes of a hidden tab wait until it is visible again.
-  if (args?.forceRefreshToken) await whenVisible();
-  const response = await fetch("/api/auth/convex/token", {
-    credentials: "same-origin",
-    headers: { Accept: "application/json" },
-  });
-  if (!response.ok) return null;
-  const payload = (await response.json()) as { token?: unknown };
-  return typeof payload.token === "string" ? payload.token : null;
-}
+type ThreadId = Id<"repoThreads">;
+type ReplyId = Id<"repoReplies">;
 
 function storageGet(key: string): string | null {
   try {
@@ -93,25 +53,14 @@ function storageSet(key: string, value: string): void {
   }
 }
 
-type Anchor =
-  | {
-      kind: "text-range";
-      quote: string;
-      path: string[];
-      startOffset: number;
-      endOffset: number;
-    }
-  | { kind: "element"; path: string[] }
-  | RepoAnchor;
-type TextAnchor = Exclude<Anchor, { kind: "element" }>;
+type Anchor = RepoAnchor;
 
 // A repository doc (#254): the rendered page and the blob it shows. Anchors resolve once per thread
 // snapshot (the page never changes), so pins cost no search while scrolling.
-let repoPage: { root: Element; blobSha: string; sections: ReturnType<typeof pageSections> | null } | null = null;
+let repoPage!: { root: Element; blobSha: string; sections: ReturnType<typeof pageSections> | null };
 const repoRanges = new WeakMap<RepoAnchor, Range | null>();
 
 function repoRange(anchor: RepoAnchor): Range | null {
-  if (!repoPage) return null;
   if (repoRanges.has(anchor)) return repoRanges.get(anchor)!;
   repoPage.sections ??= pageSections(repoPage.root);
   const found = locateRepoAnchor(repoPage.sections, anchor, repoPage.blobSha);
@@ -139,11 +88,6 @@ interface Reply {
 interface Thread {
   _id: ThreadId;
   _creationTime: number;
-  orgSlug?: string;
-  filePath?: string;
-  organizationId?: string;
-  projectId?: Id<"projects">;
-  documentPath?: string;
   canDelete?: boolean;
   authorEmail: string;
   authorName: string;
@@ -223,115 +167,8 @@ function clamp(lo: number, hi: number, v: number): number {
   return Math.max(lo, Math.min(hi, v));
 }
 
-function cssPath(el: Element | null): string[] {
-  const segs: string[] = [];
-  let cur: Element | null = el;
-  while (cur && cur !== document.body && cur.parentElement) {
-    const tag = cur.tagName.toLowerCase();
-    const sameTag = Array.from(cur.parentElement.children).filter(
-      (s) => s.tagName.toLowerCase() === tag,
-    );
-    const idx = sameTag.indexOf(cur) + 1;
-    segs.unshift(sameTag.length > 1 ? `${tag}:nth-of-type(${idx})` : tag);
-    cur = cur.parentElement;
-  }
-  return segs;
-}
-
-function resolvePath(path: string[]): Element | null {
-  if (path.length === 0) return null;
-  return document.querySelector(path.join(" > "));
-}
-
-function findQuoteRange(root: Element, quote: string): Range | null {
-  const exactNeedle = quote.trim();
-  if (!exactNeedle) return null;
-
-  const nodes: Text[] = [];
-  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
-  let node: Node | null;
-  while ((node = walker.nextNode())) {
-    const text = node as Text;
-    nodes.push(text);
-    const index = text.data.indexOf(exactNeedle);
-    if (index < 0) continue;
-    const range = document.createRange();
-    range.setStart(text, index);
-    range.setEnd(text, index + exactNeedle.length);
-    return range;
-  }
-
-  const normalizedNeedle = exactNeedle.replace(/\s+/g, " ");
-  type MappedCharacter = {
-    node: Text;
-    startOffset: number;
-    endOffset: number;
-  };
-  const findMappedRange = (separateNodes: boolean): Range | null => {
-    let normalizedText = "";
-    const characters: MappedCharacter[] = [];
-    const appendSpace = (
-      textNode: Text,
-      startOffset: number,
-      endOffset: number,
-    ) => {
-      if (!normalizedText || normalizedText.endsWith(" ")) {
-        const previous = characters.at(-1);
-        if (previous && normalizedText.endsWith(" "))
-          previous.endOffset = endOffset;
-        return;
-      }
-      normalizedText += " ";
-      characters.push({ node: textNode, startOffset, endOffset });
-    };
-
-    nodes.forEach((textNode, nodeIndex) => {
-      if (
-        separateNodes &&
-        nodeIndex > 0 &&
-        textNode.data.trim() &&
-        normalizedText
-      )
-        appendSpace(textNode, 0, 0);
-      for (let offset = 0; offset < textNode.data.length; offset += 1) {
-        const character = textNode.data[offset];
-        if (/\s/.test(character)) {
-          appendSpace(textNode, offset, offset + 1);
-          continue;
-        }
-        normalizedText += character;
-        characters.push({
-          node: textNode,
-          startOffset: offset,
-          endOffset: offset + 1,
-        });
-      }
-    });
-
-    const index = normalizedText.indexOf(normalizedNeedle);
-    if (index < 0) return null;
-    // Every character of normalizedText has exactly one mapping entry, so a match always maps.
-    const start = characters[index];
-    const end = characters[index + normalizedNeedle.length - 1];
-    const range = document.createRange();
-    range.setStart(start.node, start.startOffset);
-    range.setEnd(end.node, end.endOffset);
-    return range;
-  };
-
-  return findMappedRange(false) ?? findMappedRange(true);
-}
-
 function anchorElement(a: Anchor): Element | null {
-  if (a.kind === "repo-text") return repoRange(a)?.startContainer.parentElement ?? null;
-  if (a.kind === "text-range") {
-    return (
-      resolvePath(a.path) ??
-      findQuoteRange(document.body, a.quote)?.startContainer?.parentElement ??
-      null
-    );
-  }
-  return resolvePath(a.path);
+  return repoRange(a)?.startContainer.parentElement ?? null;
 }
 
 function textRangeClientRects(range: Range): DOMRect[] {
@@ -362,90 +199,46 @@ function textRangeClientRects(range: Range): DOMRect[] {
   return rects;
 }
 
-function textAnchorClientRects(
-  anchor: TextAnchor,
-): DOMRect[] {
-  if (anchor.kind === "repo-text") {
-    const range = repoRange(anchor);
-    return range ? textRangeClientRects(range) : [];
-  }
-  const scope =
-    resolvePath(anchor.path) ??
-    document.querySelector("main, article, [data-page]") ??
-    document.body;
-  const range = findQuoteRange(scope, anchor.quote);
+function textAnchorClientRects(anchor: Anchor): DOMRect[] {
+  const range = repoRange(anchor);
   return range ? textRangeClientRects(range) : [];
 }
 
 function anchorQuote(anchor: Anchor): string | null {
-  if (anchor.kind === "repo-text") return anchor.exact.trim() ? anchor.exact : null;
-  if (anchor.kind === "text-range")
-    return anchor.quote.trim() ? anchor.quote : null;
-  const element = resolvePath(anchor.path);
-  if (!element) return null;
-  const range = document.createRange();
-  range.selectNodeContents(element);
-  if (textRangeClientRects(range).length === 0) return null;
-  const text =
-    element instanceof HTMLElement ? element.innerText : element.textContent;
-  const quote = text?.replace(/\s+/g, " ").trim();
-  return quote || null;
+  return anchor.exact.trim() ? anchor.exact : null;
 }
 
 function anchorPoint(
   a: Anchor,
 ): { x: number; y: number; ok: true } | { ok: false } {
-  if (a.kind !== "element") {
-    const rect = textAnchorClientRects(a)[0];
-    return rect
-      ? { x: rect.left, y: rect.top, ok: true }
-      : { ok: false };
-  }
-  const el = resolvePath(a.path);
-  if (!el) return { ok: false };
-  const r = el.getBoundingClientRect();
-  return { x: r.left, y: r.top, ok: true };
+  const rect = textAnchorClientRects(a)[0];
+  return rect
+    ? { x: rect.left, y: rect.top, ok: true }
+    : { ok: false };
 }
 
 function anchorRect(a: Anchor): Rect | null {
-  if (a.kind !== "element") {
-    const rects = textAnchorClientRects(a);
-    const first = rects[0];
-    if (!first) return null;
-    const bounds: Rect = {
-      left: first.left,
-      top: first.top,
-      right: first.right,
-      bottom: first.bottom,
-    };
-    for (let index = 1; index < rects.length; index += 1) {
-      const rect = rects[index];
-      bounds.left = Math.min(bounds.left, rect.left);
-      bounds.top = Math.min(bounds.top, rect.top);
-      bounds.right = Math.max(bounds.right, rect.right);
-      bounds.bottom = Math.max(bounds.bottom, rect.bottom);
-    }
-    return bounds;
+  const rects = textAnchorClientRects(a);
+  const first = rects[0];
+  if (!first) return null;
+  const bounds: Rect = {
+    left: first.left,
+    top: first.top,
+    right: first.right,
+    bottom: first.bottom,
+  };
+  for (let index = 1; index < rects.length; index += 1) {
+    const rect = rects[index];
+    bounds.left = Math.min(bounds.left, rect.left);
+    bounds.top = Math.min(bounds.top, rect.top);
+    bounds.right = Math.max(bounds.right, rect.right);
+    bounds.bottom = Math.max(bounds.bottom, rect.bottom);
   }
-  const r = resolvePath(a.path)?.getBoundingClientRect();
-  return r
-    ? { left: r.left, top: r.top, right: r.right, bottom: r.bottom }
-    : null;
+  return bounds;
 }
 
 function anchorRects(a: Anchor): Rect[] {
-  let orderedRects: DOMRect[];
-  if (a.kind !== "element") {
-    orderedRects = textAnchorClientRects(a);
-  } else {
-    const element = resolvePath(a.path);
-    if (!element) return [];
-    const textRange = document.createRange();
-    textRange.selectNodeContents(element);
-    orderedRects = textRangeClientRects(textRange);
-    if (orderedRects.length === 0)
-      orderedRects = [element.getBoundingClientRect()];
-  }
+  const orderedRects = textAnchorClientRects(a);
   orderedRects.sort(
     (first, second) =>
       first.top - second.top || first.left - second.left,
@@ -544,9 +337,7 @@ function placeFloating(
 const MARGIN = 16;
 
 class Commentor {
-  private cfg: Config;
-  private client: ConvexClient | null;
-  private parentTransport: ParentCommentTransport | null;
+  private parentTransport: ParentCommentTransport;
   private root: ShadowRoot;
   private writeCooldown: CommentWriteCooldown;
   private dock: HTMLElement;
@@ -610,16 +401,9 @@ class Commentor {
   private dockOffset = 0;
 
   constructor(cfg: Config) {
-    this.cfg = cfg;
-    this.canWrite = isParentConfig(cfg) ? false : Boolean(cfg.author);
-    if (isParentConfig(cfg)) {
-      this.client = null;
-      this.parentTransport = new ParentCommentTransport(window.parent, window, cfg.documentPath);
-    } else {
-      this.client = new ConvexClient(cfg.convexUrl!);
-      this.client.setAuth(requestAuthToken);
-      this.parentTransport = null;
-    }
+    // The parent says whether this reader may write (see the access callback below).
+    this.canWrite = false;
+    this.parentTransport = new ParentCommentTransport(window.parent, window, cfg.documentPath);
 
     const host = document.createElement("div");
     host.id = "commentor-host";
@@ -914,107 +698,97 @@ class Commentor {
     };
     const fail = (error: Error) => {
       console.error("[commentor] subscription error", error);
-      this.toast(isParentConfig(this.cfg) ? error.message : commentErrorMessage(error, "Comments could not be loaded"), { kind: "error" });
+      this.toast(error.message, { kind: "error" });
     };
 
-    if (isParentConfig(this.cfg)) {
-      const transport = this.parentTransport!;
-      transport.subscribe(
-        (threads, canLoadMore, loading) => update(
-          threads as Thread[],
-          { canLoadMore, loading },
-        ),
-        (threadId, replies, canLoadMore, loading) => {
-          const id = threadId as ThreadId;
-          const prior = this.replyPagination.get(id);
-          if (replies.length > 0 || !loading) this.expandedReplies.set(id, replies as Reply[]);
-          this.replyPagination.set(id, { canLoadMore, loading });
-          update(this.liveThreads.map((thread) => thread._id === id
-            ? {
-                ...thread,
-                replies: this.expandedReplies.get(id) ?? thread.replies,
-                repliesHasMore: canLoadMore,
-              }
-            : thread), undefined, prior?.loading === true || loading);
+    const transport = this.parentTransport;
+    transport.subscribe(
+      (threads, canLoadMore, loading) => update(
+        threads as Thread[],
+        { canLoadMore, loading },
+      ),
+      (threadId, replies, canLoadMore, loading) => {
+        const id = threadId as ThreadId;
+        const prior = this.replyPagination.get(id);
+        if (replies.length > 0 || !loading) this.expandedReplies.set(id, replies as Reply[]);
+        this.replyPagination.set(id, { canLoadMore, loading });
+        update(this.liveThreads.map((thread) => thread._id === id
+          ? {
+              ...thread,
+              replies: this.expandedReplies.get(id) ?? thread.replies,
+              repliesHasMore: canLoadMore,
+            }
+          : thread), undefined, prior?.loading === true || loading);
+      },
+      fail,
+      () => this.toast("Still waiting for confirmation. Your change is pending; refreshing comments will keep waiting for its result.", {
+        actionLabel: "Refresh",
+        duration: 30_000,
+        onAction: () => {
+          void transport.refresh().catch(() => {
+            this.toast("Comments could not be refreshed. Still waiting for confirmation.", { kind: "error" });
+          });
         },
-        fail,
-        () => this.toast("Still waiting for confirmation. Your change is pending; refreshing comments will keep waiting for its result.", {
-          actionLabel: "Refresh",
-          duration: 30_000,
-          onAction: () => {
-            void transport.refresh().catch(() => {
-              this.toast("Comments could not be refreshed. Still waiting for confirmation.", { kind: "error" });
-            });
-          },
-        }),
-        () => {
-          // The parent is replacing its reply subscriptions too. Let the new
-          // thread snapshots supply replies instead of retaining stale pages.
-          this.expandedReplies.clear();
-          this.replyPagination.clear();
-          this.syncRecoveryDrafts();
-          const operations = Object.values(transport.recovery.value.operations);
-          if (operations.some((op) => !transport.isMutationPending(op.method, op.args))) {
-            this.toast(new CommentMutationOutcomeUnknownError().message, { kind: "error" });
-          }
-          const draft = transport.recovery.value.drafts.create;
-          if (draft && !this.bubbleLayer.querySelector('.composer[data-state="open"]')) {
-            this.openComposer(draft.anchor as Anchor, this.commentsBtn.getBoundingClientRect());
-          }
-        },
-        () => {
-          this.writeCooldown.reset();
-          this.replyDrafts.clear();
-          this.closeBubbles(false);
-          this.hideSelectionAction(true);
-          this.hideTip();
-          this.collapseDrawer(true);
-          this.expandedReplies.clear();
-          this.replyPagination.clear();
-          // Another reader's writes are not this one's to show.
+      }),
+      () => {
+        // The parent is replacing its reply subscriptions too. Let the new
+        // thread snapshots supply replies instead of retaining stale pages.
+        this.expandedReplies.clear();
+        this.replyPagination.clear();
+        this.syncRecoveryDrafts();
+        const operations = Object.values(transport.recovery.value.operations);
+        if (operations.some((op) => !transport.isMutationPending(op.method, op.args))) {
+          this.toast(new CommentMutationOutcomeUnknownError().message, { kind: "error" });
+        }
+        const draft = transport.recovery.value.drafts.create;
+        if (draft && !this.bubbleLayer.querySelector('.composer[data-state="open"]')) {
+          this.openComposer(draft.anchor as Anchor, this.commentsBtn.getBoundingClientRect());
+        }
+      },
+      () => {
+        this.writeCooldown.reset();
+        this.replyDrafts.clear();
+        this.closeBubbles(false);
+        this.hideSelectionAction(true);
+        this.hideTip();
+        this.collapseDrawer(true);
+        this.expandedReplies.clear();
+        this.replyPagination.clear();
+        // Another reader's writes are not this one's to show.
+        this.sendingThreads = [];
+        this.sendingReplies.clear();
+        update([], { canLoadMore: false, loading: false });
+      },
+      (compatible, canReloadViewer, parentCanWrite) => {
+        this.parentUpgradeRequired = !compatible;
+        this.canReloadViewer = canReloadViewer;
+        const wasWritable = this.canWrite;
+        // A repository frame is the same for every reader: the parent says whether this one may write.
+        this.canWrite = compatible && parentCanWrite === true;
+        this.commentButton.disabled = !this.canWrite;
+        if (!compatible) {
+          this.closeBubbles(false, true);
+          this.threads = [];
+          this.liveThreads = [];
           this.sendingThreads = [];
           this.sendingReplies.clear();
-          update([], { canLoadMore: false, loading: false });
-        },
-        (compatible, canReloadViewer, parentCanWrite) => {
-          this.parentUpgradeRequired = !compatible;
-          this.canReloadViewer = canReloadViewer;
-          const wasWritable = this.canWrite;
-          // A repository frame is the same for every reader: the parent says whether this one may write.
-          this.canWrite = compatible && (this.cfg.repoId !== undefined ? parentCanWrite === true : this.cfg.canWrite === true);
-          this.commentButton.disabled = !this.canWrite;
-          if (!compatible) {
-            this.closeBubbles(false, true);
-            this.threads = [];
-            this.liveThreads = [];
-            this.sendingThreads = [];
-            this.sendingReplies.clear();
-            this.markersLayer.replaceChildren();
-          }
-          this.renderDrawerList();
-          // Access changes only matter when they cross the guard, and the re-read must not
-          // defer: a throttled or manually controlled frame schedule would leave a pending
-          // rAF in selectionRaf, blocking scheduleSelectionAction and racing a hide timer.
-          if (this.canWrite === wasWritable) return;
-          const selected = this.canWrite ? this.selectedAnchor() : null;
-          if (selected && selected.key !== this.suppressedSelectionKey && this.bubbleLayer.children.length === 0) {
-            clearTimeout(this.selectionHideTimer);
-            this.selectionAction.hidden = false;
-            this.selectionAction.setAttribute("data-state", "open");
-            placeFloating(this.selectionAction, selected.rect, 6);
-          } else if (!this.selectionAction.hidden) {
-            this.hideSelectionAction(false);
-          }
-        },
-      );
-      return;
-    }
-    // boot() only builds a direct client for a config with convexUrl, orgSlug and filePath.
-    this.client!.onUpdate(
-      api.threads.list,
-      { orgSlug: this.cfg.orgSlug!, filePath: this.cfg.filePath! },
-      update,
-      fail,
+          this.markersLayer.replaceChildren();
+        }
+        this.renderDrawerList();
+        // Access changes only matter when they cross the guard, and the re-read must not
+        // defer: a throttled or manually controlled frame schedule would leave a pending
+        // rAF in selectionRaf, blocking scheduleSelectionAction and racing a hide timer.
+        if (this.canWrite === wasWritable) return;
+        const selected = this.canWrite ? this.selectedAnchor() : null;
+        if (selected && selected.key !== this.suppressedSelectionKey && this.bubbleLayer.children.length === 0) {
+          clearTimeout(this.selectionHideTimer);
+          this.selectionAction.hidden = false;
+          this.selectionAction.setAttribute("data-state", "open");
+          placeFloating(this.selectionAction, selected.rect, 6);
+        } else if (!this.selectionAction.hidden) {
+          this.hideSelectionAction(false);
+        }
+      },
     );
   }
 
@@ -1043,7 +817,8 @@ class Commentor {
         "aria-label": "Comment",
         "aria-pressed": "false",
         onclick: () => this.onCommentButton(),
-        ...(!this.canWrite ? { disabled: "disabled" } : {}),
+        // Nobody may write until the parent says so (parentReady).
+        disabled: "disabled",
       },
       svg(ICONS.comment),
     ) as HTMLButtonElement;
@@ -1253,32 +1028,14 @@ class Commentor {
     const node = range.commonAncestorContainer;
     const el = node.nodeType === 1 ? (node as Element) : node.parentElement;
     if (!el || el.closest("#commentor-host")) return null;
-    if (repoPage) {
-      // Repository docs: the quote, its heading and its context, so the comment survives new commits.
-      const repoAnchor = repoAnchorFor(repoPage.root, repoPage.sections ??= pageSections(repoPage.root), range, repoPage.blobSha);
-      const bounds = range.getBoundingClientRect();
-      if (!repoAnchor || (!bounds.width && !bounds.height)) return null;
-      return {
-        anchor: repoAnchor,
-        rect: { left: bounds.left, top: bounds.top, right: bounds.right, bottom: bounds.bottom },
-        key: `${repoAnchor.headingSlug}\u0000${repoAnchor.offset}:${repoAnchor.exact.length}`,
-      };
-    }
-    const quote = sel.toString();
-    const path = cssPath(el);
-    const anchor: Anchor = {
-      kind: "text-range",
-      quote,
-      path,
-      startOffset: range.startOffset,
-      endOffset: range.endOffset,
-    };
-    const r = range.getBoundingClientRect();
-    if (!r.width && !r.height) return null;
+    // Repository docs: the quote, its heading and its context, so the comment survives new commits.
+    const repoAnchor = repoAnchorFor(repoPage.root, repoPage.sections ??= pageSections(repoPage.root), range, repoPage.blobSha);
+    const bounds = range.getBoundingClientRect();
+    if (!repoAnchor || (!bounds.width && !bounds.height)) return null;
     return {
-      anchor,
-      rect: { left: r.left, top: r.top, right: r.right, bottom: r.bottom },
-      key: `${quote}\u0000${path.join(">")}\u0000${range.startOffset}:${range.endOffset}`,
+      anchor: repoAnchor,
+      rect: { left: bounds.left, top: bounds.top, right: bounds.right, bottom: bounds.bottom },
+      key: `${repoAnchor.headingSlug}\u0000${repoAnchor.offset}:${repoAnchor.exact.length}`,
     };
   }
 
@@ -1377,18 +1134,14 @@ class Commentor {
       this.toast("Click an element or select text to comment.");
       return;
     }
-    let anchor: Anchor = { kind: "element", path: cssPath(target) };
-    if (repoPage) {
-      // Repository docs anchor to text only: the clicked element's text, if it has any.
-      const range = document.createRange();
-      range.selectNodeContents(target);
-      const repoAnchor = repoAnchorFor(repoPage.root, repoPage.sections ??= pageSections(repoPage.root), range, repoPage.blobSha);
-      if (!repoAnchor) {
-        this.setCommentMode(false);
-        this.toast("Select some text to comment on.");
-        return;
-      }
-      anchor = repoAnchor;
+    // Repository docs anchor to text only: the clicked element's text, if it has any.
+    const range = document.createRange();
+    range.selectNodeContents(target);
+    const anchor = repoAnchorFor(repoPage.root, repoPage.sections ??= pageSections(repoPage.root), range, repoPage.blobSha);
+    if (!anchor) {
+      this.setCommentMode(false);
+      this.toast("Select some text to comment on.");
+      return;
     }
     this.setCommentMode(false);
     this.openComposer(anchor, {
@@ -1594,7 +1347,7 @@ class Commentor {
 
   /** The reader's new thread, in flight with this clientOperationId; nothing when the write was refused before it left. */
   private addSendingThread(body: string, anchor: Anchor): Thread | null {
-    const clientOperationId = this.parentTransport!.inFlightOperationId("thread.create");
+    const clientOperationId = this.parentTransport.inFlightOperationId("thread.create");
     if (!clientOperationId) return null;
     const thread: Thread = {
       _id: `sending-${clientOperationId}` as ThreadId, _creationTime: Date.now(), authorEmail: "", authorName: "You",
@@ -1606,7 +1359,7 @@ class Commentor {
   }
 
   private addSendingReply(threadId: ThreadId, body: string): Reply | null {
-    const clientOperationId = this.parentTransport?.inFlightOperationId("reply.add", { threadId });
+    const clientOperationId = this.parentTransport.inFlightOperationId("reply.add", { threadId });
     if (!clientOperationId) return null;
     const reply: Reply = {
       _id: `sending-${clientOperationId}` as ReplyId, _creationTime: Date.now(), authorEmail: "", authorName: "You",
@@ -1647,7 +1400,7 @@ class Commentor {
   }
 
   private syncRecoveryDrafts(): void {
-    const state = this.parentTransport?.recovery?.value;
+    const state = this.parentTransport.recovery.value;
     if (!state) return;
     this.replyDrafts.clear();
     for (const [key, draft] of Object.entries(state.drafts)) {
@@ -1664,13 +1417,13 @@ class Commentor {
     invoker: HTMLElement | null = null,
   ): { textarea: HTMLTextAreaElement; post: HTMLButtonElement } | null {
     if (!this.canWrite) return null;
-    if (this.parentTransport?.isMutationPending("thread.create")) {
+    if (this.parentTransport.isMutationPending("thread.create")) {
       this.toast("Still waiting for confirmation of your comment.");
       return null;
     }
-    const savedDraft = this.parentTransport?.recovery?.value.drafts.create;
+    const savedDraft = this.parentTransport.recovery.value.drafts.create;
     if (savedDraft) anchor = savedDraft.anchor as Anchor;
-    this.composerHasSubmitted = Boolean(Object.values(this.parentTransport?.recovery?.value.operations ?? {}).some((op) => op.method === "thread.create"));
+    this.composerHasSubmitted = Boolean(Object.values(this.parentTransport.recovery.value.operations).some((op) => op.method === "thread.create"));
     this.closeBubbles(false);
     this.hideSelectionAction(true);
     this.bubbleReturnFocus = invoker ?? this.commentsBtn;
@@ -1681,7 +1434,7 @@ class Commentor {
       "aria-describedby": "commentor-composer-help",
     }) as HTMLTextAreaElement;
     textarea.value = typeof savedDraft?.body === "string" ? savedDraft.body : "";
-    textarea.addEventListener("input", () => this.parentTransport?.saveDraft("create", { body: textarea.value, anchor }));
+    textarea.addEventListener("input", () => this.parentTransport.saveDraft("create", { body: textarea.value, anchor }));
     const post = h(
       "button",
       {
@@ -1712,28 +1465,7 @@ class Commentor {
       post.classList.add("is-pending");
       post.setAttribute("aria-busy", "true");
       post.textContent = "Posting…";
-      if (this.parentTransport) {
-        await this.postThread(body, anchor, rect, invoker);
-        return;
-      }
-      try {
-        await this.client!.mutation(api.threads.create, {
-          orgSlug: this.cfg.orgSlug!,
-          filePath: this.cfg.filePath!,
-          body,
-          // Only parent configurations (repository docs among them) make repository anchors.
-          anchor: anchor as Exclude<Anchor, RepoAnchor>,
-        });
-        this.closeBubbles(true, true);
-      } catch (err) {
-        textarea.disabled = false;
-        post.disabled = false;
-        cancel.disabled = false;
-        post.classList.remove("is-pending");
-        post.removeAttribute("aria-busy");
-        post.textContent = "Post";
-        this.composerFailed(err, textarea, post);
-      }
+      await this.postThread(body, anchor, rect, invoker);
     };
     post.addEventListener("click", submit);
     textarea.addEventListener("keydown", async (e: KeyboardEvent) => {
@@ -1778,7 +1510,7 @@ class Commentor {
    * where the error is shown and Post retries with the same operation when its outcome is unknown.
    */
   private async postThread(body: string, anchor: Anchor, rect: Rect, invoker: HTMLElement | null): Promise<void> {
-    const sending = this.parentTransport!.mutate("thread.create", { body, anchor });
+    const sending = this.parentTransport.mutate("thread.create", { body, anchor });
     const item = this.addSendingThread(body, anchor);
     this.closeBubbles(true, true);
     try {
@@ -1911,44 +1643,25 @@ class Commentor {
         button.removeAttribute("aria-busy");
         button.setAttribute("aria-label", label);
       }
-      if (this.parentTransport) {
-        this.renderDrawerList();
-        this.refreshOpenBubble();
-      }
+      this.renderDrawerList();
+      this.refreshOpenBubble();
     }
   }
 
   private removeThread(threadId: ThreadId, clientOperationId: string): Promise<unknown> {
-    return isParentConfig(this.cfg)
-      ? this.parentTransport!.mutate("thread.remove", { threadId, clientOperationId })
-      : this.client!.mutation(api.threads.remove, {
-          threadId: threadId as Id<"threads">,
-        });
+    return this.parentTransport.mutate("thread.remove", { threadId, clientOperationId });
   }
 
   private resolveThread(threadId: ThreadId, resolved: boolean): Promise<unknown> {
-    return isParentConfig(this.cfg)
-      ? this.parentTransport!.mutate("thread.resolve", { threadId, resolved })
-      : this.client!.mutation(api.threads.resolve, {
-          threadId: threadId as Id<"threads">,
-        });
+    return this.parentTransport.mutate("thread.resolve", { threadId, resolved });
   }
 
   private archiveThread(threadId: ThreadId, archived: boolean): Promise<unknown> {
-    return isParentConfig(this.cfg)
-      ? this.parentTransport!.mutate("thread.archive", { threadId, archived })
-      : this.client!.mutation(api.threads.archive, {
-          threadId: threadId as Id<"threads">,
-        });
+    return this.parentTransport.mutate("thread.archive", { threadId, archived });
   }
 
   private addReply(threadId: ThreadId, body: string): Promise<unknown> {
-    return isParentConfig(this.cfg)
-      ? this.parentTransport!.mutate("reply.add", { threadId, body })
-      : this.client!.mutation(api.replies.add, {
-          threadId: threadId as Id<"threads">,
-          body,
-        });
+    return this.parentTransport.mutate("reply.add", { threadId, body });
   }
 
   private async loadOlderThreads(): Promise<void> {
@@ -1966,7 +1679,6 @@ class Commentor {
   }
 
   private async loadOlderReplies(threadId: ThreadId): Promise<void> {
-    if (!this.parentTransport) return;
     const thread = this.threads.find((candidate) => candidate._id === threadId);
     const current = this.replyPagination.get(threadId) ?? {
       canLoadMore: Boolean(thread?.repliesHasMore),
@@ -2057,7 +1769,7 @@ class Commentor {
         },
         svg(ICONS.check),
       ) as HTMLButtonElement;
-      resolveButton.disabled = this.parentTransport?.isMutationPending("thread.resolve", { threadId: t._id }) ?? false;
+      resolveButton.disabled = this.parentTransport.isMutationPending("thread.resolve", { threadId: t._id });
       resolveButton.addEventListener("click", (e) => {
         e.stopPropagation();
         void this.runThreadAction(
@@ -2080,7 +1792,7 @@ class Commentor {
         },
         svg(ICONS.archive),
       ) as HTMLButtonElement;
-      archiveButton.disabled = this.parentTransport?.isMutationPending("thread.archive", { threadId: t._id }) ?? false;
+      archiveButton.disabled = this.parentTransport.isMutationPending("thread.archive", { threadId: t._id });
       archiveButton.addEventListener("click", (e) => {
         e.stopPropagation();
         void this.runThreadAction(
@@ -2106,7 +1818,7 @@ class Commentor {
         svg(ICONS.trash),
       );
       actions.append(resolveButton);
-      if (t.canDelete === true || !isParentConfig(this.cfg)) {
+      if (t.canDelete === true) {
         actions.append(archiveButton, deleteButton);
       }
       head.append(actions);
@@ -2171,14 +1883,14 @@ class Commentor {
           ...(r.sending === "sending"
             ? [" ", h("span", { class: "sending-state", "data-testid": "commentor-sending" }, "Sending…")]
             : []),
-          this.canWrite && r.canDelete === true && isParentConfig(this.cfg)
+          this.canWrite && r.canDelete === true
             ? h("button", {
                 class: "card-action danger",
                 type: "button",
                 "data-tip": "Delete reply",
                 "aria-label": `Delete reply by ${r.authorName}`,
                 "data-testid": "commentor-delete-reply-btn",
-                ...(this.parentTransport!.isMutationPending("reply.remove", { threadId: t._id, replyId: r._id })
+                ...(this.parentTransport.isMutationPending("reply.remove", { threadId: t._id, replyId: r._id })
                   ? { disabled: "" } : {}),
                 onclick: (event: Event) => {
                   event.stopPropagation();
@@ -2186,7 +1898,7 @@ class Commentor {
                   void this.runThreadAction(
                     button,
                     `Delete reply by ${r.authorName}`,
-                    () => this.parentTransport!.mutate("reply.remove", { threadId: t._id, replyId: r._id }),
+                    () => this.parentTransport.mutate("reply.remove", { threadId: t._id, replyId: r._id }),
                     "Could not delete reply.",
                   );
                 },
@@ -2229,7 +1941,7 @@ class Commentor {
       input.addEventListener("input", () => {
         if (input.value) this.replyDrafts.set(t._id, input.value);
         else this.replyDrafts.delete(t._id);
-        this.parentTransport?.saveDraft(t._id, { body: input.value });
+        this.parentTransport.saveDraft(t._id, { body: input.value });
       });
       const send = h(
         "button",
@@ -2263,16 +1975,14 @@ class Commentor {
         const item = this.addSendingReply(t._id, body);
         try {
           await sending;
-          if (item) this.sentReply(t._id, item);
+          // A write that succeeds was dispatched, so it has its optimistic copy.
+          this.sentReply(t._id, item!);
           const nextDraft = draftAfterSuccessfulReply(
             this.replyDrafts.get(t._id),
             submittedDraft,
           );
           if (nextDraft === undefined) this.replyDrafts.delete(t._id);
           else this.replyDrafts.set(t._id, nextDraft);
-          for (const candidate of this.replyInputs(t._id)) {
-            if (candidate.value === submittedDraft) candidate.value = "";
-          }
         } catch (err) {
           console.error("[commentor] reply failed", err);
           if (item) {
@@ -2524,13 +2234,13 @@ class Commentor {
       this.drawerList.append(h("div", { class: "empty", role: "status", "aria-live": "polite" },
         h("p", undefined, COMMENTOR_UPGRADE_NOTICE),
         ...(this.canReloadViewer
-          ? [h("button", { type: "button", onclick: () => this.parentTransport?.requestViewerReload() }, "Show reload notice")]
+          ? [h("button", { type: "button", onclick: () => this.parentTransport.requestViewerReload() }, "Show reload notice")]
           : [h("p", undefined, "Use your browser’s Reload button to reload the full page.")]),
       ));
       return;
     }
     const visible = this.filteredThreads(this.threadFilter);
-    if (isParentConfig(this.cfg) && (this.canLoadMoreThreads || this.loadingMoreThreads)) {
+    if (this.canLoadMoreThreads || this.loadingMoreThreads) {
       const loadOlder = h(
         "button",
         {
@@ -2988,11 +2698,9 @@ class Commentor {
   }
 }
 
+/** A new comment's anchor always quotes text: the reader selected it, or a kept draft (validated) did. */
 function anchorLabel(a: Anchor): string {
-  const quote = anchorQuote(a);
-  return quote
-    ? `On: “${quote.slice(0, 60)}${quote.length > 60 ? "…" : ""}”`
-    : "On: element";
+  return `On: “${a.exact.slice(0, 60)}${a.exact.length > 60 ? "…" : ""}”`;
 }
 
 // ────────────────────────────── boot ────────────────────────────────
@@ -3012,17 +2720,12 @@ function scriptConfig(): Config | undefined {
 }
 
 function boot(): void {
-  const cfg = (window as unknown as { COMMENTOR?: Config }).COMMENTOR ?? scriptConfig();
-  const hasLegacyScope = Boolean(cfg?.orgSlug && cfg.filePath);
-  if (!cfg || (!isParentConfig(cfg) && (!cfg.convexUrl || !hasLegacyScope))) {
-    console.error(
-      "[commentor] not started — configure a legacy organization/file or project document scope",
-    );
+  const cfg = scriptConfig();
+  if (!cfg || cfg.transport !== "parent" || typeof cfg.repoId !== "number" || typeof cfg.blobSha !== "string" || !cfg.documentPath) {
+    console.error("[commentor] not started — configure a repository document scope");
     return;
   }
-  if (typeof cfg.repoId === "number" && typeof cfg.blobSha === "string") {
-    repoPage = { root: document.querySelector("article.markdown-body") ?? document.body, blobSha: cfg.blobSha, sections: null };
-  }
+  repoPage = { root: document.querySelector("article.markdown-body") ?? document.body, blobSha: cfg.blobSha, sections: null };
   new Commentor(cfg);
 }
 

@@ -25,15 +25,6 @@ describe("management query cache edge paths", () => {
     expect(mutationImpact(path, options, identity)).toEqual({ organizationId: "org-a", resource: "all" });
   });
 
-  it("invalidates every project's publications when the write names no project", () => {
-    for (const body of [{}, { projectId: 7 }, { projectId: "" }]) {
-      expect(mutationImpact("/api/rendro/publications", { body: JSON.stringify(body) }, identity))
-        .toEqual({ organizationId: "org-a", resource: "publications" });
-    }
-    expect(mutationImpact("/api/rendro/publications", { body: JSON.stringify({ projectId: "p" }) }, identity))
-      .toEqual({ organizationId: "org-a", resource: "publications", projectId: "p" });
-  });
-
   it("never caches an unparseable URL", () => {
     expect(managementQueryKey("http://[", identity)).toBeNull();
   });
