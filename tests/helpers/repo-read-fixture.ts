@@ -52,13 +52,18 @@ export class InMemoryRepoAccess implements RepoPermissionSource, RevocationEpoch
   }
 }
 
-/** A Workers KV namespace holding `epoch:<userId>` like P5 writes it. */
+/**
+ * A Workers KV namespace holding `epoch:user:<userId>` and `epoch:repo:<id>` like P5 writes them, from
+ * `access.epochs` (repositories as `repo:<id>`). No legacy `epoch:<userId>` key exists, and reads of one are not counted.
+ */
 export function epochKv(access: InMemoryRepoAccess) {
   return {
     get: vi.fn((key: string) => {
       if (access.epochsUnavailable) return Promise.reject(new Error("KV GET failed: 503"));
+      const name = key.startsWith("epoch:user:") ? key.slice("epoch:user:".length) : key.startsWith("epoch:repo:") ? key.slice("epoch:".length) : null;
+      if (name === null) return Promise.resolve(null);
       access.calls.epochs += 1;
-      const epoch = access.epochs.get(key.slice("epoch:".length));
+      const epoch = access.epochs.get(name);
       return Promise.resolve(epoch === undefined ? null : String(epoch));
     }),
   };

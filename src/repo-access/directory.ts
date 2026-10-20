@@ -9,6 +9,12 @@
  * - A mirror per user: the repository IDs GitHub lists for them through the
  *   app's installations, at most `MIRROR_TTL_MS` old (conditional requests;
  *   a 304 is free).
+ * - Public visibility is never trusted for longer than GitHub last stated it
+ *   (#295): a public record older than `PUBLIC_CONFIRM_TTL_MS` is confirmed
+ *   again before it grants (conditional, so an unchanged repository costs no
+ *   quota), and one GitHub has not confirmed for `PUBLIC_CONFIRM_MAX_MS`
+ *   grants nobody. A missed `privatized` delivery is then caught on the next
+ *   read, and the visibility epoch moves exactly as that delivery would.
  * - The epoch outbox: users whose capabilities must be re-decided. Epochs are
  *   written to KV only after the registry and the mirror already deny. Where
  *   comments are configured (#254), each epoch, and every repository GitHub
@@ -28,7 +34,7 @@ import { DeliveryDedupe } from "@/ingest/github/delivery-dedupe";
 import { GitHubError } from "@/ingest/github/source";
 import type { InstallationTokenProvider } from "@/ingest/github/token";
 import type { DurableStorageLike } from "@/ingest/orchestrator/coordinator";
-import { RepoAccessUnavailable, repoKey, VISIBILITY_EPOCH_KEY_PREFIX, type RepoRecord } from "@/repo-read/access";
+import { RepoAccessUnavailable, repoKey, USER_EPOCH_KEY_PREFIX, VISIBILITY_EPOCH_KEY_PREFIX, type RepoRecord } from "@/repo-read/access";
 import type { EventPlan, RepoHint } from "./events";
 import type { GitHubAccessClient, ListedInstallation, ListedRepo, Page } from "./github";
 import { confirmRemoval } from "./removal";
@@ -102,6 +108,13 @@ export interface LinkRequest {
 
 /** A mirror older than this is refreshed from GitHub before it answers; if that fails, the answer is 503. */
 export const MIRROR_TTL_MS = 5 * 60_000;
+/** A public record GitHub has not confirmed for this long is confirmed again before it grants anyone. */
+export const PUBLIC_CONFIRM_TTL_MS = MIRROR_TTL_MS;
+/**
+ * While GitHub cannot answer (an outage, a rate limit), a public record keeps granting until it is this old;
+ * past it, nobody is granted on it (503) until GitHub confirms it again.
+ */
+export const PUBLIC_CONFIRM_MAX_MS = 60 * 60_000;
 /** An epoch outlives every capability minted before it (cookies 5 minutes, tickets 15), so the KV key may expire. */
 export const EPOCH_TTL_SECONDS = 3_600;
 /** After a failed GitHub call, the same work answers 503 at once for this long instead of calling again. */
@@ -137,6 +150,10 @@ interface RepoEntry {
   check: boolean;
   /** The event sequence number that last changed this record. */
   seq: number;
+  /** When GitHub last stated this record's visibility (a repository read or a listing); absent: never. */
+  confirmedAt?: number;
+  /** The ETag of the repository read that set these fields, for a conditional re-read; null once anything else changed them. */
+  etag?: string | null;
 }
 
 interface InstallationEntry {
@@ -202,6 +219,7 @@ interface ReaderCheck {
 type Need =
   | { kind: "installation"; entry: InstallationEntry }
   | { kind: "repo"; entry: RepoEntry }
+  | { kind: "visibility"; entry: RepoEntry }
   | { kind: "mirror"; user: UserEntry }
   | { kind: "reader"; user: UserEntry; entry: RepoEntry };
 
@@ -291,10 +309,19 @@ export class AccessDirectory {
    */
   async authorize(viewer: string | null, owner: string, name: string): Promise<RepoRecord | null> {
     try {
+      // Set once GitHub could not confirm a public record: it grants until PUBLIC_CONFIRM_MAX_MS, still decided from storage.
+      let unconfirmed = false;
       for (let round = 0; round < MAX_ROUNDS; round += 1) {
-        const decision = await this.decide(viewer, owner, name);
+        const decision = await this.decide(viewer, owner, name, unconfirmed);
         if ("answer" in decision) return decision.answer;
-        await this.perform(viewer as string, decision.need);
+        try {
+          await this.perform(viewer as string, decision.need);
+        } catch (error) {
+          const { need } = decision;
+          if (need.kind !== "visibility" || this.deps.now() - (need.entry.confirmedAt ?? 0) >= PUBLIC_CONFIRM_MAX_MS) throw error;
+          this.deps.log("access.visibility-unconfirmed", { reason: error instanceof GitHubError ? error.kind : "unavailable" });
+          unconfirmed = true;
+        }
       }
       // Webhooks kept changing the answer while GitHub was asked: unknown for now.
       throw new RepoAccessUnavailable();
@@ -314,7 +341,7 @@ export class AccessDirectory {
     return installation ? { entry, installation } : null;
   }
 
-  private async decide(viewer: string | null, owner: string, name: string): Promise<Decision> {
+  private async decide(viewer: string | null, owner: string, name: string, unconfirmed = false): Promise<Decision> {
     const found = await this.lookup(owner, name);
     if (found) {
       const { entry, installation } = found;
@@ -323,7 +350,12 @@ export class AccessDirectory {
       // An anonymous reader is denied a repository recorded as private without asking GitHub: a check could only deny them too.
       if (viewer === null && entry.private) return { answer: null };
       if (entry.check || entry.defaultBranch === null) return { need: { kind: "repo", entry } };
-      if (!entry.private) return { answer: repoRecord(entry) };
+      if (!entry.private) {
+        // A `privatized` delivery can be missed: public is only as current as GitHub's last word on it.
+        const age = this.deps.now() - (entry.confirmedAt ?? 0);
+        if (age >= PUBLIC_CONFIRM_TTL_MS && !(unconfirmed && age < PUBLIC_CONFIRM_MAX_MS)) return { need: { kind: "visibility", entry } };
+        return { answer: repoRecord(entry) };
+      }
     }
     if (viewer === null) return { answer: null };
     const user = await this.user(viewer);
@@ -347,6 +379,7 @@ export class AccessDirectory {
       case "installation":
         return this.checkInstallation(need.entry);
       case "repo":
+      case "visibility":
         return this.checkRepo(need.entry);
       case "mirror":
         await this.refreshMirror(viewer, need.user);
@@ -375,14 +408,24 @@ export class AccessDirectory {
 
   private async checkRepo(entry: RepoEntry): Promise<void> {
     const installation = entry.installation as number;
-    const repo = await this.guarded(`repo:${entry.id}`, () => this.asInstallation(installation, (token) => this.deps.github.repository(`installation:${installation}`, token, entry.owner, entry.name)));
+    // The fields GitHub answered with last time, so an unchanged repository is a free 304.
+    const cached = entry.etag && entry.defaultBranch !== null ? { ...repoRecord(entry), etag: entry.etag } : null;
+    const repo = await this.guarded(`repo:${entry.id}`, () => this.asInstallation(installation, (token) => this.deps.github.repository(`installation:${installation}`, token, entry.owner, entry.name, cached)));
     const current = await this.storage.get<RepoEntry>(`repo:${entry.id}`) as RepoEntry;
     if (current.seq !== entry.seq) return;
     // Not visible to the installation (or now another repository under that name): nobody reads it through the app.
-    if (!repo || repo.id !== entry.id) return this.putRepo({ ...current, removed: true, check: false }, current);
-    await this.putRepo({ ...current, owner: repo.owner, name: repo.name, private: repo.private, defaultBranch: repo.defaultBranch, removed: false, check: false }, current);
-    // GitHub answered for this very repository: a purge pending from an earlier removal (a reinstall since, or a replay) is cancelled.
-    await this.restoreRemoved(entry.id);
+    if (!repo || repo.id !== entry.id) {
+      await this.putRepo({ ...current, removed: true, check: false, etag: null }, current);
+    } else {
+      await this.putRepo({
+        ...current, owner: repo.owner, name: repo.name, private: repo.private, defaultBranch: repo.defaultBranch, removed: false, check: false,
+        confirmedAt: this.deps.now(), etag: repo.etag,
+      }, current);
+      // GitHub answered for this very repository: a purge pending from an earlier removal (a reinstall since, or a replay) is cancelled.
+      await this.restoreRemoved(entry.id);
+    }
+    // Found invisible without an event (a missed `privatized` delivery): its visibility epoch is written now, as that delivery's would be.
+    if (await this.storage.get(`pending-repo:${entry.id}`) !== undefined) await this.flushEpochs();
   }
 
   private async asInstallation<T>(installation: number, call: (token: string | null) => Promise<T>): Promise<T> {
@@ -547,11 +590,15 @@ export class AccessDirectory {
       if (existing && existing.seq > start) continue;
       await this.storage.put(`inst:${installation.id}`, { id: installation.id, account: installation.account, state: installation.suspended ? "suspended" : "active", check: false, seq: existing?.seq ?? 0 } satisfies InstallationEntry);
     }
+    const now = this.deps.now();
     for (const repo of listing.repos) {
       const existing = await this.storage.get<RepoEntry>(`repo:${repo.id}`);
       if (existing && existing.seq > start) continue;
-      const entry: RepoEntry = { id: repo.id, owner: repo.owner, name: repo.name, private: repo.private, defaultBranch: repo.defaultBranch, installation: repo.installation, removed: false, check: false, seq: existing?.seq ?? 0 };
-      if (JSON.stringify(entry) !== JSON.stringify(existing)) await this.putRepo(entry, existing);
+      const fields = { id: repo.id, owner: repo.owner, name: repo.name, private: repo.private, defaultBranch: repo.defaultBranch, installation: repo.installation, removed: false, check: false };
+      const same = existing !== undefined && (Object.keys(fields) as Array<keyof typeof fields>).every((key) => existing[key] === fields[key]);
+      // The listing is GitHub's word on visibility too; an unchanged record is rewritten only to renew a public one's confirmation.
+      if (same && (fields.private || now - (existing.confirmedAt ?? 0) < PUBLIC_CONFIRM_TTL_MS)) continue;
+      await this.putRepo({ ...fields, seq: existing?.seq ?? 0, confirmedAt: now, etag: same ? existing.etag ?? null : null }, existing);
     }
     const previous = await this.storage.get<Mirror>(`mirror:${userId}`) ?? null;
     const mirror: Mirror = { gen: user.gen, fetchedAt: this.deps.now(), installationPages: listing.installationPages, repoPages: listing.repoPages, partial: listing.partial };
@@ -660,15 +707,16 @@ export class AccessDirectory {
     const existing = await this.storage.get<RepoEntry>(`repo:${hint.id}`);
     if (change === "privatize" && !existing) return;
     const base: RepoEntry = existing ?? { id: hint.id, owner: hint.owner, name: hint.name, private: true, defaultBranch: null, installation, removed: true, check: true, seq };
+    // A payload is not a repository read: its fields no longer match the stored ETag.
     const entry: RepoEntry = change === "confirm"
-      ? { ...base, owner: hint.owner, name: hint.name, private: hint.private ?? base.private, installation: installation ?? base.installation, removed: false, check: true, seq }
-      : change === "privatize" ? { ...base, private: true, seq } : { ...base, removed: true, seq };
+      ? { ...base, owner: hint.owner, name: hint.name, private: hint.private ?? base.private, installation: installation ?? base.installation, removed: false, check: true, seq, etag: null }
+      : change === "privatize" ? { ...base, private: true, seq, etag: null } : { ...base, removed: true, seq, etag: null };
     await this.putRepo(entry, existing);
   }
 
   private async renameOwner(from: string, to: string, seq: number): Promise<void> {
     for (const entry of (await this.storage.list<RepoEntry>({ prefix: "repo:" })).values()) {
-      if (entry.owner.toLowerCase() === from.toLowerCase()) await this.putRepo({ ...entry, owner: to, check: true, seq }, entry);
+      if (entry.owner.toLowerCase() === from.toLowerCase()) await this.putRepo({ ...entry, owner: to, check: true, seq, etag: null }, entry);
     }
   }
 
@@ -749,7 +797,7 @@ export class AccessDirectory {
       try {
         // A time, never an increment: it is the order of writes, not their count, that revokes.
         const epoch = Math.max(this.deps.now(), (await this.storage.get<number>(`epoch:${userId}`) ?? 0) + 1);
-        await this.deps.epochs.put(`epoch:${userId}`, String(epoch), { expirationTtl: EPOCH_TTL_SECONDS });
+        await this.deps.epochs.put(`${USER_EPOCH_KEY_PREFIX}${userId}`, String(epoch), { expirationTtl: EPOCH_TTL_SECONDS });
         await this.storage.put(`epoch:${userId}`, epoch);
         // Pages are revoked; comments follow from their own outbox entry, so a Convex outage never rewrites KV.
         if (this.deps.comments) await this.storage.put(`notify:${userId}`, epoch);
@@ -873,7 +921,10 @@ export class AccessDirectory {
         await postpone(item);
       } else if (verdict.kind === "accessible") {
         const { repo } = verdict;
-        await this.putRepo({ ...current, owner: repo.owner, name: repo.name, private: repo.private, defaultBranch: repo.defaultBranch, removed: false, check: false }, current);
+        await this.putRepo({
+          ...current, owner: repo.owner, name: repo.name, private: repo.private, defaultBranch: repo.defaultBranch, removed: false, check: false,
+          confirmedAt: now, etag: repo.etag,
+        }, current);
         // A replayed uninstall also marked the installation deleted: GitHub decides it again on the next read.
         const installation = await this.storage.get<InstallationEntry>(`inst:${current.installation}`);
         if (installation && installation.state !== "active") await this.storage.put(`inst:${installation.id}`, { ...installation, check: true } satisfies InstallationEntry);

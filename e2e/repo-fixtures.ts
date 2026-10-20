@@ -76,6 +76,8 @@ export type RepositoryWorld = ReturnType<typeof repositoryWorld>;
 export async function seedRepositories(input: {
   /** The serving Worker's REPO_CONTENT_KEY: private fixtures are sealed as the ingest Worker would seal them (#263). */
   bucket: R2BucketLike; contentKey: string; world: RepositoryWorld; control: ControlFetch; webhookSecret: string; userIds: Record<"owner" | "outsider" | "member", string>;
+  /** The serving Worker's REPO_ACCESS binding: the control Worker's internal endpoints answer only through it (#295). */
+  service: ControlFetch;
   /** The repository search index (#251), when the harness binds one; sections are written at ingest. */
   search?: SearchIndex;
 }): Promise<{ fixtures: RepoFixtures; close(): Promise<void> }> {
@@ -106,7 +108,7 @@ export async function seedRepositories(input: {
   if (installed !== 202) throw new Error(`Installation webhook answered ${installed}`);
   for (const role of ["owner", "outsider", "member"] as const) {
     const person = people[role];
-    const linked = await input.control("https://repo-access.internal/v1/accounts/link", {
+    const linked = await input.service("https://repo-access.internal/v1/accounts/link", {
       method: "POST", body: JSON.stringify({ userId: input.userIds[role], githubId: person.id, login: person.login, tokens: github.signIn(person) }),
     });
     if (linked.status !== 204) throw new Error(`Linking ${role} answered ${linked.status}`);

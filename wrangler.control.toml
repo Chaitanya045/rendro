@@ -1,7 +1,8 @@
 # Control Worker for the GitHub pivot (#214, phase P5, #243). DEVELOPMENT AND TESTS ONLY.
 # No route, no workers.dev URL, no deploy script; wrangler.toml does not bind it yet.
 # It is the serving Worker's REPO_ACCESS service (the repository permission source) and receives
-# GitHub's permission webhooks. Bindings and what the owner must configure are documented in
+# GitHub's permission webhooks. The serving Worker must bind it with entrypoint = "RepoAccessService":
+# only that named entrypoint serves /v1/authorize and /v1/accounts/*, the default handler the webhook only. Bindings and what the owner must configure are documented in
 # docs/TECHNICAL.md ("Repository permission mirror"). tests/repo-access-workerd.test.ts and the
 # E2E suite run it on real workerd against a fake GitHub.
 name = "rendro-control-dev"

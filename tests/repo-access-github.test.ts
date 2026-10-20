@@ -61,7 +61,17 @@ describe("GitHubAccessClient", () => {
   it("confirms repositories and installations with an installation token", async () => {
     const { github, client, installation } = setup();
     const repo = github.repo("octo", "docs", { id: 801, private: true });
-    expect(await client.repository("installation:71", github.token, "octo", "docs")).toEqual({ id: 801, owner: "octo", name: "docs", private: true, defaultBranch: "main" });
+    const first = await client.repository("installation:71", github.token, "octo", "docs");
+    expect(first).toEqual({ id: 801, owner: "octo", name: "docs", private: true, defaultBranch: "main", etag: expect.stringMatching(/^W\/"/) });
+    // Conditional with the earlier answer: unchanged is a 304 that answers it again, changed is the new state and validator.
+    github.resetLog();
+    expect(await client.repository("installation:71", github.token, "octo", "docs", first)).toBe(first);
+    expect(github.count("repository", { status: 304 })).toBe(1);
+    repo.isPrivate = false;
+    const changed = await client.repository("installation:71", github.token, "octo", "docs", first);
+    expect(changed).toMatchObject({ private: false });
+    expect(changed?.etag).not.toBe(first?.etag);
+    repo.isPrivate = true;
     expect(await client.repository("installation:71", github.token, "octo", "missing")).toBeNull();
     expect(await client.repository("installation:71", null, "octo", "docs")).toBeNull();
     // A renamed repository redirects within the API origin.

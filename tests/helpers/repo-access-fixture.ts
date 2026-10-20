@@ -36,7 +36,7 @@ export class FakeEpochKv implements EpochStore, KvReader {
   }
 
   epoch(userId: string): number {
-    return Number(this.data.get(`epoch:${userId}`) ?? 0);
+    return Number(this.data.get(`epoch:user:${userId}`) ?? 0);
   }
 
   visibilityEpoch(repoId: number): number {

@@ -4,14 +4,17 @@ import { join } from "node:path";
 /** The fixture control Worker some test configurations add beside the production Worker (#234). */
 export const repoReadWorker = { access: "rendro-repo-access-fixture", accessConfig: join(import.meta.dirname, "repo-access/wrangler.toml") };
 
-/** The real control Worker (#243, wrangler.control.toml) and the KV namespace both Workers share for epochs. */
-export const controlWorker = { name: "rendro-control-dev", epochs: "rendro-repo-epochs-test" };
+/**
+ * The real control Worker (#243, wrangler.control.toml), the named entrypoint that serves its internal endpoints (#295)
+ * and the KV namespace both Workers share for epochs.
+ */
+export const controlWorker = { name: "rendro-control-dev", entrypoint: "RepoAccessService", epochs: "rendro-repo-epochs-test" };
 
 /**
  * Adds the repository read path's bindings to a Worker configuration: snapshots in R2, revocation
  * epochs in KV, the repository search index in D1 and a control Worker as the permission source
- * (the #234 fixture unless `service` names another). Production configures none of them yet, so
- * there every /r/ URL is a 404.
+ * (the #234 fixture unless `service` names another; the real control Worker is bound through its internal
+ * entrypoint). Production configures none of them yet, so there every /r/ URL is a 404.
  */
 export function withRepoReadBindings(config: string, service = repoReadWorker.access): string {
   return `${config}
@@ -31,7 +34,7 @@ database_id = "rendro-repo-search-test"
 [[services]]
 binding = "REPO_ACCESS"
 service = "${service}"
-`;
+${service === controlWorker.name ? `entrypoint = "${controlWorker.entrypoint}"\n` : ""}`;
 }
 
 /** The production wrangler.toml with paths relocated to `root`, plus the read-path bindings. */

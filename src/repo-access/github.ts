@@ -26,6 +26,11 @@ export interface ListedRepo {
   defaultBranch: string;
 }
 
+/** A repository as `GET /repos/{owner}/{name}` answered it, with that response's validator. */
+export interface ConfirmedRepo extends ListedRepo {
+  etag: string | null;
+}
+
 /** A conditional read: `null` means 304, the cached page is still current (and cost no primary quota). */
 export type Page<T> = { items: T[]; etag: string | null; next: boolean } | null;
 
@@ -130,13 +135,18 @@ export class GitHubAccessClient {
     return { items: parseAll(body?.repositories, parseListedRepo), etag: response.headers.get("etag"), next: hasNext(response) };
   }
 
-  /** `GET /repos/{owner}/{name}` with an installation token, or null when the installation cannot see it. */
-  async repository(budget: string, token: string | null, owner: string, name: string): Promise<ListedRepo | null> {
+  /**
+   * `GET /repos/{owner}/{name}` with an installation token, or null when the installation cannot see it.
+   * With `cached` (an earlier answer and its ETag) the request is conditional: a 304, which costs no
+   * primary quota, answers `cached` again.
+   */
+  async repository(budget: string, token: string | null, owner: string, name: string, cached: ConfirmedRepo | null = null): Promise<ConfirmedRepo | null> {
     try {
-      const response = await this.send(budget, "repository", `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}`, token, null) as Response;
+      const response = await this.send(budget, "repository", `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}`, token, cached?.etag ?? null);
+      if (!response) return cached;
       const repo = parseListedRepo(await readJson(response));
       if (!repo) throw new GitHubError("invalid-response", "Unexpected repository response", response.status);
-      return repo;
+      return { ...repo, etag: response.headers.get("etag") };
     } catch (error) {
       if (error instanceof GitHubError && error.kind === "not-found") return null;
       throw error;

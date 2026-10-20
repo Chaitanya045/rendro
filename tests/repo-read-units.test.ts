@@ -4,7 +4,8 @@ import { blobKey, manifestKey, refKey, sidebarKey } from "@/ingest/orchestrator/
 import { plaintextSealer, r2Store, type ContentSealer, type ObjectStore } from "@/ingest/orchestrator/store";
 import type { SidebarIndex } from "@/ingest/sidebar";
 import {
-  kvRevocationEpochs, kvVisibilityEpochs, parseRepoRecord, repoAccessHandler, RepoAccessUnavailable, serviceRepoPermissions, type RepoRecord,
+  kvRevocationEpochs, kvVisibilityEpochs, parseRepoRecord, repoAccessHandler, RepoAccessUnavailable, serviceRepoPermissions, USER_EPOCH_KEY_PREFIX,
+  VISIBILITY_EPOCH_KEY_PREFIX, type RepoRecord,
 } from "@/repo-read/access";
 import { authorizeRepo, authorizeTicket, clearAuthorizationMemory, mintTicket, type AuthorizeDependencies, type Viewer } from "@/repo-read/authorize";
 import { mintCapability, peekCapability, sessionBinding, verifyCapability, type CapabilityClaims } from "@/repo-read/capability";
@@ -13,11 +14,13 @@ import { imageProxyPath, verifyImageProxyPath } from "@/image-proxy";
 import { issueGrant, type RepoGrant } from "@/repo-read/grant";
 import { encodeRepoPath, parseRepoPath, repoBase } from "@/repo-read/paths";
 import { clearSnapshotMemory, isPagePath, manifestFile, readDeadline, RepoSnapshots } from "@/repo-read/snapshot";
-import { SHARED_CACHE_PATH, sharedCacheReader, sharedCacheUrl, verifySharedCachePath, type SharedCacheProbe } from "@/repo-read/shared-cache";
+import { SHARED_CACHE_KEY_LABEL, SHARED_CACHE_PATH, sharedCacheReader, sharedCacheUrl, verifySharedCachePath, type SharedCacheProbe } from "@/repo-read/shared-cache";
 import { treePage, TREE_PAGE_SIZE } from "@/repo-read/tree";
 import { sessionViewer } from "@/middleware/session";
 import { sessionCache } from "@/session-cache";
 import { ViewerBackendError } from "@/viewer-backend";
+import { createHmac } from "node:crypto";
+import { FakeEpochKv } from "./helpers/repo-access-fixture";
 import { readFileSync } from "node:fs";
 import { HIGHLIGHT_CSS } from "@/ingest/highlight-theme";
 import { styleManifest } from "@/routes/style-manifest";
@@ -157,16 +160,46 @@ describe("repository access protocol", () => {
     expect(await (await call(JSON.stringify({ viewer: "u", owner: "octo", name: "docs" }))).json()).toEqual({ repo: record });
   });
 
-  it("reads epochs from KV: absent is 0, malformed and failures are unavailable", async () => {
-    const values = new Map<string, string>([["epoch:a", "1792000000000"], ["epoch:b", "-1"], ["epoch:c", "1".repeat(16)]]);
+  it("reads user epochs from KV under epoch:user:<id>: absent is 0, malformed and failures are unavailable", async () => {
+    const values = new Map<string, string>([["epoch:user:a", "1792000000000"], ["epoch:user:b", "-1"], ["epoch:user:c", "1".repeat(16)]]);
     const get = vi.fn((key: string, _options: { cacheTtl: number }) => Promise.resolve(values.get(key) ?? null));
     const epochs = kvRevocationEpochs({ get });
     expect(await epochs.currentEpoch("a")).toBe(1792000000000);
     expect(await epochs.currentEpoch("z")).toBe(0);
-    expect(get).toHaveBeenCalledWith("epoch:a", { cacheTtl: 60 });
+    expect(get).toHaveBeenCalledWith("epoch:user:a", { cacheTtl: 60 });
     await expect(epochs.currentEpoch("b")).rejects.toBeInstanceOf(RepoAccessUnavailable);
     await expect(epochs.currentEpoch("c")).rejects.toBeInstanceOf(RepoAccessUnavailable);
     await expect(kvRevocationEpochs({ get: () => Promise.reject(new Error("KV down")) }).currentEpoch("a")).rejects.toBeInstanceOf(RepoAccessUnavailable);
+  });
+
+  it("still honours a revocation written under the legacy epoch:<id> key until it expires: the later key wins", async () => {
+    const values = new Map<string, string>([
+      ["epoch:legacy-only", "1792000000000"],
+      ["epoch:both", "1792000000500"], ["epoch:user:both", "1792000000100"],
+      ["epoch:user:newer", "1792000000900"], ["epoch:newer", "1792000000100"],
+      ["epoch:broken", "x"],
+    ]);
+    const get = vi.fn((key: string, _options: { cacheTtl: number }) => Promise.resolve(values.get(key) ?? null));
+    const epochs = kvRevocationEpochs({ get });
+    expect(await epochs.currentEpoch("legacy-only")).toBe(1792000000000);
+    expect(get).toHaveBeenCalledWith("epoch:legacy-only", { cacheTtl: 60 });
+    expect(await epochs.currentEpoch("both")).toBe(1792000000500);
+    expect(await epochs.currentEpoch("newer")).toBe(1792000000900);
+    // A broken legacy value is doubt like a broken current one.
+    await expect(epochs.currentEpoch("broken")).rejects.toBeInstanceOf(RepoAccessUnavailable);
+    // Once the legacy key has expired, only epoch:user:<id> counts.
+    values.delete("epoch:legacy-only");
+    expect(await epochs.currentEpoch("legacy-only")).toBe(0);
+  });
+
+  it("keeps user and visibility epochs apart: a user ID shaped like a repository key never overwrites or reads one", async () => {
+    const kv = new FakeEpochKv();
+    await kv.put("epoch:repo:7", "1792000000000", {});
+    const userKey = `${USER_EPOCH_KEY_PREFIX}repo:7`;
+    expect(userKey).not.toBe(`${VISIBILITY_EPOCH_KEY_PREFIX}7`);
+    await kv.put(userKey, "1792000000500", { expirationTtl: 3600 });
+    expect(await kvVisibilityEpochs(kv).visibilityEpoch(7)).toBe(1792000000000);
+    expect(await kvRevocationEpochs(kv).currentEpoch("repo:7")).toBe(1792000000500);
   });
 
   it("reads visibility epochs from KV under epoch:repo:<id>, with the same doubt rules", async () => {
@@ -313,6 +346,19 @@ describe("shared cache", () => {
     const later = await sharedCacheUrl(secret, "https://rendro.test", key, 9);
     expect(await verifySharedCachePath(secret, path(later))).toEqual({ storageKey: key, epoch: 9 });
     expect(path(later)).not.toBe(path(url));
+  });
+
+  it("signs under a key derived for the shared cache alone, so a URL signed with the raw secret does not verify", async () => {
+    const hmac = (keyBytes: Buffer | string, message: string) => createHmac("sha256", keyBytes).update(message).digest();
+    const message = `public\n0\n${key}`;
+    const derived = hmac(hmac(secret, SHARED_CACHE_KEY_LABEL), message).toString("base64url");
+    const raw = hmac(secret, message).toString("base64url");
+    const [signature, epoch, encoded] = path(await sharedCacheUrl(secret, "https://rendro.test", key, 0)).slice(SHARED_CACHE_PATH.length).split("/");
+    expect(signature).toBe(derived);
+    expect(signature).not.toBe(raw);
+    expect(await verifySharedCachePath(secret, `${SHARED_CACHE_PATH}${raw}/${epoch}/${encoded}`)).toBeNull();
+    // Nor is it the key of either capability purpose.
+    for (const purpose of ["cookie", "ticket"]) expect(signature).not.toBe(hmac(hmac(secret, `rendro-repo-capability:v1:${purpose}`), message).toString("base64url"));
   });
 
   it("rejects anything that is not one canonical, correctly signed key and epoch", async () => {

@@ -52,6 +52,14 @@ export interface RevocationEpochs {
 
 /** KV keys `epoch:repo:<id>`: when a repository last became invisible (private, removed, uninstalled). */
 export const VISIBILITY_EPOCH_KEY_PREFIX = "epoch:repo:";
+/** KV keys `epoch:user:<userId>`: when a user's capabilities were last revoked. Never shares a key with a visibility epoch. */
+export const USER_EPOCH_KEY_PREFIX = "epoch:user:";
+/**
+ * The user epoch key the control plane wrote before `USER_EPOCH_KEY_PREFIX` (#295). Those writes expire after an hour
+ * (`EPOCH_TTL_SECONDS`), so a revocation made just before the switch is still read here until it has expired.
+ * Remove this read once every environment's control Worker has written only the new keys for an hour.
+ */
+export const LEGACY_USER_EPOCH_KEY_PREFIX = "epoch:";
 
 export interface RepoVisibilityEpochs {
   /**
@@ -149,25 +157,33 @@ export interface KvReader {
   get(key: string, options: { cacheTtl: number }): Promise<string | null>;
 }
 
+/** One epoch from KV: absent is 0; a failure or anything but a decimal safe integer is unavailable. */
+async function readEpoch(kv: KvReader, key: string): Promise<number> {
+  let value: string | null;
+  try {
+    value = await kv.get(key, { cacheTtl: 60 });
+  } catch {
+    throw new RepoAccessUnavailable();
+  }
+  if (value === null) return 0;
+  // Fifteen digits stay a safe integer; anything else is a broken writer, not a revocation.
+  if (!/^\d{1,15}$/.test(value)) throw new RepoAccessUnavailable();
+  return Number(value);
+}
+
 /**
- * Epochs in KV under `epoch:<userId>`, as decimal milliseconds. P5 writes the
- * time of the revocation (never a read-modify-write increment, which loses
+ * Epochs in KV under `epoch:user:<userId>`, as decimal milliseconds. P5 writes
+ * the time of the revocation (never a read-modify-write increment, which loses
  * concurrent bumps), after its access mirror already denies the grant.
  * `cacheTtl` keeps hot keys in the colo for 60 s, the floor KV Classic allows.
+ * Until the legacy key is retired, the later of the two keys counts, so a
+ * revocation written under either is honoured until it expires.
  */
 export function kvRevocationEpochs(kv: KvReader): RevocationEpochs {
   return {
     async currentEpoch(userId) {
-      let value: string | null;
-      try {
-        value = await kv.get(`epoch:${userId}`, { cacheTtl: 60 });
-      } catch {
-        throw new RepoAccessUnavailable();
-      }
-      if (value === null) return 0;
-      // Fifteen digits stay a safe integer; anything else is a broken writer, not a revocation.
-      if (!/^\d{1,15}$/.test(value)) throw new RepoAccessUnavailable();
-      return Number(value);
+      const [current, legacy] = await Promise.all([readEpoch(kv, `${USER_EPOCH_KEY_PREFIX}${userId}`), readEpoch(kv, `${LEGACY_USER_EPOCH_KEY_PREFIX}${userId}`)]);
+      return Math.max(current, legacy);
     },
   };
 }
@@ -180,16 +196,6 @@ export function kvRevocationEpochs(kv: KvReader): RevocationEpochs {
  */
 export function kvVisibilityEpochs(kv: KvReader): RepoVisibilityEpochs {
   return {
-    async visibilityEpoch(repoId) {
-      let value: string | null;
-      try {
-        value = await kv.get(`${VISIBILITY_EPOCH_KEY_PREFIX}${repoId}`, { cacheTtl: 60 });
-      } catch {
-        throw new RepoAccessUnavailable();
-      }
-      if (value === null) return 0;
-      if (!/^\d{1,15}$/.test(value)) throw new RepoAccessUnavailable();
-      return Number(value);
-    },
+    visibilityEpoch: (repoId) => readEpoch(kv, `${VISIBILITY_EPOCH_KEY_PREFIX}${repoId}`),
   };
 }

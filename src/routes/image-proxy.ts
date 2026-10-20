@@ -54,13 +54,14 @@ async function discard(response: Response): Promise<void> {
 }
 
 /**
- * Follow at most MAX_REDIRECTS redirects by hand, re-checking every target.
+ * Follow at most MAX_REDIRECTS redirects by hand, re-checking every target,
+ * and never one on the host this request arrived on (`ownHost`).
  * No cookies, credentials or reader headers are sent; only a fixed user agent.
  */
-async function fetchUpstream(target: string, signal: AbortSignal): Promise<Response | null> {
+async function fetchUpstream(target: string, ownHost: string, signal: AbortSignal): Promise<Response | null> {
   let url = target;
   for (let hop = 0; ; hop++) {
-    if (!isProxyableImageUrl(url)) return null;
+    if (!isProxyableImageUrl(url, [ownHost])) return null;
     const response = await fetch(url, {
       method: "GET",
       redirect: "manual",
@@ -119,11 +120,11 @@ function cappedBody(body: ReadableStream<Uint8Array>, signal: AbortSignal): Read
   });
 }
 
-async function proxiedImage(target: string): Promise<Response> {
+async function proxiedImage(target: string, ownHost: string): Promise<Response> {
   const signal = AbortSignal.timeout(UPSTREAM_TIMEOUT_MS);
   let upstream: Response | null;
   try {
-    upstream = await fetchUpstream(target, signal);
+    upstream = await fetchUpstream(target, ownHost, signal);
   } catch {
     return failure();
   }
@@ -175,7 +176,7 @@ imageProxy.get("/img/*", async (c) => {
   const key = await cacheKey(c, target);
   const cached = await cache?.match(key);
   if (cached) return reply(cached);
-  const response = await proxiedImage(target);
+  const response = await proxiedImage(target, new URL(c.req.url).hostname);
   if (!cache) return response;
   if (response.body === null) {
     store(c, cache, key, response.clone());

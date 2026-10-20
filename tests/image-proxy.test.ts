@@ -28,6 +28,8 @@ describe("upstream target checks", () => {
   it.each([
     "https://images.example.com/a.png", "http://example.org/x.svg?y=1", "https://8.8.8.8/a.png", "https://[2606:4700::1111]/a.png", "https://[2606:4700:1:2:3:4:5:6]/a.png",
     "https://sub.example.co.uk./a.png", "https://localhost.example.com/a.png",
+    // Just past RFC 9637's 3fff::/20; other people's Workers and look-alike domains.
+    "https://[3fff:1000::1]/a.png", "https://images.someone.workers.dev/a.png", "https://rendro-like.example/a.png", "https://notrendro.app/a.png",
   ])("allows %s", (url) => {
     expect(isProxyableImageUrl(url)).toBe(true);
   });
@@ -45,12 +47,25 @@ describe("upstream target checks", () => {
     "http://[::1]/", "http://[::]/", "http://[::ffff:127.0.0.1]/", "http://[::ffff:a9fe:a9fe]/", "http://[::127.0.0.1]/",
     "http://[64:ff9b::a9fe:a9fe]/", "http://[fc00::1]/", "http://[fd12:3456::1]/", "http://[fe80::1]/", "http://[ff02::1]/",
     "http://[2001:db8::1]/", "http://[2002:7f00:1::]/", "http://[2001:0:4136:e378::1]/",
+    // RFC 9637's documentation prefix, 3fff::/20.
+    "http://[3fff::1]/", "http://[3fff:fff:ffff::1]/",
+    // The site itself: production, development and other subdomains, its Workers on workers.dev (preview URLs too).
+    "https://rendro.app/a.png", "https://RENDRO.APP./a.png", "https://dev.rendro.app/a.png", "https://x.y.rendro.app/a.png",
+    "https://rendro.acct.workers.dev/a.png", "https://rendro-dev.acct.workers.dev/a.png", "https://0a1b2c3d-rendro-dev.acct.workers.dev/a.png",
+    "https://rendro-control-dev.acct.workers.dev/a.png",
     // Local-only and metadata names.
     "http://localhost/", "http://LOCALHOST./", "http://intranet/", "http://app.localhost/", "http://printer.local/",
     "http://db.internal/", "http://metadata.google.internal/computeMetadata/v1/", "http://metadata.goog/",
     "http://instance-data.ec2.internal/", "http://metadata.azure.com/", "http://router.home.arpa/", "http://x.lan/",
   ])("refuses %s", (url) => {
     expect(isProxyableImageUrl(url)).toBe(false);
+  });
+
+  it("refuses the hosts the caller names as the site's own, whatever their case or trailing dot", () => {
+    expect(isProxyableImageUrl("https://docs.example.com/a.png")).toBe(true);
+    expect(isProxyableImageUrl("https://docs.example.com/a.png", ["DOCS.example.com."])).toBe(false);
+    expect(isProxyableImageUrl("https://docs.example.com./a.png", ["docs.example.com"])).toBe(false);
+    expect(isProxyableImageUrl("https://cdn.example.com/a.png", ["docs.example.com"])).toBe(true);
   });
 });
 
@@ -259,6 +274,17 @@ describe("GET /img/<sig>/<url>", () => {
     "http://127.0.0.1/admin", "http://169.254.169.254/latest/meta-data/", "http://[::1]/", "http://10.0.0.5/",
     "http://metadata.google.internal/", "file:///etc/passwd", "http://localhost:8080/",
   ])("refuses a redirect to %s without following it", async (location) => {
+    upstream = () => redirect(location);
+    await expectFailure(await get(await signed()));
+    expect(calls).toHaveLength(1);
+  });
+
+  it("refuses a signed target on the host the request arrived on, without fetching it", async () => {
+    await expectFailure(await get(await signed("https://rendro.test/r/octo/docs/logo.png")));
+    expect(calls).toHaveLength(0);
+  });
+
+  it.each(["https://rendro.test/img/x", "https://dev.rendro.app/r/octo/docs/", "https://rendro-dev.acct.workers.dev/"])("refuses a redirect to the site itself (%s) without following it", async (location) => {
     upstream = () => redirect(location);
     await expectFailure(await get(await signed()));
     expect(calls).toHaveLength(1);

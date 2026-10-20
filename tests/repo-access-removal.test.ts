@@ -27,7 +27,7 @@ function world() {
 describe("confirmRemoval (#258)", () => {
   it("finds a repository the installation still sees accessible, under its current name", async () => {
     const { github, repo, confirm } = world();
-    expect(await confirm()).toEqual({ kind: "accessible", repo: { id: repo.id, owner: "octo", name: "docs", private: true, defaultBranch: "main" } });
+    expect(await confirm()).toEqual({ kind: "accessible", repo: { id: repo.id, owner: "octo", name: "docs", private: true, defaultBranch: "main", etag: expect.any(String) } });
     github.rename(repo, "octo", "handbook");
     expect(await confirm()).toMatchObject({ kind: "accessible", repo: { id: repo.id, name: "handbook" } });
   });

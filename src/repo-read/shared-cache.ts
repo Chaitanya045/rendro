@@ -8,7 +8,8 @@
  * (or colo) reuses it.
  *
  * The URL carries an HMAC over `public\n<visibility epoch>\n<storage key>`
- * under REPO_CAPABILITY_SECRET, and the epoch rides in the path with it. The
+ * under a key derived from REPO_CAPABILITY_SECRET for this purpose alone
+ * (`SHARED_CACHE_KEY_LABEL`), and the epoch rides in the path with it. The
  * route behind it can only ever hold objects the serving Worker decided are
  * public, and only for as long as the repository's visibility epoch (bumped
  * when a repository is privatized, removed or left by its installation) still
@@ -18,7 +19,7 @@
  * content stays on the per-colo path.
  */
 import { constantTimeEqual } from "../../shared/constant-time";
-import { base64url, fromBase64url } from "./capability";
+import { base64url, derivedHmacKey, fromBase64url } from "./capability";
 
 /** A reserved path no user URL names; only the reader route and this module use it. */
 export const SHARED_CACHE_PATH = "/__repo-cache/tiered/v1/";
@@ -34,22 +35,17 @@ const CACHE_TTL_BY_STATUS = { "200-299": SHARED_CACHE_TTL_SECONDS, "404": 60, "5
 const SIGNATURE = /^[A-Za-z0-9_-]{43}$/;
 /** Canonical decimal epochs only: one URL per object and epoch, so "05" can never stand in for "5". */
 const EPOCH = /^(?:0|[1-9]\d{0,14})$/;
+/**
+ * The shared-cache signing key is `HMAC(REPO_CAPABILITY_SECRET, this label)`, never the raw secret, so
+ * no signature here is ever made under a key that also signs capabilities.
+ */
+export const SHARED_CACHE_KEY_LABEL = "rendro-repo-shared-cache:v1";
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
-const keys = new Map<string, Promise<CryptoKey>>();
-
-/** One HMAC key per secret, imported once per isolate (tests switch secrets). */
-function hmacKey(secret: string): Promise<CryptoKey> {
-  let key = keys.get(secret);
-  if (!key) {
-    key = crypto.subtle.importKey("raw", encoder.encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
-    keys.set(secret, key);
-  }
-  return key;
-}
 
 async function sign(secret: string, epoch: number, storageKey: string): Promise<string> {
-  const mac = await crypto.subtle.sign("HMAC", await hmacKey(secret), encoder.encode(`public\n${epoch}\n${storageKey}`));
+  const key = await derivedHmacKey(secret, SHARED_CACHE_KEY_LABEL);
+  const mac = await crypto.subtle.sign("HMAC", key, encoder.encode(`public\n${epoch}\n${storageKey}`));
   return base64url(new Uint8Array(mac));
 }
 
