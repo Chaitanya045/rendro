@@ -1,5 +1,5 @@
 import { CommentWriteCooldown } from "./write-cooldown";
-import { commentErrorMessage, commentRetryAfter } from "./errors";
+import { commentErrorMessage, commentRetryAfter } from "./frame-errors";
 import { CommentOperationConflictError, editDraftKey } from "./operation-state";
 // commentor.ts — a drop-in commenting widget for any HTML file.
 //

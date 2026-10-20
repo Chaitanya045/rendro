@@ -1,5 +1,4 @@
-import { ConvexError } from "convex/values";
-import { commentRetryAfter } from "./errors";
+import { CommentErrorEnvelope, commentRetryAfter } from "./frame-errors";
 import { normalizeMutationArgs } from "./mutation-args";
 import { CommentOperationState, mutationKey } from "./operation-state";
 import {
@@ -273,7 +272,7 @@ export class ParentCommentTransport {
     request.dismissSlow?.();
     if (event.data.ok) request.resolve();
     else {
-      const quota = new ConvexError({ kind: "RateLimited", name: "comments", retryAfter: event.data.retryAfter ?? null });
+      const quota = new CommentErrorEnvelope({ kind: "RateLimited", name: "comments", retryAfter: event.data.retryAfter ?? null });
       request.reject(commentRetryAfter(quota) !== null ? quota : event.data.rejected === true
       ? new CommentMutationRejectedError(event.data.error || "Comment operation failed")
       : new Error(event.data.error || "Comment operation failed"));

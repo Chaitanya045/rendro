@@ -593,7 +593,7 @@ document iframe -> scoped messages -> trusted parent shell -> authenticated Conv
 document iframe <- scoped results  <- trusted parent shell <- reactive pages
 ```
 
-The parent's Convex client refreshes its JWT shortly before it expires (`forceRefreshToken`); each refresh confirms the identity first (`/api/auth/get-session`) and then asks `/api/auth/convex/token`. The iframe receives only document-scoped comment data and operation results, never a JWT or session credential. The parent derives the repository and document from its trusted configuration and frame URL, allowlists comment operations, and answers only the frame document it loaded itself (#296).
+The parent's Convex client refreshes its JWT shortly before it expires (`forceRefreshToken`); each refresh confirms the identity first (`/api/auth/get-session`) and then asks `/api/auth/convex/token`. The iframe receives only document-scoped comment data and operation results, never a JWT or session credential. The widget bundles no `convex/` module (#315): the parent maps every failure from a real `ConvexError` (`src/commentor/errors.ts`) and sends only the resulting message, the rejection flag and a quota's `retryAfter`; the frame rebuilds the quota as a `CommentErrorEnvelope` and reads envelopes structurally (`src/commentor/frame-errors.ts`). Both inject their reader into one Convex-free mapping (`src/commentor/error-mapping.ts`). `tests/build-scripts.test.ts` asserts from esbuild's metafile that `commentor.js` has no `convex/` input. The parent derives the repository and document from its trusted configuration and frame URL, allowlists comment operations, and answers only the frame document it loaded itself (#296).
 
 Convex delivers the reactive snapshot that contains a new comment or reply before the mutation's acknowledgement, so the widget treats either order as normal. Closing the composer returns focus to the control that opened it even when the snapshot closes the composer first. Thread and reply history uses bounded reactive Convex pages; explicit load-older controls preserve access to the full history, and loaded pages stay subscribed.
 
@@ -679,8 +679,8 @@ Every file the Worker serves from `public/` is public and is served **before the
 
 | Bundle (2026-10-21) | Raw | Brotli |
 |---|---|---|
-| `commentor.js` (document frame) | 104,934 | 24,309 |
-| `commentor-parent.js` (repository shell, holds the Convex client) | 98,036 | 24,401 |
+| `commentor.js` (document frame, no `convex/` module, #315) | 102,428 | 23,194 |
+| `commentor-parent.js` (repository shell, holds the Convex client) | 98,174 | 24,419 |
 | `lazy-tree.js` | 26,274 | 8,057 |
 | `rum.js` | 12,893 | 4,418 |
 | `private-viewer.js` | 6,269 | 2,163 |
