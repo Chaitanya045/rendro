@@ -8249,6 +8249,28 @@
               "kind": "e2e"
             }
           ]
+        },
+        {
+          "id": "UI-139-E06",
+          "from": "Security page loading",
+          "trigger": "Resolve/reject method lookup, then retry",
+          "expected": "the final layout is reserved at first paint: the footer, Back to home and Sign out never move (no layout shift)",
+          "inventoryRefs": [
+            "A09"
+          ],
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/auth-pages-browser.test.ts",
+              "name": "keeps the security footer and its links in place from first paint until a %s lookup settles at %ipx",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/auth-hidden-browser.test.ts",
+              "name": "security hides inactive password controls before loading and after %s recovery",
+              "kind": "browser"
+            }
+          ]
         }
       ]
     },

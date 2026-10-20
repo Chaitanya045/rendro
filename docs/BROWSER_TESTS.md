@@ -212,7 +212,9 @@ The #146 signup visibility regression passes in all engines: the credential form
 disappears, focus moves to the confirmation, and returning through sign-in
 restores the signup controls. `tests/auth-hidden-browser.test.ts` checks computed
 display, keyboard focus, retry and restored forms at desktop/mobile sizes, plus
-reset and security states.
+reset and security states. The inactive security password sections keep their space
+(#312), so the test checks that they are invisible, unfocusable and absent from the
+accessibility tree rather than `display: none`.
 
 Expected failures, when present, name follow-up issues. Their broken assertions
 receive no `e2e` registry credit; an unexpected pass fails the suite so the marker
@@ -298,7 +300,7 @@ These edges are asserted at the cheapest level that can see them.
 | Test | Covers |
 |---|---|
 | `tests/landing-browser.test.ts` | The production landing page and inline controller with the production security headers, in Chromium: header/logo/footer links, the three sign-up calls to action, Product/Workflow/Security anchors (sticky-header clearance, no fragment or history entry, legacy fragments removed on load), the screenshot at every width, reveals, reduced motion, print and no-JavaScript rendering |
-| `tests/auth-pages-browser.test.ts` | The production authentication pages in Chromium: a safe `returnTo` carried through every related link (unsafe targets dropped), OAuth callback failure copy per error code, email sign-in callbacks confined to this origin, the "Add below" reveal and scroll, duplicate reset exclusion |
+| `tests/auth-pages-browser.test.ts` | The production authentication pages in Chromium: a safe `returnTo` carried through every related link (unsafe targets dropped), OAuth callback failure copy per error code, email sign-in callbacks confined to this origin, the "Add below" reveal and scroll, duplicate reset exclusion, and a stable layout (#312): `/account/security` keeps its footer links where they were first painted whatever the method lookup returns, and `/home`, `/sign-in` and `/sign-up` insert nothing above their links after first paint (layout shifts are counted once the web fonts have settled) |
 | `tests/sign-out-browser.test.ts` | GET sign-out confirmation without revocation, native POST, the complete page's working Sign in, a failed native sign-out (Try again, cookies kept), restored pages whose live identity changed or ended (drafts stay in the original account's storage), failed identity checks |
 | `tests/session-outage-browser.test.ts` | The real session middleware: an upstream outage is a 503 page (cookie kept, no redirect) that recovers through Try again; a missing session redirects to sign-in |
 | `e2e/auth-transitions.spec.ts` | An invalid verification link offers recovery; changing a password with "Sign out other sessions" off keeps the other browser signed in, and Back to home; a restored page for a different account; a sign-out whose cookie cleanup is lost |
