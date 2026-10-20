@@ -29,18 +29,22 @@ import { ViewerBackendError } from "@/viewer-backend";
 import { viewerScript, viewerUpdateNotice } from "@/viewer/markup";
 import { RUM_VERSION } from "@/viewer/asset-versions";
 import { kvRevocationEpochs, kvVisibilityEpochs, serviceRepoPermissions, type Fetcher, type KvReader } from "./access";
-import { authorizeRepo, authorizeTicket, mintTicket, type Authorization, type AuthorizeDependencies } from "./authorize";
+import {
+  authorizeRepo, authorizeTicket, CAPABILITY_TTL_SECONDS, mintTicket, TICKET_TTL_SECONDS, type Authorization, type AuthorizeDependencies,
+} from "./authorize";
 import {
   COMMENT_GRANT_MIN_MS, commentAccess, commentorScript, commentSnapshot, convexCommentGrants, convexCommentSnapshots, type CommentGrants, type CommentSnapshots,
 } from "./comments";
 import { rateLimiter, takeToken, type RateLimiter } from "./admission";
 import { admitFirstView, durableFirstView, interpretOutcome, prepareRepo, PREPARE_WINDOW_MS, repoIngestTarget, touchRepo, type RepoFirstView } from "./first-view";
-import { FRAME_TEMPLATE_TAG, FRAME_VERSION, failureBody, frameBody, frameContentSecurityPolicy, needsRelativeRewrite, renderFrameDocument } from "./frame";
+import {
+  FRAME_TEMPLATE_TAG, FRAME_VERSION, failureBody, frameBody, frameContentSecurityPolicy, needsRelativeRewrite, renderFrameDocument, ticketImageSlots,
+} from "./frame";
 import type { RepoGrant } from "./grant";
-import { encodeRepoPath, parseRepoPath, repoBase, type RepoRefSpec, type RepoRequestPath } from "./paths";
+import { isPagePath, parseRepoPath, repoBase, type RepoRefSpec, type RepoRequestPath } from "./paths";
 import { READINESS_HEADER, renderPreparingPage, type PreparingState } from "./preparing";
 import { searchManifest } from "./search";
-import { isPagePath, manifestFile, readDeadline, RepoSnapshots, type EdgeCache } from "./snapshot";
+import { manifestFile, readDeadline, RepoSnapshots, type EdgeCache } from "./snapshot";
 import { SHARED_CACHE_PATH, SHARED_CACHE_TTL_SECONDS, sharedCacheReader, verifySharedCachePath, type SharedCacheProbe } from "./shared-cache";
 import { REPO_SPECULATION_RULES_PATH, repoSpeculationRules } from "./speculation";
 import { ReadTiming } from "./timing";
@@ -54,6 +58,12 @@ const PREPARING_RETRY_SECONDS = 5;
 /** A client the per-client limiter refused (#294) retries after its window: the limiters count per minute. */
 const LIMITED_RETRY_SECONDS = 60;
 const IMMUTABLE = "max-age=31536000, immutable";
+/**
+ * Private reads at a commit URL: a browser keeps them no longer than a capability cookie lasts, so a copy never
+ * outlives a session or an access decision by more than that (#293). A private frame also embeds an asset ticket
+ * of the same lifetime, which a revalidated (304) copy would keep past its expiry, so it gets no validator either.
+ */
+const PRIVATE_COMMIT = `max-age=${CAPABILITY_TTL_SECONDS}`;
 /** Branch URLs: a short freshness window, then revalidation by ETag; stale copies survive an outage. */
 const BRANCH = "max-age=10, stale-if-error=86400";
 
@@ -173,7 +183,8 @@ function notFound(c: Context, kind: Representation): Response {
 }
 
 function cachePolicy(grant: RepoGrant, ref: RepoRefSpec): string {
-  return `${grant.repo.private ? "private" : "public"}, ${ref.kind === "commit" ? IMMUTABLE : BRANCH}`;
+  if (ref.kind !== "commit") return `${grant.repo.private ? "private" : "public"}, ${BRANCH}`;
+  return grant.repo.private ? `private, ${PRIVATE_COMMIT}` : `public, ${IMMUTABLE}`;
 }
 
 /** The snapshot a ref serves. A pointer to a missing snapshot is a broken store (503), never "not found".
@@ -261,45 +272,49 @@ interface Delivery {
   file: ManifestFile;
   path: string;
   services: Services;
+  /** The asset ticket that authorized an image request; pages are never read through one (#293). */
   ticket: string | null;
   /** A listed object storage no longer has: the ordinary 404, as on the other delivery routes (#94). */
   missing: () => Response;
 }
 
-async function frame(c: Context, manifest: SnapshotManifest, { grant, request, file, path, services, ticket, missing }: Delivery): Promise<Response> {
+async function frame(c: Context, manifest: SnapshotManifest, { grant, request, file, path, services, missing }: Delivery): Promise<Response> {
   const origin = new URL(c.req.url).origin;
   const base = repoBase(request.owner, request.name, request.ref);
   const pinned = repoBase(request.owner, request.name, { kind: "commit", commit: manifest.commit });
   // Version-3 renders already carry document-relative URLs (#242); only older
-  // snapshots need the rewrite, and the variant key keeps both derived forms
-  // apart in memory. The body depends only on the render key (which names the
-  // page's directory), so it is derived once per isolate.
-  const variant = `${needsRelativeRewrite(manifest.rendererVersion) ? "legacy-" : ""}frame-v${FRAME_VERSION}`;
-  const page = file.render === undefined ? { title: null, body: failureBody(file.error ?? "missing") }
-    : await services.snapshots.page(grant, file, variant, async rendered => ("html" in rendered
-      ? {
-        title: rendered.title,
-        body: needsRelativeRewrite(manifest.rendererVersion) ? await frameBody(rendered.html, path, isProxiedImage) : rendered.html,
-      }
-      : { title: null, body: failureBody(rendered.error) }));
+  // snapshots need the rewrite. A private body is split where its images take
+  // the reader's ticket (#293). The variant key keeps the derived forms apart in
+  // memory. The body depends only on the render key (which names the page's
+  // directory), so it is derived once per isolate.
+  const legacy = needsRelativeRewrite(manifest.rendererVersion);
+  const variant = `${grant.repo.private ? "private-" : ""}${legacy ? "legacy-" : ""}frame-v${FRAME_VERSION}`;
+  const page = file.render === undefined ? { title: null, parts: [failureBody(file.error ?? "missing")] }
+    : await services.snapshots.page(grant, file, variant, async rendered => {
+      if (!("html" in rendered)) return { title: null, parts: [failureBody(rendered.error)] };
+      const html = legacy ? await frameBody(rendered.html, path, isProxiedImage) : rendered.html;
+      return { title: rendered.title, parts: grant.repo.private ? ticketImageSlots(html, path) : [html] };
+    });
   // Every reader gets the same frame (it may be cached publicly); the shell decides what the widget may do.
   const widget = file.render === undefined ? "" : commentorScript(origin, grant.repo.id, path, file);
   let head = viewerScript("navigation", { prefix: `${base}/files/`, documentPath: path }, c.req.url);
+  let prefix = "";
   if (grant.repo.private) {
-    // Requests from the opaque frame carry no cookies: images inherit the ticket through the base URL.
-    const prefix = `${pinned}/view/${ticket ?? await mintTicket(services.authorize, grant, manifest.commit)}/files/`;
-    head = `<base data-rendro-viewer href="${prefix}${encodeRepoPath(path)}">\n`
-      + viewerScript("frame", { base: pinned, prefix, manifestKey: manifest.commit, deploymentId: manifest.commit }, c.req.url)
-      + viewerScript("navigation", { prefix: `${base}/files/`, ticketBase: `${pinned}/view/`, documentPath: path }, c.req.url);
+    // Requests from the opaque frame carry no cookies, so its images carry an asset ticket. Nothing else does: with
+    // no <base>, a link opened or copied from the frame is always the cookie-authorized URL (#293).
+    const issuedAt = services.authorize.now();
+    prefix = `${pinned}/view/${await mintTicket(services.authorize, grant, manifest.commit)}/files/`;
+    const ticket = { issuedAt, renewAfter: TICKET_TTL_SECONDS * 1000 / 2 };
+    head = viewerScript("frame", { base: pinned, prefix, manifestKey: manifest.commit, deploymentId: manifest.commit, ticket }, c.req.url) + head;
   }
   const title = page.title ?? path.slice(path.lastIndexOf("/") + 1);
-  const bytes = new TextEncoder().encode(renderFrameDocument({ title, body: page.body, origin, head: `${head}\n${widget}` }));
+  const bytes = new TextEncoder().encode(renderFrameDocument({ title, body: page.parts.join(prefix), origin, head: `${head}\n${widget}` }));
   return serveObject({
     request: c.req.raw,
     headers: {
       "Content-Type": "text/html; charset=utf-8",
       "Content-Security-Policy": frameContentSecurityPolicy(origin),
-      "Cache-Control": ticket ? "private, max-age=900" : cachePolicy(grant, request.ref),
+      "Cache-Control": cachePolicy(grant, request.ref),
     },
     // A public frame is fixed by its URL and render key; a private one embeds a per-reader ticket and has no validator.
     // Generated documents are never ranged.
@@ -317,7 +332,8 @@ async function asset(c: Context, { grant, request, file, path, services, ticket,
     "Content-Type": type,
     // Bytes from a repository never run as a document, even when navigated to (SVG).
     "Content-Security-Policy": "default-src 'none'; sandbox; frame-ancestors 'self'",
-    "Cache-Control": ticket ? "private, max-age=900" : cachePolicy(grant, request.ref),
+    // A ticket URL changes with every renewal: a cached copy is worth no more than the ticket's own lifetime.
+    "Cache-Control": ticket ? `private, max-age=${TICKET_TTL_SECONDS}` : cachePolicy(grant, request.ref),
   };
   return serveObject({
     request: c.req.raw, headers, etag: `"git-${file.sha}"`, size: file.size,

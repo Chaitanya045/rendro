@@ -21,12 +21,17 @@ function events() {
   };
 }
 
-/** A renewal client in a document that is `visible` or hidden to begin with. */
-function viewer(initially: "visible" | "hidden" = "visible", standalone = false) {
+/**
+ * A renewal client in a document that is `visible` or hidden to begin with. A publisher frame carries its ticket in a
+ * `<base>`; a repository frame (#293) has none, names the ticket in its images only and says when it was issued.
+ */
+function viewer(initially: "visible" | "hidden" = "visible", standalone = false, repository?: { issuedAt: number }) {
   vi.useFakeTimers();
   const win = new DOMWindow({ url: `${origin}${base}/files/guide/index.html`, settings: { disableCSSFileLoading: true } });
   windows.push(win);
-  win.document.write(`<html><head><base data-rendro-viewer href="${origin}${prefix}guide/index.html"></head><body><img src="assets/a.png"></body></html>`);
+  win.document.write(repository
+    ? `<html><head></head><body><a href="other.html">other</a><img src="${prefix}guide/assets/a.png"><img src="/img/sig/proxied"></body></html>`
+    : `<html><head><base data-rendro-viewer href="${origin}${prefix}guide/index.html"></head><body><img src="assets/a.png"></body></html>`);
   const bus = events();
   const parent = { postMessage: vi.fn() };
   const setInterval = vi.fn(globalThis.setInterval);
@@ -39,7 +44,8 @@ function viewer(initially: "visible" | "hidden" = "visible", standalone = false)
     win.document.dispatchEvent(new win.Event("visibilitychange"));
   };
   Object.defineProperty(win.document, "visibilityState", { configurable: true, value: initially });
-  installViewerFrame({ base, prefix, manifestKey: "release/manifest.json", deploymentId: "release" }, host);
+  const ticket = repository && { issuedAt: repository.issuedAt, renewAfter: 2.5 * minute };
+  installViewerFrame({ base, prefix, manifestKey: "release/manifest.json", deploymentId: "release", ...(ticket ? { ticket } : {}) }, host);
   let tickets = 0;
   const requests = () => parent.postMessage.mock.calls.filter(([message]) => message.type === "viewer-renew").length;
   /** The trusted parent answers the latest request, so the next one is due five minutes after it. */
@@ -167,6 +173,32 @@ describe("viewer renewal in a hidden tab", () => {
     f.show("visible");
     f.show("hidden");
     f.show("visible");
+    expect(f.requests()).toBe(1);
+  });
+});
+
+describe("repository frame renewal without a base (#293)", () => {
+  it("renews the images' ticket halfway through its five minutes, and leaves links and other images alone", () => {
+    vi.useFakeTimers();
+    const f = viewer("visible", false, { issuedAt: Date.now() });
+    f.pass(2 * minute);
+    expect(f.requests()).toBe(0);
+    f.pass(minute);
+    expect(f.requests()).toBe(1);
+    const images = [...f.win.document.querySelectorAll("img")].map(image => image.getAttribute("src"));
+    expect(images).toEqual([`${origin}${base}/view/t1/files/guide/assets/a.png`, "/img/sig/proxied"]);
+    expect(f.win.document.querySelector("a")!.getAttribute("href")).toBe("other.html");
+    expect(f.win.document.querySelector("base")).toBeNull();
+    // Every ticket is replaced well before it lapses: one renewal per three heartbeats, all hour.
+    f.pass(57 * minute);
+    expect(f.requests()).toBe(20);
+    expect(f.win.document.querySelector("img")!.getAttribute("src")).toBe(`${origin}${base}/view/t20/files/guide/assets/a.png`);
+  });
+
+  it("renews at once when the frame came from the browser cache with an older ticket", () => {
+    vi.useFakeTimers();
+    const f = viewer("visible", false, { issuedAt: Date.now() - 4 * minute });
+    f.bus.emit("pageshow");
     expect(f.requests()).toBe(1);
   });
 });

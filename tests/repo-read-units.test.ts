@@ -9,11 +9,11 @@ import {
 } from "@/repo-read/access";
 import { authorizeRepo, authorizeTicket, clearAuthorizationMemory, mintTicket, type AuthorizeDependencies, type Viewer } from "@/repo-read/authorize";
 import { mintCapability, peekCapability, sessionBinding, verifyCapability, type CapabilityClaims } from "@/repo-read/capability";
-import { failureBody, frameBody, relativeUrl } from "@/repo-read/frame";
+import { failureBody, frameBody, relativeUrl, ticketImageSlots } from "@/repo-read/frame";
 import { imageProxyPath, verifyImageProxyPath } from "@/image-proxy";
 import { issueGrant, type RepoGrant } from "@/repo-read/grant";
-import { encodeRepoPath, parseRepoPath, repoBase } from "@/repo-read/paths";
-import { clearSnapshotMemory, isPagePath, manifestFile, readDeadline, RepoSnapshots } from "@/repo-read/snapshot";
+import { encodeRepoPath, isPagePath, parseRepoPath, repoBase } from "@/repo-read/paths";
+import { clearSnapshotMemory, manifestFile, readDeadline, RepoSnapshots } from "@/repo-read/snapshot";
 import { SHARED_CACHE_KEY_LABEL, SHARED_CACHE_PATH, sharedCacheReader, sharedCacheUrl, verifySharedCachePath, type SharedCacheProbe } from "@/repo-read/shared-cache";
 import { treePage, TREE_PAGE_SIZE } from "@/repo-read/tree";
 import { sessionViewer } from "@/middleware/session";
@@ -231,6 +231,9 @@ describe("URL grammar", () => {
     "/r/octo/docs/files/a%2Fb", "/r/octo/docs/files/", "/r/octo/docs/tree/x", "/r/octo/docs/viewer-ticket",
     `/r/octo/docs/@${commit}/view/x/files/a%2Fb`, `/r/octo/docs/@${commit}/view/x/other/a`, `/r/octo/docs/@${commit}/view/x/files`,
     `/r/octo/docs/@${commit}/view//files/a`, `/r/octo/docs/@${commit}/viewer-ticket/x`,
+    // A ticket reaches assets only: every page path under it is no URL at all (#293).
+    `/r/octo/docs/@${commit}/view/v1.a/files/index.md`, `/r/octo/docs/@${commit}/view/v1.a/files/docs/Guide.MARKDOWN`,
+    `/r/octo/docs/@${commit}/view/v1.a/files/a.mdx`, `/r/octo/docs/@${commit}/view/v1.a/files/site/page.html`, `/r/octo/docs/@${commit}/view/v1.a/files/x.htm`,
   ])("rejects %s", (path) => {
     expect(parseRepoPath(path)).toBeNull();
   });
@@ -277,6 +280,20 @@ describe("document frames", () => {
     expect(await frameBody(html, "docs/a.md", check)).toBe(`<p><img src="${signed}" alt="a"><img src="${signed}" alt="b"><img src="..${forged}" alt="c">`
       + `<img src="../img/logo.png" alt="d"><a href="..${signed}">e</a></p>`);
     expect(check.mock.calls.map(([src]) => src)).toEqual([signed, forged, "/img/logo.png"]);
+  });
+
+  it("splits a private body only where a repository image takes the ticket prefix", () => {
+    const html = '<p><a href="guide/b.md">b</a> <a href="#top">top</a> <img src="img/a b.png?x#y" alt="a"> <img src="../up.png" alt="up">'
+      + ' <img src="/img/sig/proxied" alt="proxied"> <img src="https://example.com/x.png" alt="x"> <img src=" HTTPS://example.com/y.png" alt="y">'
+      + ' <img src="\\host\\z.png" alt="z"> <img alt="none"> <a href="img/c.png">c</a></p>';
+    const parts = ticketImageSlots(html, "docs/guide/a.md");
+    expect(parts.join("/r/o/n/@c/view/T/files/")).toBe('<p><a href="guide/b.md">b</a> <a href="#top">top</a> <img src="/r/o/n/@c/view/T/files/docs/guide/img/a%20b.png?x#y" alt="a">'
+      + ' <img src="/r/o/n/@c/view/T/files/docs/up.png" alt="up"> <img src="/img/sig/proxied" alt="proxied"> <img src="https://example.com/x.png" alt="x">'
+      + ' <img src=" HTTPS://example.com/y.png" alt="y"> <img src="\\host\\z.png" alt="z"> <img alt="none"> <a href="img/c.png">c</a></p>');
+    expect(parts).toHaveLength(3);
+    // A document's own NULs never become slots: the parser drops or replaces every one.
+    expect(ticketImageSlots('<p title="a\u0000b">x\u0000y<img src="i\u0000.png" alt="\u0000"></p>', "a.md")).toHaveLength(2);
+    expect(ticketImageSlots("<p>No images</p>", "a.md")).toEqual(["<p>No images</p>"]);
   });
 
   it("ships the ingest highlight palette byte for byte in the frame stylesheet", () => {

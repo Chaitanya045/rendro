@@ -3,7 +3,16 @@ import { rewriteCssUrls } from "./css-urls";
 import { createStylesheetRenewer } from "./stylesheets";
 
 interface ParentConfig { base: string }
-interface FrameConfig extends ParentConfig { prefix: string; manifestKey: string; deploymentId: string }
+interface FrameConfig extends ParentConfig {
+  prefix: string;
+  manifestKey: string;
+  deploymentId: string;
+  /**
+   * Repository frames (#293) have no `<base>`: only their images name the ticket. They say when it was issued
+   * (a frame may come from the HTTP cache) and how long after that to renew it.
+   */
+  ticket?: { issuedAt: number; renewAfter: number };
+}
 interface RenewalMessage { type?: string; requestId?: string; deploymentId?: string; manifestKey?: string; prefix?: string }
 
 export function showViewerUpdateNotice(host: Window = window, message = "A newer version of this document was published."): void {
@@ -102,12 +111,14 @@ export function installViewerFrame(config: FrameConfig, host: Window = window): 
   host.addEventListener("message", (event: MessageEvent<RenewalMessage>) => {
     if (event.source === host.parent && event.origin === origin && event.data?.type === "viewer-identify") reportDeployment();
   });
+  // Publisher frames carry the ticket in a <base>; repository frames (#293) only in their images' URLs.
   const base = doc.querySelector<HTMLBaseElement>("base[data-rendro-viewer]");
-  if (!base) return;
+  if (!base && !config.ticket) return;
+  const renewAfter = config.ticket?.renewAfter ?? 5 * 60_000;
   let prefix = config.prefix;
   let managedCssUrls = new Set<string>();
   const renewStylesheet = createStylesheetRenewer();
-  let renewedAt = Date.now();
+  let renewedAt = config.ticket?.issuedAt ?? Date.now();
   let requestedAt = 0;
   let requestId = "";
   // A resource failure that happened while hidden; the next visible moment retries it.
@@ -117,7 +128,7 @@ export function installViewerFrame(config: FrameConfig, host: Window = window): 
     // Hidden documents neither heartbeat nor renew; becoming visible settles it.
     if (doc.visibilityState === "hidden") { forceOnResume ||= force; return; }
     if (Date.now() - requestedAt < 30_000) return;
-    if (!force && Date.now() - renewedAt < 5 * 60_000) return;
+    if (!force && Date.now() - renewedAt < renewAfter) return;
     requestedAt = Date.now();
     requestId = crypto.randomUUID();
     host.parent.postMessage({ type: "viewer-renew", manifestKey: config.manifestKey, requestId }, origin);
@@ -129,7 +140,7 @@ export function installViewerFrame(config: FrameConfig, host: Window = window): 
       || typeof data.prefix !== "string" || !data.prefix.startsWith(`${config.base}/view/`)
       || !/^[-\w.]+\/files\/$/.test(data.prefix.slice(`${config.base}/view/`.length))) return;
     const next = data.prefix;
-    const oldBase = base.href;
+    const oldBase = base?.href ?? doc.baseURI;
     function replace(value: string): string {
       if (value.trimStart().startsWith("#")) return value;
       try {
@@ -167,7 +178,7 @@ export function installViewerFrame(config: FrameConfig, host: Window = window): 
     // Chromium retains the original base in parsed CSS. Resolve each scoped
     // URL explicitly, so even a resource first used after expiry gets the new
     // ticket. Reassigning identical relative CSS text is not sufficient.
-    base.href = replace(oldBase);
+    if (base) base.href = replace(oldBase);
     const nextCssUrls = new Set<string>();
     function replaceCssUrl(value: string): string {
       // Absolute publisher URLs do not inherit a ticket. Only absolute URLs

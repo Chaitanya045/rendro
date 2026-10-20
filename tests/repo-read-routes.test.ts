@@ -53,10 +53,25 @@ async function signIn(): Promise<string> {
   return `${sessionCookies.reader}; ${capability(response)}`;
 }
 
+/** The private frame's renewal client configuration, as the frame script reads it. */
+type FrameConfig = { prefix: string; ticket: { issuedAt: number; renewAfter: number } };
+function frameConfig(html: string): FrameConfig {
+  const match = /data-viewer="frame" data-config="([^"]+)"/.exec(html);
+  if (!match) throw new Error("No frame client");
+  return JSON.parse(match[1].replaceAll("&quot;", '"').replaceAll("&amp;", "&")) as FrameConfig;
+}
+
+/** The asset-ticket prefix a private frame's images use. */
 function ticketPrefix(html: string): string {
-  const match = /<base data-rendro-viewer href="([^"]+\/files\/)/.exec(html);
-  if (!match) throw new Error("No ticket base");
-  return match[1];
+  return frameConfig(html).prefix;
+}
+
+/** Every `<a href>` of a frame, resolved as the browser would: against its `<base>`, if any, else the frame's own URL. */
+function resolvedLinks(html: string, frameUrl: string): URL[] {
+  const decode = (value: string) => value.replaceAll("&quot;", '"').replaceAll("&amp;", "&");
+  const base = /<base\b[^>]*\bhref="([^"]*)"/.exec(html);
+  const against = base ? new URL(decode(base[1]), frameUrl).href : frameUrl;
+  return [...html.matchAll(/<a\b[^>]*\bhref="([^"]*)"/g)].map(match => new URL(decode(match[1]), against));
 }
 
 function expectPlainNotFound(response: Response) {
@@ -128,7 +143,7 @@ describe("public repositories", () => {
     expect(response.headers.get("Content-Security-Policy")).toBe(
       "sandbox allow-scripts allow-popups; default-src 'none'; script-src https://rendro.test/private-viewer.js https://rendro.test/commentor.js; "
       + `style-src https://rendro.test/styles/ ${COMMENTOR_STYLE_HASH}; `
-      + "img-src https://rendro.test; base-uri https://rendro.test; form-action 'none'; frame-ancestors 'self'");
+      + "img-src https://rendro.test; base-uri 'none'; form-action 'none'; frame-ancestors 'self'");
     expect(response.headers.get("X-Frame-Options")).toBe("SAMEORIGIN");
     expect(response.headers.get("Cross-Origin-Opener-Policy")).toBeNull();
     expect(response.headers.get("Accept-Ranges")).toBe("none");
@@ -270,31 +285,102 @@ describe("private repositories", () => {
     expect(fixture.access.calls.authorize).toHaveLength(1);
   });
 
-  it("serves a private frame with a ticket base, the renewal client and no validator", async () => {
+  it("serves a private frame with ticketed images only, the renewal client, a five-minute cache and no validator", async () => {
     const cookie = await signIn();
     const response = await get(`${priv}/@${fixture.commits.private}/files/docs/guide/start.md`, { cookie });
-    expect(response.headers.get("Cache-Control")).toBe("private, max-age=31536000, immutable");
+    // Never immutable: a browser keeps a private frame no longer than a capability cookie lasts.
+    expect(response.headers.get("Cache-Control")).toBe("private, max-age=300");
     expect(response.headers.get("ETag")).toBeNull();
     const html = await response.text();
-    const prefix = ticketPrefix(html);
-    expect(prefix).toMatch(new RegExp(`^${priv}/@${fixture.commits.private}/view/v1\\.[\\w-]+\\.[\\w-]+/files/$`));
-    expect(html).toContain(`<base data-rendro-viewer href="${prefix}docs/guide/start.md">`);
-    expect(html).toContain('data-viewer="frame"');
+    const config = frameConfig(html);
+    expect(config.prefix).toMatch(new RegExp(`^${priv}/@${fixture.commits.private}/view/v1\\.[\\w-]+\\.[\\w-]+/files/$`));
+    // The client renews halfway through the ticket's five minutes, counted from when the server issued it.
+    expect(config.ticket).toEqual({ issuedAt: expect.any(Number), renewAfter: 150_000 });
+    expect(Math.abs(config.ticket.issuedAt - Date.now())).toBeLessThan(60_000);
+    expect(html).not.toContain("<base");
     expect(html).toContain("<title>Getting started</title>");
     expect(html).toContain('<a href="../index.md#user-content-home">home</a>');
     expect(html).toContain('<a href="#user-content-start-here">Top</a>');
+
+    const home = await (await get(`${priv}/@${fixture.commits.private}/files/docs/index.md`, { cookie })).text();
+    const prefix = ticketPrefix(home);
+    expect(home).toContain(`<img src="${prefix}docs/img/logo.png" alt="Logo"`);
+    expect(home).toContain('<a href="guide/start.md">guide</a>');
   });
 
-  it("serves private images through the ticket alone, privately, and refuses a tampered or foreign ticket before any read", async () => {
+  it("resolves every link of a private frame to a cookie-authorized path, never a ticket", async () => {
+    const cookie = await signIn();
+    for (const frame of [
+      `${priv}/@${fixture.commits.private}/files/docs/index.md`,
+      `${priv}/@${fixture.commits.private}/files/docs/guide/start.md`,
+      `${priv}/files/docs/guide/start.md`,
+      `${priv}/~main/files/docs/index.md`,
+    ]) {
+      const url = `https://rendro.test${frame}`;
+      const html = await (await get(frame, { cookie })).text();
+      const links = resolvedLinks(html, url);
+      expect(links.length, frame).toBeGreaterThan(0);
+      for (const link of links) {
+        expect(link.origin).toBe("https://rendro.test");
+        expect(link.pathname, link.href).not.toContain("/view/");
+        // Each resolves under the URL the frame was read at, which the reader's cookie authorizes.
+        expect(link.pathname.startsWith(frame.slice(0, frame.indexOf("/files/") + "/files/".length)), link.href).toBe(true);
+      }
+    }
+  });
+
+  it("serves a ticket's images but answers every page under it with the plain 404 of an unknown path", async () => {
+    const cookie = await signIn();
+    const prefix = ticketPrefix(await (await get(`${priv}/@${fixture.commits.private}/files/docs/index.md`, { cookie })).text());
+    expect((await get(`${prefix}docs/img/logo.png`)).status).toBe(200);
+    expectPlainNotFound(await get(`${prefix}docs/img/missing.png`));
+    // The reference: a page URL under /r/ that no route knows.
+    const unknown = await get(`${priv}/@${fixture.commits.private}/no-such-route/docs/index.md`);
+    expectPlainNotFound(unknown);
+    // Every HTML response carries its own nonce; nothing else may differ.
+    const withoutNonces = (html: string) => html.replace(/nonce="[^"]+"/g, 'nonce=""');
+    const unknownBody = withoutNonces(await unknown.text());
+    const reads = fixture.bucket.ops.get;
+    const lookups = sessionLookups.length;
+    // No cookie, the reader's own session and cookie, and another user's session.
+    for (const headers of [{}, { cookie }, { cookie: sessionCookies.outsider }] as Array<Record<string, string>>) {
+      for (const page of ["docs/index.md", "docs/guide/start.md", "docs/missing.md", "docs/INDEX.MD", "docs/page.html"]) {
+        const response = await get(`${prefix}${page}`, headers);
+        expectPlainNotFound(response);
+        expect(response.headers.get("Content-Type"), page).toBe(unknown.headers.get("Content-Type"));
+        expect(withoutNonces(await response.text()), page).toBe(unknownBody);
+        expect(setCookies(response)).toEqual([]);
+      }
+    }
+    // Refused by the URL grammar: no session, ticket or storage read happened.
+    expect(fixture.bucket.ops.get).toBe(reads);
+    expect(sessionLookups).toHaveLength(lookups);
+  });
+
+  it("expires a ticket with the capability cookie's five minutes, and the shell renews it for a page left open", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const cookie = await signIn();
+    const prefix = ticketPrefix(await (await get(`${priv}/@${fixture.commits.private}/files/docs/index.md`, { cookie })).text());
+    const opened = Date.now();
+    vi.setSystemTime(opened + 299_000);
+    expect((await get(`${prefix}docs/img/logo.png`)).status).toBe(200);
+    vi.setSystemTime(opened + 301_000);
+    expectPlainNotFound(await get(`${prefix}docs/img/logo.png`));
+    // The cookie has lapsed too; the shell's renewal re-authorizes through the session and mints a fresh ticket.
+    const renewal = await get(`${priv}/@${fixture.commits.private}/viewer-ticket?manifestKey=${fixture.commits.private}`, { cookie });
+    expect(renewal.status).toBe(200);
+    const renewed = (await renewal.json() as { prefix: string }).prefix;
+    expect(renewed).not.toBe(prefix);
+    expect((await get(`${renewed}docs/img/logo.png`)).status).toBe(200);
+  });
+
+  it("serves private images through the ticket alone, privately for the ticket's lifetime, and refuses a tampered or foreign ticket before any read", async () => {
     const cookie = await signIn();
     const prefix = ticketPrefix(await (await get(`${priv}/@${fixture.commits.private}/files/docs/index.md`, { cookie })).text());
     const image = await get(`${prefix}docs/img/logo.png`);
     expect(image.status).toBe(200);
-    expect(image.headers.get("Cache-Control")).toBe("private, max-age=900");
+    expect(image.headers.get("Cache-Control")).toBe("private, max-age=300");
     expect(image.headers.get("Content-Type")).toBe("image/png");
-    const page = await get(`${prefix}docs/index.md`);
-    expect(page.status).toBe(200);
-    expect(ticketPrefix(await page.text())).toBe(prefix);
 
     const edge = new MemoryEdgeCache();
     Object.assign(globalThis, { caches: { default: edge } });

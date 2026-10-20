@@ -464,7 +464,7 @@ test("sign-out tells the browser to evict cached site data", async ({ page }) =>
   expect(clearSiteData).toBe('"cache"');
 });
 
-test("sign-out evicts the immutably cached private frame a shared-machine reader warmed", async ({ baseURL }, info) => {
+test("sign-out evicts the cached private frame a shared-machine reader warmed", async ({ baseURL }, info) => {
   if (info.project.name !== "chromium") test.skip(true, "Cache eviction is proven on Chromium; the header value itself is engine-independent above.");
   const { closed } = JSON.parse(readFileSync(process.env.RENDRO_E2E_REPOS as string, "utf8")) as RepoFixtures;
   const framePath = `/r/${closed.owner}/${closed.name}/@${closed.commit}/files/docs/index.md`;
@@ -495,7 +495,8 @@ test("sign-out evicts the immutably cached private frame a shared-machine reader
 
     // Prime the HTTP cache with the private frame; the first load transmits.
     const primed = await page.goto(framePath);
-    expect(primed?.headers()["cache-control"]).toBe("private, max-age=31536000, immutable");
+    // Cached for the capability cookie's five minutes, never immutably (#293): long enough to need eviction.
+    expect(primed?.headers()["cache-control"]).toBe("private, max-age=300");
     expect(transmissions.get(framePath)).toBe(1);
 
     // Chromium may finish writing the cache entry late, so settle with repeated

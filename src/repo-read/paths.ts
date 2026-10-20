@@ -5,7 +5,7 @@
  *   /r/{owner}/{repo}[/{ref}]                       shell; `?doc=<repo path>` selects the document
  *   /r/{owner}/{repo}[/{ref}]/files/{path}          rendered page (document frame) or asset bytes
  *   /r/{owner}/{repo}[/{ref}]/tree                  one sidebar directory page (JSON)
- *   /r/{owner}/{repo}/@{commit}/view/{ticket}/files/{path}   private assets, authorized by an asset ticket
+ *   /r/{owner}/{repo}/@{commit}/view/{ticket}/files/{path}   private assets (never pages), authorized by an asset ticket
  *   /r/{owner}/{repo}/@{commit}/viewer-ticket       ticket renewal for the trusted shell (JSON)
  *   POST /r/{owner}/{repo}/comment-access           comment access for the trusted shell (#254, JSON)
  *
@@ -41,6 +41,11 @@ export interface RepoRequestPath {
 
 const TICKET_SEGMENT = /^[A-Za-z0-9._-]{1,2048}$/;
 
+/** A page is anything the renderer handles; everything else in a manifest is an asset. */
+export function isPagePath(path: string): boolean {
+  return /\.(?:md|markdown|mdx|html?)$/i.test(path);
+}
+
 function parseRef(segment: string): RepoRefSpec | null {
   if (segment.startsWith("@")) {
     const commit = segment.slice(1);
@@ -70,7 +75,8 @@ function parseTarget(rest: string[], ref: RepoRefSpec): RepoTarget | null {
   if (rest.length === 1 && rest[0] === "viewer-ticket") return { kind: "viewer-ticket" };
   if (rest[0] === "view" && rest[2] === "files" && rest.length > 3 && TICKET_SEGMENT.test(rest[1])) {
     const path = decodeStoragePath(rest.slice(3).join("/"));
-    return path ? { kind: "ticket-files", ticket: rest[1], path } : null;
+    // A ticket reaches images only (#293): pages are read with the cookie, so a page under a ticket is no URL at all.
+    return path && !isPagePath(path) ? { kind: "ticket-files", ticket: rest[1], path } : null;
   }
   return null;
 }
