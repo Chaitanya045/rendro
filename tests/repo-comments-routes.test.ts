@@ -24,7 +24,7 @@ beforeEach(async () => {
   vi.stubEnv("SITE_URL", ORIGIN);
   fixture = await repoReadFixture();
   clearCommentGrantMemory();
-  stubSessions();
+  stubSessions({ "reader-token.sig": users.reader, "outsider-token.sig": users.outsider, "down-token.sig": "down" });
   grants = [];
   snapshots = [];
   convex = {
@@ -224,15 +224,26 @@ describe("comment access mirrors read access", () => {
 describe("the first comments come with the first access answer (#284)", () => {
   const first = "?path=docs%2Fguide.md";
 
-  it("hands a public repository's first page to anyone, read as anonymous, never cacheable", async () => {
+  it("hands a public repository's first page to anyone, read for the signed-in reader, never cacheable (#303)", async () => {
     const response = await access(pub, { cookie: sessionCookies.reader }, first);
     expect(response.status).toBe(200);
     expect(response.headers.get("Cache-Control")).toBe("private, no-store");
     expect(await response.json()).toEqual({
       repoId: publicRepo.id, private: false, expiresAt: expect.any(Number), threads: { path: "docs/guide.md", page, isDone: false },
     });
-    // A public grant names no reader, and neither does its page: it is the same for everyone.
-    expect(snapshots).toEqual([{ repoId: publicRepo.id, path: "docs/guide.md", userId: null, epoch: 0 }]);
+    // A public grant names no reader; its page is read for the session's reader, so their own threads carry their actions.
+    expect(snapshots).toEqual([{ repoId: publicRepo.id, path: "docs/guide.md", userId: null, epoch: 0, viewerId: users.reader }]);
+    expect(grants).toEqual([expect.objectContaining({ repoId: publicRepo.id, userId: null })]);
+  });
+
+  it("reads a public first page as anonymous for a reader the session does not name (#303)", async () => {
+    // No session, a session the backend does not know, and a session check that is down: anyone may read the page.
+    for (const cookie of [undefined, "better-auth.session_token=unknown-token.sig", "better-auth.session_token=down-token.sig"]) {
+      const response = await access(pub, cookie ? { cookie } : {}, first);
+      expect(response.status).toBe(200);
+      expect((await response.json() as { threads?: unknown }).threads).toEqual({ path: "docs/guide.md", page, isDone: false });
+    }
+    expect(snapshots).toEqual(Array.from({ length: 3 }, () => ({ repoId: publicRepo.id, path: "docs/guide.md", userId: null, epoch: 0 })));
   });
 
   it("hands a private repository's first page to its reader only, at the epoch the read path checked", async () => {

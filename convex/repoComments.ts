@@ -20,7 +20,7 @@ import { validateClientOperationId, validateCommentAuthor } from "./commentOpera
 import { publicError } from "./publicErrors";
 import { mutation, query } from "./publicFunctions";
 import { publicPaginate } from "./publicPagination";
-import { repoCommentReader, repoCommentSnapshotAllowed, requireRepoCommentWriter } from "./repoCommentAccess";
+import { repoCommentReader, repoCommentSnapshotAllowed, requireRepoCommentWriter, validUserId } from "./repoCommentAccess";
 import { repoAnchorValidator } from "./schema";
 import { requireInternalSecret } from "./security";
 import { consumeWriteQuota } from "./writeQuotas";
@@ -141,14 +141,21 @@ export const listThreads = query({
  * before its Convex socket is up. Internal-secret only: the Worker calls it after `authorizeRepo` granted this reader
  * the repository, alongside recording the grant, and hands the page only to that reader (`private, no-store`). The
  * page is the one `listThreads` gives the same reader; what `grant` would refuse is an empty page here too.
+ *
+ * `userId` is whom the grant names (null: anyone, for a public repository) and decides access, exactly as `grant`
+ * does. A public page is the same for every reader except which threads and replies the reader may delete, so the
+ * Worker names its signed-in reader as `viewerId` (#303), and the page is read for them. A private page is always
+ * read for the grant's own reader.
  */
 export const threadSnapshot = query({
-  args: { internalSecret: v.string(), ...scopeArgs, userId: v.union(v.string(), v.null()), epoch: v.number() },
+  args: { internalSecret: v.string(), ...scopeArgs, userId: v.union(v.string(), v.null()), epoch: v.number(), viewerId: v.optional(v.string()) },
   handler: async (ctx, args) => {
     requireInternalSecret(args.internalSecret);
-    if (!validRepoPath(args.path)) publicError("invalid_input");
+    if (!validRepoPath(args.path) || (args.viewerId !== undefined && (args.userId !== null || !validUserId(args.viewerId)))) {
+      publicError("invalid_input");
+    }
     if (!await repoCommentSnapshotAllowed(ctx, args.repoId, args.userId, args.epoch)) return emptyPage();
-    return threadPage(ctx, args.repoId, args.path, args.userId, { numItems: REPO_THREAD_PAGE_SIZE, cursor: null });
+    return threadPage(ctx, args.repoId, args.path, args.userId ?? args.viewerId ?? null, { numItems: REPO_THREAD_PAGE_SIZE, cursor: null });
   },
 });
 

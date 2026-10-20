@@ -21596,6 +21596,33 @@
               "kind": "unit"
             }
           ]
+        },
+        {
+          "id": "UI-163-E21",
+          "from": "A signed-in author of threads on a public repository document opens it",
+          "trigger": "The shell's first comment-access answer arrives before the live subscription (#303)",
+          "expected": "The author's threads show with their Archive and Delete from the first paint; an anonymous reader's show neither; a private repository's first page is its reader's as before",
+          "inventoryRefs": [
+            "UI-163"
+          ],
+          "status": "e2e",
+          "tests": [
+            {
+              "file": "e2e/repo-comments.spec.ts",
+              "name": "the first comments carry the signed-in author's Archive and Delete before the live page, and nobody else's",
+              "kind": "e2e"
+            },
+            {
+              "file": "tests/repo-comments-convex.test.ts",
+              "name": "reads a public first page for the signed-in reader the Worker names, deciding access as the public grant does (#303)",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/repo-comments-routes.test.ts",
+              "name": "hands a public repository's first page to anyone, read for the signed-in reader, never cacheable (#303)",
+              "kind": "unit"
+            }
+          ]
         }
       ]
     },
