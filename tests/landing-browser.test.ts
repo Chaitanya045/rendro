@@ -57,7 +57,7 @@ const scrollOffset = (page: Page, id: string) => page.evaluate(target => {
 
 it('loads the landing page and resolves the sign-in, get-started, logo and call-to-action links', async () => {
   const page = await open();
-  expect(await page.title()).toContain('Documentation that ships with your code');
+  expect(await page.title()).toContain('Docs straight from your GitHub repository');
   expect(await page.getByRole('link', { name: 'Sign in', exact: true }).getAttribute('href')).toBe('/sign-in');
   expect(await page.locator('a.header-get-started').getAttribute('href')).toBe('/sign-up');
   expect(await page.getByRole('link', { name: 'Rendro home' }).getAttribute('href')).toBe('/');
@@ -75,7 +75,7 @@ it('loads the landing page and resolves the sign-in, get-started, logo and call-
   expect(await page.getByRole('heading', { name: 'Start shipping docs' }).isVisible()).toBe(true);
   await page.getByRole('link', { name: /^Rendro/ }).first().click();
   await page.waitForURL(`${harness.origin}/`);
-  expect(await page.getByRole('heading', { name: 'Your docs should ship with your code.' }).isVisible()).toBe(true);
+  expect(await page.getByRole('heading', { name: 'Docs straight from your GitHub repository.' }).isVisible()).toBe(true);
   expect(page.errors).toEqual([]);
 });
 
@@ -132,7 +132,7 @@ it('resolves the footer links without leaving the page and opens GitHub in a pro
 it.each([320, 375, 430, 1440])('keeps the product screenshot proportional, unfiltered and inside the viewport at %ipx', async width => {
   for (const colorScheme of ['light', 'dark'] as const) {
     const page = await open({ viewport: { width, height: 900 }, colorScheme });
-    const image = page.getByRole('img', { name: /Rendro workspace with an organization file tree/ });
+    const image = page.getByRole('img', { name: /Rendro repository workspace with a searchable document tree/ });
     await image.scrollIntoViewIfNeeded();
     await expect.poll(() => image.evaluate(element => (element as HTMLImageElement).complete && (element as HTMLImageElement).naturalWidth)).toBe(1280);
     const box = await image.evaluate(element => {
@@ -234,5 +234,5 @@ it('shows all content without motion under reduced-motion, print and no-JavaScri
   await noScript.goto(harness.origin + '/');
   expect(await noScript.evaluate(() => document.documentElement.classList.contains('motion-ready'))).toBe(false);
   expect(await noScript.locator('#security .security-copy').evaluate(element => getComputedStyle(element).opacity)).toBe('1');
-  expect(await noScript.getByRole('heading', { name: 'Private by default. Scoped by organization.' }).isVisible()).toBe(true);
+  expect(await noScript.getByRole('heading', { name: 'Private stays private. Access follows GitHub.' }).isVisible()).toBe(true);
 });

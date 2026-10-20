@@ -56,8 +56,8 @@ describe("unauthenticated landing", () => {
     const html = await res.text();
 
     expect(res.status).toBe(200);
-    expect(html).toContain("<title>Rendro — Documentation that ships with your code</title>");
-    expect(html).toContain('<h1 id="hero-title">Your docs should ship with your code.</h1>');
+    expect(html).toContain("<title>Rendro — Docs straight from your GitHub repository</title>");
+    expect(html).toContain('<h1 id="hero-title">Docs straight from your GitHub repository.</h1>');
     expect(html).toContain('src="/landing-product.webp"');
     expect(html).toContain('id="product"');
     expect(html).toContain('id="workflow"');
@@ -78,6 +78,18 @@ describe("unauthenticated landing", () => {
     expect(html).toContain('navigationEntry.type === "reload"');
     expect(html).not.toContain('window.addEventListener("hashchange"');
     expect(html).not.toContain("Sign in to read your team's docs.");
+  });
+
+  it("describes the GitHub-backed product, not organizations, the CLI or API keys", async () => {
+    const html = await (await workerApp.request("https://dev.rendro.app/")).text();
+    // The three journey steps, with GitHub sign-in announced but not offered yet (P1).
+    for (const step of ["Sign in with GitHub", "Pick a repository", "Read and comment"]) expect(html).toContain(`<h3>${step}</h3>`);
+    expect(html).toContain("GitHub sign-in is coming soon; until then, create an account with your email.");
+    expect(html).toContain('<h2 id="security-title">Private stays private. Access follows GitHub.</h2>');
+    expect(html).toContain('<h3 class="signals-title">Where Rendro looks for docs</h3>');
+    // Nothing of the upload era is left: organizations, the CLI and its push, API keys, publications and shares.
+    const text = html.replace(/<style[\s\S]*?<\/style>|<script[\s\S]*?<\/script>/g, "");
+    expect(text).not.toMatch(/organi[sz]ation|\bCLI\b|rendro push|API[ -]?key|RENDRO_API_KEY|terminal|publication|share link|signed URL/i);
   });
 
 });
