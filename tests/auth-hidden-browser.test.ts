@@ -36,6 +36,20 @@ async function hidden(page: Page, selector: string) {
   expect(await node.isVisible()).toBe(false);
 }
 
+// The inactive password sections keep their space so the footer below never moves (#312): they are invisible, out of
+// the accessibility tree and unfocusable instead of removed from layout.
+async function reserved(page: Page, selector: string) {
+  const node = page.locator(selector);
+  expect(await node.count()).toBe(1);
+  expect(await node.evaluate(element => getComputedStyle(element).visibility)).toBe('hidden');
+  expect(await node.isVisible()).toBe(false);
+  expect(await node.evaluate(element => [...element.querySelectorAll('input, button')].some(control => {
+    (control as HTMLElement).focus();
+    return document.activeElement === control;
+  }))).toBe(false);
+  expect(await page.getByRole('heading', { name: await node.locator('h2').textContent() ?? '' }).count()).toBe(0);
+}
+
 it.each([375, 1440])('signup hides the form, focuses success and restores a fresh form at %ipx', async width => {
   const page = await open('/sign-up?returnTo=%2Fr%2Facme%2Fhandbook', width);
   await hidden(page, '#success-panel');
@@ -94,13 +108,13 @@ it.each(['credential', 'google'])('security hides inactive password controls bef
   await page.route('**/api/auth/list-accounts', route => route.fulfill({ status: 503, json: {} }));
   await page.goto(harness.origin + '/account/security');
   await page.getByRole('button', { name: 'Try again' }).waitFor();
-  await hidden(page, '#initial-password-section');
-  await hidden(page, '#change-password-section');
+  await reserved(page, '#initial-password-section');
+  await reserved(page, '#change-password-section');
   await page.route('**/api/auth/list-accounts', route => route.fulfill({ json: [{ providerId }] }));
   await page.getByRole('button', { name: 'Try again' }).click();
   const shown = providerId === 'credential' ? '#change-password-section' : '#initial-password-section';
   await page.locator(shown).waitFor();
-  await hidden(page, providerId === 'credential' ? '#initial-password-section' : '#change-password-section');
+  await reserved(page, providerId === 'credential' ? '#initial-password-section' : '#change-password-section');
 });
 
 it.each([

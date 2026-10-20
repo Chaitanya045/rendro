@@ -66,6 +66,8 @@ Sign-up responses do not reveal whether an address is already registered. Better
 
 The provider-neutral OAuth error path stays for GitHub sign-in: `/api/auth/error` and any upstream redirect to it are rewritten by the Worker to `/sign-in?error=<code>`, which shows fixed copy for cancellation, an expired or mismatched state, a failed link and unknown codes, never the upstream text.
 
+`/account/security` loads the account's sign-in methods from the browser (`/api/auth/list-accounts`) but reserves the final layout at first paint (#312). The live method list shares a grid cell with an invisible, inert copy of every row the lookup can end in (loading, configured, not configured, failed), and the controller clones the matching row into the list. Both password sections stack in one cell with a section skeleton, the inactive ones `visibility: hidden` rather than `display: none`. The card is therefore as tall as its tallest outcome from the start, and the footer links never move.
+
 The local authentication regression suite (`e2e/auth.spec.ts`) exercises these
 flows against workerd and the disposable Convex backend, with captured mail.
 Original signup verification and resend are separate journeys; reset mismatch

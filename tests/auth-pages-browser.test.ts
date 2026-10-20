@@ -1,6 +1,6 @@
 import { getRequestListener } from '@hono/node-server';
 import type { User } from 'better-auth/types';
-import { Hono } from 'hono';
+import { Hono, type Context, type Next } from 'hono';
 import type { Page } from 'playwright';
 import { beforeAll, expect, it } from 'vitest';
 import authPages from '@/routes/auth-pages';
@@ -16,10 +16,12 @@ beforeAll(async () => {
   const app = new Hono<{ Variables: { user?: User } }>();
   app.use('*', securityHeaders);
   app.get('/fonts/*', serveFonts);
-  app.use('/account/*', async (c, next) => {
-    c.set('user', { id: 'user-a', email: 'person@example.test' } as User);
+  const signedIn = async (c: Context<{ Variables: { user?: User } }>, next: Next) => {
+    c.set('user', { id: 'user-a', name: 'Synthetic User', email: 'person@example.test' } as User);
     await next();
-  });
+  };
+  app.use('/account/*', signedIn);
+  app.use('/home', signedIn);
   app.route('/', authPages);
   const listener = getRequestListener(request => app.fetch(request));
   await harness.start((request, response) => { void listener(request, response).catch(error => response.destroy(error as Error)); });
@@ -180,4 +182,90 @@ it('excludes duplicate reset submissions while pending, then recovers from a rej
   await page.locator('#success-panel').waitFor();
   expect(requests).toBe(2);
   expect(await page.getByRole('link', { name: 'Sign in', exact: true }).getAttribute('href')).toBe('/sign-in?returnTo=%2Faccount%2Fsecurity');
+});
+
+// #312: the footer's links sat below content that only appeared once the sign-in methods loaded, so a click aimed at
+// "Back to home" could land on the password form instead. Each page's final layout must exist at first paint. Shifts are
+// counted from the moment the web fonts have settled: a font swap after first paint is a separate effect.
+const layoutProbe = () => {
+  const shifts: { value: number; startTime: number }[] = [];
+  Object.assign(window, { shifts });
+  new PerformanceObserver(list => { for (const entry of list.getEntries()) shifts.push({ value: (entry as PerformanceEntry & { value: number }).value, startTime: entry.startTime }); })
+    .observe({ type: 'layout-shift', buffered: true });
+};
+// Waits for the fonts and a rendered frame, then returns the time from which a layout shift counts.
+const settle = (page: Page) => page.evaluate(async () => {
+  await document.fonts.ready;
+  await new Promise(requestAnimationFrame);
+  await new Promise(requestAnimationFrame);
+  return performance.now();
+});
+const boxes = (page: Page, selectors: string[]) => page.evaluate(list => list.map(selector => {
+  const rect = document.querySelector(selector)!.getBoundingClientRect();
+  return { x: rect.x, y: rect.y + scrollY, width: rect.width, height: rect.height };
+}), selectors);
+const shiftsSince = (page: Page, since: number) => page.evaluate(async since => {
+  await new Promise(requestAnimationFrame);
+  return (window as unknown as { shifts: { value: number; startTime: number }[] }).shifts.filter(entry => entry.startTime >= since).map(entry => entry.value);
+}, since);
+const anchors = ['.account-footer', '.account-footer a', '.account-footer button', '.footer'];
+
+it.each([
+  ['credential', 375], ['credential', 1440], ['google', 375], ['google', 1440], ['failure', 320], ['failure', 1440],
+] as const)('keeps the security footer and its links in place from first paint until a %s lookup settles at %ipx', async (outcome, width) => {
+  const page = await harness.newPage({ viewport: { width, height: 900 }, reducedMotion: 'reduce' });
+  await page.addInitScript(layoutProbe);
+  let lookups = 0;
+  let release!: () => void;
+  const held = new Promise<void>(resolve => { release = resolve; });
+  await page.route('**/api/auth/list-accounts', async route => {
+    if (++lookups === 1) await held;
+    if (outcome === 'failure' && lookups === 1) return route.fulfill({ status: 503, json: {} });
+    return route.fulfill({ json: [{ providerId: outcome === 'failure' ? 'credential' : outcome }] });
+  });
+  await page.goto(`${harness.origin}/account/security`);
+  const since = await settle(page);
+  const list = page.locator('#method-list');
+  expect(await list.getAttribute('aria-busy')).toBe('true');
+  expect(await page.getByText('Loading sign-in methods').count()).toBe(1);
+  // The reserved rows are invisible and inert: no duplicate controls, alerts or text reach assistive technology.
+  expect(await page.getByRole('button', { name: /Add below|Try again/ }).count()).toBe(0);
+  expect(await page.getByRole('alert').count()).toBe(0);
+  const before = await boxes(page, anchors);
+  release();
+  await expect.poll(() => list.getAttribute('aria-busy')).toBe('false');
+  if (outcome === 'failure') {
+    expect(await page.getByRole('alert').textContent()).toContain("Couldn't load your sign-in methods");
+    expect(await boxes(page, anchors)).toEqual(before);
+    await page.getByRole('button', { name: 'Try again' }).click();
+    await page.locator('#change-password-section').waitFor();
+  } else {
+    await page.locator(outcome === 'credential' ? '#change-password-section' : '#initial-password-section').waitFor();
+  }
+  await expect.poll(() => list.getAttribute('aria-busy')).toBe('false');
+  expect(await list.textContent()).toContain(outcome === 'google' ? 'Not configured' : 'Configured');
+  expect(await page.locator('#method-list .method').count()).toBe(1);
+  expect(await page.locator('#security-skeleton').isVisible()).toBe(false);
+  expect(await boxes(page, anchors)).toEqual(before);
+  expect(await shiftsSince(page, since)).toEqual([]);
+  // Its invisible reserve still exposes no duplicate row, alert or control.
+  expect(await page.getByRole('button', { name: /Add below|Try again/ }).count()).toBe(outcome === 'google' ? 1 : 0);
+  expect(await page.getByRole('alert').count()).toBe(0);
+  await page.getByRole('link', { name: 'Back to home' }).click();
+  await page.waitForURL(`${harness.origin}/home`);
+});
+
+it.each([
+  ['/home', '.account-footer'], ['/sign-in', '.switch'], ['/sign-up', '.switch'],
+])('paints %s in its final layout, with nothing inserted above its links later', async (path, links) => {
+  for (const width of [375, 1440]) {
+    const page = await harness.newPage({ viewport: { width, height: 900 }, reducedMotion: 'reduce' });
+    await page.addInitScript(layoutProbe);
+    await page.goto(harness.origin + path);
+    const since = await settle(page);
+    const before = await boxes(page, [links, '.footer']);
+    await page.waitForLoadState('networkidle');
+    expect(await boxes(page, [links, '.footer']), `${path} at ${width}px`).toEqual(before);
+    expect(await shiftsSince(page, since), `${path} at ${width}px`).toEqual([]);
+  }
 });
