@@ -1414,6 +1414,8 @@ describe("lazy tree instant navigation (#245)", () => {
     await link(tab, indexHref).waitFor();
     await link(tab, indexHref).focus();
     await tab.waitForFunction(href => !!document.querySelector(`iframe[data-preload="${href}"]`), indexHref);
+    // The frame exists before its request reaches the fixture server.
+    await expect.poll(() => frameHrefCount(indexHref)).toBe(1);
     await tab.evaluate(() => {
       const tree = document.getElementById("tree-container")!;
       const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");

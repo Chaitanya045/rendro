@@ -464,11 +464,12 @@ Request
   │   ├─ /p/:slug, /p/:slug/tree, /p/:slug/files/*      publications
   │   ├─ /s/:token, /s/:token/files/*                   private shares
   │   ├─ /r/{owner}/{repo}/…                            repository docs (own capability cookie; session only on a miss)
+  │   ├─ POST /rum                                     real-user monitoring beacons (no cookie read or set)
   │   ├─ /share/:token                                  legacy HMAC share links
   │   └─ /public/:org/:slug/*                           legacy public folders
   ├─ 6. Public static assets, before session middleware (explicit allowlist, `src/routes/public-assets.ts`)
   │   ├─ versioned bundles: /management-pages.js, /management-query.js, /select.js, /lazy-tree.js,
-  │   │   /private-viewer.js, /commentor-parent.js, /commentor.js
+  │   │   /private-viewer.js, /commentor-parent.js, /commentor.js, /rum.js
   │   ├─ /favicon.svg, /favicon.ico, /landing-product.webp, /fonts/* (hashed fonts and licenses only)
   ├─ 7. Session middleware
   ├─ 8. Auth
@@ -1317,7 +1318,7 @@ The repository shell (`/r/…`) keeps navigation inside the shell and makes a li
 - A shell `fetch()` cannot warm the opaque sandboxed frame: the HTTP cache is partitioned by the frame's opaque origin, so the prefetch must load a real frame carrying the content frame's `sandbox` attribute.
 - Preloads are **hidden sibling frames in the content area, never moved**. Moving an iframe to a new parent — even a `replaceWith` in the same task — discards its browsing context in Chromium and re-requests the document. The pool keeps at most three buffers as absolute, invisible siblings; adopting one toggles visibility and identity in place, so the browsing context and the painted document survive with no second request.
 - Readiness is the frame's own `doc-loaded` announcement, not its `load` event: an aborted subframe navigation still fires `load` on Chromium's error page, so silence is the only failure signal. A preload that has not spoken is cancelled rather than adopted, and the click loads normally.
-- The reveal runs inside `document.startViewTransition` so the old and new documents cross-fade instead of flashing, unless the reader prefers reduced motion or the API is absent. Either way a `rendro:frame-switch` `performance.measure` records the switch (the target is under 200 ms for a warmed frame).
+- The reveal runs inside `document.startViewTransition` so the old and new documents cross-fade instead of flashing, unless the reader prefers reduced motion or the API is absent. Either way a `rendro:frame-switch` `performance.measure` records the switch (the target is under 200 ms for a warmed frame), and on the repository read path one `rendro:navigation` measure records activation → swap → load → paint for real-user monitoring (see [Real-user monitoring](#real-user-monitoring-282)).
 - After a reveal the private viewer is asked to redeploy in its new cell (`viewer-identify`); the shell re-sends the fragment and settles the loader exactly as a fresh load does.
 
 ### Sticky Headers (CSS)
@@ -2278,7 +2279,130 @@ An earlier pair of runs at load about 9 (before the rewritten body was memoized)
 ### Open points
 
 - The repository shell has no account menu: the capability cookie carries no display identity. P1's GitHub sign-in reworks the shell.
-- `Server-Timing` phases and real-user monitoring (P0) for these routes.
+- Real-user monitoring and `Server-Timing` phases ship with #282 ([Real-user monitoring](#real-user-monitoring-282)); dashboards and alerting are a follow-up.
+
+## Real-user monitoring (#282)
+
+Every latency budget of the read path (cached view, cold colo, in-shell switch, first view) is checked against field data from two sources: `Server-Timing` phases on every authorized `/r/` response, and a small browser bundle in the repository shell that reports web-vitals and in-shell navigation timings to a Workers Analytics Engine dataset. Only the `/r/` surfaces are instrumented: management pages and the legacy viewers carry neither.
+
+| Module | Role |
+|---|---|
+| `src/repo-read/timing.ts` | `ReadTiming`: the per-request phase record and its `Server-Timing` header |
+| `src/rum/schema.ts` | The beacon schema: enumerations, bounds, the strict validator shared by browser and Worker |
+| `src/rum/client.ts` | `/rum.js`: web-vitals, navigation measures, frame and request timings, `sendBeacon` |
+| `src/rum/route.ts` | `POST /rum`: cross-site refusal, size cap, schema, in-colo rate limit, one data point per event |
+| `src/viewer/navigation.ts` | The frame reports its own response timing with `doc-loaded` (`documentResponseTiming`) |
+
+### Server-Timing phases
+
+An authorized `GET /r/…` response (shell, frame, image, tree page, search, renewal, preparing page, and a 503 after authorization) carries one header such as `Server-Timing: auth;dur=0.4, cache;desc=r2, shared;dur=6.1, r2;dur=2.3, total;dur=11.8`. The metric names are fixed, `desc` is one of four words, and nothing names a repository, path, commit, user or key.
+
+| Metric | Present when | Meaning |
+|---|---|---|
+| `auth` | always | Authorization (`authorizeRepo` / `authorizeTicket`): cookie verify, the epoch read, and on a miss the session and permission source |
+| `cache;desc=` | always | The slowest tier any object read needed: `memory` (all in this isolate), `shared` (the signed cacheable subrequest), `colo` (`caches.default`), `r2` |
+| `shared`, `colo`, `r2` | that tier was tried | Wall time spent in that tier, summed over the request's reads (a miss counts too). A pointer refreshed in the background is not on the request's path and is not counted |
+| `first-view` | a first view waited | The `ensure` window before the preparing page or the docs (#242) |
+| `search` | a search ran | The D1 query and ranking (#251) |
+| `total` | always | Middleware entry to the response, error mapping included |
+
+Denials, unknown repositories, malformed URLs and an unconfigured Worker carry no `Server-Timing` at all, so a denial stays byte-for-byte the response for a repository that does not exist. Recording costs a few clock reads per request; the header is built once after the handler. In Workers the clock advances only across I/O, so phases measure I/O waits, not CPU. The shared-tier route and `POST /r/…/comment-access` report nothing.
+
+### What the browser sends
+
+The repository shell loads `/rum.js?v=<RUM_VERSION>` with `async` and the request nonce (a versioned, same-origin bundle in the asset ledger; `connect-src 'self'` already admits the beacon, so the CSP is unchanged). It bundles `web-vitals` 6.2.3 (Apache-2.0; the attribution-free build, licence named in a banner): 12.6 KB minified, 4.7 KB gzip, 4.3 KB Brotli. It never runs on a click: it only observes performance entries, which the browser delivers asynchronously (web-vitals' one input listener ends LCP on the first input).
+
+- **Shell document:** LCP, INP, CLS, FCP and TTFB, plus the shell's own `Server-Timing` total, with the shell's `cache` tier.
+- **In-shell navigation:** the lazy tree writes one `rendro:navigation` `performance.measure` per settled navigation (repository read path only). It starts at the activating event's `timeStamp` (a click, a key, a frame's message, a `popstate`; navigation start for the first document) and records the frame swap (`src` replaced, or the preloaded sibling revealed), the frame's `load` (for a preload, the reveal), and the next paint (a task after the following animation frame). Only `performance.now()` reads happen on the click path; the measure is written after the paint. `rum.js` turns it into `swap`, `load` and `switch` events with `preloaded`.
+- **Frame response:** an opaque-origin frame never exposes its `Server-Timing` to the shell's resource timing, whatever `Timing-Allow-Origin` says (Chromium reports an empty `serverTiming`). The frame reads its own navigation entry and adds `{ url, tier, server, response }` (its own path and query) to its existing `doc-loaded` message. A frame and the shell run apart, so the report may arrive before or after the navigation measure: the shell matches the two by address, a navigation waits for its report, and one still waiting at the next send goes without a tier or response. Each report serves one navigation, only messages from the shell's own frames count, and at most 16 unused reports are kept.
+- **Tree and search:** the resource entries of `/r/…/tree` and `/r/…/search` fetches give `response` (start → response end) and `server`, with their tier.
+
+Navigation types: the shell's own load is `cold`, `reload`, `prerender` (counted from `activationStart`; collection starts at `prerenderingchange`), `back-forward` (refetched) or `bfcache` (restored: no request, so no tier); inside the shell, `switch` (a link, a search result, a confirmed document link) and `history` (back/forward between documents). Tree and search requests carry the shell's navigation type.
+
+Events are queued and sent with `navigator.sendBeacon` as a `text/plain` JSON string, at most 32 to a beacon, when the page becomes hidden, once the queue holds 32 events, and on `pagehide` only if the page is already hidden: leaving fires `pagehide` while still visible and then `visibilitychange`, after web-vitals finalizes LCP, CLS and INP, so one leave sends one complete beacon. There is no `unload` listener, and the page stays eligible for the back/forward cache. An event that would fail the schema is dropped before it is queued.
+
+### `POST /rum`
+
+Mounted before the session middleware; it reads no cookie and sets none, and every answer is `private, no-store` with no body.
+
+1. **Cross-site posts are refused (403).** Where the browser sends `Sec-Fetch-Site`, it must be `same-origin`, and an `Origin` other than `"null"` must equal the site (`SITE_URL`, else the request's origin). Without `Sec-Fetch-Site` the `Origin` must match exactly. (Chromium sends both; the Fetch standard lets a beacon from the `no-referrer` shell carry `Origin: null`, which only `Sec-Fetch-Site` can vouch for.)
+2. **No dataset or rate-limit binding: 204, and the body is dropped unread.** Production until its deploy adds both.
+3. `text/plain` or `application/json` only (415); the body is capped at 8 KiB while reading (413).
+4. **Strict schema (400 for any fault, no partial acceptance):** exactly `{ "v": 1, "events": [...] }`, 1–32 events. Each event has exactly `route`, `metric`, `value`, `nav` and optionally `tier` and `preloaded`, no other key; every string is an enumeration, metrics only on their routes (web-vitals on `shell`, `swap`/`load`/`switch` on `frame`, `response` on `frame`/`tree`/`search`, `server` anywhere), `value` finite and 0 ≤ value ≤ 3,600,000 ms (CLS ≤ 100), `preloaded` a boolean on navigation metrics only.
+5. **Rate limit:** one token from a Workers Rate Limiting binding (`RUM_LIMIT`, `[[ratelimits]]`: 60 per 60 s), keyed on the ingress-verified client address the Worker already registers (`CF-Connecting-IP`, `authClientIp`); requests without one share an `unverified` bucket. The counter lives in the colo, so the limit costs no round trip and depends on nothing outside the Worker. Validation runs first, so only a beacon that would be written spends a token. Over the limit, or if the limiter fails, the answer is still 204 and nothing is written: a beacon is never retried, so a refusal status would only add noise. 60 a minute is about one beacon per page leave plus a full-queue flush every 32 events (roughly six switches), with room for a handful of readers behind one NAT; the limiter is per colo and eventually consistent, so it bounds abuse rather than counting exactly.
+6. One `writeDataPoint` per event, then 204.
+
+### Dataset schema
+
+Dataset `rendro_rum_dev` (binding `RUM_ANALYTICS`, with the `RUM_LIMIT` limiter, namespace `2820`; `[env.development]` in `wrangler.toml` only; tests fake both). One row per event:
+
+| Column | Holds |
+|---|---|
+| `index1` | `metric` (the sampling key, so rare metrics keep their weight) |
+| `blob1` | `route`: `shell`, `frame`, `tree`, `search` |
+| `blob2` | `metric`: `LCP`, `INP`, `CLS`, `FCP`, `TTFB`, `swap`, `load`, `switch`, `response`, `server` |
+| `blob3` | `nav`: `cold`, `reload`, `prerender`, `back-forward`, `bfcache`, `switch`, `history` |
+| `blob4` | `tier`: `memory`, `shared`, `colo`, `r2`, or empty |
+| `blob5` | `preloaded`: `1`, `0`, or empty |
+| `blob6` | The colo that received the beacon (`request.cf.colo`, three capital letters), or empty |
+| `double1` | The value: milliseconds, or the CLS score |
+
+A schema change is a new dataset, never a reinterpretation of these positions.
+
+### Privacy guarantees
+
+- No user, session, repository, owner, path, URL, commit, query or IP is ever sent or stored. The schema has no field that could carry one, and an event with any extra key is refused whole.
+- The beacon endpoint reads no cookie and sets none. The client address is only the key of the colo's rate-limit counter; it is never written to the dataset or sent anywhere.
+- The colo is the only location, at the granularity of a Cloudflare data centre.
+- Server-Timing headers carry fixed names and four tier words, and only on authorized responses.
+- Production has no binding until its deploy adds them; without them beacons are accepted and dropped unread.
+
+### Querying the budgets
+
+Against the [Analytics Engine SQL API](https://developers.cloudflare.com/analytics/analytics-engine/sql-api/) (`POST https://api.cloudflare.com/client/v4/accounts/<account>/analytics_engine/sql`). Rows are sampled, so weight every aggregate by `_sample_interval`. The budgets are those of the performance research behind #214.
+
+```sql
+-- Cached page view: server time ≤ 10 ms, TTFB ≤ 100 ms, LCP ≤ 1.0 s (desktop) at p75, warm colo
+SELECT blob2 AS metric, quantileExactWeighted(0.75)(double1, _sample_interval) AS p75, sum(_sample_interval) AS views
+FROM rendro_rum_dev
+WHERE timestamp > NOW() - INTERVAL '1' DAY AND blob1 = 'shell' AND blob3 IN ('cold', 'reload')
+  AND blob4 IN ('memory', 'colo') AND blob2 IN ('server', 'TTFB', 'LCP', 'INP', 'CLS')
+GROUP BY metric
+
+-- Cold colo: shell TTFB ≤ 300 ms when the read reached the shared tier or R2, per colo
+SELECT blob6 AS colo, quantileExactWeighted(0.75)(double1, _sample_interval) AS ttfb_p75, sum(_sample_interval) AS views
+FROM rendro_rum_dev
+WHERE timestamp > NOW() - INTERVAL '7' DAY AND blob1 = 'shell' AND blob2 = 'TTFB' AND blob4 IN ('shared', 'r2')
+GROUP BY colo ORDER BY views DESC
+
+-- In-shell navigation: click → painted ≤ 200 ms on a cache hit, ≤ 500 ms on an edge miss
+SELECT blob5 AS preloaded, blob4 AS tier, quantileExactWeighted(0.75)(double1, _sample_interval) AS switch_p75, sum(_sample_interval) AS switches
+FROM rendro_rum_dev
+WHERE timestamp > NOW() - INTERVAL '1' DAY AND blob1 = 'frame' AND blob2 = 'switch' AND blob3 IN ('switch', 'history')
+GROUP BY preloaded, tier
+
+-- First view: first document painted ≤ 2.5 s after navigation start (the shell's own first document)
+SELECT blob4 AS tier, quantileExactWeighted(0.75)(double1, _sample_interval) AS painted_p75
+FROM rendro_rum_dev
+WHERE timestamp > NOW() - INTERVAL '7' DAY AND blob1 = 'frame' AND blob2 = 'switch' AND blob3 IN ('cold', 'prerender')
+GROUP BY tier
+
+-- Search: Worker time per query (target p50 ≤ 50 ms) and what the reader waited
+SELECT blob2 AS metric, quantileExactWeighted(0.5)(double1, _sample_interval) AS p50, quantileExactWeighted(0.9)(double1, _sample_interval) AS p90
+FROM rendro_rum_dev
+WHERE timestamp > NOW() - INTERVAL '1' DAY AND blob1 = 'search' AND blob2 IN ('server', 'response')
+GROUP BY metric
+```
+
+Push-to-live, revocation and comment round trips are not page-view metrics and are not in this dataset.
+
+### Measured overhead
+
+Measured in Chromium against the real Worker app on 2026-10-20 (shared i5-8300H, load 7–15), two runs of 12 fresh shells per variant, main's lazy tree with no `rum.js` against this one with `rum.js`. Synchronous work in the click handler: median 1.7 ms against 1.6–1.7 ms. Preloaded switch (`rendro:frame-switch`): median 53.4 / 48.6 ms against 53.7 / 48.1 ms. Plain switch: 50.8 / 48.2 ms against 46.9 / 57.2 ms, within the run-to-run noise of either. The navigation marks add 248 bytes Brotli to the lazy tree, which is now minified (v53: 11,148 → 8,418 bytes Brotli for the whole bundle).
+
+### Tests
+
+`tests/repo-read-timing.test.ts` (the builder, the header on each surface and tier, none on denials), `tests/rum-endpoint.test.ts` (schema, cross-site refusal, no binding, size, the rate limit and its key, data points) and `tests/rum-browser.test.ts` (Chromium with the back/forward cache enabled: a cold load, in-shell switches with and without the preload and a full-queue flush, in-shell history and a real back/forward-cache restore, prerender activation, and a browser without navigation timing; beacons are captured as the server received them and answered by the real endpoint).
 
 ## Repository Search (GitHub pivot, P7)
 

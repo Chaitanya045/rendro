@@ -553,6 +553,10 @@
       "reason": "Static browser code or favicon, not an HTML page."
     },
     {
+      "route": "GET /rum.js",
+      "reason": "Static browser code or favicon, not an HTML page."
+    },
+    {
       "route": "ALL /*",
       "reason": "Middleware registration (security/session/logging/CORS); page handlers are checked separately by method and path."
     },
@@ -26463,6 +26467,144 @@
             {
               "file": "tests/lazy-tree-browser.test.ts",
               "name": "reads the Retry-After date form and honours its wait",
+              "kind": "browser"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "UI-165",
+      "title": "Repository docs viewer: real-user monitoring",
+      "area": "Repository docs (GitHub pivot)",
+      "routes": [
+        "GET /r/*",
+        "POST /rum"
+      ],
+      "sources": [
+        "src/rum/client.ts",
+        "src/rum/route.ts",
+        "src/rum/schema.ts",
+        "src/lazy-tree/lazy-tree.ts",
+        "src/viewer/navigation.ts",
+        "src/repo-read/timing.ts"
+      ],
+      "roles": [
+        "anonymous"
+      ],
+      "viewports": [
+        1100
+      ],
+      "engines": [
+        "chromium"
+      ],
+      "status": "browser",
+      "auditEvidence": "NOT_IN_AUDIT",
+      "auditNote": "New surface from #282: web-vitals, in-shell navigation marks and Server-Timing phases, sent with sendBeacon to POST /rum.",
+      "edges": [
+        {
+          "id": "UI-165-E01",
+          "from": "A reader opens a repository shell",
+          "trigger": "The shell and its first document load, then the reader leaves",
+          "expected": "One beacon reports the shell's web-vitals and Server-Timing, the first document's swap, load and paint, and the tree's responses, with the cache tier and no repository, path or identifier",
+          "inventoryRefs": [
+            "UI-165"
+          ],
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/rum-browser.test.ts",
+              "name": "report a cold load: the shell's vitals and Server-Timing, the first document and the tree, naming nothing",
+              "kind": "browser"
+            }
+          ]
+        },
+        {
+          "id": "UI-165-E02",
+          "from": "A reader switches documents inside the shell",
+          "trigger": "A click on a preloaded link, then on links that were never preloaded, and a search",
+          "expected": "Each switch is reported with whether the preloaded frame was used; a full queue is sent before the page is hidden",
+          "inventoryRefs": [
+            "UI-165"
+          ],
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/rum-browser.test.ts",
+              "name": "report in-shell switches with and without the preloaded frame, flushing a full queue early",
+              "kind": "browser"
+            }
+          ]
+        },
+        {
+          "id": "UI-165-E03",
+          "from": "A reader goes back and forward",
+          "trigger": "Back between two documents inside the shell, then away and back to a shell restored from the back/forward cache",
+          "expected": "The in-shell step is reported as history; the shell, back from another page, as bfcache with no cache tier when restored, or as back-forward when loaded again",
+          "inventoryRefs": [
+            "UI-165"
+          ],
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/rum-browser.test.ts",
+              "name": "report back/forward: between documents inside the shell, then back to the shell from another page",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/rum-browser.test.ts",
+              "name": "treats a persisted pageshow as a restore from the back/forward cache",
+              "kind": "browser"
+            }
+          ]
+        },
+        {
+          "id": "UI-165-E04",
+          "from": "A prerendered shell is activated",
+          "trigger": "The shell was prerendered and the reader activates it",
+          "expected": "Its metrics count from activation and are reported as prerender, with no tier or server time it was not told",
+          "inventoryRefs": [
+            "UI-165"
+          ],
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/rum-browser.test.ts",
+              "name": "counts a prerendered shell from its activation and reports no tier it was not told",
+              "kind": "browser"
+            }
+          ]
+        },
+        {
+          "id": "UI-165-E05",
+          "from": "A browser exposes less timing",
+          "trigger": "No navigation timing, no frame report and no window.event",
+          "expected": "Switches are still reported, without a tier or response events, and nothing errors",
+          "inventoryRefs": [
+            "UI-165"
+          ],
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/rum-browser.test.ts",
+              "name": "still reports without navigation timing, frame reports or window.event",
+              "kind": "browser"
+            }
+          ]
+        },
+        {
+          "id": "UI-165-E06",
+          "from": "A document frame reports its response late",
+          "trigger": "The frame's doc-loaded announcement arrives after the lazy tree measured the navigation, among reports no navigation asked for",
+          "expected": "The navigation waits for its own report and is sent with its tier and response; unused reports are let go, oldest first",
+          "inventoryRefs": [
+            "UI-165"
+          ],
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/rum-browser.test.ts",
+              "name": "waits for a frame's report that arrives after its navigation, and keeps only the newest unused reports",
               "kind": "browser"
             }
           ]

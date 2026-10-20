@@ -48,7 +48,7 @@ export async function waitForSettled(page: Page | Frame) {
 }
 
 /** Call once at file scope. Owns one browser/server and a fresh context per page. */
-export function createBrowserHarness(harnessOptions: { coverage?: boolean; chromiumArgs?: string[]; onCoverage?: (report: CoverageMapData) => void } = {}) {
+export function createBrowserHarness(harnessOptions: { coverage?: boolean; chromiumArgs?: string[]; ignoreDefaultArgs?: string[]; onCoverage?: (report: CoverageMapData) => void } = {}) {
   const collectors = new Map<BrowserContext, Awaited<ReturnType<typeof collectBrowserContext>>>();
   let browser: Browser | undefined;
   let server: Server | undefined;
@@ -146,6 +146,8 @@ export function createBrowserHarness(harnessOptions: { coverage?: boolean; chrom
       browser = await browserStep("launch Chromium", () => chromium.launch({
         timeout: 45_000,
         args: harnessOptions.chromiumArgs,
+        // For example Playwright's --disable-back-forward-cache, where a suite exercises the back/forward cache.
+        ignoreDefaultArgs: harnessOptions.ignoreDefaultArgs,
         // CI uses the pinned Playwright build; local hosts can opt into system Chromium.
         executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH
           ?? (!process.env.CI && existsSync("/usr/bin/chromium") ? "/usr/bin/chromium" : undefined),

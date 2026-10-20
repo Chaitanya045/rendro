@@ -52,6 +52,19 @@ required = ["CONVEX_INTERNAL_SECRET", "AUTH_SECRET", "IMAGE_PROXY_SECRET", "REPO
 binding = "STORAGE"
 bucket_name = "dev-rendro"
 
+# Real-user monitoring beacons (POST /rum, #282). Development only: production gets its dataset and
+# limiter at its own deploy. Without either binding the endpoint accepts beacons and drops them.
+[[env.development.analytics_engine_datasets]]
+binding = "RUM_ANALYTICS"
+dataset = "rendro_rum_dev"
+
+# The beacon's in-colo rate limit, keyed on the verified client address (#282): 60 beacons a minute per
+# address, against about one per page leave. Development only, like the dataset; without it beacons are dropped.
+[[env.development.ratelimits]]
+name = "RUM_LIMIT"
+namespace_id = "2820"
+simple = { limit = 60, period = 60 }
+
 [env.development.triggers]
 crons = ["23 3 * * *"]
 

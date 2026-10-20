@@ -12,6 +12,7 @@ import { r2Store, type R2BucketLike } from "@/ingest/orchestrator/store";
 import type { ManifestFile, SnapshotManifest } from "@/ingest/orchestrator/snapshot";
 import { CONVEX_URL, IMAGE_PROXY_SECRET, REPO_CAPABILITY_SECRET, REPO_CONTENT_KEY, REPO_CONTENT_KEY_PREVIOUS } from "@/config";
 import { verifyImageProxyPath } from "@/image-proxy";
+import { nonceAttribute } from "@/middleware/html-nonce";
 import { sessionViewer } from "@/middleware/session";
 import { renderScopedDocumentShell } from "@/routes/app";
 import { assetError } from "@/routes/asset-headers";
@@ -26,6 +27,7 @@ import { isCanonicalStorageKey } from "@/storage-boundary";
 import { storageKeyRepoId } from "@/ingest/orchestrator/keys";
 import { ViewerBackendError } from "@/viewer-backend";
 import { viewerScript, viewerUpdateNotice } from "@/viewer/markup";
+import { RUM_VERSION } from "@/viewer/asset-versions";
 import { kvRevocationEpochs, kvVisibilityEpochs, serviceRepoPermissions, type Fetcher, type KvReader } from "./access";
 import { authorizeRepo, authorizeTicket, mintTicket, type Authorization, type AuthorizeDependencies } from "./authorize";
 import { COMMENT_GRANT_MIN_MS, commentAccess, commentorScript, convexCommentGrants, type CommentGrants } from "./comments";
@@ -38,6 +40,7 @@ import { searchManifest } from "./search";
 import { isPagePath, manifestFile, readDeadline, RepoSnapshots, type EdgeCache } from "./snapshot";
 import { SHARED_CACHE_PATH, SHARED_CACHE_TTL_SECONDS, sharedCacheReader, verifySharedCachePath, type SharedCacheProbe } from "./shared-cache";
 import { REPO_SPECULATION_RULES_PATH, repoSpeculationRules } from "./speculation";
+import { ReadTiming } from "./timing";
 import { treePage } from "./tree";
 import { requireCookieWrite } from "../../shared/request-admission";
 
@@ -73,7 +76,17 @@ interface Services {
   visibilityEpoch: (repoId: number) => Promise<number>;
   /** Dev-only (REPO_SHARED_CACHE_DEBUG): what the platform's cache said about the request's last shared-cache subrequest. */
   sharedProbe: { last: string | null } | null;
+  /** The request's `Server-Timing` phases (#282). */
+  timing: ReadTiming;
 }
+
+/**
+ * Each request's phases, and whether it was authorized. Only an authorized
+ * read reports them: a denial stays byte-for-byte the response for a
+ * repository that does not exist, headers included.
+ */
+type TimingRecord = { timing: ReadTiming; granted: boolean };
+const requestTimings = new WeakMap<Request, TimingRecord>();
 
 /** The preparing/retry page a first-view outcome leaves the reader on (#242). */
 function readinessResponse(c: Context, state: PreparingState): Response {
@@ -88,7 +101,7 @@ function hasMethods(value: unknown, names: string[]): boolean {
 }
 
 /** The surface exists only where its bindings are configured; elsewhere every URL under /r/ is a 404. */
-function services(c: Context): Services | null {
+function services(c: Context, timing = new ReadTiming()): Services | null {
   const env = (c.env ?? {}) as Record<string, unknown>;
   const bucket = env.REPO_CONTENT, epochs = env.REPO_EPOCHS, access = env.REPO_ACCESS, search = env.REPO_SEARCH;
   if (!hasMethods(bucket, ["get", "head", "put", "list"]) || !hasMethods(epochs, ["get"]) || !hasMethods(access, ["fetch"])) return null;
@@ -114,7 +127,7 @@ function services(c: Context): Services | null {
     },
     snapshots: new RepoSnapshots({
       store: readDeadline(r2Store(bucket as R2BucketLike), READ_TIMEOUT_MS), sealer, edge,
-      origin, shared: sharedCacheReader(REPO_CAPABILITY_SECRET, origin, visibilityEpoch, fetch, probe ?? undefined), waitUntil, now,
+      origin, shared: sharedCacheReader(REPO_CAPABILITY_SECRET, origin, visibilityEpoch, fetch, probe ?? undefined), waitUntil, now, timing,
     }),
     waitUntil,
     firstView: durableFirstView(env.REPO_INGEST),
@@ -123,6 +136,7 @@ function services(c: Context): Services | null {
     search: hasMethods(search, ["prepare", "batch", "exec"]) ? d1SearchIndex(search as SearchD1) : null,
     visibilityEpoch,
     sharedProbe,
+    timing,
   };
 }
 
@@ -185,7 +199,10 @@ function shell(c: Context, grant: RepoGrant, request: RepoRequestPath, manifest:
     basePath: repoBase(request.owner, request.name, request.ref), frameBase: pinned, selectedPath: selected, copyLink: true, repoCommentConfig, repoSearch: true,
   });
   // Private frames load their images through tickets, which only the trusted shell may renew.
-  const body = grant.repo.private ? html.replace("</body>", viewerUpdateNotice() + viewerScript("parent", { base: pinned }) + "</body>") : html;
+  const ticketRenewal = grant.repo.private ? viewerUpdateNotice() + viewerScript("parent", { base: pinned }) : "";
+  // Real-user monitoring (#282): async, so it never holds up parsing or the first document.
+  const monitoring = `<script${nonceAttribute()} async src="/rum.js?v=${RUM_VERSION}"></script>\n`;
+  const body = html.replace("</body>", ticketRenewal + monitoring + "</body>");
   // Revalidated on every navigation (each response has its own nonce), but never no-store: back/forward cache stays usable.
   // The shell points at same-origin speculation rules so Chromium prefetches the frames the sidebar links to (#245).
   return c.html(body, 200, { "Cache-Control": "private, no-cache", "Speculation-Rules": `"${REPO_SPECULATION_RULES_PATH}"` });
@@ -211,7 +228,8 @@ async function search(c: Context, manifest: SnapshotManifest, services: Services
   // No index bound (production, until P-deploy provisions one): the URL does not exist.
   if (!services.search) return notFound(c, "json");
   const limit = c.req.query("limit") === undefined ? undefined : Number(c.req.query("limit"));
-  const outcome = await searchManifest(services.search, manifest, c.req.query("q") ?? "", limit);
+  const index = services.search;
+  const outcome = await services.timing.time("search", () => searchManifest(index, manifest, c.req.query("q") ?? "", limit));
   if (outcome.status === "invalid") return c.json({ error: "Invalid search query" }, 400);
   return c.json(outcome);
 }
@@ -315,6 +333,13 @@ function setAuthorizationCookies(c: Context, authorization: Authorization): void
 
 const app = new Hono();
 app.use("/r/*", viewerErrorCache);
+// Wraps every read, so the total spans the handler and the error mapping (#282).
+app.use("/r/*", async (c, next) => {
+  const record: TimingRecord = { timing: new ReadTiming(), granted: false };
+  requestTimings.set(c.req.raw, record);
+  await next();
+  if (record.granted) c.header("Server-Timing", record.timing.header(), { append: true });
+});
 // Chromium reads this from the shell's `Speculation-Rules` header. Same-origin JSON, never under /r/
 // so a reader's capability cookie cannot reach it. The rules are constant and tiny; the Worker serves
 // every route private by default, so this one is too rather than holding a cacheable public copy.
@@ -362,19 +387,22 @@ app.get(`${SHARED_CACHE_PATH}*`, async (c) => {
 app.get("/r/*", async (c) => {
   c.header("Referrer-Policy", "no-referrer");
   const request = parseRepoPath(new URL(c.req.url).pathname);
-  const configured = services(c);
+  // Set by the middleware above for every request under /r/.
+  const record = requestTimings.get(c.req.raw) as TimingRecord;
+  const configured = services(c, record.timing);
   const kind = representation(request?.target.kind);
   // Comment access changes state, so it is POST only (below).
   if (!request || !configured) return notFound(c, kind);
   const { target } = request;
   if (target.kind === "comment-access") return notFound(c, kind);
 
-  const authorization: Authorization = target.kind === "ticket-files"
-    ? await authorizeTicket(configured.authorize, target.ticket, request.owner, request.name, (request.ref as { commit: string }).commit)
-    : await authorizeRepo(configured.authorize, c.req.raw, request.owner, request.name);
+  const authorization: Authorization = await configured.timing.time("auth", () => target.kind === "ticket-files"
+    ? authorizeTicket(configured.authorize, target.ticket, request.owner, request.name, (request.ref as { commit: string }).commit)
+    : authorizeRepo(configured.authorize, c.req.raw, request.owner, request.name));
   setAuthorizationCookies(c, authorization);
   if (authorization.kind === "unavailable") return unavailableResponse(c, { unavailable: true, retryAfter: authorization.retryAfter }, kind);
   if (authorization.kind === "denied") return notFound(c, kind);
+  record.granted = true;
   const { grant } = authorization;
   const scope = configured;
   const path = request;
@@ -404,7 +432,8 @@ app.get("/r/*", async (c) => {
     const { repo } = repoIngestTarget(grant, branch);
     let attempt;
     try {
-      attempt = await prepareRepo(configured.firstView, repo, branch, PREPARE_WINDOW_MS, configured.waitUntil);
+      const firstView = configured.firstView;
+      attempt = await configured.timing.time("first-view", () => prepareRepo(firstView, repo, branch, PREPARE_WINDOW_MS, configured.waitUntil));
     } catch {
       // Only the ensurer's transport raises here: could-not-check is #225's retryable 503.
       return unavailableResponse(c, { unavailable: true, retryAfter: String(PREPARING_RETRY_SECONDS) }, kind);

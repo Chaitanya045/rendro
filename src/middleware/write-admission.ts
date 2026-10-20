@@ -24,6 +24,9 @@ export const workerMutationPolicies = {
   "DELETE /api/legacy/content": "cookie-bodyless",
   // Comment access for repository docs (#254); mounted before this middleware, so the route applies the same rule itself.
   "POST /r/*": "cookie-bodyless",
+  // Real-user monitoring beacons (#282); mounted before this middleware and cookie-free, it refuses cross-site posts itself
+  // (Sec-Fetch-Site, or an exact Origin), since a beacon from the no-referrer shell may carry "Origin: null".
+  "POST /rum": "beacon",
   "POST /api/orgs": "retired",
   "POST /api/publications": "mixed-json",
   "DELETE /api/publications/:slug": "mixed-bodyless",
