@@ -388,6 +388,27 @@ The shell states are also baselined at 320px (the narrowest supported layout), a
 preparing, retry, rate limited) at 375 and 1440 only: their centred card is the same at 768. Below the desktop breakpoint
 the cell opens the tree drawer first (the `/r/` search panel and the viewer's document tree live in it).
 
+Third slice (#319): the account and auth pages.
+
+| Family | States added |
+|---|---|
+| sign-in | field validation (an invalid address), bad credentials, rate limited, and each fixed message of the OAuth `?error=` codes (canceled, expired state, account not linked, unknown) |
+| sign-up | field validation (a password under 15 characters), rate limited |
+| forgot-password | the form, the acknowledgement after a request, a server error |
+| reset-password | the form opened with a token, the invalid or expired link |
+| verify-email | verified, the invalid or expired link with its resend form |
+| security (`/account/security`) | methods loading, password configured, no password (an account from the retired Google sign-in), lookup failure with Try again, a refused password change, and mismatched passwords in the add-password form |
+| not-found | the generic 404 outside `/r/` |
+
+The forms are baselined at 320/375/768/1440 (the auth card changes at the 520px phone padding and the 820px single
+column), the rest at 375/1440. Every form is submitted from its last field with Enter, so no pointer rests on a button in
+the shot. The text a cell types is fixed (`reader@example.test` and fixed passwords), and every request that would reach
+an auth limiter or change an account is answered at the browser boundary with Better Auth's own public response
+(`Invalid email or password`, `Too many requests. Please try again later.`, `Invalid password`). The no-password account
+is the method lookup answered with a Google account; the loading state holds the lookup until the cell closes. Account
+security renders the visual owner's own fixed address. The cells live in `e2e/visual/cells.ts`, which
+`tests/ui-transitions.test.ts` also reads, so `tests/ui-transitions.json` cites each baseline and axe cell by its title.
+
 Data for the second slice is deterministic as well: the public repository `e2e-org/visual-docs`
 (`e2e/visual/visual-repo-docs.ts`) is ingested by the global setup only when `RENDRO_E2E_VISUAL=1`, and the comment states
 use threads seeded on two reference pages (`docs/reference/errors.md` and `docs/reference/config.md`), created inside the
@@ -431,8 +452,7 @@ timeout (the suites take a few minutes). Both upload their diffs and traces on f
 
 ### Not yet covered
 
-Tracked in #268: the auth families beyond sign-in and sign-up (verify-email, reset and forgot password, error banners) and
-account security. The organization, project, team, API-key and account-menu pages left the product with #286, and their
+The organization, project, team, API-key and account-menu pages left the product with #286, and their
 baselines with them; the comment widget states are rendered on `/r/`. The comment *edit* state of the issue does not
 exist: the widget has no edit action. The landing no-JS variant is not covered (the page's script is its only dynamic
 part, and the reduced-motion assertion above covers what it holds back).

@@ -5,7 +5,6 @@ import { signInSeeded } from "../shell-helpers";
 import { content } from "../viewer-fixtures";
 import { READINESS_HEADER, renderPreparingPage } from "../../src/repo-read/preparing";
 import type { VisualState } from "./state";
-import type { Width } from "./states";
 import { longTitle } from "./visual-repo-docs";
 
 /**
@@ -15,8 +14,6 @@ import { longTitle } from "./visual-repo-docs";
  * that unwinds any held request before the next cell navigates.
  */
 
-/** `widths` narrows or extends the default 375/768/1440 of the baselines (a card page is the same at 768 and 1440; the shell is also read at 320). */
-export type Cell = { family: string; state: string; widths?: Width[] };
 /** `verify` re-asserts, after settling, that the state the cell opened is still on screen (a scan of a lost overlay would be vacuous). */
 export type Rendered = { close: () => Promise<void>; verify?: () => Promise<void> };
 
@@ -62,16 +59,14 @@ async function openCell(page: Page, visual: VisualState, family: string, state: 
         }
         return rendered();
       }
-      case "sign-in": {
-        await page.goto("/sign-in");
-        await expect(page.locator("#email")).toBeVisible();
-        return rendered();
-      }
-      case "sign-up": {
-        await page.goto("/sign-up");
-        await expect(page.locator("#name")).toBeVisible();
-        return rendered();
-      }
+      case "sign-in":
+      case "sign-up":
+      case "forgot-password":
+      case "reset-password":
+      case "verify-email":
+      case "security":
+      case "not-found":
+        return await openAuth(page, visual, family, state, closers, rendered);
       case "home": {
         await page.context().addCookies(visual.crown.cookies);
         await page.goto("/home");
@@ -181,15 +176,23 @@ async function layerToasts(ui: FrameLocator) {
 
 /** Holds the document's own opaque request at the browser boundary, exactly like the viewer specs. */
 async function holdDocument(page: Page, file: string) {
-  const glob = `**/files/${file}`;
+  return await holdRequest(page, `**/files/${file}`);
+}
+
+/** Holds every request matching `glob` at the browser boundary until close(); `held` settles once the page has sent one. */
+async function holdRequest(page: Page, glob: string) {
   const pending: Route[] = [];
   let holding = true;
+  let arrived = () => {};
+  const held = new Promise<void>(resolve => { arrived = resolve; });
   const handler = async (route: Route) => {
     if (!holding) { await route.continue().catch(() => undefined); return; }
     pending.push(route);
+    arrived();
   };
   await page.route(glob, handler);
   return {
+    held,
     close: async () => {
       holding = false;
       for (const route of pending.splice(0)) await route.continue().catch(() => undefined);
@@ -367,6 +370,180 @@ async function openRepo(page: Page, visual: VisualState, state: string, closers:
     default:
       throw new Error(`Unknown visual state repo/${state}`);
   }
+}
+
+/** The text the auth cells type: an address and passwords no seeded account uses. */
+const reader = "reader@example.test";
+const typedPassword = "Visual typed password 1";
+
+/** Better Auth's own refusals, exactly as its routes send them. */
+const invalidCredentials = { code: "INVALID_EMAIL_OR_PASSWORD", message: "Invalid email or password" };
+const tooManyRequests = { message: "Too many requests. Please try again later." };
+/** An account from the retired Google sign-in (#286): it has no password, so the page offers to add one. */
+const legacyAccounts = [{ id: "visual-legacy", providerId: "google", accountId: "visual-legacy", userId: "visual-legacy-user", scopes: [], createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" }];
+
+/** One callback code per fixed recovery message of /sign-in?error=, the unknown one included. */
+const oauthCodes: Record<string, string | undefined> = {
+  "oauth-access-denied": "access_denied",
+  "oauth-state-mismatch": "state_mismatch",
+  "oauth-account-not-linked": "account_not_linked",
+  "oauth-unknown": "server_error",
+};
+
+/**
+ * Answers one of the page's own auth requests at the browser boundary with the server's public response (#319). An error
+ * state then renders without reaching the seeded backend: no attempt counts against its limiter, and no account changes.
+ */
+async function answerAuth(page: Page, path: string, status: number, body: unknown, closers: Array<() => Promise<void>>) {
+  const glob = `**/api/auth/${path}`;
+  const handler = (route: Route) => route.fulfill({ status, contentType: "application/json", headers: { "Cache-Control": "no-store" }, body: JSON.stringify(body) });
+  await page.route(glob, handler);
+  closers.push(() => page.unroute(glob, handler));
+}
+
+/** Submits an auth form from its last field, as a keyboard user would: no pointer rests on a button in the shot. */
+async function submitFrom(page: Page, field: string) {
+  await page.locator(field).press("Enter");
+}
+
+/** The account and auth pages (#319): sign-in and sign-up errors, account recovery, email verification, account security and the 404. */
+async function openAuth(page: Page, visual: VisualState, family: string, state: string, closers: Array<() => Promise<void>>, rendered: () => Rendered): Promise<Rendered> {
+  const formError = page.locator("#form-error");
+  const submit = page.locator("#auth-form button[type=submit]");
+  if (family === "sign-in") {
+    const code = oauthCodes[state];
+    if (code) {
+      await page.goto(`/sign-in?error=${code}`);
+      await expect(formError).not.toBeEmpty();
+      return rendered();
+    }
+    if (state === "invalid-credentials" || state === "rate-limited") {
+      const limited = state === "rate-limited";
+      await answerAuth(page, "sign-in/email", limited ? 429 : 401, limited ? tooManyRequests : invalidCredentials, closers);
+    }
+    await page.goto("/sign-in");
+    await expect(page.locator("#email")).toBeVisible();
+    if (state === "default") return rendered();
+    if (state === "validation") {
+      await page.locator("#email").fill("reader.example.test");
+      await submitFrom(page, "#email");
+      await expect(formError).toHaveText("Enter a valid email address.");
+      await expect(page.locator("#email")).toBeFocused();
+      return rendered();
+    }
+    if (state !== "invalid-credentials" && state !== "rate-limited") throw new Error(`Unknown visual state sign-in/${state}`);
+    await page.locator("#email").fill(reader);
+    await page.locator("#password").fill(typedPassword);
+    await submitFrom(page, "#password");
+    await expect(formError).toHaveText(state === "rate-limited" ? tooManyRequests.message : invalidCredentials.message);
+    await expect(submit).toBeEnabled();
+    return rendered();
+  }
+  if (family === "sign-up") {
+    if (state === "rate-limited") await answerAuth(page, "sign-up/email", 429, tooManyRequests, closers);
+    await page.goto("/sign-up");
+    await expect(page.locator("#name")).toBeVisible();
+    if (state === "default") return rendered();
+    await page.locator("#name").fill("Visual Reader");
+    await page.locator("#email").fill(reader);
+    if (state === "validation") {
+      // The length limit only applies to a typed value, so the short password is typed key by key.
+      await page.locator("#password").pressSequentially("too short");
+      await submitFrom(page, "#password");
+      await expect(formError).toHaveText("Use at least 15 characters.");
+      await expect(page.locator("#password")).toBeFocused();
+      return rendered();
+    }
+    if (state !== "rate-limited") throw new Error(`Unknown visual state sign-up/${state}`);
+    await page.locator("#password").fill(typedPassword);
+    await submitFrom(page, "#password");
+    await expect(formError).toHaveText(tooManyRequests.message);
+    await expect(submit).toBeEnabled();
+    return rendered();
+  }
+  if (family === "forgot-password") {
+    if (state === "sent") await answerAuth(page, "request-password-reset", 200, { status: true }, closers);
+    if (state === "error") await answerAuth(page, "request-password-reset", 500, { message: "Internal Server Error" }, closers);
+    await page.goto("/forgot-password");
+    await expect(page.locator("#email")).toBeVisible();
+    if (state === "default") return rendered();
+    if (state !== "sent" && state !== "error") throw new Error(`Unknown visual state forgot-password/${state}`);
+    await page.locator("#email").fill(reader);
+    await submitFrom(page, "#email");
+    await expect(page.locator("#form-message")).toHaveText(state === "sent" ? "If an account exists for that email, a reset link is on its way." : "We couldn't send that email. Please try again.");
+    await expect(submit).toBeEnabled();
+    return rendered();
+  }
+  if (family === "reset-password") {
+    if (state === "form") {
+      await page.goto("/reset-password?token=visual-reset-token");
+      await expect(page.locator("#confirmPassword")).toBeVisible();
+      return rendered();
+    }
+    if (state !== "invalid") throw new Error(`Unknown visual state reset-password/${state}`);
+    // Better Auth sends an invalid or expired link back here with an error code and no token.
+    await page.goto("/reset-password?error=INVALID_TOKEN");
+    await expect(page.getByRole("heading", { level: 1, name: "Reset link unavailable" })).toBeVisible();
+    return rendered();
+  }
+  if (family === "verify-email") {
+    if (state === "verified") {
+      await page.goto("/verify-email?verified=1");
+      await expect(page.getByRole("heading", { level: 1, name: "Email verified" })).toBeVisible();
+      return rendered();
+    }
+    if (state !== "invalid") throw new Error(`Unknown visual state verify-email/${state}`);
+    await page.goto("/verify-email?error=invalid_token");
+    const heading = page.getByRole("heading", { level: 1, name: "Verification link unavailable" });
+    await expect(heading).toBeFocused();
+    return rendered();
+  }
+  if (family === "not-found") {
+    const response = await page.goto("/visual-missing-page");
+    expect(response?.status()).toBe(404);
+    await expect(page.getByRole("heading", { level: 1, name: "Page not found" })).toBeVisible();
+    return rendered();
+  }
+  if (family !== "security") throw new Error(`Unknown visual family ${family}`);
+  // The visual owner's own page. Its password requests never leave the browser, so the account never changes.
+  await page.context().addCookies(visual.crown.cookies);
+  const methods = page.locator("#method-list");
+  if (state === "loading") {
+    const hold = await holdRequest(page, "**/api/auth/list-accounts");
+    closers.push(() => hold.close());
+    await page.goto("/account/security");
+    await hold.held;
+    await expect(methods).toHaveAttribute("aria-busy", "true");
+    await expect(page.locator("#security-skeleton")).toBeVisible();
+    return rendered();
+  }
+  const legacy = state === "no-password" || state === "add-mismatch";
+  if (legacy) await answerAuth(page, "list-accounts", 200, legacyAccounts, closers);
+  if (state === "failure") await answerAuth(page, "list-accounts", 500, { message: "Internal Server Error" }, closers);
+  if (state === "change-error") await answerAuth(page, "change-password", 400, { code: "INVALID_PASSWORD", message: "Invalid password" }, closers);
+  await page.goto("/account/security");
+  await expect(methods).toHaveAttribute("aria-busy", "false");
+  if (state === "failure") {
+    await expect(methods.locator('[data-method="error"]')).toBeVisible();
+    return rendered();
+  }
+  await expect(methods.locator(`[data-method="${legacy ? "unconfigured" : "configured"}"]`)).toBeVisible();
+  await expect(page.locator(legacy ? "#initial-password-section" : "#change-password-section")).toBeVisible();
+  if (state === "credential" || state === "no-password") return rendered();
+  if (state === "change-error") {
+    await page.locator("#currentPassword").fill(typedPassword);
+    await page.locator("#newPassword").fill("Visual new password 2");
+    await submitFrom(page, "#newPassword");
+    await expect(page.locator("#change-error")).toHaveText("Invalid password");
+    await expect(page.locator("#change-password-form button[type=submit]")).toBeEnabled();
+    return rendered();
+  }
+  if (state !== "add-mismatch") throw new Error(`Unknown visual state security/${state}`);
+  await page.locator("#password").fill("Visual new password 1");
+  await page.locator("#confirmPassword").fill("Visual new password 2");
+  await submitFrom(page, "#confirmPassword");
+  await expect(page.locator("#initial-error")).toHaveText("Passwords do not match.");
+  return rendered();
 }
 
 type CommentSocket = { rejectWrites(on: boolean): void; blackhole(on: boolean): void };
