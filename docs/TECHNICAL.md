@@ -663,6 +663,7 @@ An anchor re-attaches to its quote in a later commit by text and section, not by
 ### Deploy Commands
 
 ```bash
+pnpm preflight:prod                   # production wiring against scripts/production-manifest.ts (SETUP.md)
 pnpm exec convex deploy
 pnpm run deploy                       # serving Worker (production)
 pnpm run deploy --env development     # serving Worker (development)
@@ -1169,6 +1170,8 @@ This section covers how a GitHub commit becomes a ready-to-serve snapshot (#220,
 | `REPO_CONTENT_KEY_PREVIOUS` | Secret, optional | During a [key rotation](#key-rotation) only |
 | `REPO_IDLE_EXPIRY_SECONDS` | Var, tests only | Shortens the idle window (default 30 days) |
 
+Production needs `REPO_SEARCH` too: `scripts/production-manifest.ts` marks it required, and `pnpm preflight:prod` checks the production configuration ([SETUP.md](SETUP.md#production-readiness-checklist)).
+
 ### Storage key schema
 
 Every key a repository owns sits under `gh/v1/repo/<repo id>/`. The prefix uses GitHub's numeric repository ID, so renames and transfers move nothing, and purging a repository (#263) is one prefix delete. The ref pointer is the only mutable object; every other key names immutable bytes.
@@ -1407,7 +1410,7 @@ The frame wraps the sanitized page in Rendro's markup: the comment widget (#254)
 | `FIRST_VIEW_LIMIT` | Rate Limiting | Per-client admission of first views of a branch other than the default (#294); without it those are refused |
 | `SEARCH_LIMIT` | Rate Limiting | Per-client search rate (#294); without it searches are not limited per client |
 
-None is configured in `wrangler.toml` yet. The control Worker exists (`wrangler.control.toml`, development and tests only, #243), and the owner wires both once the GitHub App exists ([SETUP.md](SETUP.md#github-repository-reads-not-configured-yet)). Until then every `/r/` URL is a 404 in production and development. `REPO_CAPABILITY_SECRET` is required now, so the secret exists before the bindings do. Test configurations add all four bindings to a copy of the production configuration (`e2e/repo-read-config.ts`): the E2E suite and `tests/repo-access-workerd.test.ts` with the real control Worker over a fake GitHub, `tests/repo-read-workerd.test.ts` with a fixture control Worker (`e2e/repo-access/`) that speaks the same protocol from grants it is given.
+None is configured in `wrangler.toml` yet. The control Worker exists (`wrangler.control.toml`, development and tests only, #243), and the owner wires both once the GitHub App exists ([SETUP.md](SETUP.md#production-readiness-checklist)). Until then every `/r/` URL is a 404 in production and development. `REPO_CAPABILITY_SECRET` is required now, so the secret exists before the bindings do. Test configurations add all four bindings to a copy of the production configuration (`e2e/repo-read-config.ts`): the E2E suite and `tests/repo-access-workerd.test.ts` with the real control Worker over a fake GitHub, `tests/repo-read-workerd.test.ts` with a fixture control Worker (`e2e/repo-access/`) that speaks the same protocol from grants it is given.
 
 ### Measurements
 
@@ -1744,7 +1747,7 @@ Real GitHub adds its own latency to a refresh (typically 100–300 ms per reques
 | `CONVEX_URL`, `CONVEX_INTERNAL_SECRET` | Var and secret, optional | Comments (#254): Convex hears every epoch and removed repository. Both are needed; without them comment grants end with their own lifetime (at most five minutes) |
 | `REPO_INGEST` | Durable Object binding, optional | The ingest Worker's `RepoIngestCoordinator` (`script_name` the ingest Worker): a confirmed removal purges the repository's cached R2 content and search rows (#263) |
 
-What the owner configures later is in [SETUP.md](SETUP.md#github-repository-reads-not-configured-yet).
+The code runs without the optional entries; production needs `CONVEX_URL`, `CONVEX_INTERNAL_SECRET`, the App's OAuth client and `REPO_INGEST` too, and `scripts/production-manifest.ts` marks them required. What the owner configures later is in [SETUP.md](SETUP.md#production-readiness-checklist).
 
 ### Purging removed repositories
 
@@ -1855,7 +1858,7 @@ Rendered pages and manifests are a few KiB, so a sealed object costs tens of mic
 
 - The search index (#251) holds the section text of private repositories in plaintext in D1: full-text search needs it. Purges and expiry delete it with the content.
 - Cache API entries of a purged or expired repository are not deleted (there is no per-prefix purge); they are sealed, reachable only after authorization, and age out of the colo cache.
-- Production wiring of `REPO_INGEST` in the control and serving Workers ([SETUP.md](SETUP.md#github-repository-reads-not-configured-yet)).
+- Production wiring of `REPO_INGEST` in the control and serving Workers ([SETUP.md](SETUP.md#production-readiness-checklist)).
 
 ## Comments on Repository Docs (GitHub pivot, P6)
 
@@ -1981,5 +1984,5 @@ Tests: `tests/repo-comments-convex.test.ts` ("editing repository comments (#287)
 ## Known Limitations
 
 1. Sign-in is email and password only until GitHub sign-in (P1); the signed-in home cannot list a reader's repositories yet.
-2. The read path's bindings are not in `wrangler.toml` yet, and the ingest and control Workers exist for development and tests only, until the GitHub App exists ([SETUP.md](SETUP.md#github-repository-reads-not-configured-yet)). Until the owner wires them, every `/r/` URL is a 404.
+2. The read path's bindings are not in `wrangler.toml` yet, and the ingest and control Workers exist for development and tests only, until the GitHub App exists ([SETUP.md](SETUP.md#production-readiness-checklist)). Until the owner wires them, every `/r/` URL is a 404.
 3. The first Convex HTTP action after a cold start can add latency.

@@ -53,6 +53,7 @@
     "visual:update": "bash scripts/visual-baselines.sh update",
     "visual:repeat": "bash scripts/visual-baselines.sh repeat",
     "check:r2-public": "tsx scripts/check-r2-public-access.ts",
+    "preflight:prod": "tsx scripts/preflight-prod.ts",
     "deploy": "pnpm build:assets && wrangler deploy --config wrangler.toml",
     "e2e": "playwright test --config e2e/playwright.config.ts"
   },
