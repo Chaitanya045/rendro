@@ -13,49 +13,9 @@ export const repoAnchorValidator = v.object({
   offset: v.number(),
 });
 export default defineSchema({
-  organizationTombstones: defineTable({
-    organizationId: v.string(),
-    deletedAt: v.number(),
-    deletedBy: v.string(),
-  }).index("by_organization", ["organizationId"]),
-
   admissionBuckets: defineTable({ name: v.string(), key: v.string(), expiresAt: v.number() })
     .index("by_bucket", ["name", "key"])
     .index("by_expiry", ["expiresAt"]),
-
-  failedApiKeyBuckets: defineTable({ key: v.string(), expiresAt: v.number() })
-    .index("by_key", ["key"])
-    .index("by_expiry", ["expiresAt"]),
-
-  projects: defineTable({
-    organizationId: v.string(),
-    name: v.string(),
-    slug: v.string(),
-    createdBy: v.string(),
-    createdAt: v.number(),
-    // Retired with deployments (#286); unread, removed with the table in the organizations slice.
-    activeDeploymentId: v.optional(v.string()),
-  })
-    .index("by_organization", ["organizationId", "createdAt"])
-    .index("by_organization_slug", ["organizationId", "slug"]),
-
-  apiKeyCredentials: defineTable({
-    organizationId: v.string(),
-    projectId: v.optional(v.id("projects")),
-    keyId: v.string(),
-    keyPrefix: v.string(),
-    name: v.string(),
-    secretHash: v.string(),
-    scopes: v.array(v.string()),
-    expiresAt: v.optional(v.number()),
-    revokedAt: v.optional(v.number()),
-    createdBy: v.string(),
-    createdAt: v.number(),
-    lastUsedAt: v.optional(v.number()),
-  })
-    .index("by_secret_hash", ["secretHash"])
-    .index("by_organization", ["organizationId", "createdAt"])
-    .index("by_key_id", ["keyId"]),
 
   // Repository doc comments (#254). Access mirrors repository read access: the
   // serving Worker writes a grant after its own authorization (cookie, epoch,

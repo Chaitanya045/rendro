@@ -7,7 +7,7 @@ import { publicError } from "./publicErrors";
 // Convex's native argument validator runs before the handler and includes input
 // and schema diagnostics on dev deployments. Validate public RPC arguments here
 // instead, using the same schema and inferred API types, with a safe rejection.
-// IDs remain strings and are normalized after authentication by requireId.
+// IDs remain strings; each handler normalizes them after authentication.
 function matches(schema: Validator<unknown, "required" | "optional", string>, value: unknown): boolean {
   switch (schema.kind) {
     case "string": return typeof value === "string";

@@ -26,7 +26,7 @@ it("rejects same-site sibling submissions with real browser cookies", async () =
     await route.fulfill({ response: undefined, status: response.status, contentType: "application/json", body: await response.text() });
   });
   await page.goto(siblingOrigin);
-  const path = "/api/rendro/projects";
+  const path = "/api/auth/set-initial-password";
   await page.evaluate(async ({ url, body }) => {
     await fetch(url, { method: "POST", mode: "no-cors", credentials: "include", headers: { "Content-Type": "text/plain" }, body: JSON.stringify(body) });
   }, { url: appOrigin + path, body: f.bodies[path] });
@@ -36,6 +36,6 @@ it("rejects same-site sibling submissions with real browser cookies", async () =
     const response = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
     return response.status;
   }, { path, body: f.bodies[path] });
-  expect(result).toBe(201);
-  expect(observed.at(-1)).toMatchObject({ origin: appOrigin, cookie: true, status: 201 });
+  expect(result).toBe(200);
+  expect(observed.at(-1)).toMatchObject({ origin: appOrigin, cookie: true, status: 200 });
 });

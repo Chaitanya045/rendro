@@ -1,5 +1,5 @@
 import type { Page } from "@playwright/test";
-import { test, expect } from "./org-fixtures";
+import { test, expect } from "./actor-fixtures";
 import { addReply, anchorOn, card, createThread, journeyDoc, open, openDrawer, pauseClock, pin, repoIds, repos, sessionToken, threadsAs, ui, writeThread } from "./comment-helpers";
 import { desktop } from "./shell-helpers";
 

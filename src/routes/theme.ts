@@ -89,6 +89,6 @@ export function renderThemeAssets(): string {
 
 // Shells share markup as well as behavior: page-local button classes must not
 // override this control's interaction states. Menu placement changes only layout.
-export function renderThemeButton(id: "theme-toggle" | "cp-theme" = "theme-toggle"): string {
-  return `<button class="rendro-theme-control" id="${id}" type="button" aria-label="Switch to dark theme" title="Theme: system"><span class="material-symbols-outlined rendro-theme-icon" aria-hidden="true">contrast</span></button>`;
+export function renderThemeButton(): string {
+  return `<button class="rendro-theme-control" id="theme-toggle" type="button" aria-label="Switch to dark theme" title="Theme: system"><span class="material-symbols-outlined rendro-theme-icon" aria-hidden="true">contrast</span></button>`;
 }

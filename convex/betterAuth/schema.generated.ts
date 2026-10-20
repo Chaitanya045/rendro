@@ -34,6 +34,7 @@ export const tables = {
     ipAddress: v.optional(v.union(v.null(), v.string())),
     userAgent: v.optional(v.union(v.null(), v.string())),
     userId: v.string(),
+    // Retired with the organization plugin (#286): kept so existing sessions still validate.
     activeOrganizationId: v.optional(v.union(v.null(), v.string())),
     activeTeamId: v.optional(v.union(v.null(), v.string())),
     rememberMe: v.optional(v.union(v.null(), v.boolean())),
@@ -69,55 +70,6 @@ export const tables = {
   })
     .index("expiresAt", ["expiresAt"])
     .index("identifier", ["identifier"]),
-  organization: defineTable({
-    name: v.string(),
-    slug: v.string(),
-    logo: v.optional(v.union(v.null(), v.string())),
-    createdAt: v.number(),
-    metadata: v.optional(v.union(v.null(), v.string())),
-  })
-    .index("name", ["name"])
-    .index("slug", ["slug"]),
-  team: defineTable({
-    name: v.string(),
-    organizationId: v.string(),
-    createdAt: v.number(),
-    updatedAt: v.optional(v.union(v.null(), v.number())),
-  })
-    .index("organizationId", ["organizationId"]),
-  teamMember: defineTable({
-    teamId: v.string(),
-    userId: v.string(),
-    createdAt: v.optional(v.union(v.null(), v.number())),
-  })
-    .index("teamId", ["teamId"])
-    .index("userId", ["userId"]),
-  member: defineTable({
-    organizationId: v.string(),
-    userId: v.string(),
-    role: v.string(),
-    createdAt: v.number(),
-  })
-    .index("organizationId", ["organizationId"])
-    .index("organizationId_userId", ["organizationId", "userId"])
-    .index("userId", ["userId"])
-    .index("role", ["role"]),
-  invitation: defineTable({
-    organizationId: v.string(),
-    email: v.string(),
-    role: v.optional(v.union(v.null(), v.string())),
-    teamId: v.optional(v.union(v.null(), v.string())),
-    status: v.string(),
-    expiresAt: v.number(),
-    createdAt: v.number(),
-    inviterId: v.string(),
-  })
-    .index("organizationId", ["organizationId"])
-    .index("email", ["email"])
-    .index("role", ["role"])
-    .index("teamId", ["teamId"])
-    .index("status", ["status"])
-    .index("inviterId", ["inviterId"]),
   jwks: defineTable({
     publicKey: v.string(),
     privateKey: v.string(),

@@ -1900,13 +1900,4 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
         Name
       >;
     };
-    teamLookup: {
-      get: FunctionReference<
-        "query",
-        "internal",
-        { teamId: string },
-        { organizationId: string } | null,
-        Name
-      >;
-    };
   };

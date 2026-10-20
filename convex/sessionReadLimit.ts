@@ -14,37 +14,19 @@ export function sessionExpiryMs(value: unknown): number {
   }
 }
 
-// Exact read-only endpoints. Invitation writes and all credential endpoints keep
-// Better Auth's strict IP limits. Query parameters cannot split these buckets.
-export const organizationReadPaths = [
-  "/organization/get-full-organization",
-  "/organization/list",
-  "/organization/list-invitations",
-] as const;
-
 /** HTTP reads only: internal authorization still reads persisted sessions. */
 export function sessionReadLimit(consume: (key: string) => Promise<number>): BetterAuthPlugin {
-  return authReadLimit(consume, false);
-}
-
-export function organizationReadLimit(consume: (key: string) => Promise<number>): BetterAuthPlugin {
-  return authReadLimit(consume, true);
-}
-
-function authReadLimit(consume: (key: string) => Promise<number>, organizationReads: boolean): BetterAuthPlugin {
-  const prefix = organizationReads ? "organization-read" : "session-read";
+  const prefix = "session-read";
   return {
     id: `rendro-${prefix}-limit`,
     hooks: { before: [{
-      matcher: (ctx) => !!ctx.request && (organizationReads
-        ? organizationReadPaths.some(path => path === ctx.path) && ctx.request.method === "GET"
-        : ctx.path === "/get-session"),
+      matcher: (ctx) => !!ctx.request && ctx.path === "/get-session",
       handler: createAuthMiddleware(async (ctx) => {
         const ip = ctx.headers?.get(AUTH_CLIENT_IP_HEADER) ?? "no-trusted-ip";
         async function enforce(key: string) {
           const retryAfter = await consume(key);
           if (retryAfter) throw new APIError("TOO_MANY_REQUESTS", {
-            message: organizationReads ? "Too many organization reads" : "Too many session reads",
+            message: "Too many session reads",
           }, { "Retry-After": String(retryAfter) });
         }
         // Bound even invalid signed-cookie probes before hitting the session store.
@@ -69,10 +51,8 @@ function authReadLimit(consume: (key: string) => Promise<number>, organizationRe
         };
         let key: string;
         if (token && persisted && expiresAt > Date.now()) {
-          // Session reads use the token; organization reads use the verified user
-          // so opening fresh sessions cannot multiply the allowance. Hash both
-          // to avoid storing credentials or identity in limiter keys.
-          const hash = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(organizationReads ? persisted.user.id : token));
+          // Session reads key on the token, hashed so limiter keys never store credentials.
+          const hash = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(token));
           key = `${prefix}:${Array.from(new Uint8Array(hash), b => b.toString(16).padStart(2, "0")).join("")}`;
         } else {
           key = `${prefix}-unverified:${ip}`;

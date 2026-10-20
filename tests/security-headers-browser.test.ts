@@ -1,4 +1,3 @@
-import { managementPagesSource } from "../scripts/management-pages-source";
 import AxeBuilder from "@axe-core/playwright";
 import { getRequestListener } from "@hono/node-server";
 import { readFile } from "node:fs/promises";
@@ -37,12 +36,9 @@ beforeAll(async () => {
     ["/private-viewer.js", "src/viewer/entry.ts"],
     ["/lazy-tree.js", "src/lazy-tree/lazy-tree.ts"],
     ["/commentor.js", "src/commentor/commentor.ts"],
-    ["/management-query.js", "src/management-query/browser.ts"],
-    ["/select.js", "src/ui/select-browser.ts"],
   ]) {
     assets.set(path, await bundleBrowserAsset(entry));
   }
-  assets.set("/management-pages.js", (await build({ stdin: { contents: managementPagesSource(), sourcefile: "tests/fixtures/generated-management-pages.js", resolveDir: process.cwd() } })).outputFiles[0].text);
   // Exercise the real parent protocol and widget with a deterministic comment
   // backend. Auth/Convex services are fixture boundaries, not live accounts.
   const parent = await browserStep("bundle comment parent fixture", () => build({ stdin: { contents: `
@@ -164,22 +160,16 @@ describe("Chromium security header smoke", () => {
     } finally { await page.close(); }
   });
 
-  it("runs management navigation under the active document nonce", async () => {
+  it("loads the signed-in home and account security under CSP", async () => {
     const page = await pageFor(true);
     try {
-      const response = await browserStep("load organization management", () => page.goto(harness.origin + "/organizations/org-a"));
-      expect(response?.status()).toBe(200);
-      await browserStep("initialize management UI", () => page.waitForFunction(() => Boolean((window as unknown as { RendroUI?: unknown }).RendroUI)));
-      // Force the fetched-page fallback, not the prebuilt controller path.
-      await page.evaluate(() => { (window as unknown as { RendroManagementPages?: unknown }).RendroManagementPages = undefined; });
-      const originalNonce = await page.locator("script[data-cp-page-script]").evaluate(script => (script as HTMLScriptElement).nonce);
-      await browserStep("navigate to projects with the current document nonce", async () => {
-        await page.locator('.cp-nav a[href="/organizations/org-a/projects"]').click();
-        await page.waitForURL("**/organizations/org-a/projects");
-        await page.waitForFunction(() => document.querySelector("h1")?.textContent?.includes("Projects"));
-      });
-      await settled(page);
-      expect(await page.locator("script[data-cp-page-script]").evaluate(script => (script as HTMLScriptElement).nonce)).toBe(originalNonce);
+      for (const [path, heading] of [["/home", `Welcome, ${testUser.name}`], ["/account/security", "Sign-in methods"]]) {
+        const response = await browserStep(`navigate to ${path}`, () => page.goto(harness.origin + path));
+        expect(response?.status()).toBe(200);
+        await browserStep("initialize page theme", () => page.waitForFunction(() => Boolean((window as unknown as { RendroTheme?: unknown }).RendroTheme)));
+        expect(await page.locator("h1").textContent()).toBe(heading);
+        await settled(page);
+      }
     } finally { await page.close(); }
   });
 

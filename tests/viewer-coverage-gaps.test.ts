@@ -1,6 +1,5 @@
 import { Window as DOMWindow } from "happy-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { managementLabel } from "@/ui/management-ui";
 import { isContentFrameSource, newTabLinkHref, normalizeLoadedDocumentPath, validDocumentSearch } from "@/lazy-tree/messages";
 import { replaceViewerFragment, sendDocumentFragment } from "@/viewer/fragments";
 import { createMessageRateLimit } from "@/viewer/message-limits";
@@ -28,11 +27,7 @@ function events() {
   };
 }
 
-describe("shared labels and message validators", () => {
-  it.each([[null, ""], [undefined, ""], ["", ""], ["needs_review", "Needs Review"]])("labels %s defensively", (value, label) => {
-    expect(managementLabel("status", value)).toBe(label);
-  });
-
+describe("message validators", () => {
   it("rejects loaded paths that escape their namespace and ignores foreign frame sources", () => {
     expect(normalizeLoadedDocumentPath("org/../secret.html", "org")).toBeNull();
     expect(normalizeLoadedDocumentPath("org/guide//page.html", "org")).toBeNull();

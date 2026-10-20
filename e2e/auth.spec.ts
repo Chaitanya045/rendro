@@ -198,7 +198,7 @@ test("returnTo permits local paths and rejects off-site and protocol-relative de
   for (const destination of ["/account/security?from=auth", "https://outside.invalid/private", "//outside.invalid/private", "/\\outside.invalid/private"]) {
     await login(page, "owner@example.test", password, true, destination);
     if (destination === "/account/security?from=auth") await expect(page).toHaveURL(`${baseURL}${destination}`);
-    else await expect(page).toHaveURL(/\/organizations\//);
+    else await expect(page).toHaveURL(/\/home$/);
     expect(new URL(page.url()).origin).toBe(baseURL);
     expect((await session(page))?.email).toBe("owner@example.test");
     await page.goto("/account/security");
@@ -583,7 +583,7 @@ test("persisted pageshow checks the backend and hides a revoked account", async 
 
 // Exercise fresh and cached protected reads, ticket-backed document assets, and
 // the server expiry boundary with the production Better Auth settings.
-test("nonpersistent session retains its short backend lifetime [AUTH-111-02]", async ({ page, context, seed }) => {
+test("nonpersistent session retains its short backend lifetime [AUTH-111-02]", async ({ page, context }) => {
   await login(page, "owner@example.test", password, false);
   await expect(page).toHaveURL(/\/account\/security$/);
   const identity = await session(page);
@@ -596,12 +596,11 @@ test("nonpersistent session retains its short backend lifetime [AUTH-111-02]", a
   // Better Auth samples expiresAt and createdAt separately on the real clock.
   expect(initial.expiresAt - initial.createdAt).toBeGreaterThan(86400_000 - 1000);
   expect(initial.expiresAt - initial.createdAt).toBeLessThanOrEqual(86400_000);
-  const org = `/organizations/${seed.organizationId}`;
   // A private repository the owner may read (#234) looks the session up as every signed-in page does.
   const { closed } = JSON.parse(readFileSync(process.env.RENDRO_E2E_REPOS as string, "utf8")) as RepoFixtures;
   const docs = `/r/${closed.owner}/${closed.name}`;
   const docsHeading = () => page.frameLocator("#content-frame").getByRole("heading", { name: "Closed home", level: 1 });
-  for (const path of [org, `${org}/projects`, docs, "/account/security"]) {
+  for (const path of ["/home", docs, "/account/security"]) {
     expect((await page.goto(path))?.status()).toBe(200);
     await page.reload();
     if (path === docs) await expect(docsHeading()).toBeVisible();
@@ -612,7 +611,7 @@ test("nonpersistent session retains its short backend lifetime [AUTH-111-02]", a
     await context.clearCookies({ name: "better-auth.dont_remember" });
     if (marker !== null) await context.addCookies([{ name: "better-auth.dont_remember", value: marker, url: page.url() }]);
     // End on a fresh-identity page; the reloads below must not use cached identity.
-    for (const path of [org, docs, "/account/security"]) {
+    for (const path of ["/home", docs, "/account/security"]) {
       expect((await page.goto(path))?.status()).toBe(200);
       if (path === docs) await expect(docsHeading()).toBeVisible();
       expect((await session(page))?.sessionId).toBe(identity.sessionId);
@@ -634,7 +633,7 @@ test("nonpersistent session retains its short backend lifetime [AUTH-111-02]", a
 
 // Sessions are cookie-only on the real Convex runtime and through the Worker: a
 // bearer session token neither authenticates nor refreshes/persists the session.
-test("bearer session tokens never extend a nonpersistent session [AUTH-111-02]", async ({ page, context, seed }) => {
+test("bearer session tokens never extend a nonpersistent session [AUTH-111-02]", async ({ page, context }) => {
   await login(page, "owner@example.test", password, false);
   await expect(page).toHaveURL(/\/account\/security$/);
   const identity = await session(page);
@@ -649,16 +648,14 @@ test("bearer session tokens never extend a nonpersistent session [AUTH-111-02]",
   const cookie = `${token.name}=${token.value}`;
   const authorization = `Bearer ${decodeURIComponent(token.value)}`;
   for (const origin of [process.env.RENDRO_E2E_CONVEX_SITE, process.env.RENDRO_E2E_ORIGIN]) {
-    for (const path of ["/api/auth/get-session", "/api/auth/convex/token", "/api/auth/organization/list", "/api/auth/list-sessions", `/api/rendro/management/access?organizationId=${seed.organizationId}`]) {
+    for (const path of ["/api/auth/get-session", "/api/auth/convex/token", "/api/auth/list-sessions"]) {
       for (const headers of [{ authorization }, { authorization, cookie }] as Record<string, string>[]) {
         const label = `${origin === process.env.RENDRO_E2E_ORIGIN ? "worker" : "convex"} ${path} ${Object.keys(headers).join("+")}`;
         const response = await localHttp(`${origin}${path}`, undefined, headers);
         const sessionCookies = [response.headers["set-cookie"] ?? []].flat().filter(value => /^[^=]*\.session_token=/.test(value));
         for (const value of sessionCookies) expect(value.replace(/; Max-Age=0(?=;|$)/i, ""), label).not.toMatch(/; (?:Max-Age|Expires)=/i);
         const authenticated = response.status === 200 && response.body !== "null";
-        // Convex Rendro APIs treat Authorization as an API-key request, never a session.
-        const cookieAuthority = "cookie" in headers && (path.startsWith("/api/auth/") || origin === process.env.RENDRO_E2E_ORIGIN);
-        expect(authenticated, `${label}: ${response.status}`).toBe(cookieAuthority);
+        expect(authenticated, `${label}: ${response.status}`).toBe("cookie" in headers);
         const current = await stored();
         expect(current.expiresAt, label).toBe(initial.expiresAt);
         expect(current.rememberMe, label).toBe(false);

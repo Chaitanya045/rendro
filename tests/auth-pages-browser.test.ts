@@ -35,10 +35,8 @@ async function open(path: string, options: Parameters<typeof harness.newPage>[0]
 }
 
 const returnLinks = (page: Page) => page.evaluate(() => [...document.querySelectorAll('a[data-return-link]')].map(link => link.getAttribute('href')));
-const invitation = async (page: Page) => page.locator('.invitation-chip').isVisible();
-
-it('keeps a safe return destination and the invitation context through every related authentication link', async () => {
-  const destination = '/accept-invitation/inv-197';
+it('keeps a safe return destination through every related authentication link', async () => {
+  const destination = '/r/acme/handbook';
   const query = `?returnTo=${encodeURIComponent(destination)}`;
   const base = `/sign-in${query}`;
   // Every page that links onwards carries the destination on all of its related links.
@@ -51,7 +49,6 @@ it('keeps a safe return destination and the invitation context through every rel
   for (const [path, targets] of pages) {
     const page = await open(`${path}${path.includes('?') ? '&' : '?'}returnTo=${encodeURIComponent(destination)}`);
     expect(await returnLinks(page), path).toEqual(targets.map(target => `${target}${query}`));
-    expect(await invitation(page), path).toBe(true);
   }
   // Following the links keeps the destination across the whole round trip.
   const page = await open(base);
@@ -60,25 +57,22 @@ it('keeps a safe return destination and the invitation context through every rel
     await page.getByRole('link', { name: link, exact: true }).click();
     await page.waitForURL(url => url.pathname === path);
     expect(urlParts()).toEqual({ path, returnTo: destination });
-    expect(await invitation(page)).toBe(true);
   }
   // A path with its own query round-trips unchanged.
-  const nested = '/organizations/org-1/projects?tab=keys&x=1';
+  const nested = '/r/acme/handbook?doc=docs%2Fguide.md&x=1';
   const deep = await open(`/sign-in?returnTo=${encodeURIComponent(nested)}`);
   await deep.getByRole('link', { name: 'Create an account' }).click();
   await deep.waitForURL('**/sign-up?**');
   expect(new URL(deep.url()).searchParams.get('returnTo')).toBe(nested);
-  expect(await invitation(deep)).toBe(false);
 });
 
-it('drops an unsafe return target from every related link and the invitation context', async () => {
-  for (const unsafe of ['https://outside.invalid/accept-invitation/x', '//outside.invalid/accept-invitation/x', '/\\outside.invalid', '/accept-invitation/x\u0001']) {
+it('drops an unsafe return target from every related link', async () => {
+  for (const unsafe of ['https://outside.invalid/r/acme/x', '//outside.invalid/r/acme/x', '/\\outside.invalid', '/r/acme/x\u0001']) {
     for (const path of ['/sign-in', '/sign-up', '/forgot-password', '/verify-email']) {
       const page = await open(`${path}?returnTo=${encodeURIComponent(unsafe)}`);
       const hrefs = await returnLinks(page);
       expect(hrefs.length, `${path} ${unsafe}`).toBeGreaterThan(0);
       for (const href of hrefs) expect(href, `${path} ${unsafe}`).not.toContain('returnTo');
-      expect(await invitation(page)).toBe(false);
     }
   }
 });
@@ -114,7 +108,7 @@ it('explains each Google callback failure with fixed recovery copy and keeps eve
 
 it('starts Google sign-in only for a callback inside this origin, whatever return target is requested', async () => {
   const cases: [string, string][] = [
-    ['/accept-invitation/inv-197', '/accept-invitation/inv-197'],
+    ['/r/acme/handbook', '/r/acme/handbook'],
     ['https://outside.invalid/phish', '/'], ['//outside.invalid/phish', '/'], ['/\\outside.invalid', '/'],
   ];
   for (const page of ['/sign-in', '/sign-up']) {

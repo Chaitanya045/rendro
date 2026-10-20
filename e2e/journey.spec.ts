@@ -1,32 +1,9 @@
 import { readFileSync } from "node:fs";
 import { test, expect } from "./fixtures";
 import { localHttp } from "./backend";
-import { password, roles } from "./seed";
+import { password } from "./seed";
 import type { Mail } from "./services";
 import type { RepoFixtures } from "./repo-fixtures";
-
-for (const role of roles) {
-  test(`seeded ${role} session enforces organization and credential boundaries`, async ({ page, context, baseURL, seed }, info) => {
-    await context.addCookies(seed.cookies[role].split("; ").map(pair => {
-      const split = pair.indexOf("=");
-      return { name: pair.slice(0, split), value: pair.slice(split + 1), url: baseURL ?? "" };
-    }));
-    await page.goto("/organizations?choose=1");
-    const result = await page.evaluate(async ({ organizationId, otherOrganizationId, slug }) => {
-      const access = await fetch(`/api/rendro/management/access?organizationId=${organizationId}`);
-      const other = await fetch(`/api/rendro/management/access?organizationId=${otherOrganizationId}`);
-      const keys = await fetch(`/api/rendro/credentials?organizationId=${organizationId}`);
-      const create = await fetch("/api/rendro/projects", { method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ organizationId, name: "Denied control", slug }) });
-      return { access: access.status, other: other.status, keys: keys.status, create: create.status, body: await access.json() as { member?: { role: string } } };
-    }, { ...seed, slug: `role-control-${role}-${info.project.name}-${info.retry}` });
-    expect(result.access).toBe(role === "outsider" ? 403 : 200);
-    expect(result.other).toBe(role === "outsider" ? 200 : 403);
-    expect(result.keys).toBe(role === "owner" || role === "admin" ? 200 : 403);
-    expect(result.create).toBe(role === "member" || role === "outsider" ? 403 : 201);
-    if (role !== "outsider") expect(result.body.member?.role).toBe(role);
-  });
-}
 
 test("Google OAuth uses local code exchange and rejects a changed state", async ({ page }) => {
   await page.goto("/sign-in");
@@ -35,7 +12,7 @@ test("Google OAuth uses local code exchange and rejects a changed state", async 
   await page.goto("/sign-in");
   await expect(page.getByRole("heading", { name: "Sign in to Rendro" })).toBeVisible();
   await page.getByRole("button", { name: "Continue with Google" }).click();
-  await expect(page.getByLabel("Organization name", { exact: true })).toBeVisible();
+  await expect(page).toHaveURL(/\/home$/);
   const user = await page.evaluate(async () => {
     const response = await fetch("/api/auth/get-session");
     return await response.json() as { user: { email: string; emailVerified: boolean } };
@@ -43,7 +20,7 @@ test("Google OAuth uses local code exchange and rejects a changed state", async 
   expect(user.user).toMatchObject({ email: "oauth@example.test", emailVerified: true });
 });
 
-test("sign up → verify → organization → project → repository document → reactive comment", async ({ page, context, baseURL }, info) => {
+test("sign up → verify → home → repository document → reactive comment", async ({ page, context, baseURL }, info) => {
   test.setTimeout(90_000);
   const email = `journey-${info.project.name}-${info.retry}@example.test`;
   await page.goto("/sign-up");
@@ -67,11 +44,8 @@ test("sign up → verify → organization → project → repository document �
   await page.getByLabel("Work email", { exact: true }).fill(email);
   await page.getByLabel("Password", { exact: true }).fill(password);
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
-  await page.getByLabel("Organization name", { exact: true }).fill(`Journey ${info.project.name} ${info.retry}`);
-  await page.getByRole("button", { name: "Create organization", exact: true }).click();
-  await page.getByLabel("Project name", { exact: true }).fill("Journey documents");
-  await page.getByRole("button", { name: "Create project", exact: true }).click();
-  await expect(page.locator(".cp-page-heading")).toHaveText("Journey documents");
+  await expect(page).toHaveURL(/\/home$/);
+  await expect(page.getByRole("heading", { name: "Welcome, Journey Author", level: 1 })).toBeVisible();
   // Anyone signed in may comment on a public repository: the new account reads one and writes there at once.
   const { viewer } = JSON.parse(readFileSync(process.env.RENDRO_E2E_REPOS as string, "utf8")) as RepoFixtures;
   await page.goto(`/r/${viewer.owner}/${viewer.name}?doc=${encodeURIComponent("docs/comment.md")}`);

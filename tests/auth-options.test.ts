@@ -4,12 +4,11 @@ import type * as readLimit from "../convex/sessionReadLimit";
 import * as emails from "../convex/authEmails";
 
 const consumers = vi.hoisted(() => [] as Array<(key: string) => Promise<number>>);
-vi.mock("../convex/authEmails", () => ({ sendAuthLinkEmail: vi.fn(), sendExistingAccountNotice: vi.fn(), sendOrganizationInvitationEmail: vi.fn() }));
+vi.mock("../convex/authEmails", () => ({ sendAuthLinkEmail: vi.fn(), sendExistingAccountNotice: vi.fn() }));
 vi.mock("../convex/sessionReadLimit", async importOriginal => {
   const original = await importOriginal<typeof readLimit>();
   return { ...original,
     sessionReadLimit: (consume: (key: string) => Promise<number>) => { consumers.push(consume); return original.sessionReadLimit(consume); },
-    organizationReadLimit: (consume: (key: string) => Promise<number>) => { consumers.push(consume); return original.organizationReadLimit(consume); },
   };
 });
 afterEach(() => { vi.unstubAllEnvs(); vi.clearAllMocks(); consumers.length = 0; });
@@ -23,7 +22,7 @@ it("requires runtime auth secrets while permitting offline schema generation", (
   expect(generated.options.socialProviders?.google).toMatchObject({ clientId: "schema-generation-google_client_id", clientSecret: "schema-generation-google_client_secret" });
 });
 
-it("keeps email callbacks and exact organization read/write rate rules wired to their services", async () => {
+it("keeps email callbacks and exact credential rate rules wired to their services", async () => {
   const options = createAuthOptions({} as never);
   const user = { email: "reader@example.test", name: "Reader" }, url = "http://localhost:3000/verify";
   await options.emailAndPassword.sendResetPassword({ user, url } as never);
@@ -32,18 +31,16 @@ it("keeps email callbacks and exact organization read/write rate rules wired to 
   expect(emails.sendAuthLinkEmail).toHaveBeenCalledWith("password-reset", user, url);
   expect(emails.sendAuthLinkEmail).toHaveBeenCalledWith("verification", user, url);
   expect(emails.sendExistingAccountNotice).toHaveBeenCalledWith(user);
-  const org = options.plugins.find(plugin => plugin.id === "organization") as Extract<typeof options.plugins[number], { id: "organization" }>;
-  await org.options.sendInvitationEmail!({ email: user.email, inviter: { user }, organization: { name: "Readers" }, id: "invite /" } as never);
-  expect(emails.sendOrganizationInvitationEmail).toHaveBeenCalledWith({ email: user.email, inviterName: user.name, organizationName: "Readers", invitationUrl: "http://localhost:3000/accept-invitation/invite%20%2F" });
-  const rules = options.rateLimit.customRules as unknown as Record<string, (request: Request) => unknown>;
-  const path = "/organization/list";
-  expect(rules[path](new Request(`http://localhost:3000${path}`))).toBe(false);
-  expect(rules[path](new Request(`http://localhost:3000${path}`, { method: "POST" }))).toEqual({ window: 60, max: 100 });
+  // No organization plugin, so no invitation email and no organization read rule (#286).
+  expect(options.plugins.some(plugin => plugin.id === "organization")).toBe(false);
+  const rules = options.rateLimit.customRules as Record<string, unknown>;
+  expect(Object.keys(rules).filter(path => path.startsWith("/organization"))).toEqual([]);
+  expect(rules["/sign-in/email"]).toEqual({ window: 60, max: 5 });
 });
 
 it("refuses HTTP limiter consumption in a read-only auth context", () => {
   createAuthOptions({} as never);
-  expect(consumers).toHaveLength(2);
+  expect(consumers).toHaveLength(1);
   for (const consume of consumers) expect(() => consume("test")).toThrow("mutation-capable context");
 });
 
@@ -51,7 +48,7 @@ it("does not emit Better Auth callback URLs or exception diagnostics", async () 
   const log = vi.spyOn(console, "error").mockImplementation(() => {});
   try {
     const context = await createAuth({} as never).$context;
-    for (const path of ["reset-password", "verify-email", "accept-invitation", "callback/google"]) {
+    for (const path of ["reset-password", "verify-email", "callback/google"]) {
       const url = `https://test/${path}/synthetic-private-token?token=synthetic-private-token`;
       context.logger.error(url, Object.assign(new Error(url), { cause: { token: url }, authorization: url }));
       context.logger.warn(url, { password: url, token: url });

@@ -25,19 +25,16 @@ function connectionSources(): string {
   return [...sources].join(" ");
 }
 
-function appPolicy(nonce: string, path: string, embeddedError = false): string {
-  // Management navigation inserts each page's CSS at runtime, so only those
-  // shells allow inline style elements. Every other trusted page, including
-  // the repository docs shell, accepts only nonced <style> elements and
-  // same-origin stylesheets.
-  const dynamicStyles = /^\/organizations(?:\/|$)/.test(path);
+function appPolicy(nonce: string, embeddedError = false): string {
+  // Every trusted page, including the repository docs shell, accepts only
+  // nonced <style> elements and same-origin stylesheets.
   return [
     "default-src 'self'",
     // Nonced scripts and the scripts they load. 'self' is the fallback for
     // browsers without 'strict-dynamic' (CSP3 browsers ignore it here).
     `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'`,
     "script-src-attr 'none'",
-    `style-src 'self' ${dynamicStyles ? "'unsafe-inline'" : `'nonce-${nonce}'`}`,
+    `style-src 'self' 'nonce-${nonce}'`,
     // Shells use authored style attributes for sizing and loading feedback.
     "style-src-attr 'unsafe-inline'",
     "font-src 'self'",
@@ -64,7 +61,7 @@ export const securityHeaders: MiddlewareHandler = async (c, next) => {
   await nonceContext.run(nonce, next);
   // Apply after downstream handlers (including Hono's error handler), so local
   // denials, proxy failures and malformed/unmatched capability paths inherit it.
-  const capability = /^\/(?:accept-invitation|reset-password|verify-email)(?:\/|$)/.test(c.req.path);
+  const capability = /^\/(?:reset-password|verify-email)(?:\/|$)/.test(c.req.path);
   if (/^\/api(?:\/|$)/.test(c.req.path)) {
     c.header("Cache-Control", apiCacheControl(c.req.raw, c.res));
     // API data is never a cross-origin subresource: refuse no-cors embedding
@@ -104,7 +101,7 @@ export const securityHeaders: MiddlewareHandler = async (c, next) => {
     const revalidatedShell = /^\/r\//.test(c.req.path) && c.res.status < 400 && cacheControl === "private, no-cache";
     // No route serves trusted HTML for shared caches any more (#286): even one that asked would get no-store.
     if (!revalidatedShell) c.header("Cache-Control", "private, no-store");
-    c.header("Content-Security-Policy", appPolicy(nonce, c.res.status >= 400 ? "" : c.req.path, document));
+    c.header("Content-Security-Policy", appPolicy(nonce, document));
     // Styled document errors must remain visible inside the owning viewer.
     c.header("X-Frame-Options", document ? "SAMEORIGIN" : "DENY");
     c.header("Cross-Origin-Resource-Policy", "same-origin");

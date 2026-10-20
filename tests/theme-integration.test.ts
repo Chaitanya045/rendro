@@ -1,25 +1,21 @@
-import "./fixtures/management-page-presentation";
 import { Hono } from "hono";
 import type { User } from "better-auth/types";
 import { describe, expect, it } from "vitest";
 import authPages from "@/routes/auth-pages";
-import organizationPages from "@/routes/organization-pages";
-import projectPages from "@/routes/project-pages";
-import apiKeyPages from "@/routes/api-key-pages";
 import { repoShell } from "./helpers/repo-shell";
 import { renderNotFoundPage } from "@/routes/not-found";
 import { sharedThemeRuntime, renderThemeButton, sharedThemeStyles } from "@/routes/theme";
 import { mobileViewportStyles } from "@/routes/viewport";
 import { renderLandingPage } from "@/routes/landing";
 
-function assertSharedTheme(html: string, buttonId?: "theme-toggle" | "cp-theme") {
+function assertSharedTheme(html: string, buttonId?: "theme-toggle") {
   expect(html).toContain('<link rel="icon" href="/favicon.ico" sizes="16x16 32x32" type="image/x-icon">');
   expect(html).toContain('<link rel="icon" href="/favicon.svg" sizes="any" type="image/svg+xml">');
   expect(html).toContain(sharedThemeRuntime);
   expect(html).toContain(mobileViewportStyles);
   expect(html.match(/<script data-rendro-theme>/g)).toHaveLength(1);
   if (buttonId) {
-    expect(html).toContain(renderThemeButton(buttonId));
+    expect(html).toContain(renderThemeButton());
     expect(html).toContain(`RendroTheme.mount(document.getElementById("${buttonId}")`);
     expect(html.match(new RegExp(`id="${buttonId}"`, "g"))).toHaveLength(1);
   }
@@ -71,17 +67,17 @@ describe("shared theme integration", () => {
     }
   });
 
-  it("uses the same controller on account security and every management route", async () => {
+  it("uses the same controller on the signed-in home and account security", async () => {
     const app = new Hono<{ Variables: { user?: User } }>();
     app.use("*", async (c, next) => {
       c.set("user", { id: "qa", name: "QA", email: "qa@example.test" } as User);
       await next();
     });
-    for (const routes of [authPages, organizationPages, projectPages, apiKeyPages]) app.route("/", routes);
-    for (const path of ["/organizations", "/organizations/org", "/organizations/org/people", "/organizations/org/teams", "/organizations/org/settings", "/organizations/org/api-keys", "/organizations/org/onboarding", "/organizations/org/projects", "/organizations/org/projects/project", "/account/security"]) {
+    app.route("/", authPages);
+    for (const path of ["/home", "/account/security"]) {
       const response = await app.request(path);
       expect(response.status, path).toBe(200);
-      assertSharedTheme(await response.text(), path === "/account/security" ? "theme-toggle" : "cp-theme");
+      assertSharedTheme(await response.text(), "theme-toggle");
     }
   });
 

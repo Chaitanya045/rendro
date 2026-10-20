@@ -1,15 +1,14 @@
 import { expect } from "../fixtures";
 import { testVisual } from "./state";
 import { applyTheme, fixClock, settleVisual, sizeFor, widths, type Theme, type Width } from "./states";
-import { maskFor, openState, pinVolatileText, type Cell } from "./render-states";
+import { openState, type Cell } from "./render-states";
 
 /**
  * Visual baselines (#120): every page family and its loading/empty/error/dialog/menu state at
  * 375/768/1440px in light and dark, emulated reduced motion, a fixed page clock and drained
  * animations. Chromium renders the screenshots (see visual.config.ts and docs/BROWSER_TESTS.md
- * for the environment and the no-auto-accept approval process). Masks cover only text that is
- * intentionally run-specific (server ids and key prefixes); their content is asserted by the
- * functional specs, not this suite.
+ * for the environment and the no-auto-accept approval process). Every rendered string is seeded
+ * fixed text, so no cell needs a mask.
  */
 const cards: Width[] = [375, 1440];
 const shell: Width[] = [320, 375, 768, 1440];
@@ -20,17 +19,7 @@ const cells: Cell[] = [
   { family: "landing", state: "security" },
   { family: "sign-in", state: "default" },
   { family: "sign-up", state: "default" },
-  { family: "org", state: "overview" },
-  { family: "projects", state: "list" },
-  { family: "projects", state: "empty" },
-  { family: "projects", state: "loading" },
-  { family: "projects", state: "error" },
-  { family: "projects", state: "dialog" },
-  { family: "project", state: "overview" },
-  { family: "project", state: "loading" },
-  { family: "teams", state: "list" },
-  { family: "keys", state: "list" },
-  { family: "account-menu", state: "default" },
+  { family: "home", state: "default", widths: cards },
   { family: "viewer", state: "tree" },
   { family: "viewer", state: "loading" },
   { family: "viewer", state: "menu", widths: [375] },
@@ -75,10 +64,8 @@ for (const cell of cells) {
         await fixClock(page, visual.clockEpoch);
         const open = await openState(page, visual, cell.family, cell.state);
         try {
-          await pinVolatileText(page, cell.family, cell.state);
           await settleVisual(page);
-          const mask = maskFor(cell.family, cell.state).map(selector => page.locator(selector));
-          await expect(page).toHaveScreenshot(`${cell.family}-${cell.state}-${width}-${theme}.png`, { mask: mask.length ? mask : undefined });
+          await expect(page).toHaveScreenshot(`${cell.family}-${cell.state}-${width}-${theme}.png`);
         } finally {
           await open.close();
         }

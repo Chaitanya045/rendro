@@ -1,5 +1,5 @@
 import type { Page } from "@playwright/test";
-import { test, expect } from "./org-fixtures";
+import { test, expect } from "./actor-fixtures";
 import { ageRecord, login, session, signout } from "./auth-helpers";
 import { password } from "./seed";
 import { journeyDoc, open, pin, publicThreads, repos, startComment, storedDrafts, ui } from "./comment-helpers";

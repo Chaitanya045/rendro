@@ -16,7 +16,7 @@ beforeEach(() => {
 afterEach(() => { vi.restoreAllMocks(); vi.resetAllMocks(); vi.unstubAllGlobals(); });
 
 it("forwards Origin and Fetch Metadata through the generic proxy", async () => {
-  await proxyConvexRequest(new Request("https://rendro.test/api/rendro/projects", post({})));
+  await proxyConvexRequest(new Request("https://rendro.test/api/auth/set-initial-password", post({})));
   const forwarded = new Headers(vi.mocked(fetch).mock.calls[0][1]?.headers);
   expect(forwarded.get("origin")).toBe(headers.origin);
   expect(forwarded.get("sec-fetch-site")).toBe(headers["sec-fetch-site"]);
@@ -24,19 +24,17 @@ it("forwards Origin and Fetch Metadata through the generic proxy", async () => {
 it("preserves admission failures and sanitizes unexpected middleware errors", async () => {
   const app = new Hono<{ Variables: { user?: User } }>();
   app.use("*", writeAdmission);
-  app.post("/api/rendro/projects", () => new Response("write"));
+  app.post("/api/auth/set-initial-password", () => new Response("write"));
   app.onError(() => new Response("server error", { status: 500 }));
   vi.spyOn(admission, "requireCookieWrite").mockImplementation(() => { throw new Error("Unexpected admission failure"); });
-  expect((await app.request("/api/rendro/projects", post({}))).status).toBe(500);
+  expect((await app.request("/api/auth/set-initial-password", post({}))).status).toBe(500);
 });
 it("keeps proxy exceptions on the mounted routes as backend errors", async () => {
   const app = new Hono<{ Variables: { user?: User } }>();
   mountSessionRoutes(app);
   for (const error of [new Error("offline"), "offline"]) {
     vi.spyOn(proxy, "proxyAuthRequest").mockRejectedValue(error);
-    vi.spyOn(proxy, "proxyConvexRequest").mockRejectedValue(error);
     expect((await app.request("/api/auth/get-session")).status).toBe(502);
-    expect((await app.request("/api/rendro/projects")).status).toBe(502);
   }
 });
 it("handles absent and malformed session responses and cookie-header compatibility", async () => {

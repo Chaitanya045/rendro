@@ -91,17 +91,16 @@ async function runtime(
 }
 
 describe("auth UI regressions", () => {
-  it("rejects backslash-based external return targets while preserving invitations", async () => {
+  it("rejects backslash-based external return targets while preserving same-origin ones", async () => {
     const unsafe = await authPageRoutes.request("/sign-in?returnTo=%2F%5Cevil.example");
-    const safe = await authPageRoutes.request("/sign-in?returnTo=%2Faccept-invitation%2Finv-123");
+    const safe = await authPageRoutes.request("/sign-in?returnTo=%2Fr%2Facme%2Fdocs");
     const unsafeHtml = await unsafe.text();
     const safeHtml = await safe.text();
 
     expect(unsafe.status).toBe(200);
     expect(unsafeHtml).toContain('"returnTo":"/"');
     expect(unsafeHtml).not.toContain("evil.example");
-    expect(safeHtml).toContain('"returnTo":"/accept-invitation/inv-123"');
-    expect(safeHtml).toContain("You have been invited to collaborate.");
+    expect(safeHtml).toContain('"returnTo":"/r/acme/docs"');
   });
 
   it("renders an immediate recovery state when a reset token is missing", async () => {

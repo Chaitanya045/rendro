@@ -223,7 +223,7 @@ describe("authenticated entry", () => {
     vi.unstubAllGlobals();
   });
 
-  it("redirects an authenticated session to organization selection", async () => {
+  it("redirects an authenticated session to its home", async () => {
     vi.stubGlobal("fetch", (input: string | URL | Request) => {
       const url = typeof input === "string"
         ? input
@@ -252,7 +252,7 @@ describe("authenticated entry", () => {
     });
     expect(await res.text()).toBe("");
     expect(res.status).toBe(302);
-    expect(res.headers.get("location")).toBe("/organizations");
+    expect(res.headers.get("location")).toBe("/home");
   });
 });
 

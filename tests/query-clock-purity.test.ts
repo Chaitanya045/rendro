@@ -1,17 +1,9 @@
-import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import type { MockInstance } from "vitest";
+import { describe, expect, it } from "vitest";
 import { readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { convexTest } from "convex-test";
-import rateLimiterTest from "./convex-rate-limiter";
-import { internal } from "../convex/_generated/api";
-import schema from "../convex/schema";
-import { apiKeyRateLimiter } from "../convex/apiKeyHttp";
-import { sha256 } from "../convex/credentialHash";
 import { analyzeQueryClockReads, enforceAllowlist } from "./helpers/convex-query-clock";
 
 const modules = import.meta.glob("../convex/**/*.ts");
-const start = Date.UTC(2026, 0, 1);
 
 // ---- Static guard over the real tree -------------------------------------
 
@@ -19,8 +11,8 @@ const start = Date.UTC(2026, 0, 1);
 // reason it cannot affect an access decision. Entries are `file#top-level symbol`.
 // An entry that no query reaches any more fails the test, so this list only shrinks.
 const allowedClockReads: Record<string, string> = {
-  "convex/sessionReadLimit.ts#authReadLimit":
-    "Better Auth before-hook for HTTP /get-session and organization reads, run only by auth.handler/auth.api in httpActions "
+  "convex/sessionReadLimit.ts#sessionReadLimit":
+    "Better Auth before-hook for HTTP /get-session reads, run only by auth.handler/auth.api in httpActions "
     + "(it calls ctx.runMutation, which a query cannot). Queries reach it only because createAuthOptions() builds the plugin list "
     + "for auth.$context/adapter lookups. It reads the clock solely to pick a rate-limit bucket, never to grant access.",
 };
@@ -62,7 +54,7 @@ describe("Convex queries never read the clock", () => {
         }
       }
     }
-    expect(registered.length).toBeGreaterThan(5);
+    expect(registered.length).toBeGreaterThanOrEqual(5);
     expect(analyzeQueryClockReads(loadSources()).queries).toEqual(registered.sort());
   }, 30_000);
 
@@ -145,77 +137,5 @@ describe("Convex queries never read the clock", () => {
     expect(violations).toEqual([]);
     expect(stale).toEqual(["convex/q.ts#unused"]);
     expect(enforceAllowlist(analysis, {}).violations).toHaveLength(1);
-  });
-});
-
-// ---- Runtime regressions --------------------------------------------------
-
-// Any clock read now throws and is recorded; callers restore with `clock.mockReturnValue`.
-const forbidClock = (clock: MockInstance<() => number>) => {
-  const fail = () => { throw new Error("query read the clock"); };
-  clock.mockClear();
-  clock.mockImplementation(fail);
-  return [clock, vi.spyOn(performance, "now").mockImplementation(fail)];
-};
-
-function fixture() {
-  const clock = vi.spyOn(Date, "now").mockReturnValue(start);
-  const t = convexTest(schema, modules);
-  rateLimiterTest.register(t);
-  return { t, clock };
-}
-
-beforeAll(async () => { await import("../convex/http"); }, 30_000);
-afterEach(() => vi.restoreAllMocks());
-
-describe("API-key rate-limit identity is decided by the caller, not the cached query", () => {
-  async function keyFixture() {
-    const f = fixture();
-    const secret = "expiring-api-key";
-    const expiresAt = start + 5_000;
-    const secretHash = await sha256(secret);
-    const id = await f.t.mutation(internal.apiKeyCredentials.createInternal, {
-      organizationId: "org-test", keyId: "expiring", keyPrefix: "rnd_live_expiring", name: "CI", secretHash, scopes: ["docs:read"], expiresAt, actorId: "owner",
-    });
-    const limit = vi.spyOn(apiKeyRateLimiter, "limit");
-    const validate = () => f.t.fetch(`/api/rendro/credentials/validate?organizationId=org-test&scope=docs:read`, { headers: { authorization: `Bearer ${secret}` } });
-    // [budget, bucket] of every limiter charge since the last call.
-    const charges = () => { const calls = limit.mock.calls.map(call => [call[1], call[2]]); limit.mockClear(); return calls; };
-    return { ...f, id, expiresAt, secretHash, charges, validate };
-  }
-
-  it("charges the credential bucket at expiresAt-1 and treats the key as unverified at expiresAt", async () => {
-    const f = await keyFixture();
-    f.clock.mockReturnValue(f.expiresAt - 1);
-    await f.validate();
-    expect(f.charges()).toEqual([["credential", { key: f.id }]]);
-    f.clock.mockReturnValue(f.expiresAt);
-    expect((await f.validate()).status).toBe(401);
-    // The same cached lookup now falls back to the failed-IP budget.
-    expect(f.charges()).toEqual([["failedIp", { key: "unverified" }]]);
-    f.clock.mockReturnValue(f.expiresAt + 86_400_000);
-    await f.validate();
-    expect(f.charges()).toEqual([["failedIp", { key: "unverified" }]]);
-  });
-
-  it("returns the stored deadline from the query without reading the clock", async () => {
-    const f = await keyFixture();
-    f.clock.mockReturnValue(f.expiresAt + 1);
-    const spies = forbidClock(f.clock);
-    expect(await f.t.query(internal.apiKeyCredentials.verifiedIdInternal, { secretHash: f.secretHash })).toEqual({ id: f.id, expiresAt: f.expiresAt });
-    expect(await f.t.query(internal.apiKeyCredentials.verifiedIdInternal, { secretHash: "unknown" })).toBeNull();
-    for (const spy of spies) expect(spy).not.toHaveBeenCalled();
-    spies[1].mockRestore();
-    f.clock.mockReturnValue(f.expiresAt + 1);
-    await f.t.mutation(internal.apiKeyCredentials.revokeInternal, { organizationId: "org-test", keyId: "expiring", actorId: "owner" });
-    expect(await f.t.query(internal.apiKeyCredentials.verifiedIdInternal, { secretHash: f.secretHash })).toBeNull();
-  });
-
-  it("keeps a key without an expiry verified", async () => {
-    const f = await keyFixture();
-    await f.t.run(ctx => ctx.db.patch(f.id, { expiresAt: undefined }));
-    f.clock.mockReturnValue(start + 10 ** 12);
-    await f.validate();
-    expect(f.charges()).toEqual([["credential", { key: f.id }]]);
   });
 });

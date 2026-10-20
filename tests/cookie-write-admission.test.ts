@@ -36,13 +36,13 @@ describe("cookie write admission", () => {
         expect(response.status, `${path}: ${JSON.stringify(bad)}`).toBe("content-type" in bad ? 415 : 403);
       }
       const response = await f.post(path);
-      expect(response.status, `${path}: ${await response.clone().text()}`).toBe(path.endsWith("/revoke") || path.endsWith("/remove") || path.endsWith("set-initial-password") ? 200 : 201);
+      expect(response.status, `${path}: ${await response.clone().text()}`).toBe(200);
     }
   }, 15_000);
 
   it("never treats a bearer header as authority for a session write", async () => {
     const f = await fixture();
-    expect((await f.post("/api/rendro/projects", { authorization: "Bearer valid-key", origin: "" })).status).toBe(403);
+    expect((await f.post("/api/auth/set-initial-password", { authorization: "Bearer valid-key", origin: "" })).status).toBe(403);
   });
 
   it("requires a fresh persisted session before setting an initial password", async () => {
@@ -62,7 +62,7 @@ describe("cookie write admission", () => {
     const write = vi.fn(() => new Response(null, { status: 204 }));
     app.use("*", writeAdmission);
     app.all("*", write);
-    for (const path of ["/api/rendro/projects", "/api/rendro/credentials", "/api/rendro/credentials/revoke", "/api/auth/set-initial-password"]) {
+    for (const path of ["/api/auth/set-initial-password"]) {
       for (const bad of badHeaders) {
         const count = write.mock.calls.length;
         expect((await app.request(origin + path, { method: "POST", headers: headers(bad) })).status).toBe("content-type" in bad ? 415 : 403);
@@ -70,12 +70,12 @@ describe("cookie write admission", () => {
       }
       expect((await app.request(origin + path, { method: "POST", headers: headers() })).status).toBe(204);
     }
-    // Better Auth, the Convex proxy, comment access and beacons decide for themselves.
-    for (const path of ["/api/auth/sign-in/email", "/api/rendro/projects/other", "/r/acme/docs/comment-access", "/rum"]) {
+    // Better Auth, comment access and beacons decide for themselves.
+    for (const path of ["/api/auth/sign-in/email", "/r/acme/docs/comment-access", "/rum"]) {
       expect((await app.request(origin + path, { method: "POST", headers: { authorization: "Bearer valid-key" } })).status).toBe(204);
     }
     expect((await app.request(origin + "/health")).status).toBe(204);
     vi.stubEnv("SITE_URL", undefined);
-    expect((await app.request(origin + "/api/rendro/projects", { method: "POST", headers: headers({ origin }) })).status).toBe(204);
+    expect((await app.request(origin + "/api/auth/set-initial-password", { method: "POST", headers: headers({ origin }) })).status).toBe(204);
   });
 });

@@ -8,9 +8,8 @@ import { visualDocs } from "./visual-repo-docs";
 
 /**
  * One-time visual provisioning for #120, run once by the global setup of the visual config: a
- * verified owner ("Crown Turner"), an organization "Crown" with a project, a second organization
- * "Vault" with none, two teams with the owner, one API key, and comment threads on the visual
- * repository (#268) whose earliest creation time pins the shared page clock. Every user-visible
+ * verified owner ("Crown Turner") and comment threads on the visual repository (#268) whose
+ * earliest creation time pins the shared page clock. Every user-visible
  * string is fixed text, so a pinned clock, theme and viewport render identical pages on any runner.
  * It speaks plain HTTP to the local Worker/Convex exactly like seed.ts — no browser, no per-worker
  * cost, no fixture race between files.
@@ -21,10 +20,10 @@ export type VisualSeedCookie = { name: string; value: string };
 export type VisualSeed = {
   /** Epoch (ms) every page clock is fixed to: the earliest thread plus five minutes. */
   clockEpoch: number;
-  crown: { organizationId: string; projectId: string; teamIds: string[]; cookies: VisualSeedCookie[] };
+  /** The signed-in owner's session. */
+  crown: { cookies: VisualSeedCookie[] };
   /** `/r/<owner>/<name>` of the visual repository, whose pages carry the seeded threads. */
   docs: string;
-  vaultOrganizationId: string;
 };
 
 const email = "visual-owner@example.test";
@@ -35,7 +34,7 @@ const anchor = (page: string, headingSlug: string, exact: string) =>
   ({ kind: "repo-text", blobSha: blobSha(visualDocs()[page]), headingSlug, prefix: "", exact, suffix: "", offset: 0 }) as const;
 
 export async function seedVisualWorkspace(input: {
-  /** The Convex site proxy: Better Auth and the management HTTP router (`/api/auth/*`, `/api/rendro/*`). */
+  /** The Convex site proxy: Better Auth (`/api/auth/*`). */
   site: string;
   /** The Convex function API (`/api/query`, `/api/mutation`). */
   convex: string;
@@ -75,20 +74,7 @@ export async function seedVisualWorkspace(input: {
   if (!link) throw new Error("Visual seed verification mail is missing");
   const verified = new URL(link);
   await input.fetch(`${input.site}${verified.pathname}${verified.search}`, { redirect: "manual" });
-  const signedIn = await call<{ user: { id: string } }>("/api/auth/sign-in/email", { email, password });
-  const userId = signedIn.user.id;
-
-  const crown = await call<{ id: string }>("/api/auth/organization/create", { name: "Crown", slug: "visual-crown" });
-  const vault = await call<{ id: string }>("/api/auth/organization/create", { name: "Vault", slug: "visual-vault" });
-  const { project } = await call<{ project: { _id: string } }>("/api/rendro/projects", { organizationId: crown.id, name: "Crown docs", slug: "docs" });
-  const teamIds: string[] = [];
-  for (const name of ["Crown editors", "Crown reviewers"]) {
-    const created = await call<{ id: string }>("/api/auth/organization/create-team", { name, organizationId: crown.id });
-    teamIds.push(created.id);
-    await call("/api/auth/organization/add-team-member", { teamId: created.id, organizationId: crown.id, userId });
-  }
-  await call("/api/rendro/credentials", { organizationId: crown.id, projectId: project._id,
-    name: "Crown publisher", scopes: ["docs:read", "docs:write", "publications:read", "publications:write"] });
+  await call("/api/auth/sign-in/email", { email, password });
 
   // The shell records the reader's comment access before the widget may write (#254); seeding does what it does.
   const docs = `/r/${input.repo.owner}/${input.repo.name}`;
@@ -139,9 +125,8 @@ export async function seedVisualWorkspace(input: {
 
   return {
     clockEpoch: Math.min(...created) + 300_000,
-    crown: { organizationId: crown.id, projectId: project._id, teamIds, cookies: [...jar] },
+    crown: { cookies: [...jar] },
     docs,
-    vaultOrganizationId: vault.id,
   };
 }
 

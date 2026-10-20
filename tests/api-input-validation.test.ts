@@ -4,9 +4,7 @@ import { betterAuth } from "better-auth/minimal";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import schema from "../convex/schema";
 import authSchema from "../convex/betterAuth/schema";
-import { internal } from "../convex/_generated/api";
 import { createAuthOptions } from "../convex/auth";
-import { API_KEY_MAX_LIFETIME_MS, sha256, validExpiresAt } from "../convex/credentialHttp";
 import { failure } from "../convex/httpErrors";
 import { hasIllFormedText, IllFormedTextError, INVALID_TEXT_MESSAGE, jsonTextHasIllFormedText, requireWellFormedBody } from "../shared/text-input";
 import rateLimiterTest from "./convex-rate-limiter";
@@ -16,7 +14,6 @@ const origin = "http://localhost:3000";
 const transports = ["convex", "worker"] as const;
 type Transport = typeof transports[number];
 const lone = "a\ud800b";
-const day = 24 * 60 * 60 * 1000;
 
 afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
@@ -40,10 +37,8 @@ async function fixture() {
     const init = { method: payload === undefined ? "GET" : "POST", headers, ...(payload === undefined ? {} : { body: payload }) };
     return transport === "worker" ? worker.request(`${origin}${path}`, init) : t.fetch(path, init);
   }
-  const created = await call("convex", "/api/auth/organization/create", { name: "Acme", slug: "acme" });
-  expect(created.status).toBe(200);
-  const organizationId = (await created.json() as { id: string }).id;
-  return { t, call, organizationId };
+  const name = async () => (await context.internalAdapter.findUserById(user.id))?.name;
+  return { t, call, name };
 }
 
 describe("well-formed text helpers", () => {
@@ -91,16 +86,14 @@ describe("well-formed text helpers", () => {
 });
 
 describe("ill-formed text at the API boundary", () => {
-  it.each(transports)("is a 400 validation error, not a backend outage, for project names, keys and auth (%s)", async (transport) => {
+  it.each(transports)("is a 400 validation error, not a backend outage, for account writes and auth (%s)", async (transport) => {
     const f = await fixture();
     const expected = { error: INVALID_TEXT_MESSAGE };
     const bodies: Array<[string, unknown]> = [
-      ["/api/rendro/projects", { organizationId: f.organizationId, name: lone, slug: "unicode" }],
-      ["/api/rendro/projects", { organizationId: f.organizationId, name: "Fine", slug: "a\udc00" }],
-      ["/api/rendro/credentials", { organizationId: f.organizationId, name: lone, scopes: ["docs:read"] }],
-      ["/api/auth/organization/create", { name: lone, slug: "unicode" }],
-      ["/api/auth/organization/create-team", { organizationId: f.organizationId, name: `Team ${lone}` }],
-      ["/api/auth/organization/update", { organizationId: f.organizationId, data: { name: "x", metadata: { note: [lone] } } }],
+      ["/api/auth/update-user", { name: lone }],
+      ["/api/auth/update-user", { name: "Fine", image: "a\udc00" }],
+      ["/api/auth/sign-up/email", { name: lone, email: "new@example.test", password: "a-long-enough-password" }],
+      ["/api/auth/set-initial-password", { newPassword: `password ${lone} long enough` }],
     ];
     for (const [path, body] of bodies) {
       const response = await f.call(transport, path, body);
@@ -108,114 +101,24 @@ describe("ill-formed text at the API boundary", () => {
       expect(await response.json(), path).toEqual(expected);
     }
     // Raw escapes, nested keys and a lone low surrogate behave the same way.
-    for (const raw of ['{"organizationId":"o","name":"\\udfff","slug":"x"}', '{"organizationId":"o","name":"n","slug":"x","\\ud800":1}']) {
-      const response = await f.call(transport, "/api/rendro/projects", undefined, raw);
+    for (const raw of ['{"name":"\\udfff"}', '{"name":"n","\\ud800":1}']) {
+      const response = await f.call(transport, "/api/auth/update-user", undefined, raw);
       expect(response.status, raw).toBe(400);
       expect(await response.json(), raw).toEqual(expected);
     }
-    expect(await f.t.query(internal.projects.listInternal, { organizationId: f.organizationId })).toEqual([]);
+    expect(await f.name()).toBe("owner");
   });
 
   it.each(transports)("still accepts valid surrogate pairs, escaped backslashes and malformed JSON keeps its own error (%s)", async (transport) => {
     const f = await fixture();
-    const emoji = await f.call(transport, "/api/rendro/projects", { organizationId: f.organizationId, name: "Docs 😀", slug: "emoji" });
-    expect(emoji.status).toBe(201);
-    expect((await emoji.json() as { project: { name: string } }).project.name).toBe("Docs 😀");
-    const literal = await f.call(transport, "/api/rendro/projects", undefined, '{"organizationId":"' + f.organizationId + '","name":"\\\\ud800","slug":"literal"}');
-    expect(literal.status).toBe(201);
-    expect((await literal.json() as { project: { name: string } }).project.name).toBe("\\ud800");
-    const broken = await f.call(transport, "/api/rendro/projects", undefined, '{"name":"\\ud800"');
+    const emoji = await f.call(transport, "/api/auth/update-user", { name: "Owner 😀" });
+    expect(emoji.status).toBe(200);
+    expect(await f.name()).toBe("Owner 😀");
+    const literal = await f.call(transport, "/api/auth/update-user", undefined, '{"name":"\\\\ud800"}');
+    expect(literal.status).toBe(200);
+    expect(await f.name()).toBe("\\ud800");
+    const broken = await f.call(transport, "/api/auth/set-initial-password", undefined, '{"newPassword":"\\ud800"');
     expect(broken.status).toBe(400);
     expect(await broken.json()).toEqual({ error: "Invalid JSON body" });
-  });
-});
-
-describe("API key expiry", () => {
-  it("accepts only a finite integer in the future and within the longest lifetime", () => {
-    const now = 1_700_000_000_000;
-    expect(API_KEY_MAX_LIFETIME_MS).toBe(366 * day);
-    for (const value of [now + 1, now + 30 * day, now + 365 * day, now + API_KEY_MAX_LIFETIME_MS]) expect(validExpiresAt(value, now), String(value)).toBe(true);
-    for (const value of [now, now - 1, 0, -1, now + API_KEY_MAX_LIFETIME_MS + 1, 1e300, 1e21, 8.64e15 + 1, Number.MAX_SAFE_INTEGER + 2, now + 1.5, NaN, Infinity, -Infinity, "1900000000000", null, undefined, {}, true]) {
-      expect(validExpiresAt(value, now), typeof value).toBe(false);
-    }
-  });
-
-  it.each(transports)("rejects out-of-range expiries with the existing 400 shape and keeps the product choices (%s)", async (transport) => {
-    const f = await fixture();
-    const create = (expiresAt: unknown, name = "Key") => f.call(transport, "/api/rendro/credentials", { organizationId: f.organizationId, name, scopes: ["docs:read"], expiresAt });
-    const now = Date.now();
-    for (const expiresAt of [1e300, now - 1000, now + 400 * day, now + 1.5 * day + 0.5, "soon", null, -1, 0]) {
-      const response = await create(expiresAt);
-      expect(response.status, String(expiresAt)).toBe(400);
-      expect(await response.json(), String(expiresAt)).toEqual({ error: "Invalid credential fields" });
-    }
-    for (const [name, expiresAt] of [["30", now + 30 * day], ["90", now + 90 * day], ["365", now + 365 * day], ["never", undefined]] as const) {
-      const response = await create(expiresAt, name);
-      expect(response.status, name).toBe(201);
-      expect((await response.json() as { credential: { expiresAt?: number } }).credential.expiresAt).toBe(expiresAt);
-    }
-    const stored = await f.t.query(internal.apiKeyCredentials.listInternal, { organizationId: f.organizationId });
-    expect(stored.map(key => key.name).sort()).toEqual(["30", "365", "90", "never"]);
-  });
-
-  it("keeps authorizing keys stored before the range was enforced", async () => {
-    const f = await fixture();
-    const project = (await f.t.mutation(internal.projects.createInternal, { organizationId: f.organizationId, name: "Docs", slug: "docs", actorId: "owner" }))!;
-    const secretHash = await sha256("far-future-key");
-    await f.t.mutation(internal.apiKeyCredentials.createInternal, {
-      organizationId: f.organizationId, projectId: project._id, keyId: "far", keyPrefix: "far", name: "Far", secretHash, scopes: ["docs:read"], expiresAt: 1e300, actorId: "owner",
-    });
-    const query = new URLSearchParams({ organizationId: f.organizationId, projectId: project._id, scope: "docs:read" });
-    const response = await f.t.fetch(`/api/rendro/credentials/validate?${query}`, { headers: { authorization: "Bearer far-future-key" } });
-    expect(response.status).toBe(200);
-  });
-});
-
-describe("API key project scope", () => {
-  it("refuses a key for a malformed or wrong-table project ID and stores nothing", async () => {
-    const f = await fixture();
-    const project = (await f.t.mutation(internal.projects.createInternal, { organizationId: f.organizationId, name: "Docs", slug: "docs", actorId: "owner" }))!;
-    const secretHash = await sha256("scoped-key");
-    for (const projectId of ["not-an-id", f.organizationId]) {
-      await expect(f.t.mutation(internal.apiKeyCredentials.createInternal, {
-        organizationId: f.organizationId, projectId, keyId: "scoped", keyPrefix: "scoped", name: "Scoped", secretHash, scopes: ["docs:read"], actorId: "owner",
-      })).rejects.toMatchObject({ data: { code: "invalid_id" } });
-    }
-    expect(await f.t.query(internal.apiKeyCredentials.listInternal, { organizationId: f.organizationId })).toEqual([]);
-    await f.t.mutation(internal.apiKeyCredentials.createInternal, {
-      organizationId: f.organizationId, projectId: project._id, keyId: "scoped", keyPrefix: "scoped", name: "Scoped", secretHash, scopes: ["docs:read"], actorId: "owner",
-    });
-    expect((await f.t.query(internal.apiKeyCredentials.listInternal, { organizationId: f.organizationId })).map(key => key.projectId)).toEqual([project._id]);
-  });
-});
-
-describe("API key permissions", () => {
-  it.each(transports)("are stored once, in first-seen order, and unknown permissions still fail (%s)", async (transport) => {
-    const f = await fixture();
-    const create = (scopes: unknown) => f.call(transport, "/api/rendro/credentials", { organizationId: f.organizationId, name: "Dup", scopes });
-    const created = await create(["docs:write", "docs:read", "docs:write", "docs:read", "docs:read"]);
-    expect(created.status).toBe(201);
-    expect((await created.json() as { credential: { scopes: string[] } }).credential.scopes).toEqual(["docs:write", "docs:read"]);
-    const [stored] = await f.t.query(internal.apiKeyCredentials.listInternal, { organizationId: f.organizationId });
-    expect(stored.scopes).toEqual(["docs:write", "docs:read"]);
-    for (const scopes of [["docs:read", "docs:admin"], [], "docs:read", [1], null]) {
-      const response = await create(scopes);
-      expect(response.status, JSON.stringify(scopes)).toBe(400);
-      expect(await response.json()).toEqual({ error: "Invalid credential fields" });
-    }
-  });
-
-  it("still authorize keys that were stored with repeated permissions", async () => {
-    const f = await fixture();
-    const secretHash = await sha256("duplicate-scope-key");
-    await f.t.mutation(internal.apiKeyCredentials.createInternal, {
-      organizationId: f.organizationId, keyId: "dup", keyPrefix: "dup", name: "Dup", secretHash, scopes: ["docs:read", "docs:read", "publications:read"], actorId: "owner",
-    });
-    const validate = (scope: string) => f.t.fetch(`/api/rendro/credentials/validate?${new URLSearchParams({ organizationId: f.organizationId, scope })}`, { headers: { authorization: "Bearer duplicate-scope-key" } });
-    const allowed = await validate("docs:read");
-    expect(allowed.status).toBe(200);
-    expect(await allowed.json()).toMatchObject({ principal: { keyId: "dup", scopes: ["docs:read", "docs:read", "publications:read"] } });
-    expect((await validate("publications:read")).status).toBe(200);
-    expect((await validate("docs:write")).status).toBe(401);
   });
 });

@@ -10,10 +10,6 @@ function fault() {
   if (state.mode === "denied") throw new ConvexError("Authentication required");
   if (state.mode === "error") throw new Error("https://private.test/s/synthetic-secret");
 }
-vi.mock("../convex/authorization", () => ({
-  authorizeHttpOrganization: () => { fault(); return Promise.resolve({ user: { _id: "user" } }); },
-  httpOrganizationAccess: () => { fault(); return Promise.resolve({ organization: { id: "org" }, member: { id: "member", userId: "user", role: "owner" }, userId: "user" }); },
-}));
 vi.mock("../convex/auth", async importOriginal => ({ ...await importOriginal<typeof AuthModule>(), createAuth: () => ({
   api: { getSession: () => { fault(); return Promise.resolve({ session: { createdAt: Date.now() } }); }, setPassword: () => { fault(); return Promise.resolve(); } },
   $context: Promise.resolve({ sessionConfig: { freshAge: 3600 } }),
@@ -27,20 +23,13 @@ vi.mock("../convex/auth", async importOriginal => ({ ...await importOriginal<typ
 import http from "../convex/http";
 import { httpAction } from "../convex/httpErrors";
 
-const input = {
-  organizationId: "org", projectId: "project", teamId: "team",
-  name: "Test", slug: "test", keyId: "key",
-  scopes: ["docs:read"], scope: "docs:read", newPassword: "synthetic-long-password",
-};
+const input = { newPassword: "synthetic-long-password" };
 function answer(reference: FunctionReference<"query" | "mutation">, args: Record<string, unknown>) {
   fault();
   if (args.model) return { page: [], isDone: true };
-  if (args.teamId) return { organizationId: "org" };
   const name = getFunctionName(reference);
   if (/consume|:limit$/.test(name)) return { ok: true };
-  if (name.endsWith(":verifiedIdInternal")) return null; // exercise the failed-IP limiter without bypassing it
-  if (name.endsWith(":validateInternal")) return { principal: { keyId: "key" }, credentialId: "key", lastUsedAt: Date.now() };
-  return { _id: "project", slug: "test" };
+  return null;
 }
 /** Faults arrive as rejections, as from the real Convex client. */
 function rpc(reference: FunctionReference<"query" | "mutation">, args: Record<string, unknown>): Promise<unknown> {
@@ -51,7 +40,7 @@ const routes = http.getRoutes().map(([path, method, action]) => ({ path, method,
 function makeRequest(path: string, method: string, malformed = false) {
   const params = malformed ? "" : new URLSearchParams(Object.entries(input).filter(([, v]) => typeof v === "string") as [string, string][]).toString();
   const body: object = input;
-  const headers = new Headers({ origin: process.env.SITE_URL!, "content-type": "application/json", authorization: state.mode === "denied" ? "Bearer invalid" : "Bearer synthetic-operator" });
+  const headers = new Headers({ origin: process.env.SITE_URL!, "content-type": "application/json" });
   return new Request(`http://localhost:3000${path.replace(/\*$/, "get-session")}?${params}`, {
     method,
     headers,

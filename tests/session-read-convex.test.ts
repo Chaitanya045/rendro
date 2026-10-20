@@ -1,6 +1,8 @@
 import { createHmac } from "node:crypto";
 import { convexTest } from "convex-test";
 import { betterAuth } from "better-auth/minimal";
+import type { BetterAuthPlugin } from "better-auth";
+import { createAuthMiddleware } from "better-auth/api";
 import { Hono } from "hono";
 import type { User } from "better-auth/types";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -15,15 +17,16 @@ import { sessionMiddleware } from "@/middleware/session";
 const baseURL = "http://localhost:3000";
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers(); });
 
-async function fixture() {
+async function fixture(extra: BetterAuthPlugin[] = []) {
   const backend = convexTest(schema, import.meta.glob("../convex/**/*.ts"));
   backend.registerComponent("betterAuth", authSchema, import.meta.glob("../convex/betterAuth/**/*.ts"));
   // Keep the production database and plugins. Only the Convex RPC transport is
   // local: customTransformOutput in @convex-dev/better-auth returns numeric dates.
-  const auth = betterAuth(createAuthOptions({
+  const options = createAuthOptions({
     runQuery: backend.query,
     runMutation: backend.mutation,
-  } as never));
+  } as never);
+  const auth = betterAuth({ ...options, plugins: [...options.plugins, ...extra] });
   const context = await auth.$context;
   const user = await context.internalAdapter.createUser({ name: "Reader", email: "reader@example.test", emailVerified: true });
   const session = await context.internalAdapter.createSession(user.id);
@@ -91,6 +94,24 @@ describe("production Convex session adapter", () => {
     expect(bodies[2]).toBeNull();
     expect(find).toHaveBeenCalledTimes(3);
     expect((await f.stored()).expiresAt).toBeGreaterThan(oldExpiry);
+  });
+
+  it("answers only its own token from the request-local lookup: a nested read of another token reaches the store", async () => {
+    let other = "";
+    const nested: unknown[] = [];
+    // A later plugin's middleware on the same read, as any nested lookup would run.
+    const probe: BetterAuthPlugin = { id: "nested-lookup-probe", hooks: { before: [{
+      matcher: ctx => ctx.path === "/get-session",
+      handler: createAuthMiddleware(async ctx => { nested.push(await ctx.context.internalAdapter.findSession(other)); }),
+    }] } };
+    const f = await fixture([probe]);
+    other = (await f.context.internalAdapter.createSession(f.user.id)).token;
+    const find = vi.spyOn(f.context.internalAdapter, "findSession");
+    const response = await f.request();
+    expect(await response.json()).toMatchObject({ session: { token: f.session.token } });
+    expect(nested).toEqual([expect.objectContaining({ session: expect.objectContaining({ token: other }) })]);
+    // One store read for this request's own token, one for the other: never this session answered for that token.
+    expect(find.mock.calls.map(([token]) => token)).toEqual([f.session.token, other]);
   });
 
   it.each([NaN, Infinity, "invalid", null, {}, new Date(NaN)])("fails closed for invalid expiry %s", async expiresAt => {

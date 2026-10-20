@@ -20,7 +20,7 @@ describe("auth, landing, 404 and viewer polish", () => {
     expect(html).not.toContain("list.querySelector(\".error\").textContent=error.message");
     expect(html).toContain(".method-action{flex:none;min-width:88px;");
     expect(html).toContain("white-space:nowrap");
-    expect(html).toContain('<a href="/organizations">Back to workspace</a>');
+    expect(html).toContain('<a href="/home">Back to home</a>');
   });
 
   it("uses the shared dark palette, wordmark, and heading order on auth pages", async () => {

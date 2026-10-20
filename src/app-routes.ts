@@ -2,13 +2,10 @@ import { bodyAdmission } from "./middleware/body-admission";
 import { writeAdmission } from "./middleware/write-admission";
 import type { Hono } from "hono";
 import type { User } from "better-auth/types";
-import { proxyAuthRequest, proxyAuthSignOut, proxyConvexRequest } from "@/auth-proxy";
+import { proxyAuthRequest, proxyAuthSignOut } from "@/auth-proxy";
 import { logger } from "@/logger";
 import appRoutes from "@/routes/app";
 import authPageRoutes from "@/routes/auth-pages";
-import organizationPageRoutes from "@/routes/organization-pages";
-import projectPageRoutes from "@/routes/project-pages";
-import apiKeyPageRoutes from "@/routes/api-key-pages";
 import imageProxyRoutes from "@/routes/image-proxy";
 import repoReadRoutes from "@/repo-read/routes";
 import rumRoutes from "@/rum/route";
@@ -28,7 +25,7 @@ export function mountPublicRoutes<E extends AppEnv>(app: Hono<E>): void {
   app.route("/", rumRoutes);
 }
 
-/** Auth proxy, Convex API proxy, and application routes. Mount after session middleware. */
+/** Auth proxy and application routes. Mount after session middleware. */
 export function mountSessionRoutes<E extends AppEnv>(app: Hono<E>): void {
   app.use("*", writeAdmission);
   app.use("*", bodyAdmission);
@@ -48,21 +45,7 @@ export function mountSessionRoutes<E extends AppEnv>(app: Hono<E>): void {
     }
   });
 
-  app.on(["POST", "GET", "PATCH", "DELETE"], "/api/rendro/*", async (c) => {
-    try {
-      return await proxyConvexRequest(c.req.raw);
-    } catch {
-      logger.error(
-        { category: "TransportError" },
-        "Convex API proxy error",
-      );
-      return c.json({ error: "Backend unavailable" }, 502);
-    }
-  });
   app.route("/", authPageRoutes);
-  app.route("/", organizationPageRoutes);
-  app.route("/", projectPageRoutes);
-  app.route("/", apiKeyPageRoutes);
 
   app.route("/", appRoutes);
   app.get("/health", (c) => c.text("ok"));

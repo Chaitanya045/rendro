@@ -30,6 +30,27 @@ describe('auth route rendering boundaries', () => {
     expect(response.headers.get('Location')).toBe('/sign-in?returnTo=%2Faccount%2Fsecurity');
   });
 
+  it('renders the signed-in home with escaped identity and sends an anonymous one to sign-in', async () => {
+    const anonymous = await authPages.request('/home');
+    expect(anonymous.status).toBe(302);
+    expect(anonymous.headers.get('Location')).toBe('/sign-in?returnTo=%2Fhome');
+    const response = await signedIn({ id: 'user-a', name: '<Ada> & co', email: '<ada>@example.test' }).request('/home');
+    expect(response.status).toBe(200);
+    const html = await response.text();
+    expect(html).toContain('<title>Home — Rendro</title>');
+    expect(html).toContain('<h1>Welcome, &lt;Ada&gt; &amp; co</h1>');
+    expect(html).toContain('<strong>&lt;ada&gt;@example.test</strong>');
+    expect(html).not.toContain('<Ada>');
+    expect(html).toContain('<code>/r/{owner}/{repo}</code>');
+    expect(html).toContain('<a href="/account/security">Account security</a>');
+    expect(html).toContain('<form method="post" action="/api/auth/sign-out"><button type="submit">Sign out</button></form>');
+    // A partial identity renders empty fields, never "undefined".
+    const partial = await (await signedIn({ id: 'user-b' }).request('/home')).text();
+    expect(partial).toContain('<h1>Welcome, </h1>');
+    expect(partial).toContain('<strong></strong>');
+    expect(partial).not.toContain('undefined');
+  });
+
   it.each(['https://outside.invalid', '//outside.invalid', '/\\outside.invalid', '/\u0001invalid', '/\u007finvalid'])('rejects unsafe returnTo %j', async destination => {
     const response = await signedIn().request(`/sign-in?returnTo=${encodeURIComponent(destination)}`);
     expect(response.headers.get('Location')).toBe('/');

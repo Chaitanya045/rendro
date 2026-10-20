@@ -12,7 +12,6 @@ import type * as adapter from "../adapter.js";
 import type * as auth from "../auth.js";
 import type * as crons from "../crons.js";
 import type * as sessionReadLimit from "../sessionReadLimit.js";
-import type * as teamLookup from "../teamLookup.js";
 
 import type {
   ApiFromModules,
@@ -26,7 +25,6 @@ const fullApi: ApiFromModules<{
   auth: typeof auth;
   crons: typeof crons;
   sessionReadLimit: typeof sessionReadLimit;
-  teamLookup: typeof teamLookup;
 }> = anyApi as any;
 
 /**

@@ -32,7 +32,7 @@ async function asLegacyBrowser(page: Page, context: BrowserContext, project: str
 }
 
 for (const remember of [false, true]) {
-  test(`a legacy session stays signed in and moves to the current cookie name (remember=${remember}) [AUTH-89-01]`, async ({ page, context, seed }, info) => {
+  test(`a legacy session stays signed in and moves to the current cookie name (remember=${remember}) [AUTH-89-01]`, async ({ page, context }, info) => {
     await login(page, "owner@example.test", password, remember);
     await expect(page).toHaveURL(/\/account\/security$/);
     const identity = await session(page);
@@ -42,8 +42,8 @@ for (const remember of [false, true]) {
     if (!token) throw new Error("Missing session cookie");
 
     // Reads: the Worker renders a protected page from the legacy cookie alone (no redirect to sign-in).
-    expect((await page.goto(`/organizations/${seed.organizationId}`))?.status()).toBe(200);
-    await expect(page).toHaveURL(new RegExp(`/organizations/${seed.organizationId}$`));
+    expect((await page.goto("/home"))?.status()).toBe(200);
+    await expect(page).toHaveURL(/\/home$/);
 
     // Writes: the next successful auth read (the page's own, or this probe's) re-issues the session under the
     // current name and expires the legacy one. A transiently failed read leaves the legacy cookie usable, so wait

@@ -7,21 +7,13 @@ import {
   betterAuth,
   type BetterAuthOptions,
 } from "better-auth/minimal";
-import { organizationReadLimit, organizationReadPaths, sessionReadLimit } from "./sessionReadLimit";
-import { organization } from "better-auth/plugins";
+import { sessionReadLimit } from "./sessionReadLimit";
 import { components } from "./_generated/api";
 import type { DataModel } from "./_generated/dataModel";
 import authConfig from "./auth.config";
 import { AUTH_CLIENT_IP_HEADER } from "../shared/auth-client-ip";
 import { authCookiePrefix } from "../shared/auth-cookies";
-import {
-  sendAuthLinkEmail,
-  sendExistingAccountNotice,
-  sendOrganizationInvitationEmail,
-} from "./authEmails";
-import { beforeDeleteOrganization } from "./organizationLifecycle";
-import { invitationListPrivacy, organizationFieldHooks } from "./organizationPolicy";
-import { beforeCreateTeam, beforeUpdateTeam } from "../shared/team-names";
+import { sendAuthLinkEmail, sendExistingAccountNotice } from "./authEmails";
 import authSchema from "./betterAuth/schema";
 import { boundSessionLifetime, legacyCookieMigration, sessionLifetime } from "./sessionLifetime";
 
@@ -126,9 +118,6 @@ export function createAuthOptions(ctx: GenericCtx<DataModel>) {
         // The plugin applies real fixed windows; Better Auth resets only
         // after inactivity and would exhaust a busy shared IP indefinitely.
         "/get-session": false,
-        ...Object.fromEntries(organizationReadPaths.map(path => [path, (request: Request) =>
-          request.method === "GET" ? false : { window: 60, max: 100 }])),
-        "/organization/invite-member": { window: 60, max: 10 },
         "/sign-in/email": { window: 60, max: 5 },
         "/sign-up/email": { window: 60 * 60, max: 5 },
         "/request-password-reset": { window: 60 * 60, max: 5 },
@@ -142,33 +131,7 @@ export function createAuthOptions(ctx: GenericCtx<DataModel>) {
         if (!("runMutation" in ctx)) throw new Error("Session HTTP reads require a mutation-capable context");
         return ctx.runMutation(components.betterAuth.sessionReadLimit.consume, { key });
       }),
-      organizationReadLimit((key) => {
-        if (!("runMutation" in ctx)) throw new Error("Organization HTTP reads require a mutation-capable context");
-        return ctx.runMutation(components.betterAuth.sessionReadLimit.consume, { key });
-      }),
       sessionLifetime(),
-      organization({
-        organizationHooks: {
-          ...organizationFieldHooks((organizationId) => ctx.runQuery(components.betterAuth.adapter.findOne, {
-            model: "organization", where: [{ field: "_id", value: organizationId }],
-          }) as Promise<{ name?: unknown; slug?: unknown } | null>),
-          beforeDeleteOrganization: ({ organization, user }) => beforeDeleteOrganization(ctx, organization.id, user.id),
-          beforeCreateTeam,
-          beforeUpdateTeam,
-        },
-        teams: { enabled: true },
-        requireEmailVerificationOnInvitation: true,
-        invitationExpiresIn: 60 * 60 * 24 * 7,
-        async sendInvitationEmail(data) {
-          await sendOrganizationInvitationEmail({
-            email: data.email,
-            inviterName: data.inviter.user.name,
-            organizationName: data.organization.name,
-            invitationUrl: `${siteUrl}/accept-invitation/${encodeURIComponent(data.id)}`,
-          });
-        },
-      }),
-      invitationListPrivacy(),
       convex({ authConfig }),
     ],
   } satisfies BetterAuthOptions;

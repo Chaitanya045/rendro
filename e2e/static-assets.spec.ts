@@ -29,11 +29,10 @@ test.describe("public static assets", () => {
     test.slow();
     await signInSeeded(context, baseURL, seed, "owner");
     const bundles = trackBundles(tab);
-    // Management pages: shell navigation, query client and shared select. The document itself is private and no-store.
-    const management = await tab.goto(`/organizations/${seed.organizationId}/projects`);
-    expect(management?.headers()["cache-control"]).toBe("private, no-store");
-    expect(management?.headers()["server-timing"]).toContain("session");
-    await expect(tab.locator("script[src^='/management-pages.js']")).toHaveCount(1);
+    // The signed-in home is private and no-store, and loads no bundle of its own.
+    const home = await tab.goto("/home");
+    expect(home?.headers()["cache-control"]).toBe("private, no-store");
+    expect(home?.headers()["server-timing"]).toContain("session");
     // A private repository's shell adds the ticket renewal (private viewer) to the tree, comments and real-user
     // monitoring (#282) every repository shell loads; its document is a frame with the comment widget.
     const { closed } = JSON.parse(readFileSync(process.env.RENDRO_E2E_REPOS as string, "utf8")) as RepoFixtures;

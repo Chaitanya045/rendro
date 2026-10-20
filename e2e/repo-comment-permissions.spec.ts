@@ -1,5 +1,5 @@
 import type { Page } from "@playwright/test";
-import { test, expect } from "./org-fixtures";
+import { test, expect } from "./actor-fixtures";
 import {
   anchorOn, card, collaborator, comment, convexCallWith, convexSocket, createThread, journeyDoc, open, openDrawer, pauseClock, pin, repoIds, repos,
   sessionToken, startComment, threadsAs, ui, unique, writeThread, type CallResult,

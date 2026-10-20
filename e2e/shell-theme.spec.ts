@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import type { BrowserContext, Page } from "@playwright/test";
 import { test, expect } from "./fixtures";
 import type { Seed } from "./seed";
-import { desktop, mobile, settleFrames, shellReady, signInSeeded } from "./shell-helpers";
+import { desktop, mobile, settleFrames, signInSeeded } from "./shell-helpers";
 import type { RepoFixtures } from "./repo-fixtures";
 
 const snapshot = (page: Page) => page.evaluate(() => {
@@ -28,11 +28,11 @@ async function themeCycle(page: Page, context: BrowserContext, baseURL: string |
   // Firefox's automation drops emulated media when a navigation enters a new browsing context group, which every
   // trusted page starts with COOP same-origin (#89); navigations within the group keep it. Enter the group first, so
   // the measured load below starts with the preference already applied.
-  await page.goto(`/organizations/${seed.organizationId}`);
+  await page.goto("/home");
   await page.emulateMedia({ colorScheme: "dark" });
   // System preference with nothing stored: dark before the body exists.
-  await page.goto(`/organizations/${seed.organizationId}`);
-  await shellReady(page);
+  await page.goto("/home");
+  await expect(toggle(page)).toBeVisible();
   expect(await page.evaluate(() => (window as unknown as { themeAtBody?: boolean }).themeAtBody)).toBe(true);
   expect(await snapshot(page)).toMatchObject({ dark: true, mode: "system", resolved: "dark", stored: null, label: "Switch to dark theme", title: "Theme: system" });
   // A saved preference wins over the OS; invalid or absent values fall back to system.
@@ -46,7 +46,7 @@ async function themeCycle(page: Page, context: BrowserContext, baseURL: string |
   await page.evaluate(() => localStorage.removeItem("commentor-theme"));
   await page.emulateMedia({ colorScheme: "light" });
   await page.reload();
-  await shellReady(page);
+  await expect(toggle(page)).toBeVisible();
 
   // The control cycles through the three meanings and persists each choice.
   const steps = [
@@ -60,13 +60,11 @@ async function themeCycle(page: Page, context: BrowserContext, baseURL: string |
     await expect.poll(async () => (await snapshot(page)).rippling).toBe(false);
     expect(await snapshot(page)).toMatchObject(step);
   }
-  // Latest choice survives client navigation, reload and other shells (auth page, landing page).
+  // Latest choice survives link navigation, reload and other shells (auth page, landing page).
   await toggle(page).click();
   await expect.poll(async () => (await snapshot(page)).dark).toBe(true);
-  if (viewport.width > 400) {
-    await page.locator(".cp-nav").getByRole("link", { name: "People", exact: true }).click();
-    await expect(page).toHaveURL(/\/people$/);
-  }
+  await page.getByRole("link", { name: "Account security" }).click();
+  await expect(page).toHaveURL(/\/account\/security$/);
   expect(await snapshot(page)).toMatchObject({ dark: true, mode: "dark" });
   await page.reload();
   expect(await snapshot(page)).toMatchObject({ dark: true, mode: "dark", label: "Switch to light theme" });
@@ -211,8 +209,8 @@ test.describe("theme runtime", () => {
 
     // Full navigation and history traversal retain the latest saved choice.
     await signInSeeded(context, baseURL, seed, "owner");
-    await page.goto(`/organizations/${seed.organizationId}/settings`);
-    await shellReady(page);
+    await page.goto("/home");
+    await expect(toggle(page)).toBeVisible();
     await toggle(page).click();
     await expect.poll(async () => (await snapshot(page)).mode).toBe("dark");
     await page.goto("/account/security");
@@ -220,7 +218,7 @@ test.describe("theme runtime", () => {
     await toggle(page).click();
     await expect.poll(async () => (await snapshot(page)).mode).toBe("light");
     await page.goBack();
-    await expect(page).toHaveURL(/\/settings$/);
+    await expect(page).toHaveURL(/\/home$/);
     await expect.poll(async () => (await snapshot(page)).mode).toBe("light");
     expect(await snapshot(page)).toMatchObject({ dark: false, stored: "light" });
     await page.goForward();

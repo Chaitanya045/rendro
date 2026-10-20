@@ -25,7 +25,7 @@ function app() {
   });
   return { app, downstream };
 }
-async function request(path = "/organizations/cache-probe", headers = { cookie, accept: "text/html" }, method = "GET") {
+async function request(path = "/account/probe", headers = { cookie, accept: "text/html" }, method = "GET") {
   const fixture = app();
   const pending = fixture.app.request(path, { method, headers });
   // Yield to native WebCrypto before draining retry/deadline timers, without
@@ -68,7 +68,7 @@ describe("session lookup failures", () => {
     "skips lookup without a session token (%s)", async (cookie) => {
       const fetchMock = vi.fn();
       vi.stubGlobal("fetch", fetchMock);
-      const { response, downstream } = await request("/organizations/cache-probe", { cookie, accept: "text/html" });
+      const { response, downstream } = await request("/account/probe", { cookie, accept: "text/html" });
       expect(response.status).toBe(302);
       expect(downstream).toHaveBeenCalledOnce();
       expect(fetchMock).not.toHaveBeenCalled();
@@ -136,7 +136,7 @@ describe("session lookup failures", () => {
     },
   );
 
-  it.each(["/api/private", "/organizations/cache-probe"])("returns retryable JSON for %s", async (path) => {
+  it.each(["/api/private", "/account/probe"])("returns retryable JSON for %s", async (path) => {
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("secret")));
     const { response, downstream } = await request(path, { cookie, accept: "application/json" });
     expect(response.status).toBe(503);
@@ -261,7 +261,7 @@ describe("session lookup failures", () => {
       auth.handler(new Request("http://localhost:3000/api/auth/get-session", init))));
     const fixture = app();
     const headers = login.headers;
-    expect((await fixture.app.request("/organizations/cache-probe", { headers })).status).toBe(200);
+    expect((await fixture.app.request("/account/probe", { headers })).status).toBe(200);
     if (state === "expired") {
       await context.internalAdapter.updateSession(login.session.token, { expiresAt: new Date(Date.now() - 1_000) });
     } else if (state === "revoked") {
@@ -271,7 +271,7 @@ describe("session lookup failures", () => {
     }
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(Date.now() + 15_000);
-    const response = await fixture.app.request("/organizations/cache-probe", { headers });
+    const response = await fixture.app.request("/account/probe", { headers });
     expect(response.status).toBe(302);
     expect(response.headers.get("location")).toBe("/sign-in");
     expect(logger.warn).not.toHaveBeenCalled();
@@ -300,9 +300,10 @@ describe("session lookup failures", () => {
     vi.stubGlobal("fetch", fetchMock);
     const fixture = app();
     for (let i = 0; i < 2; i++) {
-      expect((await fixture.app.request("/organizations/cache-probe", { headers })).status).toBe(state === "valid" ? 200 : 302);
+      expect((await fixture.app.request("/account/probe", { headers })).status).toBe(state === "valid" ? 200 : 302);
     }
-    expect(fetchMock).toHaveBeenCalledTimes(state === "valid" ? 1 : 2);
+    // Pages after the middleware never reuse a cached identity, so each request validates afresh.
+    expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(logger.warn).not.toHaveBeenCalled();
   });
 
@@ -310,9 +311,9 @@ describe("session lookup failures", () => {
     const fetchMock = vi.fn().mockImplementationOnce(() => Response.json({ user, session: { expiresAt: Date.now() + 60_000 } })).mockImplementation(() => Response.json(null));
     vi.stubGlobal("fetch", fetchMock);
     const headers = { cookie: `theme=dark; __Secure-${cookie}`, accept: "text/html" };
-    expect((await request("/organizations/cache-probe", headers)).response.status).toBe(200);
+    expect((await request("/account/probe", headers)).response.status).toBe(200);
     vi.setSystemTime(Date.now() + 15_000);
-    expect((await request("/organizations/cache-probe", headers)).response.status).toBe(302);
+    expect((await request("/account/probe", headers)).response.status).toBe(302);
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 });

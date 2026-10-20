@@ -15,7 +15,6 @@ function project(files: Record<string, string>): string {
   const root = mkdtempSync(join(scratch, "project-"));
   symlinkSync(join(repo, "node_modules"), join(root, "node_modules"));
   mkdirSync(join(root, "scripts"));
-  writeFileSync(join(root, "scripts/management-pages-source.ts"), "export {};\n");
   for (const [path, text] of Object.entries(files)) {
     mkdirSync(join(root, path, ".."), { recursive: true });
     writeFileSync(join(root, path), text);
@@ -34,7 +33,7 @@ describe("icon subset", () => {
 
   it("renders every listed icon as one ligature glyph and nothing it was not asked for", () => {
     expect(missingIcons(committedIcons, fontManifest.icons.names)).toEqual([]);
-    expect(missingIcons(committedIcons, ["star", "settings_suggest", "home"])).toEqual(["star", "settings_suggest", "home"]);
+    expect(missingIcons(committedIcons, ["star", "settings_suggest", "groups"])).toEqual(["star", "settings_suggest", "groups"]);
   });
 
   it("is a small static subset, not the 4 MB source font", () => {
@@ -53,19 +52,19 @@ describe("icon extraction", () => {
     const root = project({
       "src/routes/page.ts": [
         "const markup = `<span class=\"material-symbols-outlined\" aria-hidden=\"true\">star</span>`;",
-        "const css = `.x::before{content:\"home\";font:400 20px/1 \"Material Symbols Outlined\"}`;",
+        "const css = `.x::before{content:\"bookmark\";font:400 20px/1 \"Material Symbols Outlined\"}`;",
         "const pick = flag ? 'search' : \"favorite\";",
         "const dynamic = `<i class='material-symbols-outlined'>${name ?? \"settings_suggest\"}</i>`;",
       ].join("\n"),
     });
-    expect(scanIconNames(root, catalog)).toEqual(["favorite", "home", "search", "settings_suggest", "star"]);
+    expect(scanIconNames(root, catalog)).toEqual(["bookmark", "favorite", "search", "settings_suggest", "star"]);
   });
 
   it("ignores listed words, non-icons, files that render no icons and the font definitions", () => {
     const root = project({
       "src/routes/page.ts": "const a = `<b class=\"material-symbols-outlined\">${\"warning\"}</b>`; const words = [\"block\", \"pending\", \"nonsense\", \"Star\", \"star-icon\", \"2\"];",
       "src/routes/plain.ts": "export const word = \"star\";",
-      "src/routes/fonts.ts": "export const x = 'Material Symbols Outlined'; const y = \"home\";",
+      "src/routes/fonts.ts": "export const x = 'Material Symbols Outlined'; const y = \"bookmark\";",
       "src/routes/font-manifest.ts": "export const x = 'material-symbols-outlined'; const y = \"search\";",
       "src/deep/nested/more.ts": "const n = 'material-symbols-outlined'; const icon = \"lock\";",
       "src/notes.md": "material-symbols-outlined \"mail\"",

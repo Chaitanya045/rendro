@@ -88,7 +88,7 @@ describe("current cookie names", () => {
       expect(cookie).not.toMatch(/; Domain=/i);
     }
     expect(named(f.cookies, current("convex_jwt"))).toBeDefined();
-    expect((await f.request("/organizations/reader", f.cookies.map(pair).join("; "))).status).toBe(200);
+    expect((await f.request("/home", f.cookies.map(pair).join("; "))).status).toBe(200);
   });
 
   it("keeps unprefixed, non-Secure cookies for local HTTP development", async () => {
@@ -96,7 +96,7 @@ describe("current cookie names", () => {
     const token = named(f.cookies, "better-auth.session_token")!;
     expect(token).not.toMatch(/; Secure/i);
     for (const cookie of f.cookies) expect(cookie).toMatch(/^better-auth\./);
-    expect((await f.request("/organizations/reader", f.cookies.map(pair).join("; "))).status).toBe(200);
+    expect((await f.request("/home", f.cookies.map(pair).join("; "))).status).toBe(200);
   });
 
   it("derives the prefix from the site origin", () => {
@@ -123,7 +123,7 @@ describe("legacy __Secure- cookie migration", () => {
     expect(cookie).not.toContain("__Host-");
 
     // Reads: Worker pages, cached and uncached, and the server-side session read.
-    expect(await (await f.request("/organizations/reader", cookie)).json()).toEqual({ id: f.user.id });
+    expect(await (await f.request("/home", cookie)).json()).toEqual({ id: f.user.id });
     expect((await f.request("/account/security", cookie)).status).toBe(200);
     expect(await f.auth.api.getSession({ headers: sessionCookieHeaders(new Headers({ cookie })) })).not.toBeNull();
 
@@ -180,7 +180,7 @@ describe("legacy __Secure- cookie migration", () => {
 
   it("migrates on other session-resolving reads", async () => {
     const f = await fixture(true);
-    const response = await f.request("/api/auth/organization/list", legacyHeader(f.cookies));
+    const response = await f.request("/api/auth/list-accounts", legacyHeader(f.cookies));
     expect(response.status).toBe(200);
     expect(named(response.headers.getSetCookie(), current("session_token"))).toMatch(/; Max-Age=604800/);
     expect(named(response.headers.getSetCookie(), legacy("session_token"))).toMatch(/Max-Age=0/);
@@ -189,14 +189,18 @@ describe("legacy __Secure- cookie migration", () => {
   it("keeps legacy cookies when a request fails or writes, until a session cookie is set", async () => {
     const f = await fixture(true);
     const cookie = legacyHeader(f.cookies);
-    const failed = await f.request("/api/auth/organization/get-full-organization?organizationId=missing", cookie);
+    const failed = await f.request("/api/auth/change-password", cookie, {
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ currentPassword: "not the password", newPassword: "a new password that is long" }),
+    });
     expect(failed.ok).toBe(false);
     expect(failed.headers.getSetCookie().filter(value => value.startsWith("__Secure-"))).toEqual([]);
-    const write = await f.request("/api/auth/organization/create", cookie, {
-      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "Migrated", slug: "migrated" }),
+    const write = await f.request("/api/auth/update-user", cookie, {
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "Migrated" }),
     });
     expect(write.status).toBe(200);
-    expect(write.headers.getSetCookie().filter(value => value.startsWith("__Secure-"))).toEqual([]);
+    // This write re-issues the session cookie under its current name, so the legacy ones expire with it.
+    expect(named(write.headers.getSetCookie(), current("session_token"))).toBeDefined();
+    expect(named(write.headers.getSetCookie(), legacy("session_token"))).toMatch(/Max-Age=0/);
     expect((await f.request("/account/security", cookie)).status).toBe(200);
   });
 

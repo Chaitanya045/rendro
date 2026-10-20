@@ -64,8 +64,8 @@ describe("self-hosted fonts in Chromium", () => {
   it("renders ligature names as single glyphs and keeps the design's weights", async () => {
     const { page } = await open();
     await faces(page);
-    for (const name of ["close", "unfold_more", "password"]) expect(await measure(page, 'font:400 20px "Material Symbols Outlined"', name)).toBeCloseTo(20, 0);
-    expect(await measure(page, 'font:400 20px "No Such Family",sans-serif', "unfold_more")).toBeGreaterThan(100);
+    for (const name of ["close", "folder_open", "password"]) expect(await measure(page, 'font:400 20px "Material Symbols Outlined"', name)).toBeCloseTo(20, 0);
+    expect(await measure(page, 'font:400 20px "No Such Family",sans-serif', "edit_document")).toBeGreaterThan(100);
     // Four declared weights; others snap to them exactly as they did with Google Fonts' four faces.
     const widths = Object.fromEntries(await Promise.all([400, 500, 600, 650, 700, 800].map(async weight => [weight, await measure(page, `font:${weight} 16px Inter`, "Documentation that ships")])));
     expect(widths[650]).toBe(widths[700]);

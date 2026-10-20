@@ -5,12 +5,6 @@ export const workerMutationPolicies = {
   "POST /api/auth/sign-out": "better-auth",
   "POST /api/auth/*": "better-auth",
   "POST /api/auth/set-initial-password": "cookie-json",
-  "POST /api/rendro/projects": "cookie-json",
-  "POST /api/rendro/credentials": "cookie-json",
-  "POST /api/rendro/credentials/revoke": "cookie-json",
-  "POST /api/rendro/*": "convex",
-  "PATCH /api/rendro/*": "convex",
-  "DELETE /api/rendro/*": "convex",
   // Comment access for repository docs (#254); mounted before this middleware, so the route applies the same rule itself.
   "POST /r/*": "cookie-bodyless",
   // Real-user monitoring beacons (#282); mounted before this middleware and cookie-free, it refuses cross-site posts itself

@@ -4,7 +4,8 @@ import type { Mail } from "./services";
 
 export const roles = ["owner", "admin", "member", "outsider"] as const;
 export type Role = typeof roles[number];
-export type Seed = { organizationId: string; otherOrganizationId: string; projectId: string; cookies: Record<Role, string>; userIds: Record<Role, string> };
+// Verified, signed-in users. The role names only label them: repository access is granted per test.
+export type Seed = { cookies: Record<Role, string>; userIds: Record<Role, string> };
 export const password = "Local fixture password 109!";
 export async function seedWorkspace(input: { site: string; worker: string; secret: string; mail: Mail[]; fetch: typeof fetch }): Promise<Seed> {
   const cookies = {} as Record<Role, string>;
@@ -35,12 +36,5 @@ export async function seedWorkspace(input: { site: string; worker: string; secre
     if (verified.status >= 400) throw new Error(`Seed verification for ${role} failed (${outcome})`);
     userIds[role] = (await call<{ user: { id: string } }>(role, "/api/auth/sign-in/email", { email, password })).user.id;
   }
-  const organization = await call<{ id: string }>("owner", "/api/auth/organization/create", { name: "E2E primary", slug: "e2e-primary" });
-  const other = await call<{ id: string }>("outsider", "/api/auth/organization/create", { name: "E2E other", slug: "e2e-other" });
-  for (const role of ["admin", "member"] as const) {
-    const invitation = await call<{ id: string }>("owner", "/api/auth/organization/invite-member", { organizationId: organization.id, email: `${role}@example.test`, role });
-    await call(role, "/api/auth/organization/accept-invitation", { invitationId: invitation.id });
-  }
-  const { project } = await call<{ project: { _id: string } }>("owner", "/api/rendro/projects", { organizationId: organization.id, name: "Worker publication", slug: "smoke" });
-  return { organizationId: organization.id, otherOrganizationId: other.id, projectId: project._id, cookies, userIds };
+  return { cookies, userIds };
 }

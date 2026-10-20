@@ -8,12 +8,6 @@ import { backendFetch } from "@/backend-fetch";
 import { authClientIpHeaders } from "@/auth-client-ip";
 import { AUTH_COOKIE_NAMES } from "../shared/auth-cookies";
 
-// Only this pass-through API-key read accepts bearer credentials. Keep auth
-// and management routes cookie-only.
-const API_KEY_GET_PATHS = new Set([
-  "/api/rendro/credentials/validate",
-]);
-
 const SESSION_REVOCATION_PATHS = new Set([
   "/api/auth/revoke-session", "/api/auth/revoke-sessions", "/api/auth/revoke-other-sessions",
   "/api/auth/change-password", "/api/auth/reset-password", "/api/auth/delete-user",
@@ -78,14 +72,11 @@ async function proxiedHeaders(request: Request, target: string, method = request
   return headers;
 }
 
+/** Forwards an auth request to Convex's HTTP actions, cookie-only (no bearer credentials). */
 export async function proxyConvexRequest(request: Request): Promise<Response> {
   const sourceUrl = new URL(request.url);
   const target = `${CONVEX_SITE_URL}${sourceUrl.pathname}${sourceUrl.search}`;
   const requestHeaders = await proxiedHeaders(request, target);
-  if (request.method === "GET" && API_KEY_GET_PATHS.has(sourceUrl.pathname)) {
-    const authorization = request.headers.get("authorization");
-    if (authorization) requestHeaders.set("authorization", authorization);
-  }
   const init: RequestInit = {
     method: request.method,
     headers: requestHeaders,

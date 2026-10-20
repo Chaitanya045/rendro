@@ -4,7 +4,7 @@ import schema from "../convex/schema";
 import authSchema from "../convex/betterAuth/schema";
 import { components } from "../convex/_generated/api";
 import { Hono } from "hono";
-import { sessionCache, sessionMiddleware } from "@/middleware/session";
+import { sessionCache, sessionViewer } from "@/middleware/session";
 import { memoryAdapter } from "@better-auth/memory-adapter";
 import { betterAuth } from "better-auth/minimal";
 import { testUtils } from "better-auth/plugins";
@@ -162,15 +162,18 @@ describe("auth rate limits", () => {
     await context.test!.saveUser(user);
     const sessions = await Promise.all([0, 1].map(() => context.test!.login({ userId: user.id })));
     const app = new Hono();
-    app.use("*", sessionMiddleware);
-    app.get("/organizations/cache-probe", c => c.text("OK"));
+    // The repository read path's session lookup (#234) is the one that coalesces through the isolate cache.
+    app.get("/r/cache-probe", async c => {
+      const viewer = await sessionViewer(c.req.raw);
+      return viewer.kind === "user" ? c.text("OK") : c.body(null, viewer.kind === "unavailable" ? 503 : 401);
+    });
     const fetchSession = vi.fn((_url: string, init: RequestInit) => request("/get-session", "192.0.2.38", init.headers));
     vi.stubGlobal("fetch", fetchSession);
     // 180 navigations/minute across two sessions used to exhaust the shared
     // 120 bucket. Freeze time so this cannot pass by crossing a window boundary.
     vi.useFakeTimers({ toFake: ["Date"] });
     for (let i = 0; i < 90; i++) {
-      for (const login of sessions) expect((await app.request("/organizations/cache-probe", { headers: login.headers })).status).toBe(200);
+      for (const login of sessions) expect((await app.request("/r/cache-probe", { headers: login.headers })).status).toBe(200);
     }
     expect(fetchSession).toHaveBeenCalledTimes(2);
     for (const login of sessions) {
@@ -185,9 +188,9 @@ describe("auth rate limits", () => {
     alternate.set("cookie", alternate.get("cookie")!.replace(/session_token=(.)/, (_, first: string) => `session_token=%${first.charCodeAt(0).toString(16)}`));
     expect((await request("/get-session", "192.0.2.101", alternate)).status).toBe(429);
     await sessionCache.evict(sessions[0].headers.get("cookie")!);
-    expect((await app.request("/organizations/cache-probe", { headers: sessions[0].headers })).status).toBe(503);
+    expect((await app.request("/r/cache-probe", { headers: sessions[0].headers })).status).toBe(503);
     await sessionCache.evict(sessions[1].headers.get("cookie")!);
-    expect((await app.request("/organizations/cache-probe", { headers: sessions[1].headers })).status).toBe(200);
+    expect((await app.request("/r/cache-probe", { headers: sessions[1].headers })).status).toBe(200);
     expect(fetchSession).toHaveBeenCalledTimes(4);
     const rows = await buckets();
     const sessionRows = rows.filter(row => row.key.startsWith("session-read:"));
@@ -234,8 +237,11 @@ describe("auth rate limits", () => {
       sessions.push(await context.test!.login({ userId: user.id }));
     }
     const app = new Hono();
-    app.use("*", sessionMiddleware);
-    app.get("/organizations/cache-probe", c => c.text("OK"));
+    // The repository read path's session lookup (#234) is the one that coalesces through the isolate cache.
+    app.get("/r/cache-probe", async c => {
+      const viewer = await sessionViewer(c.req.raw);
+      return viewer.kind === "user" ? c.text("OK") : c.body(null, viewer.kind === "unavailable" ? 503 : 401);
+    });
     vi.stubGlobal("fetch", (_url: string, init: RequestInit) => request("/get-session", "192.0.2.38", init.headers));
     vi.useFakeTimers({ toFake: ["Date"] });
     const start = Date.now();
@@ -248,7 +254,7 @@ describe("auth rate limits", () => {
           const windowStart = start + minute * 60_000 + index * 400;
           vi.setSystemTime(windowStart + read * 800);
           sessionCache.clear();
-          expect((await app.request("/organizations/cache-probe", { headers: login.headers })).status,
+          expect((await app.request("/r/cache-probe", { headers: login.headers })).status,
             `minute ${minute + 1}, session ${index}, read ${read + 1}`).toBe(200);
           const key = sessionBucket(login.session.token);
           expect((await buckets()).find(row => row.key === key)).toMatchObject({ count: read + 1, lastRequest: windowStart });

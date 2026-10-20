@@ -9,7 +9,7 @@ afterEach(() => {
 describe("fail-closed API boundaries", () => {
   it("does not expose unhandled exception messages or request paths", async () => {
     const response = await workerApp.request(
-      "/select.js",
+      "/lazy-tree.js",
       undefined,
       { ASSETS: { fetch: () => { throw new Error("storage password leaked in stack"); } } },
     );
