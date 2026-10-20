@@ -230,6 +230,8 @@ export async function pinVolatileText(page: Page, family: string, state: string)
   const pins: Array<[string, string]> = [];
   if (family === "project" && state !== "loading") pins.push([".deployment-row td:nth-child(2) strong", "/workspace/docs-site"], [".deployment-row td:nth-child(2) .cell-secondary", "Source provenance"]);
   if ((family === "org" || family === "account-menu") && state !== "loading") pins.push(["#recent-deployment .cell-secondary", "Commit 0123456789ab"]);
+  // A key's "Last used" is the server's real time of the seed's own push, not the page clock: it changed every day.
+  if (family === "keys") pins.push(['#key-list td[data-label="Last used"]', "10/19/2026"]);
   // The recent-deployment card loads after the page settles: pin only once its row has rendered.
   for (const [selector] of pins) await page.locator(selector).first().waitFor({ state: "attached" });
   await page.evaluate(entries => {
