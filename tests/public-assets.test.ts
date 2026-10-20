@@ -13,6 +13,8 @@ import { privateRepo, repoReadFixture } from "./helpers/repo-read-fixture";
 vi.mock("@hono/node-server", () => ({ serve: vi.fn() }));
 import { app as local } from "@/index";
 
+// The unit-test site (tests/setup.ts): local HTTP, so the unprefixed cookie names.
+const localSite = "http://localhost:3000";
 const ledger = JSON.parse(readFileSync("scripts/asset-versions.json", "utf8")) as Record<string, Record<string, string>>;
 const cookie = "better-auth.session_token=test-session";
 const immutable = "public, max-age=31536000, immutable";
@@ -111,7 +113,7 @@ describe("Worker and Node serve public assets without a session lookup", () => {
   it("never evicts or refreshes a warm identity cache", async () => {
     // The repository read path's cached identity (the only one the Worker reuses).
     sessionCache.clear();
-    await sessionCache.lookup(cookie, () => Promise.resolve({ kind: "authenticated", user: testUser, expiresAt: Date.now() + 60_000 } as never));
+    await sessionCache.lookup(localSite, cookie, () => Promise.resolve({ kind: "authenticated", user: testUser, expiresAt: Date.now() + 60_000 } as never));
     const warm = sessionCalls();
     expect(warm).toBe(0);
     for (const [path, version] of bundles) await worker.request(`https://rendro.test${path}?v=${version}`, { headers: { cookie } }, { ASSETS: assetsFor() });
@@ -120,7 +122,7 @@ describe("Worker and Node serve public assets without a session lookup", () => {
     }
     expect(sessionCalls()).toBe(warm);
     const fresh = vi.fn();
-    await sessionCache.lookup(cookie, fresh);
+    await sessionCache.lookup(localSite, cookie, fresh);
     expect(fresh).not.toHaveBeenCalled();
     sessionCache.clear();
     // An asset response never carries per-user state or the session's private policy.

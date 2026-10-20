@@ -6,6 +6,7 @@ import { CONVEX_SITE_URL } from "@/config";
 import { logger } from "@/logger";
 import { backendFetch } from "@/backend-fetch";
 import { authClientIpHeaders } from "@/auth-client-ip";
+import { cookieSite } from "@/viewer-ticket";
 import { AUTH_COOKIE_NAMES } from "../shared/auth-cookies";
 
 const SESSION_REVOCATION_PATHS = new Set([
@@ -13,8 +14,9 @@ const SESSION_REVOCATION_PATHS = new Set([
   "/api/auth/change-password", "/api/auth/reset-password", "/api/auth/delete-user",
 ]);
 
-// Every Better Auth cookie under current, legacy and local names, plus the
-// Node development identity cookie.
+// Every Better Auth cookie under current, retired (pre-#89 `__Secure-`) and
+// local names, plus the Node development identity cookie. Nothing reads the
+// retired names any more; expiring them tidies browsers that still hold them.
 const SIGN_OUT_COOKIE_NAMES = [...AUTH_COOKIE_NAMES, "rendro-dev-user"];
 
 function strippedSetCookies(headers: Headers): string[] {
@@ -91,7 +93,7 @@ export async function proxyConvexRequest(request: Request): Promise<Response> {
       return response;
     }
   }
-  const upstream = await backendFetch(target, init, "proxyConvexRequest");
+  const upstream = await backendFetch(target, init, "proxyConvexRequest", cookieSite(request.url));
   const setCookies = strippedSetCookies(upstream.headers);
 
   const headers = new Headers(upstream.headers);
@@ -121,7 +123,7 @@ export async function proxyAuthRequest(request: Request): Promise<Response> {
   const revokesSessions = (request.method === "POST" && SESSION_REVOCATION_PATHS.has(path))
     || path === "/api/auth/delete-user/callback";
   const invalidateCaller = async () => {
-    if (revokesSessions) await sessionCache.evict(request.headers.get("cookie") ?? "");
+    if (revokesSessions) await sessionCache.evict(cookieSite(request.url), request.headers.get("cookie") ?? "");
   };
   await invalidateCaller();
   let upstream: Response;
@@ -138,7 +140,7 @@ export async function proxyAuthRequest(request: Request): Promise<Response> {
   if (path === "/api/auth/get-session" && upstream.ok) {
     // Better Auth represents authoritative missing/revoked sessions as JSON null.
     const identity: unknown = await upstream.clone().json().catch(() => undefined);
-    if (identity === null) await sessionCache.evict(request.headers.get("cookie") ?? "");
+    if (identity === null) await sessionCache.evict(cookieSite(request.url), request.headers.get("cookie") ?? "");
   }
   const location = upstream.headers.get("location");
   if (upstream.status >= 300 && upstream.status < 400 && location) {
@@ -156,6 +158,7 @@ export async function proxyAuthRequest(request: Request): Promise<Response> {
 
 export async function proxyAuthSignOut(request: Request): Promise<Response> {
   const cookie = request.headers.get("cookie") ?? "";
+  const site = cookieSite(request.url);
   const source = new URL(request.url);
   const json = request.headers.get("accept")?.includes("application/json");
   const reply = (state: "confirm" | "failed" | "complete", status: number, headers = new Headers()) => {
@@ -164,7 +167,7 @@ export async function proxyAuthSignOut(request: Request): Promise<Response> {
     return new Response(json ? JSON.stringify(state === "complete" ? { success: true } : { error: "Sign-out was not completed. Please try again." })
       : renderSignOutPage(state), { status, headers });
   };
-  await sessionCache.evict(cookie);
+  await sessionCache.evict(site, cookie);
   try {
     // GET is safe to follow/prefetch; only the confirmation form can sign out.
     if (request.method !== "POST") {
@@ -197,6 +200,6 @@ export async function proxyAuthSignOut(request: Request): Promise<Response> {
     return reply("failed", 502);
   } finally {
     // Also evict lookups that began while sign-out was in flight, on every path.
-    await sessionCache.evict(cookie);
+    await sessionCache.evict(site, cookie);
   }
 }

@@ -8,6 +8,9 @@ import { proxyAuthRequest, proxyAuthSignOut, proxyConvexRequest } from "@/auth-p
 import { mountSessionRoutes } from "@/app-routes";
 import { logger } from "@/logger";
 
+// The unit-test site (tests/setup.ts): local HTTP, so the unprefixed cookie names.
+const localSite = "http://localhost:3000";
+const secureSite = "https://rendro.test";
 const cookie = "better-auth.session_token=raw-secret-signed-cookie";
 const user = { id: "reader", email: "reader@example.test", name: "Reader", emailVerified: true,
   image: null, createdAt: 1, updatedAt: 1 };
@@ -30,22 +33,32 @@ afterEach(() => { sessionCache.clear(); vi.restoreAllMocks(); vi.unstubAllGlobal
 describe("bounded isolate session cache", () => {
   it("keys and evicts by token alone when a lifetime preference is present", async () => {
     const header = `better-auth.dont_remember=signed-preference; ${cookie}`;
-    expect(await sessionCacheKey(header)).toBe(await sessionCacheKey(cookie));
-    expect(await sessionCacheKey("better-auth.dont_remember=signed-preference")).toBeNull();
-    expect(await sessionCacheKey(`${header}; __Secure-${cookie}`)).toBeNull();
+    expect(await sessionCacheKey(localSite, header)).toBe(await sessionCacheKey(localSite, cookie));
+    expect(await sessionCacheKey(localSite, "better-auth.dont_remember=signed-preference")).toBeNull();
+    expect(await sessionCacheKey(localSite, `${header}; ${cookie}-other`)).toBeNull();
+    // Only the site's own name is a session token (#208): any other variant neither keys nor disambiguates.
+    for (const other of [`__Secure-${cookie}`, `__Host-${cookie}`]) {
+      expect(await sessionCacheKey(localSite, `${header}; ${other}`)).toBe(await sessionCacheKey(localSite, cookie));
+      expect(await sessionCacheKey(localSite, other)).toBeNull();
+    }
+    for (const other of [`__Secure-${cookie}`, cookie]) {
+      expect(await sessionCacheKey(secureSite, `${other}; __Host-${cookie}`)).toBe(await sessionCacheKey(localSite, cookie));
+      expect(await sessionCacheKey(secureSite, `__Host-${cookie}; ${other}`)).toBe(await sessionCacheKey(localSite, cookie));
+      expect(await sessionCacheKey(secureSite, other)).toBeNull();
+    }
     const cache = new SessionCache<ReturnType<typeof success>>();
     const resolve = vi.fn(() => Promise.resolve(success()));
-    await cache.lookup(header, resolve);
-    await cache.lookup(header, resolve);
-    await cache.lookup(cookie, resolve);
+    await cache.lookup(localSite, header, resolve);
+    await cache.lookup(localSite, header, resolve);
+    await cache.lookup(localSite, cookie, resolve);
     expect(resolve).toHaveBeenCalledOnce();
-    await cache.evict(header);
-    await cache.lookup(header, resolve);
+    await cache.evict(localSite, header);
+    await cache.lookup(localSite, header, resolve);
     expect(resolve).toHaveBeenCalledTimes(2);
   });
 
   it("hashes only the cookie value and never stores or logs credentials", async () => {
-    expect(await sessionCacheKey(`theme=dark; ${cookie}; better-auth.session_data=unused`))
+    expect(await sessionCacheKey(localSite, `theme=dark; ${cookie}; better-auth.session_data=unused`))
       .toBe(createHash("sha256").update("raw-secret-signed-cookie").digest("hex"));
     const debug = vi.spyOn(logger, "debug").mockImplementation(() => {});
     const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
@@ -64,52 +77,50 @@ describe("bounded isolate session cache", () => {
   it("hits without sliding TTL, misses at exactly 15s, and keeps cookies isolated", async () => {
     const cache = new SessionCache<ReturnType<typeof success>>();
     const resolve = vi.fn(() => Promise.resolve(success()));
-    await cache.lookup(cookie, resolve);
+    await cache.lookup(localSite, cookie, resolve);
     vi.setSystemTime(Date.now() + 14_999);
-    await cache.lookup(cookie, resolve);
+    await cache.lookup(localSite, cookie, resolve);
     expect(resolve).toHaveBeenCalledTimes(1);
     vi.setSystemTime(Date.now() + 1);
-    await cache.lookup(cookie, resolve);
+    await cache.lookup(localSite, cookie, resolve);
     expect(resolve).toHaveBeenCalledTimes(2);
-    expect((await cache.lookup(cookie + "-other", () => Promise.resolve(success("other")))).id).toBe("other");
-    expect((await cache.lookup(cookie, resolve)).id).toBe("reader");
+    expect((await cache.lookup(localSite, cookie + "-other", () => Promise.resolve(success("other")))).id).toBe("other");
+    expect((await cache.lookup(localSite, cookie, resolve)).id).toBe("reader");
     // Identical values under a different cookie name must not share a result.
-    expect((await cache.lookup(`__Secure-${cookie}`, () => Promise.resolve(success("secure")))).id).toBe("secure");
-    // Migrating a legacy cookie to its __Host- name is a fresh lookup, not a hit.
-    expect((await cache.lookup(`__Host-${cookie}`, () => Promise.resolve(success("host")))).id).toBe("host");
-    expect(await sessionCacheKey(`__Host-${cookie}`)).toBe(await sessionCacheKey(cookie));
+    expect((await cache.lookup(secureSite, `__Host-${cookie}`, () => Promise.resolve(success("host")))).id).toBe("host");
+    expect(await sessionCacheKey(secureSite, `__Host-${cookie}`)).toBe(await sessionCacheKey(localSite, cookie));
   });
 
   it("coalesces concurrent reads and does not extend TTL by backend latency", async () => {
     const cache = new SessionCache<ReturnType<typeof success>>();
     let finish!: (value: ReturnType<typeof success>) => void;
     const resolve = vi.fn(() => new Promise<ReturnType<typeof success>>(r => { finish = r; }));
-    const first = cache.lookup(cookie, resolve);
-    const second = cache.lookup(cookie, resolve);
+    const first = cache.lookup(localSite, cookie, resolve);
+    const second = cache.lookup(localSite, cookie, resolve);
     await vi.waitFor(() => expect(resolve).toHaveBeenCalledTimes(1));
     vi.setSystemTime(Date.now() + 10_000);
     finish(success());
     expect(await first).toEqual(await second);
     vi.setSystemTime(Date.now() + 5_000);
     const next = vi.fn(() => Promise.resolve(success()));
-    await cache.lookup(cookie, next);
+    await cache.lookup(localSite, cookie, next);
     expect(next).toHaveBeenCalledOnce();
   });
 
   it("bounds completed and pending entries with LRU eviction", async () => {
     const cache = new SessionCache<ReturnType<typeof success>>();
-    for (let i = 0; i < SESSION_CACHE_MAX_ENTRIES; i++) await cache.lookup(`${cookie}-${i}`, () => Promise.resolve(success()));
+    for (let i = 0; i < SESSION_CACHE_MAX_ENTRIES; i++) await cache.lookup(localSite, `${cookie}-${i}`, () => Promise.resolve(success()));
     const resolve = vi.fn(() => Promise.resolve(success()));
-    await cache.lookup(`${cookie}-0`, resolve); // touch oldest
-    await cache.lookup(`${cookie}-new`, resolve);
-    await cache.lookup(`${cookie}-0`, resolve);
+    await cache.lookup(localSite, `${cookie}-0`, resolve); // touch oldest
+    await cache.lookup(localSite, `${cookie}-new`, resolve);
+    await cache.lookup(localSite, `${cookie}-0`, resolve);
     expect(resolve).toHaveBeenCalledTimes(1);
-    await cache.lookup(`${cookie}-1`, resolve); // evicted
+    await cache.lookup(localSite, `${cookie}-1`, resolve); // evicted
     expect(resolve).toHaveBeenCalledTimes(2);
     const entries = (cache as unknown as { entries: Map<string, unknown> }).entries;
     expect(entries.size).toBe(SESSION_CACHE_MAX_ENTRIES);
     const pending = Array.from({ length: SESSION_CACHE_MAX_ENTRIES + 1 }, (_, i) =>
-      cache.lookup(`${cookie}-pending-${i}`, () => new Promise<ReturnType<typeof success>>(() => {})));
+      cache.lookup(localSite, `${cookie}-pending-${i}`, () => new Promise<ReturnType<typeof success>>(() => {})));
     await vi.waitFor(() => expect([...entries.values()].every(e => !(e as { value?: unknown }).value)).toBe(true));
     expect(entries.size).toBe(SESSION_CACHE_MAX_ENTRIES);
     void pending;
@@ -118,20 +129,23 @@ describe("bounded isolate session cache", () => {
   it.each([{ kind: "anonymous" }, { kind: "failure" }, success("expired", 0)])("never caches %j", async result => {
     const cache = new SessionCache<typeof result>();
     const resolve = vi.fn(() => Promise.resolve(result));
-    await cache.lookup(cookie, resolve);
-    await cache.lookup(cookie, resolve);
+    await cache.lookup(localSite, cookie, resolve);
+    await cache.lookup(localSite, cookie, resolve);
     expect(resolve).toHaveBeenCalledTimes(2);
   });
 
   it("does not cache thrown failures or ambiguous/missing cookies", async () => {
     const cache = new SessionCache<ReturnType<typeof success>>();
     const reject = vi.fn(() => Promise.reject(new Error("offline")));
-    for (let i = 0; i < 2; i++) await expect(cache.lookup(cookie, reject)).rejects.toThrow("offline");
+    for (let i = 0; i < 2; i++) await expect(cache.lookup(localSite, cookie, reject)).rejects.toThrow("offline");
     expect(reject).toHaveBeenCalledTimes(2);
-    for (const header of ["", `${cookie}; __Secure-${cookie}`, `__Host-${cookie}; __Secure-${cookie}`, `${cookie}; ${cookie}-other`]) {
+    for (const [site, header] of [
+      [localSite, ""], [localSite, `__Secure-${cookie}`], [localSite, `__Host-${cookie}`], [localSite, `${cookie}; ${cookie}-other`],
+      [secureSite, cookie], [secureSite, `__Host-${cookie}; __Host-${cookie}-other`],
+    ]) {
       const resolve = vi.fn(() => Promise.resolve(success()));
-      await cache.lookup(header, resolve);
-      await cache.lookup(header, resolve);
+      await cache.lookup(site, header, resolve);
+      await cache.lookup(site, header, resolve);
       expect(resolve).toHaveBeenCalledTimes(2);
     }
   });
@@ -140,13 +154,13 @@ describe("bounded isolate session cache", () => {
     const cache = new SessionCache<ReturnType<typeof success>>();
     let finish!: (value: ReturnType<typeof success>) => void;
     const resolve = vi.fn(() => new Promise<ReturnType<typeof success>>(r => { finish = r; }));
-    const pending = cache.lookup(cookie, resolve);
+    const pending = cache.lookup(localSite, cookie, resolve);
     await vi.waitFor(() => expect(resolve).toHaveBeenCalledOnce());
-    await cache.evict(cookie);
+    await cache.evict(localSite, cookie);
     finish(success());
     await pending;
     const next = vi.fn(() => Promise.resolve(success()));
-    await cache.lookup(cookie, next);
+    await cache.lookup(localSite, cookie, next);
     expect(next).toHaveBeenCalledOnce();
   });
 
@@ -154,15 +168,15 @@ describe("bounded isolate session cache", () => {
     const cache = new SessionCache<ReturnType<typeof success>>();
     let reject!: (error: Error) => void;
     const resolve = vi.fn(() => new Promise<ReturnType<typeof success>>((_, fail) => { reject = fail; }));
-    const pending = cache.lookup(cookie, resolve);
+    const pending = cache.lookup(localSite, cookie, resolve);
     await vi.waitFor(() => expect(resolve).toHaveBeenCalledOnce());
-    await cache.evict(cookie);
+    await cache.evict(localSite, cookie);
     const replacement = vi.fn(() => Promise.resolve(success()));
-    await cache.lookup(cookie, replacement);
+    await cache.lookup(localSite, cookie, replacement);
     const rejected = expect(pending).rejects.toThrow("old lookup failed");
     reject(new Error("old lookup failed"));
     await rejected;
-    await cache.lookup(cookie, replacement);
+    await cache.lookup(localSite, cookie, replacement);
     expect(replacement).toHaveBeenCalledOnce();
   });
 });
@@ -212,25 +226,25 @@ describe("Worker cache integration", () => {
 
   it("keeps unrelated entries on sign-out and rejected anonymous revocation", async () => {
     const resolve = vi.fn(() => Promise.resolve({ kind: "authenticated" as const, user, expiresAt: Date.now() + 60_000 }));
-    await sessionCache.lookup(cookie, () => Promise.resolve({ kind: "authenticated", user, expiresAt: Date.now() + 60_000 }));
+    await sessionCache.lookup(localSite, cookie, () => Promise.resolve({ kind: "authenticated", user, expiresAt: Date.now() + 60_000 }));
     vi.stubGlobal("fetch", vi.fn(() => Response.json({ error: "Denied" }, { status: 401 })));
     for (const operation of ["sign-out", "revoke-session", "revoke-sessions"]) {
       await proxyAuthRequest(new Request(`http://localhost:3000/api/auth/${operation}`, { method: "POST" }));
     }
     await proxyAuthSignOut(new Request("http://localhost:3000/api/auth/sign-out"));
-    await sessionCache.lookup(cookie, resolve);
+    await sessionCache.lookup(localSite, cookie, resolve);
     expect(resolve).not.toHaveBeenCalled();
   });
 
   it("invalidates another session on successful targeted revocation or deletion callback redirect", async () => {
     for (const [path, status] of [["revoke-session", 200], ["delete-user/callback", 302]] as const) {
       const resolve = vi.fn(() => Promise.resolve({ kind: "authenticated" as const, user, expiresAt: Date.now() + 60_000 }));
-      await sessionCache.lookup(cookie, resolve);
+      await sessionCache.lookup(localSite, cookie, resolve);
       vi.stubGlobal("fetch", vi.fn(() => new Response(null, { status })));
       await proxyAuthRequest(new Request(`http://localhost:3000/api/auth/${path}`, {
         method: path === "revoke-session" ? "POST" : "GET", headers: { cookie: cookie + "-other" },
       }));
-      await sessionCache.lookup(cookie, resolve);
+      await sessionCache.lookup(localSite, cookie, resolve);
       expect(resolve).toHaveBeenCalledTimes(2);
       sessionCache.clear();
     }
@@ -262,7 +276,7 @@ describe("Worker cache integration", () => {
 describe("fresh identity decisions", () => {
   it.each(["/", "/sign-in", "/sign-up", "/get-started", "/home", "/account/security"])(
     "does not authorize or redirect using a warm revoked identity on %s", async path => {
-      await sessionCache.lookup(cookie, () => Promise.resolve({ kind: "authenticated", user, expiresAt: Date.now() + 60_000 }));
+      await sessionCache.lookup(localSite, cookie, () => Promise.resolve({ kind: "authenticated", user, expiresAt: Date.now() + 60_000 }));
       const fetch = vi.fn(() => Response.json(null));
       vi.stubGlobal("fetch", fetch);
       const worker = new Hono<{ Variables: { user?: User } }>();
@@ -275,19 +289,19 @@ describe("fresh identity decisions", () => {
         expect(response.headers.get("location")).toBeNull();
       } else expect([302, 401, 404]).toContain(response.status);
       const fresh = vi.fn(() => Promise.resolve({ kind: "anonymous" as const }));
-      await sessionCache.lookup(cookie, fresh);
+      await sessionCache.lookup(localSite, cookie, fresh);
       expect(fresh).toHaveBeenCalledOnce();
     },
   );
 
   it.each([400, 401, 403, 404, 200])("evicts after an authoritative proxy denial (%s)", async status => {
-    await sessionCache.lookup(cookie, () => Promise.resolve({ kind: "authenticated", user, expiresAt: Date.now() + 60_000 }));
+    await sessionCache.lookup(localSite, cookie, () => Promise.resolve({ kind: "authenticated", user, expiresAt: Date.now() + 60_000 }));
     vi.stubGlobal("fetch", vi.fn(() => Response.json(null, { status })));
     const request = new Request(`http://localhost:3000${status === 200 ? "/api/auth/get-session" : "/api/auth/list-sessions"}`, { headers: { cookie } });
     if (status === 200) await proxyAuthRequest(request);
     else await proxyConvexRequest(request);
     const fresh = vi.fn(() => Promise.resolve({ kind: "anonymous" as const }));
-    await sessionCache.lookup(cookie, fresh);
+    await sessionCache.lookup(localSite, cookie, fresh);
     expect(fresh).toHaveBeenCalledOnce();
   });
 });

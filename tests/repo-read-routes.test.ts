@@ -26,6 +26,7 @@ beforeEach(async () => {
 
 afterEach(() => {
   vi.useRealTimers();
+  vi.unstubAllEnvs();
   Reflect.deleteProperty(globalThis, "caches");
 });
 
@@ -264,6 +265,21 @@ describe("private repositories", () => {
     expectPlainNotFound(missing);
     const page = async (response: Response) => (await response.text()).replace(/nonce="[^"]+"/g, "");
     expect(await page(denied)).toBe((await page(missing)).replace("/r/octo/no-such-repo", priv));
+  });
+
+  it("reads only the __Host- session cookie on HTTPS, never an unprefixed or retired one (#208)", async () => {
+    vi.stubEnv("SITE_URL", "https://rendro.test");
+    const host = (cookie: string) => `__Host-${cookie}`;
+    // Alone, an unprefixed (sibling-settable) or retired session cookie is anonymous and never looked up.
+    for (const cookie of [sessionCookies.reader, `__Secure-${sessionCookies.reader}`]) expectPlainNotFound(await get(priv, { cookie }));
+    expect(sessionLookups).toEqual([]);
+    // Beside a __Host- cookie, before or after it, the reader's unprefixed token is neither looked up nor granted.
+    for (const cookie of [`${sessionCookies.reader}; ${host(sessionCookies.outsider)}`, `${host(sessionCookies.outsider)}; ${sessionCookies.reader}`]) {
+      expectPlainNotFound(await get(priv, { cookie }));
+    }
+    expect(sessionLookups).not.toContain("reader-token.sig");
+    expect(sessionLookups).toContain("outsider-token.sig");
+    expect((await get(priv, { cookie: `${sessionCookies.outsider}; ${host(sessionCookies.reader)}` })).status).toBe(200);
   });
 
   it("grants a reader once, sets a host-only capability cookie and then serves without the session or the source", async () => {

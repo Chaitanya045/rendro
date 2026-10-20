@@ -15,7 +15,7 @@ import { AUTH_CLIENT_IP_HEADER } from "../shared/auth-client-ip";
 import { authCookiePrefix } from "../shared/auth-cookies";
 import { sendAuthLinkEmail, sendExistingAccountNotice } from "./authEmails";
 import authSchema from "./betterAuth/schema";
-import { boundSessionLifetime, legacyCookieMigration, sessionLifetime } from "./sessionLifetime";
+import { boundSessionLifetime, sessionLifetime } from "./sessionLifetime";
 
 export const authComponent = createClient<DataModel, typeof authSchema>(
   components.betterAuth,
@@ -116,8 +116,6 @@ export function createAuthOptions(ctx: GenericCtx<DataModel>) {
       },
     },
     plugins: [
-      // First: every later hook and endpoint reads only current cookie names.
-      legacyCookieMigration(),
       sessionReadLimit((key) => {
         if (!("runMutation" in ctx)) throw new Error("Session HTTP reads require a mutation-capable context");
         return ctx.runMutation(components.betterAuth.sessionReadLimit.consume, { key });

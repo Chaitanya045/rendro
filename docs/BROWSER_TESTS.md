@@ -245,7 +245,7 @@ These specs cover the pages around the documentation, in all three engines at 14
 | `auth-controls.spec.ts` | The shared field and button states on the sign-up form: hover, focus ring, required and invalid fields in the alert region, 36px icon and 44px field/button targets, long values contained |
 | `fonts.spec.ts` | Self-hosted fonts and icons on public and signed-in pages and the repository shell, ligature glyphs, and no overflow with every font blocked (with a self-test that removes the icon safety and must find overflow) |
 | `static-assets.spec.ts` | Every bundle a signed-in page and a private repository load is immutable for its version and bypasses the session stack; stale or unknown versions are uncached; unlisted paths 404 |
-| `smoke.spec.ts`, `image-proxy.spec.ts`, `cookie-migration.spec.ts` | CSP nonce and opaque frame/SVG smokes, external images only through the proxy, and legacy cookie names migrating to the current ones |
+| `smoke.spec.ts`, `image-proxy.spec.ts`, `retired-cookies.spec.ts` | CSP nonce and opaque frame/SVG smokes, external images only through the proxy, and the retired `__Secure-` auth cookie names never signing anyone in while sign-out still expires them |
 
 Tests that sign out or mutate use a verified disposable user (`provision` in `e2e/shell-helpers.ts`); the seeded users
 are used read-only.

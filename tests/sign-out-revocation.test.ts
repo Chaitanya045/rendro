@@ -67,23 +67,23 @@ describe("sign-out with the real Better Auth handler", () => {
   it.each(["GET", "untrusted POST", "POST"])("evicts cached identity on %s, including a lookup racing revocation", async mode => {
     const f = await runtime();
     const resolver = vi.fn(() => Promise.resolve({ kind: "authenticated" as const, user: { id: "user", email: "user@example.test", name: "User", emailVerified: true, image: null, createdAt: 1, updatedAt: 1 }, expiresAt: Date.now() + 60_000 }));
-    await sessionCache.lookup(f.cookie, resolver);
-    await sessionCache.lookup(f.cookie, resolver);
+    await sessionCache.lookup(origin, f.cookie, resolver);
+    await sessionCache.lookup(origin, f.cookie, resolver);
     expect(resolver).toHaveBeenCalledTimes(1);
     if (mode === "POST") f.fetch.mockImplementationOnce(async () => {
-      await sessionCache.lookup(f.cookie, resolver);
+      await sessionCache.lookup(origin, f.cookie, resolver);
       return Response.json({ success: true });
     });
     const response = await f.signOut(mode === "GET" ? "GET" : "POST", mode === "untrusted POST" ? null : origin);
     expect(response.status).toBe(mode === "untrusted POST" ? 403 : 200);
-    await sessionCache.lookup(f.cookie, resolver);
+    await sessionCache.lookup(origin, f.cookie, resolver);
     expect(resolver).toHaveBeenCalledTimes(mode === "POST" ? 3 : 2);
   });
 
   it.each([403, 500, 302, "network"])("retains cookies and offers retry on upstream %s, evicting cached identity", async failure => {
     const f = await runtime();
     const resolver = vi.fn(() => Promise.resolve({ kind: "authenticated" as const, user: { id: "user", email: "user@example.test", name: "User", emailVerified: true, image: null, createdAt: 1, updatedAt: 1 }, expiresAt: Date.now() + 60_000 }));
-    await sessionCache.lookup(f.cookie, resolver);
+    await sessionCache.lookup(origin, f.cookie, resolver);
     if (failure === "network") f.fetch.mockRejectedValueOnce(new Error("private diagnostic"));
     else f.fetch.mockResolvedValueOnce(new Response("private diagnostic", { status: failure as number, headers: { "set-cookie": "better-auth.session_token=; Max-Age=0" } }));
     const response = await f.signOut();
@@ -94,7 +94,7 @@ describe("sign-out with the real Better Auth handler", () => {
     expect(body).toContain("Try again");
     expect(body).not.toContain("private diagnostic");
     expect(await (await f.request("/get-session?disableCookieCache=true")).json()).not.toBeNull();
-    await sessionCache.lookup(f.cookie, resolver);
+    await sessionCache.lookup(origin, f.cookie, resolver);
     expect(resolver).toHaveBeenCalledTimes(2);
   });
 

@@ -1,9 +1,7 @@
 import type { BetterAuthPlugin, DBAdapter, DBTransactionAdapter } from "better-auth";
-import { createAuthMiddleware, isAPIError } from "better-auth/api";
-import { splitSetCookieHeader } from "better-auth/cookies";
+import { createAuthMiddleware } from "better-auth/api";
 import { makeSignature } from "better-auth/crypto";
 import { parseCookies } from "better-call";
-import { authCookiePrefix, LEGACY_AUTH_COOKIE_PREFIX } from "../shared/auth-cookies";
 import { sessionExpiryMs } from "./sessionReadLimit";
 
 const day = 86_400_000;
@@ -59,13 +57,11 @@ export function boundSessionLifetime<A extends DBAdapter | DBTransactionAdapter>
  * Headers for server-side session reads. Sessions are cookie-only: a bearer
  * token is never a session, and a request that carries Authorization never
  * falls back to the browser's cookie session either.
- * Legacy cookie names (including those inside viewer tickets) are read under
- * the current names, exactly as the HTTP handler reads them.
  */
 export function sessionCookieHeaders(headers: Headers): Headers {
   const cookie = headers.get("cookie");
   if (cookie === null || headers.has("authorization")) return new Headers();
-  return new Headers({ cookie: promoteLegacyCookies(cookie, authCookiePrefix(process.env.SITE_URL)).header });
+  return new Headers({ cookie });
 }
 
 // Endpoints that never resolve the caller's session, refresh it, or write its
@@ -90,100 +86,6 @@ export function withLifetimeMarker(header: string, name: string, marker?: string
     if (baseName(key) !== baseName(name)) pairs.push(`${key}=${cookieValue(value)}`);
   }
   return pairs.join("; ");
-}
-
-export interface LegacyCookies {
-  /** Legacy pairs renamed to the current name because no current cookie was sent. */
-  promoted: string[];
-  /** Legacy pairs dropped because the current cookie was also sent and wins. */
-  shadowed: string[];
-}
-
-/**
- * Read `__Secure-better-auth.*` cookies under the current `prefix`. A current
- * cookie always wins over its legacy twin. Headers without legacy names are
- * returned unchanged; otherwise the header is rebuilt from better-call's parse.
- */
-export function promoteLegacyCookies(header: string, prefix: string): LegacyCookies & { header: string } {
-  const cookies = parseCookies(header);
-  const legacy: LegacyCookies = { promoted: [], shadowed: [] };
-  if (![...cookies.keys()].some(name => name.startsWith(LEGACY_AUTH_COOKIE_PREFIX))) return { header, ...legacy };
-  const pairs: string[] = [];
-  for (const [name, value] of cookies) {
-    const current = name.startsWith(LEGACY_AUTH_COOKIE_PREFIX) ? `${prefix}.${name.slice(LEGACY_AUTH_COOKIE_PREFIX.length)}` : name;
-    if (current !== name && cookies.has(current)) legacy.shadowed.push(name);
-    else {
-      if (current !== name) legacy.promoted.push(name);
-      pairs.push(`${current}=${cookieValue(value)}`);
-    }
-  }
-  return { header: pairs.join("; "), ...legacy };
-}
-
-// Internal request header from onRequest to the after hook. Callers cannot set
-// it: onRequest replaces any value, and server API calls never carry it.
-const legacyCookieHeader = "x-rendro-legacy-auth-cookies";
-const legacySessionToken = `${LEGACY_AUTH_COOKIE_PREFIX}session_token`;
-
-/**
- * Migrates pre-#89 `__Secure-better-auth.*` cookies to the current names.
- * Reads: every HTTP request is rewritten before routing, so all hooks and
- * endpoints see only current names. Writes: a successful GET that resolves a
- * stored session from a promoted legacy token re-issues it under the current
- * name, with the lifetime the persisted session allows (#145: non-remembered
- * sessions stay browser-session cookies). Promoted legacy cookies are expired
- * only by such a read, or once the response sets or clears the current session
- * cookie, so a failed or writing request never signs anyone out. Shadowed
- * legacy cookies are always expired.
- */
-export function legacyCookieMigration(): BetterAuthPlugin {
-  return {
-    id: "rendro-legacy-cookie-migration",
-    onRequest: (request, context) => {
-      const cookie = request.headers.get("cookie");
-      const prefix = context.authCookies.sessionToken.name.slice(0, -".session_token".length);
-      const migration = cookie === null ? undefined : promoteLegacyCookies(cookie, prefix);
-      const migrates = migration !== undefined && migration.promoted.length + migration.shadowed.length > 0;
-      if (!migrates && !request.headers.has(legacyCookieHeader)) return Promise.resolve(undefined);
-      const headers = new Headers(request.headers);
-      headers.delete(legacyCookieHeader);
-      if (migrates) {
-        headers.set("cookie", migration.header);
-        headers.set(legacyCookieHeader, JSON.stringify({ promoted: migration.promoted, shadowed: migration.shadowed }));
-      }
-      return Promise.resolve({ request: new Request(request, { headers }) });
-    },
-    hooks: { after: [{
-      matcher: ctx => ctx.headers?.has(legacyCookieHeader) === true,
-      handler: createAuthMiddleware(async ctx => {
-        // The matcher guarantees the record; only onRequest can have written it.
-        const legacy = JSON.parse(ctx.headers?.get(legacyCookieHeader) as string) as LegacyCookies;
-        const cookies = ctx.context.authCookies;
-        // Convex's runtime may lack Headers#getSetCookie; split like Better Auth does.
-        const sessionCookieWritten = splitSetCookieHeader(ctx.context.responseHeaders?.get("set-cookie") ?? "")
-          .some(value => value.startsWith(`${cookies.sessionToken.name}=`));
-        let expire = legacy.shadowed;
-        if (sessionCookieWritten) expire = [...expire, ...legacy.promoted];
-        else if (legacy.promoted.includes(legacySessionToken) && ctx.request?.method === "GET"
-          && !isAPIError(ctx.context.returned) && !sessionlessAuthPaths.has(ctx.path)) {
-          const token = await ctx.getSignedCookie(cookies.sessionToken.name, ctx.context.secret);
-          // No clock read: an expired session was already deleted, with its cookie, by the endpoint.
-          const resolved = token ? await ctx.context.internalAdapter.findSession(token) : null;
-          if (token && resolved) {
-            const rememberMe = remembered(resolved.session);
-            await ctx.setSignedCookie(cookies.sessionToken.name, token, ctx.context.secret, {
-              ...cookies.sessionToken.attributes, maxAge: rememberMe ? ctx.context.sessionConfig.expiresIn : undefined,
-            });
-            if (!rememberMe) await ctx.setSignedCookie(cookies.dontRememberToken.name, "true", ctx.context.secret, cookies.dontRememberToken.attributes);
-          }
-          // A legacy token without a session can never authenticate again.
-          expire = [...expire, ...legacy.promoted];
-        }
-        // Legacy cookies were set host-only by the Worker, which strips Domain.
-        for (const name of expire) ctx.setCookie(name, "", { maxAge: 0, path: "/", secure: true, httpOnly: true, sameSite: "lax" });
-      }),
-    }] },
-  };
 }
 
 export function sessionLifetime(): BetterAuthPlugin {

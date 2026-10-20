@@ -8,8 +8,8 @@ type Cacheable = { kind: string; expiresAt?: number };
 type Entry<T> = { cookieName: string; until: number; pending: Promise<T>; value?: T };
 
 /** Hash only an unambiguous session cookie value. Never retain cookie strings. */
-export async function sessionCacheKey(cookie: string): Promise<string | null> {
-  const pairs = sessionTokenCookie(cookie).split("; ").filter(Boolean);
+export async function sessionCacheKey(site: string, cookie: string): Promise<string | null> {
+  const pairs = sessionTokenCookie(site, cookie).split("; ").filter(Boolean);
   // Multiple token cookies can have backend-dependent precedence. Bypass them.
   if (pairs.length !== 1) return null;
   const value = pairs[0].slice(pairs[0].indexOf("=") + 1);
@@ -23,20 +23,20 @@ export class SessionCache<T extends Cacheable> {
 
   clear(): void { this.entries.clear(); }
 
-  async evict(cookie: string): Promise<void> {
+  async evict(site: string, cookie: string): Promise<void> {
     // Delete each presented token independently, including ambiguous headers.
     // Anonymous/invalid sign-out attempts must not flush other users' entries.
-    for (const pair of sessionTokenCookie(cookie).split("; ").filter(Boolean)) {
-      const key = await sessionCacheKey(pair);
+    for (const pair of sessionTokenCookie(site, cookie).split("; ").filter(Boolean)) {
+      const key = await sessionCacheKey(site, pair);
       // Each pair above is exactly one nonempty session-token cookie.
       this.entries.delete(key as string);
     }
   }
 
-  async lookup(cookie: string, resolve: () => Promise<T>): Promise<T> {
-    const key = await sessionCacheKey(cookie);
+  async lookup(site: string, cookie: string, resolve: () => Promise<T>): Promise<T> {
+    const key = await sessionCacheKey(site, cookie);
     if (!key) return resolve();
-    const cookieName = sessionTokenCookie(cookie).split("=", 1)[0];
+    const cookieName = sessionTokenCookie(site, cookie).split("=", 1)[0];
     const now = Date.now();
     const cached = this.entries.get(key);
     if (cached && cached.cookieName === cookieName && cached.until > now) {
@@ -72,7 +72,7 @@ export class SessionCache<T extends Cacheable> {
 export const sessionCache = new SessionCache<LookupResult>();
 
 /** Call before translating authoritative denials into redirects/opaque 404s. */
-export async function evictRejectedSession(cookie: string, status: number): Promise<void> {
+export async function evictRejectedSession(site: string, cookie: string, status: number): Promise<void> {
   // Better Auth also uses 400 for rejected membership/permission checks.
-  if ([400, 401, 403, 404].includes(status)) await sessionCache.evict(cookie);
+  if ([400, 401, 403, 404].includes(status)) await sessionCache.evict(site, cookie);
 }

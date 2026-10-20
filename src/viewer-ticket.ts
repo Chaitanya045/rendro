@@ -1,21 +1,27 @@
 import { authCookiePair } from "../shared/auth-cookies";
 
-const sessionTokenPair = authCookiePair("session_token");
-const preferencePair = authCookiePair("dont_remember");
-
-/** Session-token pairs under every name Convex reads (current and legacy). */
-export function sessionTokenCookie(cookie: string): string {
-  return cookie.split(";").map(part => part.trim())
-    .filter(part => sessionTokenPair.test(part)).join("; ");
+/**
+ * The site whose auth cookie names a Worker request reads: the configured
+ * SITE_URL, else the request's own origin (as write admission does).
+ */
+export function cookieSite(requestUrl: string): string {
+  return process.env.SITE_URL ?? new URL(requestUrl).origin;
 }
 
-export function viewerSessionCookie(cookie: string): string {
-  const token = sessionTokenCookie(cookie);
+function pairs(cookie: string, pattern: RegExp): string[] {
+  return cookie.split(";").map(part => part.trim()).filter(part => pattern.test(part));
+}
+
+/** Session-token pairs under the one name Convex reads for `site`. */
+export function sessionTokenCookie(site: string, cookie: string): string {
+  return pairs(cookie, authCookiePair(site, "session_token")).join("; ");
+}
+
+export function viewerSessionCookie(site: string, cookie: string): string {
+  const token = sessionTokenCookie(site, cookie);
   if (!token) return "";
   // Retain compatibility with existing tickets. Convex derives the lifetime
   // preference from the persisted session, regardless of this client marker.
   // Never forward session_data, unrelated cookies, or bearer API credentials.
-  const preference = cookie.split(";").map(part => part.trim())
-    .filter(part => preferencePair.test(part));
-  return [token, ...preference].join("; ");
+  return [token, ...pairs(cookie, authCookiePair(site, "dont_remember"))].join("; ");
 }

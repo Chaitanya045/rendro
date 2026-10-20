@@ -185,9 +185,9 @@ describe("auth rate limits", () => {
     const alternate = new Headers(sessions[0].headers);
     alternate.set("cookie", alternate.get("cookie")!.replace(/session_token=(.)/, (_, first: string) => `session_token=%${first.charCodeAt(0).toString(16)}`));
     expect((await request("/get-session", "192.0.2.101", alternate)).status).toBe(429);
-    await sessionCache.evict(sessions[0].headers.get("cookie")!);
+    await sessionCache.evict(baseURL, sessions[0].headers.get("cookie")!);
     expect((await app.request("/r/cache-probe", { headers: sessions[0].headers })).status).toBe(503);
-    await sessionCache.evict(sessions[1].headers.get("cookie")!);
+    await sessionCache.evict(baseURL, sessions[1].headers.get("cookie")!);
     expect((await app.request("/r/cache-probe", { headers: sessions[1].headers })).status).toBe(200);
     expect(fetchSession).toHaveBeenCalledTimes(4);
     const rows = await buckets();

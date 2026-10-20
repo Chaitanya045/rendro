@@ -51,7 +51,7 @@ describe("Worker backend error mapping", () => {
     const response = await backendFetch("https://user:private-password@backend.test/private-secret?token=private-query", {
       method: "POST", body: diagnostic,
       headers: { authorization: "Bearer private-token", cookie: "private-cookie" },
-    }, "proxyConvexRequest");
+    }, "proxyConvexRequest", "http://localhost:3000");
     expect(response.status).toBe(502);
     expect(await response.json()).toEqual({ error: "Backend unavailable" });
     expect(mocks.error.mock.calls).toEqual([[{ category: "UpstreamError", operation: "proxyConvexRequest", status }, "Backend request failed"]]);

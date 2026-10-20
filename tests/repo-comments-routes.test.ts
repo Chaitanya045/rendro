@@ -10,6 +10,8 @@ import { COMMENTOR_PARENT_VERSION } from "@/viewer/asset-versions";
 import { privateRepo, publicRepo, repoReadFixture, sessionCookies, stubSessions, users } from "./helpers/repo-read-fixture";
 
 const ORIGIN = "https://rendro.test";
+// The canonical site is HTTPS, so sessions travel under the host-only names (#208).
+const sessions = { reader: `__Host-${sessionCookies.reader}`, outsider: `__Host-${sessionCookies.outsider}` } as const;
 const pub = `/r/${publicRepo.owner}/${publicRepo.name}`;
 const priv = `/r/${privateRepo.owner}/${privateRepo.name}`;
 
@@ -81,7 +83,7 @@ function expectPlainNotFound(response: Response) {
 
 describe("the repository shell carries the one comments connection", () => {
   it.each([["public", pub, publicRepo.id], ["private", priv, privateRepo.id]])("configures comments in the %s shell", async (_kind, base, repoId) => {
-    const response = await request(base, { headers: { cookie: sessionCookies.reader } });
+    const response = await request(base, { headers: { cookie: sessions.reader } });
     const html = await response.text();
     const config = /window\.RENDRO_REPO_COMMENT_CONFIG=(\{[^;]+\});/.exec(html)?.[1];
     expect(JSON.parse(config ?? "null")).toEqual({ repoId, accessUrl: `${base}/comment-access`, convexUrl: process.env.CONVEX_URL, documentPath: "docs/index.md" });
@@ -114,22 +116,22 @@ describe("comment access mirrors read access", () => {
     expect(body.expiresAt - before).toBeLessThanOrEqual(60_000 + 50);
     expect(grants).toEqual([{ repoId: publicRepo.id, userId: null, epoch: 0, expiresAt: body.expiresAt }]);
     // A signed-in reader of a public repository holds the same public grant.
-    expect((await access(pub, { cookie: sessionCookies.reader })).status).toBe(200);
+    expect((await access(pub, { cookie: sessions.reader })).status).toBe(200);
     expect(grants).toHaveLength(1);
   });
 
   it("grants a private repository's comments to its reader only, at the epoch the read path checked", async () => {
     fixture.access.epochs.set(users.reader, 42);
-    for (const headers of [{}, { cookie: sessionCookies.outsider }] as Array<Record<string, string>>) expectPlainNotFound(await access(priv, headers));
+    for (const headers of [{}, { cookie: sessions.outsider }] as Array<Record<string, string>>) expectPlainNotFound(await access(priv, headers));
     expect(grants).toEqual([]);
-    const granted = await access(priv, { cookie: sessionCookies.reader });
+    const granted = await access(priv, { cookie: sessions.reader });
     expect(granted.status).toBe(200);
     const body = await granted.json() as { expiresAt: number };
     expect(body).toEqual({ repoId: privateRepo.id, private: true, expiresAt: expect.any(Number) });
     expect(body.expiresAt - Date.now()).toBeLessThanOrEqual(CAPABILITY_TTL_SECONDS * 1000);
     expect(grants).toEqual([{ repoId: privateRepo.id, userId: users.reader, epoch: 42, expiresAt: body.expiresAt }]);
     // The capability cookie answers the next request: no session lookup, no permission source, no second write.
-    const cookie = `${sessionCookies.reader}; ${capability(granted)}`;
+    const cookie = `${sessions.reader}; ${capability(granted)}`;
     const calls = fixture.access.calls.authorize.length;
     expect((await access(priv, { cookie })).status).toBe(200);
     expect(fixture.access.calls.authorize.length).toBe(calls);
@@ -138,8 +140,8 @@ describe("comment access mirrors read access", () => {
 
   it("never grants past the capability cookie it rests on", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
-    const granted = await access(priv, { cookie: sessionCookies.reader });
-    const cookie = `${sessionCookies.reader}; ${capability(granted)}`;
+    const granted = await access(priv, { cookie: sessions.reader });
+    const cookie = `${sessions.reader}; ${capability(granted)}`;
     const cookieExpiry = Math.floor(Date.now() / 1000) * 1000 + CAPABILITY_TTL_SECONDS * 1000;
     vi.setSystemTime(Date.now() + 2 * 60_000);
     clearCommentGrantMemory();
@@ -159,8 +161,8 @@ describe("comment access mirrors read access", () => {
     expect(asked()).toBe(before + 1);
     expect((await renewed.json() as { expiresAt: number }).expiresAt - Date.now()).toBeGreaterThan(55_000);
 
-    const granted = await access(priv, { cookie: sessionCookies.reader });
-    const cookie = `${sessionCookies.reader}; ${capability(granted)}`;
+    const granted = await access(priv, { cookie: sessions.reader });
+    const cookie = `${sessions.reader}; ${capability(granted)}`;
     // 24 s left on the capability cookie: decided again (session, epoch, source), with a fresh cookie and a full grant.
     vi.setSystemTime(Date.now() + CAPABILITY_TTL_SECONDS * 1000 - 24_000);
     const calls = asked();
@@ -171,8 +173,8 @@ describe("comment access mirrors read access", () => {
   });
 
   it("stops at once when the reader's epoch moves: the next request is decided again and denied", async () => {
-    const granted = await access(priv, { cookie: sessionCookies.reader });
-    const cookie = `${sessionCookies.reader}; ${capability(granted)}`;
+    const granted = await access(priv, { cookie: sessions.reader });
+    const cookie = `${sessions.reader}; ${capability(granted)}`;
     fixture.access.revoke(users.reader, privateRepo.id);
     expectPlainNotFound(await access(priv, { cookie }));
     expect(grants).toHaveLength(1);
@@ -189,7 +191,7 @@ describe("comment access mirrors read access", () => {
     expect(response.status).toBe(503);
     expect(response.headers.get("Retry-After")).toBe("1");
     fixture.access.unavailable = true;
-    const unknown = await access(priv, { cookie: sessionCookies.reader });
+    const unknown = await access(priv, { cookie: sessions.reader });
     expect(unknown.status).toBe(503);
     expect(response.headers.get("Content-Type")).toContain("application/json");
   });
@@ -225,7 +227,7 @@ describe("the first comments come with the first access answer (#284)", () => {
   const first = "?path=docs%2Fguide.md";
 
   it("hands a public repository's first page to anyone, read for the signed-in reader, never cacheable (#303)", async () => {
-    const response = await access(pub, { cookie: sessionCookies.reader }, first);
+    const response = await access(pub, { cookie: sessions.reader }, first);
     expect(response.status).toBe(200);
     expect(response.headers.get("Cache-Control")).toBe("private, no-store");
     expect(await response.json()).toEqual({
@@ -238,7 +240,7 @@ describe("the first comments come with the first access answer (#284)", () => {
 
   it("reads a public first page as anonymous for a reader the session does not name (#303)", async () => {
     // No session, a session the backend does not know, and a session check that is down: anyone may read the page.
-    for (const cookie of [undefined, "better-auth.session_token=unknown-token.sig", "better-auth.session_token=down-token.sig"]) {
+    for (const cookie of [undefined, "__Host-better-auth.session_token=unknown-token.sig", "__Host-better-auth.session_token=down-token.sig"]) {
       const response = await access(pub, cookie ? { cookie } : {}, first);
       expect(response.status).toBe(200);
       expect((await response.json() as { threads?: unknown }).threads).toEqual({ path: "docs/guide.md", page, isDone: false });
@@ -248,14 +250,14 @@ describe("the first comments come with the first access answer (#284)", () => {
 
   it("hands a private repository's first page to its reader only, at the epoch the read path checked", async () => {
     fixture.access.epochs.set(users.reader, 7);
-    for (const headers of [{}, { cookie: sessionCookies.outsider }] as Array<Record<string, string>>) {
+    for (const headers of [{}, { cookie: sessions.outsider }] as Array<Record<string, string>>) {
       const denied = await access(priv, headers, first);
       expectPlainNotFound(denied);
       expect(await denied.json()).toEqual({ error: "Not found" });
     }
     // A reader without access never reaches Convex: no grant and no page is asked for.
     expect(snapshots).toEqual([]);
-    const granted = await access(priv, { cookie: sessionCookies.reader }, first);
+    const granted = await access(priv, { cookie: sessions.reader }, first);
     expect(granted.headers.get("Cache-Control")).toBe("private, no-store");
     expect(granted.headers.get("ETag")).toBeNull();
     expect((await granted.json() as { threads: unknown }).threads).toEqual({ path: "docs/guide.md", page, isDone: false });
