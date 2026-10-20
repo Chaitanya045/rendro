@@ -18366,7 +18366,7 @@
             },
             {
               "file": "tests/commentor-widget-browser.test.ts",
-              "name": "shows a pending post, keeps the draft on every failure and recovers",
+              "name": "rolls a failed post back, keeps the draft in the reopened composer and retries the same operation (#284)",
               "kind": "browser"
             }
           ]
@@ -18508,7 +18508,7 @@
           "tests": [
             {
               "file": "tests/commentor-widget-browser.test.ts",
-              "name": "shows a pending post, keeps the draft on every failure and recovers",
+              "name": "rolls a failed post back, keeps the draft in the reopened composer and retries the same operation (#284)",
               "kind": "browser"
             },
             {
@@ -18530,7 +18530,7 @@
           "tests": [
             {
               "file": "tests/commentor-widget-browser.test.ts",
-              "name": "shows a pending post, keeps the draft on every failure and recovers",
+              "name": "rolls a failed post back, keeps the draft in the reopened composer and retries the same operation (#284)",
               "kind": "browser"
             },
             {
@@ -19812,7 +19812,7 @@
             },
             {
               "file": "tests/commentor-widget-browser.test.ts",
-              "name": "shows a pending post, keeps the draft on every failure and recovers",
+              "name": "rolls a failed post back, keeps the draft in the reopened composer and retries the same operation (#284)",
               "kind": "browser"
             },
             {
@@ -26254,6 +26254,157 @@
               "file": "tests/repo-comments-browser.test.ts",
               "name": "anchors a clicked element by its text, and refuses one without text",
               "kind": "browser"
+            }
+          ]
+        },
+        {
+          "id": "UI-163-E12",
+          "from": "A reader opens a repository document; the Convex socket is not up yet",
+          "trigger": "The shell's first comment-access answer arrives with the opening document's first thread page (#284)",
+          "expected": "Its threads show at once; the live page then replaces them, removing a deleted thread, updating an edited one and adding a new one, with no empty page in between",
+          "inventoryRefs": [
+            "UI-163"
+          ],
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/repo-comments-latency-browser.test.ts",
+              "name": "shows the snapshot, then the live page replaces it: a deleted thread goes, an edited one changes, a new one arrives",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/repo-comments-host.test.ts",
+              "name": "holds the live subscription until the first access answer, shows its page, then lets the live page replace it",
+              "kind": "unit"
+            }
+          ]
+        },
+        {
+          "id": "UI-163-E13",
+          "from": "A reader the read path denies opens a repository document",
+          "trigger": "The shell asks for comment access with the opening document (#284)",
+          "expected": "The answer is the plain 404 with no thread page and `private, no-store`; nothing shows and the widget stays read-only",
+          "inventoryRefs": [
+            "UI-163"
+          ],
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/repo-comments-latency-browser.test.ts",
+              "name": "shows a reader the read path denies nothing, and lets them write nothing",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/repo-comments-routes.test.ts",
+              "name": "hands a private repository's first page to its reader only, at the epoch the read path checked",
+              "kind": "unit"
+            }
+          ]
+        },
+        {
+          "id": "UI-163-E14",
+          "from": "A signed-in reader with access writes a new comment",
+          "trigger": "Press Post (#284)",
+          "expected": "The composer closes and the thread shows at once as “Sending…” (aria-busy, no actions); the live echo replaces it, matched by clientOperationId, without a duplicate",
+          "inventoryRefs": [
+            "UI-163"
+          ],
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/commentor-widget-browser.test.ts",
+              "name": "shows the reader's own thread at once as sending, and the live echo replaces it without a duplicate (#284)",
+              "kind": "browser"
+            }
+          ]
+        },
+        {
+          "id": "UI-163-E15",
+          "from": "A new comment is sending",
+          "trigger": "The write fails (#284)",
+          "expected": "The optimistic thread is removed, the composer reopens with the draft, the error is shown, and Post retries the same operation when its outcome is unknown",
+          "inventoryRefs": [
+            "UI-163"
+          ],
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/commentor-widget-browser.test.ts",
+              "name": "rolls a failed post back, keeps the draft in the reopened composer and retries the same operation (#284)",
+              "kind": "browser"
+            }
+          ]
+        },
+        {
+          "id": "UI-163-E16",
+          "from": "A signed-in reader with access writes a new comment",
+          "trigger": "Submit twice in one moment, then try to open another composer (#284)",
+          "expected": "One write is sent and one optimistic thread shows; a second composer waits for the outcome",
+          "inventoryRefs": [
+            "UI-163"
+          ],
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/commentor-widget-browser.test.ts",
+              "name": "sends a double submit once and shows one optimistic thread (#284)",
+              "kind": "browser"
+            }
+          ]
+        },
+        {
+          "id": "UI-163-E17",
+          "from": "A thread is open with a reply written",
+          "trigger": "Send the reply; it fails, then succeeds (#284)",
+          "expected": "The reply shows at once as “Sending…” with the input locked and empty; a failure removes it and puts the draft back; the echo replaces it once",
+          "inventoryRefs": [
+            "UI-163"
+          ],
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/commentor-widget-browser.test.ts",
+              "name": "shows the reader's own reply at once, rolls a failure back into the input, and dedupes the echo (#284)",
+              "kind": "browser"
+            }
+          ]
+        },
+        {
+          "id": "UI-163-E18",
+          "from": "A reply is sending",
+          "trigger": "Its acknowledgement arrives before any live page carries it (#284)",
+          "expected": "It stays shown, no longer sending, until the live page replaces it with the real reply",
+          "inventoryRefs": [
+            "UI-163"
+          ],
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/commentor-edges-browser.test.ts",
+              "name": "clears a sent reply when its acknowledgement beats the snapshot, and ignores a repeated delete",
+              "kind": "browser"
+            }
+          ]
+        },
+        {
+          "id": "UI-163-E19",
+          "from": "A repository document whose comments are still loading (subscription and first access answer in flight)",
+          "trigger": "Switch to another document in the shell before they answer (#284)",
+          "expected": "The left page's late request and its snapshot are dropped silently (no toast); the current page shows its own threads only",
+          "inventoryRefs": [
+            "UI-163"
+          ],
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/repo-comments-latency-browser.test.ts",
+              "name": "drops the left page's late subscription and its held first answer silently, and shows the current page's threads",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/repo-comments-host.test.ts",
+              "name": "answers nothing to a read from a page the shell has already left, and still refuses a write from it",
+              "kind": "unit"
             }
           ]
         }

@@ -101,6 +101,19 @@ export async function repoCommentReader(ctx: Ctx, repoId: number): Promise<RepoC
   return held ? { user, held } : null;
 }
 
+/**
+ * May the serving Worker hand `userId` (null: anyone, for a public repository) the first page of comments on
+ * `repoId`, which its own authorization just granted (#284)? It asks while recording the grant, before any grant
+ * may exist here, so this refuses exactly what `grant` refuses: a removed repository, and a decision older than a
+ * revocation Convex already holds.
+ */
+export async function repoCommentSnapshotAllowed(ctx: Ctx, repoId: number, userId: string | null, epoch: number): Promise<boolean> {
+  if (!validRepoId(repoId) || (userId !== null && !validUserId(userId)) || !validEpoch(epoch)) publicError("invalid_input");
+  const repo = await repoRow(ctx, repoId);
+  if (!repo || repo.removedAt !== undefined) return false;
+  return userId === null || ((await epochRow(ctx, userId))?.epoch ?? 0) <= epoch;
+}
+
 /** Writers must be signed in and hold a live grant; mutations may read the clock, so expiry is checked too. */
 export async function requireRepoCommentWriter(ctx: MutationCtx, repoId: number): Promise<RepoCommentReader & { user: AuthUser }> {
   const reader = await repoCommentReader(ctx, repoId);

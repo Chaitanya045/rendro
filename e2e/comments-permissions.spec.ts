@@ -181,7 +181,8 @@ test.describe("write limits", () => {
     socket.hold(true);
     const post = ui.getByTestId("commentor-composer-post");
     await post.click();
-    await expect(post).toHaveAttribute("aria-busy", "true");
+    // Optimistic (#284): the thread shows at once as sending while the write is held.
+    await expect(ui.locator(".drawer-thread.is-sending")).toHaveCount(1);
     await expect.poll(() => socket.heldMessage("documentThreads:create")).toBe(true);
 
     // Spend the signed-in person's allowance (thirty a minute, shared by threads and replies), one write at a time since
@@ -198,6 +199,8 @@ test.describe("write limits", () => {
     expect(allowed).toBeGreaterThanOrEqual(25);
     socket.release();
     await expect(ui.locator(".comment-quota")).toContainText(/Too many comments right now; try again in [1-9]\d* seconds?\./);
+    // The thread is taken back and the composer reopens with the draft, its Post held until the limit lapses.
+    await expect(ui.locator(".drawer-thread.is-sending")).toHaveCount(0);
     await expect(post).toBeDisabled();
     await expect(ui.getByTestId("commentor-composer-textarea")).toHaveValue("Over the limit");
     // The reason is announced politely once, rather than on every countdown tick.
@@ -214,7 +217,8 @@ test.describe("write limits", () => {
       // The page clock is paused, so the widget's own timers advance only when the test moves them.
       await expect.poll(async () => {
         await page.clock.runFor(100);
-        if (await ui.getByTestId("commentor-composer").count() === 0) return "posted";
+        // The composer closes at once (#284); the post has landed once its optimistic thread has settled too.
+        if (await ui.getByTestId("commentor-composer").count() === 0 && await ui.locator(".drawer-thread.is-sending").count() === 0) return "posted";
         return /^Too many comments/.test(await ui.locator(".quota-live").innerText()) ? "refused" : "pending";
       }, { timeout: 15_000 }).not.toBe("pending");
       await expect(ui.getByTestId("commentor-composer")).toHaveCount(0, { timeout: 1_000 });

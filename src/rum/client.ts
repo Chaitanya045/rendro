@@ -33,6 +33,8 @@ type TimedEntry = PerformanceResourceTiming | PerformanceNavigationTiming;
 interface FrameTiming { url?: unknown; tier?: unknown; server?: unknown; response?: unknown }
 
 const NAVIGATION_MEASURE = "rendro:navigation";
+/** The comment host's measures (src/commentor/parent-host.ts, #284), named here so this bundle imports nothing of it. */
+const COMMENT_MEASURES: Record<string, "ready" | "echo"> = { "rendro:comments": "ready", "rendro:comment-echo": "echo" };
 /** How web-vitals names the way a page was loaded, in the dataset's terms. */
 const SHELL_NAVIGATIONS: Record<MetricType["navigationType"], RumNavigation> = {
   navigate: "cold", reload: "reload", prerender: "prerender", "back-forward": "back-forward",
@@ -95,6 +97,7 @@ let shellNavigation: RumNavigation = activationStart > 0 ? "prerender" : ENTRY_N
 function handle(entry: PerformanceEntry): void {
   if (entry.entryType === "measure") {
     if (entry.name === NAVIGATION_MEASURE) handleNavigation(entry as PerformanceMeasure);
+    else if (Object.hasOwn(COMMENT_MEASURES, entry.name)) handleComments(entry as PerformanceMeasure);
     return;
   }
   const resource = entry as PerformanceResourceTiming;
@@ -134,6 +137,13 @@ function handleNavigation(measure: PerformanceMeasure): void {
   }
   frameTimings.delete(key);
   complete(timing);
+}
+
+/** A page's first comments, or the reader's own comment saved: the shell's opening page counts from activation. */
+function handleComments(measure: PerformanceMeasure): void {
+  const cold = (measure.detail as { kind?: unknown } | null)?.kind === "cold";
+  const value = cold ? measure.duration - (measure.startTime === 0 ? activationStart : 0) : measure.duration;
+  record({ route: "comments", metric: COMMENT_MEASURES[measure.name], value: Math.max(0, value), nav: cold ? shellNavigation : "switch" });
 }
 
 /** A document frame's `doc-loaded` announcement: only its timing is read, and only from a frame of this shell. */

@@ -224,7 +224,8 @@ describe("project comment parent transport", () => {
     } as MessageEvent);
     expect(mutate).toHaveBeenCalledTimes(2);
     expect(subscribe).toHaveBeenCalledTimes(1);
-    expect(postMessage).toHaveBeenCalledWith(expect.objectContaining({ requestId: "transition", ok: false }), "*");
+    // A read from the page being left gets no answer (#284): an error there would be toasted on the way out.
+    expect(postMessage).not.toHaveBeenCalledWith(expect.objectContaining({ requestId: "transition" }), "*");
     messageHandler({
       source,
       data: { type: COMMENTOR_PARENT_REQUEST, requestId: "transition-mutation", method: "thread.resolve", args: { threadId: "current-thread" } },

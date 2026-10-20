@@ -339,6 +339,8 @@ textarea:disabled {
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 25%, transparent);
 }
 .drawer-thread.is-new { animation: new-card var(--duration-base) var(--ease-standard); }
+.drawer-thread.is-sending, .reply.is-sending { border-style: dashed; }
+.reply.is-sending { border: 1px dashed var(--border); }
 .orphan-badge {
   display: inline-flex;
   margin-bottom: 7px;
@@ -487,6 +489,7 @@ textarea:disabled {
 .pin:active { transform: rotate(-45deg) scale(.96); }
 .pin.orphan { display: none; }
 .pin.is-new { animation: pin-in var(--duration-base) var(--ease-spring); }
+.pin.is-sending { box-shadow: 0 0 0 2px var(--bg), 0 0 0 3px var(--accent); }
 
 /* Composer and thread bubbles */
 .bubbles {
@@ -573,6 +576,11 @@ textarea:disabled {
   font-weight: 650;
 }
 .when { color: var(--fg-muted); }
+.sending-state {
+  color: var(--fg-muted);
+  font-size: 11px;
+  font-weight: 650;
+}
 .resolved {
   display: inline-flex;
   align-items: center;

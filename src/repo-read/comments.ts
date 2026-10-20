@@ -11,7 +11,7 @@
  * The frame half lives here too: the widget's configuration is the same for
  * every reader (frames are cached), so who may write is the shell's to say.
  */
-import { convexMutationRequired } from "@/convex-internal";
+import { convexMutationRequired, convexQueryRequired } from "@/convex-internal";
 import { COMMENTOR_STYLE_HASH } from "@/commentor/style-hash";
 import { escapeHtml } from "@/routes/html";
 import { COMMENTOR_VERSION } from "@/viewer/asset-versions";
@@ -38,6 +38,27 @@ export const convexCommentGrants: CommentGrants = {
     return result?.granted === true && typeof result.expiresAt === "number" ? result.expiresAt : null;
   },
 };
+
+/** The first page of a document's threads, as the shell renders it before its live subscription delivers (#284). */
+export type CommentSnapshot = { page: unknown[]; isDone: boolean };
+
+export interface CommentSnapshots {
+  /** The page Convex gives this reader, or null when its answer is malformed. Throws when it could not be asked. */
+  threads(input: { repoId: number; path: string; userId: string | null; epoch: number }): Promise<CommentSnapshot | null>;
+}
+
+/** Convex's `repoComments:threadSnapshot`, called with the internal secret. */
+export const convexCommentSnapshots: CommentSnapshots = {
+  async threads(input) {
+    const result = await convexQueryRequired("repoComments:threadSnapshot", { ...input }) as { page?: unknown; isDone?: unknown } | null;
+    return Array.isArray(result?.page) && typeof result.isDone === "boolean" ? { page: result.page, isDone: result.isDone } : null;
+  },
+};
+
+/** The first thread page for an authorized reader: as private as the grant (the reader alone, or anyone for a public repository). */
+export function commentSnapshot(snapshots: CommentSnapshots, grant: RepoGrant, path: string): Promise<CommentSnapshot | null> {
+  return snapshots.threads({ repoId: grant.repo.id, path, userId: grant.repo.private ? grant.viewer : null, epoch: grant.epoch });
+}
 
 /** Comment access is decided afresh when the authorization behind it would end sooner (a capability or public memory near
  * its end), so every grant lasts at least this long and the shell, renewing halfway, never sees one lapse. */

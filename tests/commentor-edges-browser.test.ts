@@ -330,9 +330,12 @@ describe("ordering of acknowledgements and snapshots", () => {
     await card.locator('[data-testid="commentor-reply-send"]').click();
     await expect.poll(async () => (await lab.calls).length).toBe(1);
     await expect.poll(() => card.locator('[data-testid="commentor-reply-input"]').inputValue()).toBe("");
-    expect(await card.locator(".reply").count()).toBe(0);
+    // Acknowledged before any page carries it (#284): still shown, no longer sending, until the live page replaces it.
+    await expect.poll(() => card.locator(".reply.is-sending:not([aria-busy])").count()).toBe(1);
+    expect(await card.getByTestId("commentor-sending").count()).toBe(0);
     await lab.host(l => l.publish());
-    await expect.poll(() => card.locator(".reply").count()).toBe(1);
+    await expect.poll(() => card.locator(".reply:not(.is-sending)").count()).toBe(1);
+    expect(await card.locator(".reply").count()).toBe(1);
     await lab.page.clock.install();
     await card.locator('[data-testid="commentor-delete-btn"]').evaluate(button => { (button as HTMLButtonElement).click(); (button as HTMLButtonElement).click(); });
     expect(await lab.ui.locator(".toast", { hasText: "Comment deleted." }).count()).toBe(1);

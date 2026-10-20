@@ -24,6 +24,18 @@ import {
 } from "./parent-protocol";
 
 const PAGE_SIZE = 20;
+/** Real-user monitoring (#282) reads these from the shell's performance timeline: repository docs only. */
+export const COMMENTS_READY_MEASURE = "rendro:comments";
+export const COMMENT_ECHO_MEASURE = "rendro:comment-echo";
+
+/** A duration on the performance timeline, `kind` saying whether it belongs to the shell's opening page. */
+function measure(name: string, start: number, kind: "cold" | "switch"): void {
+  try {
+    performance.measure(name, { start, end: performance.now(), detail: { kind } });
+  } catch {
+    // A browser without User Timing's measure options reports nothing; comments work the same.
+  }
+}
 
 type CommentPaginationState = {
   canLoadMore: boolean;
@@ -41,8 +53,11 @@ export type LegacyCommentScope = { orgSlug: string; filePath: string; documentPa
 export type RepoCommentScope = { repoId: number; documentPath: string };
 export type DocumentCommentScope = ProjectCommentScope | LegacyCommentScope | RepoCommentScope;
 
-/** The repository shell's comments (#254): where it asks the read path for comment access. */
-export type RepoCommentParentConfig = { repoId: number; accessUrl: string; convexUrl: string };
+/** The repository shell's comments (#254): where it asks the read path for comment access, and the document it opens with (#284). */
+export type RepoCommentParentConfig = { repoId: number; accessUrl: string; convexUrl: string; documentPath?: string };
+
+/** The first page of one document's threads, from the first comment-access answer (#284). */
+export type RepoCommentSnapshot = { documentPath: string; threads: unknown[]; canLoadMore: boolean };
 
 export type CommentorParentConfig = {
   organizationId: string;
@@ -147,6 +162,18 @@ export class CommentorParentHost {
   private mutationsInFlight = 0;
   // Repository docs (#254): may this reader write, as the read path last said? Anyone may read a public repository.
   private writable: boolean;
+  // Repository docs (#284): until the first comment-access answer has recorded this reader's grant, a live
+  // subscription would only see the empty page Convex gives a reader without one, so it waits.
+  private liveHeld = false;
+  private startLive: (() => void) | null = null;
+  // That answer's first page of the opening document, shown until the live subscription delivers its own.
+  private snapshot: { scope: DocumentCommentScope; threads: unknown[]; canLoadMore: boolean } | null = null;
+  // Real-user monitoring (#284): the pages this shell has shown, when the current one began (the opening page at
+  // navigation start, as the lazy tree's measures count it; later ones at their frame's load), and whether its first
+  // comments have been measured yet.
+  private documents = 0;
+  private documentStart = 0;
+  private readyMeasured = true;
 
   private allowBackendRequest(): boolean {
     const now = performance.now();
@@ -175,12 +202,31 @@ export class CommentorParentHost {
     this.announce();
   }
 
+  /** Hold live thread subscriptions until `accessAnswered` (repository docs, #284). */
+  holdLive(): void {
+    this.liveHeld = true;
+  }
+
+  /**
+   * The first comment-access answer came back (#284), with the opening document's first thread page when the read
+   * path served one. A subscription waiting for it shows that page and starts live; the live page then replaces it.
+   */
+  accessAnswered(snapshot: RepoCommentSnapshot | null): void {
+    if (snapshot && "repoId" in this.config) {
+      this.snapshot = { scope: { repoId: this.config.repoId, documentPath: snapshot.documentPath }, threads: snapshot.threads, canLoadMore: snapshot.canLoadMore };
+    }
+    this.liveHeld = false;
+    const start = this.startLive;
+    this.startLive = null;
+    start?.();
+  }
+
   setUserId(userId: string | null): void {
     if (this.userId === userId) return;
     syncCommentRecoveryUser(window.sessionStorage, userId);
     this.userId = userId;
     this.parentGeneration = crypto.randomUUID();
-    this.onFrameLoad();
+    this.reload();
   }
 
   /** The shell made another, already loaded iframe the content frame (an adopted preload): talk to that one now. */
@@ -220,6 +266,7 @@ export class CommentorParentHost {
     this.generation += 1;
     this.threadSubscription?.unsubscribe();
     this.threadSubscription = null;
+    this.startLive = null;
     for (const subscription of this.replySubscriptions.values()) subscription.unsubscribe();
     this.replySubscriptions.clear();
     this.activeScope = null;
@@ -228,11 +275,24 @@ export class CommentorParentHost {
   }
 
   private readonly onFrameLoad = (): void => {
+    if ("repoId" in this.config) {
+      this.documents += 1;
+      this.documentStart = this.documents === 1 ? 0 : performance.now();
+      this.readyMeasured = false;
+    }
+    this.reload();
+  };
+
+  private pageKind(): "cold" | "switch" {
+    return this.documents === 1 ? "cold" : "switch";
+  }
+
+  private reload(): void {
     this.connectionGeneration += 1;
     this.reset();
     this.loadedScope = this.currentScope();
     this.announce();
-  };
+  }
 
   private announce(): void {
     const source = this.frame.contentWindow;
@@ -285,16 +345,18 @@ export class CommentorParentHost {
     this.activeScope = scope;
     this.activeSource = source;
     const generation = this.generation;
-    this.threadSubscription = this.backend.subscribe(scope, (threads, state) => {
-      if (!this.owns(generation, source, scope)) return;
-      this.threadIds = new Set(threads.flatMap((thread) => {
-        const value = record(thread)?._id;
-        return typeof value === "string" ? [value] : [];
-      }));
-      for (const [threadId, subscription] of this.replySubscriptions) {
-        if (this.threadIds.has(threadId)) continue;
-        subscription.unsubscribe();
-        this.replySubscriptions.delete(threadId);
+    const deliver = (threads: unknown[], state: CommentPaginationState) => {
+      // A first page still loading carries no rows (the widget keeps what it shows): keep the IDs it may write to.
+      if (!state.loading || threads.length > 0) {
+        this.threadIds = new Set(threads.flatMap((thread) => {
+          const value = record(thread)?._id;
+          return typeof value === "string" ? [value] : [];
+        }));
+        for (const [threadId, subscription] of this.replySubscriptions) {
+          if (this.threadIds.has(threadId)) continue;
+          subscription.unsubscribe();
+          this.replySubscriptions.delete(threadId);
+        }
       }
       if ("postMessage" in source && typeof source.postMessage === "function") {
         (source as WindowProxy).postMessage({
@@ -303,9 +365,28 @@ export class CommentorParentHost {
           ...state,
         }, "*");
       }
-    }, (error) => {
-      if (this.owns(generation, source, scope)) this.subscriptionError(source, error);
-    });
+      // The page's first comments (snapshot or live) have reached its widget.
+      if (!state.loading && !this.readyMeasured) {
+        this.readyMeasured = true;
+        measure(COMMENTS_READY_MEASURE, this.documentStart, this.pageKind());
+      }
+    };
+    const begin = () => {
+      // A snapshot of this page (#284) is shown at once; one of another page is never shown, and is stale by now.
+      const snapshot = this.snapshot;
+      if (snapshot && !sameScope(snapshot.scope, scope)) this.snapshot = null;
+      else if (snapshot) deliver(snapshot.threads, { canLoadMore: snapshot.canLoadMore, loading: false });
+      this.threadSubscription = this.backend.subscribe(scope, (threads, state) => {
+        if (!this.owns(generation, source, scope)) return;
+        // The live page has arrived: it supersedes the snapshot, adding, removing and editing as it says.
+        if (!state.loading || threads.length > 0) this.snapshot = null;
+        deliver(threads, state);
+      }, (error) => {
+        if (this.owns(generation, source, scope)) this.subscriptionError(source, error);
+      });
+    };
+    if (this.liveHeld) this.startLive = begin;
+    else begin();
     this.respond(source, requestId, true);
   }
 
@@ -386,6 +467,9 @@ export class CommentorParentHost {
     const scope = this.currentScope();
     // Anyone may read a public repository's comments; every write (and draft) still needs the signed-in reader.
     const reading = event.data.method === "subscribe" || event.data.method === "threads.more" || event.data.method === "replies.more";
+    // The shell has already sent this frame to another page (#284): a read from the page it is leaving is for a
+    // document that is no longer current. It is dropped without an answer, so the leaving page shows no error.
+    if (reading && this.loadedScope && !sameScope(scope, this.loadedScope)) return;
     const anonymous = !this.userId && !(reading && "repoId" in this.config);
     if (anonymous || !scope || !sameScope(scope, this.loadedScope) || !event.source) {
       if (event.source) this.respond(event.source, event.data.requestId, false, "Comment scope is unavailable");
@@ -457,11 +541,15 @@ export class CommentorParentHost {
     }
     const generation = this.connectionGeneration;
     const key = mutationKey(operation.method, operation.args);
+    // The reader's own thread or reply shows at once (#284); this is how long it takes to be saved.
+    const sentAt = performance.now();
+    const echo = "repoId" in this.config && (operation.method === "thread.create" || operation.method === "reply.add");
     this.mutationsInFlight++;
     void this.backend.mutate(operation.method, scope, { ...operation.args, clientOperationId: operation.clientOperationId, expectedAuthorId: this.userId }).then(() => {
       // An abandoned acknowledgement cannot retire the durable identity: the
       // replacement widget may still hold (or save) the unconfirmed draft.
       if (this.ownsConnection(generation, event.source!, scope)) {
+        if (echo) measure(COMMENT_ECHO_MEASURE, sentAt, this.pageKind());
         if (operation.clientOperationId) this.recovery(scope).complete(key, operation.clientOperationId);
         this.respond(event.source!, event.data.requestId, true);
       }
@@ -643,17 +731,30 @@ export const REPO_ACCESS_MIN_RENEW_MS = 15_000;
 export const REPO_ACCESS_DENIED_RETRY_MS = 60_000;
 export const REPO_ACCESS_MAX_RETRY_MS = 60_000;
 
+/** The opening document whose first comments the first access request asks for, and who wants the answer (#284). */
+export type FirstRepoCommentAccess = { documentPath: string | null; onAnswer: (snapshot: RepoCommentSnapshot | null) => void };
+
+function repoCommentSnapshot(body: { threads?: unknown } | null, documentPath: string | null): RepoCommentSnapshot | null {
+  const threads = record(body?.threads);
+  return documentPath !== null && threads && threads.path === documentPath && Array.isArray(threads.page) && typeof threads.isDone === "boolean"
+    ? { documentPath, threads: threads.page, canLoadMore: !threads.isDone } : null;
+}
+
 /**
  * Keep the reader's comment access recorded in Convex while the shell is open
  * (#254): ask the read path at once, then again halfway through each grant.
  * The read path decides exactly as for a page view; a denial is a 404 and a
  * failure to check is retried with backoff. A hidden tab holds its renewal
  * until it is shown again (the grant lapses meanwhile, and comments with it).
+ * The first request names the opening document (#284): its answer, whatever it
+ * is, goes to `first.onAnswer`, with that document's first thread page if the
+ * read path sent one.
  */
-export function keepRepoCommentAccess(accessUrl: string, onChange: (writable: boolean) => void): () => void {
+export function keepRepoCommentAccess(accessUrl: string, onChange: (writable: boolean) => void, first?: FirstRepoCommentAccess): () => void {
   let disposed = false;
   let timer: number | undefined;
   let retry = REPO_ACCESS_MIN_RENEW_MS / 3;
+  let pending = first ?? null;
   const schedule = (delay: number) => {
     if (!disposed) timer = window.setTimeout(() => { void renew(); }, delay);
   };
@@ -662,26 +763,38 @@ export function keepRepoCommentAccess(accessUrl: string, onChange: (writable: bo
     retry = Math.min(retry * 2, REPO_ACCESS_MAX_RETRY_MS);
     schedule(delay);
   };
+  const answered = (body: { threads?: unknown } | null) => {
+    const waiting = pending;
+    pending = null;
+    waiting?.onAnswer(repoCommentSnapshot(body, waiting.documentPath));
+  };
   const renew = async () => {
     await whenVisible();
     if (disposed) return;
+    const url = pending?.documentPath ? `${accessUrl}?path=${encodeURIComponent(pending.documentPath)}` : accessUrl;
     let response: Response;
     try {
-      response = await fetch(accessUrl, { method: "POST", credentials: "same-origin", cache: "no-store", headers: { Accept: "application/json" } });
+      response = await fetch(url, { method: "POST", credentials: "same-origin", cache: "no-store", headers: { Accept: "application/json" } });
     } catch {
+      if (!disposed) answered(null);
       backoff();
       return;
     }
-    const body = response.ok ? await response.json().catch(() => null) as { expiresAt?: unknown } | null : null;
+    const body = response.ok ? await response.json().catch(() => null) as { expiresAt?: unknown; threads?: unknown } | null : null;
     if (disposed) return;
     if (body && typeof body.expiresAt === "number") {
       retry = REPO_ACCESS_MIN_RENEW_MS / 3;
       onChange(true);
+      answered(body);
       schedule(Math.max(REPO_ACCESS_MIN_RENEW_MS, (body.expiresAt - Date.now()) / 2));
     } else if (response.status === 404) {
       onChange(false);
+      answered(null);
       schedule(REPO_ACCESS_DENIED_RETRY_MS);
-    } else backoff();
+    } else {
+      answered(null);
+      backoff();
+    }
   };
   void renew();
   return () => {
@@ -699,6 +812,10 @@ export function bootCommentorParentHost(frameAlreadyLoaded = false): (() => void
   // Repository docs (#254) are readable without signing in when public; a reader who signs out mid-session is still signed out.
   const repo = "repoId" in config ? config : null;
   let disposed = false;
+  // Repository docs (#284): comment access is cookie-authorized, so it is asked at once, in parallel with the
+  // frame and the session check, and its first answer brings the opening document's first comments.
+  let writable: boolean | null = null;
+  let firstAnswer: { snapshot: RepoCommentSnapshot | null } | null = null;
   let signedOut = false;
   let signedIn = false;
   let frameLoaded = frameAlreadyLoaded;
@@ -708,6 +825,19 @@ export function bootCommentorParentHost(frameAlreadyLoaded = false): (() => void
   let unsubscribeDeployment: (() => void) | undefined;
   let deploymentStopped = false;
   let stopAccess: (() => void) | undefined;
+  if (repo) {
+    stopAccess = keepRepoCommentAccess(repo.accessUrl, (value) => {
+      writable = value;
+      host?.setWritable(value);
+    }, {
+      // A page restored from the back/forward cache shows whatever page the reader had moved to.
+      documentPath: documentCommentScopeFromFrame(frame.src, location.origin, repo)?.documentPath ?? repo.documentPath ?? null,
+      onAnswer: (snapshot) => {
+        firstAnswer = { snapshot };
+        host?.accessAnswered(snapshot);
+      },
+    });
+  }
   const stopDeployment = () => {
     deploymentStopped = true;
     const unsubscribe = unsubscribeDeployment;
@@ -745,6 +875,11 @@ export function bootCommentorParentHost(frameAlreadyLoaded = false): (() => void
     const current = document.getElementById("content-frame");
     const adopted = current instanceof HTMLIFrameElement && current !== frame ? current : null;
     host = new CommentorParentHost(adopted ?? frame, location.origin, config, backend, userId);
+    if (repo) {
+      if (writable !== null) host.setWritable(writable);
+      if (firstAnswer) host.accessAnswered(firstAnswer.snapshot);
+      else host.holdLive();
+    }
     // The iframe may have loaded while checking the session.
     host.start(Boolean(adopted) || frameLoaded || document.readyState === "complete");
     frame.removeEventListener("load", rememberLoad);
@@ -757,11 +892,7 @@ export function bootCommentorParentHost(frameAlreadyLoaded = false): (() => void
       const token = await requestAuthToken(() => { if (!disposed && !signedOut) stopDeployment(); });
       return disposed || signedOut ? null : token;
     });
-    if (repo) {
-      const current = host;
-      stopAccess = keepRepoCommentAccess(repo.accessUrl, writable => current.setWritable(writable));
-      return;
-    }
+    if (repo) return;
     if ("organizationId" in config && userId && !deploymentStopped) {
       const unsubscribe = client.onUpdate(api.projects.activeDeployment,
         { organizationId: config.organizationId, projectId: config.projectId },

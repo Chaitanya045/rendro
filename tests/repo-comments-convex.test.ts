@@ -314,6 +314,39 @@ describe("repository comment access (Convex boundary)", () => {
     expect((await backend.run(ctx => ctx.db.query("repoCommentGrants").collect())).filter(row => row.userId === users.other.userId)).toEqual([]);
   });
 
+  it("serves the Worker the first page a reader would see, refusing what a grant would (#284)", async () => {
+    const { backend, users, as, grant } = await world();
+    const snapshot = (args: Record<string, unknown> = {}) => backend.query(api.repoComments.threadSnapshot, {
+      internalSecret, ...scope(PRIVATE), userId: users.reader.userId, epoch: 10, ...args,
+    } as never);
+    await expect(snapshot({ internalSecret: "wrong" })).rejects.toThrow("Forbidden");
+    for (const bad of [{ path: "../x.md" }, { repoId: 0 }, { userId: "" }, { epoch: -1 }, { epoch: 0.5 }]) {
+      await expect(snapshot(bad)).rejects.toThrow("Invalid input");
+    }
+    // A repository no reader has seen has no comments: nothing to read.
+    expect(await snapshot()).toMatchObject({ page: [], isDone: true });
+    await grant(PRIVATE, users.reader.userId, { epoch: 10 });
+    await as("reader").mutation(api.repoComments.createThread, { ...scope(PRIVATE), body: "Mine", anchor: anchor(), clientOperationId: "op-1" });
+    const live = await as("reader").query(api.repoComments.listThreads, { ...scope(PRIVATE), paginationOpts: pageOpts });
+    // Before any grant of its own exists in Convex, the page is the one the live query will give this reader.
+    await backend.run(async ctx => {
+      for (const row of await ctx.db.query("repoCommentGrants").collect()) await ctx.db.delete(row._id);
+    });
+    const first = await snapshot();
+    expect(first.page).toEqual(live.page);
+    expect(first.page).toEqual([expect.objectContaining({ body: "Mine", clientOperationId: "op-1", canDelete: true, authorName: "reader", authorEmail: "" })]);
+    // A public page names no reader: nothing in it is anyone's to delete.
+    expect((await snapshot({ userId: null })).page).toEqual([expect.objectContaining({ canDelete: false })]);
+    expect((await snapshot({ path: "docs/other.md" })).page).toEqual([]);
+    // Decided before a revocation Convex already holds: refused, as the grant would be.
+    await backend.mutation(api.repoCommentAccess.revokeUser, { internalSecret, userId: users.reader.userId, epoch: 20 });
+    expect((await snapshot()).page).toEqual([]);
+    expect((await snapshot({ epoch: 20 })).page).toHaveLength(1);
+    // A removed repository's comments are hidden from the snapshot at once, like everywhere else.
+    await backend.mutation(api.repoCommentAccess.removeRepos, { internalSecret, repoIds: [PRIVATE] });
+    expect((await snapshot({ epoch: 20 })).page).toEqual([]);
+  });
+
   it("checks a writer's grant expiry in the mutation even before the expiry job ran", async () => {
     vi.useFakeTimers();
     const { as, grant } = await world();

@@ -132,6 +132,9 @@ interface Reply {
   authorEmail: string;
   authorName: string;
   body: string;
+  clientOperationId?: string;
+  /** The reader's own reply, shown before the live page carries it (#284). */
+  sending?: SendingState;
 }
 interface Thread {
   _id: ThreadId;
@@ -150,7 +153,12 @@ interface Thread {
   archived?: boolean;
   replies: Reply[];
   repliesHasMore?: boolean;
+  clientOperationId?: string;
+  /** The reader's own new thread, shown before the live page carries it (#284). */
+  sending?: SendingState;
 }
+/** An optimistic write (#284): "sending" until acknowledged, then "sent" until the live page carries it. */
+type SendingState = "sending" | "sent";
 type Edge = "bottom" | "top" | "left" | "right";
 type ThreadFilter = "active" | "resolved" | "history";
 const THREAD_FILTERS: readonly ThreadFilter[] = [
@@ -563,6 +571,11 @@ class Commentor {
   private suppressedSelectionKey: string | null = null;
   private bubbleReturnFocus: HTMLElement | null = null;
   private threads: Thread[] = [];
+  // Optimistic writes (#284): the page as the parent last delivered it, and the reader's own new threads and
+  // replies laid over it (into `threads`) until a live page carries them, matched by clientOperationId, or they fail.
+  private liveThreads: Thread[] = [];
+  private sendingThreads: Thread[] = [];
+  private sendingReplies = new Map<ThreadId, Reply>();
   private threadFilter: ThreadFilter = "active";
   private seenThreadIds = new Set<ThreadId>();
   private seenReplyIds = new Set<ReplyId>();
@@ -821,6 +834,8 @@ class Commentor {
           ? { ...thread, replies: expanded, repliesHasMore: this.replyPagination.get(thread._id)!.canLoadMore }
           : thread;
       });
+      this.settleSending(threads);
+      this.liveThreads = threads;
       suppressNew ||= wasLoadingMore || pagination?.loading === true;
       const activeReply = this.root.activeElement instanceof HTMLTextAreaElement
         && this.root.activeElement.matches('[data-testid="commentor-reply-input"]')
@@ -855,7 +870,7 @@ class Commentor {
           !thread.archived &&
           !this.pendingDeletes.has(thread._id),
       ).length;
-      this.threads = threads;
+      this.threads = this.withSending(threads);
       this.seenThreadIds = new Set(threads.map((thread) => thread._id));
       this.seenReplyIds = new Set(
         threads.flatMap((thread) => thread.replies.map((reply) => reply._id)),
@@ -914,7 +929,7 @@ class Commentor {
           const prior = this.replyPagination.get(id);
           if (replies.length > 0 || !loading) this.expandedReplies.set(id, replies as Reply[]);
           this.replyPagination.set(id, { canLoadMore, loading });
-          update(this.threads.map((thread) => thread._id === id
+          update(this.liveThreads.map((thread) => thread._id === id
             ? {
                 ...thread,
                 replies: this.expandedReplies.get(id) ?? thread.replies,
@@ -956,6 +971,9 @@ class Commentor {
           this.collapseDrawer(true);
           this.expandedReplies.clear();
           this.replyPagination.clear();
+          // Another reader's writes are not this one's to show.
+          this.sendingThreads = [];
+          this.sendingReplies.clear();
           update([], { canLoadMore: false, loading: false });
         },
         (compatible, canReloadViewer, parentCanWrite) => {
@@ -968,6 +986,9 @@ class Commentor {
           if (!compatible) {
             this.closeBubbles(false, true);
             this.threads = [];
+            this.liveThreads = [];
+            this.sendingThreads = [];
+            this.sendingReplies.clear();
             this.markersLayer.replaceChildren();
           }
           this.renderDrawerList();
@@ -1390,11 +1411,11 @@ class Commentor {
         {
           class: `pin${t.resolved ? " resolved" : ""}${
             this.newThreadIds.has(t._id) ? " is-new" : ""
-          }`,
+          }${t.sending ? " is-sending" : ""}`,
           "data-testid": "commentor-pin",
           "data-thread-id": t._id,
           "data-tip": `${t.authorName}: ${t.body.slice(0, 60)}`,
-          "aria-label": `Thread ${i + 1} by ${t.authorName}`,
+          "aria-label": `Thread ${i + 1} by ${t.authorName}${t.sending === "sending" ? ", sending" : ""}`,
           "aria-pressed": String(this.openThreadId === t._id),
           onpointerenter: () => this.highlightThread(t._id),
           onpointerleave: () => {
@@ -1524,6 +1545,107 @@ class Commentor {
     return { el, pin, size: measureFloating(el), placed };
   }
 
+  // ── optimistic writes (#284) ──
+  /** The live page with the reader's own writes still on their way laid over it. */
+  private withSending(live: Thread[]): Thread[] {
+    const threads = live.map((thread) => {
+      const reply = this.sendingReplies.get(thread._id);
+      return reply ? { ...thread, replies: [...thread.replies, reply] } : thread;
+    });
+    return [...threads, ...this.sendingThreads];
+  }
+
+  /**
+   * A live page arrived. What it carries replaces the optimistic copy (no duplicate), and an acknowledged write is
+   * retired too: Convex updates its subscriptions before it acknowledges a write, so a page after the
+   * acknowledgement has the write wherever it belongs on that page.
+   */
+  private settleSending(live: Thread[]): void {
+    const echoOf = <T extends { clientOperationId?: string }>(item: { clientOperationId?: string }, rows: T[]) =>
+      rows.find((row) => row.clientOperationId === item.clientOperationId);
+    this.sendingThreads = this.sendingThreads.filter((item) => {
+      const echo = echoOf(item, live);
+      // An open bubble on the optimistic thread follows it to the real one.
+      if (echo && this.openThreadId === item._id) {
+        this.openThreadId = echo._id;
+        this.bubbleLayer.querySelector<HTMLElement>('[data-testid="commentor-thread-bubble"]')!.dataset.threadId = echo._id;
+      }
+      return !echo && item.sending === "sending";
+    });
+    for (const [threadId, reply] of this.sendingReplies) {
+      const thread = live.find((candidate) => candidate._id === threadId);
+      if (reply.sending === "sent" || (thread && echoOf(reply, thread.replies))) this.sendingReplies.delete(threadId);
+    }
+  }
+
+  /** Show the optimistic writes as they now stand, over the last live page. */
+  private applySending(): void {
+    this.threads = this.withSending(this.liveThreads);
+    this.renderPins();
+    this.renderDrawerList();
+    this.refreshOpenBubble();
+    if (this.dock.hasAttribute("data-expanded")) {
+      requestAnimationFrame(() => {
+        const { w, h } = this.sizeContent();
+        this.repositionExpandedDock(w, h);
+      });
+    }
+  }
+
+  /** The reader's new thread, in flight with this clientOperationId; nothing when the write was refused before it left. */
+  private addSendingThread(body: string, anchor: Anchor): Thread | null {
+    const clientOperationId = this.parentTransport!.inFlightOperationId("thread.create");
+    if (!clientOperationId) return null;
+    const thread: Thread = {
+      _id: `sending-${clientOperationId}` as ThreadId, _creationTime: Date.now(), authorEmail: "", authorName: "You",
+      body, anchor, resolved: false, archived: false, replies: [], clientOperationId, sending: "sending",
+    };
+    this.sendingThreads.push(thread);
+    this.applySending();
+    return thread;
+  }
+
+  private addSendingReply(threadId: ThreadId, body: string): Reply | null {
+    const clientOperationId = this.parentTransport?.inFlightOperationId("reply.add", { threadId });
+    if (!clientOperationId) return null;
+    const reply: Reply = {
+      _id: `sending-${clientOperationId}` as ReplyId, _creationTime: Date.now(), authorEmail: "", authorName: "You",
+      body, clientOperationId, sending: "sending",
+    };
+    this.sendingReplies.set(threadId, reply);
+    // The text moves from the input into the list; a failure puts it back.
+    for (const input of this.replyInputs(threadId)) input.value = "";
+    this.applySending();
+    return reply;
+  }
+
+  /** Acknowledged: no longer sending, and gone with the next live page (normally it is already there). */
+  private sentThread(item: Thread): void {
+    if (!this.sendingThreads.includes(item)) return;
+    item.sending = "sent";
+    this.applySending();
+  }
+
+  private sentReply(threadId: ThreadId, item: Reply): void {
+    if (this.sendingReplies.get(threadId) !== item) return;
+    item.sending = "sent";
+    this.applySending();
+  }
+
+  /** Roll a failed write back. False when it is no longer shown (carried by a live page, or the reader changed). */
+  private dropSendingThread(item: Thread): boolean {
+    if (!this.sendingThreads.includes(item)) return false;
+    this.sendingThreads = this.sendingThreads.filter((candidate) => candidate !== item);
+    this.applySending();
+    return true;
+  }
+
+  private dropSendingReply(threadId: ThreadId, item: Reply): void {
+    if (this.sendingReplies.get(threadId) !== item) return;
+    this.sendingReplies.delete(threadId);
+    this.applySending();
+  }
+
   private syncRecoveryDrafts(): void {
     const state = this.parentTransport?.recovery?.value;
     if (!state) return;
@@ -1540,11 +1662,11 @@ class Commentor {
     anchor: Anchor,
     rect: Rect,
     invoker: HTMLElement | null = null,
-  ): void {
-    if (!this.canWrite) return;
+  ): { textarea: HTMLTextAreaElement; post: HTMLButtonElement } | null {
+    if (!this.canWrite) return null;
     if (this.parentTransport?.isMutationPending("thread.create")) {
       this.toast("Still waiting for confirmation of your comment.");
-      return;
+      return null;
     }
     const savedDraft = this.parentTransport?.recovery?.value.drafts.create;
     if (savedDraft) anchor = savedDraft.anchor as Anchor;
@@ -1590,33 +1712,27 @@ class Commentor {
       post.classList.add("is-pending");
       post.setAttribute("aria-busy", "true");
       post.textContent = "Posting…";
+      if (this.parentTransport) {
+        await this.postThread(body, anchor, rect, invoker);
+        return;
+      }
       try {
-        if (isParentConfig(this.cfg)) {
-          await this.parentTransport?.mutate("thread.create", { body, anchor });
-        } else {
-          await this.client!.mutation(api.threads.create, {
-            orgSlug: this.cfg.orgSlug!,
-            filePath: this.cfg.filePath!,
-            body,
-            // Only parent configurations (repository docs among them) make repository anchors.
-            anchor: anchor as Exclude<Anchor, RepoAnchor>,
-          });
-        }
+        await this.client!.mutation(api.threads.create, {
+          orgSlug: this.cfg.orgSlug!,
+          filePath: this.cfg.filePath!,
+          body,
+          // Only parent configurations (repository docs among them) make repository anchors.
+          anchor: anchor as Exclude<Anchor, RepoAnchor>,
+        });
         this.closeBubbles(true, true);
       } catch (err) {
-        console.error("[commentor] create failed", err);
         textarea.disabled = false;
         post.disabled = false;
         cancel.disabled = false;
         post.classList.remove("is-pending");
         post.removeAttribute("aria-busy");
         post.textContent = "Post";
-        // A reply may have started a shared cooldown while this create was in flight.
-        this.writeCooldown.updateButton(post);
-        const retryAfter = commentRetryAfter(err);
-        if (retryAfter !== null) this.writeCooldown.start(retryAfter, () => textarea);
-        else this.toast((err instanceof CommentMutationRejectedError || err instanceof CommentMutationOutcomeUnknownError || err instanceof CommentOperationConflictError) ? err.message : commentErrorMessage(err, "Could not post comment. Try again."), { kind: "error" });
-        textarea.focus();
+        this.composerFailed(err, textarea, post);
       }
     };
     post.addEventListener("click", submit);
@@ -1653,6 +1769,44 @@ class Commentor {
     this.bubbleLayer.append(bubble);
     placeFloating(bubble, rect);
     queueMicrotask(() => textarea.focus());
+    return { textarea, post };
+  }
+
+  /**
+   * Post through the parent, optimistically (#284): the thread shows at once, marked as sending, and the composer
+   * closes. A failure takes the thread back and reopens the composer with the draft (kept in the recovery state),
+   * where the error is shown and Post retries with the same operation when its outcome is unknown.
+   */
+  private async postThread(body: string, anchor: Anchor, rect: Rect, invoker: HTMLElement | null): Promise<void> {
+    const sending = this.parentTransport!.mutate("thread.create", { body, anchor });
+    const item = this.addSendingThread(body, anchor);
+    this.closeBubbles(true, true);
+    try {
+      await sending;
+      // A write that succeeds was dispatched, so it has its optimistic copy.
+      this.sentThread(item!);
+    } catch (err) {
+      // Already carried by a live page, or the reader changed meanwhile: nothing of it is on screen to take back.
+      if (item && !this.dropSendingThread(item)) return;
+      const reopened = this.openComposer(anchor, rect, invoker);
+      if (reopened) this.composerFailed(err, reopened.textarea, reopened.post);
+      else this.toast(this.writeErrorMessage(err, "Could not post comment. Try again."), { kind: "error" });
+    }
+  }
+
+  private writeErrorMessage(err: unknown, fallback: string): string {
+    return err instanceof CommentMutationRejectedError || err instanceof CommentMutationOutcomeUnknownError || err instanceof CommentOperationConflictError
+      ? err.message : commentErrorMessage(err, fallback);
+  }
+
+  private composerFailed(err: unknown, textarea: HTMLTextAreaElement, post: HTMLButtonElement): void {
+    console.error("[commentor] create failed", err);
+    // A reply may have started a shared cooldown while this create was in flight.
+    this.writeCooldown.updateButton(post);
+    const retryAfter = commentRetryAfter(err);
+    if (retryAfter !== null) this.writeCooldown.start(retryAfter, () => textarea);
+    else this.toast(this.writeErrorMessage(err, "Could not post comment. Try again."), { kind: "error" });
+    textarea.focus();
   }
 
   private openThreadBubble(
@@ -1870,7 +2024,8 @@ class Commentor {
       "div",
       { class: "head" },
       h("span", { class: "who", title: t.authorEmail }, t.authorName),
-      h("span", { class: "when" }, timeAgo(t._creationTime)),
+      // A thread on its way (#284) has no server time yet.
+      t.sending ? null : h("span", { class: "when" }, timeAgo(t._creationTime)),
       t.resolved
         ? h("span", { class: "resolved" }, svg(ICONS.check), "Resolved")
         : null,
@@ -1882,8 +2037,12 @@ class Commentor {
             "Archived",
           )
         : null,
+      t.sending === "sending"
+        ? h("span", { class: "sending-state", "data-testid": "commentor-sending" }, "Sending…")
+        : null,
     );
-    if (this.canWrite) {
+    // The reader's own thread on its way (#284) has no ID to act on until the live page carries it.
+    if (this.canWrite && !t.sending) {
       const actions = h("div", { class: "card-actions" });
       const resolveLabel = t.resolved ? "Reopen" : "Resolve";
       const resolveActionLabel = `${resolveLabel} comment by ${t.authorName}`;
@@ -2002,13 +2161,16 @@ class Commentor {
         h(
           "div",
           {
-            class: `reply${this.newReplyIds.has(r._id) ? " is-new" : ""}`,
+            class: `reply${this.newReplyIds.has(r._id) ? " is-new" : ""}${r.sending ? " is-sending" : ""}`,
+            ...(r.sending === "sending" ? { "aria-busy": "true" } : {}),
           },
           h("span", { class: "reply-who" }, r.authorName),
           " ",
-          h("span", { class: "when" }, timeAgo(r._creationTime)),
-          " ",
+          ...(r.sending ? [] : [h("span", { class: "when" }, timeAgo(r._creationTime)), " "]),
           r.body,
+          ...(r.sending === "sending"
+            ? [" ", h("span", { class: "sending-state", "data-testid": "commentor-sending" }, "Sending…")]
+            : []),
           this.canWrite && r.canDelete === true && isParentConfig(this.cfg)
             ? h("button", {
                 class: "card-action danger",
@@ -2052,7 +2214,7 @@ class Commentor {
       view.append(loadOlder);
     }
     view.append(replies);
-    if (this.canWrite) {
+    if (this.canWrite && !t.sending) {
       const helpId = `commentor-reply-help-${t._id}`;
       const input = h("textarea", {
         class: "reply-input",
@@ -2062,7 +2224,8 @@ class Commentor {
         rows: "1",
         "aria-describedby": helpId,
       }) as HTMLTextAreaElement;
-      input.value = this.replyDrafts.get(t._id) ?? "";
+      // A reply on its way (#284) shows in the list, not in the input.
+      input.value = this.sendingReplies.has(t._id) && this.pendingReplies.has(t._id) ? "" : this.replyDrafts.get(t._id) ?? "";
       input.addEventListener("input", () => {
         if (input.value) this.replyDrafts.set(t._id, input.value);
         else this.replyDrafts.delete(t._id);
@@ -2095,8 +2258,12 @@ class Commentor {
         const bubble = input.closest(".bubble");
         this.pendingReplies.set(t._id, submittedDraft);
         this.setReplyPendingState(t._id, true);
+        const sending = this.addReply(t._id, body);
+        // Optimistic (#284): the reply shows at once, marked as sending, while the input stays locked.
+        const item = this.addSendingReply(t._id, body);
         try {
-          await this.addReply(t._id, body);
+          await sending;
+          if (item) this.sentReply(t._id, item);
           const nextDraft = draftAfterSuccessfulReply(
             this.replyDrafts.get(t._id),
             submittedDraft,
@@ -2108,6 +2275,11 @@ class Commentor {
           }
         } catch (err) {
           console.error("[commentor] reply failed", err);
+          if (item) {
+            // The draft goes back where the reader wrote it: the inputs are rebuilt from the kept drafts.
+            if (!this.replyDrafts.has(t._id)) this.replyDrafts.set(t._id, submittedDraft);
+            this.dropSendingReply(t._id, item);
+          }
           const retryAfter = commentRetryAfter(err);
           if (retryAfter !== null) this.writeCooldown.start(retryAfter, () => this.replyInputs(t._id).find((candidate) => candidate.closest(".bubble") === bubble));
           else this.toast((err instanceof CommentMutationRejectedError || err instanceof CommentMutationOutcomeUnknownError || err instanceof CommentOperationConflictError) ? err.message : commentErrorMessage(err, "Could not post reply."), { kind: "error" });
@@ -2417,8 +2589,9 @@ class Commentor {
         {
           class: `drawer-thread${
             this.newThreadIds.has(t._id) ? " is-new" : ""
-          }`,
+          }${t.sending ? " is-sending" : ""}`,
           "data-thread-id": t._id,
+          ...(t.sending === "sending" ? { "aria-busy": "true" } : {}),
           role: "group",
           tabindex: "0",
           "aria-label": `Comment by ${t.authorName}`,

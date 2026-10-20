@@ -137,7 +137,8 @@ describe("parent compatibility and recovery", () => {
     await lab.host(l => { l.holds = []; });
     await lab.tid("commentor-composer-textarea").fill("Unconfirmed");
     await lab.tid("commentor-composer-post").click();
-    await expect.poll(() => lab.pins().count()).toBe(1);
+    // Saved, not just shown as sending (#284).
+    await expect.poll(() => lab.ui.locator('[data-testid="commentor-pin"]:not(.is-sending)').count()).toBe(1);
     const creates = (await lab.calls).filter(call => call.method === "thread.create");
     expect(creates).toHaveLength(2);
     expect(creates[1].args.clientOperationId).toBe(creates[0].args.clientOperationId);
