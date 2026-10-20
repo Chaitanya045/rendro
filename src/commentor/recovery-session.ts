@@ -17,8 +17,14 @@ export function syncCommentRecoveryUser(storage: Storage, userId: string | null)
 // Shared by authenticated shells and the native POST success page. No navigation
 // is triggered in other tabs; focus/pageshow remain authoritative backstops.
 export function renderCommentRecoveryLifecycle(userId: string | null, nonceAttributes = "", completedSignOut = false): string {
-  const id = JSON.stringify(userId).replace(/</g, "\\u003c");
-  return `<script${nonceAttributes}>(() => {
+  return `<script${nonceAttributes}>${commentRecoveryScript(userId, completedSignOut)}</script>`;
+}
+
+/** The lifecycle script's body; the pages render it through their nonce'd inline script. */
+export function commentRecoveryScript(userId: string | null, completedSignOut = false): string {
+  // As scriptJson (src/routes/trusted-html.tsx) escapes it; this module is also bundled for the browser, so it imports nothing.
+  const id = JSON.stringify(userId).replace(/[<\u2028\u2029]/g, character => `\\u${character.charCodeAt(0).toString(16).padStart(4, "0")}`);
+  return `(() => {
     const userId = ${id};
     const key = "rendro-sign-out";
     let signedOut = false;
@@ -135,5 +141,5 @@ export function renderCommentRecoveryLifecycle(userId: string | null, nonceAttri
       }
     });
     ${completedSignOut ? "broadcast();" : ""}
-  })();</script>`;
+  })();`;
 }

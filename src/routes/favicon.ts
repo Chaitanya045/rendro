@@ -1,7 +1,5 @@
-/** Shared by every Rendro-owned HTML document. */
-export function renderFaviconLinks(): string {
-  return '<link rel="icon" href="/favicon.ico" sizes="16x16 32x32" type="image/x-icon"><link rel="icon" href="/favicon.svg" sizes="any" type="image/svg+xml">';
-}
+// Every Rendro-owned HTML document links both: FaviconLinks (head.tsx).
+export { renderFaviconLinks } from "./head";
 
 export const faviconAssets = {
   "/favicon.svg": "image/svg+xml",

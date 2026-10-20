@@ -106,8 +106,8 @@ describe("font document head", () => {
 
   it("preloads the Latin file and the icon font with crossorigin, from this origin only", () => {
     const head = renderFontHead({ icons: true });
-    expect(head).toContain(`<link rel="preload" href="/fonts/${fontManifest.inter.faces[0].file}" as="font" type="font/woff2" crossorigin>`);
-    expect(head).toContain(`<link rel="preload" href="/fonts/${fontManifest.icons.file}" as="font" type="font/woff2" crossorigin>`);
+    expect(head).toContain(`<link rel="preload" href="/fonts/${fontManifest.inter.faces[0].file}" as="font" type="font/woff2" crossorigin=""/>`);
+    expect(head).toContain(`<link rel="preload" href="/fonts/${fontManifest.icons.file}" as="font" type="font/woff2" crossorigin=""/>`);
     expect(head.match(/rel="preload"/g)).toHaveLength(2);
     expect(head).not.toMatch(origin);
   });

@@ -7,9 +7,9 @@ import { renderSessionUnavailablePage } from "@/routes/session-unavailable";
  */
 describe("recovery page", () => {
   it.each([
-    [503, "session", "We couldn't check your session"],
-    [500, "session", "We couldn't load this page"],
-    [503, "document", "We couldn't load this document"],
+    [503, "session", "We couldn&#39;t check your session"],
+    [500, "session", "We couldn&#39;t load this page"],
+    [503, "document", "We couldn&#39;t load this document"],
   ] as const)("renders %s for the %s subject", (status, subject, heading) => {
     const page = renderSessionUnavailablePage(status, subject);
     expect(page).toContain(`<h1 id="session-error-title">${heading}</h1>`);

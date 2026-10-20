@@ -148,8 +148,8 @@ describe("viewer shell without the Tailwind runtime", () => {
     + readFileSync(join(repo, styleSources["viewer-base"]), "utf8");
 
   it("links the hashed base stylesheet as the last head element and loads no third-party script", () => {
-    expect(renderStylesheet("viewer-base")).toBe(`<link rel="stylesheet" href="/styles/${file}">`);
-    expect(html).toContain(`${renderStylesheet("viewer-base")}\n<body>`);
+    expect(renderStylesheet("viewer-base")).toBe(`<link rel="stylesheet" href="/styles/${file}"/>`);
+    expect(html).toContain(`${renderStylesheet("viewer-base")}</head><body>`);
     expect(html.indexOf(renderStylesheet("viewer-base"))).toBeGreaterThan(html.lastIndexOf("</style>", html.indexOf("<body>")));
     expect(html).not.toMatch(/tailwind/i);
     expect(html).not.toMatch(/<script[^>]+src="(?:https?:)?\/\//i);

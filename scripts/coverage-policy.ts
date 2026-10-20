@@ -1,7 +1,13 @@
 import { resolve } from "node:path";
 
-export const sourceInclude = ["src/**/*.ts", "convex/**/*.ts", "shared/**/*.ts", "scripts/**/*.{ts,mjs}"];
+export const sourceInclude = ["src/**/*.ts", "src/**/*.tsx", "convex/**/*.ts", "shared/**/*.ts", "scripts/**/*.{ts,mjs}"];
 export const sourceExclude = ["**/*.d.ts", "convex/_generated/**", "convex/betterAuth/_generated/**", "convex/betterAuth/schema.generated.ts"];
+
+/** esbuild loader options that compile one authored file as the project does: server pages are Hono JSX (tsconfig.json). */
+export function sourceLoader(path: string) {
+  if (path.endsWith(".tsx")) return { loader: "tsx", jsx: "automatic", jsxImportSource: "hono/jsx" } as const;
+  return { loader: /\.[cm]?ts$/.test(path) ? "ts" : "js" } as const;
+}
 
 // Vitest uses picomatch with contains:true. Absolute globs prevent a relative
 // src/** (or exclusion) from also selecting a nested */src/** tree.

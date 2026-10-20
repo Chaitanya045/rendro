@@ -17,6 +17,21 @@ export default tseslint.config(
     },
   },
   {
+    // Pages render through Hono JSX, which escapes every string (#288). Only src/routes/trusted-html.tsx writes
+    // text unescaped: nonce'd inline code authored in this repository, and the finished page.
+    files: ["src/**/*.{ts,tsx}"],
+    ignores: ["src/routes/trusted-html.tsx"],
+    rules: {
+      "no-restricted-imports": ["error", {
+        patterns: [{ group: ["hono/html", "hono/utils/html", "hono/helper/*"], message: "Unescaped HTML goes through src/routes/trusted-html.tsx only." }],
+      }],
+      "no-restricted-syntax": ["error",
+        { selector: "JSXAttribute[name.name='dangerouslySetInnerHTML']", message: "Unescaped HTML goes through src/routes/trusted-html.tsx only." },
+        { selector: "Property[key.name='dangerouslySetInnerHTML']", message: "Unescaped HTML goes through src/routes/trusted-html.tsx only." },
+      ],
+    },
+  },
+  {
     files: ["tests/**/*.ts", "vitest.config.ts"],
     rules: {
       "@typescript-eslint/no-non-null-assertion": "off",

@@ -1,5 +1,3 @@
-import { escapeHtml } from "@/routes/html";
-import { styleManifest } from "./style-manifest";
 
 // Content-hashed like the fonts: a changed stylesheet always gets a new URL.
 export const styleCacheControl = "public, max-age=31536000, immutable";
@@ -11,7 +9,5 @@ export function styleResponseHeaders(path: string): Record<string, string> | und
   return hashedStyle.test(path) ? { "Content-Type": "text/css; charset=utf-8", "Cache-Control": styleCacheControl } : undefined;
 }
 
-/** Same-origin stylesheet link for a self-hosted, hashed stylesheet. */
-export function renderStylesheet(name: keyof typeof styleManifest): string {
-  return `<link rel="stylesheet" href="/styles/${escapeHtml(styleManifest[name])}">`;
-}
+// The link to a self-hosted, hashed stylesheet is Stylesheet (head.tsx).
+export { renderStylesheet } from "./head";

@@ -79,7 +79,7 @@ async function runtime(
   const successPanel = new ElementMock("section", document); successPanel.id = "success-panel"; successPanel.hidden = true;
   document.map.set("theme-toggle", theme); document.map.set("theme-icon", themeIcon); document.map.set("auth-form", page === "verify-email" ? null : form); document.map.set("resend-form", page === "verify-email" ? form : null); document.map.set("form-error", error); document.map.set("form-message", formMessage); document.map.set("success-panel", successPanel);
   document.getElementById = (id: string) => document.map.get(id) ?? null;
-  const heading = html.includes(" data-autofocus>") ? new ElementMock("h1", document) : null;
+  const heading = html.includes(' data-autofocus="">') ? new ElementMock("h1", document) : null;
   document.querySelector = (selector: string) => selector === "#auth-form button[type=submit]" || selector === "button[type=submit]" ? submit : selector === "[data-autofocus]" ? heading : null;
   document.querySelectorAll = (selector: string) => selector === "form" ? [form] : [];
   const context: any = { window: { __AUTH_STATE__: state, RendroTheme: { mount() {} } }, document, matchMedia: () => ({ matches: false, addEventListener() {} }), localStorage: { getItem: () => null, setItem() {}, removeItem() {} }, location: { origin: "http://local", assign() {} }, fetch: fetchImpl, console, Error, HTMLInputElement: InputMock };

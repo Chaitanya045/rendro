@@ -8,6 +8,7 @@ import { transform } from "esbuild";
 import type { CoverageMapData, FileCoverageData } from "istanbul-lib-coverage";
 import { parseAstAsync } from "vitest/node";
 import { canonicalPath, sourceManifest } from "../../scripts/coverage-gate";
+import { sourceLoader } from "../../scripts/coverage-policy";
 import { convertMapped, mergeBrowserFile, type MappedSource } from "./browser-coverage";
 import { alignCoverage, canonicalCoverage, reprintedIdentities } from "./normalize-node-coverage";
 import { subprocessBundleRegistry, subprocessRawDirectory } from "./subprocess-coverage";
@@ -47,7 +48,7 @@ export async function reproduceTsxModule(source: string, file: string, cached: M
   const recorded = cached.lineLengths;
   for (const format of ["esm", "cjs"] as const) {
     const output = await transform(source, {
-      loader: file.endsWith("x") ? "tsx" : /\.[cm]?ts$/.test(file) ? "ts" : "js", sourcefile: file, format, target: `node${process.versions.node}`,
+      ...sourceLoader(file), sourcefile: file, format, target: `node${process.versions.node}`,
       sourcemap: true, sourcesContent: true, minifyWhitespace: true, keepNames: true,
     });
     let code = output.code.replace(/\n$/, "");

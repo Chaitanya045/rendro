@@ -840,7 +840,7 @@ describe("the preparing page", () => {
     expect(failed).toContain('data-readiness="failed"');
     expect(failed).toContain('aria-busy="false"');
     expect(failed).toContain('role="alert"');
-    expect(failed).toContain("We couldn't prepare the docs for this repository");
+    expect(failed).toContain("We couldn&#39;t prepare the docs for this repository");
     expect(failed).toContain('href="">Retry</a>');
     // The only script on the failed page is the shared theme runtime, which sets html.dark (#270).
     expect(failed).toContain("data-rendro-theme");
