@@ -350,6 +350,41 @@ function placeFloating(
 // ──────────────────────────── the widget ────────────────────────────
 
 const MARGIN = 16;
+/** The toast region and the comment-mode hint, which styles.ts centres 96px above the bottom edge. */
+const OVERLAYS = ".toast-region, .hint";
+const OVERLAY_BOTTOM = 96;
+
+interface Overlay {
+  el: HTMLElement;
+  left: number;
+  right: number;
+  height: number;
+}
+/** Layout reads for placeOverlay, taken before the caller's writes. The height is the content's, however much shows. */
+function measureOverlays(root: ShadowRoot): Overlay[] {
+  return Array.from(root.querySelectorAll<HTMLElement>(OVERLAYS), (el) => {
+    const { left, right } = el.getBoundingClientRect();
+    return { el, left, right, height: el.scrollHeight };
+  });
+}
+/**
+ * Keeps a notification or the hint off the open drawer (#329). Where it already clears the drawer's box it stays where
+ * the stylesheet puts it; otherwise it moves above the drawer or, when there is more room there, below it, and scrolls
+ * if it is taller than that room (never shorter than one 44px row).
+ */
+function placeOverlay({ el, left, right, height }: Overlay, drawer: Rect | null): void {
+  const vh = window.innerHeight;
+  const bottom = vh - OVERLAY_BOTTOM;
+  let place = ["", "", ""];
+  if (drawer && Math.min(right, drawer.right) > Math.max(left, drawer.left) && Math.min(bottom, drawer.bottom) > Math.max(bottom - height, drawer.top)) {
+    const above = drawer.top - 8 - MARGIN;
+    const below = vh - drawer.bottom - 8 - MARGIN;
+    place = above >= Math.min(height, below)
+      ? ["", `${vh - drawer.top + 8}px`, `${Math.max(44, above)}px`]
+      : [`${drawer.bottom + 8}px`, "auto", `${Math.max(44, below)}px`];
+  }
+  [el.style.top, el.style.bottom, el.style.maxHeight] = place;
+}
 
 class Commentor {
   private parentTransport: ParentCommentTransport;
@@ -418,6 +453,8 @@ class Commentor {
   private canReloadViewer = false;
   private raf = 0;
   private drawerRaf = 0;
+  // Where the last layout pass put the open dock (not where its transitions are passing through); null while closed.
+  private drawerBox: Rect | null = null;
   private openThreadId: ThreadId | null = null;
   private closeTimer = 0;
   // Where a close animation in flight will return focus; a later close must not drop it.
@@ -1024,7 +1061,7 @@ class Commentor {
   // offsetWidth/offsetHeight — the latter return the pre-transition (compact)
   // size because the CSS width/height transition hasn't laid out the target
   // size yet.
-  private repositionDock(targetW?: number, targetH?: number): void {
+  private repositionDock(targetW?: number, targetH?: number): { left: number; top: number } {
     const vw = window.innerWidth;
     const vh = window.innerHeight;
     const w = targetW ?? this.dock.offsetWidth;
@@ -1033,12 +1070,15 @@ class Commentor {
     this.dock.style.bottom = "auto";
     this.dock.style.transform = "";
     const off = clamp(MARGIN, (this.dockEdge === "bottom" || this.dockEdge === "top" ? vw - w - MARGIN : vh - h - MARGIN), this.dockOffset);
-    switch (this.dockEdge) {
-      case "bottom": this.dock.style.left = `${off}px`; this.dock.style.top = `${vh - h - MARGIN}px`; break;
-      case "top":    this.dock.style.left = `${off}px`; this.dock.style.top = `${MARGIN}px`; break;
-      case "left":   this.dock.style.left = `${MARGIN}px`; this.dock.style.top = `${off}px`; break;
-      case "right":  this.dock.style.left = `${vw - w - MARGIN}px`; this.dock.style.top = `${off}px`; break;
-    }
+    const place = {
+      bottom: { left: off, top: vh - h - MARGIN },
+      top: { left: off, top: MARGIN },
+      left: { left: MARGIN, top: off },
+      right: { left: vw - w - MARGIN, top: off },
+    }[this.dockEdge];
+    this.dock.style.left = `${place.left}px`;
+    this.dock.style.top = `${place.top}px`;
+    return place;
   }
 
   // ── comment authoring ──
@@ -1143,6 +1183,7 @@ class Commentor {
           "Click an element (or select text first) — Esc to cancel",
         ),
       );
+      if (this.drawerBox) this.placeOverlays();
     }
   }
 
@@ -2394,6 +2435,9 @@ class Commentor {
       window.clearTimeout(this.drawerCollapseTimer);
       this.drawerCollapseTimer = 0;
     }
+    // Closed, the drawer leaves the notifications and the hint where the stylesheet puts them; read before any write.
+    this.drawerBox = null;
+    this.placeOverlays();
     this.commentsBtn.setAttribute("aria-expanded", "false");
     this.commentsBtn.classList.remove("active");
     delete this.content.dataset.layout;
@@ -2442,8 +2486,15 @@ class Commentor {
   private layoutDrawer(): void {
     if (!this.dock.hasAttribute("data-expanded")) return;
     const { w, h } = this.sizeContent();
-    this.repositionExpandedDock(w, h);
+    // Read while the layout the sizing forced is still current, so moving the notifications costs no further one.
+    const overlays = measureOverlays(this.root);
+    this.drawerBox = this.repositionExpandedDock(w, h);
+    this.placeOverlays(overlays);
     this.content.dataset.layout = "settled";
+  }
+
+  private placeOverlays(overlays = measureOverlays(this.root)): void {
+    for (const overlay of overlays) placeOverlay(overlay, this.drawerBox);
   }
 
   private sizeContent(): { w: number; h: number } {
@@ -2473,7 +2524,7 @@ class Commentor {
     return { w: targetW, h: targetH };
   }
 
-  private repositionExpandedDock(contentW: number, contentH: number): void {
+  private repositionExpandedDock(contentW: number, contentH: number): Rect {
     const tw = this.toolbar.offsetWidth;
     const th = this.toolbar.offsetHeight;
     const ds = getComputedStyle(this.dock);
@@ -2485,13 +2536,15 @@ class Commentor {
     const dockW = (horizontal ? tw + contentW : Math.max(tw, contentW)) + bw;
     const dockH = (horizontal ? Math.max(th, contentH) : th + contentH) + bh;
     if (compact) {
+      const top = window.innerHeight - dockH - MARGIN;
       this.dock.style.right = "auto";
       this.dock.style.bottom = "auto";
       this.dock.style.left = `${MARGIN}px`;
-      this.dock.style.top = `${window.innerHeight - dockH - MARGIN}px`;
-      return;
+      this.dock.style.top = `${top}px`;
+      return { left: MARGIN, top, right: MARGIN + dockW, bottom: top + dockH };
     }
-    this.repositionDock(dockW, dockH);
+    const { left, top } = this.repositionDock(dockW, dockH);
+    return { left, top, right: left + dockW, bottom: top + dockH };
   }
 
   // `keepPlace` is false when the list starts afresh (the drawer opening, another tab), so no layout is read for it.
@@ -2981,6 +3034,8 @@ class Commentor {
       );
     }
     region.append(el);
+    // Over the open drawer it moves now, before it is ever painted there; a closed drawer leaves it in place.
+    if (this.drawerBox) this.placeOverlays();
     const timeout = window.setTimeout(
       () => close(el),
       options.duration ?? (options.kind === "error" ? 6000 : 3000),
