@@ -318,6 +318,17 @@ Trusted HTML policies also use `object-src 'none'`, `base-uri 'self'`, and `form
 
 `tests/security-headers.test.ts` covers route policies, nonce isolation, HTTPS detection, private protections and non-HTML responses. `tests/security-headers-browser.test.ts` runs Chromium against actual Worker routes on an isolated local server, with fixture auth and comment backends, a `securitypolicyviolation` listener in every frame and CSP console checks. It exercises the landing page, sign-in errors and auth error redirects, email verification, the home and account pages, 404s and the real comments postMessage host and widget. The suite uses the shared offline Chromium harness ([Chromium tests](BROWSER_TESTS.md)); any external request, including a CSS CDN, fails it.
 
+### Server-rendered HTML (Hono JSX)
+
+Every Rendro-owned page is server-only Hono JSX (#288): the landing page, the auth pages and `/home`, the repository shell, the preparing page, the 404 and "temporarily unavailable" pages, sign-out, and the shared head (`src/routes/head.tsx`: favicons, fonts, stylesheet links, the theme assets and button, the comment-recovery bootstrap). JSX is compiled with `jsxImportSource: "hono/jsx"` and nothing of it reaches the browser: no client framework, no hydration, and the client bundles' bytes do not change. Each page's markup is a `.tsx` module beside the `.ts` module that keeps its inline CSS and script as constants and re-exports its `render…` function (`landing.ts` ↔ `landing-page.tsx`, `app.ts` ↔ `shell.tsx`, `auth-pages.ts` ↔ `auth-page.tsx`, and so on). `tests/jsx-boundary.test.ts` keeps `.tsx` to `src/routes` and `src/repo-read`.
+
+Hono JSX escapes every string it renders, in text and attributes. `src/routes/trusted-html.tsx` is the one module that writes text unescaped, and only:
+
+- the body of a nonced `<script>` or `<style>` (`InlineScript`, `InlineStyle`): code authored in this repository. Request or repository data enters a script body only as `scriptJson(value)`, JSON with `<`, U+2028 and U+2029 escaped;
+- the finished page (`renderHtml`), rendered in place. Hono's `toString()` would also run its React-style metadata pass and move an async `<script src>` (the RUM script) into `<head>`.
+
+A lint rule (`eslint.config.mjs`) and `tests/jsx-boundary.test.ts` keep `hono/html` (`raw`) and `dangerouslySetInnerHTML` out of every other module. `tests/page-html-snapshots.test.ts` pins the exact HTML of every page and state (`tests/__snapshots__/pages/`, the nonce replaced by a placeholder): a snapshot diff is a change to what readers receive. `tests/page-html-escaping.test.ts` renders each page's dynamic fields (repository names and paths, titles, the reader's name and email, return paths, tokens, the 404 options) with hostile values and checks that they come back intact as text, attributes or script data, with no added element. The rendered document frame (`src/repo-read/frame.ts`) stays a string template: its body is the sanitized repository HTML from ingest, which JSX would have to write unescaped.
+
 ### Convex access from the Worker
 
 The Worker never opens a WebSocket to Convex. It calls Convex HTTP actions at `CONVEX_SITE_URL` for auth, signing the trusted client IP with `CONVEX_INTERNAL_SECRET` (`src/auth-client-ip.ts`). The read path's comment access (`src/repo-read/comments.ts`) calls the Convex function API at `CONVEX_URL` through `src/convex-internal.ts`, with the same secret inside the arguments of internal-secret-gated functions:
@@ -350,7 +361,7 @@ Convex caches a query result until a document it read changes; elapsed time does
 ```
 Server (Hono SSR)
   │
-  ├─ renderScopedDocumentShell(options)  (src/routes/app.ts, called by src/repo-read/routes.ts)
+  ├─ renderScopedDocumentShell(options)  (markup src/routes/shell.tsx, CSS and script src/routes/app.ts; called by src/repo-read/routes.ts)
   │   ├─ Topbar (repository title, copy-link, theme, shell hide/show; mobile "More document actions" menu)
   │   ├─ Sidebar (#doc-sidebar, resizable, mobile drawer)
   │   │   ├─ repository search (#repo-search, when the search binding exists)
@@ -361,12 +372,13 @@ Server (Hono SSR)
   │   │   └─ #content-frame (sandboxed iframe)
   │   ├─ Inline scripts (theme, shell hide/show, shortcut forwarding, copy-link feedback)
   │   ├─ <script src="/lazy-tree.js?v=…">, /rum.js?v=…
-  │   └─ /commentor-parent.js?v=… (comment host, when Convex is configured)
+  │   ├─ /commentor-parent.js?v=… (comment host, when Convex is configured)
+  │   └─ /private-viewer.js?v=… and its update notice (private repositories: ticket renewal)
   │
   ├─ Document frames (src/repo-read/frame.ts): the rendered page, /private-viewer.js?v=… (link bridge,
   │   ticket renewal) and /commentor.js?v=… (the comment widget)
   │
-  ├─ renderNotFoundPage(options)  (src/routes/not-found.ts)
+  ├─ renderNotFoundPage(options)  (src/routes/not-found-page.tsx)
   │   └─ Shared 404 HTML for missing routes, documents, and iframe objects
   │
 Client (lazy-tree.js, built from src/lazy-tree/)
@@ -1353,7 +1365,7 @@ What the reader sees depends on the outcome inside a 5-second window (`PREPARE_W
 - **Outcome arrives in window.** `flipped`/`current`: the pointer is read again, this time fresh (the same request's "never ingested" pointer miss would otherwise hide the just-published branch for up to 5 s, so `RepoSnapshots.pointer` takes a `fresh` flag), and the response is the ordinary docs. `duplicate`: still building, the preparing page. `no-ref`: a plain 404, no readiness header. `failed`: the retry page, 503. `throttled` (the repository's first-view budget is spent, below): #225's retryable 503 with `Retry-After` set to the end of the budget window.
 - **Window expires.** The response is the preparing page (200) while the build continues unattended (`waitUntil` holds the coordinator call; the build proceeds whatever the reader does). Every later poll runs its own `ensure` — the per-isolate `SingleFlight` still shares any call still open, and the coordinator coalesces the rest — so the page is self-healing and the server stays stateless. A transport failure from the coordinator is #225's retryable 503; it never becomes a 404. "Ready but no pointer" (the coordinator answered while the store lost the pointer) is a broken store, so also a retryable 503.
 
-The preparing page (`renderPreparingPage` in `src/repo-read/preparing.ts`) is `aria-busy`, announces itself politely (`role="status"`), polls its own URL with `fetch` (`cache: "no-store"`) after the response's `Retry-After` (5 s) doubling per attempt, capped at 60 s, pausing while the tab is hidden. The poll reads the state from `X-Rendro-Readiness` and the status: a 404 stops with "These docs are no longer available.", a `failed` state loads the retry page with `location.replace`, and anything else that is no longer `preparing` reloads into the docs. The server never polls itself from `waitUntil` and stores no per-reader state: any reader of the URL can re-check what any other is preparing. The retry page (503) is the same layout with `role="alert"` and a `Retry` link to the URL itself; the retry re-runs `ensure` (the coordinator records the failure but always re-attempts, so reader retries are fresh attempts). The page follows the reader's theme (#270): like every Worker-served page it ships the shared theme runtime (`renderThemeAssets`), which sets `html.dark` from the reader's saved choice or appearance, and the page's own variables follow it.
+The preparing page (`renderPreparingPage` in `src/repo-read/preparing-page.tsx`; its poll script and CSS are in `preparing.ts`) is `aria-busy`, announces itself politely (`role="status"`), polls its own URL with `fetch` (`cache: "no-store"`) after the response's `Retry-After` (5 s) doubling per attempt, capped at 60 s, pausing while the tab is hidden. The poll reads the state from `X-Rendro-Readiness` and the status: a 404 stops with "These docs are no longer available.", a `failed` state loads the retry page with `location.replace`, and anything else that is no longer `preparing` reloads into the docs. The server never polls itself from `waitUntil` and stores no per-reader state: any reader of the URL can re-check what any other is preparing. The retry page (503) is the same layout with `role="alert"` and a `Retry` link to the URL itself; the retry re-runs `ensure` (the coordinator records the failure but always re-attempts, so reader retries are fresh attempts). The page follows the reader's theme (#270): like every Worker-served page it ships the shared theme runtime (`renderThemeAssets`), which sets `html.dark` from the reader's saved choice or appearance, and the page's own variables follow it.
 
 | Response | `Cache-Control` | State header |
 |---|---|---|
@@ -1954,7 +1966,7 @@ Tests: `tests/repo-comments-convex.test.ts` ("editing repository comments (#287)
 |---|---|
 | Access follows GitHub; Rendro keeps no tenancy of its own | Who may read a repository's docs and comments is exactly who may read the repository, so there is no second permission model to keep in sync (#286) |
 | Convex for identity and comments, R2 for rendered bytes | Indexed relationships and authorization remain separate from cheap blob storage |
-| Server HTML and vanilla TypeScript bundles | Small, versioned bundles and nonced inline controllers, with no client framework |
+| Server HTML and vanilla TypeScript bundles | Small, versioned bundles and nonced inline controllers, with no client framework. Pages are server-only Hono JSX, which escapes every value (#288) |
 | iframe document rendering | Rendered repository HTML stays isolated from the application chrome, in an opaque sandbox |
 | Repo docs rendered and sanitized once at ingest | comrak (cmark-gfm lineage) is linear on hostile Markdown; a parse5 allowlist with a fixed-point re-parse check is the XSS boundary, and readers never pay render cost |
 | Stateless repository capability cookie plus revocation epoch | A cached repository page view verifies one HMAC and reads one epoch; GitHub and the database are reached only on a cookie miss, and revocation reaches every colo with the epoch store |

@@ -7,6 +7,7 @@ import type { CoverageMapData, FileCoverageData } from "istanbul-lib-coverage";
 import { moduleRunnerTransform, type Rollup } from "vite";
 import { parseAstAsync } from "vitest/node";
 import { canonicalPath } from "../../scripts/coverage-gate";
+import { sourceLoader } from "../../scripts/coverage-policy";
 
 const maps = ["statementMap", "fnMap", "branchMap"] as const;
 const fingerprint = (value: unknown) => JSON.stringify(value);
@@ -87,7 +88,7 @@ const executed = (file: FileCoverageData) => [...Object.values(file.s), ...Objec
 
 /** The gate's own transform of one authored file, as its zero-hit reference map. */
 export async function canonicalCoverage(absolute: string): Promise<{ canonical: FileCoverageData; output: TransformResult; sourceMap: Rollup.SourceMap; coverage: { url: string; functions: never[] } }> {
-  const output = await transform(readFileSync(absolute, "utf8"), { loader: /\.[cm]?ts$/.test(absolute) ? "ts" : "js", sourcefile: absolute, sourcemap: "external", target: "esnext" });
+  const output = await transform(readFileSync(absolute, "utf8"), { ...sourceLoader(absolute), sourcefile: absolute, sourcemap: "external", target: "esnext" });
   const sourceMap = JSON.parse(output.map) as Rollup.SourceMap;
   const coverage = { url: pathToFileURL(absolute).href, functions: [] };
   const canonical = (await convert({ code: output.code, sourceMap, ast: parseAstAsync(output.code), coverage }) as unknown as CoverageMapData)[absolute];

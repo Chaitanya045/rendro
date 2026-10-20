@@ -1,4 +1,3 @@
-import { nonceAttribute } from "@/middleware/html-nonce";
 import { mobileViewportStyles } from "./viewport";
 
 export const sharedThemeStyles = String.raw`
@@ -83,12 +82,5 @@ export const sharedThemeRuntime = String.raw`
   window.RendroUI.applyTheme=function(mode,persist,animate){if(activeController)activeController.apply(mode,persist,animate);else applyRoot(mode,persist);};
 })();`;
 
-export function renderThemeAssets(): string {
-  return `<style${nonceAttribute()} data-rendro-theme>${sharedThemeStyles}</style><script${nonceAttribute()} data-rendro-theme>${sharedThemeRuntime}</script>`;
-}
-
-// Shells share markup as well as behavior: page-local button classes must not
-// override this control's interaction states. Menu placement changes only layout.
-export function renderThemeButton(): string {
-  return `<button class="rendro-theme-control" id="theme-toggle" type="button" aria-label="Switch to dark theme" title="Theme: system"><span class="material-symbols-outlined rendro-theme-icon" aria-hidden="true">contrast</span></button>`;
-}
+// Their markup, and the theme button every shell shares, is ThemeAssets and ThemeButton (head.tsx).
+export { renderThemeAssets, renderThemeButton } from "./head";

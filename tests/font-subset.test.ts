@@ -72,6 +72,11 @@ describe("icon extraction", () => {
     expect(scanIconNames(root, catalog)).toEqual(["lock"]);
     for (const word of ["block", "pending", "warning"]) expect(NON_ICON_LITERALS.has(word) && catalog.has(word)).toBe(true);
   });
+
+  it("scans the JSX page modules too (#288)", () => {
+    const root = project({ "src/routes/page.tsx": "export const P = () => <span class=\"material-symbols-outlined\">search</span>;" });
+    expect(scanIconNames(root, catalog)).toEqual(["search"]);
+  });
 });
 
 describe("font build output", () => {

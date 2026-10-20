@@ -1,13 +1,6 @@
-import { COMMENTOR_PARENT_VERSION, LAZY_TREE_VERSION } from "@/viewer/asset-versions";
-import { renderCommentRecoveryLifecycle } from "../commentor/recovery-session";
-import { nonceAttribute } from "@/middleware/html-nonce";
-import { renderFaviconLinks } from "./favicon";
-import { renderFontHead } from "./fonts";
-import { renderStylesheet } from "./styles";
 import { Hono } from "hono";
 import type { User } from "better-auth/types";
 import { renderLandingPage } from "@/routes/landing";
-import { renderThemeAssets, renderThemeButton } from "./theme";
 import { menuSurfaceStyles } from "../ui/menu-styles";
 
 const app = new Hono<{ Variables: { user?: User } }>();
@@ -43,25 +36,16 @@ export interface ScopedDocumentShellOptions {
   frameBase: string;
   selectedPath: string;
   repoCommentConfig: RepoCommentConfig;
+  /** A private repository's frames load images through tickets only the shell may renew: the parent viewer, at the frames' base (#293). */
+  privateViewerBase?: string;
+  /** Real-user monitoring (#282), on the shell the read path serves. */
+  monitoring?: boolean;
 }
 
-export function renderScopedDocumentShell(options: ScopedDocumentShellOptions): string {
-  const org = options.namespace;
-  const selectedDoc = `${org}/${options.selectedPath}`;
-  const documentBase = options.basePath;
-  const orgEsc = escapeHtml(org);
-  const displayNameEsc = escapeHtml(options.title);
-  const shareLabel = "Copy link";
-  const sandboxAttribute = ' sandbox="allow-scripts allow-forms allow-popups allow-downloads"';
-  return `<!DOCTYPE html>
-<html lang="en">
-<head>${renderFaviconLinks()}
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>${displayNameEsc} — Rendro</title>
-${renderFontHead({ icons: true, weights: [400, 600, 700] })}
-${renderThemeAssets()}
-<style${nonceAttribute()}>
+// The shell's CSS and behaviour. The markup is ShellDocument (shell.tsx).
+export const shareLabel = "Copy link";
+
+export const shellStyles = `
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
   :root{--sidebar-expanded-width:280px;--sidebar-width:var(--sidebar-expanded-width);--tree-row-height:33px;--viewer-focus:#c2410c}
   body{display:flow-root;font-family:Inter,system-ui,sans-serif;background:#fff;color:#09090b;overflow:hidden;height:100vh;font-size:14px;line-height:20px}
@@ -356,60 +340,9 @@ ${renderThemeAssets()}
     html.shell-hidden.tree-mobile-open .sidebar{transform:translateX(0);opacity:1;pointer-events:auto}
   }
   ${menuSurfaceStyles}
-</style>
-${renderStylesheet("viewer-base")}
-<body>
+`;
 
-<header class="topbar">
-  <div class="topbar-left">
-    <button class="topbar-btn-icon mobile-tree-toggle" id="mobile-tree-toggle" type="button" aria-label="Open document tree" aria-expanded="false"><span class="material-symbols-outlined" aria-hidden="true">menu</span></button>
-    <h1 class="topbar-logo">${displayNameEsc}</h1>
-  </div>
-  <div class="topbar-actions">
-    <span class="shortcut-tooltip-wrap"><button class="topbar-btn-icon shell-toggle" id="shell-toggle" type="button" aria-label="Hide app shell, keyboard shortcut Ctrl Shift H" aria-describedby="shell-shortcut-tooltip" aria-pressed="false"><span class="material-symbols-outlined" aria-hidden="true">fullscreen</span><span class="mobile-action-label" id="shell-mobile-label">Enter reading mode</span></button><span class="shortcut-tooltip" id="shell-shortcut-tooltip" role="tooltip"><span class="shortcut-tooltip-label">Hide app shell</span><span class="shortcut-keys" id="shell-shortcut-keys" aria-hidden="true"><span class="shortcut-key">Ctrl</span><span class="shortcut-key">Shift</span><span class="shortcut-key">H</span></span></span></span>
-    <button class="topbar-btn topbar-btn-share" id="share-btn" type="button" aria-label="${shareLabel}">
-      <span class="share-icon-window" aria-hidden="true"><span class="share-icon-track"><span class="material-symbols-outlined share-icon-row">link</span><span class="share-icon-row"><span class="share-loader"></span></span><span class="material-symbols-outlined share-icon-row" id="share-feedback-icon">check</span></span></span>
-      <span class="share-label-window" aria-hidden="true"><span class="share-label-track"><span class="share-label">${shareLabel}</span><span class="share-label">Copying link…</span><span class="share-label" id="share-feedback-label">Link copied!</span></span></span>
-    </button>
-    ${renderThemeButton()}
-    <div class="mobile-more" id="mobile-more">
-      <button class="topbar-btn-icon" id="mobile-more-btn" type="button" aria-label="More document actions" aria-haspopup="dialog" aria-controls="mobile-more-menu" aria-expanded="false"><span class="material-symbols-outlined" aria-hidden="true">more_vert</span></button>
-      <div class="mobile-more-menu" id="mobile-more-menu" role="dialog" aria-label="More document actions" hidden></div>
-    </div>
-  </div>
-</header>
-<div class="share-live" id="share-live" role="status" aria-live="polite" aria-atomic="true"></div>
-<aside class="share-error" id="share-error" aria-label="Sharing feedback" hidden>
-  <div id="share-error-message" aria-hidden="true"><span id="share-error-text"></span></div>
-  <div class="share-error-actions"><button type="button" class="topbar-btn" id="share-retry">Retry</button><button type="button" class="topbar-btn" id="share-dismiss">Dismiss</button></div>
-</aside>
-<div class="shell-hotzone shell-hotzone-top" id="shell-hotzone-top" aria-hidden="true"></div>
-<div class="shell-hotzone shell-hotzone-left" id="shell-hotzone-left" aria-hidden="true"></div>
-<button class="mobile-tree-backdrop" id="mobile-tree-backdrop" type="button" aria-label="Close document tree"></button>
-
-<aside class="sidebar" id="doc-sidebar" aria-labelledby="doc-sidebar-title">
-  <div class="sidebar-divider" id="doc-sidebar-title">Docs</div>
-  ${renderRepoSearch()}
-  <div class="sidebar-tree" data-tree-org="${orgEsc}" data-document-base="${escapeHtml(documentBase)}" data-frame-base="${escapeHtml(options.frameBase)}">
-    <div class="tree-stack" id="tree-container" style="position:relative">
-      <div class="active-indicator" id="active-indicator" style="opacity:0;transition:none"></div>
-      ${renderTreeSkeleton()}
-    </div>
-  </div>
-</aside>
-
-<main class="main">
-<div class="sidebar-resizer" id="sidebar-resizer" role="separator" aria-orientation="vertical" aria-controls="doc-sidebar" aria-label="Resize document tree" aria-valuemin="220" aria-valuemax="420" aria-valuenow="280" aria-valuetext="Document tree 280 pixels wide" tabindex="0"><span class="resizer-sparks resizer-sparks-top" aria-hidden="true"></span><span class="resizer-sparks resizer-sparks-bottom" aria-hidden="true"></span></div>
-  <div class="main-placeholder" id="main-placeholder">
-    <div class="ph-icon"><span class="material-symbols-outlined" aria-hidden="true" style="font-size:32px;color:#71717a">edit_document</span></div>
-    <h2>Select a document</h2>
-    <p>Choose a document from the sidebar to view its contents, or create a new page to start writing.</p>
-  </div>
-  <iframe name="content-frame" id="content-frame" class="content-frame"
-    src="about:blank" title="Document content" style="display:none"${sandboxAttribute}></iframe>
-</main>
-
-<script${nonceAttribute()}>
+export const shellScript = `
 (function(){
   var root=document.documentElement;
   function normalizedTheme(){return window.RendroTheme.getMode();}
@@ -754,78 +687,8 @@ ${renderStylesheet("viewer-base")}
   // The retry is the shell's own navigation, recorded as src/viewer/content-frame.ts records one (#296).
   window.addEventListener("message",function(e){var frame=document.getElementById("content-frame");if(frame&&frame.contentWindow&&e.source===frame.contentWindow&&e.data&&e.data.type==="doc-retry"){if(frame.dataset.navigation)frame.dataset.loading=frame.dataset.navigation=String(Number(frame.dataset.navigation)+1);frame.contentWindow.location.replace(frame.src);}});
 })();
-</script>
-<script${nonceAttribute()}>window.RENDRO_INITIAL_DOC=${inlineJson(selectedDoc)};window.RENDRO_ORG=${inlineJson(org)};window.RENDRO_DOCUMENT_BASE=${inlineJson(documentBase)};window.RENDRO_REPO_COMMENT_CONFIG=${inlineJson(options.repoCommentConfig)};</script>
-${renderCommentRecoveryLifecycle(null, nonceAttribute())}
-${options.repoCommentConfig.convexUrl ? `<script${nonceAttribute()} src="/commentor-parent.js?v=${COMMENTOR_PARENT_VERSION}"></script>` : ""}
-<script${nonceAttribute()} src="/lazy-tree.js?v=${LAZY_TREE_VERSION}"></script>
-</body>
-</html>`;
-}
+`;
 
-
-function renderRepoSearch(): string {
-  return `<div class="repo-search" id="repo-search" data-repo-search hidden>
-    <form class="repo-search-field" role="search">
-      <span class="material-symbols-outlined repo-search-icon" aria-hidden="true">search</span>
-      <input class="repo-search-input" id="repo-search-input" type="search" name="q" placeholder="Search documents" aria-label="Search documents" role="combobox" aria-autocomplete="list" aria-controls="repo-search-results" aria-expanded="false" autocomplete="off" spellcheck="false" maxlength="200" />
-      <button class="repo-search-clear" id="repo-search-clear" type="button" aria-label="Clear search" hidden><span class="material-symbols-outlined" aria-hidden="true">close</span></button>
-    </form>
-    <div class="repo-search-results" id="repo-search-results" role="listbox" aria-label="Search results" hidden></div>
-    <div class="repo-search-status" id="repo-search-status" role="status" aria-live="polite" aria-atomic="true"></div>
-  </div>`;
-}
-
-function renderTreeSkeleton(): string {
-  return `<div class="tree-skeleton" aria-label="Loading documents" aria-busy="true">
-    <div class="tree-skeleton-node">
-      <div class="tree-skeleton-item">
-        <span class="tree-skeleton-icon"></span>
-        <span class="tree-skeleton-label w-lg"></span>
-      </div>
-    </div>
-    <div class="tree-skeleton-node">
-      <div class="tree-skeleton-item">
-        <span class="tree-skeleton-icon tree-skeleton-caret"></span>
-        <span class="tree-skeleton-icon"></span>
-        <span class="tree-skeleton-label w-md"></span>
-      </div>
-    </div>
-    <div class="tree-skeleton-node">
-      <div class="tree-skeleton-item">
-        <span class="tree-skeleton-icon tree-skeleton-caret"></span>
-        <span class="tree-skeleton-icon"></span>
-        <span class="tree-skeleton-label w-md"></span>
-      </div>
-    </div>
-    <div class="tree-skeleton-node">
-      <div class="tree-skeleton-item">
-        <span class="tree-skeleton-icon tree-skeleton-caret"></span>
-        <span class="tree-skeleton-icon"></span>
-        <span class="tree-skeleton-label w-lg"></span>
-      </div>
-    </div>
-    <div class="tree-skeleton-node">
-      <div class="tree-skeleton-item">
-        <span class="tree-skeleton-icon tree-skeleton-caret"></span>
-        <span class="tree-skeleton-icon"></span>
-        <span class="tree-skeleton-label w-md"></span>
-      </div>
-    </div>
-  </div>`;
-}
-
-function inlineJson(value: unknown): string {
-  return JSON.stringify(value).replace(/</g, "\\u003c");
-}
-
-function escapeHtml(s: string): string {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
-}
-
+export { renderScopedDocumentShell } from "./shell";
 
 export default app;

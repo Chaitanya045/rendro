@@ -1,4 +1,3 @@
-import { nonceAttribute } from "@/middleware/html-nonce";
 import { fontManifest } from "./font-manifest";
 
 // Content-hashed, so a changed font always gets a new URL and the old one never changes.
@@ -15,7 +14,7 @@ export function fontResponseHeaders(path: string): Record<string, string> | unde
   return undefined;
 }
 
-const fontUrl = (file: string) => `/fonts/${file}`;
+export const fontUrl = (file: string) => `/fonts/${file}`;
 const iconFontFile = fontManifest.icons.file;
 
 // `block` keeps ligature names invisible while the icon font loads; iconBox bounds them if it never does.
@@ -40,13 +39,15 @@ export interface FontOptions {
   weights?: readonly number[];
 }
 
-/**
- * Same-origin font preloads and @font-face rules for the document head. All Inter weights share one
- * variable file per subset; each face clamps the variable axis to a single weight, so weights the
- * design never used still snap to the nearest declared face. Only the Latin file is preloaded.
- */
-export function renderFontHead({ icons = false, weights = fontManifest.inter.weights }: FontOptions = {}): string {
-  const preload = (file: string) => `<link rel="preload" href="${fontUrl(file)}" as="font" type="font/woff2" crossorigin>`;
-  const latin = fontManifest.inter.faces[0].file;
-  return `${preload(latin)}${icons ? preload(iconFontFile) : ""}<style${nonceAttribute()} data-rendro-fonts>${interFaces(weights)}${icons ? iconFace + iconBox : ""}</style>`;
+/** The fonts a page preloads: the Latin Inter file, and the icon font when the page renders icons. */
+export function fontPreloads({ icons = false }: FontOptions = {}): string[] {
+  return icons ? [fontManifest.inter.faces[0].file, iconFontFile] : [fontManifest.inter.faces[0].file];
 }
+
+/** The page's @font-face rules (and the icon box), the body of its nonce'd `data-rendro-fonts` style. */
+export function fontFaceStyles({ icons = false, weights = fontManifest.inter.weights }: FontOptions = {}): string {
+  return `${interFaces(weights)}${icons ? iconFace + iconBox : ""}`;
+}
+
+// The head markup that uses them is FontHead (head.tsx).
+export { renderFontHead } from "./head";

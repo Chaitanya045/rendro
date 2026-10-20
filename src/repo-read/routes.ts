@@ -12,7 +12,6 @@ import { r2Store, type R2BucketLike } from "@/ingest/orchestrator/store";
 import type { ManifestFile, SnapshotManifest } from "@/ingest/orchestrator/snapshot";
 import { CONVEX_URL, IMAGE_PROXY_SECRET, REPO_CAPABILITY_SECRET, REPO_CONTENT_KEY, REPO_CONTENT_KEY_PREVIOUS } from "@/config";
 import { verifyImageProxyPath } from "@/image-proxy";
-import { nonceAttribute } from "@/middleware/html-nonce";
 import { sessionViewer } from "@/middleware/session";
 import { renderScopedDocumentShell } from "@/routes/app";
 import { assetError } from "@/routes/asset-headers";
@@ -25,8 +24,7 @@ import { unavailableResponse, viewerErrorCache, viewerErrorResponse } from "@/ro
 import { isCanonicalStorageKey } from "@/storage-boundary";
 import { storageKeyRepoId } from "@/ingest/orchestrator/keys";
 import { ViewerBackendError } from "@/viewer-backend";
-import { viewerScript, viewerUpdateNotice } from "@/viewer/markup";
-import { RUM_VERSION } from "@/viewer/asset-versions";
+import { viewerScript } from "@/viewer/markup";
 import { kvRevocationEpochs, kvVisibilityEpochs, serviceRepoPermissions, type Fetcher, type KvReader } from "./access";
 import {
   authorizeRepo, authorizeTicket, CAPABILITY_TTL_SECONDS, mintTicket, TICKET_TTL_SECONDS, type Authorization, type AuthorizeDependencies,
@@ -220,18 +218,15 @@ function shell(c: Context, grant: RepoGrant, request: RepoRequestPath, manifest:
   const repoCommentConfig = {
     repoId: grant.repo.id, accessUrl: `${repoBase(request.owner, request.name, { kind: "default" })}/comment-access`, convexUrl: CONVEX_URL, documentPath: selected,
   };
+  // Private frames load their images through tickets, which only the trusted shell may renew.
   const html = renderScopedDocumentShell({
     namespace: request.name, title: `${request.owner}/${request.name}`,
     basePath: repoBase(request.owner, request.name, request.ref), frameBase: pinned, selectedPath: selected, repoCommentConfig,
+    privateViewerBase: grant.repo.private ? pinned : undefined, monitoring: true,
   });
-  // Private frames load their images through tickets, which only the trusted shell may renew.
-  const ticketRenewal = grant.repo.private ? viewerUpdateNotice() + viewerScript("parent", { base: pinned }) : "";
-  // Real-user monitoring (#282): async, so it never holds up parsing or the first document.
-  const monitoring = `<script${nonceAttribute()} async src="/rum.js?v=${RUM_VERSION}"></script>\n`;
-  const body = html.replace("</body>", ticketRenewal + monitoring + "</body>");
   // Revalidated on every navigation (each response has its own nonce), but never no-store: back/forward cache stays usable.
   // The shell points at same-origin speculation rules so Chromium prefetches the frames the sidebar links to (#245).
-  return c.html(body, 200, { "Cache-Control": "private, no-cache", "Speculation-Rules": `"${REPO_SPECULATION_RULES_PATH}"` });
+  return c.html(html, 200, { "Cache-Control": "private, no-cache", "Speculation-Rules": `"${REPO_SPECULATION_RULES_PATH}"` });
 }
 
 async function tree(c: Context, grant: RepoGrant, request: RepoRequestPath, manifest: SnapshotManifest, services: Services): Promise<Response> {

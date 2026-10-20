@@ -17,7 +17,7 @@ describe('auth route rendering boundaries', () => {
     expect(html).toContain('id="form-error" role="alert">');
     expect(html).not.toContain('<unknown>');
     // Recovery is the email form: no third-party sign-in is offered (#286).
-    expect(html).toContain('<form id="auth-form" novalidate>');
+    expect(html).toContain('<form id="auth-form" novalidate="">');
     expect(html).not.toMatch(/google/i);
   });
 
@@ -83,7 +83,7 @@ describe('auth route rendering boundaries', () => {
       const html = await (await authPages.request(`/verify-email?${query}`)).text();
       expect(html).not.toContain('Email verified');
       expect(html).not.toContain('Continue to sign in');
-      expect(html).toContain('<h1 tabindex="-1" data-autofocus>Verification link unavailable</h1>');
+      expect(html).toContain('<h1 tabindex="-1" data-autofocus="">Verification link unavailable</h1>');
       expect(html).toContain('<p role="alert" class="message error reset-invalid">This verification link is invalid or has expired.');
       expect(html).toContain('id="resend-form"');
       expect(html).not.toContain(error ? `>${error}<` : 'undefined');
@@ -94,7 +94,7 @@ describe('auth route rendering boundaries', () => {
   it('keeps the plain verification page free of the invalid-link state', async () => {
     const html = await (await authPages.request('/verify-email')).text();
     expect(html).toContain('Verify your email');
-    expect(html).not.toContain(' data-autofocus>');
+    expect(html).not.toContain(' data-autofocus="">');
     expect(html).not.toContain('invalid or has expired');
   });
 

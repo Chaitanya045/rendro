@@ -88,7 +88,7 @@ Rules:
 
 ## Account pages
 
-Sign-in, sign-up, verification, recovery, reset, the signed-in home and account security share one template and runtime (`src/routes/auth-pages.ts`).
+Sign-in, sign-up, verification, recovery, reset, the signed-in home and account security share one template (`src/routes/auth-page.tsx`) and runtime (`src/routes/auth-pages.ts`).
 
 - Authentication uses a focused two-column desktop composition: factual Rendro context beside a `380px`–`440px` card. Mobile collapses to the card.
 - The pages share the same fields, error region, pending state, password reveal behavior, and theme semantics. Their dark tokens match the shell (`#09090b` surface, `#18181b` secondary surface, `#27272a` border), and the card's `h1` precedes the context `h2` in DOM order.

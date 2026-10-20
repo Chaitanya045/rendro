@@ -61,13 +61,13 @@ describe("auth error redirects through the Worker", () => {
     ["state_not_found", "Your sign-in attempt expired or could not be verified."],
     ["state_security_mismatch", "Your sign-in attempt expired or could not be verified."],
     ["invalid_state", "Your sign-in attempt expired or could not be verified."],
-    ["unable_to_link_account", "We couldn&#039;t connect that account."],
-    ["account_not_linked", "We couldn&#039;t connect that account."],
-    ["account_already_linked_to_different_user", "We couldn&#039;t connect that account."],
-    ["email_doesn't_match", "We couldn&#039;t connect that account."],
-    ["EMAIL_NOT_VERIFIED", "We couldn&#039;t connect that account."],
-    ["unexpected_error", "We couldn&#039;t complete sign-in."],
-    ["<script>alert(1)</script>", "We couldn&#039;t complete sign-in."],
+    ["unable_to_link_account", "We couldn&#39;t connect that account."],
+    ["account_not_linked", "We couldn&#39;t connect that account."],
+    ["account_already_linked_to_different_user", "We couldn&#39;t connect that account."],
+    ["email_doesn't_match", "We couldn&#39;t connect that account."],
+    ["EMAIL_NOT_VERIFIED", "We couldn&#39;t connect that account."],
+    ["unexpected_error", "We couldn&#39;t complete sign-in."],
+    ["<script>alert(1)</script>", "We couldn&#39;t complete sign-in."],
   ])("renders a friendly alert for %s", async (code, message) => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
@@ -90,14 +90,14 @@ describe("auth error redirects through the Worker", () => {
     expect(response.headers.get("location")).toBe("/sign-in?error=unknown_error");
     const signIn = await worker.request(response.headers.get("location")!);
     expect(signIn.status).toBe(200);
-    expect(await signIn.text()).toContain("We couldn&#039;t complete sign-in.");
+    expect(await signIn.text()).toContain("We couldn&#39;t complete sign-in.");
   });
 
   it("shows linking errors even when a user already has a session", async () => {
     fixtures.user = { id: "user", email: "user@acme.test", name: "User", emailVerified: true, createdAt: new Date(), updatedAt: new Date() };
     const response = await worker.request("/sign-in?error=unable_to_link_account");
     expect(response.status).toBe(200);
-    expect(await response.text()).toContain("We couldn&#039;t connect that account. Sign in with your existing method and verify your email first.");
+    expect(await response.text()).toContain("We couldn&#39;t connect that account. Sign in with your existing method and verify your email first.");
   });
 
   it.each(["/api/auth/error", "https://rendro.test/api/auth/error", `${CONVEX_SITE_URL}/api/auth/error`])("rewrites %s redirects and preserves cookie cleanup", async (errorUrl) => {

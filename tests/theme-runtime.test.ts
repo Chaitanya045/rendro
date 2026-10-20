@@ -352,7 +352,7 @@ describe("shared theme runtime", () => {
     expect(sharedThemeStyles).toContain("transform 150ms cubic-bezier(.4,0,.2,1)");
     expect(sharedThemeStyles).toContain("rendro-theme-icon-track");
     expect(sharedThemeStyles).toContain("--rendro-theme-x");
-    expect(renderThemeAssets()).toContain("<style data-rendro-theme>");
-    expect(renderThemeAssets()).toContain("<script data-rendro-theme>");
+    expect(renderThemeAssets()).toContain('<style data-rendro-theme="">');
+    expect(renderThemeAssets()).toContain('<script data-rendro-theme="">');
   });
 });

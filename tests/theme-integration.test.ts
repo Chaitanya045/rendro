@@ -9,11 +9,11 @@ import { mobileViewportStyles } from "@/routes/viewport";
 import { renderLandingPage } from "@/routes/landing";
 
 function assertSharedTheme(html: string, buttonId?: "theme-toggle") {
-  expect(html).toContain('<link rel="icon" href="/favicon.ico" sizes="16x16 32x32" type="image/x-icon">');
-  expect(html).toContain('<link rel="icon" href="/favicon.svg" sizes="any" type="image/svg+xml">');
+  expect(html).toContain('<link rel="icon" href="/favicon.ico" sizes="16x16 32x32" type="image/x-icon"/>');
+  expect(html).toContain('<link rel="icon" href="/favicon.svg" sizes="any" type="image/svg+xml"/>');
   expect(html).toContain(sharedThemeRuntime);
   expect(html).toContain(mobileViewportStyles);
-  expect(html.match(/<script data-rendro-theme>/g)).toHaveLength(1);
+  expect(html.match(/<script data-rendro-theme="">/g)).toHaveLength(1);
   if (buttonId) {
     expect(html).toContain(renderThemeButton());
     expect(html).toContain(`RendroTheme.mount(document.getElementById("${buttonId}")`);

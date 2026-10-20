@@ -815,7 +815,7 @@ describe("first views enqueue the ingest", () => {
     const html = await response.text();
     expect(html).toContain('data-readiness="failed"');
     expect(html).toContain('role="alert"');
-    expect(html).toContain("We couldn't prepare the docs for this repository");
+    expect(html).toContain("We couldn&#39;t prepare the docs for this repository");
     expect(html).toContain(">Retry</a>");
     expect(html).not.toContain("fetch(location.pathname");
   });

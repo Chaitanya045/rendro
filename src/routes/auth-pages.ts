@@ -1,15 +1,10 @@
-import { renderCommentRecoveryLifecycle } from "../commentor/recovery-session";
-import { nonceAttribute } from "@/middleware/html-nonce";
-import { renderFaviconLinks } from "./favicon";
-import { renderFontHead } from "./fonts";
 import { Hono } from "hono";
 import type { User } from "better-auth/types";
-import { renderThemeAssets, renderThemeButton } from "./theme";
-import { escapeHtml } from "./html";
+import { renderAuthPage } from "./auth-page";
 
 const app = new Hono<{ Variables: { user?: User } }>();
 
-type AuthPage =
+export type AuthPage =
   | "sign-in"
   | "sign-up"
   | "verify-email"
@@ -18,7 +13,7 @@ type AuthPage =
   | "security"
   | "home";
 
-function safeReturnTo(value: string | undefined): string {
+export function safeReturnTo(value: string | undefined): string {
   if (!value || !value.startsWith("/") || value.startsWith("//") || value.includes("\\") || Array.from(value).some((character) => { const code = character.charCodeAt(0); return code < 32 || code === 127; })) return "/";
   return value;
 }
@@ -27,24 +22,7 @@ function signInHref(returnTo: string): string {
   return `/sign-in?returnTo=${encodeURIComponent(returnTo)}`;
 }
 
-function field(
-  id: string,
-  label: string,
-  type: "email" | "password" | "text",
-  autocomplete: string,
-  options: { minlength?: number } = {},
-): string {
-  const minlength = options.minlength ? ` minlength="${options.minlength}"` : "";
-  return `<div class="field">
-    <label for="${id}"><span>${label}</span></label>
-    <span class="input-wrap">
-      <input id="${id}" name="${id}" type="${type}" autocomplete="${autocomplete}" required${minlength}>
-      ${type === "password" ? `<button class="reveal" type="button" data-reveal="${id}" aria-label="Show password">Show</button>` : ""}
-    </span>
-  </div>`;
-}
-
-function signInErrorMessage(code: string): string {
+export function signInErrorMessage(code: string): string {
   switch (code.toLowerCase()) {
     case "access_denied":
       return "Sign-in was canceled. Try again or sign in with your email and password.";
@@ -64,69 +42,7 @@ function signInErrorMessage(code: string): string {
   }
 }
 
-// The loading row and every row the method lookup can end in (#312). They render, invisible, in the same grid cell as the live list, so the
-// list is already as tall as its tallest outcome at first paint; the controller clones the matching row into the list.
-const methodSkeleton = `<div class="method method-skeleton" aria-hidden="true"><span class="method-skeleton-icon"></span><span class="method-skeleton-copy"><span></span><span></span></span><span class="method-skeleton-pill"></span></div>`;
-const methodSizer = `<div class="method-list method-sizer" id="method-sizer" aria-hidden="true" inert>${methodSkeleton}<div class="method" data-method="configured"><span class="method-copy"><strong>Password</strong><span>Configured</span></span><span class="method-state">Active</span></div><div class="method" data-method="unconfigured"><span class="method-copy"><strong>Password</strong><span>Not configured</span></span><button class="method-action" type="button">Add below</button></div><div class="method method-error" role="alert" data-method="error"><span class="method-copy"><strong>Couldn&#39;t load your sign-in methods</strong><span>Check your connection, then try again.</span></span><button class="method-action" type="button">Try again</button></div></div>`;
-
-function pageBody(page: AuthPage, user?: User, verified = false, token = "", error = "", linkInvalid = false): string {
-  if (page === "sign-in") {
-    return `<div class="heading"><p class="eyebrow">Welcome back</p><h1>Sign in to Rendro</h1><p>Open your team documentation and continue where you left off.</p></div>
-      <form id="auth-form" novalidate>
-        ${field("email", "Work email", "email", "email")}
-        ${field("password", "Password", "password", "current-password")}
-        <div class="form-row"><label class="check"><input id="rememberMe" type="checkbox" checked> Keep me signed in</label><a data-return-link href="/forgot-password">Forgot password?</a></div>
-        <p class="message error" id="form-error" role="alert">${error ? escapeHtml(signInErrorMessage(error)) : ""}</p>
-        <button class="button primary" type="submit"><span class="button-label">Sign in</span><span class="spinner" aria-hidden="true"></span></button>
-      </form>
-      <p class="switch">New to Rendro? <a data-return-link href="/sign-up">Create an account</a></p>`;
-  }
-  if (page === "sign-up") {
-    return `<div class="heading"><p class="eyebrow">Create your account</p><h1>Start shipping docs</h1><p>Use your verified work email to create your account.</p></div>
-      <form id="auth-form" novalidate>
-        ${field("name", "Full name", "text", "name")}
-        ${field("email", "Work email", "email", "email")}
-        ${field("password", "Password", "password", "new-password", { minlength: 15 })}
-        <p class="hint">Use at least 15 characters. Password-manager generated values work best.</p>
-        <p class="message error" id="form-error" role="alert"></p>
-        <button class="button primary" type="submit"><span class="button-label">Create account</span><span class="spinner" aria-hidden="true"></span></button>
-      </form>
-      <section class="success-panel" id="success-panel" tabindex="-1" aria-labelledby="success-title" hidden><span class="success-icon" aria-hidden="true"><span class="material-symbols-outlined">check</span></span><h2 id="success-title">Check your email</h2><p>If the address can be registered, we sent a verification link. Verify it before signing in.</p><a class="button primary" data-return-link href="/sign-in">Back to sign in</a></section>
-      <p class="switch">Already have an account? <a data-return-link href="/sign-in">Sign in</a></p>`;
-  }
-  if (page === "verify-email") {
-    const confirmed = verified && !linkInvalid;
-    const intro = linkInvalid
-      ? `<p role="alert" class="message error reset-invalid">This verification link is invalid or has expired. Request a new one below.</p>`
-      : `<p>${confirmed ? "Your account is ready. Sign in to continue." : "Open the verification link we sent to your work email. The link expires after one hour."}</p>`;
-    return `<div class="heading status-heading"><span class="status-icon ${confirmed ? "success" : "mail"}"><span class="material-symbols-outlined" aria-hidden="true">${confirmed ? "mark_email_read" : linkInvalid ? "error" : "mail"}</span></span><p class="eyebrow">Email verification</p><h1${linkInvalid ? ` tabindex="-1" data-autofocus` : ""}>${confirmed ? "Email verified" : linkInvalid ? "Verification link unavailable" : "Verify your email"}</h1>${intro}</div>
-      ${confirmed ? `<a class="button primary" data-return-link href="/sign-in">Continue to sign in</a>` : `<form id="resend-form" novalidate>${field("email", "Work email", "email", "email")}<p class="message" id="form-message" role="status"></p><button class="button secondary" type="submit"><span class="button-label">Resend verification email</span><span class="spinner" aria-hidden="true"></span></button></form><p class="switch"><a data-return-link href="/sign-in">Back to sign in</a></p>`}`;
-  }
-  if (page === "forgot-password") {
-    return `<div class="heading status-heading"><span class="status-icon mail"><span class="material-symbols-outlined" aria-hidden="true">key</span></span><p class="eyebrow">Account recovery</p><h1>Reset your password</h1><p>Enter your work email. If an account exists, we will send a secure reset link.</p></div>
-      <form id="auth-form" novalidate>${field("email", "Work email", "email", "email")}<p class="message" id="form-message" role="status"></p><p class="message error" id="form-error" role="alert"></p><button class="button primary" type="submit"><span class="button-label">Send reset link</span><span class="spinner" aria-hidden="true"></span></button></form>
-      <p class="switch"><a data-return-link href="/sign-in">Back to sign in</a></p>`;
-  }
-  if (page === "reset-password") {
-    if (!token) return `<div class="heading status-heading"><span class="status-icon mail"><span class="material-symbols-outlined" aria-hidden="true">password</span></span><p class="eyebrow">Account recovery</p><h1>Reset link unavailable</h1><p role="alert" class="message error reset-invalid">This reset link is missing or invalid. Request a new link to continue.</p></div><a class="button primary" data-return-link href="/forgot-password">Request a new reset link</a>`;
-    return `<div class="heading status-heading"><span class="status-icon mail"><span class="material-symbols-outlined" aria-hidden="true">password</span></span><p class="eyebrow">Choose a new password</p><h1>Set a secure password</h1><p>This link can be used once. Signing in again will require your new password.</p></div>
-      <form id="auth-form" novalidate>${field("password", "New password", "password", "new-password", { minlength: 15 })}${field("confirmPassword", "Confirm password", "password", "new-password", { minlength: 15 })}<p class="hint">Use at least 15 characters.</p><p class="message error" id="form-error" role="alert"></p><button class="button primary" type="submit"><span class="button-label">Update password</span><span class="spinner" aria-hidden="true"></span></button></form>
-      <section class="success-panel" id="success-panel" tabindex="-1" aria-labelledby="success-title" hidden><span class="success-icon"><span class="material-symbols-outlined" aria-hidden="true">check</span></span><h2 id="success-title">Password updated</h2><p>Your password was reset. Previous sessions were revoked.</p><a class="button primary" data-return-link href="/sign-in">Sign in</a></section>`;
-  }
-  if (page === "home") {
-    // The signed-in home (#286): until GitHub sign-in lists the reader's repositories, it says how to open one.
-    return `<div class="heading"><p class="eyebrow">Signed in</p><h1>Welcome, ${escapeHtml(user?.name ?? "")}</h1><p>You are signed in as <strong>${escapeHtml(user?.email ?? "")}</strong>.</p></div>
-    <section class="security-action home-open" aria-labelledby="home-open-title"><h2 id="home-open-title">Open a repository's documentation</h2><p>Rendro shows the Markdown of a GitHub repository at its own address: <code>/r/{owner}/{repo}</code>. For example, <code>/r/acme/handbook</code> opens the handbook repository of the acme account.</p></section>
-    <div class="account-footer"><a href="/account/security">Account security</a><form method="post" action="/api/auth/sign-out"><button type="submit">Sign out</button></form></div>`;
-  }
-  return `<div class="heading"><p class="eyebrow">Account security</p><h1>Sign-in methods</h1><p>Manage the ways you sign in as <strong>${escapeHtml(user?.email ?? "")}</strong>.</p></div>
-    <div class="method-slot"><div class="method-list" id="method-list" aria-live="polite" aria-busy="true">${methodSkeleton}<span class="sr-only">Loading sign-in methods</span></div>${methodSizer}</div>
-    <div class="security-slot"><div class="security-action security-skeleton" id="security-skeleton" aria-hidden="true"><span></span><span></span><span></span><span></span></div><section class="security-action" id="initial-password-section" hidden><h2>Add a password</h2><p>Create a credential for this verified email without changing your account.</p><form id="initial-password-form">${field("password", "New password", "password", "new-password", { minlength: 15 })}${field("confirmPassword", "Confirm password", "password", "new-password", { minlength: 15 })}<p class="message error" id="initial-error" role="alert"></p><button class="button primary" type="submit"><span class="button-label">Set password</span><span class="spinner" aria-hidden="true"></span></button></form></section>
-    <section class="security-action" id="change-password-section" hidden><h2>Change password</h2><form id="change-password-form">${field("currentPassword", "Current password", "password", "current-password")}${field("newPassword", "New password", "password", "new-password", { minlength: 15 })}<label class="check"><input id="revokeSessions" type="checkbox" checked> Sign out other sessions</label><p class="message error" id="change-error" role="alert"></p><button class="button secondary" type="submit"><span class="button-label">Change password</span><span class="spinner" aria-hidden="true"></span></button></form></section></div>
-    <p class="message" id="security-message" role="status"></p><div class="account-footer"><a href="/home">Back to home</a><form method="post" action="/api/auth/sign-out"><button type="submit">Sign out</button></form></div>`;
-}
-
-const authRefreshStyles = `
+export const authRefreshStyles = `
 [hidden]{display:none!important}
 /* The security card reserves its final height from first paint (#312): the live method list shares a grid cell with an
    invisible copy of every row it can end in, and the password sections stack in one cell, the inactive ones invisible
@@ -153,36 +69,15 @@ const authRefreshStyles = `
 @media(prefers-reduced-motion:reduce){.button,.field input,.method-action,.reveal,.account-footer a,.switch a,.form-row>a{transition-duration:.01ms}.field input,.method-action{transition-duration:.01ms}}
 `;
 
-
-function renderAuthPage(
-  page: AuthPage,
-  options: { returnTo?: string; token?: string; user?: User; verified?: boolean; error?: string; linkInvalid?: boolean } = {},
-): string {
-  const returnTo = safeReturnTo(options.returnTo);
-  const state = JSON.stringify({
-    page,
-    returnTo,
-    token: options.token ?? "",
-  }).replace(/</g, "\\u003c");
-  const wide = page === "security" ? " wide" : "";
-  const context = page === "security"
-    ? `<aside class="auth-context"><p class="eyebrow">Account security</p><h2>Keep access deliberate.</h2><p>Manage the verified sign-in methods of this account.</p></aside>`
-    : `<aside class="auth-context"><p class="eyebrow">Documentation</p><h2>Read the docs in your repositories.</h2><p>Rendro renders the Markdown in your GitHub repositories, with comments, for the people who can read them.</p></aside>`;
-  return `<!DOCTYPE html>
-<html lang="en"><head>${renderFaviconLinks()}<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>${page === "security" ? "Account security" : page === "home" ? "Home" : "Authentication"} — Rendro</title>
-${renderFontHead({ icons: true })}
-${renderThemeAssets()}
-<style${nonceAttribute()}>
+export const authStyles = `
 :root{color-scheme:light;--page:#fafafa;--surface:#fff;--surface-2:#f4f4f5;--text:#18181b;--muted:#71717a;--border:#e4e4e7;--accent:#c2410c;--accent-hover:#9a3412;--on-accent:#fff;--focus:rgba(194,65,12,.2);--danger:#b42318;--success:#15803d;--shadow:0 24px 60px rgba(24,24,27,.09)}
 html.dark{color-scheme:dark;--page:#09090b;--surface:#09090b;--surface-2:#18181b;--text:#fafafa;--muted:#a1a1aa;--border:#27272a;--accent:#fb923c;--accent-hover:#fdba74;--on-accent:#09090b;--focus:rgba(251,146,60,.24);--danger:#fca5a5;--success:#86efac;--shadow:0 24px 70px rgba(0,0,0,.42)}
 *{box-sizing:border-box}body{margin:0;min-height:100vh;background:var(--page);color:var(--text);font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;-webkit-font-smoothing:antialiased}button,input{font:inherit}a{color:inherit;text-underline-offset:3px}.shell{min-height:100vh;display:grid;grid-template-rows:auto 1fr auto}.topbar{height:64px;display:flex;align-items:center;justify-content:space-between;padding:0 clamp(20px,4vw,52px);border-bottom:1px solid var(--border);background:color-mix(in srgb,var(--page) 88%,transparent)}.brand{color:var(--text);font-size:24px;font-weight:700;line-height:32px;letter-spacing:-.04em;text-decoration:none}.brand i{color:var(--accent);font-style:normal}.main{display:grid;place-items:center;padding:48px 20px}.card{width:min(100%,440px);background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:36px;box-shadow:var(--shadow)}.card.wide{width:min(100%,620px)}.heading{margin-bottom:26px}.heading h1{font-size:30px;line-height:1.15;letter-spacing:-.035em;margin:5px 0 10px}.heading>p:last-child{color:var(--muted);line-height:1.55;margin:0;font-size:14px}.heading strong{color:var(--text)}.eyebrow{text-transform:uppercase;letter-spacing:.13em;color:var(--accent)!important;font-size:11px!important;font-weight:750}.button{width:100%;min-height:44px;display:flex;align-items:center;justify-content:center;gap:10px;border-radius:8px;border:1px solid var(--border);font-weight:650;cursor:pointer;text-decoration:none;padding:10px 16px;transition:background .15s,border-color .15s,transform .15s}.button:active{transform:translateY(1px)}.button:disabled{opacity:.62;cursor:wait}.primary{background:var(--accent);border-color:var(--accent);color:#18181b}.primary:hover{background:var(--accent-hover);border-color:var(--accent-hover)}.secondary{background:var(--surface);color:var(--text)}.secondary:hover{background:var(--surface-2)}.field{display:block;margin:0 0 16px}.field>span:first-child{display:block;font-size:12px;font-weight:650;margin-bottom:7px}.input-wrap{display:block;position:relative}.field input{width:100%;height:44px;background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:0 12px;outline:none}.field input[type=password]{padding-right:62px}.field input:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--focus)}.reveal{position:absolute;right:5px;top:5px;height:34px;border:0;background:transparent;color:var(--muted);font-size:11px;font-weight:650;cursor:pointer;padding:0 8px}.form-row{display:flex;justify-content:space-between;align-items:center;font-size:12px;margin:-2px 0 18px;gap:12px}.form-row a,.switch a,.account-footer a{font-weight:650}.check{display:flex;align-items:center;gap:7px;color:var(--muted);font-size:12px}.check input{accent-color:var(--accent)}.hint{font-size:11px;color:var(--muted);line-height:1.45;margin:-7px 0 17px}.message{display:none;font-size:12px;line-height:1.5;margin:0 0 14px}.message:not(:empty){display:block}.error{color:var(--danger)}.success-message{color:var(--success)}.switch{text-align:center;color:var(--muted);font-size:13px;margin:24px 0 0}.switch a{color:var(--text)}.spinner{display:none;width:15px;height:15px;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;animation:spin .7s linear infinite}.button[aria-busy=true] .spinner{display:block}.button[aria-busy=true] .button-label{opacity:.7}@keyframes spin{to{transform:rotate(360deg)}}.success-panel{text-align:center}.success-panel[hidden]{display:none}.success-icon,.status-icon{width:44px;height:44px;border-radius:50%;display:grid;place-items:center;background:color-mix(in srgb,var(--success) 14%,var(--surface));color:var(--success);font-weight:800;margin:0 auto 18px}.success-panel h2{font-size:24px;margin:0 0 8px}.success-panel p{color:var(--muted);font-size:14px;line-height:1.55;margin:0 0 22px}.status-heading{text-align:center}.status-icon.mail{background:color-mix(in srgb,var(--accent) 13%,var(--surface));color:var(--accent)}.method-list{border:1px solid var(--border);border-radius:10px;overflow:hidden;margin-bottom:24px}.method{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:14px 16px;border-bottom:1px solid var(--border)}.method:last-child{border-bottom:0}.method-copy{display:flex;flex-direction:column;gap:3px}.method-copy strong{font-size:13px}.method-copy span,.method-state{font-size:11px;color:var(--muted)}.method-action{flex:none;min-width:88px;border:1px solid var(--border);border-radius:6px;padding:6px 12px;background:var(--surface);color:var(--text);font-size:13px;font-weight:650;white-space:nowrap;cursor:pointer}.method-error .method-copy span{color:var(--muted);font-size:12px;line-height:1.5}.skeleton span{height:12px;background:var(--surface-2);border-radius:5px;width:42%}.skeleton span:last-child{width:18%}.security-action{border-top:1px solid var(--border);padding-top:22px;margin-top:22px}.security-action[hidden]{display:none}.security-action h2{font-size:16px;margin:0 0 6px}.security-action>p{color:var(--muted);font-size:12px;line-height:1.5;margin:0 0 18px}.account-footer{border-top:1px solid var(--border);padding-top:20px;margin-top:24px;display:flex;justify-content:space-between;color:var(--muted);font-size:12px}.account-footer form{margin:0}.account-footer button{appearance:none;margin:0;padding:0;border:0;background:none;color:var(--text);font:inherit;font-weight:650;cursor:pointer;transition:color 150ms cubic-bezier(.4,0,.2,1)}@media(hover:hover){.account-footer button:hover{color:var(--accent)}}.account-footer button:focus-visible{outline:2px solid var(--accent);outline-offset:3px}@media(max-width:760px){.account-footer button{min-height:44px}}@media(prefers-reduced-motion:reduce){.account-footer button{transition-duration:.01ms}}.footer{padding:18px;text-align:center;font-size:11px;color:var(--muted)}
 @media(max-width:520px){.main{padding:24px 12px;place-items:start center}.card{padding:26px 20px;border-radius:12px}.topbar{height:56px}.heading h1{font-size:26px}.form-row{align-items:flex-start}}
 @media(prefers-reduced-motion:reduce){*,*:before,*:after{scroll-behavior:auto!important;animation-duration:.01ms!important;transition-duration:.01ms!important}}
-</style><style${nonceAttribute()}>${authRefreshStyles}</style></head>
-<body><div class="shell"><header class="topbar"><a class="brand" href="/">Rendro<i>.</i></a>${renderThemeButton()}</header><main class="main${page === "security" ? " security-main" : ""}"><section class="card${wide}" data-page="${page}">${pageBody(page, options.user, options.verified ?? false, options.token ?? "", options.error ?? "", options.linkInvalid ?? false)}</section>${context}</main><footer class="footer">Rendro · Documentation that ships with your code</footer></div>
-<script${nonceAttribute()}>window.__AUTH_STATE__=${state};</script>
-<script${nonceAttribute()} id="auth-runtime">
+`;
+
+export const authRuntime = `
 
 (function(){
   "use strict";
@@ -223,8 +118,7 @@ html.dark{color-scheme:dark;--page:#09090b;--surface:#09090b;--surface-2:#18181b
   var initial=document.getElementById("initial-password-form");if(initial)initial.addEventListener("submit",async function(event){event.preventDefault();if(initial.dataset.inFlight==="true"||!validate(initial,"initial-error"))return;clearError("initial-error");if(initial.password.value!==initial.confirmPassword.value){errorAt("initial-error",new Error("Passwords do not match."));return;}busy(initial,true);try{await post("/api/auth/set-initial-password",{newPassword:initial.password.value});location.reload();}catch(error){busy(initial,false);errorAt("initial-error",error);}});
   var change=document.getElementById("change-password-form");if(change)change.addEventListener("submit",async function(event){event.preventDefault();if(change.dataset.inFlight==="true"||!validate(change,"change-error"))return;busy(change,true);clearError("change-error");try{await post("/api/auth/change-password",{currentPassword:change.currentPassword.value,newPassword:change.newPassword.value,revokeOtherSessions:change.revokeSessions.checked});change.reset();var message=document.getElementById("security-message");message.textContent="Password changed successfully.";}catch(error){errorAt("change-error",error);}busy(change,false);});
 })();
-</script>${renderCommentRecoveryLifecycle(options.user?.id ?? null, nonceAttribute())}</body></html>`;
-}
+`;
 
 app.get("/sign-in", (c) => {
   const returnTo = safeReturnTo(c.req.query("returnTo"));

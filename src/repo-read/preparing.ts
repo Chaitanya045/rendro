@@ -5,9 +5,7 @@
  * poll pattern only consults its own responses, so any reader of the URL can
  * re-check what any other is already preparing.
  */
-import { nonceAttribute } from "@/middleware/html-nonce";
-import { renderFaviconLinks } from "@/routes/favicon";
-import { renderThemeAssets } from "@/routes/theme";
+import { renderPreparingPage } from "./preparing-page";
 
 /** Header that labels the response state for the poll script (readable same-origin). */
 export const READINESS_HEADER = "X-Rendro-Readiness";
@@ -37,17 +35,9 @@ export function pollDelayMs(retryAfterSeconds: number, attempt: number): number 
   return Math.min(base * 2 ** Math.max(attempt, 0) * 1000, 60_000);
 }
 
-export function renderPreparingPage(state: PreparingState, retryAfterSeconds: number): string {
-  const { busy, message, assertive } = readinessAccessibility(state);
-  const preparing = state === "preparing";
-  const heading = preparing ? "Preparing these docs…" : "We couldn't load these docs";
-  const detail = preparing
-    ? "Rendro is assembling the documentation from the repository. This page updates on its own; there is nothing to do."
-    : "Rendro couldn't assemble the documentation from the repository. Use Retry to try again.";
-  const retry = preparing ? "" : `
-  <a class="retry" href="">Retry</a>`;
-  const poll = preparing ? `
-<script${nonceAttribute()}>
+/** The preparing page's poll: it re-checks this URL with backoff while the page is visible. */
+export function pollScript(retryAfterSeconds: number): string {
+  return `
   var base=${Math.round(pollDelayMs(retryAfterSeconds, 0))},live=document.querySelector("[data-readiness] p");
   async function poll(){
     if(document.hidden){setTimeout(poll,base);return;}
@@ -62,12 +52,10 @@ export function renderPreparingPage(state: PreparingState, retryAfterSeconds: nu
     setTimeout(poll,base);
   }
   poll();
-</script>` : "";
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>${preparing ? "Preparing" : "Unavailable"} — Rendro</title>
-${renderFaviconLinks()}
-${renderThemeAssets()}
-<style${nonceAttribute()}>
+`;
+}
+
+export const preparingStyles = `
   *{box-sizing:border-box}
   :root{color-scheme:light;--page:#fafafa;--surface:#fff;--text:#18181b;--muted:#71717a;--border:#e4e4e7;--accent:#c2410c;--accent-hover:#9a3412;--on-accent:#fff}
   html.dark{color-scheme:dark;--page:#09090b;--surface:#18181b;--text:#fafafa;--muted:#a1a1aa;--border:#27272a;--accent:#fb923c;--accent-hover:#fdba74;--on-accent:#09090b}
@@ -81,14 +69,7 @@ ${renderThemeAssets()}
   p{color:var(--muted);font-size:15px;line-height:1.6}
   .retry{display:inline-flex;align-items:center;justify-content:center;min-height:44px;margin-top:8px;padding:10px 18px;border-radius:6px;background:var(--accent);color:var(--on-accent);font-size:14px;font-weight:650;text-decoration:none}
   .retry:hover{background:var(--accent-hover)}.retry:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
-</style>
-</head><body>
-<main data-readiness="${state}" aria-busy="${busy ? "true" : "false"}" aria-labelledby="readiness-title">
-  <div class="brand">Rendro<span>.</span></div>
-  <p class="eyebrow">${preparing ? "One moment" : "503 · Temporarily unavailable"}</p>
-  <h1 id="readiness-title">${heading}</h1>
-  <p${assertive ? ` role="alert"` : ` role="status" aria-live="polite"`}>${message}</p>
-  <p>${detail}</p>${retry}
-</main>${poll}
-</body></html>`;
-}
+`;
+
+// The markup is PreparingPage (preparing-page.tsx).
+export { renderPreparingPage };

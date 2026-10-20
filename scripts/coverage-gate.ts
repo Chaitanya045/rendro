@@ -8,7 +8,7 @@ import libCoverage from "istanbul-lib-coverage";
 import type { CoverageSummaryData, FileCoverageData } from "istanbul-lib-coverage";
 import { glob } from "tinyglobby";
 import { z } from "zod";
-import { sourceExclude, sourceInclude } from "./coverage-policy";
+import { sourceExclude, sourceInclude, sourceLoader } from "./coverage-policy";
 
 export const metrics = ["statements", "branches", "functions", "lines"] as const;
 const count = z.number().int().nonnegative();
@@ -67,7 +67,7 @@ export async function sourceManifest(root: string) {
 async function zeroCoverage(root: string, name: string) {
   const path = resolve(root, name);
   const output = await transform(readFileSync(path, "utf8"), {
-    loader: name.endsWith(".ts") ? "ts" : "js", sourcefile: path, sourcemap: "external", target: "esnext",
+    ...sourceLoader(name), sourcefile: path, sourcemap: "external", target: "esnext",
   });
   const { parseAstAsync } = await import("vitest/node");
   const converted = await convert({

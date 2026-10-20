@@ -50,8 +50,8 @@ afterEach(() => {
 
 describe("coverage source policy", () => {
   it("matches only authored root trees, including Node entry and mjs scripts", async () => {
-    const included = ["src/example.ts", "src/index.ts", "convex/auth.ts", "shared/x.ts", "scripts/build.mjs", "scripts/nested/x.ts", "src/.hidden.ts"];
-    const excluded = ["src/types.d.ts", "convex/_generated/api.ts", "convex/betterAuth/_generated/api.ts", "convex/betterAuth/schema.generated.ts", "tests/src/x.ts", "cli/src/index.ts", "vendor/cli/src/index.ts", "scripts/no.js", "src/no.tsx", "public/build.js", "src/not-code.ts/child.js"];
+    const included = ["src/example.ts", "src/index.ts", "src/routes/page.tsx", "convex/auth.ts", "shared/x.ts", "scripts/build.mjs", "scripts/nested/x.ts", "src/.hidden.ts"];
+    const excluded = ["src/types.d.ts", "convex/_generated/api.ts", "convex/betterAuth/_generated/api.ts", "convex/betterAuth/schema.generated.ts", "tests/src/x.ts", "cli/src/index.ts", "vendor/cli/src/index.ts", "scripts/no.js", "shared/no.tsx", "public/build.js", "src/not-code.ts/child.js"];
     for (const name of [...included, ...excluded]) write(name, "export const x = 1;");
     expect(await sourceManifest(root)).toEqual(included.sort());
     // Exercise the installed Vitest matcher's contains:true semantics explicitly.
@@ -116,6 +116,13 @@ describe("Istanbul shard merge", () => {
     await expect(runGate(root, ["--update-ledger", "shard.json"])).rejects.toThrow("missing from every shard");
     expect(JSON.parse(readFileSync(join(root, "coverage-debt.json"), "utf8"))).toEqual(ledger);
     expect(JSON.parse(readFileSync(join(root, "coverage/merged/coverage-summary.json"), "utf8"))).toHaveProperty("shared/missing.ts");
+  });
+
+  it("seeds an absent server JSX page with executable zero counters (#288)", async () => {
+    write("src/missing.tsx", "export const Page = ({ ok }: { ok: boolean }) => <p>{ok ? 1 : 0}</p>;\n");
+    const result = await mergeReports(root, ["shard.json"]);
+    expect(result.missing).toEqual(["src/missing.tsx"]);
+    for (const metric of metrics) expect(result.debt["src/missing.tsx"][metric]).toBeGreaterThan(0);
   });
 
   it("seeds an absent type-only module without inventing executable counters", async () => {

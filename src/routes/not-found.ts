@@ -1,9 +1,6 @@
 import type { Context } from "hono";
-import { nonceAttribute } from "@/middleware/html-nonce";
 import { assetError } from "./asset-headers";
-import { renderFaviconLinks } from "./favicon";
-import { renderFontHead } from "./fonts";
-import { renderThemeAssets } from "./theme";
+import { renderNotFoundPage } from "./not-found-page";
 
 /** Shared global fallback for the Worker and local Node server. */
 export function notFoundResponse(c: Context): Response {
@@ -24,35 +21,13 @@ export interface NotFoundPageOptions {
   message?: string;
 }
 
-function escapeHtml(value: string): string {
-  return value
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
-}
-
-export function renderNotFoundPage(options: NotFoundPageOptions = {}): string {
-  const status = options.status ?? 404;
-  const path = options.path || "/";
-  const homeHref = options.homeHref || "/";
-  const homeLabel = options.homeLabel || "Go to Rendro";
-  const heading = options.heading || "Page not found";
-  const message = options.message || "The URL points to a document or route that Rendro cannot find. It may have moved, been deleted, or never existed.";
-
-  return `<!DOCTYPE html>
-<html lang="en">
-<head>${renderFaviconLinks()}
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>${status} · ${escapeHtml(heading)} — Rendro</title>
-${renderFontHead()}
-${renderThemeAssets()}
-<script${nonceAttribute()}>
+// Inside a viewer frame the page follows the shell's theme and drops its own brand link.
+export const frameThemeListener = `
   addEventListener("message",function(event){if(event.source!==window.parent||window.parent===window)return;var data=event.data||{};if(data.type==="rendro-theme")window.RendroUI.applyTheme(data.theme,false,false);});
   if(window.parent!==window){document.documentElement.classList.add("framed");window.parent.postMessage({type:"commentor-theme-ready"},"*");}
-</script>
-<style${nonceAttribute()}>
+`;
+
+export const notFoundStyles = `
   *{box-sizing:border-box}
   :root{color-scheme:light;--page:#fafafa;--surface:#fff;--container:#f4f4f5;--text:#18181b;--strong:#09090b;--muted:#71717a;--border:#e4e4e7;--border-strong:#d4d4d8;--accent:#c2410c;--accent-hover:#9a3412;--accent-soft:#ffedd5;--on-accent:#fff;--focus:rgba(194,65,12,.2)}
   html.dark{color-scheme:dark;--page:#09090b;--surface:#09090b;--container:#18181b;--text:#e4e4e7;--strong:#fafafa;--muted:#a1a1aa;--border:#27272a;--border-strong:#3f3f46;--accent:#fb923c;--accent-hover:#fdba74;--accent-soft:rgba(251,146,60,.16);--on-accent:#09090b;--focus:rgba(251,146,60,.23)}
@@ -70,26 +45,10 @@ ${renderThemeAssets()}
   @media (prefers-reduced-motion:reduce){.btn{transition:none}.btn:active{transform:none}.btn:active:not(:disabled):not([aria-disabled=true]){transform:none!important}}
   @media (max-width:760px){.brand{font-size:20px;line-height:28px}}
   @media (max-width:520px){body{padding:14px}.panel{padding:24px 20px}.actions{align-items:stretch;flex-direction:column}.btn{width:100%}}
-</style>
-</head>
-<body>
-  <main class="page" aria-labelledby="not-found-title">
-    <a class="brand" href="/" target="_top">Rendro<i>.</i></a>
-    <section class="panel">
-      <div class="eyebrow">Error ${status}</div>
-      <h1 id="not-found-title">${escapeHtml(heading)}</h1>
-      <p>${escapeHtml(message)}</p>
-      <p class="path-label" id="requested-path-label">Requested path</p>
-      <code class="path" aria-labelledby="requested-path-label">${escapeHtml(path)}</code>
-      <div class="actions">
-        <a class="btn primary" href="${escapeHtml(homeHref)}" target="_top">${escapeHtml(homeLabel)}</a>
-        <button class="btn secondary" id="go-back" type="button" data-home-href="${escapeHtml(homeHref)}">Go back</button>
-      </div>
-      <p class="hint">Check the URL for typos, or go back to the previous page.</p>
-    </section>
-  </main>
-</body>
-<script${nonceAttribute()}>
+`;
+
+// Back to where the reader came from, else home; in a frame, the top window moves.
+export const goBackScript = `
   (function(){
     var button=document.getElementById("go-back");
     if(!button)return;
@@ -103,6 +62,7 @@ ${renderThemeAssets()}
       try{target.location.assign(href);}catch(_){window.location.assign(href);}
     });
   })();
-</script>
-</html>`;
-}
+`;
+
+// The markup is NotFoundPage (not-found-page.tsx).
+export { renderNotFoundPage };

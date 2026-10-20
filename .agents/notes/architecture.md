@@ -31,10 +31,12 @@ Control Worker (src/repo-access/)                wrangler.control.toml  GitHub p
 
 ## UI layer
 
-- No UI framework. Pages are TypeScript functions returning template-literal
-  HTML (`src/routes/*-pages.ts`, `src/routes/app.ts` for the repository shell),
-  escaped with `escapeHtml` (`src/routes/html.ts`). Inline scripts carry CSP
-  nonces (`src/middleware/html-nonce.ts`).
+- No UI framework in the browser. Pages are server-only Hono JSX (`src/routes/*.tsx`,
+  `src/routes/shell.tsx` for the repository shell, #288), which escapes every value;
+  their inline CSS and scripts are constants in the sibling `.ts` modules. Only
+  `src/routes/trusted-html.tsx` writes unescaped text (nonced inline code), and inline
+  scripts carry CSP nonces (`src/middleware/html-nonce.ts`). The document frame
+  (`src/repo-read/frame.ts`) stays a string template around sanitized HTML.
 - Browser behavior is vanilla TS bundled by esbuild into IIFEs in `public/*.js`
   (`scripts/build-*.ts`), git-ignored and versioned in `scripts/asset-versions.json`.
   Changing their bytes requires a version bump, `pnpm build:assets` and

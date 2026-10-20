@@ -8,3 +8,7 @@ export function nonceAttribute(): string {
   return nonce ? ` nonce="${nonce}"` : "";
 }
 
+/** The request's nonce for a JSX `nonce` prop: undefined (the attribute is omitted) outside a request. */
+export function requestNonce(): string | undefined {
+  return nonceContext.getStore() || undefined;
+}

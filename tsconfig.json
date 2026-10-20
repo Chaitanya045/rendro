@@ -14,10 +14,12 @@
     "baseUrl": ".",
     "resolveJsonModule": true,
     "declaration": true,
+    "jsx": "react-jsx",
+    "jsxImportSource": "hono/jsx",
     "paths": {
       "@/*": ["./src/*"]
     }
   },
-  "include": ["src/**/*.ts", "tests/**/*.ts", "e2e/**/*.ts", "vitest.config.ts"],
+  "include": ["src/**/*.ts", "src/**/*.tsx", "tests/**/*.ts", "e2e/**/*.ts", "vitest.config.ts"],
   "exclude": ["scripts/**"]
 }

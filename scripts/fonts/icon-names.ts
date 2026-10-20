@@ -52,7 +52,7 @@ function sourceFiles(root: string): string[] {
     for (const entry of readdirSync(join(root, dir), { withFileTypes: true })) {
       const path = `${dir}/${entry.name}`;
       if (entry.isDirectory()) visit(path);
-      else if (path.endsWith(".ts")) files.push(path);
+      else if (/\.tsx?$/.test(path)) files.push(path);
     }
   };
   visit("src");
