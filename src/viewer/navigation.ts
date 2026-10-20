@@ -1,4 +1,4 @@
-import { externalLinkHref, validDocumentSearch, validRelativeDocumentPath } from "../lazy-tree/messages";
+import { newTabLinkHref, validDocumentSearch, validRelativeDocumentPath } from "../lazy-tree/messages";
 import { shouldUseNativeLinkNavigation } from "../lazy-tree/navigation";
 import { scrollToFragment, validFragment } from "./fragments";
 
@@ -96,13 +96,13 @@ export function installDocumentNavigation(config: DocumentNavigationConfig, host
     if (href === null) return;
     const link = classifyDocumentLink(href, doc.baseURI, host.location.href, config);
     if (!link) {
-      // The frame cannot load another site, so a plain click would do nothing the reader can see. The parent asks first
-      // and opens it in a new tab. Standalone documents keep their native navigation.
-      const external = host.parent !== host ? externalLinkHref(href, doc.baseURI, origin) : null;
-      if (external) {
-        event.preventDefault();
-        host.parent.postMessage({ type: "doc-external", path: config.documentPath, href: external }, origin);
-      }
+      // Only the shell loads documents into this frame (#296). Another site cannot load here, and a page of this one
+      // that is not a repository document must not: no web link navigates the frame. The parent asks first and opens
+      // either in a new tab (one too long to show is dropped). Standalone documents keep their native navigation.
+      if (host.parent === host || (anchor.protocol !== "http:" && anchor.protocol !== "https:")) return;
+      event.preventDefault();
+      const external = newTabLinkHref(href, doc.baseURI);
+      if (external) host.parent.postMessage({ type: "doc-external", path: config.documentPath, href: external }, origin);
       return;
     }
     if (!validDocumentSearch(link.search)) { event.preventDefault(); return; }

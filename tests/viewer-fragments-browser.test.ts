@@ -44,7 +44,7 @@ function publisherHtml(path: string): string {
     <a href="#">Empty hash</a><a href="#ToP">Top</a><a href="#missing">Missing</a>
     </nav>
     <div style="position:fixed;bottom:0;left:0;right:0;background:white"><a id="external" href="https://outside.test/page?q=1#top">External</a>
-    <a id="external-later" href="https://later.test/">Later</a>${hostileLinks}</div><section><textarea>Comment draft</textarea></section>
+    <a id="external-later" href="https://later.test/">Later</a><a id="same-site" href="/organizations?tab=1">Same site</a>${hostileLinks}</div><section><textarea>Comment draft</textarea></section>
     <h2 id="details">Details</h2><section></section><h2 id="section">Section</h2>
     <section></section><h2 id="日本語">Unicode target</h2><section></section>
     <h2 id="café">Encoded target</h2><section></section><a name="legacy">Named target</a><section></section>
@@ -1009,6 +1009,19 @@ describe("viewer fragment navigation in Chromium", () => {
     } finally { await page.close(); }
   });
 
+  it("keeps listening to a document the shell reloads at its own request, as the Try again page asks (#296)", async () => {
+    const { page, frame } = await open(privateBase);
+    try {
+      await frame.evaluate(() => { (window as unknown as { before: boolean }).before = true; });
+      await frame.evaluate(() => parent.postMessage({ type: "doc-retry" }, "*"));
+      await expect.poll(() => frame.evaluate(() => document.readyState === "complete" && !(window as unknown as { before?: boolean }).before).catch(() => false)).toBe(true);
+      expect(frame.url()).toBe(`${harness.origin}${privateBase}/files/${documents[0]}`);
+      // The reload was the shell's: what the reloaded document reports is still acted on.
+      await frame.evaluate(path => parent.postMessage({ type: "doc-fragment", path, fragment: "#section" }, location.origin), documents[0]);
+      await browserStep("apply the reloaded document's fragment", () => page.waitForFunction(() => location.hash === "#section"));
+    } finally { await page.close(); }
+  });
+
   it("rejects forged sources/origins, malformed hashes and stale-document messages", async () => {
     const { page } = await open(privateBase);
     try {
@@ -1103,6 +1116,27 @@ describe("external link confirmation in Chromium", () => {
     } finally { await page.close(); }
   });
 
+  it("asks before opening a page of this site that is not a document, which never loads in the frame (#296)", async () => {
+    const { page, frame } = await open(privateBase);
+    try {
+      await spyOpen(page);
+      // Marks the document now in the frame: a native navigation would replace it, and the mark with it.
+      await frame.evaluate(() => { (window as unknown as { kept: boolean }).kept = true; });
+      const loads = requests.length;
+      await frame.locator("#same-site").click();
+      await notice(page).waitFor();
+      const address = `${harness.origin}/organizations?tab=1`;
+      expect(await label(page).textContent()).toBe(`Open ${address} in a new tab?`);
+      expect(await frame.evaluate(() => (window as unknown as { kept?: boolean }).kept)).toBe(true);
+      expect(frame.url()).toBe(`${harness.origin}${privateBase}/files/${documents[0]}`);
+      await notice(page).getByRole("button", { name: "Open in new tab", exact: true }).click();
+      expect(await opened(page)).toEqual([[address, "_blank", "noopener,noreferrer"]]);
+      expect(await frame.evaluate(() => (window as unknown as { kept?: boolean }).kept)).toBe(true);
+      // Nothing was requested for the frame: the page opens only in the new tab.
+      expect(requests.slice(loads)).toEqual([]);
+    } finally { await page.close(); }
+  });
+
   it("drops forged and unsupported external-link messages from the document", async () => {
     const { page, frame } = await open(privateBase);
     try {
@@ -1110,7 +1144,7 @@ describe("external link confirmation in Chromium", () => {
       await frame.evaluate(() => {
         const send = (message: unknown) => parent.postMessage(message, location.origin);
         const path = "guide/page.html";
-        for (const href of ["/organizations", `${location.origin}/r/acme/other`, "mailto:someone@outside.test", "javascript:alert(1)", 5, undefined, `https://outside.test/${"x".repeat(2100)}`]) {
+        for (const href of ["mailto:someone@outside.test", "javascript:alert(1)", 5, undefined, `https://outside.test/${"x".repeat(2100)}`]) {
           send({ type: "doc-external", path, href });
         }
         send({ type: "doc-fragment", path, fragment: "#sentinel" });

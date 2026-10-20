@@ -786,7 +786,8 @@ ${renderStylesheet("viewer-base")}
   window.addEventListener("message",function(e){var frame=document.getElementById("content-frame");if(frame&&e.source===frame.contentWindow&&e.data&&e.data.type==="doc-pointer")setMobileMore(false,false);});
   // The document's "Try again" page (a 503 while a backend was unreachable) cannot reload itself with the session cookie from
   // inside the sandbox, so it asks this page to: src is the document the shell chose, and replace keeps the history entry.
-  window.addEventListener("message",function(e){var frame=document.getElementById("content-frame");if(frame&&frame.contentWindow&&e.source===frame.contentWindow&&e.data&&e.data.type==="doc-retry")frame.contentWindow.location.replace(frame.src);});
+  // The retry is the shell's own navigation, recorded as src/viewer/content-frame.ts records one (#296).
+  window.addEventListener("message",function(e){var frame=document.getElementById("content-frame");if(frame&&frame.contentWindow&&e.source===frame.contentWindow&&e.data&&e.data.type==="doc-retry"){if(frame.dataset.navigation)frame.dataset.loading=frame.dataset.navigation=String(Number(frame.dataset.navigation)+1);frame.contentWindow.location.replace(frame.src);}});
 })();
 </script>
 <script${nonceAttribute()}>window.RENDRO_INITIAL_DOC=${inlineJson(selectedDoc)};window.RENDRO_ORG=${inlineJson(org)};window.RENDRO_DOCUMENT_BASE=${inlineJson(documentBase)};window.RENDRO_REPO_COMMENT_CONFIG=${inlineJson(options.repoCommentConfig)};</script>

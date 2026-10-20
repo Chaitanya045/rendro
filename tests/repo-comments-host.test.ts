@@ -68,7 +68,7 @@ describe("the repository comment host", () => {
     const posted: Array<Record<string, unknown>> = [];
     const child = { postMessage: vi.fn((message: Record<string, unknown>) => { posted.push(message); }) };
     let load = () => {};
-    const frame = { src: frameUrl, contentWindow: child, addEventListener: (_type: string, listener: () => void) => { load = listener; }, removeEventListener: vi.fn() };
+    const frame = { src: frameUrl, dataset: { navigation: "1", document: "1" }, contentWindow: child, addEventListener: (_type: string, listener: () => void) => { load = listener; }, removeEventListener: vi.fn() };
     const subscribe = vi.fn<DocumentCommentBackend["subscribe"]>(() => ({ unsubscribe: vi.fn(), loadMore: vi.fn(() => true) }));
     const mutate = vi.fn<DocumentCommentBackend["mutate"]>(() => Promise.resolve(null));
     const backend: DocumentCommentBackend = { subscribe, subscribeReplies: vi.fn(() => ({ unsubscribe: vi.fn(), loadMore: vi.fn(() => true) })), mutate };
@@ -120,8 +120,12 @@ describe("the repository comment host", () => {
     const { host, readies } = setup("user-a");
     const before = readies().length;
     const posted: Array<Record<string, unknown>> = [];
-    const next = { src: `${ORIGIN}/r/octo/docs/@${commit}/files/docs/other.md`, contentWindow: { postMessage: (message: Record<string, unknown>) => { posted.push(message); } },
+    // A preload the shell loaded (#296); a preload that went somewhere by itself is announced nothing.
+    const stray = { src: `${ORIGIN}/r/octo/docs/@${commit}/files/docs/other.md`, dataset: { navigation: "1" }, contentWindow: { postMessage: (message: Record<string, unknown>) => { posted.push(message); } },
       addEventListener: vi.fn(), removeEventListener: vi.fn() };
+    host.replaceFrame(stray as never);
+    expect(posted).toEqual([]);
+    const next = { ...stray, dataset: { navigation: "1", document: "1" }, addEventListener: vi.fn() };
     host.replaceFrame(next as never);
     host.replaceFrame(next as never);
     expect(posted.filter(message => message.type === COMMENTOR_PARENT_READY)).toHaveLength(1);
@@ -135,7 +139,7 @@ describe("the first comments before the live subscription (#284)", () => {
     const posted: Array<Record<string, unknown>> = [];
     const child = { postMessage: vi.fn((message: Record<string, unknown>) => { posted.push(message); }) };
     let load = () => {};
-    const frame = { src: frameUrl, contentWindow: child, addEventListener: (_type: string, listener: () => void) => { load = listener; }, removeEventListener: vi.fn() };
+    const frame = { src: frameUrl, dataset: { navigation: "1", document: "1" }, contentWindow: child, addEventListener: (_type: string, listener: () => void) => { load = listener; }, removeEventListener: vi.fn() };
     const subscribe = vi.fn<DocumentCommentBackend["subscribe"]>(() => ({ unsubscribe: vi.fn(), loadMore: vi.fn(() => true) }));
     const mutate = vi.fn<DocumentCommentBackend["mutate"]>(() => Promise.resolve(null));
     const backend: DocumentCommentBackend = { subscribe, subscribeReplies: vi.fn(() => ({ unsubscribe: vi.fn(), loadMore: vi.fn(() => true) })), mutate };
@@ -480,7 +484,7 @@ describe("keeping comment access", () => {
 
 describe("booting the repository shell's comments", () => {
   function page() {
-    document.body.innerHTML = `<iframe id="content-frame"></iframe>`;
+    document.body.innerHTML = `<iframe id="content-frame" data-navigation="1" data-document="1"></iframe>`;
     Object.assign(window, { RENDRO_REPO_COMMENT_CONFIG: config });
   }
   function server(users: Array<string | null>) {

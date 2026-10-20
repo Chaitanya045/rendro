@@ -6,7 +6,7 @@ import {
   bootCommentorParentHost, CommentorParentHost, ConvexRepoCommentBackend, type DocumentCommentBackend,
 } from "../src/commentor/parent-host";
 import {
-  COMMENTOR_PARENT_ERROR, COMMENTOR_PARENT_READY, COMMENTOR_PARENT_REQUEST, COMMENTOR_PARENT_RESPONSE, COMMENTOR_PARENT_REPLIES_UPDATE,
+  COMMENTOR_PARENT_ERROR, COMMENTOR_PARENT_READY, COMMENTOR_PARENT_REQUEST, COMMENTOR_PARENT_RESPONSE, COMMENTOR_PARENT_REPLIES_UPDATE, COMMENTOR_PARENT_UPDATE,
 } from "../src/commentor/parent-protocol";
 
 const clients = vi.hoisted(() => [] as Array<{
@@ -33,6 +33,8 @@ describe("comment host protocol handling", () => {
     let load = () => {};
     const frame = {
       src: options.src ?? documentUrl,
+      // A document the shell loaded (#296).
+      dataset: { navigation: "1", document: "1" } as Record<string, string>,
       contentWindow: "contentWindow" in options ? options.contentWindow : child,
       addEventListener: (_type: string, listener: () => void) => { load = listener; },
       removeEventListener: vi.fn(),
@@ -88,6 +90,33 @@ describe("comment host protocol handling", () => {
     const anonymous = setup({ userId: null });
     anonymous.load();
     expect(anonymous.posted[0]).toMatchObject({ type: COMMENTOR_PARENT_READY, userId: null, recoveryState: { operations: {}, drafts: {} } });
+  });
+
+  it("drops the session of a frame that loaded a document by itself, and answers it nothing until the shell loads one (#296)", () => {
+    const f = setup();
+    f.subscribe();
+    f.publish([thread("t")], { canLoadMore: false, loading: false });
+    expect(f.posted.map(message => message.type)).toEqual([COMMENTOR_PARENT_READY, COMMENTOR_PARENT_RESPONSE, COMMENTOR_PARENT_UPDATE]);
+    f.request("pending", "thread.resolve", { threadId: "t", resolved: true });
+    expect(f.mutate).toHaveBeenCalledOnce();
+    f.posted.length = 0;
+    // The frame's `src` is unchanged, but its load was not the shell's: frame tracking has cleared its document.
+    delete f.frame.dataset.document;
+    f.load();
+    expect(f.subscriptions[0].unsubscribe).toHaveBeenCalledOnce();
+    f.request("sub", "subscribe", { documentPath: "guide.html" });
+    f.request("write", "thread.create", { body: "x", anchor: { kind: "repo-text", blobSha: "b".repeat(40), headingSlug: "install", prefix: "", exact: "pnpm install", suffix: "", offset: 0 } });
+    f.request("draft", "draft.save", { key: "create", draft: { body: "x" } });
+    f.receive({ type: "commentor-viewer-reload" });
+    f.pendingMutations[0].resolve();
+    f.publish([thread("t")], { canLoadMore: false, loading: false });
+    expect(f.posted).toEqual([]);
+    expect(f.mutate).toHaveBeenCalledOnce();
+    // The shell loads the page again: the widget is announced to and served as before.
+    f.frame.dataset.document = "2";
+    f.frame.dataset.navigation = "2";
+    f.subscribe();
+    expect(f.posted.map(message => message.type)).toEqual([COMMENTOR_PARENT_READY, COMMENTOR_PARENT_RESPONSE]);
   });
 
   it("reports unavailable durable storage instead of announcing recovery state or accepting writes", () => {
@@ -248,7 +277,7 @@ describe("Convex backends", () => {
 describe("booting the parent host", () => {
   const repoConfig = { ...repo, convexUrl: "https://convex.test" };
   function page(config: Record<string, unknown> | null = repoConfig) {
-    document.body.innerHTML = '<iframe id="content-frame"></iframe>';
+    document.body.innerHTML = '<iframe id="content-frame" data-navigation="1" data-document="1"></iframe>';
     Reflect.deleteProperty(window, "RENDRO_REPO_COMMENT_CONFIG");
     if (config) Object.assign(window, { RENDRO_REPO_COMMENT_CONFIG: config });
   }

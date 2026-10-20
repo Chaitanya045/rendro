@@ -138,6 +138,9 @@ const backend: DocumentCommentBackend = {
 
 const query = new URLSearchParams(location.search);
 const frame = document.querySelector<HTMLIFrameElement>("#content-frame")!;
+// The lab's shell names the frame's document in its own HTML: that document is the shell's (#296). Its later loads are
+// not tracked, as the lab's tests reload and move the frame themselves.
+Object.assign(frame.dataset, { navigation: "1", document: "1" });
 lab.host = new CommentorParentHost(frame, location.origin,
   { repoId: 9101, accessUrl: "/r/acme/docs/comment-access", convexUrl: "http://unused.test" }, backend, query.get("user") === "" ? null : query.get("user") ?? "user-a");
 // The read path's comment access decides who may write (#254); the lab grants it unless the test asked for a reader.

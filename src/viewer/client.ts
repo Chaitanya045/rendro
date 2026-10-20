@@ -1,3 +1,4 @@
+import { shellFrameNavigation } from "./content-frame";
 import { createMessageRateLimit } from "./message-limits";
 
 interface ParentConfig { base: string }
@@ -25,7 +26,6 @@ export function installViewerParent(config: ParentConfig, host: Window = window)
   let pending = false;
   // Match the ticket/heartbeat clock while enforcing the budget in the parent.
   const allowRenewal = createMessageRateLimit(30_000, () => Date.now());
-  let generation = 0;
   const notice = host.document.getElementById("viewer-update-notice");
   const reload = notice?.querySelector("button");
   reload?.addEventListener("click", () => {
@@ -33,10 +33,10 @@ export function installViewerParent(config: ParentConfig, host: Window = window)
     reload.disabled = true;
     host.location.reload();
   });
-  host.addEventListener("load", event => {
+  // On the document: a frame's load never reaches the window.
+  host.document.addEventListener("load", event => {
     const frame = host.document.getElementById("content-frame");
     if (!frame || event.target !== frame) return;
-    generation++;
     if (notice) notice.hidden = true;
   }, true);
   host.addEventListener("message", (event: MessageEvent<RenewalMessage>) => {
@@ -44,13 +44,15 @@ export function installViewerParent(config: ParentConfig, host: Window = window)
     const data = event.data;
     if (!frame?.contentWindow || event.source !== frame.contentWindow || event.origin !== "null"
       || !data) return;
+    // Only a document the shell loaded may hold a ticket (#296).
+    const navigation = shellFrameNavigation(frame);
+    if (navigation === null) return;
     const src = new URL(frame.src, host.location.href);
     if (src.origin !== host.location.origin || !src.pathname.startsWith(`${config.base}/files/`)) return;
     if (data.type !== "viewer-renew" || typeof data.manifestKey !== "string" || data.manifestKey.length > 2048
       || typeof data.requestId !== "string" || data.requestId.length > 128 || pending || !allowRenewal()) return;
     pending = true;
     const source = frame.contentWindow;
-    const requestedGeneration = generation;
     void (async () => {
       try {
         const query = new URLSearchParams({ manifestKey: data.manifestKey as string });
@@ -59,8 +61,8 @@ export function installViewerParent(config: ParentConfig, host: Window = window)
         });
         if (!response.ok) return;
         const result = await response.json() as { prefix?: unknown };
-        // A navigation (including a reload of the same path) invalidates replies from the old frame.
-        if (frame.src !== src.href || generation !== requestedGeneration) return;
+        // A navigation (including a reload of the same path, by the shell or not) invalidates replies from the old frame.
+        if (frame.src !== src.href || shellFrameNavigation(frame) !== navigation) return;
         // Never turn this into a general fetch or credential broker.
         if (typeof result.prefix === "string" && result.prefix.startsWith(`${config.base}/view/`)) {
           source.postMessage({ type: "viewer-renewed", requestId: data.requestId, prefix: result.prefix }, "*");

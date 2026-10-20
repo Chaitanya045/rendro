@@ -26,6 +26,8 @@ function recoveryRuntime(scope = { repoId: 9101, documentPath: "docs/guide.md" }
   let frameLoad!: () => void;
   const frame = {
     src: `https://rendro.test/r/acme/docs/@${"c".repeat(40)}/files/${scope.documentPath}`,
+    // A document the shell loaded (#296); "reload iframe" below is the shell loading it again.
+    dataset: { navigation: "1", document: "1" },
     contentWindow: child,
     addEventListener: (_type: string, listener: () => void) => { frameLoad = listener; },
     removeEventListener: vi.fn(),

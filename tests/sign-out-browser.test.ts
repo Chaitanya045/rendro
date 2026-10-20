@@ -90,9 +90,10 @@ beforeAll(async () => {
   app.post("/api/rendro/credentials", c => c.json({ rawKey }));
   app.get("/api/rendro/projects", c => c.json({ projects: [] }));
   app.get("/api/rendro/projects/get", c => c.json({ project: { name: "Project" } }));
+  // The frame shows the document this shell names (#296).
   app.get("/viewer", c => c.html(`<!doctype html><html><body>
     <form method="post" action="/api/auth/sign-out"><button type="submit">Sign out</button></form>
-    <iframe id="content-frame" src="/r/acme/docs/files/guide.md"></iframe>
+    <iframe id="content-frame" data-navigation="1" data-document="1" src="/r/acme/docs/files/guide.md"></iframe>
     <script>window.RENDRO_REPO_COMMENT_CONFIG={repoId:1,accessUrl:'/r/acme/docs/comment-access',convexUrl:'https://convex.invalid'};</script>
     ${renderCommentRecoveryLifecycle(c.req.query("as") ?? "reader")}<script src="/commentor-parent.js"></script></body></html>`));
   const listener = getRequestListener(app.fetch);

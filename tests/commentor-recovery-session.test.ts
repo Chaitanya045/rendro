@@ -88,7 +88,7 @@ describe("comment recovery session ownership", () => {
     const storage = win.sessionStorage as unknown as Storage;
     syncCommentRecoveryUser(storage, "A");
     storage.setItem("commentor-operations:legacy", "private");
-    win.document.body.innerHTML = '<iframe id="content-frame"></iframe>';
+    win.document.body.innerHTML = '<iframe id="content-frame" data-navigation="1" data-document="1"></iframe>';
     const frame = win.document.getElementById("content-frame")!;
     frame.setAttribute("src", "https://rendro.test/r/acme/docs/files/guide.md");
     const source = { postMessage: vi.fn() };

@@ -32,6 +32,8 @@ describe("repository comment parent transport", () => {
     const source = { postMessage } as unknown as WindowProxy;
     const frame = {
       src: "https://rendro.test/r/acme/docs/files/guide.html",
+      // A document the shell loaded (#296).
+      dataset: { navigation: "1", document: "1" },
       contentWindow: source,
       addEventListener: (type: string, listener: () => void) => { if (type === "load") loadHandler = listener; },
       removeEventListener: vi.fn(),

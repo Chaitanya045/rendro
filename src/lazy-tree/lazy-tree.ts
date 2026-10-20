@@ -4,11 +4,11 @@
  */
 import { coalesceMessage, createDocumentNavigationGate } from "../viewer/message-limits";
 import { createNavigationNotice } from "../viewer/navigation-notice";
-import { CONTENT_FRAME_EVENT } from "../viewer/content-frame";
+import { CONTENT_FRAME_EVENT, shellFrameNavigation, startShellNavigation } from "../viewer/content-frame";
 import { replaceViewerFragment, sendDocumentFragment, validFragment } from "../viewer/fragments";
 import {
-  externalLinkHref,
   isContentFrameSource,
+  newTabLinkHref,
   normalizeLoadedDocumentPath,
   validRelativeDocumentPath,
   validDocumentSearch,
@@ -541,7 +541,10 @@ for (const type of ["pointerdown", "pointerup", "mousedown", "keydown", "touchen
 }
 const navigationNotice = createNavigationNotice({
   describe: ({ fullPath, search, fragment, href }) => href
-    ? { question: `Open external link ${href}?`, open: "Open external link", review: "Review external link" }
+    // A page of this site that is not a repository document opens in a new tab too (#296).
+    ? new URL(href).origin === location.origin
+      ? { question: `Open ${href} in a new tab?`, open: "Open in new tab", review: "Review link" }
+      : { question: `Open external link ${href}?`, open: "Open external link", review: "Review external link" }
     : { question: `Open linked document ${relativeDocumentPath(fullPath)}${search}${fragment}?`, open: "Open linked document", review: "Review linked document" },
   open: ({ fullPath, search, fragment, href }) => {
     if (!href) {
@@ -662,6 +665,8 @@ function loadDoc(fullPath: string, pushState: false | "push" | "replace", fragme
       showDocLoadError(frame);
     };
     docLoadTimeout = window.setTimeout(() => showDocLoadError(frame), 15000);
+    // The comment host and ticket renewal answer only a document the shell loaded (#296).
+    startShellNavigation(frame);
     frame.src = frameUrl;
     // Keep src authoritative for comments/tickets, but replace the pending
     // frame navigation: the shell alone owns document history entries.
@@ -1079,8 +1084,10 @@ function init() {
     // reader's frame's. Consume them before the content-frame checks.
     if (framePreloader.ready(event.source)) return;
     const frame = document.getElementById("content-frame") as HTMLIFrameElement | null;
-    if (!isContentFrameSource(event.source, frame?.contentWindow ?? null)) return;
-    if (event.origin !== (frame?.hasAttribute("sandbox") ? "null" : location.origin)) return;
+    if (!frame || !isContentFrameSource(event.source, frame.contentWindow)) return;
+    // A document the frame loaded by itself is not one of the shell's (#296): nothing it says is acted on.
+    if (shellFrameNavigation(frame) === null) return;
+    if (event.origin !== (frame.hasAttribute("sandbox") ? "null" : location.origin)) return;
     if (!isDocumentMessage(event.data)) return;
     if (event.data.type === "doc-fragment") {
       if (!ORG || `${ORG}/${event.data.path}` !== RENDRO_WINDOW.RENDRO_CURRENT_DOC
@@ -1103,7 +1110,7 @@ function init() {
     }
     if (event.data.type === "doc-external") {
       // Never navigates or opens anything by itself: the reader confirms the exact address shown.
-      const href = externalLinkHref(event.data.href, location.href, location.origin);
+      const href = newTabLinkHref(event.data.href, location.href);
       if (href) offerExternalLink(href);
     }
     if (event.data.type === "doc-loaded") {

@@ -629,6 +629,28 @@ describe("lazy tree messages from the document frame", () => {
     expect(await location(tab)).toBe("/r/acme/site?doc=guide%2Fa.html#after");
   });
 
+  it("acts on nothing a document says once the frame loaded it by itself, until the shell loads one again (#296)", async () => {
+    const tab = await open("/r/acme/site?doc=guide%2Fa.html");
+    await settled(tab);
+    // The frame reloads itself: its src is unchanged, but the shell did not load what it now shows.
+    await docFrame(tab).evaluate(() => { (window as unknown as { before: boolean }).before = true; window.location.reload(); });
+    await expect.poll(() => docFrame(tab).evaluate(() => document.readyState === "complete" && !(window as unknown as { before?: boolean }).before).catch(() => false)).toBe(true);
+    const before = requests.length;
+    await post(tab, { type: "doc-navigate", path: "guide/b.html", search: "", fragment: "" });
+    await post(tab, { type: "doc-external", path: "guide/a.html", href: "https://outside.test/" });
+    await post(tab, { type: "doc-fragment", path: "guide/a.html", fragment: "#ignored" });
+    await tab.waitForTimeout(300);
+    expect(await location(tab)).toBe("/r/acme/site?doc=guide%2Fa.html");
+    expect(await tab.locator("#document-navigation-notice").count()).toBe(0);
+    expect(requests.length).toBe(before);
+    // The reader opens a page from the tree: the shell loaded it, and is listened to again.
+    await tab.locator('a.tree-link[href="/r/acme/site/@pin/files/top.html"]').click();
+    await tab.waitForFunction(() => new URLSearchParams(window.location.search).get("doc") === "top.html");
+    await settled(tab);
+    await post(tab, { type: "doc-fragment", path: "top.html", fragment: "#heard" });
+    await tab.waitForFunction(() => window.location.hash === "#heard");
+  });
+
   it("follows a link the reader clicks inside the document and keeps its query and fragment", async () => {
     const tab = await open("/r/acme/site?doc=guide%2Fa.html");
     await settled(tab);
@@ -822,9 +844,25 @@ describe("lazy tree navigation confirmation", () => {
       expect(await notice(tab).count()).toBe(0);
     });
 
+    it("asks first for a page of this site that is not a document, then opens it in a new tab (#296)", async () => {
+      const tab = await open("/r/acme/site?doc=guide%2Fa.html");
+      await settled(tab);
+      await spyOpen(tab);
+      await post(tab, { ...external, href: "/organizations?tab=1" });
+      await notice(tab).waitFor();
+      const address = `${harness.origin}/organizations?tab=1`;
+      expect(await tab.locator("#document-navigation-destination").textContent()).toBe(`Open ${address} in a new tab?`);
+      expect(await opened(tab)).toEqual([]);
+      await notice(tab).getByRole("button", { name: "Dismiss" }).click();
+      await tab.getByRole("button", { name: "Review link" }).click();
+      await notice(tab).getByRole("button", { name: "Open in new tab" }).click();
+      expect(await opened(tab)).toEqual([[address, "_blank", "noopener,noreferrer"]]);
+      // The document stays where it is.
+      expect(await frameSrc(tab)).toBe("/r/acme/site/@pin/files/guide/a.html");
+      expect(await location(tab)).toBe("/r/acme/site?doc=guide%2Fa.html");
+    });
+
     it.each([
-      ["a same-origin address", { href: "/organizations" }],
-      ["the shell's own origin", { href: "PAGE_ORIGIN/other" }],
       ["a mail link", { href: "mailto:someone@outside.test" }],
       ["a script URL", { href: "javascript:alert(1)" }],
       ["a missing address", {}],
