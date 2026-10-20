@@ -9,10 +9,11 @@ export async function backendFetch(
   url: string,
   init: RequestInit | undefined,
   operation: BackendOperation,
+  site: string,
 ): Promise<Response> {
   try {
     const response = await fetch(url, init);
-    await evictRejectedSession(new Headers(init?.headers).get("cookie") ?? "", response.status);
+    await evictRejectedSession(site, new Headers(init?.headers).get("cookie") ?? "", response.status);
     if (response.status < 500) return response;
     logger.error({ category: "UpstreamError", operation, status: response.status }, "Backend request failed");
   } catch {

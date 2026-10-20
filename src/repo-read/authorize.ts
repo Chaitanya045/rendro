@@ -14,7 +14,7 @@
  * Denials are indistinguishable from missing repositories. "Could not check"
  * is `unavailable`, never a denial.
  */
-import { sessionTokenCookie } from "@/viewer-ticket";
+import { cookieSite, sessionTokenCookie } from "@/viewer-ticket";
 import { constantTimeEqual } from "../../shared/constant-time";
 import { repoKey, type RepoPermissionSource, type RepoRecord, type RevocationEpochs } from "./access";
 import { mintCapability, peekCapability, sessionBinding, verifyCapability, type CapabilityClaims } from "./capability";
@@ -154,7 +154,7 @@ export async function authorizeRepo(deps: AuthorizeDependencies, request: Reques
   const known = publicRepos.get(key);
   if (known && known.until > deps.now() + minRemainingMs) return { kind: "granted", grant: issueGrant(known.repo, null, 0, known.until), cookies: [] };
 
-  const session = sessionTokenCookie(request.headers.get("cookie") ?? "");
+  const session = sessionTokenCookie(cookieSite(request.url), request.headers.get("cookie") ?? "");
   const { claims, stale } = await capabilityCookies(deps, request, key, session);
   const cookies = stale.map(repoId => clearCookie(secure, repoId));
   try {

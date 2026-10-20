@@ -259,7 +259,7 @@ describe("authenticated entry", () => {
     });
 
     const res = await workerApp.request("https://dev.rendro.app/", {
-      headers: { cookie: "__Secure-better-auth.session_token=test-session" },
+      headers: { cookie: "better-auth.session_token=test-session" },
     });
     expect(await res.text()).toBe("");
     expect(res.status).toBe(302);

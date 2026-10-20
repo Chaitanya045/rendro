@@ -1,7 +1,7 @@
 import type { Context, Next } from "hono";
 import type { User } from "better-auth/types";
 import { CONVEX_SITE_URL } from "@/config";
-import { sessionTokenCookie, viewerSessionCookie } from "@/viewer-ticket";
+import { cookieSite, sessionTokenCookie, viewerSessionCookie } from "@/viewer-ticket";
 import { logger } from "@/logger";
 import { authClientIpHeaders } from "@/auth-client-ip";
 import { renderSessionUnavailablePage } from "@/routes/session-unavailable";
@@ -79,7 +79,7 @@ async function lookupSession(request: Request, cookie: string): Promise<LookupRe
       redirect: "manual",
       signal: controller.signal,
     });
-    await evictRejectedSession(cookie, res.status);
+    await evictRejectedSession(cookieSite(request.url), cookie, res.status);
     if (!res.ok && res.status !== 401) {
       const failure: LookupFailure = {
         kind: "failure",
@@ -135,7 +135,7 @@ async function lookupWithRetry(request: Request, cookie: string, cached: boolean
     // Coalesce only the first read. A failed entry is removed before backoff;
     // retries have independent deadlines and cannot retain a failed promise.
     const result = cached && attempt === 1
-      ? await sessionCache.lookup(cookie, () => lookupSession(request, cookie))
+      ? await sessionCache.lookup(cookieSite(request.url), cookie, () => lookupSession(request, cookie))
       : await lookupSession(request, cookie);
     if (result.kind === "failure") {
       logger.warn({ category: result.category, status: result.status ?? null, attempt }, "Session lookup failed");
@@ -157,12 +157,13 @@ async function lookupWithRetry(request: Request, cookie: string, cached: boolean
  * capability cookie cannot answer). Uses the same coalesced 15-second cache and retry as the middleware.
  */
 export async function sessionViewer(request: Request): Promise<{ kind: "anonymous" } | { kind: "user"; id: string } | { kind: "unavailable"; retryAfter: string }> {
-  const cookie = viewerSessionCookie(request.headers.get("cookie") || "");
-  if (!sessionTokenCookie(cookie)) return { kind: "anonymous" };
+  const site = cookieSite(request.url);
+  const cookie = viewerSessionCookie(site, request.headers.get("cookie") || "");
+  if (!sessionTokenCookie(site, cookie)) return { kind: "anonymous" };
   const result = await lookupWithRetry(request, cookie, true);
   if (result.kind === "failure") return { kind: "unavailable", retryAfter: String(Math.max(1, Math.ceil((result.retryAfterMs ?? 1_000) / 1_000))) };
   if (result.kind === "anonymous") {
-    await sessionCache.evict(cookie);
+    await sessionCache.evict(site, cookie);
     return { kind: "anonymous" };
   }
   return { kind: "user", id: result.user.id };
@@ -173,10 +174,11 @@ export async function sessionMiddleware(
   next: Next,
 ): Promise<void> {
   const path = c.req.path;
-  const cookie = viewerSessionCookie(c.req.raw.headers.get("cookie") || "");
+  const site = cookieSite(c.req.url);
+  const cookie = viewerSessionCookie(site, c.req.raw.headers.get("cookie") || "");
   const finish = async () => {
     await next();
-    await evictRejectedSession(cookie, c.res.status);
+    await evictRejectedSession(site, cookie, c.res.status);
   };
   if (path.startsWith("/api/auth/")) {
     await finish();
@@ -185,13 +187,13 @@ export async function sessionMiddleware(
 
   let sessionDuration: string | undefined;
   // `cookie` holds only session-token and preference pairs (see viewerSessionCookie).
-  if (sessionTokenCookie(cookie)) {
+  if (sessionTokenCookie(site, cookie)) {
     const sessionStartedAt = performance.now();
     // Every page here (landing, home, sign-in, sign-up and account pages) needs fresh identity; only the
     // repository read path reuses a cached one (sessionViewer).
-    await sessionCache.evict(cookie);
+    await sessionCache.evict(site, cookie);
     const result = await lookupWithRetry(c.req.raw, cookie, false);
-    if (result.kind === "anonymous") await sessionCache.evict(cookie);
+    if (result.kind === "anonymous") await sessionCache.evict(site, cookie);
     sessionDuration = duration(sessionStartedAt);
     if (result.kind === "failure") {
       const retryAfter = String(Math.max(1, Math.ceil((result.retryAfterMs ?? 1_000) / 1_000)));

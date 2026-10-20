@@ -50,6 +50,7 @@ afterEach(() => {
   vi.useRealTimers();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
 });
 
 describe("session lookup failures", () => {
@@ -307,10 +308,11 @@ describe("session lookup failures", () => {
     expect(logger.warn).not.toHaveBeenCalled();
   });
 
-  it("recognizes secure cookies and stops reusing a revoked session within 15 seconds", async () => {
+  it("recognizes host-only cookies on HTTPS and stops reusing a revoked session within 15 seconds", async () => {
+    vi.stubEnv("SITE_URL", "https://rendro.test");
     const fetchMock = vi.fn().mockImplementationOnce(() => Response.json({ user, session: { expiresAt: Date.now() + 60_000 } })).mockImplementation(() => Response.json(null));
     vi.stubGlobal("fetch", fetchMock);
-    const headers = { cookie: `theme=dark; __Secure-${cookie}`, accept: "text/html" };
+    const headers = { cookie: `theme=dark; __Host-${cookie}`, accept: "text/html" };
     expect((await request("/account/probe", headers)).response.status).toBe(200);
     vi.setSystemTime(Date.now() + 15_000);
     expect((await request("/account/probe", headers)).response.status).toBe(302);

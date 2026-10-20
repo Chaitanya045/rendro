@@ -15,7 +15,7 @@ it("rejects same-site sibling submissions with real browser cookies", async () =
   // Reserved .test hosts are resolved entirely in this local fixture. Chromium
   // still owns cookie, Origin and CORS behavior.
   const observed: Array<{ origin: string | undefined; site: string | undefined; cookie: boolean; status: number }> = [];
-  await page.context().addCookies([{ name: "__Secure-better-auth.session_token", value: f.cookie.split("=").slice(1).join("="), domain: "app.rendro.test", path: "/", secure: true, httpOnly: true, sameSite: "Lax" }]);
+  await page.context().addCookies([{ name: "__Host-better-auth.session_token", value: f.cookie.split("=").slice(1).join("="), url: appOrigin, secure: true, httpOnly: true, sameSite: "Lax" }]);
   await page.context().route("https://*.rendro.test/**", async route => {
     const request = route.request();
     const url = new URL(request.url());

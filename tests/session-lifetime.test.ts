@@ -85,7 +85,7 @@ it.each([false, true])("preserves cookie attributes and backend lifetime through
   expect((await f.stored()).expiresAt).toBe(expiry);
 
   // The filtered session cookie the Worker forwards for session reads preserves the preference.
-  const ticket = { cookie: viewerSessionCookie(f.cookie) };
+  const ticket = { cookie: viewerSessionCookie(origin, f.cookie) };
   expect(ticket).not.toBeNull();
   expect(await f.auth.api.getSession({ headers: new Headers({ cookie: ticket!.cookie }) })).not.toBeNull();
   expect((await f.stored()).expiresAt).toBe(expiry);
@@ -132,7 +132,7 @@ for (const remember of [false, true]) {
         }
       }
     }
-    const ticket = { cookie: viewerSessionCookie(cookie) };
+    const ticket = { cookie: viewerSessionCookie(origin, cookie) };
     expect(await f.auth.api.getSession({ headers: new Headers({ cookie: ticket!.cookie }) })).not.toBeNull();
     expect((await f.stored()).expiresAt).toBe(expiry);
     if (!remember) {
