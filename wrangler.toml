@@ -54,9 +54,11 @@ bucket_name = "dev-rendro"
 
 # Real-user monitoring beacons (POST /rum, #282). Development only: production gets its dataset and
 # limiter at its own deploy. Without either binding the endpoint accepts beacons and drops them.
-[[env.development.analytics_engine_datasets]]
-binding = "RUM_ANALYTICS"
-dataset = "rendro_rum_dev"
+# The dataset binding is commented out until Analytics Engine is enabled on the Cloudflare account
+# (owner action; `wrangler deploy` fails with code 10089 while it is off). Restore these three lines then.
+# [[env.development.analytics_engine_datasets]]
+# binding = "RUM_ANALYTICS"
+# dataset = "rendro_rum_dev"
 
 # The beacon's in-colo rate limit, keyed on the verified client address (#282): 60 beacons a minute per
 # address, against about one per page leave. Development only, like the dataset; without it beacons are dropped.
