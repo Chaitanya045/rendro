@@ -1,6 +1,6 @@
 import type { RepoRef } from "../github/source";
 import { SingleFlight } from "./concurrency";
-import type { IngestOutcome, PurgeOutcome, ReconcileOutcome, RepoTouch } from "./coordinator";
+import type { EnsureOutcome, IngestOutcome, PurgeOutcome, ReconcileOutcome, RepoTouch } from "./coordinator";
 import type { IngestMessage } from "./messages";
 
 /** The subset of a DurableObjectNamespace binding used here. */
@@ -11,7 +11,8 @@ export interface DurableObjectNamespaceLike {
 
 export interface CoordinatorClient {
   ingest(message: IngestMessage): Promise<IngestOutcome>;
-  ensure(repo: RepoRef, branch: string): Promise<IngestOutcome>;
+  /** `defaultBranch`: the branch is the repository's default, which first-view budgets exempt (#294). */
+  ensure(repo: RepoRef, branch: string, defaultBranch?: boolean): Promise<EnsureOutcome>;
   reconcile(repo: RepoRef): Promise<ReconcileOutcome>;
   /** A view (#263): last access for idle expiry, and the visibility the reader was granted. */
   touch(touch: RepoTouch): Promise<{ status: "ok" | "misrouted" }>;
@@ -35,7 +36,7 @@ export function coordinatorClient(namespace: DurableObjectNamespaceLike, repoId:
   };
   return {
     ingest: (message) => call("/ingest", message),
-    ensure: (repo, branch) => call("/ensure", { repo, branch }),
+    ensure: (repo, branch, defaultBranch = false) => call("/ensure", { repo, branch, defaultBranch }),
     reconcile: (repo) => call("/reconcile", { repo }),
     touch: (touch) => call("/touch", { id: touch.id, private: touch.private }),
     purge: (repoId) => call("/purge", { repoId }),
@@ -47,7 +48,9 @@ export function coordinatorClient(namespace: DurableObjectNamespaceLike, repoId:
  * isolate share one Durable Object call, and the Durable Object shares one
  * ingest across isolates. (Wired into the serving path in P4.)
  */
-export function firstViewEnsurer(clientFor: (repoId: number) => CoordinatorClient): (repo: RepoRef, branch: string) => Promise<IngestOutcome> {
-  const flights = new SingleFlight<IngestOutcome>();
-  return (repo, branch) => flights.run(`${repo.id}:${branch}`, () => clientFor(repo.id).ensure(repo, branch));
+export function firstViewEnsurer(
+  clientFor: (repoId: number) => CoordinatorClient,
+): (repo: RepoRef, branch: string, defaultBranch?: boolean) => Promise<EnsureOutcome> {
+  const flights = new SingleFlight<EnsureOutcome>();
+  return (repo, branch, defaultBranch = false) => flights.run(`${repo.id}:${branch}`, () => clientFor(repo.id).ensure(repo, branch, defaultBranch));
 }

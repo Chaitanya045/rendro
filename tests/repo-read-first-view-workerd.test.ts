@@ -6,14 +6,15 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createTestHarness } from "wrangler";
 import { repoReadWorker, workerConfigWithRepoRead } from "../e2e/repo-read-config";
 import { refKey } from "../src/ingest/orchestrator/keys";
-import { FakeGitHub } from "./helpers/fake-github";
+import { FakeGitHub, type FakeRepo } from "./helpers/fake-github";
 
 /**
  * First-view ingest on real workerd (#242): the serving Worker with a
  * cross-script Durable Object binding to the ingest Worker's per-repo
  * coordinator, both sharing the test R2 bucket; the preparing page while a
  * GitHub gate holds the build past the 5 s window, then the docs once the
- * pointer lands.
+ * pointer lands. With the per-client limiter bound (#294), a branch other than
+ * the default prepares the same way, and an unknown one is asked about once.
  */
 
 interface R2Like { get(key: string): Promise<{ text(): Promise<string> } | null> }
@@ -76,6 +77,11 @@ beforeAll(async () => {
 name = "REPO_INGEST"
 class_name = "RepoIngestCoordinator"
 script_name = "rendro-ingest-dev"
+
+[[ratelimits]]
+name = "FIRST_VIEW_LIMIT"
+namespace_id = "2940"
+simple = { limit = 100, period = 60 }
 `);
   const vars = {
     NODE_ENV: "production", LOG_LEVEL: "error", CONVEX_URL: "http://convex.test:3210", CONVEX_SITE_URL: convexSite,
@@ -139,5 +145,23 @@ describe("first-view ingest on workerd", () => {
     expect(await second.text()).toContain('window.RENDRO_INITIAL_DOC="new-docs/docs/index.md"');
     const frame = await get(`/r/octo/new-docs/@${commit}/files/docs/index.md`);
     expect(await frame.text()).toContain("<h1 id=\"user-content-fresh-home\">Fresh home</h1>");
+  }, 120_000);
+
+  it("answers repeats of an unknown branch without asking GitHub again, and still prepares a real new branch", async () => {
+    const repo = github.repos.get("octo/new-docs") as FakeRepo;
+    github.resetLog();
+    for (let repeat = 0; repeat < 4; repeat += 1) expect((await get("/r/octo/new-docs/~no-such-branch")).status).toBe(404);
+    expect(github.count("ref")).toBe(1);
+    const feature = repo.commit({ ...freshDocs, "docs/index.md": "# Feature home\n" }, "feature");
+    const deadline = Date.now() + 90_000;
+    let response = await get("/r/octo/new-docs/~feature");
+    while (response.headers.get("X-Rendro-Readiness") === "preparing") {
+      if (Date.now() > deadline) throw new Error("Timed out waiting for the new branch");
+      await new Promise(resolve => setTimeout(resolve, 200));
+      response = await get("/r/octo/new-docs/~feature");
+    }
+    expect(response.status).toBe(200);
+    expect(await response.text()).toContain('window.RENDRO_INITIAL_DOC="new-docs/docs/index.md"');
+    expect(JSON.parse(await (await env.REPO_CONTENT.get(refKey(703, "feature")))?.text() as string)).toMatchObject({ commit: feature });
   }, 120_000);
 });

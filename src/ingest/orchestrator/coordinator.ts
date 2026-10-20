@@ -34,6 +34,9 @@ export type IngestOutcome =
   /** Expired for lack of views (#263): a push or a reconciliation waits for the next view. */
   | { status: "idle" };
 
+/** What a first view gets (#294): an ingest outcome, or a refusal while the repository's first-view budget is spent. */
+export type EnsureOutcome = IngestOutcome | { status: "throttled"; retryAt: number };
+
 /** A purge of a removed repository's content (#263): finished, or recorded and continuing from the alarm. */
 export type PurgeOutcome = { status: "done" | "accepted" | "misrouted" };
 
@@ -75,6 +78,30 @@ const ACCESS_RESOLUTION = 30;
 export const WIPE_RESUME_MS = 1_000;
 /** Durable Object storage deletes at most 128 keys per call. */
 const STORAGE_DELETE_BATCH = 128;
+
+/** A branch GitHub said does not exist is answered from here, with no GitHub call, for this long (#294). */
+export const MISSING_REF_TTL_MS = 5 * 60_000;
+/** At most this many distinct branches GitHub did not know, per repository and window, are asked about on first views. */
+export const UNKNOWN_BRANCH_CAP = 10;
+export const UNKNOWN_BRANCH_WINDOW_MS = 10 * 60_000;
+/** At most this many first-view jobs for branches nothing serves yet start per repository and window. */
+export const FIRST_VIEW_BUDGET = 30;
+export const FIRST_VIEW_WINDOW_MS = 60 * 60_000;
+
+/**
+ * First-view admission for one repository (#294), under storage key `first-views`.
+ * The default branch is exempt from both limits, never from the negative cache.
+ */
+interface FirstViewRecord {
+  /** Branches GitHub did not know, and until when each is answered without asking again. */
+  missing: Record<string, number>;
+  /** The current unknown-branch window: its start, and the distinct misses counted in it. */
+  unknownSince: number;
+  unknown: number;
+  /** The current budget window: its start, and the first-view jobs started in it. */
+  jobsSince: number;
+  jobs: number;
+}
 
 interface FailureRecord {
   commit: string | null;
@@ -121,6 +148,10 @@ function positiveInteger(value: unknown): value is number {
  */
 export class IngestCoordinator {
   private tail: Promise<unknown> = Promise.resolve();
+  /** Changes to the first-view record (#294), one at a time. */
+  private firstViewChain: Promise<unknown> = Promise.resolve();
+  /** First-view jobs admitted and not yet answered: each may still turn out to be a miss. */
+  private firstViewJobs = 0;
   private readonly running = new Map<string, Job>();
   private readonly pending = new Map<string, Job>();
   private readonly maxFollowUps: number;
@@ -145,7 +176,9 @@ export class IngestCoordinator {
       }
       case "/ensure": {
         const repo = parseRepoRef(body?.repo);
-        return repo && isBranchName(body?.branch) ? Response.json(await this.ensure(repo, body.branch)) : new Response("Bad request", { status: 400 });
+        return repo && isBranchName(body?.branch)
+          ? Response.json(await this.ensure(repo, body.branch, body.defaultBranch === true))
+          : new Response("Bad request", { status: 400 });
       }
       case "/reconcile": {
         const repo = parseRepoRef(body?.repo);
@@ -178,8 +211,13 @@ export class IngestCoordinator {
     return outcome;
   }
 
-  /** First view of a branch: return the served commit, or ingest it once however many readers ask. */
-  async ensure(repo: RepoRef, branch: string): Promise<IngestOutcome> {
+  /**
+   * First view of a branch: return the served commit, or ingest it once however many readers ask.
+   * A branch nothing serves yet is admitted first (#294): one GitHub said does not exist is answered
+   * from the negative cache, and other than the default branch, a new job needs the repository's
+   * unknown-branch cap and first-view budget. Readers joining a job already queued spend nothing.
+   */
+  async ensure(repo: RepoRef, branch: string, defaultBranch = false): Promise<EnsureOutcome> {
     const misrouted = await this.claim(repo.id);
     if (misrouted) return misrouted;
     // A view: the repository is wanted again, whatever idle expiry did.
@@ -188,7 +226,15 @@ export class IngestCoordinator {
     // Content that must be wiped first (or a wipe still running) is never answered from: the job wipes, then builds.
     const pointer = await this.contentReady(repo.private) === true ? await readPointer(this.deps.store, repo.id, branch) : null;
     if (pointer) return { status: "current", commit: pointer.value.commit, staleHint: false };
-    const outcome = await this.schedule(repo, branch, null);
+    const admission = await this.admitFirstView(branch, defaultBranch);
+    if ("refused" in admission) return admission.refused;
+    let outcome: EnsureOutcome;
+    try {
+      outcome = await this.schedule(repo, branch, null);
+      if (outcome.status === "no-ref") await this.rememberMissing(branch, defaultBranch);
+    } finally {
+      if (admission.charged) this.firstViewJobs -= 1;
+    }
     // The reader waited for this build: the idle window starts when it is served.
     await this.recordAccess();
     return outcome;
@@ -264,6 +310,71 @@ export class IngestCoordinator {
       }
       // An unfinished step has already re-armed the alarm for the next one.
       if (await this.wipeOnce()) await this.rearm();
+    });
+  }
+
+  /** The first-view record with expired negative entries dropped and finished windows restarted. */
+  private async firstViews(now: number): Promise<FirstViewRecord> {
+    const stored = await this.state.storage.get<FirstViewRecord>("first-views");
+    const record: FirstViewRecord = stored ?? { missing: {}, unknownSince: now, unknown: 0, jobsSince: now, jobs: 0 };
+    record.missing = Object.fromEntries(Object.entries(record.missing).filter(([, until]) => until > now));
+    if (now - record.unknownSince >= UNKNOWN_BRANCH_WINDOW_MS) Object.assign(record, { unknownSince: now, unknown: 0 });
+    if (now - record.jobsSince >= FIRST_VIEW_WINDOW_MS) Object.assign(record, { jobsSince: now, jobs: 0 });
+    return record;
+  }
+
+  /**
+   * Read, change and store the first-view record one change at a time: readers that arrive together
+   * must not overwrite each other's counts. `change` returns the result and whether to store the record.
+   */
+  private updateFirstViews<T>(change: (record: FirstViewRecord, now: number) => [T, boolean]): Promise<T> {
+    const run = this.firstViewChain.then(async () => {
+      const now = this.deps.now();
+      const record = await this.firstViews(now);
+      const [result, changed] = change(record, now);
+      if (changed) await this.state.storage.put("first-views", record);
+      return result;
+    });
+    this.firstViewChain = run.catch(() => {});
+    return run;
+  }
+
+  /**
+   * Whether a first view of `branch` may run, and if so whether it was charged as a new job; else what
+   * to answer instead. Jobs still in flight count against the unknown-branch cap as possible misses, so
+   * readers arriving together cannot make the coordinator ask GitHub about more than the cap allows.
+   */
+  private admitFirstView(branch: string, defaultBranch: boolean): Promise<{ refused: EnsureOutcome } | { charged: boolean }> {
+    return this.updateFirstViews<{ refused: EnsureOutcome } | { charged: boolean }>((record) => {
+      if (Object.hasOwn(record.missing, branch)) return [{ refused: { status: "no-ref" } }, false];
+      if (defaultBranch || this.running.has(branch) || this.pending.has(branch)) return [{ charged: false }, false];
+      if (record.unknown + this.firstViewJobs >= UNKNOWN_BRANCH_CAP) {
+        return [{ refused: { status: "throttled", retryAt: record.unknownSince + UNKNOWN_BRANCH_WINDOW_MS } }, false];
+      }
+      if (record.jobs >= FIRST_VIEW_BUDGET) return [{ refused: { status: "throttled", retryAt: record.jobsSince + FIRST_VIEW_WINDOW_MS } }, false];
+      record.jobs += 1;
+      this.firstViewJobs += 1;
+      return [{ charged: true }, true];
+    });
+  }
+
+  /** GitHub does not know `branch`: answer it from here for a while; a branch other than the default counts against the cap once. */
+  private rememberMissing(branch: string, defaultBranch: boolean): Promise<void> {
+    return this.updateFirstViews((record, now) => {
+      // Readers who shared the job report the same miss.
+      if (Object.hasOwn(record.missing, branch)) return [undefined, false];
+      record.missing[branch] = now + MISSING_REF_TTL_MS;
+      if (!defaultBranch) record.unknown += 1;
+      return [undefined, true];
+    });
+  }
+
+  /** The branch exists after all (a push created it): drop its negative entry. */
+  private forgetMissing(branch: string): Promise<void> {
+    return this.updateFirstViews((record) => {
+      if (!Object.hasOwn(record.missing, branch)) return [undefined, false];
+      delete record.missing[branch];
+      return [undefined, true];
     });
   }
 
@@ -412,6 +523,7 @@ export class IngestCoordinator {
         if (result.status !== "flipped" || !result.headMoved || followUps >= this.maxFollowUps) break;
       }
       await this.state.storage.delete([`failure:${branch}`]);
+      if (result.status !== "no-ref") await this.forgetMissing(branch);
       return result;
     } catch (error) {
       const failure = toIngestError(error);

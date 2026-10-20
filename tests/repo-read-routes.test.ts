@@ -11,7 +11,7 @@ import { READINESS_HEADER } from "@/repo-read/preparing";
 import { imageProxyPath } from "@/image-proxy";
 import { COMMENTOR_STYLE_HASH } from "@/commentor/style-hash";
 import {
-  FakeIngestCoordinator, freshRepo, MemoryEdgeCache, privateRepo, publicRepo, repoFiles, repoReadFixture,
+  FakeIngestCoordinator, FakeRateLimiter, freshRepo, MemoryEdgeCache, privateRepo, publicRepo, repoFiles, repoReadFixture,
   sessionCookies, stubSessions, users,
 } from "./helpers/repo-read-fixture";
 
@@ -628,6 +628,7 @@ describe("first views enqueue the ingest", () => {
     expect(coordinator.calls).toEqual([{
       repo: { id: freshRepo.id, owner: freshRepo.owner, name: freshRepo.name, private: freshRepo.private, installationId: null },
       branch: "main",
+      defaultBranch: true,
     }]);
   }
 
@@ -735,12 +736,65 @@ describe("first views enqueue the ingest", () => {
 
   it("enqueues the branch a URL names, not just the repository's default", async () => {
     const coordinator = withCoordinator();
+    fixture.env.FIRST_VIEW_LIMIT = new FakeRateLimiter();
     vi.useFakeTimers({ toFake: ["setTimeout"] });
     const first = get(`${fresh}/~preview`);
     for (let spins = 0; spins < 1000 && coordinator.calls.length === 0; spins += 1) await Promise.resolve();
-    expect(coordinator.calls[0]).toMatchObject({ repo: { id: freshRepo.id }, branch: "preview" });
+    expect(coordinator.calls[0]).toMatchObject({ repo: { id: freshRepo.id }, branch: "preview", defaultBranch: false });
     await vi.advanceTimersByTimeAsync(PREPARE_WINDOW_MS);
     expect((await first).headers.get(READINESS_HEADER)).toBe("preparing");
+  });
+
+  /** The retryable 503 every refused first view gets (#294): nothing enqueued, nothing cached. */
+  function expectRefused(response: Response, retryAfter: string) {
+    expect(response.status).toBe(503);
+    expect(response.headers.get("Retry-After")).toBe(retryAfter);
+    expect(response.headers.get("Cache-Control")).toBe("private, no-store");
+    expect(response.headers.get(READINESS_HEADER)).toBeNull();
+  }
+
+  it("admits first views of other branches per client, keyed on the verified address, and refuses once its tokens are spent", async () => {
+    const coordinator = withCoordinator();
+    coordinator.autoAnswer = { status: "duplicate" };
+    const limiter = new FakeRateLimiter(2);
+    fixture.env.FIRST_VIEW_LIMIT = limiter;
+    const client = { "CF-Connecting-IP": "203.0.113.7" };
+    expect((await get(`${fresh}/~preview`, client)).headers.get(READINESS_HEADER)).toBe("preparing");
+    expect((await get(`${fresh}/~feature`)).headers.get(READINESS_HEADER)).toBe("preparing");
+    const refused = await get(`${fresh}/~another`, client);
+    expectRefused(refused, "60");
+    expect(await refused.text()).toContain("Try again");
+    expect(limiter.keys).toEqual(["203.0.113.7", "unverified", "203.0.113.7"]);
+    expect(coordinator.calls.map(call => call.branch)).toEqual(["preview", "feature"]);
+    // The default branch, by name or by the bare URL, needs no token: the coordinator builds it once.
+    expect((await get(`${fresh}/~main`, client)).headers.get(READINESS_HEADER)).toBe("preparing");
+    expect((await get(fresh, client)).headers.get(READINESS_HEADER)).toBe("preparing");
+    expect(limiter.keys).toHaveLength(3);
+    expect(coordinator.calls.slice(2)).toMatchObject([{ branch: "main", defaultBranch: true }, { branch: "main", defaultBranch: true }]);
+  });
+
+  it("refuses first views of other branches without the limiter binding, or when it fails, but still prepares the default branch", async () => {
+    const coordinator = withCoordinator();
+    coordinator.autoAnswer = { status: "duplicate" };
+    expectRefused(await get(`${fresh}/~preview`), "60");
+    const limiter = new FakeRateLimiter();
+    limiter.fail = true;
+    fixture.env.FIRST_VIEW_LIMIT = limiter;
+    expectRefused(await get(`${fresh}/~preview`), "60");
+    expect(coordinator.calls).toEqual([]);
+    expect((await get(fresh)).headers.get(READINESS_HEADER)).toBe("preparing");
+    expect(coordinator.calls).toHaveLength(1);
+  });
+
+  it("answers a spent repository budget with a retryable 503 until its window ends", async () => {
+    const coordinator = withCoordinator();
+    fixture.env.FIRST_VIEW_LIMIT = new FakeRateLimiter();
+    vi.useFakeTimers({ toFake: ["Date"] });
+    coordinator.autoAnswer = { status: "throttled", retryAt: Date.now() + 90_500 };
+    expectRefused(await get(`${fresh}/~preview`), "91");
+    // A window that has just ended still waits a second rather than retrying at once.
+    coordinator.autoAnswer = { status: "throttled", retryAt: Date.now() - 1_000 };
+    expectRefused(await get(`${fresh}/~other`), "1");
   });
 
   it("answers a coordinator transport failure as a retryable 503", async () => {

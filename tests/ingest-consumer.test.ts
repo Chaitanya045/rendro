@@ -96,7 +96,9 @@ describe("coordinator client", () => {
     const { binding, names } = namespace((request) => coordinator.fetch(request));
     const client = coordinatorClient(binding, 41);
     expect(names).toEqual([coordinatorName(41)]);
-    expect(await client.ensure(fake.ref, "main")).toMatchObject({ status: "flipped", commit: head });
+    expect(await client.ensure(fake.ref, "main", true)).toMatchObject({ status: "flipped", commit: head });
+    // Without the flag, an unknown branch counts against the repository's cap (#294).
+    expect(await client.ensure(fake.ref, "missing")).toEqual({ status: "no-ref" });
     expect(await client.ingest({ ...body, repo: fake.ref, sha: head })).toEqual({ status: "current", commit: head, staleHint: false });
     expect(await client.reconcile(fake.ref)).toEqual({ stale: [], retryAt: null });
   });
@@ -108,16 +110,19 @@ describe("coordinator client", () => {
 
   it("coalesces first views within an isolate before they reach the Durable Object", async () => {
     let calls = 0;
+    const flags: Array<boolean | undefined> = [];
     const client: CoordinatorClient = {
-      ensure: () => { calls += 1; return new Promise((resolve) => setTimeout(() => resolve({ status: "current", commit: "c", staleHint: false }), 2)); },
+      ensure: (_repo, _branch, defaultBranch) => { calls += 1; flags.push(defaultBranch); return new Promise((resolve) => setTimeout(() => resolve({ status: "current", commit: "c", staleHint: false }), 2)); },
       ingest: () => Promise.reject(new Error("unused")),
       reconcile: () => Promise.reject(new Error("unused")),
       touch: () => Promise.reject(new Error("unused")),
       purge: () => Promise.reject(new Error("unused")),
     };
     const ensure = firstViewEnsurer(() => client);
-    const results = await Promise.all([ensure(repo, "main"), ensure(repo, "main"), ensure(repo, "dev")]);
+    const results = await Promise.all([ensure(repo, "main", true), ensure(repo, "main", true), ensure(repo, "dev")]);
     expect(results.map((result) => result.status)).toEqual(["current", "current", "current"]);
     expect(calls).toBe(2);
+    // The default-branch flag reaches the coordinator (#294); unset, it is false.
+    expect(flags).toEqual([true, false]);
   });
 });

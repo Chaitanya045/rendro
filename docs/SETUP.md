@@ -180,6 +180,7 @@ pnpm run deploy
 5. P1 replaces `GITHUB_DEV_TOKEN` with installation tokens minted per installation, and calls `/v1/accounts/link` at sign-in.
 6. For comments on repository docs (#254), give the control Worker the `CONVEX_URL` var and the `CONVEX_INTERNAL_SECRET` secret (the same values the serving Worker and Convex use). It then ends a revoked reader's comment access with the epoch, and hides an uninstalled repository's comments at once. Without them, comment access still ends, but only when its grant expires (at most five minutes).
 7. Give the ingest Worker the serving Worker's `REPO_CONTENT_KEY` (`wrangler secret put REPO_CONTENT_KEY --config wrangler.ingest.toml`); without it, private repositories are not ingested. Bind the ingest Worker's coordinators in the control Worker (`REPO_INGEST`: a Durable Object binding to `RepoIngestCoordinator` with `script_name` set to the ingest Worker), so a removal GitHub confirmed also purges the repository's cached content (#263), and in the serving Worker (`REPO_INGEST`, for first views and idle expiry). Deploy the ingest Worker before the Workers that bind it.
+8. In the serving Worker, add the `FIRST_VIEW_LIMIT` and `SEARCH_LIMIT` rate-limit bindings (`[[ratelimits]]`, as `[env.development]` in `wrangler.toml` has them, each with a `namespace_id` unique in the account) (#294). Without `FIRST_VIEW_LIMIT`, first views of branches other than the default are refused until a push builds them; without `SEARCH_LIMIT`, searches are not limited per client.
 
 #### Migrating from S3 access keys
 

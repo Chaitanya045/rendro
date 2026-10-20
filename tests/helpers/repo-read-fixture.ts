@@ -142,7 +142,8 @@ export async function repoReadFixture() {
   for (const repo of Object.values(repos)) await ingestBranch(ingest.deps, cache, repo.ref, "main");
   const pending: Array<Promise<unknown>> = [];
   const kv = epochKv(access);
-  const env = { REPO_CONTENT: ingest.bucket, REPO_EPOCHS: kv, REPO_ACCESS: { fetch: repoAccessHandler(access) }, REPO_INGEST: null as FakeIngestCoordinator["namespace"] | null };
+  const env = { REPO_CONTENT: ingest.bucket, REPO_EPOCHS: kv, REPO_ACCESS: { fetch: repoAccessHandler(access) }, REPO_INGEST: null as FakeIngestCoordinator["namespace"] | null,
+    FIRST_VIEW_LIMIT: null as FakeRateLimiter | null, SEARCH_LIMIT: null as FakeRateLimiter | null };
   const ctx = { waitUntil: (promise: Promise<unknown>) => void pending.push(promise), passThroughOnException() {}, props: {} };
   const settle = async () => {
     while (pending.length) await Promise.allSettled(pending.splice(0));
@@ -155,8 +156,22 @@ export async function repoReadFixture() {
  * ensure call lands in a pending queue that tests resolve in order, or
  * transport-fails. The serving Worker talks to it exactly as to the real one.
  */
+/** A Workers Rate Limiting binding (#294): grants `allow` tokens, then refuses; records every key it was asked for. */
+export class FakeRateLimiter {
+  readonly keys: string[] = [];
+  /** When set, every call fails like an unavailable limiter. */
+  fail = false;
+  constructor(public allow = Number.POSITIVE_INFINITY) {}
+
+  limit({ key }: { key: string }): Promise<{ success: boolean }> {
+    this.keys.push(key);
+    if (this.fail) return Promise.reject(new Error("limiter unavailable"));
+    return Promise.resolve({ success: this.keys.length <= this.allow });
+  }
+}
+
 export class FakeIngestCoordinator {
-  readonly calls: Array<{ repo: { id: number; owner: string; name: string; private: boolean; installationId: number | null }; branch: string }> = [];
+  readonly calls: Array<{ repo: { id: number; owner: string; name: string; private: boolean; installationId: number | null }; branch: string; defaultBranch: boolean }> = [];
   /** When set, every ensure call fails like an unreachable coordinator. */
   transportError: string | null = null;
   /** When set, every ensure call answers immediately with this outcome. */
@@ -176,8 +191,8 @@ export class FakeIngestCoordinator {
           return this.failTouches ? new Response("down", { status: 502 }) : Response.json({ status: "ok" });
         }
         if (new URL(url).pathname !== "/ensure") return new Response("Bad request", { status: 400 });
-        const { repo, branch } = JSON.parse(String(init?.body as string)) as { repo: unknown; branch: string };
-        this.calls.push({ repo: repo as typeof this.calls[number]["repo"], branch });
+        const { repo, branch, defaultBranch } = JSON.parse(String(init?.body as string)) as { repo: unknown; branch: string; defaultBranch: boolean };
+        this.calls.push({ repo: repo as typeof this.calls[number]["repo"], branch, defaultBranch });
         if (this.transportError) return new Response(this.transportError, { status: 502 });
         if (this.autoAnswer !== null) return Response.json(this.autoAnswer);
         return await new Promise<Response>((resolve, reject) => this.pending.push({
