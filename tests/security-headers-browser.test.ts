@@ -130,7 +130,7 @@ describe("Chromium security header smoke", () => {
       expect(response.status()).toBe(status);
       expect(response.headers()["cache-control"]).toContain("no-store");
       expect(await page.locator("h1").textContent()).toBe(heading);
-      if (path.includes("error=access_denied")) expect(await page.locator("#form-error").textContent()).toContain("Google sign-in was canceled.");
+      if (path.includes("error=access_denied")) expect(await page.locator("#form-error").textContent()).toContain("Sign-in was canceled.");
       await browserStep("initialize page theme", () => page.waitForFunction(() => Boolean((window as unknown as { RendroTheme?: unknown }).RendroTheme)));
       const nonce = response.headers()["content-security-policy"].match(/'nonce-([^']+)'/)![1];
       const nonces = await page.locator("script:not([src]), style").evaluateAll(elements => elements.map(element => (element as HTMLElement).nonce));

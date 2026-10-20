@@ -38,12 +38,12 @@ function appPolicy(nonce: string, embeddedError = false): string {
     // Shells use authored style attributes for sizing and loading feedback.
     "style-src-attr 'unsafe-inline'",
     "font-src 'self'",
-    "img-src 'self' data: https://lh3.googleusercontent.com",
+    "img-src 'self' data:",
     `connect-src ${connectionSources()}`,
     "frame-src 'self'",
     "object-src 'none'",
     "base-uri 'self'",
-    "form-action 'self' https://accounts.google.com",
+    "form-action 'self'",
     `frame-ancestors ${embeddedError ? "'self'" : "'none'"}`,
   ].join("; ");
 }

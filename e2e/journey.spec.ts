@@ -5,21 +5,6 @@ import { password } from "./seed";
 import type { Mail } from "./services";
 import type { RepoFixtures } from "./repo-fixtures";
 
-test("Google OAuth uses local code exchange and rejects a changed state", async ({ page }) => {
-  await page.goto("/sign-in");
-  // An invalid state must not create a session.
-  await page.goto("/api/auth/callback/google?code=invalid&state=invalid");
-  await page.goto("/sign-in");
-  await expect(page.getByRole("heading", { name: "Sign in to Rendro" })).toBeVisible();
-  await page.getByRole("button", { name: "Continue with Google" }).click();
-  await expect(page).toHaveURL(/\/home$/);
-  const user = await page.evaluate(async () => {
-    const response = await fetch("/api/auth/get-session");
-    return await response.json() as { user: { email: string; emailVerified: boolean } };
-  });
-  expect(user.user).toMatchObject({ email: "oauth@example.test", emailVerified: true });
-});
-
 test("sign up → verify → home → repository document → reactive comment", async ({ page, context, baseURL }, info) => {
   test.setTimeout(90_000);
   const email = `journey-${info.project.name}-${info.retry}@example.test`;

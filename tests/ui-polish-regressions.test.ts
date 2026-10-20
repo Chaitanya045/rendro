@@ -50,19 +50,14 @@ describe("auth, landing, 404 and viewer polish", () => {
     expect(contextual).toContain('href="/docs/acme" target="_top">Open docs tree</a>');
   });
 
-  it("keeps landing sign-in reachable on mobile and explains Google failures inline", () => {
+  it("keeps landing sign-in reachable on mobile and every call to action a sign-up link", () => {
     const html = renderLandingPage();
     expect(html).not.toMatch(/\.header-signin[^{]*\{\s*display:\s*none/);
     expect(html).not.toContain(".nav-links, .header-signin { display: none; }");
     expect(html).toContain('<a class="brand" href="/" aria-label="Rendro home">Rendro<i aria-hidden="true">.</i></a>');
-    for (const id of ["hero-start", "security-start", "final-start"]) {
-      expect(html).toContain(`data-auth-id="${id}"`);
-      expect(html).toContain(`<p class="auth-error" id="${id}-error" role="alert"></p>`);
-    }
-    expect(html).toContain("Google sign-in could not start.");
-    expect(html).not.toContain('label.textContent = "Try again"');
-    // One shared JSON submit handler drives every Google action.
-    expect(html.match(/fetch\("\/api\/auth\/sign-in\/social"/g)).toHaveLength(1);
+    expect(html.match(/<a class="button button-(?:primary|secondary)" href="\/sign-up" data-action-id="(?:hero|security|final)-start">Get started<\/a>/g)).toHaveLength(3);
+    // No sign-in submits from the landing page, so it has no inline error region to explain one.
+    expect(html).not.toContain('class="auth-error"');
   });
 
   it("gives the viewer an h1 naming the repository", () => {

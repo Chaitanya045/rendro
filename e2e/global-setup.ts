@@ -123,7 +123,6 @@ export default async function globalSetup() {
     if (health.status !== 200 || await health.text() !== "ok") throw new Error("Worker HTTP health check failed");
     identity.allowedOrigins.add(url.origin);
     await convex.environment({ SITE_URL: url.origin, AUTH_SECRET: authSecret, CONVEX_INTERNAL_SECRET: vars.CONVEX_INTERNAL_SECRET,
-      GOOGLE_CLIENT_ID: "e2e-google", GOOGLE_CLIENT_SECRET: randomBytes(32).toString("hex"),
       RESEND_API_KEY: randomBytes(32).toString("hex"), AUTH_EMAIL_FROM: "Rendro <fixture@example.test>" });
     await convex.push();
     const seed = await seedWorkspace({ site: convex.site, worker: url.origin, secret: vars.CONVEX_INTERNAL_SECRET, mail: identity.mail, fetch: originalFetch });
@@ -164,7 +163,7 @@ export default async function globalSetup() {
       process.env.RENDRO_E2E_VISUAL = visualPath;
     }
     process.env.RENDRO_E2E_DIRECTORY = directory;
-    console.log("E2E: real workerd ready; real local Convex, local R2 simulation, captured mail and OAuth, a fake image host, external fetch blocked.");
+    console.log("E2E: real workerd ready; real local Convex, local R2 simulation, captured mail, a fake image host, external fetch blocked.");
     return cleanup;
   } catch (error) {
     try { await cleanup(); } catch (cleanupError) {

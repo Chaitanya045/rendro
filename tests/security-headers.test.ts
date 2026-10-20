@@ -38,8 +38,10 @@ describe("shared response security policy", () => {
     expect(response.headers.get("Content-Type")).toContain("text/html");
     expect(response.headers.get("X-Frame-Options")).toBe("DENY");
     const csp = response.headers.get("Content-Security-Policy")!;
-    for (const directive of ["default-src 'self'", "frame-ancestors 'none'", "object-src 'none'", "base-uri 'self'", "script-src-attr 'none'", "form-action 'self' https://accounts.google.com", "http://127.0.0.1:3210", "ws://127.0.0.1:3210"]) expect(csp).toContain(directive);
+    for (const directive of ["default-src 'self'", "frame-ancestors 'none'", "object-src 'none'", "base-uri 'self'", "script-src-attr 'none'", "form-action 'self';", "img-src 'self' data:;", "http://127.0.0.1:3210", "ws://127.0.0.1:3210"]) expect(csp).toContain(directive);
     expect(csp).not.toContain("'unsafe-eval'");
+    // No third-party sign-in origin or avatar host since Google sign-in was removed (#286).
+    expect(csp).not.toMatch(/google/i);
     expect(csp.match(/script-src [^;]+/)![0]).not.toContain("'unsafe-inline'");
     // Fonts are self-hosted: no font CDN in any directive, and fonts only from this origin.
     expect(csp).not.toMatch(/fonts\.(?:googleapis|gstatic)\.com/);
@@ -146,7 +148,7 @@ describe("shared response security policy", () => {
   });
 
   it("keeps auth error redirects in the baseline header class", async () => {
-    for (const path of ["/api/auth/error?error=access_denied", "/api/auth/callback/google"]) {
+    for (const path of ["/api/auth/error?error=access_denied", "/api/auth/callback/oauth"]) {
       vi.mocked(fetch).mockResolvedValue(new Response(null, {
         status: 302,
         headers: { Location: "http://127.0.0.1:3211/api/auth/error?error=access_denied" },

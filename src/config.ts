@@ -5,7 +5,7 @@ const envSchema = z.object({
   NODE_ENV: z.enum(["development", "production", "test"]).default("development"),
   LOG_LEVEL: z.enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"]).optional(),
 
-  // Convex (Google OAuth credentials belong only to Convex)
+  // Convex
   CONVEX_URL: z.string().default(""),
   CONVEX_SITE_URL: z.string().url().optional(),
   CONVEX_INTERNAL_SECRET: z

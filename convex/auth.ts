@@ -30,8 +30,6 @@ function assertRuntimeEnvironment(): void {
   for (const name of [
     "SITE_URL",
     "AUTH_SECRET",
-    "GOOGLE_CLIENT_ID",
-    "GOOGLE_CLIENT_SECRET",
   ]) {
     if (!process.env[name]) throw new Error(`${name} is required`);
   }
@@ -58,12 +56,6 @@ export function createAuthOptions(ctx: GenericCtx<DataModel>) {
       ipAddress: { ipAddressHeaders: [AUTH_CLIENT_IP_HEADER] },
       database: {
         generateId: false,
-      },
-    },
-    socialProviders: {
-      google: {
-        clientId: optionEnv("GOOGLE_CLIENT_ID"),
-        clientSecret: optionEnv("GOOGLE_CLIENT_SECRET"),
       },
     },
     session: {
@@ -97,7 +89,6 @@ export function createAuthOptions(ctx: GenericCtx<DataModel>) {
     account: {
       accountLinking: {
         enabled: true,
-        trustedProviders: ["google"],
         requireLocalEmailVerified: true,
         allowDifferentEmails: false,
         allowUnlinkingAll: false,

@@ -1,7 +1,7 @@
 /** Deployment selection must never inherit a developer's shell credentials. */
 export function localEnvironment(environment: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
   return Object.fromEntries(Object.entries(environment).filter(([key]) =>
-    !/^(CONVEX_|GOOGLE_|RESEND_|AUTH_|SITE_URL$|HTTP_PROXY$|HTTPS_PROXY$|ALL_PROXY$|http_proxy$|https_proxy$|all_proxy$)/.test(key)));
+    !/^(CONVEX_|RESEND_|AUTH_|SITE_URL$|HTTP_PROXY$|HTTPS_PROXY$|ALL_PROXY$|http_proxy$|https_proxy$|all_proxy$)/.test(key)));
 }
 export function assertLoopback(value: string) {
   const url = new URL(value);

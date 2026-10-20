@@ -56,16 +56,16 @@ describe("removed upload-era routes", () => {
 
 describe("auth error redirects through the Worker", () => {
   it.each([
-    ["access_denied", "Google sign-in was canceled."],
+    ["access_denied", "Sign-in was canceled."],
     ["state_mismatch", "Your sign-in attempt expired or could not be verified."],
     ["state_not_found", "Your sign-in attempt expired or could not be verified."],
     ["state_security_mismatch", "Your sign-in attempt expired or could not be verified."],
     ["invalid_state", "Your sign-in attempt expired or could not be verified."],
-    ["unable_to_link_account", "We couldn&#039;t connect this Google account."],
-    ["account_not_linked", "We couldn&#039;t connect this Google account."],
-    ["account_already_linked_to_different_user", "We couldn&#039;t connect this Google account."],
-    ["email_doesn't_match", "We couldn&#039;t connect this Google account."],
-    ["EMAIL_NOT_VERIFIED", "We couldn&#039;t connect this Google account."],
+    ["unable_to_link_account", "We couldn&#039;t connect that account."],
+    ["account_not_linked", "We couldn&#039;t connect that account."],
+    ["account_already_linked_to_different_user", "We couldn&#039;t connect that account."],
+    ["email_doesn't_match", "We couldn&#039;t connect that account."],
+    ["EMAIL_NOT_VERIFIED", "We couldn&#039;t connect that account."],
     ["unexpected_error", "We couldn&#039;t complete sign-in."],
     ["<script>alert(1)</script>", "We couldn&#039;t complete sign-in."],
   ])("renders a friendly alert for %s", async (code, message) => {
@@ -97,7 +97,7 @@ describe("auth error redirects through the Worker", () => {
     fixtures.user = { id: "user", email: "user@acme.test", name: "User", emailVerified: true, createdAt: new Date(), updatedAt: new Date() };
     const response = await worker.request("/sign-in?error=unable_to_link_account");
     expect(response.status).toBe(200);
-    expect(await response.text()).toContain("try connecting Google from account security");
+    expect(await response.text()).toContain("We couldn&#039;t connect that account. Sign in with your existing method and verify your email first.");
   });
 
   it.each(["/api/auth/error", "https://rendro.test/api/auth/error", `${CONVEX_SITE_URL}/api/auth/error`])("rewrites %s redirects and preserves cookie cleanup", async (errorUrl) => {
@@ -108,16 +108,16 @@ describe("auth error redirects through the Worker", () => {
         "set-cookie": "better-auth.state=; Max-Age=0; Path=/; Domain=convex.site; HttpOnly",
       },
     })));
-    const response = await worker.request("https://rendro.test/api/auth/callback/google?error=access_denied");
+    const response = await worker.request("https://rendro.test/api/auth/callback/oauth?error=access_denied");
     expect(response.status).toBe(302);
     expect(response.headers.get("location")).toBe("/sign-in?error=access_denied");
     expect(response.headers.get("set-cookie")).toContain("Max-Age=0");
     expect(response.headers.get("set-cookie")).not.toContain("Domain=");
   });
 
-  it.each(["https://accounts.google.com/oauth", "https://rendro.test/organizations", "https://another.test/api/auth/error?error=access_denied"])("preserves unrelated redirects to %s", async (location) => {
+  it.each(["https://github.com/login/oauth/authorize", "https://rendro.test/home", "https://another.test/api/auth/error?error=access_denied"])("preserves unrelated redirects to %s", async (location) => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(null, { status: 302, headers: { location } })));
-    const response = await worker.request("https://rendro.test/api/auth/callback/google");
+    const response = await worker.request("https://rendro.test/api/auth/callback/oauth");
     expect(response.status).toBe(302);
     expect(response.headers.get("location")).toBe(location);
   });
@@ -129,13 +129,14 @@ describe("auth error redirects through the Worker", () => {
     expect(await response.json()).toEqual({ code: "INVALID_EMAIL_OR_PASSWORD" });
   });
 
-  it("handles a real Better Auth Google denial and invalid state via the Worker proxy", async () => {
+  it("handles a real Better Auth OAuth denial and invalid state via the Worker proxy", async () => {
     const origin = "https://rendro.test";
     const auth = betterAuth({
       baseURL: origin,
       secret: "test-auth-secret-32-chars-long!!",
       database: memoryAdapter({}),
-      socialProviders: { google: { clientId: "test", clientSecret: "test" } },
+      // A stand-in provider: the product has no OAuth sign-in until GitHub (#286), but the error path is the same.
+      socialProviders: { github: { clientId: "test", clientSecret: "test" } },
       logger: { disabled: true },
     });
     vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
@@ -145,19 +146,19 @@ describe("auth error redirects through the Worker", () => {
     const start = await worker.request(`${origin}/api/auth/sign-in/social`, {
       method: "POST",
       headers: { "content-type": "application/json", origin },
-      body: JSON.stringify({ provider: "google", callbackURL: `${origin}/organizations` }),
+      body: JSON.stringify({ provider: "github", callbackURL: `${origin}/home` }),
     });
     expect(start.status).toBe(200);
     const { url } = await start.json() as { url: string };
     const state = new URL(url).searchParams.get("state")!;
     const cookie = start.headers.getSetCookie().map((value) => value.split(";")[0]).join("; ");
-    const denied = await worker.request(`${origin}/api/auth/callback/google?error=access_denied&state=${encodeURIComponent(state)}`, { headers: { cookie } });
+    const denied = await worker.request(`${origin}/api/auth/callback/github?error=access_denied&state=${encodeURIComponent(state)}`, { headers: { cookie } });
     expect(denied.status).toBe(302);
     expect(denied.headers.get("location")).toBe("/sign-in?error=access_denied");
     const signIn = await worker.request(denied.headers.get("location")!);
     expect(signIn.status).toBe(200);
-    expect(await signIn.text()).toContain("Google sign-in was canceled.");
-    const invalid = await worker.request(`${origin}/api/auth/callback/google?error=access_denied&state=invalid`);
+    expect(await signIn.text()).toContain("Sign-in was canceled.");
+    const invalid = await worker.request(`${origin}/api/auth/callback/github?error=access_denied&state=invalid`);
     expect(invalid.status).toBe(302);
     expect(invalid.headers.get("location")).toMatch(/^\/sign-in\?error=state_(mismatch|not_found)$/);
   });

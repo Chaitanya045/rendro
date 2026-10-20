@@ -32,11 +32,11 @@ copy of `wrangler.toml` relocates only the entry point and asset directory to
 absolute paths, preserving the production compatibility date, `nodejs_compat`,
 ASSETS binding and `run_worker_first`. `NODE_ENV` remains `production`. The copy
 also binds the repository read path (#234), which production leaves unbound until
-P5: a local R2 bucket and KV namespace, and a second Worker, the fixture control
-Worker in `e2e/repo-access/` that answers the real access protocol from grants in
-its own KV. After seeding, setup ingests two repositories (public and private)
-with the P3b pipeline from the fake GitHub straight into that bucket
-(`e2e/repo-fixtures.ts`) and grants the private one to the seeded owner.
+P5: a local R2 bucket, KV namespace and D1 database, and a second Worker, the real
+control Worker (`wrangler.control.toml`) over a fake GitHub served in this process.
+After seeding, setup ingests the fixture repositories (public, private, and the
+viewer and comment ones) with the P3b pipeline from the fake GitHub straight into
+that bucket (`e2e/repo-fixtures.ts`), and grants private ones to their readers.
 
 We evaluated both APIs exposed by the locked Wrangler version.
 [`createTestHarness`](https://developers.cloudflare.com/workers/wrangler/api/)
@@ -82,31 +82,20 @@ The real schema, HTTP actions, Better Auth/rate-limiter components, authorizatio
 and WebSocket subscriptions execute unchanged. Never supply a shared deployment
 or copy `.env.local` into this workflow.
 
-Storage is the Worker's own `STORAGE` R2 binding on Miniflare's local simulation (the
-production `wrangler.toml` bindings, an empty bucket per run), so no storage container,
-port, endpoint or credential exists. The Worker and the CLI exercise reads, ranges,
-uploads, listings and commits through the binding. Specs still make storage fail through `e2e/faults.ts`,
-but the mechanism follows the transport: the generated Wrangler config (the production file with only paths and the
-`STORAGE` binding changed) points `STORAGE` at a small service Worker (`e2e/storage-faults-worker.mjs`) that forwards
-every call to the real local R2 bucket after asking the harness whether a rule matches the key. A matching rule fails the
-call with an R2 `10043` error, which the application classifies, replays and reports as a 503 like a real outage.
-Production code has no test hook; R2 objects cross that service boundary as plain data plus the body stream.
-The public smoke publication is created
-through the real API after a real CLI push. Its missing-object control deliberately
-deletes one already-uploaded object; its manifest remains intact.
+Storage is Miniflare's local R2, KV and D1 (an empty set per run), so no storage container, port, endpoint or
+credential exists. Specs make the Worker's Convex requests fail through `e2e/faults.ts`: the Worker's outbound
+transport asks the fault service whether a rule matches the request, and a matching rule answers like a real outage,
+for one spec's own data only. Production code has no test hook.
 
-Convex's outbound proxy terminates mail and OAuth requests locally, with a fresh
-CA and server certificate trusted only by the child backend process. The Resend
-wire endpoint captures verification/invitation messages in memory. The deterministic
-Google fixture preserves state, binds authorization codes to the redirect and PKCE
-challenge, consumes codes once, and returns a locally signed identity token. Browser
-navigation to Google's authorization URL is fulfilled locally. No email or OAuth
-request reaches an external provider. Only the exact local Worker/Convex origins
-can pass through the backend proxy; other destinations fail teardown. This tests
-the application/provider protocol boundary, not Google's UI or deliverability.
+Convex's outbound proxy terminates mail requests locally, with a fresh CA and
+server certificate trusted only by the child backend process. The Resend wire
+endpoint captures verification and reset messages in memory. No email reaches an
+external provider. Only the exact local Worker/Convex origins can pass through
+the backend proxy; other destinations fail teardown.
 
-Seed helpers use real signup, verification, sign-in, organization and invitation
-APIs to provision owner/admin/member plus an outsider in a second organization.
+Seed helpers use real signup, verification and sign-in APIs to provision four
+verified users (`owner`, `admin`, `member`, `outsider`: labels only, since
+repository access is granted per test).
 Their generated sessions live only in a mode-0600 temporary fixture file. Each
 browser context gets its own cookies; test artifacts contain disposable fixture
 identities only. Distinct synthetic ingress IPs keep engine auth rate-limit windows
@@ -124,11 +113,10 @@ Trusted pages send `Cross-Origin-Opener-Policy: same-origin` (#89). In Firefox, 
 first navigation from `about:blank` to a trusted page does. A spec that needs a non-default preference on its first
 load navigates to the origin first, then emulates, then makes the load it measures (see `shell-theme.spec.ts`).
 
-The three engines run the original nonce/CSP, opaque publication/SVG and 404 MIME
-smokes, role/tenant allowed-and-denied checks, local OAuth success/state rejection,
-and one full UI signup → mail verification → organization → project → one-time API
-key → built CLI push → private viewer → comment journey. The comment must arrive
-in a second open viewer via a real subscription and remain after reload. These are
+The three engines run the nonce/CSP, opaque frame/SVG and 404 MIME smokes, and one
+full UI signup → mail verification → home → repository document → comment journey.
+The comment must arrive in a second open viewer via a real subscription and remain
+after reload. These are
 functional checks, not visual fidelity assertions or coverage of every epic #99 edge.
 
 Local retries are zero. CI permits one diagnostic retry, prints each attempt,
@@ -156,7 +144,7 @@ reshard (raise the `/2`, the `shard` list and `PWTEST_SHARD_WEIGHTS` in
 `quality.yml` and `stability.yml`) when the warning appears.
 
 Playwright cuts the ordered test list into contiguous ranges, balanced by test
-count. The first half (auth, organizations, comments, projects) is multi-actor and
+count. The first half (auth and repository comments) is multi-actor and
 roughly twice as slow per test as the second (shell, viewer), so an even split gave
 shard 1 about twice the wall time of shard 2 (WebKit 20.6 against 10.2 minutes).
 `PWTEST_SHARD_WEIGHTS=47:63` (an internal Playwright variable, honoured by 1.64;
@@ -168,7 +156,7 @@ faster shard; the weights must have one entry per shard. Open a trace with
 `pnpm verify` continues to run the existing Vitest layers independently.
 `e2e/` is typechecked/linted test infrastructure, outside the production
 coverage denominator. The loopback/environment guards have a separate 100% coverage
-regression. The Worker no longer bundles the S3 SDK or its XML polyfill; no generated Convex module is modified.
+regression.
 
 `tests/convex-public-rpc.test.ts` now always starts its own pinned backend: all 12
 RPC envelope/cursor tests execute in `pnpm verify` and in an explicit mandatory
@@ -177,11 +165,8 @@ CI caches the verified backend archive as well as pnpm dependencies.
 The workflow jobs have no conditional opt-out or allowed failure. Repository
 branch protection must require the existing `verify`, `coverage`, and `e2e` checks.
 
-The remaining slices extend this foundation: #110 shell,
-navigation, menus, dialogs and selects; #112 organizations, onboarding, people/invitations and teams; #113 projects,
-deployments, API keys, shares and publications; #114 document tree/viewer/link
-confirmation; #115 comments and recovery. The transition registry's `e2e` status still requires edge-specific assertions;
-this baseline does not promote all those journeys to complete E2E coverage.
+The journeys below extend this foundation. The transition registry's `e2e` status still requires edge-specific
+assertions.
 
 ## Authentication journeys (#111)
 
@@ -189,286 +174,138 @@ this baseline does not promote all those journeys to complete E2E coverage.
 neutral duplicate/recovery responses, browser validation/focus/reveal, pending
 submission exclusion, the production sign-in limiter, remember-me session/cookie
 lifetimes, safe return destinations, password reset and change, initial-password
-freshness, method-load retry, Google linking/callback errors, and sign-out across
-contexts, tabs and history. Tests project session reads to non-secret identity
-and lifetime metadata, and check backend record removal after revocation.
-The original signup mail is captured before any later verification message and
-followed through explicit sign-in to its query-bearing return destination. A
-separate account tests resend delivery and neutral eligible/ineligible responses.
-Reset mismatch asserts zero reset requests, with one request after correction.
-Sign-out checks that the retained protected containers are hidden and their shell
-is inert in both tabs before navigation; protected inputs cannot regain focus.
-The shared sign-out helper waits for the security method list's `aria-busy=false`
-before clicking Sign out in every journey. Method loading expands the card and
-moves that control; WebKit can otherwise finish its actionability check just
-before the response arrives and click the old position. Waiting for this explicit
-ready state also covers the method-load failure UI, without sleeps or retries.
+freshness for an account without a password (as the retired Google sign-in left
+them), method-load retry, and sign-out across contexts, tabs and history. Tests
+project session reads to non-secret identity and lifetime metadata, and check
+backend record removal after revocation. The original signup mail is captured
+before any later verification message and followed through explicit sign-in to
+its query-bearing return destination. A separate account tests resend delivery
+and neutral eligible/ineligible responses. Reset mismatch asserts zero reset
+requests, with one request after correction. Sign-out checks that the retained
+protected containers are hidden and their shell is inert in both tabs before
+navigation; protected inputs cannot regain focus. The shared sign-out helper
+waits for the security method list's `aria-busy=false` before clicking Sign out
+in every journey. Method loading expands the card and moves that control; WebKit
+can otherwise finish its actionability check just before the response arrives and
+click the old position. Waiting for this explicit ready state also covers the
+method-load failure UI, without sleeps or retries.
 
-The complete three-engine suite has a 45-minute bound locally. In CI each engine
-is its own job (30 minutes including installation), so the bound applies per
-engine; individual auth journeys have a 60-second bound.
 Each test/context has a deterministic synthetic ingress address. The limiter
 case actually exhausts the configured five-attempt window; production limits
 remain enabled. Transport-failure tests hold individual browser requests and
-return a deliberate 503. Method-load and Google-link cases then retry against
-the real backend. The OAuth fixture
-supports per-authorization identities, denial and mismatched state while keeping
-the real callback, single-use code, PKCE and token exchange.
+return a deliberate 503. Method-load cases then retry against the real backend.
 
 A mode-0600 file in the run's private directory gives the test helper access to
 that exact loopback backend's component adapter. It changes only disposable
-session creation/expiry and reset-token expiry timestamps. It is never copied
-into the worktree, exposed to browser JavaScript or supplied to a shared backend.
-No production auth option or Convex source changes are needed for these cases.
+records: session creation/expiry and reset-token expiry timestamps, and the one
+account row the initial-password journey turns into a passwordless legacy account.
+It is never copied into the worktree, exposed to browser JavaScript or supplied to
+a shared backend. No production auth option or Convex source changes are needed
+for these cases.
 
 Real back/forward traversal checks that signed-out pages do not expose account
 content. Since browser routing can prevent native BFCache eligibility, an
 additional test explicitly dispatches a persisted `pageshow` event after backend
 revocation; it checks the restoration handler, not native cache admission.
 
-The #146 signup visibility regression now passes in all engines: the credential
-form, Google control and divider disappear, focus moves to the confirmation,
-and returning through sign-in restores the signup controls.
-`tests/auth-hidden-browser.test.ts` checks computed display, keyboard focus,
-retry and restored forms at desktop/mobile sizes, plus reset and security states.
+The #146 signup visibility regression passes in all engines: the credential form
+disappears, focus moves to the confirmation, and returning through sign-in
+restores the signup controls. `tests/auth-hidden-browser.test.ts` checks computed
+display, keyboard focus, retry and restored forms at desktop/mobile sizes, plus
+reset and security states.
 
 Expected failures, when present, name follow-up issues. Their broken assertions
 receive no `e2e` registry credit; an unexpected pass fails the suite so the marker
 must be removed when the product is fixed. None are currently open.
 
-The #145 regression (AUTH-111-02) now passes in all three engines. It asserts the
-one-day backend lifetime after account, organization, project and document reads,
-reloads and the expiry boundary, alongside the session-only browser cookie.
-The same reads run with absent and altered client preference markers. Password
-rotation regressions check both stored lifetime choices and replacement-cookie
-persistence after removing the marker.
-A remembered-session control ages the disposable record past its update age and
-verifies protected entry refreshes it to seven days. A bearer-token check sends
-the session token as `Authorization`, alone and with the cookie, directly to
-Convex and through the Worker. It asserts that bearer tokens never authenticate,
-that no persistent session cookie is set, and that the stored expiry is unchanged.
+The #145 regression (AUTH-111-02) passes in all three engines. It asserts the
+one-day backend lifetime after home, account and repository reads, reloads and
+the expiry boundary, alongside the session-only browser cookie. The same reads
+run with absent and altered client preference markers. Password rotation
+regressions check both stored lifetime choices and replacement-cookie persistence
+after removing the marker. A remembered-session control ages the disposable record
+past its update age and verifies protected entry refreshes it to seven days. A
+bearer-token check sends the session token as `Authorization`, alone and with the
+cookie, directly to Convex and through the Worker. It asserts that bearer tokens
+never authenticate, that no persistent session cookie is set, and that the stored
+expiry is unchanged.
 
-## Shell, navigation, menus, dialogs and selects (#110)
+## Entry, home, theme and shared controls (#110)
 
-Six specs under `e2e/shell-*.spec.ts` cover the management shell and its shared
-controls on the real Worker, in all three engines at 1440px and 375px. They
-use `tests/ui-transitions.json` as the checklist: an edge is credited `e2e`
-only when a named test asserts its final state (URL and history entries, focus
-location, `aria-expanded`/`aria-modal`/`inert`, visible content and request
-counts); the ledger names those tests.
+These specs cover the pages around the documentation, in all three engines at 1440px and 375px. They use
+`tests/ui-transitions.json` as the checklist: an edge is credited `e2e` only when a named test asserts its final state
+(URL and history entries, focus location, ARIA state, visible content and request counts); the registry names those tests.
 
 | Spec | Covers |
 |---|---|
-| `shell-navigation.spec.ts` | Persistent chrome and the ten client-routed destinations (no document request), destination skeleton and in-place data swap, modified/targeted/download/cross-organization links, no-JavaScript navigation, Back/Forward, blocked Back, dialog/pending-write/cross-tab blockers and Refresh, late responses from disposed pages, dirty-settings discard, revoked membership and account change, and the authenticated-HTML fallback (unavailable bundle, invalid/mismatched/stalled HTML) |
-| `shell-menus.spec.ts` | Mobile drawer modal semantics, focus trap, scrim/Escape/close/route dismissal and resize reconciliation; account menu; organization switcher lazy load, cache reuse, keyboard/typeahead, dismissal, optimistic label hand-off, failure/empty/retry, late responses |
-| `shell-dialogs.spec.ts` | Form dialogs (containment, Close/Cancel/Escape/backdrop, mobile footer order and fit, pending exclusion, failure retention), shared destructive confirmation, toasts |
-| `shell-selects.spec.ts` | Enhanced select keyboard, typeahead, disabled options/groups, validation, reset, programmatic changes, positioning and dismissal |
-| `shell-theme.spec.ts` | Initial theme before first paint, cycle and persistence, OS/storage synchronization, rapid and failing transitions, reduced motion, unavailable storage |
-| `shell-controls.spec.ts` / `shell-entry.spec.ts` | Copy feedback, control sizes and states; direct-entry redirects, focused layouts and error pages |
+| `shell-entry.spec.ts` | The signed-in root redirecting to `/home`, an anonymous home redirecting to sign-in with its destination, the home itself (identity, the `/r/` explainer, Account security and back, sign-out in place), and the 404 pages (standalone and inside the viewer frame, Go back, plain asset errors, never cached) |
+| `shell-theme.spec.ts` | Initial theme before first paint, cycle and persistence across the home, account and repository shells, OS/storage synchronization, rapid and failing transitions, reduced motion, unavailable storage |
+| `auth-controls.spec.ts` | The shared field and button states on the sign-up form: hover, focus ring, required and invalid fields in the alert region, 36px icon and 44px field/button targets, long values contained |
+| `fonts.spec.ts` | Self-hosted fonts and icons on public and signed-in pages and the repository shell, ligature glyphs, and no overflow with every font blocked (with a self-test that removes the icon safety and must find overflow) |
+| `static-assets.spec.ts` | Every bundle a signed-in page and a private repository load is immutable for its version and bypasses the session stack; stale or unknown versions are uncached; unlisted paths 404 |
+| `smoke.spec.ts`, `image-proxy.spec.ts`, `cookie-migration.spec.ts` | CSP nonce and opaque frame/SVG smokes, external images only through the proxy, and legacy cookie names migrating to the current ones |
 
-Tests that mutate or need an exact organization list use a verified disposable
-user. `e2e/shell-fixtures.ts` shares one such user per worker (eight organizations,
-each with a project) and one for the organization switcher, so signup and
-mail verification are paid once; tests that sign out or change membership still
-create their own. The seeded owner is used read-only. Hold helpers stall a single
-backend request at the browser boundary; no production behavior, header or
-clock is changed. The authenticated-HTML fallback test installs Playwright's fake
-clock to cross the 15-second navigation timeout without waiting.
+Tests that sign out or mutate use a verified disposable user (`provision` in `e2e/shell-helpers.ts`); the seeded users
+are used read-only.
 
-No expected failures are currently open. The #162 regression passes in all three
-engines: the shared select follows a user-activated native Reset button. The browser
-restores the control only after the `reset` event and its microtasks have run (a
-microtask suffices for programmatic `form.reset()`), so the select also re-syncs from a
-task queued by the event. `tests/shared-select-browser.test.ts` covers it in Chromium and
-`e2e/shell-selects.spec.ts` asserts the label, selected option and `aria-selected`
-state in every engine (registry edge UI-023-E11).
+## Repository docs and the viewer (#114)
 
-
-## Organizations, onboarding, people and teams (#112)
-
-Six specs under `e2e/org-*.spec.ts` run the organization journeys on the real Worker
-and local Convex in all three engines. Journeys that involve several people use
-`e2e/org-fixtures.ts`: each *actor* is its own browser context (own cookies and
-ingress address), provisioned through the real signup, mail verification and
-organization APIs by the shell helpers, and closed with the external-request guard
-asserted. Setup that is not the journey under test (an invitation accepted so
-someone is already a member) goes through the real authorization APIs; the journey
-itself is driven through the UI. Final state is asserted three ways: the DOM (text,
-ARIA, focus, announced toasts), the URL, and a re-fetch from the server or a second
-person's view.
+The repository specs run the real read path on the real Worker: the fixture repositories are ingested from the fake
+GitHub by the production pipeline (`e2e/repo-fixtures.ts`), and access goes through the real control Worker. Final state
+is asserted in the DOM, ARIA, focus, the URL, history length, `localStorage`, and the iframe's own location; the
+document is opaque, so only Playwright can read where it is.
 
 | Spec | Covers |
 |---|---|
-| `org-lifecycle.spec.ts` | Chooser with zero, one and many organizations (replace-redirect, forced chooser, cards, hostile names as text), create with slug derivation/override, length, native validation, pending exclusion, conflict and retry, the completed-state recovery link, list failure and Try again; settings guard, canonical save, slug conflict; owner-only deletion (API-only: there is no delete control) and the lost access of every member |
-| `org-onboarding.spec.ts` | Organization → project → credential → first deployment with a real CLI push, five-second polling on a frozen page clock (hidden-tab pause, outage and recovery), one-time key reveal/copy/confirmation, setup initialization failure, foreign project, Finish later, member restriction |
-| `org-people.spec.ts` | Invite batch (1–10 rows, native validation, sequential partial failure, retry without resending, captured mail), pending list failure and retry, revocation; roles (owner/admin/member controls, last-owner rule, failure revert, self-demotion, leave); member removal (confirmation, pending, failure, retry, lost access, team membership, revoked admin's rejected action) |
-| `org-invitations.spec.ts` | Mailed link signed out through sign-up, verification and sign-in; review, accept (failure, pending, completed-state recovery) and decline; wrong recipient, revoked, expired and already-used invitations |
-| `org-teams.spec.ts` | Create (validation, pending, failure, reuse), assign, roster open/hide/refresh, remove from team, delete (the last team and the session's active team are not offered, and the server still refuses them), read-only members; a 52-member roster with Load more, failure and retry, and an outdated page response |
-| `org-permissions.spec.ts` | Controls of owner, admin and member on People, Teams and Settings; outsider denial; every management write refused for members, outsiders and (for ownership and deletion) admins |
+| `repo-docs.spec.ts` | Anonymous browsing of a public repository (entry page, sidebar titles, links, images); a granted reader on a private repository (capability cookie, ticketed images); in-shell search; a membership webhook revoking a team reader (the next view is a plain 404) |
+| `viewer-links.spec.ts` | Fragments within and across documents (named anchors, bare and unmatched hashes, replace vs push, reload), and the parent-owned link confirmation: a reader's click opens at once; a link followed with no reader action is offered (confirm, dismiss, review) |
+| `viewer-chrome.spec.ts` | Theme (cycle, persistence, what the document is told), reading mode (control, shortcut, hot zones, Escape, persistence), sidebar resize (keyboard, drag, limits), the mobile tree drawer and More menu (closed by a tap in the document) at 320/375/430px, document loading (slow, never arriving, replaced, reduced motion), copy-link feedback and its refusal |
+| `viewer-comment-links.spec.ts` | A same-document link keeps the document, its scroll and the comment being written; a waiting or dismissed link confirmation leaves theme, tree and comment actions working |
+| `viewer-styles.spec.ts` | A private and a public repository render without a CSS runtime under a strict CSP: every stylesheet is a hashed, immutable same-origin file |
 
-Completed writes navigate immediately, so "stays visible" states are observed by
-cancelling the destination navigation (`stopNavigation`, an aborted request that keeps the
-current document) and then following the recovery link with real navigation. The 52
-organization members of the roster test are written directly to the disposable auth
-store through the admin key (`authRecord("create", …)`): signing up that many users
-would dominate the run, and the roster is read through the same management APIs.
-Invitation expiry is aged the same way. Polling uses Playwright's fake clock paused
-after load; timers advance only when the test says so. A real `beforeunload`
-prompt is not exercised: the guard is checked by dispatching the event and reading
-`defaultPrevented`.
+Timing-sensitive steps never sleep. The loading cases install Playwright's fake clock and pause it where the page is
+idle, hold the document request at the browser boundary, and advance time by exact amounts across the 15-second
+deadline and the 520 ms minimum row feedback. The link-confirmation specs use `trackActivation()`: it waits until the
+shell's user activation has lapsed and then posts to the content frame from inside the shell, so the request carries
+no reader authorization. `viewer-chrome.spec.ts` and `viewer-links.spec.ts` fail any test that records a CSP
+violation (#89).
 
-No organization expected failures remain: every journey above passes in all three engines.
+## Comments and recovery (#115, #302)
 
-Not asserted (not credited): the invitation page's own read-failure state (the page consumes the
-server-rendered lookup instead of issuing a read that a browser test could fail), the organization
-creation form's Cancel (there is none), roster completion beyond 100 members, the onboarding
-credential step's third and fourth scope (the step offers only the two recommended ones), a
-real `beforeunload` prompt, and an empty team list (unreachable: the server never deletes the last team).
-
-## Projects, deployments, API keys, shares and publications (#113)
-
-Five specs run the project journeys on the real Worker, local Convex, Miniflare R2 and the built CLI in all three
-engines. They reuse the `actor` fixture of `e2e/org-fixtures.ts` (one independent browser context per person, own
-cookies and ingress address, provisioned through real signup, mail verification and organization APIs), so each test
-owns its users, organization and slugs; none uses the seeded users. Final state is
-asserted four ways: the DOM (text, ARIA, focus, announced toasts), the URL, the authoritative API, and the **actual
-URL or credential** the feature is about (an anonymous recipient's `/s/<token>` and `/p/<slug>` requests, a Bearer key
-used by the CLI or `curl`-style calls). Helpers in `e2e/project-helpers.ts` push a document tree with the real CLI,
-start/upload/commit/fail a deployment by hand (to hold one in `staging` or `failed`), and call the Worker with only a
-Bearer key.
-
-| Spec | Covers |
-|---|---|
-| `projects.spec.ts` | Empty list, create dialog (slug follows name, manual override, native validation, pending exclusion, conflict with retained draft, correction, same-shell navigation), overview facts and tabs, release badge; server-side normalization, boundaries and refusals; per-organization slug scope; read failure with Try again; another organization's project is a 404; owner/admin/member/outsider/anonymous controls and API |
-| `deployments.spec.ts` | Empty history and the pinned, placeholder-only CLI command; a staging deployment (commit, dirty flag, size, date), an incomplete commit refused, a failed attempt with its reason, a real CLI push to Active/Deployed, a superseded release, a manually completed release; a stale failure call cannot deactivate the live release; history read failure with isolated retry; organization overview (counts, checklist, recent deployment empty/active/retry); member, outsider and anonymous access |
-| `api-keys.spec.ts` | Create dialog (defaults, validation, rejection that keeps every choice, retry), one-time secret (modal, Done gated by the stored checkbox, Escape refused, exact copy values and clipboard rejection, scrubbed on close, absent from the list/DOM/storage), list facts, use by the CLI and recorded last use, revoke (Escape, pending, failure, success) with the **very next** API and CLI request refused; scope and project binding matrix; expiry (short-lived key refused after its time, "Expiring"/"Expired"/"Never", expired key still revocable); refused creation fields; owner/admin/member/outsider/anonymous |
-| `shares.spec.ts` | Share from the document toolbar (exact copied URL, seven-day grant), anonymous recipient (headers, document, stylesheet, image), scope (sibling and unreferenced files, other folders, `?doc=`, altered token), pinned to its release across a later deployment, list facts without the link, revoke (Escape, pending, failure, success) ending every request; a one-minute link expiring while others live, "Expiring"/"Expired"/"Revoked", invalid shares refused; member creates but cannot revoke, admin revokes, outsider and anonymous denied |
-| `publications.spec.ts` | Create dialog (validation, no deployment, lazily loaded pin choices with retry, only active/superseded releases offered, entry-file and slug conflicts that keep the form, reset after success), tracked vs pinned publication viewed anonymously (follows the new release vs keeps the old one, folder scope, tree, traversal), copy/open link, unpublish (Escape, pending, failure, success) with the URL gone on the next request and the slug reusable; API normalization and pinned-deployment rules; list failure with Try again; member read-only, admin removes, outsider and anonymous denied, slugs shared across organizations |
-
-The one-minute share expiry is real time (the API minimum is 60 seconds and the Worker/backend read the system clock);
-the test does its other work while waiting and polls the link, so it adds about 45 seconds per engine. The short key
-expiry uses eight seconds. Everything else is clock-independent.
-
-Not supported by the product (so not tested): renaming, editing settings of or deleting a project; re-activating an
-older deployment (a new push is the only way to change the active release, and an older release is reachable through a
-pinned publication or an existing private share); a retention display (the history shows the latest 100 releases and
-says so). Not asserted (not credited): the sign-out and other-tab races of the key reveal and share revoke, copy
-feedback timing (the copied values are asserted), legacy signed URLs, public-URL copy from the document toolbar,
-`?docQuery`/fragment restoration in a shared document, the mobile layout of these pages, and quota (429) responses.
-
-The four expected failures this suite once pinned (a lone surrogate in a project name answered 502, an out-of-range
-key expiry was stored, a repeated permission was stored twice, and the publication title length was not enforced by
-the API) were fixed by #187 and are now ordinary passing tests with registry credit.
-
-Harness note: an oversized request body (the Worker answers 413 without reading it) makes the *next* request on that
-connection fail with miniflare's "Network connection lost" 500. This is the local development transport, not the
-application, but it means no test here sends an oversized body.
-
-## Document viewer: tree, chrome and link confirmation (#114)
-
-Four specs run the document viewers on the real Worker and local Convex in all three engines. One
-deployment per worker is pushed through the real CLI (`e2e/viewer-fixtures.ts`: a private project with
-an owner and an outsider, a whole-deployment and a one-folder publication, pages written to exercise
-links, fragments and hostile publisher scripts; `e2e/deployment-tree.spec.ts` pushes its own 260-file
-deployment so folders page). Final state is asserted in the DOM, ARIA, focus, the URL, history length,
-`localStorage`, and the iframe's own location (`documentFrame()`); the document is opaque, so only
-Playwright can read where it is.
-
-| Spec | Covers |
-|---|---|
-| `deployment-tree.spec.ts` | Directory-page browsing (root page, folder pages and Load more by cursor, deep links beyond the first page), folder and Load more failure and Retry, failed deep-link reveal, root failure and empty listing, no deployment, Tab/Enter/Space operation (arrow, Home/End and typed keys do nothing; a closed folder's rows are inert and skipped by Tab; an open folder is as tall as its rows), selection indicator, Back/Forward between documents |
-| `viewer-links.spec.ts` | Fragments within and across documents (Unicode ids, named anchors, bare and unmatched hashes, replace vs push, reload), `docQuery`, and the parent-owned link confirmation: a reader's click or Enter opens at once; a link followed with no reader action is offered (confirm, dismiss, review, repeat), a visible prompt is never retargeted, forged and malformed requests do nothing, new-tab links, and a link to another site (asks first, then opens a new tab with no opener) |
-| `viewer-chrome.spec.ts` | Theme (cycle, persistence, what the document is told and that its own colors are untouched), avatar menu (also closed by a click in the document), reading mode (control, shortcut, hot zones, Escape, persistence), sidebar resize (keyboard, drag, cancel, limits, viewport clamp, persistence), the phone tree drawer and More menu (focus, dismissal, one handler per action, desktop/landscape restore), 320/375/430px containment, document loading, never-arriving and replaced loads with their announcements, reduced motion, share failure notices |
-| `viewer-surfaces.spec.ts` | Private vs publication vs share chrome; outsider and signed-out access (sign-in carries the requested document and publisher query, and only a same-origin path); a publication's deep links, Back/Forward and scope; a share's fragments and out-of-grant links; revoked and expired shares are 404 in the shell, the document and a viewer that was open; the anonymous viewers make no session lookup. Creating, listing and revoking shares and publications is #113's and is not repeated |
-| `viewer-comment-links.spec.ts` | A same-document link keeps the document, its scroll and the comment being written; a waiting or dismissed link confirmation leaves theme, tree and comment actions working. |
-
-Timing-sensitive steps never sleep. The loading specs install Playwright's fake clock and pause it
-where the page is idle, hold the document request at the browser boundary, and then advance time by
-exact amounts (14,999 ms, then 1 ms, across the 15-second deadline; 519 ms, then 1 ms, across the 520 ms
-minimum row feedback). The link-confirmation specs use `trackActivation()`: it waits until the shell's
-user activation has lapsed (a navigation typed into the address bar and any Playwright evaluation grant
-activation) and then posts to the content frame from inside the shell, so the request carries no reader
-authorization; acknowledgements are requests the shell itself makes after handling each message. The
-share expiry journey uses the shortest lifetime the product allows (one minute), created when the worker
-starts and polled for rather than waited out. Every test uses data provisioned for its worker.
-
-**#169 part 2** (a Back/Forward entry that names no document) is an open product decision. The
-Back/Forward test asserts the current behavior and says so: reaching such an entry changes only the URL;
-the last document and its selection stay showing.
-
-The five viewer bugs this suite once pinned as expected failures (a closed folder's rows reached by Tab, an open
-folder overlapping the rows after it, a link to another site doing nothing visible, the account and More menus
-staying open when the reader clicks in the document, and sign-in losing the requested document) were fixed by #191
-and are now ordinary passing tests with registry credit. `tests/viewer-chrome-browser.test.ts` repeats the tree
-layout, `inert` and menu behavior against the real shell CSS, base stylesheet and strict nonce CSP in Chromium.
-`viewer-chrome.spec.ts` and `viewer-links.spec.ts` fail any test that records a CSP violation (#89).
-
-**#199 (safety net).** The share viewer confirms links to other sites like the other viewers (#202):
-`tests/viewer-fragments-browser.test.ts` ("share external link confirmation in Chromium") and the share test in
-`viewer-surfaces.spec.ts` assert prompt, Dismiss/Review, and a new tab with `noopener,noreferrer`. The rest of the batch
-closes the untested edges of the viewer, frame and comment families in the registry: ticket renewal, republish and
-opaque-frame asset delivery (`private-viewer-renewal.test.ts`, `private-viewer-browser.test.ts`,
-`viewer-publisher-content-browser.test.ts`, `viewer-stream-errors.test.ts`), the comment widget's handshake, drafts, theme,
-shells and scope (`commentor-gaps-browser.test.ts`, `commentor-theme-browser.test.ts`, `commentor-shells-browser.test.ts`,
-`commentor-ticket-scope.test.ts`), and shell chrome and navigation (`viewer-chrome-browser.test.ts`,
-`viewer-fragments-browser.test.ts`). Two product bugs were first pinned as expected failures with no registry credit,
-and are now fixed with normal tests: a reply shows its age like a thread does (UI-115-E03), and the comments drawer list
-keeps the reader's place when older comments load or new ones arrive (UI-123-E01). A third, long names inside an open tree folder (UI-100-E09), was fixed in round 2:
-the folder's collapse wrapper now keeps a `minmax(0,1fr)` column, so labels truncate at the row.
-
-## Comments and recovery (#115)
-
-Three specs run the document-comment journeys on the real Worker, local Convex and the sandboxed publisher frame in all
-three engines. Every person is an `actor` context (see #112/#113); documents are published through the deployment API
-because the journey under test is the comment UI. `e2e/comment-helpers.ts` re-reads server state with a person's *own*
+The comment specs run on the real Worker, local Convex and the sandboxed document frame in all three engines. Each
+person is an `actor` context (`e2e/actor-fixtures.ts`: its own cookies and ingress address, provisioned through real
+signup and verification) or a seeded reader. `e2e/comment-helpers.ts` re-reads server state with a person's *own*
 Convex JWT (never an ambient cookie), so "the server holds it" is asserted with the same functions the widget
-subscribes to, and a forged request is the same call the UI would have made. Final state is asserted in the widget's
-DOM, ARIA, focus and announced toasts (`role=status`/`alert`), on the server, and in a second person's open document.
+subscribes to, and a forged request is the same call the UI would have made.
 
 | Spec | Covers |
 |---|---|
-| `comments-journeys.spec.ts` | Comment on a pointer text selection (chip, anchor label, empty/whitespace Enter ignored, Shift+Enter newline, focus return) and on a clicked element (comment mode, Escape, hint); a teammate's open document receives the pin live. Reply with Enter, resolve/reopen by a teammate, reply removal, empty-state messages. Delete → announced Undo → undo, then delete again → committed exactly once and live for the teammate (paused page clock). Drawer: collapsed `inert`/`aria-hidden`, counts, Arrow/Home/End views, archive from the card and unarchive from the server, drawer stays inside the viewport. Older threads/replies on demand and the "new comment" prompt while scrolled away |
-| `comments-permissions.spec.ts` | The controls each of owner, admin and two members is offered (thread and reply level) and the forged request each refusal maps to (`forbidden`, nothing changed); an admin demoted/removed while the drawer is open loses controls without a reload and is refused as `not_found`; an outsider (other organization) and an anonymous caller refused (`not_found`/`unauthenticated`) and a private share and a public publication carry no widget at all; the write limit (below) |
-| `comments-recovery.spec.ts` | Signing out in another tab (signed-out notice, draft kept in user-bound storage, restored after sign-in, never shown to a different account); a revoked session found on focus; a connection replaced mid-mutation (request committed, answer lost, reload → "outcome unknown" alert, resubmit reuses the operation: one thread, same `clientOperationId`); a redeploy that rewrites the document (orphaned anchors listed, pins hidden, locate explains itself, orphaned thread still answerable and resolvable) |
+| `repo-comments.spec.ts` | Create, reply and resolve on a repository doc; an anchor that survives an unrelated commit and a nearby edit; an orphan whose text was deleted; losing comment access with repository access; an anonymous reader of a public repository; the first comments with the author's actions before the live page |
+| `repo-comment-journeys.spec.ts` | Delete with Undo inside its window; the Active, Resolved and History views; older threads and replies on demand, and a comment arriving while scrolled away |
+| `repo-comment-permissions.spec.ts` | An outsider refused a private repository's comments, anonymous readers of a public one; a writer over the comment limit (the post shows as sending, then returns with its draft) |
+| `repo-comment-recovery.spec.ts` | A draft that survives signing out in another tab and returns after signing back in, never to another account; a revoked session noticed on focus |
 
 Timing. The widget's undo window, quota countdown and toast exits run on the page clock, which the tests install and
 pause once the widget is ready, advancing it explicitly (#174). The server's rate-limit bucket refills in **real** time
-and the widget's request is the thing being refused, so the test holds the page's outgoing WebSocket messages
-(`convexSocket(page).hold`) while it empties the bucket through the API (one write at a time: concurrent writers
-conflict with each other rather than with the limit) and releases them when the next token is more than a second away. The
-refusal therefore never depends on winning a race for a refilled token. The retry after the notice ends is a person
-trying again: a retry that arrives before the server's refill is refused with a fresh notice, and the test tries again.
-Nothing sleeps for a fixed time; every wait is on a readiness signal (`aria-busy`, subscribed pins, a server read).
-
-Not supported by the product, so not tested: a read-only "viewer" role (organization roles are owner/admin/member and the
-only page that mounts the widget always grants write; a reader who cannot comment is an anonymous share or public
-visitor, who gets no widget). Not asserted here (covered by the Chromium browser tests, or
-not at all, and not credited): toolbar drag/clamp and tooltips, mobile widths, duplicate-submit blocking, comment
-validation messages other than empty text, archive/delete failure rollbacks, pagination errors, sign-out racing a pending
-moderation. No product bug is pinned by this suite.
+and the widget's request is the thing being refused, so the test holds the page's outgoing WebSocket messages while it
+empties the bucket through the API and releases them when the next token is more than a second away. Nothing sleeps for
+a fixed time; every wait is on a readiness signal (`aria-busy`, subscribed pins, a server read).
 
 ## Authentication, account, landing and sign-out transitions (#197)
 
-These edges needed no new product behavior; they needed assertions at the cheapest level that can see them.
+These edges are asserted at the cheapest level that can see them.
 
 | Test | Covers |
 |---|---|
-| `tests/landing-browser.test.ts` | The production landing page and inline controller with the production security headers, in Chromium: header/logo/footer links, Product/Workflow/Security anchors (sticky-header clearance, no fragment or history entry, legacy fragments removed on load), the screenshot's proportions and unfiltered appearance at 320/375/430/1440 in both appearances; reveal-once, focus-reveal and the section indicator; no `IntersectionObserver`, reduced-motion, print and no-JavaScript rendering; Google start (JSON request only, every action guarded while pending, busy and error feedback only on the originating call-to-action, rejected/malformed/missing/offline responses restore controls, focus and an email sign-in link, success navigates), and the persisted-page restore (`pageshow`) |
-| `tests/auth-pages-browser.test.ts` | The production authentication pages in Chromium: safe `returnTo` and the invitation context carried through every related link (unsafe targets dropped), Google callback failure copy per error code, Google start confined to this origin, "Add below" reveal/scroll/focus with the reduced-motion fallback, reset pending exclusion and retry |
-| `tests/sign-out-browser.test.ts` | GET sign-out confirmation without revocation, native POST, the complete page's working Sign in, a failed native sign-out (Try again, cookies kept), restored pages whose live identity changed or ended (drafts stay in the original account's storage), failed identity checks (including offline) that are *not* a sign-out, comment-token renewal (identity first; transient/offline failures survive; denied token or deployment subscription stops following without signing out) |
+| `tests/landing-browser.test.ts` | The production landing page and inline controller with the production security headers, in Chromium: header/logo/footer links, the three sign-up calls to action, Product/Workflow/Security anchors (sticky-header clearance, no fragment or history entry, legacy fragments removed on load), the screenshot at every width, reveals, reduced motion, print and no-JavaScript rendering |
+| `tests/auth-pages-browser.test.ts` | The production authentication pages in Chromium: a safe `returnTo` carried through every related link (unsafe targets dropped), OAuth callback failure copy per error code, email sign-in callbacks confined to this origin, the "Add below" reveal and scroll, duplicate reset exclusion |
+| `tests/sign-out-browser.test.ts` | GET sign-out confirmation without revocation, native POST, the complete page's working Sign in, a failed native sign-out (Try again, cookies kept), restored pages whose live identity changed or ended (drafts stay in the original account's storage), failed identity checks |
 | `tests/session-outage-browser.test.ts` | The real session middleware: an upstream outage is a 503 page (cookie kept, no redirect) that recovers through Try again; a missing session redirects to sign-in |
-| `e2e/auth-transitions.spec.ts` | Google sign-in never leaves the origin; changing a password with "Sign out other sessions" off keeps the other browser signed in, and Back to workspace; a restored page for a different account; a sign-out whose cookie cleanup is lost |
+| `e2e/auth-transitions.spec.ts` | An invalid verification link offers recovery; changing a password with "Sign out other sessions" off keeps the other browser signed in, and Back to home; a restored page for a different account; a sign-out whose cookie cleanup is lost |
 
 Timing: no fixed sleeps. Smooth scrolling is awaited by polling where the section landed (or the page bottom when the
 page is too short to reach it); CSS transitions are polled to their final value; negative assertions after a failed
 identity check synchronize on the request finishing and two animation frames.
-
-Expected failure (its broken assertion gets no `e2e` credit; an unexpected pass fails the suite):
-
-- **An invalid or expired verification link is reported as "Email verified".** Better Auth redirects a rejected token to
-  the callback with `&error=INVALID_TOKEN` (or `token_expired`), but `/verify-email` keys only on `verified=1`, so the
-  page shows the success screen and "Continue to sign in" while the account stays unverified. Fix: when the `error`
-  query parameter is present, render the unverified page with a "link invalid or expired" message and the resend form.
 
 ## Visual baselines and accessibility scans (#120)
 
@@ -496,10 +333,8 @@ Docker is required (the E2E harness already needs it).
 **Determinism.** Each cell emulates the theme and reduced motion, fixes the page clock (`page.clock.setFixedTime`) to five
 minutes past the seeded comments so every relative age is identical, and settles through `settleVisual` before the shot:
 `document.fonts.ready`, every finite animation awaited through `getAnimations()` (#262), two painted frames, then the
-remaining (looping) animations paused. Data is seeded with fixed text. Text that is run-specific by nature is handled per element, never per region:
-values whose length changes the layout (the deployment source path or commit, which depend on where the runner checks out
-the repository) are rewritten to a fixed string before the shot (`pinVolatileText`); the deployment time and id, the CLI
-panel with local ids and port, and the API key prefix are masked. The functional specs assert the real values by name.
+remaining (looping) animations paused. Data is seeded with fixed text, so no cell needs a mask or a rewritten string; a run-specific value in a new state must
+be seeded as fixed text too.
 A cell waits for the state it shows, not for time:
 - the shell's document-loading shimmer (held for a minimum time after a document arrives) has cleared;
 - a link inside the page is only clicked once the shell has selected the page's row (a click during the first reveal
@@ -508,7 +343,6 @@ A cell waits for the state it shows, not for time:
   refuses a subscribe that arrives after the switch, with a toast);
 - the deletion state closes and reopens the drawer, so it is measured without the deleted thread (the open drawer keeps
   its old height until a later thread snapshot, which may or may not arrive before the shot).
-- the held project page waits for the organization name and project description, which arrive on requests of their own;
 - the comment widget's toast region is put on its own layer before the shot. Chromium otherwise draws it into the page
   first and moves it onto a layer some seconds later, and the two paths blend the pill's antialiased outline one level
   apart, so a fast run and a slow run shot different pixels.
@@ -536,9 +370,9 @@ does not wait for, an animation, a caret, a clock-dependent string, a raster pat
 the committed baseline at the old 0.2 but fails at the configured threshold. It is skipped in update mode, where a
 failed comparison would rewrite the baseline.
 
-**Baseline families.** First slice (#120): landing, sign-in, sign-up, organization overview, projects (list, empty, loading,
-error, create dialog), project deployments (list and loading), teams, API keys, account menu, viewer (tree, document
-loading, menu), comments drawer, and `/r/` (home, search, not found) at 375/768/1440px. Second slice (#268), chosen from the
+**Baseline families.** First slice (#120): landing, sign-in, sign-up, viewer (tree, document loading, menu), comments
+drawer, and `/r/` (home, search, not found) at 375/768/1440px, and the signed-in home at 375/1440 (#286; the organization,
+project, team, API-key and account-menu cells left with those pages). Second slice (#268), chosen from the
 surfaces that survive the GitHub-only pivot (#214):
 
 | Family | States added |
@@ -554,8 +388,8 @@ the cell opens the tree drawer first (the `/r/` search panel and the viewer's do
 
 Data for the second slice is deterministic as well: the public repository `e2e-org/visual-docs`
 (`e2e/visual/visual-repo-docs.ts`) is ingested by the global setup only when `RENDRO_E2E_VISUAL=1`, and the comment states
-use two extra threads on their own page (`guide/advanced.html`), created inside the seeding's 25 second window so every age
-rounds to the same "5m". Two states cannot come from the e2e Worker alone and are produced at a boundary the product owns:
+use threads seeded on two reference pages (`docs/reference/errors.md` and `docs/reference/config.md`), created inside the
+seeding's 25 second window so every age rounds to the same "5m". Two states cannot come from the e2e Worker alone and are produced at a boundary the product owns:
 the "Preparing…" page is the product's own renderer (`renderPreparingPage`) fulfilled at the browser, because the e2e Worker
 has no ingest coordinator (the Worker route and its polling are covered by `tests/repo-read-first-view-workerd.test.ts`), and
 the comment states go through a routed Convex socket that never forwards a write: an offline send is simply not sent, and a
@@ -567,7 +401,7 @@ settling and the shot, and its close clicks Undo.
 
 ```sh
 pnpm visual:update            # rewrites only baselines that changed (or are new), in the pinned container
-pnpm visual:update -g "projects — list"   # extra arguments go to `playwright test`
+pnpm visual:update -g "home — default"   # extra arguments go to `playwright test`
 ```
 
 1. Make the intended UI change first. `pnpm visual` (check mode) fails and writes expected, actual and diff images
@@ -595,13 +429,11 @@ timeout (the suites take a few minutes). Both upload their diffs and traces on f
 
 ### Not yet covered
 
-Tracked in #268: the auth families (verify-email, reset and forgot password, error banners, Google start) and the
-organization/project/teams/API-key management pages. They belong to the pre-pivot product and are deleted by the GitHub-only
-pivot (#214), so they get no new baselines; remove the existing ones together with their pages. The comment widget states
-are rendered on the pre-pivot project viewer because that is where seeded threads exist today; when the pivot removes it,
-re-host them on `/r/` (the widget and its markup are shared) and keep the baselines. The comment *edit* state of the issue does
-not exist: the widget has no edit action. The landing no-JS variant is not covered (the page's script is its only dynamic part,
-and the reduced-motion assertion above covers what it holds back).
+Tracked in #268: the auth families beyond sign-in and sign-up (verify-email, reset and forgot password, error banners) and
+account security. The organization, project, team, API-key and account-menu pages left the product with #286, and their
+baselines with them; the comment widget states are rendered on `/r/`. The comment *edit* state of the issue does not
+exist: the widget has no edit action. The landing no-JS variant is not covered (the page's script is its only dynamic
+part, and the reduced-motion assertion above covers what it holds back).
 
 ## Vitest Chromium project
 
@@ -622,9 +454,6 @@ excludes those files from `unit`. Unit files retain their normal parallelism.
 The browser project has `sequence.groupOrder: 1` and `fileParallelism: false`:
 it starts after the unit project finishes, and launches one browser file at a
 time. See [Vitest's project ordering](https://vitest.dev/config/sequence#sequence-grouporder).
-A third `timing` project (`groupOrder: 2`, serial) holds `tests/share-budget.test.ts`, whose
-CPU-time ratio assertions drifted when parallel unit workers (esbuild builds, tsx
-children) shared the cores; it now runs alone after the browser project.
 Browser tests have 30s budgets and hooks 60s; cold Chromium startup on a small
 runner cannot reliably fit a unit test's budget (unit tests have 30s, see the
 stability rules below). Operations normally fail
@@ -641,15 +470,11 @@ assumptions, not product defects. The suites now follow these rules:
   a navigation committed, not that the document's inline scripts have run;
   e2e helpers wait for `load` plus the page's own ready state (`securityReady`).
   Component tests that start a controller track its in-flight requests and await
-  them (`settleRequests` in `management-page-access.test.ts`) instead of sleeping
-  a fixed interval, and drain them before closing the DOM window.
+  them instead of sleeping a fixed interval, and drain them before closing the DOM
+  window.
 - **Do not depend on pointer delivery right after a navigation** when the click is
   incidental to the test: Firefox can drop it under load. Submit with the keyboard
   and wait for the visible confirmation (`requestPasswordReset`).
-- **A URL change is not a settled page (#277).** A client-routed navigation updates
-  the URL before the destination has its data, and the swap from skeleton to content
-  swallows keys and popups from that gap. Keyboard specs wait on `pageSettled`
-  (not only `shellReady`) after every navigation they continue from.
 - **Collect network evidence by polling, not by one read (#277).** A list built from
   `page.on("response")` is complete only once each response arrived: the viewer's
   `defer` scripts are requested after the heading renders. Assert with
@@ -670,11 +495,10 @@ assumptions, not product defects. The suites now follow these rules:
   socket at exactly 5000 ms idle reproduces `ECONNRESET` against
   `createTestHarness`). An `APIRequestContext` call that reuses it at that moment
   fails before any byte is sent, so a spec that issues such calls with long pauses
-  between them sends `Connection: close` (`get()` in `backend-unavailable.spec.ts`)
-  instead of retrying.
-- **Measure CPU, not wall time, and reduce noise structurally.** The share-budget
-  matrix reports process CPU time, takes the median of three identical samples for
-  the scaling comparison, and keeps the absolute ceiling on the slowest sample.
+  between them sends `Connection: close` instead of retrying.
+- **Measure CPU, not wall time, and reduce noise structurally.** A timing assertion
+  reports process CPU time, takes the median of identical samples for a scaling
+  comparison, and keeps an absolute ceiling on the slowest sample.
 - **Race-free lifecycle checks.** The comment recovery lifecycle re-checks the
   session when focus/pageshow fire. A trigger arriving while a check is in flight is
   never absorbed: one more check runs after it, because the in-flight request may
@@ -795,8 +619,11 @@ Neither migration requires changing production viewer behavior or assertions.
 `tests/ui-transitions.json` is the maintained behavior inventory. It reconciles
 all 152 coverage-audit families (`UI-001`–`UI-152`), the 98 broader modernization
 families (`G/A/M/O/P/V/C` references on edges), and route ledger `R01`–`R35`.
-Eight additional families cover landing motion/OAuth, viewer reading mode/resize,
-legacy organization creation, cache invalidation, and shared controls. Keep IDs
+Additional families cover landing motion, viewer reading mode/resize, shared
+controls, the signed-in home (UI-166), and the `/r/` read path. Families, edges,
+route-ledger entries and inventory references whose surface was removed (#286:
+uploads, organizations, projects, API keys, Google sign-in) move to the
+`retired` section with a reason; their IDs are never reused. Keep IDs
 stable; append new IDs instead of renumbering. Sources are canonical controller
 paths; route strings use Hono's actual method and parameter names. In particular,
 `:viewerToken` corresponds to the inventory's abbreviated `:ticket`.
@@ -872,13 +699,13 @@ verify would leave insufficient headroom. Vitest honors `VITEST_MAX_WORKERS`;
 use two workers on the shared development host.
 
 `scripts/coverage-policy.ts` is the shared source policy: authored `.ts` in
-`src` (including `src/index.ts`), `convex`, `cli/src`, and `shared`, and `.ts`/`.mjs`
+`src` (including `src/index.ts`), `convex` and `shared`, and `.ts`/`.mjs`
 in `scripts`. Declaration files, both Convex `_generated` trees, and
 `convex/betterAuth/schema.generated.ts` are excluded. Vitest filters are rooted
 at the absolute repository path and require end-of-path because its
 `contains: true` matcher otherwise selects nested trees and `.tsx` suffixes.
 The gate independently globs the source manifest without directory expansion.
-Generated browser/CLI bundles and tests are outside the source denominator.
+Generated browser bundles and tests are outside the source denominator.
 
 The gate reads Istanbul JSON counter reports, canonicalizes relative paths,
 absolute paths within this checkout, and `file:` URLs to repository-relative
@@ -1018,28 +845,25 @@ an `iframe`. `tests/browser-coverage.test.ts` checks required suite receipts and
 strict merging. The existing gate tests retain the absent-source/zero-seeding
 proof; browser execution cannot remove a file from the denominator.
 
-Management bundle fixture builds map to generated test source. Their returned
-controller strings, other inline management/auth/theme controllers, and
-publisher HTML scripts do **not** receive authored-module coverage here:
-extraction and genuine source maps belong to #105/#106. These boundaries must
-not be mistaken for full coverage of rendered controllers.
+Inline auth/theme/shell controllers rendered as strings do **not** receive
+authored-module coverage here: extraction and genuine source maps belong to
+#105/#106. That boundary must not be mistaken for full coverage of rendered
+controllers.
 
-### Subprocess coverage (CLI, server, scripts)
+### Subprocess coverage (server, scripts)
 
 Tests that spawn Node run the repository's own code outside Vitest's collector:
-the CLI (tsx source and an esbuild bundle), the Node server and the `scripts/`
-entry points. `pnpm coverage` sets `RENDRO_SUBPROCESS_COVERAGE_DIR`
+the Node server and the `scripts/` entry points (as tsx source or an esbuild bundle). `pnpm coverage` sets `RENDRO_SUBPROCESS_COVERAGE_DIR`
 (`coverage/subprocess`); a test that spawns passes `subprocessEnv(env)` from
 `tests/helpers/subprocess-coverage.ts` to the child (and `subprocessArgs()` before
 the entry for a server that SIGTERM stops, so it exits normally and writes its
 dump). Each call creates its own receipt directory `raw/<suite>-<uuid>` as that
 child's `NODE_V8_COVERAGE`, strictly under the coverage output and never in the
 repository tree. Without the variable the helpers do nothing, so plain
-`pnpm test` runs are unchanged. Test-built CLI bundles use `buildCliBundle`, the
-`scripts/build-cli.mjs` options plus inline source maps and no tree-shaking, and
-register the bundle text, because the scratch file is deleted before conversion.
-A scratch bundle built any other way (a production-style bundle) must run
-without the collector.
+`pnpm test` runs are unchanged. Test-built script bundles use `buildRegisteredBundle`
+(inline source maps, no tree-shaking) and register the bundle text, because the
+scratch file is deleted before conversion. A scratch bundle built any other way
+must run without the collector.
 
 `tests/helpers/merge-subprocess-coverage.ts` converts the dumps after the run
 (`convertSubprocessCoverage`) and reuses the browser pipeline: manifest and
@@ -1053,9 +877,10 @@ canonical-path filtering, the source-map conversion and stale-source check of
   if every line length equals Node's recorded `lineLengths`. tsx's `.then(...)`
   interop after each dynamic `import()` is inserted as an equal-length placeholder
   and its nodes are ignored. The recorded source map is the one used.
-- **Registered bundles** map through their inline source map back to `cli/` and
-  `shared/`.
-- **Plain `.js`/`.mjs`** (the QA runners) run unmodified.
+- **Registered bundles** map through their inline source map back to `scripts/`
+  and `shared/`.
+- **Plain `.js`/`.mjs`** run unmodified (the repository has none today; a scratch
+  project in the collector's own tests keeps the path exercised).
 
 The converted maps are re-keyed onto the gate's canonical maps because tsx and
 bundles re-print code (esbuild's `__name` helpers, `_default` export bindings,
@@ -1065,7 +890,7 @@ files that a subprocess also covers; a file Vitest listed without executing is
 replaced by its zero map.
 
 The run fails closed: the suites that call the helpers (found by scanning for
-`subprocessEnv(`/`captureCliPush(`) must each leave a receipt; a receipt with no
+`subprocessEnv(`) must each leave a receipt; a receipt with no
 dump (a child killed before exit), one that touched no repository source, a
 script that maps to authored files but was never registered, an unreproducible
 tsx transform, a stale recorded source or an ambiguous pairing all stop the
@@ -1073,10 +898,7 @@ merge. Raw dumps are deleted once converted, leaving
 `coverage/subprocess/<suite>-<uuid>.json` shards, which `--merge-only` reuses.
 
 Subprocesses write only to temp directories and local loopback fixtures: build
-scripts run with a copied `src/` in a scratch working directory, the QA runners
-see a stand-in `pnpm` as the only executable on `PATH`, and the legacy migration talks to
-a loopback fake. The deliberately uninstrumented child in `share-budget.test.ts`
-measures CPU time and stays outside the collector.
+scripts run with a copied `src/` in a scratch working directory.
 
 After a successful complete collection, use the same required browser shards
 to review/shrink debt without rerunning Chromium:

@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, createHmac } from "node:crypto";
 import { convexTest } from "convex-test";
 import schema from "../convex/schema";
 import authSchema from "../convex/betterAuth/schema";
@@ -53,14 +53,12 @@ async function runtime() {
   if (!context.adapter.options) throw new Error("Memory adapter options are required");
   context.adapter.options.isRunMutationCtx = true;
   async function request(path: string, ip?: string, headers?: HeadersInit) {
-    const social = path === "/sign-in/social";
-    const post = path === "/sign-in/email" || social;
+    const post = path === "/sign-in/email";
     const req = new Request(`${baseURL}/api/auth${path}`, {
       method: post ? "POST" : "GET",
       ...(post ? {
         headers: { "content-type": "application/json", origin: baseURL },
-        body: JSON.stringify(social ? { provider: "google", callbackURL: baseURL }
-          : { email: "missing@rendro.invalid", password: "wrong-password-long-enough" }),
+        body: JSON.stringify({ email: "missing@rendro.invalid", password: "wrong-password-long-enough" }),
       } : {}),
     });
     new Headers(headers).forEach((v, k) => req.headers.set(k, v));
@@ -296,16 +294,11 @@ describe("auth rate limits", () => {
     expect((await request("/get-session", "192.0.2.6", login.headers)).status).toBe(200);
   });
 
-  it("keeps renamed OAuth state, unrelated cookies and expired sessions in the unauthenticated IP bucket", async () => {
+  it("keeps signed non-session values, unrelated cookies and expired sessions in the unauthenticated IP bucket", async () => {
     const { request, context, backend, seedCount } = await runtime();
-    const cookies: string[] = [];
-    for (let i = 0; i < 2; i++) {
-      const response = await request("/sign-in/social", "192.0.2.8");
-      expect(response.status).toBe(200);
-      const state = response.headers.getSetCookie().find(cookie => cookie.startsWith("better-auth.state="));
-      expect(state).toBeDefined();
-      cookies.push(state!.split(";")[0].replace("better-auth.state=", "better-auth.session_token="));
-    }
+    // Better Auth signs other cookies (OAuth state among them) with the same secret: a valid signature is not a session.
+    const cookies = ["signed-but-not-a-session", "another-signed-value"].map(value =>
+      `better-auth.session_token=${encodeURIComponent(`${value}.${createHmac("sha256", process.env.AUTH_SECRET!).update(value).digest("base64")}`)}`);
     const user = context.test!.createUser({ emailVerified: true });
     await context.test!.saveUser(user);
     const login = await context.test!.login({ userId: user.id });

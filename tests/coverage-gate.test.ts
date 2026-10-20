@@ -50,8 +50,8 @@ afterEach(() => {
 
 describe("coverage source policy", () => {
   it("matches only authored root trees, including Node entry and mjs scripts", async () => {
-    const included = ["src/example.ts", "src/index.ts", "cli/src/index.ts", "convex/auth.ts", "shared/x.ts", "scripts/build.mjs", "scripts/nested/x.ts", "src/.hidden.ts"];
-    const excluded = ["src/types.d.ts", "convex/_generated/api.ts", "convex/betterAuth/_generated/api.ts", "convex/betterAuth/schema.generated.ts", "tests/src/x.ts", "vendor/cli/src/index.ts", "scripts/no.js", "src/no.tsx", "public/build.js", "src/not-code.ts/child.js"];
+    const included = ["src/example.ts", "src/index.ts", "convex/auth.ts", "shared/x.ts", "scripts/build.mjs", "scripts/nested/x.ts", "src/.hidden.ts"];
+    const excluded = ["src/types.d.ts", "convex/_generated/api.ts", "convex/betterAuth/_generated/api.ts", "convex/betterAuth/schema.generated.ts", "tests/src/x.ts", "cli/src/index.ts", "vendor/cli/src/index.ts", "scripts/no.js", "src/no.tsx", "public/build.js", "src/not-code.ts/child.js"];
     for (const name of [...included, ...excluded]) write(name, "export const x = 1;");
     expect(await sourceManifest(root)).toEqual(included.sort());
     // Exercise the installed Vitest matcher's contains:true semantics explicitly.

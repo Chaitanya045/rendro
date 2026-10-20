@@ -10,8 +10,7 @@ import { createBrowserHarness, waitForSettled } from './helpers/browser';
 import { serveFonts } from './helpers/fonts';
 
 // The production landing renderer and inline controller, served with the
-// production security headers. The OAuth start endpoint is stubbed per test so
-// pending, rejected and malformed responses are deterministic.
+// production security headers.
 const harness = createBrowserHarness();
 const ctas = ['hero-start', 'security-start', 'final-start'] as const;
 const sections = ['product', 'workflow', 'security'] as const;
@@ -22,7 +21,6 @@ beforeAll(async () => {
   app.get('/fonts/*', serveFonts);
   app.get('/landing-product.webp', async c => c.body(new Uint8Array(await readFile('public/landing-product.webp')), 200, { 'Content-Type': 'image/webp' }));
   app.get('/', c => c.html(renderLandingPage()));
-  app.get('/oauth-stub', c => c.html('<h1>Google consent stub</h1>'));
   app.route('/', authPages);
   const listener = getRequestListener(request => app.fetch(request));
   await harness.start((request, response) => { void listener(request, response).catch(error => response.destroy(error as Error)); });
@@ -46,26 +44,9 @@ async function withoutScripts(page: Page) {
   });
 }
 
-/** Hold the OAuth start request until released, answering with the given status/body. */
-async function holdOAuth(page: Page) {
-  let release!: (response: { status: number; body: string } | 'abort') => void;
-  const gate = new Promise<{ status: number; body: string } | 'abort'>(resolve => { release = resolve; });
-  const requests: { method: string; contentType: string | null; body: unknown; navigation: boolean }[] = [];
-  await page.route('**/api/auth/sign-in/social', async route => {
-    const request = route.request();
-    requests.push({ method: request.method(), contentType: await request.headerValue('content-type'),
-      body: request.postDataJSON() as unknown, navigation: request.isNavigationRequest() });
-    const outcome = await gate;
-    if (outcome === 'abort') await route.abort('failed');
-    else await route.fulfill({ status: outcome.status, contentType: 'application/json', body: outcome.body });
-  });
-  return { requests, release };
-}
-
-const state = (page: Page) => page.evaluate(() => [...document.querySelectorAll<HTMLButtonElement>('[data-auth]')].map(button => ({
-  id: button.dataset.authId, disabled: button.disabled, busy: button.getAttribute('aria-busy'),
-  label: button.querySelector('[data-auth-label]')!.textContent,
-  error: document.getElementById(`${button.dataset.authId}-error`)!.textContent,
+/** Every call to action: a plain link to email sign-up (#286). */
+const ctaLinks = (page: Page) => page.evaluate(() => [...document.querySelectorAll<HTMLAnchorElement>('a[data-action-id$="-start"]')].map(link => ({
+  id: link.dataset.actionId, href: link.getAttribute('href'), label: link.textContent,
 })));
 
 /** Resolves once smooth scrolling lands on the section, or at the bottom when the page is too short to reach it. */
@@ -74,19 +55,22 @@ const scrollOffset = (page: Page, id: string) => page.evaluate(target => {
   return scrollY - Math.min(top, document.documentElement.scrollHeight - innerHeight);
 }, id);
 
-it('loads the landing page and resolves the sign-in, get-started, logo and Google call-to-action links', async () => {
+it('loads the landing page and resolves the sign-in, get-started, logo and call-to-action links', async () => {
   const page = await open();
   expect(await page.title()).toContain('Documentation that ships with your code');
   expect(await page.getByRole('link', { name: 'Sign in', exact: true }).getAttribute('href')).toBe('/sign-in');
-  expect(await page.getByRole('link', { name: 'Get started', exact: true }).getAttribute('href')).toBe('/sign-up');
+  expect(await page.locator('a.header-get-started').getAttribute('href')).toBe('/sign-up');
   expect(await page.getByRole('link', { name: 'Rendro home' }).getAttribute('href')).toBe('/');
-  // Hero, security panel and final panel each own one Google call-to-action.
-  expect(await state(page)).toEqual(ctas.map(id => ({ id, disabled: false, busy: null, label: 'Start with Google', error: '' })));
+  // Hero, security panel and final panel each own one call to action, and each leads to sign-up.
+  expect(await ctaLinks(page)).toEqual(ctas.map(id => ({ id, href: '/sign-up', label: 'Get started' })));
+  await page.locator('[data-action-id="hero-start"]').click();
+  await page.waitForURL('**/sign-up');
+  await page.goBack();
   await page.getByRole('link', { name: 'Sign in', exact: true }).click();
   await page.waitForURL('**/sign-in');
   expect(await page.getByRole('heading', { name: 'Sign in to Rendro' }).isVisible()).toBe(true);
   await page.goBack();
-  await page.getByRole('link', { name: 'Get started', exact: true }).click();
+  await page.locator('a.header-get-started').click();
   await page.waitForURL('**/sign-up');
   expect(await page.getByRole('heading', { name: 'Start shipping docs' }).isVisible()).toBe(true);
   await page.getByRole('link', { name: /^Rendro/ }).first().click();
@@ -188,7 +172,7 @@ it('reveals below-the-fold content once as it enters view, including when focuse
   // Keyboard focus reveals content that has not been scrolled to yet.
   const panel = page.locator('.cta-panel');
   expect(await panel.evaluate(element => element.classList.contains('is-visible'))).toBe(false);
-  await page.locator('[data-auth-id="final-start"]').evaluate(button => (button as HTMLElement).focus({ preventScroll: true }));
+  await page.locator('[data-action-id="final-start"]').evaluate(link => (link as HTMLElement).focus({ preventScroll: true }));
   await expect.poll(() => panel.evaluate(element => element.classList.contains('is-visible'))).toBe(true);
   expect(page.errors).toEqual([]);
 });
@@ -221,13 +205,9 @@ it('keeps content, navigation and sign-in usable when IntersectionObserver is un
   expect(await page.evaluate(() => document.querySelectorAll('[aria-current]').length)).toBe(0);
   await page.locator('.nav-links a[data-scroll-section="security"]').click();
   await expect.poll(() => scrollOffset(page, 'security')).toBeCloseTo(0, 0);
-  // The submit controller is registered after the observer branches.
-  expect(await state(page)).toHaveLength(3);
-  const held = await holdOAuth(page);
-  await page.locator('[data-auth-id="security-start"]').click();
-  await expect.poll(() => held.requests.length).toBe(1);
-  held.release({ status: 503, body: '{}' });
-  await expect.poll(async () => (await state(page)).every(item => !item.disabled)).toBe(true);
+  // Sign-up stays one link away without the observer.
+  await page.locator('[data-action-id="security-start"]').click();
+  await page.waitForURL('**/sign-up');
   expect(errors).toEqual([]);
 });
 
@@ -255,99 +235,4 @@ it('shows all content without motion under reduced-motion, print and no-JavaScri
   expect(await noScript.evaluate(() => document.documentElement.classList.contains('motion-ready'))).toBe(false);
   expect(await noScript.locator('#security .security-copy').evaluate(element => getComputedStyle(element).opacity)).toBe('1');
   expect(await noScript.getByRole('heading', { name: 'Private by default. Scoped by organization.' }).isVisible()).toBe(true);
-});
-
-it('restores ready authentication buttons after Back and after a persisted page restore', async () => {
-  const page = await open();
-  const held = await holdOAuth(page);
-  await page.locator('[data-auth-id="hero-start"]').click();
-  await expect.poll(() => held.requests.length).toBe(1);
-  expect((await state(page)).every(item => item.disabled)).toBe(true);
-  // A restored page runs no load handlers, so pageshow is the only recovery path.
-  await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true })));
-  expect(await state(page)).toEqual(ctas.map(id => ({ id, disabled: false, busy: null, label: 'Start with Google', error: '' })));
-  held.release({ status: 200, body: JSON.stringify({ url: `${harness.origin}/oauth-stub` }) });
-  await page.waitForURL('**/oauth-stub');
-  await page.goBack();
-  await page.getByRole('heading', { name: 'Your docs should ship with your code.' }).waitFor();
-  expect(await state(page)).toEqual(ctas.map(id => ({ id, disabled: false, busy: null, label: 'Start with Google', error: '' })));
-});
-
-it('starts Google sign-in with a JSON request only, from the originating call-to-action', async () => {
-  const page = await open();
-  for (const id of ctas) {
-    const held = await holdOAuth(page);
-    const url = page.url();
-    await page.locator(`[data-auth-id="${id}"]`).click();
-    await expect.poll(() => held.requests.length).toBe(1);
-    expect(held.requests[0]).toEqual({ method: 'POST', contentType: 'application/json', body: { provider: 'google', callbackURL: url }, navigation: false });
-    expect(page.url()).toBe(url);
-    held.release({ status: 503, body: '{}' });
-    await expect.poll(async () => (await state(page)).every(item => !item.disabled)).toBe(true);
-    await page.unrouteAll({ behavior: 'wait' });
-  }
-});
-
-it('guards every authentication action while a request is pending and gives feedback only on the originating call-to-action', async () => {
-  const page = await open();
-  for (const id of ctas) {
-    const held = await holdOAuth(page);
-    await page.locator(`[data-auth-id="${id}"]`).click();
-    await expect.poll(() => held.requests.length).toBe(1);
-    expect(await state(page)).toEqual(ctas.map(other => ({ id: other, disabled: true,
-      busy: other === id ? 'true' : null, label: other === id ? 'Redirecting…' : 'Start with Google', error: '' })));
-    // Neither another submission path nor a programmatic submit starts a second request.
-    await page.evaluate(() => (document.getElementById('sign-in-form') as HTMLFormElement).requestSubmit());
-    await page.locator(`[data-auth-id="${id}"]`).dispatchEvent('click');
-    expect(held.requests).toHaveLength(1);
-    held.release({ status: 503, body: '{}' });
-    await expect.poll(async () => (await state(page)).find(item => item.id === id)!.error).toContain('Google sign-in could not start');
-    expect(await state(page)).toEqual(ctas.map(other => ({ id: other, disabled: false, busy: null, label: 'Start with Google',
-      error: other === id ? 'Google sign-in could not start. Try again, or sign in with email.' : '' })));
-    await page.unrouteAll({ behavior: 'wait' });
-  }
-});
-
-it('restores controls, focus and an email sign-in link after a rejected, malformed or missing OAuth response', async () => {
-  const page = await open();
-  const failures: { status: number; body: string }[] = [
-    { status: 503, body: '{}' }, { status: 200, body: '{}' }, { status: 200, body: JSON.stringify({ url: 42 }) },
-    { status: 200, body: 'not json' }, { status: 200, body: 'null' },
-  ];
-  let attempt = 0;
-  for (const failure of [...failures, 'abort' as const]) {
-    const id = ctas[attempt++ % ctas.length];
-    const held = await holdOAuth(page);
-    await page.locator(`[data-auth-id="${id}"]`).click();
-    await expect.poll(() => held.requests.length).toBe(1);
-    held.release(failure);
-    await expect.poll(async () => (await state(page)).find(item => item.id === id)!.error, { message: JSON.stringify(failure) }).not.toBe('');
-    expect(await state(page)).toEqual(ctas.map(other => ({ id: other, disabled: false, busy: null, label: 'Start with Google',
-      error: other === id ? 'Google sign-in could not start. Try again, or sign in with email.' : '' })));
-    expect(await page.locator(`[data-auth-id="${id}"]`).evaluate(button => document.activeElement === button)).toBe(true);
-    expect(await page.locator(`#${id}-error a`).getAttribute('href')).toBe('/sign-in');
-    await page.unrouteAll({ behavior: 'wait' });
-  }
-  await page.locator('#final-start-error a').click();
-  await page.waitForURL('**/sign-in');
-  expect(page.errors).toEqual([]);
-});
-
-it('navigates to the returned authorization URL and starts over from a clean state on the next attempt', async () => {
-  const page = await open();
-  const held = await holdOAuth(page);
-  await page.locator('[data-auth-id="security-start"]').click();
-  await expect.poll(() => held.requests.length).toBe(1);
-  held.release({ status: 503, body: '{}' });
-  await expect.poll(async () => (await state(page))[1].error).not.toBe('');
-  await page.unrouteAll({ behavior: 'wait' });
-  const retry = await holdOAuth(page);
-  await page.locator('[data-auth-id="security-start"]').click();
-  // Starting again clears the previous failure before the new request settles.
-  await expect.poll(() => retry.requests.length).toBe(1);
-  expect((await state(page))[1]).toMatchObject({ error: '', busy: 'true', label: 'Redirecting…' });
-  retry.release({ status: 200, body: JSON.stringify({ url: `${harness.origin}/oauth-stub?state=ok` }) });
-  await page.waitForURL(`${harness.origin}/oauth-stub?state=ok`);
-  expect(await page.getByRole('heading', { name: 'Google consent stub' }).isVisible()).toBe(true);
-  expect(page.errors).toEqual([]);
 });

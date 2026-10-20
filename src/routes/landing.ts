@@ -89,8 +89,6 @@ export function renderLandingPage(): string {
     .button-quiet { border-color: transparent; background: transparent; color: var(--text-muted); box-shadow: none; }
     .button-quiet:hover:not(:disabled):not([aria-disabled="true"]) { color: var(--text); background: var(--surface-elevated); }
     .button[disabled], .button[aria-disabled="true"] { cursor: wait; opacity: .72; transform: none; }
-    .button-spinner { display: none; width: 14px; height: 14px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: spin 700ms linear infinite; }
-    .button[aria-busy="true"] .button-spinner { display: block; }
     .hero { position: relative; overflow: clip; padding: 104px 0 88px; }
     .hero::before { content: ""; position: absolute; width: 520px; height: 520px; top: -180px; right: -180px; border-radius: 50%; background: radial-gradient(circle, var(--primary-muted), transparent 68%); pointer-events: none; }
     .hero-grid { position: relative; display: grid; grid-template-columns: minmax(0,.86fr) minmax(520px,1.14fr); align-items: center; gap: 64px; }
@@ -164,17 +162,11 @@ export function renderLandingPage(): string {
     .site-footer { padding: 32px 0; border-top: 1px solid var(--border); }
     .footer-inner { display: flex; align-items: center; gap: 28px; color: var(--text-muted); font-size: 13px; }
     .footer-brand { font-size: 16px; line-height: 24px; }
-    .auth-error { margin: 0 0 20px; color: var(--danger); font-size: 14px; line-height: 20px; }
-    .auth-error:empty { display: none; }
-    .auth-error a { color: inherit; font-weight: 600; text-decoration: underline; text-underline-offset: 3px; }
-    .hero-copy .auth-error { margin: -12px 0 24px; }
-    .security-copy .auth-error, .cta-panel .auth-error { margin: 12px 0 0; color: var(--danger); }
     .footer-links { display: flex; flex-wrap: wrap; gap: 20px; margin-left: auto; }
     @media (prefers-reduced-motion: no-preference) {
       [data-reveal], [data-reveal-item] { transition: opacity 300ms var(--ease-standard), transform 300ms var(--ease-standard), background-color 200ms var(--ease-standard), border-color 200ms var(--ease-standard); transition-delay: var(--reveal-delay,0ms), var(--reveal-delay,0ms), 0ms, 0ms; }
       .motion-ready [data-reveal]:not(.is-visible), .motion-ready [data-reveal-item]:not(.is-visible) { opacity: 0; transform: translateY(var(--reveal-y,16px)); }
     }
-    @keyframes spin { to { transform: rotate(360deg); } }
     @keyframes heroReveal { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
     @keyframes shotReveal { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
     @media (max-width: 980px) {
@@ -241,7 +233,6 @@ export function renderLandingPage(): string {
 </head>
 <body>
   <a class="skip-link" href="#main-content">Skip to content</a>
-  <form id="sign-in-form" hidden></form>
   <header class="site-header">
     <div class="container header-inner">
       <a class="brand" href="/" aria-label="Rendro home">Rendro<i aria-hidden="true">.</i></a>
@@ -265,12 +256,9 @@ export function renderLandingPage(): string {
           <h1 id="hero-title">Your docs should ship with your code.</h1>
           <p class="hero-lede">Keep documentation as plain HTML in the repo. Rendro publishes it from CI into a fast, navigable workspace—with contextual comments and no CMS to maintain.</p>
           <div class="hero-actions">
-            <button class="button button-primary" type="submit" form="sign-in-form" data-auth data-auth-id="hero-start">
-              <span data-auth-label>Start with Google</span><span class="button-spinner" aria-hidden="true"></span>
-            </button>
+            <a class="button button-primary" href="/sign-up" data-action-id="hero-start">Get started</a>
             <a class="button button-secondary" href="#product" data-scroll-section="product" data-action-id="explore-product">Explore the workspace <span class="arrow" aria-hidden="true">→</span></a>
           </div>
-          <p class="auth-error" id="hero-start-error" role="alert"></p>
           <ul class="hero-facts" aria-label="Product principles">
             <li>Plain HTML</li>
             <li>Zero-dependency CLI</li>
@@ -343,11 +331,10 @@ export function renderLandingPage(): string {
           <p class="section-kicker">Security</p>
           <h2 id="security-title">Private by default. Scoped by organization.</h2>
           <p class="section-intro">The organization boundary is part of every request, not an optional permission setting.</p>
-          <button class="button button-secondary" type="submit" form="sign-in-form" data-auth data-auth-id="security-start"><span data-auth-label>Start with Google</span><span class="button-spinner" aria-hidden="true"></span></button>
-          <p class="auth-error" id="security-start-error" role="alert"></p>
+          <a class="button button-secondary" href="/sign-up" data-action-id="security-start">Get started</a>
         </div>
         <dl class="security-list" data-reveal-group data-reveal-stagger="45">
-          <div class="security-row" data-reveal-item style="--reveal-y:12px"><dt>Identity</dt><dd>Google OAuth or verified email credentials connect each session to one stable account.</dd></div>
+          <div class="security-row" data-reveal-item style="--reveal-y:12px"><dt>Identity</dt><dd>Verified email credentials connect each session to one stable account.</dd></div>
           <div class="security-row" data-reveal-item style="--reveal-y:12px"><dt>Organization</dt><dd>Organization membership and roles determine access to each workspace.</dd></div>
           <div class="security-row" data-reveal-item style="--reveal-y:12px"><dt>Storage</dt><dd>Document objects are stored under organization-specific prefixes.</dd></div>
           <div class="security-row" data-reveal-item style="--reveal-y:12px"><dt>Public access</dt><dd>Only folders explicitly registered by trusted CI receive anonymous routes.</dd></div>
@@ -358,8 +345,8 @@ export function renderLandingPage(): string {
     <section class="final-cta" aria-labelledby="cta-title">
       <div class="container">
         <div class="cta-panel" data-reveal style="--reveal-y:12px">
-          <div><h2 id="cta-title">Keep writing docs where the code changes.</h2><p>Let Rendro handle delivery, navigation, and feedback.</p><p class="auth-error" id="final-start-error" role="alert"></p></div>
-          <button class="button button-primary" type="submit" form="sign-in-form" data-auth data-auth-id="final-start"><span data-auth-label>Start with Google</span><span class="button-spinner" aria-hidden="true"></span></button>
+          <div><h2 id="cta-title">Keep writing docs where the code changes.</h2><p>Let Rendro handle delivery, navigation, and feedback.</p></div>
+          <a class="button button-primary" href="/sign-up" data-action-id="final-start">Get started</a>
         </div>
       </div>
     </section>
@@ -475,59 +462,6 @@ export function renderLandingPage(): string {
           if (section) sectionObserver.observe(section);
         });
       }
-
-      var form = document.getElementById("sign-in-form");
-      if (!(form instanceof HTMLFormElement)) return;
-      var buttons = Array.from(document.querySelectorAll("[data-auth]"));
-      buttons.forEach(function (button) {
-        var label = button.querySelector("[data-auth-label]");
-        if (label && !label.hasAttribute("data-auth-idle-label"))
-          label.setAttribute("data-auth-idle-label", label.textContent || "");
-      });
-      var errors = Array.from(document.querySelectorAll(".auth-error"));
-      var resetSignIn = function () {
-        delete form.dataset.submitting;
-        errors.forEach(function (region) { region.textContent = ""; });
-        buttons.forEach(function (button) {
-          button.disabled = false;
-          button.removeAttribute("aria-busy");
-          var label = button.querySelector("[data-auth-label]");
-          var idleLabel = label && label.getAttribute("data-auth-idle-label");
-          if (label && idleLabel !== null) label.textContent = idleLabel;
-        });
-      };
-      window.addEventListener("pageshow", resetSignIn);
-      form.addEventListener("submit", function (event) {
-        if (form.dataset.submitting === "true") { event.preventDefault(); return; }
-        event.preventDefault();
-        resetSignIn();
-        form.dataset.submitting = "true";
-        var submitter = event.submitter;
-        buttons.forEach(function (button) { button.disabled = true; });
-        if (submitter instanceof HTMLButtonElement) {
-          submitter.setAttribute("aria-busy", "true");
-          var label = submitter.querySelector("[data-auth-label]");
-          if (label) label.textContent = "Redirecting…";
-        }
-        fetch("/api/auth/sign-in/social", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ provider: "google", callbackURL: window.location.href })
-        }).then(function (response) {
-          if (!response.ok) throw new Error("Sign-in request failed");
-          return response.json();
-        }).then(function (data) {
-          if (!data || typeof data.url !== "string") throw new Error("Sign-in URL missing");
-          window.location.href = data.url;
-        }).catch(function () {
-          resetSignIn();
-          if (submitter instanceof HTMLButtonElement) {
-            var region = document.getElementById((submitter.getAttribute("data-auth-id") || "") + "-error");
-            if (region) region.innerHTML = 'Google sign-in could not start. Try again, or <a href="/sign-in">sign in with email</a>.';
-            submitter.focus();
-          }
-        });
-      });
     })();
   </script>
 </body>
