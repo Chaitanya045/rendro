@@ -14,12 +14,17 @@ vi.mock("../convex/sessionReadLimit", async importOriginal => {
 afterEach(() => { vi.unstubAllEnvs(); vi.clearAllMocks(); consumers.length = 0; });
 
 it("requires runtime auth secrets while permitting offline schema generation", () => {
-  for (const name of ["SITE_URL", "AUTH_SECRET", "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET"]) vi.stubEnv(name, undefined);
+  for (const name of ["SITE_URL", "AUTH_SECRET"]) vi.stubEnv(name, undefined);
   expect(() => createAuth({} as never)).toThrow("SITE_URL is required");
   const generated = createAuth({} as never, true);
   expect(generated.options.baseURL).toBe("http://localhost:3000");
   expect(generated.options.secret).toBe("schema-generation-auth_secret");
-  expect(generated.options.socialProviders?.google).toMatchObject({ clientId: "schema-generation-google_client_id", clientSecret: "schema-generation-google_client_secret" });
+  // Email is the only sign-in method until GitHub sign-in (#286): no social provider and no provider credential is needed.
+  expect(generated.options).not.toHaveProperty("socialProviders");
+  vi.stubEnv("SITE_URL", "https://rendro.test");
+  expect(() => createAuth({} as never)).toThrow("AUTH_SECRET is required");
+  vi.stubEnv("AUTH_SECRET", "synthetic-auth-secret-at-least-32-characters");
+  expect(() => createAuth({} as never)).not.toThrow();
 });
 
 it("keeps email callbacks and exact credential rate rules wired to their services", async () => {
@@ -48,7 +53,7 @@ it("does not emit Better Auth callback URLs or exception diagnostics", async () 
   const log = vi.spyOn(console, "error").mockImplementation(() => {});
   try {
     const context = await createAuth({} as never).$context;
-    for (const path of ["reset-password", "verify-email", "callback/google"]) {
+    for (const path of ["reset-password", "verify-email", "callback/oauth"]) {
       const url = `https://test/${path}/synthetic-private-token?token=synthetic-private-token`;
       context.logger.error(url, Object.assign(new Error(url), { cause: { token: url }, authorization: url }));
       context.logger.warn(url, { password: url, token: url });

@@ -54,12 +54,6 @@ export interface RevocationEpochs {
 export const VISIBILITY_EPOCH_KEY_PREFIX = "epoch:repo:";
 /** KV keys `epoch:user:<userId>`: when a user's capabilities were last revoked. Never shares a key with a visibility epoch. */
 export const USER_EPOCH_KEY_PREFIX = "epoch:user:";
-/**
- * The user epoch key the control plane wrote before `USER_EPOCH_KEY_PREFIX` (#295). Those writes expire after an hour
- * (`EPOCH_TTL_SECONDS`), so a revocation made just before the switch is still read here until it has expired.
- * Remove this read once every environment's control Worker has written only the new keys for an hour.
- */
-export const LEGACY_USER_EPOCH_KEY_PREFIX = "epoch:";
 
 export interface RepoVisibilityEpochs {
   /**
@@ -176,15 +170,10 @@ async function readEpoch(kv: KvReader, key: string): Promise<number> {
  * the time of the revocation (never a read-modify-write increment, which loses
  * concurrent bumps), after its access mirror already denies the grant.
  * `cacheTtl` keeps hot keys in the colo for 60 s, the floor KV Classic allows.
- * Until the legacy key is retired, the later of the two keys counts, so a
- * revocation written under either is honoured until it expires.
  */
 export function kvRevocationEpochs(kv: KvReader): RevocationEpochs {
   return {
-    async currentEpoch(userId) {
-      const [current, legacy] = await Promise.all([readEpoch(kv, `${USER_EPOCH_KEY_PREFIX}${userId}`), readEpoch(kv, `${LEGACY_USER_EPOCH_KEY_PREFIX}${userId}`)]);
-      return Math.max(current, legacy);
-    },
+    currentEpoch: userId => readEpoch(kv, `${USER_EPOCH_KEY_PREFIX}${userId}`),
   };
 }
 

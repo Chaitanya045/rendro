@@ -36,8 +36,8 @@ async function hidden(page: Page, selector: string) {
   expect(await node.isVisible()).toBe(false);
 }
 
-it.each([375, 1440])('signup hides alternatives, focuses success and restores a fresh form at %ipx', async width => {
-  const page = await open('/sign-up?returnTo=%2Faccept-invitation%2Finv-146', width);
+it.each([375, 1440])('signup hides the form, focuses success and restores a fresh form at %ipx', async width => {
+  const page = await open('/sign-up?returnTo=%2Fr%2Facme%2Fhandbook', width);
   await hidden(page, '#success-panel');
   let writes = 0;
   await page.route('**/api/auth/sign-up/email', route => {
@@ -50,8 +50,6 @@ it.each([375, 1440])('signup hides alternatives, focuses success and restores a 
   await page.getByRole('button', { name: 'Create account' }).click();
   await expect.poll(() => page.getByRole('alert').textContent()).toBe('Try again');
   await hidden(page, '#success-panel');
-  expect(await page.locator('#google-auth').isVisible()).toBe(true);
-  expect(await page.locator('#google-auth').isEnabled()).toBe(true);
   // A rejected request keeps everything typed so the retry needs no re-entry.
   expect(await page.locator('#name').inputValue()).toBe('Synthetic User');
   expect(await page.locator('#email').inputValue()).toBe('person@example.test');
@@ -59,7 +57,7 @@ it.each([375, 1440])('signup hides alternatives, focuses success and restores a 
   expect(await page.getByRole('button', { name: 'Create account' }).isEnabled()).toBe(true);
   await page.getByRole('button', { name: 'Create account' }).click();
   await expect.poll(() => page.locator('#success-panel').evaluate(node => node === document.activeElement)).toBe(true);
-  for (const selector of ['#google-auth', '.divider', '#auth-form']) await hidden(page, selector);
+  await hidden(page, '#auth-form');
   await page.locator('#email').evaluate(input => input.focus());
   expect(await page.locator('#success-panel').evaluate(node => node === document.activeElement)).toBe(true);
   await page.keyboard.press('Tab');
@@ -67,9 +65,8 @@ it.each([375, 1440])('signup hides alternatives, focuses success and restores a 
   await page.keyboard.press('Enter');
   await page.getByRole('link', { name: 'Create an account' }).click();
   await hidden(page, '#success-panel');
-  expect(new URL(page.url()).searchParams.get('returnTo')).toBe('/accept-invitation/inv-146');
-  for (const selector of ['#google-auth', '.divider', '#auth-form']) expect(await page.locator(selector).isVisible()).toBe(true);
-  expect(await page.locator('#google-auth').isEnabled()).toBe(true);
+  expect(new URL(page.url()).searchParams.get('returnTo')).toBe('/r/acme/handbook');
+  expect(await page.locator('#auth-form').isVisible()).toBe(true);
   expect(writes).toBe(2);
 });
 
@@ -91,6 +88,7 @@ it('reset success focuses its confirmation while failure retains the form', asyn
   expect(await page.getByRole('link', { name: 'Sign in', exact: true }).evaluate(node => node === document.activeElement)).toBe(true);
 });
 
+// 'google' is an account from the retired Google sign-in (#286): it has no password and is offered one.
 it.each(['credential', 'google'])('security hides inactive password controls before loading and after %s recovery', async providerId => {
   const page = await open('/sign-in');
   await page.route('**/api/auth/list-accounts', route => route.fulfill({ status: 503, json: {} }));

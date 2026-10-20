@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { chromium } from "playwright";
 import { test, expect } from "./fixtures";
 import { password } from "./seed";
-import { ageRecord, authRecord, fontsSettled, holdRequest, login, mailFor, mailLink, oauthFixture, requestPasswordReset, securityReady, session, sessionCookieExpiry, signout, signup, tamperedToken, verifiedUser } from "./auth-helpers";
+import { ageRecord, authRecord, fontsSettled, holdRequest, login, mailFor, mailLink, requestPasswordReset, securityReady, session, sessionCookieExpiry, signout, signup, tamperedToken, verifiedUser } from "./auth-helpers";
 import { localHttp } from "./backend";
 import type { RepoFixtures } from "./repo-fixtures";
 
@@ -149,12 +149,10 @@ test("auth validation, reveal, pending exclusion and transport recovery preserve
       await expect.poll(pending.count).toBe(1);
       await expect(submit).toBeDisabled();
       await expect(submit).toHaveAttribute("aria-busy", "true");
-      await expect(page.locator("#google-auth")).toBeDisabled();
       await page.locator("#auth-form").dispatchEvent("submit");
       pending.release(true);
       await expect(page.getByRole("alert")).toContainText("Service unavailable");
       await expect(submit).toBeEnabled();
-      await expect(page.locator("#google-auth")).toBeEnabled();
       expect(pending.count()).toBe(1);
       await expect(page.locator("#email")).toHaveValue("transport@example.test");
       await expect(page.locator("#password")).toHaveValue(password);
@@ -293,7 +291,8 @@ test("security methods expose loading, failure and a real retry", async ({ page 
   } finally { await pending.close(); }
   await page.getByRole("button", { name: "Try again" }).click();
   await expect(page.locator("#method-list")).toContainText("Configured");
-  await expect(page.locator("#method-list")).toContainText("Not connected");
+  // Password is the only sign-in method (#286).
+  await expect(page.locator("#method-list .method")).toHaveCount(1);
   await expect(page.locator("#change-password-section")).toBeVisible();
 });
 
@@ -325,14 +324,17 @@ test("change password rejects wrong current credentials and revokes other sessio
   await expect(page).toHaveURL(/\/account\/security$/);
 });
 
-test("OAuth callback creates a verified session and initial password requires freshness", async ({ page }, info) => {
+test("a legacy Google-only account adds an initial password, which requires a fresh session", async ({ page }, info) => {
   const email = `initial-${info.project.name}-${info.retry}@example.test`;
-  await oauthFixture(page, email);
-  await page.goto("/sign-in?returnTo=%2Faccount%2Fsecurity");
-  await page.getByRole("button", { name: "Continue with Google" }).click();
+  await verifiedUser(page, email);
+  await login(page, email);
   await expect(page).toHaveURL(/\/account\/security$/);
   const identity = await session(page);
   expect(identity).toMatchObject({ email, verified: true });
+  // Accounts created with the retired Google sign-in (#286) have only a provider row and no password: model one.
+  await authRecord("updateOne", { input: { model: "account", where: [{ field: "userId", value: identity?.userId ?? "" }],
+    update: { providerId: "google", accountId: `legacy-google-${email}`, password: null } } });
+  await page.reload();
   await expect(page.locator("#method-list")).toContainText("Not configured");
   await page.getByRole("button", { name: "Add below" }).click();
   await expect(page.locator("#password")).toBeFocused();
@@ -346,10 +348,8 @@ test("OAuth callback creates a verified session and initial password requires fr
   await page.getByRole("button", { name: "Set password" }).click();
   await expect(page.locator("#initial-error")).toHaveText("Sign in again before setting a password");
   await expect(page.getByRole("button", { name: "Set password" })).toBeEnabled();
-  await signout(page);
-  await page.goto("/sign-in?returnTo=%2Faccount%2Fsecurity");
-  await page.getByRole("button", { name: "Continue with Google" }).click();
-  await expect(page).toHaveURL(/\/account\/security$/);
+  // A fresh sign-in, as the provider gave one: the same session, recently created.
+  await ageRecord("session", "_id", identity?.sessionId ?? "", { createdAt: Date.now() });
   await page.locator("#password").fill(password);
   await page.locator("#confirmPassword").fill(password);
   await page.getByRole("button", { name: "Set password" }).click();
@@ -357,45 +357,6 @@ test("OAuth callback creates a verified session and initial password requires fr
   await expect(page.locator("#method-list")).toContainText("Configured");
   await signout(page);
   await login(page, email);
-  await expect(page).toHaveURL(/\/account\/security$/);
-  expect((await session(page))?.userId).toBe(identity?.userId);
-});
-
-test("OAuth denial and mismatched state create no session and offer sign-in recovery", async ({ page }, info) => {
-  for (const mode of ["denial", "state-mismatch"] as const) {
-    await oauthFixture(page, `denied-${info.project.name}-${info.retry}@example.test`, mode);
-    await page.goto("/sign-in");
-    await page.getByRole("button", { name: "Continue with Google" }).click();
-    await expect(page).toHaveURL(/\/sign-in\?error=/);
-    await expect(page.getByRole("alert")).toContainText(mode === "denial" ? /canceled/i : /expired|verified/i);
-    expect(await session(page)).toBeNull();
-    await expect(page.getByRole("button", { name: "Continue with Google" })).toBeEnabled();
-    await page.unroute("https://accounts.google.com/o/oauth2/v2/auth?**");
-  }
-});
-
-test("Google linking restores controls on failure and connects the matching account", async ({ page }, info) => {
-  const email = `link-${info.project.name}-${info.retry}@example.test`;
-  await verifiedUser(page, email);
-  await login(page, email);
-  await expect(page).toHaveURL(/\/account\/security$/);
-  const identity = await session(page);
-  const pending = await holdRequest(page, "/api/auth/link-social");
-  try {
-    await page.getByRole("button", { name: "Connect", exact: true }).click();
-    await expect.poll(pending.count).toBe(1);
-    await expect(page.getByRole("button", { name: "Connect", exact: true })).toBeDisabled();
-    pending.release(true);
-    await expect(page.locator("#security-message")).toContainText("Service unavailable");
-    await expect(page.getByRole("button", { name: "Connect", exact: true })).toBeEnabled();
-  } finally { await pending.close(); }
-  await oauthFixture(page, email);
-  await page.getByRole("button", { name: "Connect", exact: true }).click();
-  await expect(page.locator("#method-list")).toContainText("Connected");
-  expect((await session(page))?.userId).toBe(identity?.userId);
-  await signout(page);
-  await page.goto("/sign-in?returnTo=%2Faccount%2Fsecurity");
-  await page.getByRole("button", { name: "Continue with Google" }).click();
   await expect(page).toHaveURL(/\/account\/security$/);
   expect((await session(page))?.userId).toBe(identity?.userId);
 });
@@ -529,10 +490,8 @@ test("sign-out evicts the cached private frame a shared-machine reader warmed", 
   }
 });
 
-test("signup success hides Google and the credential divider [AUTH-111-01]", async ({ page }, info) => {
+test("signup success hides the form and restores it for a new account [AUTH-111-01]", async ({ page }, info) => {
   await signup(page, `hidden-${info.project.name}-${info.retry}@example.test`);
-  await expect(page.locator("#google-auth")).toBeHidden();
-  await expect(page.locator(".divider")).toBeHidden();
   await expect(page.locator("#auth-form")).toBeHidden();
   await expect(page.locator("#success-panel")).toBeFocused();
   await page.locator("#email").evaluate(input => input.focus());
@@ -541,27 +500,8 @@ test("signup success hides Google and the credential divider [AUTH-111-01]", asy
   await expect(page.getByRole("link", { name: "Back to sign in" })).toBeFocused();
   await page.keyboard.press("Enter");
   await page.getByRole("link", { name: "Create an account" }).click();
-  await expect(page.locator("#google-auth")).toBeVisible();
-  await expect(page.locator("#google-auth")).toBeEnabled();
-  await expect(page.locator(".divider")).toBeVisible();
   await expect(page.locator("#auth-form")).toBeVisible();
   await expect(page.locator("#success-panel")).toBeHidden();
-});
-
-test("Google linking rejects a different provider email without replacing the session", async ({ page }, info) => {
-  const email = `mismatch-${info.project.name}-${info.retry}@example.test`;
-  await verifiedUser(page, email);
-  await login(page, email);
-  await expect(page).toHaveURL(/\/account\/security$/);
-  const identity = await session(page);
-  await oauthFixture(page, `other-${email}`);
-  await page.getByRole("button", { name: "Connect", exact: true }).click();
-  await expect(page).toHaveURL(/\/sign-in\?error=/);
-  await expect(page.getByRole("alert")).toContainText("couldn't connect this Google account");
-  expect((await session(page))?.userId).toBe(identity?.userId);
-  await page.goto("/account/security");
-  await expect(page.locator("#method-list")).toContainText("Not connected");
-  await expect(page.getByRole("button", { name: "Connect", exact: true })).toBeEnabled();
 });
 
 test("persisted pageshow checks the backend and hides a revoked account", async ({ page }) => {

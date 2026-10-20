@@ -172,26 +172,6 @@ describe("repository access protocol", () => {
     await expect(kvRevocationEpochs({ get: () => Promise.reject(new Error("KV down")) }).currentEpoch("a")).rejects.toBeInstanceOf(RepoAccessUnavailable);
   });
 
-  it("still honours a revocation written under the legacy epoch:<id> key until it expires: the later key wins", async () => {
-    const values = new Map<string, string>([
-      ["epoch:legacy-only", "1792000000000"],
-      ["epoch:both", "1792000000500"], ["epoch:user:both", "1792000000100"],
-      ["epoch:user:newer", "1792000000900"], ["epoch:newer", "1792000000100"],
-      ["epoch:broken", "x"],
-    ]);
-    const get = vi.fn((key: string, _options: { cacheTtl: number }) => Promise.resolve(values.get(key) ?? null));
-    const epochs = kvRevocationEpochs({ get });
-    expect(await epochs.currentEpoch("legacy-only")).toBe(1792000000000);
-    expect(get).toHaveBeenCalledWith("epoch:legacy-only", { cacheTtl: 60 });
-    expect(await epochs.currentEpoch("both")).toBe(1792000000500);
-    expect(await epochs.currentEpoch("newer")).toBe(1792000000900);
-    // A broken legacy value is doubt like a broken current one.
-    await expect(epochs.currentEpoch("broken")).rejects.toBeInstanceOf(RepoAccessUnavailable);
-    // Once the legacy key has expired, only epoch:user:<id> counts.
-    values.delete("epoch:legacy-only");
-    expect(await epochs.currentEpoch("legacy-only")).toBe(0);
-  });
-
   it("keeps user and visibility epochs apart: a user ID shaped like a repository key never overwrites or reads one", async () => {
     const kv = new FakeEpochKv();
     await kv.put("epoch:repo:7", "1792000000000", {});

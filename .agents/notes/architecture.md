@@ -1,64 +1,66 @@
 # Architecture observations
 
-_Recorded 2026-10-15 from `main` at `6e22d7f`._
+_Recorded 2026-10-15 from `main` at `6e22d7f`; updated 2026-10-20 after #286 (GitHub-only pivot: uploads, organizations, projects, API keys and Google sign-in removed)._
 
 ## Shape of the system
 
 ```text
-Browser / CI (CLI)
-      │ session cookie or scoped API key
+Browser
+      │ session cookie, repository capability cookie
       ▼
-Cloudflare Worker (Hono)                         src/
+Serving Worker (Hono, src/worker.ts)             wrangler.toml
   ├─ /api/auth/* proxy ──► Convex HTTP actions running Better Auth (convex/betterAuth/)
-  ├─ metadata API ───────► Convex HTTP actions (convex/*Http.ts)
-  └─ file delivery ──────► R2 through the native STORAGE binding (src/storage.ts; Miniflare locally)
+  ├─ /r/{owner}/{repo} ──► R2 snapshots, KV epochs, D1 search; control Worker on a capability miss
+  └─ pages ──────────────► landing, email auth, /home, /account/security
+Ingest Worker (src/ingest/orchestrator/)         wrangler.ingest.toml   GitHub → render → R2 + D1
+Control Worker (src/repo-access/)                wrangler.control.toml  GitHub permissions, webhooks, epochs
 ```
 
 - `src/worker.ts` (Workers) and `src/index.ts` (local Node via `@hono/node-server`)
   both mount the same routes from `src/app-routes.ts`. Each entry point owns its
   own middleware, static assets and error handling, so changes to one often
-  need the same change in the other.
-- Storage is the Worker's native R2 binding (`STORAGE`); there are no S3 keys.
-  `src/storage.ts` is the only code that touches the bucket. The local Node server
-  borrows Miniflare's R2 simulation (`src/local-storage.ts`).
-- The browser never talks to Convex directly. Everything goes browser → Worker →
-  Convex HTTP action. Much of the session-cache, signed-IP-proof and rate-limit
-  machinery in `docs/TECHNICAL.md` exists because of that hop.
+  need the same change in the other. The Node server has no read-path bindings:
+  `/r/` works only in the E2E harness and on a configured Worker.
+- Access to repository docs follows GitHub, mirrored by the control Worker. A
+  cached page view verifies a signed capability cookie and reads one KV epoch;
+  GitHub and Convex are reached only on a cookie miss.
+- The browser talks to Convex directly only for comments (a short-lived JWT from
+  `/api/auth/convex/token`); auth goes browser → Worker → Convex HTTP action. Much
+  of the session-cache, signed-IP-proof and rate-limit machinery in
+  `docs/TECHNICAL.md` exists because of that hop.
 
 ## UI layer
 
 - No UI framework. Pages are TypeScript functions returning template-literal
-  HTML (`src/routes/*-pages.ts`), escaped with `escapeHtml` (`src/routes/html.ts`).
-  Inline scripts carry CSP nonces (`src/middleware/html-nonce.ts`).
-- Browser behavior is vanilla TS bundled by esbuild into committed IIFEs in
-  `public/*.js` (`scripts/build-*.ts`). The bundles are versioned. Changing their
-  source requires `pnpm build:assets`, and `pnpm verify:assets` fails on drift.
-  Management controller changes also need `MANAGEMENT_SHELL_VERSION` bumped
-  (`src/routes/management-navigation.ts`).
-- Hand-built pieces a framework would normally provide: select/menu component
-  (`src/ui/select.ts`), query cache (`src/management-query/`, on TanStack
-  query-core), client navigation (`src/routes/management-navigation.ts`),
-  loading pages and an asset-version ledger (`scripts/asset-version-ledger.ts`).
-- Publisher HTML renders in a sandboxed iframe. The parent (`src/viewer/`,
-  `src/lazy-tree/`, `src/commentor/parent-*`) talks to it over postMessage.
+  HTML (`src/routes/*-pages.ts`, `src/routes/app.ts` for the repository shell),
+  escaped with `escapeHtml` (`src/routes/html.ts`). Inline scripts carry CSP
+  nonces (`src/middleware/html-nonce.ts`).
+- Browser behavior is vanilla TS bundled by esbuild into IIFEs in `public/*.js`
+  (`scripts/build-*.ts`), git-ignored and versioned in `scripts/asset-versions.json`.
+  Changing their bytes requires a version bump, `pnpm build:assets` and
+  `pnpm record:assets`; `pnpm verify:assets` fails on drift.
+- Rendered repository pages render in a sandboxed iframe. The shell
+  (`src/viewer/`, `src/lazy-tree/`, `src/commentor/parent-*`) talks to it over
+  postMessage, and only while the frame shows a document the shell loaded (#296).
   In-document link navigation needs a confirmation in the parent (#76, #78).
 
 ## Data and storage
 
-- Convex tables are in `convex/schema.ts`. Several legacy tables (`threads`,
-  `replies`, `api_keys`, `deleted_files`, `legacyCommentStatusReceipts`) remain
-  for the slug-to-organization migration window.
-- Deployments are immutable namespaces described by SHA-256 manifests. A push
-  copies unchanged files server-side in batches of 16 (Worker subrequest budget)
-  and activates atomically.
+- Convex tables are in `convex/schema.ts`: repository comment grants, threads and
+  replies, write-quota buckets and audit events. Better Auth owns users,
+  sessions and accounts.
+- Snapshots are immutable per commit under R2's `gh/v1/` key schema; a branch
+  pointer flips after a whole commit is rendered. Private content is sealed per
+  repository.
 
 ## Testing
 
 - Vitest has two projects: `unit` (happy-dom/node, convex-test) and `browser`
-  (`*-browser.test.ts`, real Chromium via Playwright, serial). See
-  `docs/BROWSER_TESTS.md`.
-- Before this effort, coverage only included `src/**/*.ts` and had no
-  thresholds. `convex/`, `cli/`, `shared/` and `scripts/` were not measured.
+  (`*-browser.test.ts`, real Chromium via Playwright, serial). Playwright E2E runs
+  the real Workers on workerd with a disposable local Convex. Visual baselines
+  render in a pinned container. See `docs/BROWSER_TESTS.md`.
+- Coverage is 100% per file across Node, browser and subprocess shards;
+  `coverage-debt.json` is empty.
 - `pnpm verify` is the full local gate and runs in `.github/workflows/quality.yml`.
 
 ## Sharp edges seen so far

@@ -10,8 +10,6 @@ process.env.REPO_CAPABILITY_SECRET = "test-repo-capability-secret-32-chars";
 process.env.REPO_CONTENT_KEY = "test-repo-content-key-0123456789abcdef";
 
 // Convex auth tests still need these; the Worker config tests explicitly unset them.
-process.env.GOOGLE_CLIENT_ID = "test-google-client-id";
-process.env.GOOGLE_CLIENT_SECRET = "test-google-client-secret";
 process.env.SITE_URL = "http://localhost:3000";
 
 // No permissive legacy credential/deletion emulator: tests must configure their backend.

@@ -124,18 +124,3 @@ export async function holdRequest(page: Page, path: string) {
   await page.route(`**${path}`, handler);
   return { release, count: () => count, async close() { release(); await page.unroute(`**${path}`, handler); } };
 }
-
-export async function oauthFixture(page: Page, email: string, mode = "success") {
-  await page.route("https://accounts.google.com/o/oauth2/v2/auth?**", async route => {
-    const url = new URL(route.request().url());
-    expect(url.searchParams.get("state")).toBeTruthy();
-    expect(url.searchParams.get("code_challenge")).toBeTruthy();
-    expect(new URL(url.searchParams.get("redirect_uri") ?? "").origin).toBe(process.env.RENDRO_E2E_ORIGIN);
-    url.searchParams.set("fixture_email", email);
-    url.searchParams.set("fixture_mode", mode);
-    const response = await localHttp(`${process.env.RENDRO_E2E_MAIL}/authorize${url.search}`);
-    expect(response.status).toBe(200);
-    const { location } = JSON.parse(response.body) as { location: string };
-    await route.fulfill({ contentType: "text/html", body: `<!doctype html><title>Local OAuth fixture</title><script>location.replace(${JSON.stringify(location).replaceAll("<", "\\u003c")})</script>` });
-  });
-}

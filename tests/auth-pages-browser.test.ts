@@ -16,7 +16,6 @@ beforeAll(async () => {
   const app = new Hono<{ Variables: { user?: User } }>();
   app.use('*', securityHeaders);
   app.get('/fonts/*', serveFonts);
-  app.get('/oauth-stub', c => c.html('<h1>Google consent stub</h1>'));
   app.use('/account/*', async (c, next) => {
     c.set('user', { id: 'user-a', email: 'person@example.test' } as User);
     await next();
@@ -77,17 +76,17 @@ it('drops an unsafe return target from every related link', async () => {
   }
 });
 
-it('explains each Google callback failure with fixed recovery copy and keeps every control usable', async () => {
+it('explains each OAuth callback failure with fixed recovery copy and keeps the email form usable', async () => {
   const expectations: [string, RegExp][] = [
-    ['access_denied', /Google sign-in was canceled\. Try again or sign in with your email and password\./],
+    ['access_denied', /^Sign-in was canceled\. Try again or sign in with your email and password\./],
     ['state_mismatch', /attempt expired or could not be verified/],
     ['state_security_mismatch', /attempt expired or could not be verified/],
     ['state_not_found', /attempt expired or could not be verified/],
     ['invalid_state', /attempt expired or could not be verified/],
-    ['unable_to_link_account', /couldn't connect this Google account/],
-    ['account_not_linked', /couldn't connect this Google account/],
-    ['account_already_linked_to_different_user', /couldn't connect this Google account/],
-    ["email_doesn't_match", /couldn't connect this Google account/],
+    ['unable_to_link_account', /couldn't connect that account/],
+    ['account_not_linked', /couldn't connect that account/],
+    ['account_already_linked_to_different_user', /couldn't connect that account/],
+    ["email_doesn't_match", /couldn't connect that account/],
     ['email_not_verified', /verify your email/],
     ['ACCESS_DENIED', /was canceled/],
     ['server_error', /couldn't complete sign-in\. Please try again or use your email and password/],
@@ -100,29 +99,28 @@ it('explains each Google callback failure with fixed recovery copy and keeps eve
     // The upstream code is never echoed or interpreted as markup.
     expect(await alert.textContent(), code).not.toContain(code.startsWith('<') ? 'onerror' : '\u0000');
     expect(await page.locator('#form-error img').count()).toBe(0);
-    expect(await page.locator('#google-auth').isEnabled()).toBe(true);
     expect(await page.locator('#auth-form button[type=submit]').isEnabled()).toBe(true);
     expect(page.errors).toEqual([]);
   }
 });
 
-it('starts Google sign-in only for a callback inside this origin, whatever return target is requested', async () => {
+it('sends email sign-in callbacks only inside this origin, whatever return target is requested', async () => {
   const cases: [string, string][] = [
     ['/r/acme/handbook', '/r/acme/handbook'],
     ['https://outside.invalid/phish', '/'], ['//outside.invalid/phish', '/'], ['/\\outside.invalid', '/'],
   ];
-  for (const page of ['/sign-in', '/sign-up']) {
-    for (const [requested, expected] of cases) {
-      const tab = await open(`${page}?returnTo=${encodeURIComponent(requested)}`);
-      let callbackURL: unknown;
-      await tab.route('**/api/auth/sign-in/social', route => {
-        callbackURL = (route.request().postDataJSON() as { callbackURL: string }).callbackURL;
-        return route.fulfill({ json: { url: `${harness.origin}/oauth-stub` } });
-      });
-      await tab.locator('#google-auth').click();
-      await tab.waitForURL('**/oauth-stub');
-      expect(callbackURL, `${page} ${requested}`).toBe(`${harness.origin}${expected}`);
-    }
+  for (const [requested, expected] of cases) {
+    const tab = await open(`/sign-in?returnTo=${encodeURIComponent(requested)}`);
+    let callbackURL: unknown;
+    await tab.route('**/api/auth/sign-in/email', route => {
+      callbackURL = (route.request().postDataJSON() as { callbackURL: string }).callbackURL;
+      return route.fulfill({ json: {} });
+    });
+    await tab.getByLabel('Work email').fill('person@example.test');
+    await tab.getByLabel('Password', { exact: true }).fill(password);
+    await tab.getByRole('button', { name: 'Sign in', exact: true }).click();
+    await expect.poll(() => callbackURL, { message: requested }).toBe(`${harness.origin}${expected}`);
+    await tab.waitForURL(`${harness.origin}${expected}`);
   }
 });
 
@@ -137,6 +135,7 @@ it('reveals, scrolls to and focuses the initial-password form, jumping instead o
       const original = prototype.scrollIntoView;
       prototype.scrollIntoView = function (this: Element, options) { scrolls.push({ id: this.id, options }); original.call(this, options); };
     });
+    // An account created with the retired Google sign-in has no password yet (#286): it can add one here.
     await page.route('**/api/auth/list-accounts', route => route.fulfill({ json: [{ providerId: 'google' }] }));
     await page.goto(`${harness.origin}/account/security`);
     const section = page.locator('#initial-password-section');

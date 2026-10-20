@@ -49,7 +49,7 @@ describe("session middleware", () => {
 // 4. Unauthenticated landing — product and auth contract
 // ────────────────────────────────────────────────────
 describe("unauthenticated landing", () => {
-  it("presents the product before offering Google sign-in", async () => {
+  it("presents the product before offering sign-up", async () => {
     process.env.NODE_ENV = "development";
 
     const res = await workerApp.request("https://dev.rendro.app/");
@@ -62,13 +62,11 @@ describe("unauthenticated landing", () => {
     expect(html).toContain('id="product"');
     expect(html).toContain('id="workflow"');
     expect(html).toContain('id="security"');
-    expect(html).toContain('fetch("/api/auth/sign-in/social"');
-    expect(html).not.toContain('action="/api/auth/sign-in/social"');
-    expect(html).toContain('window.addEventListener("pageshow", resetSignIn)');
-    expect(html).not.toContain("form.submit()");
-    expect(html).toContain("Start with Google");
+    // Every call to action is a plain link to email sign-up: no third-party sign-in starts from the landing page (#286).
+    for (const id of ["hero-start", "security-start", "final-start"]) expect(html).toContain(`href="/sign-up" data-action-id="${id}">Get started</a>`);
+    expect(html).not.toContain("/api/auth/sign-in/social");
+    expect(html).not.toMatch(/google/i);
     expect(html).toContain("prefers-reduced-motion: reduce");
-    expect(html.match(/data-auth-id=/g)).toHaveLength(3);
     expect(html).toContain('href="#product" data-scroll-section="product" data-action-id="explore-product"');
     expect(html).not.toContain('href="https://dev.rendro.app/public/rendro-feature-test/reference"');
     expect(html).toContain("data-reveal-group");
@@ -92,7 +90,7 @@ describe("worker auth proxy", () => {
     vi.unstubAllGlobals();
   });
 
-  it("forwards the browser origin for repeated OAuth sign-in requests", async () => {
+  it("forwards the browser origin, cookies and body of a sign-in request", async () => {
     let proxiedHeaders = new Headers();
     let proxiedBody = "";
     const upstreamUrls: string[] = [];
@@ -100,23 +98,24 @@ describe("worker auth proxy", () => {
       const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
       upstreamUrls.push(url);
       if (url.includes("/api/auth/get-session")) return Promise.resolve(Response.json(null));
-      if (url.includes("/api/auth/sign-in/social")) {
+      if (url.includes("/api/auth/sign-in/email")) {
         proxiedHeaders = new Headers(init?.headers);
         proxiedBody = typeof init?.body === "string" ? init.body : "";
-        return Promise.resolve(Response.json({ url: "https://accounts.google.com/o/oauth2/v2/auth" }));
+        return Promise.resolve(Response.json({ redirect: false }));
       }
       return Promise.resolve(new Response("unexpected fetch", { status: 500 }));
     };
     vi.stubGlobal("fetch", fakeFetch);
 
     const body = JSON.stringify({
-      provider: "google",
+      email: "reader@example.test",
+      password: "synthetic-password-0123",
       callbackURL: "https://dev.rendro.app/",
     });
-    const res = await workerApp.request("https://dev.rendro.app/api/auth/sign-in/social", {
+    const res = await workerApp.request("https://dev.rendro.app/api/auth/sign-in/email", {
       method: "POST",
       headers: {
-        cookie: "__Secure-better-auth.state=oauth-state",
+        cookie: "theme=dark",
         "content-type": "application/json",
         origin: "https://dev.rendro.app",
       },
@@ -126,7 +125,7 @@ describe("worker auth proxy", () => {
     expect(res.status).toBe(200);
     expect(proxiedHeaders.get("origin")).toBe("https://dev.rendro.app");
     expect(proxiedHeaders.get("content-type")).toBe("application/json");
-    expect(proxiedHeaders.get("cookie")).toBe("__Secure-better-auth.state=oauth-state");
+    expect(proxiedHeaders.get("cookie")).toBe("theme=dark");
     expect(upstreamUrls.filter((url) => url.includes("/api/auth/get-session"))).toHaveLength(0);
     expect(proxiedBody).toBe(body);
   });

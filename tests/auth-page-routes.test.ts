@@ -16,7 +16,9 @@ describe('auth route rendering boundaries', () => {
     const html = await response.text();
     expect(html).toContain('id="form-error" role="alert">');
     expect(html).not.toContain('<unknown>');
-    expect(html).toContain('id="google-auth"');
+    // Recovery is the email form: no third-party sign-in is offered (#286).
+    expect(html).toContain('<form id="auth-form" novalidate>');
+    expect(html).not.toMatch(/google/i);
   });
 
   it('redirects signed-in forms and denies anonymous account access', async () => {

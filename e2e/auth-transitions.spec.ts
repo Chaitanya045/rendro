@@ -1,6 +1,6 @@
 import { test, expect } from "./fixtures";
 import { password } from "./seed";
-import { authRecord, login, mailLink, oauthFixture, securityReady, session, signout, signup, tamperedToken, verifiedUser } from "./auth-helpers";
+import { authRecord, login, mailLink, securityReady, session, signout, signup, tamperedToken, verifiedUser } from "./auth-helpers";
 
 test.describe.configure({ timeout: 60_000 });
 
@@ -21,21 +21,6 @@ test("an invalid verification link offers recovery instead of reporting the emai
   // No success claim, and the resend form is offered.
   await expect(page.getByRole("heading", { name: "Email verified", exact: true })).toBeHidden();
   await expect(page.getByRole("button", { name: "Resend verification email" })).toBeVisible();
-});
-
-test("Google sign-in never leaves the origin, whatever return target was requested", async ({ page, baseURL }, info) => {
-  for (const [index, requested] of ["https://outside.invalid/phish", "//outside.invalid/phish", "/\\outside.invalid"].entries()) {
-    await oauthFixture(page, `redirect-${index}-${info.project.name}-${info.retry}@example.test`);
-    await page.goto(`/sign-in?returnTo=${encodeURIComponent(requested)}`);
-    await page.getByRole("button", { name: "Continue with Google" }).click();
-    await page.waitForURL(url => url.origin === baseURL && !url.pathname.startsWith("/sign-in") && !url.pathname.startsWith("/api/"));
-    await page.waitForLoadState("load");
-    expect(new URL(page.url()).origin).toBe(baseURL);
-    expect((await session(page))?.email).toBe(`redirect-${index}-${info.project.name}-${info.retry}@example.test`);
-    await page.goto("/account/security");
-    await signout(page);
-    await page.unroute("https://accounts.google.com/o/oauth2/v2/auth?**");
-  }
 });
 
 test("changing a password can keep other sessions, and Back to home leaves account security", async ({ page, secondContext }, info) => {

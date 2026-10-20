@@ -49,7 +49,7 @@
     {
       "id": "R02",
       "surface": "`/sign-in?returnTo=&error=`",
-      "variants": "Email/Google login, OAuth error explanation, invitation context, authenticated redirect unless error present",
+      "variants": "Email login, OAuth error explanation, authenticated redirect unless error present",
       "sourceNote": "`src/routes/auth-pages.ts:62`, `:217`",
       "routes": [
         "GET /sign-in"
@@ -58,7 +58,7 @@
     {
       "id": "R03",
       "surface": "`/sign-up?returnTo=`",
-      "variants": "Name/email/password, Google, generic verification-success panel, authenticated redirect",
+      "variants": "Name/email/password, generic verification-success panel, authenticated redirect",
       "sourceNote": "`auth-pages.ts:76`, `:224`",
       "routes": [
         "GET /sign-up"
@@ -94,7 +94,7 @@
     {
       "id": "R07",
       "surface": "`/account/security`",
-      "variants": "Auth guard; sign-in-method loading/error/configured states; Google linking, initial password/change password",
+      "variants": "Auth guard; sign-in-method loading/error/configured states; initial password/change password",
       "sourceNote": "`auth-pages.ts:105`, `:241`",
       "routes": [
         "GET /account/security"
@@ -245,7 +245,7 @@
       ],
       "status": "browser",
       "auditEvidence": "U",
-      "auditNote": "landing-theme-navigation.test.ts; routes.test.ts (route/markup contracts, not click journey) Reconciled A01 with landing.ts: three Google CTAs (hero, security, final), not four.",
+      "auditNote": "landing-theme-navigation.test.ts; routes.test.ts (route/markup contracts, not click journey) Reconciled A01 with landing.ts: three calls to action (hero, security, final), not four; since #286 each is a sign-up link.",
       "edges": [
         {
           "id": "UI-001-E01",
@@ -259,7 +259,7 @@
           "tests": [
             {
               "file": "tests/landing-browser.test.ts",
-              "name": "loads the landing page and resolves the sign-in, get-started, logo and Google call-to-action links",
+              "name": "loads the landing page and resolves the sign-in, get-started, logo and call-to-action links",
               "kind": "browser"
             }
           ]
@@ -268,7 +268,7 @@
           "id": "UI-001-E02",
           "from": "Landing page ready",
           "trigger": "Activate navigation links or resize page",
-          "expected": "logo/home, Sign in, Get started, Google buttons in all three Google CTA placements",
+          "expected": "logo/home, Sign in, Get started, and the sign-up link in all three call-to-action placements",
           "inventoryRefs": [
             "A01"
           ],
@@ -276,12 +276,7 @@
           "tests": [
             {
               "file": "tests/landing-browser.test.ts",
-              "name": "loads the landing page and resolves the sign-in, get-started, logo and Google call-to-action links",
-              "kind": "browser"
-            },
-            {
-              "file": "tests/landing-browser.test.ts",
-              "name": "starts Google sign-in with a JSON request only, from the originating call-to-action",
+              "name": "loads the landing page and resolves the sign-in, get-started, logo and call-to-action links",
               "kind": "browser"
             }
           ]
@@ -363,7 +358,7 @@
           "id": "UI-001-E07",
           "from": "Anonymous landing request",
           "trigger": "Load / and inspect sign-in/sign-up links",
-          "expected": "Presents the product before offering Google sign-in",
+          "expected": "Presents the product before offering sign-up",
           "inventoryRefs": [
             "UI-001"
           ],
@@ -371,7 +366,7 @@
           "tests": [
             {
               "file": "tests/routes.test.ts",
-              "name": "presents the product before offering Google sign-in",
+              "name": "presents the product before offering sign-up",
               "kind": "unit"
             }
           ]
@@ -412,7 +407,7 @@
       ],
       "status": "e2e",
       "auditEvidence": "B",
-      "auditNote": "session-stack-browser.test.ts; management-page-access.test.ts (#286: the organization chooser and project pages were removed; the signed-in root now opens the home.)",
+      "auditNote": "session-stack-browser.test.ts; shell-entry.spec.ts (#286: the signed-in root opens the home.)",
       "edges": [
         {
           "id": "UI-003-E01",
@@ -6821,23 +6816,6 @@
           ]
         },
         {
-          "id": "UI-128-E06",
-          "from": "Sign-in form ready",
-          "trigger": "Validate, reveal, or submit credentials",
-          "expected": "pending disables Google too",
-          "inventoryRefs": [
-            "A04"
-          ],
-          "status": "e2e",
-          "tests": [
-            {
-              "file": "e2e/auth.spec.ts",
-              "name": "auth validation, reveal, pending exclusion and transport recovery preserve inputs",
-              "kind": "e2e"
-            }
-          ]
-        },
-        {
           "id": "UI-128-E07",
           "from": "Sign-in form ready",
           "trigger": "Validate, reveal, or submit credentials",
@@ -7178,7 +7156,7 @@
           "id": "UI-131-E05",
           "from": "Sign-up form ready",
           "trigger": "Validate and submit new account details",
-          "expected": "success hides credential form/Google/divider, focuses the neutral confirmation; returning to signup restores enabled controls",
+          "expected": "success hides the credential form, focuses the neutral confirmation; returning to signup restores enabled controls",
           "inventoryRefs": [
             "A06"
           ],
@@ -7186,12 +7164,12 @@
           "tests": [
             {
               "file": "e2e/auth.spec.ts",
-              "name": "signup success hides Google and the credential divider [AUTH-111-01]",
+              "name": "signup success hides the form and restores it for a new account [AUTH-111-01]",
               "kind": "e2e"
             },
             {
               "file": "tests/auth-hidden-browser.test.ts",
-              "name": "signup hides alternatives, focuses success and restores a fresh form at %ipx",
+              "name": "signup hides the form, focuses success and restores a fresh form at %ipx",
               "kind": "browser"
             }
           ]
@@ -7320,7 +7298,7 @@
           "tests": [
             {
               "file": "tests/auth-hidden-browser.test.ts",
-              "name": "signup hides alternatives, focuses success and restores a fresh form at %ipx",
+              "name": "signup hides the form, focuses success and restores a fresh form at %ipx",
               "kind": "browser"
             },
             {
@@ -8027,15 +8005,14 @@
     },
     {
       "id": "UI-138",
-      "title": "Google sign-in redirect/callback success or cancel/error recovery",
+      "title": "OAuth callback errors return to sign-in with fixed recovery copy",
       "area": "Authentication/security",
       "routes": [
-        "GET /",
-        "GET /account/security",
         "GET /sign-in"
       ],
       "sources": [
-        "src/routes/auth-pages.ts"
+        "src/routes/auth-pages.ts",
+        "src/auth-proxy.ts"
       ],
       "roles": [
         "anonymous",
@@ -8057,79 +8034,69 @@
       ],
       "status": "e2e",
       "auditEvidence": "UNTESTED",
-      "auditNote": "security-headers-browser.test.ts renders access_denied; no provider redirect/callback lifecycle",
+      "auditNote": "security-headers-browser.test.ts renders access_denied; no provider redirect/callback lifecycle (#286: Google sign-in and linking were removed; the provider-neutral error path stays for GitHub sign-in.)",
       "edges": [
         {
           "id": "UI-138-E01",
-          "from": "Google sign-in/link initiated",
-          "trigger": "Complete/cancel provider callback or return OAuth error",
-          "expected": "Google sign-in redirect/callback success or cancel/error recovery",
+          "from": "OAuth error return",
+          "trigger": "Return an OAuth error code or an invalid state through the Worker",
+          "expected": "Friendly sign-in recovery and no session",
           "inventoryRefs": [
             "UI-138"
           ],
-          "status": "e2e",
+          "status": "unit",
           "tests": [
             {
-              "file": "e2e/auth.spec.ts",
-              "name": "OAuth callback creates a verified session and initial password requires freshness",
-              "kind": "e2e"
+              "file": "tests/error-pages.test.ts",
+              "name": "renders a friendly alert for %s",
+              "kind": "unit"
             },
             {
-              "file": "e2e/auth.spec.ts",
-              "name": "OAuth denial and mismatched state create no session and offer sign-in recovery",
-              "kind": "e2e"
+              "file": "tests/error-pages.test.ts",
+              "name": "handles a real Better Auth OAuth denial and invalid state via the Worker proxy",
+              "kind": "unit"
             }
           ]
         },
         {
           "id": "UI-138-E02",
-          "from": "OAuth return or link in flight",
-          "trigger": "Handle callback error or unsafe return target",
-          "expected": "cancellation, missing/invalid state, email mismatch/unverified/link failure, unknown code",
+          "from": "OAuth error return",
+          "trigger": "Handle a callback error code",
+          "expected": "cancellation, missing/invalid state, link failure and unknown codes each get fixed copy; the email form stays usable",
           "inventoryRefs": [
             "A05"
           ],
-          "status": "e2e",
+          "status": "browser",
           "tests": [
             {
               "file": "tests/auth-pages-browser.test.ts",
-              "name": "explains each Google callback failure with fixed recovery copy and keeps every control usable",
+              "name": "explains each OAuth callback failure with fixed recovery copy and keeps the email form usable",
               "kind": "browser"
-            },
-            {
-              "file": "e2e/auth.spec.ts",
-              "name": "OAuth denial and mismatched state create no session and offer sign-in recovery",
-              "kind": "e2e"
-            },
-            {
-              "file": "e2e/auth.spec.ts",
-              "name": "Google linking rejects a different provider email without replacing the session",
-              "kind": "e2e"
             }
           ]
         },
         {
           "id": "UI-138-E03",
-          "from": "OAuth return or link in flight",
-          "trigger": "Handle callback error or unsafe return target",
+          "from": "OAuth error return",
+          "trigger": "Handle a callback error code",
           "expected": "friendly error on sign-in even with an existing session",
           "inventoryRefs": [
             "A05"
           ],
-          "status": "e2e",
+          "status": "unit",
           "tests": [
             {
-              "file": "e2e/auth.spec.ts",
-              "name": "Google linking rejects a different provider email without replacing the session",
-              "kind": "e2e"
+              "file": "tests/error-pages.test.ts",
+              "name": "shows linking errors even when a user already has a session",
+              "kind": "unit"
             }
           ]
         },
         {
           "id": "UI-138-E04",
-          "from": "OAuth return or link in flight",
-          "trigger": "Handle callback error or unsafe return target",
-          "expected": "no open redirect from returnTo",
+          "from": "Sign-in form ready",
+          "trigger": "Sign in with an unsafe return target",
+          "expected": "no open redirect from returnTo: the callback stays on this origin",
           "inventoryRefs": [
             "A05"
           ],
@@ -8137,29 +8104,12 @@
           "tests": [
             {
               "file": "tests/auth-pages-browser.test.ts",
-              "name": "starts Google sign-in only for a callback inside this origin, whatever return target is requested",
+              "name": "sends email sign-in callbacks only inside this origin, whatever return target is requested",
               "kind": "browser"
             },
             {
-              "file": "e2e/auth-transitions.spec.ts",
-              "name": "Google sign-in never leaves the origin, whatever return target was requested",
-              "kind": "e2e"
-            }
-          ]
-        },
-        {
-          "id": "UI-138-E05",
-          "from": "OAuth return or link in flight",
-          "trigger": "Handle callback error or unsafe return target",
-          "expected": "Google link failure restores original button and current page",
-          "inventoryRefs": [
-            "A05"
-          ],
-          "status": "e2e",
-          "tests": [
-            {
               "file": "e2e/auth.spec.ts",
-              "name": "Google linking restores controls on failure and connects the matching account",
+              "name": "returnTo permits local paths and rejects off-site and protocol-relative destinations",
               "kind": "e2e"
             }
           ]
@@ -8168,7 +8118,7 @@
     },
     {
       "id": "UI-139",
-      "title": "Account methods loading→credential/Google rows; failure→usable recovery",
+      "title": "Account methods loading→password row; failure→usable recovery",
       "area": "Authentication/security",
       "routes": [
         "GET /account/security"
@@ -8201,8 +8151,8 @@
         {
           "id": "UI-139-E01",
           "from": "Account methods loading",
-          "trigger": "Resolve Password/Google rows or fail with recovery",
-          "expected": "Account methods loading→credential/Google rows; failure→usable recovery",
+          "trigger": "Resolve the Password row or fail with recovery",
+          "expected": "Account methods loading→password row; failure→usable recovery",
           "inventoryRefs": [
             "UI-139"
           ],
@@ -8219,7 +8169,7 @@
           "id": "UI-139-E02",
           "from": "Security page loading",
           "trigger": "Resolve/reject method lookup or reveal initial password form",
-          "expected": "skeleton → Password/Google rows",
+          "expected": "skeleton → Password row",
           "inventoryRefs": [
             "A09"
           ],
@@ -8253,7 +8203,7 @@
           "id": "UI-139-E04",
           "from": "Security page loading",
           "trigger": "Resolve/reject method lookup or reveal initial password form",
-          "expected": "configured/unconfigured/connected variants",
+          "expected": "configured/unconfigured variants, including an account from the retired Google sign-in",
           "inventoryRefs": [
             "A09"
           ],
@@ -8266,12 +8216,7 @@
             },
             {
               "file": "e2e/auth.spec.ts",
-              "name": "OAuth callback creates a verified session and initial password requires freshness",
-              "kind": "e2e"
-            },
-            {
-              "file": "e2e/auth.spec.ts",
-              "name": "Google linking restores controls on failure and connects the matching account",
+              "name": "a legacy Google-only account adds an initial password, which requires a fresh session",
               "kind": "e2e"
             }
           ]
@@ -8293,7 +8238,7 @@
             },
             {
               "file": "e2e/auth.spec.ts",
-              "name": "OAuth callback creates a verified session and initial password requires freshness",
+              "name": "a legacy Google-only account adds an initial password, which requires a fresh session",
               "kind": "e2e"
             }
           ]
@@ -8344,7 +8289,7 @@
           "tests": [
             {
               "file": "e2e/auth.spec.ts",
-              "name": "OAuth callback creates a verified session and initial password requires freshness",
+              "name": "a legacy Google-only account adds an initial password, which requires a fresh session",
               "kind": "e2e"
             }
           ]
@@ -8403,7 +8348,7 @@
         {
           "id": "UI-141-E02",
           "from": "Security form ready",
-          "trigger": "Set/change password or connect Google",
+          "trigger": "Set or change password",
           "expected": "initial password validation/confirmation → reload",
           "inventoryRefs": [
             "A10"
@@ -8412,7 +8357,7 @@
           "tests": [
             {
               "file": "e2e/auth.spec.ts",
-              "name": "OAuth callback creates a verified session and initial password requires freshness",
+              "name": "a legacy Google-only account adds an initial password, which requires a fresh session",
               "kind": "e2e"
             }
           ]
@@ -8420,7 +8365,7 @@
         {
           "id": "UI-141-E03",
           "from": "Security form ready",
-          "trigger": "Set/change password or connect Google",
+          "trigger": "Set or change password",
           "expected": "change current/new password with optional revoke-other-sessions → reset form + status",
           "inventoryRefs": [
             "A10"
@@ -8442,7 +8387,7 @@
         {
           "id": "UI-141-E04",
           "from": "Security form ready",
-          "trigger": "Set/change password or connect Google",
+          "trigger": "Set or change password",
           "expected": "failures retain retryable controls",
           "inventoryRefs": [
             "A10"
@@ -8456,29 +8401,7 @@
             },
             {
               "file": "e2e/auth.spec.ts",
-              "name": "OAuth callback creates a verified session and initial password requires freshness",
-              "kind": "e2e"
-            },
-            {
-              "file": "e2e/auth.spec.ts",
-              "name": "Google linking restores controls on failure and connects the matching account",
-              "kind": "e2e"
-            }
-          ]
-        },
-        {
-          "id": "UI-141-E05",
-          "from": "Security form ready",
-          "trigger": "Set/change password or connect Google",
-          "expected": "Google Connect → returned OAuth URL",
-          "inventoryRefs": [
-            "A10"
-          ],
-          "status": "e2e",
-          "tests": [
-            {
-              "file": "e2e/auth.spec.ts",
-              "name": "Google linking restores controls on failure and connects the matching account",
+              "name": "a legacy Google-only account adds an initial password, which requires a fresh session",
               "kind": "e2e"
             }
           ]
@@ -8486,8 +8409,8 @@
         {
           "id": "UI-141-E06",
           "from": "Security form ready",
-          "trigger": "Set/change password or connect Google",
-          "expected": "Back to workspace and sign-out",
+          "trigger": "Set or change password",
+          "expected": "Back to home and sign-out",
           "inventoryRefs": [
             "A10"
           ],
@@ -8501,57 +8424,6 @@
             {
               "file": "e2e/auth.spec.ts",
               "name": "sign-out failure retries, clears both tabs and protects back-forward history",
-              "kind": "e2e"
-            }
-          ]
-        }
-      ]
-    },
-    {
-      "id": "UI-142",
-      "title": "Connect Google pending→redirect or failure→retry",
-      "area": "Authentication/security",
-      "routes": [
-        "GET /account/security"
-      ],
-      "sources": [
-        "src/routes/auth-pages.ts"
-      ],
-      "roles": [
-        "anonymous",
-        "owner",
-        "admin",
-        "member",
-        "outsider"
-      ],
-      "viewports": [
-        320,
-        375,
-        430,
-        1440
-      ],
-      "engines": [
-        "chromium",
-        "firefox",
-        "webkit"
-      ],
-      "status": "e2e",
-      "auditEvidence": "UNTESTED",
-      "auditNote": "auth-pages.ts linkGoogle; no controller integration assertion found",
-      "edges": [
-        {
-          "id": "UI-142-E01",
-          "from": "Google Connect button ready",
-          "trigger": "Start linking and return redirect or retryable failure",
-          "expected": "Connect Google pending→redirect or failure→retry",
-          "inventoryRefs": [
-            "UI-142"
-          ],
-          "status": "e2e",
-          "tests": [
-            {
-              "file": "e2e/auth.spec.ts",
-              "name": "Google linking restores controls on failure and connects the matching account",
               "kind": "e2e"
             }
           ]
@@ -9470,11 +9342,6 @@
               "file": "tests/landing-browser.test.ts",
               "name": "shows all content without motion under reduced-motion, print and no-JavaScript rendering",
               "kind": "browser"
-            },
-            {
-              "file": "tests/landing-browser.test.ts",
-              "name": "restores ready authentication buttons after Back and after a persisted page restore",
-              "kind": "browser"
             }
           ]
         },
@@ -9542,172 +9409,6 @@
             {
               "file": "tests/landing-browser.test.ts",
               "name": "shows all content without motion under reduced-motion, print and no-JavaScript rendering",
-              "kind": "browser"
-            }
-          ]
-        },
-        {
-          "id": "UI-153-E06",
-          "from": "Landing content unshown",
-          "trigger": "Load, scroll, restore, print, or disable animation/JavaScript",
-          "expected": "navigation back restores ready auth buttons",
-          "inventoryRefs": [
-            "A02"
-          ],
-          "status": "browser",
-          "tests": [
-            {
-              "file": "tests/landing-browser.test.ts",
-              "name": "restores ready authentication buttons after Back and after a persisted page restore",
-              "kind": "browser"
-            }
-          ]
-        }
-      ]
-    },
-    {
-      "id": "UI-154",
-      "title": "Landing OAuth pending and failure recovery",
-      "area": "Pages and entry",
-      "routes": [
-        "GET /"
-      ],
-      "sources": [
-        "src/routes/landing.ts"
-      ],
-      "roles": [
-        "anonymous",
-        "owner",
-        "admin",
-        "member",
-        "outsider"
-      ],
-      "viewports": [
-        320,
-        375,
-        430,
-        1440
-      ],
-      "engines": [
-        "chromium",
-        "firefox",
-        "webkit"
-      ],
-      "status": "browser",
-      "auditEvidence": "NOT_IN_AUDIT",
-      "auditNote": "Additional family from the modernization inventory/route ledger.",
-      "edges": [
-        {
-          "id": "UI-154-E01",
-          "from": "Landing Google CTA ready",
-          "trigger": "Start OAuth and resolve/reject returned URL",
-          "expected": "Landing OAuth pending and failure recovery",
-          "inventoryRefs": [],
-          "status": "browser",
-          "tests": [
-            {
-              "file": "tests/landing-browser.test.ts",
-              "name": "starts Google sign-in with a JSON request only, from the originating call-to-action",
-              "kind": "browser"
-            },
-            {
-              "file": "tests/landing-browser.test.ts",
-              "name": "guards every authentication action while a request is pending and gives feedback only on the originating call-to-action",
-              "kind": "browser"
-            },
-            {
-              "file": "tests/landing-browser.test.ts",
-              "name": "restores controls, focus and an email sign-in link after a rejected, malformed or missing OAuth response",
-              "kind": "browser"
-            },
-            {
-              "file": "tests/landing-browser.test.ts",
-              "name": "navigates to the returned authorization URL and starts over from a clean state on the next attempt",
-              "kind": "browser"
-            }
-          ]
-        },
-        {
-          "id": "UI-154-E02",
-          "from": "Landing auth CTA ready",
-          "trigger": "Start Google sign-in and resolve/reject response",
-          "expected": "JSON request only",
-          "inventoryRefs": [
-            "A03"
-          ],
-          "status": "browser",
-          "tests": [
-            {
-              "file": "tests/landing-browser.test.ts",
-              "name": "starts Google sign-in with a JSON request only, from the originating call-to-action",
-              "kind": "browser"
-            }
-          ]
-        },
-        {
-          "id": "UI-154-E03",
-          "from": "Landing auth CTA ready",
-          "trigger": "Start Google sign-in and resolve/reject response",
-          "expected": "all auth actions guarded while pending",
-          "inventoryRefs": [
-            "A03"
-          ],
-          "status": "browser",
-          "tests": [
-            {
-              "file": "tests/landing-browser.test.ts",
-              "name": "guards every authentication action while a request is pending and gives feedback only on the originating call-to-action",
-              "kind": "browser"
-            }
-          ]
-        },
-        {
-          "id": "UI-154-E04",
-          "from": "Landing auth CTA ready",
-          "trigger": "Start Google sign-in and resolve/reject response",
-          "expected": "originating CTA owns busy/error feedback",
-          "inventoryRefs": [
-            "A03"
-          ],
-          "status": "browser",
-          "tests": [
-            {
-              "file": "tests/landing-browser.test.ts",
-              "name": "guards every authentication action while a request is pending and gives feedback only on the originating call-to-action",
-              "kind": "browser"
-            }
-          ]
-        },
-        {
-          "id": "UI-154-E05",
-          "from": "Landing auth CTA ready",
-          "trigger": "Start Google sign-in and resolve/reject response",
-          "expected": "bad/missing URL or rejected request restores controls/focus and email sign-in link",
-          "inventoryRefs": [
-            "A03"
-          ],
-          "status": "browser",
-          "tests": [
-            {
-              "file": "tests/landing-browser.test.ts",
-              "name": "restores controls, focus and an email sign-in link after a rejected, malformed or missing OAuth response",
-              "kind": "browser"
-            }
-          ]
-        },
-        {
-          "id": "UI-154-E06",
-          "from": "Landing auth CTA ready",
-          "trigger": "Start Google sign-in and resolve/reject response",
-          "expected": "success navigates returned URL",
-          "inventoryRefs": [
-            "A03"
-          ],
-          "status": "browser",
-          "tests": [
-            {
-              "file": "tests/landing-browser.test.ts",
-              "name": "navigates to the returned authorization URL and starts over from a clean state on the next attempt",
               "kind": "browser"
             }
           ]
@@ -12518,6 +12219,16 @@
         "id": "UI-160",
         "title": "Select popup positioning and dismissal",
         "reason": "Its surface left with organizations, projects, teams, invitations and API keys (#286)."
+      },
+      {
+        "id": "UI-142",
+        "title": "Connect Google pending→redirect or failure→retry",
+        "reason": "Google sign-in was removed (#286); email sign-in remains until GitHub sign-in."
+      },
+      {
+        "id": "UI-154",
+        "title": "Landing OAuth pending and failure recovery",
+        "reason": "Google sign-in was removed (#286); email sign-in remains until GitHub sign-in."
       }
     ],
     "routeLedger": [
@@ -12867,6 +12578,10 @@
       {
         "id": "P12",
         "reason": "Every transition it named belonged to organizations, projects, teams, invitations or API keys (#286)."
+      },
+      {
+        "id": "A03",
+        "reason": "Every transition it named belonged to the removed Google sign-in (#286)."
       }
     ]
   }

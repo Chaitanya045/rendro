@@ -13,7 +13,7 @@ const optionalSettings = [
 
 beforeEach(() => {
   vi.resetModules();
-  for (const key of [...optionalSettings, "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "BASE_URL", "PORT", "AUTH_SECRET", "RETENTION_SECRET"]) {
+  for (const key of [...optionalSettings, "BASE_URL", "PORT", "AUTH_SECRET", "RETENTION_SECRET"]) {
     vi.stubEnv(key, undefined);
   }
   for (const [key, value] of Object.entries(requiredSettings)) vi.stubEnv(key, value);
@@ -25,7 +25,7 @@ afterEach(() => {
 });
 
 describe("Worker environment validation", () => {
-  it("loads with only the four required settings, without Google credentials", async () => {
+  it("loads with only the four required settings", async () => {
     const config = await import("../src/config");
     expect(config).toMatchObject({
       ...requiredSettings,
@@ -44,7 +44,7 @@ describe("Worker environment validation", () => {
     expect(Object.keys(config).filter(name => /AUTH_SECRET|RETENTION/.test(name))).toEqual([]);
   });
 
-  it("starts the Worker and serves health without Google credentials or Convex URLs", async () => {
+  it("starts the Worker and serves health without Convex URLs", async () => {
     vi.stubEnv("NODE_ENV", "production");
     const { default: worker } = await import("../src/worker");
     const response = await worker.request("http://localhost/health");
@@ -106,9 +106,7 @@ describe("Worker environment validation", () => {
     await expect(import("../src/config")).resolves.toMatchObject({ REPO_CONTENT_KEY_PREVIOUS: "test-repo-content-key-previous-0123456789" });
   });
 
-  it("ignores unused Google/BASE_URL settings and the Node-only PORT", async () => {
-    vi.stubEnv("GOOGLE_CLIENT_ID", "");
-    vi.stubEnv("GOOGLE_CLIENT_SECRET", "");
+  it("ignores an unused BASE_URL and the Node-only PORT", async () => {
     vi.stubEnv("BASE_URL", "not a URL");
     vi.stubEnv("PORT", "not a port");
     await expect(import("../src/config")).resolves.toMatchObject(requiredSettings);

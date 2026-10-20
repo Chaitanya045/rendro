@@ -1,10 +1,9 @@
-import { createHash, randomBytes } from "node:crypto";
+import { randomBytes } from "node:crypto";
 import { createServer, request, type IncomingMessage, type RequestListener } from "node:http";
 import { createServer as createTlsServer } from "node:https";
 import { readFile, writeFile } from "node:fs/promises";
 import type { Duplex } from "node:stream";
 import { join } from "node:path";
-import { SignJWT, generateKeyPair, exportJWK } from "jose";
 import { run } from "./backend";
 
 export async function listen(handler: RequestListener) {
@@ -113,7 +112,7 @@ export async function startImageHost() {
   };
 }
 
-/** No external forwarding: HTTPS mail/Google requests terminate in this fixture.
+/** No external forwarding: HTTPS mail requests terminate in this fixture.
  * The only forwarded HTTP origins are the harness's own Worker and Convex.
  */
 export async function startIdentityFixtures(directory: string) {
@@ -126,14 +125,11 @@ export async function startIdentityFixtures(directory: string) {
   await run("openssl", ["req", "-x509", "-newkey", "rsa:2048", "-nodes", "-keyout", caKey, "-out", caCert,
     "-days", "1", "-subj", "/CN=Rendro disposable E2E CA", "-addext", "basicConstraints=critical,CA:TRUE"]);
   await run("openssl", ["req", "-newkey", "rsa:2048", "-nodes", "-keyout", key, "-out", csr, "-subj", "/CN=api.resend.com"]);
-  await writeFile(extensions, "basicConstraints=critical,CA:FALSE\nkeyUsage=digitalSignature,keyEncipherment\nextendedKeyUsage=serverAuth\nsubjectAltName=DNS:api.resend.com,DNS:oauth2.googleapis.com,DNS:www.googleapis.com\n");
+  await writeFile(extensions, "basicConstraints=critical,CA:FALSE\nkeyUsage=digitalSignature,keyEncipherment\nextendedKeyUsage=serverAuth\nsubjectAltName=DNS:api.resend.com\n");
   await run("openssl", ["x509", "-req", "-in", csr, "-CA", caCert, "-CAkey", caKey, "-CAcreateserial", "-out", certificate, "-days", "1", "-extfile", extensions]);
   const mail: Mail[] = [];
   const allowedOrigins = new Set<string>();
   const blocked = new Set<string>();
-  const codes = new Map<string, { challenge: string; redirect: string; email: string }>();
-  const signing = await generateKeyPair("RS256", { extractable: true });
-  const jwk = { ...await exportJWK(signing.publicKey), alg: "RS256", kid: "fixture-google" };
   const handle: RequestListener = (req, res) => {
     void (async () => {
       const url = new URL(req.url ?? "/", `https://${req.headers.host}`);
@@ -141,22 +137,6 @@ export async function startIdentityFixtures(directory: string) {
         mail.push(JSON.parse(await body(req)) as Mail);
         res.setHeader("Content-Type", "application/json");
         res.end(JSON.stringify({ id: `mail-${mail.length}` }));
-      } else if (url.origin === "https://oauth2.googleapis.com" && url.pathname === "/token" && req.method === "POST") {
-        const params = new URLSearchParams(await body(req));
-        const code = params.get("code") ?? "";
-        const stored = codes.get(code);
-        codes.delete(code);
-        if (!stored || stored.redirect !== params.get("redirect_uri") || params.get("client_id") !== "e2e-google"
-          || createHash("sha256").update(params.get("code_verifier") ?? "").digest("base64url") !== stored.challenge) {
-          res.writeHead(400).end(JSON.stringify({ error: "invalid_grant" })); return;
-        }
-        const idToken = await new SignJWT({ email: stored.email, email_verified: true, name: "OAuth Fixture" })
-          .setProtectedHeader({ alg: "RS256", kid: jwk.kid }).setSubject(`e2e-google-${stored.email}`).setAudience("e2e-google")
-          .setIssuer("https://accounts.google.com").setIssuedAt().setExpirationTime("1h").sign(signing.privateKey);
-        res.setHeader("Content-Type", "application/json");
-        res.end(JSON.stringify({ access_token: "local-access", token_type: "Bearer", expires_in: 3600, id_token: idToken }));
-      } else if (url.origin === "https://www.googleapis.com" && url.pathname === "/oauth2/v3/certs") {
-        res.setHeader("Content-Type", "application/json"); res.end(JSON.stringify({ keys: [jwk] }));
       } else {
         blocked.add(url.origin); res.writeHead(403).end("Blocked fixture destination");
       }
@@ -176,7 +156,7 @@ export async function startIdentityFixtures(directory: string) {
     req.pipe(upstream);
   });
   proxy.server.on("connect", (req, socket, head) => {
-    if (!["api.resend.com:443", "oauth2.googleapis.com:443", "www.googleapis.com:443"].includes(req.url ?? "")) {
+    if (req.url !== "api.resend.com:443") {
       blocked.add(req.url ?? "unknown"); socket.end("HTTP/1.1 403 Forbidden\r\n\r\n"); return;
     }
     sockets.add(socket); socket.on("close", () => sockets.delete(socket));
@@ -188,18 +168,6 @@ export async function startIdentityFixtures(directory: string) {
     const url = new URL(req.url ?? "/", "http://fixture.invalid");
     res.setHeader("Content-Type", "application/json");
     if (url.pathname === "/mail") { res.end(JSON.stringify(mail.filter(item => item.to === url.searchParams.get("to")))); return; }
-    if (url.pathname === "/authorize") {
-      const redirect = url.searchParams.get("redirect_uri") ?? "";
-      if (!URL.canParse(redirect) || !allowedOrigins.has(new URL(redirect).origin) || url.searchParams.get("client_id") !== "e2e-google"
-        || !url.searchParams.get("state") || !url.searchParams.get("code_challenge")) { res.writeHead(400).end("{}"); return; }
-      const code = randomBytes(24).toString("hex");
-      codes.set(code, { redirect, challenge: url.searchParams.get("code_challenge") ?? "", email: url.searchParams.get("fixture_email") ?? "oauth@example.test" });
-      const callback = new URL(redirect);
-      callback.searchParams.set("code", code); callback.searchParams.set("state", url.searchParams.get("state") ?? "");
-      if (url.searchParams.get("fixture_mode") === "denial") { callback.searchParams.delete("code"); callback.searchParams.set("error", "access_denied"); codes.delete(code); }
-      if (url.searchParams.get("fixture_mode") === "state-mismatch") callback.searchParams.set("state", "tampered-state");
-      res.end(JSON.stringify({ location: callback.href })); return;
-    }
     res.writeHead(404).end("{}");
   });
   return {

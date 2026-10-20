@@ -1,7 +1,6 @@
 import { createHash } from "node:crypto";
 import { test as base, expect, type BrowserContext } from "@playwright/test";
 import { readFile } from "node:fs/promises";
-import { localHttp } from "./backend";
 import type { Seed } from "./seed";
 
 type Checks = { secondContext: BrowserContext; networkGuard: void; cspViolations: string[]; seed: Seed };
@@ -58,14 +57,6 @@ export async function guardContext(context: BrowserContext, baseURL: string | un
   await context.route("**/*", async route => {
     const url = new URL(route.request().url());
     if (url.origin === baseURL || url.origin === process.env.RENDRO_E2E_CONVEX) return route.continue();
-    if (url.origin === "https://accounts.google.com" && url.pathname === "/o/oauth2/v2/auth") {
-      const result = await localHttp(`${process.env.RENDRO_E2E_MAIL}/authorize${url.search}`);
-      if (result.status !== 200) throw new Error("Local OAuth authorization failed");
-      const { location } = JSON.parse(result.body) as { location: string };
-      // WebKit cannot fulfill an intercepted request with a 3xx response.
-      // Model the provider's completion page, retaining a real browser callback navigation.
-      return route.fulfill({ contentType: "text/html", body: `<!doctype html><title>Local OAuth fixture</title><script>location.replace(${JSON.stringify(location).replaceAll("<", "\\u003c")})</script>` });
-    }
     // Fonts and viewer styles are self-hosted: any CDN request is unexpected and fails the test.
     unexpectedOrigins.add(url.origin);
     return route.abort("blockedbyclient");
