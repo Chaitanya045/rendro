@@ -1813,8 +1813,9 @@ init). Shiki took 4.6 s warm, with 320 ms of init for 31 grammars.
   - Fragments gain `user-content-`, matching the prefixed ids.
   - Relative and `/`-rooted references resolve against the document's repo path, the
     way GitHub resolves README links, and are emitted relative to the document's own
-    directory, so the frame resolves them under whatever commit, branch or ticket base
-    it was loaded from without rewriting the HTML (#242). A reference that leaves the
+    directory, so the frame resolves them under whatever commit or branch URL it was
+    loaded from without rewriting its links (#242); a private frame only prefixes its
+    repository images with an asset ticket (#293). A reference that leaves the
     repository, or encodes a separator or control character, loses its `href`.
   - External links get `rel="nofollow noopener noreferrer"`. Images get
     `loading="lazy" decoding="async" referrerpolicy="no-referrer"`.
@@ -2145,7 +2146,7 @@ This section covers how a reader gets an ingested snapshot (#234, part of epic #
 | `…[/{ref}]/files/{path}` | A rendered page as a document frame, or an image's bytes |
 | `…[/{ref}]/tree?dir=&cursor=` | One sidebar directory page (JSON), as the viewer's lazy tree reads it |
 | `…[/{ref}]/search?q=&limit=` | Full-text search over the snapshot (#251), JSON; optional binding (`REPO_SEARCH`) |
-| `/r/{owner}/{repo}/@{commit}/view/{ticket}/files/{path}` | Private repositories: the same, authorized by the asset ticket alone |
+| `/r/{owner}/{repo}/@{commit}/view/{ticket}/files/{path}` | Private repositories: an image's bytes, authorized by the asset ticket alone. Never a page: a page path here is no URL at all, the plain 404 (#293) |
 | `/r/{owner}/{repo}/@{commit}/viewer-ticket?manifestKey={commit}` | Ticket renewal for the trusted shell (cookie-authorized, JSON) |
 | `POST /r/{owner}/{repo}/comment-access[?path=]` | Comment access for the trusted shell: authorized like a page view, then recorded in Convex (same-origin, JSON). With `?path=`, the answer also carries that page's first threads (#284). See [Comments on Repository Docs](#comments-on-repository-docs-github-pivot-p6) |
 | `/__repo-cache/tiered/v1/{sig}/{epoch}/{key}` | Not a reader URL: the Worker's own cacheable subrequest for one public immutable object (see [Read order and caches](#read-order-and-caches), #242). The signature covers `public\n{epoch}\n{key}` and `{epoch}` is the repository's visibility epoch; a bad signature, a stale epoch, an unknown object or an unconfigured Worker is a plain 404 |
@@ -2185,7 +2186,11 @@ An unknown answer from the session, the epoch store or the permission source is 
 
 ### Asset tickets for private frames
 
-The document frame is an opaque sandbox (#79), and requests it makes carry no cookies. A private frame's `<base>` therefore points at `/r/{owner}/{repo}/@{commit}/view/{ticket}/files/…`, where the ticket is a capability for the same user and repository bound to that commit instead of a session (15 minutes). Ticket requests check the signature, repository, commit and the epoch on every request. Renewal reuses the private viewer's protocol: the frame asks the trusted shell, the shell calls `…/viewer-ticket` with its cookie, and resource URLs are swapped in place. A ticket cannot renew itself.
+The document frame is an opaque sandbox (#79), and requests it makes carry no cookies. A private frame's repository images therefore load from `/r/{owner}/{repo}/@{commit}/view/{ticket}/files/…`, where the ticket is a capability for the same user and repository bound to that commit instead of a session. It lives five minutes, as long as the capability cookie (`TICKET_TTL_SECONDS`). Ticket requests check the signature, repository, commit and the epoch on every request.
+
+A ticket reaches images only (#293). The URL grammar has no page under `/view/{ticket}/`: such a path is the plain 404 of an unknown URL, with or without a cookie, before any session, ticket or storage read. Pages are always read with the cookie. The frame has no `<base>`, so its links, footnotes and fragments resolve against the frame's own cookie-authorized URL, and a link the reader middle-clicks, ctrl-clicks or copies is that URL, never a ticket. Only `img src` values that are relative to the document get the ticket prefix (`ticketImageSlots` in `frame.ts`). The split depends only on the render, so it is derived once per isolate, and each request joins it with its own ticket. Frame CSP is `base-uri 'none'`.
+
+Renewal reuses the private viewer's protocol: the frame asks the trusted shell, the shell calls `…/viewer-ticket` with its cookie, and image URLs are swapped in place. A ticket cannot renew itself. The frame's client is told when the server issued its ticket and renews halfway through its life (2.5 minutes), checking once a minute and on focus, page show and resource errors, so a long-open page keeps loading images (a frame from the browser cache, with an older ticket, renews at once). A cookie that has lapsed meanwhile is re-decided through the session at the renewal request.
 
 ### Revocation epochs, and the contract P5 implements
 
@@ -2215,10 +2220,11 @@ Every immutable object is read in that order: memory, then — for a public repo
 | Response | `Cache-Control` | Validator |
 |---|---|---|
 | Shell | `private, no-cache` (never `no-store`; each response has its own nonce) | none |
-| Frame or image at a commit URL | `public` or `private`, `max-age=31536000, immutable` | Public frames `"page-<render key>-<template tag>"`; images `"git-<blob SHA>"`. A 304 needs no object read |
-| Frame or image at a branch URL | `public` or `private`, `max-age=10, stale-if-error=86400` | Same |
-| Private frame | as above | none: it embeds a per-reader ticket |
-| Ticket-authorized image | `private, max-age=900` | `"git-<blob SHA>"` |
+| Public frame or image at a commit URL | `public, max-age=31536000, immutable` | Public frames `"page-<render key>-<template tag>"`; images `"git-<blob SHA>"`. A 304 needs no object read |
+| Private frame, image or tree page at a commit URL | `private, max-age=300`: a browser keeps it no longer than the capability cookie lasts, so a copy never outlives a session or an access decision by more than that (#293) | Images and tree pages as public ones |
+| Frame or image at a branch URL | `public` or `private`, `max-age=10, stale-if-error=86400` | Public frames and images as above |
+| Private frame | as above | none: it embeds a per-reader ticket with the same five minutes, which a revalidated copy would keep past its expiry |
+| Ticket-authorized image | `private, max-age=300` (the ticket's lifetime) | `"git-<blob SHA>"` |
 | Tree page | as the URL's ref | `"tree-<commit>-r<renderer>"` |
 | Renewal, denials, faults | `private, no-store` | none |
 
@@ -2260,7 +2266,7 @@ The shell is `renderScopedDocumentShell` with the lazy tree, as for projects and
 - Private shells add the private viewer's parent script (ticket renewal) and its update notice.
 - The share button copies the viewer URL ("Copy link").
 
-The frame wraps the sanitized page in Rendro's markup: the comment widget (#254), the hashed `repo-doc` stylesheet (GitHub-style typography plus `HIGHLIGHT_CSS`, kept identical by a test), the navigation bridge and, for private repositories, the ticket base and renewal client. Ingest emits repository-internal links and images relative to the document's own directory (see "Rendering and sanitizing"), so the frame resolves them under whatever commit, branch or ticket base it was loaded from without rewriting the HTML (#242). External images that ingest wrote as signed image-proxy paths (`/img/<sig>/<url>`, see "Image proxy") stay absolute, but only when `verifyImageProxyPath` accepts them, so a repository folder named `img` still resolves inside the repository. The derived body depends only on the render key, so it is derived once per isolate and kept in memory (a variant key prefixes `legacy-` for a version-2 render, which the read path still rewrites to the old `/<repo path>` form until the rebuild finishes). A page ingest could not render shows a notice instead.
+The frame wraps the sanitized page in Rendro's markup: the comment widget (#254), the hashed `repo-doc` stylesheet (GitHub-style typography plus `HIGHLIGHT_CSS`, kept identical by a test), the navigation bridge and, for private repositories, the ticketed image URLs and renewal client (see "Asset tickets for private frames"). Ingest emits repository-internal links and images relative to the document's own directory (see "Rendering and sanitizing"), so the frame resolves them under whatever commit or branch URL it was loaded from without rewriting its links (#242). External images that ingest wrote as signed image-proxy paths (`/img/<sig>/<url>`, see "Image proxy") stay absolute, but only when `verifyImageProxyPath` accepts them, so a repository folder named `img` still resolves inside the repository. The derived body depends only on the render key, so it is derived once per isolate and kept in memory (a variant key prefixes `legacy-` for a version-2 render, which the read path still rewrites to the old `/<repo path>` form until the rebuild finishes, and `private-` for a private frame's image split). A page ingest could not render shows a notice instead.
 
 ### Bindings and configuration
 
@@ -2542,7 +2548,7 @@ A signature covers the body, not the delivery ID, and payloads carry no timestam
 
 "Re-checked" sets `check`: before that record grants anything again, the directory asks GitHub with an installation token (`GET /repos/{o}/{r}`, or `GET /installation/repositories` for an installation, whose token GitHub refuses once suspended). A replayed `publicized` or `unsuspend` therefore grants nothing GitHub does not confirm. Reaching a user means a new generation: their mirror and single-repository checks are no longer used, and the next authorize asks GitHub. People events never trust the payload's direction either; GitHub's listing decides.
 
-**Order.** The plan updates the registry, then reaches users (mirrors are now stale, so `authorize` already asks GitHub and denies), then queues the epochs, remembers the delivery and writes the epochs. Epochs are written from a durable outbox (`pending:<user>`): inline after each delivery, and by the Durable Object's alarm, which also retries failed KV writes every 10 s. Each value is `max(now, previous + 1)` in milliseconds, written by one serialized pass at a time, so a user's epoch only grows. KV keys expire after an hour (`EPOCH_TTL_SECONDS`): an epoch outlives every capability minted before it (cookies five minutes, tickets fifteen), and KV holds only recently bumped users, which is what KV Instant needs.
+**Order.** The plan updates the registry, then reaches users (mirrors are now stale, so `authorize` already asks GitHub and denies), then queues the epochs, remembers the delivery and writes the epochs. Epochs are written from a durable outbox (`pending:<user>`): inline after each delivery, and by the Durable Object's alarm, which also retries failed KV writes every 10 s. Each value is `max(now, previous + 1)` in milliseconds, written by one serialized pass at a time, so a user's epoch only grows. KV keys expire after an hour (`EPOCH_TTL_SECONDS`): an epoch outlives every capability minted before it (cookies and tickets five minutes), and KV holds only recently bumped users, which is what KV Instant needs.
 
 **Races.** The Durable Object's input gates open while it awaits GitHub, so a webhook can land mid-refresh or mid-check. Two rules keep a stale grant out:
 
@@ -2580,8 +2586,8 @@ From GitHub's change to the first denied view:
 |---|---|
 | Covered by a webhook, KV Classic | GitHub's delivery latency (unpublished; usually seconds) + the control Worker (measured below) + the epoch reaching the reader's colo: KV Classic is visible elsewhere within about 60 s, the serving Worker's `cacheTtl: 60` adds up to a minute, so expect 60–90 s |
 | Covered by a webhook, KV Instant | Delivery latency + under a second (p99 256 ms replication); the serving Worker's `cacheTtl` would then be the floor to lower |
-| If the epoch never arrives (KV outage) | The cookie's five minutes for pages and branch views; fifteen minutes for frame resources through a ticket already issued |
-| No webhook (enterprise policy, a lost delivery the reconciler has not redelivered) | Mirror TTL + cookie lifetime: at most ten minutes for pages (tested: `tests/repo-access-revocation.test.ts`); a ticket issued just before can add its fifteen minutes for frame resources of that commit |
+| If the epoch never arrives (KV outage) | The cookie's five minutes for pages and branch views; five minutes for frame images through a ticket already issued |
+| No webhook (enterprise policy, a lost delivery the reconciler has not redelivered) | Mirror TTL + cookie lifetime: at most ten minutes for pages (tested: `tests/repo-access-revocation.test.ts`); a ticket issued just before can add its five minutes for frame images of that commit |
 | Repository made private, anonymous readers | Delivery latency + the serving isolate's one-minute public-repository memory (no epoch involved) |
 
 Measured on workerd (`tests/repo-access-workerd.test.ts`, 2026-10-18, final code, local machine at load about 10, 25 revocations per run, two runs). The production Worker reads through the real control Worker over the service binding. KV is Miniflare's, with no propagation delay, so "delivery to first denied view" is only the Workers' own share. `/health` is the local stack's floor. The refresh rows include the harness's round trip from workerd to the fake GitHub in the Node test process, which dominates them.
@@ -2633,7 +2639,7 @@ A single-repository check that finds the repository accessible during the window
 
 - One GitHub App has one webhook URL, but push events go to the ingest Worker (#229) and permission events here. P1 decides on a single ingress; the recommendation is the control Worker verifying once and forwarding `push` to the ingest queue.
 - The account hand-over is a service-binding call; if P1's sign-in runs in Convex rather than a Worker, it needs an authenticated public path instead.
-- Asset tickets live fifteen minutes and are only epoch-checked, so a missed webhook can leave frame resources of an open commit readable that long; five minutes would match the cookie.
+- Asset tickets are only epoch-checked, so a missed webhook can leave an open commit's frame images readable for a ticket's five minutes (the cookie's lifetime since #293).
 - With KV Instant, the serving Worker's `cacheTtl: 60` becomes the dominant term.
 - Commit-pinned frames of public repositories are cached `public, immutable`; a repository made private stays readable from browser caches that already hold a page.
 

@@ -76,10 +76,6 @@ export function clearSnapshotMemory(): void {
   pointers.clear();
 }
 
-/** A page is anything the renderer handles; everything else in a manifest is an asset. */
-export function isPagePath(path: string): boolean {
-  return /\.(?:md|markdown|mdx|html?)$/i.test(path);
-}
 
 function parseJson(bytes: Uint8Array): unknown {
   try {

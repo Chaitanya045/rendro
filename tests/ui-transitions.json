@@ -25416,7 +25416,8 @@
         "src/repo-read/authorize.ts",
         "src/repo-read/frame.ts",
         "src/repo-read/routes.ts",
-        "src/repo-read/tree.ts"
+        "src/repo-read/tree.ts",
+        "src/viewer/client.ts"
       ],
       "roles": [
         "anonymous",
@@ -25505,7 +25506,7 @@
           "id": "UI-161-E04",
           "from": "Private repository, signed-in reader with access",
           "trigger": "Open the repository",
-          "expected": "Granted once through the permission source; HttpOnly SameSite=Lax capability cookie set; later requests skip the session and the source; images load through the frame's asset ticket",
+          "expected": "Granted once through the permission source; HttpOnly SameSite=Lax capability cookie set; later requests skip the session and the source; images load through a five-minute asset ticket in their own URLs; the frame is cached privately for at most five minutes, never immutable",
           "inventoryRefs": [
             "UI-161"
           ],
@@ -25518,7 +25519,12 @@
             },
             {
               "file": "tests/repo-read-routes.test.ts",
-              "name": "serves private images through the ticket alone, privately, and refuses a tampered or foreign ticket before any read",
+              "name": "serves a private frame with ticketed images only, the renewal client, a five-minute cache and no validator",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/repo-read-routes.test.ts",
+              "name": "serves private images through the ticket alone, privately for the ticket's lifetime, and refuses a tampered or foreign ticket before any read",
               "kind": "unit"
             },
             {
@@ -25770,6 +25776,82 @@
               "file": "tests/repo-access-directory.test.ts",
               "name": "denies anonymous readers as soon as a repository is made private",
               "kind": "unit"
+            }
+          ]
+        },
+        {
+          "id": "UI-161-E15",
+          "from": "Private repository document open in the viewer",
+          "trigger": "Middle-click, ctrl-click or copy the address of a link inside the rendered page",
+          "expected": "The new tab (or copied address) is the link's cookie-authorized frame URL under …/files/, which the reader's own cookie opens; no link in a private frame names an asset ticket",
+          "inventoryRefs": [
+            "UI-161"
+          ],
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/repo-read-routes.test.ts",
+              "name": "resolves every link of a private frame to a cookie-authorized path, never a ticket",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/repo-read-browser.test.ts",
+              "name": "opens a middle-clicked or ctrl-clicked link of a private frame at its cookie-authorized URL, with no ticket in it",
+              "kind": "browser"
+            }
+          ]
+        },
+        {
+          "id": "UI-161-E16",
+          "from": "Any reader holding an asset-ticket URL",
+          "trigger": "Open a page path under the ticket, with no cookie, the reader's own cookie or another user's session",
+          "expected": "The plain 404 of an unknown URL before any session, ticket or storage read; the ticket still serves the commit's images",
+          "inventoryRefs": [
+            "UI-161"
+          ],
+          "status": "unit",
+          "tests": [
+            {
+              "file": "tests/repo-read-routes.test.ts",
+              "name": "serves a ticket's images but answers every page under it with the plain 404 of an unknown path",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/repo-read-units.test.ts",
+              "name": "rejects %s",
+              "kind": "unit"
+            }
+          ]
+        },
+        {
+          "id": "UI-161-E17",
+          "from": "Private repository document left open in the viewer",
+          "trigger": "The frame's asset ticket reaches half its five-minute life (or the frame came from the browser cache with an older ticket)",
+          "expected": "The frame asks the trusted shell, which renews with its cookie (re-deciding a lapsed one); image URLs swap to the fresh ticket in place and keep loading, with links, scroll and drafts untouched; an expired ticket is the plain 404",
+          "inventoryRefs": [
+            "UI-161"
+          ],
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/repo-read-routes.test.ts",
+              "name": "expires a ticket with the capability cookie's five minutes, and the shell renews it for a page left open",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/viewer-hidden-renewal.test.ts",
+              "name": "renews the images' ticket halfway through its five minutes, and leaves links and other images alone",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/viewer-hidden-renewal.test.ts",
+              "name": "renews at once when the frame came from the browser cache with an older ticket",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/repo-read-browser.test.ts",
+              "name": "renews a private frame's image ticket through the shell, with no <base>, and reloads the image under the new ticket",
+              "kind": "browser"
             }
           ]
         }

@@ -179,7 +179,7 @@ describe("repository read path on workerd", () => {
     const frame = await get(`/r/octo/closed-docs/@${privateCommit}/files/docs/index.md`, { cookie: cookie.split("; ")[1] + "; " + reader });
     const html = await frame.text();
     expect(html).toContain("Closed home");
-    const prefix = /<base data-rendro-viewer href="([^"]+\/files\/)/.exec(html)?.[1] as string;
+    const prefix = /<img src="([^"]+\/view\/[^/"]+\/files\/)/.exec(html)?.[1] as string;
     const image = await get(`${prefix}docs/img/logo.png`);
     expect(image.status).toBe(200);
     await image.arrayBuffer();

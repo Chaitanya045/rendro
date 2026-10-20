@@ -38,7 +38,8 @@ export type Authorization =
   | { kind: "unavailable"; retryAfter: string };
 
 export const CAPABILITY_TTL_SECONDS = 5 * 60;
-export const TICKET_TTL_SECONDS = 15 * 60;
+/** An asset ticket lives no longer than the cookie it was minted under; the frame renews it halfway (#293). */
+export const TICKET_TTL_SECONDS = CAPABILITY_TTL_SECONDS;
 const PUBLIC_TTL_MS = 60_000;
 const ANONYMOUS_DENIAL_TTL_MS = 30_000;
 const REFRESH_TTL_MS = 60_000;
@@ -202,7 +203,7 @@ export async function authorizeRepo(deps: AuthorizeDependencies, request: Reques
   }
 }
 
-/** An asset ticket for `commit`, carried in a private document frame's base URL. */
+/** An asset ticket for `commit`, carried only in a private document frame's image URLs (#293). */
 export async function mintTicket(deps: Pick<AuthorizeDependencies, "secret" | "now">, grant: RepoGrant, commit: string): Promise<string> {
   const issuedAt = Math.floor(deps.now() / 1000);
   return mintCapability(deps.secret, "ticket", {
@@ -211,7 +212,10 @@ export async function mintTicket(deps: Pick<AuthorizeDependencies, "secret" | "n
   });
 }
 
-/** Requests from the opaque frame carry no cookies: the ticket alone authorizes, bounded by its lifetime and the epoch. */
+/**
+ * Requests from the opaque frame carry no cookies: the ticket alone authorizes, bounded by its lifetime and the epoch.
+ * It authorizes assets only; the read path never parses a page under a ticket (#293).
+ */
 export async function authorizeTicket(deps: AuthorizeDependencies, ticket: string, owner: string, name: string, commit: string): Promise<Authorization> {
   const claims = await verifyCapability(deps.secret, "ticket", ticket, Math.floor(deps.now() / 1000));
   if (!claims || claims.n !== repoKey(owner, name) || claims.c !== commit || !claims.p) return { kind: "denied", cookies: [] };

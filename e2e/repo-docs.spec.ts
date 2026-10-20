@@ -73,9 +73,13 @@ test("a granted reader browses a private repository with a capability cookie and
   await expect(heading(page, "Closed home")).toBeVisible();
   const capability = (await page.context().cookies()).find(cookie => /^(?:__Host-)?rendro-repo\.9002$/.test(cookie.name));
   expect(capability).toMatchObject({ httpOnly: true, sameSite: "Lax", path: "/" });
-  // The opaque frame sends no cookies: its image loads through the ticket in the frame's base URL.
+  // The opaque frame sends no cookies: its image loads through the ticket in its own URL.
   await expectLogoRendered(page);
   expect(await logo(page).evaluate(image => (image as HTMLImageElement).currentSrc)).toMatch(/\/view\/v1\.[\w-]+\.[\w-]+\/files\/docs\/img\/logo\.svg$/);
+  // Only images name the ticket: every link resolves to the cookie-authorized URL (#293).
+  const hrefs = await content(page).locator("a[href]").evaluateAll(links => links.map(link => (link as HTMLAnchorElement).href));
+  expect(hrefs.length).toBeGreaterThan(0);
+  for (const href of hrefs) expect(new URL(href).pathname, href).not.toContain("/view/");
   await page.locator(".tree-folder-name", { hasText: "Guide" }).click();
   await page.locator(".tree-link", { hasText: "Getting started" }).click();
   await expect(heading(page, "Start here")).toBeVisible();

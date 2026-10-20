@@ -137,7 +137,7 @@ describe("Server-Timing on /r/ responses", () => {
     const frame = await get(`${priv}/@${fixture.commits.private}/files/docs/index.md`, { cookie: sessionCookies.reader });
     expect(frame.status).toBe(200);
     expect(phases(frame)?.total).toBeDefined();
-    const prefix = /<base data-rendro-viewer href="([^"]+\/files\/)/.exec(await frame.text())?.[1] as string;
+    const prefix = /<img src="([^"]+\/view\/[^/"]+\/files\/)/.exec(await frame.text())?.[1] as string;
     expect(phases(await get(`${prefix}docs/img/logo.png`))?.total).toBeDefined();
   });
 

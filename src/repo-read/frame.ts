@@ -1,7 +1,8 @@
 /**
  * The document frame for one rendered page (#234). Rendered HTML is already
  * sanitized at ingest (#215); the frame adds Rendro's stylesheet, the viewer's
- * navigation bridge and, for private repositories, the asset ticket base.
+ * navigation bridge and, for private repositories, the asset tickets of its
+ * images.
  * The response's own policy is stricter than the publisher frames': the only
  * scripts are Rendro's viewer and comment bundles, the only inline style is the
  * comment widget's stylesheet (by hash), and nothing may load except same-origin
@@ -14,6 +15,7 @@ import { escapeHtml } from "@/routes/html";
 import { styleManifest } from "@/routes/style-manifest";
 import { COMMENTOR_VERSION, PRIVATE_VIEWER_VERSION } from "@/viewer/asset-versions";
 import { COMMENTOR_SCRIPT_PATH, COMMENTOR_STYLE_SOURCE } from "./comments";
+import { encodeRepoPath } from "./paths";
 
 /** Bump when the frame markup changes: it is part of every frame validator. */
 export const FRAME_VERSION = 2;
@@ -42,8 +44,8 @@ export function needsRelativeRewrite(rendererVersion: number): boolean {
  * The compatibility shim for pre-v3 renders, which wrote links and images as
  * `/<repo path>` ("the serving layer maps that namespace onto the commit being
  * viewed"). Here they become relative to the page, so they resolve under
- * whatever URL (commit, branch or ticket base) the frame was loaded from. Dot
- * segments never come out of ingest; any that do lose their URL.
+ * whatever URL (commit or branch) the frame was loaded from. Dot segments
+ * never come out of ingest; any that do lose their URL.
  */
 export function relativeUrl(value: string, documentPath: string): string | null {
   if (!value.startsWith("/") || value.startsWith("//")) return value;
@@ -93,6 +95,43 @@ export async function frameBody(html: string, documentPath: string, isProxied: (
   return serialize(fragment);
 }
 
+/** Where a private frame's per-request ticket prefix goes. parse5 never keeps a NUL, so the serialized HTML holds none of its own. */
+const TICKET_SLOT = "\u0000";
+const SLOT_ORIGIN = "https://repository.invalid";
+
+/** The repository path (percent-encoded, with its query and fragment) an image source relative to the document names, else null. */
+function repositoryImagePath(src: string, documentPath: string): string | null {
+  // Only a relative-path reference: a scheme or a rooted path (the signed image proxy's `/img/…`) is left as it is.
+  // eslint-disable-next-line no-control-regex
+  if (/^[\u0000-\u0020]*(?:[a-zA-Z][a-zA-Z0-9+.-]*:|[/\\])/.test(src)) return null;
+  const url = new URL(src, `${SLOT_ORIGIN}/${encodeRepoPath(documentPath)}`);
+  return url.pathname.slice(1) + url.search + url.hash;
+}
+
+/**
+ * A private frame's body, split where a repository image's URL needs the
+ * reader's asset-ticket prefix (#293): `parts.join(prefix)` is the body. The
+ * frame has no `<base>`, so links, footnotes and anything else navigable
+ * resolve against the frame's own cookie-authorized URL, and only the images,
+ * which the opaque frame loads without cookies, carry the ticket. The split
+ * depends only on the render, so it is derived once per isolate; joining it
+ * with each request's ticket is a string concatenation.
+ */
+export function ticketImageSlots(html: string, documentPath: string): string[] {
+  const fragment = parseFragment(html);
+  const visit = (node: Node) => {
+    if ("attrs" in node && node.nodeName === "img") {
+      for (const attribute of node.attrs) {
+        const path = attribute.name === "src" ? repositoryImagePath(attribute.value, documentPath) : null;
+        if (path !== null) attribute.value = TICKET_SLOT + path;
+      }
+    }
+    if ("childNodes" in node) node.childNodes.forEach(visit);
+  };
+  visit(fragment);
+  return serialize(fragment).split(TICKET_SLOT);
+}
+
 export function failureBody(reason: string): string {
   return `<p class="rendro-render-failure">${escapeHtml(REASONS[reason] ?? "This page could not be rendered safely.")}</p>`;
 }
@@ -106,7 +145,8 @@ export function frameContentSecurityPolicy(origin: string): string {
     // Same-origin only: since #224 ingest writes every external image as a signed /img/ proxy path or drops it,
     // so an external URL reaching a frame is a bug, and the policy keeps it from the reader (as RENDERED_DOCUMENT_POLICY).
     `img-src ${origin}`,
-    `base-uri ${origin}`,
+    // No frame has a <base> (#293): a document's links always resolve against its own URL.
+    "base-uri 'none'",
     "form-action 'none'",
     "frame-ancestors 'self'",
   ].join("; ");
