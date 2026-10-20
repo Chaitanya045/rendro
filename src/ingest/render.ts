@@ -9,7 +9,7 @@ import { parseHtmlDocument, parseHtmlFragment } from "@/ingest/parse-html";
 import { dirnameOf, extensionOf } from "@/ingest/paths";
 import { sanitizeContent, serializeVerified } from "@/ingest/sanitize";
 import { extractSections, type PageSection } from "@/ingest/sections";
-import { assignHeadingIds, convertAlerts, decorateLinksAndImages, rewriteExternalImages, rewriteUrls, titleFromHeadings, type Heading } from "@/ingest/transforms";
+import { assignHeadingIds, convertAlerts, decorateLinksAndImages, focusScrollRegions, nameTaskListCheckboxes, rewriteExternalImages, rewriteUrls, titleFromHeadings, type Heading } from "@/ingest/transforms";
 
 export type DocumentKind = "markdown" | "mdx" | "html";
 
@@ -81,6 +81,8 @@ async function finish(tree: Root, path: string, title: string | null, options: R
   // not the classes and spans the later passes add.
   const sections = extractSections(clean);
   decorateLinksAndImages(clean);
+  nameTaskListCheckboxes(clean);
+  focusScrollRegions(clean);
   highlightCodeBlocks(clean);
   return { html: serializeVerified(clean), title: title ?? titleFromHeadings(headings), headings, sections };
 }

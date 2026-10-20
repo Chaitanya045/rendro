@@ -588,7 +588,10 @@ describe("unusual snapshots", () => {
   });
 
   it("rewrites a version-2 render's repo-path links and images on the way out", async () => {
-    const legacy = RENDERER_VERSION - 1;
+    // Version 2 is the last renderer that wrote `/<repo path>`; version 3 and later emit relative
+    // URLs. A branch pointer that still names version 2 (the rebuild has not landed) goes through the shim.
+    const legacy = 2;
+    await fixture.bucket.put(refKey(publicRepo.id, "main"), new TextEncoder().encode(JSON.stringify({ repoId: publicRepo.id, commit, rendererVersion: legacy })));
     const render = `render/v${legacy}/markdown/${"f".repeat(40)}/${"0".repeat(32)}`;
     const proxied = await imageProxyPath(process.env.IMAGE_PROXY_SECRET as string, "https://example.com/badge.svg") as string;
     await fixture.bucket.put(`gh/v1/repo/${publicRepo.id}/${render}`, new TextEncoder().encode(JSON.stringify({
@@ -596,7 +599,7 @@ describe("unusual snapshots", () => {
     })));
     await snapshot({ "docs/badges.md": { sha: "f".repeat(40), size: 1, render } }, null, legacy);
     clearSnapshotMemory();
-    const html = await (await get(`${base}/files/docs/badges.md`)).text();
+    const html = await (await get(`${pub}/files/docs/badges.md`)).text();
     // The pre-#242 shim still rewrites `/repo/path` for snapshots the old renderer wrote.
     expect(html).toContain('<a href="../docs/guide/start.md">guide</a>');
     expect(html).toContain('<img src="../docs/img/logo.png" alt="Logo">');

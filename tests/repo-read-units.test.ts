@@ -797,7 +797,9 @@ describe("the preparing page", () => {
     expect(failed).toContain('role="alert"');
     expect(failed).toContain("We couldn't prepare the docs for this repository");
     expect(failed).toContain('href="">Retry</a>');
-    expect(failed).not.toContain("<script");
+    // The only script on the failed page is the shared theme runtime, which sets html.dark (#270).
+    expect(failed).toContain("data-rendro-theme");
+    expect(failed).not.toContain("res.headers.get");
   });
 
   it("announces each state once for readers", () => {

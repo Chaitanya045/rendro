@@ -464,6 +464,8 @@ Theme mismatch rule:
 - Dropdowns must remain reachable by keyboard in future iterations; current click-only menus are acceptable but should not regress.
 - Active tree state cannot be color-only; the 4px indicator and active background both communicate selection.
 - Error states use text or ARIA labels in addition to red color.
+- Rendered Markdown keeps every syntax token at 4.5:1 or better on the code background in both appearances; the search panel carries `role="listbox"` only while it holds options (a message state is a plain message), and its rate-limited reply names the wait from `Retry-After` and keeps Retry disabled until it elapses (#270).
+- Wide `pre` and `table` blocks in a document frame are keyboard-reachable scroll regions: `tabindex="0"` at ingest with a visible `:focus-visible` ring (#270).
 - Verify mobile layouts at `320px`, `375px`, and `430px` (320px is the WCAG Reflow width); management controls are `44px` up to `760px` and `36px` on desktop.
 - Current `doc-loading` and `doc-loading-error` feedback is visual-only. This is a known accessibility gap, not a pattern to copy; add text or status semantics before treating it as complete accessible feedback.
 

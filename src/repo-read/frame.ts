@@ -9,7 +9,6 @@
  * never connects anywhere: it talks to the trusted shell (#254).
  */
 import { parseFragment, serialize, type DefaultTreeAdapterMap } from "parse5";
-import { RENDERER_VERSION } from "@/ingest/limits";
 import { IMAGE_PROXY_PREFIX } from "@/image-proxy";
 import { escapeHtml } from "@/routes/html";
 import { styleManifest } from "@/routes/style-manifest";
@@ -30,12 +29,13 @@ const REASONS: Record<string, string> = {
 /**
  * Version-3 renders emit links and images already relative to the document
  * (src/ingest/paths.ts), so the read path serves their HTML untouched (#242).
- * Older snapshots were written as `/<repo path>` and need `frameBody` below;
- * a commit-pinned URL keeps serving the previous renderer's manifest until a
- * rebuild lands, so the shim stays until those are gone.
+ * Version 4 and later inherit that (the a11y transforms of #270 change other
+ * attributes only); older snapshots were written as `/<repo path>` and need
+ * `frameBody` below. A commit-pinned URL keeps serving an older renderer's
+ * manifest until a rebuild lands, so the shim stays until those are gone.
  */
 export function needsRelativeRewrite(rendererVersion: number): boolean {
-  return rendererVersion < RENDERER_VERSION;
+  return rendererVersion < 3;
 }
 
 /**

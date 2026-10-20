@@ -1690,6 +1690,7 @@ blob + path ──► renderDocument:
    Markdown: front matter ─► comrak (WASM, GFM) ─► HTML string ┐
    HTML:                                                       ├► bounded parse5 ─► rewrite URLs ─► allowlist sanitize
                                                                ┘   ─► alerts, heading ids, link/img attributes, highlight
+                                                                   ─► task-list checkbox labels, focusable pre/table
                                                                    ─► serialize ─► re-parse + re-sanitize until byte-stable
 rendered titles ──► buildSidebar ──► per-commit sidebar tree
 ```
@@ -1701,7 +1702,7 @@ rendered titles ──► buildSidebar ──► per-commit sidebar tree
 | `markdown-engine.ts` | comrak WASM wrapper; `initMarkdownEngine(module)` must run once per isolate |
 | `parse-html.ts` | parse5 with depth, formatting-list, attribute and work bounds |
 | `sanitize.ts` | Allowlist schemas and fixed-point serialization (the security boundary) |
-| `transforms.ts`, `paths.ts` | URL rewriting, GitHub heading slugs, alerts, link/image attributes, image proxy rewrite |
+| `transforms.ts`, `paths.ts` | URL rewriting, GitHub heading slugs, alerts, link/image attributes, image proxy rewrite, task-list checkbox labels and focusable `pre`/`table` scroll regions (#270) |
 | `highlight.ts`, `highlight-theme.ts` | Class-only highlighting and its stylesheet |
 | `sidebar.ts` | Sidebar tree with titles |
 
@@ -1770,7 +1771,11 @@ init). Shiki took 4.6 s warm, with 320 ms of init for 31 grammars.
   languages: lowlight's `common` set plus Dart, Dockerfile, Elixir, Haskell, nginx,
   PowerShell, Protobuf and Scala. There is no auto-detection. `HIGHLIGHT_CSS`
   carries GitHub's light and dark palettes, taken from highlight.js's github themes
-  (BSD-3-Clause).
+  (BSD-3-Clause), with the tokens the stock themes renders below 4.5:1 on the
+  frame's code background replaced by GitHub's own higher-contrast tokens
+  (#270): light keyword `#cf222e`, variable `#953800`, tag and light addition
+  `#116329`, dark heading `#4493f8`; every token reads at 4.5:1 or better on
+  `--subtle` in both appearances, which `tests/ingest-render.test.ts` checks.
 - **Sanitizer: `hast-util-sanitize` over parse5** (the same spec-compliant tree
   builder `share-html.ts` uses). sanitize-html (htmlparser2, with 2026 parser-differential
   CVEs) and DOMPurify (needs a DOM) were ruled out. ammonia has no maintained
@@ -1795,7 +1800,7 @@ init). Shiki took 4.6 s warm, with 320 ms of init for 31 grammars.
     `noscript`, `textarea`, `xmp`, `base`, `meta`, `link`, media and so on.
   - Unknown elements, including MDX components, are unwrapped.
   - No `style`, event handler, `srcset`, `ping`, `formaction` or other URL-bearing attribute survives.
-  - Inputs are disabled checkboxes.
+  - Inputs are disabled checkboxes, named from their item's text (#270).
   - Table parts outside a table are dropped rather than re-parented.
   - Author `id`/`name`/`aria-describedby` get the `user-content-` prefix, as on
     GitHub, so content cannot clobber globals in the viewer frame.
@@ -1821,7 +1826,8 @@ init). Shiki took 4.6 s warm, with 320 ms of init for 31 grammars.
     rendered output even if a transform forgets one. `srcset` never survives
     sanitizing, so `src` is the only image URL.
 - **Fixed point.** The trusted transforms (alerts, heading ids, highlighting,
-  attributes) emit only what a second `outputSchema` allows. The serialized HTML
+  task-list labels, focusable scroll regions, attributes) emit only what a second
+  `outputSchema` allows. The serialized HTML
   must survive parse → sanitize(outputSchema) → serialize byte for byte. That
   proves the browser's re-parse matches the sanitized tree, which catches
   mutation-XSS differentials and transform mistakes. Output that does not settle
@@ -2221,7 +2227,7 @@ What the reader sees depends on the outcome inside a 5-second window (`PREPARE_W
 - **Outcome arrives in window.** `flipped`/`current`: the pointer is read again, this time fresh (the same request's "never ingested" pointer miss would otherwise hide the just-published branch for up to 5 s, so `RepoSnapshots.pointer` takes a `fresh` flag), and the response is the ordinary docs. `duplicate`: still building, the preparing page. `no-ref`: a plain 404, no readiness header. `failed`: the retry page, 503.
 - **Window expires.** The response is the preparing page (200) while the build continues unattended (`waitUntil` holds the coordinator call; the build proceeds whatever the reader does). Every later poll runs its own `ensure` — the per-isolate `SingleFlight` still shares any call still open, and the coordinator coalesces the rest — so the page is self-healing and the server stays stateless. A transport failure from the coordinator is #225's retryable 503; it never becomes a 404. "Ready but no pointer" (the coordinator answered while the store lost the pointer) is a broken store, so also a retryable 503.
 
-The preparing page (`renderPreparingPage` in `src/repo-read/preparing.ts`) is `aria-busy`, announces itself politely (`role="status"`), polls its own URL with `fetch` (`cache: "no-store"`) after the response's `Retry-After` (5 s) doubling per attempt, capped at 60 s, pausing while the tab is hidden. The poll reads the state from `X-Rendro-Readiness` and the status: a 404 stops with "These docs are no longer available.", a `failed` state loads the retry page with `location.replace`, and anything else that is no longer `preparing` reloads into the docs. The server never polls itself from `waitUntil` and stores no per-reader state: any reader of the URL can re-check what any other is preparing. The retry page (503) is the same layout with `role="alert"` and a `Retry` link to the URL itself; the retry re-runs `ensure` (the coordinator records the failure but always re-attempts, so reader retries are fresh attempts).
+The preparing page (`renderPreparingPage` in `src/repo-read/preparing.ts`) is `aria-busy`, announces itself politely (`role="status"`), polls its own URL with `fetch` (`cache: "no-store"`) after the response's `Retry-After` (5 s) doubling per attempt, capped at 60 s, pausing while the tab is hidden. The poll reads the state from `X-Rendro-Readiness` and the status: a 404 stops with "These docs are no longer available.", a `failed` state loads the retry page with `location.replace`, and anything else that is no longer `preparing` reloads into the docs. The server never polls itself from `waitUntil` and stores no per-reader state: any reader of the URL can re-check what any other is preparing. The retry page (503) is the same layout with `role="alert"` and a `Retry` link to the URL itself; the retry re-runs `ensure` (the coordinator records the failure but always re-attempts, so reader retries are fresh attempts). The page follows the reader's theme (#270): like every Worker-served page it ships the shared theme runtime (`renderThemeAssets`), which sets `html.dark` from the reader's saved choice or appearance, and the page's own variables follow it.
 
 | Response | `Cache-Control` | State header |
 |---|---|---|
@@ -2304,7 +2310,7 @@ Candidates are fetched at four times the page size, then mapped back onto the se
 
 ### Shell UI
 
-The search box sits in the repository shell's sidebar (`renderRepoSearch`, markup also mirrored in the browser-test fixture). `/` focuses it from anywhere outside a typing context; typing is debounced (200 ms) into one request to the pinned commit's `/search`; results are a listbox of options with `path#slug`, the title and a snippet whose matched runs arrive wrapped in `\u0002`/`\u0003` and are rendered as `<mark>` text nodes — snippet text is never parsed as HTML. Arrow keys move the selection (wrapping), Enter or a click activates it through the same in-shell `loadDoc` a tree row uses, so the shell owns the history entry and the frame scrolls to the section. Escape, an outside click and the clear button close the panel. Loading ("Searching…"), empty and error states (with a Retry control) are announced through a `role="status"` live region, and the shell's `maxlength` bounds the input client-side. Asset version: lazy-tree 50.
+The search box sits in the repository shell's sidebar (`renderRepoSearch`, markup also mirrored in the browser-test fixture). `/` focuses it from anywhere outside a typing context; typing is debounced (200 ms) into one request to the pinned commit's `/search`; results are a listbox of options with `path#slug`, the title and a snippet whose matched runs arrive wrapped in `\u0002`/`\u0003` and are rendered as `<mark>` text nodes — snippet text is never parsed as HTML. Arrow keys move the selection (wrapping), Enter or a click activates it through the same in-shell `loadDoc` a tree row uses, so the shell owns the history entry and the frame scrolls to the section. Escape, an outside click and the clear button close the panel. Loading ("Searching…"), empty and error states (with a Retry control) are announced through a `role="status"` live region, and the shell's `maxlength` bounds the input client-side. The panel carries `role="listbox"` only while it holds options: while it shows a single message (no results, an error) the role and the combobox's `aria-controls` are dropped, so screen readers are never told about an empty listbox, and both come back with the next result set (#270). A rate-limited reply (429) is its own message, "Too many searches — try again in N s", read from `Retry-After` (seconds or an HTTP date, shared with the shell's parser): its Retry stays disabled until the wait elapses and the live region announces the wait once and its end; without a usable `Retry-After` Retry is enabled at once (#270). Asset version: lazy-tree 52.
 
 ### Measurements
 

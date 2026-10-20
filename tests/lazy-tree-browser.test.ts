@@ -42,6 +42,8 @@ const scopedTree: Record<string, Record<string, ScopedPage[]>> = {
   },
 };
 const requests: string[] = [];
+// One rate-limited reply per query, so a Retry reaches the real results.
+const searchLimitedRetries = new Set<string>();
 
 interface Shell { orgAttr?: boolean; org?: string; base?: string; frameBase?: string; sandbox?: boolean; initial?: string; frame?: boolean; tree?: boolean; host?: boolean; late?: boolean; noMatchMedia?: boolean; search?: true | string }
 function shell(options: Shell = {}): string {
@@ -120,6 +122,13 @@ beforeAll(async () => {
     if (url.pathname === `${pinnedBase}/search`) {
       const q = url.searchParams.get("q") ?? "";
       if (q === "boom") { response.writeHead(500, { "Content-Type": "application/json" }); return void response.end("{}"); }
+      if (q === "limited") {
+        // The first reply is rate-limited; its retry reaches the real results.
+        const retrying = searchLimitedRetries.has(q);
+        searchLimitedRetries.add(q);
+        if (!retrying) { response.writeHead(429, { "Content-Type": "application/json", "Retry-After": "30" }); return void response.end(JSON.stringify({ error: "Too many requests. Please retry later.", code: "rate_limited" })); }
+      }
+      if (q === "limited-noheader") { response.writeHead(429, { "Content-Type": "application/json" }); return void response.end(JSON.stringify({ error: "Too many requests" })); }
       if (q === "junk") return json({ status: "ok", results: "nope", more: false });
       if (q === "nul") return json(null);
       if (q === "junkitems") return json({ status: "ok", results: [null, "x", { path: 5, slug: "", title: "", snippet: "" }], more: false });
@@ -1687,8 +1696,95 @@ describe("repository sidebar search (#251)", () => {
     expect(pageErrors(tab)).toEqual([]);
   });
 
-  it("ignores a stale response after a newer query", async () => {
+  it("holds no listbox while the panel shows a message and restores the wiring with results (#270)", async () => {
+    const tab = await openSearch({ clock: true });
+    await item(tab, "docs/index.md").waitFor();
+    await tab.keyboard.press("/");
+    // No results: the panel keeps its message but drops the listbox role and the combobox wiring.
+    await box(tab).fill("nothing left");
+    await tab.clock.runFor(300);
+    await tab.waitForFunction(() => !document.getElementById("repo-search-results")!.hidden);
+    expect(await panel(tab).getAttribute("role")).toBeNull();
+    expect(await panel(tab).getAttribute("aria-label")).toBeNull();
+    expect(await box(tab).getAttribute("aria-controls")).toBeNull();
+    expect(await box(tab).getAttribute("aria-expanded")).toBe("false");
+    // Results come back: role, label, aria-controls, expanded and the keyboard all return.
+    await box(tab).fill("installer");
+    await tab.clock.runFor(300);
+    await tab.waitForFunction(() => document.querySelectorAll("#repo-search-results .repo-search-item").length === 2);
+    expect(await panel(tab).getAttribute("role")).toBe("listbox");
+    expect(await panel(tab).getAttribute("aria-label")).toBe("Search results");
+    expect(await box(tab).getAttribute("aria-controls")).toBe("repo-search-results");
+    expect(await box(tab).getAttribute("aria-expanded")).toBe("true");
+    expect(await box(tab).getAttribute("aria-activedescendant")).toBe("repo-search-option-0");
+    // The keyboard still works on the restored listbox.
+    await tab.keyboard.press("ArrowDown");
+    expect(await box(tab).getAttribute("aria-activedescendant")).toBe("repo-search-option-1");
+    await tab.keyboard.press("ArrowUp");
+    expect(await box(tab).getAttribute("aria-activedescendant")).toBe("repo-search-option-0");
+    await tab.keyboard.press("Enter");
+    await tab.waitForFunction((href: string) => document.getElementById("content-frame")!.getAttribute("src") === href, `${pinnedBase}/files/guide/start.md`);
+    // And a message after results drops the wiring again.
+    await box(tab).fill("nothing left");
+    await tab.clock.runFor(300);
+    await tab.waitForFunction(() => (document.getElementById("repo-search-results")?.textContent ?? "").includes("No results for"));
+    expect(await panel(tab).getAttribute("role")).toBeNull();
+    expect(await box(tab).getAttribute("aria-controls")).toBeNull();
+    expect(pageErrors(tab)).toEqual([]);
+  });
+
+  it("announces a rate-limited reply with its Retry-After wait and disables Retry until it elapses (#270)", async () => {
+    const tab = await openSearch({ clock: true });
+    await item(tab, "docs/index.md").waitFor();
+    await tab.keyboard.press("/");
+    await box(tab).fill("limited");
+    await tab.clock.runFor(300);
+    await tab.waitForFunction(() => (document.getElementById("repo-search-results")?.textContent ?? "").includes("Too many searches"));
+    expect(await panel(tab).getAttribute("role")).toBeNull();
+    const retry = panel(tab).getByRole("button", { name: "Retry" });
+    expect(await panel(tab).textContent()).toContain("try again in 30 s");
+    expect(await searchStatus(tab).textContent()).toBe("Too many searches — try again in 30 seconds");
+    expect(await retry.isDisabled()).toBe(true);
+    // The visible countdown follows the wait; the announcement does not repeat every second.
+    await tab.clock.runFor(28_000);
+    expect(await panel(tab).textContent()).toContain("try again in 2 s");
+    expect(await searchStatus(tab).textContent()).toBe("Too many searches — try again in 30 seconds");
+    expect(await retry.isDisabled()).toBe(true);
+    await tab.clock.runFor(2_000);
+    expect(await panel(tab).textContent()).toBe("Too many searches.Retry");
+    expect(await searchStatus(tab).textContent()).toBe("You can search again now.");
+    expect(await retry.isDisabled()).toBe(false);
+    await retry.click();
+    await tab.waitForFunction(() => document.querySelectorAll("#repo-search-results .repo-search-item").length === 2);
+    expect(await searchStatus(tab).textContent()).toBe("2 results");
+    // A 429 without a usable Retry-After never disables Retry.
+    await box(tab).fill("limited-noheader");
+    await tab.clock.runFor(300);
+    await tab.waitForFunction(() => (document.getElementById("repo-search-results")?.textContent ?? "").includes("Too many searches"));
+    expect(await panel(tab).getByRole("button", { name: "Retry" }).isDisabled()).toBe(false);
+    expect(await panel(tab).textContent()).toBe("Too many searches.Retry");
+    expect(pageErrors(tab)).toEqual([]);
+  });
+
+  it("reads the Retry-After date form and honours its wait", async () => {
+    // The page clock is pinned to 2026-01-01T00:00:01Z; the date header names 20 s past it.
     const tab = await openSearch({ clock: true, routes: async page => {
+      await page.route("**/search*", route => route.fulfill({ status: 429, contentType: "application/json",
+        headers: { "Retry-After": "Fri, 01 Jan 2026 00:00:21 GMT" }, body: "{}" }));
+    } });
+    await item(tab, "docs/index.md").waitFor();
+    await tab.keyboard.press("/");
+    await box(tab).fill("limited-date");
+    await tab.clock.runFor(300);
+    await tab.waitForFunction(() => (document.getElementById("repo-search-results")?.textContent ?? "").includes("try again in 20 s"));
+    const retry = panel(tab).getByRole("button", { name: "Retry" });
+    expect(await retry.isDisabled()).toBe(true);
+    await tab.clock.runFor(20_000);
+    expect(await retry.isDisabled()).toBe(false);
+    expect(pageErrors(tab)).toEqual([]);
+  });
+
+  it("ignores a stale response after a newer query", async () => {    const tab = await openSearch({ clock: true, routes: async page => {
       // The first request's answer arrives late, after the reader extended the query.
       await page.route("**/search*", async route => {
         const q = new URL(route.request().url()).searchParams.get("q");

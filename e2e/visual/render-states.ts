@@ -401,7 +401,7 @@ async function openRepo(page: Page, visual: VisualState, state: string, closers:
         await expect(page.locator("#repo-search-results .repo-search-message")).toContainText("No results for");
         return rendered();
       }
-      // Failure at the network boundary: the shell shows one message and a Retry, whatever the status.
+      // Failure at the network boundary: the shell shows one message, or the wait a rate limit names.
       const limited = state === "search-limited";
       const glob = "**/search?q=*";
       const handler = (route: Route) => route.fulfill(limited
@@ -410,7 +410,7 @@ async function openRepo(page: Page, visual: VisualState, state: string, closers:
       await page.route(glob, handler);
       closers.push(() => page.unroute(glob, handler));
       await input.fill("back");
-      await expect(page.locator("#repo-search-results .repo-search-message")).toContainText("Search failed.");
+      await expect(page.locator("#repo-search-results .repo-search-message")).toContainText(limited ? "Too many searches — try again in 30 s" : "Search failed.");
       return rendered();
     }
     default:
