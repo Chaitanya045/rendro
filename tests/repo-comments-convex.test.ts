@@ -347,6 +347,42 @@ describe("repository comment access (Convex boundary)", () => {
     expect((await snapshot({ epoch: 20 })).page).toEqual([]);
   });
 
+  it("reads a public first page for the signed-in reader the Worker names, deciding access as the public grant does (#303)", async () => {
+    const { backend, users, as, grant } = await world();
+    const snapshot = (args: Record<string, unknown> = {}) => backend.query(api.repoComments.threadSnapshot, {
+      internalSecret, ...scope(PUBLIC), userId: null, epoch: 0, ...args,
+    } as never);
+    // A viewer only says whom a page is read for: it never names a reader for a grant that already has one.
+    for (const bad of [{ viewerId: "" }, { viewerId: "x".repeat(257) }, { userId: users.reader.userId, viewerId: users.reader.userId }]) {
+      await expect(snapshot(bad)).rejects.toThrow("Invalid input");
+    }
+    await grant(PUBLIC, null);
+    const threadId = await as("reader").mutation(api.repoComments.createThread, { ...scope(PUBLIC), body: "Mine", anchor: anchor() });
+    await as("other").mutation(api.repoComments.addReply, { ...scope(PUBLIC), threadId, body: "Theirs" });
+    await as("reader").mutation(api.repoComments.addReply, { ...scope(PUBLIC), threadId, body: "Mine too" });
+    const live = await as("reader").query(api.repoComments.listThreads, { ...scope(PUBLIC), paginationOpts: pageOpts });
+    // The author's page is the one their live subscription gives them: their thread and reply are theirs to delete.
+    const mine = await snapshot({ viewerId: users.reader.userId });
+    expect(mine.page).toEqual(live.page);
+    expect(mine.page).toEqual([expect.objectContaining({ body: "Mine", canDelete: true, replies: [
+      expect.objectContaining({ body: "Theirs", canDelete: false }), expect.objectContaining({ body: "Mine too", canDelete: true }),
+    ] })]);
+    // Another reader's page holds the same thread, with only their own reply theirs; the anonymous page, nothing.
+    expect((await snapshot({ viewerId: users.other.userId })).page).toEqual([expect.objectContaining({ body: "Mine", canDelete: false, replies: [
+      expect.objectContaining({ body: "Theirs", canDelete: true }), expect.objectContaining({ body: "Mine too", canDelete: false }),
+    ] })]);
+    expect((await snapshot()).page).toEqual([expect.objectContaining({ body: "Mine", canDelete: false, replies: [
+      expect.objectContaining({ body: "Theirs", canDelete: false }), expect.objectContaining({ body: "Mine too", canDelete: false }),
+    ] })]);
+    // A revocation of the reader elsewhere changes nothing here: the page is public, so anyone may read it.
+    await backend.mutation(api.repoCommentAccess.revokeUser, { internalSecret, userId: users.reader.userId, epoch: 20 });
+    expect((await snapshot({ viewerId: users.reader.userId })).page).toHaveLength(1);
+    // What the grant refuses, the snapshot refuses, whoever it is read for: a removed repository shows nothing.
+    await backend.mutation(api.repoCommentAccess.removeRepos, { internalSecret, repoIds: [PUBLIC] });
+    expect((await snapshot({ viewerId: users.reader.userId })).page).toEqual([]);
+    expect(await grant(PUBLIC, null)).toEqual({ granted: false });
+  });
+
   it("checks a writer's grant expiry in the mutation even before the expiry job ran", async () => {
     vi.useFakeTimers();
     const { as, grant } = await world();

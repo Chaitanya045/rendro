@@ -1,6 +1,9 @@
 import { randomBytes } from "node:crypto";
 import { test, expect } from "./fixtures";
-import { card, collaborator, comment, commit, convexCallWith, open, openDrawer, pin, publicThreads, repos, select, ui, unique } from "./comment-helpers";
+import {
+  anchorOn, card, collaborator, comment, commit, convexCallWith, convexSocket, createThread, journeyDoc, open, openDrawer, pin, publicThreads, repoIds, repos,
+  select, sessionToken, ui, unique,
+} from "./comment-helpers";
 import { desktop, signInSeeded } from "./shell-helpers";
 import { commentDocs } from "./repo-fixtures";
 
@@ -122,4 +125,54 @@ test("an anonymous reader of a public repository sees its comments but cannot po
     anchor: { kind: "repo-text", blobSha: "a".repeat(40), headingSlug: "usage", prefix: "", exact: "Call", suffix: "", offset: 0 },
   });
   expect(forged).toMatchObject({ ok: false, code: "unauthenticated" });
+});
+
+test("the first comments carry the signed-in author's Archive and Delete before the live page, and nobody else's", async ({ page, secondContext, seed, baseURL }) => {
+  test.setTimeout(120_000);
+  const { comments, commentsPrivate } = repos();
+  // Idempotent start: the owner is a collaborator of the private repository (a retry of another spec may have removed them).
+  expect(await collaborator("added")).toBe(202);
+  const doc = await journeyDoc("first-actions");
+  await signInSeeded(page.context(), baseURL, seed, "owner");
+  await open(page, comments, doc.path, doc.commit);
+  const body = unique("Mine from the start");
+  await createThread(await sessionToken(page), { repoId: repoIds.comments, path: doc.path }, body, await anchorOn(page, "quick brown"));
+
+  // Only the shell's first access answer can show comments: the Convex socket carries nothing the page sends (#303).
+  const firstPaint = async (reader: typeof page, repo: { owner: string; name: string }, path: string, commitSha?: string) => {
+    const socket = await convexSocket(reader);
+    socket.hold(true);
+    // Not `open`: with the socket held the live page stays loading, which is the point.
+    const response = await reader.goto(`/r/${repo.owner}/${repo.name}${commitSha ? `/@${commitSha}` : ""}?doc=${encodeURIComponent(path)}`);
+    expect(response?.status()).toBe(200);
+    await expect(ui(reader).getByTestId("commentor-dock")).toBeAttached();
+    await openDrawer(reader);
+    return socket;
+  };
+  const author = await page.context().newPage();
+  const socket = await firstPaint(author, comments, doc.path, doc.commit);
+  await expect(card(author, body)).toBeVisible();
+  // The author's actions are there with the first paint of the thread; nothing has come from the live subscription.
+  await expect(card(author, body).getByTestId("commentor-archive-btn")).toBeVisible();
+  await expect(card(author, body).getByTestId("commentor-delete-btn")).toBeVisible();
+  // The page's subscription is held on its way out: it is asked for, and never answered while the test looks.
+  await expect.poll(() => socket.heldMessage("repoComments:listThreads")).toBe(true);
+  await expect(card(author, body).getByTestId("commentor-delete-btn")).toBeVisible();
+  await author.close();
+
+  // An anonymous reader of the same public page sees the thread with neither.
+  const anonymous = await secondContext.newPage();
+  await firstPaint(anonymous, comments, doc.path, doc.commit);
+  await expect(card(anonymous, body)).toBeVisible();
+  await expect(card(anonymous, body).getByTestId("commentor-archive-btn")).toHaveCount(0);
+  await expect(card(anonymous, body).getByTestId("commentor-delete-btn")).toHaveCount(0);
+
+  // A private repository's first page was already its reader's, and still is.
+  await open(page, commentsPrivate, "docs/private.md");
+  const secret = unique("Private and mine");
+  await comment(page, "Only collaborators", secret);
+  const privateReader = await page.context().newPage();
+  await firstPaint(privateReader, commentsPrivate, "docs/private.md");
+  await expect(card(privateReader, secret).getByTestId("commentor-delete-btn")).toBeVisible();
+  await expect(card(privateReader, secret).getByTestId("commentor-archive-btn")).toBeVisible();
 });

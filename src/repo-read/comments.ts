@@ -44,7 +44,7 @@ export type CommentSnapshot = { page: unknown[]; isDone: boolean };
 
 export interface CommentSnapshots {
   /** The page Convex gives this reader, or null when its answer is malformed. Throws when it could not be asked. */
-  threads(input: { repoId: number; path: string; userId: string | null; epoch: number }): Promise<CommentSnapshot | null>;
+  threads(input: { repoId: number; path: string; userId: string | null; epoch: number; viewerId?: string }): Promise<CommentSnapshot | null>;
 }
 
 /** Convex's `repoComments:threadSnapshot`, called with the internal secret. */
@@ -55,9 +55,14 @@ export const convexCommentSnapshots: CommentSnapshots = {
   },
 };
 
-/** The first thread page for an authorized reader: as private as the grant (the reader alone, or anyone for a public repository). */
-export function commentSnapshot(snapshots: CommentSnapshots, grant: RepoGrant, path: string): Promise<CommentSnapshot | null> {
-  return snapshots.threads({ repoId: grant.repo.id, path, userId: grant.repo.private ? grant.viewer : null, epoch: grant.epoch });
+/**
+ * The first thread page for an authorized reader, decided as the grant is (the reader alone, or anyone for a public
+ * repository). A public page is read for `reader`, the signed-in reader when there is one (#303), so their own threads
+ * carry their Archive and Delete from the first paint; a private page is always read for the grant's reader.
+ */
+export function commentSnapshot(snapshots: CommentSnapshots, grant: RepoGrant, path: string, reader: string | null): Promise<CommentSnapshot | null> {
+  if (grant.repo.private) return snapshots.threads({ repoId: grant.repo.id, path, userId: grant.viewer, epoch: grant.epoch });
+  return snapshots.threads({ repoId: grant.repo.id, path, userId: null, epoch: grant.epoch, ...(reader ? { viewerId: reader } : {}) });
 }
 
 /** Comment access is decided afresh when the authorization behind it would end sooner (a capability or public memory near

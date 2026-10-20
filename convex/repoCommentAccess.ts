@@ -50,7 +50,7 @@ export function validRepoId(value: number): boolean {
   return Number.isSafeInteger(value) && value > 0;
 }
 
-function validUserId(value: string): boolean {
+export function validUserId(value: string): boolean {
   return value.length > 0 && value.length <= 256;
 }
 

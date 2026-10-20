@@ -356,6 +356,18 @@ async function renewal(c: Context, grant: RepoGrant, request: RepoRequestPath, m
 const MAX_SNAPSHOT_PATH_LENGTH = 1_024;
 
 /**
+ * Whom a public repository's first comment page is read for (#303): the signed-in reader, so the page says which threads
+ * are theirs to archive or delete. Anyone may read the page, so a reader the session cannot name now (anonymous, or the
+ * session check unavailable) gets the anonymous page, as before; a check that fails outright leaves the page out, and the
+ * live subscription delivers it. A private page is always its grant's reader's.
+ */
+async function snapshotReader(request: Request, grant: RepoGrant, services: Services): Promise<string | null> {
+  if (grant.repo.private) return null;
+  const viewer = await services.authorize.identity(request);
+  return viewer.kind === "user" ? viewer.id : null;
+}
+
+/**
  * Record the reader's comment access in Convex (#254). Only the trusted shell asks: a same-origin POST. The shell's
  * first request names the document it shows (`?path=`), and the answer then carries that document's first thread
  * page too (#284), read for this reader in parallel with the grant and returned only when the grant was recorded,
@@ -368,7 +380,8 @@ async function commentAccessResponse(c: Context, grant: RepoGrant, services: Ser
   const wanted = path !== undefined && path.length <= MAX_SNAPSHOT_PATH_LENGTH && isCanonicalStorageKey(path) ? path : null;
   const [access, threads] = await Promise.all([
     commentAccess(services.comments, grant, services.authorize.now()),
-    wanted === null ? null : commentSnapshot(services.commentSnapshots, grant, wanted).catch(() => null),
+    wanted === null ? null : snapshotReader(c.req.raw, grant, services)
+      .then(reader => commentSnapshot(services.commentSnapshots, grant, wanted, reader)).catch(() => null),
   ]);
   if (!access) return notFound(c, "json");
   return c.json({
