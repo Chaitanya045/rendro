@@ -208,6 +208,59 @@ describe("comments drawer", () => {
     await lab.tid("commentor-panel-btn").click();
     await expect.poll(() => dock(lab).getAttribute("data-expanded")).toBeNull();
   });
+
+  it.each([{ motion: "reduce" as const }, { motion: "no-preference" as const }])("fits its content as it changes while open and ends where a fresh open would put it ($motion motion)", async ({ motion }) => {
+    const lab = await commentLab.open({ motion });
+    await lab.ready([{ _id: "t1", anchor: heading, body: "First" }]);
+    const drawer = lab.tid("commentor-drawer");
+    const list = lab.tid("commentor-drawer-list");
+    // Settled is the size and place the drawer is heading to; with motion its transition then has to finish.
+    const settled = async () => {
+      await expect.poll(() => drawer.getAttribute("data-layout")).toBe("settled");
+      await expect.poll(() => lab.doc(() => document.getElementById("commentor-host")!.shadowRoot!.getAnimations().length)).toBe(0);
+    };
+    const place = () => dock(lab).evaluate(el => { const rect = el.getBoundingClientRect(); return { top: rect.top, height: rect.height }; });
+    // A fitted list neither scrolls nor leaves room under its last card beyond its own 10px bottom padding.
+    const fit = () => list.evaluate(el => {
+      const cards = el.querySelectorAll(".drawer-thread");
+      return { overflow: el.scrollHeight - el.clientHeight, below: el.getBoundingClientRect().bottom - cards[cards.length - 1].getBoundingClientRect().bottom };
+    });
+    const fresh = async () => {
+      await lab.tid("commentor-panel-btn").click();
+      await expect.poll(() => drawer.getAttribute("aria-hidden")).toBe("true");
+      expect(await drawer.getAttribute("data-layout")).toBeNull();
+      await lab.openDrawer();
+      await settled();
+      return place();
+    };
+    await lab.openDrawer();
+    await settled();
+    const one = await place();
+    expect(await fit()).toEqual({ overflow: 0, below: 10 });
+    expect(await fresh()).toEqual(one);
+    // A reply arrives while the drawer is open: it grows to fit, upwards from its bottom edge.
+    await lab.host(l => l.seed([{ _id: "t1", anchor: l.anchorOn("Quarterly report"), body: "First", replies: [l.reply({ _id: "r1", body: "A reply" })] }]));
+    await expect.poll(() => lab.ui.locator(".drawer-thread .reply").count()).toBe(1);
+    await settled();
+    const replied = await place();
+    expect(replied.height).toBeGreaterThan(one.height);
+    expect(replied.top + replied.height).toBe(one.top + one.height);
+    expect(await fit()).toEqual({ overflow: 0, below: 10 });
+    expect(await fresh()).toEqual(replied);
+    // And shrinks back when it leaves, to exactly where it first opened.
+    await lab.host(l => l.seed([{ _id: "t1", anchor: l.anchorOn("Quarterly report"), body: "First" }]));
+    await expect.poll(() => lab.ui.locator(".drawer-thread .reply").count()).toBe(0);
+    await settled();
+    expect(await place()).toEqual(one);
+    expect(await fit()).toEqual({ overflow: 0, below: 10 });
+    // Content that resizes without a re-render (the reader drags the reply box taller) is followed too.
+    const input = lab.ui.getByTestId("commentor-reply-input");
+    const before = await input.evaluate(el => el.getBoundingClientRect().height);
+    await input.evaluate(el => { (el as HTMLElement).style.height = "120px"; });
+    await expect.poll(async () => (await place()).height).toBe(one.height + 120 - before);
+    await settled();
+    expect(await fit()).toEqual({ overflow: 0, below: 10 });
+  });
 });
 
 describe("drawer details", () => {

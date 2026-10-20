@@ -11,6 +11,7 @@
 #                                        determinism check the zero threshold relies on (#276)
 #
 # Extra arguments go to `playwright test` (for example `-g "projects — list"`).
+# RENDRO_VISUAL_CPUS=0.5 limits the browser container's CPU (docker --cpus), to prove a cell waits on state, not time.
 set -euo pipefail
 
 mode="${1:-check}"
@@ -55,7 +56,9 @@ trap cleanup EXIT INT TERM
 # --disable-partial-raster (#276): Chromium otherwise re-rasterises only the invalidated part of a tile and keeps the
 # rest from an earlier raster, and the two can round an antialiased edge or a translucent fill one level apart. Which
 # regions get a partial raster depends on paint timing, so the same cell differed by up to 0.04 (YIQ) between runs.
-container="$(docker run -d --rm --init --ipc=host --network host --name "$name" \
+cpus=()
+[ -n "${RENDRO_VISUAL_CPUS:-}" ] && cpus=(--cpus "$RENDRO_VISUAL_CPUS")
+container="$(docker run -d --rm --init --ipc=host --network host --name "$name" "${cpus[@]}" \
   -e RENDRO_VISUAL_PORT="$port" -v "$root:/work:ro" -w /work "$image" \
   node -e 'require("@playwright/test").chromium.launchServer({ host: "127.0.0.1", port: Number(process.env.RENDRO_VISUAL_PORT), wsPath: "/", args: ["--disable-partial-raster"] }).then(server => console.log(`Listening on ${server.wsEndpoint()}`), error => { console.error(error); process.exit(1); })')"
 
