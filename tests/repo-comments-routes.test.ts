@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import app from "@/worker";
 import { COMMENTOR_STYLE_HASH } from "@/commentor/style-hash";
 import { COMMENTOR_STYLES } from "@/commentor/styles";
-import { clearCommentGrantMemory, commentAccess, convexCommentGrants, type CommentGrants } from "@/repo-read/comments";
+import { clearCommentGrantMemory, commentAccess, convexCommentGrants, convexCommentSnapshots, type CommentGrants } from "@/repo-read/comments";
 import { CAPABILITY_TTL_SECONDS } from "@/repo-read/authorize";
 import { issueGrant } from "@/repo-read/grant";
 import { parseRepoPath } from "@/repo-read/paths";
@@ -15,7 +15,9 @@ const priv = `/r/${privateRepo.owner}/${privateRepo.name}`;
 
 let fixture: Awaited<ReturnType<typeof repoReadFixture>>;
 let grants: Array<Record<string, unknown>>;
-let convex: { answer: (args: Record<string, unknown>) => Response };
+let snapshots: Array<Record<string, unknown>>;
+let convex: { answer: (args: Record<string, unknown>) => Response; snapshot: (args: Record<string, unknown>) => Response };
+const page = [{ _id: "t1", body: "First" }];
 
 beforeEach(async () => {
   // Cookie writes are pinned to the canonical site, which these fixtures serve.
@@ -24,10 +26,22 @@ beforeEach(async () => {
   clearCommentGrantMemory();
   stubSessions();
   grants = [];
-  convex = { answer: args => Response.json({ status: "success", value: { granted: true, expiresAt: args.expiresAt } }) };
+  snapshots = [];
+  convex = {
+    answer: args => Response.json({ status: "success", value: { granted: true, expiresAt: args.expiresAt } }),
+    snapshot: () => Response.json({ status: "success", value: { page, isDone: false, continueCursor: "c" } }),
+  };
   const sessions = globalThis.fetch;
   globalThis.fetch = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input instanceof Request ? input.url : input);
+    if (url === `${process.env.CONVEX_URL}/api/query`) {
+      const { path, args: [args] } = JSON.parse(init?.body as string) as { path: string; args: [Record<string, unknown>] };
+      expect(path).toBe("repoComments:threadSnapshot");
+      expect(args.internalSecret).toBe(process.env.CONVEX_INTERNAL_SECRET);
+      const { internalSecret: _secret, ...asked } = args;
+      snapshots.push(asked);
+      return Promise.resolve(convex.snapshot(args));
+    }
     if (url === `${process.env.CONVEX_URL}/api/mutation`) {
       const { path, args: [args] } = JSON.parse(init?.body as string) as { path: string; args: [Record<string, unknown>] };
       expect(path).toBe("repoCommentAccess:grant");
@@ -49,8 +63,8 @@ function request(path: string, init: { method?: string; headers?: Record<string,
   return app.request(`${ORIGIN}${path}`, { method: init.method ?? "GET", headers: init.headers ?? {} }, fixture.env, fixture.ctx);
 }
 
-function access(base: string, headers: Record<string, string> = {}) {
-  return request(`${base}/comment-access`, { method: "POST", headers: { Origin: ORIGIN, ...headers } });
+function access(base: string, headers: Record<string, string> = {}, query = "") {
+  return request(`${base}/comment-access${query}`, { method: "POST", headers: { Origin: ORIGIN, ...headers } });
 }
 
 function capability(response: Response): string {
@@ -70,7 +84,7 @@ describe("the repository shell carries the one comments connection", () => {
     const response = await request(base, { headers: { cookie: sessionCookies.reader } });
     const html = await response.text();
     const config = /window\.RENDRO_REPO_COMMENT_CONFIG=(\{[^;]+\});/.exec(html)?.[1];
-    expect(JSON.parse(config ?? "null")).toEqual({ repoId, accessUrl: `${base}/comment-access`, convexUrl: process.env.CONVEX_URL });
+    expect(JSON.parse(config ?? "null")).toEqual({ repoId, accessUrl: `${base}/comment-access`, convexUrl: process.env.CONVEX_URL, documentPath: "docs/index.md" });
     expect(html).toContain(`src="/commentor-parent.js?v=${COMMENTOR_PARENT_VERSION}"`);
   });
 
@@ -204,6 +218,72 @@ describe("comment access mirrors read access", () => {
   it("is a 404 where the read path is not configured", async () => {
     const response = await app.request(`${ORIGIN}${pub}/comment-access`, { method: "POST", headers: { Origin: ORIGIN } }, {}, fixture.ctx);
     expectPlainNotFound(response);
+  });
+});
+
+describe("the first comments come with the first access answer (#284)", () => {
+  const first = "?path=docs%2Fguide.md";
+
+  it("hands a public repository's first page to anyone, read as anonymous, never cacheable", async () => {
+    const response = await access(pub, { cookie: sessionCookies.reader }, first);
+    expect(response.status).toBe(200);
+    expect(response.headers.get("Cache-Control")).toBe("private, no-store");
+    expect(await response.json()).toEqual({
+      repoId: publicRepo.id, private: false, expiresAt: expect.any(Number), threads: { path: "docs/guide.md", page, isDone: false },
+    });
+    // A public grant names no reader, and neither does its page: it is the same for everyone.
+    expect(snapshots).toEqual([{ repoId: publicRepo.id, path: "docs/guide.md", userId: null, epoch: 0 }]);
+  });
+
+  it("hands a private repository's first page to its reader only, at the epoch the read path checked", async () => {
+    fixture.access.epochs.set(users.reader, 7);
+    for (const headers of [{}, { cookie: sessionCookies.outsider }] as Array<Record<string, string>>) {
+      const denied = await access(priv, headers, first);
+      expectPlainNotFound(denied);
+      expect(await denied.json()).toEqual({ error: "Not found" });
+    }
+    // A reader without access never reaches Convex: no grant and no page is asked for.
+    expect(snapshots).toEqual([]);
+    const granted = await access(priv, { cookie: sessionCookies.reader }, first);
+    expect(granted.headers.get("Cache-Control")).toBe("private, no-store");
+    expect(granted.headers.get("ETag")).toBeNull();
+    expect((await granted.json() as { threads: unknown }).threads).toEqual({ path: "docs/guide.md", page, isDone: false });
+    expect(snapshots).toEqual([{ repoId: privateRepo.id, path: "docs/guide.md", userId: users.reader, epoch: 7 }]);
+  });
+
+  it("drops the page when Convex refuses the grant: the answer is the plain 404", async () => {
+    convex.answer = () => Response.json({ status: "success", value: { granted: false } });
+    const response = await access(pub, {}, first);
+    expectPlainNotFound(response);
+    expect(await response.json()).toEqual({ error: "Not found" });
+  });
+
+  it("still grants when the page cannot be read, or is not a repository path; the live subscription delivers it", async () => {
+    convex.snapshot = () => new Response("down", { status: 503 });
+    expect(await (await access(pub, {}, first)).json()).not.toHaveProperty("threads");
+    convex.snapshot = () => Response.json({ status: "success", value: { page: "nope" } });
+    clearCommentGrantMemory();
+    expect(await (await access(pub, {}, first)).json()).not.toHaveProperty("threads");
+    const asked = snapshots.length;
+    for (const query of ["?path=", "?path=..%2Fx.md", "?path=a%2F%2Fb.md", `?path=${"a".repeat(1_025)}`]) {
+      const response = await access(pub, {}, query);
+      expect(response.status).toBe(200);
+      expect(await response.json()).not.toHaveProperty("threads");
+    }
+    expect(snapshots).toHaveLength(asked);
+  });
+
+  it("reads Convex's page strictly", async () => {
+    const stub = (value: unknown) => {
+      globalThis.fetch = vi.fn(() => Promise.resolve(Response.json({ status: "success", value }))) as typeof fetch;
+    };
+    const input = { repoId: 1, path: "a.md", userId: null, epoch: 0 };
+    stub({ page: [1], isDone: true });
+    expect(await convexCommentSnapshots.threads(input)).toEqual({ page: [1], isDone: true });
+    stub({ page: [1] });
+    expect(await convexCommentSnapshots.threads(input)).toBeNull();
+    stub(null);
+    expect(await convexCommentSnapshots.threads(input)).toBeNull();
   });
 });
 

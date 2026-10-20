@@ -55,7 +55,8 @@ async function select(page: Page, text: string) {
   }, text);
 }
 
-const pin = (page: Page, body: string) => ui(page).locator(`[data-testid="commentor-pin"][data-tip*="${body}"]`);
+// Saved pins only: the reader's own thread shows at once as sending (#284), before it is saved.
+const pin = (page: Page, body: string) => ui(page).locator(`[data-testid="commentor-pin"]:not(.is-sending)[data-tip*="${body}"]`);
 const card = (page: Page, body: string) => ui(page).locator(".drawer-thread", { hasText: body });
 
 async function comment(page: Page, quote: string, body: string) {

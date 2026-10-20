@@ -20,8 +20,9 @@ import { validateClientOperationId, validateCommentAuthor } from "./commentOpera
 import { publicError } from "./publicErrors";
 import { mutation, query } from "./publicFunctions";
 import { publicPaginate } from "./publicPagination";
-import { repoCommentReader, requireRepoCommentWriter } from "./repoCommentAccess";
+import { repoCommentReader, repoCommentSnapshotAllowed, requireRepoCommentWriter } from "./repoCommentAccess";
 import { repoAnchorValidator } from "./schema";
+import { requireInternalSecret } from "./security";
 import { consumeWriteQuota } from "./writeQuotas";
 
 export const REPO_THREAD_PAGE_SIZE = 20;
@@ -97,35 +98,57 @@ async function scopedThread(ctx: Ctx, repoId: number, path: string, value: strin
 const scopeArgs = { repoId: v.number(), path: v.string() };
 const operationArgs = { clientOperationId: v.optional(v.string()), expectedAuthorId: v.optional(v.string()) };
 
+type PageOptions = { numItems: number; cursor: string | null };
+
+/** One page of a document's live threads, newest first, each with its newest replies, as `userId` (null: anonymous) sees it. */
+async function threadPage(ctx: QueryCtx, repoId: number, path: string, userId: string | null, paginationOpts: PageOptions) {
+  const threads = await publicPaginate(ctx.db.query("repoThreads")
+    .withIndex("by_repo_path", q => q.eq("repoId", repoId).eq("path", path).eq("deletedAt", undefined))
+    .order("desc"), { ...paginationOpts, maximumRowsRead: MAX_REACTIVE_PAGE_ROWS, maximumBytesRead: MAX_PAGE_BYTES_READ });
+  const author = authors(ctx);
+  const page = await Promise.all(threads.page.map(async thread => {
+    const [threadAuthor, newest] = await Promise.all([
+      author(thread.authorId),
+      ctx.db.query("repoReplies").withIndex("by_thread", q => q.eq("threadId", thread._id).eq("deletedAt", undefined))
+        .order("desc").take(REPO_REPLY_PREVIEW_SIZE + 1),
+    ]);
+    const replies = await Promise.all(newest.slice(0, REPO_REPLY_PREVIEW_SIZE).reverse().map(async reply => ({
+      _id: reply._id, _creationTime: reply._creationTime, clientOperationId: reply.clientOperationId, body: reply.body,
+      canDelete: reply.authorId === userId, ...authorDisplay(await author(reply.authorId)),
+    })));
+    return {
+      _id: thread._id, _creationTime: thread._creationTime, clientOperationId: thread.clientOperationId,
+      repoId: thread.repoId, path: thread.path, blobSha: thread.blobSha, anchor: thread.anchor, body: thread.body,
+      resolved: thread.resolved, archived: thread.archived, canDelete: thread.authorId === userId,
+      ...authorDisplay(threadAuthor), replies, repliesHasMore: newest.length > REPO_REPLY_PREVIEW_SIZE,
+    };
+  }));
+  return { ...threads, page };
+}
+
 export const listThreads = query({
   args: { ...scopeArgs, paginationOpts: paginationOptsValidator },
   handler: async (ctx, args) => {
     if (!validPageSize(args.paginationOpts.numItems, REPO_THREAD_PAGE_SIZE)) publicError("invalid_input");
     const reader = await repoCommentReader(ctx, args.repoId);
     if (!reader || !validRepoPath(args.path)) return emptyPage();
-    const threads = await publicPaginate(ctx.db.query("repoThreads")
-      .withIndex("by_repo_path", q => q.eq("repoId", args.repoId).eq("path", args.path).eq("deletedAt", undefined))
-      .order("desc"), { ...args.paginationOpts, maximumRowsRead: MAX_REACTIVE_PAGE_ROWS, maximumBytesRead: MAX_PAGE_BYTES_READ });
-    const author = authors(ctx);
-    const userId = reader.user?._id ?? null;
-    const page = await Promise.all(threads.page.map(async thread => {
-      const [threadAuthor, newest] = await Promise.all([
-        author(thread.authorId),
-        ctx.db.query("repoReplies").withIndex("by_thread", q => q.eq("threadId", thread._id).eq("deletedAt", undefined))
-          .order("desc").take(REPO_REPLY_PREVIEW_SIZE + 1),
-      ]);
-      const replies = await Promise.all(newest.slice(0, REPO_REPLY_PREVIEW_SIZE).reverse().map(async reply => ({
-        _id: reply._id, _creationTime: reply._creationTime, clientOperationId: reply.clientOperationId, body: reply.body,
-        canDelete: reply.authorId === userId, ...authorDisplay(await author(reply.authorId)),
-      })));
-      return {
-        _id: thread._id, _creationTime: thread._creationTime, clientOperationId: thread.clientOperationId,
-        repoId: thread.repoId, path: thread.path, blobSha: thread.blobSha, anchor: thread.anchor, body: thread.body,
-        resolved: thread.resolved, archived: thread.archived, canDelete: thread.authorId === userId,
-        ...authorDisplay(threadAuthor), replies, repliesHasMore: newest.length > REPO_REPLY_PREVIEW_SIZE,
-      };
-    }));
-    return { ...threads, page };
+    return threadPage(ctx, args.repoId, args.path, reader.user?._id ?? null, args.paginationOpts);
+  },
+});
+
+/**
+ * The first page of a document's threads for the serving Worker (#284), so the repository shell can show comments
+ * before its Convex socket is up. Internal-secret only: the Worker calls it after `authorizeRepo` granted this reader
+ * the repository, alongside recording the grant, and hands the page only to that reader (`private, no-store`). The
+ * page is the one `listThreads` gives the same reader; what `grant` would refuse is an empty page here too.
+ */
+export const threadSnapshot = query({
+  args: { internalSecret: v.string(), ...scopeArgs, userId: v.union(v.string(), v.null()), epoch: v.number() },
+  handler: async (ctx, args) => {
+    requireInternalSecret(args.internalSecret);
+    if (!validRepoPath(args.path)) publicError("invalid_input");
+    if (!await repoCommentSnapshotAllowed(ctx, args.repoId, args.userId, args.epoch)) return emptyPage();
+    return threadPage(ctx, args.repoId, args.path, args.userId, { numItems: REPO_THREAD_PAGE_SIZE, cursor: null });
   },
 });
 

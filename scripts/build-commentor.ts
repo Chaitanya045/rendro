@@ -10,7 +10,7 @@ import { writeFileSync } from "node:fs";
 const result = await esbuild.build({
   entryPoints: ["src/commentor/commentor.ts"],
   bundle: true,
-  minify: false,
+  minify: true,
   format: "iife",
   globalName: "Commentor",
   outfile: "public/commentor.js",

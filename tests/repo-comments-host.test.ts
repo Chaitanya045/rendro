@@ -5,7 +5,7 @@ import {
   bootCommentorParentHost, CommentorParentHost, ConvexDocumentCommentBackend, ConvexRepoCommentBackend, documentCommentScopeFromFrame, keepRepoCommentAccess,
   REPO_ACCESS_DENIED_RETRY_MS, REPO_ACCESS_MAX_RETRY_MS, REPO_ACCESS_MIN_RENEW_MS, sameScope, type DocumentCommentBackend, type DocumentCommentScope,
 } from "../src/commentor/parent-host";
-import { COMMENTOR_PARENT_READY, COMMENTOR_PARENT_REQUEST, COMMENTOR_PARENT_RESPONSE } from "../src/commentor/parent-protocol";
+import { COMMENTOR_PARENT_READY, COMMENTOR_PARENT_REQUEST, COMMENTOR_PARENT_RESPONSE, COMMENTOR_PARENT_UPDATE } from "../src/commentor/parent-protocol";
 
 /*
  * The trusted shell's half of comments on repository docs (#254): the scope comes from the frame's URL and the
@@ -61,7 +61,7 @@ describe("repository comment scopes", () => {
 });
 
 describe("the repository comment host", () => {
-  function setup(userId: string | null) {
+  function setup(userId: string | null, hostConfig: ConstructorParameters<typeof CommentorParentHost>[2] = config) {
     const posted: Array<Record<string, unknown>> = [];
     const child = { postMessage: vi.fn((message: Record<string, unknown>) => { posted.push(message); }) };
     let load = () => {};
@@ -69,14 +69,16 @@ describe("the repository comment host", () => {
     const subscribe = vi.fn<DocumentCommentBackend["subscribe"]>(() => ({ unsubscribe: vi.fn(), loadMore: vi.fn(() => true) }));
     const mutate = vi.fn<DocumentCommentBackend["mutate"]>(() => Promise.resolve(null));
     const backend: DocumentCommentBackend = { subscribe, subscribeReplies: vi.fn(() => ({ unsubscribe: vi.fn(), loadMore: vi.fn(() => true) })), mutate };
-    const host = new CommentorParentHost(frame as never, ORIGIN, config, backend, userId);
+    const host = new CommentorParentHost(frame as never, ORIGIN, hostConfig, backend, userId);
     host.start();
     load();
     const request = (requestId: string, method: string, args: unknown = {}) =>
       window.dispatchEvent(new MessageEvent("message", { data: { type: COMMENTOR_PARENT_REQUEST, requestId, method, args }, source: child as never }));
     const responses = () => posted.filter(message => message.type === COMMENTOR_PARENT_RESPONSE);
     const readies = () => posted.filter(message => message.type === COMMENTOR_PARENT_READY);
-    return { host, subscribe, mutate, request, responses, readies };
+    const updates = () => posted.filter(message => message.type === COMMENTOR_PARENT_UPDATE);
+    const live = (threads: unknown[], state = { canLoadMore: false, loading: false }) => subscribe.mock.calls.at(-1)![1](threads, state);
+    return { host, subscribe, mutate, request, responses, readies, updates, live, load };
   }
 
   it("lets an anonymous reader read, and never write or keep drafts", () => {
@@ -122,6 +124,148 @@ describe("the repository comment host", () => {
     expect(posted.filter(message => message.type === COMMENTOR_PARENT_READY)).toHaveLength(1);
     expect(readies()).toHaveLength(before);
     expect(next.addEventListener).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("the first comments before the live subscription (#284)", () => {
+  function setup(userId: string | null, hostConfig?: ConstructorParameters<typeof CommentorParentHost>[2]) {
+    const posted: Array<Record<string, unknown>> = [];
+    const child = { postMessage: vi.fn((message: Record<string, unknown>) => { posted.push(message); }) };
+    let load = () => {};
+    const frame = { src: frameUrl, contentWindow: child, addEventListener: (_type: string, listener: () => void) => { load = listener; }, removeEventListener: vi.fn() };
+    const subscribe = vi.fn<DocumentCommentBackend["subscribe"]>(() => ({ unsubscribe: vi.fn(), loadMore: vi.fn(() => true) }));
+    const mutate = vi.fn<DocumentCommentBackend["mutate"]>(() => Promise.resolve(null));
+    const backend: DocumentCommentBackend = { subscribe, subscribeReplies: vi.fn(() => ({ unsubscribe: vi.fn(), loadMore: vi.fn(() => true) })), mutate };
+    const host = new CommentorParentHost(frame as never, ORIGIN, hostConfig ?? config, backend, userId);
+    host.start();
+    load();
+    const request = (requestId: string, method: string, args: unknown = {}) =>
+      window.dispatchEvent(new MessageEvent("message", { data: { type: COMMENTOR_PARENT_REQUEST, requestId, method, args }, source: child as never }));
+    const updates = () => posted.filter(message => message.type === COMMENTOR_PARENT_UPDATE);
+    const responses = () => posted.filter(message => message.type === COMMENTOR_PARENT_RESPONSE);
+    const live = (threads: unknown[], state = { canLoadMore: false, loading: false }) => subscribe.mock.calls.at(-1)![1](threads, state);
+    return { host, subscribe, mutate, request, updates, responses, live, frame, load: () => load() };
+  }
+  const snapshot = (documentPath = "docs/guide.md") => ({ documentPath, threads: [{ _id: "t1" }, { _id: 7 }], canLoadMore: true });
+  const subscribeNow = (request: (id: string, method: string, args?: unknown) => void, id = "sub") => request(id, "subscribe", { documentPath: "docs/guide.md" });
+
+  it("holds the live subscription until the first access answer, shows its page, then lets the live page replace it", async () => {
+    const { host, subscribe, mutate, request, updates, responses, live } = setup("user-a");
+    host.holdLive();
+    subscribeNow(request);
+    // Answered at once; nothing is shown and nothing subscribes before the reader's grant is recorded.
+    expect(responses()).toEqual([expect.objectContaining({ requestId: "sub", ok: true })]);
+    expect(subscribe).not.toHaveBeenCalled();
+    expect(updates()).toEqual([]);
+    host.accessAnswered(snapshot());
+    expect(updates()).toEqual([{ type: COMMENTOR_PARENT_UPDATE, threads: [{ _id: "t1" }, { _id: 7 }], canLoadMore: true, loading: false }]);
+    expect(subscribe).toHaveBeenCalledTimes(1);
+    // The snapshot's threads may be replied to before the live page arrives, also while it is still loading.
+    live([], { canLoadMore: false, loading: true });
+    expect(updates().at(-1)).toMatchObject({ threads: [], loading: true });
+    request("reply", "reply.add", { threadId: "t1", body: "Hi" });
+    await vi.waitFor(() => expect(mutate).toHaveBeenCalledTimes(1));
+    // The live page supersedes it: a deleted thread goes, a new one arrives.
+    live([{ _id: "t2" }]);
+    expect(updates().at(-1)).toMatchObject({ threads: [{ _id: "t2" }], loading: false });
+    request("gone", "reply.add", { threadId: "t1", body: "Late" });
+    expect(responses().at(-1)).toMatchObject({ requestId: "gone", ok: false, error: "Comment operation is outside this document" });
+    // Once superseded, a later subscription never shows the stale snapshot again.
+    subscribeNow(request, "again");
+    expect(updates()).toHaveLength(3);
+    expect(subscribe).toHaveBeenCalledTimes(2);
+  });
+
+  it("shows a snapshot that arrived first at once, and never one of another page", () => {
+    const first = setup("user-a");
+    first.host.accessAnswered(snapshot());
+    subscribeNow(first.request);
+    expect(first.updates()).toHaveLength(1);
+    expect(first.subscribe).toHaveBeenCalledTimes(1);
+
+    const other = setup("user-a");
+    other.host.accessAnswered(snapshot("docs/other.md"));
+    subscribeNow(other.request);
+    expect(other.updates()).toEqual([]);
+    expect(other.subscribe).toHaveBeenCalledTimes(1);
+
+    const none = setup(null);
+    none.host.holdLive();
+    subscribeNow(none.request);
+    none.host.accessAnswered(null);
+    expect(none.updates()).toEqual([]);
+    expect(none.subscribe).toHaveBeenCalledTimes(1);
+  });
+
+  it("marks when each page's first comments reached its widget, and how long the reader's own writes took to save, for monitoring", async () => {
+    performance.clearMeasures();
+    const marks = (name: string) => performance.getEntriesByName(name).map(entry => ({ start: entry.startTime, kind: ((entry as PerformanceMeasure).detail as { kind: string }).kind }));
+    const { host, mutate, request, live, load, frame } = setup("user-a");
+    host.accessAnswered(snapshot());
+    subscribeNow(request);
+    // The opening page counts from navigation start; its snapshot was its first comments. The live page that follows is not another.
+    live([{ _id: "t1" }]);
+    expect(marks("rendro:comments")).toEqual([{ start: 0, kind: "cold" }]);
+    // The reader's own thread and reply are timed until saved; other writes, and failures, are not.
+    request("create", "thread.create", { body: "Hi", anchor });
+    request("reply", "reply.add", { threadId: "t1", body: "Hi" });
+    request("resolve", "thread.resolve", { threadId: "t1", resolved: true });
+    await vi.waitFor(() => expect(marks("rendro:comment-echo")).toHaveLength(2));
+    expect(marks("rendro:comment-echo").every(mark => mark.kind === "cold" && mark.start > 0)).toBe(true);
+    mutate.mockImplementationOnce(() => Promise.reject(new Error("down")));
+    request("failed", "reply.add", { threadId: "t1", body: "Again" });
+    await vi.waitFor(() => expect(mutate).toHaveBeenCalledTimes(4));
+    await Promise.resolve();
+    expect(marks("rendro:comment-echo")).toHaveLength(2);
+    // The next page counts from its frame's load, and only once its page is no longer loading.
+    frame.src = `${ORIGIN}/r/octo/docs/@${commit}/files/docs/guide.md?next`;
+    load();
+    subscribeNow(request, "next");
+    live([], { canLoadMore: false, loading: true });
+    expect(marks("rendro:comments")).toHaveLength(1);
+    live([]);
+    expect(marks("rendro:comments")).toEqual([{ start: 0, kind: "cold" }, { start: expect.any(Number), kind: "switch" }]);
+    expect(marks("rendro:comments")[1].start).toBeGreaterThan(0);
+  });
+
+  it("marks nothing outside repository docs, and keeps working where measures are unavailable", () => {
+    performance.clearMeasures();
+    const project = setup("user-a", { organizationId: "o", projectId: "p" as never, convexUrl: "https://convex.test" });
+    project.request("sub", "subscribe", { documentPath: "docs/guide.md" });
+    expect(performance.getEntriesByName("rendro:comments")).toEqual([]);
+    vi.spyOn(performance, "measure").mockImplementation(() => { throw new TypeError("no options"); });
+    const { host, request, updates } = setup("user-a");
+    host.accessAnswered(snapshot());
+    subscribeNow(request);
+    expect(updates()).toHaveLength(1);
+  });
+
+  it("answers nothing to a read from a page the shell has already left, and still refuses a write from it", () => {
+    const { subscribe, mutate, request, responses, frame } = setup("user-a");
+    // The sidebar moved the frame on; the page it is leaving has not unloaded, and its requests still arrive.
+    frame.src = `${ORIGIN}/r/octo/docs/@${commit}/files/docs/next.md`;
+    subscribeNow(request);
+    request("more", "threads.more");
+    request("replies", "replies.more", { threadId: "t1" });
+    expect(responses()).toEqual([]);
+    expect(subscribe).not.toHaveBeenCalled();
+    request("create", "thread.create", { body: "Hi", anchor });
+    expect(responses()).toEqual([expect.objectContaining({ requestId: "create", ok: false, error: "Comment scope is unavailable" })]);
+    expect(mutate).not.toHaveBeenCalled();
+  });
+
+  it("starts nothing for a frame that was replaced while it waited, and ignores snapshots outside repository docs", () => {
+    const { host, subscribe, request, updates, load } = setup("user-a");
+    host.holdLive();
+    subscribeNow(request);
+    load();
+    host.accessAnswered(snapshot());
+    expect(subscribe).not.toHaveBeenCalled();
+    expect(updates()).toEqual([]);
+
+    const project = setup("user-a", { organizationId: "o", projectId: "p" as never, convexUrl: "https://convex.test" });
+    project.host.accessAnswered(snapshot());
+    expect(project.updates()).toEqual([]);
   });
 });
 
@@ -229,6 +373,58 @@ describe("keeping comment access", () => {
     stop();
     await vi.advanceTimersByTimeAsync(REPO_ACCESS_MAX_RETRY_MS * 2);
     expect(fetcher).toHaveBeenCalledTimes(7);
+  });
+
+  it("asks for the opening page's first comments once, and reports the first answer whatever it is (#284)", async () => {
+    vi.useFakeTimers();
+    const page = [{ _id: "t1" }];
+    const fetcher = answers(Response.json({ expiresAt: Date.now() + 60_000, threads: { path: "docs/guide.md", page, isDone: false } }));
+    const first = vi.fn();
+    const stop = keepRepoCommentAccess(config.accessUrl, vi.fn(), { documentPath: "docs/guide.md", onAnswer: first });
+    await settle();
+    expect(fetcher).toHaveBeenCalledWith(`${config.accessUrl}?path=docs%2Fguide.md`, expect.objectContaining({ method: "POST", cache: "no-store" }));
+    expect(first).toHaveBeenCalledWith({ documentPath: "docs/guide.md", threads: page, canLoadMore: true });
+    // Renewals (halfway through the minute) ask for access only.
+    await vi.advanceTimersByTimeAsync(30_000);
+    await settle();
+    expect(fetcher).toHaveBeenLastCalledWith(config.accessUrl, expect.anything());
+    expect(first).toHaveBeenCalledTimes(1);
+    stop();
+
+    // A page for another document, a malformed one, none at all, a denial, a fault and an outage are all "no snapshot".
+    for (const reply of [
+      Response.json({ expiresAt: Date.now() + 60_000, threads: { path: "docs/other.md", page, isDone: true } }),
+      Response.json({ expiresAt: Date.now() + 60_000, threads: { path: "docs/guide.md", page: "x", isDone: true } }),
+      Response.json({ expiresAt: Date.now() + 60_000 }),
+      new Response(null, { status: 404 }),
+      new Response(null, { status: 503 }),
+      new Error("offline"),
+    ]) {
+      answers(reply);
+      const onAnswer = vi.fn();
+      const stopOne = keepRepoCommentAccess(config.accessUrl, vi.fn(), { documentPath: "docs/guide.md", onAnswer });
+      await settle();
+      expect(onAnswer).toHaveBeenCalledWith(null);
+      stopOne();
+    }
+    // Without an opening page, the first request asks for access only, and its answer still releases the host.
+    const plain = answers(Response.json({ expiresAt: Date.now() + 60_000, threads: { path: "docs/guide.md", page, isDone: true } }));
+    const onAnswer = vi.fn();
+    const stopPlain = keepRepoCommentAccess(config.accessUrl, vi.fn(), { documentPath: null, onAnswer });
+    await settle();
+    expect(plain).toHaveBeenCalledWith(config.accessUrl, expect.anything());
+    expect(onAnswer).toHaveBeenCalledWith(null);
+    stopPlain();
+    // Stopped while offline: nobody is told.
+    let fail!: (error: Error) => void;
+    vi.stubGlobal("fetch", vi.fn(() => new Promise((_resolve, reject) => { fail = reject; })));
+    const late = vi.fn();
+    const stopLate = keepRepoCommentAccess(config.accessUrl, vi.fn(), { documentPath: "docs/guide.md", onAnswer: late });
+    await settle();
+    stopLate();
+    fail(new Error("offline"));
+    await settle();
+    expect(late).not.toHaveBeenCalled();
   });
 
   it("caps the backoff at a minute", async () => {
@@ -357,6 +553,52 @@ describe("booting the repository shell's comments", () => {
     dispose();
     window.dispatchEvent(new CustomEvent("rendro:content-frame", { detail: later }));
     expect(replaced).toHaveBeenCalledTimes(1);
+  });
+
+  it("asks for access and the opening page's comments at once, before the session check, and hands the host the answer (#284)", async () => {
+    Object.assign(window, { RENDRO_REPO_COMMENT_CONFIG: { ...config, documentPath: "docs/guide.md" } });
+    let session!: (response: Response) => void;
+    const accessUrls: string[] = [];
+    vi.stubGlobal("fetch", vi.fn((url: string) => {
+      if (String(url).includes("get-session")) return new Promise<Response>(done => { session = done; });
+      accessUrls.push(String(url));
+      return Promise.resolve(Response.json({ expiresAt: Date.now() + 60_000, threads: { path: "docs/guide.md", page: [], isDone: true } }));
+    }));
+    const answered = vi.spyOn(CommentorParentHost.prototype, "accessAnswered");
+    const writable = vi.spyOn(CommentorParentHost.prototype, "setWritable");
+    const held = vi.spyOn(CommentorParentHost.prototype, "holdLive");
+    const dispose = bootCommentorParentHost()!;
+    await vi.waitFor(() => expect(accessUrls).toEqual([`${config.accessUrl}?path=docs%2Fguide.md`]));
+    // Answered before the host existed: the host gets it as it is created.
+    await Promise.resolve();
+    session(new Response("null"));
+    await vi.waitFor(() => expect(answered).toHaveBeenCalledWith({ documentPath: "docs/guide.md", threads: [], canLoadMore: false }));
+    expect(writable).toHaveBeenCalledWith(true);
+    expect(held).not.toHaveBeenCalled();
+    dispose();
+  });
+
+  it("holds the host's live subscription when the access answer comes after it, and names the page the frame shows", async () => {
+    // As after a back/forward-cache restore: the frame shows another page than the shell opened with.
+    Object.defineProperty(document.getElementById("content-frame")!, "src", { value: `${location.origin}/r/octo/docs/~main/files/docs/shown.md` });
+    let access!: (response: Response) => void;
+    const accessUrls: string[] = [];
+    vi.stubGlobal("fetch", vi.fn((url: string) => {
+      if (String(url).includes("get-session")) return Promise.resolve(new Response("null"));
+      accessUrls.push(String(url));
+      return new Promise<Response>(done => { access = done; });
+    }));
+    const answered = vi.spyOn(CommentorParentHost.prototype, "accessAnswered");
+    const writable = vi.spyOn(CommentorParentHost.prototype, "setWritable");
+    const held = vi.spyOn(CommentorParentHost.prototype, "holdLive");
+    const dispose = bootCommentorParentHost()!;
+    await vi.waitFor(() => expect(held).toHaveBeenCalled());
+    expect(accessUrls).toEqual([`${config.accessUrl}?path=docs%2Fshown.md`]);
+    expect(answered).not.toHaveBeenCalled();
+    access(new Response(null, { status: 404 }));
+    await vi.waitFor(() => expect(answered).toHaveBeenCalledWith(null));
+    expect(writable).toHaveBeenCalledWith(false);
+    dispose();
   });
 
   it("authenticates a signed-in reader, and stops everything when that reader signs out", async () => {

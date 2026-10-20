@@ -111,6 +111,12 @@ export class ParentCommentTransport {
     return this.mutations.has(mutationKey(method, (args ?? {}) as Record<string, unknown>));
   }
 
+  /** The clientOperationId of a write now in flight (#284), so its optimistic copy can be matched to the live echo. */
+  inFlightOperationId(method: CommentorParentMutationMethod, args: Record<string, unknown> = {}): string | undefined {
+    const key = mutationKey(method, args);
+    return this.mutations.has(key) ? this.recovery.value.operations[key]?.clientOperationId : undefined;
+  }
+
   saveDraft(key: string, args: Record<string, unknown>): void {
     if (!this.compatible) return;
     this.recovery.draft(key, args);

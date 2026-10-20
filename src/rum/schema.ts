@@ -16,8 +16,8 @@ export const RUM_MAX_EVENTS = 32;
 /** Bytes per beacon, well above 32 events of the longest valid shape. */
 export const RUM_MAX_BYTES = 8 * 1024;
 
-/** What was measured: the shell document, a document frame, or a scripted tree or search read. */
-export const RUM_ROUTES = ["shell", "frame", "tree", "search"] as const;
+/** What was measured: the shell document, a document frame, a scripted tree or search read, or a page's comments (#284). */
+export const RUM_ROUTES = ["shell", "frame", "tree", "search", "comments"] as const;
 export const RUM_METRICS = [
   // web-vitals, for the shell document.
   "LCP", "INP", "CLS", "FCP", "TTFB",
@@ -25,6 +25,9 @@ export const RUM_METRICS = [
   "swap", "load", "switch",
   // A request as the browser saw it (start → response end), and the Server-Timing total the Worker reported.
   "response", "server",
+  // Comments (#284): a page's first comments reaching its widget (from navigation start for the shell's opening
+  // page, else from the frame's load), and the reader's own thread or reply being saved after it was sent.
+  "ready", "echo",
 ] as const;
 /**
  * How the measured view began. The shell's own load: `cold`, `reload`,
@@ -61,6 +64,7 @@ const METRIC_ROUTES: Readonly<Record<RumMetric, readonly RumRoute[]>> = {
   LCP: ["shell"], INP: ["shell"], CLS: ["shell"], FCP: ["shell"], TTFB: ["shell"],
   swap: ["frame"], load: ["frame"], switch: ["frame"],
   response: ["frame", "tree", "search"], server: ["shell", "frame", "tree", "search"],
+  ready: ["comments"], echo: ["comments"],
 };
 const NAVIGATION_METRICS: ReadonlySet<RumMetric> = new Set(["swap", "load", "switch"]);
 /** An hour in milliseconds; CLS is a unitless score. Anything larger is not a real measurement. */

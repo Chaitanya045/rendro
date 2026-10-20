@@ -150,7 +150,8 @@ describe("authoring", () => {
     expect(await composer.locator(".anchor-label").innerText()).toBe("On: “Second bold paragraph with spaced text.”");
     await lab.tid("commentor-composer-textarea").fill("Element comment");
     await lab.tid("commentor-composer-post").click();
-    await expect.poll(() => lab.pins().count()).toBe(1);
+    // Saved, not just shown as sending (#284): only then has the write reached the backend.
+    await expect.poll(() => lab.ui.locator('[data-testid="commentor-pin"]:not(.is-sending)').count()).toBe(1);
     expect(await lastCall(lab)).toMatchObject({ method: "thread.create", args: { anchor: { kind: "element", path: ["main", "p:nth-of-type(2)"] } } });
     // An element with no text is labelled generically.
     await button.click();
@@ -167,36 +168,203 @@ describe("authoring", () => {
     await expect.poll(() => composer.count()).toBe(0);
   });
 
-  it("shows a pending post, keeps the draft on every failure and recovers", async () => {
+  it("shows the reader's own thread at once as sending, and the live echo replaces it without a duplicate (#284)", async () => {
     const lab = await commentLab.open();
-    await lab.ready();
-    const compose = async (text: string) => {
-      await lab.tid("commentor-comment-btn").click();
-      await lab.doc(() => document.getElementById("title")!.click());
-      await lab.tid("commentor-composer-textarea").fill(text);
-    };
-    await compose("Held comment");
+    await lab.ready([{ _id: "t1", anchor: heading }]);
+    await lab.openDrawer();
+    await lab.tid("commentor-comment-btn").click();
+    await lab.doc(() => document.getElementById("second")!.click());
+    await lab.tid("commentor-composer-textarea").fill("Optimistic comment");
     await lab.host(l => { l.holds = ["thread.create"]; });
     await lab.tid("commentor-composer-post").click();
-    const post = lab.tid("commentor-composer-post");
-    await expect.poll(() => post.innerText()).toBe("Posting…");
-    expect(await post.getAttribute("aria-busy")).toBe("true");
-    expect(await post.isDisabled()).toBe(true);
-    expect(await lab.tid("commentor-composer-textarea").isDisabled()).toBe(true);
-    expect(await lab.tid("commentor-composer-cancel").isDisabled()).toBe(true);
+    // Within a frame of the click, before the request reaches the backend: the composer is gone, the thread is here.
+    const sending = lab.ui.locator(".drawer-thread.is-sending");
+    await expect.poll(() => sending.count()).toBe(1);
+    await expect.poll(() => lab.tid("commentor-composer").count()).toBe(0);
+    expect(await sending.getAttribute("aria-busy")).toBe("true");
+    expect(await sending.getByTestId("commentor-sending").innerText()).toBe("Sending…");
+    expect(await sending.innerText()).toContain("Optimistic comment");
+    // It has no ID yet: nothing to resolve, archive, delete or reply to.
+    expect(await sending.locator('[data-testid="commentor-resolve-btn"], [data-testid="commentor-delete-btn"], [data-testid="commentor-reply-input"]').count()).toBe(0);
+    expect(await lab.pins().count()).toBe(2);
+    expect(await lab.pins().nth(1).getAttribute("aria-label")).toBe("Thread 2 by You, sending");
+    expect(await lab.pins().nth(1).getAttribute("class")).toContain("is-sending");
+    // The live page carries it (published before the acknowledgement, as Convex does): one thread, the real one.
+    await lab.release();
+    await expect.poll(() => lab.ui.locator(".drawer-thread").count()).toBe(2);
+    expect(await sending.count()).toBe(0);
+    expect(await lab.ui.locator(".drawer-thread", { hasText: "Optimistic comment" }).getAttribute("data-thread-id")).toMatch(/^thread-/);
+    const create = (await lab.calls).filter(call => call.method === "thread.create");
+    expect(create).toHaveLength(1);
+    expect(create[0].args.clientOperationId).toEqual(expect.any(String));
+  });
+
+  it("rolls a failed post back, keeps the draft in the reopened composer and retries the same operation (#284)", async () => {
+    const lab = await commentLab.open();
+    await lab.ready();
+    await lab.openDrawer();
+    await lab.tid("commentor-comment-btn").click();
+    await lab.doc(() => document.getElementById("title")!.click());
+    await lab.tid("commentor-composer-textarea").fill("Held comment");
+    await lab.host(l => { l.holds = ["thread.create"]; });
+    await lab.tid("commentor-composer-post").click();
+    await expect.poll(() => lab.ui.locator(".drawer-thread.is-sending").count()).toBe(1);
     await lab.release({ kind: "convex", code: "forbidden" });
     await expect.poll(() => toastText(lab).innerText()).toBe("You do not have permission to change this comment.");
+    expect(await lab.ui.locator(".drawer-thread").count()).toBe(0);
+    const post = lab.tid("commentor-composer-post");
     expect(await lab.tid("commentor-composer-textarea").inputValue()).toBe("Held comment");
     expect(await post.innerText()).toBe("Post");
     expect(await post.getAttribute("aria-busy")).toBeNull();
-    expect(await lab.tid("commentor-composer-textarea").evaluate(el => el === (el.getRootNode() as ShadowRoot).activeElement)).toBe(true);
-    await lab.host(l => { l.holds = []; l.failures = { "thread.create": { kind: "plain" } }; });
+    await expect.poll(() => lab.focused()).toBe("commentor-composer-textarea");
+    // An unknown failure keeps the operation: Post retries it under the same clientOperationId.
+    await lab.host(l => { l.failures = { "thread.create": { kind: "plain" } }; });
     await post.click();
     await expect.poll(() => toastText(lab).last().innerText()).toBe("Could not post comment. Try again.");
+    expect(await lab.tid("commentor-composer-textarea").inputValue()).toBe("Held comment");
     await lab.host(l => { l.failures = {}; });
     await post.click();
     await expect.poll(() => lab.pins().count()).toBe(1);
     await expect.poll(() => lab.tid("commentor-composer").count()).toBe(0);
+    const ids = (await lab.calls).filter(call => call.method === "thread.create").map(call => call.args.clientOperationId);
+    expect(ids).toHaveLength(3);
+    expect(ids[2]).toBe(ids[1]);
+    expect(ids[1]).not.toBe(ids[0]);
+  });
+
+  it("sends a double submit once and shows one optimistic thread (#284)", async () => {
+    const lab = await commentLab.open();
+    await lab.ready();
+    await lab.openDrawer();
+    await lab.tid("commentor-comment-btn").click();
+    await lab.doc(() => document.getElementById("title")!.click());
+    const textarea = lab.tid("commentor-composer-textarea");
+    await textarea.fill("Only once");
+    await lab.host(l => { l.holds = ["thread.create"]; });
+    // Enter twice and a click, in one task: the first submit locks the composer before the second runs.
+    await textarea.evaluate(element => {
+      const enter = () => element.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, composed: true }));
+      enter();
+      enter();
+      (element.getRootNode() as ShadowRoot).querySelector<HTMLButtonElement>('[data-testid="commentor-composer-post"]')?.click();
+    });
+    await expect.poll(() => lab.host(l => l.held.length)).toBe(1);
+    expect(await lab.ui.locator(".drawer-thread.is-sending").count()).toBe(1);
+    // A second composer waits for the first post's outcome.
+    await lab.tid("commentor-comment-btn").click();
+    await lab.doc(() => document.getElementById("second")!.click());
+    await expect.poll(() => lab.ui.locator(".toast", { hasText: "Still waiting for confirmation of your comment." }).count()).toBe(1);
+    await expect.poll(() => lab.tid("commentor-composer").count()).toBe(0);
+    await lab.release();
+    await expect.poll(() => lab.ui.locator(".drawer-thread").count()).toBe(1);
+    expect((await lab.calls).filter(call => call.method === "thread.create")).toHaveLength(1);
+  });
+
+  it("shows the reader's own reply at once, rolls a failure back into the input, and dedupes the echo (#284)", async () => {
+    const lab = await commentLab.open();
+    await lab.ready([{ _id: "t1", anchor: heading }]);
+    const bubble = await openBubble(lab);
+    const input = bubble.locator('[data-testid="commentor-reply-input"]');
+    await input.fill("Optimistic reply");
+    await lab.host(l => { l.holds = ["reply.add"]; });
+    await bubble.locator('[data-testid="commentor-reply-send"]').click();
+    const sending = bubble.locator(".reply.is-sending");
+    await expect.poll(() => sending.count()).toBe(1);
+    expect(await sending.getAttribute("aria-busy")).toBe("true");
+    expect(await sending.innerText()).toContain("Optimistic reply");
+    expect(await sending.getByTestId("commentor-sending").innerText()).toBe("Sending…");
+    // The text moved into the list; the input stays locked until the outcome.
+    expect(await bubble.locator('[data-testid="commentor-reply-input"]').inputValue()).toBe("");
+    expect(await bubble.locator('[data-testid="commentor-reply-input"]').isDisabled()).toBe(true);
+    await lab.release({ kind: "plain" });
+    await expect.poll(() => toastText(lab).innerText()).toBe("Could not post reply.");
+    expect(await bubble.locator(".reply").count()).toBe(0);
+    await expect.poll(() => bubble.locator('[data-testid="commentor-reply-input"]').inputValue()).toBe("Optimistic reply");
+    expect(await bubble.locator('[data-testid="commentor-reply-input"]').isDisabled()).toBe(false);
+    // Retried: the echo replaces the optimistic reply, so it is there once.
+    await lab.host(l => { l.holds = ["reply.add"]; });
+    await bubble.locator('[data-testid="commentor-reply-send"]').click();
+    await expect.poll(() => sending.count()).toBe(1);
+    await lab.release();
+    await expect.poll(() => bubble.locator(".reply:not(.is-sending)").count()).toBe(1);
+    expect(await bubble.locator(".reply").count()).toBe(1);
+    const replies = (await lab.calls).filter(call => call.method === "reply.add");
+    expect(replies.map(call => call.args.clientOperationId)).toEqual([replies[0].args.clientOperationId, replies[0].args.clientOperationId]);
+  });
+
+  it("keeps an open optimistic thread open as the echo replaces it, and keeps a sending reply across other live pages (#284)", async () => {
+    const lab = await commentLab.open();
+    await lab.ready([{ _id: "t1", anchor: intro }]);
+    await lab.openDrawer();
+    await lab.host(l => { l.holds = ["reply.add", "thread.create"]; });
+    // A reply is sending while unrelated live pages arrive: it stays until its own echo.
+    const other = lab.ui.locator('.drawer-thread[data-thread-id="t1"]');
+    await other.locator('[data-testid="commentor-reply-input"]').fill("Still sending");
+    await other.locator('[data-testid="commentor-reply-send"]').click();
+    await expect.poll(() => lab.host(l => l.held.length)).toBe(1);
+    await lab.host(l => l.publish());
+    await expect.poll(() => other.locator(".reply.is-sending").count()).toBe(1);
+    await lab.tid("commentor-comment-btn").click();
+    await lab.doc(() => document.getElementById("title")!.click());
+    await lab.tid("commentor-composer-textarea").fill("Watch me");
+    await lab.tid("commentor-composer-post").click();
+    await expect.poll(() => lab.host(l => l.held.length)).toBe(2);
+    await expect.poll(() => lab.tid("commentor-composer").count()).toBe(0);
+    await lab.ui.locator(".pin.is-sending").click();
+    const bubble = lab.tid("commentor-thread-bubble");
+    await expect.poll(() => bubble.getByTestId("commentor-sending").count()).toBe(1);
+    expect(await bubble.getAttribute("data-thread-id")).toMatch(/^sending-/);
+    // The thread's echo: the open bubble follows it to the real thread.
+    await lab.host(l => l.settle(1));
+    await expect.poll(() => bubble.getAttribute("data-thread-id")).toMatch(/^thread-/);
+    expect(await bubble.getByTestId("commentor-sending").count()).toBe(0);
+    expect(await bubble.innerText()).toContain("Watch me");
+    await lab.host(l => l.settle(0));
+    await expect.poll(() => other.locator(".reply:not(.is-sending)").count()).toBe(1);
+    expect(await other.locator(".reply").count()).toBe(1);
+  });
+
+  it("takes nothing back on screen when the reader changes while their writes are sending (#284)", async () => {
+    const lab = await commentLab.open();
+    await lab.ready([{ _id: "t1", anchor: heading }]);
+    await lab.openDrawer();
+    await lab.host(l => { l.holds = ["thread.create", "reply.add"]; });
+    const card = lab.ui.locator('.drawer-thread[data-thread-id="t1"]');
+    await card.locator('[data-testid="commentor-reply-input"]').fill("Mine");
+    await card.locator('[data-testid="commentor-reply-send"]').click();
+    await lab.tid("commentor-comment-btn").click();
+    await lab.doc(() => document.getElementById("second")!.click());
+    await lab.tid("commentor-composer-textarea").fill("Also mine");
+    await lab.tid("commentor-composer-post").click();
+    await expect.poll(() => lab.host(l => l.held.length)).toBe(2);
+    await lab.host(l => l.host!.setUserId("user-b"));
+    // Another reader's view: neither optimistic item, and no composer brought back with the old reader's draft.
+    await expect.poll(() => lab.ui.locator(".is-sending").count()).toBe(0);
+    await expect.poll(() => toastText(lab).count()).toBeGreaterThan(0);
+    expect(await lab.tid("commentor-composer").count()).toBe(0);
+  });
+
+  it("closes a composer reopened after an unknown outcome once the echo shows the post was saved (#284)", async () => {
+    const lab = await commentLab.open();
+    await lab.ready();
+    await lab.tid("commentor-comment-btn").click();
+    await lab.doc(() => document.getElementById("title")!.click());
+    await lab.tid("commentor-composer-textarea").fill("Did it save?");
+    await lab.host(l => { l.holds = ["thread.create"]; });
+    await lab.tid("commentor-composer-post").click();
+    await expect.poll(() => lab.host(l => l.held.length)).toBe(1);
+    // The parent is replaced before the acknowledgement: the outcome is unknown, so the draft comes back.
+    await lab.host(() => {
+      (document.getElementById("content-frame") as HTMLIFrameElement).contentWindow!.postMessage({
+        type: "commentor-parent-ready", protocolVersion: 2, parentGeneration: "replacement", canReloadViewer: true, userId: "user-a",
+      }, "*");
+    });
+    await expect.poll(() => lab.tid("commentor-composer-textarea").inputValue()).toBe("Did it save?");
+    expect(await lab.ui.locator(".is-sending").count()).toBe(0);
+    // It had been saved: the echo carries its operation, which settles the draft and closes the composer.
+    await lab.host(l => { l.holds = []; l.settle(0); });
+    await expect.poll(() => lab.tid("commentor-composer").count()).toBe(0);
+    await expect.poll(() => lab.pins().count()).toBe(1);
   });
 
   it("explains a rate limit with a countdown, then lets the reader post again", async () => {
@@ -230,10 +398,17 @@ describe("authoring", () => {
     await expect.poll(() => lab.tid("commentor-composer-textarea").inputValue()).toBe("Half-written thought");
     expect(await lab.tid("commentor-composer").locator(".anchor-label").innerText()).toBe("On: “Quarterly report”");
     await lab.tid("commentor-composer-post").click();
+    // The pin shows at once as sending (#284); the stored draft clears once the post is saved.
+    await expect.poll(() => lab.ui.locator('[data-testid="commentor-pin"]:not(.is-sending)').count()).toBe(1);
+    const stored = () => lab.page.evaluate(() => (Object.entries(sessionStorage) as Array<[string, string]>).filter(([key]) => key.startsWith("commentor-operations:")).map(([, value]) => JSON.parse(value) as { operations: object; drafts: object }));
+    await expect.poll(async () => (await stored())[0].drafts).toEqual({});
+    expect((await stored())[0].operations).toEqual({});
+    // A reload after the confirmed post never brings the posted text back as a draft.
+    await lab.page.reload();
+    await lab.ready([{ _id: "posted", anchor: heading, body: "Half-written thought" }]);
     await expect.poll(() => lab.pins().count()).toBe(1);
-    const stored = await lab.page.evaluate(() => (Object.entries(sessionStorage) as Array<[string, string]>).filter(([key]) => key.startsWith("commentor-operations:")).map(([, value]) => JSON.parse(value) as { operations: object; drafts: object }));
-    expect(stored[0].drafts).toEqual({});
-    expect(stored[0].operations).toEqual({});
+    expect(await lab.tid("commentor-composer").count()).toBe(0);
+    expect((await stored()).every(entry => Object.keys(entry.drafts).length === 0 && Object.keys(entry.operations).length === 0)).toBe(true);
   });
 });
 

@@ -115,6 +115,8 @@ export interface RepoCommentConfig {
   repoId: number;
   accessUrl: string;
   convexUrl: string;
+  /** The document the shell opens with: its first comments come with the first access answer (#284). */
+  documentPath?: string;
 }
 
 export interface ScopedDocumentShellOptions {

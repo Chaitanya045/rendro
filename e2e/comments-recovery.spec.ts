@@ -45,7 +45,8 @@ test.describe("session loss", () => {
     expect(await threadsOf(other.page, site)).toHaveLength(0);
     await ui.getByTestId("commentor-composer-post").click();
     await expect(ui.getByTestId("commentor-composer")).toHaveCount(0);
-    expect((await threadsOf(other.page, site)).map(thread => thread.body)).toEqual(["Unsent thought"]);
+    // The composer closes at once (#284); the post is saved a round trip later.
+    await expect.poll(async () => (await threadsOf(other.page, site)).map(thread => thread.body)).toEqual(["Unsent thought"]);
     await expect.poll(() => storedDrafts(owner.page)).toEqual([]);
 
     // A second draft, then a different account signs in on the same tab: the first person's draft is gone for good.
@@ -90,7 +91,7 @@ test.describe("session loss", () => {
     await expect(ui.getByTestId("commentor-composer-textarea")).toHaveValue("Written as the session expired");
     await ui.getByTestId("commentor-composer-post").click();
     await expect(ui.getByTestId("commentor-composer")).toHaveCount(0);
-    expect((await threadsOf(owner.page, site)).map(thread => thread.body)).toEqual(["Written as the session expired"]);
+    await expect.poll(async () => (await threadsOf(owner.page, site)).map(thread => thread.body)).toEqual(["Written as the session expired"]);
   });
 });
 
@@ -111,11 +112,12 @@ test.describe("connection loss", () => {
     // The request reaches the server, but its answer (and every later update) never reaches this page.
     socket.blackhole(true);
     await ui.getByTestId("commentor-composer-post").click();
-    await expect(ui.getByTestId("commentor-composer-post")).toHaveAttribute("aria-busy", "true");
+    // Optimistic (#284): the owner's thread shows at once, marked as sending, and stays so with no answer.
+    await expect(ui.locator('[data-testid="commentor-pin"].is-sending')).toHaveCount(1);
     await expect.poll(async () => (await threadsOf(reader.page, site)).map(thread => thread.body)).toEqual(["Survives a lost response"]);
     const [committed] = await threadsOf(reader.page, site);
     await expect(widget(reader.page).getByTestId("commentor-pin")).toHaveCount(1);
-    await expect(ui.getByTestId("commentor-pin")).toHaveCount(0);
+    await expect(ui.locator('[data-testid="commentor-pin"]:not(.is-sending)')).toHaveCount(0);
     expect(await storedOperations(owner.page)).toEqual([expect.objectContaining({ method: "thread.create", clientOperationId: expect.any(String) })]);
 
     // The page (and with it the connection) is replaced before any confirmation: the reader is told, honestly, that the
@@ -129,16 +131,17 @@ test.describe("connection loss", () => {
 
     // Resubmitting while still offline reuses the original operation; reconnecting delivers both sends to the server.
     await ui.getByTestId("commentor-composer-post").click();
-    await expect(ui.getByTestId("commentor-composer-post")).toHaveAttribute("aria-busy", "true");
+    await expect(ui.locator('[data-testid="commentor-pin"].is-sending')).toHaveCount(1);
     socket.blackhole(false);
     await socket.drop();
     await expect(ui.getByTestId("commentor-composer")).toHaveCount(0);
-    await expect(ui.getByTestId("commentor-pin")).toHaveCount(1);
+    await expect(ui.locator('[data-testid="commentor-pin"]:not(.is-sending)')).toHaveCount(1);
+    await expect(ui.locator('[data-testid="commentor-pin"]')).toHaveCount(1);
     const after = await threadsOf(reader.page, site);
     expect(after).toHaveLength(1);
     expect(after[0]).toMatchObject({ _id: committed._id, body: "Survives a lost response", clientOperationId: operation.clientOperationId });
     await expect(widget(reader.page).getByTestId("commentor-pin")).toHaveCount(1);
-    expect(await storedOperations(owner.page)).toEqual([]);
+    await expect.poll(() => storedOperations(owner.page)).toEqual([]);
     expect(await storedDrafts(owner.page)).toEqual([]);
   });
 });
@@ -185,7 +188,7 @@ test.describe("redeploy", () => {
     // The comment itself is intact: it can be answered and resolved, and the server records both.
     await cards.filter({ hasText: "About the sentence" }).getByTestId("commentor-reply-input").fill("Still relevant?");
     await cards.filter({ hasText: "About the sentence" }).getByTestId("commentor-reply-send").click();
-    await expect(cards.filter({ hasText: "About the sentence" }).locator(".reply")).toHaveCount(1);
+    await expect(cards.filter({ hasText: "About the sentence" }).locator(".reply:not(.is-sending)")).toHaveCount(1);
     await cards.filter({ hasText: "About the sentence" }).getByTestId("commentor-resolve-btn").click();
     await expect(cards).toHaveCount(2);
     const [stored] = (await threadsOf(owner.page, site)).filter(thread => thread._id === textual);

@@ -51,6 +51,9 @@ describe("the beacon schema", () => {
       { route: "frame", metric: "load", value: 120, nav: "history", preloaded: false },
       { route: "tree", metric: "response", value: 18, nav: "reload", tier: "shared" },
       { route: "search", metric: "server", value: 9, nav: "back-forward" },
+      // A page's first comments and the reader's own comment saved (#284).
+      { route: "comments", metric: "ready", value: 240, nav: "cold" },
+      { route: "comments", metric: "echo", value: 210, nav: "switch" },
     ];
     expect(parseBeacon(beacon(events))).toEqual(events);
     expect(RUM_METRICS).toContain("switch");
@@ -81,6 +84,10 @@ describe("the beacon schema", () => {
     ["a web vital on a frame", { ...event, metric: "LCP" }],
     ["a switch on the shell", { ...event, route: "shell" }],
     ["a response on the shell", { ...event, route: "shell", metric: "response", preloaded: undefined }],
+    ["comments readiness on a frame", { route: "frame", metric: "ready", value: 1, nav: "switch" }],
+    ["a comment echo on the shell", { route: "shell", metric: "echo", value: 1, nav: "cold" }],
+    ["a frame load on comments", { route: "comments", metric: "load", value: 1, nav: "switch" }],
+    ["a preload flag on comments", { route: "comments", metric: "ready", value: 1, nav: "switch", preloaded: true }],
     ["an unknown navigation", { ...event, nav: "soft" }],
     ["a string value", { ...event, value: "42" }],
     ["an infinite value", { ...event, value: Infinity }],

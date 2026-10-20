@@ -30,7 +30,9 @@ import { viewerScript, viewerUpdateNotice } from "@/viewer/markup";
 import { RUM_VERSION } from "@/viewer/asset-versions";
 import { kvRevocationEpochs, kvVisibilityEpochs, serviceRepoPermissions, type Fetcher, type KvReader } from "./access";
 import { authorizeRepo, authorizeTicket, mintTicket, type Authorization, type AuthorizeDependencies } from "./authorize";
-import { COMMENT_GRANT_MIN_MS, commentAccess, commentorScript, convexCommentGrants, type CommentGrants } from "./comments";
+import {
+  COMMENT_GRANT_MIN_MS, commentAccess, commentorScript, commentSnapshot, convexCommentGrants, convexCommentSnapshots, type CommentGrants, type CommentSnapshots,
+} from "./comments";
 import { durableFirstView, interpretOutcome, prepareRepo, PREPARE_WINDOW_MS, repoIngestTarget, touchRepo, type RepoFirstView } from "./first-view";
 import { FRAME_TEMPLATE_TAG, FRAME_VERSION, failureBody, frameBody, frameContentSecurityPolicy, needsRelativeRewrite, renderFrameDocument } from "./frame";
 import type { RepoGrant } from "./grant";
@@ -70,6 +72,8 @@ interface Services {
   firstView: RepoFirstView | null;
   /** Where comment grants are recorded (#254). */
   comments: CommentGrants;
+  /** Where the shell's first page of a document's threads comes from (#284). */
+  commentSnapshots: CommentSnapshots;
   /** Set only where the repository search index is bound (#251); the search URL is otherwise the plain 404. */
   search: SearchIndex | null;
   /** The visibility epoch a repository is at now: the shared-cache route re-checks every signed URL against it (#242). */
@@ -132,6 +136,7 @@ function services(c: Context, timing = new ReadTiming()): Services | null {
     waitUntil,
     firstView: durableFirstView(env.REPO_INGEST),
     comments: convexCommentGrants,
+    commentSnapshots: convexCommentSnapshots,
     // The search index is optional: without a D1 binding the search URL is the plain 404.
     search: hasMethods(search, ["prepare", "batch", "exec"]) ? d1SearchIndex(search as SearchD1) : null,
     visibilityEpoch,
@@ -193,7 +198,10 @@ function shell(c: Context, grant: RepoGrant, request: RepoRequestPath, manifest:
   if (!selected || !isCanonicalStorageKey(selected) || !isPage(manifest)(selected)) return notFound(c, "html");
   const pinned = repoBase(request.owner, request.name, { kind: "commit", commit: manifest.commit });
   // The shell holds the one comments connection (#254); frames only talk to it. Without a Convex URL the shell loads no client.
-  const repoCommentConfig = { repoId: grant.repo.id, accessUrl: `${repoBase(request.owner, request.name, { kind: "default" })}/comment-access`, convexUrl: CONVEX_URL };
+  // It names the document the shell opens with, so its first access request can bring that page's first comments (#284).
+  const repoCommentConfig = {
+    repoId: grant.repo.id, accessUrl: `${repoBase(request.owner, request.name, { kind: "default" })}/comment-access`, convexUrl: CONVEX_URL, documentPath: selected,
+  };
   const html = renderScopedDocumentShell({
     user: null, namespace: request.name, title: `${request.owner}/${request.name}`,
     basePath: repoBase(request.owner, request.name, request.ref), frameBase: pinned, selectedPath: selected, copyLink: true, repoCommentConfig, repoSearch: true,
@@ -316,12 +324,29 @@ async function renewal(c: Context, grant: RepoGrant, request: RepoRequestPath, m
   return c.json({ prefix: `${pinned}/view/${await mintTicket(services.authorize, grant, manifest.commit)}/files/` });
 }
 
-/** Record the reader's comment access in Convex (#254). Only the trusted shell asks: a same-origin POST. */
+/** A repository page the shell may ask the first comments of: a canonical repository path, as Convex accepts it. */
+const MAX_SNAPSHOT_PATH_LENGTH = 1_024;
+
+/**
+ * Record the reader's comment access in Convex (#254). Only the trusted shell asks: a same-origin POST. The shell's
+ * first request names the document it shows (`?path=`), and the answer then carries that document's first thread
+ * page too (#284), read for this reader in parallel with the grant and returned only when the grant was recorded,
+ * so the drawer and highlights need not wait for the Convex socket. A page that could not be read is left out: the
+ * live subscription still delivers it.
+ */
 async function commentAccessResponse(c: Context, grant: RepoGrant, services: Services): Promise<Response> {
   c.header("Cache-Control", "private, no-store");
-  const access = await commentAccess(services.comments, grant, services.authorize.now());
+  const path = c.req.query("path");
+  const wanted = path !== undefined && path.length <= MAX_SNAPSHOT_PATH_LENGTH && isCanonicalStorageKey(path) ? path : null;
+  const [access, threads] = await Promise.all([
+    commentAccess(services.comments, grant, services.authorize.now()),
+    wanted === null ? null : commentSnapshot(services.commentSnapshots, grant, wanted).catch(() => null),
+  ]);
   if (!access) return notFound(c, "json");
-  return c.json({ repoId: grant.repo.id, private: grant.repo.private, expiresAt: access.expiresAt });
+  return c.json({
+    repoId: grant.repo.id, private: grant.repo.private, expiresAt: access.expiresAt,
+    ...(threads ? { threads: { path: wanted, page: threads.page, isDone: threads.isDone } } : {}),
+  });
 }
 
 function setAuthorizationCookies(c: Context, authorization: Authorization): void {

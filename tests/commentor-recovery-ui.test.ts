@@ -181,26 +181,35 @@ describe("comment widget recovery controls", () => {
     input.value = "New comment draft";
     button("commentor-composer-post").click();
     await vi.advanceTimersByTimeAsync(60_001);
-    expect(button("commentor-composer-post").disabled).toBe(true);
+    // Optimistic (#284): the composer has closed and the thread shows as sending, without an ID to act on.
+    expect(root.querySelector('[data-testid="commentor-composer"]')).toBeNull();
+    const sending = () => root.querySelector('.drawer-thread.is-sending');
+    expect(sending()?.getAttribute("aria-busy")).toBe("true");
+    expect(sending()?.querySelector('[data-testid="commentor-sending"]')?.textContent).toBe("Sending…");
+    expect(sending()?.querySelector('[data-testid="commentor-resolve-btn"], [data-testid="commentor-reply-input"]')).toBeNull();
     if (recovery === "refresh") {
       root.querySelector<HTMLButtonElement>(".toast button")!.click();
       await flush();
-      expect(button("commentor-composer-post").disabled).toBe(true);
-      button("commentor-composer-post").click();
+      expect(sending()).not.toBeNull();
       // Trying to open another composer must retain the original guard/draft.
       button("commentor-comment-btn").click();
       win.document.querySelector("main")!.click();
-      expect(root.querySelector('[data-testid="commentor-composer-textarea"]')).toBe(input);
-      expect(input.value).toBe("New comment draft");
+      expect(root.querySelector('[data-testid="commentor-composer"]')).toBeNull();
+      expect([...root.querySelectorAll(".toast")].some(toast => toast.textContent === "Still waiting for confirmation of your comment.")).toBe(true);
       finish();
       await flush();
-      expect(root.querySelector('[data-testid="commentor-composer"]')?.getAttribute("data-state")).toBe("closed");
+      // Acknowledged: no longer sending, and kept until the live page carries it.
+      expect(sending()?.getAttribute("aria-busy")).toBeNull();
+      expect(sending()?.querySelector('[data-testid="commentor-sending"]')).toBeNull();
     } else {
       send({ type: COMMENTOR_PARENT_READY, protocolVersion: COMMENTOR_PROTOCOL_VERSION, parentGeneration: "host-2" });
       await flush();
+      // The outcome is unknown: the optimistic thread goes, and the composer comes back with the draft.
+      expect(sending()).toBeNull();
+      const restored = root.querySelector<HTMLTextAreaElement>('[data-testid="commentor-composer-textarea"]')!;
       expect(button("commentor-composer-post").disabled).toBe(false);
-      expect(input.disabled).toBe(false);
-      expect(input.value).toBe("New comment draft");
+      expect(restored.disabled).toBe(false);
+      expect(restored.value).toBe("New comment draft");
       const notice = root.querySelector('.toast[role="alert"]')?.textContent;
       expect(notice).toContain("outcome is unknown");
       expect(notice).not.toMatch(/try again/i);

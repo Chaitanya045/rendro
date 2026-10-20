@@ -247,6 +247,42 @@ describe("real-user monitoring beacons", () => {
   });
 });
 
+describe("real-user monitoring of comments (#284)", () => {
+  it("reports when a page's first comments arrived and how long the reader's own comment took to save", async () => {
+    // The comment host's measures, as src/commentor/parent-host.ts writes them; this bundle only reads the timeline.
+    const page = await open();
+    await navigated(page, 1);
+    await page.evaluate(() => {
+      performance.measure("rendro:comments", { start: 0, end: 420, detail: { kind: "cold" } });
+      performance.measure("rendro:comment-echo", { start: 500, end: 710, detail: { kind: "cold" } });
+      performance.measure("rendro:comments", { start: 900, end: 945, detail: { kind: "switch" } });
+      performance.measure("rendro:comment-echo", { start: 1_000, end: 1_200, detail: null });
+    });
+    await leave(page);
+    expectAccepted();
+    expect(events().filter(event => event.route === "comments")).toEqual([
+      { route: "comments", metric: "ready", value: 420, nav: "cold" },
+      { route: "comments", metric: "echo", value: 210, nav: "cold" },
+      { route: "comments", metric: "ready", value: 45, nav: "switch" },
+      { route: "comments", metric: "echo", value: 200, nav: "switch" },
+    ]);
+  });
+
+  it("counts a prerendered shell's first comments from its activation", async () => {
+    // Activated 100 ms after its navigation started, as the prerender test above fakes it.
+    const page = await open(shell, `(() => {
+      if (window.parent !== window) return;
+      const byType = performance.getEntriesByType.bind(performance);
+      performance.getEntriesByType = type => type !== "navigation" ? byType(type)
+        : byType(type).map(entry => Object.assign(entry.toJSON(), { activationStart: 100, serverTiming: [] }));
+    })();`);
+    await navigated(page, 1);
+    await page.evaluate(() => performance.measure("rendro:comments", { start: 0, end: 400, detail: { kind: "cold" } }));
+    await leave(page);
+    expect(events().filter(event => event.route === "comments")).toEqual([{ route: "comments", metric: "ready", value: 300, nav: "prerender" }]);
+  });
+});
+
 describe("real-user monitoring where the browser tells less", () => {
   it("treats a persisted pageshow as a restore from the back/forward cache", async () => {
     // The coverage profiler does not follow a restored document, and Playwright's headless shell has no

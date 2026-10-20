@@ -52,6 +52,8 @@ const endpoints: Endpoint[] = [
   { name: "repoCommentAccess:removeRepos", kind: "mutation", args: () => ({ internalSecret: "wrong", repoIds: [1] }), ids: [] },
   { name: "repoCommentAccess:purgeRepos", kind: "mutation", args: () => ({ internalSecret: "wrong", repoIds: [1] }), ids: [] },
   { name: "repoCommentAccess:restoreRepos", kind: "mutation", args: () => ({ internalSecret: "wrong", repoIds: [1] }), ids: [] },
+  // The read path's first-page snapshot (#284): internal secret only.
+  { name: "repoComments:threadSnapshot", kind: "query", args: () => ({ internalSecret: "wrong", ...repoPage, userId: null, epoch: 0 }), ids: [] },
   { name: "repoComments:listThreads", kind: "query", args: () => ({ ...repoPage, paginationOpts }), ids: [] },
   { name: "repoComments:listReplies", kind: "query", args: f => ({ ...repoPage, threadId: f.threadId, paginationOpts }), ids: [] },
   { name: "repoComments:createThread", kind: "mutation", args: () => ({ ...repoPage, body: "Test", anchor: repoAnchor }), ids: [] },
@@ -106,10 +108,11 @@ describe("public Convex application error contract", () => {
   it.each(endpoints)("$name safely rejects unauthenticated callers", async endpoint => {
     const f = await fixture();
     vi.stubEnv("CONVEX_INTERNAL_SECRET", "correct-secret");
-    const service = /^(legacyAccess|deletedFiles|repoCommentAccess):/.test(endpoint.name);
+    // Internal-secret endpoints refuse a wrong secret outright, whoever calls.
+    const service = /^(legacyAccess|deletedFiles|repoCommentAccess):|^repoComments:threadSnapshot$/.test(endpoint.name);
     const args = { ...endpoint.args(f) };
     if (!/^(document|projects:)/.test(endpoint.name) && endpoint.ids.length) args.threadId = "malformed";
-    if (endpoint.name.startsWith("repoComments:")) {
+    if (endpoint.name.startsWith("repoComments:") && !service) {
       // Access to repository comments is decided before anything else, and reveals nothing: no grant reads as
       // an empty page and writes as "not found", exactly like a repository nobody has commented on.
       if (endpoint.kind === "query") expect(await call(f.backend, endpoint, args)).toEqual({ page: [], isDone: true, continueCursor: "" });
