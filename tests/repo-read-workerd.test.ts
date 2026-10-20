@@ -183,7 +183,7 @@ describe("repository read path on workerd", () => {
     const image = await get(`${prefix}docs/img/logo.png`);
     expect(image.status).toBe(200);
     await image.arrayBuffer();
-    await env.REPO_EPOCHS.put("epoch:user-reader", String(Date.now()));
+    await env.REPO_EPOCHS.put("epoch:user:user-reader", String(Date.now()));
     expect((await get(`${prefix}docs/img/logo.png`)).status).toBe(404);
     // Still a reader per the source: the cookie is re-minted at the new epoch.
     const renewed = await get("/r/octo/closed-docs", { cookie });

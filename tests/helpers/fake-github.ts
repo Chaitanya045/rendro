@@ -395,7 +395,12 @@ export class FakeGitHub {
     }
     const rest = match[3];
     const etag = request.headers.get("if-none-match");
-    if (endpoint === "repository") return this.billed(this.json(this.repoJson(repo)));
+    if (endpoint === "repository") {
+      const body = JSON.stringify(this.repoJson(repo));
+      const tag = `W/"${sha1(body)}"`;
+      if (etag === tag) return this.withRate(new Response(null, { status: 304, headers: { etag: tag } }));
+      return this.billed(new Response(body, { headers: { "content-type": "application/json", etag: tag } }));
+    }
     if (endpoint === "permission") {
       const login = decodeURIComponent(rest.slice("collaborators/".length, -"/permission".length));
       const user = [...this.users.values()].find((candidate) => candidate.login.toLowerCase() === login.toLowerCase());

@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { GitHubError } from "../src/ingest/github/source";
 import { RepoAccessUnavailable } from "../src/repo-read/access";
-import { EPOCH_TTL_SECONDS, FAILURE_COOLDOWN_MS, MAX_REPOSITORY_PAGES, MIRROR_TTL_MS } from "../src/repo-access/directory";
+import { EPOCH_TTL_SECONDS, FAILURE_COOLDOWN_MS, MAX_REPOSITORY_PAGES, MIRROR_TTL_MS, PUBLIC_CONFIRM_MAX_MS, PUBLIC_CONFIRM_TTL_MS } from "../src/repo-access/directory";
 import { openTokens, sealTokens, type TokenRefresher } from "../src/repo-access/tokens";
 import { accessFixture, mintedInstallationTokens, TOKEN_KEY } from "./helpers/repo-access-fixture";
 
@@ -12,8 +12,7 @@ import { accessFixture, mintedInstallationTokens, TOKEN_KEY } from "./helpers/re
  */
 
 const revoked = (world: { kv: { puts: Array<{ key: string }> } }) =>
-  world.kv.puts.filter((put) => put.key.startsWith("epoch:") && !put.key.startsWith("epoch:repo:"))
-    .map((put) => put.key.slice("epoch:".length)).sort();
+  world.kv.puts.filter((put) => put.key.startsWith("epoch:user:")).map((put) => put.key.slice("epoch:user:".length)).sort();
 
 const record = (repo: { id: number; owner: string; name: string; isPrivate: boolean }) =>
   ({ id: repo.id, owner: repo.owner, name: repo.name, private: repo.isPrivate, defaultBranch: "main" });
@@ -112,6 +111,132 @@ describe("answers from the registry and the mirror", () => {
   });
 });
 
+describe("public visibility is confirmed again once old (#295)", () => {
+  it("re-confirms an old public record with GitHub and denies it once private, with the visibility epoch bumped, without any webhook", async () => {
+    const world = accessFixture();
+    await world.setup();
+    expect(await world.read(null, world.open)).toEqual(record(world.open));
+    world.github.resetLog();
+    // Within the TTL the record answers alone.
+    world.clock.time += PUBLIC_CONFIRM_TTL_MS - 1;
+    expect(await world.read(null, world.open)).toEqual(record(world.open));
+    expect(world.github.requests).toEqual([]);
+    // The owner makes the repository private and the `privatized` delivery never arrives.
+    world.open.isPrivate = true;
+    world.clock.time += 1;
+    expect(await world.read(null, world.open)).toBeNull();
+    expect(world.github.count("repository")).toBe(1);
+    // The visibility epoch is written at once, as the missed delivery would have written it: outstanding shared-cache URLs die.
+    expect(world.kv.visibilityEpoch(world.open.id)).toBe(world.clock.time);
+    expect(world.kv.puts).toContainEqual({ key: `epoch:repo:${world.open.id}`, value: String(world.clock.time) });
+    // Signed-in readers who do not hold it are denied too; GitHub is not asked again.
+    expect(await world.read("outsider", world.open)).toBeNull();
+    expect(world.github.count("repository")).toBe(1);
+  });
+
+  it("costs no quota while nothing changed: the re-confirmation is a conditional 304, and it counts as a confirmation", async () => {
+    const world = accessFixture();
+    await world.setup();
+    expect(await world.read(null, world.open)).not.toBeNull();
+    world.github.resetLog();
+    world.clock.time += PUBLIC_CONFIRM_TTL_MS;
+    expect(await world.read(null, world.open)).toEqual(record(world.open));
+    expect(world.github.requests.map((request) => [request.endpoint, request.status])).toEqual([["repository", 304]]);
+    expect(world.github.billable()).toBe(0);
+    // Confirmed again: the next TTL starts now.
+    world.clock.time += PUBLIC_CONFIRM_TTL_MS - 1;
+    expect(await world.read(null, world.open)).not.toBeNull();
+    expect(world.github.requests).toHaveLength(1);
+    // A real change answers in full: renamed under the same ID, the record follows.
+    world.clock.time += 1;
+    world.open.defaultBranch = "trunk";
+    expect(await world.read(null, world.open)).toEqual({ ...record(world.open), defaultBranch: "trunk" });
+    expect(world.github.count("repository", { status: 200 })).toBe(1);
+  });
+
+  it("keeps granting through a GitHub outage until the longer bound, then fails closed for anonymous readers", async () => {
+    const world = accessFixture();
+    await world.setup();
+    expect(await world.read(null, world.open)).not.toBeNull();
+    const confirmedAt = world.clock.time;
+    let down = true;
+    world.github.fault(() => down, () => new Response("down", { status: 502 }), 10_000);
+    world.clock.time += PUBLIC_CONFIRM_TTL_MS;
+    expect(await world.read(null, world.open)).toEqual(record(world.open));
+    expect(world.logs).toContainEqual({ event: "access.visibility-unconfirmed", fields: { reason: "server" } });
+    // The failure cooldown keeps GitHub from being hammered meanwhile.
+    const calls = world.github.requests.length;
+    expect(await world.read(null, world.open)).not.toBeNull();
+    expect(world.github.requests.length).toBe(calls);
+    expect(world.logs).toContainEqual({ event: "access.visibility-unconfirmed", fields: { reason: "unavailable" } });
+    // Past the bound nobody is granted on the stale record. (The client's retry backoff advances this clock by under a second.)
+    world.clock.time = confirmedAt + PUBLIC_CONFIRM_MAX_MS - 1_000;
+    expect(await world.read(null, world.open)).not.toBeNull();
+    world.clock.time = confirmedAt + PUBLIC_CONFIRM_MAX_MS;
+    await expect(world.read(null, world.open)).rejects.toBeInstanceOf(RepoAccessUnavailable);
+    await expect(world.read("outsider", world.open)).rejects.toBeInstanceOf(RepoAccessUnavailable);
+    // GitHub answers again: confirmed, granted.
+    down = false;
+    world.clock.time += FAILURE_COOLDOWN_MS;
+    expect(await world.read(null, world.open)).toEqual(record(world.open));
+  });
+
+  it("decides again from storage after a failed confirmation: a privatization that landed meanwhile still denies", async () => {
+    const world = accessFixture();
+    await world.setup();
+    expect(await world.read(null, world.open)).not.toBeNull();
+    world.clock.time += PUBLIC_CONFIRM_TTL_MS;
+    world.github.fault(/\/repos\/octo\/open-docs$/, async () => {
+      await world.deliver("repository", { action: "privatized", ...world.repoPayload(world.open) });
+      return new Response("down", { status: 502 });
+    });
+    expect(await world.read(null, world.open)).toBeNull();
+  });
+
+  it("confirms a record stored before confirmations existed on its first read, and never grants on it through an outage", async () => {
+    const world = accessFixture();
+    await world.setup();
+    expect(await world.read(null, world.open)).not.toBeNull();
+    const { confirmedAt: _confirmedAt, etag: _etag, ...legacy } = await world.storage.get<Record<string, unknown>>(`repo:${world.open.id}`) as Record<string, unknown>;
+    await world.storage.put(`repo:${world.open.id}`, legacy);
+    world.github.fault(/\/repos\/octo\/open-docs$/, () => new Response("down", { status: 502 }), 2);
+    await expect(world.read(null, world.open)).rejects.toBeInstanceOf(RepoAccessUnavailable);
+    world.clock.time += FAILURE_COOLDOWN_MS;
+    world.github.resetLog();
+    expect(await world.read(null, world.open)).toEqual(record(world.open));
+    expect(world.github.requests.map((request) => [request.endpoint, request.status])).toEqual([["repository", 200]]);
+  });
+
+  it("takes a member's listing as a confirmation too, keeping a still-valid validator", async () => {
+    const world = accessFixture();
+    await world.setup();
+    const reads = (status?: number) => world.github.requests.filter((request) => request.path === "/repos/octo/open-docs" && (status === undefined || request.status === status)).length;
+    world.open.collaborators.add(world.people.reader.id);
+    expect(await world.read(null, world.open)).not.toBeNull();
+    // A record stored before confirmations existed, confirmed by the reader's first listing.
+    const { confirmedAt: _confirmedAt, etag: _etag, ...legacy } = await world.storage.get<Record<string, unknown>>(`repo:${world.open.id}`) as Record<string, unknown>;
+    await world.storage.put(`repo:${world.open.id}`, legacy);
+    world.github.resetLog();
+    expect(await world.read("reader", world.closed)).not.toBeNull();
+    expect(await world.read(null, world.open)).toEqual(record(world.open));
+    expect(reads()).toBe(0);
+    // Its confirmation is due: GitHub is read in full (the listing carried no validator for it).
+    world.clock.time += PUBLIC_CONFIRM_TTL_MS;
+    expect(await world.read(null, world.open)).not.toBeNull();
+    expect(reads(200)).toBe(1);
+    // A later listing (changed, so read in full) confirms it again and keeps that read's validator...
+    world.teamDocs.collaborators.add(world.people.reader.id);
+    world.clock.time += PUBLIC_CONFIRM_TTL_MS;
+    expect(await world.read("reader", world.closed)).not.toBeNull();
+    expect(await world.read(null, world.open)).not.toBeNull();
+    expect(reads()).toBe(1);
+    // ...so the next confirmation is a free 304.
+    world.clock.time += PUBLIC_CONFIRM_TTL_MS;
+    expect(await world.read(null, world.open)).not.toBeNull();
+    expect(reads(304)).toBe(1);
+  });
+});
+
 describe("webhooks update the mirror, then the epoch", () => {
   it("revokes a user removed from a team: the mirror denies before the epoch is written", async () => {
     const world = accessFixture();
@@ -120,13 +245,13 @@ describe("webhooks update the mirror, then the epoch", () => {
     world.team.members.delete(world.people.member.id);
     const seen: Array<unknown> = [];
     world.kv.beforePut = async (key) => {
-      if (key === `epoch:${world.userIds.member}`) seen.push(await world.read("member", world.teamDocs));
+      if (key === `epoch:user:${world.userIds.member}`) seen.push(await world.read("member", world.teamDocs));
     };
     world.clock.time += 1_000;
     expect(await world.deliver("membership", { action: "removed", member: world.userPayload(world.people.member), team: { slug: "writers" } })).toBe("applied");
     expect(seen).toEqual([null]);
     expect(world.kv.epoch(world.userIds.member)).toBe(world.clock.time);
-    expect(world.kv.puts).toEqual([{ key: `epoch:${world.userIds.member}`, value: String(world.clock.time), expirationTtl: EPOCH_TTL_SECONDS }]);
+    expect(world.kv.puts).toEqual([{ key: `epoch:user:${world.userIds.member}`, value: String(world.clock.time), expirationTtl: EPOCH_TTL_SECONDS }]);
     expect(await world.read("member", world.teamDocs)).toBeNull();
     // Nobody else was touched.
     expect(await world.read("reader", world.closed)).not.toBeNull();
@@ -165,7 +290,7 @@ describe("webhooks update the mirror, then the epoch", () => {
     world.team.repos.delete(world.teamDocs.id);
     await world.deliver("team", { action: "removed_from_repository", team: { slug: "writers" }, ...world.repoPayload(world.teamDocs) });
     // Only the member held team-docs.
-    expect(world.kv.puts.map((put) => put.key)).toEqual([`epoch:${world.userIds.member}`]);
+    expect(world.kv.puts.map((put) => put.key)).toEqual([`epoch:user:${world.userIds.member}`]);
     expect(await world.read("member", world.teamDocs)).toBeNull();
 
     // The member now holds nothing in the installation; the outsider never did (no explicit access, so it is not listed for them).
@@ -922,7 +1047,7 @@ describe("epoch outbox", () => {
     await world.setup();
     let requeued = false;
     world.kv.beforePut = async (key) => {
-      if (!requeued && key === `epoch:${world.userIds.member}`) {
+      if (!requeued && key === `epoch:user:${world.userIds.member}`) {
         requeued = true;
         await world.storage.put(`pending:${world.userIds.member}`, "newer");
       }

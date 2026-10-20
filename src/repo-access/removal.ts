@@ -17,7 +17,7 @@
  */
 import { GitHubError } from "@/ingest/github/source";
 import type { InstallationTokenProvider } from "@/ingest/github/token";
-import type { GitHubAccessClient, ListedRepo } from "./github";
+import type { ConfirmedRepo, GitHubAccessClient } from "./github";
 
 export interface RemovalTarget {
   /** GitHub's repository ID: the answer must be about this repository, whatever its name is now. */
@@ -30,7 +30,7 @@ export interface RemovalTarget {
 
 export type RemovalVerdict =
   | { kind: "removed" }
-  | { kind: "accessible"; repo: ListedRepo }
+  | { kind: "accessible"; repo: ConfirmedRepo }
   | { kind: "unknown"; reason: string };
 
 export interface RemovalCheck {

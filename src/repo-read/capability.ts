@@ -69,19 +69,27 @@ async function importHmac(raw: Uint8Array<ArrayBuffer>): Promise<CryptoKey> {
   return crypto.subtle.importKey("raw", raw, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
 }
 
-/** One derived key per secret and purpose, imported once per isolate. */
-function purposeKey(secret: string, purpose: CapabilityPurpose): Promise<CryptoKey> {
-  const id = `${purpose}\u0000${secret}`;
+/**
+ * The HMAC key `HMAC(secret, label)`, imported once per isolate and label. Every
+ * use of `REPO_CAPABILITY_SECRET` signs under its own label, never the raw secret.
+ */
+export function derivedHmacKey(secret: string, label: string): Promise<CryptoKey> {
+  const id = `${label}\u0000${secret}`;
   let key = keys.get(id);
   if (!key) {
     key = (async () => {
       const root = await importHmac(encoder.encode(secret));
-      const derived = await crypto.subtle.sign("HMAC", root, encoder.encode(`rendro-repo-capability:v1:${purpose}`));
+      const derived = await crypto.subtle.sign("HMAC", root, encoder.encode(label));
       return importHmac(new Uint8Array(derived));
     })();
     keys.set(id, key);
   }
   return key;
+}
+
+/** One derived key per secret and purpose. */
+function purposeKey(secret: string, purpose: CapabilityPurpose): Promise<CryptoKey> {
+  return derivedHmacKey(secret, `rendro-repo-capability:v1:${purpose}`);
 }
 
 async function mac(secret: string, purpose: CapabilityPurpose, message: string): Promise<string> {

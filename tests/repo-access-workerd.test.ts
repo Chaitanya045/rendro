@@ -18,7 +18,7 @@ import { repoFiles } from "./helpers/repo-read-fixture";
  * reader, and the time from delivery to the first denied view is measured.
  */
 
-interface ProductEnv { REPO_CONTENT: R2BucketLike }
+interface ProductEnv { REPO_CONTENT: R2BucketLike; REPO_ACCESS: { fetch(url: string, init?: RequestInit): Promise<Response> } }
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const originalFetch = globalThis.fetch;
@@ -36,6 +36,7 @@ const iterations = 25;
 let server: ReturnType<typeof createTestHarness>;
 let origin: string;
 let directory: string;
+let service: ProductEnv["REPO_ACCESS"];
 
 function sessionResponse(request: Request): Response {
   const token = /session_token=([^;]+)/.exec(request.headers.get("cookie") ?? "")?.[1] ?? "";
@@ -108,7 +109,9 @@ beforeAll(async () => {
   const etags = { get: () => Promise.resolve(null), set: () => Promise.resolve() };
   await ingestBranch({ ...ingest.deps, store: r2Store(env.REPO_CONTENT) }, etags, teamDocs.ref, "main");
   expect(await deliver("installation", { action: "created", repositories: [github.repoJson(teamDocs)] })).toBe(202);
-  const linked = await control().fetch(`https://repo-access.internal/v1/accounts/link`, { method: "POST", body: JSON.stringify({ userId: "user-member", githubId: member.id, login: member.login, tokens: github.signIn(member) }) });
+  // Account hand-overs go through the serving Worker's binding, which names the internal entrypoint (#295).
+  service = env.REPO_ACCESS;
+  const linked = await service.fetch("https://repo-access.internal/v1/accounts/link", { method: "POST", body: JSON.stringify({ userId: "user-member", githubId: member.id, login: member.login, tokens: github.signIn(member) }) });
   expect(linked.status).toBe(204);
 }, 180_000);
 
@@ -172,7 +175,22 @@ describe("permission mirror on workerd", () => {
     for (const status of [202, 200]) {
       expect((await control().fetch("https://control.rendro.test/v1/github/webhook", { method: "POST", body: replay.body, headers: replay.headers })).status).toBe(status);
     }
-    // The internal endpoints do not answer a public host.
-    expect((await control().fetch("https://control.rendro.test/v1/authorize", { method: "POST", body: "{}" })).status).toBe(404);
+  });
+
+  it("serves the internal endpoints only through the entrypoint the service binding names, whatever the host", async () => {
+    const link = JSON.stringify({ userId: "user-other", githubId: 7001, login: "other", tokens: github.signIn(github.user("other", 7001)) });
+    for (const host of ["control.rendro.test", "repo-access.internal"]) {
+      for (const path of ["/v1/authorize", "/v1/accounts/link", "/v1/accounts/unlink"]) {
+        const response = await control().fetch(`https://${host}${path}`, { method: "POST", body: path === "/v1/accounts/link" ? link : "{}" });
+        expect(response.status, `${host}${path}`).toBe(404);
+        await response.arrayBuffer();
+      }
+    }
+    // The binding reaches them; the webhook is not served there.
+    const unlinked = await service.fetch("https://repo-access.internal/v1/accounts/unlink", { method: "POST", body: JSON.stringify({ userId: "user-nobody" }) });
+    expect(unlinked.status).toBe(204);
+    const hook = await service.fetch("https://repo-access.internal/v1/github/webhook", { method: "POST", body: "{}" });
+    expect(hook.status).toBe(404);
+    await hook.arrayBuffer();
   });
 });

@@ -144,11 +144,13 @@ export default async function globalSetup() {
     const { BUCKET } = await server.getWorker<{ BUCKET: Parameters<typeof removeSmokeAsset>[0] }>("storage-faults").getEnv();
     await removeSmokeAsset(BUCKET, seed.organizationId, seed.projectId);
     await writeFile(join(directory, "backend-admin.json"), JSON.stringify({ origin: convex.origin, adminKey: convex.adminKey }), { mode: 0o600 });
-    const workerEnv = await server.getWorker<{ REPO_CONTENT: R2BucketLike; REPO_SEARCH: SearchD1 }>().getEnv();
+    const workerEnv = await server.getWorker<{ REPO_CONTENT: R2BucketLike; REPO_SEARCH: SearchD1; REPO_ACCESS: { fetch(url: string, init?: RequestInit): Promise<unknown> } }>().getEnv();
     const controlHandle = server.getWorker(controlWorker.name);
     const repos = await seedRepositories({
       bucket: workerEnv.REPO_CONTENT, contentKey: vars.REPO_CONTENT_KEY, world, webhookSecret: controlSecrets.GITHUB_WEBHOOK_SECRET, userIds: seed.userIds,
       control: (url, init) => controlHandle.fetch(url, init) as unknown as Promise<Response>,
+      // Account hand-overs reach the control Worker's internal entrypoint only through the serving Worker's binding.
+      service: (url, init) => workerEnv.REPO_ACCESS.fetch(url, init) as Promise<Response>,
       search: d1SearchIndex(workerEnv.REPO_SEARCH),
     });
     closers.push(() => repos.close());

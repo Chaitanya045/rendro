@@ -2,16 +2,19 @@
  * The control Worker (#243; development and tests only, see
  * wrangler.control.toml). It is the serving Worker's `REPO_ACCESS` service:
  *
- * - `POST https://repo-access.internal/v1/authorize`: `repoAccessHandler`
- *   over the access directory (the read path's permission source).
- * - `POST https://repo-access.internal/v1/accounts/link` and `/unlink`: where
- *   P1's sign-in hands over a user's GitHub identity and tokens.
+ * - `POST /v1/authorize`: `repoAccessHandler` over the access directory (the
+ *   read path's permission source).
+ * - `POST /v1/accounts/link` and `/unlink`: where P1's sign-in hands over a
+ *   user's GitHub identity and tokens.
  * - `POST /v1/github/webhook`: GitHub's permission events, verified and
  *   deduplicated like #229's push webhook.
  *
- * Internal endpoints answer only requests addressed to the internal host, which
- * only a service binding can send, so a public route added for the webhook
- * never exposes them. Tokens never appear in a response or a log line.
+ * The internal endpoints are served only by the named entrypoint
+ * `RepoAccessService` (#295). A named entrypoint is reachable only through a
+ * service binding that names it (`entrypoint = "RepoAccessService"`), never
+ * over HTTP, whatever the host: the default handler, which a public route for
+ * the webhook would expose, serves the webhook alone. Tokens never appear in a
+ * response or a log line.
  */
 import { isDeliveryId, readVerifiedWebhook } from "@/ingest/github/webhook";
 import { staticTokenProvider } from "@/ingest/github/token";
@@ -51,7 +54,6 @@ export interface ControlWorkerEnv {
   REPO_INGEST?: DurableObjectNamespaceLike;
 }
 
-export const INTERNAL_HOST = "repo-access.internal";
 const DIRECTORY_URL = "https://directory";
 
 /** Structured logs: event names, counts and outcomes only. */
@@ -120,16 +122,21 @@ async function webhook(request: Request, env: ControlWorkerEnv): Promise<Respons
   return new Response(null, { status: status === "duplicate" ? 200 : 202 });
 }
 
+/** The default handler: what any route or caller without the entrypoint reaches. The webhook only. */
 export default {
   async fetch(request: Request, env: ControlWorkerEnv): Promise<Response> {
-    const url = new URL(request.url);
-    if (url.hostname === INTERNAL_HOST) {
-      if (url.pathname === "/v1/authorize") return repoAccessHandler(directorySource(env))(request);
-      if (url.pathname === "/v1/accounts/link") return accounts(request, env, "link");
-      if (url.pathname === "/v1/accounts/unlink") return accounts(request, env, "unlink");
-    } else if (url.pathname === "/v1/github/webhook") {
-      return webhook(request, env);
-    }
+    if (new URL(request.url).pathname === "/v1/github/webhook") return webhook(request, env);
+    return new Response(null, { status: 404 });
+  },
+};
+
+/** The internal endpoints, for service bindings that name this entrypoint (`entrypoint = "RepoAccessService"`). Any host. */
+export const RepoAccessService = {
+  async fetch(request: Request, env: ControlWorkerEnv): Promise<Response> {
+    const { pathname } = new URL(request.url);
+    if (pathname === "/v1/authorize") return repoAccessHandler(directorySource(env))(request);
+    if (pathname === "/v1/accounts/link") return accounts(request, env, "link");
+    if (pathname === "/v1/accounts/unlink") return accounts(request, env, "unlink");
     return new Response(null, { status: 404 });
   },
 };

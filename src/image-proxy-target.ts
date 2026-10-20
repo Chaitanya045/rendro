@@ -9,6 +9,11 @@
  * risk: Workers egress goes to the public Internet only (private services need
  * a Workers VPC binding), so it cannot reach a private network. The Node
  * server is for local development and has no such egress boundary.
+ *
+ * Rendro's own hosts are refused too, so a proxied fetch never re-enters the
+ * site: the production and development domains and their subdomains, the
+ * site's Workers on any workers.dev subdomain (preview URLs included), and
+ * the host the request itself arrived on.
  */
 
 /** [first address as a 32-bit number, prefix length] */
@@ -23,6 +28,10 @@ const METADATA_HOSTS = new Set([
   "metadata.azure.com", "metadata.tencentyun.com", "metadata.platformequinix.com",
 ]);
 const LOCAL_SUFFIXES = [".localhost", ".local", ".localdomain", ".internal", ".intranet", ".lan", ".home.arpa", ".corp"];
+/** rendro.app (production) and dev.rendro.app (development) and every other subdomain. */
+const OWN_DOMAIN = "rendro.app";
+/** The site's Worker names (wrangler*.toml) all carry this label: `rendro`, `rendro-dev`, `<version>-rendro-dev`, … */
+const OWN_WORKER_LABEL = "rendro";
 
 function ipv4Number(host: string): number | null {
   const parts = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(host);
@@ -44,17 +53,26 @@ function ipv6Pieces(host: string): number[] {
 }
 
 /**
- * Only global unicast (2000::/3) is allowed, minus documentation, 6to4 and the
- * IETF protocol block (Teredo and friends), which can embed private IPv4.
+ * Only global unicast (2000::/3) is allowed, minus documentation (2001:db8::/32
+ * and RFC 9637's 3fff::/20), 6to4 and the IETF protocol block (Teredo and
+ * friends), which can embed private IPv4.
  * Loopback, unspecified, IPv4-mapped and -compatible, NAT64, ULA, link-local
  * and multicast all fall outside 2000::/3.
  */
 function blockedIpv6(host: string): boolean {
   const [first, second] = ipv6Pieces(host);
-  return (first & 0xe000) !== 0x2000 || first === 0x2002 || (first === 0x2001 && (second < 0x0200 || second === 0x0db8));
+  return (first & 0xe000) !== 0x2000 || first === 0x2002 || (first === 0x2001 && (second < 0x0200 || second === 0x0db8))
+    || (first === 0x3fff && second < 0x1000);
 }
 
-export function isProxyableImageUrl(href: string): boolean {
+function ownHost(host: string, extra: readonly string[]): boolean {
+  if (host === OWN_DOMAIN || host.endsWith(`.${OWN_DOMAIN}`)) return true;
+  if (host.endsWith(".workers.dev") && host.split(".")[0].split("-").includes(OWN_WORKER_LABEL)) return true;
+  return extra.some((own) => host === own.toLowerCase().replace(/\.$/, ""));
+}
+
+/** `ownHosts`: further hosts that are the site itself, such as the one the current request arrived on. */
+export function isProxyableImageUrl(href: string, ownHosts: readonly string[] = []): boolean {
   let url: URL;
   try {
     url = new URL(href);
@@ -67,6 +85,6 @@ export function isProxyableImageUrl(href: string): boolean {
   const v4 = ipv4Number(host);
   if (v4 !== null) return !blockedIpv4(v4);
   // A single-label name only resolves on a local network.
-  if (!host.includes(".") || METADATA_HOSTS.has(host)) return false;
+  if (!host.includes(".") || METADATA_HOSTS.has(host) || ownHost(host, ownHosts)) return false;
   return !LOCAL_SUFFIXES.some((suffix) => host.endsWith(suffix));
 }

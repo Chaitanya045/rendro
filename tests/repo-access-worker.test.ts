@@ -2,14 +2,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { DurableObjectNamespaceLike } from "../src/ingest/orchestrator/coordinator-client";
 import { serviceRepoPermissions } from "../src/repo-read/access";
 import * as entry from "../src/repo-access/entry";
-import worker, { directorySource, log, RepoAccessDirectory, type ControlWorkerEnv } from "../src/repo-access/worker";
+import worker, { directorySource, log, RepoAccessDirectory, RepoAccessService, type ControlWorkerEnv } from "../src/repo-access/worker";
+import { controlWorker } from "../e2e/repo-read-config";
 import { FakeGitHub } from "./helpers/fake-github";
 import { FakeDirectoryStorage, FakeEpochKv, TOKEN_KEY } from "./helpers/repo-access-fixture";
 
 /**
  * The control Worker (#243): the read path's permission source over the
  * service binding, the account hand-over P1 will use, and GitHub's permission
- * webhooks. Internal endpoints answer only the internal host.
+ * webhooks. Internal endpoints answer only through the named entrypoint the
+ * binding names (#295), never the default handler.
  */
 
 const SECRET = "test-webhook-secret-0123456789abcdef";
@@ -63,14 +65,14 @@ describe("control Worker", () => {
     const repo = github.repo("octo", "docs", { id: 801, private: true });
     const reader = github.user("reader", 5001);
     repo.collaborators.add(reader.id);
-    const source = serviceRepoPermissions({ fetch: (request) => worker.fetch(request, env) });
+    const source = serviceRepoPermissions({ fetch: (request) => RepoAccessService.fetch(request, env) });
     expect(await source.authorize("user-1", "octo", "docs")).toBeNull();
     expect((await worker.fetch(webhook(github, "installation", { action: "created", installation: { id: 71, account: { login: "octo" } }, repositories: [github.repoJson(repo)] }), env)).status).toBe(202);
     const tokens = github.signIn(reader);
-    expect((await worker.fetch(internal("/v1/accounts/link", { userId: "user-1", githubId: reader.id, login: "reader", tokens }), env)).status).toBe(204);
+    expect((await RepoAccessService.fetch(internal("/v1/accounts/link", { userId: "user-1", githubId: reader.id, login: "reader", tokens }), env)).status).toBe(204);
     expect(await source.authorize("user-1", "octo", "docs")).toEqual({ id: 801, owner: "octo", name: "docs", private: true, defaultBranch: "main" });
     expect(await source.authorize(null, "octo", "docs")).toBeNull();
-    expect((await worker.fetch(internal("/v1/accounts/unlink", { userId: "user-1" }), env)).status).toBe(204);
+    expect((await RepoAccessService.fetch(internal("/v1/accounts/unlink", { userId: "user-1" }), env)).status).toBe(204);
     expect(await source.authorize("user-1", "octo", "docs")).toBeNull();
   });
 
@@ -94,23 +96,34 @@ describe("control Worker", () => {
     expect(kv.puts).toEqual([]);
   });
 
-  it("answers internal endpoints only on the internal host", async () => {
-    const { env, github } = environment();
-    for (const path of ["/v1/authorize", "/v1/accounts/link", "/v1/accounts/unlink"]) {
-      expect((await worker.fetch(new Request(`https://control.rendro.test${path}`, { method: "POST", body: "{}" }), env)).status, path).toBe(404);
+  it("refuses internal endpoints on the default handler, on any host: only the service entrypoint serves them", async () => {
+    const { env, github, storage } = environment();
+    const reader = github.user("reader", 5001);
+    const link = { userId: "u", githubId: reader.id, login: "reader", tokens: github.signIn(reader) };
+    for (const host of ["control.rendro.test", "repo-access.internal"]) {
+      for (const path of ["/v1/authorize", "/v1/accounts/link", "/v1/accounts/unlink"]) {
+        const body = JSON.stringify(path === "/v1/accounts/link" ? link : { userId: "u", viewer: null, owner: "octo", name: "docs" });
+        expect((await worker.fetch(new Request(`https://${host}${path}`, { method: "POST", body }), env)).status, `${host}${path}`).toBe(404);
+      }
     }
-    expect((await worker.fetch(internal("/v1/github/webhook", {}), env)).status).toBe(404);
-    expect((await worker.fetch(internal("/other", {}), env)).status).toBe(404);
-    expect((await worker.fetch(webhook(github, "member", {}, { host: "repo-access.internal" }), env)).status).toBe(404);
+    // Nothing reached the directory: no account was linked.
+    expect(await storage.get("user:u")).toBeUndefined();
+    expect((await RepoAccessService.fetch(internal("/v1/accounts/link", link), env)).status).toBe(204);
+    // The entrypoint serves nothing else, and the webhook stays on the default handler, on any host.
+    expect((await RepoAccessService.fetch(internal("/v1/github/webhook", {}), env)).status).toBe(404);
+    expect((await RepoAccessService.fetch(internal("/other", {}), env)).status).toBe(404);
+    // Verified and planned there (an action without effect).
+    expect((await worker.fetch(webhook(github, "member", {}, { host: "repo-access.internal" }), env)).status).toBe(204);
+    expect((await worker.fetch(new Request("https://control.rendro.test/other"), env)).status).toBe(404);
   });
 
   it("validates account hand-overs and never echoes tokens", async () => {
     const { env, github } = environment();
     const reader = github.user("reader", 5001);
     const tokens = github.signIn(reader);
-    const link = (body: unknown) => worker.fetch(internal("/v1/accounts/link", body), env);
-    expect((await worker.fetch(internal("/v1/accounts/link", null, "GET"), env)).status).toBe(405);
-    expect((await worker.fetch(new Request("https://repo-access.internal/v1/accounts/link", { method: "POST", body: "{" }), env)).status).toBe(400);
+    const link = (body: unknown) => RepoAccessService.fetch(internal("/v1/accounts/link", body), env);
+    expect((await RepoAccessService.fetch(internal("/v1/accounts/link", null, "GET"), env)).status).toBe(405);
+    expect((await RepoAccessService.fetch(new Request("https://repo-access.internal/v1/accounts/link", { method: "POST", body: "{" }), env)).status).toBe(400);
     for (const bad of [{ githubId: 1, login: "reader", tokens }, { userId: "", githubId: 1, login: "reader", tokens }, { userId: "u", githubId: 0, login: "reader", tokens },
       { userId: "u", githubId: 1, login: "-bad-", tokens }, { userId: "u", githubId: 1, login: "reader", tokens: { accessToken: 5 } }, { userId: "x".repeat(257), githubId: 1, login: "reader", tokens }]) {
       expect((await link(bad)).status, JSON.stringify(bad).slice(0, 60)).toBe(400);
@@ -125,10 +138,10 @@ describe("control Worker", () => {
     expect((await worker.fetch(webhook(missingSecret.github, "membership", { action: "removed", member: { id: 1 } }), missingSecret.env)).status).toBe(503);
     for (const key of [undefined, "short", SECRET]) {
       const { env, github } = environment({ GITHUB_TOKEN_KEY: key });
-      const source = serviceRepoPermissions({ fetch: (request) => worker.fetch(request, env) });
+      const source = serviceRepoPermissions({ fetch: (request) => RepoAccessService.fetch(request, env) });
       await expect(source.authorize(null, "octo", "docs")).rejects.toThrow("unavailable");
       expect((await worker.fetch(webhook(github, "membership", { action: "removed", member: { id: 1 }, installation: { id: 71 } }), env)).status).toBe(503);
-      expect((await worker.fetch(internal("/v1/accounts/unlink", { userId: "u" }), env)).status).toBe(503);
+      expect((await RepoAccessService.fetch(internal("/v1/accounts/unlink", { userId: "u" }), env)).status).toBe(503);
       await env.REPO_ACCESS_DIRECTORY.get("directory").fetch("https://directory/authorize", { method: "POST", body: "{}" });
     }
     const reused = environment({ GITHUB_TOKEN_KEY: "same-secret-0123456789abcdef012345", GITHUB_APP_CLIENT_SECRET: "same-secret-0123456789abcdef012345" });
@@ -142,7 +155,7 @@ describe("control Worker", () => {
       globalThis.fetch = github.fetch;
       const reader = github.user("reader", 5001);
       const expired = { ...github.signIn(reader), accessTokenExpiresAt: 1 };
-      expect((await worker.fetch(internal("/v1/accounts/link", { userId: "u", githubId: reader.id, login: "reader", tokens: expired }), env)).status).toBe(204);
+      expect((await RepoAccessService.fetch(internal("/v1/accounts/link", { userId: "u", githubId: reader.id, login: "reader", tokens: expired }), env)).status).toBe(204);
       expect(storage.alarm).not.toBeNull();
       const directory = new RepoAccessDirectory({ storage }, env);
       await directory.alarm();
@@ -169,7 +182,7 @@ describe("control Worker", () => {
         return Promise.resolve(Response.json({ status: "success", value: null }));
       }) as typeof fetch;
       const reader = github.user("reader", 5001);
-      expect((await worker.fetch(internal("/v1/accounts/link", { userId: "u", githubId: reader.id, login: "reader", tokens: github.signIn(reader) }), env)).status).toBe(204);
+      expect((await RepoAccessService.fetch(internal("/v1/accounts/link", { userId: "u", githubId: reader.id, login: "reader", tokens: github.signIn(reader) }), env)).status).toBe(204);
       await new RepoAccessDirectory({ storage }, env).alarm();
       expect(calls).toEqual(configured ? [{ path: "repoCommentAccess:revokeUser", args: { userId: "u", epoch: kv.epoch("u"), internalSecret: "convex-internal-secret-0123456789abcdef" } }] : []);
     }
@@ -188,9 +201,10 @@ describe("control Worker", () => {
     }
   });
 
-  it("exposes only the handler and the directory class from its main module", () => {
-    expect(Object.keys(entry).sort()).toEqual(["RepoAccessDirectory", "default"]);
+  it("exposes only the handler, the service entrypoint the binding names and the directory class from its main module", () => {
+    expect(Object.keys(entry).sort()).toEqual(["RepoAccessDirectory", "RepoAccessService", "default"]);
     expect(entry.default).toBe(worker);
+    expect(entry[controlWorker.entrypoint as keyof typeof entry]).toBe(RepoAccessService);
   });
 
   it("logs one JSON line per event", () => {

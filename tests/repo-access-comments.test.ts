@@ -46,7 +46,7 @@ describe("comment access follows the epoch outbox (#254)", () => {
     const sink = new RecordingSink(order);
     const fixture = await world(sink);
     order.length = 0;
-    fixture.kv.beforePut = (key) => void order.push(`kv:${key.slice("epoch:".length)}`);
+    fixture.kv.beforePut = (key) => void order.push(`kv:${key.slice("epoch:user:".length)}`);
     fixture.team.members.delete(fixture.people.member.id);
     await fixture.deliver("membership", { action: "removed", member: fixture.userPayload(fixture.people.member) });
     expect(sink.calls).toEqual([["revoke", fixture.userIds.member, fixture.kv.epoch(fixture.userIds.member)]]);
