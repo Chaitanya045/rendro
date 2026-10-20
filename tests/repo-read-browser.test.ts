@@ -1,5 +1,6 @@
 import type { ServerResponse } from "node:http";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { readFileSync } from "node:fs";
 import { RENDERER_VERSION } from "@/ingest/limits";
 import { blobKey, manifestKey } from "@/ingest/orchestrator/keys";
 import { gitBlobId } from "@/ingest/github/git-objects";
@@ -8,6 +9,9 @@ import { imageProxyPath } from "@/image-proxy";
 import worker from "@/worker";
 import { browserStep, createBrowserHarness } from "./helpers/browser";
 import { TEST_CONTENT_SEALER } from "./helpers/ingest-fixture";
+import { nonceContext } from "@/middleware/html-nonce";
+import { READINESS_HEADER, renderPreparingPage } from "@/repo-read/preparing";
+import { styleManifest } from "@/routes/style-manifest";
 import { privateRepo, publicRepo, repoReadFixture, users } from "./helpers/repo-read-fixture";
 
 /*
@@ -40,7 +44,9 @@ async function addImagesPage(repo: typeof publicRepo, commit: string) {
   await content.putBytes(blobKey(repo.id, pixel), new Uint8Array(PNG));
   await content.putJson(`gh/v1/repo/${repo.id}/${render}`, {
     title: "Images", headings: [],
-    html: `<p><img id="proxied" src="${proxied}" alt="proxied"> <img id="repository" src="img/pixel.png" alt="repository"> <img id="external" src="${EXTERNAL}" alt="external"></p>`,
+    html: `<p><img id="proxied" src="${proxied}" alt="proxied"> <img id="repository" src="img/pixel.png" alt="repository"> <img id="external" src="${EXTERNAL}" alt="external"></p>`
+      // Wide blocks exactly as ingest emits them since #270: keyboard-reachable scroll regions.
+      + `<pre tabindex="0" id="wide-code">${"wide code ".repeat(60)}</pre><table tabindex="0" id="wide-table"><tr><td>${"wide table ".repeat(40)}</td></tr></table>`,
   });
   const key = manifestKey(repo.id, commit, RENDERER_VERSION);
   const manifest = await content.getJson<{ files: Record<string, unknown> }>(key) as { files: Record<string, unknown> };
@@ -56,6 +62,19 @@ beforeAll(async () => {
     if (url.pathname === "/viewer") {
       response.writeHead(200, { "Content-Type": "text/html" });
       response.end(`<!doctype html><iframe name="content-frame" sandbox="allow-scripts allow-popups" src="${url.searchParams.get("frame") ?? ""}" width="600" height="400"></iframe>`);
+      return;
+    }
+    if (url.pathname === "/preparing-fixture") {
+      // The page exactly as the readinessResponse serves it (#270): the theme runtime runs under a nonce.
+      const body = nonceContext.run("n0nce-browser", () => renderPreparingPage("preparing", 5));
+      response.writeHead(200, { "Content-Type": "text/html; charset=utf-8", [READINESS_HEADER]: "preparing", "Retry-After": "5" });
+      response.end(body);
+      return;
+    }
+    if (url.pathname === `/styles/${styleManifest["repo-doc"]}`) {
+      // The frame's real stylesheet, so the focus ring of the scroll regions is testable.
+      response.writeHead(200, { "Content-Type": "text/css" });
+      response.end(readFileSync(new URL(`../public/styles/${styleManifest["repo-doc"]}`, import.meta.url)));
       return;
     }
     const headers = new Headers(Object.entries(request.headers).flatMap(([name, value]) => typeof value === "string" ? [[name, value] as [string, string]] : []));
@@ -110,6 +129,21 @@ describe("repository document frames in Chromium", () => {
     expect(requests.some(path => path.startsWith("/img/"))).toBe(true);
   });
 
+  it("renders the preparing page in the reader's appearance, including dark (#270)", async () => {
+    for (const colorScheme of ["light", "dark"] as const) {
+      const page = await harness.newPage({ colorScheme });
+      await browserStep(`open the preparing page in ${colorScheme}`, () => page.goto(`${harness.origin}/preparing-fixture`));
+      await page.waitForFunction(() => document.querySelector('main[data-readiness="preparing"]') !== null);
+      // The shared theme runtime resolved the emulated appearance onto html.dark, which the page's stylesheet follows.
+      expect(await page.evaluate(() => document.documentElement.classList.contains("dark"))).toBe(colorScheme === "dark");
+      expect(await page.evaluate(() => getComputedStyle(document.body).backgroundColor))
+        .toBe(colorScheme === "dark" ? "rgb(9, 9, 11)" : "rgb(250, 250, 250)");
+      expect(await page.evaluate(() => getComputedStyle(document.querySelector("main")!).borderColor))
+        .toBe(colorScheme === "dark" ? "rgb(39, 39, 42)" : "rgb(228, 228, 231)");
+      await page.close();
+    }
+  });
+
   it("render proxied images and ticketed repository images in a private frame and block an external one", async () => {
     const result = await openFrame(`/r/${privateRepo.owner}/${privateRepo.name}/@${fixture.commits.private}/files/docs/images.md`, "better-auth.session_token=reader-token.sig");
     expect(result.widths).toEqual({ proxied: 1, repository: 1, external: 0 });
@@ -117,5 +151,29 @@ describe("repository document frames in Chromium", () => {
     expect(result.sources.repository).toMatch(/\/view\/v1\.[\w-]+\.[\w-]+\/files\/docs\/img\/pixel\.png$/);
     expect(result.sources.proxied).toMatch(/\/img\/[\w-]{43}\/[\w-]+$/);
     expect(result.violations).toContain(`img-src ${EXTERNAL}`);
+  });
+
+  it("keeps the wide pre and table blocks reachable from the keyboard with a visible focus ring (#270)", async () => {
+    const page = await harness.newPage();
+    await browserStep("open the wide-block frame", () => page.goto(`${harness.origin}/viewer?frame=${encodeURIComponent(`/r/${publicRepo.owner}/${publicRepo.name}/@${fixture.commits.public}/files/docs/images.md`)}`));
+    const frame = () => page.frames().find(candidate => candidate.name() === "content-frame" && candidate.url().includes("/files/docs/images.md"));
+    await expect.poll(() => frame() !== undefined && frame()!.evaluate(() => document.readyState === "complete").catch(() => false)).toBe(true);
+    const content = frame()!;
+    // Both scroll regions take focus, and the stylesheet's :focus-visible ring applies (script focus
+    // counts when the reader has not used a pointer; the axe scan proves the attribute on real renders).
+    const focused = await content.evaluate(() => {
+      const reached: Array<[string, string, string]> = [];
+      for (const selector of ["pre#wide-code", "table#wide-table"]) {
+        const element = document.querySelector<HTMLElement>(selector)!;
+        element.focus();
+        if (document.activeElement === element) {
+          const style = getComputedStyle(element);
+          reached.push([selector, style.outlineWidth, style.outlineColor]);
+        }
+      }
+      return reached;
+    });
+    expect(focused).toEqual([["pre#wide-code", "2px", "rgb(9, 105, 218)"], ["table#wide-table", "2px", "rgb(9, 105, 218)"]]);
+    await page.close();
   });
 });

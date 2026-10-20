@@ -4,8 +4,10 @@
  * 3: links and images are emitted relative to the document, so the read path no
  *    longer rewrites them per request (#242); see src/repo-read/frame.ts for the
  *    compatibility shim that still serves version-2 snapshots.
+ * 4: task-list checkboxes are named from their item's text and overflowing
+ *    `pre`/`table` blocks are keyboard-focusable (#270).
  */
-export const RENDERER_VERSION = 3;
+export const RENDERER_VERSION = 4;
 
 /** Larger sources are not rendered; the caller decides how to present them. */
 export const MAX_SOURCE_BYTES = 1024 * 1024;

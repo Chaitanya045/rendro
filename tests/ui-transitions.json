@@ -26376,7 +26376,7 @@
           "id": "UI-164-E06",
           "from": "A query returns nothing",
           "trigger": "The response has no results",
-          "expected": "An accessible empty message is shown and announced",
+          "expected": "An accessible empty message is shown and announced; the panel holds no listbox role while it shows a message (#270)",
           "inventoryRefs": [
             "UI-163"
           ],
@@ -26386,6 +26386,11 @@
               "file": "tests/lazy-tree-browser.test.ts",
               "name": "shows an empty state, an error state with retry, and closes on Escape, outside clicks and clear",
               "kind": "browser"
+            },
+            {
+              "file": "tests/lazy-tree-browser.test.ts",
+              "name": "holds no listbox while the panel shows a message and restores the wiring with results (#270)",
+              "kind": "browser"
             }
           ]
         },
@@ -26393,7 +26398,7 @@
           "id": "UI-164-E07",
           "from": "A request fails or answers an error status",
           "trigger": "The fetch is aborted by the network, or the endpoint answers non-200",
-          "expected": "An accessible error message with a Retry control is shown; activating Retry repeats the query",
+          "expected": "An accessible error message with a Retry control is shown, without the listbox role while no options exist; activating Retry repeats the query",
           "inventoryRefs": [
             "UI-163"
           ],
@@ -26436,6 +26441,28 @@
             {
               "file": "tests/lazy-tree-browser.test.ts",
               "name": "ignores a stale response after a newer query",
+              "kind": "browser"
+            }
+          ]
+        },
+        {
+          "id": "UI-164-E10",
+          "from": "A rate-limited reply (429 with Retry-After)",
+          "trigger": "The endpoint answers 429",
+          "expected": "The message names the wait (\"Too many searches — try again in N s\"), Retry stays disabled until Retry-After elapses (seconds or HTTP date), and the panel holds no listbox role; without a usable Retry-After Retry is enabled at once",
+          "inventoryRefs": [
+            "UI-163"
+          ],
+          "status": "browser",
+          "tests": [
+            {
+              "file": "tests/lazy-tree-browser.test.ts",
+              "name": "announces a rate-limited reply with its Retry-After wait and disables Retry until it elapses (#270)",
+              "kind": "browser"
+            },
+            {
+              "file": "tests/lazy-tree-browser.test.ts",
+              "name": "reads the Retry-After date form and honours its wait",
               "kind": "browser"
             }
           ]

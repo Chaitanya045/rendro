@@ -1,7 +1,7 @@
 import type { Element, Root } from "hast";
 import GithubSlugger from "github-slugger";
 
-import { element, isElement, textOf, walkElements } from "@/ingest/hast";
+import { element, isElement, textOf, walkElements, classList } from "@/ingest/hast";
 import { rewriteUrl, USER_CONTENT_PREFIX } from "@/ingest/paths";
 
 export interface Heading {
@@ -86,6 +86,38 @@ export function decorateLinksAndImages(tree: Root): void {
     } else if (node.tagName === "img") {
       Object.assign(node.properties, { loading: "lazy", decoding: "async", referrerPolicy: "no-referrer" });
     }
+  });
+}
+
+/**
+ * Name the disabled checkboxes of Markdown task lists from their item's text
+ * (#270): a bare `<input type=checkbox>` has no accessible name, so a screen
+ * reader reads "checkbox" with no clue what it toggles. The checkbox stays
+ * disabled; the label is descriptive text, never interactive markup. An item
+ * without text has nothing to name, so its checkbox is left as it is.
+ */
+export function nameTaskListCheckboxes(tree: Root): void {
+  walkElements(tree, (node) => {
+    if (node.tagName !== "li" || !classList(node).includes("task-list-item")) return;
+    const text = textOf(node).replace(/\s+/g, " ").trim();
+    if (!text) return;
+    for (const child of node.children) {
+      if (isElement(child, "input") && child.properties.type === "checkbox") child.properties.ariaLabel = text;
+    }
+  });
+}
+
+/**
+ * Wide `pre` and `table` blocks scroll horizontally in the frame (#270): give
+ * each scroll container `tabindex="0"` so keyboard readers can reach it (the
+ * frame stylesheet draws its focus ring). Their native roles — and the table's
+ * own semantics — are kept; the transform never wraps content. Every block
+ * gets the attribute: whether it overflows is a viewport question the renderer
+ * cannot answer.
+ */
+export function focusScrollRegions(tree: Root): void {
+  walkElements(tree, (node) => {
+    if (node.tagName === "pre" || node.tagName === "table") node.properties.tabIndex = "0";
   });
 }
 

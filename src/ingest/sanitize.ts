@@ -104,6 +104,11 @@ export const outputSchema: Schema = {
     // signed image proxy. No external host survives, with or without a scheme.
     img: [["src", IMAGE_SRC], "alt", "width", "height", ["loading", "lazy"], ["decoding", "async"], ["referrerPolicy", "no-referrer"]],
     p: [["className", "markdown-alert-title"]],
+    // The #270 a11y transforms make overflowing blocks keyboard-focusable. The
+    // fixed 0 is the only value a transform emits, and parsing counts it as a
+    // number, so both spellings are allowed; author content has neither.
+    pre: [["tabIndex", "0", 0]],
+    table: [["tabIndex", "0", 0]],
     // highlight.js emits hljs-<scope> plus sub-scope classes such as "function_".
     span: [["className", /^hljs-[a-z][a-z0-9-]{0,40}$/, /^[a-z][a-z0-9]{0,40}_+$/]],
   },

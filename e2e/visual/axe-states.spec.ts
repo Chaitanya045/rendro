@@ -66,15 +66,7 @@ const cells: Array<Scanned & { theme: Theme }> = scanned.flatMap(cell => cell.th
  */
 type Engine = "chromium" | "firefox" | "webkit";
 type Known = { family: string; state: string; rule: string; target: string; issue: string; reason: string; /** The appearance the entry belongs to: light unless stated, or "both". */ theme?: Theme | "both"; /** Only this viewport width; every width unless stated. */ width?: Width; /** Only this engine; every engine unless stated. */ engines?: Engine[] };
-const known: Known[] = [
-  // #270, found by the #268 states.
-  ...["search-empty", "search-error", "search-limited"].map((state): Known => ({ family: "repo", state, rule: "aria-required-children", target: "#repo-search-results", issue: "#270", theme: "both", reason: "the panel keeps role=listbox while it holds a single message instead of options" })),
-  { family: "repo", state: "markdown", rule: "label", target: ".task-list-item", issue: "#270", theme: "both", reason: "the checkboxes of a rendered task list have no accessible name" },
-  { family: "repo", state: "markdown", rule: "color-contrast", target: ".hljs-keyword", issue: "#270", reason: "the light highlight theme's keyword colour is below 4.5:1 on the code background" },
-  { family: "repo", state: "markdown", rule: "scrollable-region-focusable", target: "pre:nth-child", issue: "#270", theme: "both", width: 320, reason: "a code block that overflows at 320px cannot be scrolled from the keyboard" },
-  { family: "repo", state: "markdown", rule: "scrollable-region-focusable", target: "table", issue: "#270", theme: "both", width: 320, reason: "a table that overflows at 320px cannot be scrolled from the keyboard" },
-];
-
+const known: Known[] = [];
 /** WCAG 2.1 A/AA rules; anything outside these tags is out of scope for this suite. */
 const tags = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"];
 

@@ -17,7 +17,7 @@ export const ALLOWED_ATTRIBUTES = new Set([
   "align", "dir", "id", "lang", "title", "aria-label", "aria-describedby", "href", "name", "rel", "class",
   "data-footnote-ref", "data-footnote-backref", "data-footnotes", "src", "alt", "width", "height", "loading",
   "decoding", "referrerpolicy", "type", "disabled", "checked", "open", "start", "reversed", "colspan", "rowspan",
-  "scope", "abbr",
+  "scope", "abbr", "tabindex",
 ]);
 
 // A same-origin reference: a repo path (`/repo/file`) or a document-relative path. No scheme (so no

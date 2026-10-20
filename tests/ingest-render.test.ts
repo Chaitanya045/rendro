@@ -30,12 +30,33 @@ describe("GitHub-flavoured Markdown", () => {
     expect(html).toContain('<th align="left">a</th>');
     expect(html).toContain('<td align="right">2</td>');
     expect(html).toContain('<ul class="contains-task-list">');
-    expect(html).toContain('<li class="task-list-item"><input type="checkbox" checked disabled> done</li>');
-    expect(html).toContain('<li class="task-list-item"><input type="checkbox" disabled> todo</li>');
+    // Every checkbox is named from its item's text (#270) and stays disabled.
+    expect(html).toContain('<li class="task-list-item"><input type="checkbox" checked disabled aria-label="done"> done</li>');
+    expect(html).toContain('<li class="task-list-item"><input type="checkbox" disabled aria-label="todo"> todo</li>');
     expect(html).toContain("<del>old</del>");
     expect(html).toContain('<a href="http://www.example.com/" rel="nofollow noopener noreferrer">www.example.com</a>');
     expect(html).toContain('<a href="https://example.org/x" rel="nofollow noopener noreferrer">https://example.org/x</a>');
     expect(outputViolations(html)).toEqual([]);
+  });
+
+  it("names task-list checkboxes from the item's own text, including nested content, and leaves textless items alone", async () => {
+    const { html } = await md("- [ ] Run `pnpm build`\n- [ ] ![](pic.png)\n- [ ] Outer\n  - [ ] Inner");
+    expect(html).toContain('aria-label="Run pnpm build"');
+    // An item whose content renders no text has nothing to name.
+    expect(html).toMatch(/<li class="task-list-item"><input type="checkbox" disabled>(?! aria-label)/);
+    expect(html).toContain('aria-label="Outer Inner"');
+    expect(html).toContain('aria-label="Inner"');
+  });
+
+  it("makes every pre and table a keyboard-reachable scroll region (#270)", async () => {
+    const { html } = await md("| a | b |\n|:--|--:|\n| 1 | 2 |\n\n```ts\nconst x = 1;\n```\n\n    indented");
+    expect(html).toContain('<table tabindex="0">');
+    expect(html).toContain('<pre tabindex="0"><code');
+    // Author tabindex never survives sanitizing: only the transform's fixed 0.
+    expect((await render('<pre tabindex="7">x</pre><table tabindex="9"><tr><td>t</td></tr></table>', "a.html")).html)
+      .toBe('<pre tabindex="0">x</pre><table tabindex="0"><tbody><tr><td>t</td></tr></tbody></table>');
+    expect(outputViolations(html)).toEqual([]);
+    expect(serializeVerified(parseHtmlFragment(html))).toBe(html);
   });
 
   it("renders footnotes with ids and back-references that resolve to each other", async () => {
@@ -180,9 +201,9 @@ describe("syntax highlighting", () => {
   });
 
   it("leaves unknown, unnamed and oversized code plain", async () => {
-    expect((await md("```klingon\nqapla'\n```")).html).toBe('<pre><code class="language-klingon">qapla\'\n</code></pre>\n');
-    expect((await md("```\nplain\n```")).html).toBe("<pre><code>plain\n</code></pre>\n");
-    expect((await md("    indented")).html).toBe("<pre><code>indented\n</code></pre>\n");
+    expect((await md("```klingon\nqapla'\n```")).html).toBe('<pre tabindex="0"><code class="language-klingon">qapla\'\n</code></pre>\n');
+    expect((await md("```\nplain\n```")).html).toBe('<pre tabindex="0"><code>plain\n</code></pre>\n');
+    expect((await md("    indented")).html).toBe('<pre tabindex="0"><code>indented\n</code></pre>\n');
     const big = "x".repeat(MAX_HIGHLIGHT_BLOCK_CHARS + 1);
     expect((await md("```js\n" + big + "\n```")).html).not.toContain("hljs");
   });
@@ -197,13 +218,34 @@ describe("syntax highlighting", () => {
   });
 
   it("only highlights a <pre> whose sole child is <code>", async () => {
-    expect((await render('<pre><code class="language-js">let a</code> tail</pre><pre>let b</pre>', "a.html")).html).toBe('<pre><code class="language-js">let a</code> tail</pre><pre>let b</pre>');
+    expect((await render('<pre><code class="language-js">let a</code> tail</pre><pre>let b</pre>', "a.html")).html).toBe('<pre tabindex="0"><code class="language-js">let a</code> tail</pre><pre tabindex="0">let b</pre>');
   });
 
   it("ships a class-only theme for light and dark", () => {
     expect(HIGHLIGHT_CSS).toContain(".hljs-keyword");
     expect(HIGHLIGHT_CSS).toContain("@media (prefers-color-scheme:dark)");
     expect(HIGHLIGHT_CSS).not.toContain("url(");
+  });
+
+  it("keeps every token at 4.5:1 or better on the frame's code background, in both themes (#270)", () => {
+    const media = "@media (prefers-color-scheme:dark)";
+    const light = HIGHLIGHT_CSS.slice(0, HIGHLIGHT_CSS.indexOf(media));
+    const dark = HIGHLIGHT_CSS.slice(HIGHLIGHT_CSS.indexOf(media));
+    const vars = (segment: string) => Object.fromEntries([...segment.matchAll(/--hl-([a-z-]+):(#(?:[0-9a-f]{6}))/g)].map(match => [match[1], match[2]]));
+    // The frame stylesheet (src/styles/repo-doc.css) paints code blocks with --subtle.
+    const backgrounds = { light: "#f6f8fa", dark: "#151b23" } as const;
+    const channel = (value: number) => { const c = value / 255; return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4; };
+    const luminance = (hex: string) => { const n = parseInt(hex.slice(1), 16); return 0.2126 * channel((n >> 16) & 255) + 0.7152 * channel((n >> 8) & 255) + 0.0722 * channel(n & 255); };
+    const ratio = (fg: string, bg: string) => { const a = luminance(fg), b = luminance(bg); return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05); };
+    for (const theme of ["light", "dark"] as const) {
+      const palette = vars(theme === "light" ? light : dark);
+      for (const [name, colour] of Object.entries(palette)) {
+        if (name.endsWith("-bg")) continue;
+        // Addition and deletion tokens read on their own background colour.
+        const against = name === "ins-fg" ? palette["ins-bg"] : name === "del-fg" ? palette["del-bg"] : backgrounds[theme];
+        expect(ratio(colour, against), `${theme} --hl-${name} (${colour}) on ${against}`).toBeGreaterThanOrEqual(4.5);
+      }
+    }
   });
 });
 

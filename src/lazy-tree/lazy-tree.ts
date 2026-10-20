@@ -17,6 +17,7 @@ import { documentLoadAccessibility } from "./load-state";
 import { emptyTreeAction, shouldUseNativeLinkNavigation } from "./navigation";
 import { folderTransitionOverride, indicatorTransition } from "./motion";
 import { createFramePreloader, framePrefetchUrl, prefetchPermitted, ACTIVE_FRAME_STYLE, BUFFER_FRAME_STYLE, type NetworkInformation } from "./prefetch";
+import { retryAfterMs } from "../../shared/retry-after";
 
 type RendroWindow = Window & { RENDRO_INITIAL_DOC?: string; RENDRO_CURRENT_DOC?: string };
 const RENDRO_WINDOW = window as RendroWindow;
@@ -802,11 +803,33 @@ function initSearch(root: HTMLElement): void {
   let timer: number | undefined;
   let controller: AbortController | null = null;
   let requestId = 0;
+  let countdown: number | undefined;
 
   const announce = (message: string) => { status.textContent = message; };
   const setExpanded = (open: boolean) => input.setAttribute("aria-expanded", String(open));
 
+  // The panel carries the listbox role only while it holds options: a role=listbox
+  // with a single message ("no results", an error) tells screen readers about an
+  // empty listbox (#270), so while a message shows the role and the combobox's
+  // aria-controls are dropped, and both come back with the next result set.
+  const setListbox = (on: boolean) => {
+    if (on) {
+      panel.setAttribute("role", "listbox");
+      panel.setAttribute("aria-label", "Search results");
+      input.setAttribute("aria-controls", panel.id);
+    } else {
+      panel.removeAttribute("role");
+      panel.removeAttribute("aria-label");
+      input.removeAttribute("aria-controls");
+    }
+  };
+  const stopCountdown = () => {
+    if (countdown !== undefined) window.clearInterval(countdown);
+    countdown = undefined;
+  };
+
   function closePanel() {
+    stopCountdown();
     panel.hidden = true;
     panel.replaceChildren();
     setExpanded(false);
@@ -815,20 +838,54 @@ function initSearch(root: HTMLElement): void {
     active = -1;
   }
 
-  function message(text: string, retry?: () => void) {
+  function message(text: string): Text {
+    stopCountdown();
     const node = document.createElement("div");
     node.className = "repo-search-message";
-    node.textContent = text;
-    if (retry) {
-      const button = document.createElement("button");
-      button.type = "button";
-      button.textContent = "Retry";
-      button.addEventListener("click", retry);
-      node.append(button);
-    }
+    const label = document.createTextNode(text);
+    node.append(label);
+    setListbox(false);
+    setExpanded(false);
+    input.removeAttribute("aria-activedescendant");
     panel.replaceChildren(node);
     panel.hidden = false;
-    setExpanded(true);
+    return label;
+  }
+
+  function retryMessage(text: string, retry: () => void): { label: Text; button: HTMLButtonElement } {
+    const label = message(text);
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = "Retry";
+    button.addEventListener("click", retry);
+    label.after(button);
+    return { label, button };
+  }
+
+  /**
+   * A 429 answer names its wait in Retry-After: say so, and keep Retry disabled
+   * until it elapses (#270). The visible countdown updates every second; the
+   * live region announces the wait once, and again when searching may resume —
+   * the same cadence as the share quota's notice.
+   */
+  function rateLimited(delayMs: number, query: string) {
+    const until = Date.now() + delayMs;
+    const text = (left: number) => (left ? `Too many searches — try again in ${left} s` : "Too many searches.");
+    const seconds = Math.ceil(delayMs / 1000);
+    const { label, button } = retryMessage(text(seconds), () => void run(query));
+    button.disabled = delayMs > 0;
+    announce(seconds ? `Too many searches — try again in ${seconds} seconds` : "Too many searches.");
+    if (delayMs > 0) {
+      countdown = window.setInterval(() => {
+        const left = Math.max(0, Math.ceil((until - Date.now()) / 1000));
+        label.textContent = text(left);
+        if (left === 0) {
+          stopCountdown();
+          button.disabled = false;
+          announce("You can search again now.");
+        }
+      }, 1000);
+    }
   }
 
   function snippetNode(snippet: string): HTMLElement {
@@ -905,6 +962,11 @@ function initSearch(root: HTMLElement): void {
     try {
       const url = `${FRAME_BASE}/search?q=${encodeURIComponent(trimmed)}&limit=${SEARCH_LIMIT}`;
       const response = await fetch(url, { signal: controller.signal });
+      if (response.status === 429) {
+        // No supersession check: nothing awaits since fetch, and a newer query aborts this one.
+        rateLimited(retryAfterMs(response.headers.get("Retry-After")), trimmed);
+        return;
+      }
       if (!response.ok) throw new Error(`${response.status}`);
       const found = searchItems(await response.json());
       items = found;
@@ -913,6 +975,8 @@ function initSearch(root: HTMLElement): void {
         announce(`No results for ${trimmed}`);
         return;
       }
+      stopCountdown();
+      setListbox(true);
       panel.replaceChildren(...found.map(option));
       panel.hidden = false;
       setExpanded(true);
@@ -921,7 +985,7 @@ function initSearch(root: HTMLElement): void {
     } catch {
       // A request a newer query aborted, or that answered after it, never shows an error.
       if (id !== requestId) return;
-      message("Search failed.", () => void run(trimmed));
+      retryMessage("Search failed.", () => void run(trimmed));
       announce("Search failed");
     }
   }

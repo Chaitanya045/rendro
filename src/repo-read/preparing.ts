@@ -7,6 +7,7 @@
  */
 import { nonceAttribute } from "@/middleware/html-nonce";
 import { renderFaviconLinks } from "@/routes/favicon";
+import { renderThemeAssets } from "@/routes/theme";
 
 /** Header that labels the response state for the poll script (readable same-origin). */
 export const READINESS_HEADER = "X-Rendro-Readiness";
@@ -65,6 +66,7 @@ export function renderPreparingPage(state: PreparingState, retryAfterSeconds: nu
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${preparing ? "Preparing" : "Unavailable"} — Rendro</title>
 ${renderFaviconLinks()}
+${renderThemeAssets()}
 <style${nonceAttribute()}>
   *{box-sizing:border-box}
   :root{color-scheme:light;--page:#fafafa;--surface:#fff;--text:#18181b;--muted:#71717a;--border:#e4e4e7;--accent:#c2410c;--accent-hover:#9a3412;--on-accent:#fff}
