@@ -13398,7 +13398,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "browser",
+      "status": "e2e",
       "auditEvidence": "U",
       "auditNote": "commentor-recovery-ui.test.ts",
       "edges": [
@@ -13508,12 +13508,17 @@
           "inventoryRefs": [
             "C01"
           ],
-          "status": "browser",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/commentor-widget-browser.test.ts",
               "name": "offers Delete and Archive only where the server allows them, and nothing to read-only viewers",
               "kind": "browser"
+            },
+            {
+              "file": "e2e/repo-comment-permissions.spec.ts",
+              "name": "an outsider is refused a private repository's comments, and anonymous readers read a public one's but cannot write",
+              "kind": "e2e"
             }
           ]
         },
@@ -13659,7 +13664,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "browser",
+      "status": "e2e",
       "auditEvidence": "U",
       "auditNote": "commentor-recovery-ui.test.ts",
       "edges": [
@@ -13698,7 +13703,7 @@
           "inventoryRefs": [
             "C05"
           ],
-          "status": "browser",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/commentor-widget-browser.test.ts",
@@ -13709,6 +13714,11 @@
               "file": "tests/commentor-widget-browser.test.ts",
               "name": "restores an unsent draft after the document reloads and clears it once posted",
               "kind": "browser"
+            },
+            {
+              "file": "e2e/repo-comment-recovery.spec.ts",
+              "name": "a draft survives signing out in another tab and returns after signing back in, but never appears for another account",
+              "kind": "e2e"
             }
           ]
         },
@@ -13798,12 +13808,17 @@
           "inventoryRefs": [
             "C05"
           ],
-          "status": "browser",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/commentor-widget-browser.test.ts",
               "name": "rolls a failed post back, keeps the draft in the reopened composer and retries the same operation (#284)",
               "kind": "browser"
+            },
+            {
+              "file": "e2e/repo-comment-permissions.spec.ts",
+              "name": "a writer over the comment limit sees the post as sending, gets it back with the draft and a countdown, and posts once it lapses",
+              "kind": "e2e"
             }
           ]
         },
@@ -13815,12 +13830,17 @@
           "inventoryRefs": [
             "C05"
           ],
-          "status": "browser",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/commentor-widget-browser.test.ts",
               "name": "rolls a failed post back, keeps the draft in the reopened composer and retries the same operation (#284)",
               "kind": "browser"
+            },
+            {
+              "file": "e2e/repo-comment-permissions.spec.ts",
+              "name": "a writer over the comment limit sees the post as sending, gets it back with the draft and a countdown, and posts once it lapses",
+              "kind": "e2e"
             }
           ]
         },
@@ -13832,12 +13852,17 @@
           "inventoryRefs": [
             "C05"
           ],
-          "status": "browser",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/commentor-widget-browser.test.ts",
               "name": "posts a comment on selected text, focuses the toolbar again and shows the new pin",
               "kind": "browser"
+            },
+            {
+              "file": "e2e/repo-comment-permissions.spec.ts",
+              "name": "a writer over the comment limit sees the post as sending, gets it back with the draft and a countdown, and posts once it lapses",
+              "kind": "e2e"
             }
           ]
         },
@@ -13888,7 +13913,7 @@
           "inventoryRefs": [
             "UI-114"
           ],
-          "status": "browser",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/commentor-widget-browser.test.ts",
@@ -13899,6 +13924,11 @@
               "file": "tests/commentor-quota-ui.test.ts",
               "name": "renders a quota through the transport and preserves create/reply drafts until an explicit retry",
               "kind": "unit"
+            },
+            {
+              "file": "e2e/repo-comment-permissions.spec.ts",
+              "name": "a writer over the comment limit sees the post as sending, gets it back with the draft and a countdown, and posts once it lapses",
+              "kind": "e2e"
             }
           ]
         },
@@ -13968,7 +13998,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "browser",
+      "status": "e2e",
       "auditEvidence": "U",
       "auditNote": "commentor-recovery-ui.test.ts; commentor-parent-transport.test.ts",
       "edges": [
@@ -14017,12 +14047,17 @@
           "inventoryRefs": [
             "C07"
           ],
-          "status": "browser",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/commentor-drawer-browser.test.ts",
               "name": "pages older threads and replies on demand and says when more cannot be loaded",
               "kind": "browser"
+            },
+            {
+              "file": "e2e/repo-comment-journeys.spec.ts",
+              "name": "older threads and replies load on demand, and a comment arriving while scrolled away is offered, not forced",
+              "kind": "e2e"
             }
           ]
         },
@@ -14068,12 +14103,17 @@
           "inventoryRefs": [
             "C07"
           ],
-          "status": "browser",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/commentor-widget-browser.test.ts",
               "name": "keeps the reply draft on a rejected reply and explains it",
               "kind": "browser"
+            },
+            {
+              "file": "e2e/repo-comment-permissions.spec.ts",
+              "name": "a writer over the comment limit sees the post as sending, gets it back with the draft and a countdown, and posts once it lapses",
+              "kind": "e2e"
             }
           ]
         },
@@ -14200,7 +14240,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "browser",
+      "status": "e2e",
       "auditEvidence": "U",
       "auditNote": "document-ui-regressions.test.ts (delete-state unit assertions, not rendered Undo click)",
       "edges": [
@@ -14234,12 +14274,17 @@
           "inventoryRefs": [
             "C10"
           ],
-          "status": "browser",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/commentor-widget-browser.test.ts",
               "name": "deletes after an undo window and rolls back with an explanation when the delete fails",
               "kind": "browser"
+            },
+            {
+              "file": "e2e/repo-comment-journeys.spec.ts",
+              "name": "a deleted comment can be undone within its window and is then removed for good",
+              "kind": "e2e"
             }
           ]
         },
@@ -14251,12 +14296,17 @@
           "inventoryRefs": [
             "C10"
           ],
-          "status": "browser",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/commentor-widget-browser.test.ts",
               "name": "deletes after an undo window and rolls back with an explanation when the delete fails",
               "kind": "browser"
+            },
+            {
+              "file": "e2e/repo-comment-journeys.spec.ts",
+              "name": "a deleted comment can be undone within its window and is then removed for good",
+              "kind": "e2e"
             }
           ]
         },
@@ -14268,12 +14318,17 @@
           "inventoryRefs": [
             "C10"
           ],
-          "status": "browser",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/commentor-widget-browser.test.ts",
               "name": "deletes after an undo window and rolls back with an explanation when the delete fails",
               "kind": "browser"
+            },
+            {
+              "file": "e2e/repo-comment-journeys.spec.ts",
+              "name": "a deleted comment can be undone within its window and is then removed for good",
+              "kind": "e2e"
             }
           ]
         },
@@ -14394,7 +14449,7 @@
           "inventoryRefs": [
             "UI-117"
           ],
-          "status": "browser",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/commentor-widget-browser.test.ts",
@@ -14405,6 +14460,11 @@
               "file": "tests/commentor-permissions-rendering.test.ts",
               "name": "hides Delete and Archive without server permission (%s), preserving Resolve",
               "kind": "unit"
+            },
+            {
+              "file": "e2e/repo-comment-permissions.spec.ts",
+              "name": "an outsider is refused a private repository's comments, and anonymous readers read a public one's but cannot write",
+              "kind": "e2e"
             }
           ]
         },
@@ -14482,6 +14542,11 @@
             {
               "file": "e2e/repo-comments.spec.ts",
               "name": "an anonymous reader of a public repository sees its comments but cannot post",
+              "kind": "e2e"
+            },
+            {
+              "file": "e2e/repo-comment-permissions.spec.ts",
+              "name": "an outsider is refused a private repository's comments, and anonymous readers read a public one's but cannot write",
               "kind": "e2e"
             }
           ]
@@ -14809,7 +14874,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "browser",
+      "status": "e2e",
       "auditEvidence": "B",
       "auditNote": "sign-out-browser.test.ts; commentor-recovery-session.test.ts",
       "edges": [
@@ -14821,7 +14886,7 @@
           "inventoryRefs": [
             "UI-120"
           ],
-          "status": "browser",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/sign-out-browser.test.ts",
@@ -14832,6 +14897,11 @@
               "file": "tests/commentor-parent-recovery.test.ts",
               "name": "sign-out retains local drafts but clears live recovery and rejects further operations",
               "kind": "unit"
+            },
+            {
+              "file": "e2e/repo-comment-recovery.spec.ts",
+              "name": "a draft survives signing out in another tab and returns after signing back in, but never appears for another account",
+              "kind": "e2e"
             }
           ]
         },
@@ -14959,7 +15029,7 @@
           "inventoryRefs": [
             "C14"
           ],
-          "status": "browser",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/sign-out-browser.test.ts",
@@ -14970,6 +15040,11 @@
               "file": "tests/commentor-protocol-browser.test.ts",
               "name": "stops serving and releases its subscriptions when torn down",
               "kind": "browser"
+            },
+            {
+              "file": "e2e/repo-comment-recovery.spec.ts",
+              "name": "a revoked session is noticed when the page regains focus, and the draft returns once the person signs in again",
+              "kind": "e2e"
             }
           ]
         },
@@ -14981,12 +15056,17 @@
           "inventoryRefs": [
             "C14"
           ],
-          "status": "browser",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/commentor-protocol-browser.test.ts",
               "name": "starts over for a different signed-in reader",
               "kind": "browser"
+            },
+            {
+              "file": "e2e/repo-comment-recovery.spec.ts",
+              "name": "a draft survives signing out in another tab and returns after signing back in, but never appears for another account",
+              "kind": "e2e"
             }
           ]
         },
@@ -15270,7 +15350,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "browser",
+      "status": "e2e",
       "auditEvidence": "UNTESTED",
       "auditNote": "commentor.ts toggleDrawer/setThreadFilter",
       "edges": [
@@ -15428,12 +15508,17 @@
           "inventoryRefs": [
             "C08"
           ],
-          "status": "browser",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/commentor-drawer-browser.test.ts",
               "name": "lists threads by view with live counts, keyboard-navigable tabs and helpful empty states",
               "kind": "browser"
+            },
+            {
+              "file": "e2e/repo-comment-journeys.spec.ts",
+              "name": "the Active, Resolved and History views follow each comment's status, from the drawer and from the server",
+              "kind": "e2e"
             }
           ]
         },
@@ -15445,12 +15530,17 @@
           "inventoryRefs": [
             "C08"
           ],
-          "status": "browser",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/commentor-drawer-browser.test.ts",
               "name": "lists threads by view with live counts, keyboard-navigable tabs and helpful empty states",
               "kind": "browser"
+            },
+            {
+              "file": "e2e/repo-comment-journeys.spec.ts",
+              "name": "the Active, Resolved and History views follow each comment's status, from the drawer and from the server",
+              "kind": "e2e"
             }
           ]
         },
@@ -15462,12 +15552,17 @@
           "inventoryRefs": [
             "C08"
           ],
-          "status": "browser",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/commentor-drawer-browser.test.ts",
               "name": "lists threads by view with live counts, keyboard-navigable tabs and helpful empty states",
               "kind": "browser"
+            },
+            {
+              "file": "e2e/repo-comment-journeys.spec.ts",
+              "name": "the Active, Resolved and History views follow each comment's status, from the drawer and from the server",
+              "kind": "e2e"
             }
           ]
         },
@@ -15479,12 +15574,17 @@
           "inventoryRefs": [
             "C08"
           ],
-          "status": "browser",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/commentor-widget-browser.test.ts",
               "name": "resolves and reopens, archives and unarchives, with accessible pending state and failures",
               "kind": "browser"
+            },
+            {
+              "file": "e2e/repo-comment-journeys.spec.ts",
+              "name": "the Active, Resolved and History views follow each comment's status, from the drawer and from the server",
+              "kind": "e2e"
             }
           ]
         },
@@ -15496,12 +15596,17 @@
           "inventoryRefs": [
             "C08"
           ],
-          "status": "browser",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/commentor-widget-browser.test.ts",
               "name": "resolves and reopens, archives and unarchives, with accessible pending state and failures",
               "kind": "browser"
+            },
+            {
+              "file": "e2e/repo-comment-journeys.spec.ts",
+              "name": "the Active, Resolved and History views follow each comment's status, from the drawer and from the server",
+              "kind": "e2e"
             }
           ]
         }
@@ -15537,7 +15642,7 @@
         "firefox",
         "webkit"
       ],
-      "status": "browser",
+      "status": "e2e",
       "auditEvidence": "UNTESTED",
       "auditNote": "document-comment-pagination.test.ts tests backend pages; no rendered pagination assertions found",
       "edges": [
@@ -15549,7 +15654,7 @@
           "inventoryRefs": [
             "UI-123"
           ],
-          "status": "browser",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/commentor-gaps-browser.test.ts",
@@ -15590,6 +15695,11 @@
               "file": "tests/commentor-drawer-browser.test.ts",
               "name": "announces comments that arrive while the reader is away from the end of the list",
               "kind": "browser"
+            },
+            {
+              "file": "e2e/repo-comment-journeys.spec.ts",
+              "name": "older threads and replies load on demand, and a comment arriving while scrolled away is offered, not forced",
+              "kind": "e2e"
             }
           ]
         },
@@ -15635,7 +15745,7 @@
           "inventoryRefs": [
             "C11"
           ],
-          "status": "browser",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/commentor-drawer-browser.test.ts",
@@ -15646,6 +15756,11 @@
               "file": "tests/commentor-drawer-browser.test.ts",
               "name": "does not announce arrivals when the list is short, and scrolls to the newest on request ($motion motion)",
               "kind": "browser"
+            },
+            {
+              "file": "e2e/repo-comment-journeys.spec.ts",
+              "name": "older threads and replies load on demand, and a comment arriving while scrolled away is offered, not forced",
+              "kind": "e2e"
             }
           ]
         },
@@ -15657,7 +15772,7 @@
           "inventoryRefs": [
             "C11"
           ],
-          "status": "browser",
+          "status": "e2e",
           "tests": [
             {
               "file": "tests/commentor-drawer-browser.test.ts",
@@ -15668,6 +15783,11 @@
               "file": "tests/commentor-drawer-browser.test.ts",
               "name": "does not announce arrivals when the list is short, and scrolls to the newest on request ($motion motion)",
               "kind": "browser"
+            },
+            {
+              "file": "e2e/repo-comment-journeys.spec.ts",
+              "name": "older threads and replies load on demand, and a comment arriving while scrolled away is offered, not forced",
+              "kind": "e2e"
             }
           ]
         },
