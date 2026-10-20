@@ -1964,5 +1964,4 @@ Tests: `tests/repo-comments-convex.test.ts` ("editing repository comments (#287)
 
 1. Sign-in is email and password only until GitHub sign-in (P1); the signed-in home cannot list a reader's repositories yet.
 2. The read path's bindings are not in `wrangler.toml` yet, and the ingest and control Workers exist for development and tests only, until the GitHub App exists ([SETUP.md](SETUP.md#github-repository-reads-not-configured-yet)). Until the owner wires them, every `/r/` URL is a 404.
-3. The landing page still describes the upload-era product; its rewrite for GitHub-backed docs is tracked in #308.
-4. The first Convex HTTP action after a cold start can add latency.
+3. The first Convex HTTP action after a cold start can add latency.

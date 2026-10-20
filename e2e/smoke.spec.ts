@@ -10,7 +10,7 @@ const pinned = () => `${repo()}/@${open().commit}`;
 test("landing uses a fresh CSP nonce and renders without CSP violations", async ({ page, cspViolations }) => {
   const response = await page.goto("/");
   expect(response?.status()).toBe(200);
-  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Your docs should ship with your code.");
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Docs straight from your GitHub repository.");
   const policy = response?.headers()["content-security-policy"] ?? "";
   const nonce = /'nonce-([^']+)'/.exec(policy)?.[1];
   expect(nonce).toMatch(/^[A-Za-z0-9+/]{24}$/);

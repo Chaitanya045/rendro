@@ -245,7 +245,7 @@
       ],
       "status": "browser",
       "auditEvidence": "U",
-      "auditNote": "landing-theme-navigation.test.ts; routes.test.ts (route/markup contracts, not click journey) Reconciled A01 with landing.ts: three calls to action (hero, security, final), not four; since #286 each is a sign-up link.",
+      "auditNote": "landing-theme-navigation.test.ts; routes.test.ts (route/markup contracts, not click journey) Reconciled A01 with landing.ts: three calls to action (hero, security, final), not four; since #286 each is a sign-up link. #308 rewrote the copy for GitHub-backed docs: the CLI terminal became a static docs-detection list (no new interactive element).",
       "edges": [
         {
           "id": "UI-001-E01",
@@ -367,6 +367,11 @@
             {
               "file": "tests/routes.test.ts",
               "name": "presents the product before offering sign-up",
+              "kind": "unit"
+            },
+            {
+              "file": "tests/routes.test.ts",
+              "name": "describes the GitHub-backed product, not organizations, the CLI or API keys",
               "kind": "unit"
             }
           ]
