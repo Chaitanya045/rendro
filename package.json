@@ -62,6 +62,7 @@
     "visual": "bash scripts/visual-baselines.sh check",
     "a11y": "RENDRO_E2E_VISUAL=1 playwright test --config e2e/visual.config.ts --project=a11y-chromium --project=a11y-firefox --project=a11y-webkit",
     "visual:update": "bash scripts/visual-baselines.sh update",
+    "visual:repeat": "bash scripts/visual-baselines.sh repeat",
     "check:r2-public": "tsx scripts/check-r2-public-access.ts",
     "deploy": "pnpm build:assets && wrangler deploy --config wrangler.toml",
     "e2e": "playwright test --config e2e/playwright.config.ts"

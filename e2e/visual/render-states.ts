@@ -31,6 +31,19 @@ const widgetUi = (page: Page) => content(page);
 const classes = (page: Page) => page.evaluate(() => [...document.documentElement.classList]);
 
 export async function openState(page: Page, visual: VisualState, family: string, state: string): Promise<Rendered> {
+  const opened = await openCell(page, visual, family, state);
+  try {
+    // The shell keeps its loading shimmer on the active row for a minimum time after a document arrives (#276): a shot
+    // inside that window caught it on one run and not the next. Only the held load is meant to show it.
+    if (!(family === "viewer" && state === "loading")) await expect(page.locator("html.doc-loading")).toHaveCount(0);
+  } catch (error) {
+    await opened.close().catch(() => undefined);
+    throw error;
+  }
+  return opened;
+}
+
+async function openCell(page: Page, visual: VisualState, family: string, state: string): Promise<Rendered> {
   const closers: Array<() => Promise<void>> = [];
   const rendered = (verify?: () => Promise<void>): Rendered => ({ verify, close: async () => { for (const close of closers.splice(0).reverse()) await close(); } });
   try {
@@ -147,8 +160,12 @@ export async function openState(page: Page, visual: VisualState, family: string,
           // An in-shell load held at the browser boundary (the initial document cannot be held:
           // the page's load event would wait for the opaque frame). The held index.html request
           // leaves the shell in its deterministic loading state with the previous document shown.
+          await countCommentUpdates(page);
           await page.goto(`${visual.crown.docs}?doc=${encodeURIComponent("guide/start.html")}`);
           await viewerReady(page, "Getting started");
+          // This document has no threads, so the empty pin count above holds before its comment subscription answers.
+          // Left unanswered, the subscribe reached the shell after the switch, which refused it with a toast (#276).
+          await expect.poll(() => content(page).locator("body").evaluate(() => (window as { rendroVisualUpdates?: number }).rendroVisualUpdates ?? 0)).toBeGreaterThan(0);
           const hold = await holdDocument(page, "index.html");
           closers.push(() => hold.close());
           // Below the desktop breakpoint the tree is a drawer; choosing a document closes it.
@@ -203,6 +220,20 @@ async function viewerReady(page: Page, title: string, pins = 0) {
   // race the subscription and alternate between pinned and unpinned documents. Only the indexed
   // document carries threads; other pages of the site render none.
   await expect(widgetUi(page).getByTestId("commentor-pin")).toHaveCount(pins);
+}
+
+/** Counts, in every document frame of the page, the comment updates the shell delivers to the widget. */
+const countingPages = new WeakSet<Page>();
+async function countCommentUpdates(page: Page) {
+  if (countingPages.has(page)) return;
+  countingPages.add(page);
+  await page.addInitScript(() => {
+    const counted = window as { rendroVisualUpdates?: number };
+    counted.rendroVisualUpdates = 0;
+    window.addEventListener("message", event => {
+      if ((event.data as { type?: unknown } | null)?.type === "commentor-parent-update") counted.rendroVisualUpdates = (counted.rendroVisualUpdates ?? 0) + 1;
+    });
+  });
 }
 
 /** Holds the document's own opaque request at the browser boundary, exactly like the viewer specs. */
@@ -262,6 +293,16 @@ async function openTreeDrawer(page: Page) {
 /** Every image of the rendered page decoded: a shot must not race an asset that arrives through the frame's ticket. */
 async function pageImagesLoaded(page: Page) {
   await expect.poll(() => repoContent(page).locator("img").evaluateAll(images => images.every(image => (image as HTMLImageElement).complete && (image as HTMLImageElement).naturalWidth > 0))).toBe(true);
+}
+
+/**
+ * The visual repository's home, its row selected. A click into the page before the shell's first reveal has marked the row
+ * supersedes that reveal (newest wins), so the row stayed unselected on one run and selected on the next (#276).
+ */
+async function openVisualHome(page: Page, base: string) {
+  await page.goto(base);
+  await expect(repoContent(page).getByRole("heading", { level: 1, name: "Visual home" })).toBeVisible();
+  await expect(page.locator(".tree-item.active .tree-label")).toHaveText("Visual home");
 }
 
 /** The visual-docs repository (public, fixed Markdown), only provisioned in the visual runs. */
@@ -349,8 +390,7 @@ async function openRepo(page: Page, visual: VisualState, state: string, closers:
       return rendered();
     }
     case "tree-expanded": {
-      await page.goto(base);
-      await expect(frameHeading("Visual home")).toBeVisible();
+      await openVisualHome(page, base);
       await openTreeDrawer(page);
       for (const folder of ["Guide", "Deep", "Nested", "Reference"]) {
         const row = page.locator(".tree-folder > .tree-item", { has: page.locator(".tree-folder-name", { hasText: new RegExp(`^${folder}$`) }) });
@@ -362,16 +402,14 @@ async function openRepo(page: Page, visual: VisualState, state: string, closers:
     }
     case "doc-error": {
       // The page links to a document that no longer exists: the shell asks for it and the frame says so.
-      await page.goto(base);
-      await expect(frameHeading("Visual home")).toBeVisible();
+      await openVisualHome(page, base);
       await repoContent(page).getByRole("link", { name: "link to a page that was removed" }).click();
       await expect(repoContent(page).getByRole("heading", { name: "Page not found" })).toBeVisible();
       return rendered();
     }
     case "link-confirm": {
       // A link to another site is never followed: the shell shows the exact address and waits for the reader.
-      await page.goto(base);
-      await expect(frameHeading("Visual home")).toBeVisible();
+      await openVisualHome(page, base);
       await repoContent(page).getByRole("link", { name: "external changelog" }).click();
       const notice = page.locator("#document-navigation-notice");
       await expect(notice).toBeVisible();
@@ -503,6 +541,14 @@ async function openThreadState(page: Page, visual: VisualState, state: string, c
     await retry.getByTestId("commentor-delete-btn").press("Enter");
     const undo = ui.locator(".toast").getByRole("button", { name: "Undo" });
     await expect(undo).toBeVisible();
+    // The open drawer keeps the height it measured with the thread in it until a later snapshot happens to re-measure it, so
+    // the shot caught either height (#276). Reopening it measures the list as it is now; the toast lives outside the drawer.
+    // A programmatic click neither focuses nor hovers the button, so its tooltip stays closed.
+    const panel = ui.getByTestId("commentor-panel-btn");
+    await panel.evaluate(button => (button as HTMLButtonElement).click());
+    await expect(ui.getByTestId("commentor-drawer")).toHaveAttribute("aria-hidden", "true");
+    await panel.evaluate(button => (button as HTMLButtonElement).click());
+    await expect(ui.getByTestId("commentor-drawer")).toHaveAttribute("aria-hidden", "false");
     closers.push(async () => { if (await undo.count()) await undo.click().catch(() => undefined); });
     return rendered();
   }

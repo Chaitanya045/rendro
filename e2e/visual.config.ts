@@ -31,7 +31,11 @@ export default defineConfig({
       scale: "css",
       maxDiffPixels: 0,
       maxDiffPixelRatio: 0,
-      threshold: 0.2,
+      // pixelmatch ignores a pixel whose YIQ colour distance is below `threshold` before maxDiffPixels counts anything.
+      // Playwright's default 0.2 hid #274's #71717a → #52525b text (a distance of 0.117) in every /r/ cell. The pinned
+      // renders are bit-identical across runs (`scripts/visual-baselines.sh repeat`, #276), so any colour change fails;
+      // e2e/visual/threshold-self-test.spec.ts proves it on a real cell.
+      threshold: 0,
     },
   },
   outputDir: "../test-results/e2e-visual",
@@ -45,7 +49,8 @@ export default defineConfig({
     trace: "retain-on-failure",
     screenshot: "only-on-failure",
   },
-  snapshotPathTemplate: "{testFileDir}/__screenshots__/{arg}{ext}",
+  // `scripts/visual-baselines.sh repeat` renders into a scratch directory and compares the next runs against it.
+  snapshotPathTemplate: process.env.RENDRO_VISUAL_SNAPSHOTS ? `${process.env.RENDRO_VISUAL_SNAPSHOTS}/{arg}{ext}` : "{testFileDir}/__screenshots__/{arg}{ext}",
   projects: [
     {
       name: "visual-chromium",
