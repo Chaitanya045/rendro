@@ -675,6 +675,19 @@ Every file the Worker serves from `public/` is public and is served **before the
 
 **Adding or changing a bundle.** Bump its constant in `src/viewer/asset-versions.ts`, `pnpm build:assets`, then `pnpm record:assets` (rebase onto `main` first; a version collision is a ledger conflict). CSP nonces are unaffected.
 
+**Bundle-size budget (#285).** `scripts/bundle-budget.json` records the raw and Brotli (quality 11, what the edge serves) bytes of every served bundle: the five versioned bundles, the stylesheets and font subsets (keyed without their content hash) and the comrak WASM. `pnpm verify:budget` runs at the end of `pnpm verify` (so in CI's verify job, after `pnpm build:assets`) and fails when a bundle grows more than 1% over its recorded size in either measure, when a served bundle has no entry, or when an entry names a bundle that is no longer served. The message names the bundle, the old and new sizes and the delta. Shrinking always passes, with a hint to lower the budget. When added weight is intended, run `pnpm build:assets` and `pnpm record:budget` and commit the budget file with the change, so a weight change is reviewed like a baseline (after a rebase onto a `main` that changed a bundle, re-record). The 1% tolerance absorbs toolchain noise; it is measured against the recorded size, not the previous build, so small increments still add up to a failure. Recorded sizes match under Node 22 (CI) and Node 24.
+
+| Bundle (2026-10-21) | Raw | Brotli |
+|---|---|---|
+| `commentor.js` (document frame) | 104,934 | 24,309 |
+| `commentor-parent.js` (repository shell, holds the Convex client) | 98,036 | 24,401 |
+| `lazy-tree.js` | 26,274 | 8,057 |
+| `rum.js` | 12,893 | 4,418 |
+| `private-viewer.js` | 6,269 | 2,163 |
+| `repo-doc.css` / `viewer-base.css` | 7,231 / 1,435 | 1,987 / 577 |
+| Fonts (Inter Latin, Latin Extended, icons; already compressed woff2) | 34,380 / 55,820 / 5,184 | n/a |
+| `comrak_engine_bg.wasm` (Worker, not sent to browsers) | 368,424 | 99,904 |
+
 ### Self-hosted fonts
 
 Inter and a Material Symbols Outlined subset are committed under `public/fonts/` as content-hashed woff2 files (`<name>.<sha256[:10]>.woff2`), with their licenses beside them: `LICENSE-Inter-OFL-1.1.txt` (SIL OFL 1.1) and `LICENSE-Material-Symbols-Apache-2.0.txt` (Apache-2.0). They are static assets of the Worker (`[assets]` directory `public/`).

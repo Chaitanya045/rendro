@@ -1,0 +1,46 @@
+{
+  "public/commentor-parent.js": {
+    "raw": 98036,
+    "brotli": 24401
+  },
+  "public/commentor.js": {
+    "raw": 104934,
+    "brotli": 24309
+  },
+  "public/fonts/inter-latin-ext.woff2": {
+    "raw": 55820,
+    "brotli": 55824
+  },
+  "public/fonts/inter-latin.woff2": {
+    "raw": 34380,
+    "brotli": 34384
+  },
+  "public/fonts/material-symbols-outlined.woff2": {
+    "raw": 5184,
+    "brotli": 5188
+  },
+  "public/lazy-tree.js": {
+    "raw": 26274,
+    "brotli": 8057
+  },
+  "public/private-viewer.js": {
+    "raw": 6269,
+    "brotli": 2163
+  },
+  "public/rum.js": {
+    "raw": 12893,
+    "brotli": 4418
+  },
+  "public/styles/repo-doc.css": {
+    "raw": 7231,
+    "brotli": 1987
+  },
+  "public/styles/viewer-base.css": {
+    "raw": 1435,
+    "brotli": 577
+  },
+  "src/ingest/comrak-engine/comrak_engine_bg.wasm": {
+    "raw": 368424,
+    "brotli": 99904
+  }
+}
