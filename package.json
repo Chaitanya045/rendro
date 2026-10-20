@@ -54,7 +54,7 @@
     "rebuild:wasm": "tsx scripts/verify-comrak-wasm.ts --rebuild",
     "build:wasm": "tsx scripts/verify-comrak-wasm.ts --write",
     "bench:hostile": "tsx scripts/benchmark-hostile-input.ts",
-    "build:assets": "tsx scripts/build-private-viewer.ts && tsx scripts/build-commentor.ts && tsx scripts/build-commentor-parent.ts && tsx scripts/build-lazy-tree.ts && tsx scripts/build-management-query.ts && tsx scripts/build-select.ts && tsx scripts/build-management-pages.ts",
+    "build:assets": "tsx scripts/build-private-viewer.ts && tsx scripts/build-commentor.ts && tsx scripts/build-commentor-parent.ts && tsx scripts/build-lazy-tree.ts && tsx scripts/build-rum.ts && tsx scripts/build-management-query.ts && tsx scripts/build-select.ts && tsx scripts/build-management-pages.ts",
     "cli": "tsx cli/src/index.ts",
     "cli:build": "node scripts/build-cli.mjs",
     "prepack": "node scripts/build-cli.mjs",
@@ -116,6 +116,7 @@
     "typescript-eslint": "^8.62.0",
     "vite": "7.3.6",
     "vitest": "^4.1.11",
+    "web-vitals": "6.2.3",
     "wrangler": "^4.149.0",
     "zod": "^4.4.3"
   }

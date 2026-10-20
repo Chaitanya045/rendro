@@ -1,6 +1,8 @@
+import { readFileSync } from "node:fs";
 import type { Page } from "@playwright/test";
 import { versionedBundles } from "../src/routes/versioned-bundles";
 import { test, expect, content } from "./viewer-fixtures";
+import type { RepoFixtures } from "./repo-fixtures";
 
 /**
  * Public static assets on the real Worker (#95): every bundle a page loads is served from the allowlist with the
@@ -32,6 +34,10 @@ test.describe("public static assets", () => {
     await expect(tab.locator("script[src^='/management-pages.js']")).toHaveCount(1);
     await tab.goto(`${site.docs}?doc=index.html`);
     await expect(content(tab).getByRole("heading", { name: "Viewer home" })).toBeVisible();
+    // The repository shell loads the real-user monitoring bundle (#282); its document is a frame like the viewer's.
+    const { open } = JSON.parse(readFileSync(process.env.RENDRO_E2E_REPOS as string, "utf8")) as RepoFixtures;
+    await tab.goto(`/r/${open.owner}/${open.name}`);
+    await expect(tab.locator("script[src^='/rum.js']")).toHaveCount(1);
 
     // The viewer document and its comment frame load their `defer` scripts after the heading renders, so the list
     // is complete only once every bundle's response arrived: poll the real condition instead of reading it once.

@@ -712,6 +712,15 @@ Default CI must never require a live account, CDN, font service, or backend.
 CI uses the installed Playwright Chromium; a local executable can be supplied
 with `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH`.
 
+Playwright launches Chromium with `--disable-back-forward-cache`. A suite that
+exercises a real back/forward-cache restore passes
+`createBrowserHarness({ ignoreDefaultArgs: ["--disable-back-forward-cache"] })`
+(`tests/rum-browser.test.ts`). The coverage profiler does not follow a restored
+document, so cover restore-only code with a dispatched `pageshow`
+(`persisted: true`) on a page that never left, beside the real restore. Code
+that runs while leaving a page (`pagehide`, the final `visibilitychange`) runs
+after the collector's `beforeunload` snapshot; exercise it on a page that stays.
+
 ## Ticket expiry
 
 Set `page.clock.setFixedTime(epoch)` **before navigation**, using the same

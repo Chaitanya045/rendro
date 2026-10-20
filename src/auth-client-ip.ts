@@ -8,6 +8,11 @@ export function registerAuthClientIp(request: Request, ip: string | undefined): 
   if (ip) clientIps.set(request, ip);
 }
 
+/** The ingress-verified client address of a request (CF-Connecting-IP, or the Node socket), if registered. */
+export function authClientIp(request: Request): string | undefined {
+  return clientIps.get(request);
+}
+
 export function authClientIpHeaders(request: Request, target: string, method = request.method): Promise<Headers> {
   return signAuthClientIp(new Request(target, { method }), clientIps.get(request), CONVEX_INTERNAL_SECRET);
 }

@@ -32,6 +32,7 @@ import { logger } from "@/logger";
 import { ViewerBackendError } from "@/viewer-backend";
 import type { RepoGrant } from "./grant";
 import type { SharedCacheReader } from "./shared-cache";
+import { ReadTiming, type StorageTier } from "./timing";
 
 /** The Workers Cache API surface used here. */
 export interface EdgeCache {
@@ -55,6 +56,8 @@ export interface SnapshotDependencies {
   shared: SharedCacheReader | null;
   waitUntil(promise: Promise<unknown>): void;
   now(): number;
+  /** The request's `Server-Timing` record (#282): which tier answered, and how long each tier took. */
+  timing?: ReadTiming;
 }
 
 /** Immutable snapshot objects, parsed, per isolate. Entries larger than 1 MiB are not kept. */
@@ -106,7 +109,17 @@ function validManifest(value: unknown, repoId: number, commit: string): Snapshot
 }
 
 export class RepoSnapshots {
-  constructor(private readonly deps: SnapshotDependencies) {}
+  private readonly timing: ReadTiming;
+
+  constructor(private readonly deps: SnapshotDependencies) {
+    this.timing = deps.timing ?? new ReadTiming();
+  }
+
+  /** One read from `tier` on the request's own path, timed and noted as reached. */
+  private reach<T>(tier: StorageTier, work: () => Promise<T>): Promise<T> {
+    this.timing.served(tier);
+    return this.timing.time(tier, work);
+  }
 
   /**
    * Stored bytes, opened. A private repository's bytes must open; a public
@@ -152,13 +165,22 @@ export class RepoSnapshots {
   private async read(grant: RepoGrant, key: string): Promise<Uint8Array | null> {
     const { edge, shared } = this.deps;
     if (!grant.repo.private && shared) {
-      const bytes = await shared(grant.repo.id, key);
-      if (bytes && !isSealed(bytes)) return bytes;
+      const bytes = await this.timing.time("shared", () => shared(grant.repo.id, key));
+      if (bytes && !isSealed(bytes)) {
+        this.timing.served("shared");
+        return bytes;
+      }
     }
     const { cacheKey, keyId } = await this.edgeKey(grant, key);
-    const hit = edge ? await edge.match(cacheKey) : undefined;
-    if (hit) return this.open(grant, key, new Uint8Array(await hit.arrayBuffer()));
-    const object = await this.deps.store.get(key);
+    const hit = edge ? await this.timing.time("colo", async () => {
+      const response = await edge.match(cacheKey);
+      return response && new Uint8Array(await response.arrayBuffer());
+    }) : undefined;
+    if (hit) {
+      this.timing.served("colo");
+      return this.open(grant, key, hit);
+    }
+    const object = await this.reach("r2", () => this.deps.store.get(key));
     if (!object) return null;
     const opened = await this.open(grant, key, object.bytes);
     if (edge && (grant.repo.private ? envelopeKeyId(object.bytes) === keyId : !isSealed(object.bytes))) {
@@ -200,8 +222,9 @@ export class RepoSnapshots {
     const now = this.deps.now();
     const entry = pointers.get(key);
     if (!fresh && entry && now - entry.at < POINTER_FRESH_MS) return entry.value;
-    const load = async () => {
-      const object = await this.deps.store.get(key);
+    // Only the blocking read is the request's own; a background refresh is not on its path.
+    const load = async (timed: boolean) => {
+      const object = await (timed ? this.reach("r2", () => this.deps.store.get(key)) : this.deps.store.get(key));
       const value = object ? validPointer(parseJson(object.bytes), grant.repo.id) : null;
       pointers.delete(key);
       pointers.set(key, { value, at: this.deps.now(), refresh: null });
@@ -210,11 +233,11 @@ export class RepoSnapshots {
     };
     if (!fresh && entry && now - entry.at < POINTER_STALE_MS) {
       // Stale while revalidate: one refresh per pointer; a failed one leaves the stale value in place.
-      entry.refresh ??= load().then(() => {}, () => { entry.refresh = null; });
+      entry.refresh ??= load(false).then(() => {}, () => { entry.refresh = null; });
       this.deps.waitUntil(entry.refresh);
       return entry.value;
     }
-    return load();
+    return load(true);
   }
 
   /**

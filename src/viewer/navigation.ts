@@ -45,6 +45,31 @@ export function classifyDocumentLink(href: string, baseURI: string, documentURL:
   } catch { return null; }
 }
 
+/** What the frame's own response took, as its Server-Timing and Navigation Timing tell it (#282). */
+export interface DocumentResponseTiming {
+  /** The document's own address (path and query), so the shell can match the report to its navigation. */
+  url: string;
+  tier?: string;
+  server?: number;
+  response: number;
+}
+
+/**
+ * Only the document can read its Server-Timing: an opaque-origin frame never
+ * exposes it to the shell's resource timing, whatever `Timing-Allow-Origin`
+ * says. So the frame reports it with its `doc-loaded` announcement, for the
+ * shell's real-user monitoring. Numbers and a tier name only.
+ */
+export function documentResponseTiming(host: Window): DocumentResponseTiming | undefined {
+  const entry = host.performance?.getEntriesByType("navigation")[0] as PerformanceNavigationTiming | undefined;
+  if (!entry) return undefined;
+  const named = (name: string) => entry.serverTiming.find(timing => timing.name === name);
+  return {
+    url: host.location.pathname + host.location.search,
+    tier: named("cache")?.description, server: named("total")?.duration, response: entry.responseEnd - entry.startTime,
+  };
+}
+
 export function installDocumentNavigation(config: DocumentNavigationConfig, host: Window = window): void {
   const doc = host.document;
   const origin = host.location.origin;
@@ -58,7 +83,7 @@ export function installDocumentNavigation(config: DocumentNavigationConfig, host
   });
   function loaded() {
     if (host.parent !== host) host.parent.postMessage({ type: "doc-loaded", path: config.loadedPath ?? config.documentPath,
-      search: host.location.search, fragment: host.location.hash }, origin);
+      search: host.location.search, fragment: host.location.hash, timing: documentResponseTiming(host) }, origin);
   }
   if (config.singleDocument) {
     // Report the destination after native navigation/restoration, never while

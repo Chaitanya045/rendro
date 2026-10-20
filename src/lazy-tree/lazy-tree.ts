@@ -88,6 +88,51 @@ const FRAME_SWITCH_MEASURE = "rendro:frame-switch";
 const FRAME_SWITCH_START = `${FRAME_SWITCH_MEASURE}:start`;
 const FRAME_SWITCH_END = `${FRAME_SWITCH_MEASURE}:end`;
 
+// ── real-user monitoring marks (#282) ──
+
+/** The shell's first document, a link/search/confirmed switch, or back/forward between documents. */
+type NavigationKind = "cold" | "switch" | "history";
+/** One measure per settled navigation: activation → next paint, with the swap and load offsets in `detail`. */
+const NAVIGATION_MEASURE = "rendro:navigation";
+
+interface NavigationTiming {
+  kind: NavigationKind;
+  loadId: number;
+  url: string;
+  activation: number;
+  swap: number;
+  load: number;
+  preloaded: boolean;
+}
+
+/**
+ * Starts the record of one navigation. The activation is the event that asked
+ * for it (a click, a key, a frame's message, a popstate), or the shell's own
+ * navigation start for the first document. Only clock reads happen on the
+ * click path; the measure is written after the paint (`measureNavigation`).
+ */
+function startNavigationTiming(kind: NavigationKind, loadId: number, url: string): NavigationTiming {
+  // `window.event` is the event being dispatched, whichever handler called loadDoc.
+  const activation = kind === "cold" ? 0 : window.event?.timeStamp ?? performance.now();
+  return { kind, loadId, url, activation, swap: 0, load: 0, preloaded: false };
+}
+
+/**
+ * Written once the frame has had a paint (call it from an animation frame
+ * callback: the next task runs after that frame's rendering), and only on the
+ * repository read path, where the RUM bundle reads it.
+ */
+function measureNavigation(timing: NavigationTiming) {
+  if (!PREFETCH_OPT_IN) return;
+  window.setTimeout(() => {
+    const { kind, url, activation, swap, load, preloaded } = timing;
+    performance.measure(NAVIGATION_MEASURE, {
+      start: activation, end: performance.now(),
+      detail: { kind, url, preloaded, swap: swap - activation, load: load - activation },
+    });
+  }, 0);
+}
+
 /**
  * The content area that holds the reader's frame. Preloads live here as hidden
  * siblings so adoption toggles them in place instead of moving a frame, which
@@ -573,7 +618,8 @@ function markFrameSwitch() {
  * an iframe discards its browsing context. The switch runs inside a same-document
  * view transition so the old and new documents cross-fade instead of flashing,
  * unless the reader prefers reduced motion. */
-function adoptPreloadedFrame(preloaded: HTMLIFrameElement, current: HTMLIFrameElement, loadId: number, fullPath: string) {
+function adoptPreloadedFrame(preloaded: HTMLIFrameElement, current: HTMLIFrameElement, timing: NavigationTiming, fullPath: string) {
+  const { loadId } = timing;
   const className = current.className;
   const title = current.getAttribute("title") ?? "Document content";
   const reveal = () => {
@@ -581,6 +627,9 @@ function adoptPreloadedFrame(preloaded: HTMLIFrameElement, current: HTMLIFrameEl
     // `content-frame` at once, or a link click could navigate the wrong one.
     current.removeAttribute("name");
     current.removeAttribute("id");
+    // A buffer is the pool's: its old load handlers must not settle (or measure) a later navigation when it is reused.
+    current.onload = null;
+    current.onerror = null;
     current.setAttribute("aria-hidden", "true");
     current.tabIndex = -1;
     current.style.cssText = BUFFER_FRAME_STYLE;
@@ -595,6 +644,9 @@ function adoptPreloadedFrame(preloaded: HTMLIFrameElement, current: HTMLIFrameEl
     preloaded.style.cssText = ACTIVE_FRAME_STYLE;
     // Shell scripts holding the frame element (the comment host, #254) follow the reader's new frame.
     window.dispatchEvent(new CustomEvent(CONTENT_FRAME_EVENT, { detail: preloaded }));
+    // The preload had already loaded: its swap is its load.
+    timing.swap = timing.load = performance.now();
+    timing.preloaded = true;
   };
   // The document is already rendered, so settling waits only for the reveal.
   const settle = () => {
@@ -602,6 +654,7 @@ function adoptPreloadedFrame(preloaded: HTMLIFrameElement, current: HTMLIFrameEl
     hideDocLoader(preloaded);
     sendDocumentFragment(preloaded, relativeDocumentPath(fullPath), location.hash);
     markFrameSwitch();
+    measureNavigation(timing);
   };
   const startViewTransition = (document as Document & {
     startViewTransition?: (update: () => void) => { updateCallbackDone: Promise<unknown> };
@@ -621,7 +674,7 @@ function adoptPreloadedFrame(preloaded: HTMLIFrameElement, current: HTMLIFrameEl
   preloaded.contentWindow?.postMessage({ type: "viewer-identify" }, "*");
 }
 
-function loadDoc(fullPath: string, pushState: false | "push" | "replace", fragment = "", search = "") {
+function loadDoc(fullPath: string, pushState: false | "push" | "replace", fragment = "", search = "", kind: NavigationKind = "switch") {
   navigationNotice.clear();
   const frame = document.getElementById("content-frame") as HTMLIFrameElement | null;
   const placeholder = document.getElementById("main-placeholder");
@@ -638,16 +691,19 @@ function loadDoc(fullPath: string, pushState: false | "push" | "replace", fragme
 
   const frameUrl = documentFrameUrl(fullPath) + search;
   performance.mark(FRAME_SWITCH_START);
+  const timing = startNavigationTiming(kind, loadId, frameUrl);
   const preloaded = PREFETCH_OPT_IN && frame ? framePreloader.take(frameUrl) : null;
 
   if (frame && preloaded) {
-    adoptPreloadedFrame(preloaded, frame, loadId, fullPath);
+    adoptPreloadedFrame(preloaded, frame, timing, fullPath);
   } else if (frame) {
     frame.onload = () => {
+      timing.load = performance.now();
       window.clearTimeout(docLoadTimeout);
       hideDocLoader(frame);
       sendDocumentFragment(frame, relativeDocumentPath(fullPath), location.hash);
       markFrameSwitch();
+      requestAnimationFrame(() => measureNavigation(timing));
     };
     frame.onerror = () => {
       window.clearTimeout(docLoadTimeout);
@@ -658,6 +714,7 @@ function loadDoc(fullPath: string, pushState: false | "push" | "replace", fragme
     // Keep src authoritative for comments/tickets, but replace the pending
     // frame navigation: the shell alone owns document history entries.
     frame.contentWindow?.location.replace(frameUrl);
+    timing.swap = performance.now();
   }
 
   if (pushState) {
@@ -1114,7 +1171,7 @@ function init() {
   window.addEventListener("popstate", (event) => {
     navigationGate.suspend();
     const docPath = documentPathFromHistory(event.state) || docFromPathname();
-    if (docPath) loadDoc(docPath, false, location.hash, documentSearchFromLocation());
+    if (docPath) loadDoc(docPath, false, location.hash, documentSearchFromLocation(), "history");
   });
 
   window.addEventListener("hashchange", () => {
@@ -1127,7 +1184,7 @@ function init() {
   const initialDoc = RENDRO_WINDOW.RENDRO_INITIAL_DOC || docFromPathname();
   if (initialDoc) {
     history.replaceState({ ...history.state, docPath: initialDoc }, "", location.href);
-    loadDoc(initialDoc, false, location.hash, documentSearchFromLocation());
+    loadDoc(initialDoc, false, location.hash, documentSearchFromLocation(), "cold");
     return;
   }
   const params = new URLSearchParams(location.search);

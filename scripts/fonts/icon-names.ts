@@ -18,7 +18,7 @@ const iconMarker = /material-symbols-outlined|Material Symbols/;
  * rendered as an icon; the E2E glyph-presence check catches a wrongly listed icon on visited pages.
  */
 export const NON_ICON_LITERALS: ReadonlySet<string> = new Set([
-  "badge", "block", "cancel", "checklist", "code", "eyebrow", "function", "input", "label", "light",
+  "badge", "block", "cancel", "checklist", "code", "eyebrow", "function", "history", "input", "label", "light",
   "overview", "pending", "post", "resize", "script", "security", "select", "start", "step", "storage",
   "switch", "title", "toast", "token", "tooltip", "verified", "warning",
 ]);
