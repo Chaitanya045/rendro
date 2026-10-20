@@ -1,4 +1,4 @@
-import type { Page, Route } from "@playwright/test";
+import type { FrameLocator, Page, Route } from "@playwright/test";
 import { expect } from "../fixtures";
 import { failOnce } from "../org-fixtures";
 import { injectFault } from "../faults";
@@ -129,6 +129,10 @@ async function openCell(page: Page, visual: VisualState, family: string, state: 
           closers.push(() => hold.close());
           await page.goto(`${path}/deployments`);
           await expect(page.locator(".loading-view[aria-busy=true]").first()).toBeVisible();
+          // The organization's name and the project's description arrive on their own requests, which the held list does not
+          // wait for: a shot before them showed the placeholder mark and description on one run and not the next (#276).
+          await expect(page.locator("#cp-org-switcher [data-org-name]")).toHaveText("Crown");
+          await expect(page.locator(".cp-page-description")).toContainText("Crown docs");
           return rendered();
         }
         await page.goto(`${path}/deployments`);
@@ -234,6 +238,15 @@ async function countCommentUpdates(page: Page) {
       if ((event.data as { type?: unknown } | null)?.type === "commentor-parent-update") counted.rendroVisualUpdates = (counted.rendroVisualUpdates ?? 0) + 1;
     });
   });
+}
+
+/**
+ * Chromium draws the widget's toast region into the page at first and moves it onto a layer of its own some seconds later,
+ * and the two paths blend the pill's antialiased outline one level apart: a fast run shot one, a slow run the other (#276).
+ * The cell puts the region on its own layer from the start, so every run shoots the same path; nothing it shows changes.
+ */
+async function layerToasts(ui: FrameLocator) {
+  await ui.locator(".toast-region").evaluate(region => { (region as HTMLElement).style.willChange = "transform"; });
 }
 
 /** Holds the document's own opaque request at the browser boundary, exactly like the viewer specs. */
@@ -530,6 +543,7 @@ async function openThreadState(page: Page, visual: VisualState, state: string, c
     socket.rejectWrites(true);
     await retry.getByTestId("commentor-reply-send").click();
     await expect(ui.locator('.toast[role="alert"]')).toBeVisible();
+    await layerToasts(ui);
     return rendered();
   }
   if (state === "deleted") {
@@ -549,6 +563,7 @@ async function openThreadState(page: Page, visual: VisualState, state: string, c
     await expect(ui.getByTestId("commentor-drawer")).toHaveAttribute("aria-hidden", "true");
     await panel.evaluate(button => (button as HTMLButtonElement).click());
     await expect(ui.getByTestId("commentor-drawer")).toHaveAttribute("aria-hidden", "false");
+    await layerToasts(ui);
     closers.push(async () => { if (await undo.count()) await undo.click().catch(() => undefined); });
     return rendered();
   }

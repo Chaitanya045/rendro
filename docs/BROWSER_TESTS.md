@@ -508,6 +508,10 @@ A cell waits for the state it shows, not for time:
   refuses a subscribe that arrives after the switch, with a toast);
 - the deletion state closes and reopens the drawer, so it is measured without the deleted thread (the open drawer keeps
   its old height until a later thread snapshot, which may or may not arrive before the shot).
+- the held project page waits for the organization name and project description, which arrive on requests of their own;
+- the comment widget's toast region is put on its own layer before the shot. Chromium otherwise draws it into the page
+  first and moves it onto a layer some seconds later, and the two paths blend the pill's antialiased outline one level
+  apart, so a fast run and a slow run shot different pixels.
 
 Chromium's partial raster is off: re-rasterising only an invalidated part of a tile rounded antialiased edges and
 translucent fills one level apart from a full raster, depending on paint timing. Before baselines are committed the
