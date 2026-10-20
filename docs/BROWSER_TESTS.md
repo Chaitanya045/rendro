@@ -476,7 +476,7 @@ Expected failure (its broken assertion gets no `e2e` credit; an unexpected pass 
 
 | Check | Command | Engines | What it asserts |
 |---|---|---|---|
-| Visual baselines | `pnpm visual` | Chromium, in the pinned container | `toHaveScreenshot` with zero tolerated pixels, per state, at 375/768/1440px, light and dark |
+| Visual baselines | `pnpm visual` | Chromium, in the pinned container | `toHaveScreenshot` with zero tolerated pixels at a zero colour threshold, per state, at 375/768/1440px, light and dark |
 | Accessibility | `pnpm a11y` | Chromium, Firefox, WebKit | axe (WCAG 2.1 A/AA) finds no violation in the interactive states |
 
 Both run the real Worker and local Convex backend of the functional E2E layer, with a separate global provisioning
@@ -486,8 +486,9 @@ Both run the real Worker and local Convex backend of the functional E2E layer, w
 **One pinned environment.** A screenshot depends on the Chromium build, system libraries and fonts that rasterise it, so
 no baseline is ever produced by a host browser. `scripts/visual-baselines.sh` starts the official Playwright image, pinned
 by digest at the repo's Playwright version (`mcr.microsoft.com/playwright@sha256:06a9939e…`, v1.64.0-noble, linux/amd64),
-as a `run-server` browser with the host network; the Worker, backend and test client keep running on the host and
-connect to that browser (`RENDRO_VISUAL_WS`). The same script runs in CI. The spec and the script refuse a run
+as a browser server (`launchServer`) with the host network; the Worker, backend and test client keep running on the host and
+connect to that browser (`RENDRO_VISUAL_WS`). The browser's flags are set by the script, never by a client: Playwright's
+defaults plus `--disable-partial-raster` (see Determinism). The same script runs in CI. The spec and the script refuse a run
 whose Playwright version does not match the image, and the spec throws without the container's endpoint. Bump
 `@playwright/test` and the digest together (`docker buildx imagetools inspect mcr.microsoft.com/playwright:v<version>-noble`).
 Docker is required (the E2E harness already needs it).
@@ -498,8 +499,38 @@ minutes past the seeded comments so every relative age is identical, and settles
 remaining (looping) animations paused. Data is seeded with fixed text. Text that is run-specific by nature is handled per element, never per region:
 values whose length changes the layout (the deployment source path or commit, which depend on where the runner checks out
 the repository) are rewritten to a fixed string before the shot (`pinVolatileText`); the deployment time and id, the CLI
-panel with local ids and port, and the API key prefix are masked. The functional specs assert the real values by name. A baseline run is repeatable: the whole suite is run twice in a row
-without a pixel of difference before baselines are committed.
+panel with local ids and port, and the API key prefix are masked. The functional specs assert the real values by name.
+A cell waits for the state it shows, not for time:
+- the shell's document-loading shimmer (held for a minimum time after a document arrives) has cleared;
+- a link inside the page is only clicked once the shell has selected the page's row (a click during the first reveal
+  supersedes it);
+- the held document load only starts after the previous document's comment subscription has answered (the shell
+  refuses a subscribe that arrives after the switch, with a toast);
+- the deletion state closes and reopens the drawer, so it is measured without the deleted thread (the open drawer keeps
+  its old height until a later thread snapshot, which may or may not arrive before the shot).
+
+Chromium's partial raster is off: re-rasterising only an invalidated part of a tile rounded antialiased edges and
+translucent fills one level apart from a full raster, depending on paint timing. Before baselines are committed the
+whole suite is rendered three times in the pinned container (`pnpm visual:repeat`), and every cell must match across
+the runs at the configured threshold (#276).
+
+**Comparison threshold (#276).** `toHaveScreenshot` compares with pixelmatch, which first ignores every pixel whose YIQ
+colour distance is below `threshold` and only then counts the rest against `maxDiffPixels` (it also skips pixels it
+classifies as antialiasing). Playwright's default `threshold: 0.2` absorbed a whole muted-text token change: `#71717a` →
+`#52525b` is a distance of 0.117 even on a fully covered glyph pixel, so #274 changed the comment widget's muted
+foreground without failing a single cell, and the dock handle of every light `/r/` cell kept the old colour in its
+baseline until #276. `e2e/visual.config.ts` now sets `threshold: 0` with `maxDiffPixels: 0`: any colour change fails.
+That is only sound because the renders are bit-identical. Measured in the pinned container before the fixes above,
+72 of the 256 images (35 of the 130 landing, sign-in and `/r/` ones) differed between two runs (state races up to 0.76,
+partial-raster noise up to 0.04); after them, the whole suite matched across three runs at threshold 0 (the 130 surviving
+images bit-identical, the rest identical apart from pixels pixelmatch classifies as antialiasing). `pnpm visual:repeat` repeats that measurement: it
+renders every cell into a scratch directory, then compares two more runs against it at the configured threshold.
+Never raise the threshold to absorb a flaky cell; run `pnpm visual:repeat`, find the nondeterminism (a state the cell
+does not wait for, an animation, a caret, a clock-dependent string, a raster path) and remove it.
+`e2e/visual/threshold-self-test.spec.ts` keeps the threshold honest: it renders the light 1440px landing with
+`--text-muted` set one step lighter (`#52525b` → `#71717a`, #274 in reverse) and asserts that the shot passes against
+the committed baseline at the old 0.2 but fails at the configured threshold. It is skipped in update mode, where a
+failed comparison would rewrite the baseline.
 
 **Baseline families.** First slice (#120): landing, sign-in, sign-up, organization overview, projects (list, empty, loading,
 error, create dialog), project deployments (list and loading), teams, API keys, account menu, viewer (tree, document
