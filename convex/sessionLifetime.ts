@@ -57,8 +57,8 @@ export function boundSessionLifetime<A extends DBAdapter | DBTransactionAdapter>
 
 /**
  * Headers for server-side session reads. Sessions are cookie-only: a bearer
- * token is never a session. A request with Authorization opted into API-key
- * authority, so it never falls back to the browser's cookie session either.
+ * token is never a session, and a request that carries Authorization never
+ * falls back to the browser's cookie session either.
  * Legacy cookie names (including those inside viewer tickets) are read under
  * the current names, exactly as the HTTP handler reads them.
  */
@@ -209,7 +209,7 @@ export function sessionLifetime(): BetterAuthPlugin {
         const resolved = await adapter.findSession(token);
         if (!resolved) return;
         // Request-local reuse composes with the read limiter and applies to both
-        // HTTP and server API calls, including nested organization middleware.
+        // HTTP and server API calls, including nested plugin middleware.
         ctx.context.internalAdapter = {
           ...adapter,
           findSession: async candidate => candidate === token ? resolved : adapter.findSession(candidate),

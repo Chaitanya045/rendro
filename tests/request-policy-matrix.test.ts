@@ -8,7 +8,8 @@ import { workerMutationPolicies } from "../src/middleware/write-admission";
 
 it("declares admission policy for every registered Convex HTTP route", () => {
   const routes = http.getRoutes();
-  expect(routes.length).toBeGreaterThan(10);
+  // The initial-password write and Better Auth's GET and POST handlers (#286).
+  expect(routes.length).toBe(3);
   for (const [path, method, handler] of routes) {
     const policy = httpActionPolicies.get(handler);
     expect(policy, `${method} ${path}`).toBeDefined();
@@ -18,7 +19,7 @@ it("declares admission policy for every registered Convex HTTP route", () => {
   }
   // Pin security-sensitive assignments, rather than only testing membership.
   for (const [path, method, handler] of routes) {
-    if (method === "POST" && /set-initial-password|projects$|credentials/.test(path)) {
+    if (method === "POST" && /set-initial-password/.test(path)) {
       expect(httpActionPolicies.get(handler), path).toBe("cookie-json");
     }
   }
@@ -32,10 +33,8 @@ it("enumerates every registered Worker mutation, including dedicated and wildcar
     .map(route => `${route.method} ${route.path}`));
   // Exact equality makes both new routes and stale policy entries visible.
   const policies = new Set(Object.keys(workerMutationPolicies));
-  // These custom paths are handled by the registered Convex wildcard proxy.
-  for (const path of ["/api/auth/set-initial-password", "/api/rendro/projects", "/api/rendro/credentials", "/api/rendro/credentials/revoke"]) {
-    policies.delete(`POST ${path}`);
-  }
+  // This custom path is handled by the registered Better Auth proxy.
+  policies.delete("POST /api/auth/set-initial-password");
   expect([...registered].sort()).toEqual([...policies].sort());
 });
 

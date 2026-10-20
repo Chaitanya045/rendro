@@ -7,18 +7,12 @@ import { isPublicErrorData, type PublicErrorData } from "../src/shared/public-er
 import { ConvexError } from "convex/values";
 import { httpAction as registerHttpAction } from "./_generated/server";
 
-export class RateLimitedError extends Error {
-  constructor(readonly retryAfterMs: number) {
-    super("Rate limit exceeded");
-  }
-}
-
 // Use only for messages authored by the handler, never caught exceptions.
-export function clientFailure(message: string, status = 400): Response {
+function clientFailure(message: string, status = 400): Response {
   return Response.json({ error: message }, { status });
 }
 
-export function isApplicationError(error: unknown): error is ConvexError<string | PublicErrorData> {
+function isApplicationError(error: unknown): error is ConvexError<string | PublicErrorData> {
   return error instanceof ConvexError && (typeof error.data === "string" || isPublicErrorData(error.data));
 }
 
@@ -31,12 +25,6 @@ export function failure(error: unknown, applicationStatus = 400, operation = "ht
     return Response.json({ error: `Too many writes. Please try again in ${seconds} seconds.`, code: "rate_limited" }, { status: 429, headers: { "Retry-After": String(seconds) } });
   }
   if (error instanceof RequestAdmissionError) return clientFailure(error.message, error.status);
-  if (error instanceof RateLimitedError) {
-    return Response.json({ error: "Rate limit exceeded", code: "rate_limited" }, {
-      status: 429,
-      headers: { "Retry-After": String(Math.max(1, Math.ceil(error.retryAfterMs / 1000))) },
-    });
-  }
   if (isApplicationError(error)) {
     if (isPublicErrorData(error.data)) {
       const { code, message } = error.data;

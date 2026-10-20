@@ -79,7 +79,7 @@ describe("collector", () => {
     writeFileSync(join(project, "tests/pure.test.ts"), "expect(1).toBe(1);");
     writeFileSync(join(project, "tests/subprocess-coverage.test.ts"), "subprocessEnv();");
     expect(await subprocessSuites(project)).toEqual(["spawns.test.ts"]);
-    expect(await subprocessSuites()).toEqual(expect.arrayContaining(["build-scripts.test.ts", "qa-runners.test.ts"]));
+    expect(await subprocessSuites()).toEqual(expect.arrayContaining(["build-scripts.test.ts", "repository-quality-gates.test.ts"]));
   });
 });
 
@@ -99,12 +99,16 @@ describe("conversion", () => {
   });
 
   it("maps modules with dynamic imports and default exports, ignoring what tsx inserts", async () => {
-    runTs('await import("./src/routes/organization-pages.ts");');
+    // The gate holds a dynamic import; the auth pages a default export.
+    const modules = ["scripts/coverage-gate.ts", "src/routes/auth-pages.ts"];
+    runTs(modules.map(path => `await import("./${path}");`).join(" "));
     const [shard] = await shardsOf();
-    const file = readShard(shard)["src/routes/organization-pages.ts"];
-    const { canonical } = await canonicalCoverage(resolve("src/routes/organization-pages.ts"));
-    for (const map of ["statementMap", "fnMap", "branchMap"] as const) expect(locations(file[map])).toEqual(locations(canonical[map]));
-    expect(Object.values(file.s).some(count => count > 0)).toBe(true);
+    for (const path of modules) {
+      const file = readShard(shard)[path];
+      const { canonical } = await canonicalCoverage(resolve(path));
+      for (const map of ["statementMap", "fnMap", "branchMap"] as const) expect(locations(file[map]), path).toEqual(locations(canonical[map]));
+      expect(Object.values(file.s).some(count => count > 0), path).toBe(true);
+    }
   }, 60_000);
 
   it("reproduces tsx's dynamic-import interop as same-length placeholders", async () => {
@@ -140,9 +144,14 @@ describe("conversion", () => {
   }, 60_000);
 
   it("maps unmodified JavaScript scripts directly", async () => {
-    expect(() => run(["scripts/run-workspace-qa.mjs"])).toThrow(/Usage: run-workspace-qa\.mjs/);
-    const [shard] = await shardsOf();
-    const file = readShard(shard)["scripts/run-workspace-qa.mjs"];
+    // The repository has no JavaScript scripts left (#286), so a scratch project supplies one.
+    const project = mkdtempSync(join(tmpdir(), "rendro-subprocess-plain-"));
+    directories.push(project);
+    mkdirSync(join(project, "scripts"));
+    writeFileSync(join(project, "scripts/plain.mjs"), 'const pick = (flag) => flag ? "used" : "unused";\nfunction never() { return pick(false); }\nconsole.log(pick(true));\n');
+    expect(execFileSync(process.execPath, ["scripts/plain.mjs"], { cwd: project, env: subprocessEnv(), encoding: "utf8", timeout: 60_000 })).toBe("used\n");
+    const [shard] = await convertSubprocessCoverage(project, output, []);
+    const file = readShard(shard)["scripts/plain.mjs"];
     expect(file.fnMap).toBeDefined();
     expect(Object.values(file.s).some(count => count > 0)).toBe(true);
     expect(Object.values(file.s).some(count => count === 0)).toBe(true);
@@ -168,7 +177,7 @@ describe("conversion", () => {
 
 describe("fail closed", () => {
   it("errors when a required suite left no receipt", async () => {
-    await expect(shardsOf(["qa-runners.test.ts"])).rejects.toThrow("Missing subprocess coverage: qa-runners.test.ts");
+    await expect(shardsOf(["build-scripts.test.ts"])).rejects.toThrow("Missing subprocess coverage: build-scripts.test.ts");
   });
 
   it("errors when a receipt stays empty, e.g. a child killed before exit", async () => {

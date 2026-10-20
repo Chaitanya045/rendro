@@ -12,8 +12,7 @@ import { versionedBundles } from "./versioned-bundles";
  * which CI checks against the built bytes. A URL is immutable only for the current version; any other
  * (or missing) version gets the current bytes with `no-store`, so a stale or foreign URL is never
  * cached under bytes it does not name. Old versions are not kept: a rollout-straddling request gets
- * the new bundle uncached rather than a 404 (the management shell already falls back on a version
- * mismatch).
+ * the new bundle uncached rather than a 404.
  */
 /** Same policy as content-hashed fonts: the URL names its bytes. */
 export const bundleCacheControl = fontCacheControl;

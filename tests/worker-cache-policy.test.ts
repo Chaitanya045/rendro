@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import worker from "../src/worker";
-import { MANAGEMENT_QUERY_VERSION } from "../src/routes/management-asset-versions";
+import { LAZY_TREE_VERSION } from "../src/viewer/asset-versions";
 import { mockSecurityBackend } from "./fixtures/security-headers";
 
 const routes = worker.routes.filter(route => route.method !== "ALL");
@@ -25,13 +25,13 @@ describe("Worker cache policy from all actual route registrations", () => {
 });
 
 it("covers one-time capability pages, malformed paths and proxy failures", async () => {
-  for (const path of ["/accept-invitation/invalid", "/accept-invitation/%ZZ", "/reset-password?token=invalid", "/verify-email?token=invalid"]) {
+  for (const path of ["/reset-password?token=invalid", "/reset-password/%ZZ", "/verify-email?token=invalid"]) {
     const response = await worker.request(`https://test${path}`);
     expect(response.headers.get("cache-control"), path).toBe("private, no-store");
     expect(response.headers.get("referrer-policy"), path).toBe("no-referrer");
   }
   vi.mocked(fetch).mockRejectedValue(new Error("synthetic transport fault"));
-  for (const path of ["/api/auth/get-session", "/api/rendro/projects", "/api/rendro/credentials"]) {
+  for (const path of ["/api/auth/get-session", "/api/auth/list-accounts"]) {
     const response = await worker.request(`https://test${path}`);
     expect(response.status).toBe(502);
     expect(response.headers.get("cache-control")).toBe("private, no-store");
@@ -39,7 +39,7 @@ it("covers one-time capability pages, malformed paths and proxy failures", async
 });
 
 it("preserves the reviewed JWKS and static asset exceptions", async () => {
-  const response = await worker.request(`/management-query.js?v=${MANAGEMENT_QUERY_VERSION}`, {}, { ASSETS: { fetch: () => new Response("asset", { headers: { "Cache-Control": "public, max-age=0, must-revalidate" } }) } });
+  const response = await worker.request(`/lazy-tree.js?v=${LAZY_TREE_VERSION}`, {}, { ASSETS: { fetch: () => new Response("asset", { headers: { "Cache-Control": "public, max-age=0, must-revalidate" } }) } });
   expect(response.headers.get("cache-control")).toBe("public, max-age=31536000, immutable");
   for (const [status, cookies, expected] of [
     [200, false, "public, max-age=300, must-revalidate"],

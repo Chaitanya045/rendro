@@ -178,10 +178,7 @@ export async function sessionMiddleware(
     await next();
     await evictRejectedSession(cookie, c.res.status);
   };
-  if (
-    path.startsWith("/api/auth/")
-    || path.startsWith("/api/rendro/")
-  ) {
+  if (path.startsWith("/api/auth/")) {
     await finish();
     return;
   }
@@ -190,12 +187,10 @@ export async function sessionMiddleware(
   // `cookie` holds only session-token and preference pairs (see viewerSessionCookie).
   if (sessionTokenCookie(cookie)) {
     const sessionStartedAt = performance.now();
-    // Only scoped management pages redundantly validate the live session and
-    // membership downstream. All other routes (including landing, sign-in,
-    // sign-up/Get started and account pages) need fresh identity.
-    const cached = c.req.method === "GET" && /^(?:\/organizations\/[^/]+(?:\/|$)|\/accept-invitation\/[^/]+$)/.test(path);
-    if (!cached) await sessionCache.evict(cookie);
-    const result = await lookupWithRetry(c.req.raw, cookie, cached);
+    // Every page here (landing, home, sign-in, sign-up and account pages) needs fresh identity; only the
+    // repository read path reuses a cached one (sessionViewer).
+    await sessionCache.evict(cookie);
+    const result = await lookupWithRetry(c.req.raw, cookie, false);
     if (result.kind === "anonymous") await sessionCache.evict(cookie);
     sessionDuration = duration(sessionStartedAt);
     if (result.kind === "failure") {

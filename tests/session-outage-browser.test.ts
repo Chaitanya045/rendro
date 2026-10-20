@@ -20,8 +20,8 @@ beforeAll(async () => {
   app.use('*', securityHeaders);
   app.get('/fonts/*', serveFonts);
   app.get('/sign-in', c => c.html('<h1>Sign in</h1>'));
-  app.use('/organizations/*', sessionMiddleware);
-  app.get('/organizations/home', c => c.get('user') ? c.html(`<h1>Welcome ${c.get('user')!.name}</h1>`) : c.redirect('/sign-in'));
+  app.use('/home', sessionMiddleware);
+  app.get('/home', c => c.get('user') ? c.html(`<h1>Welcome ${c.get('user')!.name}</h1>`) : c.redirect('/sign-in'));
   const listener = getRequestListener(request => app.fetch(request));
   await harness.start((request, response) => { void listener(request, response).catch(error => response.destroy(error as Error)); });
 });
@@ -35,25 +35,25 @@ it('keeps an upstream session outage distinct from signed out, preserves the coo
   const page = await harness.newPage();
   await page.context().addCookies([{ name: 'better-auth.session_token', value: 'opaque-cookie', url: harness.origin }]);
   upstream = 'outage';
-  const response = await page.goto(`${harness.origin}/organizations/home`);
+  const response = await page.goto(`${harness.origin}/home`);
   expect(response!.status()).toBe(503);
   expect(response!.headers()['retry-after']).toBe('1');
   await page.getByRole('heading', { name: "We couldn't check your session" }).waitFor();
   expect(await page.getByText("You don't need to sign in again because of this error.").isVisible()).toBe(true);
   expect(await page.locator('body').textContent()).not.toContain('private upstream diagnostic');
   // An outage must neither redirect to sign-in nor clear the credential.
-  expect(new URL(page.url()).pathname).toBe('/organizations/home');
+  expect(new URL(page.url()).pathname).toBe('/home');
   expect((await page.context().cookies()).map(cookie => cookie.name)).toEqual(['better-auth.session_token']);
   // The page works as a sign-in-free retry once the upstream recovers.
   upstream = 'member';
-  await Promise.all([page.waitForResponse(response => response.status() === 200 && new URL(response.url()).pathname === '/organizations/home'),
+  await Promise.all([page.waitForResponse(response => response.status() === 200 && new URL(response.url()).pathname === '/home'),
     page.getByRole('link', { name: 'Try again' }).click()]);
   await page.getByRole('heading', { name: 'Welcome Member' }).waitFor();
-  expect(new URL(page.url()).pathname).toBe('/organizations/home');
+  expect(new URL(page.url()).pathname).toBe('/home');
   // An authoritative missing session is a real sign-out: it redirects instead.
   sessionCache.clear();
   upstream = 'signed-out';
-  await page.goto(`${harness.origin}/organizations/home`);
+  await page.goto(`${harness.origin}/home`);
   await page.getByRole('heading', { name: 'Sign in' }).waitFor();
   expect(new URL(page.url()).pathname).toBe('/sign-in');
   expect(lookups).toBeGreaterThanOrEqual(3);

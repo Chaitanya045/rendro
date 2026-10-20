@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import worker from "@/worker";
 import { securityHeaders } from "@/middleware/security-headers";
 import { nonceAttribute } from "@/middleware/html-nonce";
-import { MANAGEMENT_QUERY_VERSION } from "@/routes/management-asset-versions";
+import { LAZY_TREE_VERSION } from "@/viewer/asset-versions";
 import { docsBase, mockSecurityBackend } from "./fixtures/security-headers";
 
 const cookie = "better-auth.session_token=test-session";
@@ -30,11 +30,9 @@ beforeEach(mockSecurityBackend);
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 describe("shared response security policy", () => {
-  it.each(["/", "/sign-in", "/sign-in?error=access_denied", "/verify-email", "/sign-up", "/forgot-password", "/reset-password", "/organizations/org-a", "/account/security", "/accept-invitation/test", docsBase, "/docs/example", "/missing"])("protects trusted HTML: %s", async path => {
-    const response = await request(path, path.startsWith("/organizations") || path === "/account/security" || path.startsWith("/accept-invitation/"));
-    if (path === "/organizations/org-a" || path === "/accept-invitation/test") {
-      expect(response.status, "authorized management page must render, not a styled error").toBe(200);
-    }
+  it.each(["/", "/sign-in", "/sign-in?error=access_denied", "/verify-email", "/sign-up", "/forgot-password", "/reset-password", "/home", "/account/security", docsBase, "/docs/example", "/missing"])("protects trusted HTML: %s", async path => {
+    const response = await request(path, path === "/home" || path === "/account/security");
+    if (path === "/home") expect(response.status, "the signed-in home must render, not a styled error").toBe(200);
     common(response);
     expect(response.headers.get("Cache-Control")).toMatch(/(?:^|,\s*)no-store(?:,|$)/);
     expect(response.headers.get("Content-Type")).toContain("text/html");
@@ -51,9 +49,7 @@ describe("shared response security policy", () => {
     const html = await response.text();
     expect(html).not.toMatch(/fonts\.(?:googleapis|gstatic)\.com/);
     expect(html).toContain(`nonce="${nonce}"`);
-    if (!csp.includes("style-src 'self' 'unsafe-inline'")) {
-      for (const tag of html.matchAll(/<style\b[^>]*>/g)) expect(tag[0]).toContain(`nonce="${nonce}"`);
-    }
+    for (const tag of html.matchAll(/<style\b[^>]*>/g)) expect(tag[0]).toContain(`nonce="${nonce}"`);
     // 'strict-dynamic' ignores 'self': every parser-inserted script and script
     // preload must carry the request nonce, or CSP3 browsers refuse it.
     expect(csp.match(/script-src [^;]+/)![0]).toBe(`script-src 'self' 'nonce-${nonce}' 'strict-dynamic'`);
@@ -65,15 +61,12 @@ describe("shared response security policy", () => {
   });
 
   it.each([
-    // Management navigation inserts page CSS at runtime.
-    ["/organizations/org-a", true, "'unsafe-inline'"],
-    ["/organizations", true, "'unsafe-inline'"],
-    // Every other trusted page, the repository shell's 404 among them: nonced styles only.
-    [docsBase, false, "nonce"], ["/", false, "nonce"], ["/sign-in", false, "nonce"], ["/account/security", true, "nonce"],
-  ] as const)("uses the style policy for its route class: %s", async (path, signedIn, styles) => {
+    // Every trusted page, the repository shell's 404 among them: nonced styles only.
+    [docsBase, false], ["/", false], ["/sign-in", false], ["/home", true], ["/account/security", true],
+  ] as const)("uses nonced styles only: %s", async (path, signedIn) => {
     const csp = (await request(path, signedIn)).headers.get("Content-Security-Policy")!;
     const nonce = csp.match(/'nonce-([^']+)'/)![1];
-    expect(csp.match(/style-src [^;]+/)![0]).toBe(`style-src 'self' ${styles === "nonce" ? `'nonce-${nonce}'` : styles}`);
+    expect(csp.match(/style-src [^;]+/)![0]).toBe(`style-src 'self' 'nonce-${nonce}'`);
     expect(csp).toContain("style-src-attr 'unsafe-inline'");
   });
 
@@ -168,7 +161,7 @@ describe("shared response security policy", () => {
   });
 
   it("covers static assets and applies the public asset cache policy", async () => {
-    const response = await worker.request(`https://rendro.test/management-query.js?v=${MANAGEMENT_QUERY_VERSION}`, {}, {
+    const response = await worker.request(`https://rendro.test/lazy-tree.js?v=${LAZY_TREE_VERSION}`, {}, {
       ASSETS: { fetch: () => new Response("/* asset */", { headers: { "Content-Type": "text/javascript", "Cache-Control": "public, max-age=3600" } }) },
     });
     common(response);
@@ -184,7 +177,7 @@ describe("shared response security policy", () => {
     // The one preflight route left is the Better Auth proxy, which answers through Convex.
     const preflight = await worker.request("https://rendro.test/api/auth/sign-in/email", { method: "OPTIONS", headers: { Origin: "https://other.test", "Access-Control-Request-Method": "POST" } });
     common(preflight);
-    common(await request("/organizations"));
+    common(await request("/home"));
     vi.mocked(fetch).mockRejectedValue(new Error("backend failed"));
     const error = await request("/api/auth/get-session");
     common(error);

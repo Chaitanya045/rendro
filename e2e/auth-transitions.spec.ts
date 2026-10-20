@@ -38,7 +38,7 @@ test("Google sign-in never leaves the origin, whatever return target was request
   }
 });
 
-test("changing a password can keep other sessions, and Back to workspace leaves account security", async ({ page, secondContext }, info) => {
+test("changing a password can keep other sessions, and Back to home leaves account security", async ({ page, secondContext }, info) => {
   const email = `keep-${info.project.name}-${info.retry}@example.test`;
   await verifiedUser(page, email);
   await login(page, email);
@@ -58,8 +58,8 @@ test("changing a password can keep other sessions, and Back to workspace leaves 
   expect(await session(page)).toMatchObject({ email });
   // The unchecked option leaves the other browser's session valid.
   expect(await session(second)).toMatchObject({ email, sessionId: other?.sessionId });
-  await page.getByRole("link", { name: "Back to workspace" }).click();
-  await expect(page).toHaveURL(/\/organizations(\/|$)/);
+  await page.getByRole("link", { name: "Back to home" }).click();
+  await expect(page).toHaveURL(/\/home$/);
   await page.goBack();
   await expect(page.getByRole("heading", { name: "Sign-in methods" })).toBeVisible();
   await signout(page);

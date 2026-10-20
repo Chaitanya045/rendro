@@ -10,7 +10,7 @@ import { subprocessEnv } from "./helpers/subprocess-coverage";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const scripts = JSON.parse(readFileSync(join(root, "package.json"), "utf8")).scripts as Record<string, string>;
-const assets = ["management-query.js", "select.js", "management-pages.js", "lazy-tree.js", "private-viewer.js", "commentor-parent.js", "commentor.js", "rum.js"];
+const assets = ["lazy-tree.js", "private-viewer.js", "commentor-parent.js", "commentor.js", "rum.js"];
 const fixtures: string[] = [];
 
 function assetFixture(): string {
@@ -168,7 +168,7 @@ describe("repository quality gates", () => {
 
   it("rejects changed bundle bytes even after they are staged", () => {
     const directory = assetFixture();
-    writeFileSync(join(directory, "public/management-query.js"), "const changed = true;\n");
+    writeFileSync(join(directory, "public/lazy-tree.js"), "const changed = true;\n");
     execFileSync("git", ["add", "public"], { cwd: directory });
     expect(spawnSync("git", ["diff", "--exit-code", "--", "public"], { cwd: directory }).status).toBe(0);
     const result = checkAssets(directory);
@@ -183,11 +183,11 @@ describe("repository quality gates", () => {
     const manifest = join(directory, "scripts/asset-versions.json");
     const ledger = JSON.parse(readFileSync(manifest, "utf8")) as AssetVersionLedger;
     const changed = "const changed = true;\n";
-    for (const version of Object.keys(ledger["public/management-query.js"])) {
-      ledger["public/management-query.js"][version] = createHash("sha256").update(changed).digest("hex");
+    for (const version of Object.keys(ledger["public/lazy-tree.js"])) {
+      ledger["public/lazy-tree.js"][version] = createHash("sha256").update(changed).digest("hex");
     }
     writeFileSync(manifest, JSON.stringify(ledger));
-    writeFileSync(join(directory, "public/management-query.js"), changed);
+    writeFileSync(join(directory, "public/lazy-tree.js"), changed);
     execFileSync("git", ["add", "public", "scripts/asset-versions.json"], { cwd: directory });
     const result = checkAssets(directory, "HEAD");
     expect(result.status).toBe(1);
@@ -201,19 +201,19 @@ describe("repository quality gates", () => {
     const directory = assetFixture();
     const manifest = join(directory, "scripts/asset-versions.json");
     const ledger = JSON.parse(readFileSync(manifest, "utf8")) as AssetVersionLedger;
-    const [version, hash] = Object.entries(ledger["public/select.js"]).at(-1)!;
-    delete ledger["public/select.js"][version];
+    const [version, hash] = Object.entries(ledger["public/rum.js"]).at(-1)!;
+    delete ledger["public/rum.js"][version];
     writeFileSync(manifest, JSON.stringify(ledger));
     const rejected = checkAssets(directory);
     expect(rejected.status).toBe(1);
-    expect(rejected.stderr).toContain(`public/select.js v${version} is unrecorded. Rebuild and run pnpm record:assets.`);
+    expect(rejected.stderr).toContain(`public/rum.js v${version} is unrecorded. Rebuild and run pnpm record:assets.`);
 
     const recorded = record(directory);
     expect(recorded.status, recorded.stderr).toBe(0);
     expect(recorded.stdout).toBe("Asset version hashes verified.\n");
     const next = JSON.parse(readFileSync(manifest, "utf8")) as AssetVersionLedger;
-    expect(next["public/select.js"][version]).toBe(hash);
-    expect(next).toEqual({ ...ledger, "public/select.js": { ...ledger["public/select.js"], [version]: hash } });
+    expect(next["public/rum.js"][version]).toBe(hash);
+    expect(next).toEqual({ ...ledger, "public/rum.js": { ...ledger["public/rum.js"], [version]: hash } });
     expect(readFileSync(manifest, "utf8").endsWith("\n")).toBe(true);
     expect(checkAssets(directory).status).toBe(0);
   });
@@ -221,7 +221,7 @@ describe("repository quality gates", () => {
   it("refuses to record a changed bundle over an immutable version", () => {
     const directory = assetFixture();
     const before = readFileSync(join(directory, "scripts/asset-versions.json"), "utf8");
-    writeFileSync(join(directory, "public/select.js"), "const changed = true;\n");
+    writeFileSync(join(directory, "public/rum.js"), "const changed = true;\n");
     const result = record(directory);
     expect(result.status).toBe(1);
     expect(result.stderr).toContain("changed without a version bump");

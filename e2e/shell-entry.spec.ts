@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import type { Page } from "@playwright/test";
 import { test, expect } from "./fixtures";
-import { api, desktop, heading, mobile, provision, shellReady, signInSeeded } from "./shell-helpers";
+import { desktop, mobile, provision, signInSeeded } from "./shell-helpers";
 import type { RepoFixtures } from "./repo-fixtures";
 
 /** The public repository the read path serves (#234), pinned to the commit its frames are served at. */
@@ -39,70 +39,61 @@ async function notFound(page: Page, cspViolations: string[], viewport: { width: 
 test.describe("direct entry", () => {
   test.use({ viewport: desktop });
 
-  test("authenticated root, chooser, project and repository URLs load without a server error", async ({ page, context, baseURL, seed }) => {
+  test("authenticated root, home and repository URLs load without a server error", async ({ page, context, baseURL, seed }) => {
     await signInSeeded(context, baseURL, seed, "owner");
     const statuses: number[] = [];
     page.on("response", response => { if (response.request().resourceType() === "document" && response.request().frame() === page.mainFrame()) statuses.push(response.status()); });
-    const base = `/organizations/${seed.organizationId}`;
-    // The signed-in root and the chooser redirect a single-organization user into the organization.
+    // The signed-in root redirects to the home.
     await page.goto("/");
-    await expect(page).toHaveURL(new RegExp(`${base}$`));
-    await shellReady(page);
-    await page.goto("/organizations");
-    await expect(page).toHaveURL(new RegExp(`${base}$`));
-    // The explicit chooser never redirects.
-    await page.goto("/organizations?choose=1");
-    await expect(page).toHaveURL(/\/organizations\?choose=1$/);
-    await expect(page.locator(".organization-card", { hasText: "E2E primary" })).toBeVisible();
-    await page.goto(`${base}/projects`);
-    await expect(heading(page)).toHaveText("Projects");
-    await page.goto(`${base}/projects/${seed.projectId}`);
-    await expect(heading(page)).toHaveText("Worker publication");
+    await expect(page).toHaveURL(/\/home$/);
+    await expect(page.getByRole("heading", { name: "Welcome, E2E owner", level: 1 })).toBeVisible();
+    await expect(page.locator("body")).toContainText("owner@example.test");
     await page.goto(repo());
     await expect(page.frameLocator("#content-frame").getByRole("heading", { name: "Open home", level: 1 })).toBeVisible();
     expect(statuses.every(status => status < 400 || [301, 302, 303, 307].includes(status)), JSON.stringify(statuses)).toBe(true);
     expect(statuses).not.toContain(503);
   });
 
-  test("anonymous management URLs redirect to sign-in and preserve the destination", async ({ page, seed }) => {
-    const base = `/organizations/${seed.organizationId}`;
-    for (const path of [base, `${base}/people`, `${base}/api-keys`, `${base}/projects/${seed.projectId}`]) {
-      await page.goto(path);
-      await expect(page).toHaveURL(/\/sign-in\?/);
-      expect(new URL(page.url()).searchParams.get("returnTo")).toBe(path);
-      await expect(page.getByRole("heading", { name: "Sign in to Rendro" })).toBeVisible();
-    }
+  test("an anonymous home redirects to sign-in and preserves the destination", async ({ page }) => {
+    await page.goto("/home");
+    await expect(page).toHaveURL(/\/sign-in\?/);
+    expect(new URL(page.url()).searchParams.get("returnTo")).toBe("/home");
+    await expect(page.getByRole("heading", { name: "Sign in to Rendro" })).toBeVisible();
   });
 });
 
-test.describe("focused layouts", () => {
-  test.use({ viewport: desktop });
+/** The signed-in home of a fresh user: its account, the `/r/` explainer, Account security and Sign out. */
+async function signedInHome(page: Page, cspViolations: string[], viewport: { width: number; height: number }, label: string) {
+  await page.setViewportSize(viewport);
+  const user = await provision(page, label);
+  await page.goto("/home");
+  await expect(page.getByRole("heading", { name: /^Welcome, Shell / })).toBeVisible();
+  await expect(page.locator("body")).toContainText(user.email);
+  const open = page.getByRole("region", { name: "Open a repository's documentation" });
+  await expect(open).toContainText("/r/{owner}/{repo}");
+  await expect(open).toContainText("/r/acme/handbook");
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 
-  test("chooser, onboarding and invitation use focused layouts and omit the organization switcher where specified", async ({ page, secondContext }, info) => {
-    const owner = await provision(page, `focus-owner-${info.project.name}`, { organizations: ["Focus"] });
-    const organization = owner.organizations[0];
-    const focused = async (target: Page) => {
-      await expect(target.locator(".cp-main.focused")).toBeVisible();
-      await expect(target.locator(".cp-sidebar, #cp-menu, #cp-backdrop")).toHaveCount(0);
-      await expect(target.locator("body")).toHaveClass(/focused-layout/);
-    };
-    await page.goto("/organizations?choose=1");
-    await expect(page.locator(".organization-card", { hasText: "Focus" })).toBeVisible();
-    await focused(page);
-    await expect(page.locator("#cp-org-switcher, #cp-org-menu")).toHaveCount(0);
+  await page.getByRole("link", { name: "Account security" }).click();
+  await expect(page).toHaveURL(/\/account\/security$/);
+  await page.getByRole("link", { name: "Back to home" }).click();
+  await expect(page).toHaveURL(/\/home$/);
 
-    await page.goto(`/organizations/${organization.id}/onboarding`);
-    await expect(page.getByRole("heading", { name: "Create your first project" }).first()).toBeVisible();
-    await focused(page);
+  // The page's own sign-out tears the session down in place.
+  await page.getByRole("button", { name: "Sign out" }).click();
+  await expect(page.getByRole("heading", { name: "You're signed out", level: 1 })).toBeVisible();
+  await page.goto("/home");
+  await expect(page).toHaveURL(/\/sign-in\?returnTo=%2Fhome$/);
+  expect(cspViolations).toEqual([]);
+}
 
-    const memberPage = await secondContext.newPage();
-    const member = await provision(memberPage, `focus-member-${info.project.name}`);
-    const invitation = await api<{ id: string }>(page, "/api/auth/organization/invite-member", { organizationId: organization.id, email: member.email, role: "member" });
-    expect(invitation.status).toBe(200);
-    await memberPage.goto(`/accept-invitation/${invitation.body.id}`);
-    await focused(memberPage);
-    await expect(memberPage.locator("#cp-org-switcher, #cp-org-menu")).toHaveCount(0);
-    await expect(memberPage.locator("body")).toContainText("Focus");
+test.describe("signed-in home", () => {
+  test("explains how to open a repository, links to account security and signs out at 1440", async ({ page, cspViolations }, info) => {
+    await signedInHome(page, cspViolations, desktop, `home-1440-${info.project.name}`);
+  });
+
+  test("explains how to open a repository, links to account security and signs out at 375", async ({ page, cspViolations }, info) => {
+    await signedInHome(page, cspViolations, mobile, `home-375-${info.project.name}`);
   });
 });
 

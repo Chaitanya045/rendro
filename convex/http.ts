@@ -5,20 +5,6 @@ import { createAuth } from "./auth";
 import { verifiedAuthRequest } from "../shared/auth-client-ip";
 import { cacheJwksResponse } from "./authHttp";
 import { sessionCookieHeaders } from "./sessionLifetime";
-import {
-  createProject,
-  getProject,
-  listProjects,
-  managementAccess,
-  managementTeamMembers,
-  managementMembers,
-} from "./rendroHttp";
-import {
-  createCredential,
-  listCredentials,
-  revokeCredential,
-  validateCredential,
-} from "./credentialHttp";
 
 const http = httpRouter();
 const setInitialPasswordHandler = httpAction(async (ctx, request) => {
@@ -63,17 +49,6 @@ http.route({
   method: "POST",
   handler: setInitialPasswordHandler,
 });
-
-http.route({ path: "/api/rendro/projects", method: "GET", handler: listProjects });
-http.route({ path: "/api/rendro/management/access", method: "GET", handler: managementAccess });
-http.route({ path: "/api/rendro/management/team-members", method: "GET", handler: managementTeamMembers });
-http.route({ path: "/api/rendro/management/members", method: "GET", handler: managementMembers });
-http.route({ path: "/api/rendro/projects", method: "POST", handler: createProject });
-http.route({ path: "/api/rendro/projects/get", method: "GET", handler: getProject });
-http.route({ path: "/api/rendro/credentials", method: "GET", handler: listCredentials });
-http.route({ path: "/api/rendro/credentials", method: "POST", handler: createCredential });
-http.route({ path: "/api/rendro/credentials/revoke", method: "POST", handler: revokeCredential });
-http.route({ path: "/api/rendro/credentials/validate", method: "GET", handler: validateCredential });
 
 const authHandler = httpAction(async (ctx, request) => {
   const auth = createAuth(ctx);

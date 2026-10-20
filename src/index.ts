@@ -58,7 +58,7 @@ app.get("/api/auth/me", (c) => {
   return c.json(user || { user: null });
 });
 
-// Auth/API proxies, management pages, app routes and the health check.
+// Auth proxies, app routes and the health check.
 mountSessionRoutes(app);
 
 app.notFound(notFoundResponse);

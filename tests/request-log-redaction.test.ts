@@ -63,11 +63,11 @@ describe("request logs derived from all Worker route registrations", () => {
 });
 
 it("captures asset and proxy errors without capabilities", async () => {
-  const failure = await worker.request(`https://test/select.js${query}`, {}, { ASSETS: { fetch: () => { throw faulty(); } } });
+  const failure = await worker.request(`https://test/lazy-tree.js${query}`, {}, { ASSETS: { fetch: () => { throw faulty(); } } });
   expect(failure.status).toBe(500);
   vi.mocked(fetch).mockRejectedValue(faulty());
   expect((await worker.request(`https://test/api/auth/verify-email${query}`)).status).toBe(502);
-  expect((await worker.request(`https://test/api/rendro/projects${query}`)).status).toBe(502);
+  expect((await worker.request(`https://test/api/auth/get-session${query}`)).status).toBe(502);
   noSecrets();
 });
 

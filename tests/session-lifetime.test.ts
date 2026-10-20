@@ -13,7 +13,7 @@ import { components } from "../convex/_generated/api";
 import { createAuthOptions } from "../convex/auth";
 import { boundSessionLifetime, sessionCookieHeaders, sessionLifetime, sessionlessAuthPaths, withLifetimeMarker } from "../convex/sessionLifetime";
 import { proxyAuthRequest } from "@/auth-proxy";
-import { sessionCache, sessionMiddleware } from "@/middleware/session";
+import { sessionCache, sessionMiddleware, sessionViewer } from "@/middleware/session";
 import { viewerSessionCookie } from "@/viewer-ticket";
 import rateLimiterTest from "./convex-rate-limiter";
 
@@ -37,6 +37,11 @@ async function fixture(rememberMe: boolean) {
   // limiter, Worker proxy, middleware and cache behavior.
   vi.stubGlobal("fetch", vi.fn((input: string, init: RequestInit) => auth.handler(new Request(`${origin}${new URL(input).pathname}`, init))));
   const app = new Hono<{ Variables: { user?: User } }>();
+  // The repository read path (#234) looks the session up itself, through the coalesced cache; it mounts before the middleware.
+  app.get("/r/probe", async c => {
+    const viewer = await sessionViewer(c.req.raw);
+    return viewer.kind === "user" ? c.json({ id: viewer.id }) : c.body(null, 401);
+  });
   app.use("*", sessionMiddleware);
   app.all("/api/auth/*", c => proxyAuthRequest(c.req.raw));
   app.get("*", c => c.get("user") ? c.json({ id: c.get("user")!.id }) : c.body(null, 401));
@@ -50,7 +55,7 @@ async function fixture(rememberMe: boolean) {
   const tokenCookie = cookies.find(value => value.startsWith("better-auth.session_token="))!;
   const token = (await login.json()).token as string;
   const stored = () => backend.query(components.betterAuth.adapter.findOne, { model: "session", where: [{ field: "token", value: token }] });
-  const read = (path = "/organizations/reader", header = cookie) => app.request(`${origin}${path}`, { headers: { cookie: header } });
+  const read = (path = "/r/probe", header = cookie) => app.request(`${origin}${path}`, { headers: { cookie: header } });
   return { app, auth, context, backend, token, user, cookie, cookies, tokenCookie, stored, read };
 }
 
@@ -117,9 +122,9 @@ for (const remember of [false, true]) {
     const cookie = tokenOnly + suffix;
     vi.setSystemTime(Number(initial.createdAt) + (remember ? 2 * day : day - 1000));
     const expiry = remember ? Date.now() + 7 * day : initial.expiresAt;
-    for (const path of ["/organizations/reader", "/organizations/reader", "/account/security", "/api/auth/get-session", "/api/auth/organization/list"]) {
+    for (const path of ["/r/probe", "/r/probe", "/account/security", "/api/auth/get-session", "/api/auth/list-accounts"]) {
       const response = await f.read(path, cookie);
-      expect(response.status).toBe(200);
+      expect(response.status, path).toBe(200);
       expect((await f.stored()).expiresAt).toBe(expiry);
       if (!remember) {
         for (const setCookie of response.headers.getSetCookie().filter(c => c.startsWith("better-auth.session_token="))) {
@@ -182,27 +187,6 @@ it.each([1, 7])("preserves legacy sessions with a %s-day stored duration", async
   } });
   expect((await f.read("/account/security", f.tokenCookie.split(";", 1)[0])).status).toBe(200);
   expect((await f.stored()).expiresAt).toBe(initial.createdAt + duration * day);
-});
-
-it.each([false, true])("uses persisted choice when organization selection writes cookies (remember=%s)", async remember => {
-  const f = await fixture(remember);
-  // Clearing a selection is the cookie-writing path that needs no membership.
-  await f.backend.mutation(components.betterAuth.adapter.updateOne, { input: {
-    model: "session", where: [{ field: "token", value: f.token }], update: { activeOrganizationId: "selected" },
-  } });
-  const initial = await f.stored();
-  const cookie = `${f.tokenCookie.split(";", 1)[0]}; better-auth.dont_remember=true.invalid`;
-  const response = await f.app.request(`${origin}/api/auth/organization/set-active`, {
-    method: "POST", headers: { cookie, origin, "content-type": "application/json" },
-    body: JSON.stringify({ organizationId: null, rememberMe: !remember }),
-  });
-  expect(response.status).toBe(200);
-  expect((await f.stored()).rememberMe).toBe(remember);
-  expect((await f.stored()).expiresAt).toBe(initial.expiresAt);
-  const tokenCookie = response.headers.getSetCookie().find(c => c.startsWith("better-auth.session_token="))!;
-  expect(tokenCookie).toBeDefined();
-  if (remember) expect(tokenCookie).toMatch(/; Max-Age=604800(?:;|$)/i);
-  else expect(tokenCookie).not.toMatch(/; (?:Max-Age|Expires)=/i);
 });
 
 it("rejects client writes to the persisted lifetime choice", async () => {
@@ -277,7 +261,8 @@ it.each([false, true])("ignores client marker variants Better Auth would parse (
   vi.setSystemTime(Number(initial.createdAt) + 60 * 60_000);
   for (const value of values) {
     for (const variant of variants(value)) {
-      for (const path of ["/get-session", "/convex/token", "/organization/list"]) {
+      // The session reads Better Auth leaves unlimited, so the many variants below are not throttled.
+      for (const path of ["/get-session", "/convex/token"]) {
         for (const send of [
           (cookie: string) => f.app.request(`${origin}/api/auth${path}`, { headers: { cookie } }),
           (cookie: string) => f.auth.handler(new Request(`${origin}/api/auth${path}`, { headers: { cookie } })),
@@ -367,7 +352,7 @@ it("bounds every Better Auth session refresh path at the storage layer, whatever
   // so the stored result proves the clamp rather than an absent refresh.
   const update = vi.spyOn(f.context.adapter, "update");
   const paths: Record<string, (headers: Headers) => Promise<unknown>> = {
-    ...Object.fromEntries(["/get-session", "/convex/token", "/organization/list", "/list-sessions"].map(path =>
+    ...Object.fromEntries(["/get-session", "/convex/token", "/list-accounts", "/list-sessions"].map(path =>
       [`HTTP ${path}`, (headers: Headers) => f.auth.handler(new Request(`${origin}/api/auth${path}`, { headers }))])),
     "server getSession": headers => f.auth.api.getSession({ headers }),
     "server listSessions": headers => f.auth.api.listSessions({ headers }).catch(() => null),
@@ -407,18 +392,12 @@ it("never treats bearer tokens as sessions or persists a non-remembered cookie o
   const f = await fixture(false);
   const initial = await f.stored();
   const { cookie, variants } = await credentialVariants(f);
-  const now = Date.now();
-  const organization = await f.context.adapter.create<{ id: string }>({ model: "organization", data: { name: "Org", slug: "org", createdAt: new Date(now) } });
-  await f.context.adapter.create({ model: "member", data: { organizationId: organization.id, userId: f.user.id, role: "owner", createdAt: new Date(now) } });
-  const management = `/api/rendro/management/access?organizationId=${organization.id}`;
   const authenticated = async (response: Response) => response.status === 200 && await response.clone().text() !== "null";
   const routes: Record<string, (headers: Record<string, string>) => Promise<Response>> = {
-    ...Object.fromEntries(["/get-session", "/convex/token", "/organization/list", "/list-sessions"].flatMap(path => [
+    ...Object.fromEntries(["/get-session", "/convex/token", "/list-accounts", "/list-sessions"].flatMap(path => [
       [`convex ${path}`, (headers: Record<string, string>) => f.backend.fetch(`/api/auth${path}`, { headers })],
       [`worker ${path}`, (headers: Record<string, string>) => f.app.request(`${origin}/api/auth${path}`, { headers })],
     ])),
-    "convex management access": headers => f.backend.fetch(management, { headers }),
-    "convex projects": headers => f.backend.fetch(`/api/rendro/projects?organizationId=${organization.id}`, { headers }),
     "convex set-initial-password": headers => f.backend.fetch("/api/auth/set-initial-password", {
       method: "POST", headers: { ...headers, origin, "content-type": "application/json" }, body: JSON.stringify({ newPassword: `${password} initial` }),
     }),
@@ -431,16 +410,14 @@ it("never treats bearer tokens as sessions or persists a non-remembered cookie o
       const response = await send(headers);
       expect(persistentSessionCookies(response), `${label} with ${name}`).toEqual([]);
       expect(Number((await f.stored()).expiresAt), `${label} with ${name}`).toBe(Number(initial.expiresAt));
-      // Better Auth endpoints use only the cookie. Rendro APIs treat any
-      // Authorization header as an API-key request, never as a session.
+      // Better Auth endpoints use only the cookie; the password write refuses any Authorization header as a session.
       const sessionAuthority = name === "cookie" || (name.includes("cookie") && label.includes("/"));
       if (label.includes("set-initial-password")) expect(await response.json(), `${label} with ${name}`).toEqual({ error: sessionAuthority
         ? "Unable to set password. Sign in again and retry." : "Sign in again before setting a password" });
-      else if (label.includes("projects")) expect(response.status, `${label} with ${name}`).toBe(sessionAuthority ? 200 : 403);
       else expect(await authenticated(response), `${label} with ${name}`).toBe(sessionAuthority);
     }
   }
-  expect(await authenticated(await f.backend.fetch(management, { headers: { cookie } }))).toBe(true);
+  expect(await authenticated(await f.backend.fetch("/api/auth/get-session", { headers: { cookie } }))).toBe(true);
 }, 30_000);
 
 it("builds cookie-only headers for server-side session reads", () => {

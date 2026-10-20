@@ -12,18 +12,14 @@ import { menuSurfaceStyles } from "../ui/menu-styles";
 
 const app = new Hono<{ Variables: { user?: User } }>();
 
-/**
- * The public root is the product landing page. Authenticated users enter
- * through the organization selector; organization membership, not email
- * domain derivation, determines every subsequent authorization decision.
- */
+/** The public root is the product landing page; a signed-in reader goes to their home (#286). */
 app.get("/", (c) => {
   const user = c.get("user");
   if (!user) {
     return c.html(renderLandingPage());
   }
 
-  return c.redirect("/organizations");
+  return c.redirect("/home");
 });
 
 // ----- HTML renderers -----

@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import type { Page } from "@playwright/test";
 import { test, expect } from "./fixtures";
-import { desktop, mobile, shellReady, signInSeeded } from "./shell-helpers";
+import { desktop, mobile, signInSeeded } from "./shell-helpers";
 import type { RepoFixtures } from "./repo-fixtures";
 
 const fontCdn = /fonts\.(?:googleapis|gstatic)\.com/;
@@ -62,7 +62,7 @@ const overflows = (page: Page) => page.evaluate(() => {
   return found;
 });
 
-/** Management pages hydrate data after the shell is ready; judge the layout once it has settled. */
+/** Pages hydrate data after they load (the security page lists sign-in methods); judge the layout once it has settled. */
 const settledOverflows = async (page: Page) => {
   let last: string[] = [];
   // On timeout the caller's assertion reports the remaining violations in full.
@@ -75,11 +75,7 @@ const exposedIcons = (page: Page) => page.evaluate(() => [...document.querySelec
   .filter(icon => !icon.closest('[aria-hidden="true"]')).map(icon => icon.outerHTML.slice(0, 120)));
 
 const publicPaths = ["/", "/sign-in", "/sign-up", "/forgot-password", "/no-such-page"];
-const managementPaths = (organization: string, project: string) => [
-  `/organizations/${organization}`, `/organizations/${organization}/projects`, `/organizations/${organization}/people`,
-  `/organizations/${organization}/teams`, `/organizations/${organization}/settings`, `/organizations/${organization}/api-keys`,
-  `/organizations/${organization}/projects/${project}`, "/account/security",
-];
+const signedInPaths = ["/home", "/account/security"];
 
 test.describe("self-hosted fonts", () => {
   test.use({ viewport: desktop });
@@ -110,27 +106,26 @@ test.describe("self-hosted fonts", () => {
   test("the loaded icon font turns ligature names into single glyphs", async ({ page }) => {
     await page.goto("/sign-in");
     await faces(page);
-    const widths = await ligatureWidths(page, ["close", "unfold_more", "space_dashboard", "mark_email_read"]);
+    const widths = await ligatureWidths(page, ["close", "folder_open", "edit_document", "mark_email_read"]);
     for (const width of widths) expect(width).toBeCloseTo(20, 0);
     // Without the font the same names are several times wider; that is what the blocked test contains.
     const [fallback] = await page.evaluate(() => {
       const probe = document.createElement("span");
       probe.style.cssText = 'position:absolute;white-space:nowrap;font:400 20px "No Such Family",sans-serif';
-      probe.textContent = "unfold_more";
+      probe.textContent = "edit_document";
       document.body.append(probe);
       return [probe.getBoundingClientRect().width];
     });
     expect(fallback).toBeGreaterThan(100);
   });
 
-  test("management pages and the document shell use only self-hosted fonts and decorative icons", async ({ page, context, baseURL, seed }) => {
+  test("signed-in pages and the document shell use only self-hosted fonts and decorative icons", async ({ page, context, baseURL, seed }) => {
     test.setTimeout(120_000);
     await signInSeeded(context, baseURL, seed, "owner");
     const tracked = trackFonts(page);
-    for (const path of managementPaths(seed.organizationId, seed.projectId)) {
+    for (const path of signedInPaths) {
       const response = await page.goto(path);
       expect(response?.headers()["content-security-policy"], path).not.toMatch(fontCdn);
-      if (path.startsWith("/organizations")) await shellReady(page);
       const state = await faces(page);
       expect(state.filter(face => face.status === "error"), `${path} font errors`).toEqual([]);
       expect(state.some(face => face.family === iconFont && face.status === "loaded"), `${path} icon font`).toBe(true);
@@ -152,7 +147,7 @@ test.describe("self-hosted fonts", () => {
 
 test.describe("layout without the icon font", () => {
   const blockFonts = (page: Page) => page.route("**/fonts/*.woff2", route => route.abort("blockedbyclient"));
-  const withoutSafety = ":where(.material-symbols-outlined){width:auto!important;overflow:visible!important;white-space:normal!important}.dialog-close::before{width:auto!important;overflow:visible!important}";
+  const withoutSafety = ":where(.material-symbols-outlined){width:auto!important;overflow:visible!important;white-space:normal!important}";
 
   for (const [name, viewport] of [["desktop", desktop], ["mobile", mobile]] as const) {
     test(`no control overflows its box with every font blocked (${name})`, async ({ page, context, baseURL, seed }) => {
@@ -165,42 +160,27 @@ test.describe("layout without the icon font", () => {
         expect(await settledOverflows(page), `${path} (${name})`).toEqual([]);
       }
       await signInSeeded(context, baseURL, seed, "owner");
-      for (const path of managementPaths(seed.organizationId, seed.projectId)) {
+      for (const path of signedInPaths) {
         await page.goto(path);
-        if (path.startsWith("/organizations")) await shellReady(page);
-        expect(await settledOverflows(page), `${path} (${name})`).toEqual([]);
+          expect(await settledOverflows(page), `${path} (${name})`).toEqual([]);
       }
     });
   }
 
-  test("form dialogs keep their close button inside with the icon font blocked", async ({ page, context, baseURL, seed }) => {
-    test.setTimeout(120_000);
+  test("the overflow check detects the failure it guards against", async ({ page }) => {
     await blockFonts(page);
-    await signInSeeded(context, baseURL, seed, "owner");
-    const base = `/organizations/${seed.organizationId}`;
-    for (const [path, trigger, dialog] of [["teams", "Create team", "#team-dialog"], ["people", "Invite people", "#invite-dialog"], ["projects", "Create project", "#project-dialog"], ["api-keys", "Create API key", "#key-dialog"]] as const) {
-      await page.goto(`${base}/${path}`);
-      await shellReady(page);
-      await page.locator(".cp-page-actions").getByRole("button", { name: trigger, exact: true }).click();
-      await expect(page.locator(dialog)).toBeVisible();
-      expect(await overflows(page), path).toEqual([]);
-      const close = page.locator(`${dialog} .dialog-close`);
-      const [box, parent] = [(await close.boundingBox())!, (await page.locator(dialog).boundingBox())!];
-      expect(box.width, path).toBeLessThanOrEqual(44);
-      expect(box.x + box.width, path).toBeLessThanOrEqual(parent.x + parent.width + 1);
-      expect(await close.evaluate(button => button.scrollWidth <= button.clientWidth)).toBe(true);
-    }
-  });
-
-  test("the overflow check detects the failure it guards against", async ({ page, context, baseURL, seed }) => {
-    await blockFonts(page);
-    await signInSeeded(context, baseURL, seed, "owner");
-    await page.goto(`/organizations/${seed.organizationId}/teams`);
-    await shellReady(page);
-    await page.locator(".cp-page-actions").getByRole("button", { name: "Create team", exact: true }).click();
-    await expect(page.locator("#team-dialog")).toBeVisible();
+    // The repository shell's toolbar icons are ligature names in a fallback font: only the icon box keeps them inside.
+    const { open } = JSON.parse(readFileSync(process.env.RENDRO_E2E_REPOS as string, "utf8")) as RepoFixtures;
+    await page.goto(`/r/${open.owner}/${open.name}`);
+    await expect(page.locator("#shell-toggle")).toBeVisible();
     expect(await overflows(page)).toEqual([]);
-    await page.addStyleTag({ content: withoutSafety });
+    // The page's policy admits only nonced styles: the override carries the document's nonce.
+    await page.evaluate(css => {
+      const style = document.createElement("style");
+      style.nonce = document.querySelector<HTMLStyleElement>("style[nonce]")?.nonce ?? "";
+      style.textContent = css;
+      document.head.append(style);
+    }, withoutSafety);
     expect((await overflows(page)).length).toBeGreaterThan(0);
   });
 });

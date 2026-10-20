@@ -1,8 +1,7 @@
 import type { FrameLocator, Page, Route } from "@playwright/test";
 import { expect } from "../fixtures";
-import { failOnce } from "../org-fixtures";
 import { injectFault } from "../faults";
-import { holdFirst, pageSettled, signInSeeded } from "../shell-helpers";
+import { signInSeeded } from "../shell-helpers";
 import { content } from "../viewer-fixtures";
 import { READINESS_HEADER, renderPreparingPage } from "../../src/repo-read/preparing";
 import type { VisualState } from "./state";
@@ -73,96 +72,10 @@ async function openCell(page: Page, visual: VisualState, family: string, state: 
         await expect(page.locator("#name")).toBeVisible();
         return rendered();
       }
-      case "account-menu": {
-        await signInSeeded(page.context(), origin(), visual.seedOwner, "owner");
-        await page.goto(`/organizations/${visual.seedOwner.organizationId}`);
-        await pageSettled(page);
-        await page.locator("#cp-avatar").click();
-        await expect(page.locator("#cp-account-menu")).toBeVisible();
-        return rendered();
-      }
-      case "org": {
+      case "home": {
         await page.context().addCookies(visual.crown.cookies);
-        await page.goto(`/organizations/${visual.crown.organizationId}`);
-        await pageSettled(page);
-        await expect(page.locator("#workspace-checklist .checklist-row").first()).toBeVisible();
-        return rendered();
-      }
-      case "projects": {
-        await page.context().addCookies(visual.crown.cookies);
-        const organizationId = state === "empty" ? visual.vaultOrganizationId : visual.crown.organizationId;
-        const path = `/organizations/${organizationId}/projects`;
-        if (state === "loading") {
-          const hold = await holdFirst(page, "**/api/rendro/projects?*");
-          closers.push(() => hold.close());
-          await page.goto(path);
-          await expect(page.locator(".loading-view[aria-busy=true]")).toHaveCount(1);
-          return rendered();
-        }
-        if (state === "error") {
-          const outage = await failOnce(page, "**/api/rendro/projects?*", "Projects are unavailable right now");
-          closers.push(() => outage.close());
-          await page.goto(path);
-          await expect(page.getByRole("heading", { name: "Unable to load projects", level: 2 })).toBeVisible();
-          return rendered();
-        }
-        await page.goto(path);
-        await pageSettled(page);
-        if (state === "empty") {
-          await expect(page.locator("#project-list")).toContainText("Create project");
-          return rendered();
-        }
-        await expect(page.locator(".project-row").first()).toBeVisible();
-        if (state === "dialog") {
-          const create = page.locator("#project-create");
-          await expect(create).toBeEnabled();
-          await create.click();
-          await expect(page.locator("#project-dialog")).toBeVisible();
-        }
-        return rendered();
-      }
-      case "project": {
-        await page.context().addCookies(visual.crown.cookies);
-        const path = `/organizations/${visual.crown.organizationId}/projects/${visual.crown.projectId}`;
-        if (state === "loading") {
-          // The server answers the page with its project; without that initial data, as after an in-shell navigation,
-          // the page reads the project itself, and that read is held.
-          await page.route(`**${path}`, async route => {
-            const response = await route.fetch();
-            const body = (await response.text()).replace(/<script[^>]*data-cp-initial-data[^>]*>[\s\S]*?<\/script>/, "");
-            await route.fulfill({ response, body });
-          }, { times: 1 });
-          const hold = await holdFirst(page, "**/api/rendro/projects/get?*");
-          closers.push(() => hold.close());
-          await page.goto(path);
-          await expect(page.locator(".loading-view[aria-busy=true]").first()).toBeVisible();
-          // The organization's name arrives on its own request, which the held project read does not wait for: a shot before
-          // it showed the placeholder mark on one run and not the next (#276). The description waits for the held read.
-          await expect(page.locator("#cp-org-switcher [data-org-name]")).toHaveText("Crown");
-          await expect(page.locator(".cp-page-description")).toHaveText("Stable identifiers for this documentation product.");
-          return rendered();
-        }
-        await page.goto(path);
-        await pageSettled(page);
-        await expect(page.locator("#project-id .cp-id")).toBeVisible();
-        return rendered();
-      }
-      case "teams": {
-        await page.context().addCookies(visual.crown.cookies);
-        const path = `/organizations/${visual.crown.organizationId}/teams`;
-        await page.goto(path);
-        await pageSettled(page);
-        await expect(page.locator(".team-card").first()).toBeVisible();
-        return rendered();
-      }
-      case "keys": {
-        await page.context().addCookies(visual.crown.cookies);
-        const path = `/organizations/${visual.crown.organizationId}/api-keys`;
-        await page.goto(path);
-        await pageSettled(page);
-        await expect(page.locator("#api-key-create")).toBeVisible();
-        // The list arrives after the button: a shot taken on the skeleton once became a baseline on a loaded host.
-        await expect(page.locator("#key-list code.cell-secondary").first()).toBeVisible();
+        await page.goto("/home");
+        await expect(page.getByRole("heading", { name: "Welcome, Crown Turner", level: 1 })).toBeVisible();
         return rendered();
       }
       case "viewer": {
@@ -284,30 +197,6 @@ async function holdDocument(page: Page, file: string) {
     },
   };
 }
-/** Text that varies per run in length or content (the seeded site's temporary directory, the pushed commit): rewritten to a
- * fixed string before the shot, because a mask keeps the varying layout (a wrapped path changes every row's height). The
- * functional e2e specs assert the real values. */
-export async function pinVolatileText(page: Page, family: string, state: string): Promise<void> {
-  const pins: Array<[string, string]> = [];
-  // A project's creation date is the server's real time of the seed, not the page clock: it changes every day.
-  if (family === "project" && state !== "loading") pins.push(["#project-created", "10/19/2026"]);
-  // Pin only once the text has rendered.
-  for (const [selector] of pins) await page.locator(selector).first().waitFor({ state: "attached" });
-  await page.evaluate(entries => {
-    for (const [selector, text] of entries) for (const node of document.querySelectorAll(selector)) node.textContent = text;
-  }, pins);
-}
-
-/** Regions whose text is intentionally run-specific (server ids, the seeded key prefix, the
- * local loopback endpoint): masked in the baseline instead of pinned, asserted by name in the
- * functional e2e specs. */
-export function maskFor(family: string, state: string): string[] {
-  // The project's id is the run's own; the functional specs assert it.
-  if (family === "project" && state !== "loading") return ["#project-id .cp-id"];
-  if (family === "keys") return ["#key-list code.cell-secondary"];
-  return [];
-}
-
 /** The shell's tree is a closed drawer below the desktop breakpoint; the search panel and the tree live in it. */
 async function openTreeDrawer(page: Page) {
   const drawer = page.locator("#mobile-tree-toggle");

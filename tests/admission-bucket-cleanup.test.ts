@@ -42,19 +42,19 @@ it("bounds cleanup, continues, and removes actor and tenant state", async () => 
   }
 });
 
-it("keeps actor and organization expiry with their write transaction and rolls back failed quota attempts", async () => {
+it("keeps actor and tenant expiry with their write transaction and rolls back failed quota attempts", async () => {
   const t = fixture();
-  await t.run(ctx => consumeWriteQuota(ctx, "projects", "actor", "tenant"));
+  await t.run(ctx => consumeWriteQuota(ctx, "comments", "actor", "tenant"));
   vi.setSystemTime(12 * HOUR - 1);
   await t.run(async ctx => {
-    for (let i = 0; i < 20; i++) await consumeWriteQuota(ctx, "projects", "actor", "tenant");
+    for (let i = 0; i < writeQuotaLimits.comments.capacity; i++) await consumeWriteQuota(ctx, "comments", "actor", "tenant");
   });
   const before = await t.run(ctx => ctx.db.query("admissionBuckets").collect());
   vi.setSystemTime(12 * HOUR);
-  await expect(t.run(ctx => consumeWriteQuota(ctx, "projects", "actor", "other-tenant"))).rejects.toMatchObject({ data: { kind: "RateLimited" } });
+  await expect(t.run(ctx => consumeWriteQuota(ctx, "comments", "actor", "other-tenant"))).rejects.toMatchObject({ data: { kind: "RateLimited" } });
   expect(await t.run(ctx => ctx.db.query("admissionBuckets").collect())).toEqual(before);
   await t.mutation(internal.admissionBuckets.cleanup, {});
-  expect((await t.run(ctx => writeQuotaLimiter.check(ctx, "projects", { key: "user:actor" }))).ok).toBe(false);
+  expect((await t.run(ctx => writeQuotaLimiter.check(ctx, "comments", { key: "user:actor" }))).ok).toBe(false);
   expect(await t.run(ctx => ctx.db.query("admissionBuckets").collect())).toHaveLength(2);
 });
 

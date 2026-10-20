@@ -1,7 +1,4 @@
 import { writeAdmission } from "../src/middleware/write-admission";
-import type { User } from "better-auth/types";
-import { renderApiKeyPage } from "@/routes/api-key-pages";
-import { renderProjectPage } from "@/routes/project-pages";
 import { getRequestListener } from "@hono/node-server";
 import { buildBrowserBundle as build } from "./helpers/browser";
 import { Hono } from "hono";
@@ -18,8 +15,6 @@ let failSignOut = false;
 // What the live identity check receives; "signed-out" follows the sign-out state.
 let tokenMode: "ok" | "denied" | "unavailable" | "empty" = "ok";
 let identity: "reader" | "other" | "signed-out" | "unavailable" | "malformed" = "reader";
-const rawKey = "rd_fixture_secret_must_disappear";
-const reader = { id: "reader", name: "Reader", email: "reader@example.test" } as User;
 beforeEach(() => { authenticated = true; failSignOut = false; identity = "reader"; tokenMode = "ok"; });
 afterAll(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
 beforeAll(async () => {
@@ -48,10 +43,6 @@ beforeAll(async () => {
       }`, loader: "js", resolveDir: process.cwd() }));
   } }] });
   const assets = new Map([["/commentor-parent.js", parent.outputFiles[0].text]]);
-  for (const [path, entry] of [["/management-query.js", "src/management-query/browser.ts"], ["/select.js", "src/ui/select-browser.ts"]]) {
-    const bundle = await build({ entryPoints: [entry], bundle: true, write: false, platform: "browser" });
-    assets.set(path, bundle.outputFiles[0].text);
-  }
   vi.stubGlobal("fetch", vi.fn(() => {
     if (failSignOut) return Promise.resolve(new Response(null, { status: 503 }));
     authenticated = false;
@@ -82,14 +73,6 @@ beforeAll(async () => {
     });
     window.lateWrite = () => parent.postMessage({type:'commentor-parent-request',requestId:'write',method:'reply.add',args:{documentPath:'guide.md',threadId:'thread',body:'Late'}}, '*');
   </script>`));
-  app.get("/organizations/org/api-keys", c => c.html(renderApiKeyPage(reader, "org")));
-  app.get("/organizations/org/projects", c => c.html(renderProjectPage(reader, "org")));
-  app.get("/api/rendro/management/access", c => c.json({ id: "org", name: "Fixture", userId: "reader", member: { userId: "reader", role: "owner" } }));
-  app.get("/api/auth/organization/list", c => c.json([{ id: "org", name: "Private organization", slug: "private" }]));
-  app.get("/api/rendro/credentials", c => c.json({ credentials: [] }));
-  app.post("/api/rendro/credentials", c => c.json({ rawKey }));
-  app.get("/api/rendro/projects", c => c.json({ projects: [] }));
-  app.get("/api/rendro/projects/get", c => c.json({ project: { name: "Project" } }));
   // The frame shows the document this shell names (#296).
   app.get("/viewer", c => c.html(`<!doctype html><html><body>
     <form method="post" action="/api/auth/sign-out"><button type="submit">Sign out</button></form>
@@ -111,49 +94,6 @@ async function withoutScripts(page: Page) {
 }
 
 type Transport = { subscriptions: number; closes: number; writes: number; updates: number };
-it("refetches HTML for a cached v19 controller and clears state on sign-out", async () => {
-  const page = await harness.newPage();
-  // Pin the pre-#75 version and its incompatible organization-context contract.
-  // Using the current version here would hide the missing-bump regression.
-  const staleBundle = await build({ stdin: { sourcefile: "tests/fixtures/stale-management.js", contents: `
-    window.RendroManagementPages={version:"19",pages:{projects:{
-      state:'{}',dialogs:'',title:'Stale projects',mount:function(){
-        window.staleControllerMounted=true;
-        window.RendroUI.organizationContext={display:function(){return {name:"Stale organization"};}};
-      }
-    }}};
-  ` } });
-  await page.route("**/management-pages.js?*", route => route.fulfill({ contentType: "text/javascript; charset=utf-8", body: staleBundle.outputFiles[0].text }));
-  const errors: string[] = [];
-  page.on("pageerror", error => errors.push(error.message));
-  await page.goto(`${harness.origin}/organizations/org/api-keys`);
-  await expect.poll(() => page.evaluate(() => (window as unknown as { RendroManagementPages: { version: string } }).RendroManagementPages?.version)).toBe("19");
-  const [refreshedHtml] = await Promise.all([
-    page.waitForResponse(response => response.url() === `${harness.origin}/organizations/org/projects` && response.request().resourceType() === "fetch"),
-    page.getByRole("link", { name: "Projects", exact: true }).click(),
-  ]);
-  expect(refreshedHtml.status()).toBe(200);
-  await expect.poll(() => page.locator("#project-list").count()).toBe(1);
-  type ManagementWindow = {
-    staleControllerMounted?: boolean;
-    __RENDRO_PAGE_STATE__: unknown;
-    RendroUI: {
-      request(path: string): Promise<unknown>;
-      organizationContext: { display(id: string): unknown };
-    };
-  };
-  await page.evaluate(() => (window as unknown as ManagementWindow).RendroUI.request("/api/auth/organization/list"));
-  await expect.poll(() => page.evaluate(() => (window as unknown as ManagementWindow).RendroUI.organizationContext.display("org"))).not.toBeNull();
-  expect(await page.evaluate(() => (window as unknown as ManagementWindow).staleControllerMounted)).toBeUndefined();
-  expect(await page.evaluate(() => (window as unknown as ManagementWindow).__RENDRO_PAGE_STATE__)).not.toBeNull();
-  await page.locator('form[action="/api/auth/sign-out"]').evaluate((form: HTMLFormElement) => form.requestSubmit());
-  await page.locator("#rendro-signed-out").waitFor();
-  expect(await page.evaluate(() => (window as unknown as ManagementWindow).__RENDRO_PAGE_STATE__)).toBeNull();
-  expect(await page.evaluate(() => (window as unknown as ManagementWindow).RendroUI.organizationContext.display("org"))).toBeNull();
-  expect(await page.evaluate(() => Object.keys(sessionStorage).filter(key => key.startsWith("rendro-organization-list-")))).toEqual([]);
-  expect(errors).toEqual([]);
-});
-
 it.each(["broadcast", "storage", "native-form"])("tears down a background viewer within 2 seconds via %s and signs back in without a loop", async mode => {
   const tabA = await harness.newPage();
   const context = tabA.context();
@@ -204,103 +144,6 @@ it("keeps the session and subscriptions on failure, then allows retry", async ()
   await page.getByRole("button", { name: "Sign out" }).click();
   await page.locator("#rendro-signed-out").waitFor();
   expect(authenticated).toBe(false);
-});
-
-// Exercise the real renderers/controllers: the secret's cleanup owns both its
-// DOM text and copy closures. No injected sign-out/dialog implementation.
-it.each(["broadcast", "storage", "focus", "own-form"])("scrubs the open API-key reveal and focuses usable sign-in via %s", async mode => {
-  const tabA = await harness.newPage();
-  const context = tabA.context();
-  if (mode === "storage") await context.addInitScript(() => { Object.defineProperty(window, "BroadcastChannel", { value: undefined }); });
-  // Separate contexts simulate a missed cross-tab signal; focus must read the server.
-  const tabB = mode === "focus" ? await harness.newPage() : await context.newPage();
-  const errors: string[] = [];
-  tabB.on("pageerror", error => errors.push(error.message));
-  await tabA.goto(`${harness.origin}/viewer`);
-  await tabB.goto(`${harness.origin}/organizations/org/api-keys`);
-  await tabB.evaluate(() => (window as unknown as { RendroUI: { request: (path: string) => Promise<unknown> } }).RendroUI.request("/api/auth/organization/list"));
-  const cachedOrganizations = () => tabB.evaluate(() => Object.keys(sessionStorage).filter(key => key.startsWith("rendro-organization-list-")));
-  await expect.poll(cachedOrganizations).toHaveLength(1);
-  await tabB.locator("#api-key-create").click();
-  await tabB.locator('#key-form [name="name"]').fill("Fixture key");
-  await tabB.locator('#key-form button[type="submit"]').click();
-  await tabB.locator("#secret-dialog[open]").waitFor();
-  expect(await tabB.locator("#raw-key").textContent()).toBe(rawKey);
-  expect(await tabB.locator("#secret-confirmed").isChecked()).toBe(false);
-
-  if (mode === "own-form") {
-    await tabB.locator('form[action="/api/auth/sign-out"]').evaluate((form: HTMLFormElement) => form.requestSubmit());
-  } else {
-    await tabA.bringToFront();
-    await tabA.getByRole("button", { name: "Sign out", exact: true }).click();
-    await tabA.locator("#rendro-signed-out").waitFor();
-    if (mode === "focus") await tabB.evaluate(() => window.dispatchEvent(new Event("focus")));
-  }
-  const overlay = tabB.locator("#rendro-signed-out");
-  await overlay.waitFor();
-  expect(await tabB.locator("dialog[open]").count()).toBe(0);
-  expect(await tabB.locator("#raw-key").textContent()).toBe("");
-  await expect.poll(cachedOrganizations).toEqual([]);
-  expect(await tabB.locator("body").textContent()).not.toContain(rawKey);
-  expect(await tabB.locator("#copy-key").evaluate((button: HTMLButtonElement) => button.onclick)).toBeNull();
-  expect(await tabB.locator("#copy-env").evaluate((button: HTMLButtonElement) => button.onclick)).toBeNull();
-  expect(await overlay.evaluate(element => document.activeElement === element)).toBe(true);
-  expect(await overlay.getAttribute("aria-live")).toBe("polite");
-  expect(await overlay.ariaSnapshot()).toContain(`status "You're signed out"`);
-  await tabB.keyboard.press("Tab");
-  expect(await overlay.getByRole("link", { name: "Sign in", exact: true }).evaluate(element => document.activeElement === element)).toBe(true);
-  await tabB.keyboard.press("Enter");
-  await tabB.waitForURL("**/sign-in");
-  expect(errors).toEqual([]);
-});
-
-it("never reveals a key whose creation response arrives after the account signed out elsewhere", async () => {
-  const tabA = await harness.newPage();
-  const tabB = await tabA.context().newPage();
-  await tabA.goto(`${harness.origin}/viewer`);
-  await tabB.goto(`${harness.origin}/organizations/org/api-keys`);
-  let release!: () => void;
-  const gate = new Promise<void>(resolve => { release = resolve; });
-  let held = false, delivered!: () => void;
-  const answered = new Promise<void>(resolve => { delivered = resolve; });
-  await tabB.route(url => url.pathname === "/api/rendro/credentials", async route => {
-    if (route.request().method() !== "POST") return route.continue();
-    held = true;
-    await gate;
-    await route.continue();
-    delivered();
-  });
-  await tabB.locator("#api-key-create").click();
-  await tabB.locator('#key-form [name="name"]').fill("Late key");
-  await tabB.locator('#key-form button[type="submit"]').click();
-  await expect.poll(() => held).toBe(true);
-
-  await tabA.bringToFront();
-  await tabA.getByRole("button", { name: "Sign out", exact: true }).click();
-  await tabB.locator("#rendro-signed-out").waitFor();
-  release(); await answered;
-  // Let the page process the response that is now delivered to the disposed form.
-  await tabB.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(resolve, 0)))));
-  expect(await tabB.locator("dialog[open]").count()).toBe(0);
-  expect(await tabB.locator("#raw-key").textContent()).toBe("");
-  expect(await tabB.locator("body").textContent()).not.toContain(rawKey);
-  expect(await tabB.locator("#copy-key").evaluate((button: HTMLButtonElement) => button.onclick)).toBeNull();
-});
-
-it("closes the key-creation dialog and its top-layer select popover on cross-tab sign-out", async () => {
-  const tabA = await harness.newPage();
-  const tabB = await tabA.context().newPage();
-  await tabA.goto(`${harness.origin}/viewer`);
-  await tabB.goto(`${harness.origin}/organizations/org/api-keys`);
-  await tabB.locator("#api-key-create").click();
-  await tabB.getByRole("combobox", { name: "Expiration", exact: true }).click();
-  expect(await tabB.locator(":popover-open").count()).toBe(1);
-  await tabA.bringToFront();
-  await tabA.getByRole("button", { name: "Sign out", exact: true }).click();
-  await tabB.locator("#rendro-signed-out").waitFor();
-  expect(await tabB.locator("dialog[open], :popover-open").count()).toBe(0);
-  await tabB.getByRole("link", { name: "Sign in", exact: true }).click();
-  await tabB.waitForURL("**/sign-in");
 });
 
 it("shows the sign-out confirmation for GET without revoking, then signs out natively and permits signing back in", async () => {

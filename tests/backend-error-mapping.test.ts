@@ -106,6 +106,14 @@ describe("Convex HTTP error boundary", () => {
     expect(await response.json()).toEqual({ error: "Invalid ID" });
     expect(console.error).not.toHaveBeenCalled();
   });
+  it("answers an application message under the action wrapper's 500 default as a 400, and keeps a caller's 4xx", async () => {
+    const error = new ConvexError("Password already set");
+    error.message = diagnostic;
+    const wrapped = failure(error, 500);
+    expect(wrapped.status).toBe(400);
+    expect(await wrapped.json()).toEqual({ error: "Password already set" });
+    expect(failure(error, 409).status).toBe(409);
+  });
   it.each([
     [new Error(diagnostic), "Error"],
     [new TypeError(diagnostic), "TypeError"],

@@ -5,7 +5,6 @@ const harness = createBrowserHarness();
 beforeAll(async () => {
   const assets = new Map([
     ["/tree.js", await bundleBrowserAsset("src/lazy-tree/lazy-tree.ts")],
-    ["/select.js", await bundleBrowserAsset("src/ui/select-browser.ts")],
     ["/commentor.js", await bundleBrowserAsset("src/commentor/commentor.ts")],
     ["/host.js", await bundleBrowserAsset("tests/fixtures/deterministic-comment-host.ts")],
   ]);
@@ -16,8 +15,6 @@ beforeAll(async () => {
       response.end(JSON.stringify({ children: [{ name: "page.html", type: "file" }] }));
     } else if (request.url === "/tree") {
       response.end('<!doctype html><div class="sidebar-tree" data-tree-org="fixture" data-document-base="/r/acme/docs" data-frame-base="/r/acme/docs"><div id="tree-container"></div></div><iframe id="content-frame" name="content-frame"></iframe><script src="/tree.js"></script>');
-    } else if (request.url === "/select") {
-      response.end('<!doctype html><div id="container"><select class="select" aria-label="Choice"><option>A</option><option>B</option></select></div><script src="/select.js"></script>');
     } else if (request.url === "/comments") {
       response.end('<!doctype html><iframe style="width:800px;height:600px" id="content-frame" sandbox="allow-scripts" src="/r/acme/docs/files/page.html?comments"></iframe><script src="/host.js"></script>');
     } else if (request.url?.endsWith("?comments")) {
@@ -66,22 +63,6 @@ it.each([0, 600])("settles the document loader after %i ms and handles explicit 
     })));
     expect(await page.locator(".tree-item.active").getAttribute("data-path")).toBe("fixture/page.html");
   } finally { release(); }
-});
-
-it("repositions an open select on an ancestor transition and ignores unrelated transitions", async () => {
-  const page = await harness.newPage({ reducedMotion: "reduce" });
-  await page.goto(`${harness.origin}/select`);
-  await page.getByRole("combobox").click();
-  await page.getByRole("listbox").waitFor();
-  await page.evaluate(() => {
-    const container = document.getElementById("container")!;
-    container.style.marginTop = "100px";
-    container.dispatchEvent(new Event("transitionend", { bubbles: true }));
-    document.body.appendChild(document.createElement("div")).dispatchEvent(new Event("transitionend", { bubbles: true }));
-  });
-  const trigger = await page.getByRole("combobox").boundingBox();
-  const popup = await page.getByRole("listbox").boundingBox();
-  expect(popup!.y).toBeGreaterThanOrEqual(trigger!.y + trigger!.height);
 });
 
 it("delivers loading, stale subscription, drawer scroll and compatibility states explicitly", async () => {

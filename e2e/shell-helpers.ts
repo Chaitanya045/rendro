@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import type { Page, BrowserContext, Route } from "@playwright/test";
+import type { Page, BrowserContext } from "@playwright/test";
 import { expect } from "./fixtures";
 import { mailLink } from "./auth-helpers";
 import { password, type Role, type Seed } from "./seed";
@@ -7,11 +7,7 @@ import { password, type Role, type Seed } from "./seed";
 export const desktop = { width: 1440, height: 900 };
 export const mobile = { width: 375, height: 812 };
 
-export type Workspace = {
-  email: string;
-  organizations: Array<{ id: string; name: string; slug: string }>;
-  projects: Array<{ id: string; organizationId: string }>;
-};
+export type Workspace = { email: string };
 
 /** Same-origin JSON call from the page, so cookies, Origin and ingress headers match a real browser. */
 export async function api<T = unknown>(page: Page, path: string, data?: unknown): Promise<{ status: number; body: T }> {
@@ -28,7 +24,7 @@ export async function api<T = unknown>(page: Page, path: string, data?: unknown)
   }, { path, data });
 }
 
-/** Seeded owner/admin/member cookies; read-only tests only (never sign out or mutate). */
+/** Seeded user cookies; read-only tests only (never sign out or mutate). */
 export async function signInSeeded(context: BrowserContext, baseURL: string | undefined, seed: Seed, role: Role) {
   await context.addCookies(seed.cookies[role].split("; ").map(pair => {
     const split = pair.indexOf("=");
@@ -37,10 +33,10 @@ export async function signInSeeded(context: BrowserContext, baseURL: string | un
 }
 
 /**
- * Provision a disposable verified user with real signup/verification/sign-in plus organizations and projects.
+ * Provision a disposable verified user with real signup/verification/sign-in.
  * The label is made unique per call, so repeats and retries within one backend never collide.
  */
-export async function provision(page: Page, prefix: string, options: { organizations?: string[]; project?: boolean } = {}): Promise<Workspace> {
+export async function provision(page: Page, prefix: string): Promise<Workspace> {
   const label = `${prefix}-${randomBytes(3).toString("hex")}`;
   const email = `${label}@example.test`;
   await page.goto("/sign-in");
@@ -50,58 +46,7 @@ export async function provision(page: Page, prefix: string, options: { organizat
   await page.goto("/sign-in");
   const signIn = await api(page, "/api/auth/sign-in/email", { email, password });
   expect(signIn.status).toBe(200);
-  const workspace: Workspace = { email, organizations: [], projects: [] };
-  for (const name of options.organizations ?? []) {
-    const slug = `${label}-${name}`.toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 48).replace(/^-|-$/g, "");
-    const created = await api<{ id: string }>(page, "/api/auth/organization/create", { name, slug });
-    expect(created.status).toBe(200);
-    workspace.organizations.push({ id: created.body.id, name, slug });
-    if (options.project) {
-      const project = await api<{ project: { _id: string } }>(page, "/api/rendro/projects", { organizationId: created.body.id, name: `${name} docs`, slug: "docs" });
-      expect(project.status).toBe(201);
-      workspace.projects.push({ id: project.body.project._id, organizationId: created.body.id });
-    }
-  }
-  return workspace;
-}
-
-/** Wait until the management shell finished mounting (switcher upgraded and page content ready). */
-export async function shellReady(page: Page) {
-  await expect(page.locator("button#cp-org-switcher")).toBeVisible();
-  await expect(page.locator(".cp-content[aria-busy=true]")).toHaveCount(0);
-}
-
-/** Wait until the page has also filled in its own data. Skeletons are replaced by content of another height, which
- * moves every control below them: a press that straddles the swap, or a popup opened just before it, is lost. */
-export async function pageSettled(page: Page) {
-  await shellReady(page);
-  await expect(page.locator(".cp-main .loading-view[aria-busy=true]")).toHaveCount(0);
-}
-
-export const heading = (page: Page) => page.locator(".cp-page-heading");
-
-/** Hold only the first matching request; later requests continue untouched. Release resolves the first. */
-export async function holdFirst(page: Page, glob: string) {
-  let release!: () => void, finish!: () => void;
-  const gate = new Promise<void>(resolve => { release = resolve; });
-  const delivered = new Promise<void>(resolve => { finish = resolve; });
-  let held = 0, seen = 0;
-  const handler = async (route: Route) => {
-    seen++;
-    if (held++ > 0) { await route.continue(); return; }
-    await gate;
-    await route.continue().catch(() => undefined);
-    // Resolve once the page has received the whole response, so "it must not repaint" checks start after delivery.
-    await route.request().response().then(response => response?.finished()).catch(() => undefined);
-    finish();
-  };
-  await page.route(glob, handler);
-  return {
-    release, held: () => held, seen: () => seen,
-    /** Resolves after the released request's response reached the page. */
-    delivered: () => delivered,
-    async close() { release(); if (held) await delivered; await page.unroute(glob, handler); },
-  };
+  return { email };
 }
 
 /** Let promise callbacks and two rendered frames that follow an event run, without guessing a duration. */

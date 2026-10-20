@@ -13,11 +13,11 @@ import type { RepoFixtures } from "../repo-fixtures";
 export type VisualState = {
   /** Fixed time (ms) that every page clock is set to before navigation. */
   clockEpoch: number;
-  crown: { organizationId: string; projectId: string; teamIds: string[]; cookies: Array<{ name: string; value: string; url: string }> };
+  /** The visual owner ("Crown Turner"), whose session reads the visual repository. */
+  crown: { cookies: Array<{ name: string; value: string; url: string }> };
   /** `/r/<owner>/<name>` of the visual repository, whose pages carry the seeded threads. */
   docs: string;
-  vaultOrganizationId: string;
-  /** The seeded owner (`owner@example.test`): the account menu email must stay fixed. */
+  /** The seeded users (`owner@example.test`, `outsider@example.test`). */
   seedOwner: Seed;
   repos: () => RepoFixtures;
 };
@@ -37,9 +37,8 @@ export function loadVisualState(): VisualState {
   if (!origin || !seedPath || !reposPath || !directory) throw new Error("Missing local E2E state");
   const visual = JSON.parse(readFileSync(path, "utf8")) as {
     clockEpoch: number;
-    crown: { organizationId: string; projectId: string; teamIds: string[]; cookies: Array<{ name: string; value: string }> };
+    crown: { cookies: Array<{ name: string; value: string }> };
     docs: string;
-    vaultOrganizationId: string;
   };
   const state: VisualState = {
     ...visual,

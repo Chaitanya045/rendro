@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { sendAuthLinkEmail, sendExistingAccountNotice, sendOrganizationInvitationEmail } from "../convex/authEmails";
+import { sendAuthLinkEmail, sendExistingAccountNotice } from "../convex/authEmails";
 
 type Delivered = { to: string; subject: string; text: string; html: string; from: string };
 let fetchMock: ReturnType<typeof vi.fn<typeof fetch>>;
@@ -57,26 +57,6 @@ describe("authentication email delivery", () => {
     expect(message.text).toContain("Your existing account was not changed.");
     expect(message.html).toContain("Your existing account was not changed.");
     expect(message.text + message.html).not.toMatch(/https?:|Taken/);
-  });
-
-  it("renders an organization invitation with escaped names and URL", async () => {
-    await sendOrganizationInvitationEmail({
-      email: "new@example.test", inviterName: " Grace <Hopper> ", organizationName: " R&D \"Lab\" ",
-      invitationUrl: "https://rendro.test/accept?id=1&x=<y>",
-    });
-    const message = delivered();
-    expect(message.to).toBe("new@example.test");
-    expect(message.subject).toBe("Join R&D \"Lab\" on Rendro");
-    expect(message.text).toBe("Grace <Hopper> invited you to join R&D \"Lab\" on Rendro.\n\nAccept the invitation:\nhttps://rendro.test/accept?id=1&x=<y>\n\nThis invitation expires in seven days.");
-    expect(message.html).toBe("<p>Grace &lt;Hopper&gt; invited you to join <strong>R&amp;D &quot;Lab&quot;</strong> on Rendro.</p><p><a href=\"https://rendro.test/accept?id=1&amp;x=&lt;y&gt;\">Accept invitation</a></p><p>This invitation expires in seven days.</p>");
-  });
-
-  it("falls back to generic names for blank inviter and organization names", async () => {
-    await sendOrganizationInvitationEmail({ email: "new@example.test", inviterName: "  ", organizationName: "", invitationUrl: "https://rendro.test/a" });
-    const message = delivered();
-    expect(message.subject).toBe("Join a Rendro organization on Rendro");
-    expect(message.text.startsWith("A Rendro teammate invited you to join a Rendro organization on Rendro.")).toBe(true);
-    expect(message.html).toContain("<strong>a Rendro organization</strong>");
   });
 
   it.each(["RESEND_API_KEY", "AUTH_EMAIL_FROM"])("fails closed without sending when %s is missing or blank", async name => {

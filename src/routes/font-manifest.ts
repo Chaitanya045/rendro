@@ -21,41 +21,30 @@ export const fontManifest = {
     ]
   },
   "icons": {
-    "file": "material-symbols-outlined.97badd4fdf.woff2",
+    "file": "material-symbols-outlined.ac4c48953b.woff2",
     "names": [
       "article",
       "check",
       "chevron_right",
       "close",
-      "content_copy",
       "contrast",
       "dark_mode",
-      "domain",
       "edit_document",
       "error",
       "folder",
       "folder_open",
       "fullscreen",
       "fullscreen_exit",
-      "group",
-      "groups",
-      "inbox",
       "key",
       "light_mode",
       "link",
       "list",
-      "lock",
-      "logout",
       "mail",
       "mark_email_read",
       "menu",
       "more_vert",
       "password",
-      "search",
-      "settings",
-      "shield",
-      "space_dashboard",
-      "unfold_more"
+      "search"
     ]
   }
 } as const;

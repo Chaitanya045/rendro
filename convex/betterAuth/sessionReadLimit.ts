@@ -31,6 +31,7 @@ export const cleanup = internalMutation({
       .withIndex("lastRequest", q => q.lte("lastRequest", cutoff))
       .paginate({ cursor: args.cursor ?? null, numItems: 100 });
     for (const row of batch.page) {
+      // The organization-read rows are the retired organization limiter's (#286): expired ones are still collected.
       if (["session-read:", "session-read-ip:", "session-read-unverified:", "organization-read:", "organization-read-ip:", "organization-read-unverified:"].some(prefix => row.key.startsWith(prefix))) {
         await ctx.db.delete(row._id);
       }

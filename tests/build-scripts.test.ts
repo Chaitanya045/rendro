@@ -31,13 +31,8 @@ const assets = [
   ["build-commentor-parent.ts", "commentor-parent.js"],
   ["build-lazy-tree.ts", "lazy-tree.js"],
   ["build-rum.ts", "rum.js"],
-  ["build-management-query.ts", "management-query.js"],
   ["build-private-viewer.ts", "private-viewer.js"],
-  ["build-select.ts", "select.js"],
-  ["build-management-pages.ts", "management-pages.js"],
 ] as const;
-// Checked-in bundles: the script must reproduce them byte for byte.
-const committed = new Set(["management-query.js", "select.js", "management-pages.js"]);
 
 describe("asset build scripts", () => {
   it.each(assets)("%s writes only %s into its working directory, deterministically", async (script, output) => {
@@ -53,7 +48,6 @@ describe("asset build scripts", () => {
     const second = workspace("src", "shared", "convex");
     expect((await run(second, script)).code).toBe(0);
     expect(readFileSync(join(second, "public", output)).equals(bytes)).toBe(true);
-    if (committed.has(output)) expect(readFileSync(resolve("public", output)).equals(bytes)).toBe(true);
   }, 90_000);
 
   it("wraps the commentor in a scoped function so its global name does not leak", async () => {

@@ -1,9 +1,7 @@
-import { runInNewContext } from "node:vm";
 import { describe, expect, it } from "vitest";
-import { MAX_RETRY_AFTER_MS, RETRY_AFTER_SOURCE, retryAfterMs } from "../shared/retry-after";
+import { MAX_RETRY_AFTER_MS, retryAfterMs } from "../shared/retry-after";
 
 const now = Date.parse("2026-01-01T00:00:00Z");
-const inline = runInNewContext(`${RETRY_AFTER_SOURCE}; parseRetryAfterMs`) as (value: unknown, now: number) => number;
 
 const cases: [string, unknown, number][] = [
   ["seconds", "3", 3000],
@@ -27,7 +25,6 @@ const cases: [string, unknown, number][] = [
 describe("Retry-After parsing", () => {
   it.each(cases)("%s", (_name, value, expected) => {
     expect(retryAfterMs(value as string, now)).toBe(expected);
-    expect(inline(value, now)).toBe(expected);
   });
   it("defaults to the current clock", () => {
     expect(retryAfterMs("1")).toBe(1000);

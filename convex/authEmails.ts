@@ -94,19 +94,3 @@ export async function sendExistingAccountNotice(user: AuthEmailUser): Promise<vo
     html: "<p>A sign-up was requested for this email address.</p><p>Your existing account was not changed. If this was you, sign in or request a password reset.</p>",
   });
 }
-
-export async function sendOrganizationInvitationEmail(input: {
-  email: string;
-  inviterName: string;
-  organizationName: string;
-  invitationUrl: string;
-}): Promise<void> {
-  const inviterName = input.inviterName.trim() || "A Rendro teammate";
-  const organizationName = input.organizationName.trim() || "a Rendro organization";
-  await deliverEmail({
-    to: input.email,
-    subject: `Join ${organizationName} on Rendro`,
-    text: `${inviterName} invited you to join ${organizationName} on Rendro.\n\nAccept the invitation:\n${input.invitationUrl}\n\nThis invitation expires in seven days.`,
-    html: `<p>${escapeHtml(inviterName)} invited you to join <strong>${escapeHtml(organizationName)}</strong> on Rendro.</p><p><a href="${escapeHtml(input.invitationUrl)}">Accept invitation</a></p><p>This invitation expires in seven days.</p>`,
-  });
-}

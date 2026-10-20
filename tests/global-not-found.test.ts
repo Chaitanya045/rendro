@@ -78,7 +78,7 @@ describe.each(runtimes)("global not-found handler: $name", ({ request }) => {
   });
 
   it("preserves JSON errors from matched API routes", async () => {
-    const response = await request("/api/rendro/projects", { method: "POST", headers: { origin: "https://foreign.test", "content-type": "application/json" }, body: "{}" });
+    const response = await request("/api/auth/set-initial-password", { method: "POST", headers: { origin: "https://foreign.test", "content-type": "application/json" }, body: "{}" });
     expect(response.status).toBe(403);
     expect(response.headers.get("Content-Type")).toContain("application/json");
     expect(await response.json()).toEqual({ error: "Same-origin request required" });

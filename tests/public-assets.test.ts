@@ -7,6 +7,7 @@ import { faviconAssets, faviconCacheControl } from "@/routes/favicon";
 import { bundleCacheControl, publicAssetHeaders, publicAssetPaths } from "@/routes/public-assets";
 import { versionedBundles } from "@/routes/versioned-bundles";
 import { docsBase, mockSecurityBackend, testUser } from "./fixtures/security-headers";
+import { sessionCache } from "@/session-cache";
 import { privateRepo, repoReadFixture } from "./helpers/repo-read-fixture";
 
 vi.mock("@hono/node-server", () => ({ serve: vi.fn() }));
@@ -29,8 +30,11 @@ describe("public asset inventory", () => {
   it("lists every versioned bundle in the asset-version ledger at its current version", () => {
     expect(bundles.length).toBeGreaterThan(0);
     for (const [path, version] of bundles) expect(ledger[`public${path}`]?.[version], path).toMatch(/^[0-9a-f]{64}$/);
-    // The ledger tracks exactly the bundles that can be served as immutable.
-    expect(Object.keys(ledger).sort()).toEqual(bundles.map(([path]) => `public${path}`).sort());
+    // The ledger tracks exactly the bundles that can be served as immutable, plus the recorded history
+    // of retired bundles (#286), which is immutable but never served.
+    const retired = ["public/management-pages.js", "public/management-query.js", "public/select.js"];
+    expect(Object.keys(ledger).filter(path => !retired.includes(path)).sort()).toEqual(bundles.map(([path]) => `public${path}`).sort());
+    for (const path of retired) expect(publicAssetPaths, path).not.toContain(path.slice("public".length));
   });
 
   it("classifies every file in public/: allowlisted, a hashed font, license or stylesheet, or absent", () => {
@@ -105,19 +109,22 @@ describe("Worker and Node serve public assets without a session lookup", () => {
   });
 
   it("never evicts or refreshes a warm identity cache", async () => {
-    const page = () => worker.request("https://rendro.test/organizations/org-a", { headers: { cookie } }, { ASSETS: assetsFor() });
-    expect((await page()).status).toBe(200);
+    // The repository read path's cached identity (the only one the Worker reuses).
+    sessionCache.clear();
+    await sessionCache.lookup(cookie, () => Promise.resolve({ kind: "authenticated", user: testUser, expiresAt: Date.now() + 60_000 } as never));
     const warm = sessionCalls();
-    expect(warm).toBe(1);
+    expect(warm).toBe(0);
     for (const [path, version] of bundles) await worker.request(`https://rendro.test${path}?v=${version}`, { headers: { cookie } }, { ASSETS: assetsFor() });
     for (const path of [...Object.keys(faviconAssets), "/landing-product.webp", `/fonts/${readdirSync("public/fonts").find(file => file.endsWith(".woff2"))}`]) {
       await worker.request(`https://rendro.test${path}`, { headers: { cookie } }, { ASSETS: assetsFor() });
     }
     expect(sessionCalls()).toBe(warm);
-    expect((await page()).status).toBe(200);
-    expect(sessionCalls()).toBe(warm);
+    const fresh = vi.fn();
+    await sessionCache.lookup(cookie, fresh);
+    expect(fresh).not.toHaveBeenCalled();
+    sessionCache.clear();
     // An asset response never carries per-user state or the session's private policy.
-    const response = await worker.request(`https://rendro.test/select.js?v=${versionedBundles["/select.js"]}`, { headers: { cookie } }, { ASSETS: assetsFor() });
+    const response = await worker.request(`https://rendro.test/rum.js?v=${versionedBundles["/rum.js"]}`, { headers: { cookie } }, { ASSETS: assetsFor() });
     expect(response.headers.get("cache-control")).toBe(immutable);
   });
 
@@ -134,9 +141,9 @@ describe("Worker and Node serve public assets without a session lookup", () => {
   });
 
   it("serves the current bytes uncached for a stale open tab's old version", async () => {
-    const current = versionedBundles["/management-pages.js"];
+    const current = versionedBundles["/commentor.js"];
     for (const version of ["19", String(Number(current) - 1), String(Number(current) + 1)]) {
-      const response = await worker.request(`https://rendro.test/management-pages.js?v=${version}`, { headers: { cookie } }, { ASSETS: assetsFor() });
+      const response = await worker.request(`https://rendro.test/commentor.js?v=${version}`, { headers: { cookie } }, { ASSETS: assetsFor() });
       expect(response.status).toBe(200);
       expect(response.headers.get("cache-control")).toBe("no-store");
       expect(await response.text()).toBe("bytes");
@@ -145,12 +152,12 @@ describe("Worker and Node serve public assets without a session lookup", () => {
 
   it("does not label or cache a missing or failing asset as immutable", async () => {
     for (const status of [404, 500]) {
-      const response = await worker.request(`https://rendro.test/select.js?v=${versionedBundles["/select.js"]}`, {}, { ASSETS: assetsFor({ status }) });
+      const response = await worker.request(`https://rendro.test/rum.js?v=${versionedBundles["/rum.js"]}`, {}, { ASSETS: assetsFor({ status }) });
       expect(response.status).toBe(status);
       expect(response.headers.get("cache-control")).not.toContain("immutable");
       expect(response.headers.get("content-type")).not.toBe("text/javascript; charset=utf-8");
     }
-    const unbound = await worker.request(`https://rendro.test/select.js?v=${versionedBundles["/select.js"]}`);
+    const unbound = await worker.request(`https://rendro.test/rum.js?v=${versionedBundles["/rum.js"]}`);
     expect(unbound.status).toBe(404);
     expect(unbound.headers.get("cache-control")).toBe("private, no-store");
   });
@@ -158,31 +165,37 @@ describe("Worker and Node serve public assets without a session lookup", () => {
   it("only serves assets for GET and HEAD, and never reaches ASSETS for application paths", async () => {
     const assets = assetsFor();
     for (const method of ["POST", "PUT", "DELETE", "PATCH"]) {
-      const response = await worker.request(`https://rendro.test/select.js?v=${versionedBundles["/select.js"]}`, { method, headers: { cookie, origin: "https://rendro.test" } }, { ASSETS: assets });
+      const response = await worker.request(`https://rendro.test/rum.js?v=${versionedBundles["/rum.js"]}`, { method, headers: { cookie, origin: "https://rendro.test" } }, { ASSETS: assets });
       expect(response.headers.get("cache-control"), method).not.toContain("immutable");
       expect(response.status, method).not.toBe(200);
     }
-    for (const path of ["/organizations", "/api/auth/me", docsBase, "/sign-in", "/unlisted.js", "/robots.txt", "/fonts"]) {
+    for (const path of ["/home", "/api/auth/me", docsBase, "/sign-in", "/unlisted.js", "/robots.txt", "/fonts"]) {
       await worker.request(`https://rendro.test${path}`, { headers: { cookie } }, { ASSETS: assets });
     }
     expect(assets.fetch).not.toHaveBeenCalled();
   });
 
   describe("Node server", () => {
-    const committed = bundles.filter(([path]) => ["/management-query.js", "/select.js", "/management-pages.js"].includes(path));
-
-    it.each(committed)("serves %s from public/ with the same headers and no session lookup", async (path, version) => {
-      const bytes = readFileSync(`public${path}`);
+    // Built bundles are gitignored: a built one is served with the Worker's headers, and one never built is a
+    // plain 404 that never enters the session stack and never looks cached.
+    it.each(bundles)("serves %s from public/ with the same headers and no session lookup", async (path, version) => {
+      const built = existsSync(`public${path}`);
       for (const [search, cacheControl] of [[`?v=${version}`, immutable], ["?v=0", "no-store"], ["", "no-store"]] as const) {
         for (const headers of [{ cookie }, {} as Record<string, string>]) {
           vi.mocked(fetch).mockClear();
           const response = await local.request(`https://rendro.test${path}${search}`, { headers }, nodeContext);
+          expect(fetch).not.toHaveBeenCalled();
+          expect(response.headers.get("x-content-type-options")).toBe("nosniff");
+          if (!built) {
+            expect(response.status).toBe(404);
+            expect(await response.text()).toBe("");
+            expect(response.headers.get("cache-control")).toBe("private, no-store");
+            continue;
+          }
           expect(response.status).toBe(200);
           expect(response.headers.get("content-type")).toBe("text/javascript; charset=utf-8");
           expect(response.headers.get("cache-control")).toBe(cacheControl);
-          expect(response.headers.get("x-content-type-options")).toBe("nosniff");
-          expect(Buffer.from(await response.arrayBuffer())).toEqual(bytes);
-          expect(fetch).not.toHaveBeenCalled();
+          expect(Buffer.from(await response.arrayBuffer())).toEqual(readFileSync(`public${path}`));
         }
       }
     });
@@ -195,23 +208,15 @@ describe("Worker and Node serve public assets without a session lookup", () => {
       expect(fetch).not.toHaveBeenCalled();
     });
 
-    it("answers HEAD, ends a missing bundle as an empty 404, and ignores non-GET methods", async () => {
-      const [path, version] = committed[0];
-      const head = await local.request(`https://rendro.test${path}?v=${version}`, { method: "HEAD" }, nodeContext);
+    it("answers HEAD and ignores non-GET methods", async () => {
+      const head = await local.request("https://rendro.test/favicon.svg", { method: "HEAD" }, nodeContext);
       expect(head.status).toBe(200);
-      expect(head.headers.get("cache-control")).toBe(immutable);
+      expect(head.headers.get("cache-control")).toBe(faviconCacheControl);
+      expect(await head.text()).toBe("");
+      const [path, version] = bundles[0];
       const post = await local.request(`https://rendro.test${path}?v=${version}`, { method: "POST", headers: { cookie } }, nodeContext);
       expect(post.headers.get("cache-control")).not.toContain("immutable");
-      vi.mocked(fetch).mockClear();
-      // Built output is gitignored: a bundle that was never built is a plain 404 that never enters
-      // the session stack (and never looks cached), while a built one is served normally.
-      const missing = await local.request(`https://rendro.test/lazy-tree.js?v=${versionedBundles["/lazy-tree.js"]}`, { headers: { cookie } }, nodeContext);
-      expect(missing.status).toBe(existsSync("public/lazy-tree.js") ? 200 : 404);
-      if (missing.status === 404) {
-        expect(await missing.text()).toBe("");
-        expect(missing.headers.get("cache-control")).toBe("private, no-store");
-      }
-      expect(fetch).not.toHaveBeenCalled();
+      expect(post.status).not.toBe(200);
     });
 
     it("returns 404 for unlisted paths without serving files from public/", async () => {
@@ -237,7 +242,7 @@ describe("rendered pages reference only served bundle versions", () => {
     const shell = `/r/${privateRepo.owner}/${privateRepo.name}`;
     const frameBase = /data-frame-base="([^"]+)"/.exec(await (await worker.request(`https://rendro.test${shell}`, { headers: { cookie } }, env, fixture.ctx)).text())![1];
     const pages = [
-      "/organizations/org-a", "/organizations/org-a/projects", "/organizations/org-a/people", "/account/security",
+      "/", "/home", "/account/security",
       shell, `${frameBase}/files/docs/index.md`,
     ];
     for (const page of pages) {
@@ -247,7 +252,7 @@ describe("rendered pages reference only served bundle versions", () => {
         expect(publicAssetHeaders(path, `?v=${version}`)?.["Cache-Control"], `${page} references ${path}?v=${version}`).toBe(immutable);
       }
     }
-    // The shell, management and frame pages together reference each bundle family.
-    expect([...seen].sort()).toEqual(expect.arrayContaining(["/commentor-parent.js", "/commentor.js", "/lazy-tree.js", "/management-pages.js", "/management-query.js", "/private-viewer.js", "/select.js"]));
+    // The shell and frame pages together reference each bundle family.
+    expect([...seen].sort()).toEqual(expect.arrayContaining(["/commentor-parent.js", "/commentor.js", "/lazy-tree.js", "/private-viewer.js"]));
   });
 });

@@ -28,22 +28,7 @@ describe("Better Auth session revocation", () => {
     const configured = createAuthOptions({} as never);
     expect(configured.session.cookieCache).toEqual({ enabled: false });
 
-    const organizationPlugin = configured.plugins.find(
-      (plugin) => plugin.id === "organization",
-    );
-    expect(organizationPlugin).toBeDefined();
-
-    const database: Record<string, unknown[]> = {
-      user: [],
-      session: [],
-      account: [],
-      verification: [],
-      organization: [],
-      member: [],
-      invitation: [],
-      team: [],
-      teamMember: [],
-    };
+    const database: Record<string, unknown[]> = { user: [], session: [], account: [], verification: [] };
     const runtimeOptions = {
       ...configured,
       baseURL: baseUrl,
@@ -54,13 +39,10 @@ describe("Better Auth session revocation", () => {
     };
     const cacheIssuer = betterAuth({
       ...runtimeOptions,
-      plugins: [organizationPlugin!, testUtils()],
+      plugins: [testUtils()],
       session: { cookieCache: { enabled: true, maxAge: 5 * 60 } },
     });
-    const protectedAuth = betterAuth({
-      ...runtimeOptions,
-      plugins: [organizationPlugin!, testUtils()],
-    });
+    const protectedAuth = betterAuth({ ...runtimeOptions, plugins: [testUtils()] });
 
     const issuerContext = await cacheIssuer.$context;
     const user = issuerContext.test!.createUser({
@@ -69,16 +51,6 @@ describe("Better Auth session revocation", () => {
       name: "Session Revocation",
     });
     await issuerContext.test!.saveUser(user);
-    const organization = issuerContext.test!.createOrganization!({
-      name: "Revocation Test",
-      slug: "revocation-test",
-    });
-    await issuerContext.test!.saveOrganization!(organization);
-    await issuerContext.test!.addMember!({
-      userId: user.id,
-      organizationId: String(organization.id),
-      role: "owner",
-    });
     const login = await issuerContext.test!.login({ userId: user.id });
 
     const cachedSessionResponse = await cacheIssuer.handler(new Request(
@@ -92,22 +64,15 @@ describe("Better Auth session revocation", () => {
     );
     expect(cachedHeaders.get("cookie")).toMatch(/session_data/);
 
-    const organizationUrl = `${baseUrl}/api/auth/organization/get-full-organization?organizationId=${encodeURIComponent(String(organization.id))}`;
-    const beforeRevocation = await protectedAuth.handler(new Request(
-      organizationUrl,
-      { headers: cachedHeaders },
-    ));
+    const sessionUrl = `${baseUrl}/api/auth/get-session`;
+    const beforeRevocation = await protectedAuth.handler(new Request(sessionUrl, { headers: cachedHeaders }));
     expect(beforeRevocation.status).toBe(200);
-    await expect(beforeRevocation.json()).resolves.toMatchObject({
-      id: organization.id,
-    });
+    await expect(beforeRevocation.json()).resolves.toMatchObject({ user: { id: user.id } });
 
     await issuerContext.internalAdapter.deleteSession(login.session.token);
 
-    const afterRevocation = await protectedAuth.handler(new Request(
-      organizationUrl,
-      { headers: cachedHeaders },
-    ));
-    expect(afterRevocation.status).toBe(401);
+    // The signed cache cookie still verifies, but the deleted session is not trusted.
+    const afterRevocation = await protectedAuth.handler(new Request(sessionUrl, { headers: cachedHeaders }));
+    await expect(afterRevocation.json()).resolves.toBeNull();
   });
 });
