@@ -58,6 +58,36 @@ describe("repository quality gates", () => {
     expect(readFileSync(join(root, ".github/workflows/quality.yml"), "utf8")).toContain("run: pnpm verify");
   });
 
+  it("checks the bundle-size budget after rebuilding, in verify and so in CI's verify job", () => {
+    expect(scripts["verify:budget"]).toBe("tsx scripts/verify-bundle-budget.ts");
+    expect(scripts["record:budget"]).toBe("tsx scripts/verify-bundle-budget.ts --record");
+    expect(scripts.verify.indexOf("pnpm verify:budget")).toBeGreaterThan(scripts.verify.indexOf("pnpm build:assets"));
+  });
+
+  it("runs the bundle budget CLI: fails growth beyond the recorded size until it is recorded", () => {
+    const directory = mkdtempSync(join(tmpdir(), "rendro-budget-gate-"));
+    fixtures.push(directory);
+    for (const path of ["scripts", "public/styles", "public/fonts", "src/ingest/comrak-engine"]) mkdirSync(join(directory, path), { recursive: true });
+    for (const name of ["verify-bundle-budget.ts", "bundle-budget.ts"]) symlinkSync(join(root, "scripts", name), join(directory, "scripts", name));
+    for (const name of ["routes", "viewer"]) symlinkSync(join(root, "src", name), join(directory, "src", name));
+    symlinkSync(join(root, "node_modules"), join(directory, "node_modules"));
+    for (const name of assets) writeFileSync(join(directory, "public", name), "const version = 1;\n");
+    writeFileSync(join(directory, "src/ingest/comrak-engine/comrak_engine_bg.wasm"), "\0asm");
+    const run = (script: string) => spawnSync("sh", ["-c", scripts[script]], { cwd: directory, encoding: "utf8", env: subprocessEnv() });
+
+    expect(run("record:budget").status).toBe(0);
+    const verified = run("verify:budget");
+    expect(verified.status, verified.stdout + verified.stderr).toBe(0);
+    expect(verified.stdout).toBe(`Bundle budget verified (${assets.length + 1} bundles, 1% tolerance).\n`);
+    writeFileSync(join(directory, "public/commentor.js"), "const version = 1; // and a lot more weight than before\n");
+    const grown = run("verify:budget");
+    expect(grown.status).toBe(1);
+    expect(grown.stdout).toContain("public/commentor.js grew beyond its budget: Brotli");
+    expect(grown.stdout).toContain("run pnpm record:budget and commit scripts/bundle-budget.json");
+    expect(run("record:budget").status).toBe(0);
+    expect(run("verify:budget").status).toBe(0);
+  });
+
   it("schedules a credential-free stability workflow: constrained coverage twice with diffs, e2e without retries", () => {
     const workflow = readFileSync(join(root, ".github/workflows/stability.yml"), "utf8");
     expect(workflow).toMatch(/schedule:\s+- cron:/);
