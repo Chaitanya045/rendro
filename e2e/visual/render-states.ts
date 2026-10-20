@@ -111,7 +111,7 @@ async function openCell(page: Page, visual: VisualState, family: string, state: 
         await widgetUi(page).getByTestId("commentor-panel-btn").press("Enter");
         await expect(widgetUi(page).getByTestId("commentor-drawer")).toHaveAttribute("aria-hidden", "false");
         await liveComments(page);
-        await remeasureDrawer(page);
+        await drawerSettled(page);
         return rendered();
       }
       case "repo":
@@ -146,23 +146,15 @@ async function liveComments(page: Page) {
 }
 
 /**
- * The open drawer sizes itself to its list when it opens and when a page re-renders it, not when the frame's own layout
- * settles later; its tabs are taller below the widget's 760px breakpoint, and one run kept a drawer 8px taller than the next
- * (#276). Once the frame's fonts are in, a resize makes it measure the list as it is, as the reader's next window resize
- * would, until two measures agree.
+ * The open drawer fits its content as it changes (#322) and says when it has: `data-layout="settled"`. The fonts are
+ * awaited first, and a frame passes so the widget has observed the size they gave its text before the state is read.
  */
-async function remeasureDrawer(page: Page) {
+async function drawerSettled(page: Page) {
   await content(page).locator("body").evaluate(async () => {
     await document.fonts.ready;
-    const frames = () => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
-    const drawer = () => document.getElementById("commentor-host")?.shadowRoot?.querySelector<HTMLElement>('[data-testid="commentor-drawer"]')?.style.height ?? "";
-    for (let attempt = 0, last = ""; attempt < 5; attempt++) {
-      window.dispatchEvent(new Event("resize"));
-      await frames();
-      if (drawer() === last) return;
-      last = drawer();
-    }
+    await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
   });
+  await expect(widgetUi(page).getByTestId("commentor-drawer")).toHaveAttribute("data-layout", "settled");
 }
 
 /**
@@ -587,7 +579,7 @@ async function commentSocket(page: Page): Promise<CommentSocket> {
  * the toast lifetime) are stretched so a state cannot lapse between the settle and the shot, and the close undoes the deletion.
  */
 async function openThreadState(page: Page, visual: VisualState, state: string, closers: Array<() => Promise<void>>, done: (verify?: () => Promise<void>) => Rendered): Promise<Rendered> {
-  const rendered = async () => { await remeasureDrawer(page); return done(); };
+  const rendered = async () => { await drawerSettled(page); return done(); };
   const socket = await commentSocket(page);
   closers.push(async () => { socket.rejectWrites(false); socket.blackhole(false); await page.evaluate(() => sessionStorage.clear()).catch(() => undefined); });
   await page.goto(`${visual.docs}?doc=${encodeURIComponent("docs/reference/config.md")}`);
@@ -635,14 +627,7 @@ async function openThreadState(page: Page, visual: VisualState, state: string, c
     await retry.getByTestId("commentor-delete-btn").press("Enter");
     const undo = ui.locator(".toast").getByRole("button", { name: "Undo" });
     await expect(undo).toBeVisible();
-    // The open drawer keeps the height it measured with the thread in it until a later snapshot happens to re-measure it, so
-    // the shot caught either height (#276). Reopening it measures the list as it is now; the toast lives outside the drawer.
-    // A programmatic click neither focuses nor hovers the button, so its tooltip stays closed.
-    const panel = ui.getByTestId("commentor-panel-btn");
-    await panel.evaluate(button => (button as HTMLButtonElement).click());
-    await expect(ui.getByTestId("commentor-drawer")).toHaveAttribute("aria-hidden", "true");
-    await panel.evaluate(button => (button as HTMLButtonElement).click());
-    await expect(ui.getByTestId("commentor-drawer")).toHaveAttribute("aria-hidden", "false");
+    // The open drawer shrinks to the list without the thread by itself (#322); the toast lives outside the drawer.
     await layerToasts(ui);
     closers.push(async () => { if (await undo.count()) await undo.click().catch(() => undefined); });
     return rendered();

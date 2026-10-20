@@ -86,7 +86,11 @@ export async function signout(page: Page) {
   // Method loading expands the security card and moves Sign out. WebKit can
   // finish its actionability check before that layout change and miss the click.
   await securityReady(page);
+  // The sign-out request is the real signal: when the backend misses the Worker's upstream budget the page rightly
+  // reports a failed sign-out, and the answer says so instead of a heading that never appears (#322).
+  const response = page.waitForResponse(response => new URL(response.url()).pathname === "/api/auth/sign-out" && response.request().method() === "POST");
   await page.getByRole("button", { name: "Sign out", exact: true }).click();
+  expect((await response).status(), "sign-out answer").toBe(200);
   await expect(page.getByRole("heading", { name: "You're signed out" })).toBeVisible();
   expect(await session(page)).toBeNull();
 }

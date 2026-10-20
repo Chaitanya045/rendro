@@ -309,13 +309,18 @@ textarea:disabled {
   width: 100%;
   overflow-y: auto;
   overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+.content-body {
   padding: 4px 8px 10px;
   display: flex;
   flex-direction: column;
   gap: 8px;
-  scrollbar-width: thin;
-  scrollbar-color: var(--border) transparent;
 }
+/* Laid out at the drawer's target width while its own width animates there (clipped, never reflowed). */
+.content-head, .content-list { min-width: var(--drawer-width, 0px); }
+.filter-tabs { min-width: calc(var(--drawer-width, 20px) - 20px); }
 .content-list::-webkit-scrollbar { width: 5px; }
 .content-list::-webkit-scrollbar-track { background: transparent; }
 .content-list::-webkit-scrollbar-thumb {

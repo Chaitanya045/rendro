@@ -358,6 +358,8 @@ class Commentor {
   private dock: HTMLElement;
   private content!: HTMLElement;
   private drawerList!: HTMLElement;
+  // The list's cards in their natural height: the list itself is only as tall as the drawer lets it be.
+  private drawerBody!: HTMLElement;
   private toolbar!: HTMLElement;
   private commentButton!: HTMLButtonElement;
   private commentsBtn!: HTMLButtonElement;
@@ -415,6 +417,7 @@ class Commentor {
   private parentUpgradeRequired = false;
   private canReloadViewer = false;
   private raf = 0;
+  private drawerRaf = 0;
   private openThreadId: ThreadId | null = null;
   private closeTimer = 0;
   // Where a close animation in flight will return focus; a later close must not drop it.
@@ -545,7 +548,7 @@ class Commentor {
         tabindex: "0",
         "aria-label": "Active comments",
         onscroll: () => this.onDrawerScroll(),
-      })),
+      }, (this.drawerBody = h("div", { class: "content-body" })))),
       this.newCommentsButton,
     );
 
@@ -587,12 +590,8 @@ class Commentor {
       passive: true,
     });
     window.addEventListener("resize", () => {
-      if (this.dock.hasAttribute("data-expanded")) {
-        const { w, h } = this.sizeContent();
-        this.repositionExpandedDock(w, h);
-      } else {
-        this.repositionDock();
-      }
+      if (this.dock.hasAttribute("data-expanded")) this.layoutDrawer();
+      else this.repositionDock();
       this.scheduleReposition();
     });
     // Content that reflows without a scroll or window resize (images, fonts, expanding
@@ -600,6 +599,10 @@ class Commentor {
     const reflow = new ResizeObserver(() => this.scheduleReposition());
     reflow.observe(document.documentElement);
     reflow.observe(document.body);
+    // The open drawer fits what it shows, however that changes: a re-render, a reply box the reader drags taller,
+    // text reflowing once the fonts load. The observer's first callback is the initial frame.
+    const drawerReflow = new ResizeObserver(() => this.scheduleDrawerLayout());
+    for (const part of [this.content.querySelector(".content-head")!, this.filterTabs, this.drawerBody]) drawerReflow.observe(part);
     document.addEventListener("keydown", (e) => {
       if (e.key === "Escape") {
         if (this.commentMode) this.setCommentMode(false);
@@ -693,12 +696,6 @@ class Commentor {
       this.renderPins();
       this.renderDrawerList();
       if (incomingActive > 0) this.announceNewComments(incomingActive);
-      if (this.dock.hasAttribute("data-expanded")) {
-        requestAnimationFrame(() => {
-          const { w, h } = this.sizeContent();
-          this.repositionExpandedDock(w, h);
-        });
-      }
       this.refreshOpenBubble();
       if (activeThreadId) {
         requestAnimationFrame(() => {
@@ -797,6 +794,8 @@ class Commentor {
         this.canEdits = this.canWrite && parentEdits === true;
         if (!this.canEdits) this.editing = null;
         this.commentButton.disabled = !this.canWrite;
+        // A mode the disabled Comment control can no longer leave would keep its hint over the drawer.
+        if (!this.canWrite && this.commentMode) this.setCommentMode(false);
         if (!compatible) {
           this.closeBubbles(false, true);
           this.threads = [];
@@ -1387,12 +1386,6 @@ class Commentor {
     this.renderPins();
     this.renderDrawerList();
     this.refreshOpenBubble();
-    if (this.dock.hasAttribute("data-expanded")) {
-      requestAnimationFrame(() => {
-        const { w, h } = this.sizeContent();
-        this.repositionExpandedDock(w, h);
-      });
-    }
   }
 
   /** The reader's new thread, in flight with this clientOperationId; nothing when the write was refused before it left. */
@@ -2359,10 +2352,6 @@ class Commentor {
     }
     this.renderDrawerList(false);
     this.renderPins();
-    requestAnimationFrame(() => {
-      const { w, h } = this.sizeContent();
-      this.repositionExpandedDock(w, h);
-    });
   }
 
   private onFilterKeyDown(e: KeyboardEvent, filter: ThreadFilter): void {
@@ -2398,10 +2387,6 @@ class Commentor {
     this.commentsBtn.classList.add("active");
     this.renderDrawerList(false);
     this.renderPins();
-    requestAnimationFrame(() => {
-      const { w, h } = this.sizeContent();
-      this.repositionExpandedDock(w, h);
-    });
   }
 
   private collapseDrawer(immediate = false): void {
@@ -2411,6 +2396,7 @@ class Commentor {
     }
     this.commentsBtn.setAttribute("aria-expanded", "false");
     this.commentsBtn.classList.remove("active");
+    delete this.content.dataset.layout;
     this.content.inert = true;
     this.content.setAttribute("aria-hidden", "true");
     this.content.style.height = "0px";
@@ -2438,17 +2424,31 @@ class Commentor {
     }, 300);
   }
 
+  /**
+   * Coalesces everything that can change the open drawer's size (a re-render, content that resizes on its own) into one
+   * layout pass per animation frame. `data-layout` is "pending" while a pass is due and "settled" once the drawer has the
+   * size and place its current content gives it, the same a fresh open would.
+   */
+  private scheduleDrawerLayout(): void {
+    if (!this.dock.hasAttribute("data-expanded")) return;
+    this.content.dataset.layout = "pending";
+    if (this.drawerRaf) return;
+    this.drawerRaf = requestAnimationFrame(() => {
+      this.drawerRaf = 0;
+      this.layoutDrawer();
+    });
+  }
+
+  private layoutDrawer(): void {
+    if (!this.dock.hasAttribute("data-expanded")) return;
+    const { w, h } = this.sizeContent();
+    this.repositionExpandedDock(w, h);
+    this.content.dataset.layout = "settled";
+  }
+
   private sizeContent(): { w: number; h: number } {
-    if (!this.dock.hasAttribute("data-expanded")) return { w: 0, h: 0 };
     const compact = window.innerWidth < 420;
     this.dock.toggleAttribute("data-compact-sheet", compact);
-    const headH = this.content.querySelector<HTMLElement>(".content-head")!.offsetHeight;
-    const tabsH = this.filterTabs.offsetHeight;
-    const maxH = Math.min(window.innerHeight * 0.6, 520);
-    const naturalH = Math.min(
-      headH + tabsH + this.drawerList.scrollHeight,
-      maxH,
-    );
     const tw = this.toolbar.offsetWidth;
     const horizontal =
       !compact && (this.dockEdge === "left" || this.dockEdge === "right");
@@ -2457,6 +2457,16 @@ class Commentor {
       window.innerWidth - 2 * MARGIN - (horizontal ? tw : 0),
     );
     const targetW = Math.min(380, availW);
+    // The drawer's parts are laid out at the width it is opening to, not at the one its width transition is passing
+    // through, so the height is measured for the text as it will wrap.
+    this.content.style.setProperty("--drawer-width", `${targetW}px`);
+    const maxH = Math.min(window.innerHeight * 0.6, 520);
+    // The list's own height is whatever the drawer gives it; its cards' natural height is the body's. The list starts
+    // below the head and the tabs, margins included.
+    const naturalH = Math.min(
+      this.drawerList.offsetTop + Math.ceil(this.drawerBody.getBoundingClientRect().height),
+      maxH,
+    );
     const targetH = horizontal ? maxH : naturalH;
     this.content.style.height = `${targetH}px`;
     this.content.style.width = `${targetW}px`;
@@ -2464,7 +2474,6 @@ class Commentor {
   }
 
   private repositionExpandedDock(contentW: number, contentH: number): void {
-    if (!this.dock.hasAttribute("data-expanded")) return;
     const tw = this.toolbar.offsetWidth;
     const th = this.toolbar.offsetHeight;
     const ds = getComputedStyle(this.dock);
@@ -2513,9 +2522,10 @@ class Commentor {
       );
     }
     const place = keepPlace && this.dock.hasAttribute("data-expanded") ? this.captureDrawerPlace() : null;
-    this.drawerList.replaceChildren();
+    this.scheduleDrawerLayout();
+    this.drawerBody.replaceChildren();
     if (this.parentUpgradeRequired) {
-      this.drawerList.append(h("div", { class: "empty", role: "status", "aria-live": "polite" },
+      this.drawerBody.append(h("div", { class: "empty", role: "status", "aria-live": "polite" },
         h("p", undefined, COMMENTOR_UPGRADE_NOTICE),
         ...(this.canReloadViewer
           ? [h("button", { type: "button", onclick: () => this.parentTransport.requestViewerReload() }, "Show reload notice")]
@@ -2537,7 +2547,7 @@ class Commentor {
         this.loadingMoreThreads ? "Loading older comments…" : "Load older comments",
       ) as HTMLButtonElement;
       loadOlder.disabled = this.loadingMoreThreads;
-      this.drawerList.append(loadOlder);
+      this.drawerBody.append(loadOlder);
     }
     if (visible.length === 0) {
       const title: Record<ThreadFilter, string> = {
@@ -2574,7 +2584,7 @@ class Commentor {
           ),
         );
       }
-      this.drawerList.append(empty);
+      this.drawerBody.append(empty);
       return;
     }
     for (const t of visible) {
@@ -2622,7 +2632,7 @@ class Commentor {
           this.focusThread(t, card);
         }
       });
-      this.drawerList.append(card);
+      this.drawerBody.append(card);
     }
     this.restoreDrawerPlace(place, visible);
     this.highlightThread(this.highlightedThreadId);
