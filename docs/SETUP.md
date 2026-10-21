@@ -97,7 +97,7 @@ pnpm preflight:prod --online   # owner only, with production credentials: also t
 | Control Worker `rendro-control` | `wrangler.control.toml`, top level | `pnpm exec wrangler deploy --config wrangler.control.toml` |
 | Convex | the production deployment (`--prod`) | `pnpm exec convex deploy` |
 
-Production is the top level of each wrangler file, as `pnpm run deploy` deploys it. The top levels of `wrangler.ingest.toml` and `wrangler.control.toml` are still the development Workers (`rendro-ingest-dev`, `rendro-control-dev`) that the tests run, so until their production configurations exist, the preflight reports them under "Worker name".
+Production is the top level of each wrangler file, as `pnpm run deploy` deploys it. The development Workers (`rendro-dev`, `rendro-ingest-dev`, `rendro-control-dev`) are each file's `[env.development]`, which the tests load. The top levels of `wrangler.ingest.toml` and `wrangler.control.toml` are production skeletons (#336): name, entry, Durable Objects, queues and cron, but no R2 bucket, D1 database or KV namespace. Until those are created and bound, the preflight reports them missing.
 
 Each line has a status:
 
@@ -138,8 +138,8 @@ Rendro runs as three Workers ([TECHNICAL.md](TECHNICAL.md#architecture)):
 | Worker | Configuration | Role |
 |---|---|---|
 | Serving Worker (`rendro`, `rendro-dev`) | `wrangler.toml` | Pages, auth proxy, the `/r/` read path, image proxy, static assets |
-| Ingest Worker (`rendro-ingest`; `rendro-ingest-dev` today) | `wrangler.ingest.toml` | Renders repository Markdown into R2 and the D1 search index |
-| Control Worker (`rendro-control`; `rendro-control-dev` today) | `wrangler.control.toml` | Mirrors GitHub permissions and receives the GitHub App's webhooks |
+| Ingest Worker (`rendro-ingest`, `rendro-ingest-dev`) | `wrangler.ingest.toml` | Renders repository Markdown into R2 and the D1 search index |
+| Control Worker (`rendro-control`, `rendro-control-dev`) | `wrangler.control.toml` | Mirrors GitHub permissions and receives the GitHub App's webhooks |
 
 The secrets and vars each Worker needs are in the manifest. `[secrets] required` in each wrangler section makes Wrangler refuse a deploy while one is unset, and `src/config.ts` validates the serving Worker's at startup. No two secrets may share a value; generate each with `openssl rand -hex 32`. List secret names with `pnpm exec wrangler secret list` for production (`rendro`) and `pnpm exec wrangler secret list --env development` for development (`rendro-dev`). Production uses the top-level configuration; there is no named `--env production` environment.
 
@@ -152,7 +152,7 @@ pnpm exec wrangler secret put <NAME> --config wrangler.control.toml   # control 
 pnpm run deploy
 ```
 
-`pnpm run deploy` runs `pnpm build:assets` before `wrangler deploy`; a bare `wrangler deploy` from a fresh checkout ships without the git-ignored bundles. For the `rendro-dev` Worker (`dev.rendro.app`), add `--env development` to each `wrangler secret put` and run `pnpm run deploy --env development`. Use the explicit `run`: `pnpm deploy` is an unrelated pnpm command. See [Deploy Commands](TECHNICAL.md#deploy-commands) and [Environment Variables (Workers)](TECHNICAL.md#environment-variables-workers).
+`pnpm run deploy` runs `pnpm build:assets` before `wrangler deploy`; a bare `wrangler deploy` from a fresh checkout ships without the git-ignored bundles. For the development Workers, add `--env development` to each `wrangler secret put` and deploy: `pnpm run deploy --env development` for `rendro-dev` (`dev.rendro.app`), `pnpm exec wrangler deploy --config wrangler.ingest.toml --env development` for `rendro-ingest-dev`, and the same with `wrangler.control.toml` for `rendro-control-dev`. Without `--env`, the ingest and control commands target the production Workers. Use the explicit `run`: `pnpm deploy` is an unrelated pnpm command. See [Deploy Commands](TECHNICAL.md#deploy-commands) and [Environment Variables (Workers)](TECHNICAL.md#environment-variables-workers).
 
 `/r/` stays a 404 in production until the [checklist](#production-readiness-checklist) passes: the read path's bindings are not wired there yet.
 

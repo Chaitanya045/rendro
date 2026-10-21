@@ -74,6 +74,8 @@ beforeAll(async () => {
     root,
     workers: [{
       configPath: "wrangler.ingest.toml",
+      // The development Worker; the top level is the production skeleton (#336).
+      env: "development",
       vars: { GITHUB_API_ORIGIN: github.origin, GITHUB_ARCHIVE_ORIGINS: github.archiveOrigin },
       secrets: { GITHUB_DEV_TOKEN: github.token, IMAGE_PROXY_SECRET: process.env.IMAGE_PROXY_SECRET as string, REPO_CONTENT_KEY: process.env.REPO_CONTENT_KEY as string },
     }],

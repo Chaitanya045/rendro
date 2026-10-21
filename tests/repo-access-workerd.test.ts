@@ -103,7 +103,7 @@ beforeAll(async () => {
   };
   const controlVars = { GITHUB_API_ORIGIN: github.origin, GITHUB_WEB_ORIGIN: github.webOrigin, GITHUB_APP_CLIENT_ID: github.clientId };
   const controlSecrets = { GITHUB_WEBHOOK_SECRET: WEBHOOK_SECRET, GITHUB_TOKEN_KEY: "workerd-github-token-key-0123456789abcdef", GITHUB_APP_CLIENT_SECRET: github.clientSecret, GITHUB_DEV_TOKEN: github.token };
-  server = createTestHarness({ root, workers: [{ configPath, vars, secrets: vars }, { configPath: controlPath, vars: controlVars, secrets: controlSecrets }] });
+  server = createTestHarness({ root, workers: [{ configPath, vars, secrets: vars }, { configPath: controlPath, env: controlWorker.env, vars: controlVars, secrets: controlSecrets }] });
   origin = (await server.listen()).url.origin;
   const env = await server.getWorker<ProductEnv>().getEnv();
   const etags = { get: () => Promise.resolve(null), set: () => Promise.resolve() };

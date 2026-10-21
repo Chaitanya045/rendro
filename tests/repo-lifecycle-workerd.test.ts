@@ -147,6 +147,7 @@ script_name = "rendro-ingest-dev"
       { configPath: repoReadWorker.accessConfig },
       {
         configPath: ingestConfigPath,
+        env: "development",
         vars: { GITHUB_API_ORIGIN: github.origin, GITHUB_ARCHIVE_ORIGINS: github.archiveOrigin, REPO_IDLE_EXPIRY_SECONDS: String(IDLE_SECONDS) },
         secrets: { GITHUB_DEV_TOKEN: github.token, IMAGE_PROXY_SECRET: process.env.IMAGE_PROXY_SECRET as string, REPO_CONTENT_KEY: key },
       },

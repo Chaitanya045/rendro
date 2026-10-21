@@ -96,6 +96,7 @@ simple = { limit = 100, period = 60 }
       { configPath: repoReadWorker.accessConfig },
       {
         configPath: ingestConfigPath,
+        env: "development",
         vars: { GITHUB_API_ORIGIN: github.origin, GITHUB_ARCHIVE_ORIGINS: github.archiveOrigin },
         secrets: { GITHUB_DEV_TOKEN: github.token, IMAGE_PROXY_SECRET: process.env.IMAGE_PROXY_SECRET as string, REPO_CONTENT_KEY: process.env.REPO_CONTENT_KEY as string },
       },

@@ -379,6 +379,14 @@ describe("preflight command", () => {
       await import("../scripts/preflight-prod");
       expect(log).toHaveBeenCalledWith(expect.stringMatching(/^\d+ required items? missing, \d+ to verify/));
       expect(log).toHaveBeenCalledWith(expect.stringContaining('Serving Worker "rendro": wrangler.toml (top level)'));
+      // Every top level is the production Worker; the development Workers live under [env.development] (#336).
+      const text = log.mock.calls.map(([line]) => String(line)).join("\n");
+      for (const worker of ["rendro", "rendro-ingest", "rendro-control"]) expect(text).toContain(`ok        Worker name: ${worker}\n`);
+      expect(text).not.toMatch(/rendro-[a-z-]+-dev\b/);
+      // The ingest and control skeletons bind no production resource until the owner creates them.
+      expect(text).toContain("MISSING   INGEST_BUCKET (r2): ");
+      expect(text).toContain("MISSING   REPO_SEARCH (d1): The search index");
+      expect(text).toContain("MISSING   REPO_EPOCHS (kv): Revocation epochs, read by the serving Worker");
       expect(process.exitCode).toBe(0);
     } finally { process.argv = argv; process.exitCode = exitCode; }
   });

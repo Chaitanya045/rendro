@@ -1,8 +1,12 @@
-# Ingest Worker for the GitHub pivot (#214, phase P3b). DEVELOPMENT AND TESTS ONLY.
+# Ingest Worker for the GitHub pivot (#214, phase P3b).
 # No route, no workers.dev URL, no deploy script; nothing in wrangler.toml refers to it.
 # tests/ingest-workerd.test.ts runs it on real workerd against a fake GitHub.
 # Bindings are documented in docs/TECHNICAL.md ("Repository ingest orchestration").
-name = "rendro-ingest-dev"
+#
+# The top level is the production Worker (#336), as in wrangler.toml. It is a skeleton: production's R2
+# bucket and D1 database are not bound yet, so `pnpm preflight:prod` reports them missing until the owner
+# creates them (docs/SETUP.md, "Production readiness checklist"). Development and tests use [env.development].
+name = "rendro-ingest"
 main = "src/ingest/orchestrator/entry.ts"
 compatibility_date = "2025-07-06"
 workers_dev = false
@@ -16,21 +20,16 @@ required = ["IMAGE_PROXY_SECRET", "REPO_CONTENT_KEY"]
 enabled = true
 invocation_logs = false
 
-# Content cache: GitHub stays the source of truth (gh/v1/ key schema).
-[[r2_buckets]]
-binding = "INGEST_BUCKET"
-bucket_name = "rendro-ingest-dev"
-
 [[queues.producers]]
 binding = "INGEST_QUEUE"
-queue = "rendro-ingest-dev"
+queue = "rendro-ingest"
 
 [[queues.consumers]]
-queue = "rendro-ingest-dev"
+queue = "rendro-ingest"
 max_batch_size = 10
 max_batch_timeout = 1
 max_retries = 10
-dead_letter_queue = "rendro-ingest-dev-dlq"
+dead_letter_queue = "rendro-ingest-dlq"
 
 # One coordinator per repository: single flight, serialized ingest, delivery dedupe.
 [[durable_objects.bindings]]
@@ -41,13 +40,52 @@ class_name = "RepoIngestCoordinator"
 tag = "v1"
 new_sqlite_classes = ["RepoIngestCoordinator"]
 
+# Reconciliation: re-check branch heads with ETags; redeliver failed webhooks (from P1).
+[triggers]
+crons = ["*/10 * * * *"]
+
+# ── Development and tests (`--env development`) ──
+# Wrangler does not inherit bindings, vars or secrets into an environment, so this section repeats all of them.
+[env.development]
+name = "rendro-ingest-dev"
+workers_dev = false
+
+[env.development.secrets]
+required = ["IMAGE_PROXY_SECRET", "REPO_CONTENT_KEY"]
+
+[env.development.observability.logs]
+enabled = true
+invocation_logs = false
+
+# Content cache: GitHub stays the source of truth (gh/v1/ key schema).
+[[env.development.r2_buckets]]
+binding = "INGEST_BUCKET"
+bucket_name = "rendro-ingest-dev"
+
+[[env.development.queues.producers]]
+binding = "INGEST_QUEUE"
+queue = "rendro-ingest-dev"
+
+[[env.development.queues.consumers]]
+queue = "rendro-ingest-dev"
+max_batch_size = 10
+max_batch_timeout = 1
+max_retries = 10
+dead_letter_queue = "rendro-ingest-dev-dlq"
+
+[[env.development.durable_objects.bindings]]
+name = "INGEST_COORDINATOR"
+class_name = "RepoIngestCoordinator"
+
+[[env.development.migrations]]
+tag = "v1"
+new_sqlite_classes = ["RepoIngestCoordinator"]
+
 # Repository search index (#251): sections in a D1-backed FTS5 table.
-# Development and tests only; P-deploy provisions the production database.
-[[d1_databases]]
+[[env.development.d1_databases]]
 binding = "REPO_SEARCH"
 database_name = "rendro-repo-search-dev"
 database_id = "rendro-repo-search-dev"
 
-# Reconciliation: re-check branch heads with ETags; redeliver failed webhooks (from P1).
-[triggers]
+[env.development.triggers]
 crons = ["*/10 * * * *"]

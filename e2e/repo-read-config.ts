@@ -5,10 +5,11 @@ import { join } from "node:path";
 export const repoReadWorker = { access: "rendro-repo-access-fixture", accessConfig: join(import.meta.dirname, "repo-access/wrangler.toml") };
 
 /**
- * The real control Worker (#243, wrangler.control.toml), the named entrypoint that serves its internal endpoints (#295)
- * and the KV namespace both Workers share for epochs.
+ * The real control Worker (#243, wrangler.control.toml), loaded from its development environment (the top level is
+ * the production skeleton, #336), the named entrypoint that serves its internal endpoints (#295) and the KV namespace
+ * both Workers share for epochs.
  */
-export const controlWorker = { name: "rendro-control-dev", entrypoint: "RepoAccessService", epochs: "rendro-repo-epochs-test" };
+export const controlWorker = { name: "rendro-control-dev", env: "development", entrypoint: "RepoAccessService", epochs: "rendro-repo-epochs-test" };
 
 /**
  * Adds the repository read path's bindings to a Worker configuration: snapshots in R2, revocation
@@ -45,7 +46,7 @@ export async function workerConfigWithRepoRead(root: string, service?: string): 
     .replace('directory = "./public"', `directory = ${JSON.stringify(join(root, "public"))}`), service);
 }
 
-/** wrangler.control.toml with its entry relocated to `root` and its epoch namespace shared with the serving Worker. */
+/** wrangler.control.toml with its entry relocated to `root` and its development epoch namespace shared with the serving Worker. */
 export async function controlWorkerConfig(root: string): Promise<string> {
   const control = await readFile(join(root, "wrangler.control.toml"), "utf8");
   const relocated = control
